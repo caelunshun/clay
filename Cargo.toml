@@ -1,0 +1,9 @@
+[workspace]
+members = ["crates/bytecode", "crates/runtime"]
+resolver = "2"
+
+[workspace.dependencies]
+salsa = "0.16"
+cranelift-entity = "0.114"
+hashbrown = "0.15"
+compact_str = "0.8"

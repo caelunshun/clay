@@ -1,0 +1,9 @@
+[package]
+name = "zyon-bytecode"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cranelift-entity.workspace = true
+hashbrown.workspace = true
+compact_str.workspace = true
