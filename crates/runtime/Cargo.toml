@@ -4,3 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+zyon-bytecode.workspace = true
+cranelift-entity.workspace = true
+compact_str.workspace = true
+hashbrown.workspace = true
+crossbeam-utils.workspace = true
+thread_local.workspace = true
+parking_lot.workspace = true
+bytemuck.workspace = true
+tracing.workspace = true 
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

@@ -1,5 +1,7 @@
-use crate::module::{Field, Func, Instr};
-use crate::{Local, Type};
+use crate::{
+    module::{Constant, Field, Instr, LocalFunc},
+    Local, LocalType,
+};
 use cranelift_entity::EntityList;
 
 /// Current goal is to keep this struct at a size
@@ -12,19 +14,23 @@ pub enum InstrData {
     Branch(Branch),
     Call(Call),
     Return(Return),
+    Copy(Copy),
 
+    IntConstant(ConstantInstr),
     IntAdd(BinaryInstr),
     IntSub(BinaryInstr),
     IntMul(BinaryInstr),
     IntDiv(BinaryInstr),
     IntCmp(CmpInstr),
 
+    RealConstant(ConstantInstr),
     RealAdd(BinaryInstr),
     RealSub(BinaryInstr),
     RealMul(BinaryInstr),
     RealDiv(BinaryInstr),
     RealCmp(CmpInstr),
 
+    BoolConstant(ConstantInstr),
     BoolAnd(BinaryInstr),
     BoolOr(BinaryInstr),
     BoolXor(BinaryInstr),
@@ -34,13 +40,29 @@ pub enum InstrData {
     GetField(GetField),
     SetField(SetField),
     Alloc(Alloc),
-    LoadCopy(LoadCopy),
-    LoadFieldCopy(LoadFieldCopy),
+    Load(Load),
+    LoadField(LoadField),
     Store(Store),
     StoreField(StoreField),
-    MakeFieldReference(MakeFieldReference),
 
     MakeFunctionObject(MakeFunctionObject),
+}
+
+impl InstrData {
+    pub fn set_branch_target(&mut self, target: Instr) {
+        match self {
+            InstrData::Jump(instr) => instr.target = target,
+            InstrData::Branch(instr) => instr.target = target,
+            _ => panic!("not a branch"),
+        }
+    }
+}
+
+/// Copy from one local to another.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Copy {
+    pub dst: Local,
+    pub src: Local,
 }
 
 /// Unconditional jump to a different instruction.
@@ -65,12 +87,21 @@ pub struct Call {
     pub func: Local,
     /// Arguments to pass to the function.
     pub args: EntityList<Local>,
+    /// Destination for the return value.
+    pub return_value_dst: Local,
 }
 
 /// Return a value to the caller.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Return {
     pub return_value: Local,
+}
+
+/// Copy a constant value into a local.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ConstantInstr {
+    pub dst: Local,
+    pub constant: Constant,
 }
 
 /// Instruction with two source operands
@@ -114,16 +145,13 @@ pub enum CompareMode {
 pub struct InitStruct {
     pub dst: Local,
     /// Type of struct to initialize.
-    pub typ: Type,
+    pub typ: LocalType,
     /// Field values to initialize, in the same
     /// order as the struct fields are declared.
     pub fields: EntityList<Local>,
 }
 
-/// Move a field in a local struct into its own local.
-///
-/// If the field type is not copyable, then the field
-/// is invalidated after this instruction.
+/// Copy a field in a local struct into its own local.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct GetField {
     pub dst: Local,
@@ -131,10 +159,7 @@ pub struct GetField {
     pub field: Field,
 }
 
-/// Move a local into a local struct field.
-///
-/// If the field type is not copyable, then the source local
-/// is invalidated after this instruction.
+/// Copy a local into a local struct field.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SetField {
     pub dst_struct: Local,
@@ -146,9 +171,6 @@ pub struct SetField {
 /// from local ("stack") data.
 ///
 /// Result type is Reference(typeof(src)).
-///
-/// For non-copyable types, this moves the value out of `src`,
-/// such that `src` becomes invalid after this instruction.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Alloc {
     pub dst_ref: Local,
@@ -159,10 +181,8 @@ pub struct Alloc {
 /// into a local.
 ///
 /// Type of `src` must be `Reference(?T)`.
-///
-/// This is illegal for non-copyable types `T`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct LoadCopy {
+pub struct Load {
     pub dst: Local,
     pub src_ref: Local,
 }
@@ -173,19 +193,14 @@ pub struct LoadCopy {
 /// Type of `src` must be `Reference(Struct(?T))`.
 /// Type of `dst` is `typeof(field)`.
 /// `field` must be a valid field of the struct `T`.
-///
-/// `typeof(field)` must be a copyable type.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct LoadFieldCopy {
+pub struct LoadField {
     pub dst: Local,
     pub src_ref: Local,
     pub field: Field,
 }
 
 /// Store a local into the memory behind a managed reference.
-///
-/// If the type of the store is not copyable, then the
-/// source local is invalidated after this instruction.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Store {
     pub dst_ref: Local,
@@ -198,9 +213,6 @@ pub struct Store {
 /// Type of `dst_ref` must be `Reference(Struct(?T))`.
 /// Type of `src_val` must be `typeof(field)`.
 /// `field` must be a valid field of the struct `T`.
-///
-/// If `typeof(field)` is not a copyable type,
-/// then this instruction invalidates the local `val`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct StoreField {
     pub dst_ref: Local,
@@ -208,22 +220,9 @@ pub struct StoreField {
     pub field: Field,
 }
 
-/// Create a managed reference into a field of a struct
-/// that is behind a managed reference.
-///
-/// Type of `src` must be `Reference(Struct(?T))`.
-/// Type of `dst` is `Reference(typeof(field))`.
-/// `field` must be a valid field of the struct `T`.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct MakeFieldReference {
-    pub dst: Local,
-    pub src_ref: Local,
-    pub field: Field,
-}
-
 /// Construct a function object, given the function
 /// implementation (as a `Func` id) and a value containing
-/// the captures for the function.
+/// the captures for the function (not behind a reference).
 ///
 /// The captures must have
 /// the same type as the `captures_type` field of the corresponding
@@ -231,7 +230,7 @@ pub struct MakeFieldReference {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MakeFunctionObject {
     pub dst: Local,
-    pub func: Func,
+    pub func: LocalFunc,
     pub captures: Local,
 }
 

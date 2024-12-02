@@ -1,9 +1,11 @@
+#[macro_export]
 macro_rules! entity_ref {
     {
         $(#[$attr:meta])*
         pub struct $ident:ident;
     } => {
-        #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+        #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default, bytemuck::Pod, bytemuck::Zeroable)]
+        #[repr(transparent)]
         $(#[$attr])*
         pub struct $ident(u32);
 
@@ -33,12 +35,14 @@ macro_rules! entity_ref {
     };
 }
 
+#[macro_export]
 macro_rules! entity_ref_16bit {
      {
          $(#[$attr:meta])*
         pub struct $ident:ident;
     } => {
-        #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+        #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default, bytemuck::Pod, bytemuck::Zeroable)]
+        #[repr(transparent)]
             $(#[$attr])*
         pub struct $ident(u16);
 
@@ -72,4 +76,6 @@ pub mod instr;
 pub mod module;
 
 pub use instr::InstrData;
-pub use module::{Func, FuncParam, Instr, Local, ModuleData, PrimitiveType, Type};
+pub use module::{
+    FuncParam, Instr, Local, LocalFunc, LocalType, ModuleData, PrimitiveType, TypeData,
+};

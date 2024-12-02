@@ -7,3 +7,4 @@ edition = "2021"
 cranelift-entity.workspace = true
 hashbrown.workspace = true
 compact_str.workspace = true
+bytemuck.workspace = true

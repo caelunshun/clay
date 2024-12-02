@@ -2,23 +2,30 @@ use crate::instr::InstrData;
 use compact_str::CompactString;
 use cranelift_entity::{ListPool, PrimaryMap, SecondaryMap};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ModuleData {
-    pub types: PrimaryMap<Type, TypeData>,
-    pub funcs: PrimaryMap<Func, FuncData>,
+    pub types: PrimaryMap<LocalType, TypeData>,
+    pub funcs: PrimaryMap<LocalFunc, FuncData>,
+    pub constants: PrimaryMap<Constant, ConstantData>,
     // pub imported_modules: PrimaryMap<ImportedModule, ImportedModuleData>,
+}
+
+impl ModuleData {
+    pub fn constant(&mut self, c: ConstantData) -> Constant {
+        self.constants.push(c)
+    }
 }
 
 entity_ref_16bit! {
     /// ID of a type used in a module.
-    pub struct Type;
+    pub struct LocalType;
 }
 
 #[derive(Debug, Clone)]
 pub enum TypeData {
     Primitive(PrimitiveType),
     /// Managed reference to another type.
-    Reference(Type),
+    Reference(LocalType),
     Func(FuncTypeData),
     Lazy(LazyTypeData),
     Struct(StructTypeData),
@@ -33,12 +40,12 @@ pub enum TypeData {
 ///
 /// Value is initialized by the associated initializer
 /// function on first use.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LazyTypeData {
     /// Underlying type of the variable.
-    pub inner_type: Type,
+    pub inner_type: LocalType,
     /// Function used to initialize the value.
-    pub initializer_func: Func,
+    pub initializer_func: LocalFunc,
 }
 
 /// A closure object, consisting of a dynamic
@@ -46,8 +53,8 @@ pub struct LazyTypeData {
 /// captures struct.
 #[derive(Debug, Clone)]
 pub struct FuncTypeData {
-    pub param_types: Vec<Type>,
-    pub return_type: Type,
+    pub param_types: Vec<LocalType>,
+    pub return_type: LocalType,
 }
 
 /// Type built in to the language.
@@ -76,7 +83,19 @@ entity_ref_16bit! {
 #[derive(Debug, Clone)]
 pub struct FieldData {
     pub name: CompactString,
-    pub typ: Type,
+    pub typ: LocalType,
+}
+
+entity_ref! {
+    /// ID of a constant value in a module.
+    pub struct Constant;
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum ConstantData {
+    Int(i64),
+    Real(f64),
+    Bool(bool),
 }
 
 /*
@@ -104,17 +123,19 @@ pub struct ImportedTypeData {
  */
 
 entity_ref! {
-    pub struct Func;
+    /// Function ID within a module.
+    pub struct LocalFunc;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FuncData {
     /// Used for debugging; may be synthetic
     /// in the case of anonymous functions.
     pub name: CompactString,
     /// Type used to store the captured variables
-    /// for the function.
-    pub captures_type: Type,
+    /// for the function. At runtime, the value in `captures_local`
+    /// at the start of the function will have type `Reference(captures_type)`.
+    pub captures_type: LocalType,
     /// Local into which the captures are placed
     /// by the interpreter
     /// when the function is called.
@@ -144,8 +165,16 @@ pub struct FuncData {
 
 impl FuncData {
     /// Gets the type expected for the given parameter.
-    pub fn param_type(&self, param: FuncParam) -> &Type {
+    pub fn param_type(&self, param: FuncParam) -> &LocalType {
         &self.locals[self.params[param].bind_to_local].typ
+    }
+
+    pub fn local(&mut self, typ: LocalType) -> Local {
+        self.locals.push(LocalData::new(typ))
+    }
+
+    pub fn instr(&mut self, instr: InstrData) -> Instr {
+        self.instrs.push(instr)
     }
 }
 
@@ -156,7 +185,13 @@ entity_ref_16bit! {
 #[derive(Debug, Clone)]
 pub struct LocalData {
     /// Type of the local.
-    pub typ: Type,
+    pub typ: LocalType,
+}
+
+impl LocalData {
+    pub fn new(typ: LocalType) -> Self {
+        Self { typ }
+    }
 }
 
 entity_ref_16bit! {
