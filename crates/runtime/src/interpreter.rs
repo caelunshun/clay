@@ -2,18 +2,15 @@ use crate::{
     engine::{Engine, Func, Instance, Module},
     gc::StackWalker,
     ptr::MRef,
-    type_registry::{Type, TypeKind},
+    type_registry::{FuncLayout, Type, TypeKind},
 };
 use bytecode::{
     instr::CompareMode,
     module::{ConstantData, FuncData},
-    Instr, InstrData, Local, ModuleData, PrimitiveType,
+    Instr, InstrData, Local, PrimitiveType,
 };
-use bytemuck::{NoUninit, Pod};
-use cranelift_entity::{
-    packed_option::{PackedOption, ReservedValue},
-    EntityRef, SecondaryMap,
-};
+use bytemuck::{NoUninit, Pod, Zeroable};
+use cranelift_entity::{packed_option::ReservedValue, EntityRef, SecondaryMap};
 use std::{
     alloc::Layout,
     ptr::NonNull,
@@ -32,11 +29,6 @@ pub struct Interpreter {
     function_stack_maps: SecondaryMap<Func, Option<FunctionStackMap>>,
     current_func: Option<Func>,
     current_instr: Instr,
-    /// Local in the calling function to place the return value
-    /// from the current function. Arbitrary if we're at the top of
-    /// the stack.
-    #[expect(unused)]
-    return_target: Local,
 }
 
 impl Interpreter {
@@ -46,7 +38,6 @@ impl Interpreter {
             function_stack_maps: SecondaryMap::default(),
             current_func: None,
             current_instr: Instr::reserved_value(),
-            return_target: Local::reserved_value(),
         }
     }
 
@@ -54,62 +45,46 @@ impl Interpreter {
     /// currently providing no parameters
     /// and assuming that the return value is an `int`.
     pub fn interp(&mut self, func: Func, instance: &Instance) -> i64 {
-        self.current_func = None;
-        self.interp_func(func, instance, &[], true).unwrap()
+        let func_data = instance.engine.func_data(func);
+        let (module, _) = instance.engine.funcs[func];
+        assert_eq!(
+            instance.engine.type_registry.module_mapping[module][func_data.captures_type],
+            instance.engine.type_registry.unit_type,
+            "cannot directly call function with non-unit captures type from host code"
+        );
+
+        // create temporary function object
+        #[repr(C)]
+        struct FuncObject {
+            func: Func,
+            captures: MRef,
+        }
+
+        let func_object = FuncObject {
+            func,
+            captures: unsafe { MRef::null() },
+        };
+
+        unsafe {
+            self.call(
+                &func_object as *const FuncObject as *const u8,
+                &[],
+                Local::reserved_value(), // no return stack
+                instance,
+            )
+        }
     }
 
     /// Args provided as locals in the calling function.
-    fn interp_func(
-        &mut self,
-        func: Func,
-        instance: &Instance,
-        args: &[Local],
-        return_int: bool,
-    ) -> Option<i64> {
-        if !args.is_empty() {
-            todo!();
-        }
-
+    fn continue_func(&mut self, func: Func, instr: Instr, instance: &Instance) -> i64 {
         let func_data = instance.engine.func_data(func);
 
         let module = instance.engine.funcs[func].0;
         let module_data = &instance.engine.modules[module];
 
-        let func_stack_map = self.function_stack_maps[func].get_or_insert_with(|| {
-            FunctionStackMap::new(func_data, instance.engine.funcs[func].0, &instance.engine)
-        });
-
-        let return_address = self.current_func;
-        self.stack.push_frame(return_address, func_stack_map);
-
         self.current_func = Some(func);
-        self.current_instr = Instr::new(0);
+        self.current_instr = instr;
 
-        let ret_val = self.interp_func_instrs(func, func_data, module, module_data, instance);
-
-        let func_stack_map = self.function_stack_maps[func].as_ref().unwrap(); // reborrow
-        let ret_val = if return_int {
-            Some(self.stack.load(func_stack_map.local_offsets[ret_val]))
-        } else {
-            todo!()
-        };
-
-        self.stack.pop_frame(&func_stack_map);
-
-        ret_val
-    }
-
-    /// Interpret until return, then yield the return value local
-    /// without popping the stack frame.
-    fn interp_func_instrs(
-        &mut self,
-        func: Func,
-        func_data: &FuncData,
-        module: Module,
-        module_data: &ModuleData,
-
-        instance: &Instance,
-    ) -> Local {
         let func_stack_map = self.function_stack_maps[func].as_ref().unwrap();
 
         /// Helper to quickly load/store Locals with automatic offset
@@ -165,11 +140,38 @@ impl Interpreter {
                         continue;
                     }
                 }
-                InstrData::Call(_) => {
-                    todo!()
+                InstrData::Call(instr) => {
+                    let func_object = locals
+                        .stack
+                        .get_ptr(locals.func_stack_map.local_offsets[instr.func]);
+                    unsafe {
+                        // hopefully gets compiled as a tail call
+                        return self.call(
+                            func_object,
+                            instr.args.as_slice(&func_data.local_pool),
+                            instr.return_value_dst,
+                            instance,
+                        );
+                    }
                 }
                 InstrData::Return(instr) => {
-                    return instr.return_value;
+                    let return_value = locals.load(instr.return_value);
+
+                    let return_address = locals.stack.pop_frame(
+                        locals.func_stack_map,
+                        |func| self.function_stack_maps[func].as_ref().unwrap(),
+                        instr.return_value,
+                    );
+                    if return_address.is_present() {
+                        // Hopefully gets compiled as a tail call.
+                        return self.continue_func(
+                            return_address.func,
+                            return_address.instr,
+                            instance,
+                        );
+                    } else {
+                        return return_value;
+                    }
                 }
                 InstrData::Copy(instr) => {
                     let typ = func_data.locals[instr.src].typ;
@@ -473,6 +475,65 @@ impl Interpreter {
             self.current_instr = Instr::new(self.current_instr.index() + 1);
         }
     }
+
+    unsafe fn call(
+        &mut self,
+        func_object_ptr: *const u8,
+        args: &[Local],
+        return_value_dst: Local,
+        instance: &Instance,
+    ) -> i64 {
+        let func_object_layout = FuncLayout::new();
+
+        let target_func = func_object_layout.get_fnptr(func_object_ptr);
+
+        let (target_module, target_local_func) = instance.engine.funcs[target_func];
+        let target_module_data = &instance.engine.modules[target_module];
+        let target_func_data = &target_module_data.funcs[target_local_func];
+
+        self.function_stack_maps[target_func].get_or_insert_with(|| {
+            FunctionStackMap::new(target_func_data, target_module, &instance.engine)
+        });
+        // borrow checker limitation prevents using return value from get_or_insert_with directly
+        let target_func_stack_map = self.function_stack_maps[target_func].as_ref().unwrap();
+
+        let return_address = match self.current_func {
+            Some(f) => ReturnAddress::some(
+                f,
+                Instr::new(self.current_instr.index() + 1),
+                return_value_dst,
+            ),
+            None => ReturnAddress::none(),
+        };
+        self.stack.push_frame(return_address, target_func_stack_map);
+
+        let captures_ptr = func_object_layout.get_captures_ptr(func_object_ptr);
+        self.stack.store(
+            target_func_stack_map.local_offsets[target_func_data.captures_local],
+            captures_ptr,
+        );
+
+        for (arg, param) in args
+            .iter()
+            .copied()
+            .zip(target_func_data.params.values().copied())
+        {
+            let current_func_stack_map = self.function_stack_maps[self.current_func.unwrap()]
+                .as_ref()
+                .unwrap();
+            let src_offset = current_func_stack_map.local_offsets[arg];
+            let dst_offset = target_func_stack_map.local_offsets[param.bind_to_local];
+            self.stack.copy_caller_to_callee(
+                src_offset,
+                dst_offset,
+                current_func_stack_map.local_sizes[arg],
+                target_func_stack_map,
+            );
+        }
+
+        // Hopefully gets compiled as a tail call
+        self.continue_func(target_func, Instr::new(0), instance)
+    }
 }
 
 /// Contains locals used by bytecode instructions
@@ -501,7 +562,7 @@ impl Stack {
     /// Begins a new stack frame for the given function.
     pub fn push_frame(
         &mut self,
-        return_address: Option<Func>,
+        return_address: ReturnAddress,
         new_function_stack_map: &FunctionStackMap,
     ) {
         self.offset = self.data.len() * size_of::<u64>();
@@ -512,13 +573,27 @@ impl Stack {
             .div_ceil(size_of::<u64>());
         self.data.extend((0..num_words).map(|_| 0));
 
-        self.store(0, PackedOption::from(return_address));
+        self.store(0, return_address);
     }
 
-    /// Pops the current stack frame, returning the `Func`
+    /// Pops the current stack frame, returning the `ReturnAddress`
     /// to return to.
-    pub fn pop_frame(&mut self, current_function_stack_map: &FunctionStackMap) -> Option<Func> {
+    pub fn pop_frame<'a>(
+        &mut self,
+        current_function_stack_map: &FunctionStackMap,
+        get_stack_map: impl Fn(Func) -> &'a FunctionStackMap,
+        return_value_src: Local,
+    ) -> ReturnAddress {
         let return_address = self.load::<ReturnAddress>(0);
+
+        if return_address.is_present() {
+            self.copy_callee_to_caller(
+                current_function_stack_map.local_offsets[return_value_src],
+                get_stack_map(return_address.func).local_offsets[return_address.return_value_dst],
+                current_function_stack_map.local_sizes[return_value_src],
+                current_function_stack_map,
+            );
+        }
 
         let num_words = current_function_stack_map
             .layout
@@ -527,7 +602,7 @@ impl Stack {
         let new_len = self.data.len() - num_words;
         self.data.truncate(new_len);
 
-        return_address.into()
+        return_address
     }
 
     /// Loads a `Pod` value from the stack at the given offset.
@@ -535,6 +610,11 @@ impl Stack {
         let offset = self.offset + usize::try_from(offset).unwrap();
         let bytes = &self.data()[offset..][..size_of::<T>()];
         *bytemuck::from_bytes(bytes)
+    }
+
+    pub fn get_ptr(&self, offset: u32) -> *const u8 {
+        let offset = self.offset + usize::try_from(offset).unwrap();
+        self.data()[offset..].as_ptr()
     }
 
     /// Stores a `Pod` value onto the stack at the given offset.
@@ -548,6 +628,48 @@ impl Stack {
     pub fn copy(&mut self, src_offset: u32, dst_offset: u32, size: u32) {
         let src_offset = self.offset + usize::try_from(src_offset).unwrap();
         let dst_offset = self.offset + usize::try_from(dst_offset).unwrap();
+
+        self.data_mut().copy_within(
+            src_offset..src_offset + usize::try_from(size).unwrap(),
+            dst_offset,
+        );
+    }
+
+    /// Copies a value from the previous function stack frame
+    /// into the current stack frame.
+    pub fn copy_caller_to_callee(
+        &mut self,
+        src_offset_in_caller: u32,
+        dst_offset_in_callee: u32,
+        size: u32,
+        callee_stack_map: &FunctionStackMap,
+    ) {
+        let caller_offset = self.offset - callee_stack_map.layout.size();
+        let callee_offset = self.offset;
+
+        let src_offset = caller_offset + usize::try_from(src_offset_in_caller).unwrap();
+        let dst_offset = callee_offset + usize::try_from(dst_offset_in_callee).unwrap();
+
+        self.data_mut().copy_within(
+            src_offset..src_offset + usize::try_from(size).unwrap(),
+            dst_offset,
+        );
+    }
+
+    /// Copies a value from the current function stack frame
+    /// into the previous stack frame.
+    pub fn copy_callee_to_caller(
+        &mut self,
+        src_offset_in_callee: u32,
+        dst_offset_in_caller: u32,
+        size: u32,
+        callee_stack_map: &FunctionStackMap,
+    ) {
+        let caller_offset = self.offset - callee_stack_map.layout.size();
+        let callee_offset = self.offset;
+
+        let src_offset = callee_offset + usize::try_from(src_offset_in_callee).unwrap();
+        let dst_offset = caller_offset + usize::try_from(dst_offset_in_caller).unwrap();
 
         self.data_mut().copy_within(
             src_offset..src_offset + usize::try_from(size).unwrap(),
@@ -593,22 +715,21 @@ impl Stack {
                         let return_address: ReturnAddress = *bytemuck::from_bytes(
                             &self.data[self.current_offset..][..size_of::<ReturnAddress>()],
                         );
-                        return match return_address.into() {
-                            Some(next) => {
-                                self.current_offset -= self.func_stack_maps[self.current_func]
-                                    .as_ref()
-                                    .unwrap()
-                                    .layout
-                                    .size();
-                                self.current_func = next;
-                                self.local_offsets_iter = self.func_stack_maps[self.current_func]
-                                    .as_ref()
-                                    .unwrap()
-                                    .local_offsets
-                                    .iter();
-                                self.next()
-                            }
-                            None => None,
+                        return if return_address.is_present() {
+                            self.current_offset -= self.func_stack_maps[self.current_func]
+                                .as_ref()
+                                .unwrap()
+                                .layout
+                                .size();
+                            self.current_func = return_address.func;
+                            self.local_offsets_iter = self.func_stack_maps[self.current_func]
+                                .as_ref()
+                                .unwrap()
+                                .local_offsets
+                                .iter();
+                            self.next()
+                        } else {
+                            None
                         };
                     }
                 };
@@ -618,15 +739,17 @@ impl Stack {
                 let local_type = self.instance.engine.type_registry.module_mapping
                     [self.instance.engine.funcs[self.current_func].0][local_type];
 
-                self.instance
-                    .engine
-                    .type_registry
-                    .traverse_references(local_type, |ref_offset| {
-                        let bytes = &self.data
-                            [self.current_offset + *local_offset as usize + ref_offset..]
-                            [..size_of::<MRef>()];
-                        self.current_refs.push(*bytemuck::from_bytes(bytes));
-                    });
+                unsafe {
+                    self.instance.engine.type_registry.traverse_references(
+                        self.data
+                            .as_ptr()
+                            .add(self.current_offset + *local_offset as usize),
+                        local_type,
+                        |r| {
+                            self.current_refs.push(r);
+                        },
+                    );
+                }
                 self.next()
             }
         }
@@ -647,7 +770,38 @@ impl Stack {
     }
 }
 
-type ReturnAddress = PackedOption<Func>;
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default, Pod, Zeroable)]
+#[repr(C)]
+struct ReturnAddress {
+    func: Func,
+    instr: Instr,
+    return_value_dst: Local,
+    present: u32, // bool + padding
+}
+
+impl ReturnAddress {
+    pub fn some(func: Func, instr: Instr, return_value_dst: Local) -> Self {
+        Self {
+            func,
+            instr,
+            return_value_dst,
+            present: 1,
+        }
+    }
+
+    pub fn none() -> Self {
+        Self {
+            func: Func::reserved_value(),
+            instr: Instr::reserved_value(),
+            return_value_dst: Local::reserved_value(),
+            present: 0,
+        }
+    }
+
+    pub fn is_present(&self) -> bool {
+        self.present != 0
+    }
+}
 
 /// Cached stack map for a function, mapping `Local`
 /// indices to their offset from the start of the stack frame.
@@ -658,12 +812,14 @@ type ReturnAddress = PackedOption<Func>;
 struct FunctionStackMap {
     layout: Layout,
     local_offsets: SecondaryMap<Local, u32>,
+    local_sizes: SecondaryMap<Local, u32>,
 }
 
 impl FunctionStackMap {
     pub fn new(func: &FuncData, module: Module, engine: &Engine) -> Self {
         let mut layout = Layout::new::<ReturnAddress>();
         let mut local_offsets = SecondaryMap::default();
+        let mut local_sizes = SecondaryMap::default();
 
         for (local, local_data) in &func.locals {
             let local_type = engine.type_registry.module_mapping[module][local_data.typ];
@@ -671,6 +827,7 @@ impl FunctionStackMap {
 
             let (new_layout, offset) = layout.extend(local_layout).unwrap();
             local_offsets[local] = offset.try_into().unwrap();
+            local_sizes[local] = local_layout.size().try_into().unwrap();
 
             layout = new_layout;
         }
@@ -691,6 +848,7 @@ impl FunctionStackMap {
         Self {
             layout,
             local_offsets,
+            local_sizes,
         }
     }
 }
@@ -734,12 +892,20 @@ unsafe fn memory_load(
             }
             PrimitiveType::Unit => {}
         },
-        TypeKind::Reference(_) => {
+        TypeKind::Reference(_) | TypeKind::LazyReference(_) => {
             let val = unsafe { (*src.cast::<AtomicPtr<u8>>()).load(Ordering::Relaxed) };
             dst_stack.store(dst_offset, unsafe { MRef::new(NonNull::new(val).unwrap()) });
         }
+        TypeKind::Func(_) => {
+            let layout = FuncLayout::new();
+            unsafe {
+                let func = layout.get_fnptr(src_ref.as_ptr());
+                let captures_ptr = layout.get_captures_ptr(src_ref.as_ptr());
+                dst_stack.store(dst_offset + layout.fnptr_offset as u32, func);
+                dst_stack.store(dst_offset + layout.captures_offset as u32, captures_ptr);
+            }
+        }
         TypeKind::Lazy(_) => todo!(),
-        TypeKind::Func(_) => todo!(),
     }
 }
 
@@ -787,13 +953,23 @@ unsafe fn memory_store(
             }
             PrimitiveType::Unit => {}
         },
-        TypeKind::Reference(_) => {
+        TypeKind::Reference(_) | TypeKind::LazyReference(_) => {
             let val = src_stack.load::<MRef>(src_offset);
             unsafe {
                 (*dst.cast::<AtomicPtr<u8>>()).store(val.as_ptr(), Ordering::Relaxed);
             }
         }
+        TypeKind::Func(_) => {
+            let layout = FuncLayout::new();
+            let fnptr = src_stack.load::<Func>(src_offset + layout.fnptr_offset as u32);
+            let captures_ptr = src_stack.load::<MRef>(src_offset + layout.captures_offset as u32);
+            unsafe {
+                dst.add(layout.fnptr_offset).cast::<Func>().write(fnptr);
+                dst.add(layout.captures_offset)
+                    .cast::<MRef>()
+                    .write(captures_ptr);
+            }
+        }
         TypeKind::Lazy(_) => todo!(),
-        TypeKind::Func(_) => todo!(),
     }
 }

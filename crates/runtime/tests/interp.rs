@@ -20,7 +20,7 @@ fn factorial() {
         .types
         .push(bytecode::TypeData::Primitive(bytecode::PrimitiveType::Bool));
 
-    let mut func = FuncData::default();
+    let mut func = FuncData::new(&mut module);
 
     let x = func.locals.push(LocalData::new(int));
     let i = func.locals.push(LocalData::new(int));
@@ -119,7 +119,7 @@ fn linked_list() {
         }));
     module.types.push(bytecode::TypeData::Reference(node_type));
 
-    let mut func = FuncData::default();
+    let mut func = FuncData::new(&mut module);
 
     let head = func.local(node_ref_type);
     let has_head = func.local(bool_);
@@ -289,3 +289,6 @@ fn linked_list() {
     let instance = Instance::new_test(module, 1024 * 34);
     assert_eq!(instance.interp(Func::new(0)), 999);
 }
+
+#[test]
+fn fibonacci() {}

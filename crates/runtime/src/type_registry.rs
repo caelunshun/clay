@@ -2,6 +2,7 @@ use crate::{engine::Module, ptr::MRef, Func};
 use bytecode::{module::Field, LocalType, ModuleData, PrimitiveType};
 use cranelift_entity::{EntityRef, PrimaryMap, SecondaryMap};
 use hashbrown::HashMap;
+use parking_lot::{Once, OnceState};
 use std::{alloc::Layout, cmp};
 use zyon_bytecode::entity_ref;
 
@@ -79,6 +80,11 @@ impl TypeRegistry {
             let mapped_id = match typ {
                 bytecode::TypeData::Primitive(p) => self.primitive(*p),
                 // TypeData::Import TODO
+                bytecode::TypeData::LazyReference(_) => {
+                    let id = Type::new(next_id);
+                    next_id += 2; // extra ID allocated for the Lazy type
+                    id
+                }
                 _ => {
                     let id = Type::new(next_id);
                     next_id += 1;
@@ -89,6 +95,7 @@ impl TypeRegistry {
         }
 
         let mut structs_to_lay_out = Vec::new();
+        let mut lazies_to_lay_out = Vec::new();
 
         for (local_type_id, typ) in &module.types {
             let mapped_id = match typ {
@@ -103,10 +110,20 @@ impl TypeRegistry {
                     }),
                     local_ids: HashMap::new(),
                 }),
-                bytecode::TypeData::Lazy(l) => self.types.push(TypeData {
-                    kind: TypeKind::Lazy(id_mapping[l.inner_type]),
-                    local_ids: HashMap::new(),
-                }),
+                bytecode::TypeData::LazyReference(l) => {
+                    let lazy_type = self.types.push(TypeData {
+                        kind: TypeKind::Lazy(LazyType {
+                            value_type: id_mapping[l.inner_type],
+                            layout: LazyLayout::placeholder(),
+                        }),
+                        local_ids: HashMap::new(),
+                    });
+                    lazies_to_lay_out.push(lazy_type);
+                    self.types.push(TypeData {
+                        kind: TypeKind::LazyReference(lazy_type),
+                        local_ids: HashMap::new(),
+                    })
+                }
                 bytecode::TypeData::Struct(_) => {
                     structs_to_lay_out.push(local_type_id);
                     self.types.push(TypeData {
@@ -143,6 +160,14 @@ impl TypeRegistry {
             }
         }
 
+        for lazy_id in lazies_to_lay_out {
+            let TypeKind::Lazy(lazy) = &mut self.types[lazy_id].kind else {
+                unreachable!()
+            };
+            let value_layout = self.layouts[lazy.value_type].unwrap();
+            lazy.layout = LazyLayout::new(value_layout);
+        }
+
         for local_type_id in module.types.keys() {
             let type_id = id_mapping[local_type_id];
             self.layouts[type_id] = Some(self.types[type_id].kind.layout(self));
@@ -151,40 +176,56 @@ impl TypeRegistry {
         self.module_mapping[module_id] = id_mapping;
     }
 
-    /// Traverses all references stored inline in the given type
-    /// by providing their byte offsets from the start of this object.
-    pub fn traverse_references(&self, typ: Type, mut callback: impl FnMut(usize)) {
-        self.traverse_references_inner(typ, &mut callback, 0)
+    /// Traverses all references stored inline in the given type.
+    pub unsafe fn traverse_references(
+        &self,
+        ptr: *const u8,
+        typ: Type,
+        mut callback: impl FnMut(MRef),
+    ) {
+        self.traverse_references_inner(ptr, typ, &mut callback)
     }
 
-    fn traverse_references_inner(
+    unsafe fn traverse_references_inner(
         &self,
+        ptr: *const u8,
         typ: Type,
-        callback: &mut impl FnMut(usize),
-        start_offset: usize,
+        callback: &mut impl FnMut(MRef),
     ) {
         let type_data = &self.types[typ];
         match &type_data.kind {
             TypeKind::Struct(s) => {
                 for field in s.fields.values() {
                     self.traverse_references_inner(
+                        ptr.add(field.offset),
                         field.field_type,
                         callback,
-                        start_offset + field.offset,
                     );
                 }
             }
             TypeKind::Primitive(_) => {}
-            TypeKind::Reference(_) => {
-                callback(start_offset);
+            TypeKind::Reference(_) | TypeKind::LazyReference(_) => {
+                callback(*ptr.cast::<MRef>());
             }
-            TypeKind::Lazy(t) => self.traverse_references_inner(
-                *t,
-                callback,
-                start_offset + LazyLayout::new(self.layouts[*t].unwrap()).value_offset,
-            ),
             TypeKind::Func(_) => {
-                callback(start_offset + FuncLayout::new().captures_offset);
+                callback(*ptr.add(FuncLayout::new().captures_offset).cast::<MRef>());
+            }
+            TypeKind::Lazy(lazy) => {
+                let func_ptr = lazy.layout.get_initializer_func_ptr(ptr);
+                callback(
+                    *func_ptr
+                        .add(FuncLayout::new().captures_offset)
+                        .cast::<MRef>(),
+                );
+
+                let once = lazy.layout.get_once_ptr(ptr);
+                if once.state() == OnceState::Done {
+                    self.traverse_references_inner(
+                        lazy.layout.get_value_ptr(ptr),
+                        lazy.value_type,
+                        callback,
+                    );
+                }
             }
         }
     }
@@ -211,12 +252,13 @@ pub enum TypeKind {
     Struct(StructLayout),
     Primitive(PrimitiveType),
     Reference(Type),
-    Lazy(Type),
+    LazyReference(Type),
+    Lazy(LazyType),
     Func(FuncType),
 }
 
 impl TypeKind {
-    pub fn layout(&self, registry: &TypeRegistry) -> Layout {
+    pub fn layout(&self, _registry: &TypeRegistry) -> Layout {
         match self {
             TypeKind::Struct(s) => s.overall,
             TypeKind::Primitive(p) => match *p {
@@ -225,11 +267,8 @@ impl TypeKind {
                 PrimitiveType::Bool => Layout::new::<bool>(),
                 PrimitiveType::Unit => Layout::new::<()>(),
             },
-            TypeKind::Reference(_) => Layout::new::<MRef>(),
-            TypeKind::Lazy(value_type) => {
-                let value_layout = registry.types[*value_type].kind.layout(registry);
-                LazyLayout::new(value_layout).overall
-            }
+            TypeKind::Reference(_) | TypeKind::LazyReference(_) => Layout::new::<MRef>(),
+            TypeKind::Lazy(l) => l.layout.overall,
             TypeKind::Func(_) => FuncLayout::new().overall,
         }
     }
@@ -322,29 +361,60 @@ pub struct LayoutFieldEntry {
     pub size: usize,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LazyType {
+    pub value_type: Type,
+    pub layout: LazyLayout,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LazyLayout {
     pub overall: Layout,
+    pub initializer_func_offset: usize,
     pub value_offset: usize,
-    #[expect(unused)]
-    pub flag_offset: usize,
+    pub once_offset: usize,
 }
 
 impl LazyLayout {
     pub fn new(value_layout: Layout) -> Self {
-        let (overall, flag_offset) = value_layout.extend(Layout::new::<u8>()).unwrap();
+        let (overall, initializer_func_offset) =
+            value_layout.extend(FuncLayout::new().overall).unwrap();
+        let (overall, once_offset) = overall.extend(Layout::new::<Once>()).unwrap();
+
         Self {
             overall,
             value_offset: 0,
-            flag_offset,
+            initializer_func_offset,
+            once_offset,
         }
+    }
+
+    /// Placeholder value used before layout initialization.
+    pub fn placeholder() -> Self {
+        Self {
+            overall: Layout::new::<()>(),
+            initializer_func_offset: 0,
+            value_offset: 0,
+            once_offset: 0,
+        }
+    }
+
+    pub unsafe fn get_value_ptr(&self, p: *const u8) -> *const u8 {
+        p.add(self.value_offset)
+    }
+
+    pub unsafe fn get_once_ptr(&self, p: *const u8) -> &Once {
+        &*p.add(self.once_offset).cast()
+    }
+
+    pub unsafe fn get_initializer_func_ptr(&self, p: *const u8) -> *const u8 {
+        p.add(self.initializer_func_offset)
     }
 }
 
 #[derive(Copy, Clone, Debug)]
 pub struct FuncLayout {
     pub overall: Layout,
-    #[expect(unused)]
     pub fnptr_offset: usize,
     pub captures_offset: usize,
 }
@@ -358,6 +428,14 @@ impl FuncLayout {
             fnptr_offset: 0,
             captures_offset,
         }
+    }
+
+    pub unsafe fn get_fnptr(&self, ptr: *const u8) -> Func {
+        *ptr.add(self.fnptr_offset).cast::<Func>()
+    }
+
+    pub unsafe fn get_captures_ptr(&self, ptr: *const u8) -> MRef {
+        *ptr.add(self.captures_offset).cast::<MRef>()
     }
 }
 

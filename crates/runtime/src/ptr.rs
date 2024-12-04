@@ -1,5 +1,5 @@
 use bytemuck::{Pod, Zeroable};
-use std::ptr::NonNull;
+use std::ptr::{self, NonNull};
 
 /// Wrapper for a managed reference to an opaque
 /// value.
@@ -13,6 +13,10 @@ impl MRef {
     /// and have been correctly allocated.
     pub unsafe fn new(ptr: NonNull<u8>) -> Self {
         Self(ptr.as_ptr())
+    }
+
+    pub unsafe fn null() -> Self {
+        Self(ptr::null_mut())
     }
 
     pub fn as_ptr(&self) -> *mut u8 {

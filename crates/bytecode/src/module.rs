@@ -12,7 +12,19 @@ pub struct ModuleData {
 
 impl ModuleData {
     pub fn constant(&mut self, c: ConstantData) -> Constant {
-        self.constants.push(c)
+        if let Some((id, _)) = self.constants.iter().find(|(_, val)| **val == c) {
+            id
+        } else {
+            self.constants.push(c)
+        }
+    }
+
+    pub fn typ(&mut self, t: TypeData) -> LocalType {
+        if let Some((id, _)) = self.types.iter().find(|(_, val)| *val == &t) {
+            id
+        } else {
+            self.types.push(t)
+        }
     }
 }
 
@@ -21,13 +33,13 @@ entity_ref_16bit! {
     pub struct LocalType;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeData {
     Primitive(PrimitiveType),
     /// Managed reference to another type.
     Reference(LocalType),
     Func(FuncTypeData),
-    Lazy(LazyTypeData),
+    LazyReference(LazyReferenceTypeData),
     Struct(StructTypeData),
 }
 
@@ -35,23 +47,21 @@ pub enum TypeData {
 /// initialization to allow forward references and
 /// recursion.
 ///
-/// The initializer function is part of the type; thus
-/// each lazy variable gets a different type.
-///
 /// Value is initialized by the associated initializer
 /// function on first use.
+///
+/// Loading and storing can use the Load and Store
+/// instructions as with normal references.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LazyTypeData {
+pub struct LazyReferenceTypeData {
     /// Underlying type of the variable.
     pub inner_type: LocalType,
-    /// Function used to initialize the value.
-    pub initializer_func: LocalFunc,
 }
 
 /// A closure object, consisting of a dynamic
 /// function reference and a reference to an opaque
 /// captures struct.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FuncTypeData {
     pub param_types: Vec<LocalType>,
     pub return_type: LocalType,
@@ -70,7 +80,7 @@ pub enum PrimitiveType {
     Unit,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructTypeData {
     pub name: CompactString,
     pub fields: PrimaryMap<Field, FieldData>,
@@ -80,7 +90,7 @@ entity_ref_16bit! {
     pub struct Field;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldData {
     pub name: CompactString,
     pub typ: LocalType,
@@ -127,7 +137,7 @@ entity_ref! {
     pub struct LocalFunc;
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct FuncData {
     /// Used for debugging; may be synthetic
     /// in the case of anonymous functions.
@@ -164,6 +174,29 @@ pub struct FuncData {
 }
 
 impl FuncData {
+    /// Creates a `FuncData` with unit captures type.
+    pub fn new(module: &mut ModuleData) -> Self {
+        Self::with_captures_type(module.typ(TypeData::Primitive(PrimitiveType::Unit)), module)
+    }
+
+    pub fn with_captures_type(captures_type: LocalType, module: &mut ModuleData) -> Self {
+        let mut locals = PrimaryMap::<Local, LocalData>::new();
+        let captures_local = locals.push(LocalData {
+            typ: module.typ(TypeData::Reference(captures_type)),
+        });
+        Self {
+            name: "".into(),
+            captures_type,
+            captures_local,
+            locals,
+            local_names: SecondaryMap::new(),
+            params: PrimaryMap::new(),
+            param_names: SecondaryMap::new(),
+            instrs: PrimaryMap::new(),
+            local_pool: ListPool::new(),
+        }
+    }
+
     /// Gets the type expected for the given parameter.
     pub fn param_type(&self, param: FuncParam) -> &LocalType {
         &self.locals[self.params[param].bind_to_local].typ

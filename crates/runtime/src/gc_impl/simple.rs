@@ -192,23 +192,24 @@ impl SimpleGarbageCollector {
         }
 
         while let Some(live_ref) = roots.pop() {
-            let header = unsafe { ObjectHeader::of(live_ref) };
-            instance
-                .engine
-                .type_registry
-                .traverse_references(header.typ, |offset| {
-                    let pointer = unsafe { *live_ref.as_ptr().add(offset).cast::<MRef>() };
+            unsafe {
+                let header = ObjectHeader::of(live_ref);
+                instance.engine.type_registry.traverse_references(
+                    live_ref.as_ptr(),
+                    header.typ,
+                    |pointer| {
+                        // TEMP until we add runtime support for tagged unions
+                        if pointer.as_ptr().is_null() {
+                            return;
+                        }
 
-                    // TEMP until we add runtime support for tagged unions
-                    if pointer.as_ptr().is_null() {
-                        return;
-                    }
-
-                    let pointee_header = unsafe { ObjectHeader::of(pointer) };
-                    if pointee_header.mark() {
-                        roots.push(pointer);
-                    }
-                });
+                        let pointee_header = ObjectHeader::of(pointer);
+                        if pointee_header.mark() {
+                            roots.push(pointer);
+                        }
+                    },
+                );
+            }
         }
     }
 
