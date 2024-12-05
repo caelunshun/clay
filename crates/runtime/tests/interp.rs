@@ -1,6 +1,8 @@
 use bytecode::{
     instr,
-    module::{ConstantData, FieldData, FuncData, LocalData, StructTypeData},
+    module::{
+        ConstantData, FieldData, FuncData, FuncParamData, FuncTypeData, LocalData, StructTypeData,
+    },
     Instr, InstrData, LocalType, ModuleData,
 };
 use cranelift_entity::{packed_option::ReservedValue, EntityList, EntityRef, PrimaryMap};
@@ -291,4 +293,140 @@ fn linked_list() {
 }
 
 #[test]
-fn fibonacci() {}
+fn fibonacci() {
+    let mut module = ModuleData::default();
+    let int = module.typ(bytecode::TypeData::Primitive(bytecode::PrimitiveType::Int));
+    let bool_ = module.typ(bytecode::TypeData::Primitive(bytecode::PrimitiveType::Bool));
+    let unit = module.typ(bytecode::TypeData::Primitive(bytecode::PrimitiveType::Unit));
+    let func = module.typ(bytecode::TypeData::Func(FuncTypeData {
+        param_types: vec![int],
+        return_type: int,
+    }));
+
+    let mut recursive_func = FuncData::new(&mut module);
+
+    let n = recursive_func.local(int);
+    let temp_int1 = recursive_func.local(int);
+    let temp_int2 = recursive_func.local(int);
+    let condition = recursive_func.local(bool_);
+    let zero = recursive_func.local(int);
+    let one = recursive_func.local(int);
+    let two = recursive_func.local(int);
+    let unit_val = recursive_func.local(unit);
+    let f = recursive_func.local(func);
+
+    recursive_func
+        .params
+        .push(FuncParamData { bind_to_local: n });
+
+    recursive_func.instr(InstrData::IntConstant(instr::ConstantInstr {
+        dst: zero,
+        constant: module.constant(ConstantData::Int(0)),
+    }));
+    recursive_func.instr(InstrData::IntConstant(instr::ConstantInstr {
+        dst: one,
+        constant: module.constant(ConstantData::Int(1)),
+    }));
+    recursive_func.instr(InstrData::IntConstant(instr::ConstantInstr {
+        dst: two,
+        constant: module.constant(ConstantData::Int(2)),
+    }));
+
+    recursive_func.instr(InstrData::IntCmp(instr::CmpInstr {
+        dst: condition,
+        src1: n,
+        src2: one,
+        mode: instr::CompareMode::Equal,
+    }));
+    let branch_n1 = recursive_func.instr(InstrData::Branch(instr::Branch {
+        target: Instr::reserved_value(), // initialized later
+        condition,
+    }));
+    recursive_func.instr(InstrData::IntCmp(instr::CmpInstr {
+        dst: condition,
+        src1: n,
+        src2: one,
+        mode: instr::CompareMode::Less,
+    }));
+    let branch_n0 = recursive_func.instr(InstrData::Branch(instr::Branch {
+        target: Instr::reserved_value(), // initialized later
+        condition,
+    }));
+
+    recursive_func.instr(InstrData::MakeFunctionObject(instr::MakeFunctionObject {
+        dst: f,
+        func: module.funcs.next_key(),
+        captures: unit_val,
+    }));
+
+    // f(n - 1)
+    recursive_func.instr(InstrData::IntSub(instr::BinaryInstr {
+        dst: temp_int1,
+        src1: n,
+        src2: one,
+    }));
+    let args = EntityList::from_slice(&[temp_int1], &mut recursive_func.local_pool);
+    recursive_func.instr(InstrData::Call(instr::Call {
+        func: f,
+        args,
+        return_value_dst: temp_int1,
+    }));
+
+    // f(n - 2)
+    recursive_func.instr(InstrData::IntSub(instr::BinaryInstr {
+        dst: temp_int2,
+        src1: n,
+        src2: two,
+    }));
+    let args = EntityList::from_slice(&[temp_int2], &mut recursive_func.local_pool);
+    recursive_func.instr(InstrData::Call(instr::Call {
+        func: f,
+        args,
+        return_value_dst: temp_int2,
+    }));
+
+    recursive_func.instr(InstrData::IntAdd(instr::BinaryInstr {
+        dst: temp_int1,
+        src1: temp_int1,
+        src2: temp_int2,
+    }));
+    recursive_func.instr(InstrData::Return(instr::Return {
+        return_value: temp_int1,
+    }));
+
+    // n == 1 case
+    let n1_case = recursive_func.instr(InstrData::Return(instr::Return { return_value: one }));
+    recursive_func.instrs[branch_n1].set_branch_target(n1_case);
+
+    // n < 1 case
+    let n0_case = recursive_func.instr(InstrData::Return(instr::Return { return_value: zero }));
+    recursive_func.instrs[branch_n0].set_branch_target(n0_case);
+
+    let recursive_func = module.funcs.push(recursive_func);
+
+    let mut driver_func = FuncData::new(&mut module);
+    let f = driver_func.local(func);
+    let n = driver_func.local(int);
+    let unit_val = driver_func.local(unit);
+
+    driver_func.instr(InstrData::IntConstant(instr::ConstantInstr {
+        dst: n,
+        constant: module.constant(ConstantData::Int(20)),
+    }));
+    driver_func.instr(InstrData::MakeFunctionObject(instr::MakeFunctionObject {
+        dst: f,
+        func: recursive_func,
+        captures: unit_val,
+    }));
+    let args = EntityList::from_slice(&[n], &mut driver_func.local_pool);
+    driver_func.instr(InstrData::Call(instr::Call {
+        func: f,
+        args,
+        return_value_dst: n,
+    }));
+    driver_func.instr(InstrData::Return(instr::Return { return_value: n }));
+    module.funcs.push(driver_func);
+
+    let instance = Instance::new_test(module, 1024);
+    assert_eq!(instance.interp(Func::new(1)), 6765);
+}

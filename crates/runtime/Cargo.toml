@@ -13,6 +13,7 @@ thread_local.workspace = true
 parking_lot.workspace = true
 bytemuck.workspace = true
 tracing.workspace = true 
+stacker.workspace = true
 
 [dev-dependencies]
 tracing-subscriber.workspace = true

@@ -75,60 +75,52 @@ impl Interpreter {
         }
     }
 
-    /// Args provided as locals in the calling function.
     fn continue_func(&mut self, func: Func, instr: Instr, instance: &Instance) -> i64 {
-        let func_data = instance.engine.func_data(func);
+        // Bad LLVM fails to generate proper tail calls,
+        // so as a workaround, grow the stack. When feature(explicit_tail_calls)
+        // is implemented, we can add a feature to skip this.
+        stacker::maybe_grow(16 * 1024, 1024 * 1024, || {
+            let func_data = instance.engine.func_data(func);
 
-        let module = instance.engine.funcs[func].0;
-        let module_data = &instance.engine.modules[module];
+            let module = instance.engine.funcs[func].0;
+            let module_data = &instance.engine.modules[module];
 
-        self.current_func = Some(func);
-        self.current_instr = instr;
+            self.current_func = Some(func);
+            self.current_instr = instr;
 
-        let func_stack_map = self.function_stack_maps[func].as_ref().unwrap();
+            let func_stack_map = self.function_stack_maps[func].as_ref().unwrap();
 
-        /// Helper to quickly load/store Locals with automatic offset
-        /// lookup.
-        struct StackHelper<'a> {
-            stack: &'a mut Stack,
-            func_stack_map: &'a FunctionStackMap,
-        }
-
-        impl<'a> StackHelper<'a> {
-            pub fn load<T: Pod>(&self, local: Local) -> T {
-                self.stack.load(self.func_stack_map.local_offsets[local])
+            /// Helper to quickly load/store Locals with automatic offset
+            /// lookup.
+            struct StackHelper<'a> {
+                stack: &'a mut Stack,
+                func_stack_map: &'a FunctionStackMap,
             }
 
-            pub fn load_bool(&self, local: Local) -> bool {
-                self.load::<u8>(local) == 1
-            }
-
-            pub fn store<T: NoUninit>(&mut self, local: Local, value: T) {
-                self.stack
-                    .store(self.func_stack_map.local_offsets[local], value)
-            }
-        }
-
-        let mut locals = StackHelper {
-            stack: &mut self.stack,
-            func_stack_map,
-        };
-
-        loop {
-            let instr = &func_data.instrs[self.current_instr];
-            match instr {
-                InstrData::Jump(instr) => {
-                    self.current_instr = instr.target;
-
-                    let mut walker = locals
-                        .stack
-                        .walker(func, instance, &self.function_stack_maps);
-                    instance.gc.safepoint(instance, &mut walker);
-
-                    continue;
+            impl<'a> StackHelper<'a> {
+                pub fn load<T: Pod>(&self, local: Local) -> T {
+                    self.stack.load(self.func_stack_map.local_offsets[local])
                 }
-                InstrData::Branch(instr) => {
-                    if locals.load_bool(instr.condition) {
+
+                pub fn load_bool(&self, local: Local) -> bool {
+                    self.load::<u8>(local) == 1
+                }
+
+                pub fn store<T: NoUninit>(&mut self, local: Local, value: T) {
+                    self.stack
+                        .store(self.func_stack_map.local_offsets[local], value)
+                }
+            }
+
+            let mut locals = StackHelper {
+                stack: &mut self.stack,
+                func_stack_map,
+            };
+
+            loop {
+                let instr = &func_data.instrs[self.current_instr];
+                match instr {
+                    InstrData::Jump(instr) => {
                         self.current_instr = instr.target;
 
                         let mut walker =
@@ -139,341 +131,388 @@ impl Interpreter {
 
                         continue;
                     }
-                }
-                InstrData::Call(instr) => {
-                    let func_object = locals
-                        .stack
-                        .get_ptr(locals.func_stack_map.local_offsets[instr.func]);
-                    unsafe {
-                        // hopefully gets compiled as a tail call
-                        return self.call(
-                            func_object,
-                            instr.args.as_slice(&func_data.local_pool),
-                            instr.return_value_dst,
-                            instance,
+                    InstrData::Branch(instr) => {
+                        if locals.load_bool(instr.condition) {
+                            self.current_instr = instr.target;
+
+                            let mut walker =
+                                locals
+                                    .stack
+                                    .walker(func, instance, &self.function_stack_maps);
+                            instance.gc.safepoint(instance, &mut walker);
+
+                            continue;
+                        }
+                    }
+                    InstrData::Call(instr) => {
+                        let mut walker =
+                            locals
+                                .stack
+                                .walker(func, instance, &self.function_stack_maps);
+                        instance.gc.safepoint(instance, &mut walker);
+                        drop(walker);
+
+                        let func_object = locals
+                            .stack
+                            .get_ptr(locals.func_stack_map.local_offsets[instr.func]);
+                        unsafe {
+                            // hopefully gets compiled as a tail call
+                            return self.call(
+                                func_object,
+                                instr.args.as_slice(&func_data.local_pool),
+                                instr.return_value_dst,
+                                instance,
+                            );
+                        }
+                    }
+                    InstrData::Return(instr) => {
+                        let return_value = locals.load(instr.return_value);
+
+                        let return_address = locals.stack.pop_frame(
+                            locals.func_stack_map,
+                            |func| self.function_stack_maps[func].as_ref().unwrap(),
+                            instr.return_value,
                         );
+                        if return_address.is_present() {
+                            // hopefully gets compiled as a tail call.
+                            return self.continue_func(
+                                return_address.func,
+                                return_address.instr,
+                                instance,
+                            );
+                        } else {
+                            return return_value;
+                        }
                     }
-                }
-                InstrData::Return(instr) => {
-                    let return_value = locals.load(instr.return_value);
+                    InstrData::Copy(instr) => {
+                        let typ = func_data.locals[instr.src].typ;
+                        let typ = instance.engine.type_registry.module_mapping[module][typ];
+                        let layout = instance.engine.type_registry.layouts[typ].unwrap();
 
-                    let return_address = locals.stack.pop_frame(
-                        locals.func_stack_map,
-                        |func| self.function_stack_maps[func].as_ref().unwrap(),
-                        instr.return_value,
-                    );
-                    if return_address.is_present() {
-                        // Hopefully gets compiled as a tail call.
-                        return self.continue_func(
-                            return_address.func,
-                            return_address.instr,
-                            instance,
-                        );
-                    } else {
-                        return return_value;
-                    }
-                }
-                InstrData::Copy(instr) => {
-                    let typ = func_data.locals[instr.src].typ;
-                    let typ = instance.engine.type_registry.module_mapping[module][typ];
-                    let layout = instance.engine.type_registry.layouts[typ].unwrap();
-
-                    locals.stack.copy(
-                        locals.func_stack_map.local_offsets[instr.src],
-                        locals.func_stack_map.local_offsets[instr.dst],
-                        layout.size() as u32,
-                    );
-                }
-                InstrData::IntConstant(instr) => {
-                    let ConstantData::Int(x) = module_data.constants[instr.constant] else {
-                        invalid_bytecode!()
-                    };
-                    locals.store(instr.dst, x);
-                }
-                InstrData::IntAdd(instr) => {
-                    let lhs = locals.load::<i64>(instr.src1);
-                    let rhs = locals.load::<i64>(instr.src2);
-                    let result = lhs.wrapping_add(rhs);
-                    locals.store(instr.dst, result);
-                }
-                InstrData::IntSub(instr) => {
-                    let lhs = locals.load::<i64>(instr.src1);
-                    let rhs = locals.load::<i64>(instr.src2);
-                    let result = lhs.wrapping_sub(rhs);
-                    locals.store(instr.dst, result);
-                }
-                InstrData::IntMul(instr) => {
-                    let lhs = locals.load::<i64>(instr.src1);
-                    let rhs = locals.load::<i64>(instr.src2);
-                    let result = lhs.wrapping_mul(rhs);
-                    locals.store(instr.dst, result);
-                }
-                InstrData::IntDiv(instr) => {
-                    let lhs = locals.load::<i64>(instr.src1);
-                    let rhs = locals.load::<i64>(instr.src2);
-                    let result = lhs.wrapping_div(rhs);
-                    locals.store(instr.dst, result);
-                }
-                InstrData::IntCmp(instr) => {
-                    let lhs = locals.load::<i64>(instr.src1);
-                    let rhs = locals.load::<i64>(instr.src2);
-                    let result = match instr.mode {
-                        CompareMode::Less => lhs < rhs,
-                        CompareMode::LessOrEqual => lhs <= rhs,
-                        CompareMode::Greater => lhs > rhs,
-                        CompareMode::GreaterOrEqual => lhs >= rhs,
-                        CompareMode::Equal => lhs == rhs,
-                        CompareMode::NotEqual => lhs != rhs,
-                    };
-                    locals.store(instr.dst, result);
-                }
-                InstrData::RealConstant(instr) => {
-                    let ConstantData::Real(x) = module_data.constants[instr.constant] else {
-                        invalid_bytecode!()
-                    };
-                    locals.store(instr.dst, x);
-                }
-                InstrData::RealAdd(instr) => {
-                    let lhs = locals.load::<f64>(instr.src1);
-                    let rhs = locals.load::<f64>(instr.src2);
-                    let result = lhs + rhs;
-                    locals.store(instr.dst, result);
-                }
-                InstrData::RealSub(instr) => {
-                    let lhs = locals.load::<f64>(instr.src1);
-                    let rhs = locals.load::<f64>(instr.src2);
-                    let result = lhs - rhs;
-                    locals.store(instr.dst, result);
-                }
-                InstrData::RealMul(instr) => {
-                    let lhs = locals.load::<f64>(instr.src1);
-                    let rhs = locals.load::<f64>(instr.src2);
-                    let result = lhs * rhs;
-                    locals.store(instr.dst, result);
-                }
-                InstrData::RealDiv(instr) => {
-                    let lhs = locals.load::<f64>(instr.src1);
-                    let rhs = locals.load::<f64>(instr.src2);
-                    let result = lhs / rhs;
-                    locals.store(instr.dst, result);
-                }
-                InstrData::RealCmp(instr) => {
-                    let lhs = locals.load::<f64>(instr.src1);
-                    let rhs = locals.load::<f64>(instr.src2);
-                    let result = match instr.mode {
-                        CompareMode::Less => lhs < rhs,
-                        CompareMode::LessOrEqual => lhs <= rhs,
-                        CompareMode::Greater => lhs > rhs,
-                        CompareMode::GreaterOrEqual => lhs >= rhs,
-                        CompareMode::Equal => lhs == rhs,
-                        CompareMode::NotEqual => lhs != rhs,
-                    };
-                    locals.store(instr.dst, result);
-                }
-                InstrData::BoolConstant(instr) => {
-                    let ConstantData::Bool(x) = module_data.constants[instr.constant] else {
-                        invalid_bytecode!()
-                    };
-                    locals.store(instr.dst, x);
-                }
-                InstrData::BoolAnd(instr) => {
-                    let lhs = locals.load_bool(instr.src1);
-                    let rhs = locals.load_bool(instr.src2);
-                    let result = lhs & rhs;
-                    locals.store(instr.dst, result);
-                }
-                InstrData::BoolOr(instr) => {
-                    let lhs = locals.load_bool(instr.src1);
-                    let rhs = locals.load_bool(instr.src2);
-                    let result = lhs | rhs;
-                    locals.store(instr.dst, result);
-                }
-                InstrData::BoolXor(instr) => {
-                    let lhs = locals.load_bool(instr.src1);
-                    let rhs = locals.load_bool(instr.src2);
-                    let result = lhs ^ rhs;
-                    locals.store(instr.dst, result);
-                }
-                InstrData::BoolNot(instr) => {
-                    let src = locals.load_bool(instr.src);
-                    let result = !src;
-                    locals.store(instr.dst, result);
-                }
-                InstrData::InitStruct(instr) => {
-                    let field_vals = instr.fields.as_slice(&func_data.local_pool);
-                    let struct_layout = instance
-                        .engine
-                        .type_registry
-                        .local_type_data(module, instr.typ);
-                    let TypeKind::Struct(struct_layout) = &struct_layout.kind else {
-                        invalid_bytecode!()
-                    };
-
-                    let struct_base = locals.func_stack_map.local_offsets[instr.dst];
-
-                    for (field, field_val) in struct_layout.fields.values().zip(field_vals) {
-                        let src_offset = locals.func_stack_map.local_offsets[*field_val];
-                        let dst_offset = struct_base + field.offset as u32;
-                        let size = field.size as u32;
-
-                        locals.stack.copy(src_offset, dst_offset, size);
-                    }
-                }
-                InstrData::GetField(instr) => {
-                    let struct_layout = instance
-                        .engine
-                        .type_registry
-                        .local_type_data(module, func_data.locals[instr.src_struct].typ);
-                    let TypeKind::Struct(struct_layout) = &struct_layout.kind else {
-                        invalid_bytecode!()
-                    };
-                    let field_layout = &struct_layout.fields[instr.field];
-
-                    let src_offset = locals.func_stack_map.local_offsets[instr.src_struct]
-                        + field_layout.offset as u32;
-                    let dst_offset = locals.func_stack_map.local_offsets[instr.dst];
-                    locals
-                        .stack
-                        .copy(src_offset, dst_offset, field_layout.size as u32);
-                }
-                InstrData::SetField(instr) => {
-                    let struct_layout = instance
-                        .engine
-                        .type_registry
-                        .local_type_data(module, func_data.locals[instr.dst_struct].typ);
-                    let TypeKind::Struct(struct_layout) = &struct_layout.kind else {
-                        invalid_bytecode!()
-                    };
-                    let field_layout = &struct_layout.fields[instr.field];
-
-                    let src_offset = locals.func_stack_map.local_offsets[instr.src];
-                    let dst_offset = locals.func_stack_map.local_offsets[instr.dst_struct]
-                        + field_layout.offset as u32;
-                    locals
-                        .stack
-                        .copy(src_offset, dst_offset, field_layout.size as u32);
-                }
-                InstrData::Alloc(instr) => {
-                    let mut walker = locals
-                        .stack
-                        .walker(func, instance, &self.function_stack_maps);
-
-                    let local_type = func_data.locals[instr.src].typ;
-                    let typ = instance.engine.type_registry.module_mapping[module][local_type];
-
-                    let mref = instance.gc.allocate(instance, typ, &mut walker);
-                    drop(walker);
-
-                    locals.store(instr.dst_ref, mref);
-
-                    unsafe {
-                        memory_store(
-                            &locals.stack,
+                        locals.stack.copy(
                             locals.func_stack_map.local_offsets[instr.src],
-                            typ,
-                            mref,
-                            0,
-                            instance,
-                        );
-                    }
-                }
-                InstrData::Load(instr) => {
-                    let r = locals.load::<MRef>(instr.src_ref);
-                    let local_type = func_data.locals[instr.dst].typ;
-                    let typ = instance.engine.type_registry.module_mapping[module][local_type];
-
-                    unsafe {
-                        memory_load(
-                            r,
-                            0,
-                            typ,
-                            &mut locals.stack,
-                            locals.func_stack_map.local_offsets[instr.src_ref],
-                            instance,
-                        );
-                    }
-                }
-                InstrData::LoadField(instr) => {
-                    let r = locals.load::<MRef>(instr.src_ref);
-
-                    let field_type = func_data.locals[instr.dst].typ;
-                    let field_type =
-                        instance.engine.type_registry.module_mapping[module][field_type];
-
-                    let struct_type = func_data.locals[instr.src_ref].typ;
-                    let struct_type =
-                        instance.engine.type_registry.module_mapping[module][struct_type];
-                    let TypeKind::Reference(s) =
-                        &instance.engine.type_registry.types[struct_type].kind
-                    else {
-                        invalid_bytecode!()
-                    };
-                    let TypeKind::Struct(s) = &instance.engine.type_registry.types[*s].kind else {
-                        invalid_bytecode!()
-                    };
-
-                    let offset = s.fields[instr.field].offset;
-
-                    unsafe {
-                        memory_load(
-                            r,
-                            offset as u32,
-                            field_type,
-                            &mut locals.stack,
                             locals.func_stack_map.local_offsets[instr.dst],
-                            instance,
+                            layout.size() as u32,
                         );
                     }
-                }
-                InstrData::Store(instr) => {
-                    let r = locals.load::<MRef>(instr.dst_ref);
+                    InstrData::IntConstant(instr) => {
+                        let ConstantData::Int(x) = module_data.constants[instr.constant] else {
+                            invalid_bytecode!()
+                        };
+                        locals.store(instr.dst, x);
+                    }
+                    InstrData::IntAdd(instr) => {
+                        let lhs = locals.load::<i64>(instr.src1);
+                        let rhs = locals.load::<i64>(instr.src2);
+                        let result = lhs.wrapping_add(rhs);
+                        locals.store(instr.dst, result);
+                    }
+                    InstrData::IntSub(instr) => {
+                        let lhs = locals.load::<i64>(instr.src1);
+                        let rhs = locals.load::<i64>(instr.src2);
+                        let result = lhs.wrapping_sub(rhs);
+                        locals.store(instr.dst, result);
+                    }
+                    InstrData::IntMul(instr) => {
+                        let lhs = locals.load::<i64>(instr.src1);
+                        let rhs = locals.load::<i64>(instr.src2);
+                        let result = lhs.wrapping_mul(rhs);
+                        locals.store(instr.dst, result);
+                    }
+                    InstrData::IntDiv(instr) => {
+                        let lhs = locals.load::<i64>(instr.src1);
+                        let rhs = locals.load::<i64>(instr.src2);
+                        let result = lhs.wrapping_div(rhs);
+                        locals.store(instr.dst, result);
+                    }
+                    InstrData::IntCmp(instr) => {
+                        let lhs = locals.load::<i64>(instr.src1);
+                        let rhs = locals.load::<i64>(instr.src2);
+                        let result = match instr.mode {
+                            CompareMode::Less => lhs < rhs,
+                            CompareMode::LessOrEqual => lhs <= rhs,
+                            CompareMode::Greater => lhs > rhs,
+                            CompareMode::GreaterOrEqual => lhs >= rhs,
+                            CompareMode::Equal => lhs == rhs,
+                            CompareMode::NotEqual => lhs != rhs,
+                        };
+                        locals.store(instr.dst, result);
+                    }
+                    InstrData::RealConstant(instr) => {
+                        let ConstantData::Real(x) = module_data.constants[instr.constant] else {
+                            invalid_bytecode!()
+                        };
+                        locals.store(instr.dst, x);
+                    }
+                    InstrData::RealAdd(instr) => {
+                        let lhs = locals.load::<f64>(instr.src1);
+                        let rhs = locals.load::<f64>(instr.src2);
+                        let result = lhs + rhs;
+                        locals.store(instr.dst, result);
+                    }
+                    InstrData::RealSub(instr) => {
+                        let lhs = locals.load::<f64>(instr.src1);
+                        let rhs = locals.load::<f64>(instr.src2);
+                        let result = lhs - rhs;
+                        locals.store(instr.dst, result);
+                    }
+                    InstrData::RealMul(instr) => {
+                        let lhs = locals.load::<f64>(instr.src1);
+                        let rhs = locals.load::<f64>(instr.src2);
+                        let result = lhs * rhs;
+                        locals.store(instr.dst, result);
+                    }
+                    InstrData::RealDiv(instr) => {
+                        let lhs = locals.load::<f64>(instr.src1);
+                        let rhs = locals.load::<f64>(instr.src2);
+                        let result = lhs / rhs;
+                        locals.store(instr.dst, result);
+                    }
+                    InstrData::RealCmp(instr) => {
+                        let lhs = locals.load::<f64>(instr.src1);
+                        let rhs = locals.load::<f64>(instr.src2);
+                        let result = match instr.mode {
+                            CompareMode::Less => lhs < rhs,
+                            CompareMode::LessOrEqual => lhs <= rhs,
+                            CompareMode::Greater => lhs > rhs,
+                            CompareMode::GreaterOrEqual => lhs >= rhs,
+                            CompareMode::Equal => lhs == rhs,
+                            CompareMode::NotEqual => lhs != rhs,
+                        };
+                        locals.store(instr.dst, result);
+                    }
+                    InstrData::BoolConstant(instr) => {
+                        let ConstantData::Bool(x) = module_data.constants[instr.constant] else {
+                            invalid_bytecode!()
+                        };
+                        locals.store(instr.dst, x);
+                    }
+                    InstrData::BoolAnd(instr) => {
+                        let lhs = locals.load_bool(instr.src1);
+                        let rhs = locals.load_bool(instr.src2);
+                        let result = lhs & rhs;
+                        locals.store(instr.dst, result);
+                    }
+                    InstrData::BoolOr(instr) => {
+                        let lhs = locals.load_bool(instr.src1);
+                        let rhs = locals.load_bool(instr.src2);
+                        let result = lhs | rhs;
+                        locals.store(instr.dst, result);
+                    }
+                    InstrData::BoolXor(instr) => {
+                        let lhs = locals.load_bool(instr.src1);
+                        let rhs = locals.load_bool(instr.src2);
+                        let result = lhs ^ rhs;
+                        locals.store(instr.dst, result);
+                    }
+                    InstrData::BoolNot(instr) => {
+                        let src = locals.load_bool(instr.src);
+                        let result = !src;
+                        locals.store(instr.dst, result);
+                    }
+                    InstrData::InitStruct(instr) => {
+                        let field_vals = instr.fields.as_slice(&func_data.local_pool);
+                        let struct_layout = instance
+                            .engine
+                            .type_registry
+                            .local_type_data(module, instr.typ);
+                        let TypeKind::Struct(struct_layout) = &struct_layout.kind else {
+                            invalid_bytecode!()
+                        };
 
-                    let local_type = func_data.locals[instr.src_val].typ;
-                    let typ = instance.engine.type_registry.module_mapping[module][local_type];
-                    let src_offset = locals.func_stack_map.local_offsets[instr.src_val];
+                        let struct_base = locals.func_stack_map.local_offsets[instr.dst];
 
-                    unsafe {
-                        memory_store(&locals.stack, src_offset, typ, r, 0, instance);
+                        for (field, field_val) in struct_layout.fields.values().zip(field_vals) {
+                            let src_offset = locals.func_stack_map.local_offsets[*field_val];
+                            let dst_offset = struct_base + field.offset as u32;
+                            let size = field.size as u32;
+
+                            locals.stack.copy(src_offset, dst_offset, size);
+                        }
+                    }
+                    InstrData::GetField(instr) => {
+                        let struct_layout = instance
+                            .engine
+                            .type_registry
+                            .local_type_data(module, func_data.locals[instr.src_struct].typ);
+                        let TypeKind::Struct(struct_layout) = &struct_layout.kind else {
+                            invalid_bytecode!()
+                        };
+                        let field_layout = &struct_layout.fields[instr.field];
+
+                        let src_offset = locals.func_stack_map.local_offsets[instr.src_struct]
+                            + field_layout.offset as u32;
+                        let dst_offset = locals.func_stack_map.local_offsets[instr.dst];
+                        locals
+                            .stack
+                            .copy(src_offset, dst_offset, field_layout.size as u32);
+                    }
+                    InstrData::SetField(instr) => {
+                        let struct_layout = instance
+                            .engine
+                            .type_registry
+                            .local_type_data(module, func_data.locals[instr.dst_struct].typ);
+                        let TypeKind::Struct(struct_layout) = &struct_layout.kind else {
+                            invalid_bytecode!()
+                        };
+                        let field_layout = &struct_layout.fields[instr.field];
+
+                        let src_offset = locals.func_stack_map.local_offsets[instr.src];
+                        let dst_offset = locals.func_stack_map.local_offsets[instr.dst_struct]
+                            + field_layout.offset as u32;
+                        locals
+                            .stack
+                            .copy(src_offset, dst_offset, field_layout.size as u32);
+                    }
+                    InstrData::Alloc(instr) => {
+                        let mut walker =
+                            locals
+                                .stack
+                                .walker(func, instance, &self.function_stack_maps);
+
+                        let local_type = func_data.locals[instr.src].typ;
+                        let typ = instance.engine.type_registry.module_mapping[module][local_type];
+
+                        let mref = instance.gc.allocate(instance, typ, &mut walker);
+                        drop(walker);
+
+                        locals.store(instr.dst_ref, mref);
+
+                        unsafe {
+                            memory_store(
+                                &locals.stack,
+                                locals.func_stack_map.local_offsets[instr.src],
+                                typ,
+                                mref,
+                                0,
+                                instance,
+                            );
+                        }
+                    }
+                    InstrData::Load(instr) => {
+                        let r = locals.load::<MRef>(instr.src_ref);
+                        let local_type = func_data.locals[instr.dst].typ;
+                        let typ = instance.engine.type_registry.module_mapping[module][local_type];
+
+                        unsafe {
+                            memory_load(
+                                r,
+                                0,
+                                typ,
+                                &mut locals.stack,
+                                locals.func_stack_map.local_offsets[instr.src_ref],
+                                instance,
+                            );
+                        }
+                    }
+                    InstrData::LoadField(instr) => {
+                        let r = locals.load::<MRef>(instr.src_ref);
+
+                        let field_type = func_data.locals[instr.dst].typ;
+                        let field_type =
+                            instance.engine.type_registry.module_mapping[module][field_type];
+
+                        let struct_type = func_data.locals[instr.src_ref].typ;
+                        let struct_type =
+                            instance.engine.type_registry.module_mapping[module][struct_type];
+                        let TypeKind::Reference(s) =
+                            &instance.engine.type_registry.types[struct_type].kind
+                        else {
+                            invalid_bytecode!()
+                        };
+                        let TypeKind::Struct(s) = &instance.engine.type_registry.types[*s].kind
+                        else {
+                            invalid_bytecode!()
+                        };
+
+                        let offset = s.fields[instr.field].offset;
+
+                        unsafe {
+                            memory_load(
+                                r,
+                                offset as u32,
+                                field_type,
+                                &mut locals.stack,
+                                locals.func_stack_map.local_offsets[instr.dst],
+                                instance,
+                            );
+                        }
+                    }
+                    InstrData::Store(instr) => {
+                        let r = locals.load::<MRef>(instr.dst_ref);
+
+                        let local_type = func_data.locals[instr.src_val].typ;
+                        let typ = instance.engine.type_registry.module_mapping[module][local_type];
+                        let src_offset = locals.func_stack_map.local_offsets[instr.src_val];
+
+                        unsafe {
+                            memory_store(&locals.stack, src_offset, typ, r, 0, instance);
+                        }
+                    }
+                    InstrData::StoreField(instr) => {
+                        let r = locals.load::<MRef>(instr.dst_ref);
+                        let field_type = func_data.locals[instr.src_val].typ;
+                        let field_type =
+                            instance.engine.type_registry.module_mapping[module][field_type];
+
+                        let struct_type = func_data.locals[instr.dst_ref].typ;
+                        let struct_type =
+                            instance.engine.type_registry.module_mapping[module][struct_type];
+
+                        let TypeKind::Reference(s) =
+                            &instance.engine.type_registry.types[struct_type].kind
+                        else {
+                            invalid_bytecode!()
+                        };
+                        let TypeKind::Struct(s) = &instance.engine.type_registry.types[*s].kind
+                        else {
+                            invalid_bytecode!()
+                        };
+
+                        let src_offset = locals.func_stack_map.local_offsets[instr.src_val];
+                        let dst_offset = s.fields[instr.field].offset;
+
+                        unsafe {
+                            memory_store(
+                                &locals.stack,
+                                src_offset,
+                                field_type,
+                                r,
+                                dst_offset as u32,
+                                instance,
+                            );
+                        }
+                    }
+                    InstrData::MakeFunctionObject(instr) => {
+                        let fnptr = instance.engine.funcs_by_module[module][instr.func];
+                        let captures = instr.captures;
+
+                        // Heap-allocate the captures
+                        let captures_type = instance.engine.type_registry.module_mapping[module]
+                            [func_data.locals[captures].typ];
+
+                        let mut walker =
+                            locals
+                                .stack
+                                .walker(func, instance, &self.function_stack_maps);
+                        let captures_ptr =
+                            instance.gc.allocate(instance, captures_type, &mut walker);
+                        drop(walker);
+
+                        let dst_offset = locals.func_stack_map.local_offsets[instr.dst];
+                        let layout = FuncLayout::new();
+                        locals
+                            .stack
+                            .store(dst_offset + layout.fnptr_offset as u32, fnptr);
+                        locals
+                            .stack
+                            .store(dst_offset + layout.captures_offset as u32, captures_ptr);
                     }
                 }
-                InstrData::StoreField(instr) => {
-                    let r = locals.load::<MRef>(instr.dst_ref);
-                    let field_type = func_data.locals[instr.src_val].typ;
-                    let field_type =
-                        instance.engine.type_registry.module_mapping[module][field_type];
 
-                    let struct_type = func_data.locals[instr.dst_ref].typ;
-                    let struct_type =
-                        instance.engine.type_registry.module_mapping[module][struct_type];
-
-                    let TypeKind::Reference(s) =
-                        &instance.engine.type_registry.types[struct_type].kind
-                    else {
-                        invalid_bytecode!()
-                    };
-                    let TypeKind::Struct(s) = &instance.engine.type_registry.types[*s].kind else {
-                        invalid_bytecode!()
-                    };
-
-                    let src_offset = locals.func_stack_map.local_offsets[instr.src_val];
-                    let dst_offset = s.fields[instr.field].offset;
-
-                    unsafe {
-                        memory_store(
-                            &locals.stack,
-                            src_offset,
-                            field_type,
-                            r,
-                            dst_offset as u32,
-                            instance,
-                        );
-                    }
-                }
-                InstrData::MakeFunctionObject(_) => todo!(),
+                self.current_instr = Instr::new(self.current_instr.index() + 1);
             }
-
-            self.current_instr = Instr::new(self.current_instr.index() + 1);
-        }
+        })
     }
 
     unsafe fn call(
@@ -527,7 +566,7 @@ impl Interpreter {
                 src_offset,
                 dst_offset,
                 current_func_stack_map.local_sizes[arg],
-                target_func_stack_map,
+                current_func_stack_map,
             );
         }
 
@@ -571,6 +610,7 @@ impl Stack {
             .layout
             .size()
             .div_ceil(size_of::<u64>());
+
         self.data.extend((0..num_words).map(|_| 0));
 
         self.store(0, return_address);
@@ -591,7 +631,7 @@ impl Stack {
                 current_function_stack_map.local_offsets[return_value_src],
                 get_stack_map(return_address.func).local_offsets[return_address.return_value_dst],
                 current_function_stack_map.local_sizes[return_value_src],
-                current_function_stack_map,
+                get_stack_map(return_address.func),
             );
         }
 
@@ -601,6 +641,12 @@ impl Stack {
             .div_ceil(size_of::<u64>());
         let new_len = self.data.len() - num_words;
         self.data.truncate(new_len);
+
+        self.offset = if return_address.is_present() {
+            self.offset - get_stack_map(return_address.func).layout.size()
+        } else {
+            0
+        };
 
         return_address
     }
@@ -642,9 +688,9 @@ impl Stack {
         src_offset_in_caller: u32,
         dst_offset_in_callee: u32,
         size: u32,
-        callee_stack_map: &FunctionStackMap,
+        caller_stack_map: &FunctionStackMap,
     ) {
-        let caller_offset = self.offset - callee_stack_map.layout.size();
+        let caller_offset = self.offset - caller_stack_map.layout.size().div_ceil(8) * 8;
         let callee_offset = self.offset;
 
         let src_offset = caller_offset + usize::try_from(src_offset_in_caller).unwrap();
@@ -663,9 +709,9 @@ impl Stack {
         src_offset_in_callee: u32,
         dst_offset_in_caller: u32,
         size: u32,
-        callee_stack_map: &FunctionStackMap,
+        caller_stack_map: &FunctionStackMap,
     ) {
-        let caller_offset = self.offset - callee_stack_map.layout.size();
+        let caller_offset = self.offset - caller_stack_map.layout.size().div_ceil(8) * 8;
         let callee_offset = self.offset;
 
         let src_offset = callee_offset + usize::try_from(src_offset_in_callee).unwrap();
@@ -716,7 +762,7 @@ impl Stack {
                             &self.data[self.current_offset..][..size_of::<ReturnAddress>()],
                         );
                         return if return_address.is_present() {
-                            self.current_offset -= self.func_stack_maps[self.current_func]
+                            self.current_offset -= self.func_stack_maps[return_address.func]
                                 .as_ref()
                                 .unwrap()
                                 .layout

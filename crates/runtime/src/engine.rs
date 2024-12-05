@@ -1,6 +1,6 @@
 use crate::{gc::GarbageCollector, interpreter::Interpreter, type_registry::TypeRegistry};
 use bytecode::{entity_ref, module::FuncData, LocalFunc, ModuleData};
-use cranelift_entity::PrimaryMap;
+use cranelift_entity::{PrimaryMap, SecondaryMap};
 use std::{cell::RefCell, sync::Arc};
 use thread_local::ThreadLocal;
 
@@ -10,6 +10,7 @@ pub struct Engine {
     pub(crate) type_registry: TypeRegistry,
     /// Maps global function IDs to local function IDs in modules.
     pub(crate) funcs: PrimaryMap<Func, (Module, LocalFunc)>,
+    pub(crate) funcs_by_module: SecondaryMap<Module, SecondaryMap<LocalFunc, Func>>,
     pub(crate) interpreter: ThreadLocal<RefCell<Interpreter>>,
 }
 
@@ -19,7 +20,8 @@ impl Engine {
         self.type_registry.load_module_types(id, &self.modules[id]);
 
         for local_func in self.modules[id].funcs.keys() {
-            self.funcs.push((id, local_func));
+            let func = self.funcs.push((id, local_func));
+            self.funcs_by_module[id][local_func] = func;
         }
 
         id
