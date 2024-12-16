@@ -6,7 +6,7 @@ use bytecode::{
     Instr, InstrData, LocalType, ModuleData,
 };
 use cranelift_entity::{packed_option::ReservedValue, EntityList, EntityRef, PrimaryMap};
-use zyon_runtime::{Func, Instance};
+use zyon_runtime::{Error, Func, Instance, Value};
 
 extern crate zyon_bytecode as bytecode;
 
@@ -22,7 +22,7 @@ fn factorial() {
         .types
         .push(bytecode::TypeData::Primitive(bytecode::PrimitiveType::Bool));
 
-    let mut func = FuncData::new(&mut module);
+    let mut func = FuncData::new_no_captures(&mut module);
 
     let x = func.locals.push(LocalData::new(int));
     let i = func.locals.push(LocalData::new(int));
@@ -72,7 +72,10 @@ fn factorial() {
     module.funcs.push(func);
 
     let instance = Instance::new_test(module, 1024);
-    assert_eq!(instance.interp(Func::new(0)), 3628800); // 10!
+    assert_eq!(
+        instance.interp_bare(Func::new(0)).unwrap(),
+        Value::Int(3628800)
+    ); // 10!
 }
 
 // Tests garbage collection by repeatedly making a big linked list.
@@ -121,7 +124,7 @@ fn linked_list() {
         }));
     module.types.push(bytecode::TypeData::Reference(node_type));
 
-    let mut func = FuncData::new(&mut module);
+    let mut func = FuncData::new_no_captures(&mut module);
 
     let head = func.local(node_ref_type);
     let has_head = func.local(bool_);
@@ -288,22 +291,31 @@ fn linked_list() {
 
     module.funcs.push(func);
 
-    let instance = Instance::new_test(module, 1024 * 34);
-    assert_eq!(instance.interp(Func::new(0)), 999);
+    let instance = Instance::new_test(module.clone(), 1024 * 34);
+    assert_eq!(instance.interp_bare(Func::new(0)).unwrap(), Value::Int(999));
+
+    let instance2 = Instance::new_test(module, 1024 * 32);
+    assert!(matches!(
+        instance2.interp_bare(Func::new(0)),
+        Err(Error::OutOfMemory)
+    ));
 }
 
 #[test]
 fn fibonacci() {
+    tracing_subscriber::fmt::try_init().ok();
+
     let mut module = ModuleData::default();
     let int = module.typ(bytecode::TypeData::Primitive(bytecode::PrimitiveType::Int));
     let bool_ = module.typ(bytecode::TypeData::Primitive(bytecode::PrimitiveType::Bool));
     let unit = module.typ(bytecode::TypeData::Primitive(bytecode::PrimitiveType::Unit));
+    let unit_ref_type = module.typ(bytecode::TypeData::Reference(unit));
     let func = module.typ(bytecode::TypeData::Func(FuncTypeData {
         param_types: vec![int],
         return_type: int,
     }));
 
-    let mut recursive_func = FuncData::new(&mut module);
+    let mut recursive_func = FuncData::new_no_captures(&mut module);
 
     let n = recursive_func.local(int);
     let temp_int1 = recursive_func.local(int);
@@ -313,6 +325,7 @@ fn fibonacci() {
     let one = recursive_func.local(int);
     let two = recursive_func.local(int);
     let unit_val = recursive_func.local(unit);
+    let unit_ref = recursive_func.local(unit_ref_type);
     let f = recursive_func.local(func);
 
     recursive_func
@@ -330,6 +343,10 @@ fn fibonacci() {
     recursive_func.instr(InstrData::IntConstant(instr::ConstantInstr {
         dst: two,
         constant: module.constant(ConstantData::Int(2)),
+    }));
+    recursive_func.instr(InstrData::Alloc(instr::Alloc {
+        dst_ref: unit_ref,
+        src: unit_val,
     }));
 
     recursive_func.instr(InstrData::IntCmp(instr::CmpInstr {
@@ -356,7 +373,7 @@ fn fibonacci() {
     recursive_func.instr(InstrData::MakeFunctionObject(instr::MakeFunctionObject {
         dst: f,
         func: module.funcs.next_key(),
-        captures: unit_val,
+        captures_ref: unit_ref,
     }));
 
     // f(n - 1)
@@ -404,19 +421,25 @@ fn fibonacci() {
 
     let recursive_func = module.funcs.push(recursive_func);
 
-    let mut driver_func = FuncData::new(&mut module);
+    let mut driver_func = FuncData::new_no_captures(&mut module);
     let f = driver_func.local(func);
     let n = driver_func.local(int);
     let unit_val = driver_func.local(unit);
+    let unit_ref = driver_func.local(unit_ref_type);
 
     driver_func.instr(InstrData::IntConstant(instr::ConstantInstr {
         dst: n,
         constant: module.constant(ConstantData::Int(20)),
     }));
+    driver_func.instr(InstrData::Alloc(instr::Alloc {
+        dst_ref: unit_ref,
+        src: unit_val,
+    }));
+
     driver_func.instr(InstrData::MakeFunctionObject(instr::MakeFunctionObject {
         dst: f,
         func: recursive_func,
-        captures: unit_val,
+        captures_ref: unit_ref,
     }));
     let args = EntityList::from_slice(&[n], &mut driver_func.local_pool);
     driver_func.instr(InstrData::Call(instr::Call {
@@ -428,5 +451,8 @@ fn fibonacci() {
     module.funcs.push(driver_func);
 
     let instance = Instance::new_test(module, 1024);
-    assert_eq!(instance.interp(Func::new(1)), 6765);
+    assert_eq!(
+        instance.interp_bare(Func::new(1)).unwrap(),
+        Value::Int(6765)
+    );
 }

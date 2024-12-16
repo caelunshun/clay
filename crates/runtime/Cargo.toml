@@ -12,8 +12,9 @@ crossbeam-utils.workspace = true
 thread_local.workspace = true
 parking_lot.workspace = true
 bytemuck.workspace = true
-tracing.workspace = true 
-stacker.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+portable-atomic.workspace = true
 
 [dev-dependencies]
 tracing-subscriber.workspace = true

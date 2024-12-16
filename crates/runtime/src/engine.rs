@@ -1,4 +1,7 @@
-use crate::{gc::GarbageCollector, interpreter::Interpreter, type_registry::TypeRegistry};
+use crate::{
+    gc::GarbageCollector, interpreter::Interpreter, type_registry::TypeRegistry, value::Value,
+    Error,
+};
 use bytecode::{entity_ref, module::FuncData, LocalFunc, ModuleData};
 use cranelift_entity::{PrimaryMap, SecondaryMap};
 use std::{cell::RefCell, sync::Arc};
@@ -54,14 +57,16 @@ impl Instance {
         }
     }
 
-    pub fn interp(&self, func: Func) -> i64 {
+    /// Interpret a bare function. The function must have
+    /// unit captures type and no arguments.
+    pub fn interp_bare(&self, func: Func) -> Result<Value, Error> {
         self.gc.mark_thread_active();
         let res = self
             .engine
             .interpreter
             .get_or(|| RefCell::new(Interpreter::new()))
             .borrow_mut()
-            .interp(func, self);
+            .interp_bare(func, self);
         self.gc.mark_thread_inactive();
         res
     }

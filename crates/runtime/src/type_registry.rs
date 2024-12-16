@@ -1,5 +1,6 @@
 use crate::{engine::Module, ptr::MRef, Func};
 use bytecode::{module::Field, LocalType, ModuleData, PrimitiveType};
+use bytemuck::{Pod, Zeroable};
 use cranelift_entity::{EntityRef, PrimaryMap, SecondaryMap};
 use hashbrown::HashMap;
 use parking_lot::{Once, OnceState};
@@ -207,16 +208,10 @@ impl TypeRegistry {
             TypeKind::Reference(_) | TypeKind::LazyReference(_) => {
                 callback(*ptr.cast::<MRef>());
             }
-            TypeKind::Func(_) => {
-                callback(*ptr.add(FuncLayout::new().captures_offset).cast::<MRef>());
-            }
+            TypeKind::Func(_) => callback((*ptr.cast::<FuncObject>()).captures),
             TypeKind::Lazy(lazy) => {
                 let func_ptr = lazy.layout.get_initializer_func_ptr(ptr);
-                callback(
-                    *func_ptr
-                        .add(FuncLayout::new().captures_offset)
-                        .cast::<MRef>(),
-                );
+                callback(func_ptr.captures);
 
                 let once = lazy.layout.get_once_ptr(ptr);
                 if once.state() == OnceState::Done {
@@ -269,7 +264,7 @@ impl TypeKind {
             },
             TypeKind::Reference(_) | TypeKind::LazyReference(_) => Layout::new::<MRef>(),
             TypeKind::Lazy(l) => l.layout.overall,
-            TypeKind::Func(_) => FuncLayout::new().overall,
+            TypeKind::Func(_) => Layout::new::<FuncObject>(),
         }
     }
 }
@@ -378,7 +373,7 @@ pub struct LazyLayout {
 impl LazyLayout {
     pub fn new(value_layout: Layout) -> Self {
         let (overall, initializer_func_offset) =
-            value_layout.extend(FuncLayout::new().overall).unwrap();
+            value_layout.extend(Layout::new::<FuncObject>()).unwrap();
         let (overall, once_offset) = overall.extend(Layout::new::<Once>()).unwrap();
 
         Self {
@@ -407,35 +402,32 @@ impl LazyLayout {
         &*p.add(self.once_offset).cast()
     }
 
-    pub unsafe fn get_initializer_func_ptr(&self, p: *const u8) -> *const u8 {
-        p.add(self.initializer_func_offset)
+    pub unsafe fn get_initializer_func_ptr(&self, p: *const u8) -> &FuncObject {
+        &*p.add(self.initializer_func_offset).cast()
     }
 }
 
-#[derive(Copy, Clone, Debug)]
-pub struct FuncLayout {
-    pub overall: Layout,
-    pub fnptr_offset: usize,
-    pub captures_offset: usize,
+/// In-memory representation of a function object.
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+// alignment of 16 ensures 128-bit atomics can be used
+#[repr(C, align(16))]
+pub struct FuncObject {
+    /// Pointer to captures passed to the function.
+    pub captures: MRef,
+    /// Function implementation.
+    pub func: Func,
+    /// Unused; used to force 128-bit size so we atomically
+    /// load/store a function object.
+    pub padding: u32,
 }
 
-impl FuncLayout {
-    pub fn new() -> Self {
-        let fnptr_layout = Layout::new::<Func>();
-        let (overall, captures_offset) = fnptr_layout.extend(Layout::new::<MRef>()).unwrap();
-        Self {
-            overall,
-            fnptr_offset: 0,
-            captures_offset,
-        }
+impl FuncObject {
+    pub fn to_u128(self) -> u128 {
+        u128::from_le_bytes(bytemuck::bytes_of(&self).try_into().unwrap())
     }
 
-    pub unsafe fn get_fnptr(&self, ptr: *const u8) -> Func {
-        *ptr.add(self.fnptr_offset).cast::<Func>()
-    }
-
-    pub unsafe fn get_captures_ptr(&self, ptr: *const u8) -> MRef {
-        *ptr.add(self.captures_offset).cast::<MRef>()
+    pub fn from_u128(x: u128) -> Self {
+        *bytemuck::from_bytes(&x.to_le_bytes())
     }
 }
 

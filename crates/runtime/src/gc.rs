@@ -1,4 +1,4 @@
-use crate::{engine::Instance, ptr::MRef, type_registry::Type};
+use crate::{engine::Instance, ptr::MRef, type_registry::Type, Error};
 
 /// A memory management implementation for the Zyon runtime.
 ///
@@ -6,7 +6,12 @@ use crate::{engine::Instance, ptr::MRef, type_registry::Type};
 /// of memory.
 pub trait GarbageCollector: Send + Sync {
     /// Allocate managed memory for an object of the given type.
-    fn allocate(&self, instance: &Instance, typ: Type, stack_walker: &mut dyn StackWalker) -> MRef;
+    fn allocate(
+        &self,
+        instance: &Instance,
+        typ: Type,
+        stack_walker: &mut dyn StackWalker,
+    ) -> Result<MRef, Error>;
 
     /// GC safepoint: potentially check if another thread has started
     /// a GC cycle, and participate if needed.

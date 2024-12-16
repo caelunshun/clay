@@ -3,6 +3,7 @@ use crate::{
     gc::{GarbageCollector, StackWalker},
     ptr::MRef,
     type_registry::Type,
+    Error,
 };
 use crossbeam_utils::CachePadded;
 use parking_lot::{Condvar, Mutex};
@@ -179,7 +180,6 @@ impl SimpleGarbageCollector {
         let mut roots = Vec::new();
         for stack_walker in stack_walkers {
             while let Some(live_ref) = stack_walker.next() {
-                // TEMP until we add runtime support for tagged unions
                 if live_ref.as_ptr().is_null() {
                     continue;
                 }
@@ -198,7 +198,6 @@ impl SimpleGarbageCollector {
                     live_ref.as_ptr(),
                     header.typ,
                     |pointer| {
-                        // TEMP until we add runtime support for tagged unions
                         if pointer.as_ptr().is_null() {
                             return;
                         }
@@ -281,11 +280,23 @@ impl SimpleGarbageCollector {
 }
 
 impl GarbageCollector for SimpleGarbageCollector {
-    fn allocate(&self, instance: &Instance, typ: Type, stack_walker: &mut dyn StackWalker) -> MRef {
-        let thread_state = self.thread_states.get_or(Default::default);
-
+    fn allocate(
+        &self,
+        instance: &Instance,
+        typ: Type,
+        stack_walker: &mut dyn StackWalker,
+    ) -> Result<MRef, Error> {
         let type_layout = instance.engine.type_registry.layouts[typ].unwrap();
         let object_layout = ObjectLayout::new(type_layout);
+
+        if type_layout.size() == 0 {
+            // No need to allocate for a zero-sized type.
+            unsafe {
+                return Ok(MRef::new(ptr::null_mut()));
+            }
+        }
+
+        let thread_state = self.thread_states.get_or(Default::default);
 
         if object_layout.overall.size()
             + self.memory_usage.load(Ordering::Relaxed)
@@ -298,17 +309,21 @@ impl GarbageCollector for SimpleGarbageCollector {
                 + thread_state.recent_memory_usage.load(Ordering::Relaxed)
                 > self.approx_max_memory
             {
-                panic!("out of memory"); // TODO result
+                return Err(Error::OutOfMemory);
             }
         }
 
         // Soundness: since `object_layout` always includes the
         // footer, it is never of zero size.
-        let ptr =
-            unsafe { std::alloc::alloc(object_layout.overall).add(object_layout.value_offset) };
+        let ptr = unsafe {
+            std::alloc::alloc_zeroed(object_layout.overall).add(object_layout.value_offset)
+        };
+        if ptr.is_null() {
+            return Err(Error::OutOfSystemMemory);
+        }
 
         // Soundness: the pointer is managed by this garbage collector.
-        let mref = unsafe { MRef::new(NonNull::new(ptr).expect("malloc failed")) };
+        let mref = unsafe { MRef::new(ptr) };
 
         unsafe {
             ObjectHeader::init(mref, typ);
@@ -338,7 +353,7 @@ impl GarbageCollector for SimpleGarbageCollector {
             }
         }
 
-        mref
+        Ok(mref)
     }
 
     fn safepoint(&self, _instance: &Instance, stack_walker: &mut dyn StackWalker) {

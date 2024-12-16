@@ -159,7 +159,7 @@ pub struct FuncData {
     /// much less frequently than the `LocalData` itself, and they
     /// could otherwise pollute the cache in the interpreter loop.
     pub local_names: SecondaryMap<Local, CompactString>,
-    /// Parameters expected by the function.
+    /// Parameters expected by the function, not including the captures.
     pub params: PrimaryMap<FuncParam, FuncParamData>,
     /// Names of the function parameters for debugging;
     /// see `local_names` for why this is a separate map.
@@ -175,7 +175,7 @@ pub struct FuncData {
 
 impl FuncData {
     /// Creates a `FuncData` with unit captures type.
-    pub fn new(module: &mut ModuleData) -> Self {
+    pub fn new_no_captures(module: &mut ModuleData) -> Self {
         Self::with_captures_type(module.typ(TypeData::Primitive(PrimitiveType::Unit)), module)
     }
 

@@ -222,7 +222,7 @@ pub struct StoreField {
 
 /// Construct a function object, given the function
 /// implementation (as a `Func` id) and a value containing
-/// the captures for the function (not behind a reference).
+/// a reference to the captures for the function.
 ///
 /// The captures must have
 /// the same type as the `captures_type` field of the corresponding
@@ -231,7 +231,7 @@ pub struct StoreField {
 pub struct MakeFunctionObject {
     pub dst: Local,
     pub func: LocalFunc,
-    pub captures: Local,
+    pub captures_ref: Local,
 }
 
 #[cfg(test)]
