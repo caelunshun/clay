@@ -1,6 +1,6 @@
 use crate::instr::InstrData;
 use compact_str::CompactString;
-use cranelift_entity::{EntityList, ListPool, PrimaryMap};
+use cranelift_entity::{EntityList, EntitySet, ListPool, PrimaryMap, SecondaryMap};
 use hashbrown::HashSet;
 
 #[derive(Debug, Clone, Default)]
@@ -194,13 +194,35 @@ impl FuncData {
     /// appear in any *path* (not a walk) from the entry block to B (exclusive)
     /// are visited.
     pub fn visit_basic_blocks_topological(&self, mut visit: impl FnMut(BasicBlock)) {
+        // For each block, calculate blocks that appear in a path from the entry block
+        let mut acyclic_ancestors: SecondaryMap<BasicBlock, EntitySet<BasicBlock>> =
+            Default::default();
+
+        let mut stack = vec![(self.entry_block, EntitySet::<BasicBlock>::new())];
+        while let Some((current_block, mut current_path)) = stack.pop() {
+            for ancestor in current_path.iter() {
+                acyclic_ancestors[current_block].insert(ancestor);
+            }
+            current_path.insert(current_block);
+            self.visit_block_successors(current_block, |suc| {
+                if !current_path.contains(suc) {
+                    stack.push((suc, current_path.clone()));
+                }
+            });
+        }
+
         let mut stack = vec![self.entry_block];
-        let mut visited = HashSet::new();
-        visited.insert(self.entry_block);
-        while let Some(block) = stack.pop() {
-            visit(block);
-            self.visit_block_successors(block, |suc| {
-                if visited.insert(suc) {
+        let mut visited = EntitySet::<BasicBlock>::new();
+        while let Some(current) = stack.pop() {
+            visit(current);
+            visited.insert(current);
+
+            self.visit_block_successors(current, |suc| {
+                if !visited.contains(suc)
+                    && acyclic_ancestors[suc]
+                        .iter()
+                        .all(|anc| visited.contains(anc))
+                {
                     stack.push(suc);
                 }
             });
