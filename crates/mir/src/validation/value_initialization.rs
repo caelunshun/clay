@@ -11,6 +11,10 @@ pub fn verify_value_initialization(module: &ModuleData) -> Result<(), Validation
     for (_, func) in &module.funcs {
         let mut values_written_by_blocks = SecondaryMap::<BasicBlock, EntitySet<Val>>::new();
         for (block, block_data) in &func.basic_blocks {
+            for &param in block_data.params.as_slice(&func.val_lists) {
+                values_written_by_blocks[block].insert(param);
+            }
+
             for &instr in &block_data.instrs {
                 instr.visit_dst_operands(&func.val_lists, |val| {
                     values_written_by_blocks[block].insert(val);
@@ -21,6 +25,10 @@ pub fn verify_value_initialization(module: &ModuleData) -> Result<(), Validation
         let paths = func.compute_paths_from_entry();
         for (block, block_data) in &func.basic_blocks {
             let mut written_this_block = EntitySet::new();
+            for &param in block_data.params.as_slice(&func.val_lists) {
+                written_this_block.insert(param);
+            }
+
             for &instr in &block_data.instrs {
                 let mut error = None;
                 instr.visit_src_operands(&func.val_lists, |val| {
