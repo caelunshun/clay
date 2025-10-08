@@ -53,7 +53,7 @@ impl<'a> SsaConverter<'a> {
         }
 
         // Perform SSA conversion
-        self.func.visit_basic_blocks_depth_first(|block| {
+        self.func.visit_basic_blocks_topological(|block| {
             let block_data = &self.func.basic_blocks[block];
             for &param_var in block_data.params.as_slice(&self.func.val_lists) {
                 let param_val = self.new_func.vals.push(self.func.vals[param_var].clone());

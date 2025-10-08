@@ -7,7 +7,9 @@
 
 use std::fmt::Display;
 
+pub mod cfg_integrity;
 pub mod typecheck;
+pub mod value_initialization;
 
 #[derive(Debug, Clone)]
 pub struct ValidationError(String);

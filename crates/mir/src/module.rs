@@ -189,7 +189,11 @@ impl FuncData {
         )
     }
 
-    pub fn visit_basic_blocks_depth_first(&self, mut visit: impl FnMut(BasicBlock)) {
+    /// Visits all basic blocks in an order such that
+    /// a block B is not visited until after all blocks that
+    /// appear in any *path* (not a walk) from the entry block to B (exclusive)
+    /// are visited.
+    pub fn visit_basic_blocks_topological(&self, mut visit: impl FnMut(BasicBlock)) {
         let mut stack = vec![self.entry_block];
         let mut visited = HashSet::new();
         visited.insert(self.entry_block);

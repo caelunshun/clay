@@ -69,6 +69,13 @@ pub enum InstrData {
 }
 
 impl InstrData {
+    pub fn is_block_terminator(&self) -> bool {
+        matches!(
+            self,
+            InstrData::Jump(_) | InstrData::Branch(_) | InstrData::Return(_)
+        )
+    }
+
     pub fn visit_successors(self, mut visit: impl FnMut(BasicBlock)) {
         match self {
             InstrData::Jump(ins) => visit(ins.target),
