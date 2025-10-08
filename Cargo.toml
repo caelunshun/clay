@@ -1,14 +1,11 @@
 [workspace]
-members = ["crates/bytecode", "crates/runtime"]
+members = ["crates/mir"]
 resolver = "2"
 
 [workspace.dependencies]
-salsa = "0.16"
-cranelift-entity = { git = "https://github.com/caelunshun/wasmtime", branch = "cranelift-entity-bytemuck", features = [
-    "bytemuck",
-] }
-hashbrown = "0.15"
-compact_str = "0.8"
+cranelift-entity = "0.124"
+hashbrown = "0.16"
+compact_str = "0.9"
 parking_lot = "0.12"
 thread_local = "1"
 crossbeam-utils = "0.8"
@@ -18,5 +15,5 @@ tracing-subscriber = "0.3"
 thiserror = "2"
 portable-atomic = "1"
 
-zyon-bytecode = { path = "crates/bytecode" }
-zyon-runtime = { path = "crates/runtime" }
+zyon-mir = { path = "crates/mir" }
+#zyon-runtime = { path = "crates/runtime" }

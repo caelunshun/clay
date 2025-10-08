@@ -1,3 +1,5 @@
+#![feature(if_let_guard)]
+
 #[macro_export]
 macro_rules! entity_ref {
     {
@@ -74,8 +76,8 @@ macro_rules! entity_ref_16bit {
 
 pub mod instr;
 pub mod module;
+pub mod passes;
+pub mod validation;
 
 pub use instr::InstrData;
-pub use module::{
-    FuncParam, Instr, Local, LocalFunc, LocalType, ModuleData, PrimitiveType, TypeData,
-};
+pub use module::{Func, ModuleData, PrimType, Type, TypeData, Val};

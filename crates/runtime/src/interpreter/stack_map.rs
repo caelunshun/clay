@@ -1,5 +1,5 @@
 use crate::{interpreter::stack::Stack, Engine, Module};
-use bytecode::{module::FuncData, Local};
+use bytecode::{module::FuncData, Val};
 use cranelift_entity::SecondaryMap;
 use std::alloc::Layout;
 
@@ -8,8 +8,8 @@ use std::alloc::Layout;
 #[derive(Debug, Clone)]
 pub struct FunctionStackMap {
     pub layout: Layout,
-    pub local_offsets: SecondaryMap<Local, u32>,
-    pub local_sizes: SecondaryMap<Local, u32>,
+    pub local_offsets: SecondaryMap<Val, u32>,
+    pub local_sizes: SecondaryMap<Val, u32>,
 }
 
 impl FunctionStackMap {
@@ -18,7 +18,7 @@ impl FunctionStackMap {
         let mut local_offsets = SecondaryMap::default();
         let mut local_sizes = SecondaryMap::default();
 
-        for (local, local_data) in &func.locals {
+        for (local, local_data) in &func.vals {
             let local_type = engine.type_registry.module_mapping[module][local_data.typ];
             let local_layout = engine.type_registry.layouts[local_type].unwrap();
 

@@ -1,9 +1,9 @@
 use bytecode::{
     instr,
     module::{
-        ConstantData, FieldData, FuncData, FuncParamData, FuncTypeData, LocalData, StructTypeData,
+        ConstantData, FieldData, FuncData, FuncParamData, FuncTypeData, StructTypeData, ValData,
     },
-    Instr, InstrData, LocalType, ModuleData,
+    Instr, InstrData, ModuleData, Type,
 };
 use cranelift_entity::{packed_option::ReservedValue, EntityList, EntityRef, PrimaryMap};
 use zyon_runtime::{Error, Func, Instance, Value};
@@ -24,11 +24,11 @@ fn factorial() {
 
     let mut func = FuncData::new_no_captures(&mut module);
 
-    let x = func.locals.push(LocalData::new(int));
-    let i = func.locals.push(LocalData::new(int));
-    let n = func.locals.push(LocalData::new(int));
-    let one = func.locals.push(LocalData::new(int));
-    let condition = func.locals.push(LocalData::new(bool_));
+    let x = func.vals.push(ValData::new(int));
+    let i = func.vals.push(ValData::new(int));
+    let n = func.vals.push(ValData::new(int));
+    let one = func.vals.push(ValData::new(int));
+    let condition = func.vals.push(ValData::new(bool_));
 
     func.instr(InstrData::IntConstant(instr::ConstantInstr {
         dst: x,
@@ -47,17 +47,17 @@ fn factorial() {
         constant: module.constant(ConstantData::Int(1)),
     }));
 
-    let loop_start = func.instr(InstrData::IntMul(instr::BinaryInstr {
+    let loop_start = func.instr(InstrData::IntMul(instr::Binary {
         dst: x,
         src1: x,
         src2: i,
     }));
-    func.instr(InstrData::IntAdd(instr::BinaryInstr {
+    func.instr(InstrData::IntAdd(instr::Binary {
         dst: i,
         src1: i,
         src2: one,
     }));
-    func.instr(InstrData::IntCmp(instr::CmpInstr {
+    func.instr(InstrData::IntCmp(instr::Cmp {
         dst: condition,
         src1: i,
         src2: n,
@@ -92,7 +92,7 @@ fn linked_list() {
         .push(bytecode::TypeData::Primitive(bytecode::PrimitiveType::Bool));
 
     let node_type = module.types.next_key();
-    let node_ref_type = LocalType::new(node_type.index() + 1);
+    let node_ref_type = Type::new(node_type.index() + 1);
 
     let mut node_fields = PrimaryMap::default();
     let _prev_field = node_fields.push(FieldData {
@@ -126,19 +126,19 @@ fn linked_list() {
 
     let mut func = FuncData::new_no_captures(&mut module);
 
-    let head = func.local(node_ref_type);
-    let has_head = func.local(bool_);
-    let node = func.local(node_type);
-    let temp_ref = func.local(node_ref_type);
-    let uninit_ref = func.local(node_ref_type);
-    let i = func.local(int);
-    let j = func.local(int);
-    let n = func.local(int);
-    let k = func.local(int);
-    let one = func.local(int);
-    let condition = func.local(bool_);
-    let false_ = func.local(bool_);
-    let true_ = func.local(bool_);
+    let head = func.val(node_ref_type);
+    let has_head = func.val(bool_);
+    let node = func.val(node_type);
+    let temp_ref = func.val(node_ref_type);
+    let uninit_ref = func.val(node_ref_type);
+    let i = func.val(int);
+    let j = func.val(int);
+    let n = func.val(int);
+    let k = func.val(int);
+    let one = func.val(int);
+    let condition = func.val(bool_);
+    let false_ = func.val(bool_);
+    let true_ = func.val(bool_);
 
     func.instr(InstrData::IntConstant(instr::ConstantInstr {
         dst: one,
@@ -181,7 +181,7 @@ fn linked_list() {
     // !has_head case - initialize head
     let fields = EntityList::from_slice(
         &[uninit_ref, false_, uninit_ref, false_, i],
-        &mut func.local_pool,
+        &mut func.val_lists,
     );
     func.instr(InstrData::InitStruct(instr::InitStruct {
         dst: node,
@@ -196,7 +196,7 @@ fn linked_list() {
         dst: has_head,
         constant: module.constant(ConstantData::Bool(true)),
     }));
-    func.instr(InstrData::IntAdd(instr::BinaryInstr {
+    func.instr(InstrData::IntAdd(instr::Binary {
         dst: i,
         src1: i,
         src2: one,
@@ -204,8 +204,7 @@ fn linked_list() {
     func.instr(InstrData::Jump(instr::Jump { target: loop_start }));
 
     // has_head case - append
-    let fields =
-        EntityList::from_slice(&[head, true_, uninit_ref, false_, i], &mut func.local_pool);
+    let fields = EntityList::from_slice(&[head, true_, uninit_ref, false_, i], &mut func.val_lists);
     let append_start = func.instr(InstrData::InitStruct(instr::InitStruct {
         dst: node,
         typ: node_type,
@@ -232,12 +231,12 @@ fn linked_list() {
         src: temp_ref,
     }));
 
-    func.instr(InstrData::IntAdd(instr::BinaryInstr {
+    func.instr(InstrData::IntAdd(instr::Binary {
         dst: i,
         src1: i,
         src2: one,
     }));
-    func.instr(InstrData::IntCmp(instr::CmpInstr {
+    func.instr(InstrData::IntCmp(instr::Cmp {
         dst: condition,
         src1: i,
         src2: n,
@@ -248,12 +247,12 @@ fn linked_list() {
         target: loop_start,
     }));
 
-    func.instr(InstrData::IntAdd(instr::BinaryInstr {
+    func.instr(InstrData::IntAdd(instr::Binary {
         dst: j,
         src1: j,
         src2: one,
     }));
-    func.instr(InstrData::IntCmp(instr::CmpInstr {
+    func.instr(InstrData::IntCmp(instr::Cmp {
         dst: condition,
         src1: j,
         src2: k,
@@ -317,20 +316,18 @@ fn fibonacci() {
 
     let mut recursive_func = FuncData::new_no_captures(&mut module);
 
-    let n = recursive_func.local(int);
-    let temp_int1 = recursive_func.local(int);
-    let temp_int2 = recursive_func.local(int);
-    let condition = recursive_func.local(bool_);
-    let zero = recursive_func.local(int);
-    let one = recursive_func.local(int);
-    let two = recursive_func.local(int);
-    let unit_val = recursive_func.local(unit);
-    let unit_ref = recursive_func.local(unit_ref_type);
-    let f = recursive_func.local(func);
+    let n = recursive_func.val(int);
+    let temp_int1 = recursive_func.val(int);
+    let temp_int2 = recursive_func.val(int);
+    let condition = recursive_func.val(bool_);
+    let zero = recursive_func.val(int);
+    let one = recursive_func.val(int);
+    let two = recursive_func.val(int);
+    let unit_val = recursive_func.val(unit);
+    let unit_ref = recursive_func.val(unit_ref_type);
+    let f = recursive_func.val(func);
 
-    recursive_func
-        .params
-        .push(FuncParamData { bind_to_local: n });
+    recursive_func.params.push(FuncParamData { bind_to_val: n });
 
     recursive_func.instr(InstrData::IntConstant(instr::ConstantInstr {
         dst: zero,
@@ -349,7 +346,7 @@ fn fibonacci() {
         src: unit_val,
     }));
 
-    recursive_func.instr(InstrData::IntCmp(instr::CmpInstr {
+    recursive_func.instr(InstrData::IntCmp(instr::Cmp {
         dst: condition,
         src1: n,
         src2: one,
@@ -359,7 +356,7 @@ fn fibonacci() {
         target: Instr::reserved_value(), // initialized later
         condition,
     }));
-    recursive_func.instr(InstrData::IntCmp(instr::CmpInstr {
+    recursive_func.instr(InstrData::IntCmp(instr::Cmp {
         dst: condition,
         src1: n,
         src2: one,
@@ -377,12 +374,12 @@ fn fibonacci() {
     }));
 
     // f(n - 1)
-    recursive_func.instr(InstrData::IntSub(instr::BinaryInstr {
+    recursive_func.instr(InstrData::IntSub(instr::Binary {
         dst: temp_int1,
         src1: n,
         src2: one,
     }));
-    let args = EntityList::from_slice(&[temp_int1], &mut recursive_func.local_pool);
+    let args = EntityList::from_slice(&[temp_int1], &mut recursive_func.val_lists);
     recursive_func.instr(InstrData::Call(instr::Call {
         func: f,
         args,
@@ -390,19 +387,19 @@ fn fibonacci() {
     }));
 
     // f(n - 2)
-    recursive_func.instr(InstrData::IntSub(instr::BinaryInstr {
+    recursive_func.instr(InstrData::IntSub(instr::Binary {
         dst: temp_int2,
         src1: n,
         src2: two,
     }));
-    let args = EntityList::from_slice(&[temp_int2], &mut recursive_func.local_pool);
+    let args = EntityList::from_slice(&[temp_int2], &mut recursive_func.val_lists);
     recursive_func.instr(InstrData::Call(instr::Call {
         func: f,
         args,
         return_value_dst: temp_int2,
     }));
 
-    recursive_func.instr(InstrData::IntAdd(instr::BinaryInstr {
+    recursive_func.instr(InstrData::IntAdd(instr::Binary {
         dst: temp_int1,
         src1: temp_int1,
         src2: temp_int2,
@@ -422,10 +419,10 @@ fn fibonacci() {
     let recursive_func = module.funcs.push(recursive_func);
 
     let mut driver_func = FuncData::new_no_captures(&mut module);
-    let f = driver_func.local(func);
-    let n = driver_func.local(int);
-    let unit_val = driver_func.local(unit);
-    let unit_ref = driver_func.local(unit_ref_type);
+    let f = driver_func.val(func);
+    let n = driver_func.val(int);
+    let unit_val = driver_func.val(unit);
+    let unit_ref = driver_func.val(unit_ref_type);
 
     driver_func.instr(InstrData::IntConstant(instr::ConstantInstr {
         dst: n,
@@ -441,7 +438,7 @@ fn fibonacci() {
         func: recursive_func,
         captures_ref: unit_ref,
     }));
-    let args = EntityList::from_slice(&[n], &mut driver_func.local_pool);
+    let args = EntityList::from_slice(&[n], &mut driver_func.val_lists);
     driver_func.instr(InstrData::Call(instr::Call {
         func: f,
         args,

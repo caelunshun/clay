@@ -1,5 +1,5 @@
 use crate::{engine::Module, ptr::MRef, Func};
-use bytecode::{module::Field, LocalType, ModuleData, PrimitiveType};
+use bytecode::{module::Field, ModuleData, PrimitiveType, Type};
 use bytemuck::{Pod, Zeroable};
 use cranelift_entity::{EntityRef, PrimaryMap, SecondaryMap};
 use hashbrown::HashMap;
@@ -19,7 +19,7 @@ pub struct TypeRegistry {
     pub layouts: SecondaryMap<Type, Option<Layout>>,
     /// Maps `LocalType` IDs within each module to an engine-global
     /// `Type`.
-    pub module_mapping: SecondaryMap<Module, SecondaryMap<LocalType, Type>>,
+    pub module_mapping: SecondaryMap<Module, SecondaryMap<Type, Type>>,
 
     /// Type constant for `int`.
     pub int_type: Type,
@@ -67,7 +67,7 @@ impl TypeRegistry {
 
     /// Gets the `TypeData` registration for a type given its module
     /// and local type ID.
-    pub fn local_type_data(&self, module: Module, typ: LocalType) -> &TypeData {
+    pub fn local_type_data(&self, module: Module, typ: Type) -> &TypeData {
         &self.types[self.module_mapping[module][typ]]
     }
 
@@ -230,7 +230,7 @@ impl TypeRegistry {
 pub struct TypeData {
     pub kind: TypeKind,
     /// ID of the type within each module that uses it.
-    pub local_ids: HashMap<Module, bytecode::LocalType>,
+    pub local_ids: HashMap<Module, bytecode::Type>,
 }
 
 impl TypeData {
@@ -293,7 +293,7 @@ impl StructLayout {
         module: &bytecode::ModuleData,
         type_registry: &mut TypeRegistry,
         visited: &mut Vec<Type>,
-        id_mapping: &SecondaryMap<LocalType, Type>,
+        id_mapping: &SecondaryMap<Type, Type>,
     ) -> Self {
         let mut layout = Layout::new::<()>();
         let mut fields = SecondaryMap::with_capacity(struct_.fields.len());

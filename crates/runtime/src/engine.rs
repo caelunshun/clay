@@ -2,7 +2,7 @@ use crate::{
     gc::GarbageCollector, interpreter::Interpreter, type_registry::TypeRegistry, value::Value,
     Error,
 };
-use bytecode::{entity_ref, module::FuncData, LocalFunc, ModuleData};
+use bytecode::{entity_ref, module::FuncData, Func, ModuleData};
 use cranelift_entity::{PrimaryMap, SecondaryMap};
 use std::{cell::RefCell, sync::Arc};
 use thread_local::ThreadLocal;
@@ -12,8 +12,8 @@ pub struct Engine {
     pub(crate) modules: PrimaryMap<Module, ModuleData>,
     pub(crate) type_registry: TypeRegistry,
     /// Maps global function IDs to local function IDs in modules.
-    pub(crate) funcs: PrimaryMap<Func, (Module, LocalFunc)>,
-    pub(crate) funcs_by_module: SecondaryMap<Module, SecondaryMap<LocalFunc, Func>>,
+    pub(crate) funcs: PrimaryMap<Func, (Module, Func)>,
+    pub(crate) funcs_by_module: SecondaryMap<Module, SecondaryMap<Func, Func>>,
     pub(crate) interpreter: ThreadLocal<RefCell<Interpreter>>,
 }
 

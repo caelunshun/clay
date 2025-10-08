@@ -6,8 +6,8 @@ use crate::{
 };
 use bytecode::{
     instr::CompareMode,
-    module::{ConstantData, FuncData, LocalData},
-    Instr, InstrData, Local, ModuleData, PrimitiveType,
+    module::{ConstantData, FuncData, ValData},
+    Instr, InstrData, ModuleData, PrimitiveType, Val,
 };
 use core::slice;
 use cranelift_entity::{EntityRef, SecondaryMap};
@@ -136,7 +136,7 @@ impl<'a> InterpreterLoop<'a> {
                     self.gc_safepoint();
 
                     let function_object = &self.load_local::<FuncObject>(instr.func);
-                    let args = instr.args.as_slice(&self.current_func_data.local_pool);
+                    let args = instr.args.as_slice(&self.current_func_data.val_lists);
                     self.continuations.push(Continuation::ResumeCaller {
                         caller_func: self.current_func,
                         caller_instr: self.next_instr,
@@ -155,7 +155,7 @@ impl<'a> InterpreterLoop<'a> {
                 InstrData::Copy(instr) => {
                     let src = self.current_func_stack_map.local_offsets[instr.src];
                     let dst = self.current_func_stack_map.local_offsets[instr.dst];
-                    let local_type = self.current_func_data.locals[instr.dst].typ;
+                    let local_type = self.current_func_data.vals[instr.dst].typ;
                     let typ = self.instance.engine.type_registry.module_mapping
                         [self.current_module][local_type];
                     let layout = self.instance.engine.type_registry.layouts[typ];
@@ -292,7 +292,7 @@ impl<'a> InterpreterLoop<'a> {
                         invalid_bytecode!()
                     };
 
-                    let field_locals = instr.fields.as_slice(&self.current_func_data.local_pool);
+                    let field_locals = instr.fields.as_slice(&self.current_func_data.val_lists);
                     let dst_base = self.current_func_stack_map.local_offsets[instr.dst];
                     for (field, &local) in struct_data.fields.values().zip(field_locals) {
                         let src = self.current_func_stack_map.local_offsets[local];
@@ -303,7 +303,7 @@ impl<'a> InterpreterLoop<'a> {
                     }
                 }
                 InstrData::GetField(instr) => {
-                    let struct_type = self.current_func_data.locals[instr.src_struct].typ;
+                    let struct_type = self.current_func_data.vals[instr.src_struct].typ;
                     let struct_type = self.instance.engine.type_registry.module_mapping
                         [self.current_module][struct_type];
                     let TypeKind::Struct(struct_data) =
@@ -321,7 +321,7 @@ impl<'a> InterpreterLoop<'a> {
                     }
                 }
                 InstrData::SetField(instr) => {
-                    let struct_type = self.current_func_data.locals[instr.dst_struct].typ;
+                    let struct_type = self.current_func_data.vals[instr.dst_struct].typ;
                     let struct_type = self.instance.engine.type_registry.module_mapping
                         [self.current_module][struct_type];
                     let TypeKind::Struct(struct_data) =
@@ -341,7 +341,7 @@ impl<'a> InterpreterLoop<'a> {
                 InstrData::Alloc(instr) => {
                     let mut walker = self.stack_walker();
 
-                    let ref_type = self.current_func_data.locals[instr.dst_ref].typ;
+                    let ref_type = self.current_func_data.vals[instr.dst_ref].typ;
                     let ref_type = self.instance.engine.type_registry.module_mapping
                         [self.current_module][ref_type];
                     let TypeKind::Reference(alloc_type) =
@@ -367,7 +367,7 @@ impl<'a> InterpreterLoop<'a> {
                     }
                 }
                 InstrData::LoadField(instr) => {
-                    let ref_type = self.current_func_data.locals[instr.src_ref].typ;
+                    let ref_type = self.current_func_data.vals[instr.src_ref].typ;
                     let ref_type = self.instance.engine.type_registry.module_mapping
                         [self.current_module][ref_type];
                     let TypeKind::Reference(struct_type) =
@@ -395,7 +395,7 @@ impl<'a> InterpreterLoop<'a> {
                     }
                 }
                 InstrData::StoreField(instr) => {
-                    let ref_type = self.current_func_data.locals[instr.dst_ref].typ;
+                    let ref_type = self.current_func_data.vals[instr.dst_ref].typ;
                     let ref_type = self.instance.engine.type_registry.module_mapping
                         [self.current_module][ref_type];
                     let TypeKind::Reference(struct_type) =
@@ -436,7 +436,7 @@ impl<'a> InterpreterLoop<'a> {
         self.instance.gc.safepoint(self.instance, &mut walker);
     }
 
-    fn continue_(&mut self, result: Local, cont: Continuation) {
+    fn continue_(&mut self, result: Val, cont: Continuation) {
         match cont {
             Continuation::ResumeCaller {
                 caller_func,
@@ -489,7 +489,7 @@ impl<'a> InterpreterLoop<'a> {
         self.next_instr = instr;
     }
 
-    fn call(&mut self, func_object: &FuncObject, args: &[Local]) {
+    fn call(&mut self, func_object: &FuncObject, args: &[Val]) {
         let caller_stack_map = self.current_func_stack_map.clone();
         self.resume(func_object.func, Instr::new(0));
         self.stack
@@ -501,7 +501,7 @@ impl<'a> InterpreterLoop<'a> {
             unsafe {
                 self.stack.copy_from_caller(
                     caller_stack_map.local_offsets[*arg],
-                    self.current_func_stack_map.local_offsets[dst.bind_to_local],
+                    self.current_func_stack_map.local_offsets[dst.bind_to_val],
                     caller_stack_map.local_sizes[*arg],
                 );
             }
@@ -509,7 +509,7 @@ impl<'a> InterpreterLoop<'a> {
 
         unsafe {
             self.stack.store(
-                self.current_func_stack_map.local_offsets[self.current_func_data.captures_local],
+                self.current_func_stack_map.local_offsets[self.current_func_data.captures_val],
                 func_object.captures,
             );
         }
@@ -517,9 +517,9 @@ impl<'a> InterpreterLoop<'a> {
 
     /// Note: may trigger invocation of a lazy function
     /// and call `self.resume`; thus this function takes `&mut self`.
-    unsafe fn memory_load(&mut self, src: *const u8, dst: Local) -> bool {
+    unsafe fn memory_load(&mut self, src: *const u8, dst: Val) -> bool {
         let typ = self.instance.engine.type_registry.module_mapping[self.current_module]
-            [self.current_func_data.locals[dst].typ];
+            [self.current_func_data.vals[dst].typ];
         self.memory_load_impl(typ, src, self.current_func_stack_map.local_offsets[dst])
     }
 
@@ -588,9 +588,9 @@ impl<'a> InterpreterLoop<'a> {
         true
     }
 
-    unsafe fn memory_store(&self, src: Local, dst: *mut u8) {
+    unsafe fn memory_store(&self, src: Val, dst: *mut u8) {
         let typ = self.instance.engine.type_registry.module_mapping[self.current_module]
-            [self.current_func_data.locals[src].typ];
+            [self.current_func_data.vals[src].typ];
         self.memory_store_impl(typ, self.current_func_stack_map.local_offsets[src], dst)
     }
 
@@ -648,7 +648,7 @@ impl<'a> InterpreterLoop<'a> {
     }
 
     #[inline]
-    fn load_local<T: Copy>(&self, local: Local) -> T {
+    fn load_local<T: Copy>(&self, local: Val) -> T {
         unsafe {
             self.stack
                 .load(self.current_func_stack_map.local_offsets[local])
@@ -656,7 +656,7 @@ impl<'a> InterpreterLoop<'a> {
     }
 
     #[inline]
-    fn store_local<T: Copy>(&self, local: Local, value: T) {
+    fn store_local<T: Copy>(&self, local: Val, value: T) {
         unsafe {
             self.stack
                 .store(self.current_func_stack_map.local_offsets[local], value);
@@ -674,7 +674,7 @@ impl<'a> InterpreterLoop<'a> {
             current_func_stack_map: &'a FunctionStackMap,
             func_stack_maps: &'a SecondaryMap<Func, Option<Arc<FunctionStackMap>>>,
             current_module: Module,
-            locals_iter: cranelift_entity::Iter<'a, Local, LocalData>,
+            locals_iter: cranelift_entity::Iter<'a, Val, ValData>,
             conts: Rev<slice::Iter<'a, Continuation>>,
             refs: Vec<MRef>,
         }
@@ -719,7 +719,7 @@ impl<'a> InterpreterLoop<'a> {
                         self.current_func_stack_map =
                             self.func_stack_maps[next_func].as_ref().unwrap();
                         self.current_module = self.instance.engine.funcs[next_func].0;
-                        self.locals_iter = self.current_func_data.locals.iter();
+                        self.locals_iter = self.current_func_data.vals.iter();
                         self.next()
                     }
                 }
@@ -736,17 +736,18 @@ impl<'a> InterpreterLoop<'a> {
             current_func_data: self.current_func_data,
             current_module: self.current_module,
             current_func_stack_map: &self.current_func_stack_map,
-            locals_iter: self.current_func_data.locals.iter(),
+            locals_iter: self.current_func_data.vals.iter(),
             conts: self.continuations.iter().rev(),
             refs: Vec::new(),
         }
     }
 
-    fn local_to_value(&self, local: Local) -> Value {
-        let typ = self.instance.engine.type_registry.local_type_data(
-            self.current_module,
-            self.current_func_data.locals[local].typ,
-        );
+    fn local_to_value(&self, local: Val) -> Value {
+        let typ = self
+            .instance
+            .engine
+            .type_registry
+            .local_type_data(self.current_module, self.current_func_data.vals[local].typ);
         match &typ.kind {
             TypeKind::Primitive(p) => match *p {
                 PrimitiveType::Int => Value::Int(self.load_local::<i64>(local)),
