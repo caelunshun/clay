@@ -8,6 +8,7 @@
 use std::fmt::Display;
 
 pub mod cfg_integrity;
+pub mod ssa;
 pub mod typecheck;
 pub mod value_initialization;
 

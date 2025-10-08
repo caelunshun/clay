@@ -194,22 +194,7 @@ impl FuncData {
     /// appear in any *path* (not a walk) from the entry block to B (exclusive)
     /// are visited.
     pub fn visit_basic_blocks_topological(&self, mut visit: impl FnMut(BasicBlock)) {
-        // For each block, calculate blocks that appear in a path from the entry block
-        let mut acyclic_ancestors: SecondaryMap<BasicBlock, EntitySet<BasicBlock>> =
-            Default::default();
-
-        let mut stack = vec![(self.entry_block, EntitySet::<BasicBlock>::new())];
-        while let Some((current_block, mut current_path)) = stack.pop() {
-            for ancestor in current_path.iter() {
-                acyclic_ancestors[current_block].insert(ancestor);
-            }
-            current_path.insert(current_block);
-            self.visit_block_successors(current_block, |suc| {
-                if !current_path.contains(suc) {
-                    stack.push((suc, current_path.clone()));
-                }
-            });
-        }
+        let acyclic_ancestors = self.compute_acyclic_ancestors();
 
         let mut stack = vec![self.entry_block];
         let mut visited = EntitySet::<BasicBlock>::new();
@@ -227,6 +212,50 @@ impl FuncData {
                 }
             });
         }
+    }
+
+    /// Computes the set of blocks reachable by paths
+    /// (not walks) from the entry block to each block
+    /// (excluding the destination block).
+    pub fn compute_acyclic_ancestors(&self) -> SecondaryMap<BasicBlock, EntitySet<BasicBlock>> {
+        // For each block, calculate blocks that appear in a path from the entry block
+        let mut acyclic_ancestors: SecondaryMap<BasicBlock, EntitySet<BasicBlock>> =
+            Default::default();
+
+        let mut stack = vec![(self.entry_block, EntitySet::<BasicBlock>::new())];
+        while let Some((current_block, mut current_path)) = stack.pop() {
+            for ancestor in current_path.iter() {
+                acyclic_ancestors[current_block].insert(ancestor);
+            }
+            current_path.insert(current_block);
+            self.visit_block_successors(current_block, |suc| {
+                if !current_path.contains(suc) {
+                    stack.push((suc, current_path.clone()));
+                }
+            });
+        }
+
+        acyclic_ancestors
+    }
+
+    /// Computes the set of paths from the entry block
+    /// to each block. These paths do not include
+    /// the destination blocks.
+    pub fn compute_paths_from_entry(&self) -> SecondaryMap<BasicBlock, Vec<EntitySet<BasicBlock>>> {
+        let mut paths: SecondaryMap<BasicBlock, Vec<EntitySet<BasicBlock>>> = SecondaryMap::new();
+
+        let mut stack = vec![(self.entry_block, EntitySet::<BasicBlock>::new())];
+        while let Some((current_block, mut current_path)) = stack.pop() {
+            paths[current_block].push(current_path.clone());
+            current_path.insert(current_block);
+            self.visit_block_successors(current_block, |suc| {
+                if !current_path.contains(suc) {
+                    stack.push((suc, current_path.clone()));
+                }
+            });
+        }
+
+        paths
     }
 
     pub fn is_block_edge(&self, a: BasicBlock, b: BasicBlock) -> bool {
