@@ -4,6 +4,8 @@
 use compact_str::CompactString;
 use std::fmt::{Display, Formatter, Write as _};
 
+mod parser;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum SExpr {
     Int(i64),
