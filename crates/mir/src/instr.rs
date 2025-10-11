@@ -1,19 +1,19 @@
 use crate::{
-    module::{BasicBlock, Constant, Field, Func, FuncData},
+    module::{BasicBlock, Constant, Field, Func},
     Type, Val,
 };
 use cranelift_entity::{EntityList, ListPool};
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum InstrData {
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
+pub enum InstrData<'db> {
     Jump(Jump),
     Branch(Branch),
-    Call(Call),
+    Call(Call<'db>),
     CallIndirect(CallIndirect),
     Return(Return),
     Copy(Unary),
 
-    Constant(ConstantInstr),
+    Constant(ConstantInstr<'db>),
 
     IntAdd(Binary),
     IntSub(Binary),
@@ -49,7 +49,7 @@ pub enum InstrData {
     /// (3) Yield a reference to the stack slot
     LocalToERef(Unary),
 
-    InitStruct(InitStruct),
+    InitStruct(InitStruct<'db>),
     GetField(GetField),
     SetField(SetField),
     Alloc(Alloc),
@@ -57,9 +57,9 @@ pub enum InstrData {
     Store(Store),
     MakeFieldERef(MakeFieldERef),
 
-    MakeFunctionObject(MakeFunctionObject),
+    MakeFunctionObject(MakeFunctionObject<'db>),
 
-    MakeList(MakeList),
+    MakeList(MakeList<'db>),
     ListPush(ListPush),
     ListRemove(ListRemove),
     ListTrunc(ListTrunc),
@@ -68,7 +68,7 @@ pub enum InstrData {
     ListGetERef(ListGetERef),
 }
 
-impl InstrData {
+impl InstrData<'_> {
     pub fn is_block_terminator(&self) -> bool {
         matches!(
             self,
@@ -362,7 +362,7 @@ impl InstrData {
 }
 
 /// Unconditional jump to a basic block.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct Jump {
     pub target: BasicBlock,
     /// Only used after SSA transformation; empty before then.
@@ -370,7 +370,7 @@ pub struct Jump {
 }
 
 /// Conditional jump.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct Branch {
     pub target_true: BasicBlock,
     pub target_false: BasicBlock,
@@ -383,12 +383,12 @@ pub struct Branch {
 }
 
 /// Directly call a top-level function.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Call {
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
+pub struct Call<'db> {
     /// Statically known function to call.
     /// It must have a unit captures type (i.e.
     /// be a top-level function).
-    pub func: Func,
+    pub func: Func<'db>,
     /// Arguments to pass to the function.
     pub args: EntityList<Val>,
     /// Destination for the return value.
@@ -396,7 +396,7 @@ pub struct Call {
 }
 
 /// Indirectly call a function object.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct CallIndirect {
     /// Function object to call.
     pub func: Val,
@@ -407,21 +407,21 @@ pub struct CallIndirect {
 }
 
 /// Return a value to the caller.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct Return {
     pub return_value: Val,
 }
 
 /// Copy a constant value into a local.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ConstantInstr {
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
+pub struct ConstantInstr<'db> {
     pub dst: Val,
-    pub constant: Constant,
+    pub constant: Constant<'db>,
 }
 
 /// Instruction with two source operands
 /// and one destination.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct Binary {
     pub dst: Val,
     pub src1: Val,
@@ -430,14 +430,14 @@ pub struct Binary {
 
 /// Instruction with one source operand
 /// and one destination.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct Unary {
     pub dst: Val,
     pub src: Val,
 }
 
 /// Comparison of two values, resulting in a boolean.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct Cmp {
     pub dst: Val,
     pub src1: Val,
@@ -445,7 +445,7 @@ pub struct Cmp {
     pub mode: CompareMode,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub enum CompareMode {
     Less,
     LessOrEqual,
@@ -457,11 +457,11 @@ pub enum CompareMode {
 
 /// Initialize a struct from its field values,
 /// by copying each field into the new struct.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct InitStruct {
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
+pub struct InitStruct<'db> {
     pub dst: Val,
     /// Type of struct to initialize.
-    pub typ: Type,
+    pub typ: Type<'db>,
     /// Field values to initialize, in the same
     /// order as the struct fields are declared.
     pub fields: EntityList<Val>,
@@ -469,7 +469,7 @@ pub struct InitStruct {
 
 /// Copy a field in a local struct into its own local.
 /// The struct should be a local, not a reference.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct GetField {
     pub dst: Val,
     pub src_struct: Val,
@@ -479,7 +479,7 @@ pub struct GetField {
 /// Overwrite the value of a struct field, writing
 /// the updated struct into `dst`. The struct should
 /// be a local, not behind a reference.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct SetField {
     pub dst_struct: Val,
     pub src_struct: Val,
@@ -491,7 +491,7 @@ pub struct SetField {
 /// from local ("stack") data.
 ///
 /// Result type is Reference(typeof(src)).
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct Alloc {
     pub dst_ref: Val,
     pub src: Val,
@@ -501,7 +501,7 @@ pub struct Alloc {
 /// into a local.
 ///
 /// Type of `src` must be `Reference(?T)`.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct Load {
     pub dst: Val,
     pub src_ref: Val,
@@ -510,7 +510,7 @@ pub struct Load {
 /// Copy a local value into the memory pointed
 /// to by the given reference. The reference can be
 /// managed or ephemeral.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct Store {
     pub ref_: Val,
     pub val: Val,
@@ -518,7 +518,7 @@ pub struct Store {
 
 /// Creates an ERef to a field of a struct,
 /// given a reference to the struct.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct MakeFieldERef {
     pub dst_ref: Val,
     pub src_ref: Val,
@@ -532,19 +532,19 @@ pub struct MakeFieldERef {
 /// The captures must have
 /// the same type as the `captures_type` field of the corresponding
 /// `FuncData`.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct MakeFunctionObject {
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
+pub struct MakeFunctionObject<'db> {
     pub dst: Val,
-    pub func: Func,
+    pub func: Func<'db>,
     pub captures_ref: Val,
 }
 
 /// Create an empty list.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct MakeList {
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
+pub struct MakeList<'db> {
     pub dst: Val,
     /// Type of the elements inside the list.
-    pub list_type: Type,
+    pub list_type: Type<'db>,
 }
 
 // -------------------
@@ -561,7 +561,7 @@ pub struct MakeList {
 // -------------------
 
 /// Append a value onto the end of a list.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct ListPush {
     pub dst_list: Option<Val>,
     pub src_list: Val,
@@ -569,7 +569,7 @@ pub struct ListPush {
 }
 
 /// Copy a value in a list to a local value.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct ListGet {
     pub dst_val: Val,
     pub src_list: Val,
@@ -577,7 +577,7 @@ pub struct ListGet {
 }
 
 /// Create an ERef to a value inside a list.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct ListGetERef {
     pub dst_ref: Val,
     pub src_list: Val,
@@ -585,7 +585,7 @@ pub struct ListGetERef {
 }
 
 /// Get the length of a list, as an Int.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct ListLen {
     pub dst_len: Val,
     pub src_list: Val,
@@ -593,7 +593,7 @@ pub struct ListLen {
 
 /// Removes an element from a list by its index, moving elements
 /// from higher to lower indexes to fill the gap.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct ListRemove {
     pub dst_list: Option<Val>,
     pub src_list: Val,
@@ -603,7 +603,7 @@ pub struct ListRemove {
 /// Truncates a list to have the given updated size.
 /// (Panics if the list length was less than the requested
 /// new size.)
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct ListTrunc {
     pub dst_list: Option<Val>,
     pub src_list: Val,

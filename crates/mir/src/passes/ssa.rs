@@ -1,21 +1,20 @@
 use crate::{
     module::{BasicBlock, BasicBlockData, FuncData},
-    ModuleData, Val,
+    Val,
 };
 use cranelift_entity::{EntityList, ListPool, PrimaryMap, SecondaryMap};
-use hashbrown::{HashMap, HashSet};
+use zyon_core::Db;
 
 /// Convert a function to SSA form, returning the new function.
-pub fn make_ssa(module: &ModuleData, func: &FuncData) -> FuncData {
-    let mut new_func = FuncData {
+pub fn make_ssa<'db>(db: &'db Db, func: &FuncData<'db>) -> FuncData<'db> {
+    let new_func = FuncData {
         basic_blocks: PrimaryMap::new(),
         vals: PrimaryMap::new(),
         val_lists: ListPool::new(),
         ..func.clone()
     };
-
     let mut converter = SsaConverter {
-        module,
+        db,
         func,
         new_func,
         vars_in_blocks: Default::default(),
@@ -25,15 +24,16 @@ pub fn make_ssa(module: &ModuleData, func: &FuncData) -> FuncData {
     converter.new_func
 }
 
-struct SsaConverter<'a> {
-    module: &'a ModuleData,
-    func: &'a FuncData,
-    new_func: FuncData,
+struct SsaConverter<'db, 'a> {
+    #[allow(unused)]
+    db: &'db Db,
+    func: &'a FuncData<'db>,
+    new_func: FuncData<'db>,
     vars_in_blocks: SecondaryMap<BasicBlock, SecondaryMap<Val, Option<Val>>>,
     extra_terminator_args: Vec<(BasicBlock, BasicBlock, Val)>,
 }
 
-impl<'a> SsaConverter<'a> {
+impl<'db, 'a> SsaConverter<'db, 'a> {
     pub fn run(&mut self) {
         // Initialize new blocks
         for (block, block_data) in &self.func.basic_blocks {
@@ -65,7 +65,7 @@ impl<'a> SsaConverter<'a> {
                     instr.move_to_list_pool(&self.func.val_lists, &mut self.new_func.val_lists);
 
                 let mut needed_vars = Vec::new();
-                new_instr.visit_src_operands(&mut self.new_func.val_lists, |var| {
+                new_instr.visit_src_operands(&self.new_func.val_lists, |var| {
                     needed_vars.push(var);
                 });
 
@@ -77,7 +77,7 @@ impl<'a> SsaConverter<'a> {
                 });
 
                 let mut written_vars = Vec::new();
-                new_instr.visit_dst_operands(&mut self.new_func.val_lists, |var| {
+                new_instr.visit_dst_operands(&self.new_func.val_lists, |var| {
                     written_vars.push(var);
                 });
 

@@ -8,3 +8,5 @@ cranelift-entity.workspace = true
 hashbrown.workspace = true
 compact_str.workspace = true
 bytemuck.workspace = true
+zyon-core.workspace = true
+salsa.workspace = true

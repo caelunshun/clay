@@ -1,31 +1,30 @@
 use crate::{
     module::{BasicBlock, FuncData, FuncTypeData, StructTypeData},
     validation::ValidationError,
-    Func, InstrData, ModuleData, PrimType, Type, TypeData, Val,
+    InstrData, PrimType, Type, TypeData, Val,
 };
 use cranelift_entity::EntityList;
+use zyon_core::Db;
 
 /// Verifies that operands have the correct type for each instruction.
-pub fn verify_instr_types(module: &ModuleData) -> Result<(), ValidationError> {
-    for (_, func) in &module.funcs {
-        let verifier = InstrTypeVerifier { func, module };
-        verifier.verify_entry_block_params()?;
-        for (_, block) in &func.basic_blocks {
-            for instr in &block.instrs {
-                verifier.verify_types_for_instr(*instr)?;
-            }
+pub fn verify_instr_types(db: &Db, func: &FuncData) -> Result<(), ValidationError> {
+    let verifier = InstrTypeVerifier { func, db };
+    verifier.verify_entry_block_params()?;
+    for (_, block) in &func.basic_blocks {
+        for instr in &block.instrs {
+            verifier.verify_types_for_instr(*instr)?;
         }
     }
 
     Ok(())
 }
 
-struct InstrTypeVerifier<'a> {
-    func: &'a FuncData,
-    module: &'a ModuleData,
+struct InstrTypeVerifier<'a, 'db> {
+    func: &'a FuncData<'db>,
+    db: &'db Db,
 }
 
-impl<'a> InstrTypeVerifier<'a> {
+impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
     fn verify_types_for_instr(&self, instr: InstrData) -> Result<(), ValidationError> {
         match instr {
             InstrData::Jump(ins) => {
@@ -37,19 +36,16 @@ impl<'a> InstrTypeVerifier<'a> {
                 self.verify_basic_block_args(ins.target_false, &ins.args_false)?;
             }
             InstrData::Call(ins) => {
-                if self.module.types[self.module.funcs[ins.func].captures_type]
-                    != TypeData::Prim(PrimType::Unit)
+                if ins.func.data(self.db).captures_type.data(self.db)
+                    != &TypeData::Prim(PrimType::Unit)
                 {
                     return Err(ValidationError::new(
                         "can't make a direct call to a function with non-unit captures type",
                     ));
                 }
 
-                self.verify_function_args(&self.module.funcs[ins.func].param_types, &ins.args)?;
-                self.verify_type_equals(
-                    ins.return_value_dst,
-                    self.module.funcs[ins.func].return_type,
-                )?;
+                self.verify_function_args(&ins.func.data(self.db).param_types, &ins.args)?;
+                self.verify_type_equals(ins.return_value_dst, ins.func.data(self.db).return_type)?;
             }
             InstrData::CallIndirect(ins) => {
                 let TypeData::Func(func_typ) = self.type_data_of(ins.func) else {
@@ -67,10 +63,7 @@ impl<'a> InstrTypeVerifier<'a> {
                 self.verify_type_equals(ins.dst, self.type_of(ins.src))?;
             }
             InstrData::Constant(ins) => {
-                self.verify_type_data_matches(
-                    ins.dst,
-                    &[self.module.constants[ins.constant].typ()],
-                )?;
+                self.verify_type_data_matches(ins.dst, &[ins.constant.data(self.db).typ()])?;
             }
             InstrData::IntAdd(ins)
             | InstrData::IntSub(ins)
@@ -176,7 +169,7 @@ impl<'a> InstrTypeVerifier<'a> {
             }
             InstrData::MakeFieldERef(ins) => {
                 let pointee = self.expect_any_ref(ins.src_ref)?;
-                let struct_data = match &self.module.types[pointee] {
+                let struct_data = match pointee.data(self.db) {
                     TypeData::Struct(s) => s,
                     _ => return Err(ValidationError::new("expected reference to struct")),
                 };
@@ -184,7 +177,7 @@ impl<'a> InstrTypeVerifier<'a> {
                 self.verify_type_data_matches(ins.dst_ref, &[TypeData::ERef(field.typ)])?;
             }
             InstrData::MakeFunctionObject(ins) => {
-                let func_object_data = &self.module.funcs[ins.func];
+                let func_object_data = ins.func.data(self.db);
                 self.verify_type_data_matches(
                     ins.dst,
                     &[TypeData::Func(FuncTypeData {
@@ -262,7 +255,7 @@ impl<'a> InstrTypeVerifier<'a> {
             self.func
                 .param_types
                 .iter()
-                .map(|&t| self.module.types[t].clone()),
+                .map(|&t| t.data(self.db).clone()),
         );
 
         let entry_block = &self.func.basic_blocks[self.func.entry_block];
@@ -289,12 +282,12 @@ impl<'a> InstrTypeVerifier<'a> {
         Ok(())
     }
 
-    fn type_of(&self, val: Val) -> Type {
+    fn type_of(&self, val: Val) -> Type<'db> {
         self.func.vals[val].typ
     }
 
-    fn type_data_of(&self, val: Val) -> &TypeData {
-        &self.module.types[self.func.vals[val].typ]
+    fn type_data_of(&self, val: Val) -> &'db TypeData<'db> {
+        self.func.vals[val].typ.data(self.db)
     }
 
     fn verify_type_data_matches(
@@ -303,10 +296,10 @@ impl<'a> InstrTypeVerifier<'a> {
         allowed_types: &[TypeData],
     ) -> Result<(), ValidationError> {
         let typ = self.func.vals[val].typ;
-        if !allowed_types.contains(&self.module.types[typ]) {
+        if !allowed_types.contains(typ.data(self.db)) {
             return Err(ValidationError::new(format!(
                 "expected one of {allowed_types:?}, found {:?}",
-                self.module.types[typ]
+                typ.data(self.db)
             )));
         }
         Ok(())
@@ -317,7 +310,8 @@ impl<'a> InstrTypeVerifier<'a> {
         if typ != actual_typ {
             return Err(ValidationError::new(format!(
                 "wrong type: expected {:?}, found {:?}",
-                self.module.types[typ], self.module.types[actual_typ]
+                typ.data(self.db),
+                actual_typ.data(self.db)
             )));
         }
         Ok(())
@@ -372,14 +366,14 @@ impl<'a> InstrTypeVerifier<'a> {
         Ok(())
     }
 
-    fn expect_struct(&self, val: Val) -> Result<&StructTypeData, ValidationError> {
+    fn expect_struct(&self, val: Val) -> Result<&'db StructTypeData<'db>, ValidationError> {
         match self.type_data_of(val) {
             TypeData::Struct(s) => Ok(s),
             _ => Err(ValidationError::new("expected struct type")),
         }
     }
 
-    fn expect_any_ref(&self, val: Val) -> Result<Type, ValidationError> {
+    fn expect_any_ref(&self, val: Val) -> Result<Type<'db>, ValidationError> {
         match self.type_data_of(val) {
             TypeData::MRef(t) => Ok(*t),
             TypeData::ERef(t) => Ok(*t),
@@ -387,12 +381,10 @@ impl<'a> InstrTypeVerifier<'a> {
         }
     }
 
-    fn expect_list_or_list_ref(&self, val: Val) -> Result<Type, ValidationError> {
+    fn expect_list_or_list_ref(&self, val: Val) -> Result<Type<'db>, ValidationError> {
         match self.type_data_of(val) {
             TypeData::List(t) => Ok(*t),
-            TypeData::ERef(l) | TypeData::MRef(l)
-                if let TypeData::List(t) = &self.module.types[*l] =>
-            {
+            TypeData::ERef(l) | TypeData::MRef(l) if let TypeData::List(t) = l.data(self.db) => {
                 Ok(*t)
             }
             _ => Err(ValidationError::new("expected list or reference to list")),
@@ -400,6 +392,6 @@ impl<'a> InstrTypeVerifier<'a> {
     }
 
     fn is_ref(&self, t: Type) -> bool {
-        matches!(self.module.types[t], TypeData::MRef(_) | TypeData::ERef(_))
+        matches!(t.data(self.db), TypeData::MRef(_) | TypeData::ERef(_))
     }
 }

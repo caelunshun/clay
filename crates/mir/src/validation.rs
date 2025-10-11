@@ -13,7 +13,7 @@ pub mod typecheck;
 pub mod value_initialization;
 
 #[derive(Debug, Clone)]
-pub struct ValidationError(String);
+pub struct ValidationError(pub String);
 
 impl ValidationError {
     pub fn new(msg: impl Display) -> Self {

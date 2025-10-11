@@ -1,74 +1,53 @@
 use crate::instr::InstrData;
 use compact_str::CompactString;
 use cranelift_entity::{EntityList, EntitySet, ListPool, PrimaryMap, SecondaryMap};
-use hashbrown::HashSet;
+use std::{
+    hash::{Hash, Hasher},
+    mem,
+};
 
-#[derive(Debug, Clone, Default)]
-pub struct ModuleData {
-    pub types: PrimaryMap<Type, TypeData>,
-    pub funcs: PrimaryMap<Func, FuncData>,
-    pub constants: PrimaryMap<Constant, ConstantData>,
-    // pub imported_modules: PrimaryMap<ImportedModule, ImportedModuleData>,
+#[salsa::tracked(debug)]
+pub struct Type<'db> {
+    #[returns(ref)]
+    pub data: TypeData<'db>,
 }
 
-impl ModuleData {
-    pub fn constant(&mut self, c: ConstantData) -> Constant {
-        if let Some((id, _)) = self.constants.iter().find(|(_, val)| **val == c) {
-            id
-        } else {
-            self.constants.push(c)
-        }
-    }
-
-    pub fn typ(&mut self, t: TypeData) -> Type {
-        if let Some((id, _)) = self.types.iter().find(|(_, val)| *val == &t) {
-            id
-        } else {
-            self.types.push(t)
-        }
-    }
-}
-
-entity_ref_16bit! {
-    /// ID of a type used in a module.
-    pub struct Type;
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TypeData {
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub enum TypeData<'db> {
     Prim(PrimType),
     /// Reference to an object managed by the garbage collector.
     /// It has indefinite lifetime.
-    MRef(Type),
+    MRef(Type<'db>),
     /// Manages reference to another type,
     /// with lazily initialized value.
     /// It is a fat pointer that includes a function
     /// object used to initialize.
-    LazyMRef(Type),
+    LazyMRef(Type<'db>),
     /// Ephemeral reference to one of:
     /// 1. An object managed by the garbage collector.
     /// 2. A field of a struct anywhere in memory.
     /// 3. A local that has been promoted to a reference.
+    ///
     /// Its lifetime is constrained. ERefs cannot be stored
     /// in struct fields or globals.
-    ERef(Type),
-    Func(FuncTypeData),
-    Struct(StructTypeData),
+    ERef(Type<'db>),
+    Func(FuncTypeData<'db>),
+    Struct(StructTypeData<'db>),
     /// Dynamically resized array.
-    List(Type),
+    List(Type<'db>),
 }
 
 /// A closure object, consisting of a dynamic
 /// function reference and a reference to an opaque
 /// captures struct.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FuncTypeData {
-    pub param_types: Vec<Type>,
-    pub return_type: Type,
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct FuncTypeData<'db> {
+    pub param_types: Vec<Type<'db>>,
+    pub return_type: Type<'db>,
 }
 
 /// Type built in to the engine.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub enum PrimType {
     /// 64-bit signed integer.
     Int,
@@ -84,28 +63,28 @@ pub enum PrimType {
     Unit,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StructTypeData {
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct StructTypeData<'db> {
     pub name: CompactString,
-    pub fields: PrimaryMap<Field, FieldData>,
+    pub fields: PrimaryMap<Field, FieldData<'db>>,
 }
 
 entity_ref_16bit! {
     pub struct Field;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FieldData {
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct FieldData<'db> {
     pub name: CompactString,
-    pub typ: Type,
+    pub typ: Type<'db>,
 }
 
-entity_ref! {
-    /// ID of a constant value in a module.
-    pub struct Constant;
+#[salsa::tracked(debug)]
+pub struct Constant<'db> {
+    pub data: ConstantData,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum ConstantData {
     Int(i64),
     Real(f64),
@@ -113,8 +92,36 @@ pub enum ConstantData {
     Str(CompactString),
 }
 
+/// Special PartialEq that compares floats
+/// with bitwise equality.
+impl PartialEq for ConstantData {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (ConstantData::Int(a), ConstantData::Int(b)) => a == b,
+            (ConstantData::Real(a), ConstantData::Real(b)) => a.to_bits() == b.to_bits(),
+            (ConstantData::Bool(a), ConstantData::Bool(b)) => a == b,
+            (ConstantData::Str(a), ConstantData::Str(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for ConstantData {}
+
+impl Hash for ConstantData {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        mem::discriminant(self).hash(state);
+        match self {
+            ConstantData::Int(x) => x.hash(state),
+            ConstantData::Real(x) => x.to_bits().hash(state),
+            ConstantData::Bool(x) => x.hash(state),
+            ConstantData::Str(x) => x.hash(state),
+        }
+    }
+}
+
 impl ConstantData {
-    pub fn typ(&self) -> TypeData {
+    pub fn typ(&self) -> TypeData<'static> {
         match self {
             ConstantData::Int(_) => TypeData::Prim(PrimType::Int),
             ConstantData::Real(_) => TypeData::Prim(PrimType::Real),
@@ -148,13 +155,14 @@ pub struct ImportedTypeData {
 }
  */
 
-entity_ref! {
-    /// Function ID within a module.
-    pub struct Func;
+#[salsa::tracked(debug)]
+pub struct Func<'db> {
+    #[returns(ref)]
+    pub data: FuncData<'db>,
 }
 
-#[derive(Debug, Clone)]
-pub struct FuncData {
+#[derive(Debug, Clone, PartialEq, Hash, salsa::Update)]
+pub struct FuncData<'db> {
     /// Used for debugging; may be synthetic
     /// in the case of anonymous functions.
     pub name: CompactString,
@@ -162,15 +170,15 @@ pub struct FuncData {
     /// for the function. A managed reference
     /// to the captures is the first argument
     /// to the entry block of the function.
-    pub captures_type: Type,
+    pub captures_type: Type<'db>,
     /// Set of values used by the function. Values can be assigned
     /// multiple times until after the SSA lowering pass is applied.
-    pub vals: PrimaryMap<Val, ValData>,
+    pub vals: PrimaryMap<Val, ValData<'db>>,
     /// Parameters expected by the function, not including the captures.
-    pub param_types: Vec<Type>,
-    pub return_type: Type,
+    pub param_types: Vec<Type<'db>>,
+    pub return_type: Type<'db>,
     /// Basic blocks in the function instruction stream.
-    pub basic_blocks: PrimaryMap<BasicBlock, BasicBlockData>,
+    pub basic_blocks: PrimaryMap<BasicBlock, BasicBlockData<'db>>,
     /// Basic block where execution of this function starts.
     pub entry_block: BasicBlock,
 
@@ -179,16 +187,7 @@ pub struct FuncData {
     pub val_lists: ListPool<Val>,
 }
 
-impl FuncData {
-    /// Creates a `FuncData` with unit captures type.
-    pub fn new_no_captures(return_type: Type, module: &mut ModuleData) -> Self {
-        Self::with_captures_type(
-            return_type,
-            module.typ(TypeData::Prim(PrimType::Unit)),
-            module,
-        )
-    }
-
+impl FuncData<'_> {
     /// Visits all basic blocks in an order such that
     /// a block B is not visited until after all blocks that
     /// appear in any *path* (not a walk) from the entry block to B (exclusive)
@@ -289,43 +288,20 @@ impl FuncData {
             }
         })
     }
-
-    pub fn with_captures_type(
-        captures_type: Type,
-        return_type: Type,
-        module: &mut ModuleData,
-    ) -> Self {
-        let locals = PrimaryMap::<Val, ValData>::new();
-
-        let mut basic_blocks = PrimaryMap::<BasicBlock, BasicBlockData>::new();
-        let entry_block = basic_blocks.push(BasicBlockData::default());
-
-        Self {
-            name: "".into(),
-            captures_type,
-            vals: locals,
-            param_types: Vec::new(),
-
-            return_type,
-            basic_blocks,
-            entry_block,
-            val_lists: ListPool::new(),
-        }
-    }
 }
 
 entity_ref_16bit! {
     pub struct Val;
 }
 
-#[derive(Debug, Clone)]
-pub struct ValData {
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct ValData<'db> {
     /// Type of the local.
-    pub typ: Type,
+    pub typ: Type<'db>,
 }
 
-impl ValData {
-    pub fn new(typ: Type) -> Self {
+impl<'db> ValData<'db> {
+    pub fn new(typ: Type<'db>) -> Self {
         Self { typ }
     }
 }
@@ -334,9 +310,9 @@ entity_ref_16bit! {
     pub struct BasicBlock;
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct BasicBlockData {
-    pub instrs: Vec<InstrData>,
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, salsa::Update)]
+pub struct BasicBlockData<'db> {
+    pub instrs: Vec<InstrData<'db>>,
     /// Only used after SSA transformation; empty before then, except for
     /// the entry block, where the capture pointer followed by the function arguments are assigned
     /// here.
