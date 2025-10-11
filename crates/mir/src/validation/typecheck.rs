@@ -191,7 +191,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 )?;
             }
             InstrData::MakeList(ins) => {
-                self.verify_type_data_matches(ins.dst, &[TypeData::List(ins.list_type)])?;
+                self.verify_type_data_matches(ins.dst, &[TypeData::List(ins.element_type)])?;
             }
             InstrData::ListPush(ins) => {
                 let element_type = self.expect_list_or_list_ref(ins.src_list)?;

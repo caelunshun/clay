@@ -1,6 +1,7 @@
 use crate::instr::InstrData;
 use compact_str::CompactString;
 use cranelift_entity::{EntityList, EntitySet, ListPool, PrimaryMap, SecondaryMap};
+use salsa::Database;
 use std::{
     hash::{Hash, Hasher},
     mem,
@@ -12,17 +13,67 @@ pub struct Type<'db> {
     pub data: TypeData<'db>,
 }
 
+#[salsa::tracked(debug)]
+struct TypeDataWrapper<'db> {
+    data: TypeData<'db>,
+}
+
+/// Helper that ensures equal types are assigned equal Type<'db> identifiers.
+/// Essentially a manual implementation of interning, since salsa interned
+/// structs don't seem to support references to other salsa structs.
+pub fn memoized_type<'db>(db: &'db dyn Database, data: TypeData<'db>) -> Type<'db> {
+    #[salsa::tracked]
+    fn memoized_type_helper<'db>(db: &'db dyn Database, data: TypeDataWrapper<'db>) -> Type<'db> {
+        Type::new(db, data.data(db))
+    }
+
+    memoized_type_helper(db, TypeDataWrapper::new(db, data))
+}
+
+#[salsa::tracked]
+pub fn int_type<'db>(db: &'db dyn Database) -> Type<'db> {
+    memoized_type(db, TypeData::Prim(PrimType::Int))
+}
+
+#[salsa::tracked]
+pub fn real_type<'db>(db: &'db dyn Database) -> Type<'db> {
+    memoized_type(db, TypeData::Prim(PrimType::Real))
+}
+
+pub fn byte_type<'db>(db: &'db dyn Database) -> Type<'db> {
+    memoized_type(db, TypeData::Prim(PrimType::Byte))
+}
+
+pub fn bool_type<'db>(db: &'db dyn Database) -> Type<'db> {
+    memoized_type(db, TypeData::Prim(PrimType::Bool))
+}
+
+pub fn str_type<'db>(db: &'db dyn Database) -> Type<'db> {
+    memoized_type(db, TypeData::Prim(PrimType::Str))
+}
+
+pub fn unit_type<'db>(db: &'db dyn Database) -> Type<'db> {
+    memoized_type(db, TypeData::Prim(PrimType::Unit))
+}
+
+pub fn list_type<'db>(db: &'db dyn Database, element_type: Type<'db>) -> Type<'db> {
+    memoized_type(db, TypeData::List(element_type))
+}
+
+pub fn mref_type<'db>(db: &'db dyn Database, pointee_type: Type<'db>) -> Type<'db> {
+    memoized_type(db, TypeData::MRef(pointee_type))
+}
+
+pub fn eref_type<'db>(db: &'db dyn Database, pointee_type: Type<'db>) -> Type<'db> {
+    memoized_type(db, TypeData::ERef(pointee_type))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub enum TypeData<'db> {
     Prim(PrimType),
     /// Reference to an object managed by the garbage collector.
     /// It has indefinite lifetime.
     MRef(Type<'db>),
-    /// Manages reference to another type,
-    /// with lazily initialized value.
-    /// It is a fat pointer that includes a function
-    /// object used to initialize.
-    LazyMRef(Type<'db>),
     /// Ephemeral reference to one of:
     /// 1. An object managed by the garbage collector.
     /// 2. A field of a struct anywhere in memory.
@@ -317,4 +368,18 @@ pub struct BasicBlockData<'db> {
     /// the entry block, where the capture pointer followed by the function arguments are assigned
     /// here.
     pub params: EntityList<Val>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zyon_core::Db;
+
+    #[test]
+    fn types_are_memoized() {
+        let db = Db::default();
+        let t0 = int_type(&db);
+        let t1 = int_type(&db);
+        assert_eq!(t0, t1);
+    }
 }

@@ -47,6 +47,9 @@ pub enum InstrData<'db> {
     /// (1) Allocate a stack slot for the local
     /// (2) Copy the value into the stack slot
     /// (3) Yield a reference to the stack slot
+    ///
+    /// Since this logically creates a copy, the original
+    /// local is not referenced.
     LocalToERef(Unary),
 
     InitStruct(InitStruct<'db>),
@@ -544,7 +547,7 @@ pub struct MakeFunctionObject<'db> {
 pub struct MakeList<'db> {
     pub dst: Val,
     /// Type of the elements inside the list.
-    pub list_type: Type<'db>,
+    pub element_type: Type<'db>,
 }
 
 // -------------------

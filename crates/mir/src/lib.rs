@@ -74,6 +74,7 @@ macro_rules! entity_ref_16bit {
     };
 }
 
+pub mod builder;
 pub mod instr;
 pub mod module;
 pub mod passes;
