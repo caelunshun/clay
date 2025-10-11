@@ -16,6 +16,10 @@ pub enum SExpr {
 }
 
 impl SExpr {
+    pub fn parse(s: impl AsRef<str>) -> Option<Self> {
+        parser::parse_sexpr(s.as_ref())
+    }
+
     fn format(&self, dst: &mut String, indent_level: usize) {
         match self {
             SExpr::Int(x) => write!(dst, "{}", x).unwrap(),
@@ -23,7 +27,7 @@ impl SExpr {
             SExpr::Symbol(x) => write!(dst, "{}", x).unwrap(),
             SExpr::String(s) => write!(dst, "\"{}\"", escape_string(s)).unwrap(),
             SExpr::List(l) => {
-                if !dst.ends_with('\n') && !dst.is_empty() {
+                if !dst.ends_with('\n') && !dst.ends_with('(') && !dst.is_empty() {
                     dst.push('\n');
                     write!(dst, "{}", "    ".repeat(indent_level)).unwrap();
                 }

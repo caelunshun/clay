@@ -3,20 +3,8 @@ use compact_str::CompactString;
 
 pub fn parse_sexpr(input: &str) -> Option<SExpr> {
     let mut parser = Parser::new(input);
-
-    // Implicit outermost list
-    let mut items = Vec::new();
-
-    while let Some(expr) = parser.parse_expr()? {
-        items.push(expr);
-    }
-
-    parser.skip_ws();
-    if !parser.is_at_end() {
-        return None;
-    }
-
-    Some(SExpr::List(items.into_boxed_slice()))
+    let result = parser.parse_expr().flatten();
+    if !parser.is_at_end() { None } else { result }
 }
 
 struct Parser<'a> {
@@ -138,7 +126,7 @@ mod tests {
 
     #[test]
     fn test_basic() {
-        let input = r#"a 123 1.23 "str" (nested (1 2))"#;
+        let input = r#"(a 123 1.23 "str" (nested (1 2)))"#;
         let parsed = parse_sexpr(input).unwrap();
         assert_eq!(
             parsed,

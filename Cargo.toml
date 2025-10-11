@@ -15,6 +15,7 @@ tracing-subscriber = "0.3"
 thiserror = "2"
 indoc = "2"
 portable-atomic = "1"
+indexmap = "2"
 salsa = { git = "https://github.com/caelunshun/salsa", branch = "cranelift-entity-update-impl", features = ["compact_str", "cranelift-entity"] }
 
 zyon-core = { path = "crates/core" }

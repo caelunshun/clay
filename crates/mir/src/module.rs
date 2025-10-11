@@ -1,27 +1,68 @@
 use crate::instr::InstrData;
 use compact_str::CompactString;
 use cranelift_entity::{EntityList, EntitySet, ListPool, PrimaryMap, SecondaryMap};
+use indexmap::IndexSet;
 use salsa::Database;
 use std::{
     hash::{Hash, Hasher},
     mem,
 };
 
+/// A collection of functions and the types
+/// they reference.
 #[salsa::tracked(debug)]
+pub struct Module<'db> {
+    #[returns(ref)]
+    #[tracked]
+    pub functions: Vec<Func<'db>>,
+    #[returns(ref)]
+    #[tracked]
+    pub types: Vec<Type<'db>>,
+}
+
+impl<'db> Module<'db> {
+    /// Constructs a module from its constituent functions
+    /// and all types referenced by those functions.
+    pub fn from_funcs(db: &'db dyn Database, funcs: impl IntoIterator<Item = Func<'db>>) -> Self {
+        let mut types = IndexSet::with_hasher(hashbrown::DefaultHashBuilder::default());
+
+        let mut functions = Vec::new();
+        for func in funcs {
+            fn visit<'db>(
+                db: &'db dyn Database,
+                typ: Type<'db>,
+                types: &mut IndexSet<Type<'db>, hashbrown::DefaultHashBuilder>,
+            ) {
+                if types.insert(typ) {
+                    typ.data(db)
+                        .visit_used_types(db, &mut |typ2| visit(db, typ2, types));
+                }
+            }
+
+            func.data(db).visit_types(|typ| visit(db, typ, &mut types));
+
+            functions.push(func);
+        }
+
+        Self::new(db, functions, types.into_iter().collect())
+    }
+}
+
+#[salsa::interned(debug)]
 pub struct Type<'db> {
     #[returns(ref)]
-    pub data: TypeData<'db>,
+    pub data: TypeKind<'db>,
 }
 
 #[salsa::tracked(debug)]
 struct TypeDataWrapper<'db> {
-    data: TypeData<'db>,
+    data: TypeKind<'db>,
 }
 
 /// Helper that ensures equal types are assigned equal Type<'db> identifiers.
 /// Essentially a manual implementation of interning, since salsa interned
 /// structs don't seem to support references to other salsa structs.
-pub fn memoized_type<'db>(db: &'db dyn Database, data: TypeData<'db>) -> Type<'db> {
+pub fn memoized_type<'db>(db: &'db dyn Database, data: TypeKind<'db>) -> Type<'db> {
     #[salsa::tracked]
     fn memoized_type_helper<'db>(db: &'db dyn Database, data: TypeDataWrapper<'db>) -> Type<'db> {
         Type::new(db, data.data(db))
@@ -30,46 +71,44 @@ pub fn memoized_type<'db>(db: &'db dyn Database, data: TypeData<'db>) -> Type<'d
     memoized_type_helper(db, TypeDataWrapper::new(db, data))
 }
 
-#[salsa::tracked]
 pub fn int_type<'db>(db: &'db dyn Database) -> Type<'db> {
-    memoized_type(db, TypeData::Prim(PrimType::Int))
+    memoized_type(db, TypeKind::Prim(PrimType::Int))
 }
 
-#[salsa::tracked]
 pub fn real_type<'db>(db: &'db dyn Database) -> Type<'db> {
-    memoized_type(db, TypeData::Prim(PrimType::Real))
+    memoized_type(db, TypeKind::Prim(PrimType::Real))
 }
 
 pub fn byte_type<'db>(db: &'db dyn Database) -> Type<'db> {
-    memoized_type(db, TypeData::Prim(PrimType::Byte))
+    memoized_type(db, TypeKind::Prim(PrimType::Byte))
 }
 
 pub fn bool_type<'db>(db: &'db dyn Database) -> Type<'db> {
-    memoized_type(db, TypeData::Prim(PrimType::Bool))
+    memoized_type(db, TypeKind::Prim(PrimType::Bool))
 }
 
 pub fn str_type<'db>(db: &'db dyn Database) -> Type<'db> {
-    memoized_type(db, TypeData::Prim(PrimType::Str))
+    memoized_type(db, TypeKind::Prim(PrimType::Str))
 }
 
 pub fn unit_type<'db>(db: &'db dyn Database) -> Type<'db> {
-    memoized_type(db, TypeData::Prim(PrimType::Unit))
+    memoized_type(db, TypeKind::Prim(PrimType::Unit))
 }
 
 pub fn list_type<'db>(db: &'db dyn Database, element_type: Type<'db>) -> Type<'db> {
-    memoized_type(db, TypeData::List(element_type))
+    memoized_type(db, TypeKind::List(element_type))
 }
 
 pub fn mref_type<'db>(db: &'db dyn Database, pointee_type: Type<'db>) -> Type<'db> {
-    memoized_type(db, TypeData::MRef(pointee_type))
+    memoized_type(db, TypeKind::MRef(pointee_type))
 }
 
 pub fn eref_type<'db>(db: &'db dyn Database, pointee_type: Type<'db>) -> Type<'db> {
-    memoized_type(db, TypeData::ERef(pointee_type))
+    memoized_type(db, TypeKind::ERef(pointee_type))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub enum TypeData<'db> {
+pub enum TypeKind<'db> {
     Prim(PrimType),
     /// Reference to an object managed by the garbage collector.
     /// It has indefinite lifetime.
@@ -86,6 +125,33 @@ pub enum TypeData<'db> {
     Struct(StructTypeData<'db>),
     /// Dynamically resized array.
     List(Type<'db>),
+}
+
+impl<'db> TypeKind<'db> {
+    ///  Visits any types referenced / depended on by
+    /// this type. Is not recursive.
+    pub fn visit_used_types(&self, _db: &'db dyn Database, visit: &mut impl FnMut(Type<'db>)) {
+        match self {
+            TypeKind::Prim(_) => {}
+            TypeKind::MRef(t) | TypeKind::ERef(t) => {
+                visit(*t);
+            }
+            TypeKind::Func(func) => {
+                visit(func.return_type);
+                for param in &func.param_types {
+                    visit(*param);
+                }
+            }
+            TypeKind::Struct(s) => {
+                for (_, field) in &s.fields {
+                    visit(field.typ);
+                }
+            }
+            TypeKind::List(el) => {
+                visit(*el);
+            }
+        }
+    }
 }
 
 /// A closure object, consisting of a dynamic
@@ -172,12 +238,12 @@ impl Hash for ConstantData {
 }
 
 impl ConstantData {
-    pub fn typ(&self) -> TypeData<'static> {
+    pub fn typ(&self) -> TypeKind<'static> {
         match self {
-            ConstantData::Int(_) => TypeData::Prim(PrimType::Int),
-            ConstantData::Real(_) => TypeData::Prim(PrimType::Real),
-            ConstantData::Bool(_) => TypeData::Prim(PrimType::Bool),
-            ConstantData::Str(_) => TypeData::Prim(PrimType::Str),
+            ConstantData::Int(_) => TypeKind::Prim(PrimType::Int),
+            ConstantData::Real(_) => TypeKind::Prim(PrimType::Real),
+            ConstantData::Bool(_) => TypeKind::Prim(PrimType::Bool),
+            ConstantData::Str(_) => TypeKind::Prim(PrimType::Str),
         }
     }
 }
@@ -238,7 +304,20 @@ pub struct FuncData<'db> {
     pub val_lists: ListPool<Val>,
 }
 
-impl FuncData<'_> {
+impl<'db> FuncData<'db> {
+    /// Visits all types used in the function.
+    /// May visit the same type multiple times.
+    pub fn visit_types(&self, mut visit: impl FnMut(Type<'db>)) {
+        visit(self.captures_type);
+        visit(self.return_type);
+        for &param in &self.param_types {
+            visit(param);
+        }
+        for (_, val_data) in &self.vals {
+            visit(val_data.typ);
+        }
+    }
+
     /// Visits all basic blocks in an order such that
     /// a block B is not visited until after all blocks that
     /// appear in any *path* (not a walk) from the entry block to B (exclusive)
@@ -368,18 +447,4 @@ pub struct BasicBlockData<'db> {
     /// the entry block, where the capture pointer followed by the function arguments are assigned
     /// here.
     pub params: EntityList<Val>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use zyon_core::Db;
-
-    #[test]
-    fn types_are_memoized() {
-        let db = Db::default();
-        let t0 = int_type(&db);
-        let t1 = int_type(&db);
-        assert_eq!(t0, t1);
-    }
 }

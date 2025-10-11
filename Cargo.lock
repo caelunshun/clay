@@ -485,6 +485,8 @@ dependencies = [
  "compact_str",
  "cranelift-entity",
  "hashbrown 0.16.0",
+ "indexmap",
+ "indoc",
  "salsa",
  "zyon-core",
 ]

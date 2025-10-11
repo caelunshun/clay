@@ -1,26 +1,23 @@
 use crate::{
     instr,
     instr::CompareMode,
-    module::{
-        bool_type, int_type, memoized_type, BasicBlock, BasicBlockData, Constant, Field, FuncData,
-        ValData,
-    },
-    Func, InstrData, Type, TypeData, Val,
+    module::{memoized_type, BasicBlock, BasicBlockData, Constant, Field, FuncData, ValData},
+    Func, InstrData, Type, TypeKind, Val,
 };
 use compact_str::CompactString;
 use cranelift_entity::{EntityList, ListPool, PrimaryMap};
-use zyon_core::Db;
+use salsa::Database;
 
 /// Builder API for a `FuncData`.
 pub struct FuncBuilder<'db> {
-    db: &'db Db,
+    db: &'db dyn Database,
     func: FuncData<'db>,
     current_block: BasicBlock,
 }
 
 impl<'db> FuncBuilder<'db> {
     pub fn new(
-        db: &'db Db,
+        db: &'db dyn Database,
         name: impl Into<CompactString>,
         captures_type: Type<'db>,
         return_type: Type<'db>,
@@ -30,7 +27,9 @@ impl<'db> FuncBuilder<'db> {
         let mut val_lists = ListPool::new();
         let mut vals = PrimaryMap::new();
 
-        let captures_val = vals.push(ValData { typ: captures_type });
+        let captures_val = vals.push(ValData {
+            typ: memoized_type(db, TypeKind::MRef(captures_type)),
+        });
         basic_blocks[entry_block]
             .params
             .push(captures_val, &mut val_lists);
@@ -68,6 +67,10 @@ impl<'db> FuncBuilder<'db> {
         self.current_block = block;
     }
 
+    pub fn val(&mut self, typ: Type<'db>) -> Val {
+        self.func.vals.push(ValData { typ })
+    }
+
     pub fn instr<'a>(&'a mut self) -> FuncInstrBuilder<'a, 'db> {
         FuncInstrBuilder {
             db: self.db,
@@ -76,13 +79,14 @@ impl<'db> FuncBuilder<'db> {
         }
     }
 
-    pub fn finish(self) -> FuncData<'db> {
+    pub fn build(self) -> FuncData<'db> {
         self.func
     }
 }
 
 pub struct FuncInstrBuilder<'a, 'db> {
-    db: &'db Db,
+    #[allow(unused)]
+    db: &'db dyn Database,
     func: &'a mut FuncData<'db>,
     block: BasicBlock,
 }
@@ -125,9 +129,6 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         func_object: Val,
         args: impl IntoIterator<Item = Val>,
     ) {
-        let TypeData::Func(func) = self.func.vals[func_object].typ.data(self.db) else {
-            panic!("call_indirect used on non-function type");
-        };
         let args = EntityList::from_iter(args, &mut self.func.val_lists);
         self.instr(InstrData::CallIndirect(instr::CallIndirect {
             func: func_object,

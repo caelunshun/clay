@@ -1,7 +1,7 @@
 use crate::{
     module::{BasicBlock, FuncData, FuncTypeData, StructTypeData},
     validation::ValidationError,
-    InstrData, PrimType, Type, TypeData, Val,
+    InstrData, PrimType, Type, TypeKind, Val,
 };
 use cranelift_entity::EntityList;
 use zyon_core::Db;
@@ -31,13 +31,13 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 self.verify_basic_block_args(ins.target, &ins.args)?;
             }
             InstrData::Branch(ins) => {
-                self.verify_type_data_matches(ins.condition, &[TypeData::Prim(PrimType::Bool)])?;
+                self.verify_type_data_matches(ins.condition, &[TypeKind::Prim(PrimType::Bool)])?;
                 self.verify_basic_block_args(ins.target_true, &ins.args_true)?;
                 self.verify_basic_block_args(ins.target_false, &ins.args_false)?;
             }
             InstrData::Call(ins) => {
                 if ins.func.data(self.db).captures_type.data(self.db)
-                    != &TypeData::Prim(PrimType::Unit)
+                    != &TypeKind::Prim(PrimType::Unit)
                 {
                     return Err(ValidationError::new(
                         "can't make a direct call to a function with non-unit captures type",
@@ -48,7 +48,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 self.verify_type_equals(ins.return_value_dst, ins.func.data(self.db).return_type)?;
             }
             InstrData::CallIndirect(ins) => {
-                let TypeData::Func(func_typ) = self.type_data_of(ins.func) else {
+                let TypeKind::Func(func_typ) = self.type_data_of(ins.func) else {
                     return Err(ValidationError::new(
                         "CallIndirect requires a function object",
                     ));
@@ -69,59 +69,59 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
             | InstrData::IntSub(ins)
             | InstrData::IntMul(ins)
             | InstrData::IntDiv(ins) => {
-                self.verify_type_data_matches(ins.src1, &[TypeData::Prim(PrimType::Int)])?;
-                self.verify_type_data_matches(ins.src2, &[TypeData::Prim(PrimType::Int)])?;
-                self.verify_type_data_matches(ins.dst, &[TypeData::Prim(PrimType::Int)])?;
+                self.verify_type_data_matches(ins.src1, &[TypeKind::Prim(PrimType::Int)])?;
+                self.verify_type_data_matches(ins.src2, &[TypeKind::Prim(PrimType::Int)])?;
+                self.verify_type_data_matches(ins.dst, &[TypeKind::Prim(PrimType::Int)])?;
             }
             InstrData::IntCmp(ins) => {
-                self.verify_type_data_matches(ins.src1, &[TypeData::Prim(PrimType::Int)])?;
-                self.verify_type_data_matches(ins.src2, &[TypeData::Prim(PrimType::Int)])?;
-                self.verify_type_data_matches(ins.dst, &[TypeData::Prim(PrimType::Bool)])?;
+                self.verify_type_data_matches(ins.src1, &[TypeKind::Prim(PrimType::Int)])?;
+                self.verify_type_data_matches(ins.src2, &[TypeKind::Prim(PrimType::Int)])?;
+                self.verify_type_data_matches(ins.dst, &[TypeKind::Prim(PrimType::Bool)])?;
             }
             InstrData::RealAdd(ins)
             | InstrData::RealSub(ins)
             | InstrData::RealMul(ins)
             | InstrData::RealDiv(ins) => {
-                self.verify_type_data_matches(ins.src1, &[TypeData::Prim(PrimType::Real)])?;
-                self.verify_type_data_matches(ins.src2, &[TypeData::Prim(PrimType::Real)])?;
-                self.verify_type_data_matches(ins.dst, &[TypeData::Prim(PrimType::Real)])?;
+                self.verify_type_data_matches(ins.src1, &[TypeKind::Prim(PrimType::Real)])?;
+                self.verify_type_data_matches(ins.src2, &[TypeKind::Prim(PrimType::Real)])?;
+                self.verify_type_data_matches(ins.dst, &[TypeKind::Prim(PrimType::Real)])?;
             }
             InstrData::RealCmp(ins) => {
-                self.verify_type_data_matches(ins.src1, &[TypeData::Prim(PrimType::Real)])?;
-                self.verify_type_data_matches(ins.src2, &[TypeData::Prim(PrimType::Real)])?;
-                self.verify_type_data_matches(ins.dst, &[TypeData::Prim(PrimType::Bool)])?;
+                self.verify_type_data_matches(ins.src1, &[TypeKind::Prim(PrimType::Real)])?;
+                self.verify_type_data_matches(ins.src2, &[TypeKind::Prim(PrimType::Real)])?;
+                self.verify_type_data_matches(ins.dst, &[TypeKind::Prim(PrimType::Bool)])?;
             }
             InstrData::RealToInt(ins) => {
-                self.verify_type_data_matches(ins.src, &[TypeData::Prim(PrimType::Real)])?;
-                self.verify_type_data_matches(ins.dst, &[TypeData::Prim(PrimType::Int)])?;
+                self.verify_type_data_matches(ins.src, &[TypeKind::Prim(PrimType::Real)])?;
+                self.verify_type_data_matches(ins.dst, &[TypeKind::Prim(PrimType::Int)])?;
             }
             InstrData::IntToReal(ins) => {
-                self.verify_type_data_matches(ins.src, &[TypeData::Prim(PrimType::Int)])?;
-                self.verify_type_data_matches(ins.dst, &[TypeData::Prim(PrimType::Real)])?;
+                self.verify_type_data_matches(ins.src, &[TypeKind::Prim(PrimType::Int)])?;
+                self.verify_type_data_matches(ins.dst, &[TypeKind::Prim(PrimType::Real)])?;
             }
             InstrData::ByteToInt(ins) => {
-                self.verify_type_data_matches(ins.src, &[TypeData::Prim(PrimType::Byte)])?;
-                self.verify_type_data_matches(ins.dst, &[TypeData::Prim(PrimType::Int)])?;
+                self.verify_type_data_matches(ins.src, &[TypeKind::Prim(PrimType::Byte)])?;
+                self.verify_type_data_matches(ins.dst, &[TypeKind::Prim(PrimType::Int)])?;
             }
             InstrData::IntToByte(ins) => {
-                self.verify_type_data_matches(ins.src, &[TypeData::Prim(PrimType::Int)])?;
-                self.verify_type_data_matches(ins.dst, &[TypeData::Prim(PrimType::Byte)])?;
+                self.verify_type_data_matches(ins.src, &[TypeKind::Prim(PrimType::Int)])?;
+                self.verify_type_data_matches(ins.dst, &[TypeKind::Prim(PrimType::Byte)])?;
             }
             InstrData::BoolAnd(ins) | InstrData::BoolOr(ins) | InstrData::BoolXor(ins) => {
-                self.verify_type_data_matches(ins.src1, &[TypeData::Prim(PrimType::Bool)])?;
-                self.verify_type_data_matches(ins.src2, &[TypeData::Prim(PrimType::Bool)])?;
-                self.verify_type_data_matches(ins.dst, &[TypeData::Prim(PrimType::Bool)])?;
+                self.verify_type_data_matches(ins.src1, &[TypeKind::Prim(PrimType::Bool)])?;
+                self.verify_type_data_matches(ins.src2, &[TypeKind::Prim(PrimType::Bool)])?;
+                self.verify_type_data_matches(ins.dst, &[TypeKind::Prim(PrimType::Bool)])?;
             }
             InstrData::BoolNot(ins) => {
-                self.verify_type_data_matches(ins.src, &[TypeData::Prim(PrimType::Bool)])?;
-                self.verify_type_data_matches(ins.dst, &[TypeData::Prim(PrimType::Bool)])?;
+                self.verify_type_data_matches(ins.src, &[TypeKind::Prim(PrimType::Bool)])?;
+                self.verify_type_data_matches(ins.dst, &[TypeKind::Prim(PrimType::Bool)])?;
             }
             InstrData::LocalToERef(ins) => {
                 let pointee_type = self.type_of(ins.src);
-                self.verify_type_data_matches(ins.dst, &[TypeData::ERef(pointee_type)])?;
+                self.verify_type_data_matches(ins.dst, &[TypeKind::ERef(pointee_type)])?;
             }
             InstrData::InitStruct(ins) => {
-                let TypeData::Struct(struct_data) = self.type_data_of(ins.dst) else {
+                let TypeKind::Struct(struct_data) = self.type_data_of(ins.dst) else {
                     return Err(ValidationError::new("expected struct type"));
                 };
                 let field_vals = ins.fields.as_slice(&self.func.val_lists);
@@ -151,7 +151,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
             InstrData::Alloc(ins) => {
                 self.verify_type_data_matches(
                     ins.dst_ref,
-                    &[TypeData::MRef(self.type_of(ins.src))],
+                    &[TypeKind::MRef(self.type_of(ins.src))],
                 )?;
             }
             InstrData::Load(ins) => {
@@ -162,36 +162,36 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 self.verify_type_data_matches(
                     ins.ref_,
                     &[
-                        TypeData::MRef(self.type_of(ins.val)),
-                        TypeData::ERef(self.type_of(ins.val)),
+                        TypeKind::MRef(self.type_of(ins.val)),
+                        TypeKind::ERef(self.type_of(ins.val)),
                     ],
                 )?;
             }
             InstrData::MakeFieldERef(ins) => {
                 let pointee = self.expect_any_ref(ins.src_ref)?;
                 let struct_data = match pointee.data(self.db) {
-                    TypeData::Struct(s) => s,
+                    TypeKind::Struct(s) => s,
                     _ => return Err(ValidationError::new("expected reference to struct")),
                 };
                 let field = &struct_data.fields[ins.field];
-                self.verify_type_data_matches(ins.dst_ref, &[TypeData::ERef(field.typ)])?;
+                self.verify_type_data_matches(ins.dst_ref, &[TypeKind::ERef(field.typ)])?;
             }
             InstrData::MakeFunctionObject(ins) => {
                 let func_object_data = ins.func.data(self.db);
                 self.verify_type_data_matches(
                     ins.dst,
-                    &[TypeData::Func(FuncTypeData {
+                    &[TypeKind::Func(FuncTypeData {
                         param_types: func_object_data.param_types.clone(),
                         return_type: func_object_data.return_type,
                     })],
                 )?;
                 self.verify_type_data_matches(
                     ins.captures_ref,
-                    &[TypeData::MRef(func_object_data.captures_type)],
+                    &[TypeKind::MRef(func_object_data.captures_type)],
                 )?;
             }
             InstrData::MakeList(ins) => {
-                self.verify_type_data_matches(ins.dst, &[TypeData::List(ins.element_type)])?;
+                self.verify_type_data_matches(ins.dst, &[TypeKind::List(ins.element_type)])?;
             }
             InstrData::ListPush(ins) => {
                 let element_type = self.expect_list_or_list_ref(ins.src_list)?;
@@ -202,11 +202,11 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                     }
                 } else {
                     let dst_list = ins.dst_list.ok_or_else(|| ValidationError::new("for list modifying instructions operating on values, dst_list must be Some"))?;
-                    self.verify_type_data_matches(dst_list, &[TypeData::List(element_type)])?;
+                    self.verify_type_data_matches(dst_list, &[TypeKind::List(element_type)])?;
                 }
             }
             InstrData::ListRemove(ins) => {
-                self.verify_type_data_matches(ins.src_index, &[TypeData::Prim(PrimType::Int)])?;
+                self.verify_type_data_matches(ins.src_index, &[TypeKind::Prim(PrimType::Int)])?;
 
                 let element_type = self.expect_list_or_list_ref(ins.src_list)?;
                 if self.is_ref(self.type_of(ins.src_list)) {
@@ -215,11 +215,11 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                     }
                 } else {
                     let dst_list = ins.dst_list.ok_or_else(|| ValidationError::new("for list modifying instructions operating on values, dst_list must be Some"))?;
-                    self.verify_type_data_matches(dst_list, &[TypeData::List(element_type)])?;
+                    self.verify_type_data_matches(dst_list, &[TypeKind::List(element_type)])?;
                 }
             }
             InstrData::ListTrunc(ins) => {
-                self.verify_type_data_matches(ins.new_len, &[TypeData::Prim(PrimType::Int)])?;
+                self.verify_type_data_matches(ins.new_len, &[TypeKind::Prim(PrimType::Int)])?;
 
                 let element_type = self.expect_list_or_list_ref(ins.src_list)?;
                 if self.is_ref(self.type_of(ins.src_list)) {
@@ -228,29 +228,29 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                     }
                 } else {
                     let dst_list = ins.dst_list.ok_or_else(|| ValidationError::new("for list modifying instructions operating on values, dst_list must be Some"))?;
-                    self.verify_type_data_matches(dst_list, &[TypeData::List(element_type)])?;
+                    self.verify_type_data_matches(dst_list, &[TypeKind::List(element_type)])?;
                 }
             }
             InstrData::ListLen(ins) => {
                 self.expect_list_or_list_ref(ins.src_list)?;
-                self.verify_type_data_matches(ins.dst_len, &[TypeData::Prim(PrimType::Int)])?;
+                self.verify_type_data_matches(ins.dst_len, &[TypeKind::Prim(PrimType::Int)])?;
             }
             InstrData::ListGet(ins) => {
                 let element_type = self.expect_list_or_list_ref(ins.src_list)?;
-                self.verify_type_data_matches(ins.src_index, &[TypeData::Prim(PrimType::Int)])?;
+                self.verify_type_data_matches(ins.src_index, &[TypeKind::Prim(PrimType::Int)])?;
                 self.verify_type_equals(ins.dst_val, element_type)?;
             }
             InstrData::ListGetERef(ins) => {
                 let element_type = self.expect_list_or_list_ref(ins.src_list)?;
-                self.verify_type_data_matches(ins.src_index, &[TypeData::Prim(PrimType::Int)])?;
-                self.verify_type_data_matches(ins.dst_ref, &[TypeData::ERef(element_type)])?;
+                self.verify_type_data_matches(ins.src_index, &[TypeKind::Prim(PrimType::Int)])?;
+                self.verify_type_data_matches(ins.dst_ref, &[TypeKind::ERef(element_type)])?;
             }
         }
         Ok(())
     }
 
     fn verify_entry_block_params(&self) -> Result<(), ValidationError> {
-        let mut expected_param_types = vec![TypeData::MRef(self.func.captures_type)];
+        let mut expected_param_types = vec![TypeKind::MRef(self.func.captures_type)];
         expected_param_types.extend(
             self.func
                 .param_types
@@ -286,14 +286,14 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
         self.func.vals[val].typ
     }
 
-    fn type_data_of(&self, val: Val) -> &'db TypeData<'db> {
+    fn type_data_of(&self, val: Val) -> &'db TypeKind<'db> {
         self.func.vals[val].typ.data(self.db)
     }
 
     fn verify_type_data_matches(
         &self,
         val: Val,
-        allowed_types: &[TypeData],
+        allowed_types: &[TypeKind],
     ) -> Result<(), ValidationError> {
         let typ = self.func.vals[val].typ;
         if !allowed_types.contains(typ.data(self.db)) {
@@ -368,23 +368,23 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
 
     fn expect_struct(&self, val: Val) -> Result<&'db StructTypeData<'db>, ValidationError> {
         match self.type_data_of(val) {
-            TypeData::Struct(s) => Ok(s),
+            TypeKind::Struct(s) => Ok(s),
             _ => Err(ValidationError::new("expected struct type")),
         }
     }
 
     fn expect_any_ref(&self, val: Val) -> Result<Type<'db>, ValidationError> {
         match self.type_data_of(val) {
-            TypeData::MRef(t) => Ok(*t),
-            TypeData::ERef(t) => Ok(*t),
+            TypeKind::MRef(t) => Ok(*t),
+            TypeKind::ERef(t) => Ok(*t),
             _ => Err(ValidationError::new("expected mref or eref")),
         }
     }
 
     fn expect_list_or_list_ref(&self, val: Val) -> Result<Type<'db>, ValidationError> {
         match self.type_data_of(val) {
-            TypeData::List(t) => Ok(*t),
-            TypeData::ERef(l) | TypeData::MRef(l) if let TypeData::List(t) = l.data(self.db) => {
+            TypeKind::List(t) => Ok(*t),
+            TypeKind::ERef(l) | TypeKind::MRef(l) if let TypeKind::List(t) = l.data(self.db) => {
                 Ok(*t)
             }
             _ => Err(ValidationError::new("expected list or reference to list")),
@@ -392,6 +392,6 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
     }
 
     fn is_ref(&self, t: Type) -> bool {
-        matches!(t.data(self.db), TypeData::MRef(_) | TypeData::ERef(_))
+        matches!(t.data(self.db), TypeKind::MRef(_) | TypeKind::ERef(_))
     }
 }
