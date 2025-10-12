@@ -27,6 +27,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36f64beae40a84da1b4b26ff2761a5b895c12adc41dc25aaee1c4f2bbfe97a6e"
 
 [[package]]
+name = "bumpalo"
+version = "3.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46c5e41b57b8bba42a04676d81cb89e9ee8e859a1a66f80a5a72e1cb76b34d43"
+
+[[package]]
 name = "bytemuck"
 version = "1.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -472,6 +478,7 @@ checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
 name = "zyon-core"
 version = "0.1.0"
 dependencies = [
+ "bumpalo",
  "compact_str",
  "indoc",
  "salsa",
@@ -481,6 +488,7 @@ dependencies = [
 name = "zyon-mir"
 version = "0.1.0"
 dependencies = [
+ "bumpalo",
  "bytemuck",
  "compact_str",
  "cranelift-entity",

@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 salsa.workspace = true
 compact_str.workspace = true
+bumpalo.workspace = true
 
 [dev-dependencies]
 indoc.workspace = true

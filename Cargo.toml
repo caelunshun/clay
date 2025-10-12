@@ -16,7 +16,11 @@ thiserror = "2"
 indoc = "2"
 portable-atomic = "1"
 indexmap = "2"
-salsa = { git = "https://github.com/caelunshun/salsa", branch = "cranelift-entity-update-impl", features = ["compact_str", "cranelift-entity"] }
+salsa = { git = "https://github.com/caelunshun/salsa", branch = "cranelift-entity-update-impl", features = [
+    "compact_str",
+    "cranelift-entity",
+] }
+bumpalo = "3"
 
 zyon-core = { path = "crates/core" }
 zyon-mir = { path = "crates/mir" }

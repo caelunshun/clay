@@ -11,6 +11,7 @@ bytemuck.workspace = true
 zyon-core.workspace = true
 salsa.workspace = true
 indexmap.workspace = true
+bumpalo.workspace = true
 
 [dev-dependencies]
 indoc.workspace = true

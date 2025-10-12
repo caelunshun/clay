@@ -1,6 +1,7 @@
 //! Simple S-expression parsing and formatting tooling,
 //! primarily used for test cases at various levels of the IR.
 
+use bumpalo::Bump;
 use compact_str::CompactString;
 use std::fmt::{Display, Formatter, Write as _};
 
@@ -18,6 +19,21 @@ pub enum SExpr {
 impl SExpr {
     pub fn parse(s: impl AsRef<str>) -> Option<Self> {
         parser::parse_sexpr(s.as_ref())
+    }
+
+    /// Creates an `SExprRef` to this SExpr.
+    /// Auxiliary slices are allocated using
+    /// the given bump allocator.
+    pub fn to_ref<'a>(&'a self, bump: &'a Bump) -> SExprRef<'a> {
+        match self {
+            SExpr::Int(x) => SExprRef::Int(*x),
+            SExpr::Float(x) => SExprRef::Float(*x),
+            SExpr::Symbol(s) => SExprRef::Symbol(s.as_str()),
+            SExpr::String(s) => SExprRef::String(s.as_str()),
+            SExpr::List(l) => {
+                SExprRef::List(bump.alloc_slice_fill_iter(l.iter().map(|e| e.to_ref(bump))))
+            }
+        }
     }
 
     fn format(&self, dst: &mut String, indent_level: usize) {
@@ -86,6 +102,20 @@ pub fn string(x: impl Into<CompactString>) -> SExpr {
 
 pub fn list(es: impl IntoIterator<Item = SExpr>) -> SExpr {
     SExpr::List(es.into_iter().collect())
+}
+
+/// SExpr representation using slices and str
+/// references instead of boxed slices and
+/// Strings. This enables direct, nested pattern-matching
+/// against expressions. Workaround for lack
+/// of stable deref_patterns.
+#[derive(Debug, Clone)]
+pub enum SExprRef<'a> {
+    Int(i64),
+    Float(f64),
+    Symbol(&'a str),
+    String(&'a str),
+    List(&'a [SExprRef<'a>]),
 }
 
 #[cfg(test)]
