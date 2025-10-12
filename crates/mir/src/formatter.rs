@@ -483,7 +483,7 @@ mod tests {
         let mut func = FuncBuilder::new(db, "add", unit_type(db), int_type(db));
         let param0 = func.append_param(int_type(db));
         let param1 = func.append_param(int_type(db));
-        let ret_val = func.val(int_type(db));
+        let ret_val = func.val();
         func.instr().int_add(ret_val, param0, param1);
         func.instr().return_(ret_val);
         let func = func.build();
