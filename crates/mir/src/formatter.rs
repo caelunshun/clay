@@ -39,19 +39,23 @@ struct Formatter<'db> {
 
 impl<'db> Formatter<'db> {
     pub fn format_module(mut self) -> SExpr {
-        let mut items = Vec::new();
+        let mut items = vec![symbol("module"), symbol(self.module.name(self.db).clone())];
 
         for typ in self.module.types(self.db) {
-            let type_name = if let TypeKind::Prim(_) = typ.data(self.db) {
+            let type_name = if self.should_use_inline_type(*typ) {
                 self.format_type(*typ)
             } else {
+                // Reference a type definition for brevity
                 let name = symbol(format_compact!("t{}", self.next_type_index));
                 self.next_type_index += 1;
+                items.push(list([
+                    symbol("type"),
+                    name.clone(),
+                    list([self.format_type(*typ)]),
+                ]));
                 name
             };
-            self.type_names.insert(*typ, type_name.clone());
-
-            items.push(list([symbol("type"), type_name, self.format_type(*typ)]))
+            self.type_names.insert(*typ, type_name);
         }
 
         for func in self.module.functions(self.db) {
@@ -101,6 +105,21 @@ impl<'db> Formatter<'db> {
         }
     }
 
+    fn should_use_inline_type(&self, typ: Type<'db>) -> bool {
+        fn visit<'db>(db: &'db dyn Database, typ: Type<'db>, inline: &mut bool) {
+            if let TypeKind::Struct(_) = typ.data(db) {
+                *inline = false;
+            } else {
+                typ.data(db)
+                    .visit_used_types(db, &mut |typ2| visit(db, typ2, inline));
+            }
+        }
+
+        let mut inline = true;
+        visit(self.db, typ, &mut inline);
+        inline
+    }
+
     fn format_func(&mut self, func: Func<'db>) -> SExpr {
         self.val_names.clear();
         self.next_val_index = 0;
@@ -112,26 +131,14 @@ impl<'db> Formatter<'db> {
             symbol("func"),
             symbol(func_data.name.clone()),
             list([
-                symbol("returns"),
+                symbol("return_type"),
                 self.type_names[&func_data.return_type].clone(),
             ]),
             list([
-                symbol("captures"),
+                symbol("captures_type"),
                 self.type_names[&func_data.captures_type].clone(),
             ]),
         ];
-
-        for &param_type in &func_data.param_types {
-            items.push(list([symbol("param"), self.format_type(param_type)]));
-        }
-
-        for (val, val_data) in &func_data.vals {
-            items.push(list([
-                symbol("val"),
-                self.val_name(val),
-                self.type_names[&val_data.typ].clone(),
-            ]));
-        }
 
         items.push(list([
             symbol("entry"),
@@ -151,7 +158,11 @@ impl<'db> Formatter<'db> {
         let block_data = &func_data.basic_blocks[block];
 
         for &param_val in block_data.params.as_slice(&func_data.val_lists) {
-            items.push(list([symbol("param"), self.val_name(param_val)]));
+            items.push(list([
+                symbol("param"),
+                self.val_name(param_val),
+                self.type_names[&func_data.vals[param_val].typ].clone(),
+            ]));
         }
 
         for instr in &block_data.instrs {
@@ -487,7 +498,7 @@ mod tests {
         func.instr().int_add(ret_val, param0, param1);
         func.instr().return_(ret_val);
         let func = func.build();
-        let module = Module::from_funcs(db, [Func::new(db, func)]);
+        let module = Module::from_funcs(db, "main", [Func::new(db, func)]);
         module
     }
 
@@ -499,29 +510,21 @@ mod tests {
         assert_eq!(
             formatted,
             indoc! {r#"
-                ((type unit unit)
-                    (type int int)
-                    (type t0
-                        (mref unit))
-                    (func add
-                        (returns int)
-                        (captures unit)
-                        (param int)
-                        (param int)
-                        (val v0 t0)
-                        (val v1 int)
-                        (val v2 int)
-                        (val v3 int)
-                        (entry block0)
-                        (block block0
-                            (param v0)
-                            (param v1)
-                            (param v2)
-                            (int.add v3
-                                (v1 v2))
-                            (return
-                                (v3)))))
-                "#}
+            (module main
+                (func add
+                    (return_type int)
+                    (captures_type unit)
+                    (entry block0)
+                    (block block0
+                        (param v0
+                            (mref unit))
+                        (param v1 int)
+                        (param v2 int)
+                        (int.add v3
+                            (v1 v2))
+                        (return
+                            (v3)))))
+        "#}
         )
     }
 }

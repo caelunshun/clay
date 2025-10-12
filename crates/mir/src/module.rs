@@ -13,6 +13,8 @@ use std::{
 #[salsa::tracked(debug)]
 pub struct Module<'db> {
     #[returns(ref)]
+    pub name: CompactString,
+    #[returns(ref)]
     #[tracked]
     pub functions: Vec<Func<'db>>,
     #[returns(ref)]
@@ -23,7 +25,11 @@ pub struct Module<'db> {
 impl<'db> Module<'db> {
     /// Constructs a module from its constituent functions
     /// and all types referenced by those functions.
-    pub fn from_funcs(db: &'db dyn Database, funcs: impl IntoIterator<Item = Func<'db>>) -> Self {
+    pub fn from_funcs(
+        db: &'db dyn Database,
+        name: impl Into<CompactString>,
+        funcs: impl IntoIterator<Item = Func<'db>>,
+    ) -> Self {
         let mut types = IndexSet::with_hasher(hashbrown::DefaultHashBuilder::default());
 
         let mut functions = Vec::new();
@@ -44,7 +50,7 @@ impl<'db> Module<'db> {
             functions.push(func);
         }
 
-        Self::new(db, functions, types.into_iter().collect())
+        Self::new(db, name.into(), functions, types.into_iter().collect())
     }
 }
 
