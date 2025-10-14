@@ -104,12 +104,12 @@ impl TypeRef {
             .or_insert_with(|| cx.types.push(Type::new(db, data)))
     }
 
-    pub fn typ<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> Type<'db> {
+    pub fn resolve<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> Type<'db> {
         cx.data(db).types[*self]
     }
 
     pub fn data<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> &'db TypeKind {
-        self.typ(db, cx).data(db)
+        self.resolve(db, cx).data(db)
     }
 
     pub fn data_mut_cx<'db>(&self, db: &'db dyn Database, cx: &ContextData<'db>) -> &'db TypeKind {
@@ -133,12 +133,12 @@ impl FuncRef {
         cx.funcs.push(Func::new(db, func))
     }
 
-    pub fn func<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> Func<'db> {
+    pub fn resolve<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> Func<'db> {
         cx.data(db).funcs[*self]
     }
 
     pub fn data<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> &'db FuncData<'db> {
-        self.func(db, cx).data(db)
+        self.resolve(db, cx).data(db)
     }
 
     pub fn data_mut_cx<'db>(

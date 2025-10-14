@@ -75,21 +75,21 @@ impl<'db> Formatter<'db> {
                 PrimType::Str => symbol("str"),
                 PrimType::Unit => symbol("unit"),
             },
-            TypeKind::MRef(p) => list([symbol("mref"), self.format_type(p.typ(self.db, self.cx))]),
-            TypeKind::ERef(p) => list([symbol("eref"), self.format_type(p.typ(self.db, self.cx))]),
+            TypeKind::MRef(p) => list([symbol("mref"), self.format_type(p.resolve(self.db, self.cx))]),
+            TypeKind::ERef(p) => list([symbol("eref"), self.format_type(p.resolve(self.db, self.cx))]),
             TypeKind::Func(f) => {
                 let mut items = vec![
                     symbol("func"),
                     list([
                         symbol("returns"),
-                        self.format_type(f.return_type.typ(self.db, self.cx)),
+                        self.format_type(f.return_type.resolve(self.db, self.cx)),
                     ]),
                 ];
 
                 for param in &f.param_types {
                     items.push(list([
                         symbol("param"),
-                        self.format_type(param.typ(self.db, self.cx)),
+                        self.format_type(param.resolve(self.db, self.cx)),
                     ]));
                 }
 
@@ -102,12 +102,12 @@ impl<'db> Formatter<'db> {
                     items.push(list([
                         symbol("field"),
                         symbol(field_data.name.as_str()),
-                        self.format_type(field_data.typ.typ(self.db, self.cx)),
+                        self.format_type(field_data.typ.resolve(self.db, self.cx)),
                     ]));
                 }
                 SExpr::List(items.into_boxed_slice())
             }
-            TypeKind::List(t) => list([symbol("list"), self.format_type(t.typ(self.db, self.cx))]),
+            TypeKind::List(t) => list([symbol("list"), self.format_type(t.resolve(self.db, self.cx))]),
         }
     }
 
@@ -117,7 +117,7 @@ impl<'db> Formatter<'db> {
                 *inline = false;
             } else {
                 typ.data(db)
-                    .visit_used_types(&mut |typ2| visit(db, cx, typ2.typ(db, cx), inline));
+                    .visit_used_types(&mut |typ2| visit(db, cx, typ2.resolve(db, cx), inline));
             }
         }
 
@@ -138,11 +138,11 @@ impl<'db> Formatter<'db> {
             symbol(func_data.name.clone()),
             list([
                 symbol("return_type"),
-                self.type_names[&func_data.return_type.typ(self.db, self.cx)].clone(),
+                self.type_names[&func_data.return_type.resolve(self.db, self.cx)].clone(),
             ]),
             list([
                 symbol("captures_type"),
-                self.type_names[&func_data.captures_type.typ(self.db, self.cx)].clone(),
+                self.type_names[&func_data.captures_type.resolve(self.db, self.cx)].clone(),
             ]),
         ];
 
@@ -167,7 +167,7 @@ impl<'db> Formatter<'db> {
             items.push(list([
                 symbol("param"),
                 self.val_name(param_val),
-                self.type_names[&func_data.vals[param_val].typ.typ(self.db, self.cx)].clone(),
+                self.type_names[&func_data.vals[param_val].typ.resolve(self.db, self.cx)].clone(),
             ]));
         }
 
@@ -294,7 +294,7 @@ impl<'db> Formatter<'db> {
                     symbol("struct.init"),
                     self.val_name(ins.dst),
                     list([
-                        self.type_names[&ins.typ.typ(self.db, self.cx)].clone(),
+                        self.type_names[&ins.typ.resolve(self.db, self.cx)].clone(),
                         list(fields),
                     ]),
                 ])
@@ -376,7 +376,7 @@ impl<'db> Formatter<'db> {
             InstrData::MakeList(ins) => list([
                 symbol("list.init"),
                 self.val_name(ins.dst),
-                list([self.type_names[&ins.element_type.typ(self.db, self.cx)].clone()]),
+                list([self.type_names[&ins.element_type.resolve(self.db, self.cx)].clone()]),
             ]),
             InstrData::ListPush(ins) => {
                 if let Some(dst_list) = ins.dst_list {
