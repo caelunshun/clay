@@ -109,7 +109,7 @@ pub fn list(es: impl IntoIterator<Item = SExpr>) -> SExpr {
 /// Strings. This enables direct, nested pattern-matching
 /// against expressions. Workaround for lack
 /// of stable deref_patterns.
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum SExprRef<'a> {
     Int(i64),
     Float(f64),

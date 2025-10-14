@@ -1,124 +1,172 @@
 use crate::instr::InstrData;
 use compact_str::CompactString;
 use cranelift_entity::{EntityList, EntitySet, ListPool, PrimaryMap, SecondaryMap};
-use indexmap::IndexSet;
+use indexmap::IndexMap;
 use salsa::Database;
 use std::{
     hash::{Hash, Hasher},
     mem,
 };
 
-/// A collection of functions and the types
-/// they reference.
-#[salsa::tracked(debug)]
-pub struct Module<'db> {
-    #[returns(ref)]
-    pub name: CompactString,
+/// An mir context is a collection of functions and types
+/// that can refer to each other.
+#[salsa::tracked]
+pub struct Context<'db> {
     #[returns(ref)]
     #[tracked]
-    pub functions: Vec<Func<'db>>,
-    #[returns(ref)]
-    #[tracked]
-    pub types: Vec<Type<'db>>,
+    pub data: ContextData<'db>,
 }
 
-impl<'db> Module<'db> {
-    /// Constructs a module from its constituent functions
-    /// and all types referenced by those functions.
-    pub fn from_funcs(
-        db: &'db dyn Database,
-        name: impl Into<CompactString>,
-        funcs: impl IntoIterator<Item = Func<'db>>,
-    ) -> Self {
-        let mut types = IndexSet::with_hasher(hashbrown::DefaultHashBuilder::default());
+#[derive(Debug, Clone, PartialEq, Eq, salsa::Update)]
+pub struct ContextData<'db> {
+    pub types: PrimaryMap<TypeRef, Type<'db>>,
+    /// Maps TypeData
+    /// to the unique TypeRef for that TypeData.
+    /// If a TypeData does not appear in this map
+    /// then it is not referenced anywhere
+    /// in this context.
+    ///
+    /// Note that to simplify some code, all primitive types are always defined
+    /// here.
+    pub types_by_data: IndexMap<TypeKind, TypeRef, hashbrown::DefaultHashBuilder>,
+    pub funcs: PrimaryMap<FuncRef, Func<'db>>,
+}
 
-        let mut functions = Vec::new();
-        for func in funcs {
-            fn visit<'db>(
-                db: &'db dyn Database,
-                typ: Type<'db>,
-                types: &mut IndexSet<Type<'db>, hashbrown::DefaultHashBuilder>,
-            ) {
-                if types.insert(typ) {
-                    typ.data(db)
-                        .visit_used_types(db, &mut |typ2| visit(db, typ2, types));
-                }
-            }
-
-            func.data(db).visit_types(|typ| visit(db, typ, &mut types));
-
-            functions.push(func);
+impl<'db> ContextData<'db> {
+    pub fn new(db: &'db dyn Database) -> Self {
+        let mut cx = Self {
+            types: Default::default(),
+            types_by_data: Default::default(),
+            funcs: Default::default(),
+        };
+        for prim in [
+            PrimType::Int,
+            PrimType::Bool,
+            PrimType::Real,
+            PrimType::Byte,
+            PrimType::Str,
+            PrimType::Unit,
+        ] {
+            TypeRef::create(db, TypeKind::Prim(prim), &mut cx);
         }
+        cx
+    }
 
-        Self::new(db, name.into(), functions, types.into_iter().collect())
+    pub fn prim_type_ref(&self, prim: PrimType) -> TypeRef {
+        self.types_by_data[&TypeKind::Prim(prim)]
+    }
+
+    pub fn int_type_ref(&self) -> TypeRef {
+        self.prim_type_ref(PrimType::Int)
+    }
+
+    pub fn bool_type_ref(&self) -> TypeRef {
+        self.prim_type_ref(PrimType::Bool)
+    }
+
+    pub fn real_type_ref(&self) -> TypeRef {
+        self.prim_type_ref(PrimType::Real)
+    }
+
+    pub fn byte_type_ref(&self) -> TypeRef {
+        self.prim_type_ref(PrimType::Byte)
+    }
+
+    pub fn str_type_ref(&self) -> TypeRef {
+        self.prim_type_ref(PrimType::Str)
+    }
+
+    pub fn unit_type_ref(&self) -> TypeRef {
+        self.prim_type_ref(PrimType::Unit)
+    }
+}
+
+entity_ref! {
+    /// ID of a type within the same mir `Context`.
+    /// Enables circular references (e.g. struct with
+    /// a reference to itself, as seen in a linked list)
+    pub struct TypeRef;
+}
+
+impl TypeRef {
+    /// Gets the type ref corresponding to the given
+    /// type data in the given context, or `None`
+    /// if the type does not exist in the context.
+    pub fn of(db: &dyn Database, data: TypeKind, cx: &Context) -> Option<Self> {
+        cx.data(db).types_by_data.get(&data).copied()
+    }
+
+    /// Equivalent to `Self::of` but inserts a new type
+    /// into the context if it does not exist.
+    pub fn create<'db>(db: &'db dyn Database, data: TypeKind, cx: &mut ContextData<'db>) -> Self {
+        *cx.types_by_data
+            .entry(data.clone())
+            .or_insert_with(|| cx.types.push(Type::new(db, data)))
+    }
+
+    pub fn typ<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> Type<'db> {
+        cx.data(db).types[*self]
+    }
+
+    pub fn data<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> &'db TypeKind {
+        self.typ(db, cx).data(db)
+    }
+
+    pub fn data_mut_cx<'db>(&self, db: &'db dyn Database, cx: &ContextData<'db>) -> &'db TypeKind {
+        cx.types[*self].data(db)
+    }
+}
+
+entity_ref! {
+    /// ID of a function within the same mir `Context`.
+    /// Enables circular references (e.g. recursion or mutual
+    /// recursion).
+    pub struct FuncRef;
+}
+
+impl FuncRef {
+    pub fn create<'db>(
+        db: &'db dyn Database,
+        func: FuncData<'db>,
+        cx: &mut ContextData<'db>,
+    ) -> Self {
+        cx.funcs.push(Func::new(db, func))
+    }
+
+    pub fn func<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> Func<'db> {
+        cx.data(db).funcs[*self]
+    }
+
+    pub fn data<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> &'db FuncData<'db> {
+        self.func(db, cx).data(db)
+    }
+
+    pub fn data_mut_cx<'db>(
+        &self,
+        db: &'db dyn Database,
+        cx: &ContextData<'db>,
+    ) -> &'db FuncData<'db> {
+        cx.funcs[*self].data(db)
     }
 }
 
 #[salsa::interned(debug)]
 pub struct Type<'db> {
     #[returns(ref)]
-    pub data: TypeKind<'db>,
+    pub data: TypeKind,
 }
 
 #[salsa::tracked(debug)]
 struct TypeDataWrapper<'db> {
-    data: TypeKind<'db>,
-}
-
-/// Helper that ensures equal types are assigned equal Type<'db> identifiers.
-/// Essentially a manual implementation of interning, since salsa interned
-/// structs don't seem to support references to other salsa structs.
-pub fn memoized_type<'db>(db: &'db dyn Database, data: TypeKind<'db>) -> Type<'db> {
-    #[salsa::tracked]
-    fn memoized_type_helper<'db>(db: &'db dyn Database, data: TypeDataWrapper<'db>) -> Type<'db> {
-        Type::new(db, data.data(db))
-    }
-
-    memoized_type_helper(db, TypeDataWrapper::new(db, data))
-}
-
-pub fn int_type<'db>(db: &'db dyn Database) -> Type<'db> {
-    memoized_type(db, TypeKind::Prim(PrimType::Int))
-}
-
-pub fn real_type<'db>(db: &'db dyn Database) -> Type<'db> {
-    memoized_type(db, TypeKind::Prim(PrimType::Real))
-}
-
-pub fn byte_type<'db>(db: &'db dyn Database) -> Type<'db> {
-    memoized_type(db, TypeKind::Prim(PrimType::Byte))
-}
-
-pub fn bool_type<'db>(db: &'db dyn Database) -> Type<'db> {
-    memoized_type(db, TypeKind::Prim(PrimType::Bool))
-}
-
-pub fn str_type<'db>(db: &'db dyn Database) -> Type<'db> {
-    memoized_type(db, TypeKind::Prim(PrimType::Str))
-}
-
-pub fn unit_type<'db>(db: &'db dyn Database) -> Type<'db> {
-    memoized_type(db, TypeKind::Prim(PrimType::Unit))
-}
-
-pub fn list_type<'db>(db: &'db dyn Database, element_type: Type<'db>) -> Type<'db> {
-    memoized_type(db, TypeKind::List(element_type))
-}
-
-pub fn mref_type<'db>(db: &'db dyn Database, pointee_type: Type<'db>) -> Type<'db> {
-    memoized_type(db, TypeKind::MRef(pointee_type))
-}
-
-pub fn eref_type<'db>(db: &'db dyn Database, pointee_type: Type<'db>) -> Type<'db> {
-    memoized_type(db, TypeKind::ERef(pointee_type))
+    data: TypeKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub enum TypeKind<'db> {
+pub enum TypeKind {
     Prim(PrimType),
     /// Reference to an object managed by the garbage collector.
     /// It has indefinite lifetime.
-    MRef(Type<'db>),
+    MRef(TypeRef),
     /// Ephemeral reference to one of:
     /// 1. An object managed by the garbage collector.
     /// 2. A field of a struct anywhere in memory.
@@ -126,17 +174,17 @@ pub enum TypeKind<'db> {
     ///
     /// Its lifetime is constrained. ERefs cannot be stored
     /// in struct fields or globals.
-    ERef(Type<'db>),
-    Func(FuncTypeData<'db>),
-    Struct(StructTypeData<'db>),
+    ERef(TypeRef),
+    Func(FuncTypeData),
+    Struct(StructTypeData),
     /// Dynamically resized array.
-    List(Type<'db>),
+    List(TypeRef),
 }
 
-impl<'db> TypeKind<'db> {
+impl TypeKind {
     ///  Visits any types referenced / depended on by
     /// this type. Is not recursive.
-    pub fn visit_used_types(&self, _db: &'db dyn Database, visit: &mut impl FnMut(Type<'db>)) {
+    pub fn visit_used_types(&self, visit: &mut impl FnMut(TypeRef)) {
         match self {
             TypeKind::Prim(_) => {}
             TypeKind::MRef(t) | TypeKind::ERef(t) => {
@@ -164,9 +212,9 @@ impl<'db> TypeKind<'db> {
 /// function reference and a reference to an opaque
 /// captures struct.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub struct FuncTypeData<'db> {
-    pub param_types: Vec<Type<'db>>,
-    pub return_type: Type<'db>,
+pub struct FuncTypeData {
+    pub param_types: Vec<TypeRef>,
+    pub return_type: TypeRef,
 }
 
 /// Type built in to the engine.
@@ -187,9 +235,9 @@ pub enum PrimType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub struct StructTypeData<'db> {
+pub struct StructTypeData {
     pub name: CompactString,
-    pub fields: PrimaryMap<Field, FieldData<'db>>,
+    pub fields: PrimaryMap<Field, FieldData>,
 }
 
 entity_ref_16bit! {
@@ -197,9 +245,9 @@ entity_ref_16bit! {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub struct FieldData<'db> {
+pub struct FieldData {
     pub name: CompactString,
-    pub typ: Type<'db>,
+    pub typ: TypeRef,
 }
 
 #[salsa::tracked(debug)]
@@ -244,7 +292,7 @@ impl Hash for ConstantData {
 }
 
 impl ConstantData {
-    pub fn typ(&self) -> TypeKind<'static> {
+    pub fn typ(&self) -> TypeKind {
         match self {
             ConstantData::Int(_) => TypeKind::Prim(PrimType::Int),
             ConstantData::Real(_) => TypeKind::Prim(PrimType::Real),
@@ -254,33 +302,10 @@ impl ConstantData {
     }
 }
 
-/*
-/// ID of a module import; a reference
-/// to another module.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ImportedModule(u32);
-entity_impl!(ImportedModule);
-
-#[derive(Debug, Clone)]
-pub struct ImportedModuleData {
-    pub type_imports: PrimaryMap<ImportedType, ImportedTypeData>,
-}
-
-/// ID assigned to each unique imported type from a module.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ImportedType(u32);
-entity_impl!(ImportedType);
-
-#[derive(Debug, Clone)]
-pub struct ImportedTypeData {
-    /// Name of the type to import.
-    pub name: CompactString,
-}
- */
-
 #[salsa::tracked(debug)]
 pub struct Func<'db> {
     #[returns(ref)]
+    #[tracked]
     pub data: FuncData<'db>,
 }
 
@@ -293,13 +318,13 @@ pub struct FuncData<'db> {
     /// for the function. A managed reference
     /// to the captures is the first argument
     /// to the entry block of the function.
-    pub captures_type: Type<'db>,
+    pub captures_type: TypeRef,
     /// Set of values used by the function. Values can be assigned
     /// multiple times until after the SSA lowering pass is applied.
-    pub vals: PrimaryMap<Val, ValData<'db>>,
+    pub vals: PrimaryMap<Val, ValData>,
     /// Parameters expected by the function, not including the captures.
-    pub param_types: Vec<Type<'db>>,
-    pub return_type: Type<'db>,
+    pub param_types: Vec<TypeRef>,
+    pub return_type: TypeRef,
     /// Basic blocks in the function instruction stream.
     pub basic_blocks: PrimaryMap<BasicBlock, BasicBlockData<'db>>,
     /// Basic block where execution of this function starts.
@@ -313,7 +338,7 @@ pub struct FuncData<'db> {
 impl<'db> FuncData<'db> {
     /// Visits all types used in the function.
     /// May visit the same type multiple times.
-    pub fn visit_types(&self, mut visit: impl FnMut(Type<'db>)) {
+    pub fn visit_types(&self, mut visit: impl FnMut(TypeRef)) {
         visit(self.captures_type);
         visit(self.return_type);
         for &param in &self.param_types {
@@ -431,13 +456,13 @@ entity_ref_16bit! {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub struct ValData<'db> {
+pub struct ValData {
     /// Type of the local.
-    pub typ: Type<'db>,
+    pub typ: TypeRef,
 }
 
-impl<'db> ValData<'db> {
-    pub fn new(typ: Type<'db>) -> Self {
+impl ValData {
+    pub fn new(typ: TypeRef) -> Self {
         Self { typ }
     }
 }

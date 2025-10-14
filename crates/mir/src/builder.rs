@@ -1,38 +1,41 @@
 use crate::{
     instr::{self, CompareMode},
     module::{
-        bool_type, byte_type, int_type, memoized_type, real_type, unit_type, BasicBlock,
-        BasicBlockData, Constant, Field, FuncData, FuncTypeData, ValData,
+        BasicBlock, BasicBlockData, Constant, ContextData, Field, FuncData, FuncRef, FuncTypeData,
+        TypeRef, ValData,
     },
-    Func, InstrData, Type, TypeKind, Val,
+    InstrData, TypeKind, Val,
 };
 use compact_str::CompactString;
 use cranelift_entity::{EntityList, ListPool, PrimaryMap};
 use salsa::Database;
 
 /// Builder API for a `FuncData`.
-pub struct FuncBuilder<'db> {
+pub struct FuncBuilder<'a, 'db> {
+    cx: &'a mut ContextData<'db>,
     db: &'db dyn Database,
     func: FuncData<'db>,
     current_block: BasicBlock,
     /// Values created so far.
     /// Some value types may not yet be resolved.
-    val_types: PrimaryMap<Val, Option<Type<'db>>>,
+    val_types: PrimaryMap<Val, Option<TypeRef>>,
 }
 
-impl<'db> FuncBuilder<'db> {
+impl<'a, 'db> FuncBuilder<'a, 'db> {
     pub fn new(
         db: &'db dyn Database,
         name: impl Into<CompactString>,
-        captures_type: Type<'db>,
-        return_type: Type<'db>,
+        captures_type: TypeRef,
+        return_type: TypeRef,
+        cx: &'a mut ContextData<'db>,
     ) -> Self {
         let mut basic_blocks = PrimaryMap::new();
         let entry_block = basic_blocks.push(BasicBlockData::default());
         let mut val_lists = ListPool::new();
         let mut val_types = PrimaryMap::new();
 
-        let captures_val = val_types.push(Some(memoized_type(db, TypeKind::MRef(captures_type))));
+        let captures_val =
+            val_types.push(Some(TypeRef::create(db, TypeKind::MRef(captures_type), cx)));
         basic_blocks[entry_block]
             .params
             .push(captures_val, &mut val_lists);
@@ -49,12 +52,21 @@ impl<'db> FuncBuilder<'db> {
                 entry_block,
                 val_lists,
             },
+            cx,
             current_block: entry_block,
             val_types,
         }
     }
 
-    pub fn append_param(&mut self, typ: Type<'db>) -> Val {
+    pub fn cx(&self) -> &ContextData<'db> {
+        self.cx
+    }
+
+    pub fn cx_mut(&mut self) -> &mut ContextData<'db> {
+        &mut *self.cx
+    }
+
+    pub fn append_param(&mut self, typ: TypeRef) -> Val {
         let val = self.val();
         self.val_types[val] = Some(typ);
         self.func.param_types.push(typ);
@@ -79,12 +91,13 @@ impl<'db> FuncBuilder<'db> {
         self.val_types.push(None)
     }
 
-    pub fn instr<'a>(&'a mut self) -> FuncInstrBuilder<'a, 'db> {
+    pub fn instr<'b>(&'b mut self) -> FuncInstrBuilder<'b, 'db> {
         FuncInstrBuilder {
             db: self.db,
             func: &mut self.func,
             block: self.current_block,
             val_types: &mut self.val_types,
+            cx: self.cx,
         }
     }
 
@@ -94,7 +107,7 @@ impl<'db> FuncBuilder<'db> {
             // If value type was never resolved
             // then the value is unused - any type is
             // valid - use unit type
-            let val_type = val_type.unwrap_or_else(|| unit_type(self.db));
+            let val_type = val_type.unwrap_or_else(|| self.cx.unit_type_ref());
             // Same ID should be allocated since
             // same order of insertion into PrimaryMap
             assert_eq!(val, self.func.vals.push(ValData { typ: val_type }));
@@ -107,9 +120,10 @@ impl<'db> FuncBuilder<'db> {
 pub struct FuncInstrBuilder<'a, 'db> {
     #[allow(unused)]
     db: &'db dyn Database,
+    cx: &'a mut ContextData<'db>,
     func: &'a mut FuncData<'db>,
     block: BasicBlock,
-    val_types: &'a mut PrimaryMap<Val, Option<Type<'db>>>,
+    val_types: &'a mut PrimaryMap<Val, Option<TypeRef>>,
 }
 
 impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
@@ -133,7 +147,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
     pub fn call(
         mut self,
         return_value_dst: Val,
-        func: Func<'db>,
+        func: FuncRef,
         args: impl IntoIterator<Item = Val>,
     ) {
         let args = EntityList::from_iter(args, &mut self.func.val_lists);
@@ -142,7 +156,10 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             args,
             return_value_dst,
         }));
-        self.set_val_type(return_value_dst, func.data(self.db).return_type);
+        self.set_val_type(
+            return_value_dst,
+            func.data_mut_cx(self.db, self.cx).return_type,
+        );
     }
 
     pub fn call_indirect(
@@ -157,7 +174,10 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             args,
             return_value_dst,
         }));
-        let TypeKind::Func(func) = self.val_types[func_object].unwrap().data(self.db) else {
+        let TypeKind::Func(func) = self.val_types[func_object]
+            .unwrap()
+            .data_mut_cx(self.db, self.cx)
+        else {
             panic!("not a func")
         };
         self.set_val_type(return_value_dst, func.return_type);
@@ -174,27 +194,28 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
 
     pub fn constant(mut self, dst: Val, constant: Constant<'db>) {
         self.instr(InstrData::Constant(instr::ConstantInstr { dst, constant }));
-        self.set_val_type(dst, memoized_type(self.db, constant.data(self.db).typ()))
+        let typ = TypeRef::create(self.db, constant.data(self.db).typ(), self.cx);
+        self.set_val_type(dst, typ)
     }
 
     pub fn int_add(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::IntAdd(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, int_type(self.db));
+        self.set_val_type(dst, self.cx.int_type_ref());
     }
 
     pub fn int_sub(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::IntSub(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, int_type(self.db));
+        self.set_val_type(dst, self.cx.int_type_ref());
     }
 
     pub fn int_mul(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::IntMul(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, int_type(self.db));
+        self.set_val_type(dst, self.cx.int_type_ref());
     }
 
     pub fn int_div(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::IntDiv(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, int_type(self.db));
+        self.set_val_type(dst, self.cx.int_type_ref());
     }
 
     pub fn int_cmp(mut self, dst: Val, src1: Val, src2: Val, mode: CompareMode) {
@@ -204,27 +225,27 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             src2,
             mode,
         }));
-        self.set_val_type(dst, bool_type(self.db));
+        self.set_val_type(dst, self.cx.bool_type_ref());
     }
 
     pub fn real_add(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::RealAdd(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, real_type(self.db));
+        self.set_val_type(dst, self.cx.real_type_ref());
     }
 
     pub fn real_sub(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::RealSub(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, real_type(self.db));
+        self.set_val_type(dst, self.cx.real_type_ref());
     }
 
     pub fn real_mul(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::RealMul(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, real_type(self.db));
+        self.set_val_type(dst, self.cx.real_type_ref());
     }
 
     pub fn real_div(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::RealDiv(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, real_type(self.db));
+        self.set_val_type(dst, self.cx.real_type_ref());
     }
 
     pub fn real_cmp(mut self, dst: Val, src1: Val, src2: Val, mode: CompareMode) {
@@ -234,61 +255,63 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             src2,
             mode,
         }));
-        self.set_val_type(dst, bool_type(self.db));
+        self.set_val_type(dst, self.cx.bool_type_ref());
     }
 
     pub fn real_to_int(mut self, dst: Val, src: Val) {
         self.instr(InstrData::RealToInt(instr::Unary { dst, src }));
-        self.set_val_type(dst, int_type(self.db));
+        self.set_val_type(dst, self.cx.int_type_ref());
     }
 
     pub fn int_to_real(mut self, dst: Val, src: Val) {
         self.instr(InstrData::IntToReal(instr::Unary { dst, src }));
-        self.set_val_type(dst, real_type(self.db));
+        self.set_val_type(dst, self.cx.real_type_ref());
     }
 
     pub fn byte_to_int(mut self, dst: Val, src: Val) {
         self.instr(InstrData::ByteToInt(instr::Unary { dst, src }));
-        self.set_val_type(dst, int_type(self.db));
+        self.set_val_type(dst, self.cx.int_type_ref());
     }
 
     pub fn int_to_byte(mut self, dst: Val, src: Val) {
         self.instr(InstrData::IntToByte(instr::Unary { dst, src }));
-        self.set_val_type(dst, byte_type(self.db));
+        self.set_val_type(dst, self.cx.byte_type_ref());
     }
 
     pub fn bool_and(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::BoolAnd(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, bool_type(self.db));
+        self.set_val_type(dst, self.cx.bool_type_ref());
     }
 
     pub fn bool_or(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::BoolOr(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, bool_type(self.db));
+        self.set_val_type(dst, self.cx.bool_type_ref());
     }
 
     pub fn bool_xor(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::BoolXor(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, bool_type(self.db));
+        self.set_val_type(dst, self.cx.bool_type_ref());
     }
 
     pub fn bool_not(mut self, dst: Val, src: Val) {
         self.instr(InstrData::BoolNot(instr::Unary { dst, src }));
-        self.set_val_type(dst, bool_type(self.db));
+        self.set_val_type(dst, self.cx.bool_type_ref());
     }
 
     pub fn local_to_eref(mut self, dst: Val, src: Val) {
         self.instr(InstrData::LocalToERef(instr::Unary { dst, src }));
-        self.set_val_type(
-            dst,
-            memoized_type(self.db, TypeKind::ERef(self.val_types[src].unwrap())),
+        let typ = TypeRef::create(
+            self.db,
+            TypeKind::ERef(self.val_types[src].unwrap()),
+            self.cx,
         );
+        self.set_val_type(dst, typ);
     }
 
     pub fn init_struct(
         mut self,
         dst: Val,
-        struct_type: Type<'db>,
+        struct_type: TypeRef,
         field_values: impl IntoIterator<Item = Val>,
     ) {
         let fields = EntityList::from_iter(field_values, &mut self.func.val_lists);
@@ -306,7 +329,8 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             src_struct: src,
             field,
         }));
-        let TypeKind::Struct(strukt) = self.val_types[src].unwrap().data(self.db) else {
+        let TypeKind::Struct(strukt) = self.val_types[src].unwrap().data_mut_cx(self.db, self.cx)
+        else {
             panic!("not a struct")
         };
         self.set_val_type(dst, strukt.fields[field].typ);
@@ -324,17 +348,20 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
 
     pub fn alloc(mut self, dst: Val, src: Val) {
         self.instr(InstrData::Alloc(instr::Alloc { dst_ref: dst, src }));
-        self.set_val_type(
-            dst,
-            memoized_type(self.db, TypeKind::MRef(self.val_types[src].unwrap())),
+        let typ = TypeRef::create(
+            self.db,
+            TypeKind::MRef(self.val_types[src].unwrap()),
+            self.cx,
         );
+        self.set_val_type(dst, typ);
     }
 
     pub fn load(mut self, dst: Val, src_ref: Val) {
         self.instr(InstrData::Load(instr::Load { dst, src_ref }));
 
-        let (TypeKind::MRef(t) | TypeKind::ERef(t)) =
-            self.val_types[src_ref].unwrap().data(self.db)
+        let (TypeKind::MRef(t) | TypeKind::ERef(t)) = self.val_types[src_ref]
+            .unwrap()
+            .data_mut_cx(self.db, self.cx)
         else {
             panic!("not a reference")
         };
@@ -353,36 +380,35 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             field,
         }));
 
-        let TypeKind::Struct(strukt) = self.val_types[src].unwrap().data(self.db) else {
+        let TypeKind::Struct(strukt) = self.val_types[src].unwrap().data_mut_cx(self.db, self.cx)
+        else {
             panic!("not a struct")
         };
-        self.set_val_type(
-            dst,
-            memoized_type(self.db, TypeKind::ERef(strukt.fields[field].typ)),
-        );
+        let typ = TypeRef::create(self.db, TypeKind::ERef(strukt.fields[field].typ), self.cx);
+        self.set_val_type(dst, typ);
     }
 
-    pub fn make_function_object(mut self, dst: Val, func: Func<'db>, captures_ref: Val) {
+    pub fn make_function_object(mut self, dst: Val, func: FuncRef, captures_ref: Val) {
         self.instr(InstrData::MakeFunctionObject(instr::MakeFunctionObject {
             dst,
             func,
             captures_ref,
         }));
-        self.set_val_type(
-            dst,
-            memoized_type(
-                self.db,
-                TypeKind::Func(FuncTypeData {
-                    param_types: func.data(self.db).param_types.clone(),
-                    return_type: func.data(self.db).return_type,
-                }),
-            ),
+        let typ = TypeRef::create(
+            self.db,
+            TypeKind::Func(FuncTypeData {
+                param_types: func.data_mut_cx(self.db, self.cx).param_types.clone(),
+                return_type: func.data_mut_cx(self.db, self.cx).return_type,
+            }),
+            self.cx,
         );
+        self.set_val_type(dst, typ);
     }
 
-    pub fn make_list(mut self, dst: Val, element_type: Type<'db>) {
+    pub fn make_list(mut self, dst: Val, element_type: TypeRef) {
         self.instr(InstrData::MakeList(instr::MakeList { dst, element_type }));
-        self.set_val_type(dst, memoized_type(self.db, TypeKind::List(element_type)));
+        let typ = TypeRef::create(self.db, TypeKind::List(element_type), self.cx);
+        self.set_val_type(dst, typ);
     }
 
     pub fn list_push(mut self, dst: Val, src_list: Val, src_element: Val) {
@@ -444,7 +470,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             dst_len: dst,
             src_list: src,
         }));
-        self.set_val_type(dst, int_type(self.db));
+        self.set_val_type(dst, self.cx.int_type_ref());
     }
 
     pub fn list_get(mut self, dst: Val, src_list: Val, src_index: Val) {
@@ -465,19 +491,18 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             src_list,
             src_index,
         }));
-        self.set_val_type(
-            dst,
-            memoized_type(
-                self.db,
-                TypeKind::ERef(self.get_list_element_type(self.val_types[src_list].unwrap())),
-            ),
+        let typ = TypeRef::create(
+            self.db,
+            TypeKind::ERef(self.get_list_element_type(self.val_types[src_list].unwrap())),
+            self.cx,
         );
+        self.set_val_type(dst, typ);
     }
 
-    fn get_list_element_type(&self, t: Type<'db>) -> Type<'db> {
-        match t.data(self.db) {
+    fn get_list_element_type(&self, t: TypeRef) -> TypeRef {
+        match t.data_mut_cx(self.db, self.cx) {
             TypeKind::List(el) => *el,
-            TypeKind::MRef(l) | TypeKind::ERef(l) => match l.data(self.db) {
+            TypeKind::MRef(l) | TypeKind::ERef(l) => match l.data_mut_cx(self.db, self.cx) {
                 TypeKind::List(el) => *el,
                 _ => panic!("not a list"),
             },
@@ -485,7 +510,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         }
     }
 
-    fn set_val_type(&mut self, val: Val, typ: Type<'db>) {
+    fn set_val_type(&mut self, val: Val, typ: TypeRef) {
         if let Some(existing_type) = self.val_types[val] {
             assert_eq!(typ, existing_type, "value type mismatch");
         }

@@ -1,6 +1,6 @@
 use crate::{
-    module::{BasicBlock, Constant, Field, Func},
-    Type, Val,
+    module::{BasicBlock, Constant, Field, FuncRef, TypeRef},
+    Val,
 };
 use cranelift_entity::{EntityList, ListPool};
 
@@ -8,7 +8,7 @@ use cranelift_entity::{EntityList, ListPool};
 pub enum InstrData<'db> {
     Jump(Jump),
     Branch(Branch),
-    Call(Call<'db>),
+    Call(Call),
     CallIndirect(CallIndirect),
     Return(Return),
     Copy(Unary),
@@ -52,7 +52,7 @@ pub enum InstrData<'db> {
     /// local is not referenced.
     LocalToERef(Unary),
 
-    InitStruct(InitStruct<'db>),
+    InitStruct(InitStruct),
     GetField(GetField),
     SetField(SetField),
     Alloc(Alloc),
@@ -60,9 +60,9 @@ pub enum InstrData<'db> {
     Store(Store),
     MakeFieldERef(MakeFieldERef),
 
-    MakeFunctionObject(MakeFunctionObject<'db>),
+    MakeFunctionObject(MakeFunctionObject),
 
-    MakeList(MakeList<'db>),
+    MakeList(MakeList),
     ListPush(ListPush),
     ListRemove(ListRemove),
     ListTrunc(ListTrunc),
@@ -387,11 +387,11 @@ pub struct Branch {
 
 /// Directly call a top-level function.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
-pub struct Call<'db> {
+pub struct Call {
     /// Statically known function to call.
     /// It must have a unit captures type (i.e.
     /// be a top-level function).
-    pub func: Func<'db>,
+    pub func: FuncRef,
     /// Arguments to pass to the function.
     pub args: EntityList<Val>,
     /// Destination for the return value.
@@ -461,10 +461,10 @@ pub enum CompareMode {
 /// Initialize a struct from its field values,
 /// by copying each field into the new struct.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
-pub struct InitStruct<'db> {
+pub struct InitStruct {
     pub dst: Val,
     /// Type of struct to initialize.
-    pub typ: Type<'db>,
+    pub typ: TypeRef,
     /// Field values to initialize, in the same
     /// order as the struct fields are declared.
     pub fields: EntityList<Val>,
@@ -536,18 +536,18 @@ pub struct MakeFieldERef {
 /// the same type as the `captures_type` field of the corresponding
 /// `FuncData`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
-pub struct MakeFunctionObject<'db> {
+pub struct MakeFunctionObject {
     pub dst: Val,
-    pub func: Func<'db>,
+    pub func: FuncRef,
     pub captures_ref: Val,
 }
 
 /// Create an empty list.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
-pub struct MakeList<'db> {
+pub struct MakeList {
     pub dst: Val,
     /// Type of the elements inside the list.
-    pub element_type: Type<'db>,
+    pub element_type: TypeRef,
 }
 
 // -------------------

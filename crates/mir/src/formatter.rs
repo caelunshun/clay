@@ -1,7 +1,7 @@
 use crate::{
     instr,
     instr::CompareMode,
-    module::{BasicBlock, ConstantData, Field, FuncData, Module},
+    module::{BasicBlock, ConstantData, Context, Field, FuncData},
     Func, InstrData, PrimType, Type, TypeKind, Val,
 };
 use compact_str::format_compact;
@@ -10,12 +10,12 @@ use hashbrown::HashMap;
 use salsa::Database;
 use zyon_core::sexpr::{float, int, list, string, symbol, SExpr};
 
-/// Converts a module to an S-expression.
+/// Converts an mir Context and all its contents to an S-expression.
 #[salsa::tracked]
-pub fn format_module<'db>(db: &'db dyn Database, module: Module<'db>) -> SExpr {
+pub fn format_context<'db>(db: &'db dyn Database, cx: Context<'db>) -> SExpr {
     Formatter {
         db,
-        module,
+        cx,
         type_names: Default::default(),
         next_type_index: 0,
         val_names: Default::default(),
@@ -23,12 +23,12 @@ pub fn format_module<'db>(db: &'db dyn Database, module: Module<'db>) -> SExpr {
         basic_block_names: Default::default(),
         next_basic_block_index: 0,
     }
-    .format_module()
+    .format_all()
 }
 
 struct Formatter<'db> {
     db: &'db dyn Database,
-    module: Module<'db>,
+    cx: Context<'db>,
     type_names: HashMap<Type<'db>, SExpr>,
     next_type_index: usize,
     val_names: HashMap<Val, SExpr>,
@@ -38,10 +38,10 @@ struct Formatter<'db> {
 }
 
 impl<'db> Formatter<'db> {
-    pub fn format_module(mut self) -> SExpr {
-        let mut items = vec![symbol("module"), symbol(self.module.name(self.db).clone())];
+    pub fn format_all(mut self) -> SExpr {
+        let mut items = vec![symbol("mir")];
 
-        for typ in self.module.types(self.db) {
+        for (_, typ) in &self.cx.data(self.db).types {
             let type_name = if self.should_use_inline_type(*typ) {
                 self.format_type(*typ)
             } else {
@@ -58,7 +58,7 @@ impl<'db> Formatter<'db> {
             self.type_names.insert(*typ, type_name);
         }
 
-        for func in self.module.functions(self.db) {
+        for (_, func) in &self.cx.data(self.db).funcs {
             items.push(self.format_func(*func));
         }
 
@@ -75,16 +75,22 @@ impl<'db> Formatter<'db> {
                 PrimType::Str => symbol("str"),
                 PrimType::Unit => symbol("unit"),
             },
-            TypeKind::MRef(p) => list([symbol("mref"), self.format_type(*p)]),
-            TypeKind::ERef(p) => list([symbol("eref"), self.format_type(*p)]),
+            TypeKind::MRef(p) => list([symbol("mref"), self.format_type(p.typ(self.db, self.cx))]),
+            TypeKind::ERef(p) => list([symbol("eref"), self.format_type(p.typ(self.db, self.cx))]),
             TypeKind::Func(f) => {
                 let mut items = vec![
                     symbol("func"),
-                    list([symbol("returns"), self.format_type(f.return_type)]),
+                    list([
+                        symbol("returns"),
+                        self.format_type(f.return_type.typ(self.db, self.cx)),
+                    ]),
                 ];
 
                 for param in &f.param_types {
-                    items.push(list([symbol("param"), self.format_type(*param)]));
+                    items.push(list([
+                        symbol("param"),
+                        self.format_type(param.typ(self.db, self.cx)),
+                    ]));
                 }
 
                 SExpr::List(items.into_boxed_slice())
@@ -96,27 +102,27 @@ impl<'db> Formatter<'db> {
                     items.push(list([
                         symbol("field"),
                         symbol(field_data.name.as_str()),
-                        self.format_type(field_data.typ),
+                        self.format_type(field_data.typ.typ(self.db, self.cx)),
                     ]));
                 }
                 SExpr::List(items.into_boxed_slice())
             }
-            TypeKind::List(t) => list([symbol("list"), self.format_type(*t)]),
+            TypeKind::List(t) => list([symbol("list"), self.format_type(t.typ(self.db, self.cx))]),
         }
     }
 
     fn should_use_inline_type(&self, typ: Type<'db>) -> bool {
-        fn visit<'db>(db: &'db dyn Database, typ: Type<'db>, inline: &mut bool) {
+        fn visit<'db>(db: &'db dyn Database, cx: Context<'db>, typ: Type<'db>, inline: &mut bool) {
             if let TypeKind::Struct(_) = typ.data(db) {
                 *inline = false;
             } else {
                 typ.data(db)
-                    .visit_used_types(db, &mut |typ2| visit(db, typ2, inline));
+                    .visit_used_types(&mut |typ2| visit(db, cx, typ2.typ(db, cx), inline));
             }
         }
 
         let mut inline = true;
-        visit(self.db, typ, &mut inline);
+        visit(self.db, self.cx, typ, &mut inline);
         inline
     }
 
@@ -132,11 +138,11 @@ impl<'db> Formatter<'db> {
             symbol(func_data.name.clone()),
             list([
                 symbol("return_type"),
-                self.type_names[&func_data.return_type].clone(),
+                self.type_names[&func_data.return_type.typ(self.db, self.cx)].clone(),
             ]),
             list([
                 symbol("captures_type"),
-                self.type_names[&func_data.captures_type].clone(),
+                self.type_names[&func_data.captures_type.typ(self.db, self.cx)].clone(),
             ]),
         ];
 
@@ -161,7 +167,7 @@ impl<'db> Formatter<'db> {
             items.push(list([
                 symbol("param"),
                 self.val_name(param_val),
-                self.type_names[&func_data.vals[param_val].typ].clone(),
+                self.type_names[&func_data.vals[param_val].typ.typ(self.db, self.cx)].clone(),
             ]));
         }
 
@@ -220,7 +226,10 @@ impl<'db> Formatter<'db> {
                 list([
                     symbol("call"),
                     self.val_name(ins.return_value_dst),
-                    list([symbol(ins.func.data(self.db).name.clone()), list(args)]),
+                    list([
+                        symbol(ins.func.data(self.db, self.cx).name.clone()),
+                        list(args),
+                    ]),
                 ])
             }
             InstrData::CallIndirect(ins) => {
@@ -267,7 +276,7 @@ impl<'db> Formatter<'db> {
             InstrData::BoolNot(ins) => self.format_instr_unary("bool.or", ins),
             InstrData::LocalToERef(ins) => self.format_instr_unary("local_to_eref", ins),
             InstrData::InitStruct(ins) => {
-                let TypeKind::Struct(strukt) = ins.typ.data(self.db) else {
+                let TypeKind::Struct(strukt) = ins.typ.data(self.db, self.cx) else {
                     panic!("init_struct requires struct type")
                 };
 
@@ -284,11 +293,15 @@ impl<'db> Formatter<'db> {
                 list([
                     symbol("struct.init"),
                     self.val_name(ins.dst),
-                    list([self.type_names[&ins.typ].clone(), list(fields)]),
+                    list([
+                        self.type_names[&ins.typ.typ(self.db, self.cx)].clone(),
+                        list(fields),
+                    ]),
                 ])
             }
             InstrData::GetField(ins) => {
-                let TypeKind::Struct(strukt) = func_data.vals[ins.src_struct].typ.data(self.db)
+                let TypeKind::Struct(strukt) =
+                    func_data.vals[ins.src_struct].typ.data(self.db, self.cx)
                 else {
                     panic!("not a struct type");
                 };
@@ -303,7 +316,8 @@ impl<'db> Formatter<'db> {
                 ])
             }
             InstrData::SetField(ins) => {
-                let TypeKind::Struct(strukt) = func_data.vals[ins.src_struct].typ.data(self.db)
+                let TypeKind::Struct(strukt) =
+                    func_data.vals[ins.src_struct].typ.data(self.db, self.cx)
                 else {
                     panic!("not a struct type");
                 };
@@ -334,11 +348,11 @@ impl<'db> Formatter<'db> {
             ]),
             InstrData::MakeFieldERef(ins) => {
                 let (TypeKind::ERef(r) | TypeKind::MRef(r)) =
-                    func_data.vals[ins.src_ref].typ.data(self.db)
+                    func_data.vals[ins.src_ref].typ.data(self.db, self.cx)
                 else {
                     panic!("not a ref type");
                 };
-                let TypeKind::Struct(strukt) = r.data(self.db) else {
+                let TypeKind::Struct(strukt) = r.data(self.db, self.cx) else {
                     panic!("not a struct type");
                 };
 
@@ -355,14 +369,14 @@ impl<'db> Formatter<'db> {
                 symbol("func.init"),
                 self.val_name(ins.dst),
                 list([
-                    symbol(ins.func.data(self.db).name.clone()),
+                    symbol(ins.func.data(self.db, self.cx).name.clone()),
                     self.val_name(ins.captures_ref),
                 ]),
             ]),
             InstrData::MakeList(ins) => list([
                 symbol("list.init"),
                 self.val_name(ins.dst),
-                list([self.type_names[&ins.element_type].clone()]),
+                list([self.type_names[&ins.element_type.typ(self.db, self.cx)].clone()]),
             ]),
             InstrData::ListPush(ins) => {
                 if let Some(dst_list) = ins.dst_list {
@@ -484,33 +498,35 @@ mod tests {
     use super::*;
     use crate::{
         builder::FuncBuilder,
-        module::{int_type, unit_type},
+        module::{ContextData, FuncRef},
     };
     use indoc::indoc;
     use zyon_core::Db;
 
     #[salsa::tracked]
-    fn make_basic_func<'db>(db: &'db dyn Database) -> Module<'db> {
-        let mut func = FuncBuilder::new(db, "add", unit_type(db), int_type(db));
-        let param0 = func.append_param(int_type(db));
-        let param1 = func.append_param(int_type(db));
+    fn make_basic_func<'db>(db: &'db dyn Database) -> Context<'db> {
+        let mut cx = ContextData::new(db);
+        let mut func = FuncBuilder::new(db, "add", cx.unit_type_ref(), cx.int_type_ref(), &mut cx);
+        let int_type = func.cx().int_type_ref();
+        let param0 = func.append_param(int_type);
+        let param1 = func.append_param(int_type);
         let ret_val = func.val();
         func.instr().int_add(ret_val, param0, param1);
         func.instr().return_(ret_val);
         let func = func.build();
-        let module = Module::from_funcs(db, "main", [Func::new(db, func)]);
-        module
+        FuncRef::create(db, func, &mut cx);
+        Context::new(db, cx)
     }
 
     #[test]
     fn basic_formatting() {
         let db = Db::default();
-        let module = make_basic_func(&db);
-        let formatted = format_module(&db, module).to_string();
+        let cx = make_basic_func(&db);
+        let formatted = format_context(&db, cx).to_string();
         assert_eq!(
             formatted,
             indoc! {r#"
-            (module main
+            (mir
                 (func add
                     (return_type int)
                     (captures_type unit)
