@@ -17,6 +17,133 @@ pub struct Context<'db> {
     pub data: ContextData<'db>,
 }
 
+/// Builder for `ContextData` that allows
+/// lazy initialization of each type and function.
+#[derive(Debug, Clone)]
+pub struct ContextBuilder<'db> {
+    types: PrimaryMap<TypeRef, Option<Type<'db>>>,
+    types_by_data: IndexMap<TypeKind, TypeRef, hashbrown::DefaultHashBuilder>,
+    funcs: PrimaryMap<FuncRef, Option<Func<'db>>>,
+}
+
+impl<'db> ContextBuilder<'db> {
+    pub fn new(db: &'db dyn Database) -> Self {
+        let mut cx = Self {
+            types: Default::default(),
+            types_by_data: Default::default(),
+            funcs: Default::default(),
+        };
+        for prim in [
+            PrimType::Int,
+            PrimType::Bool,
+            PrimType::Real,
+            PrimType::Byte,
+            PrimType::Str,
+            PrimType::Unit,
+        ] {
+            cx.get_or_create_type_ref_with_data(db, TypeKind::Prim(prim));
+        }
+        cx
+    }
+
+    pub fn prim_type_ref(&self, prim: PrimType) -> TypeRef {
+        self.types_by_data[&TypeKind::Prim(prim)]
+    }
+
+    pub fn int_type_ref(&self) -> TypeRef {
+        self.prim_type_ref(PrimType::Int)
+    }
+
+    pub fn bool_type_ref(&self) -> TypeRef {
+        self.prim_type_ref(PrimType::Bool)
+    }
+
+    pub fn real_type_ref(&self) -> TypeRef {
+        self.prim_type_ref(PrimType::Real)
+    }
+
+    pub fn byte_type_ref(&self) -> TypeRef {
+        self.prim_type_ref(PrimType::Byte)
+    }
+
+    pub fn str_type_ref(&self) -> TypeRef {
+        self.prim_type_ref(PrimType::Str)
+    }
+
+    pub fn unit_type_ref(&self) -> TypeRef {
+        self.prim_type_ref(PrimType::Unit)
+    }
+
+    /// Creates a `TypeRef` without binding the corresponding
+    /// type data. It must be bound before finalization
+    /// or a panic will occur.
+    pub fn alloc_type(&mut self) -> TypeRef {
+        self.types.push(None)
+    }
+
+    /// Binds the value of a type.
+    pub fn bind_type(&mut self, db: &'db dyn Database, type_ref: TypeRef, typ: Type<'db>) {
+        assert!(self.types[type_ref].is_none(), "type bound twice");
+        self.types[type_ref] = Some(typ);
+        self.types_by_data.insert(typ.data(db).clone(), type_ref);
+    }
+
+    pub fn resolve_type(&self, r: TypeRef) -> Type<'db> {
+        self.types[r].expect("attempted to resolve unbound type")
+    }
+
+    pub fn get_or_create_type_ref(&mut self, db: &'db dyn Database, typ: Type<'db>) -> TypeRef {
+        *self
+            .types_by_data
+            .entry(typ.data(db).clone())
+            .or_insert_with(|| self.types.push(Some(typ)))
+    }
+
+    pub fn get_or_create_type_ref_with_data(
+        &mut self,
+        db: &'db dyn Database,
+        typ: TypeKind,
+    ) -> TypeRef {
+        self.get_or_create_type_ref(db, Type::new(db, typ))
+    }
+
+    pub fn alloc_func(&mut self) -> FuncRef {
+        self.funcs.push(None)
+    }
+
+    pub fn bind_func(&mut self, func_ref: FuncRef, func: Func<'db>) {
+        assert!(self.funcs[func_ref].is_none(), "func bound twice");
+        self.funcs[func_ref] = Some(func);
+    }
+
+    pub fn resolve_func(&self, r: FuncRef) -> Func<'db> {
+        self.funcs[r].expect("attempted to resolve unbound func")
+    }
+
+    pub fn finish(self) -> ContextData<'db> {
+        let mut types = PrimaryMap::new();
+        let mut funcs = PrimaryMap::new();
+        for (type_ref, typ) in self.types {
+            assert_eq!(
+                types.push(typ.expect("type not bound before finalization")),
+                type_ref
+            );
+        }
+        for (func_ref, func) in self.funcs {
+            assert_eq!(
+                funcs.push(func.expect("func not bound before finalization")),
+                func_ref
+            );
+        }
+
+        ContextData {
+            types,
+            funcs,
+            types_by_data: self.types_by_data,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, salsa::Update)]
 pub struct ContextData<'db> {
     pub types: PrimaryMap<TypeRef, Type<'db>>,
@@ -33,25 +160,6 @@ pub struct ContextData<'db> {
 }
 
 impl<'db> ContextData<'db> {
-    pub fn new(db: &'db dyn Database) -> Self {
-        let mut cx = Self {
-            types: Default::default(),
-            types_by_data: Default::default(),
-            funcs: Default::default(),
-        };
-        for prim in [
-            PrimType::Int,
-            PrimType::Bool,
-            PrimType::Real,
-            PrimType::Byte,
-            PrimType::Str,
-            PrimType::Unit,
-        ] {
-            TypeRef::create(db, TypeKind::Prim(prim), &mut cx);
-        }
-        cx
-    }
-
     pub fn prim_type_ref(&self, prim: PrimType) -> TypeRef {
         self.types_by_data[&TypeKind::Prim(prim)]
     }
@@ -98,22 +206,24 @@ impl TypeRef {
 
     /// Equivalent to `Self::of` but inserts a new type
     /// into the context if it does not exist.
-    pub fn create<'db>(db: &'db dyn Database, data: TypeKind, cx: &mut ContextData<'db>) -> Self {
-        *cx.types_by_data
-            .entry(data.clone())
-            .or_insert_with(|| cx.types.push(Type::new(db, data)))
+    pub fn create<'db>(
+        db: &'db dyn Database,
+        data: TypeKind,
+        cx: &mut ContextBuilder<'db>,
+    ) -> Self {
+        cx.get_or_create_type_ref_with_data(db, data)
     }
 
     pub fn resolve<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> Type<'db> {
         cx.data(db).types[*self]
     }
 
-    pub fn data<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> &'db TypeKind {
-        self.resolve(db, cx).data(db)
+    pub fn resolve_in_builder<'db>(&self, cx: &ContextBuilder<'db>) -> Type<'db> {
+        cx.resolve_type(*self)
     }
 
-    pub fn data_mut_cx<'db>(&self, db: &'db dyn Database, cx: &ContextData<'db>) -> &'db TypeKind {
-        cx.types[*self].data(db)
+    pub fn data<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> &'db TypeKind {
+        self.resolve(db, cx).data(db)
     }
 }
 
@@ -128,25 +238,23 @@ impl FuncRef {
     pub fn create<'db>(
         db: &'db dyn Database,
         func: FuncData<'db>,
-        cx: &mut ContextData<'db>,
+        cx: &mut ContextBuilder<'db>,
     ) -> Self {
-        cx.funcs.push(Func::new(db, func))
+        let this = cx.alloc_func();
+        cx.bind_func(this, Func::new(db, func));
+        this
     }
 
     pub fn resolve<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> Func<'db> {
         cx.data(db).funcs[*self]
     }
 
-    pub fn data<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> &'db FuncData<'db> {
-        self.resolve(db, cx).data(db)
+    pub fn resolve_in_builder<'db>(&self, cx: &ContextBuilder<'db>) -> Func<'db> {
+        cx.resolve_func(*self)
     }
 
-    pub fn data_mut_cx<'db>(
-        &self,
-        db: &'db dyn Database,
-        cx: &ContextData<'db>,
-    ) -> &'db FuncData<'db> {
-        cx.funcs[*self].data(db)
+    pub fn data<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> &'db FuncData<'db> {
+        self.resolve(db, cx).data(db)
     }
 }
 

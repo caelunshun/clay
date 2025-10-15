@@ -1,8 +1,8 @@
 use crate::{
     instr::{self, CompareMode},
     module::{
-        BasicBlock, BasicBlockData, Constant, ContextData, Field, FuncData, FuncRef, FuncTypeData,
-        TypeRef, ValData,
+        BasicBlock, BasicBlockData, Constant, ContextBuilder, Field, FuncData, FuncRef,
+        FuncTypeData, TypeRef, ValData,
     },
     InstrData, TypeKind, Val,
 };
@@ -12,7 +12,7 @@ use salsa::Database;
 
 /// Builder API for a `FuncData`.
 pub struct FuncBuilder<'a, 'db> {
-    cx: &'a mut ContextData<'db>,
+    cx: &'a mut ContextBuilder<'db>,
     db: &'db dyn Database,
     func: FuncData<'db>,
     current_block: BasicBlock,
@@ -27,15 +27,16 @@ impl<'a, 'db> FuncBuilder<'a, 'db> {
         name: impl Into<CompactString>,
         captures_type: TypeRef,
         return_type: TypeRef,
-        cx: &'a mut ContextData<'db>,
+        cx: &'a mut ContextBuilder<'db>,
     ) -> Self {
         let mut basic_blocks = PrimaryMap::new();
         let entry_block = basic_blocks.push(BasicBlockData::default());
         let mut val_lists = ListPool::new();
         let mut val_types = PrimaryMap::new();
 
-        let captures_val =
-            val_types.push(Some(TypeRef::create(db, TypeKind::MRef(captures_type), cx)));
+        let captures_val = val_types.push(Some(
+            cx.get_or_create_type_ref_with_data(db, TypeKind::MRef(captures_type)),
+        ));
         basic_blocks[entry_block]
             .params
             .push(captures_val, &mut val_lists);
@@ -58,11 +59,11 @@ impl<'a, 'db> FuncBuilder<'a, 'db> {
         }
     }
 
-    pub fn cx(&self) -> &ContextData<'db> {
+    pub fn cx(&self) -> &ContextBuilder<'db> {
         self.cx
     }
 
-    pub fn cx_mut(&mut self) -> &mut ContextData<'db> {
+    pub fn cx_mut(&mut self) -> &mut ContextBuilder<'db> {
         &mut *self.cx
     }
 
@@ -120,7 +121,7 @@ impl<'a, 'db> FuncBuilder<'a, 'db> {
 pub struct FuncInstrBuilder<'a, 'db> {
     #[allow(unused)]
     db: &'db dyn Database,
-    cx: &'a mut ContextData<'db>,
+    cx: &'a mut ContextBuilder<'db>,
     func: &'a mut FuncData<'db>,
     block: BasicBlock,
     val_types: &'a mut PrimaryMap<Val, Option<TypeRef>>,
@@ -158,7 +159,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         }));
         self.set_val_type(
             return_value_dst,
-            func.data_mut_cx(self.db, self.cx).return_type,
+            func.resolve_in_builder(self.cx).data(self.db).return_type,
         );
     }
 
@@ -176,7 +177,8 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         }));
         let TypeKind::Func(func) = self.val_types[func_object]
             .unwrap()
-            .data_mut_cx(self.db, self.cx)
+            .resolve_in_builder(self.cx)
+            .data(self.db)
         else {
             panic!("not a func")
         };
@@ -329,7 +331,10 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             src_struct: src,
             field,
         }));
-        let TypeKind::Struct(strukt) = self.val_types[src].unwrap().data_mut_cx(self.db, self.cx)
+        let TypeKind::Struct(strukt) = self.val_types[src]
+            .unwrap()
+            .resolve_in_builder(self.cx)
+            .data(self.db)
         else {
             panic!("not a struct")
         };
@@ -361,7 +366,8 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
 
         let (TypeKind::MRef(t) | TypeKind::ERef(t)) = self.val_types[src_ref]
             .unwrap()
-            .data_mut_cx(self.db, self.cx)
+            .resolve_in_builder(self.cx)
+            .data(self.db)
         else {
             panic!("not a reference")
         };
@@ -380,7 +386,10 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             field,
         }));
 
-        let TypeKind::Struct(strukt) = self.val_types[src].unwrap().data_mut_cx(self.db, self.cx)
+        let TypeKind::Struct(strukt) = self.val_types[src]
+            .unwrap()
+            .resolve_in_builder(self.cx)
+            .data(self.db)
         else {
             panic!("not a struct")
         };
@@ -397,8 +406,12 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         let typ = TypeRef::create(
             self.db,
             TypeKind::Func(FuncTypeData {
-                param_types: func.data_mut_cx(self.db, self.cx).param_types.clone(),
-                return_type: func.data_mut_cx(self.db, self.cx).return_type,
+                param_types: func
+                    .resolve_in_builder(self.cx)
+                    .data(self.db)
+                    .param_types
+                    .clone(),
+                return_type: func.resolve_in_builder(self.cx).data(self.db).return_type,
             }),
             self.cx,
         );
@@ -500,12 +513,14 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
     }
 
     fn get_list_element_type(&self, t: TypeRef) -> TypeRef {
-        match t.data_mut_cx(self.db, self.cx) {
+        match t.resolve_in_builder(self.cx).data(self.db) {
             TypeKind::List(el) => *el,
-            TypeKind::MRef(l) | TypeKind::ERef(l) => match l.data_mut_cx(self.db, self.cx) {
-                TypeKind::List(el) => *el,
-                _ => panic!("not a list"),
-            },
+            TypeKind::MRef(l) | TypeKind::ERef(l) => {
+                match l.resolve_in_builder(self.cx).data(self.db) {
+                    TypeKind::List(el) => *el,
+                    _ => panic!("not a list"),
+                }
+            }
             _ => panic!("not a list"),
         }
     }

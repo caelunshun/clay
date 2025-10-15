@@ -75,8 +75,14 @@ impl<'db> Formatter<'db> {
                 PrimType::Str => symbol("str"),
                 PrimType::Unit => symbol("unit"),
             },
-            TypeKind::MRef(p) => list([symbol("mref"), self.format_type(p.resolve(self.db, self.cx))]),
-            TypeKind::ERef(p) => list([symbol("eref"), self.format_type(p.resolve(self.db, self.cx))]),
+            TypeKind::MRef(p) => list([
+                symbol("mref"),
+                self.format_type(p.resolve(self.db, self.cx)),
+            ]),
+            TypeKind::ERef(p) => list([
+                symbol("eref"),
+                self.format_type(p.resolve(self.db, self.cx)),
+            ]),
             TypeKind::Func(f) => {
                 let mut items = vec![
                     symbol("func"),
@@ -107,7 +113,10 @@ impl<'db> Formatter<'db> {
                 }
                 SExpr::List(items.into_boxed_slice())
             }
-            TypeKind::List(t) => list([symbol("list"), self.format_type(t.resolve(self.db, self.cx))]),
+            TypeKind::List(t) => list([
+                symbol("list"),
+                self.format_type(t.resolve(self.db, self.cx)),
+            ]),
         }
     }
 
@@ -498,14 +507,14 @@ mod tests {
     use super::*;
     use crate::{
         builder::FuncBuilder,
-        module::{ContextData, FuncRef},
+        module::{ContextBuilder, FuncRef},
     };
     use indoc::indoc;
     use zyon_core::Db;
 
     #[salsa::tracked]
     fn make_basic_func<'db>(db: &'db dyn Database) -> Context<'db> {
-        let mut cx = ContextData::new(db);
+        let mut cx = ContextBuilder::new(db);
         let mut func = FuncBuilder::new(db, "add", cx.unit_type_ref(), cx.int_type_ref(), &mut cx);
         let int_type = func.cx().int_type_ref();
         let param0 = func.append_param(int_type);
@@ -515,7 +524,7 @@ mod tests {
         func.instr().return_(ret_val);
         let func = func.build();
         FuncRef::create(db, func, &mut cx);
-        Context::new(db, cx)
+        Context::new(db, cx.finish())
     }
 
     #[test]
