@@ -22,7 +22,7 @@ pub struct Context<'db> {
 #[derive(Debug, Clone)]
 pub struct ContextBuilder<'db> {
     types: PrimaryMap<TypeRef, Option<Type<'db>>>,
-    types_by_data: IndexMap<TypeKind, TypeRef, hashbrown::DefaultHashBuilder>,
+    types_by_data: IndexMap<TypeKind, Vec<TypeRef>, hashbrown::DefaultHashBuilder>,
     funcs: PrimaryMap<FuncRef, Option<Func<'db>>>,
     /// A function header can be known before
     /// the function body. This allows resolving
@@ -52,7 +52,7 @@ impl<'db> ContextBuilder<'db> {
     }
 
     pub fn prim_type_ref(&self, prim: PrimType) -> TypeRef {
-        self.types_by_data[&TypeKind::Prim(prim)]
+        self.types_by_data[&TypeKind::Prim(prim)][0]
     }
 
     pub fn int_type_ref(&self) -> TypeRef {
@@ -90,7 +90,10 @@ impl<'db> ContextBuilder<'db> {
     pub fn bind_type(&mut self, db: &'db dyn Database, type_ref: TypeRef, typ: Type<'db>) {
         assert!(self.types[type_ref].is_none(), "type bound twice");
         self.types[type_ref] = Some(typ);
-        self.types_by_data.insert(typ.data(db).clone(), type_ref);
+        self.types_by_data
+            .entry(typ.data(db).clone())
+            .or_default()
+            .push(type_ref);
     }
 
     pub fn resolve_type(&self, r: TypeRef) -> Type<'db> {
@@ -98,10 +101,9 @@ impl<'db> ContextBuilder<'db> {
     }
 
     pub fn get_or_create_type_ref(&mut self, db: &'db dyn Database, typ: Type<'db>) -> TypeRef {
-        *self
-            .types_by_data
+        self.types_by_data
             .entry(typ.data(db).clone())
-            .or_insert_with(|| self.types.push(Some(typ)))
+            .or_insert_with(|| vec![self.types.push(Some(typ))])[0]
     }
 
     pub fn get_or_create_type_ref_with_data(
@@ -140,6 +142,48 @@ impl<'db> ContextBuilder<'db> {
             })
     }
 
+    /// Deduplicates all types in the context builder,
+    /// returning the mapping of old typerefs to new typerefs.
+    ///
+    /// Functions must be empty as this will not apply
+    /// the mapping to function data.
+    pub fn deduplicate_types(&mut self, db: &'db dyn Database) -> SecondaryMap<TypeRef, TypeRef> {
+        assert!(
+            self.types.values().all(|x| x.is_some()),
+            "all types must be bound before callinbg deduplicate_types"
+        );
+
+        loop {
+            let mut ref_mapping = SecondaryMap::new();
+
+            let mut new_types: PrimaryMap<TypeRef, Option<Type<'db>>> = PrimaryMap::new();
+            for (type_data, type_refs) in mem::take(&mut self.types_by_data) {
+                let ref_ = new_types.push(Some(Type::new(db, type_data)));
+                for original_ref in type_refs {
+                    ref_mapping[original_ref] = ref_;
+                }
+            }
+
+            for (type_ref, typ) in &new_types {
+                let new_data = typ
+                    .unwrap()
+                    .data(db)
+                    .clone()
+                    .map_used_types(|r| ref_mapping[r]);
+                self.types_by_data
+                    .entry(new_data)
+                    .or_default()
+                    .push(type_ref);
+            }
+
+            let done = self.types.len() == new_types.len();
+            self.types = new_types;
+            if done {
+                return ref_mapping;
+            }
+        }
+    }
+
     pub fn finish(self) -> ContextData<'db> {
         let mut types = PrimaryMap::new();
         let mut funcs = PrimaryMap::new();
@@ -159,7 +203,14 @@ impl<'db> ContextBuilder<'db> {
         ContextData {
             types,
             funcs,
-            types_by_data: self.types_by_data,
+            types_by_data: self
+                .types_by_data
+                .into_iter()
+                .map(|(kind, type_refs)| {
+                    assert_eq!(type_refs.len(), 1, "types not deduplicated");
+                    (kind, type_refs[0])
+                })
+                .collect(),
         }
     }
 }
@@ -370,6 +421,30 @@ impl TypeKind {
             }
         }
     }
+
+    /// Applies a mapping to any TypeRefs used in this type.
+    pub fn map_used_types(self, mut map: impl FnMut(TypeRef) -> TypeRef) -> Self {
+        match self {
+            TypeKind::Prim(_) => self,
+            TypeKind::MRef(t) => TypeKind::MRef(map(t)),
+            TypeKind::ERef(t) => TypeKind::ERef(map(t)),
+            TypeKind::Func(f) => TypeKind::Func(FuncTypeData {
+                param_types: f.param_types.into_iter().map(&mut map).collect(),
+                return_type: map(f.return_type),
+            }),
+            TypeKind::Struct(s) => TypeKind::Struct(StructTypeData {
+                fields: s
+                    .fields
+                    .into_iter()
+                    .map(|(_, field)| FieldData {
+                        name: field.name,
+                        typ: map(field.typ),
+                    })
+                    .collect(),
+            }),
+            TypeKind::List(t) => TypeKind::List(map(t)),
+        }
+    }
 }
 
 /// A closure object, consisting of a dynamic
@@ -400,7 +475,6 @@ pub enum PrimType {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct StructTypeData {
-    pub name: CompactString,
     pub fields: PrimaryMap<Field, FieldData>,
 }
 

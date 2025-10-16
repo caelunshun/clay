@@ -78,6 +78,7 @@ pub mod builder;
 pub mod formatter;
 pub mod instr;
 pub mod module;
+pub mod parser;
 pub mod passes;
 pub mod validation;
 
