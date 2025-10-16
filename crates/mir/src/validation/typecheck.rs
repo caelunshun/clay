@@ -44,6 +44,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 if ins
                     .func
                     .data(self.db, self.cx)
+                    .header
                     .captures_type
                     .data(self.db, self.cx)
                     != &TypeKind::Prim(PrimType::Unit)
@@ -53,10 +54,13 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                     ));
                 }
 
-                self.verify_function_args(&ins.func.data(self.db, self.cx).param_types, &ins.args)?;
+                self.verify_function_args(
+                    &ins.func.data(self.db, self.cx).header.param_types,
+                    &ins.args,
+                )?;
                 self.verify_type_equals(
                     ins.return_value_dst,
-                    ins.func.data(self.db, self.cx).return_type,
+                    ins.func.data(self.db, self.cx).header.return_type,
                 )?;
             }
             InstrData::CallIndirect(ins) => {
@@ -69,7 +73,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 self.verify_type_equals(ins.return_value_dst, func_typ.return_type)?;
             }
             InstrData::Return(ins) => {
-                self.verify_type_equals(ins.return_value, self.func.return_type)?;
+                self.verify_type_equals(ins.return_value, self.func.header.return_type)?;
             }
             InstrData::Copy(ins) => {
                 self.verify_type_equals(ins.dst, self.type_of(ins.src))?;
@@ -193,13 +197,13 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 self.verify_type_data_matches(
                     ins.dst,
                     &[TypeKind::Func(FuncTypeData {
-                        param_types: func_object_data.param_types.clone(),
-                        return_type: func_object_data.return_type,
+                        param_types: func_object_data.header.param_types.clone(),
+                        return_type: func_object_data.header.return_type,
                     })],
                 )?;
                 self.verify_type_data_matches(
                     ins.captures_ref,
-                    &[TypeKind::MRef(func_object_data.captures_type)],
+                    &[TypeKind::MRef(func_object_data.header.captures_type)],
                 )?;
             }
             InstrData::MakeList(ins) => {
@@ -262,9 +266,10 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
     }
 
     fn verify_entry_block_params(&self) -> Result<(), ValidationError> {
-        let mut expected_param_types = vec![TypeKind::MRef(self.func.captures_type)];
+        let mut expected_param_types = vec![TypeKind::MRef(self.func.header.captures_type)];
         expected_param_types.extend(
             self.func
+                .header
                 .param_types
                 .iter()
                 .map(|&t| t.data(self.db, self.cx).clone()),

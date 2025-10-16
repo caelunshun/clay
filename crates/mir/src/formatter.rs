@@ -144,14 +144,14 @@ impl<'db> Formatter<'db> {
         let func_data = func.data(self.db);
         let mut items = vec![
             symbol("func"),
-            symbol(func_data.name.clone()),
+            symbol(func_data.header.name.clone()),
             list([
                 symbol("return_type"),
-                self.type_names[&func_data.return_type.resolve(self.db, self.cx)].clone(),
+                self.type_names[&func_data.header.return_type.resolve(self.db, self.cx)].clone(),
             ]),
             list([
                 symbol("captures_type"),
-                self.type_names[&func_data.captures_type.resolve(self.db, self.cx)].clone(),
+                self.type_names[&func_data.header.captures_type.resolve(self.db, self.cx)].clone(),
             ]),
         ];
 
@@ -236,7 +236,7 @@ impl<'db> Formatter<'db> {
                     symbol("call"),
                     self.val_name(ins.return_value_dst),
                     list([
-                        symbol(ins.func.data(self.db, self.cx).name.clone()),
+                        symbol(ins.func.data(self.db, self.cx).header.name.clone()),
                         list(args),
                     ]),
                 ])
@@ -378,7 +378,7 @@ impl<'db> Formatter<'db> {
                 symbol("func.init"),
                 self.val_name(ins.dst),
                 list([
-                    symbol(ins.func.data(self.db, self.cx).name.clone()),
+                    symbol(ins.func.data(self.db, self.cx).header.name.clone()),
                     self.val_name(ins.captures_ref),
                 ]),
             ]),

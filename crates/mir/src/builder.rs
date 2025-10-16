@@ -1,7 +1,7 @@
 use crate::{
     instr::{self, CompareMode},
     module::{
-        BasicBlock, BasicBlockData, Constant, ContextBuilder, Field, FuncData, FuncRef,
+        BasicBlock, BasicBlockData, Constant, ContextBuilder, Field, FuncData, FuncHeader, FuncRef,
         FuncTypeData, TypeRef, ValData,
     },
     InstrData, TypeKind, Val,
@@ -44,11 +44,15 @@ impl<'a, 'db> FuncBuilder<'a, 'db> {
         Self {
             db,
             func: FuncData {
-                name: name.into(),
-                captures_type,
+                header: FuncHeader {
+                    param_types: vec![],
+                    return_type,
+                    name: name.into(),
+                    captures_type,
+                },
+
                 vals: PrimaryMap::default(),
-                param_types: vec![],
-                return_type,
+
                 basic_blocks,
                 entry_block,
                 val_lists,
@@ -70,7 +74,7 @@ impl<'a, 'db> FuncBuilder<'a, 'db> {
     pub fn append_param(&mut self, typ: TypeRef) -> Val {
         let val = self.val();
         self.val_types[val] = Some(typ);
-        self.func.param_types.push(typ);
+        self.func.header.param_types.push(typ);
         self.func.basic_blocks[self.func.entry_block]
             .params
             .push(val, &mut self.func.val_lists);
@@ -159,7 +163,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         }));
         self.set_val_type(
             return_value_dst,
-            func.resolve_in_builder(self.cx).data(self.db).return_type,
+            func.resolve_header(self.db, self.cx).return_type,
         );
     }
 
@@ -406,12 +410,8 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         let typ = TypeRef::create(
             self.db,
             TypeKind::Func(FuncTypeData {
-                param_types: func
-                    .resolve_in_builder(self.cx)
-                    .data(self.db)
-                    .param_types
-                    .clone(),
-                return_type: func.resolve_in_builder(self.cx).data(self.db).return_type,
+                param_types: func.resolve_header(self.db, self.cx).param_types.clone(),
+                return_type: func.resolve_header(self.db, self.cx).return_type,
             }),
             self.cx,
         );

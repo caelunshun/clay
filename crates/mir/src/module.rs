@@ -24,6 +24,10 @@ pub struct ContextBuilder<'db> {
     types: PrimaryMap<TypeRef, Option<Type<'db>>>,
     types_by_data: IndexMap<TypeKind, TypeRef, hashbrown::DefaultHashBuilder>,
     funcs: PrimaryMap<FuncRef, Option<Func<'db>>>,
+    /// A function header can be known before
+    /// the function body. This allows resolving
+    /// recursive or mutually recursive functions.
+    func_headers: SecondaryMap<FuncRef, Option<FuncHeader>>,
 }
 
 impl<'db> ContextBuilder<'db> {
@@ -32,6 +36,7 @@ impl<'db> ContextBuilder<'db> {
             types: Default::default(),
             types_by_data: Default::default(),
             funcs: Default::default(),
+            func_headers: Default::default(),
         };
         for prim in [
             PrimType::Int,
@@ -111,6 +116,10 @@ impl<'db> ContextBuilder<'db> {
         self.funcs.push(None)
     }
 
+    pub fn bind_func_header(&mut self, func_ref: FuncRef, header: FuncHeader) {
+        self.func_headers[func_ref] = Some(header);
+    }
+
     pub fn bind_func(&mut self, func_ref: FuncRef, func: Func<'db>) {
         assert!(self.funcs[func_ref].is_none(), "func bound twice");
         self.funcs[func_ref] = Some(func);
@@ -118,6 +127,17 @@ impl<'db> ContextBuilder<'db> {
 
     pub fn resolve_func(&self, r: FuncRef) -> Func<'db> {
         self.funcs[r].expect("attempted to resolve unbound func")
+    }
+
+    pub fn resolve_func_header(&self, db: &'db dyn Database, r: FuncRef) -> &FuncHeader {
+        self.funcs[r]
+            .as_ref()
+            .map(|f| &f.data(db).header)
+            .unwrap_or_else(|| {
+                self.func_headers[r].as_ref().expect(
+                    "attempted to resolve header of a func whose header is not yet resolved",
+                )
+            })
     }
 
     pub fn finish(self) -> ContextData<'db> {
@@ -279,6 +299,14 @@ impl FuncRef {
 
     pub fn resolve_in_builder<'db>(&self, cx: &ContextBuilder<'db>) -> Func<'db> {
         cx.resolve_func(*self)
+    }
+
+    pub fn resolve_header<'cx, 'db>(
+        &self,
+        db: &'db dyn Database,
+        cx: &'cx ContextBuilder<'db>,
+    ) -> &'cx FuncHeader {
+        cx.resolve_func_header(db, *self)
     }
 
     pub fn data<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> &'db FuncData<'db> {
@@ -445,8 +473,10 @@ pub struct Func<'db> {
     pub data: FuncData<'db>,
 }
 
+/// The function header describes the signature
+/// of the function but not its behavior.
 #[derive(Debug, Clone, PartialEq, Hash, salsa::Update)]
-pub struct FuncData<'db> {
+pub struct FuncHeader {
     /// Used for debugging; may be synthetic
     /// in the case of anonymous functions.
     pub name: CompactString,
@@ -455,12 +485,18 @@ pub struct FuncData<'db> {
     /// to the captures is the first argument
     /// to the entry block of the function.
     pub captures_type: TypeRef,
-    /// Set of values used by the function. Values can be assigned
-    /// multiple times until after the SSA lowering pass is applied.
-    pub vals: PrimaryMap<Val, ValData>,
     /// Parameters expected by the function, not including the captures.
     pub param_types: Vec<TypeRef>,
     pub return_type: TypeRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Hash, salsa::Update)]
+pub struct FuncData<'db> {
+    pub header: FuncHeader,
+    /// Set of values used by the function. Values can be assigned
+    /// multiple times until after the SSA lowering pass is applied.
+    pub vals: PrimaryMap<Val, ValData>,
+
     /// Basic blocks in the function instruction stream.
     pub basic_blocks: PrimaryMap<BasicBlock, BasicBlockData<'db>>,
     /// Basic block where execution of this function starts.
@@ -475,9 +511,9 @@ impl<'db> FuncData<'db> {
     /// Visits all types used in the function.
     /// May visit the same type multiple times.
     pub fn visit_types(&self, mut visit: impl FnMut(TypeRef)) {
-        visit(self.captures_type);
-        visit(self.return_type);
-        for &param in &self.param_types {
+        visit(self.header.captures_type);
+        visit(self.header.return_type);
+        for &param in &self.header.param_types {
             visit(param);
         }
         for (_, val_data) in &self.vals {
