@@ -215,7 +215,21 @@ impl TypeRef {
     }
 
     pub fn resolve<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> Type<'db> {
-        cx.data(db).types[*self]
+        /// Wrapping this in a salsa::tracked
+        /// function allows salsa to avoid
+        /// recalculating a query when the returned
+        /// Type doesn't change, even if the Context
+        /// was partially updated.
+        #[salsa::tracked]
+        fn resolve_helper<'db>(
+            db: &'db dyn Database,
+            cx: Context<'db>,
+            type_ref: TypeRef,
+        ) -> Type<'db> {
+            cx.data(db).types[type_ref]
+        }
+
+        resolve_helper(db, cx, *self)
     }
 
     pub fn resolve_in_builder<'db>(&self, cx: &ContextBuilder<'db>) -> Type<'db> {
@@ -246,7 +260,21 @@ impl FuncRef {
     }
 
     pub fn resolve<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> Func<'db> {
-        cx.data(db).funcs[*self]
+        /// Wrapping this in a salsa::tracked
+        /// function allows salsa to avoid
+        /// recalculating a query when the returned
+        /// Func doesn't change, even if the Context
+        /// was partially updated.
+        #[salsa::tracked]
+        fn resolve_helper<'db>(
+            db: &'db dyn Database,
+            cx: Context<'db>,
+            func_ref: FuncRef,
+        ) -> Func<'db> {
+            cx.data(db).funcs[func_ref]
+        }
+
+        resolve_helper(db, cx, *self)
     }
 
     pub fn resolve_in_builder<'db>(&self, cx: &ContextBuilder<'db>) -> Func<'db> {
