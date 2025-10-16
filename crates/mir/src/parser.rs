@@ -293,7 +293,7 @@ impl<'a, 'db> Parser<'a, 'db> {
     }
 }
 
-struct BlockParser<'a, 'db> {
+struct BlockParser<'db> {
     db: &'db dyn Database,
-    func_builder: FuncBuilder<'a, 'db>,
+    func_builder: FuncBuilder<'db>,
 }

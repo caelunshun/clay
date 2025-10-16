@@ -516,13 +516,12 @@ mod tests {
     fn make_basic_func<'db>(db: &'db dyn Database) -> Context<'db> {
         let mut cx = ContextBuilder::new(db);
         let mut func = FuncBuilder::new(db, "add", cx.unit_type_ref(), cx.int_type_ref(), &mut cx);
-        let int_type = func.cx().int_type_ref();
-        let param0 = func.append_param(int_type);
-        let param1 = func.append_param(int_type);
+        let param0 = func.append_param(cx.int_type_ref());
+        let param1 = func.append_param(cx.int_type_ref());
         let ret_val = func.val();
-        func.instr().int_add(ret_val, param0, param1);
-        func.instr().return_(ret_val);
-        let func = func.build();
+        func.instr(&mut cx).int_add(ret_val, param0, param1);
+        func.instr(&mut cx).return_(ret_val);
+        let func = func.build(&mut cx);
         FuncRef::create(db, func, &mut cx);
         Context::new(db, cx.finish())
     }

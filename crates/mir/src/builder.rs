@@ -11,8 +11,7 @@ use cranelift_entity::{EntityList, ListPool, PrimaryMap};
 use salsa::Database;
 
 /// Builder API for a `FuncData`.
-pub struct FuncBuilder<'a, 'db> {
-    cx: &'a mut ContextBuilder<'db>,
+pub struct FuncBuilder<'db> {
     db: &'db dyn Database,
     func: FuncData<'db>,
     current_block: BasicBlock,
@@ -21,13 +20,13 @@ pub struct FuncBuilder<'a, 'db> {
     val_types: PrimaryMap<Val, Option<TypeRef>>,
 }
 
-impl<'a, 'db> FuncBuilder<'a, 'db> {
+impl<'db> FuncBuilder<'db> {
     pub fn new(
         db: &'db dyn Database,
         name: impl Into<CompactString>,
         captures_type: TypeRef,
         return_type: TypeRef,
-        cx: &'a mut ContextBuilder<'db>,
+        cx: &mut ContextBuilder<'db>,
     ) -> Self {
         let mut basic_blocks = PrimaryMap::new();
         let entry_block = basic_blocks.push(BasicBlockData::default());
@@ -57,18 +56,9 @@ impl<'a, 'db> FuncBuilder<'a, 'db> {
                 entry_block,
                 val_lists,
             },
-            cx,
             current_block: entry_block,
             val_types,
         }
-    }
-
-    pub fn cx(&self) -> &ContextBuilder<'db> {
-        self.cx
-    }
-
-    pub fn cx_mut(&mut self) -> &mut ContextBuilder<'db> {
-        &mut *self.cx
     }
 
     pub fn append_param(&mut self, typ: TypeRef) -> Val {
@@ -96,23 +86,23 @@ impl<'a, 'db> FuncBuilder<'a, 'db> {
         self.val_types.push(None)
     }
 
-    pub fn instr<'b>(&'b mut self) -> FuncInstrBuilder<'b, 'db> {
+    pub fn instr<'b>(&'b mut self, cx: &'b mut ContextBuilder<'db>) -> FuncInstrBuilder<'b, 'db> {
         FuncInstrBuilder {
             db: self.db,
             func: &mut self.func,
             block: self.current_block,
             val_types: &mut self.val_types,
-            cx: self.cx,
+            cx,
         }
     }
 
-    pub fn build(mut self) -> FuncData<'db> {
+    pub fn build(mut self, cx: &mut ContextBuilder<'db>) -> FuncData<'db> {
         // Resolve final value types
         for (val, val_type) in self.val_types {
             // If value type was never resolved
             // then the value is unused - any type is
             // valid - use unit type
-            let val_type = val_type.unwrap_or_else(|| self.cx.unit_type_ref());
+            let val_type = val_type.unwrap_or_else(|| cx.unit_type_ref());
             // Same ID should be allocated since
             // same order of insertion into PrimaryMap
             assert_eq!(val, self.func.vals.push(ValData { typ: val_type }));
