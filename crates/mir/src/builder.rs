@@ -71,8 +71,28 @@ impl<'db> FuncBuilder<'db> {
         val
     }
 
+    pub fn append_block_param(&mut self, typ: TypeRef) -> Val {
+        let val = self.val();
+        self.val_types[val] = Some(typ);
+        self.func.basic_blocks[self.current_block]
+            .params
+            .push(val, &mut self.func.val_lists);
+        val
+    }
+
     pub fn create_block(&mut self) -> BasicBlock {
         self.func.basic_blocks.push(BasicBlockData::default())
+    }
+
+    pub fn entry_block(&self) -> BasicBlock {
+        self.func.entry_block
+    }
+
+    pub fn block_param(&self, i: usize) -> Val {
+        self.func.basic_blocks[self.current_block]
+            .params
+            .get(i, &self.func.val_lists)
+            .unwrap()
     }
 
     pub fn switch_to_block(&mut self, block: BasicBlock) {

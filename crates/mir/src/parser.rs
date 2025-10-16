@@ -1,16 +1,15 @@
 use crate::{
     builder::FuncBuilder,
     module::{
-        Context, ContextBuilder, FieldData, FuncHeader, FuncRef, FuncTypeData, StructTypeData,
-        TypeRef,
+        BasicBlock, Context, ContextBuilder, FieldData, FuncHeader, FuncRef, FuncTypeData,
+        StructTypeData, TypeRef,
     },
-    Func, PrimType, Type, TypeKind,
+    Func, PrimType, TypeKind, Val,
 };
 use bumpalo::Bump;
-use compact_str::{CompactString, ToCompactString};
+use compact_str::ToCompactString;
 use cranelift_entity::PrimaryMap;
 use hashbrown::HashMap;
-use indexmap::IndexSet;
 use salsa::Database;
 use std::fmt::Display;
 use zyon_core::sexpr::{SExpr, SExprRef};
@@ -37,8 +36,16 @@ pub fn parse_mir<'db>(db: &'db dyn Database, src: &str) -> Result<Context<'db>, 
     let sexpr = sexpr.to_ref(bump);
 
     let mut cx = ContextBuilder::new(db);
+    let parser = Parser {
+        db,
+        cx: &mut cx,
+        mir_expr: sexpr,
+        types: Default::default(),
+        funcs: Default::default(),
+    };
+    parser.parse_mir()?;
 
-    todo!()
+    Ok(Context::new(db, cx.finish()))
 }
 
 struct Parser<'a, 'db> {
@@ -63,15 +70,17 @@ impl<'a, 'db> Parser<'a, 'db> {
     /// Populates `self.cx` with items from the s-expression.
     pub fn parse_mir(mut self) -> Result<(), ParseError> {
         let items = match self.mir_expr {
-            List([Symbol("mir"), List(items)]) => *items,
+            List([Symbol("mir"), items @ ..]) => items,
             _ => return Err(ParseError::new("expected `mir` expression")),
         };
 
         self.parse_types_initial(items)?;
         self.parse_types_full(items)?;
         self.deduplicate_types();
+        self.parse_funcs_initial(items)?;
+        self.parse_funcs_full(items)?;
 
-        todo!()
+        Ok(())
     }
 
     /// Initial pass that allocates TypeRefs
@@ -277,23 +286,251 @@ impl<'a, 'db> Parser<'a, 'db> {
             match item {
                 List([Symbol("func"), Symbol(func_name), decls @ ..]) => {
                     let func_ref = self.funcs[func_name];
-                    let header = func_ref.resolve_header(self.db, self.cx);
+                    let header = func_ref.resolve_header(self.db, self.cx).clone();
 
-                    for decl in decls {
-                        match decl {
-                            List([Symbol("block"), Symbol(block_name), block_decls @ ..]) => {}
-                            _ => continue,
-                        }
+                    let mut func_builder = FuncBuilder::new(
+                        self.db,
+                        func_name.to_compact_string(),
+                        header.captures_type,
+                        header.return_type,
+                        self.cx,
+                    );
+                    for &param in &header.param_types {
+                        func_builder.append_param(param);
                     }
+
+                    let mut state = FuncParserState {
+                        func_builder,
+                        entry_block_name: self.find_entry_block_name(decls),
+                        blocks: Default::default(),
+                        vals: Default::default(),
+                    };
+
+                    self.parse_blocks_initial(decls, &mut state)?;
+                    self.parse_blocks_full(decls, &mut state)?;
+
+                    let func = state.func_builder.build(self.cx);
+                    self.cx.bind_func(func_ref, Func::new(self.db, func));
                 }
                 _ => continue,
             }
         }
         Ok(())
     }
+
+    fn find_entry_block_name(&self, decls: &[SExprRef<'a>]) -> &'a str {
+        for decl in decls {
+            if let List([Symbol("entry"), Symbol(block)]) = decl {
+                return *block;
+            }
+        }
+        unreachable!()
+    }
+
+    fn parse_blocks_initial(
+        &mut self,
+        decls: &[SExprRef<'a>],
+        state: &mut FuncParserState<'a, 'db>,
+    ) -> Result<(), ParseError> {
+        for decl in decls {
+            match decl {
+                List([Symbol("block"), Symbol(block_name), block_decls @ ..]) => {
+                    let is_entry = *block_name == state.entry_block_name;
+
+                    let block = if is_entry {
+                        state.func_builder.entry_block()
+                    } else {
+                        state.func_builder.create_block()
+                    };
+                    state.func_builder.switch_to_block(block);
+                    state.blocks.insert(*block_name, block);
+
+                    let mut i = 0;
+                    for block_decl in block_decls {
+                        if let List([Symbol("param"), Symbol(val_name), typ]) = block_decl {
+                            let typ = self.parse_type(typ)?;
+                            let val = if is_entry {
+                                state.func_builder.block_param(i)
+                            } else {
+                                state.func_builder.append_block_param(typ)
+                            };
+                            state.vals.insert(*val_name, val);
+                            i += 1;
+                        }
+                    }
+                }
+                _ => continue,
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parse_blocks_full(
+        &mut self,
+        decls: &[SExprRef<'a>],
+        state: &mut FuncParserState<'a, 'db>,
+    ) -> Result<(), ParseError> {
+        for decl in decls {
+            if let List([Symbol("block"), Symbol(block_name), block_decls @ ..]) = decl {
+                let block = state.blocks[*block_name];
+                state.func_builder.switch_to_block(block);
+                for block_decl in block_decls {
+                    if !matches!(block_decl, List([Symbol("param"), ..])) {
+                        self.parse_instr(block_decl, state)?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parse_instr(
+        &mut self,
+        expr: &SExprRef<'a>,
+        state: &mut FuncParserState<'a, 'db>,
+    ) -> Result<(), ParseError> {
+        let List([Symbol(instr), args @ ..]) = expr else {
+            return Err(ParseError::new(format!("invalid block decl {expr:?}")));
+        };
+
+        match *instr {
+            "int.add" => {
+                let (dst, src1, src2) = state.parse_args_binary(args)?;
+                state.func_builder.instr(self.cx).int_add(dst, src1, src2);
+            }
+            "int.sub" => {
+                let (dst, src1, src2) = state.parse_args_binary(args)?;
+                state.func_builder.instr(self.cx).int_sub(dst, src1, src2);
+            }
+            "int.mul" => {
+                let (dst, src1, src2) = state.parse_args_binary(args)?;
+                state.func_builder.instr(self.cx).int_mul(dst, src1, src2);
+            }
+            "int.div" => {
+                let (dst, src1, src2) = state.parse_args_binary(args)?;
+                state.func_builder.instr(self.cx).int_div(dst, src1, src2);
+            }
+            "real.add" => {
+                let (dst, src1, src2) = state.parse_args_binary(args)?;
+                state.func_builder.instr(self.cx).real_add(dst, src1, src2);
+            }
+            "real.sub" => {
+                let (dst, src1, src2) = state.parse_args_binary(args)?;
+                state.func_builder.instr(self.cx).real_sub(dst, src1, src2);
+            }
+            "real.mul" => {
+                let (dst, src1, src2) = state.parse_args_binary(args)?;
+                state.func_builder.instr(self.cx).real_mul(dst, src1, src2);
+            }
+            "real.div" => {
+                let (dst, src1, src2) = state.parse_args_binary(args)?;
+                state.func_builder.instr(self.cx).real_div(dst, src1, src2);
+            }
+            _ => return Err(ParseError::new(format!("unknown instruction `{instr}`"))),
+        }
+
+        Ok(())
+    }
 }
 
-struct BlockParser<'db> {
-    db: &'db dyn Database,
+struct FuncParserState<'a, 'db> {
     func_builder: FuncBuilder<'db>,
+    entry_block_name: &'a str,
+    blocks: HashMap<&'a str, BasicBlock>,
+    vals: HashMap<&'a str, Val>,
+}
+
+impl<'a, 'db> FuncParserState<'a, 'db> {
+    pub fn parse_args_unary(&mut self, args: &[SExprRef<'a>]) -> Result<(Val, Val), ParseError> {
+        let [Symbol(dst), List([Symbol(src)])] = args else {
+            return Err(ParseError::new("invalid instruction arguments"));
+        };
+
+        Ok((self.get_or_create_val(dst), self.get_val(src)?))
+    }
+
+    pub fn parse_args_binary(
+        &mut self,
+        args: &[SExprRef<'a>],
+    ) -> Result<(Val, Val, Val), ParseError> {
+        let [Symbol(dst), List([Symbol(src1), Symbol(src2)])] = args else {
+            return Err(ParseError::new("invalid instruction arguments"));
+        };
+
+        Ok((
+            self.get_or_create_val(dst),
+            self.get_val(src1)?,
+            self.get_val(src2)?,
+        ))
+    }
+
+    pub fn get_val(&self, name: &str) -> Result<Val, ParseError> {
+        self.vals
+            .get(&name)
+            .ok_or_else(|| {
+                ParseError::new(format!("undefined value `{name}` used as source operand"))
+            })
+            .copied()
+    }
+
+    pub fn get_or_create_val(&mut self, name: &'a str) -> Val {
+        *self
+            .vals
+            .entry(name)
+            .or_insert_with(|| self.func_builder.val())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::InstrData;
+    use indoc::indoc;
+    use salsa::DatabaseImpl;
+
+    #[salsa::input]
+    struct Input {
+        src: &'static str,
+    }
+
+    #[salsa::tracked]
+    fn parse_helper<'db>(db: &'db dyn Database, input: Input) -> Context<'db> {
+        parse_mir(db, input.src(db)).unwrap()
+    }
+
+    #[test]
+    fn parse_simple_mir() {
+        let mir = indoc! {r#"
+        (mir
+            (func foo
+                (return_type int)
+                (captures_type unit)
+                (entry block0)
+                (block block0
+                    (param v0
+                        (mref unit))
+                    (param v1 int)
+                    (int.add v2 (v1 v1)))))
+        "#};
+        let db = DatabaseImpl::new();
+        let input = Input::new(&db, mir);
+        let cx = parse_helper(&db, input);
+        let cx = cx.data(&db);
+
+        assert_eq!(cx.funcs.len(), 1);
+
+        let func = *cx.funcs.values().next().unwrap();
+        let func_data = func.data(&db);
+
+        assert_eq!(func_data.header.param_types, vec![cx.int_type_ref()]);
+        assert_eq!(func_data.header.captures_type, cx.unit_type_ref());
+        assert_eq!(func_data.basic_blocks.len(), 1);
+
+        let block = &func_data.basic_blocks[func_data.entry_block];
+
+        assert_eq!(block.instrs.len(), 1);
+        assert!(matches!(block.instrs[0], InstrData::IntAdd(_)));
+    }
 }

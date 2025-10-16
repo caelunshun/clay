@@ -4,6 +4,7 @@ use compact_str::CompactString;
 pub fn parse_sexpr(input: &str) -> Option<SExpr> {
     let mut parser = Parser::new(input);
     let result = parser.parse_expr().flatten();
+    parser.skip_ws();
     if !parser.is_at_end() { None } else { result }
 }
 
@@ -72,7 +73,7 @@ impl<'a> Parser<'a> {
 
     fn parse_string(&mut self) -> Option<SExpr> {
         debug_assert_eq!(self.peek(), Some('"'));
-        self.next(); // skeep quote
+        self.next(); // skip quote
 
         let mut s = String::new();
         while let Some(c) = self.next() {
