@@ -319,7 +319,7 @@ impl<'db> Formatter<'db> {
                     symbol("struct.get"),
                     self.val_name(ins.dst),
                     list([
-                        self.val_name(ins.dst),
+                        self.val_name(ins.src_struct),
                         symbol(strukt.fields[ins.field].name.clone()),
                     ]),
                 ])

@@ -106,6 +106,10 @@ impl<'db> FuncBuilder<'db> {
         self.val_types.push(None)
     }
 
+    pub fn val_type(&self, val: Val) -> TypeRef {
+        self.val_types[val].expect("value type not bound")
+    }
+
     pub fn instr<'b>(&'b mut self, cx: &'b mut ContextBuilder<'db>) -> FuncInstrBuilder<'b, 'db> {
         FuncInstrBuilder {
             db: self.db,
@@ -142,19 +146,34 @@ pub struct FuncInstrBuilder<'a, 'db> {
 }
 
 impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
-    pub fn jump(mut self, target: BasicBlock) {
-        self.instr(InstrData::Jump(instr::Jump {
-            target,
-            args: EntityList::new(), // empty until SSA transformation
-        }));
+    pub fn jump(self, target: BasicBlock) {
+        self.jump_with_args(target, [])
     }
 
-    pub fn branch(mut self, condition: Val, target_true: BasicBlock, target_false: BasicBlock) {
+    pub fn jump_with_args(mut self, target: BasicBlock, args: impl IntoIterator<Item = Val>) {
+        let args = EntityList::from_iter(args, &mut self.func.val_lists);
+        self.instr(InstrData::Jump(instr::Jump { target, args }));
+    }
+
+    pub fn branch(self, condition: Val, target_true: BasicBlock, target_false: BasicBlock) {
+        self.branch_with_args(condition, target_true, [], target_false, [])
+    }
+
+    pub fn branch_with_args(
+        mut self,
+        condition: Val,
+        target_true: BasicBlock,
+        args_true: impl IntoIterator<Item = Val>,
+        target_false: BasicBlock,
+        args_false: impl IntoIterator<Item = Val>,
+    ) {
+        let args_true = EntityList::from_iter(args_true, &mut self.func.val_lists);
+        let args_false = EntityList::from_iter(args_false, &mut self.func.val_lists);
         self.instr(InstrData::Branch(instr::Branch {
             target_true,
             target_false,
-            args_true: EntityList::new(), // empty until SSA transformation
-            args_false: EntityList::new(), // empty until SSA transformation
+            args_true,
+            args_false,
             condition,
         }));
     }

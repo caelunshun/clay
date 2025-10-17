@@ -1,8 +1,9 @@
 use crate::{
     builder::FuncBuilder,
+    instr::CompareMode,
     module::{
-        BasicBlock, Context, ContextBuilder, FieldData, FuncHeader, FuncRef, FuncTypeData,
-        StructTypeData, TypeRef,
+        BasicBlock, Constant, ConstantData, Context, ContextBuilder, FieldData, FuncHeader,
+        FuncRef, FuncTypeData, StructTypeData, TypeRef,
     },
     Func, PrimType, TypeKind, Val,
 };
@@ -396,6 +397,88 @@ impl<'a, 'db> Parser<'a, 'db> {
         };
 
         match *instr {
+            "jump" => {
+                let [List([Symbol(block), List(block_args)])] = args else {
+                    return Err(ParseError::new("invalid instr arguments"));
+                };
+                let block = state.get_block(block)?;
+                let args = state.get_val_list(block_args)?;
+                state
+                    .func_builder
+                    .instr(self.cx)
+                    .jump_with_args(block, args)
+            }
+            "branch" => {
+                let [List(
+                    [Symbol(condition), List([Symbol("true"), Symbol(block_true), List(args_true)]), List([Symbol("false"), Symbol(block_false), List(args_false)])],
+                )] = args
+                else {
+                    return Err(ParseError::new("invalid instr arguments"));
+                };
+                let condition = state.get_val(condition)?;
+                let block_true = state.get_block(block_true)?;
+                let block_false = state.get_block(block_false)?;
+                let args_true = state.get_val_list(args_true)?;
+                let args_false = state.get_val_list(args_false)?;
+                state.func_builder.instr(self.cx).branch_with_args(
+                    condition,
+                    block_true,
+                    args_true,
+                    block_false,
+                    args_false,
+                );
+            }
+            "call" => {
+                let [Symbol(dst), List([Symbol(func), List(args)])] = args else {
+                    return Err(ParseError::new("invalid instr arguments"));
+                };
+                let dst = state.get_or_create_val(dst);
+                let func = self
+                    .funcs
+                    .get(func)
+                    .ok_or_else(|| ParseError::new(format!("undefined func `{func}`")))?;
+                let args = state.get_val_list(args)?;
+                state.func_builder.instr(self.cx).call(dst, *func, args);
+            }
+            "call_indirect" => {
+                let [Symbol(dst), List([Symbol(func), List(args)])] = args else {
+                    return Err(ParseError::new("invalid instr arguments"));
+                };
+                let dst = state.get_or_create_val(dst);
+                let func = state.get_val(func)?;
+                let args = state.get_val_list(args)?;
+                state
+                    .func_builder
+                    .instr(self.cx)
+                    .call_indirect(dst, func, args);
+            }
+            "return" => {
+                let [List([Symbol(return_value)])] = args else {
+                    return Err(ParseError::new("invalid instr arguments"));
+                };
+                let return_value = state.get_val(return_value)?;
+                state.func_builder.instr(self.cx).return_(return_value);
+            }
+            "copy" => {
+                let (dst, src) = state.parse_args_unary(args)?;
+                state.func_builder.instr(self.cx).copy(dst, src);
+            }
+            "constant" => {
+                let [Symbol(dst), List([constant])] = args else {
+                    return Err(ParseError::new("invalid instr arguments"));
+                };
+                let dst = state.get_or_create_val(dst);
+                let constant = match constant {
+                    Int(x) => ConstantData::Int(*x),
+                    Float(x) => ConstantData::Real(*x),
+                    String(s) => ConstantData::Str(s.to_compact_string()),
+                    Symbol("true") => ConstantData::Bool(true),
+                    Symbol("false") => ConstantData::Bool(false),
+                    _ => return Err(ParseError::new("invalid constant")),
+                };
+                let constant = Constant::new(self.db, constant);
+                state.func_builder.instr(self.cx).constant(dst, constant);
+            }
             "int.add" => {
                 let (dst, src1, src2) = state.parse_args_binary(args)?;
                 state.func_builder.instr(self.cx).int_add(dst, src1, src2);
@@ -412,6 +495,13 @@ impl<'a, 'db> Parser<'a, 'db> {
                 let (dst, src1, src2) = state.parse_args_binary(args)?;
                 state.func_builder.instr(self.cx).int_div(dst, src1, src2);
             }
+            "int.cmp" => {
+                let (dst, src1, src2, mode) = state.parse_args_cmp(args)?;
+                state
+                    .func_builder
+                    .instr(self.cx)
+                    .int_cmp(dst, src1, src2, mode);
+            }
             "real.add" => {
                 let (dst, src1, src2) = state.parse_args_binary(args)?;
                 state.func_builder.instr(self.cx).real_add(dst, src1, src2);
@@ -427,6 +517,259 @@ impl<'a, 'db> Parser<'a, 'db> {
             "real.div" => {
                 let (dst, src1, src2) = state.parse_args_binary(args)?;
                 state.func_builder.instr(self.cx).real_div(dst, src1, src2);
+            }
+            "real.cmp" => {
+                let (dst, src1, src2, mode) = state.parse_args_cmp(args)?;
+                state
+                    .func_builder
+                    .instr(self.cx)
+                    .real_cmp(dst, src1, src2, mode);
+            }
+            "real.to_int" => {
+                let (dst, src) = state.parse_args_unary(args)?;
+                state.func_builder.instr(self.cx).real_to_int(dst, src);
+            }
+            "int.to_real" => {
+                let (dst, src) = state.parse_args_unary(args)?;
+                state.func_builder.instr(self.cx).int_to_real(dst, src);
+            }
+            "byte.to_int" => {
+                let (dst, src) = state.parse_args_unary(args)?;
+                state.func_builder.instr(self.cx).byte_to_int(dst, src);
+            }
+            "int.to_byte" => {
+                let (dst, src) = state.parse_args_unary(args)?;
+                state.func_builder.instr(self.cx).int_to_byte(dst, src);
+            }
+            "bool.and" => {
+                let (dst, src1, src2) = state.parse_args_binary(args)?;
+                state.func_builder.instr(self.cx).bool_and(dst, src1, src2);
+            }
+            "bool.or" => {
+                let (dst, src1, src2) = state.parse_args_binary(args)?;
+                state.func_builder.instr(self.cx).bool_or(dst, src1, src2);
+            }
+            "bool.xor" => {
+                let (dst, src1, src2) = state.parse_args_binary(args)?;
+                state.func_builder.instr(self.cx).bool_xor(dst, src1, src2);
+            }
+            "bool.not" => {
+                let (dst, src) = state.parse_args_unary(args)?;
+                state.func_builder.instr(self.cx).bool_not(dst, src);
+            }
+            "local_to_eref" => {
+                let (dst, src) = state.parse_args_unary(args)?;
+                state.func_builder.instr(self.cx).local_to_eref(dst, src);
+            }
+            "struct.init" => {
+                let [Symbol(dst), List([struct_type, List(fields)])] = args else {
+                    return Err(ParseError::new("invalid instr arguments"));
+                };
+                let dst = state.get_or_create_val(dst);
+                let struct_type = self.parse_type(struct_type)?;
+                let TypeKind::Struct(struct_type_data) =
+                    struct_type.resolve_in_builder(self.cx).data(self.db)
+                else {
+                    return Err(ParseError::new("not a struct type"));
+                };
+                let mut fields = fields
+                    .iter()
+                    .map(|field| {
+                        let List([Symbol("field"), Symbol(field_name), Symbol(val)]) = field else {
+                            return Err(ParseError::new("invalid struct fields"));
+                        };
+                        let field = struct_type_data
+                            .fields
+                            .iter()
+                            .find(|(_, f)| f.name == field_name)
+                            .ok_or_else(|| ParseError::new("undefined field"))?
+                            .0;
+                        Ok((field, state.get_val(val)?))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                fields.sort_by_key(|(f, _)| *f);
+                state.func_builder.instr(self.cx).init_struct(
+                    dst,
+                    struct_type,
+                    fields.into_iter().map(|(_, v)| v),
+                );
+            }
+            "struct.get" => {
+                let [Symbol(dst), List([Symbol(src), Symbol(field_name)])] = args else {
+                    return Err(ParseError::new("invalid instr arguments"));
+                };
+                let dst = state.get_or_create_val(dst);
+                let src = state.get_val(src)?;
+                let src_type = state.func_builder.val_type(src);
+                let TypeKind::Struct(struct_type_data) =
+                    src_type.resolve_in_builder(self.cx).data(self.db)
+                else {
+                    return Err(ParseError::new("not a struct type"));
+                };
+
+                let field = struct_type_data
+                    .fields
+                    .iter()
+                    .find(|(_, f)| f.name == field_name)
+                    .ok_or_else(|| ParseError::new("undefined field"))?;
+
+                state
+                    .func_builder
+                    .instr(self.cx)
+                    .get_field(dst, src, field.0);
+            }
+            "struct.set" => {
+                let [Symbol(dst), List([Symbol(src), Symbol(field_name), Symbol(field_val)])] =
+                    args
+                else {
+                    return Err(ParseError::new("invalid instr arguments"));
+                };
+                let dst = state.get_or_create_val(dst);
+                let src = state.get_val(src)?;
+                let field_val = state.get_val(field_val)?;
+                let src_type = state.func_builder.val_type(src);
+                let TypeKind::Struct(struct_type_data) =
+                    src_type.resolve_in_builder(self.cx).data(self.db)
+                else {
+                    return Err(ParseError::new("not a struct type"));
+                };
+
+                let field = struct_type_data
+                    .fields
+                    .iter()
+                    .find(|(_, f)| f.name == field_name)
+                    .ok_or_else(|| ParseError::new("undefined field"))?;
+
+                state
+                    .func_builder
+                    .instr(self.cx)
+                    .set_field(dst, src, field_val, field.0);
+            }
+            "alloc" => {
+                let (dst, src) = state.parse_args_unary(args)?;
+                state.func_builder.instr(self.cx).alloc(dst, src);
+            }
+            "load" => {
+                let (dst, src) = state.parse_args_unary(args)?;
+                state.func_builder.instr(self.cx).load(dst, src);
+            }
+            "store" => {
+                let [Symbol(val), Symbol(ref_)] = args else {
+                    return Err(ParseError::new("invalid instr arguments"));
+                };
+                let ref_ = state.get_val(ref_)?;
+                let val = state.get_val(val)?;
+                state.func_builder.instr(self.cx).store(ref_, val);
+            }
+            "struct.field_eref" => {
+                let [Symbol(dst), List([Symbol(src), Symbol(field_name)])] = args else {
+                    return Err(ParseError::new("invalid instr arguments"));
+                };
+                let dst = state.get_or_create_val(dst);
+                let src = state.get_val(src)?;
+                let src_type = state.func_builder.val_type(src);
+                let TypeKind::Struct(struct_type_data) =
+                    src_type.resolve_in_builder(self.cx).data(self.db)
+                else {
+                    return Err(ParseError::new("not a struct type"));
+                };
+
+                let field = struct_type_data
+                    .fields
+                    .iter()
+                    .find(|(_, f)| f.name == field_name)
+                    .ok_or_else(|| ParseError::new("undefined field"))?;
+
+                state
+                    .func_builder
+                    .instr(self.cx)
+                    .make_field_eref(dst, src, field.0);
+            }
+            "func.init" => {
+                let [Symbol(dst), List([Symbol(func_name), Symbol(captures)])] = args else {
+                    return Err(ParseError::new("invalid instr arguments"));
+                };
+                let dst = state.get_or_create_val(dst);
+                let captures = state.get_val(captures)?;
+                let func = self
+                    .funcs
+                    .get(func_name)
+                    .ok_or_else(|| ParseError::new("ndefined function"))?;
+                state
+                    .func_builder
+                    .instr(self.cx)
+                    .make_function_object(dst, *func, captures);
+            }
+            "list.init" => {
+                let [Symbol(dst), List([element_type])] = args else {
+                    return Err(ParseError::new("invalid instr arguments"));
+                };
+                let dst = state.get_or_create_val(dst);
+                let element_type = self.parse_type(element_type)?;
+                state
+                    .func_builder
+                    .instr(self.cx)
+                    .make_list(dst, element_type);
+            }
+            "list.push" => {
+                let (dst, src1, src2) = state.parse_args_binary(args)?;
+                state.func_builder.instr(self.cx).list_push(dst, src1, src2);
+            }
+            "list.ref.push" => {
+                let [Symbol(src1), Symbol(src2)] = args else {
+                    return Err(ParseError::new("invalid instr arguments"));
+                };
+                let src1 = state.get_val(src1)?;
+                let src2 = state.get_val(src2)?;
+                state.func_builder.instr(self.cx).list_ref_push(src1, src2);
+            }
+            "list.remove" => {
+                let (dst, src1, src2) = state.parse_args_binary(args)?;
+                state
+                    .func_builder
+                    .instr(self.cx)
+                    .list_remove(dst, src1, src2);
+            }
+            "list.ref.remove" => {
+                let [Symbol(src1), Symbol(src2)] = args else {
+                    return Err(ParseError::new("invalid instr arguments"));
+                };
+                let src1 = state.get_val(src1)?;
+                let src2 = state.get_val(src2)?;
+                state
+                    .func_builder
+                    .instr(self.cx)
+                    .list_ref_remove(src1, src2);
+            }
+            "list.trunc" => {
+                let (dst, src1, src2) = state.parse_args_binary(args)?;
+                state
+                    .func_builder
+                    .instr(self.cx)
+                    .list_trunc(dst, src1, src2);
+            }
+            "list.ref.trunc" => {
+                let [Symbol(src1), Symbol(src2)] = args else {
+                    return Err(ParseError::new("invalid instr arguments"));
+                };
+                let src1 = state.get_val(src1)?;
+                let src2 = state.get_val(src2)?;
+                state.func_builder.instr(self.cx).list_ref_trunc(src1, src2);
+            }
+            "list.len" => {
+                let (dst, src) = state.parse_args_unary(args)?;
+                state.func_builder.instr(self.cx).list_len(dst, src);
+            }
+            "list.get" => {
+                let (dst, src1, src2) = state.parse_args_binary(args)?;
+                state.func_builder.instr(self.cx).list_get(dst, src1, src2);
+            }
+            "list.get_eref" => {
+                let (dst, src1, src2) = state.parse_args_binary(args)?;
+                state
+                    .func_builder
+                    .instr(self.cx)
+                    .list_get_eref(dst, src1, src2);
             }
             _ => return Err(ParseError::new(format!("unknown instruction `{instr}`"))),
         }
@@ -466,6 +809,32 @@ impl<'a, 'db> FuncParserState<'a, 'db> {
         ))
     }
 
+    pub fn parse_args_cmp(
+        &mut self,
+        args: &[SExprRef<'a>],
+    ) -> Result<(Val, Val, Val, CompareMode), ParseError> {
+        let [Symbol(dst), List([Symbol(mode), Symbol(src1), Symbol(src2)])] = args else {
+            return Err(ParseError::new("invalid instruction arguments"));
+        };
+
+        let mode = match *mode {
+            "<" => CompareMode::Less,
+            "<=" => CompareMode::LessOrEqual,
+            ">" => CompareMode::Greater,
+            ">=" => CompareMode::GreaterOrEqual,
+            "==" => CompareMode::Equal,
+            "!=" => CompareMode::NotEqual,
+            _ => return Err(ParseError::new("invalid compare mode")),
+        };
+
+        Ok((
+            self.get_or_create_val(dst),
+            self.get_val(src1)?,
+            self.get_val(src2)?,
+            mode,
+        ))
+    }
+
     pub fn get_val(&self, name: &str) -> Result<Val, ParseError> {
         self.vals
             .get(&name)
@@ -480,6 +849,24 @@ impl<'a, 'db> FuncParserState<'a, 'db> {
             .vals
             .entry(name)
             .or_insert_with(|| self.func_builder.val())
+    }
+
+    pub fn get_block(&self, name: &str) -> Result<BasicBlock, ParseError> {
+        self.blocks
+            .get(&name)
+            .ok_or_else(|| ParseError::new(format!("undefined block `{name}`")))
+            .copied()
+    }
+
+    pub fn get_val_list(&self, vals: &[SExprRef<'a>]) -> Result<Vec<Val>, ParseError> {
+        vals.iter()
+            .map(|val| {
+                let Symbol(val) = val else {
+                    return Err(ParseError::new("expected value"));
+                };
+                self.get_val(val)
+            })
+            .collect()
     }
 }
 
@@ -512,7 +899,8 @@ mod tests {
                     (param v0
                         (mref unit))
                     (param v1 int)
-                    (int.add v2 (v1 v1)))))
+                    (int.add v2 (v1 v1))
+                    (return (v2)))))
         "#};
         let db = DatabaseImpl::new();
         let input = Input::new(&db, mir);
@@ -530,7 +918,8 @@ mod tests {
 
         let block = &func_data.basic_blocks[func_data.entry_block];
 
-        assert_eq!(block.instrs.len(), 1);
+        assert_eq!(block.instrs.len(), 2);
         assert!(matches!(block.instrs[0], InstrData::IntAdd(_)));
+        assert!(matches!(block.instrs[1], InstrData::Return(_)));
     }
 }
