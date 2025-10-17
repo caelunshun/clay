@@ -4,7 +4,7 @@ use crate::{
     InstrData, PrimType, TypeKind, Val,
 };
 use cranelift_entity::EntityList;
-use zyon_core::Db;
+use fir_core::Db;
 
 /// Verifies that operands have the correct type for each instruction.
 pub fn verify_instr_types<'db>(

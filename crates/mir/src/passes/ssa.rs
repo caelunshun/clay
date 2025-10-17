@@ -3,7 +3,7 @@ use crate::{
     Val,
 };
 use cranelift_entity::{EntityList, ListPool, PrimaryMap, SecondaryMap};
-use zyon_core::Db;
+use fir_core::Db;
 
 /// Convert a function to SSA form, returning the new function.
 pub fn make_ssa<'db>(db: &'db Db, func: &FuncData<'db>) -> FuncData<'db> {

@@ -1,5 +1,5 @@
 [package]
-name = "zyon-mir"
+name = "fir-mir"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,7 +8,7 @@ cranelift-entity.workspace = true
 hashbrown.workspace = true
 compact_str.workspace = true
 bytemuck.workspace = true
-zyon-core.workspace = true
+fir-core.workspace = true
 salsa.workspace = true
 indexmap.workspace = true
 bumpalo.workspace = true

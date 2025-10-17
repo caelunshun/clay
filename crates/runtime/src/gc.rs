@@ -1,6 +1,6 @@
 use crate::{engine::Instance, ptr::MRef, type_registry::Type, Error};
 
-/// A memory management implementation for the Zyon runtime.
+/// A memory management implementation for the fir runtime.
 ///
 /// Garbage collectors handle both allocation and deallocation
 /// of memory.
@@ -17,14 +17,14 @@ pub trait GarbageCollector: Send + Sync {
     /// a GC cycle, and participate if needed.
     fn safepoint(&self, instance: &Instance, stack_walker: &mut dyn StackWalker);
 
-    /// Registers the current thread as active in Zyon code;
+    /// Registers the current thread as active in fir code;
     /// this will cause GC cycles to wait for `safepoint` to be
     /// called on this thread before proceeding.
     ///
     /// A call to this function should always be followed by a call to `safepoint`
-    /// before beginning Zyon execution.
+    /// before beginning fir execution.
     fn mark_thread_active(&self);
-    /// Deregisters the current thread as active in Zyon code.
+    /// Deregisters the current thread as active in fir code.
     fn mark_thread_inactive(&self);
 }
 

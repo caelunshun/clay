@@ -1,10 +1,10 @@
 [package]
-name = "zyon-runtime"
+name = "fir-runtime"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-zyon-mir.workspace = true
+fir-mir.workspace = true
 cranelift-entity.workspace = true
 compact_str.workspace = true
 hashbrown.workspace = true

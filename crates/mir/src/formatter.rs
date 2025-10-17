@@ -6,9 +6,9 @@ use crate::{
 };
 use compact_str::format_compact;
 use cranelift_entity::EntityRef;
+use fir_core::sexpr::{float, int, list, string, symbol, SExpr};
 use hashbrown::HashMap;
 use salsa::Database;
-use zyon_core::sexpr::{float, int, list, string, symbol, SExpr};
 
 /// Converts an mir Context and all its contents to an S-expression.
 #[salsa::tracked]
@@ -509,8 +509,8 @@ mod tests {
         builder::FuncBuilder,
         module::{ContextBuilder, FuncRef},
     };
+    use fir_core::Db;
     use indoc::indoc;
-    use zyon_core::Db;
 
     #[salsa::tracked]
     fn make_basic_func<'db>(db: &'db dyn Database) -> Context<'db> {

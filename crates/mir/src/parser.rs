@@ -10,10 +10,10 @@ use crate::{
 use bumpalo::Bump;
 use compact_str::ToCompactString;
 use cranelift_entity::PrimaryMap;
+use fir_core::sexpr::{SExpr, SExprRef};
 use hashbrown::HashMap;
 use salsa::Database;
 use std::fmt::Display;
-use zyon_core::sexpr::{SExpr, SExprRef};
 use SExprRef::*;
 
 #[derive(Debug, Clone)]

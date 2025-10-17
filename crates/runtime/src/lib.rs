@@ -7,7 +7,7 @@ mod ptr;
 mod type_registry;
 mod value;
 
-extern crate zyon_bytecode as bytecode;
+extern crate fir_bytecode as bytecode;
 
 pub use engine::{Engine, Func, Instance, Module};
 pub use error::Error;

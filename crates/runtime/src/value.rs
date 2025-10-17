@@ -1,4 +1,4 @@
-/// Owned Rust representation of a Zyon value.
+/// Owned Rust representation of a fir value.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Unit,

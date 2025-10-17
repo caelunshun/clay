@@ -22,6 +22,6 @@ salsa = { git = "https://github.com/caelunshun/salsa", branch = "cranelift-entit
 ] }
 bumpalo = "3"
 
-zyon-core = { path = "crates/core" }
-zyon-mir = { path = "crates/mir" }
-#zyon-runtime = { path = "crates/runtime" }
+fir-core = { path = "crates/core" }
+fir-mir = { path = "crates/mir" }
+#fir-runtime = { path = "crates/runtime" }

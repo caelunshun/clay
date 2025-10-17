@@ -6,9 +6,9 @@ use bytecode::{
     Instr, InstrData, ModuleData, Type,
 };
 use cranelift_entity::{packed_option::ReservedValue, EntityList, EntityRef, PrimaryMap};
-use zyon_runtime::{Error, Func, Instance, Value};
+use fir_runtime::{Error, Func, Instance, Value};
 
-extern crate zyon_bytecode as bytecode;
+extern crate fir_bytecode as bytecode;
 
 #[test]
 fn factorial() {

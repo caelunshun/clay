@@ -5,7 +5,7 @@ use cranelift_entity::{EntityRef, PrimaryMap, SecondaryMap};
 use hashbrown::HashMap;
 use parking_lot::{Once, OnceState};
 use std::{alloc::Layout, cmp};
-use zyon_bytecode::entity_ref;
+use fir_bytecode::entity_ref;
 
 entity_ref! {
     /// ID of a type in an `Engine`.

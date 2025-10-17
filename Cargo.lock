@@ -143,6 +143,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
+name = "fir-core"
+version = "0.1.0"
+dependencies = [
+ "bumpalo",
+ "compact_str",
+ "indoc",
+ "salsa",
+]
+
+[[package]]
+name = "fir-mir"
+version = "0.1.0"
+dependencies = [
+ "bumpalo",
+ "bytemuck",
+ "compact_str",
+ "cranelift-entity",
+ "fir-core",
+ "hashbrown 0.16.0",
+ "indexmap",
+ "indoc",
+ "salsa",
+]
+
+[[package]]
 name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -473,28 +498,3 @@ name = "windows-link"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
-
-[[package]]
-name = "zyon-core"
-version = "0.1.0"
-dependencies = [
- "bumpalo",
- "compact_str",
- "indoc",
- "salsa",
-]
-
-[[package]]
-name = "zyon-mir"
-version = "0.1.0"
-dependencies = [
- "bumpalo",
- "bytemuck",
- "compact_str",
- "cranelift-entity",
- "hashbrown 0.16.0",
- "indexmap",
- "indoc",
- "salsa",
- "zyon-core",
-]
