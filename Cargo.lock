@@ -177,6 +177,7 @@ dependencies = [
 name = "fir-mir-filetests"
 version = "0.1.0"
 dependencies = [
+ "fir-core",
  "fir-mir",
  "pretty_assertions",
  "proc-macro2",

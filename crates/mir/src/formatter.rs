@@ -273,7 +273,7 @@ impl<'db> Formatter<'db> {
             InstrData::BoolAnd(ins) => self.format_instr_binary("bool.and", ins),
             InstrData::BoolOr(ins) => self.format_instr_binary("bool.or", ins),
             InstrData::BoolXor(ins) => self.format_instr_binary("bool.xor", ins),
-            InstrData::BoolNot(ins) => self.format_instr_unary("bool.or", ins),
+            InstrData::BoolNot(ins) => self.format_instr_unary("bool.not", ins),
             InstrData::LocalToERef(ins) => self.format_instr_unary("local_to_eref", ins),
             InstrData::InitStruct(ins) => {
                 let TypeKind::Struct(strukt) = ins.typ.data(self.db, self.cx) else {

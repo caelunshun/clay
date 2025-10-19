@@ -1,0 +1,19 @@
+// @harness parser_roundtrip
+(mir
+    (func conversions
+        (return_type bool)
+        (captures_type unit)
+        (entry block0)
+        (block block0
+            (param c
+                (mref unit))
+            (param v0 int)
+            (param v1 real)
+            (param v2 byte)
+            (int.to_real v0_real (v0))
+            (real.to_int v1_int (v1))
+            (int.to_byte v1_byte (v1_int))
+            (byte.to_int v2_int (v2))
+            (int.to_real v2_real (v2_int))
+            (real.cmp res (== v2_real v0_real))
+            (return (res)))))

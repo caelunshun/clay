@@ -1,0 +1,22 @@
+// @harness parser_roundtrip
+(mir
+    (func int_ops
+        (return_type bool)
+        (captures_type unit)
+        (entry block0)
+        (block block0
+            (param c
+                (mref unit))
+            (param a int)
+            (param b int)
+            (int.add v0 
+                (a b))
+            (int.sub v1 
+                (v0 a))
+            (int.div v2 
+                (v1 v0))
+            (int.mul v3 
+                (v2 b))
+            (int.cmp v4 
+                (< v3 a))
+            (return (v4)))))

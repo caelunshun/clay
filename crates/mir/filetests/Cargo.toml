@@ -6,6 +6,7 @@ edition = "2024"
 [dev-dependencies]
 salsa.workspace = true
 fir-mir.workspace = true
+fir-core.workspace = true
 pretty_assertions.workspace = true
 
 [build-dependencies]

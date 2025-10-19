@@ -1,0 +1,20 @@
+// @harness parser_roundtrip
+(mir
+    (func bool_ops
+        (return_type bool)
+        (captures_type unit)
+        (entry block0)
+        (block block0
+            (param c
+                (mref unit))
+            (param a bool)
+            (param b bool)
+            (bool.and v0
+                (a b))
+            (bool.or v1
+                (v0 a))
+            (bool.xor v2
+                (v1 v0))
+            (bool.not v3
+                (v2))
+            (return (v3)))))
