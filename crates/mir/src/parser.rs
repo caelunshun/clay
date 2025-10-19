@@ -355,6 +355,7 @@ impl<'a, 'db> Parser<'a, 'db> {
                             } else {
                                 state.func_builder.append_block_param(typ)
                             };
+                            state.func_builder.set_val_name(val, *val_name);
                             state.vals.insert(*val_name, val);
                             i += 1;
                         }
@@ -860,7 +861,7 @@ impl<'a, 'db> FuncParserState<'a, 'db> {
         *self
             .vals
             .entry(name)
-            .or_insert_with(|| self.func_builder.val())
+            .or_insert_with(|| self.func_builder.named_val(name))
     }
 
     pub fn get_block(&self, name: &str) -> Result<BasicBlock, ParseError> {

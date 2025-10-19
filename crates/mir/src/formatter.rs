@@ -21,6 +21,7 @@ pub fn format_context<'db>(db: &'db dyn Database, cx: Context<'db>) -> SExpr {
         next_val_index: 0,
         basic_block_names: Default::default(),
         next_basic_block_index: 0,
+        current_func: None,
     }
     .format_all()
 }
@@ -34,6 +35,7 @@ struct Formatter<'db> {
     next_val_index: usize,
     basic_block_names: HashMap<BasicBlock, SExpr>,
     next_basic_block_index: usize,
+    current_func: Option<Func<'db>>,
 }
 
 impl<'db> Formatter<'db> {
@@ -120,18 +122,7 @@ impl<'db> Formatter<'db> {
     }
 
     fn should_use_inline_type(&self, typ: Type<'db>) -> bool {
-        fn visit<'db>(db: &'db dyn Database, cx: Context<'db>, typ: Type<'db>, inline: &mut bool) {
-            if let TypeKind::Struct(_) = typ.data(db) {
-                *inline = false;
-            } else {
-                typ.data(db)
-                    .visit_used_types(&mut |typ2| visit(db, cx, typ2.resolve(db, cx), inline));
-            }
-        }
-
-        let mut inline = true;
-        visit(self.db, self.cx, typ, &mut inline);
-        inline
+        !matches!(typ.data(self.db), TypeKind::Struct(_))
     }
 
     fn format_func(&mut self, func: Func<'db>) -> SExpr {
@@ -139,6 +130,7 @@ impl<'db> Formatter<'db> {
         self.next_val_index = 0;
         self.basic_block_names.clear();
         self.next_basic_block_index = 0;
+        self.current_func = Some(func);
 
         let func_data = func.data(self.db);
         let mut items = vec![
@@ -482,9 +474,13 @@ impl<'db> Formatter<'db> {
         self.val_names
             .entry(val)
             .or_insert_with(|| {
-                let name = symbol(format!("v{}", self.next_val_index));
-                self.next_val_index += 1;
-                name
+                if let Some(name) = &self.current_func.unwrap().data(self.db).vals[val].name {
+                    symbol(name.clone())
+                } else {
+                    let name = symbol(format!("v{}", self.next_val_index));
+                    self.next_val_index += 1;
+                    name
+                }
             })
             .clone()
     }
@@ -493,9 +489,14 @@ impl<'db> Formatter<'db> {
         self.basic_block_names
             .entry(bb)
             .or_insert_with(|| {
-                let name = symbol(format!("block{}", self.next_basic_block_index));
-                self.next_basic_block_index += 1;
-                name
+                if let Some(name) = &self.current_func.unwrap().data(self.db).basic_blocks[bb].name
+                {
+                    symbol(name.clone())
+                } else {
+                    let name = symbol(format!("block{}", self.next_basic_block_index));
+                    self.next_basic_block_index += 1;
+                    name
+                }
             })
             .clone()
     }

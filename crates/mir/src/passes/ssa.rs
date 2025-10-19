@@ -47,6 +47,7 @@ impl<'db, 'a> SsaConverter<'db, 'a> {
             let new_block_id = self.new_func.basic_blocks.push(BasicBlockData {
                 instrs: vec![],
                 params,
+                name: block_data.name.clone(),
             });
             // Same order of insertion, so block IDs should match
             assert_eq!(block, new_block_id);

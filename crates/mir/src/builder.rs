@@ -7,7 +7,7 @@ use crate::{
     },
 };
 use compact_str::CompactString;
-use cranelift_entity::{EntityList, ListPool, PrimaryMap};
+use cranelift_entity::{EntityList, ListPool, PrimaryMap, SecondaryMap};
 use salsa::Database;
 
 /// Builder API for a `FuncData`.
@@ -18,6 +18,7 @@ pub struct FuncBuilder<'db> {
     /// Values created so far.
     /// Some value types may not yet be resolved.
     val_types: PrimaryMap<Val, Option<TypeRef>>,
+    val_names: SecondaryMap<Val, Option<CompactString>>,
 }
 
 impl<'db> FuncBuilder<'db> {
@@ -58,6 +59,7 @@ impl<'db> FuncBuilder<'db> {
             },
             current_block: entry_block,
             val_types,
+            val_names: SecondaryMap::new(),
         }
     }
 
@@ -71,6 +73,12 @@ impl<'db> FuncBuilder<'db> {
         val
     }
 
+    pub fn append_named_param(&mut self, typ: TypeRef, name: impl Into<CompactString>) -> Val {
+        let param = self.append_param(typ);
+        self.val_names[param] = Some(name.into());
+        param
+    }
+
     pub fn append_block_param(&mut self, typ: TypeRef) -> Val {
         let val = self.val();
         self.val_types[val] = Some(typ);
@@ -78,6 +86,20 @@ impl<'db> FuncBuilder<'db> {
             .params
             .push(val, &mut self.func.val_lists);
         val
+    }
+
+    pub fn append_named_block_param(
+        &mut self,
+        typ: TypeRef,
+        name: impl Into<CompactString>,
+    ) -> Val {
+        let val = self.append_block_param(typ);
+        self.val_names[val] = Some(name.into());
+        val
+    }
+
+    pub fn set_val_name(&mut self, val: Val, name: impl Into<CompactString>) {
+        self.val_names[val] = Some(name.into());
     }
 
     pub fn create_block(&mut self) -> BasicBlock {
@@ -106,6 +128,12 @@ impl<'db> FuncBuilder<'db> {
         self.val_types.push(None)
     }
 
+    pub fn named_val(&mut self, name: impl Into<CompactString>) -> Val {
+        let val = self.val();
+        self.val_names[val] = Some(name.into());
+        val
+    }
+
     pub fn val_type(&self, val: Val) -> TypeRef {
         self.val_types[val].expect("value type not bound")
     }
@@ -129,7 +157,13 @@ impl<'db> FuncBuilder<'db> {
             let val_type = val_type.unwrap_or_else(|| cx.unit_type_ref());
             // Same ID should be allocated since
             // same order of insertion into PrimaryMap
-            assert_eq!(val, self.func.vals.push(ValData { typ: val_type }));
+            assert_eq!(
+                val,
+                self.func.vals.push(ValData {
+                    typ: val_type,
+                    name: self.val_names[val].take()
+                })
+            );
         }
 
         self.func

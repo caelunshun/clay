@@ -705,11 +705,13 @@ entity_ref_16bit! {
 pub struct ValData {
     /// Type of the local.
     pub typ: TypeRef,
+    /// Optional name, for debugging and testing.
+    pub name: Option<CompactString>,
 }
 
 impl ValData {
     pub fn new(typ: TypeRef) -> Self {
-        Self { typ }
+        Self { typ, name: None }
     }
 }
 
@@ -719,6 +721,8 @@ entity_ref_16bit! {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, salsa::Update)]
 pub struct BasicBlockData<'db> {
+    /// Optional name, for debugging and testing.
+    pub name: Option<CompactString>,
     pub instrs: Vec<InstrData<'db>>,
     /// Only used after SSA transformation; empty before then, except for
     /// the entry block, where the capture pointer followed by the function arguments are assigned
