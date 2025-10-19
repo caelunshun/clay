@@ -561,7 +561,7 @@ impl<'a, 'db> Parser<'a, 'db> {
                 state.func_builder.instr(self.cx).bool_not(dst, src);
             }
             "struct.init" => {
-                let [Symbol(dst), List([struct_type, List(fields)])] = args else {
+                let [Symbol(dst), List([struct_type, fields @ ..])] = args else {
                     return Err(ParseError::new("invalid instr arguments"));
                 };
                 let dst = state.get_or_create_val(dst);
@@ -662,17 +662,21 @@ impl<'a, 'db> Parser<'a, 'db> {
                 let val = state.get_val(val)?;
                 state.func_builder.instr(self.cx).store(ref_, val);
             }
-            "struct.field_mref" => {
+            "struct.get_mref" => {
                 let [Symbol(dst), List([Symbol(src), Symbol(field_name)])] = args else {
                     return Err(ParseError::new("invalid instr arguments"));
                 };
                 let dst = state.get_or_create_val(dst);
                 let src = state.get_val(src)?;
                 let src_type = state.func_builder.val_type(src);
-                let TypeKind::Struct(struct_type_data) =
-                    src_type.resolve_in_builder(self.cx).data(self.db)
+                let TypeKind::MRef(pointee) = src_type.resolve_in_builder(self.cx).data(self.db)
                 else {
-                    return Err(ParseError::new("not a struct type"));
+                    return Err(ParseError::new("not a reference to a struct type"));
+                };
+                let TypeKind::Struct(struct_type_data) =
+                    pointee.resolve_in_builder(self.cx).data(self.db)
+                else {
+                    return Err(ParseError::new("not a reference to a struct type"));
                 };
 
                 let field = struct_type_data

@@ -1,0 +1,53 @@
+// @harness parser_roundtrip
+(mir
+    (type Point
+        (struct
+            (field x real)
+            (field y real)))
+    (func squared_distance
+        (return_type real)
+        (captures_type unit)
+        (entry block0)
+        (block block0
+            (param captures (mref unit))
+            (param point1 Point)
+            (param point2 (mref Point))
+            (struct.get x1 (point1 x))
+            (struct.get y1 (point1 y))
+            (struct.get_mref x2_ref (point2 x))
+            (struct.get_mref y2_ref (point2 y))
+            (load x2 (x2_ref))
+            (load y2 (y2_ref))
+            (real.sub t0 (x2 x1))
+            (real.mul t0 (t0 t0))
+            (real.sub t1 (y2 y1))
+            (real.mul t1 (t1 t1))
+            (real.add t2 (t0 t1))
+            (return (t2))))
+    (func new_point
+        (return_type Point)
+        (captures_type unit)
+        (entry block0)
+        (block block0
+            (param captures (mref unit))
+            (param x real)
+            (param y real)
+            (struct.init t0 (Point
+                (field x x)
+                (field y y)))
+            (return (t0))))
+    (func main
+        (return_type real)
+        (captures_type unit)
+        (entry block0)
+        (block block0
+            (param captures (mref unit))
+            (constant x1 (10.0))
+            (constant x2 (20.0))
+            (constant y1 (5.0))
+            (constant y2 (-5.5))
+            (call p1 (new_point (x1 y1)))
+            (call p2 (new_point (x2 y2)))
+            (alloc p2_ref (p2))
+            (call result (squared_distance (p1 p2_ref)))
+            (return (result)))))

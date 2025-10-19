@@ -443,12 +443,15 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             field,
         }));
 
-        let TypeKind::Struct(strukt) = self.val_types[src]
+        let TypeKind::MRef(pointee) = self.val_types[src]
             .unwrap()
             .resolve_in_builder(self.cx)
             .data(self.db)
         else {
-            panic!("not a struct")
+            panic!("not a reference to a struct")
+        };
+        let TypeKind::Struct(strukt) = pointee.resolve_in_builder(self.cx).data(self.db) else {
+            panic!("not a reference to a struct")
         };
         let typ = TypeRef::create(self.db, TypeKind::MRef(strukt.fields[field].typ), self.cx);
         self.set_val_type(dst, typ);

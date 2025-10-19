@@ -285,14 +285,12 @@ impl<'db> Formatter<'db> {
                     ]));
                 }
 
-                list([
-                    symbol("struct.init"),
-                    self.val_name(ins.dst),
-                    list([
-                        self.type_names[&ins.typ.resolve(self.db, self.cx)].clone(),
-                        list(fields),
-                    ]),
-                ])
+                fields.insert(
+                    0,
+                    self.type_names[&ins.typ.resolve(self.db, self.cx)].clone(),
+                );
+
+                list([symbol("struct.init"), self.val_name(ins.dst), list(fields)])
             }
             InstrData::GetField(ins) => {
                 let TypeKind::Struct(strukt) =
@@ -351,7 +349,7 @@ impl<'db> Formatter<'db> {
                 };
 
                 list([
-                    symbol("struct.field_mref"),
+                    symbol("struct.get_mref"),
                     self.val_name(ins.dst_ref),
                     list([
                         self.val_name(ins.src_ref),
