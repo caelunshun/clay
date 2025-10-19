@@ -145,11 +145,6 @@ impl<'a, 'db> Parser<'a, 'db> {
                 self.cx
                     .get_or_create_type_ref_with_data(self.db, TypeKind::MRef(pointee_type))
             }
-            List([Symbol("eref"), pointee_type]) => {
-                let pointee_type = self.parse_type(pointee_type)?;
-                self.cx
-                    .get_or_create_type_ref_with_data(self.db, TypeKind::ERef(pointee_type))
-            }
             List([Symbol("list"), element_type]) => {
                 let element_type = self.parse_type(element_type)?;
                 self.cx
@@ -322,7 +317,7 @@ impl<'a, 'db> Parser<'a, 'db> {
     fn find_entry_block_name(&self, decls: &[SExprRef<'a>]) -> &'a str {
         for decl in decls {
             if let List([Symbol("entry"), Symbol(block)]) = decl {
-                return *block;
+                return block;
             }
         }
         unreachable!()
@@ -564,10 +559,6 @@ impl<'a, 'db> Parser<'a, 'db> {
                 let (dst, src) = state.parse_args_unary(args)?;
                 state.func_builder.instr(self.cx).bool_not(dst, src);
             }
-            "local_to_eref" => {
-                let (dst, src) = state.parse_args_unary(args)?;
-                state.func_builder.instr(self.cx).local_to_eref(dst, src);
-            }
             "struct.init" => {
                 let [Symbol(dst), List([struct_type, List(fields)])] = args else {
                     return Err(ParseError::new("invalid instr arguments"));
@@ -670,7 +661,7 @@ impl<'a, 'db> Parser<'a, 'db> {
                 let val = state.get_val(val)?;
                 state.func_builder.instr(self.cx).store(ref_, val);
             }
-            "struct.field_eref" => {
+            "struct.field_mref" => {
                 let [Symbol(dst), List([Symbol(src), Symbol(field_name)])] = args else {
                     return Err(ParseError::new("invalid instr arguments"));
                 };
@@ -692,7 +683,7 @@ impl<'a, 'db> Parser<'a, 'db> {
                 state
                     .func_builder
                     .instr(self.cx)
-                    .make_field_eref(dst, src, field.0);
+                    .make_field_mref(dst, src, field.0);
             }
             "func.init" => {
                 let [Symbol(dst), List([Symbol(func_name), Symbol(captures)])] = args else {
@@ -773,12 +764,12 @@ impl<'a, 'db> Parser<'a, 'db> {
                 let (dst, src1, src2) = state.parse_args_binary(args)?;
                 state.func_builder.instr(self.cx).list_get(dst, src1, src2);
             }
-            "list.get_eref" => {
+            "list.get_mref" => {
                 let (dst, src1, src2) = state.parse_args_binary(args)?;
                 state
                     .func_builder
                     .instr(self.cx)
-                    .list_get_eref(dst, src1, src2);
+                    .list_get_mref(dst, src1, src2);
             }
             _ => return Err(ParseError::new(format!("unknown instruction `{instr}`"))),
         }

@@ -80,10 +80,6 @@ impl<'db> Formatter<'db> {
                 symbol("mref"),
                 self.format_type(p.resolve(self.db, self.cx)),
             ]),
-            TypeKind::ERef(p) => list([
-                symbol("eref"),
-                self.format_type(p.resolve(self.db, self.cx)),
-            ]),
             TypeKind::Func(f) => {
                 let mut items = vec![
                     symbol("func"),
@@ -274,7 +270,6 @@ impl<'db> Formatter<'db> {
             InstrData::BoolOr(ins) => self.format_instr_binary("bool.or", ins),
             InstrData::BoolXor(ins) => self.format_instr_binary("bool.xor", ins),
             InstrData::BoolNot(ins) => self.format_instr_unary("bool.not", ins),
-            InstrData::LocalToERef(ins) => self.format_instr_unary("local_to_eref", ins),
             InstrData::InitStruct(ins) => {
                 let TypeKind::Struct(strukt) = ins.typ.data(self.db, self.cx) else {
                     panic!("init_struct requires struct type")
@@ -346,9 +341,8 @@ impl<'db> Formatter<'db> {
                 symbol("store"),
                 list([self.val_name(ins.val), self.val_name(ins.ref_)]),
             ]),
-            InstrData::MakeFieldERef(ins) => {
-                let (TypeKind::ERef(r) | TypeKind::MRef(r)) =
-                    func_data.vals[ins.src_ref].typ.data(self.db, self.cx)
+            InstrData::MakeFieldMRef(ins) => {
+                let TypeKind::MRef(r) = func_data.vals[ins.src_ref].typ.data(self.db, self.cx)
                 else {
                     panic!("not a ref type");
                 };
@@ -357,7 +351,7 @@ impl<'db> Formatter<'db> {
                 };
 
                 list([
-                    symbol("struct.field_eref"),
+                    symbol("struct.field_mref"),
                     self.val_name(ins.dst_ref),
                     list([
                         self.val_name(ins.src_ref),
@@ -430,8 +424,8 @@ impl<'db> Formatter<'db> {
                 self.val_name(ins.dst_val),
                 list([self.val_name(ins.src_list), self.val_name(ins.src_index)]),
             ]),
-            InstrData::ListGetERef(ins) => list([
-                symbol("list.get_eref"),
+            InstrData::ListGetMRef(ins) => list([
+                symbol("list.get_mref"),
                 self.val_name(ins.dst_ref),
                 list([self.val_name(ins.src_list), self.val_name(ins.src_index)]),
             ]),

@@ -42,23 +42,13 @@ pub enum InstrData<'db> {
     BoolXor(Binary),
     BoolNot(Unary),
 
-    /// Promote a local value to an ERef.
-    /// This can be viewed as executing the following steps:
-    /// (1) Allocate a stack slot for the local
-    /// (2) Copy the value into the stack slot
-    /// (3) Yield a reference to the stack slot
-    ///
-    /// Since this logically creates a copy, the original
-    /// local is not referenced.
-    LocalToERef(Unary),
-
     InitStruct(InitStruct),
     GetField(GetField),
     SetField(SetField),
     Alloc(Alloc),
     Load(Load),
     Store(Store),
-    MakeFieldERef(MakeFieldERef),
+    MakeFieldMRef(MakeFieldMRef),
 
     MakeFunctionObject(MakeFunctionObject),
 
@@ -68,7 +58,7 @@ pub enum InstrData<'db> {
     ListTrunc(ListTrunc),
     ListLen(ListLen),
     ListGet(ListGet),
-    ListGetERef(ListGetERef),
+    ListGetMRef(ListGetMRef),
 }
 
 impl InstrData<'_> {
@@ -133,8 +123,7 @@ impl InstrData<'_> {
             | InstrData::IntToReal(ins)
             | InstrData::ByteToInt(ins)
             | InstrData::IntToByte(ins)
-            | InstrData::BoolNot(ins)
-            | InstrData::LocalToERef(ins) => {
+            | InstrData::BoolNot(ins) => {
                 ins.src = map(ins.src);
             }
             InstrData::Constant(_) => {}
@@ -178,7 +167,7 @@ impl InstrData<'_> {
                 ins.val = map(ins.val);
                 ins.ref_ = map(ins.ref_);
             }
-            InstrData::MakeFieldERef(ins) => {
+            InstrData::MakeFieldMRef(ins) => {
                 ins.src_ref = map(ins.src_ref);
             }
             InstrData::MakeFunctionObject(ins) => {
@@ -204,7 +193,7 @@ impl InstrData<'_> {
                 ins.src_list = map(ins.src_list);
                 ins.src_index = map(ins.src_index);
             }
-            InstrData::ListGetERef(ins) => {
+            InstrData::ListGetMRef(ins) => {
                 ins.src_list = map(ins.src_list);
                 ins.src_index = map(ins.src_index);
             }
@@ -233,8 +222,7 @@ impl InstrData<'_> {
             | InstrData::IntToReal(ins)
             | InstrData::ByteToInt(ins)
             | InstrData::IntToByte(ins)
-            | InstrData::BoolNot(ins)
-            | InstrData::LocalToERef(ins) => {
+            | InstrData::BoolNot(ins) => {
                 ins.dst = map(ins.dst);
             }
             InstrData::Constant(ins) => {
@@ -272,7 +260,7 @@ impl InstrData<'_> {
                 ins.dst = map(ins.dst);
             }
             InstrData::Store(_) => {}
-            InstrData::MakeFieldERef(ins) => {
+            InstrData::MakeFieldMRef(ins) => {
                 ins.dst_ref = map(ins.dst_ref);
             }
             InstrData::MakeFunctionObject(ins) => {
@@ -302,7 +290,7 @@ impl InstrData<'_> {
             InstrData::ListGet(ins) => {
                 ins.dst_val = map(ins.dst_val);
             }
-            InstrData::ListGetERef(ins) => {
+            InstrData::ListGetMRef(ins) => {
                 ins.dst_ref = map(ins.dst_ref);
             }
         }
@@ -519,10 +507,10 @@ pub struct Store {
     pub val: Val,
 }
 
-/// Creates an ERef to a field of a struct,
+/// Creates an MRef to a field of a struct,
 /// given a reference to the struct.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
-pub struct MakeFieldERef {
+pub struct MakeFieldMRef {
     pub dst_ref: Val,
     pub src_ref: Val,
     pub field: Field,
@@ -579,9 +567,9 @@ pub struct ListGet {
     pub src_index: Val,
 }
 
-/// Create an ERef to a value inside a list.
+/// Create an MRef to a value inside a list.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
-pub struct ListGetERef {
+pub struct ListGetMRef {
     pub dst_ref: Val,
     pub src_list: Val,
     pub src_index: Val,

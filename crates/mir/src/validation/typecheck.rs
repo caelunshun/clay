@@ -132,10 +132,6 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 self.verify_type_data_matches(ins.src, &[TypeKind::Prim(PrimType::Bool)])?;
                 self.verify_type_data_matches(ins.dst, &[TypeKind::Prim(PrimType::Bool)])?;
             }
-            InstrData::LocalToERef(ins) => {
-                let pointee_type = self.type_of(ins.src);
-                self.verify_type_data_matches(ins.dst, &[TypeKind::ERef(pointee_type)])?;
-            }
             InstrData::InitStruct(ins) => {
                 let TypeKind::Struct(struct_data) = self.type_data_of(ins.dst) else {
                     return Err(ValidationError::new("expected struct type"));
@@ -175,22 +171,16 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 self.verify_type_equals(ins.dst, pointee)?;
             }
             InstrData::Store(ins) => {
-                self.verify_type_data_matches(
-                    ins.ref_,
-                    &[
-                        TypeKind::MRef(self.type_of(ins.val)),
-                        TypeKind::ERef(self.type_of(ins.val)),
-                    ],
-                )?;
+                self.verify_type_data_matches(ins.ref_, &[TypeKind::MRef(self.type_of(ins.val))])?;
             }
-            InstrData::MakeFieldERef(ins) => {
+            InstrData::MakeFieldMRef(ins) => {
                 let pointee = self.expect_any_ref(ins.src_ref)?;
                 let struct_data = match pointee.data(self.db, self.cx) {
                     TypeKind::Struct(s) => s,
                     _ => return Err(ValidationError::new("expected reference to struct")),
                 };
                 let field = &struct_data.fields[ins.field];
-                self.verify_type_data_matches(ins.dst_ref, &[TypeKind::ERef(field.typ)])?;
+                self.verify_type_data_matches(ins.dst_ref, &[TypeKind::MRef(field.typ)])?;
             }
             InstrData::MakeFunctionObject(ins) => {
                 let func_object_data = ins.func.data(self.db, self.cx);
@@ -262,10 +252,10 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 self.verify_type_data_matches(ins.src_index, &[TypeKind::Prim(PrimType::Int)])?;
                 self.verify_type_equals(ins.dst_val, element_type)?;
             }
-            InstrData::ListGetERef(ins) => {
+            InstrData::ListGetMRef(ins) => {
                 let element_type = self.expect_list_or_list_ref(ins.src_list)?;
                 self.verify_type_data_matches(ins.src_index, &[TypeKind::Prim(PrimType::Int)])?;
-                self.verify_type_data_matches(ins.dst_ref, &[TypeKind::ERef(element_type)])?;
+                self.verify_type_data_matches(ins.dst_ref, &[TypeKind::MRef(element_type)])?;
             }
         }
         Ok(())
@@ -399,7 +389,6 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
     fn expect_any_ref(&self, val: Val) -> Result<TypeRef, ValidationError> {
         match self.type_data_of(val) {
             TypeKind::MRef(t) => Ok(*t),
-            TypeKind::ERef(t) => Ok(*t),
             _ => Err(ValidationError::new("expected mref or eref")),
         }
     }
@@ -407,19 +396,12 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
     fn expect_list_or_list_ref(&self, val: Val) -> Result<TypeRef, ValidationError> {
         match self.type_data_of(val) {
             TypeKind::List(t) => Ok(*t),
-            TypeKind::ERef(l) | TypeKind::MRef(l)
-                if let TypeKind::List(t) = l.data(self.db, self.cx) =>
-            {
-                Ok(*t)
-            }
+            TypeKind::MRef(l) if let TypeKind::List(t) = l.data(self.db, self.cx) => Ok(*t),
             _ => Err(ValidationError::new("expected list or reference to list")),
         }
     }
 
     fn is_ref(&self, t: TypeRef) -> bool {
-        matches!(
-            t.data(self.db, self.cx),
-            TypeKind::MRef(_) | TypeKind::ERef(_)
-        )
+        matches!(t.data(self.db, self.cx), TypeKind::MRef(_))
     }
 }

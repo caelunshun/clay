@@ -379,17 +379,11 @@ struct TypeDataWrapper<'db> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub enum TypeKind {
     Prim(PrimType),
-    /// Reference to an object managed by the garbage collector.
+    /// Reference to an object managed by the garbage collector,
+    /// or to a field of an object managed by the garbage collector,
+    /// or to an element of a list.
     /// It has indefinite lifetime.
     MRef(TypeRef),
-    /// Ephemeral reference to one of:
-    /// 1. An object managed by the garbage collector.
-    /// 2. A field of a struct anywhere in memory.
-    /// 3. A local that has been promoted to a reference.
-    ///
-    /// Its lifetime is constrained. ERefs cannot be stored
-    /// in struct fields or globals.
-    ERef(TypeRef),
     Func(FuncTypeData),
     Struct(StructTypeData),
     /// Dynamically resized array.
@@ -402,7 +396,7 @@ impl TypeKind {
     pub fn visit_used_types(&self, visit: &mut impl FnMut(TypeRef)) {
         match self {
             TypeKind::Prim(_) => {}
-            TypeKind::MRef(t) | TypeKind::ERef(t) => {
+            TypeKind::MRef(t) => {
                 visit(*t);
             }
             TypeKind::Func(func) => {
@@ -427,7 +421,6 @@ impl TypeKind {
         match self {
             TypeKind::Prim(_) => self,
             TypeKind::MRef(t) => TypeKind::MRef(map(t)),
-            TypeKind::ERef(t) => TypeKind::ERef(map(t)),
             TypeKind::Func(f) => TypeKind::Func(FuncTypeData {
                 param_types: f.param_types.into_iter().map(&mut map).collect(),
                 return_type: map(f.return_type),

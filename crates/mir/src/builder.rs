@@ -367,16 +367,6 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         self.set_val_type(dst, self.cx.bool_type_ref());
     }
 
-    pub fn local_to_eref(mut self, dst: Val, src: Val) {
-        self.instr(InstrData::LocalToERef(instr::Unary { dst, src }));
-        let typ = TypeRef::create(
-            self.db,
-            TypeKind::ERef(self.val_types[src].unwrap()),
-            self.cx,
-        );
-        self.set_val_type(dst, typ);
-    }
-
     pub fn init_struct(
         mut self,
         dst: Val,
@@ -431,7 +421,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
     pub fn load(mut self, dst: Val, src_ref: Val) {
         self.instr(InstrData::Load(instr::Load { dst, src_ref }));
 
-        let (TypeKind::MRef(t) | TypeKind::ERef(t)) = self.val_types[src_ref]
+        let TypeKind::MRef(t) = self.val_types[src_ref]
             .unwrap()
             .resolve_in_builder(self.cx)
             .data(self.db)
@@ -446,8 +436,8 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         // no set_val_type since no destination operands
     }
 
-    pub fn make_field_eref(mut self, dst: Val, src: Val, field: Field) {
-        self.instr(InstrData::MakeFieldERef(instr::MakeFieldERef {
+    pub fn make_field_mref(mut self, dst: Val, src: Val, field: Field) {
+        self.instr(InstrData::MakeFieldMRef(instr::MakeFieldMRef {
             dst_ref: dst,
             src_ref: src,
             field,
@@ -460,7 +450,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         else {
             panic!("not a struct")
         };
-        let typ = TypeRef::create(self.db, TypeKind::ERef(strukt.fields[field].typ), self.cx);
+        let typ = TypeRef::create(self.db, TypeKind::MRef(strukt.fields[field].typ), self.cx);
         self.set_val_type(dst, typ);
     }
 
@@ -561,15 +551,15 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         );
     }
 
-    pub fn list_get_eref(mut self, dst: Val, src_list: Val, src_index: Val) {
-        self.instr(InstrData::ListGetERef(instr::ListGetERef {
+    pub fn list_get_mref(mut self, dst: Val, src_list: Val, src_index: Val) {
+        self.instr(InstrData::ListGetMRef(instr::ListGetMRef {
             dst_ref: dst,
             src_list,
             src_index,
         }));
         let typ = TypeRef::create(
             self.db,
-            TypeKind::ERef(self.get_list_element_type(self.val_types[src_list].unwrap())),
+            TypeKind::MRef(self.get_list_element_type(self.val_types[src_list].unwrap())),
             self.cx,
         );
         self.set_val_type(dst, typ);
@@ -578,12 +568,10 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
     fn get_list_element_type(&self, t: TypeRef) -> TypeRef {
         match t.resolve_in_builder(self.cx).data(self.db) {
             TypeKind::List(el) => *el,
-            TypeKind::MRef(l) | TypeKind::ERef(l) => {
-                match l.resolve_in_builder(self.cx).data(self.db) {
-                    TypeKind::List(el) => *el,
-                    _ => panic!("not a list"),
-                }
-            }
+            TypeKind::MRef(l) => match l.resolve_in_builder(self.cx).data(self.db) {
+                TypeKind::List(el) => *el,
+                _ => panic!("not a list"),
+            },
             _ => panic!("not a list"),
         }
     }
