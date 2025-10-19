@@ -9,7 +9,7 @@ use crate::{
 };
 use SExprRef::*;
 use bumpalo::Bump;
-use compact_str::ToCompactString;
+use compact_str::{CompactString, ToCompactString};
 use cranelift_entity::PrimaryMap;
 use fir_core::sexpr::{SExpr, SExprRef};
 use hashbrown::HashMap;
@@ -107,7 +107,7 @@ impl<'a, 'db> Parser<'a, 'db> {
         for item in items {
             match item {
                 List([Symbol("type"), Symbol(type_name), type_data]) => {
-                    let type_ref = self.parse_type(type_data)?;
+                    let type_ref = self.parse_named_type(type_data, Some(*type_name))?;
                     self.cx.bind_type(
                         self.db,
                         self.types[type_name],
@@ -120,7 +120,11 @@ impl<'a, 'db> Parser<'a, 'db> {
         Ok(())
     }
 
-    fn parse_type(&mut self, expr: &SExprRef<'a>) -> Result<TypeRef, ParseError> {
+    fn parse_named_type(
+        &mut self,
+        expr: &SExprRef<'a>,
+        name: Option<&str>,
+    ) -> Result<TypeRef, ParseError> {
         Ok(match expr {
             Symbol(x) if let Some(type_ref) = self.types.get(x) => *type_ref,
             Symbol("int") => self
@@ -190,11 +194,18 @@ impl<'a, 'db> Parser<'a, 'db> {
 
                 self.cx.get_or_create_type_ref_with_data(
                     self.db,
-                    TypeKind::Struct(StructTypeData { fields }),
+                    TypeKind::Struct(StructTypeData {
+                        fields,
+                        name: name.map(CompactString::from),
+                    }),
                 )
             }
             _ => return Err(ParseError::new(format!("invalid type {expr:?}"))),
         })
+    }
+
+    fn parse_type(&mut self, expr: &SExprRef<'a>) -> Result<TypeRef, ParseError> {
+        self.parse_named_type(expr, None)
     }
 
     fn deduplicate_types(&mut self) {

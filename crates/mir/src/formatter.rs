@@ -3,7 +3,7 @@ use crate::{
     instr::CompareMode,
     module::{BasicBlock, ConstantData, Context, Field, FuncData},
 };
-use compact_str::format_compact;
+use compact_str::{CompactString, format_compact};
 use cranelift_entity::EntityRef;
 use fir_core::sexpr::{SExpr, float, int, list, string, symbol};
 use hashbrown::HashMap;
@@ -47,13 +47,18 @@ impl<'db> Formatter<'db> {
                 self.format_type(*typ)
             } else {
                 // Reference a type definition for brevity
-                let name = symbol(format_compact!("t{}", self.next_type_index));
-                self.next_type_index += 1;
-                items.push(list([
-                    symbol("type"),
-                    name.clone(),
-                    list([self.format_type(*typ)]),
-                ]));
+                let name = typ
+                    .data(self.db)
+                    .name()
+                    .map(CompactString::from)
+                    .unwrap_or_else(|| {
+                        let name = format_compact!("t{}", self.next_type_index);
+                        self.next_type_index += 1;
+                        name
+                    });
+                let name = symbol(name);
+
+                items.push(list([symbol("type"), name.clone(), self.format_type(*typ)]));
                 name
             };
             self.type_names.insert(*typ, type_name);
@@ -67,6 +72,10 @@ impl<'db> Formatter<'db> {
     }
 
     fn format_type(&self, typ: Type<'db>) -> SExpr {
+        if let Some(existing_name) = self.type_names.get(&typ) {
+            return existing_name.clone();
+        }
+
         match typ.data(self.db) {
             TypeKind::Prim(p) => match *p {
                 PrimType::Int => symbol("int"),

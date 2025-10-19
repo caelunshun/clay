@@ -391,6 +391,13 @@ pub enum TypeKind {
 }
 
 impl TypeKind {
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            TypeKind::Struct(s) => s.name.as_deref(),
+            _ => None,
+        }
+    }
+
     ///  Visits any types referenced / depended on by
     /// this type. Is not recursive.
     pub fn visit_used_types(&self, visit: &mut impl FnMut(TypeRef)) {
@@ -426,6 +433,7 @@ impl TypeKind {
                 return_type: map(f.return_type),
             }),
             TypeKind::Struct(s) => TypeKind::Struct(StructTypeData {
+                name: s.name,
                 fields: s
                     .fields
                     .into_iter()
@@ -468,6 +476,7 @@ pub enum PrimType {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct StructTypeData {
+    pub name: Option<CompactString>,
     pub fields: PrimaryMap<Field, FieldData>,
 }
 
