@@ -1,10 +1,10 @@
 use crate::{
+    InstrData, TypeKind, Val,
     instr::{self, CompareMode},
     module::{
         BasicBlock, BasicBlockData, Constant, ContextBuilder, Field, FuncData, FuncHeader, FuncRef,
         FuncTypeData, TypeRef, ValData,
     },
-    InstrData, TypeKind, Val,
 };
 use compact_str::CompactString;
 use cranelift_entity::{EntityList, ListPool, PrimaryMap};

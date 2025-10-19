@@ -1,12 +1,13 @@
 use crate::{
+    Func, PrimType, TypeKind, Val,
     builder::FuncBuilder,
     instr::CompareMode,
     module::{
         BasicBlock, Constant, ConstantData, Context, ContextBuilder, FieldData, FuncHeader,
         FuncRef, FuncTypeData, StructTypeData, TypeRef,
     },
-    Func, PrimType, TypeKind, Val,
 };
+use SExprRef::*;
 use bumpalo::Bump;
 use compact_str::ToCompactString;
 use cranelift_entity::PrimaryMap;
@@ -14,7 +15,6 @@ use fir_core::sexpr::{SExpr, SExprRef};
 use hashbrown::HashMap;
 use salsa::Database;
 use std::fmt::Display;
-use SExprRef::*;
 
 #[derive(Debug, Clone)]
 pub struct ParseError(pub std::string::String);
@@ -409,9 +409,15 @@ impl<'a, 'db> Parser<'a, 'db> {
                     .jump_with_args(block, args)
             }
             "branch" => {
-                let [List(
-                    [Symbol(condition), List([Symbol("true"), Symbol(block_true), List(args_true)]), List([Symbol("false"), Symbol(block_false), List(args_false)])],
-                )] = args
+                let [
+                    List(
+                        [
+                            Symbol(condition),
+                            List([Symbol("true"), Symbol(block_true), List(args_true)]),
+                            List([Symbol("false"), Symbol(block_false), List(args_false)]),
+                        ],
+                    ),
+                ] = args
                 else {
                     return Err(ParseError::new("invalid instr arguments"));
                 };
@@ -619,8 +625,10 @@ impl<'a, 'db> Parser<'a, 'db> {
                     .get_field(dst, src, field.0);
             }
             "struct.set" => {
-                let [Symbol(dst), List([Symbol(src), Symbol(field_name), Symbol(field_val)])] =
-                    args
+                let [
+                    Symbol(dst),
+                    List([Symbol(src), Symbol(field_name), Symbol(field_val)]),
+                ] = args
                 else {
                     return Err(ParseError::new("invalid instr arguments"));
                 };
@@ -813,7 +821,11 @@ impl<'a, 'db> FuncParserState<'a, 'db> {
         &mut self,
         args: &[SExprRef<'a>],
     ) -> Result<(Val, Val, Val, CompareMode), ParseError> {
-        let [Symbol(dst), List([Symbol(mode), Symbol(src1), Symbol(src2)])] = args else {
+        let [
+            Symbol(dst),
+            List([Symbol(mode), Symbol(src1), Symbol(src2)]),
+        ] = args
+        else {
             return Err(ParseError::new("invalid instruction arguments"));
         };
 

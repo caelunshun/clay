@@ -1,7 +1,7 @@
 use crate::{
+    InstrData, PrimType, TypeKind, Val,
     module::{BasicBlock, Context, FuncData, FuncTypeData, StructTypeData, TypeRef},
     validation::ValidationError,
-    InstrData, PrimType, TypeKind, Val,
 };
 use cranelift_entity::EntityList;
 use fir_core::Db;
@@ -214,7 +214,9 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 self.verify_type_equals(ins.src_element, element_type)?;
                 if self.is_ref(self.type_of(ins.src_list)) {
                     if ins.dst_list.is_some() {
-                        return Err(ValidationError::new("for list modifying instructions operating on a reference, dst_list must be None"));
+                        return Err(ValidationError::new(
+                            "for list modifying instructions operating on a reference, dst_list must be None",
+                        ));
                     }
                 } else {
                     let dst_list = ins.dst_list.ok_or_else(|| ValidationError::new("for list modifying instructions operating on values, dst_list must be Some"))?;
@@ -227,7 +229,9 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 let element_type = self.expect_list_or_list_ref(ins.src_list)?;
                 if self.is_ref(self.type_of(ins.src_list)) {
                     if ins.dst_list.is_some() {
-                        return Err(ValidationError::new("for list modifying instructions operating on a reference, dst_list must be None"));
+                        return Err(ValidationError::new(
+                            "for list modifying instructions operating on a reference, dst_list must be None",
+                        ));
                     }
                 } else {
                     let dst_list = ins.dst_list.ok_or_else(|| ValidationError::new("for list modifying instructions operating on values, dst_list must be Some"))?;
@@ -240,7 +244,9 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 let element_type = self.expect_list_or_list_ref(ins.src_list)?;
                 if self.is_ref(self.type_of(ins.src_list)) {
                     if ins.dst_list.is_some() {
-                        return Err(ValidationError::new("for list modifying instructions operating on a reference, dst_list must be None"));
+                        return Err(ValidationError::new(
+                            "for list modifying instructions operating on a reference, dst_list must be None",
+                        ));
                     }
                 } else {
                     let dst_list = ins.dst_list.ok_or_else(|| ValidationError::new("for list modifying instructions operating on values, dst_list must be Some"))?;

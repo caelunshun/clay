@@ -1,7 +1,7 @@
 use crate::{
+    Val,
     module::{BasicBlock, FuncData},
     validation::ValidationError,
-    Val,
 };
 use cranelift_entity::{EntitySet, SecondaryMap};
 

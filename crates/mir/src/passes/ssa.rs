@@ -1,6 +1,6 @@
 use crate::{
-    module::{BasicBlock, BasicBlockData, FuncData},
     Val,
+    module::{BasicBlock, BasicBlockData, FuncData},
 };
 use cranelift_entity::{EntityList, ListPool, PrimaryMap, SecondaryMap};
 use fir_core::Db;

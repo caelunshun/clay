@@ -1,6 +1,6 @@
 use crate::{
-    module::{BasicBlock, Constant, Field, FuncRef, TypeRef},
     Val,
+    module::{BasicBlock, Constant, Field, FuncRef, TypeRef},
 };
 use cranelift_entity::{EntityList, ListPool};
 

@@ -1,12 +1,11 @@
 use crate::{
-    instr,
+    Func, InstrData, PrimType, Type, TypeKind, Val, instr,
     instr::CompareMode,
     module::{BasicBlock, ConstantData, Context, Field, FuncData},
-    Func, InstrData, PrimType, Type, TypeKind, Val,
 };
 use compact_str::format_compact;
 use cranelift_entity::EntityRef;
-use fir_core::sexpr::{float, int, list, string, symbol, SExpr};
+use fir_core::sexpr::{SExpr, float, int, list, string, symbol};
 use hashbrown::HashMap;
 use salsa::Database;
 

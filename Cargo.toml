@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/core", "crates/mir"]
+members = ["crates/core", "crates/mir", "crates/mir/filetests"]
 resolver = "3"
 
 [workspace.dependencies]
@@ -21,6 +21,9 @@ salsa = { git = "https://github.com/caelunshun/salsa", branch = "cranelift-entit
     "cranelift-entity",
 ] }
 bumpalo = "3"
+quote = "1"
+syn = "2"
+proc-macro2 = "1"
 
 fir-core = { path = "crates/core" }
 fir-mir = { path = "crates/mir" }
