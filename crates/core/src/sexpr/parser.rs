@@ -34,6 +34,18 @@ impl<'a> Parser<'a> {
 
     fn skip_ws(&mut self) {
         while let Some(c) = self.peek() {
+            if c == '/' && self.src[self.pos..].chars().nth(1) == Some('/') {
+                self.next();
+                self.next();
+                while let Some(c) = self.peek() {
+                    if c == '\n' {
+                        break;
+                    }
+                    self.next();
+                }
+                continue;
+            }
+
             if c.is_whitespace() {
                 self.next();
             } else {
@@ -97,6 +109,8 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_atom(&mut self) -> Option<SExpr> {
+        self.skip_ws();
+
         let start = self.pos;
         while let Some(c) = self.peek() {
             if c.is_whitespace() || c == '(' || c == ')' {
@@ -127,7 +141,9 @@ mod tests {
 
     #[test]
     fn test_basic() {
-        let input = r#"(a 123 1.23 "str" (nested (1 2)))"#;
+        let input = r#"(a
+        // comment
+         123 1.23 "str" (nested (1 2)))"#;
         let parsed = parse_sexpr(input).unwrap();
         assert_eq!(
             parsed,
