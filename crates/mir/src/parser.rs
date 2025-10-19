@@ -350,6 +350,7 @@ impl<'a, 'db> Parser<'a, 'db> {
                     } else {
                         state.func_builder.create_block()
                     };
+                    state.func_builder.set_block_name(block, *block_name);
                     state.func_builder.switch_to_block(block);
                     state.blocks.insert(*block_name, block);
 
@@ -732,7 +733,7 @@ impl<'a, 'db> Parser<'a, 'db> {
                 state.func_builder.instr(self.cx).list_push(dst, src1, src2);
             }
             "list.ref.push" => {
-                let [Symbol(src1), Symbol(src2)] = args else {
+                let [List([Symbol(src1), Symbol(src2)])] = args else {
                     return Err(ParseError::new("invalid instr arguments"));
                 };
                 let src1 = state.get_val(src1)?;
@@ -747,7 +748,7 @@ impl<'a, 'db> Parser<'a, 'db> {
                     .list_remove(dst, src1, src2);
             }
             "list.ref.remove" => {
-                let [Symbol(src1), Symbol(src2)] = args else {
+                let [List([Symbol(src1), Symbol(src2)])] = args else {
                     return Err(ParseError::new("invalid instr arguments"));
                 };
                 let src1 = state.get_val(src1)?;
@@ -765,7 +766,7 @@ impl<'a, 'db> Parser<'a, 'db> {
                     .list_trunc(dst, src1, src2);
             }
             "list.ref.trunc" => {
-                let [Symbol(src1), Symbol(src2)] = args else {
+                let [List([Symbol(src1), Symbol(src2)])] = args else {
                     return Err(ParseError::new("invalid instr arguments"));
                 };
                 let src1 = state.get_val(src1)?;

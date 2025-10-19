@@ -106,6 +106,10 @@ impl<'db> FuncBuilder<'db> {
         self.func.basic_blocks.push(BasicBlockData::default())
     }
 
+    pub fn set_block_name(&mut self, bb: BasicBlock, name: impl Into<CompactString>) {
+        self.func.basic_blocks[bb].name = Some(name.into());
+    }
+
     pub fn entry_block(&self) -> BasicBlock {
         self.func.entry_block
     }

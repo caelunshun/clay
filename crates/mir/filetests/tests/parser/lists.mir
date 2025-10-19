@@ -1,0 +1,41 @@
+// @harness parser_roundtrip
+(mir
+    (func make_list
+        (return_type (mref (list int)))
+        (captures_type unit)
+        (entry block0)
+        (block block0
+            (param captures (mref unit))
+            (param el0 int)
+            (param el1 int)
+            (list.init l (int))
+            (list.push l (l el0))
+            (alloc l_ref (l))
+            (list.ref.push (l_ref el1))
+            (return (l_ref))))
+    (func sum_list
+        (return_type int)
+        (captures_type unit)
+        (entry block0)
+        (block block0
+            (param captures (mref unit))
+            (param l (mref (list int)))
+            (constant i (0))
+            (constant sum (0))
+            (list.len len (l)))
+        (block loop
+            (int.cmp done (>= i len))
+            (branch (done
+                (true exit ())
+                (false loop_body ()))))
+        (block loop_body
+            (list.get x (l i))
+            (list.get_mref x_ref (l i)) // test this works too
+            (int.add sum (sum x))
+            (constant one (1))
+            (int.add i (i one))
+            (jump (loop ())))
+        (block exit
+            (constant zero (0))
+            (list.ref.trunc (l zero))
+            (return (sum)))))
