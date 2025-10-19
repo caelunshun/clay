@@ -14,14 +14,15 @@ use cranelift_entity::PrimaryMap;
 use fir_core::sexpr::{SExpr, SExprRef};
 use hashbrown::HashMap;
 use salsa::Database;
-use std::fmt::Display;
+use std::{fmt::Display, panic::Location};
 
 #[derive(Debug, Clone)]
-pub struct ParseError(pub std::string::String);
+pub struct ParseError(pub std::string::String, pub &'static Location<'static>);
 
 impl ParseError {
+    #[track_caller]
     pub fn new(msg: impl Display) -> Self {
-        Self(msg.to_string())
+        Self(msg.to_string(), Location::caller())
     }
 }
 

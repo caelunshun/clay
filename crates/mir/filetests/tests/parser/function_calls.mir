@@ -1,0 +1,28 @@
+// @harness parser_roundtrip
+(mir
+    (func caller
+        (return_type int)
+        (captures_type unit)
+        (entry block0)
+        (block block0
+            (param captures (mref unit))
+            (param a int)
+            (param b int)
+            // Direct call on a
+            (call v0 (callee (a)))
+            // Indirect call on b
+            (func.init f (callee captures))
+            (call_indirect v1 (f (b)))
+            (int.add v2 (v0 v1))
+            (copy v3 (v2))
+            (return (v3))))
+    (func callee
+        (return_type int)
+        (captures_type unit)
+        (entry block0)
+        (block block0
+            (param captures (mref unit))
+            (param x int)
+            (constant v0 (2))
+            (int.mul v1 (x v0))
+            (return (v1)))))

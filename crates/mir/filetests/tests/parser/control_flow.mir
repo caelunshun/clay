@@ -1,0 +1,20 @@
+// @harness parser_roundtrip
+(mir
+    (func control_flow
+        (return_type int)
+        (captures_type unit)
+        (entry block0)
+        (block block0
+            (param captures (mref unit))
+            (param v0 int)
+            (constant t0 (10))
+            (int.cmp cond (< v0 t0))
+            (branch
+                (cond
+                    (true block1 ())
+                    (false block2 ()))))
+        (block block1
+            (jump (block2 ())))
+        (block block2
+            (int.add v1 (v0 t0))
+            (return (v1)))))
