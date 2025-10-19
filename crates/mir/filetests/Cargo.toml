@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dev-dependencies]
+salsa.workspace = true
 fir-mir.workspace = true
+pretty_assertions.workspace = true
 
 [build-dependencies]
 quote.workspace = true

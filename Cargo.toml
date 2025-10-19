@@ -24,6 +24,7 @@ bumpalo = "3"
 quote = "1"
 syn = "2"
 proc-macro2 = "1"
+pretty_assertions = "1"
 
 fir-core = { path = "crates/core" }
 fir-mir = { path = "crates/mir" }
