@@ -1,6 +1,7 @@
 // @harness parser_roundtrip
 // @harness typecheck_validation_succeeds
 // @harness value_initialization_validation_succeeds
+// @harness cfg_integrity_validation_succeeds
 (mir
     (func make_list
         (return_type (mref (list int)))
@@ -24,7 +25,8 @@
             (param l (mref (list int)))
             (constant i (0))
             (constant sum (0))
-            (list.len len (l)))
+            (list.len len (l))
+            (jump (loop ())))
         (block loop
             (int.cmp done (>= i len))
             (branch (done
