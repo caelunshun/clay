@@ -36,7 +36,7 @@ mod harnesses {
     }
 
     /// Verifies that typecheck validation passes on the given module.
-    pub fn typecheck_validation_passes(input_str: &'static str) {
+    pub fn typecheck_validation_succeeds(input_str: &'static str) {
         with_parsed_context(input_str, |db, cx| {
             for func in cx.data(db).funcs.values() {
                 validation::typecheck::verify_instr_types(db, cx, func.data(db)).unwrap_or_else(
@@ -47,6 +47,21 @@ mod harnesses {
                         )
                     },
                 );
+            }
+        });
+    }
+
+    /// Verifies that value_initialization validation passes on the given module.
+    pub fn value_initialization_validation_succeeds(input_str: &'static str) {
+        with_parsed_context(input_str, |db, cx| {
+            for func in cx.data(db).funcs.values() {
+                validation::value_initialization::verify_value_initialization(func.data(db))
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "failed value initialization check for func '{}': {e:?}",
+                            func.data(db).header.name
+                        )
+                    });
             }
         });
     }

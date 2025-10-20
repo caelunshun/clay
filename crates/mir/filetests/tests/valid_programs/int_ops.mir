@@ -1,5 +1,6 @@
 // @harness parser_roundtrip
-// @harness typecheck_validation_passes
+// @harness typecheck_validation_succeeds
+// @harness value_initialization_validation_succeeds
 (mir
     (func int_ops
         (return_type bool)
