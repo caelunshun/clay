@@ -55,7 +55,7 @@ mod harnesses {
     pub fn typecheck_validation_fails(input_str: &'static str) {
         with_parsed_context(input_str, |db, cx| {
             for func in cx.data(db).funcs.values() {
-                if !validation::typecheck::verify_instr_types(db, cx, func.data(db)).is_err() {
+                if validation::typecheck::verify_instr_types(db, cx, func.data(db)).is_ok() {
                     panic!(
                         "typecheck validation succeeded on function '{}', but was not expected to succeed",
                         func.data(db).header.name
@@ -100,7 +100,7 @@ mod harnesses {
     pub fn cfg_integrity_validation_fails(input_str: &'static str) {
         with_parsed_context(input_str, |db, cx| {
             for func in cx.data(db).funcs.values() {
-                if !validation::cfg_integrity::verify_cfg_integrity(func.data(db)).is_err() {
+                if validation::cfg_integrity::verify_cfg_integrity(func.data(db)).is_ok() {
                     panic!(
                         "cfg_integrity check succeeded for function '{}', but was expected to fail",
                         func.data(db).header.name
