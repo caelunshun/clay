@@ -1,0 +1,12 @@
+// @harness typecheck_validation_succeeds
+// @harness ssa_validation_fails
+(mir
+    (func multiple_assignments
+        (return_type int)
+        (captures_type unit)
+        (entry block0)
+        (block block0
+            (param captures (mref unit))
+            (param v0 int)
+            (int.add v0 (v0 v0))
+            (return (v0)))))

@@ -57,7 +57,7 @@ mod harnesses {
             for func in cx.data(db).funcs.values() {
                 if validation::typecheck::verify_instr_types(db, cx, func.data(db)).is_ok() {
                     panic!(
-                        "typecheck validation succeeded on function '{}', but was not expected to succeed",
+                        "typecheck validation succeeded on function '{}', but was expected to fail",
                         func.data(db).header.name
                     );
                 }
@@ -103,6 +103,34 @@ mod harnesses {
                 if validation::cfg_integrity::verify_cfg_integrity(func.data(db)).is_ok() {
                     panic!(
                         "cfg_integrity check succeeded for function '{}', but was expected to fail",
+                        func.data(db).header.name
+                    );
+                }
+            }
+        });
+    }
+
+    /// Verifies that SSA validation passes on the given module.
+    pub fn ssa_validation_succeeds(input_str: &'static str) {
+        with_parsed_context(input_str, |db, cx| {
+            for func in cx.data(db).funcs.values() {
+                validation::ssa::verify_ssa(func.data(db)).unwrap_or_else(|e| {
+                    panic!(
+                        "SSA validation failed for function '{}': {e:?}",
+                        func.data(db).header.name
+                    );
+                });
+            }
+        });
+    }
+
+    /// Verifies that SSA validation fails on the given module.
+    pub fn ssa_validation_fails(input_str: &'static str) {
+        with_parsed_context(input_str, |db, cx| {
+            for func in cx.data(db).funcs.values() {
+                if validation::ssa::verify_ssa(func.data(db)).is_ok() {
+                    panic!(
+                        "SSA validation succeeded for function '{}', but was expected to fail",
                         func.data(db).header.name
                     );
                 }

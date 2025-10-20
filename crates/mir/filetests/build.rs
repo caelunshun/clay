@@ -45,23 +45,24 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 panic!("no @harness statements found in filetest");
             }
 
-            let expected_path = entry.path().with_file_name(format!("{file_name}.expected"));
-            let expected_code = if expected_path.exists() {
-                let s = fs::read_to_string(expected_path)?;
-                quote! {
-                    , #s
-                }
-            } else {
-                quote! {}
-            };
-
-            for harness in harnesses {
+            for (harness, has_expected) in harnesses {
                 let module = modules
                     .entry(harness.clone())
                     .or_default()
                     .entry(dir_name.clone())
                     .or_default();
                 let harness = format_ident!("{harness}");
+
+                let expected_path = entry.path().with_file_name(format!("{file_name}.expected"));
+                let expected_code = if has_expected {
+                    let s = fs::read_to_string(expected_path)?;
+                    quote! {
+                        , #s
+                    }
+                } else {
+                    quote! {}
+                };
+
                 module.push(quote! {
                     #[test]
                     fn #test_case_ident() {
@@ -99,7 +100,7 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     Ok(())
 }
 
-fn list_harnesses(mut file_contents: &str) -> Vec<String> {
+fn list_harnesses(mut file_contents: &str) -> Vec<(String, bool)> {
     let pattern = "// @harness";
     let mut harnesses = Vec::new();
     while let Some(pos) = file_contents.find(pattern) {
@@ -107,8 +108,12 @@ fn list_harnesses(mut file_contents: &str) -> Vec<String> {
             .find('\n')
             .unwrap_or(file_contents.len() - pos)
             + pos;
-        let harness = &file_contents[pos + pattern.len()..new_line].trim();
-        harnesses.push(harness.to_string());
+        let mut harness = file_contents[pos + pattern.len()..new_line].trim();
+        let has_expected = harness.starts_with("(expected)");
+        if has_expected {
+            harness = harness.strip_prefix("(expected)").unwrap();
+        }
+        harnesses.push((harness.to_string(), has_expected));
         file_contents = &file_contents[new_line..];
     }
     harnesses

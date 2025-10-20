@@ -2,6 +2,12 @@
 // @harness typecheck_validation_succeeds
 // @harness value_initialization_validation_succeeds
 // @harness cfg_integrity_validation_succeeds
+// @harness ssa_validation_fails
+
+// Note: SSA should fail because
+// values are not passed through block
+// parameters.
+
 (mir
     (func control_flow
         (return_type int)
