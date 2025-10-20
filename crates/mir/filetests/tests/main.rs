@@ -51,6 +51,20 @@ mod harnesses {
         });
     }
 
+    /// Verifies that typecheck validation does not pass on the given module.
+    pub fn typecheck_validation_fails(input_str: &'static str) {
+        with_parsed_context(input_str, |db, cx| {
+            for func in cx.data(db).funcs.values() {
+                if !validation::typecheck::verify_instr_types(db, cx, func.data(db)).is_err() {
+                    panic!(
+                        "typecheck validation succeeded on function '{}', but was not expected to succeed",
+                        func.data(db).header.name
+                    );
+                }
+            }
+        });
+    }
+
     /// Verifies that value_initialization validation passes on the given module.
     pub fn value_initialization_validation_succeeds(input_str: &'static str) {
         with_parsed_context(input_str, |db, cx| {

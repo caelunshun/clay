@@ -1,0 +1,10 @@
+// @harness parser_roundtrip
+// @harness typecheck_validation_fails
+(mir
+    (func foo
+        (return_type int)
+        (captures_type unit)
+        (entry block0)
+        (block block0
+            (param captures (mref unit))
+            (return (captures)))))
