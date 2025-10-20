@@ -14,35 +14,41 @@ mod harnesses {
         parse_mir(db, input.src(db)).expect("failed to parse")
     }
 
+    fn with_parsed_context(
+        input_str: &'static str,
+        callback: impl for<'db> FnOnce(&'db dyn Database, Context<'db>),
+    ) {
+        let db = DatabaseImpl::new();
+        let input = Input::new(&db, input_str);
+        let cx = parse(&db, input);
+        callback(&db, cx);
+    }
+
     /// Verifies that parsing a module succeeds, and that
     /// roundtripping produces the expected output.
     pub fn parser_roundtrip(input_str: &'static str) {
-        let db = DatabaseImpl::new();
-        let input = Input::new(&db, input_str);
-        let input = parse(&db, input);
+        with_parsed_context(input_str, |db, cx| {
+            let roundtripped = format_context(db, cx).to_string();
+            let expected_normalized = SExpr::parse(input_str).unwrap().to_string();
 
-        let roundtripped = format_context(&db, input).to_string();
-        let expected_normalized = SExpr::parse(input_str).unwrap().to_string();
-
-        assert_eq!(roundtripped, expected_normalized);
+            assert_eq!(roundtripped, expected_normalized);
+        });
     }
 
     /// Verifies that typecheck validation passes on the given module.
     pub fn typecheck_validation_passes(input_str: &'static str) {
-        let db = DatabaseImpl::new();
-        let input = Input::new(&db, input_str);
-        let cx = parse(&db, input);
-
-        for func in cx.data(&db).funcs.values() {
-            validation::typecheck::verify_instr_types(&db, cx, func.data(&db)).unwrap_or_else(
-                |e| {
-                    panic!(
-                        "failed typecheck for func '{}': {e:?}",
-                        func.data(&db).header.name
-                    )
-                },
-            );
-        }
+        with_parsed_context(input_str, |db, cx| {
+            for func in cx.data(db).funcs.values() {
+                validation::typecheck::verify_instr_types(db, cx, func.data(db)).unwrap_or_else(
+                    |e| {
+                        panic!(
+                            "failed typecheck for func '{}': {e:?}",
+                            func.data(db).header.name
+                        )
+                    },
+                );
+            }
+        });
     }
 }
 
