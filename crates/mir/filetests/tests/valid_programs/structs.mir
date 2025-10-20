@@ -32,9 +32,10 @@
             (param captures (mref unit))
             (param x real)
             (param y real)
-            (struct.init t0 (Point
-                (field x x)
-                (field y y)))
+            (struct.init t0 
+                (Point
+                    (field x x)
+                    (field y y)))
             (return (t0))))
     (func main
         (return_type real)

@@ -11,13 +11,14 @@
 //! as the "expected" output to the harness function for
 //! the test case having the file name minus ".expected."
 
+use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use std::{env, error::Error, fs};
+use std::{collections::HashMap, env, error::Error, fs};
 
 fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     println!("cargo:rerun-if-changed=tests");
 
-    let mut code = Vec::new();
+    let mut modules = HashMap::<String, HashMap<String, Vec<TokenStream>>>::new();
 
     for entry in fs::read_dir("tests")? {
         let entry = entry?;
@@ -26,8 +27,6 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
 
         let dir_name = entry.file_name().to_str().unwrap().to_owned();
-
-        let mut tests = Vec::new();
 
         for entry in fs::read_dir(entry.path())? {
             let entry = entry?;
@@ -41,12 +40,10 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             let test_case_ident = format_ident!("{test_case_name}");
 
             let file_contents = fs::read_to_string(entry.path())?;
-            let harness_start = file_contents.find("// @harness").unwrap();
-            let harness_end = file_contents[harness_start..].find("\n").unwrap();
-            let harness = file_contents[harness_start + "// @harness".len()..]
-                [..harness_end - "// @harness".len()]
-                .trim();
-            let harness = format_ident!("{harness}");
+            let harnesses = list_harnesses(&file_contents);
+            if harnesses.is_empty() {
+                panic!("no @harness statements found in filetest");
+            }
 
             let expected_path = entry.path().with_file_name(format!("{file_name}.expected"));
             let expected_code = if expected_path.exists() {
@@ -58,18 +55,38 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 quote! {}
             };
 
-            tests.push(quote! {
-                #[test]
-                fn #test_case_ident() {
-                    super::harnesses::#harness(#file_contents #expected_code);
+            for harness in harnesses {
+                let module = modules
+                    .entry(harness.clone())
+                    .or_default()
+                    .entry(dir_name.clone())
+                    .or_default();
+                let harness = format_ident!("{harness}");
+                module.push(quote! {
+                    #[test]
+                    fn #test_case_ident() {
+                        super::super::harnesses::#harness(#file_contents #expected_code);
+                    }
+                });
+            }
+        }
+    }
+
+    let mut code = Vec::new();
+    for (supermodule, submodules) in modules {
+        let supermodule = format_ident!("{supermodule}");
+        let mut module_code = Vec::new();
+        for (submodule, tokens) in submodules {
+            let submodule = format_ident!("{submodule}");
+            module_code.push(quote! {
+                mod #submodule {
+                    #(#tokens)*
                 }
             });
         }
-
-        let module_name = format_ident!("{dir_name}");
         code.push(quote! {
-            mod #module_name {
-                #(#tests)*
+            mod #supermodule {
+                #(#module_code)*
             }
         });
     }
@@ -80,4 +97,18 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     fs::write(out_path, code.to_string().as_bytes())?;
 
     Ok(())
+}
+
+fn list_harnesses(mut file_contents: &str) -> Vec<String> {
+    let pattern = "// @harness";
+    let mut harnesses = Vec::new();
+    while let Some(pos) = file_contents.find(pattern) {
+        let new_line = file_contents[pos..]
+            .find('\n')
+            .unwrap_or(file_contents.len());
+        let harness = &file_contents[pos + pattern.len()..new_line].trim();
+        harnesses.push(harness.to_string());
+        file_contents = &file_contents[new_line..];
+    }
+    harnesses
 }
