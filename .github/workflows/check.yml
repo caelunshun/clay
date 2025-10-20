@@ -1,4 +1,4 @@
-name: Rust
+name: Check and test
 
 on:
   push:
@@ -9,13 +9,13 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
     - uses: actions/checkout@v4
     - name: Check formatting
-      run: cargo +nightly fmt --check
+      run: cargo fmt --check
     - name: Check clippy
-      run: cargo +nightly clippy --all-targets -- -D warnings
+      run: cargo clippy --all-targets -- -D warnings
     - name: Test
-      run: cargo +nightly test
+      run: cargo test
