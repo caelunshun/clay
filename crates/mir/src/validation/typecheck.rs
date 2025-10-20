@@ -4,11 +4,11 @@ use crate::{
     validation::ValidationError,
 };
 use cranelift_entity::EntityList;
-use fir_core::Db;
+use salsa::Database;
 
 /// Verifies that operands have the correct type for each instruction.
 pub fn verify_instr_types<'db>(
-    db: &'db Db,
+    db: &'db dyn Database,
     cx: Context<'db>,
     func: &FuncData,
 ) -> Result<(), ValidationError> {
@@ -26,7 +26,7 @@ pub fn verify_instr_types<'db>(
 struct InstrTypeVerifier<'a, 'db> {
     cx: Context<'db>,
     func: &'a FuncData<'db>,
-    db: &'db Db,
+    db: &'db dyn Database,
 }
 
 impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
@@ -150,7 +150,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 }
             }
             InstrData::GetField(ins) => {
-                let struct_data = self.expect_struct(ins.dst)?;
+                let struct_data = self.expect_struct(ins.src_struct)?;
                 let field = &struct_data.fields[ins.field];
                 self.verify_type_equals(ins.dst, field.typ)?;
             }
@@ -379,6 +379,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
         Ok(())
     }
 
+    #[track_caller]
     fn expect_struct(&self, val: Val) -> Result<&'db StructTypeData, ValidationError> {
         match self.type_data_of(val) {
             TypeKind::Struct(s) => Ok(s),
@@ -386,6 +387,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
         }
     }
 
+    #[track_caller]
     fn expect_any_ref(&self, val: Val) -> Result<TypeRef, ValidationError> {
         match self.type_data_of(val) {
             TypeKind::MRef(t) => Ok(*t),
@@ -393,6 +395,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
         }
     }
 
+    #[track_caller]
     fn expect_list_or_list_ref(&self, val: Val) -> Result<TypeRef, ValidationError> {
         match self.type_data_of(val) {
             TypeKind::List(t) => Ok(*t),

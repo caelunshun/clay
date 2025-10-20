@@ -105,7 +105,8 @@ fn list_harnesses(mut file_contents: &str) -> Vec<String> {
     while let Some(pos) = file_contents.find(pattern) {
         let new_line = file_contents[pos..]
             .find('\n')
-            .unwrap_or(file_contents.len());
+            .unwrap_or(file_contents.len() - pos)
+            + pos;
         let harness = &file_contents[pos + pattern.len()..new_line].trim();
         harnesses.push(harness.to_string());
         file_contents = &file_contents[new_line..];

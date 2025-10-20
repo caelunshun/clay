@@ -1,4 +1,5 @@
 // @harness parser_roundtrip
+// @harness typecheck_validation_passes
 (mir
     (func make_list
         (return_type (mref (list int)))

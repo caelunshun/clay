@@ -1,4 +1,5 @@
 // @harness parser_roundtrip
+// @harness typecheck_validation_passes
 (mir
     (type Point
         (struct

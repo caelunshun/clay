@@ -1,4 +1,5 @@
 // @harness parser_roundtrip
+// @harness typecheck_validation_passes
 (mir
     (func control_flow
         (return_type int)
