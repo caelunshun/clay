@@ -95,6 +95,20 @@ mod harnesses {
             }
         });
     }
+
+    /// Verifies that cfg_integrity_validation fails on the given module.
+    pub fn cfg_integrity_validation_fails(input_str: &'static str) {
+        with_parsed_context(input_str, |db, cx| {
+            for func in cx.data(db).funcs.values() {
+                if !validation::cfg_integrity::verify_cfg_integrity(func.data(db)).is_err() {
+                    panic!(
+                        "cfg_integrity check succeeded for function '{}', but was expected to fail",
+                        func.data(db).header.name
+                    );
+                }
+            }
+        });
+    }
 }
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
