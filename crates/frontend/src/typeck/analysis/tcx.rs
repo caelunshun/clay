@@ -1,9 +1,13 @@
 use crate::{
     base::{
         Session,
+        analysis::Memo,
         arena::{ObjInterner, ObjListInterner},
     },
-    typeck::syntax::{Instance, InstanceInner, Ty, TyKind, TyList},
+    typeck::{
+        analysis::EquateResult,
+        syntax::{GenericInstance, Ty, TyKind, TyList, TyOrRe, TyOrReList, Variance},
+    },
     utils::hash::FxHashSet,
 };
 use std::{cell::RefCell, ops::Deref, rc::Rc};
@@ -16,10 +20,8 @@ pub struct TyCtxt {
 #[derive(Debug)]
 pub struct TyCtxtInner {
     pub session: Session,
-    pub ty_interner: ObjInterner<TyKind>,
-    pub ty_list_interner: ObjListInterner<Ty>,
-    pub instance_interner: ObjInterner<InstanceInner>,
     pub wf_state: RefCell<WfState>,
+    pub interners: Interners,
     pub queries: Queries,
 }
 
@@ -33,7 +35,19 @@ pub struct WfState {
 pub enum WfRequirement {}
 
 #[derive(Debug, Default)]
-pub struct Queries {}
+pub struct Interners {
+    pub ty: ObjInterner<TyKind>,
+    pub ty_list: ObjListInterner<Ty>,
+    pub ty_or_re_list: ObjListInterner<TyOrRe>,
+}
+
+#[derive(Debug, Default)]
+pub struct Queries {
+    pub substitute_ty: Memo<(Ty, Ty, GenericInstance), Ty>,
+    pub substitute_ty_list: Memo<(TyList, Ty, GenericInstance), TyList>,
+    pub substitute_ty_or_re_list: Memo<(TyOrReList, Ty, GenericInstance), TyOrReList>,
+    pub equate: Memo<(Ty, Ty, Variance), EquateResult>,
+}
 
 impl Deref for TyCtxt {
     type Target = TyCtxtInner;
@@ -48,25 +62,23 @@ impl TyCtxt {
         Self {
             inner: Rc::new(TyCtxtInner {
                 session,
-                ty_interner: ObjInterner::default(),
-                ty_list_interner: ObjListInterner::default(),
-                instance_interner: ObjInterner::default(),
                 wf_state: RefCell::default(),
+                interners: Interners::default(),
                 queries: Queries::default(),
             }),
         }
     }
 
     pub fn intern_ty(&self, ty: TyKind) -> Ty {
-        Ty::new_unchecked(self.ty_interner.intern(ty, &self.session))
+        Ty::new_unchecked(self.interners.ty.intern(ty, &self.session))
     }
 
     pub fn intern_tys(&self, ty: &[Ty]) -> TyList {
-        TyList::new_unchecked(self.ty_list_interner.intern(ty, &self.session))
+        TyList::new_unchecked(self.interners.ty_list.intern(ty, &self.session))
     }
 
-    pub fn intern_instance(&self, instance: InstanceInner) -> Instance {
-        Instance::new_unchecked(self.instance_interner.intern(instance, &self.session))
+    pub fn intern_ty_or_re_list(&self, elems: &[TyOrRe]) -> TyOrReList {
+        TyOrReList::new_unchecked(self.interners.ty_or_re_list.intern(elems, &self.session))
     }
 
     pub fn queue_wf(&self, req: WfRequirement) {
