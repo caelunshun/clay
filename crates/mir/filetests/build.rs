@@ -37,7 +37,6 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             }
 
             let test_case_name = &file_name[..file_name.find('.').unwrap_or(file_name.len())];
-            let test_case_ident = format_ident!("{test_case_name}");
 
             let file_contents = fs::read_to_string(entry.path())?;
             let harnesses = list_harnesses(&file_contents);
@@ -47,9 +46,9 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
             for (harness, has_expected) in harnesses {
                 let module = modules
-                    .entry(harness.clone())
-                    .or_default()
                     .entry(dir_name.clone())
+                    .or_default()
+                    .entry(test_case_name.to_owned())
                     .or_default();
                 let harness = format_ident!("{harness}");
 
@@ -65,7 +64,7 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
                 module.push(quote! {
                     #[test]
-                    fn #test_case_ident() {
+                    fn #harness() {
                         super::super::harnesses::#harness(#file_contents #expected_code);
                     }
                 });
