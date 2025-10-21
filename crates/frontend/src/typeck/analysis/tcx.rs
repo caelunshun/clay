@@ -3,7 +3,7 @@ use crate::{
         Session,
         arena::{ObjInterner, ObjListInterner},
     },
-    typeck::syntax::{Ty, TyKind, TyList},
+    typeck::syntax::{Instance, InstanceInner, Ty, TyKind, TyList},
     utils::hash::FxHashSet,
 };
 use std::{cell::RefCell, ops::Deref, rc::Rc};
@@ -18,6 +18,7 @@ pub struct TyCtxtInner {
     pub session: Session,
     pub ty_interner: ObjInterner<TyKind>,
     pub ty_list_interner: ObjListInterner<Ty>,
+    pub instance_interner: ObjInterner<InstanceInner>,
     pub wf_state: RefCell<WfState>,
     pub queries: Queries,
 }
@@ -49,6 +50,7 @@ impl TyCtxt {
                 session,
                 ty_interner: ObjInterner::default(),
                 ty_list_interner: ObjListInterner::default(),
+                instance_interner: ObjInterner::default(),
                 wf_state: RefCell::default(),
                 queries: Queries::default(),
             }),
@@ -61,6 +63,10 @@ impl TyCtxt {
 
     pub fn intern_tys(&self, ty: &[Ty]) -> TyList {
         TyList::new_unchecked(self.ty_list_interner.intern(ty, &self.session))
+    }
+
+    pub fn intern_instance(&self, instance: InstanceInner) -> Instance {
+        Instance::new_unchecked(self.instance_interner.intern(instance, &self.session))
     }
 
     pub fn queue_wf(&self, req: WfRequirement) {

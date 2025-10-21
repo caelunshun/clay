@@ -1,5 +1,5 @@
-mod hir;
-pub use hir::*;
+mod type_hir;
+pub use type_hir::*;
 
-mod mir;
-pub use mir::*;
+mod type_mir;
+pub use type_mir::*;
