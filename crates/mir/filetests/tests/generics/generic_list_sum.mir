@@ -1,0 +1,58 @@
+(mir
+    (trait Add
+        (type_param Rhs)
+        (assoc_type Output)
+        (assoc_func add
+            (param self Self)
+            (param other Rhs)
+            (return_type Output)))
+    (trait Default
+        (assoc_func default
+            (return_type Self)))
+    (func list_sum
+        (type_param T)
+        (requires
+            (has_impl T 
+                (trait_instance Add
+                    (type_arg Rhs (mref T)))))
+        (requires
+            (has_impl T Default))
+        (requires
+            (types_equal T
+                (get_assoc_type Output
+                    (get_trait_impl T
+                        (trait_instance Add
+                            (type_arg Rhs (mref T)))))))
+        (return_type T)
+        (captures_type unit)
+        (entry block0)
+        (block block0
+            (param captures (mref unit))
+            (param list (mref (list T)))
+            (constant i (0))
+            (call accum
+                ((get_assoc_func default
+                    (get_trait_impl T Default))
+                    ()))
+            (jump (loop_start ())))
+        (block loop_start
+            (list.len len (list))
+            (int.cmp done (== i len))
+            (branch
+                (done
+                    (true exit ())
+                    (false loop_body ()))))
+        (block loop_body
+            (list.get_mref x (list i))
+            (call accum
+                ((get_assoc_func add
+                    (get_trait_impl T
+                        (trait_instance Add
+                            (type_arg Rhs (mref T)))))
+                    (accum x)))
+            (constant one (1))
+            (int.add i (i one))
+            (jump (loop_start ())))
+        (block exit
+            (return (accum)))))
+    
