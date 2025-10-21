@@ -6,5 +6,5 @@
         (block block0
             (param captures (mref unit))
             (param x int)
-            (int.add x_r0 (x x))
-            (return (x_r0)))))
+            (int.add x_r1 (x x))
+            (return (x_r1)))))

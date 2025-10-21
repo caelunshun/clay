@@ -1,11 +1,7 @@
 mod harnesses {
     use fir_core::sexpr::SExpr;
     use fir_mir::{
-        Func,
-        formatter::format_context,
-        module::{Context, ContextBuilder},
-        parser::parse_mir,
-        passes, validation,
+        Func, formatter::format_context, module::Context, parser::parse_mir, passes, validation,
     };
     use pretty_assertions::assert_eq;
     use salsa::{Database, DatabaseImpl};

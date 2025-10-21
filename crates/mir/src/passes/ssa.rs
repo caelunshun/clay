@@ -1,7 +1,8 @@
 use crate::{
     Val,
-    module::{BasicBlock, BasicBlockData, FuncData},
+    module::{BasicBlock, BasicBlockData, FuncData, ValData},
 };
+use compact_str::{ToCompactString, format_compact};
 use cranelift_entity::{EntityList, ListPool, PrimaryMap, SecondaryMap};
 use salsa::Database;
 
@@ -19,6 +20,7 @@ pub fn make_ssa<'db>(db: &'db dyn Database, func: &FuncData<'db>) -> FuncData<'d
         new_func,
         vars_in_blocks: Default::default(),
         extra_terminator_args: Vec::new(),
+        var_revision_counters: Default::default(),
     };
     converter.run();
     converter.new_func
@@ -31,6 +33,7 @@ struct SsaConverter<'db, 'a> {
     new_func: FuncData<'db>,
     vars_in_blocks: SecondaryMap<BasicBlock, SecondaryMap<Val, Option<Val>>>,
     extra_terminator_args: Vec<(BasicBlock, BasicBlock, Val)>,
+    var_revision_counters: SecondaryMap<Val, u32>,
 }
 
 impl<'db, 'a> SsaConverter<'db, 'a> {
@@ -39,7 +42,7 @@ impl<'db, 'a> SsaConverter<'db, 'a> {
         for (block, block_data) in &self.func.basic_blocks {
             let mut params = EntityList::new();
             for param_var in block_data.params.as_slice(&self.func.val_lists) {
-                let param_val = self.new_func.vals.push(self.func.vals[*param_var].clone());
+                let param_val = self.make_new_val(*param_var);
                 params.push(param_val, &mut self.new_func.val_lists);
                 self.vars_in_blocks[block][*param_var] = Some(param_val);
             }
@@ -57,7 +60,7 @@ impl<'db, 'a> SsaConverter<'db, 'a> {
         self.func.visit_basic_blocks_topological(|block| {
             let block_data = &self.func.basic_blocks[block];
             for &param_var in block_data.params.as_slice(&self.func.val_lists) {
-                let param_val = self.new_func.vals.push(self.func.vals[param_var].clone());
+                let param_val = self.vars_in_blocks[block][param_var].unwrap();
                 self.vars_in_blocks[block][param_var] = Some(param_val);
             }
 
@@ -83,7 +86,7 @@ impl<'db, 'a> SsaConverter<'db, 'a> {
                 });
 
                 for written_var in written_vars {
-                    let val = self.new_func.vals.push(self.func.vals[written_var].clone());
+                    let val = self.make_new_val(written_var);
                     self.vars_in_blocks[block][written_var] = Some(val);
                 }
 
@@ -116,7 +119,7 @@ impl<'db, 'a> SsaConverter<'db, 'a> {
             // Need to add the variable as a parameter
             // and "thread" the variable from the block's
             // ancestors to get it in this block
-            let param = self.new_func.vals.push(self.func.vals[var].clone());
+            let param = self.make_new_val(var);
             self.new_func.basic_blocks[block]
                 .params
                 .push(param, &mut self.new_func.val_lists);
@@ -129,5 +132,24 @@ impl<'db, 'a> SsaConverter<'db, 'a> {
             });
             param
         }
+    }
+
+    fn make_new_val(&mut self, for_var: Val) -> Val {
+        let revision = self.var_revision_counters[for_var];
+        let val = self.new_func.vals.push(ValData {
+            name: match self.func.vals[for_var].name.as_deref() {
+                Some(name) => {
+                    if revision == 0 {
+                        Some(name.to_compact_string())
+                    } else {
+                        Some(format_compact!("{name}_r{revision}"))
+                    }
+                }
+                None => None,
+            },
+            typ: self.func.vals[for_var].typ,
+        });
+        self.var_revision_counters[for_var] += 1;
+        val
     }
 }
