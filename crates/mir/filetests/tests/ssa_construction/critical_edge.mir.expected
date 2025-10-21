@@ -1,0 +1,23 @@
+(mir
+    (func critical_edge
+        (return_type int)
+        (captures_type unit)
+        (entry block0)
+        (block block0
+            (param captures (mref unit))
+            (constant x (0))
+            (constant y (0))
+            (int.cmp cond (== x y))
+            (branch
+                (cond
+                    (true block1 (x))
+                    (false exit (y x)))))
+        (block block1
+            (param x_r2 int)
+            (constant y_r1 (2))
+            (jump (exit (y_r1 x_r2))))
+        (block exit
+            (param x_r1 int)
+            (param y_r2 int)
+            (int.add z (x_r1 y_r2))
+            (return (z)))))

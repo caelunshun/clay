@@ -1,0 +1,23 @@
+// @harness typecheck_validation_succeeds 
+// @harness ssa_validation_fails
+// @harness(with_expected) ssa_construction_matches_expected
+(mir
+    (func critical_edge
+        (return_type int)
+        (captures_type unit)
+        (entry block0)
+        (block block0
+            (param captures (mref unit))
+            (constant x (0))
+            (constant y (0))
+            (int.cmp cond (== x y))
+            (branch
+                (cond
+                    (true block1 ())
+                    (false exit ()))))
+        (block block1
+            (constant y (2))
+            (jump (exit ())))
+        (block exit
+            (int.add z (x y))
+            (return (z)))))
