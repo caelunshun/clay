@@ -108,9 +108,9 @@ fn list_harnesses(mut file_contents: &str) -> Vec<(String, bool)> {
             .unwrap_or(file_contents.len() - pos)
             + pos;
         let mut harness = file_contents[pos + pattern.len()..new_line].trim();
-        let has_expected = harness.starts_with("(expected)");
+        let has_expected = harness.starts_with("(with_expected)");
         if has_expected {
-            harness = harness.strip_prefix("(expected)").unwrap();
+            harness = harness.strip_prefix("(with_expected)").unwrap().trim();
         }
         harnesses.push((harness.to_string(), has_expected));
         file_contents = &file_contents[new_line..];

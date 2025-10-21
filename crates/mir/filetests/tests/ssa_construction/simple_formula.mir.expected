@@ -1,0 +1,10 @@
+(mir
+    (func formula
+        (return_type int)
+        (captures_type unit)
+        (entry block0)
+        (block block0
+            (param captures (mref unit))
+            (param x int)
+            (int.add x_r0 (x x))
+            (return (x_r0)))))

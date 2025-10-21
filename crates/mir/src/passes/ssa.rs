@@ -3,10 +3,10 @@ use crate::{
     module::{BasicBlock, BasicBlockData, FuncData},
 };
 use cranelift_entity::{EntityList, ListPool, PrimaryMap, SecondaryMap};
-use fir_core::Db;
+use salsa::Database;
 
 /// Convert a function to SSA form, returning the new function.
-pub fn make_ssa<'db>(db: &'db Db, func: &FuncData<'db>) -> FuncData<'db> {
+pub fn make_ssa<'db>(db: &'db dyn Database, func: &FuncData<'db>) -> FuncData<'db> {
     let new_func = FuncData {
         basic_blocks: PrimaryMap::new(),
         vals: PrimaryMap::new(),
@@ -26,7 +26,7 @@ pub fn make_ssa<'db>(db: &'db Db, func: &FuncData<'db>) -> FuncData<'db> {
 
 struct SsaConverter<'db, 'a> {
     #[allow(unused)]
-    db: &'db Db,
+    db: &'db dyn Database,
     func: &'a FuncData<'db>,
     new_func: FuncData<'db>,
     vars_in_blocks: SecondaryMap<BasicBlock, SecondaryMap<Val, Option<Val>>>,

@@ -1,6 +1,12 @@
 mod harnesses {
     use fir_core::sexpr::SExpr;
-    use fir_mir::{formatter::format_context, module::Context, parser::parse_mir, validation};
+    use fir_mir::{
+        Func,
+        formatter::format_context,
+        module::{Context, ContextBuilder},
+        parser::parse_mir,
+        passes, validation,
+    };
     use pretty_assertions::assert_eq;
     use salsa::{Database, DatabaseImpl};
 
@@ -21,7 +27,18 @@ mod harnesses {
         let db = DatabaseImpl::new();
         let input = Input::new(&db, input_str);
         let cx = parse(&db, input);
+
         callback(&db, cx);
+    }
+
+    #[salsa::tracked]
+    fn make_ssa<'db>(db: &'db dyn Database, cx: Context<'db>) -> Context<'db> {
+        let mut ssa_cx = cx.data(db).clone();
+        for func in ssa_cx.funcs.values_mut() {
+            let ssa_func = passes::ssa::make_ssa(db, func.data(db));
+            *func = Func::new(db, ssa_func);
+        }
+        Context::new(db, ssa_cx)
     }
 
     /// Verifies that parsing a module succeeds, and that
@@ -135,6 +152,18 @@ mod harnesses {
                     );
                 }
             }
+        });
+    }
+
+    /// Applies the SSA transformer to the module
+    /// and compares the resulting MIR against
+    /// the expected SSA MIR.
+    pub fn ssa_construction_matches_expected(input: &'static str, expected: &'static str) {
+        with_parsed_context(input, |db, cx| {
+            let ssa_cx = make_ssa(db, cx);
+            let formatted_module = format_context(db, ssa_cx).to_string();
+            let expected_module_normalized = SExpr::parse(expected).unwrap().to_string();
+            assert_eq!(formatted_module, expected_module_normalized);
         });
     }
 }
