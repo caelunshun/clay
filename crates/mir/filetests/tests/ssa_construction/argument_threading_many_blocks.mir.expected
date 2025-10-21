@@ -1,0 +1,22 @@
+(mir
+    (func argument_threading
+        (return_type int)
+        (captures_type unit)
+        (entry block0)
+        (block block0
+            (param captures (mref unit))
+            (param x int)
+            (jump (block1 (x))))
+        (block block1
+            (param x_r5 int)
+            (jump (block2 (x_r5))))
+        (block block2
+            (param x_r1 int)
+            (int.add x_r2 (x_r1 x_r1))
+            (jump (block3 (x_r2))))
+        (block block3
+            (param x_r4 int)
+            (jump (block4 (x_r4))))
+        (block block4
+            (param x_r3 int)
+            (return (x_r3)))))

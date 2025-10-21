@@ -1,0 +1,21 @@
+// @harness typecheck_validation_succeeds 
+// @harness ssa_validation_fails
+// @harness(with_expected) ssa_construction_matches_expected
+(mir
+    (func argument_threading
+        (return_type int)
+        (captures_type unit)
+        (entry block0)
+        (block block0
+            (param captures (mref unit))
+            (param x int)
+            (jump (block1 ())))
+        (block block1
+            (jump (block2 ())))
+        (block block2
+            (int.add x (x x))
+            (jump (block3 ())))
+        (block block3
+            (jump (block4 ())))
+        (block block4
+            (return (x)))))
