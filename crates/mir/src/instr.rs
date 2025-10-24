@@ -301,7 +301,7 @@ impl InstrData<'_> {
 
     #[must_use]
     pub fn move_to_list_pool(
-        mut self,
+        &self,
         old_pool: &ListPool<Val>,
         new_pool: &mut ListPool<Val>,
     ) -> Self {
@@ -309,7 +309,9 @@ impl InstrData<'_> {
             *list = EntityList::from_slice(list.as_slice(old_pool), new_pool);
         }
 
-        match &mut self {
+        let mut this = self.clone();
+
+        match &mut this {
             InstrData::Jump(j) => {
                 mv(&mut j.args, old_pool, new_pool);
             }
@@ -328,7 +330,7 @@ impl InstrData<'_> {
             }
             _ => {}
         }
-        self
+        this
     }
 
     pub fn successor_args_mut(&mut self, successor: BasicBlock) -> &mut EntityList<Val> {

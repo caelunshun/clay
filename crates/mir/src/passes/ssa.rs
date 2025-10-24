@@ -64,7 +64,7 @@ impl<'db, 'a> SsaConverter<'db, 'a> {
                 self.vars_in_blocks[block][param_var] = Some(param_val);
             }
 
-            for &instr in &block_data.instrs {
+            for instr in &block_data.instrs {
                 let new_instr =
                     instr.move_to_list_pool(&self.func.val_lists, &mut self.new_func.val_lists);
 
