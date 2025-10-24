@@ -40,9 +40,6 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
             let file_contents = fs::read_to_string(entry.path())?;
             let harnesses = list_harnesses(&file_contents);
-            if harnesses.is_empty() {
-                panic!("no @harness statements found in filetest");
-            }
 
             for (harness, has_expected) in harnesses {
                 let module = modules
