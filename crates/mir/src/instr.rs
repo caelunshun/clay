@@ -1,10 +1,10 @@
 use crate::{
-    Val,
-    module::{BasicBlock, Constant, Field, FuncRef, TypeRef},
+    TypeKind, Val,
+    module::{BasicBlock, Constant, Field, FuncRef},
 };
 use cranelift_entity::{EntityList, ListPool};
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub enum InstrData<'db> {
     Jump(Jump),
     Branch(Branch),
@@ -69,7 +69,7 @@ impl InstrData<'_> {
         )
     }
 
-    pub fn visit_successors(self, mut visit: impl FnMut(BasicBlock)) {
+    pub fn visit_successors(&self, mut visit: impl FnMut(BasicBlock)) {
         match self {
             InstrData::Jump(ins) => visit(ins.target),
             InstrData::Branch(ins) => {
@@ -80,7 +80,7 @@ impl InstrData<'_> {
         }
     }
 
-    pub fn visit_src_operands(self, val_lists: &ListPool<Val>, mut visit: impl FnMut(Val)) {
+    pub fn visit_src_operands(&self, val_lists: &ListPool<Val>, mut visit: impl FnMut(Val)) {
         // TODO don't clone val_lists - keyword generics would make this easy but will never come :(
         let _ = self.map_src_operands(&mut val_lists.clone(), |val| {
             visit(val);
@@ -88,7 +88,7 @@ impl InstrData<'_> {
         });
     }
 
-    pub fn visit_dst_operands(self, val_lists: &ListPool<Val>, mut visit: impl FnMut(Val)) {
+    pub fn visit_dst_operands(&self, val_lists: &ListPool<Val>, mut visit: impl FnMut(Val)) {
         let _ = self.map_dst_operands(&mut val_lists.clone(), |val| {
             visit(val);
             val
@@ -97,11 +97,12 @@ impl InstrData<'_> {
 
     #[must_use]
     pub fn map_src_operands(
-        mut self,
+        &self,
         val_lists: &mut ListPool<Val>,
         mut map: impl FnMut(Val) -> Val,
     ) -> Self {
-        match &mut self {
+        let mut this = self.clone();
+        match &mut this {
             InstrData::Jump(_) => {}
             InstrData::Branch(ins) => ins.condition = map(ins.condition),
             InstrData::Call(ins) => {
@@ -198,16 +199,17 @@ impl InstrData<'_> {
                 ins.src_index = map(ins.src_index);
             }
         }
-        self
+        this
     }
 
     #[must_use]
     pub fn map_dst_operands(
-        mut self,
+        &self,
         _val_lists: &mut ListPool<Val>,
         mut map: impl FnMut(Val) -> Val,
     ) -> Self {
-        match &mut self {
+        let mut this = self.clone();
+        match &mut this {
             InstrData::Jump(_) => {}
             InstrData::Branch(_) => {}
             InstrData::Call(ins) => {
@@ -294,7 +296,7 @@ impl InstrData<'_> {
                 ins.dst_ref = map(ins.dst_ref);
             }
         }
-        self
+        this
     }
 
     #[must_use]
@@ -448,11 +450,11 @@ pub enum CompareMode {
 
 /// Initialize a struct from its field values,
 /// by copying each field into the new struct.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct InitStruct {
     pub dst: Val,
     /// Type of struct to initialize.
-    pub typ: TypeRef,
+    pub typ: Box<TypeKind>,
     /// Field values to initialize, in the same
     /// order as the struct fields are declared.
     pub fields: EntityList<Val>,
@@ -531,11 +533,11 @@ pub struct MakeFunctionObject {
 }
 
 /// Create an empty list.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct MakeList {
     pub dst: Val,
     /// Type of the elements inside the list.
-    pub element_type: TypeRef,
+    pub element_type: Box<TypeKind>,
 }
 
 // -------------------

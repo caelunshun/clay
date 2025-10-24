@@ -245,10 +245,76 @@ pub enum TypeKind {
     Self_,
 }
 
+impl TypeKind {
+    pub fn bool() -> Self {
+        Self::Prim(PrimType::Bool)
+    }
+
+    pub fn int() -> Self {
+        Self::Prim(PrimType::Int)
+    }
+
+    pub fn real() -> Self {
+        Self::Prim(PrimType::Real)
+    }
+
+    pub fn byte() -> Self {
+        Self::Prim(PrimType::Byte)
+    }
+
+    pub fn str() -> Self {
+        Self::Prim(PrimType::Str)
+    }
+
+    pub fn unit() -> Self {
+        Self::Prim(PrimType::Unit)
+    }
+
+    pub fn map_inner_types(&self, mut map: impl FnMut(&TypeKind) -> TypeKind) -> Self {
+        match self {
+            TypeKind::Prim(_) | TypeKind::TypeParam(_) | TypeKind::Self_ => self.clone(),
+            TypeKind::MRef(type_kind) => TypeKind::MRef(Box::new(map(type_kind))),
+            TypeKind::Func(func_type_data) => TypeKind::Func(FuncTypeData {
+                param_types: func_type_data.param_types.iter().map(&mut map).collect(),
+                return_type: Box::new(map(&func_type_data.return_type)),
+            }),
+            TypeKind::List(type_kind) => TypeKind::List(Box::new(map(type_kind))),
+            TypeKind::Algebraic(algebraic_type_instance) => {
+                TypeKind::Algebraic(AlgebraicTypeInstance {
+                    adt: algebraic_type_instance.adt,
+                    type_args: Box::new(
+                        algebraic_type_instance
+                            .type_args
+                            .iter()
+                            .map(|(arg, ty)| {
+                                if let Some(ty) = ty {
+                                    (arg, Some(map(ty)))
+                                } else {
+                                    (arg, None)
+                                }
+                            })
+                            .collect(),
+                    ),
+                })
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct AlgebraicTypeInstance {
     pub adt: AlgebraicTypeRef,
     pub type_args: Box<SecondaryMap<TypeParam, Option<TypeKind>>>,
+}
+
+impl AlgebraicTypeInstance {
+    /// Substitute type arguments into type parameters.
+    pub fn substitute_type_args(&self, typ: &TypeKind) -> TypeKind {
+        match typ {
+            TypeKind::TypeParam(p) => self.type_args[*p].clone().unwrap(),
+            typ => typ.map_inner_types(|typ| self.substitute_type_args(typ)),
+        }
+    }
 }
 
 /// A closure object, consisting of a dynamic

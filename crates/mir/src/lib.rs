@@ -83,4 +83,4 @@ pub mod passes;
 pub mod validation;
 
 pub use instr::InstrData;
-pub use module::{Func, PrimType, Type, TypeKind, Val};
+pub use module::{Func, PrimType, TypeKind, Val};
