@@ -7,7 +7,7 @@ pub fn verify_ssa(func: &FuncData) -> Result<(), ValidationError> {
     for (block, block_data) in &func.basic_blocks {
         let mut written_vals = EntitySet::<Val>::new();
         written_vals.extend(block_data.params.as_slice(&func.val_lists).iter().copied());
-        for &instr in &block_data.instrs {
+        for instr in &block_data.instrs {
             let mut error = None;
             instr.visit_src_operands(&func.val_lists, |val| {
                    if !written_vals.contains(val) {

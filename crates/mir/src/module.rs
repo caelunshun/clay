@@ -25,7 +25,7 @@ pub struct ContextBuilder<'db> {
     /// A function header can be known before
     /// the function body. This allows resolving
     /// recursive or mutually recursive functions.
-    func_headers: SecondaryMap<FuncRef, Option<FuncHeader>>,
+    func_headers: SecondaryMap<FuncRef, Option<FuncHeader<'db>>>,
 }
 
 impl<'db> ContextBuilder<'db> {
@@ -63,7 +63,7 @@ impl<'db> ContextBuilder<'db> {
         self.funcs.push(None)
     }
 
-    pub fn bind_func_header(&mut self, func_ref: FuncRef, header: FuncHeader) {
+    pub fn bind_func_header(&mut self, func_ref: FuncRef, header: FuncHeader<'db>) {
         self.func_headers[func_ref] = Some(header);
     }
 
@@ -76,7 +76,7 @@ impl<'db> ContextBuilder<'db> {
         self.funcs[r].expect("attempted to resolve unbound func")
     }
 
-    pub fn resolve_func_header(&self, db: &'db dyn Database, r: FuncRef) -> &FuncHeader {
+    pub fn resolve_func_header(&self, db: &'db dyn Database, r: FuncRef) -> &FuncHeader<'db> {
         self.funcs[r]
             .as_ref()
             .map(|f| &f.data(db).header)
@@ -147,7 +147,11 @@ impl AlgebraicTypeRef {
         cx.resolve_adt(*self)
     }
 
-    pub fn data<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> &'db AlgebraicTypeData {
+    pub fn data<'db>(
+        &self,
+        db: &'db dyn Database,
+        cx: Context<'db>,
+    ) -> &'db AlgebraicTypeData<'db> {
         self.resolve(db, cx).data(db)
     }
 }
@@ -196,7 +200,7 @@ impl FuncRef {
         &self,
         db: &'db dyn Database,
         cx: &'cx ContextBuilder<'db>,
-    ) -> &'cx FuncHeader {
+    ) -> &'cx FuncHeader<'db> {
         cx.resolve_func_header(db, *self)
     }
 
@@ -215,7 +219,7 @@ pub struct AlgebraicType<'db> {
     pub type_params: PrimaryMap<TypeParam, ()>,
     #[tracked]
     #[returns(ref)]
-    pub data: AlgebraicTypeData,
+    pub data: AlgebraicTypeData<'db>,
 }
 
 entity_ref_16bit! {
@@ -223,29 +227,61 @@ entity_ref_16bit! {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub enum AlgebraicTypeData {
-    Struct(StructTypeData),
+pub enum AlgebraicTypeData<'db> {
+    Struct(StructTypeData<'db>),
+}
+
+#[salsa::interned(debug)]
+pub struct Type<'db> {
+    #[returns(ref)]
+    pub kind: TypeKind<'db>,
+}
+
+impl<'db> Type<'db> {
+    pub fn int(db: &'db dyn Database) -> Self {
+        Type::new(db, TypeKind::int())
+    }
+
+    pub fn real(db: &'db dyn Database) -> Self {
+        Type::new(db, TypeKind::real())
+    }
+
+    pub fn bool(db: &'db dyn Database) -> Self {
+        Type::new(db, TypeKind::bool())
+    }
+
+    pub fn byte(db: &'db dyn Database) -> Self {
+        Type::new(db, TypeKind::byte())
+    }
+
+    pub fn unit(db: &'db dyn Database) -> Self {
+        Type::new(db, TypeKind::unit())
+    }
+
+    pub fn str(db: &'db dyn Database) -> Self {
+        Type::new(db, TypeKind::str())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub enum TypeKind {
+pub enum TypeKind<'db> {
     Prim(PrimType),
     /// Reference to an object managed by the garbage collector,
     /// or to a field of an object managed by the garbage collector,
     /// or to an element of a list.
     /// It has indefinite lifetime.
-    MRef(Box<TypeKind>),
-    Func(FuncTypeData),
+    MRef(Type<'db>),
+    Func(FuncTypeData<'db>),
     /// Dynamically resized array.
-    List(Box<TypeKind>),
-    Algebraic(AlgebraicTypeInstance),
+    List(Type<'db>),
+    Algebraic(AlgebraicTypeInstance<'db>),
     /// Generic type in the current scope.
     TypeParam(TypeParam),
     /// Only valid inside a trait definition.
     Self_,
 }
 
-impl TypeKind {
+impl<'db> TypeKind<'db> {
     pub fn bool() -> Self {
         Self::Prim(PrimType::Bool)
     }
@@ -270,31 +306,34 @@ impl TypeKind {
         Self::Prim(PrimType::Unit)
     }
 
-    pub fn map_inner_types(&self, mut map: impl FnMut(&TypeKind) -> TypeKind) -> Self {
+    pub fn map_inner_types(&self, mut map: impl FnMut(Type<'db>) -> Type<'db>) -> Self {
         match self {
             TypeKind::Prim(_) | TypeKind::TypeParam(_) | TypeKind::Self_ => self.clone(),
-            TypeKind::MRef(type_kind) => TypeKind::MRef(Box::new(map(type_kind))),
+            TypeKind::MRef(type_kind) => TypeKind::MRef(map(*type_kind)),
             TypeKind::Func(func_type_data) => TypeKind::Func(FuncTypeData {
-                param_types: func_type_data.param_types.iter().map(&mut map).collect(),
-                return_type: Box::new(map(&func_type_data.return_type)),
+                param_types: func_type_data
+                    .param_types
+                    .iter()
+                    .copied()
+                    .map(&mut map)
+                    .collect(),
+                return_type: map(func_type_data.return_type),
             }),
-            TypeKind::List(type_kind) => TypeKind::List(Box::new(map(type_kind))),
+            TypeKind::List(type_kind) => TypeKind::List(map(*type_kind)),
             TypeKind::Algebraic(algebraic_type_instance) => {
                 TypeKind::Algebraic(AlgebraicTypeInstance {
                     adt: algebraic_type_instance.adt,
-                    type_args: Box::new(
-                        algebraic_type_instance
-                            .type_args
-                            .iter()
-                            .map(|(arg, ty)| {
-                                if let Some(ty) = ty {
-                                    (arg, Some(map(ty)))
-                                } else {
-                                    (arg, None)
-                                }
-                            })
-                            .collect(),
-                    ),
+                    type_args: algebraic_type_instance
+                        .type_args
+                        .iter()
+                        .map(|(arg, ty)| {
+                            if let Some(ty) = ty {
+                                (arg, Some(map(*ty)))
+                            } else {
+                                (arg, None)
+                            }
+                        })
+                        .collect(),
                 })
             }
         }
@@ -302,17 +341,20 @@ impl TypeKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub struct AlgebraicTypeInstance {
+pub struct AlgebraicTypeInstance<'db> {
     pub adt: AlgebraicTypeRef,
-    pub type_args: Box<SecondaryMap<TypeParam, Option<TypeKind>>>,
+    pub type_args: SecondaryMap<TypeParam, Option<Type<'db>>>,
 }
 
-impl AlgebraicTypeInstance {
+impl<'db> AlgebraicTypeInstance<'db> {
     /// Substitute type arguments into type parameters.
-    pub fn substitute_type_args(&self, typ: &TypeKind) -> TypeKind {
-        match typ {
+    pub fn substitute_type_args(&self, typ: Type<'db>, db: &'db dyn Database) -> Type<'db> {
+        match typ.kind(db) {
             TypeKind::TypeParam(p) => self.type_args[*p].clone().unwrap(),
-            typ => typ.map_inner_types(|typ| self.substitute_type_args(typ)),
+            typ => Type::new(
+                db,
+                typ.map_inner_types(|typ| self.substitute_type_args(typ, db)),
+            ),
         }
     }
 }
@@ -321,9 +363,9 @@ impl AlgebraicTypeInstance {
 /// function reference and a reference to an opaque
 /// captures struct.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub struct FuncTypeData {
-    pub param_types: Vec<TypeKind>,
-    pub return_type: Box<TypeKind>,
+pub struct FuncTypeData<'db> {
+    pub param_types: Vec<Type<'db>>,
+    pub return_type: Type<'db>,
 }
 
 /// Type built in to the engine.
@@ -344,8 +386,8 @@ pub enum PrimType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub struct StructTypeData {
-    pub fields: PrimaryMap<Field, FieldData>,
+pub struct StructTypeData<'db> {
+    pub fields: PrimaryMap<Field, FieldData<'db>>,
 }
 
 entity_ref_16bit! {
@@ -353,9 +395,9 @@ entity_ref_16bit! {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub struct FieldData {
+pub struct FieldData<'db> {
     pub name: CompactString,
-    pub typ: TypeKind,
+    pub typ: Type<'db>,
 }
 
 #[salsa::tracked(debug)]
@@ -400,7 +442,7 @@ impl Hash for ConstantData {
 }
 
 impl ConstantData {
-    pub fn typ(&self) -> TypeKind {
+    pub fn typ(&self) -> TypeKind<'static> {
         match self {
             ConstantData::Int(_) => TypeKind::Prim(PrimType::Int),
             ConstantData::Real(_) => TypeKind::Prim(PrimType::Real),
@@ -420,7 +462,7 @@ pub struct Func<'db> {
 /// The function header describes the signature
 /// of the function but not its behavior.
 #[derive(Debug, Clone, PartialEq, Hash, salsa::Update)]
-pub struct FuncHeader {
+pub struct FuncHeader<'db> {
     /// Used for debugging; may be synthetic
     /// in the case of anonymous functions.
     pub name: CompactString,
@@ -428,18 +470,18 @@ pub struct FuncHeader {
     /// for the function. A managed reference
     /// to the captures is the first argument
     /// to the entry block of the function.
-    pub captures_type: TypeKind,
+    pub captures_type: Type<'db>,
     /// Parameters expected by the function, not including the captures.
-    pub param_types: Vec<TypeKind>,
-    pub return_type: TypeKind,
+    pub param_types: Vec<Type<'db>>,
+    pub return_type: Type<'db>,
 }
 
 #[derive(Debug, Clone, PartialEq, Hash, salsa::Update)]
 pub struct FuncData<'db> {
-    pub header: FuncHeader,
+    pub header: FuncHeader<'db>,
     /// Set of values used by the function. Values can be assigned
     /// multiple times until after the SSA lowering pass is applied.
-    pub vals: PrimaryMap<Val, ValData>,
+    pub vals: PrimaryMap<Val, ValData<'db>>,
 
     /// Basic blocks in the function instruction stream.
     pub basic_blocks: PrimaryMap<BasicBlock, BasicBlockData<'db>>,
@@ -559,9 +601,9 @@ entity_ref_16bit! {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub struct ValData {
+pub struct ValData<'db> {
     /// Type of the local.
-    pub typ: TypeKind,
+    pub typ: Type<'db>,
     /// Optional name, for debugging and testing.
     pub name: Option<CompactString>,
 }

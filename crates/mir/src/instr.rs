@@ -1,6 +1,6 @@
 use crate::{
-    TypeKind, Val,
-    module::{BasicBlock, Constant, Field, FuncRef},
+    Val,
+    module::{BasicBlock, Constant, Field, FuncRef, Type},
 };
 use cranelift_entity::{EntityList, ListPool};
 
@@ -42,7 +42,7 @@ pub enum InstrData<'db> {
     BoolXor(Binary),
     BoolNot(Unary),
 
-    InitStruct(InitStruct),
+    InitStruct(InitStruct<'db>),
     GetField(GetField),
     SetField(SetField),
     Alloc(Alloc),
@@ -52,7 +52,7 @@ pub enum InstrData<'db> {
 
     MakeFunctionObject(MakeFunctionObject),
 
-    MakeList(MakeList),
+    MakeList(MakeList<'db>),
     ListPush(ListPush),
     ListRemove(ListRemove),
     ListTrunc(ListTrunc),
@@ -451,10 +451,10 @@ pub enum CompareMode {
 /// Initialize a struct from its field values,
 /// by copying each field into the new struct.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
-pub struct InitStruct {
+pub struct InitStruct<'db> {
     pub dst: Val,
     /// Type of struct to initialize.
-    pub typ: Box<TypeKind>,
+    pub typ: Type<'db>,
     /// Field values to initialize, in the same
     /// order as the struct fields are declared.
     pub fields: EntityList<Val>,
@@ -534,10 +534,10 @@ pub struct MakeFunctionObject {
 
 /// Create an empty list.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
-pub struct MakeList {
+pub struct MakeList<'db> {
     pub dst: Val,
     /// Type of the elements inside the list.
-    pub element_type: Box<TypeKind>,
+    pub element_type: Type<'db>,
 }
 
 // -------------------

@@ -1,9 +1,9 @@
 use crate::{
-    InstrData, PrimType, TypeKind, Val,
+    InstrData, TypeKind, Val,
     instr::{self, CompareMode},
     module::{
         AlgebraicTypeData, BasicBlock, BasicBlockData, Constant, ContextBuilder, Field, FuncData,
-        FuncHeader, FuncRef, FuncTypeData, ValData,
+        FuncHeader, FuncRef, FuncTypeData, Type, ValData,
     },
 };
 use compact_str::CompactString;
@@ -17,7 +17,7 @@ pub struct FuncBuilder<'db> {
     current_block: BasicBlock,
     /// Values created so far.
     /// Some value types may not yet be resolved.
-    val_types: PrimaryMap<Val, Option<TypeKind>>,
+    val_types: PrimaryMap<Val, Option<Type<'db>>>,
     val_names: SecondaryMap<Val, Option<CompactString>>,
 }
 
@@ -25,8 +25,8 @@ impl<'db> FuncBuilder<'db> {
     pub fn new(
         db: &'db dyn Database,
         name: impl Into<CompactString>,
-        captures_type: TypeKind,
-        return_type: TypeKind,
+        captures_type: Type<'db>,
+        return_type: Type<'db>,
         _cx: &mut ContextBuilder<'db>,
     ) -> Self {
         let mut basic_blocks = PrimaryMap::new();
@@ -61,9 +61,9 @@ impl<'db> FuncBuilder<'db> {
         }
     }
 
-    pub fn append_param(&mut self, typ: TypeKind) -> Val {
+    pub fn append_param(&mut self, typ: Type<'db>) -> Val {
         let val = self.val();
-        self.val_types[val] = Some(typ.clone());
+        self.val_types[val] = Some(typ);
         self.func.header.param_types.push(typ);
         self.func.basic_blocks[self.func.entry_block]
             .params
@@ -71,13 +71,13 @@ impl<'db> FuncBuilder<'db> {
         val
     }
 
-    pub fn append_named_param(&mut self, typ: TypeKind, name: impl Into<CompactString>) -> Val {
+    pub fn append_named_param(&mut self, typ: Type<'db>, name: impl Into<CompactString>) -> Val {
         let param = self.append_param(typ);
         self.val_names[param] = Some(name.into());
         param
     }
 
-    pub fn append_block_param(&mut self, typ: TypeKind) -> Val {
+    pub fn append_block_param(&mut self, typ: Type<'db>) -> Val {
         let val = self.val();
         self.val_types[val] = Some(typ);
         self.func.basic_blocks[self.current_block]
@@ -88,7 +88,7 @@ impl<'db> FuncBuilder<'db> {
 
     pub fn append_named_block_param(
         &mut self,
-        typ: TypeKind,
+        typ: Type<'db>,
         name: impl Into<CompactString>,
     ) -> Val {
         let val = self.append_block_param(typ);
@@ -136,8 +136,8 @@ impl<'db> FuncBuilder<'db> {
         val
     }
 
-    pub fn val_type(&self, val: Val) -> &TypeKind {
-        self.val_types[val].as_ref().expect("value type not bound")
+    pub fn val_type(&self, val: Val) -> Type<'db> {
+        self.val_types[val].expect("value type not bound")
     }
 
     pub fn instr<'b>(&'b mut self, cx: &'b mut ContextBuilder<'db>) -> FuncInstrBuilder<'b, 'db> {
@@ -156,7 +156,7 @@ impl<'db> FuncBuilder<'db> {
             // If value type was never resolved
             // then the value is unused - any type is
             // valid - use unit type
-            let val_type = val_type.unwrap_or_else(|| TypeKind::Prim(PrimType::Unit));
+            let val_type = val_type.unwrap_or_else(|| Type::unit(self.db));
             // Same ID should be allocated since
             // same order of insertion into PrimaryMap
             assert_eq!(
@@ -178,7 +178,7 @@ pub struct FuncInstrBuilder<'a, 'db> {
     cx: &'a mut ContextBuilder<'db>,
     func: &'a mut FuncData<'db>,
     block: BasicBlock,
-    val_types: &'a mut PrimaryMap<Val, Option<TypeKind>>,
+    val_types: &'a mut PrimaryMap<Val, Option<Type<'db>>>,
 }
 
 impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
@@ -228,7 +228,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         }));
         self.set_val_type(
             return_value_dst,
-            func.resolve_header(self.db, self.cx).return_type.clone(),
+            func.resolve_header(self.db, self.cx).return_type,
         );
     }
 
@@ -244,10 +244,11 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             args,
             return_value_dst,
         }));
-        let TypeKind::Func(func) = self.val_types[func_object].clone().unwrap() else {
+        let TypeKind::Func(func) = self.val_types[func_object].clone().unwrap().kind(self.db)
+        else {
             panic!("not a func")
         };
-        self.set_val_type(return_value_dst, *func.return_type.clone());
+        self.set_val_type(return_value_dst, func.return_type);
     }
 
     pub fn return_(mut self, return_value: Val) {
@@ -262,27 +263,27 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
     pub fn constant(mut self, dst: Val, constant: Constant<'db>) {
         self.instr(InstrData::Constant(instr::ConstantInstr { dst, constant }));
         let typ = constant.data(self.db).typ();
-        self.set_val_type(dst, typ)
+        self.set_val_type(dst, Type::new(self.db, typ))
     }
 
     pub fn int_add(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::IntAdd(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, TypeKind::int());
+        self.set_val_type(dst, Type::int(self.db));
     }
 
     pub fn int_sub(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::IntSub(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, TypeKind::int());
+        self.set_val_type(dst, Type::int(self.db));
     }
 
     pub fn int_mul(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::IntMul(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, TypeKind::int());
+        self.set_val_type(dst, Type::int(self.db));
     }
 
     pub fn int_div(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::IntDiv(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, TypeKind::int());
+        self.set_val_type(dst, Type::int(self.db));
     }
 
     pub fn int_cmp(mut self, dst: Val, src1: Val, src2: Val, mode: CompareMode) {
@@ -292,27 +293,27 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             src2,
             mode,
         }));
-        self.set_val_type(dst, TypeKind::bool());
+        self.set_val_type(dst, Type::bool(self.db));
     }
 
     pub fn real_add(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::RealAdd(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, TypeKind::real());
+        self.set_val_type(dst, Type::real(self.db));
     }
 
     pub fn real_sub(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::RealSub(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, TypeKind::real());
+        self.set_val_type(dst, Type::real(self.db));
     }
 
     pub fn real_mul(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::RealMul(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, TypeKind::real());
+        self.set_val_type(dst, Type::real(self.db));
     }
 
     pub fn real_div(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::RealDiv(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, TypeKind::real());
+        self.set_val_type(dst, Type::real(self.db));
     }
 
     pub fn real_cmp(mut self, dst: Val, src1: Val, src2: Val, mode: CompareMode) {
@@ -322,59 +323,59 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             src2,
             mode,
         }));
-        self.set_val_type(dst, TypeKind::bool());
+        self.set_val_type(dst, Type::bool(self.db));
     }
 
     pub fn real_to_int(mut self, dst: Val, src: Val) {
         self.instr(InstrData::RealToInt(instr::Unary { dst, src }));
-        self.set_val_type(dst, TypeKind::int());
+        self.set_val_type(dst, Type::int(self.db));
     }
 
     pub fn int_to_real(mut self, dst: Val, src: Val) {
         self.instr(InstrData::IntToReal(instr::Unary { dst, src }));
-        self.set_val_type(dst, TypeKind::real());
+        self.set_val_type(dst, Type::real(self.db));
     }
 
     pub fn byte_to_int(mut self, dst: Val, src: Val) {
         self.instr(InstrData::ByteToInt(instr::Unary { dst, src }));
-        self.set_val_type(dst, TypeKind::int());
+        self.set_val_type(dst, Type::int(self.db));
     }
 
     pub fn int_to_byte(mut self, dst: Val, src: Val) {
         self.instr(InstrData::IntToByte(instr::Unary { dst, src }));
-        self.set_val_type(dst, TypeKind::bool());
+        self.set_val_type(dst, Type::bool(self.db));
     }
 
     pub fn bool_and(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::BoolAnd(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, TypeKind::bool());
+        self.set_val_type(dst, Type::bool(self.db));
     }
 
     pub fn bool_or(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::BoolOr(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, TypeKind::bool());
+        self.set_val_type(dst, Type::bool(self.db));
     }
 
     pub fn bool_xor(mut self, dst: Val, src1: Val, src2: Val) {
         self.instr(InstrData::BoolXor(instr::Binary { dst, src1, src2 }));
-        self.set_val_type(dst, TypeKind::bool());
+        self.set_val_type(dst, Type::bool(self.db));
     }
 
     pub fn bool_not(mut self, dst: Val, src: Val) {
         self.instr(InstrData::BoolNot(instr::Unary { dst, src }));
-        self.set_val_type(dst, TypeKind::Prim(PrimType::Bool));
+        self.set_val_type(dst, Type::bool(self.db));
     }
 
     pub fn init_struct(
         mut self,
         dst: Val,
-        struct_type: TypeKind,
+        struct_type: Type<'db>,
         field_values: impl IntoIterator<Item = Val>,
     ) {
         let fields = EntityList::from_iter(field_values, &mut self.func.val_lists);
         self.instr(InstrData::InitStruct(instr::InitStruct {
             dst,
-            typ: Box::new(struct_type.clone()),
+            typ: struct_type,
             fields,
         }));
         self.set_val_type(dst, struct_type);
@@ -386,7 +387,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             src_struct: src,
             field,
         }));
-        let TypeKind::Algebraic(adt) = self.val_types[src].clone().unwrap() else {
+        let TypeKind::Algebraic(adt) = self.val_types[src].unwrap().kind(self.db) else {
             panic!("not an ADT")
         };
 
@@ -395,7 +396,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
 
         self.set_val_type(
             dst,
-            adt.substitute_type_args(&strukt_data.fields[field].typ),
+            adt.substitute_type_args(strukt_data.fields[field].typ, self.db),
         );
     }
 
@@ -411,14 +412,14 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
 
     pub fn alloc(mut self, dst: Val, src: Val) {
         self.instr(InstrData::Alloc(instr::Alloc { dst_ref: dst, src }));
-        let typ = TypeKind::MRef(Box::new(self.val_types[src].clone().unwrap()));
-        self.set_val_type(dst, typ);
+        let typ = TypeKind::MRef(self.val_types[src].clone().unwrap());
+        self.set_val_type(dst, Type::new(self.db, typ));
     }
 
     pub fn load(mut self, dst: Val, src_ref: Val) {
         self.instr(InstrData::Load(instr::Load { dst, src_ref }));
 
-        let TypeKind::MRef(t) = self.val_types[src_ref].clone().unwrap() else {
+        let TypeKind::MRef(t) = self.val_types[src_ref].unwrap().kind(self.db) else {
             panic!("not a reference")
         };
         self.set_val_type(dst, *t);
@@ -436,20 +437,18 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             field,
         }));
 
-        let TypeKind::MRef(pointee) = self.val_types[src].as_ref().unwrap() else {
+        let TypeKind::MRef(pointee) = self.val_types[src].unwrap().kind(self.db) else {
             panic!("not a reference")
         };
-        let TypeKind::Algebraic(adt) = &**pointee else {
+        let TypeKind::Algebraic(adt) = pointee.kind(self.db) else {
             panic!("not a reference to an ADT")
         };
 
         let AlgebraicTypeData::Struct(strukt_data) =
             adt.adt.resolve_in_builder(&self.cx).data(self.db);
 
-        let typ = TypeKind::MRef(Box::new(
-            adt.substitute_type_args(&strukt_data.fields[field].typ),
-        ));
-        self.set_val_type(dst, typ);
+        let typ = TypeKind::MRef(adt.substitute_type_args(strukt_data.fields[field].typ, self.db));
+        self.set_val_type(dst, Type::new(self.db, typ));
     }
 
     pub fn make_function_object(mut self, dst: Val, func: FuncRef, captures_ref: Val) {
@@ -460,17 +459,17 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         }));
         let typ = TypeKind::Func(FuncTypeData {
             param_types: func.resolve_header(self.db, self.cx).param_types.clone(),
-            return_type: Box::new(func.resolve_header(self.db, self.cx).return_type.clone()),
+            return_type: func.resolve_header(self.db, self.cx).return_type.clone(),
         });
-        self.set_val_type(dst, typ);
+        self.set_val_type(dst, Type::new(self.db, typ));
     }
 
-    pub fn make_list(mut self, dst: Val, element_type: TypeKind) {
+    pub fn make_list(mut self, dst: Val, element_type: Type<'db>) {
         self.instr(InstrData::MakeList(instr::MakeList {
             dst,
-            element_type: Box::new(element_type.clone()),
+            element_type: element_type,
         }));
-        let typ = TypeKind::List(Box::new(element_type));
+        let typ = Type::new(self.db, TypeKind::List(element_type));
         self.set_val_type(dst, typ);
     }
 
@@ -533,7 +532,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             dst_len: dst,
             src_list: src,
         }));
-        self.set_val_type(dst, TypeKind::Prim(PrimType::Int));
+        self.set_val_type(dst, Type::int(self.db));
     }
 
     pub fn list_get(mut self, dst: Val, src_list: Val, src_index: Val) {
@@ -544,7 +543,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         }));
         self.set_val_type(
             dst,
-            self.get_list_element_type(self.val_types[src_list].as_ref().unwrap())
+            self.get_list_element_type(self.val_types[src_list].unwrap().kind(self.db))
                 .clone(),
         );
     }
@@ -555,25 +554,25 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             src_list,
             src_index,
         }));
-        let typ = TypeKind::MRef(Box::new(
-            self.get_list_element_type(self.val_types[src_list].as_ref().unwrap())
+        let typ = TypeKind::MRef(
+            self.get_list_element_type(self.val_types[src_list].unwrap().kind(self.db))
                 .clone(),
-        ));
-        self.set_val_type(dst, typ);
+        );
+        self.set_val_type(dst, Type::new(self.db, typ));
     }
 
-    fn get_list_element_type<'b>(&self, t: &'b TypeKind) -> &'b TypeKind {
+    fn get_list_element_type<'b>(&self, t: &TypeKind<'db>) -> Type<'db> {
         match t {
-            TypeKind::List(el) => &*el,
-            TypeKind::MRef(l) => match &**l {
-                TypeKind::List(el) => el,
+            TypeKind::List(el) => *el,
+            TypeKind::MRef(l) => match l.kind(self.db) {
+                TypeKind::List(el) => *el,
                 _ => panic!("not a list"),
             },
             _ => panic!("not a list"),
         }
     }
 
-    fn set_val_type(&mut self, val: Val, typ: TypeKind) {
+    fn set_val_type(&mut self, val: Val, typ: Type<'db>) {
         if let Some(existing_type) = self.val_types[val].as_ref() {
             assert_eq!(&typ, existing_type, "value type mismatch");
         }
