@@ -1,133 +1,150 @@
 use crate::{
     base::{
-        Session,
-        arena::{LateInit, Obj},
+        arena::{Intern, LateInit, Obj},
+        syntax::Span,
     },
     parse::token::Ident,
 };
 
-// === Trait Definitions === //
-
-#[derive(Debug, Clone)]
-pub struct TraitDef {
-    pub name: Ident,
-    pub generics: Vec<AnyGeneric>,
-    pub methods: Vec<Obj<TraitMethod>>,
-    pub super_type: Ty,
-}
-
-#[derive(Debug, Clone)]
-pub struct TraitMethod {
-    pub name: Ident,
-    pub trait_: LateInit<Obj<TraitDef>>,
-    pub generics: Vec<AnyGeneric>,
-    pub args: TyList,
-    pub arg_names: Vec<Ident>,
-    pub ret_ty: Ty,
-}
-
-// === ADT Definition === //
+// === AdtDef === //
 
 #[derive(Debug, Clone)]
 pub struct AdtDef {
-    pub name: Ident,
-    pub generics: Vec<AnyGeneric>,
-    pub kind: AdtKind,
-    pub fields: Vec<Obj<AdtField>>,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum AdtKind {
-    Enum,
-    Struct,
+    pub span: Span,
+    pub ident: Ident,
+    pub generics: Obj<GenericBinder>,
+    pub fields: Vec<AdtField>,
 }
 
 #[derive(Debug, Clone)]
 pub struct AdtField {
     pub def: LateInit<Obj<AdtDef>>,
-    pub name: Ident,
+    pub idx: u32,
+    pub ident: Span,
     pub ty: Ty,
+}
+
+// === Traits === //
+
+#[derive(Debug, Clone)]
+pub struct TraitDef {
+    pub span: Span,
+    pub ident: Ident,
+    pub generics: Obj<GenericBinder>,
+    pub methods: Vec<()>,
+}
+
+/// A trait clause with multiple parts (e.g. `'a + Foo<u32> + Bar<Item = Baz>`).
+pub type TraitClauseList = Intern<[TraitClause]>;
+
+/// A single trait clause (e.g. `'a` or `Trait<'re1, Ty1, Ty2, AssocA = Ty3, AssocC = Ty4>`).
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum TraitClause {
+    Outlives(Re),
+    Trait(Obj<TraitDef>, TraitParamList),
+}
+
+pub type TraitParamList = Intern<[TraitParam]>;
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum TraitParam {
+    Equals(TyOrRe),
+    Implements(TraitClauseList),
+
+    /// The constraints for this generic parameter have been omitted. This is only valid if the
+    Unspecified,
 }
 
 // === Generics === //
 
+/// A definition site for multiple generics.
 #[derive(Debug, Clone)]
 pub struct GenericBinder {
-    pub items: Vec<AnyGeneric>,
+    pub span: Span,
+    pub generics: Vec<AnyGeneric>,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct GenericInstance {
     pub binder: Obj<GenericBinder>,
-    pub types: TyOrReList,
+    pub substs: TyOrReList,
 }
 
+/// A definition for any type of generic.
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum AnyGeneric {
-    Type(Obj<GenericType>),
-    Region(Obj<GenericRegion>),
+    Re(Obj<RegionGeneric>),
+    Ty(Obj<TypeGeneric>),
 }
 
-#[derive(Debug, Clone)]
-pub struct GenericType {
-    pub binder: LateInit<Obj<GenericBinder>>,
-    pub index: u32,
-    pub name: Ident,
-    pub inherits: Ty,
+impl AnyGeneric {
+    pub fn unwrap_re(self) -> Obj<RegionGeneric> {
+        let Self::Re(v) = self else {
+            unreachable!();
+        };
+
+        v
+    }
+
+    pub fn unwrap_ty(self) -> Obj<TypeGeneric> {
+        let Self::Ty(v) = self else {
+            unreachable!();
+        };
+
+        v
+    }
 }
 
+/// A definition for a generic region parameter.
 #[derive(Debug, Clone)]
-pub struct GenericRegion {
+pub struct RegionGeneric {
+    pub span: Span,
+    pub ident: Ident,
     pub binder: LateInit<Obj<GenericBinder>>,
-    pub index: u32,
-    pub name: Ident,
-    pub outlives: Re,
+    pub index_in_binder: u32,
+    pub clause: TraitClauseList,
     pub variance: Variance,
+}
+
+/// A definition for a generic type parameter.
+#[derive(Debug, Clone)]
+pub struct TypeGeneric {
+    pub span: Span,
+    pub ident: Ident,
+    pub binder: LateInit<Obj<GenericBinder>>,
+    pub index_in_binder: u32,
+    pub unspecified_clause: TraitClauseList,
+    pub fully_specified_clause: LateInit<TraitClauseList>,
+    pub is_synthetic: bool,
+    pub is_associated_type: bool,
 }
 
 // === Type === //
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct Ty {
-    inner: Obj<TyKind>,
-}
-
-impl Ty {
-    pub fn new_unchecked(inner: Obj<TyKind>) -> Self {
-        Self { inner }
-    }
-
-    pub fn r(self, s: &Session) -> &TyKind {
-        self.inner.r(s)
-    }
-}
+pub type TyOrReList = Intern<[TyOrRe]>;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct TyList {
-    inner: Obj<[Ty]>,
+pub enum TyOrRe {
+    Re(Re),
+    Ty(Ty),
 }
 
-impl TyList {
-    pub fn new_unchecked(inner: Obj<[Ty]>) -> Self {
-        Self { inner }
+impl TyOrRe {
+    pub fn unwrap_re(self) -> Re {
+        let Self::Re(v) = self else {
+            unreachable!();
+        };
+
+        v
     }
 
-    pub fn r(self, s: &Session) -> &[Ty] {
-        self.inner.r(s)
-    }
-}
+    pub fn unwrap_ty(self) -> Ty {
+        let Self::Ty(v) = self else {
+            unreachable!();
+        };
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub enum TyKind {
-    This,
-    Simple(SimpleTyKind),
-    RawSlice(Ty),
-    Adt(Obj<AdtDef>, TyOrReList),
-    Trait(Obj<TraitDef>, TyOrReList),
-    Tuple(TyList),
-    FnDef(),
-    Reference(Re, Ty),
-    Generic(Obj<GenericType>),
+        v
+    }
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -137,7 +154,7 @@ pub enum Re {
     Gc,
 
     /// Refers to a generic lifetime parameter.
-    Generic(Obj<GenericRegion>),
+    Generic(Obj<RegionGeneric>),
 
     /// An internal lifetime parameter within the body.
     Internal(i32),
@@ -147,6 +164,22 @@ pub enum Re {
 
     /// The lifetime used when we don't want to worry about lifetimes.
     Erased,
+}
+
+pub type Ty = Intern<TyKind>;
+pub type TyList = Intern<[Ty]>;
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum TyKind {
+    This,
+    Simple(SimpleTyKind),
+    RawSlice(Ty),
+    Adt(Obj<AdtDef>, TyOrReList),
+    Trait(Obj<TraitDef>, TyOrReList),
+    Tuple(TyList),
+    FnDef(),
+    Reference(Re, Ty),
+    Generic(Obj<TypeGeneric>),
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -173,45 +206,6 @@ pub enum IntKind {
 pub enum FloatKind {
     S32,
     S64,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum TyOrRe {
-    Ty(Ty),
-    Re(Re),
-}
-
-impl TyOrRe {
-    pub fn unwrap_ty(self) -> Ty {
-        let Self::Ty(v) = self else {
-            unreachable!();
-        };
-
-        v
-    }
-
-    pub fn unwrap_re(self) -> Re {
-        let Self::Re(v) = self else {
-            unreachable!();
-        };
-
-        v
-    }
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct TyOrReList {
-    inner: Obj<[TyOrRe]>,
-}
-
-impl TyOrReList {
-    pub fn new_unchecked(inner: Obj<[TyOrRe]>) -> Self {
-        Self { inner }
-    }
-
-    pub fn r(self, s: &Session) -> &[TyOrRe] {
-        self.inner.r(s)
-    }
 }
 
 // === Variance === //

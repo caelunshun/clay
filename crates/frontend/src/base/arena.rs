@@ -338,3 +338,31 @@ impl<T> Drop for LateInit<T> {
         }
     }
 }
+
+// === Intern === //
+
+#[derive_where(Copy, Clone, Hash, Eq, PartialEq)]
+#[repr(transparent)]
+pub struct Intern<T: ?Sized + 'static> {
+    inner: Obj<T>,
+}
+
+impl<T: ?Sized + 'static + fmt::Debug> fmt::Debug for Intern<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.inner.fmt(f)
+    }
+}
+
+impl<T: ?Sized + 'static> Intern<T> {
+    pub fn wrap_unchecked(inner: Obj<T>) -> Self {
+        Self { inner }
+    }
+
+    pub fn unwrap(self) -> Obj<T> {
+        self.inner
+    }
+
+    pub fn r(self, s: &Session) -> &T {
+        self.inner.r(s)
+    }
+}

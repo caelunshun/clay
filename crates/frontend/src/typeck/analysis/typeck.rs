@@ -1,10 +1,6 @@
-use crate::{
-    base::arena::Obj,
-    match_pair,
-    typeck::{
-        analysis::TyCtxt,
-        syntax::{GenericInstance, Re, Ty, TyKind, TyList, TyOrRe, TyOrReList, Variance},
-    },
+use crate::typeck::{
+    analysis::TyCtxt,
+    syntax::{GenericInstance, Re, Ty, TyKind, TyList, TyOrRe, TyOrReList},
 };
 
 impl TyCtxt {
@@ -67,7 +63,7 @@ impl TyCtxt {
             Re::Gc | Re::Infer | Re::Erased => re,
             Re::Generic(generic) => {
                 if *generic.r(s).binder == generics.binder {
-                    generics.types.r(s)[generic.r(s).index as usize].unwrap_re()
+                    generics.substs.r(s)[generic.r(s).index_in_binder as usize].unwrap_re()
                 } else {
                     re
                 }
@@ -103,38 +99,11 @@ impl TyCtxt {
             )),
             TyKind::Generic(generic) => {
                 if *generic.r(s).binder == generics.binder {
-                    generics.types.r(s)[generic.r(s).index as usize].unwrap_ty()
+                    generics.substs.r(s)[generic.r(s).index_in_binder as usize].unwrap_ty()
                 } else {
                     target
                 }
             }
         }
     }
-
-    pub fn equate(&self, src: Ty, onto: Ty, variance: Variance) -> EquateResult {
-        self.queries
-            .equate
-            .compute((src, onto, variance), |_| {
-                Ok(self.equate_inner(src, onto, variance))
-            })
-            .unwrap()
-    }
-
-    fn equate_inner(&self, src: Ty, onto: Ty, variance: Variance) -> EquateResult {
-        let s = &self.session;
-
-        todo!()
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub struct EquateResult {
-    pub errors: Obj<[EquateError]>,
-    pub internal_re_constraints: Obj<[()]>,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub struct EquateError {
-    pub src: Ty,
-    pub onto: Ty,
 }

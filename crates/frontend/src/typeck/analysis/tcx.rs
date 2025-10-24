@@ -4,10 +4,7 @@ use crate::{
         analysis::Memo,
         arena::{ObjInterner, ObjListInterner},
     },
-    typeck::{
-        analysis::EquateResult,
-        syntax::{GenericInstance, Ty, TyKind, TyList, TyOrRe, TyOrReList, Variance},
-    },
+    typeck::syntax::{GenericInstance, Ty, TyKind, TyList, TyOrRe, TyOrReList, Variance},
     utils::hash::FxHashSet,
 };
 use std::{cell::RefCell, ops::Deref, rc::Rc};
@@ -46,7 +43,6 @@ pub struct Queries {
     pub substitute_ty: Memo<(Ty, Ty, GenericInstance), Ty>,
     pub substitute_ty_list: Memo<(TyList, Ty, GenericInstance), TyList>,
     pub substitute_ty_or_re_list: Memo<(TyOrReList, Ty, GenericInstance), TyOrReList>,
-    pub equate: Memo<(Ty, Ty, Variance), EquateResult>,
 }
 
 impl Deref for TyCtxt {
@@ -70,15 +66,15 @@ impl TyCtxt {
     }
 
     pub fn intern_ty(&self, ty: TyKind) -> Ty {
-        Ty::new_unchecked(self.interners.ty.intern(ty, &self.session))
+        Ty::wrap_unchecked(self.interners.ty.intern(ty, &self.session))
     }
 
     pub fn intern_tys(&self, ty: &[Ty]) -> TyList {
-        TyList::new_unchecked(self.interners.ty_list.intern(ty, &self.session))
+        TyList::wrap_unchecked(self.interners.ty_list.intern(ty, &self.session))
     }
 
     pub fn intern_ty_or_re_list(&self, elems: &[TyOrRe]) -> TyOrReList {
-        TyOrReList::new_unchecked(self.interners.ty_or_re_list.intern(elems, &self.session))
+        TyOrReList::wrap_unchecked(self.interners.ty_or_re_list.intern(elems, &self.session))
     }
 
     pub fn queue_wf(&self, req: WfRequirement) {
