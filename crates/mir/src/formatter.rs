@@ -1,9 +1,8 @@
 use crate::{
-    Func, InstrData, PrimType, Type, TypeKind, Val, instr,
-    instr::CompareMode,
-    module::{BasicBlock, ConstantData, Context, Field, FuncData},
+    Func, InstrData, PrimType, TypeKind, Val,
+    instr::{self, CompareMode},
+    module::{BasicBlock, ConstantData, Context, Field, FuncData, Type},
 };
-use compact_str::{CompactString, format_compact};
 use cranelift_entity::EntityRef;
 use fir_core::sexpr::{SExpr, float, int, list, string, symbol};
 use hashbrown::HashMap;
@@ -15,8 +14,6 @@ pub fn format_context<'db>(db: &'db dyn Database, cx: Context<'db>) -> SExpr {
     Formatter {
         db,
         cx,
-        type_names: Default::default(),
-        next_type_index: 0,
         val_names: Default::default(),
         next_val_index: 0,
         basic_block_names: Default::default(),
@@ -29,8 +26,6 @@ pub fn format_context<'db>(db: &'db dyn Database, cx: Context<'db>) -> SExpr {
 struct Formatter<'db> {
     db: &'db dyn Database,
     cx: Context<'db>,
-    type_names: HashMap<Type<'db>, SExpr>,
-    next_type_index: usize,
     val_names: HashMap<Val, SExpr>,
     next_val_index: usize,
     basic_block_names: HashMap<BasicBlock, SExpr>,
@@ -42,28 +37,6 @@ impl<'db> Formatter<'db> {
     pub fn format_all(mut self) -> SExpr {
         let mut items = vec![symbol("mir")];
 
-        for (_, typ) in &self.cx.data(self.db).types {
-            let type_name = if self.should_use_inline_type(*typ) {
-                self.format_type(*typ)
-            } else {
-                // Reference a type definition for brevity
-                let name = typ
-                    .data(self.db)
-                    .name()
-                    .map(CompactString::from)
-                    .unwrap_or_else(|| {
-                        let name = format_compact!("t{}", self.next_type_index);
-                        self.next_type_index += 1;
-                        name
-                    });
-                let name = symbol(name);
-
-                items.push(list([symbol("type"), name.clone(), self.format_type(*typ)]));
-                name
-            };
-            self.type_names.insert(*typ, type_name);
-        }
-
         for (_, func) in &self.cx.data(self.db).funcs {
             items.push(self.format_func(*func));
         }
@@ -72,11 +45,7 @@ impl<'db> Formatter<'db> {
     }
 
     fn format_type(&self, typ: Type<'db>) -> SExpr {
-        if let Some(existing_name) = self.type_names.get(&typ) {
-            return existing_name.clone();
-        }
-
-        match typ.data(self.db) {
+        match typ.kind(self.db) {
             TypeKind::Prim(p) => match *p {
                 PrimType::Int => symbol("int"),
                 PrimType::Real => symbol("real"),
@@ -85,49 +54,24 @@ impl<'db> Formatter<'db> {
                 PrimType::Str => symbol("str"),
                 PrimType::Unit => symbol("unit"),
             },
-            TypeKind::MRef(p) => list([
-                symbol("mref"),
-                self.format_type(p.resolve(self.db, self.cx)),
-            ]),
+            TypeKind::MRef(p) => list([symbol("mref"), self.format_type(*p)]),
             TypeKind::Func(f) => {
                 let mut items = vec![
                     symbol("func"),
-                    list([
-                        symbol("returns"),
-                        self.format_type(f.return_type.resolve(self.db, self.cx)),
-                    ]),
+                    list([symbol("returns"), self.format_type(f.return_type)]),
                 ];
 
                 for param in &f.param_types {
-                    items.push(list([
-                        symbol("param"),
-                        self.format_type(param.resolve(self.db, self.cx)),
-                    ]));
+                    items.push(list([symbol("param"), self.format_type(*param)]));
                 }
 
                 SExpr::List(items.into_boxed_slice())
             }
-            TypeKind::Struct(strukt) => {
-                let mut items = vec![symbol("struct")];
-
-                for (_, field_data) in &strukt.fields {
-                    items.push(list([
-                        symbol("field"),
-                        symbol(field_data.name.as_str()),
-                        self.format_type(field_data.typ.resolve(self.db, self.cx)),
-                    ]));
-                }
-                SExpr::List(items.into_boxed_slice())
-            }
-            TypeKind::List(t) => list([
-                symbol("list"),
-                self.format_type(t.resolve(self.db, self.cx)),
-            ]),
+            TypeKind::List(t) => list([symbol("list"), self.format_type(*t)]),
+            TypeKind::Algebraic(_) => todo!(),
+            TypeKind::TypeParam(_) => todo!(),
+            TypeKind::Self_ => symbol("Self"),
         }
-    }
-
-    fn should_use_inline_type(&self, typ: Type<'db>) -> bool {
-        !matches!(typ.data(self.db), TypeKind::Struct(_))
     }
 
     fn format_func(&mut self, func: Func<'db>) -> SExpr {
@@ -143,11 +87,11 @@ impl<'db> Formatter<'db> {
             symbol(func_data.header.name.clone()),
             list([
                 symbol("return_type"),
-                self.type_names[&func_data.header.return_type.resolve(self.db, self.cx)].clone(),
+                self.format_type(func_data.header.return_type),
             ]),
             list([
                 symbol("captures_type"),
-                self.type_names[&func_data.header.captures_type.resolve(self.db, self.cx)].clone(),
+                self.format_type(func_data.header.captures_type),
             ]),
         ];
 
@@ -172,7 +116,7 @@ impl<'db> Formatter<'db> {
             items.push(list([
                 symbol("param"),
                 self.val_name(param_val),
-                self.type_names[&func_data.vals[param_val].typ.resolve(self.db, self.cx)].clone(),
+                self.format_type(func_data.vals[param_val].typ),
             ]));
         }
 
@@ -377,7 +321,7 @@ impl<'db> Formatter<'db> {
             InstrData::MakeList(ins) => list([
                 symbol("list.init"),
                 self.val_name(ins.dst),
-                list([self.type_names[&ins.element_type.resolve(self.db, self.cx)].clone()]),
+                list([self.format_type(ins.element_type)]),
             ]),
             InstrData::ListPush(ins) => {
                 if let Some(dst_list) = ins.dst_list {
@@ -516,9 +460,9 @@ mod tests {
     #[salsa::tracked]
     fn make_basic_func<'db>(db: &'db dyn Database) -> Context<'db> {
         let mut cx = ContextBuilder::new(db);
-        let mut func = FuncBuilder::new(db, "add", cx.unit_type_ref(), cx.int_type_ref(), &mut cx);
-        let param0 = func.append_param(cx.int_type_ref());
-        let param1 = func.append_param(cx.int_type_ref());
+        let mut func = FuncBuilder::new(db, "add", Type::unit(db), Type::int(db), &mut cx);
+        let param0 = func.append_param(Type::int(db));
+        let param1 = func.append_param(Type::int(db));
         let ret_val = func.val();
         func.instr(&mut cx).int_add(ret_val, param0, param1);
         func.instr(&mut cx).return_(ret_val);

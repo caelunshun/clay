@@ -894,7 +894,7 @@ impl<'a, 'db> FuncParserState<'a, 'db> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::InstrData;
+    use crate::{InstrData, module::Type};
     use indoc::indoc;
     use salsa::DatabaseImpl;
 
@@ -933,8 +933,8 @@ mod tests {
         let func = *cx.funcs.values().next().unwrap();
         let func_data = func.data(&db);
 
-        assert_eq!(func_data.header.param_types, vec![cx.int_type_ref()]);
-        assert_eq!(func_data.header.captures_type, cx.unit_type_ref());
+        assert_eq!(func_data.header.param_types, vec![Type::int(&db)]);
+        assert_eq!(func_data.header.captures_type, Type::unit(&db));
         assert_eq!(func_data.basic_blocks.len(), 1);
 
         let block = &func_data.basic_blocks[func_data.entry_block];
