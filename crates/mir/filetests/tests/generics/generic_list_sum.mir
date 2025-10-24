@@ -2,134 +2,95 @@
     (trait Default
         (assoc_func default
             (return_type Self)))
-    (trait_impl int Default
+    (trait_impl
+        (type int)
+        (trait Default)
         (assoc_func default int_default))
     (func int_default
-        (return_type int)
         (captures_type unit)
+        (return_type int)
         (entry block0)
         (block block0
             (param captures (mref unit))
-            (constant x (0))
-            (return (x))))
+            (constant v0 (0))
+            (return (v0))))
     (trait Add
         (type_param Rhs)
         (assoc_type Output)
         (assoc_func add
-            (param self Self)
-            (param other Rhs)
+            (param lhs Self)
+            (param rhs Rhs)
             (return_type Output)))
-    (trait_impl int
-        (trait_instance Add
-            (type_arg Rhs (mref int)))
-        (assoc_type Output int)
+    (trait_impl
+        (type int)
+        (trait Add
+            (type_arg Rhs int)
+            (assoc_type Output int))
         (assoc_func add int_add))
     (func int_add
-        (return_type int)
         (captures_type unit)
+        (return_type int)
         (entry block0)
         (block block0
             (param captures (mref unit))
             (param lhs int)
-            (param rhs_ref (mref int))
-            (load rhs (rhs_ref))
+            (param rhs int)
             (int.add res (lhs rhs))
             (return (res))))
-    (type GenericPoint2
+    (type Point2
         (struct
             (type_param T)
             (field x T)
             (field y T)))
     (trait_impl
-        (type_instance GenericPoint2
-            (type_arg T T))
-        (trait_instance Add
-            (type_arg Rhs
-                (mref
-                    (type_instance GenericPoint2
-                        (type_arg T T))))))
         (type_param T)
         (requires
-            (has_impl T
-                (trait_instance Add
-                    (type_arg Rhs (mref T)))))
-        (assoc_type Output
-            (mref
-                (type_instance GenericPoint2
-                    (type_arg T T))))
-        (assoc_func add 
-            (func_instance point_add
+            (impls_trait T Default))
+        (type
+            (Point2
                 (type_arg T T)))
-    (func point_add
+        (trait Default)
+        (assoc_func default point2_default))
+    (func point2_default
         (type_param T)
         (requires
-            (has_impl T
-                (trait_instance Add
-                    (type_arg Rhs (mref T)))))
-        (return_type 
-            (type_instance GenericPoint2
-                (type_arg T T)))
+            (impls_trait T Default))
         (captures_type unit)
+        (return_type
+            (Point2
+                (type_arg T T)))
         (entry block0)
         (block block0
             (param captures (mref unit))
-            (param lhs
-                (type_instance GenericPoint2
-                    (type_arg T T)))
-            (param rhs_ref
-                (mref
-                    (type_instance GenericPoint2
-                        (type_arg T T))))
-            (load rhs (rhs_ref))
-            (struct.get x_lhs (lhs x))
-            (struct.get y_lhs (lhs y))
-            (struct.get x_rhs (rhs x))
-            (struct.get y_rhs (rhs y))
-            (call x_sum
-                ((get_assoc_func
-                    (get_trait_impl T
-                        (trait_instance Add
-                            (type_arg Rhs (mref T)))
-                    (x_lhs x_rhs)))))
-            (call y_sum
-                ((get_assoc_func
-                    (get_trait_impl T
-                        (trait_instance Add
-                            (type_arg Rhs (mref T))))
-                    (y_lhs y_rhs))))
-            (struct.init res
-                ((type_instance GenericPoint2
-                    (type_arg T T))
-                    (field x x_sum)
-                    (field y y_sum)))
-            (return (res))))
+            (call x
+                ((get_assoc_func T Default default)))
+            (call y
+                ((get_assoc_func T Default default))
+            (struct.init pt
+                ((Point (type_arg T T))
+                    (field x x)
+                    (field y y))))
+            (return (pt))))
     (func list_sum
         (type_param T)
         (requires
-            (has_impl T 
-                (trait_instance Add
-                    (type_arg Rhs (mref T)))))
+            (impls_trait T Default))
         (requires
-            (has_impl T Default))
-        (requires
-            (types_equal T
-                (get_assoc_type Output
-                    (get_trait_impl T
-                        (trait_instance Add
-                            (type_arg Rhs (mref T)))))))
-        (return_type T)
+            (impls_trait T 
+                (Add
+                    (type_arg Rhs T)
+                    (assoc_type Output T))))
         (captures_type unit)
+        (return_type T)
         (entry block0)
         (block block0
             (param captures (mref unit))
             (param list (mref (list T)))
-            (constant i (0))
             (call accum
-                ((get_assoc_func default
-                    (get_trait_impl T Default))
-                    ()))
-            (jump (loop_start ())))
-        (block loop_start
+                ((get_assoc_func T Default default)))
+            (constant i (0))
+            (jump (loop ())))
+        (block loop
             (list.len len (list))
             (int.cmp done (== i len))
             (branch
@@ -137,15 +98,13 @@
                     (true exit ())
                     (false loop_body ()))))
         (block loop_body
-            (list.get_mref x (list i))
+            (list.get element (list i))
             (call accum
-                ((get_assoc_func add
-                    (get_trait_impl T
-                        (trait_instance Add
-                            (type_arg Rhs (mref T)))))
-                    (accum x)))
+                ((get_assoc_func T (Add (type_arg Rhs T) (assoc_type Output T)) add)
+                    accum element))
             (constant one (1))
             (int.add i (i one))
-            (jump (loop_start ())))
+            (jump (loop ())))
         (block exit
             (return (accum)))))
+    
