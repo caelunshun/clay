@@ -1,7 +1,6 @@
 use crate::instr::InstrData;
 use compact_str::CompactString;
 use cranelift_entity::{EntityList, EntitySet, ListPool, PrimaryMap, SecondaryMap};
-use indexmap::IndexMap;
 use salsa::Database;
 use std::{
     hash::{Hash, Hasher},
@@ -21,8 +20,7 @@ pub struct Context<'db> {
 /// lazy initialization of each type and function.
 #[derive(Debug, Clone)]
 pub struct ContextBuilder<'db> {
-    types: PrimaryMap<TypeRef, Option<Type<'db>>>,
-    types_by_data: IndexMap<TypeKind, Vec<TypeRef>, hashbrown::DefaultHashBuilder>,
+    adts: PrimaryMap<AlgebraicTypeRef, Option<AlgebraicType<'db>>>,
     funcs: PrimaryMap<FuncRef, Option<Func<'db>>>,
     /// A function header can be known before
     /// the function body. This allows resolving
@@ -31,87 +29,34 @@ pub struct ContextBuilder<'db> {
 }
 
 impl<'db> ContextBuilder<'db> {
-    pub fn new(db: &'db dyn Database) -> Self {
-        let mut cx = Self {
-            types: Default::default(),
-            types_by_data: Default::default(),
+    pub fn new(_db: &'db dyn Database) -> Self {
+        Self {
+            adts: Default::default(),
             funcs: Default::default(),
             func_headers: Default::default(),
-        };
-        for prim in [
-            PrimType::Int,
-            PrimType::Bool,
-            PrimType::Real,
-            PrimType::Byte,
-            PrimType::Str,
-            PrimType::Unit,
-        ] {
-            cx.get_or_create_type_ref_with_data(db, TypeKind::Prim(prim));
         }
-        cx
     }
 
-    pub fn prim_type_ref(&self, prim: PrimType) -> TypeRef {
-        self.types_by_data[&TypeKind::Prim(prim)][0]
-    }
-
-    pub fn int_type_ref(&self) -> TypeRef {
-        self.prim_type_ref(PrimType::Int)
-    }
-
-    pub fn bool_type_ref(&self) -> TypeRef {
-        self.prim_type_ref(PrimType::Bool)
-    }
-
-    pub fn real_type_ref(&self) -> TypeRef {
-        self.prim_type_ref(PrimType::Real)
-    }
-
-    pub fn byte_type_ref(&self) -> TypeRef {
-        self.prim_type_ref(PrimType::Byte)
-    }
-
-    pub fn str_type_ref(&self) -> TypeRef {
-        self.prim_type_ref(PrimType::Str)
-    }
-
-    pub fn unit_type_ref(&self) -> TypeRef {
-        self.prim_type_ref(PrimType::Unit)
-    }
-
-    /// Creates a `TypeRef` without binding the corresponding
+    /// Creates a `AlgebraicTypeRef` without binding the corresponding
     /// type data. It must be bound before finalization
     /// or a panic will occur.
-    pub fn alloc_type(&mut self) -> TypeRef {
-        self.types.push(None)
+    pub fn alloc_adt(&mut self) -> AlgebraicTypeRef {
+        self.adts.push(None)
     }
 
-    /// Binds the value of a type.
-    pub fn bind_type(&mut self, db: &'db dyn Database, type_ref: TypeRef, typ: Type<'db>) {
-        assert!(self.types[type_ref].is_none(), "type bound twice");
-        self.types[type_ref] = Some(typ);
-        self.types_by_data
-            .entry(typ.data(db).clone())
-            .or_default()
-            .push(type_ref);
-    }
-
-    pub fn resolve_type(&self, r: TypeRef) -> Type<'db> {
-        self.types[r].expect("attempted to resolve unbound type")
-    }
-
-    pub fn get_or_create_type_ref(&mut self, db: &'db dyn Database, typ: Type<'db>) -> TypeRef {
-        self.types_by_data
-            .entry(typ.data(db).clone())
-            .or_insert_with(|| vec![self.types.push(Some(typ))])[0]
-    }
-
-    pub fn get_or_create_type_ref_with_data(
+    /// Binds the value of an ADT.
+    pub fn bind_adt(
         &mut self,
-        db: &'db dyn Database,
-        typ: TypeKind,
-    ) -> TypeRef {
-        self.get_or_create_type_ref(db, Type::new(db, typ))
+        _db: &'db dyn Database,
+        type_ref: AlgebraicTypeRef,
+        typ: AlgebraicType<'db>,
+    ) {
+        assert!(self.adts[type_ref].is_none(), "type bound twice");
+        self.adts[type_ref] = Some(typ);
+    }
+
+    pub fn resolve_adt(&self, r: AlgebraicTypeRef) -> AlgebraicType<'db> {
+        self.adts[r].expect("attempted to resolve unbound ADT")
     }
 
     pub fn alloc_func(&mut self) -> FuncRef {
@@ -142,54 +87,12 @@ impl<'db> ContextBuilder<'db> {
             })
     }
 
-    /// Deduplicates all types in the context builder,
-    /// returning the mapping of old typerefs to new typerefs.
-    ///
-    /// Functions must be empty as this will not apply
-    /// the mapping to function data.
-    pub fn deduplicate_types(&mut self, db: &'db dyn Database) -> SecondaryMap<TypeRef, TypeRef> {
-        assert!(
-            self.types.values().all(|x| x.is_some()),
-            "all types must be bound before callinbg deduplicate_types"
-        );
-
-        loop {
-            let mut ref_mapping = SecondaryMap::new();
-
-            let mut new_types: PrimaryMap<TypeRef, Option<Type<'db>>> = PrimaryMap::new();
-            for (type_data, type_refs) in mem::take(&mut self.types_by_data) {
-                let ref_ = new_types.push(Some(Type::new(db, type_data)));
-                for original_ref in type_refs {
-                    ref_mapping[original_ref] = ref_;
-                }
-            }
-
-            for (type_ref, typ) in &new_types {
-                let new_data = typ
-                    .unwrap()
-                    .data(db)
-                    .clone()
-                    .map_used_types(|r| ref_mapping[r]);
-                self.types_by_data
-                    .entry(new_data)
-                    .or_default()
-                    .push(type_ref);
-            }
-
-            let done = self.types.len() == new_types.len();
-            self.types = new_types;
-            if done {
-                return ref_mapping;
-            }
-        }
-    }
-
     pub fn finish(self) -> ContextData<'db> {
-        let mut types = PrimaryMap::new();
+        let mut adts = PrimaryMap::new();
         let mut funcs = PrimaryMap::new();
-        for (type_ref, typ) in self.types {
+        for (type_ref, typ) in self.adts {
             assert_eq!(
-                types.push(typ.expect("type not bound before finalization")),
+                adts.push(typ.expect("type not bound before finalization")),
                 type_ref
             );
         }
@@ -200,64 +103,14 @@ impl<'db> ContextBuilder<'db> {
             );
         }
 
-        ContextData {
-            types,
-            funcs,
-            types_by_data: self
-                .types_by_data
-                .into_iter()
-                .map(|(kind, type_refs)| {
-                    assert_eq!(type_refs.len(), 1, "types not deduplicated");
-                    (kind, type_refs[0])
-                })
-                .collect(),
-        }
+        ContextData { adts, funcs }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, salsa::Update)]
 pub struct ContextData<'db> {
-    pub types: PrimaryMap<TypeRef, Type<'db>>,
-    /// Maps TypeData
-    /// to the unique TypeRef for that TypeData.
-    /// If a TypeData does not appear in this map
-    /// then it is not referenced anywhere
-    /// in this context.
-    ///
-    /// Note that to simplify some code, all primitive types are always defined
-    /// here.
-    pub types_by_data: IndexMap<TypeKind, TypeRef, hashbrown::DefaultHashBuilder>,
+    pub adts: PrimaryMap<AlgebraicTypeRef, AlgebraicType<'db>>,
     pub funcs: PrimaryMap<FuncRef, Func<'db>>,
-}
-
-impl<'db> ContextData<'db> {
-    pub fn prim_type_ref(&self, prim: PrimType) -> TypeRef {
-        self.types_by_data[&TypeKind::Prim(prim)]
-    }
-
-    pub fn int_type_ref(&self) -> TypeRef {
-        self.prim_type_ref(PrimType::Int)
-    }
-
-    pub fn bool_type_ref(&self) -> TypeRef {
-        self.prim_type_ref(PrimType::Bool)
-    }
-
-    pub fn real_type_ref(&self) -> TypeRef {
-        self.prim_type_ref(PrimType::Real)
-    }
-
-    pub fn byte_type_ref(&self) -> TypeRef {
-        self.prim_type_ref(PrimType::Byte)
-    }
-
-    pub fn str_type_ref(&self) -> TypeRef {
-        self.prim_type_ref(PrimType::Str)
-    }
-
-    pub fn unit_type_ref(&self) -> TypeRef {
-        self.prim_type_ref(PrimType::Unit)
-    }
 }
 
 entity_ref! {
@@ -267,25 +120,12 @@ entity_ref! {
     pub struct TypeRef;
 }
 
-impl TypeRef {
-    /// Gets the type ref corresponding to the given
-    /// type data in the given context, or `None`
-    /// if the type does not exist in the context.
-    pub fn of(db: &dyn Database, data: TypeKind, cx: &Context) -> Option<Self> {
-        cx.data(db).types_by_data.get(&data).copied()
-    }
+entity_ref! {
+    pub struct AlgebraicTypeRef;
+}
 
-    /// Equivalent to `Self::of` but inserts a new type
-    /// into the context if it does not exist.
-    pub fn create<'db>(
-        db: &'db dyn Database,
-        data: TypeKind,
-        cx: &mut ContextBuilder<'db>,
-    ) -> Self {
-        cx.get_or_create_type_ref_with_data(db, data)
-    }
-
-    pub fn resolve<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> Type<'db> {
+impl AlgebraicTypeRef {
+    pub fn resolve<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> AlgebraicType<'db> {
         /// Wrapping this in a salsa::tracked
         /// function allows salsa to avoid
         /// recalculating a query when the returned
@@ -295,19 +135,19 @@ impl TypeRef {
         fn resolve_helper<'db>(
             db: &'db dyn Database,
             cx: Context<'db>,
-            type_ref: TypeRef,
-        ) -> Type<'db> {
-            cx.data(db).types[type_ref]
+            type_ref: AlgebraicTypeRef,
+        ) -> AlgebraicType<'db> {
+            cx.data(db).adts[type_ref]
         }
 
         resolve_helper(db, cx, *self)
     }
 
-    pub fn resolve_in_builder<'db>(&self, cx: &ContextBuilder<'db>) -> Type<'db> {
-        cx.resolve_type(*self)
+    pub fn resolve_in_builder<'db>(&self, cx: &ContextBuilder<'db>) -> AlgebraicType<'db> {
+        cx.resolve_adt(*self)
     }
 
-    pub fn data<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> &'db TypeKind {
+    pub fn data<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> &'db AlgebraicTypeData {
         self.resolve(db, cx).data(db)
     }
 }
@@ -365,15 +205,26 @@ impl FuncRef {
     }
 }
 
-#[salsa::interned(debug)]
-pub struct Type<'db> {
+/// A type that can have generic parameters.
+#[salsa::tracked(debug)]
+pub struct AlgebraicType<'db> {
     #[returns(ref)]
-    pub data: TypeKind,
+    pub name: CompactString,
+    #[tracked]
+    #[returns(ref)]
+    pub type_params: PrimaryMap<TypeParam, ()>,
+    #[tracked]
+    #[returns(ref)]
+    pub data: AlgebraicTypeData,
 }
 
-#[salsa::tracked(debug)]
-struct TypeDataWrapper<'db> {
-    data: TypeKind,
+entity_ref_16bit! {
+    pub struct TypeParam;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub enum AlgebraicTypeData {
+    Struct(StructTypeData),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
@@ -383,69 +234,21 @@ pub enum TypeKind {
     /// or to a field of an object managed by the garbage collector,
     /// or to an element of a list.
     /// It has indefinite lifetime.
-    MRef(TypeRef),
+    MRef(Box<TypeKind>),
     Func(FuncTypeData),
-    Struct(StructTypeData),
     /// Dynamically resized array.
-    List(TypeRef),
+    List(Box<TypeKind>),
+    Algebraic(AlgebraicTypeInstance),
+    /// Generic type in the current scope.
+    TypeParam(TypeParam),
+    /// Only valid inside a trait definition.
+    Self_,
 }
 
-impl TypeKind {
-    pub fn name(&self) -> Option<&str> {
-        match self {
-            TypeKind::Struct(s) => s.name.as_deref(),
-            _ => None,
-        }
-    }
-
-    ///  Visits any types referenced / depended on by
-    /// this type. Is not recursive.
-    pub fn visit_used_types(&self, visit: &mut impl FnMut(TypeRef)) {
-        match self {
-            TypeKind::Prim(_) => {}
-            TypeKind::MRef(t) => {
-                visit(*t);
-            }
-            TypeKind::Func(func) => {
-                visit(func.return_type);
-                for param in &func.param_types {
-                    visit(*param);
-                }
-            }
-            TypeKind::Struct(s) => {
-                for (_, field) in &s.fields {
-                    visit(field.typ);
-                }
-            }
-            TypeKind::List(el) => {
-                visit(*el);
-            }
-        }
-    }
-
-    /// Applies a mapping to any TypeRefs used in this type.
-    pub fn map_used_types(self, mut map: impl FnMut(TypeRef) -> TypeRef) -> Self {
-        match self {
-            TypeKind::Prim(_) => self,
-            TypeKind::MRef(t) => TypeKind::MRef(map(t)),
-            TypeKind::Func(f) => TypeKind::Func(FuncTypeData {
-                param_types: f.param_types.into_iter().map(&mut map).collect(),
-                return_type: map(f.return_type),
-            }),
-            TypeKind::Struct(s) => TypeKind::Struct(StructTypeData {
-                name: s.name,
-                fields: s
-                    .fields
-                    .into_iter()
-                    .map(|(_, field)| FieldData {
-                        name: field.name,
-                        typ: map(field.typ),
-                    })
-                    .collect(),
-            }),
-            TypeKind::List(t) => TypeKind::List(map(t)),
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct AlgebraicTypeInstance {
+    pub adt: AlgebraicTypeRef,
+    pub type_args: Box<SecondaryMap<TypeParam, Option<TypeKind>>>,
 }
 
 /// A closure object, consisting of a dynamic
@@ -453,8 +256,8 @@ impl TypeKind {
 /// captures struct.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct FuncTypeData {
-    pub param_types: Vec<TypeRef>,
-    pub return_type: TypeRef,
+    pub param_types: Vec<TypeKind>,
+    pub return_type: Box<TypeKind>,
 }
 
 /// Type built in to the engine.
@@ -476,7 +279,6 @@ pub enum PrimType {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct StructTypeData {
-    pub name: Option<CompactString>,
     pub fields: PrimaryMap<Field, FieldData>,
 }
 
@@ -487,7 +289,7 @@ entity_ref_16bit! {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct FieldData {
     pub name: CompactString,
-    pub typ: TypeRef,
+    pub typ: TypeKind,
 }
 
 #[salsa::tracked(debug)]
@@ -560,10 +362,10 @@ pub struct FuncHeader {
     /// for the function. A managed reference
     /// to the captures is the first argument
     /// to the entry block of the function.
-    pub captures_type: TypeRef,
+    pub captures_type: TypeKind,
     /// Parameters expected by the function, not including the captures.
-    pub param_types: Vec<TypeRef>,
-    pub return_type: TypeRef,
+    pub param_types: Vec<TypeKind>,
+    pub return_type: TypeKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Hash, salsa::Update)]
@@ -584,19 +386,6 @@ pub struct FuncData<'db> {
 }
 
 impl<'db> FuncData<'db> {
-    /// Visits all types used in the function.
-    /// May visit the same type multiple times.
-    pub fn visit_types(&self, mut visit: impl FnMut(TypeRef)) {
-        visit(self.header.captures_type);
-        visit(self.header.return_type);
-        for &param in &self.header.param_types {
-            visit(param);
-        }
-        for (_, val_data) in &self.vals {
-            visit(val_data.typ);
-        }
-    }
-
     /// Visits all basic blocks in an order such that
     /// a block B is not visited until after all blocks that
     /// appear in any *path* (not a walk) from the entry block to B (exclusive)
@@ -706,15 +495,9 @@ entity_ref_16bit! {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct ValData {
     /// Type of the local.
-    pub typ: TypeRef,
+    pub typ: TypeKind,
     /// Optional name, for debugging and testing.
     pub name: Option<CompactString>,
-}
-
-impl ValData {
-    pub fn new(typ: TypeRef) -> Self {
-        Self { typ, name: None }
-    }
 }
 
 entity_ref_16bit! {
