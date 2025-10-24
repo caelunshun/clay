@@ -179,24 +179,52 @@ impl<T: ?Sized + 'static> Obj<T> {
     }
 }
 
-// === ObjInterner === //
+// === Intern === //
 
-#[derive_where(Default)]
-pub struct ObjInterner<T: 'static> {
-    interns: RefCell<FxHashMap<(Obj<T>, u64), ()>>,
+#[derive_where(Copy, Clone, Hash, Eq, PartialEq)]
+#[repr(transparent)]
+pub struct Intern<T: ?Sized + 'static> {
+    inner: Obj<T>,
 }
 
-impl<T: 'static> fmt::Debug for ObjInterner<T> {
+impl<T: ?Sized + 'static + fmt::Debug> fmt::Debug for Intern<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ObjInterner").finish_non_exhaustive()
+        self.inner.fmt(f)
     }
 }
 
-impl<T> ObjInterner<T>
+impl<T: ?Sized + 'static> Intern<T> {
+    pub fn wrap_unchecked(inner: Obj<T>) -> Self {
+        Self { inner }
+    }
+
+    pub fn unwrap(self) -> Obj<T> {
+        self.inner
+    }
+
+    pub fn r(self, s: &Session) -> &T {
+        self.inner.r(s)
+    }
+}
+
+// === Interner === //
+
+#[derive_where(Default)]
+pub struct Interner<T: 'static> {
+    interns: RefCell<FxHashMap<(Intern<T>, u64), ()>>,
+}
+
+impl<T: 'static> fmt::Debug for Interner<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Interner").finish_non_exhaustive()
+    }
+}
+
+impl<T> Interner<T>
 where
     T: 'static + hash::Hash + Eq,
 {
-    pub fn intern(&self, value: T, s: &Session) -> Obj<T> {
+    pub fn intern(&self, value: T, s: &Session) -> Intern<T> {
         let mut interns = self.interns.borrow_mut();
         let hash = FxBuildHasher::default().hash_one(&value);
 
@@ -207,33 +235,33 @@ where
             }) {
             hash_map::RawEntryMut::Occupied(entry) => entry.key().0,
             hash_map::RawEntryMut::Vacant(entry) => {
-                let ty = Obj::new(value, s);
-                entry.insert_with_hasher(hash, (ty, hash), (), |(_, hash)| *hash);
-                ty
+                let value = Intern::wrap_unchecked(Obj::new(value, s));
+                entry.insert_with_hasher(hash, (value, hash), (), |(_, hash)| *hash);
+                value
             }
         }
     }
 }
 
-// === ObjListInterner === //
+// === ListInterner === //
 
 #[derive_where(Default)]
-pub struct ObjListInterner<T: 'static> {
+pub struct ListInterner<T: 'static> {
     #[expect(clippy::type_complexity)]
-    interns: RefCell<FxHashMap<(Obj<[T]>, u64), ()>>,
+    interns: RefCell<FxHashMap<(Intern<[T]>, u64), ()>>,
 }
 
-impl<T: 'static> fmt::Debug for ObjListInterner<T> {
+impl<T: 'static> fmt::Debug for ListInterner<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ObjListInterner").finish_non_exhaustive()
+        f.debug_struct("ListInterner").finish_non_exhaustive()
     }
 }
 
-impl<T> ObjListInterner<T>
+impl<T> ListInterner<T>
 where
     T: 'static + hash::Hash + Eq,
 {
-    pub fn intern(&self, values: &[T], s: &Session) -> Obj<[T]>
+    pub fn intern(&self, values: &[T], s: &Session) -> Intern<[T]>
     where
         T: Clone,
     {
@@ -247,9 +275,9 @@ where
             }) {
             hash_map::RawEntryMut::Occupied(entry) => entry.key().0,
             hash_map::RawEntryMut::Vacant(entry) => {
-                let ty = Obj::new_slice(values, s);
-                entry.insert_with_hasher(hash, (ty, hash), (), |(_, hash)| *hash);
-                ty
+                let values = Intern::wrap_unchecked(Obj::new_slice(values, s));
+                entry.insert_with_hasher(hash, (values, hash), (), |(_, hash)| *hash);
+                values
             }
         }
     }
@@ -336,33 +364,5 @@ impl<T> Drop for LateInit<T> {
         if self.is_init.get() {
             unsafe { self.cell.get_mut().assume_init_drop() }
         }
-    }
-}
-
-// === Intern === //
-
-#[derive_where(Copy, Clone, Hash, Eq, PartialEq)]
-#[repr(transparent)]
-pub struct Intern<T: ?Sized + 'static> {
-    inner: Obj<T>,
-}
-
-impl<T: ?Sized + 'static + fmt::Debug> fmt::Debug for Intern<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.inner.fmt(f)
-    }
-}
-
-impl<T: ?Sized + 'static> Intern<T> {
-    pub fn wrap_unchecked(inner: Obj<T>) -> Self {
-        Self { inner }
-    }
-
-    pub fn unwrap(self) -> Obj<T> {
-        self.inner
-    }
-
-    pub fn r(self, s: &Session) -> &T {
-        self.inner.r(s)
     }
 }

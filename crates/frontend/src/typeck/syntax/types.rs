@@ -50,8 +50,6 @@ pub type TraitParamList = Intern<[TraitParam]>;
 pub enum TraitParam {
     Equals(TyOrRe),
     Implements(TraitClauseList),
-
-    /// The constraints for this generic parameter have been omitted. This is only valid if the
     Unspecified,
 }
 
@@ -62,6 +60,12 @@ pub enum TraitParam {
 pub struct GenericBinder {
     pub span: Span,
     pub generics: Vec<AnyGeneric>,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct BinderSpec {
+    pub def: Obj<GenericBinder>,
+    pub idx: u32,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -100,8 +104,7 @@ impl AnyGeneric {
 pub struct RegionGeneric {
     pub span: Span,
     pub ident: Ident,
-    pub binder: LateInit<Obj<GenericBinder>>,
-    pub index_in_binder: u32,
+    pub binder: LateInit<BinderSpec>,
     pub clause: TraitClauseList,
     pub variance: Variance,
 }
@@ -111,12 +114,10 @@ pub struct RegionGeneric {
 pub struct TypeGeneric {
     pub span: Span,
     pub ident: Ident,
-    pub binder: LateInit<Obj<GenericBinder>>,
-    pub index_in_binder: u32,
-    pub unspecified_clause: TraitClauseList,
-    pub fully_specified_clause: LateInit<TraitClauseList>,
+    pub binder: LateInit<BinderSpec>,
+    pub uninstantiated_clauses: TraitClauseList,
+    pub instantiated_clauses: LateInit<TraitClauseList>,
     pub is_synthetic: bool,
-    pub is_associated_type: bool,
 }
 
 // === Type === //

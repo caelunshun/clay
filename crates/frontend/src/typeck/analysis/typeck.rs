@@ -1,6 +1,17 @@
-use crate::typeck::{
-    analysis::TyCtxt,
-    syntax::{GenericInstance, Re, Ty, TyKind, TyList, TyOrRe, TyOrReList},
+use crate::{
+    base::{
+        arena::{LateInit, Obj},
+        syntax::Span,
+    },
+    parse::token::Ident,
+    symbol,
+    typeck::{
+        analysis::TyCtxt,
+        syntax::{
+            AnyGeneric, BinderSpec, GenericBinder, GenericInstance, Re, TraitClause,
+            TraitClauseList, TraitParam, Ty, TyKind, TyList, TyOrRe, TyOrReList, TypeGeneric,
+        },
+    },
 };
 
 impl TyCtxt {
@@ -62,8 +73,8 @@ impl TyCtxt {
         match re {
             Re::Gc | Re::Infer | Re::Erased => re,
             Re::Generic(generic) => {
-                if *generic.r(s).binder == generics.binder {
-                    generics.substs.r(s)[generic.r(s).index_in_binder as usize].unwrap_re()
+                if generic.r(s).binder.def == generics.binder {
+                    generics.substs.r(s)[generic.r(s).binder.idx as usize].unwrap_re()
                 } else {
                     re
                 }
@@ -98,12 +109,101 @@ impl TyCtxt {
                 self.substitute_ty(ty, self_ty, generics),
             )),
             TyKind::Generic(generic) => {
-                if *generic.r(s).binder == generics.binder {
-                    generics.substs.r(s)[generic.r(s).index_in_binder as usize].unwrap_ty()
+                if generic.r(s).binder.def == generics.binder {
+                    generics.substs.r(s)[generic.r(s).binder.idx as usize].unwrap_ty()
                 } else {
                     target
                 }
             }
         }
+    }
+
+    pub fn instantiate_clauses(
+        &self,
+        generic: Obj<TypeGeneric>,
+        span: Span,
+        binder: &mut GenericBinder,
+    ) -> TraitClauseList {
+        let s = &self.session;
+
+        let generic = generic.r(s);
+
+        if let Some(v) = LateInit::get(&generic.instantiated_clauses) {
+            return *v;
+        }
+
+        let clauses = generic
+            .uninstantiated_clauses
+            .r(s)
+            .iter()
+            .map(|clause| match *clause {
+                TraitClause::Outlives(re) => TraitClause::Outlives(re),
+                TraitClause::Trait(def, params) => {
+                    let params = params
+                        .r(s)
+                        .iter()
+                        .zip(&def.r(s).generics.r(s).generics)
+                        .map(|(&param, def)| {
+                            let clauses = match param {
+                                TraitParam::Equals(_) => return param,
+                                TraitParam::Implements(clauses) => clauses,
+                                TraitParam::Unspecified => {
+                                    def.unwrap_ty().r(s).uninstantiated_clauses
+                                }
+                            };
+
+                            let generic = Obj::new(
+                                TypeGeneric {
+                                    span,
+                                    ident: Ident {
+                                        span,
+                                        text: symbol!("?"),
+                                        raw: false,
+                                    },
+                                    binder: LateInit::uninit(),
+                                    uninstantiated_clauses: clauses,
+                                    instantiated_clauses: LateInit::uninit(),
+                                    is_synthetic: true,
+                                },
+                                s,
+                            );
+
+                            binder.generics.push(AnyGeneric::Ty(generic));
+
+                            TraitParam::Equals(TyOrRe::Ty(self.intern_ty(TyKind::Generic(generic))))
+                        })
+                        .collect::<Vec<_>>();
+
+                    TraitClause::Trait(def, self.intern_trait_param_list(&params))
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let clauses = self.intern_trait_clause_list(&clauses);
+
+        LateInit::init(&generic.instantiated_clauses, clauses);
+
+        clauses
+    }
+
+    pub fn seal_binder(&self, binder: GenericBinder) -> Obj<GenericBinder> {
+        let s = &self.session;
+
+        let binder = Obj::new(binder, s);
+
+        for (i, generic) in binder.r(s).generics.iter().enumerate() {
+            LateInit::init(
+                match generic {
+                    AnyGeneric::Re(generic) => &generic.r(s).binder,
+                    AnyGeneric::Ty(generic) => &generic.r(s).binder,
+                },
+                BinderSpec {
+                    def: binder,
+                    idx: i as u32,
+                },
+            );
+        }
+
+        binder
     }
 }

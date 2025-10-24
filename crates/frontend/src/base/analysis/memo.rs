@@ -17,6 +17,10 @@ where
     K: Clone + hash::Hash + Eq,
     V: Clone,
 {
+    pub fn compute_infallible(&self, key: K, f: impl FnOnce(&K) -> V) -> V {
+        self.compute(key, |i| Ok(f(i))).unwrap()
+    }
+
     pub fn compute(
         &self,
         key: K,

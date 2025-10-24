@@ -2,9 +2,12 @@ use crate::{
     base::{
         Session,
         analysis::Memo,
-        arena::{ObjInterner, ObjListInterner},
+        arena::{Interner, ListInterner},
     },
-    typeck::syntax::{GenericInstance, Ty, TyKind, TyList, TyOrRe, TyOrReList, Variance},
+    typeck::syntax::{
+        GenericInstance, TraitClause, TraitClauseList, TraitParam, TraitParamList, Ty, TyKind,
+        TyList, TyOrRe, TyOrReList,
+    },
     utils::hash::FxHashSet,
 };
 use std::{cell::RefCell, ops::Deref, rc::Rc};
@@ -33,9 +36,11 @@ pub enum WfRequirement {}
 
 #[derive(Debug, Default)]
 pub struct Interners {
-    pub ty: ObjInterner<TyKind>,
-    pub ty_list: ObjListInterner<Ty>,
-    pub ty_or_re_list: ObjListInterner<TyOrRe>,
+    pub ty: Interner<TyKind>,
+    pub ty_list: ListInterner<Ty>,
+    pub ty_or_re_list: ListInterner<TyOrRe>,
+    pub trait_param_list: ListInterner<TraitParam>,
+    pub trait_clause_list: ListInterner<TraitClause>,
 }
 
 #[derive(Debug, Default)]
@@ -66,15 +71,25 @@ impl TyCtxt {
     }
 
     pub fn intern_ty(&self, ty: TyKind) -> Ty {
-        Ty::wrap_unchecked(self.interners.ty.intern(ty, &self.session))
+        self.interners.ty.intern(ty, &self.session)
     }
 
     pub fn intern_tys(&self, ty: &[Ty]) -> TyList {
-        TyList::wrap_unchecked(self.interners.ty_list.intern(ty, &self.session))
+        self.interners.ty_list.intern(ty, &self.session)
     }
 
     pub fn intern_ty_or_re_list(&self, elems: &[TyOrRe]) -> TyOrReList {
-        TyOrReList::wrap_unchecked(self.interners.ty_or_re_list.intern(elems, &self.session))
+        self.interners.ty_or_re_list.intern(elems, &self.session)
+    }
+
+    pub fn intern_trait_param_list(&self, elems: &[TraitParam]) -> TraitParamList {
+        self.interners.trait_param_list.intern(elems, &self.session)
+    }
+
+    pub fn intern_trait_clause_list(&self, elems: &[TraitClause]) -> TraitClauseList {
+        self.interners
+            .trait_clause_list
+            .intern(elems, &self.session)
     }
 
     pub fn queue_wf(&self, req: WfRequirement) {
