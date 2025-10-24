@@ -1,6 +1,6 @@
 use crate::{
     InstrData, PrimType, TypeKind, Val,
-    module::{BasicBlock, Context, FuncData, FuncTypeData, StructTypeData, TypeRef},
+    module::{BasicBlock, Context, FuncData, FuncTypeData, StructTypeData, Type},
     validation::ValidationError,
 };
 use cranelift_entity::EntityList;
@@ -30,7 +30,7 @@ struct InstrTypeVerifier<'a, 'db> {
 }
 
 impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
-    fn verify_types_for_instr(&self, instr: InstrData) -> Result<(), ValidationError> {
+    fn verify_types_for_instr(&self, instr: &InstrData) -> Result<(), ValidationError> {
         match instr {
             InstrData::Jump(ins) => {
                 self.verify_basic_block_args(ins.target, &ins.args)?;
@@ -41,9 +41,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 self.verify_basic_block_args(ins.target_false, &ins.args_false)?;
             }
             InstrData::Call(ins) => {
-                if ins.func.data(self.db, self.cx).header.captures_type
-                    != TypeKind::Prim(PrimType::Unit)
-                {
+                if ins.func.data(self.db, self.cx).header.captures_type != Type::unit(self.db) {
                     return Err(ValidationError::new(
                         "can't make a direct call to a function with non-unit captures type",
                     ));
@@ -170,7 +168,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
             }
             InstrData::MakeFieldMRef(ins) => {
                 let pointee = self.expect_any_ref(ins.src_ref)?;
-                let struct_data = match pointee.data(self.db, self.cx) {
+                let struct_data = match pointee.kind(self.db) {
                     TypeKind::Struct(s) => s,
                     _ => return Err(ValidationError::new("expected reference to struct")),
                 };
@@ -263,7 +261,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 .header
                 .param_types
                 .iter()
-                .map(|&t| t.data(self.db, self.cx).clone()),
+                .map(|&t| t.kind(self.db).clone()),
         );
 
         let entry_block = &self.func.basic_blocks[self.func.entry_block];
@@ -290,12 +288,12 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
         Ok(())
     }
 
-    fn type_of(&self, val: Val) -> &TypeKind {
-        &self.func.vals[val].typ
+    fn type_of(&self, val: Val) -> Type<'db> {
+        self.func.vals[val].typ
     }
 
-    fn type_data_of(&self, val: Val) -> &TypeKind {
-        &self.func.vals[val].typ
+    fn type_data_of(&self, val: Val) -> &TypeKind<'db> {
+        self.func.vals[val].typ.kind(self.db)
     }
 
     fn verify_type_data_matches(
@@ -304,7 +302,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
         allowed_types: &[TypeKind],
     ) -> Result<(), ValidationError> {
         let typ = self.func.vals[val].typ;
-        if !allowed_types.contains(&typ) {
+        if !allowed_types.contains(typ.kind(self.db)) {
             return Err(ValidationError::new(format!(
                 "expected one of {allowed_types:?}, found {:?}",
                 typ
@@ -313,8 +311,8 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
         Ok(())
     }
 
-    fn verify_type_equals(&self, val: Val, typ: &TypeKind) -> Result<(), ValidationError> {
-        let actual_typ = &self.func.vals[val].typ;
+    fn verify_type_equals(&self, val: Val, typ: Type<'db>) -> Result<(), ValidationError> {
+        let actual_typ = self.func.vals[val].typ;
         if typ != actual_typ {
             return Err(ValidationError::new(format!(
                 "wrong type: expected {:?}, found {:?}",
@@ -353,7 +351,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
 
     fn verify_function_args(
         &self,
-        param_types: &[TypeKind],
+        param_types: &[Type<'db>],
         args: &EntityList<Val>,
     ) -> Result<(), ValidationError> {
         let args = args.as_slice(&self.func.val_lists);
@@ -382,23 +380,23 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
     }
 
     #[track_caller]
-    fn expect_any_ref(&self, val: Val) -> Result<&TypeKind, ValidationError> {
+    fn expect_any_ref(&self, val: Val) -> Result<Type<'db>, ValidationError> {
         match self.type_data_of(val) {
-            TypeKind::MRef(t) => Ok(&**t),
+            TypeKind::MRef(t) => Ok(*t),
             _ => Err(ValidationError::new("expected mref or eref")),
         }
     }
 
     #[track_caller]
-    fn expect_list_or_list_ref(&self, val: Val) -> Result<&TypeKind, ValidationError> {
+    fn expect_list_or_list_ref(&self, val: Val) -> Result<Type<'db>, ValidationError> {
         match self.type_data_of(val) {
-            TypeKind::List(t) => Ok(&**t),
-            TypeKind::MRef(l) if let TypeKind::List(t) = &**l => Ok(&**t),
+            TypeKind::List(t) => Ok(*t),
+            TypeKind::MRef(l) if let TypeKind::List(t) = l.kind(self.db) => Ok(*t),
             _ => Err(ValidationError::new("expected list or reference to list")),
         }
     }
 
-    fn is_ref(&self, t: &TypeKind) -> bool {
-        matches!(t, TypeKind::MRef(_))
+    fn is_ref(&self, t: Type<'db>) -> bool {
+        matches!(t.kind(self.db), TypeKind::MRef(_))
     }
 }
