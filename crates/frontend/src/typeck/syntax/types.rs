@@ -62,13 +62,13 @@ pub enum TraitParam {
 pub struct ImplDef {
     pub span: Span,
     pub generics: Obj<GenericBinder>,
-    pub trait_: Option<TraitSpec>,
+    pub trait_: Option<TraitInstance>,
     pub target: Ty,
     pub methods: LateInit<Vec<()>>,
 }
 
 #[derive(Debug, Clone)]
-pub struct TraitSpec {
+pub struct TraitInstance {
     pub def: Obj<TraitDef>,
     pub params: TyOrReList,
 }

@@ -263,7 +263,7 @@ impl TyCtxt {
         clauses
     }
 
-    pub fn seal_binder(&self, binder: GenericBinder) -> Obj<GenericBinder> {
+    pub fn seal_generic_binder(&self, binder: GenericBinder) -> Obj<GenericBinder> {
         let s = &self.session;
 
         let binder = Obj::new(binder, s);
@@ -692,4 +692,104 @@ pub struct DirectFailure {
     pub src_def: Obj<TraitDef>,
     pub src_params: TraitParamList,
     pub cause: Vec<SatisfiabilityFailure>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        base::Session,
+        typeck::syntax::{SimpleTyKind, TraitInstance},
+    };
+
+    #[test]
+    fn trait_check() {
+        let session = Session::new();
+        let _guard = session.clone().bind();
+        let tcx = TyCtxt::new(session);
+        let s = &tcx.session;
+
+        let my_trait = Obj::new(
+            TraitDef {
+                span: Span::DUMMY,
+                ident: Ident {
+                    span: Span::DUMMY,
+                    text: symbol!("MyTrait"),
+                    raw: false,
+                },
+                generics: tcx.seal_generic_binder(GenericBinder {
+                    span: Span::DUMMY,
+                    generics: Vec::new(),
+                }),
+                methods: LateInit::new(Vec::new()),
+                impls: LateInit::uninit(),
+            },
+            s,
+        );
+
+        let my_impl = {
+            let mut binder = GenericBinder {
+                span: Span::DUMMY,
+                generics: Vec::new(),
+            };
+
+            let type_t = Obj::new(
+                TypeGeneric {
+                    span: Span::DUMMY,
+                    ident: Ident {
+                        span: Span::DUMMY,
+                        text: symbol!("T"),
+                        raw: false,
+                    },
+                    binder: LateInit::uninit(),
+                    user_clauses: tcx.intern_trait_clause_list(&[]),
+                    instantiated_clauses: LateInit::uninit(),
+                    is_synthetic: false,
+                },
+                s,
+            );
+            binder.generics.push(AnyGeneric::Ty(type_t));
+
+            Obj::new(
+                ImplDef {
+                    span: Span::DUMMY,
+                    generics: tcx.seal_generic_binder(binder),
+                    trait_: Some(TraitInstance {
+                        def: my_trait,
+                        params: tcx.intern_ty_or_re_list(&[]),
+                    }),
+                    target: tcx.intern_ty(TyKind::Tuple(tcx.intern_tys(&[
+                        tcx.intern_ty(TyKind::Universal(type_t)),
+                        tcx.intern_ty(TyKind::Universal(type_t)),
+                    ]))),
+                    methods: LateInit::new(Vec::new()),
+                },
+                s,
+            )
+        };
+
+        LateInit::init(&my_trait.r(s).impls, vec![my_impl]);
+
+        let mut synthetic_binder = GenericBinder {
+            span: Span::DUMMY,
+            generics: Vec::new(),
+        };
+
+        let mut failures = Vec::new();
+
+        tcx.check_trait_assignability_erase_regions(
+            tcx.intern_ty(TyKind::Tuple(tcx.intern_tys(&[
+                tcx.intern_ty(TyKind::Simple(SimpleTyKind::Bool)),
+                tcx.intern_ty(TyKind::Simple(SimpleTyKind::Char)),
+            ]))),
+            my_trait,
+            tcx.intern_trait_param_list(&[]),
+            &mut synthetic_binder,
+            &mut Vec::new(),
+            &mut FxHashMap::default(),
+            &mut failures,
+        );
+
+        dbg!(failures);
+    }
 }
