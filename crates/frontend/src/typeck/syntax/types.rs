@@ -221,17 +221,13 @@ pub enum TyKind {
     /// The universal type quantification produced by a generic parameter.
     Universal(Obj<TypeGeneric>),
 
-    /// An inference variable in the source of a type assignability check. Used for inference of
-    /// types within a function body.
-    SrcInferVar(InferTy),
-
     /// An inference variable in the destination of a type assignability check. Used for inference
     /// of types in a trait implementation candidate.
-    DstInferVar(InferTy, TraitClauseList),
+    OntoInferVar(OntoInferTyVar, TraitClauseList),
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct InferTy(u32);
+pub struct OntoInferTyVar(pub u32);
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum SimpleTyKind {
