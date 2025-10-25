@@ -415,24 +415,16 @@ impl TyCtxt {
                 } else {
                     infer_var_inferences.insert(onto_var, src);
 
-                    for &clause in infer_var_clause_stack[onto_var.0 as usize].r(s).iter() {
-                        match clause {
-                            TraitClause::Outlives(_) => {
-                                // (regions are ignored)
-                            }
-                            TraitClause::Trait(onto_def, onto_params) => {
-                                self.check_trait_assignability_erase_regions(
-                                    src,
-                                    onto_def,
-                                    onto_params,
-                                    binder,
-                                    infer_var_clause_stack,
-                                    infer_var_inferences,
-                                    failures,
-                                );
-                            }
-                        }
-                    }
+                    let onto_clauses = infer_var_clause_stack[onto_var.0 as usize];
+
+                    self.check_clause_list_assignability_erase_regions(
+                        src,
+                        onto_clauses,
+                        binder,
+                        infer_var_clause_stack,
+                        infer_var_inferences,
+                        failures,
+                    );
                 }
             }
             // Omissions okay because of intern equality fast-path:
@@ -444,6 +436,35 @@ impl TyCtxt {
             //
             _ => {
                 failures.push(SatisfiabilityFailure::Structural { src, onto });
+            }
+        }
+    }
+
+    pub fn check_clause_list_assignability_erase_regions(
+        &self,
+        src: Ty,
+        onto: TraitClauseList,
+        binder: &mut GenericBinder,
+        infer_var_clause_stack: &mut Vec<TraitClauseList>,
+        infer_var_inferences: &mut FxHashMap<OntoInferTyVar, Ty>,
+        failures: &mut Vec<SatisfiabilityFailure>,
+    ) {
+        for &clause in onto.r(&self.session).iter() {
+            match clause {
+                TraitClause::Outlives(_) => {
+                    // (regions are ignored)
+                }
+                TraitClause::Trait(onto_def, onto_params) => {
+                    self.check_trait_assignability_erase_regions(
+                        src,
+                        onto_def,
+                        onto_params,
+                        binder,
+                        infer_var_clause_stack,
+                        infer_var_inferences,
+                        failures,
+                    );
+                }
             }
         }
     }
@@ -462,7 +483,7 @@ impl TyCtxt {
         let s = &self.session;
 
         // See whether the type itself can provide the implementation.
-        match *src.r(s) {
+        let direct_satisfy_failures = match *src.r(s) {
             TyKind::Trait(clauses) => {
                 todo!()
             }
@@ -472,7 +493,7 @@ impl TyCtxt {
                 let mut sub_failures = Vec::new();
                 let mut sub_inferences = infer_var_inferences.clone();
 
-                if self.check_clause_satisfies_clause_erase_regions(
+                self.check_clause_satisfies_clause_erase_regions(
                     src_instantiated,
                     onto_def,
                     onto_params,
@@ -480,13 +501,17 @@ impl TyCtxt {
                     infer_var_clause_stack,
                     &mut sub_inferences,
                     &mut sub_failures,
-                ) {
+                );
+
+                if sub_failures.is_empty() {
                     *infer_var_inferences = sub_inferences;
                     return;
                 }
+
+                Some(sub_failures)
             }
-            _ => {}
-        }
+            _ => None,
+        };
 
         // Otherwise, attempt to provide the implementation through an implementation block.
         let mut impl_failures = Vec::new();
@@ -543,6 +568,7 @@ impl TyCtxt {
             src,
             onto_def,
             onto_params,
+            direct_satisfy_failures,
             impl_failures,
         });
     }
@@ -557,18 +583,23 @@ impl TyCtxt {
         infer_var_clause_stack: &mut Vec<TraitClauseList>,
         infer_var_inferences: &mut FxHashMap<OntoInferTyVar, Ty>,
         failures: &mut Vec<SatisfiabilityFailure>,
-    ) -> bool {
+    ) {
         let s = &self.session;
 
-        'check_clauses: for &src in src_instantiated.r(s).iter() {
+        let mut direct_failures = Vec::new();
+
+        for &src in src_instantiated.r(s).iter() {
             match src {
                 TraitClause::Outlives(_) => {
                     // (regions are ignored)
                 }
                 TraitClause::Trait(src_def, src_params) => {
                     if src_def != onto_def {
-                        continue 'check_clauses;
+                        continue;
                     }
+
+                    let mut sub_failures = Vec::new();
+                    let mut sub_inferences = infer_var_inferences.clone();
 
                     for (src_param, onto_param) in src_params.r(s).iter().zip(onto_params.r(s)) {
                         let TraitParam::Equals(src) = *src_param else {
@@ -587,18 +618,45 @@ impl TyCtxt {
                                     onto_ty.unwrap_ty(),
                                     binder,
                                     infer_var_clause_stack,
-                                    infer_var_inferences,
-                                    failures,
+                                    &mut sub_inferences,
+                                    &mut sub_failures,
                                 );
                             }
-                            TraitParam::Unspecified(clauses) => {}
+                            TraitParam::Unspecified(clauses) => {
+                                self.check_clause_list_assignability_erase_regions(
+                                    src,
+                                    *clauses,
+                                    binder,
+                                    infer_var_clause_stack,
+                                    &mut sub_inferences,
+                                    &mut sub_failures,
+                                );
+                            }
                         }
                     }
+
+                    if !sub_failures.is_empty() {
+                        direct_failures.push(DirectFailure {
+                            src_def,
+                            src_params,
+                            cause: sub_failures,
+                        });
+
+                        continue;
+                    }
+
+                    *infer_var_inferences = sub_inferences;
+                    return;
                 }
             }
         }
 
-        false
+        failures.push(SatisfiabilityFailure::CannotDirect {
+            src_instantiated,
+            onto_def,
+            onto_params,
+            direct_failures,
+        });
     }
 }
 
@@ -612,12 +670,26 @@ pub enum SatisfiabilityFailure {
         src: Ty,
         onto_def: Obj<TraitDef>,
         onto_params: TraitParamList,
+        direct_satisfy_failures: Option<Vec<SatisfiabilityFailure>>,
         impl_failures: Vec<ImplFailure>,
+    },
+    CannotDirect {
+        src_instantiated: TraitClauseList,
+        onto_def: Obj<TraitDef>,
+        onto_params: TraitParamList,
+        direct_failures: Vec<DirectFailure>,
     },
 }
 
 #[derive(Debug, Clone)]
 pub struct ImplFailure {
     pub impl_: Obj<ImplDef>,
+    pub cause: Vec<SatisfiabilityFailure>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DirectFailure {
+    pub src_def: Obj<TraitDef>,
+    pub src_params: TraitParamList,
     pub cause: Vec<SatisfiabilityFailure>,
 }
