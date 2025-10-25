@@ -67,7 +67,7 @@ pub struct ImplDef {
     pub methods: LateInit<Vec<()>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct TraitInstance {
     pub def: Obj<TraitDef>,
     pub params: TyOrReList,
@@ -225,14 +225,13 @@ pub enum TyKind {
     /// The universal type quantification produced by a generic parameter.
     Universal(Obj<TypeGeneric>),
 
-    /// An inference variable in the destination of a type assignability check. Used for inference
-    /// of types in a trait implementation candidate. The second value indicates the generic from
-    /// which this variable was derived for diagnostic purposes.
-    OntoInferVar(OntoInferTyVar, Obj<TypeGeneric>),
+    /// An inference variable used in trait solving. The second parameter is used in diagnostics to
+    /// indicate the generic that led to the generation of this variable.
+    InferVar(InferTyVar, Obj<TypeGeneric>),
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct OntoInferTyVar(pub u32);
+pub struct InferTyVar(pub u32);
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum SimpleTyKind {

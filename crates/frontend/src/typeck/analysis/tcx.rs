@@ -4,9 +4,12 @@ use crate::{
         analysis::Memo,
         arena::{Interner, ListInterner, Obj},
     },
-    typeck::syntax::{
-        GenericInstance, ImplDef, OntoInferTyVar, ListOfTraitClauseList, TraitClause, TraitClauseList,
-        TraitParam, TraitParamList, Ty, TyKind, TyList, TyOrRe, TyOrReList,
+    typeck::{
+        analysis::ImplFreshInfer,
+        syntax::{
+            GenericInstance, ImplDef, ListOfTraitClauseList, InferTyVar, TraitClause,
+            TraitClauseList, TraitParam, TraitParamList, Ty, TyKind, TyList, TyOrRe, TyOrReList,
+        },
     },
     utils::hash::FxHashSet,
 };
@@ -51,8 +54,7 @@ pub struct Queries {
     pub substitute_ty_or_re_list: Memo<(TyOrReList, Ty, GenericInstance), TyOrReList>,
     pub substitute_clause_list: Memo<(TraitClauseList, Ty, GenericInstance), TraitClauseList>,
     pub substitute_trait_param_list: Memo<(TraitParamList, Ty, GenericInstance), TraitParamList>,
-    pub instantiate_fresh_target_infers:
-        Memo<(Obj<ImplDef>, OntoInferTyVar), (Ty, ListOfTraitClauseList)>,
+    pub instantiate_fresh_target_infers: Memo<(Obj<ImplDef>, InferTyVar), ImplFreshInfer>,
 }
 
 impl Deref for TyCtxt {

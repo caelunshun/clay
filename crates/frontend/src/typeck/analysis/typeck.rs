@@ -8,13 +8,13 @@ use crate::{
     typeck::{
         analysis::TyCtxt,
         syntax::{
-            AnyGeneric, BinderSpec, GenericBinder, GenericInstance, ImplDef, ListOfTraitClauseList,
-            OntoInferTyVar, Re, TraitClause, TraitClauseList, TraitDef, TraitParam, TraitParamList,
-            Ty, TyKind, TyList, TyOrRe, TyOrReList, TypeGeneric,
+            AnyGeneric, BinderSpec, GenericBinder, GenericInstance, ImplDef, InferTyVar,
+            ListOfTraitClauseList, Re, TraitClause, TraitClauseList, TraitDef, TraitParam,
+            TraitParamList, Ty, TyKind, TyList, TyOrRe, TyOrReList, TypeGeneric,
         },
     },
-    utils::hash::FxHashMap,
 };
+use disjoint::DisjointSetVec;
 
 impl TyCtxt {
     pub fn substitute_ty_or_re_list(
@@ -99,7 +99,7 @@ impl TyCtxt {
                             target
                         }
                     }
-                    TyKind::OntoInferVar(..) => unreachable!(),
+                    TyKind::InferVar(..) => unreachable!(),
                     TyKind::ExplicitInfer => unreachable!(),
                 }
             })
@@ -287,8 +287,8 @@ impl TyCtxt {
     pub fn instantiate_fresh_target_infers(
         &self,
         candidate: Obj<ImplDef>,
-        min_infer_var: OntoInferTyVar,
-    ) -> (Ty, ListOfTraitClauseList) {
+        min_infer_var: InferTyVar,
+    ) -> ImplFreshInfer {
         let s = &self.session;
 
         self.queries
@@ -305,7 +305,7 @@ impl TyCtxt {
                     .map(|generic| match generic {
                         AnyGeneric::Re(_) => TyOrRe::Re(Re::Erased),
                         AnyGeneric::Ty(generic) => {
-                            let ty = self.intern_ty(TyKind::OntoInferVar(min_infer_var, *generic));
+                            let ty = self.intern_ty(TyKind::InferVar(min_infer_var, *generic));
                             min_infer_var.0 += 1;
 
                             TyOrRe::Ty(ty)
@@ -320,7 +320,7 @@ impl TyCtxt {
                 let target =
                     self.substitute_ty(candidate.r(s).target, self.intern_ty(TyKind::This), substs);
 
-                let clauses = binder
+                let inf_var_clauses = binder
                     .r(s)
                     .generics
                     .iter()
@@ -334,100 +334,116 @@ impl TyCtxt {
                     })
                     .collect::<Vec<_>>();
 
-                let clauses = self.intern_list_of_trait_clause_list(&clauses);
+                let inf_var_clauses = self.intern_list_of_trait_clause_list(&inf_var_clauses);
 
-                (target, clauses)
+                let trait_instance = self.substitute_ty_or_re_list(
+                    candidate.r(s).trait_.unwrap().params,
+                    target,
+                    substs,
+                );
+
+                ImplFreshInfer {
+                    target,
+                    trait_instance,
+                    inf_var_clauses,
+                }
             })
     }
 
     pub fn check_type_assignability_erase_regions(
         &self,
-        src: Ty,
-        onto: Ty,
-        binder: &mut GenericBinder,
-        infer_var_clause_stack: &mut Vec<TraitClauseList>,
-        infer_var_inferences: &mut FxHashMap<OntoInferTyVar, Ty>,
+        lhs: Ty,
+        rhs: Ty,
+        infer_var_inferences: &mut InferVarInferences,
         failures: &mut Vec<SatisfiabilityFailure>,
     ) {
         let s = &self.session;
 
-        if src == onto {
+        if lhs == rhs {
             // The types are compatible!
             return;
         }
 
-        match (*src.r(s), *onto.r(s)) {
+        match (*lhs.r(s), *rhs.r(s)) {
             (TyKind::This, _)
             | (_, TyKind::This)
             | (TyKind::ExplicitInfer, _)
-            | (_, TyKind::ExplicitInfer)
-            | (TyKind::OntoInferVar(..), _) => unreachable!(),
-            (TyKind::Reference(_, src), TyKind::Reference(_, onto)) => {
+            | (_, TyKind::ExplicitInfer) => unreachable!(),
+            (TyKind::Reference(_, lhs), TyKind::Reference(_, rhs)) => {
                 self.check_type_assignability_erase_regions(
-                    src,
-                    onto,
-                    binder,
-                    infer_var_clause_stack,
+                    lhs,
+                    rhs,
                     infer_var_inferences,
                     failures,
                 );
             }
-            (TyKind::Adt(src_def, src_args), TyKind::Adt(onto_def, onto_args))
-                if src_def == onto_def =>
+            (TyKind::Adt(lhs_def, lhs_args), TyKind::Adt(rhs_def, rhs_args))
+                if lhs_def == rhs_def =>
             {
-                for (&src, &onto) in src_args.r(s).iter().zip(onto_args.r(s)) {
-                    let (TyOrRe::Ty(src), TyOrRe::Ty(onto)) = (src, onto) else {
+                for (&lhs, &rhs) in lhs_args.r(s).iter().zip(rhs_args.r(s)) {
+                    let (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) = (lhs, rhs) else {
                         continue;
                     };
 
                     self.check_type_assignability_erase_regions(
-                        src,
-                        onto,
-                        binder,
-                        infer_var_clause_stack,
+                        lhs,
+                        rhs,
                         infer_var_inferences,
                         failures,
                     );
                 }
             }
-            (TyKind::Tuple(src), TyKind::Tuple(onto)) if src.r(s).len() == onto.r(s).len() => {
-                for (&src, &onto) in src.r(s).iter().zip(onto.r(s)) {
+            (TyKind::Tuple(lhs), TyKind::Tuple(rhs)) if lhs.r(s).len() == rhs.r(s).len() => {
+                for (&lhs, &rhs) in lhs.r(s).iter().zip(rhs.r(s)) {
                     self.check_type_assignability_erase_regions(
-                        src,
-                        onto,
-                        binder,
-                        infer_var_clause_stack,
+                        lhs,
+                        rhs,
                         infer_var_inferences,
                         failures,
                     );
                 }
             }
-            (_, TyKind::OntoInferVar(onto_var, _)) => {
-                if let Some(known_onto) = infer_var_inferences.get(&onto_var).copied() {
+            (TyKind::InferVar(lhs_var, _), TyKind::InferVar(rhs_var, _)) => {
+                if let (Some(lhs_ty), Some(rhs_ty)) = (
+                    infer_var_inferences.lookup(lhs_var),
+                    infer_var_inferences.lookup(rhs_var),
+                ) {
                     self.check_type_assignability_erase_regions(
-                        src,
-                        known_onto,
-                        binder,
-                        infer_var_clause_stack,
+                        lhs_ty,
+                        rhs_ty,
                         infer_var_inferences,
                         failures,
                     );
                 } else {
-                    infer_var_inferences.insert(onto_var, src);
-
-                    let onto_clauses = infer_var_clause_stack[onto_var.0 as usize];
-
-                    self.check_clause_list_assignability_erase_regions(
-                        src,
-                        onto_clauses,
-                        binder,
-                        infer_var_clause_stack,
+                    infer_var_inferences.union(lhs_var, rhs_var);
+                }
+            }
+            (TyKind::InferVar(lhs_var, _), _) => {
+                if let Some(known_lhs) = infer_var_inferences.lookup(lhs_var) {
+                    self.check_type_assignability_erase_regions(
+                        known_lhs,
+                        rhs,
                         infer_var_inferences,
                         failures,
                     );
+                } else {
+                    infer_var_inferences.assign(lhs_var, rhs);
                 }
             }
-            // Omissions okay because of intern equality fast-path:
+            (_, TyKind::InferVar(rhs_var, _)) => {
+                if let Some(known_rhs) = infer_var_inferences.lookup(rhs_var) {
+                    self.check_type_assignability_erase_regions(
+                        lhs,
+                        known_rhs,
+                        infer_var_inferences,
+                        failures,
+                    );
+                } else {
+                    infer_var_inferences.assign(rhs_var, lhs);
+                }
+            }
+            // Omissions okay because of intern equality fast-path and the fact that all lifetimes
+            // are erased:
             //
             // - `(Simple, Simple)`
             // - `(FnDef, FnDef)`
@@ -435,76 +451,66 @@ impl TyCtxt {
             // - `(Trait, Trait)`
             //
             _ => {
-                failures.push(SatisfiabilityFailure::Structural { src, onto });
+                failures.push(SatisfiabilityFailure::Structural { lhs, rhs });
             }
         }
     }
 
     pub fn check_clause_list_assignability_erase_regions(
         &self,
-        src: Ty,
-        onto: TraitClauseList,
+        lhs: Ty,
+        rhs: TraitClauseList,
         binder: &mut GenericBinder,
-        infer_var_clause_stack: &mut Vec<TraitClauseList>,
-        infer_var_inferences: &mut FxHashMap<OntoInferTyVar, Ty>,
+        inferences: &mut InferVarInferences,
         failures: &mut Vec<SatisfiabilityFailure>,
     ) {
-        for &clause in onto.r(&self.session).iter() {
+        for &clause in rhs.r(&self.session).iter() {
             match clause {
                 TraitClause::Outlives(_) => {
                     // (regions are ignored)
                 }
-                TraitClause::Trait(onto_def, onto_params) => {
+                TraitClause::Trait(rhs_def, rhs_params) => {
                     self.check_trait_assignability_erase_regions(
-                        src,
-                        onto_def,
-                        onto_params,
-                        binder,
-                        infer_var_clause_stack,
-                        infer_var_inferences,
-                        failures,
+                        lhs, rhs_def, rhs_params, binder, inferences, failures,
                     );
                 }
             }
         }
     }
 
-    #[expect(clippy::too_many_arguments)]
     pub fn check_trait_assignability_erase_regions(
         &self,
-        src: Ty,
-        onto_def: Obj<TraitDef>,
-        onto_params: TraitParamList,
+        lhs: Ty,
+        rhs_def: Obj<TraitDef>,
+        rhs_params: TraitParamList,
         binder: &mut GenericBinder,
-        infer_var_clause_stack: &mut Vec<TraitClauseList>,
-        infer_var_inferences: &mut FxHashMap<OntoInferTyVar, Ty>,
+        inferences: &mut InferVarInferences,
         failures: &mut Vec<SatisfiabilityFailure>,
     ) {
         let s = &self.session;
 
         // See whether the type itself can provide the implementation.
-        let direct_satisfy_failures = match *src.r(s) {
+        let direct_satisfy_failures = match *lhs.r(s) {
             TyKind::Trait(clauses) => {
                 todo!()
             }
             TyKind::Universal(generic) => {
-                let src_instantiated = self.instantiate_generic_clauses(generic, binder);
+                let lhs_instantiated = self.instantiate_generic_clauses(generic, binder);
 
                 let mut sub_failures = Vec::new();
-                let mut sub_inferences = infer_var_inferences.clone();
+                let mut sub_inferences = inferences.clone();
 
                 self.check_clause_satisfies_clause_erase_regions(
-                    src_instantiated,
-                    onto_def,
-                    onto_params,
+                    lhs_instantiated,
+                    rhs_def,
+                    rhs_params,
                     binder,
-                    infer_var_clause_stack,
                     &mut sub_inferences,
                     &mut sub_failures,
                 );
 
                 if sub_failures.is_empty() {
-                    *infer_var_inferences = sub_inferences;
+                    *inferences = sub_inferences;
                     return;
                 }
 
@@ -516,45 +522,75 @@ impl TyCtxt {
         // Otherwise, attempt to provide the implementation through an implementation block.
         let mut impl_failures = Vec::new();
 
-        for &candidate in onto_def.r(s).impls.iter() {
+        for &candidate in rhs_def.r(s).impls.iter() {
             // Replace universal qualifications in `impl` with inference variables
-            let (mapped_target, additional_vars) = self.instantiate_fresh_target_infers(
-                candidate,
-                OntoInferTyVar(infer_var_clause_stack.len() as u32),
-            );
-
-            let old_infer_var_stack_len = infer_var_clause_stack.len();
-            infer_var_clause_stack.extend_from_slice(additional_vars.r(s));
+            let min_infer_var = inferences.next_infer_var();
+            let candidate_fresh = self.instantiate_fresh_target_infers(candidate, min_infer_var);
 
             // Check impl candidate.
             let mut sub_failures = Vec::new();
-            let mut sub_inferences = infer_var_inferences.clone();
+            let mut sub_inferences = inferences.clone();
 
-            let is_accepted = 'is_accepted: {
-                // See whether our target type can even match this `impl` block.
-                self.check_type_assignability_erase_regions(
-                    src,
-                    mapped_target,
-                    binder,
-                    infer_var_clause_stack,
-                    &mut sub_inferences,
-                    &mut sub_failures,
-                );
+            sub_inferences.define_infer_vars(candidate_fresh.inf_var_clauses.r(s).len());
 
-                if !sub_failures.is_empty() {
-                    break 'is_accepted false;
+            // See whether our target type can even match this `impl` block.
+            self.check_type_assignability_erase_regions(
+                lhs,
+                candidate_fresh.target,
+                &mut sub_inferences,
+                &mut sub_failures,
+            );
+
+            // See whether our specific target trait clauses can be covered by the inferred
+            // generics.
+            for (&instance_ty, &required_param) in candidate_fresh
+                .trait_instance
+                .r(s)
+                .iter()
+                .zip(rhs_params.r(s))
+            {
+                let TyOrRe::Ty(instance_ty) = instance_ty else {
+                    // (regions are ignored)
+                    continue;
+                };
+
+                match required_param {
+                    TraitParam::Equals(required_ty) => {
+                        self.check_type_assignability_erase_regions(
+                            instance_ty,
+                            required_ty.unwrap_ty(),
+                            &mut sub_inferences,
+                            &mut sub_failures,
+                        );
+                    }
+                    TraitParam::Unspecified(additional_clauses) => {
+                        self.check_clause_list_assignability_erase_regions(
+                            instance_ty,
+                            additional_clauses,
+                            binder,
+                            &mut sub_inferences,
+                            &mut sub_failures,
+                        );
+                    }
                 }
+            }
 
-                // See whether our specific trait clauses can be covered this `impl`.
-                // TODO
+            // See whether the inferences we made for all our variables are valid.
+            for (var_id, &clauses) in (min_infer_var.0..).zip(candidate_fresh.inf_var_clauses.r(s))
+            {
+                let var_id = InferTyVar(var_id);
 
-                true
-            };
+                let resolved = sub_inferences.lookup(var_id).unwrap();
 
-            infer_var_clause_stack.truncate(old_infer_var_stack_len);
+                self.check_clause_list_assignability_erase_regions(
+                    resolved, clauses, binder, inferences, failures,
+                );
+            }
 
-            if is_accepted {
-                *infer_var_inferences = sub_inferences;
+            // If the impl match was successful, commit the inferences and stop scanning for more
+            // candidates. Otherwise, report the failure and continue scanning.
+            if sub_failures.is_empty() {
+                *inferences = sub_inferences;
                 return;
             }
 
@@ -565,69 +601,64 @@ impl TyCtxt {
         }
 
         failures.push(SatisfiabilityFailure::CannotSatisfy {
-            src,
-            onto_def,
-            onto_params,
+            lhs,
+            rhs_def,
+            rhs_params,
             direct_satisfy_failures,
             impl_failures,
         });
     }
 
-    #[expect(clippy::too_many_arguments)]
     pub fn check_clause_satisfies_clause_erase_regions(
         &self,
-        src_instantiated: TraitClauseList,
-        onto_def: Obj<TraitDef>,
-        onto_params: TraitParamList,
+        lhs_instantiated: TraitClauseList,
+        rhs_def: Obj<TraitDef>,
+        rhs_params: TraitParamList,
         binder: &mut GenericBinder,
-        infer_var_clause_stack: &mut Vec<TraitClauseList>,
-        infer_var_inferences: &mut FxHashMap<OntoInferTyVar, Ty>,
+        inferences: &mut InferVarInferences,
         failures: &mut Vec<SatisfiabilityFailure>,
     ) {
         let s = &self.session;
 
         let mut direct_failures = Vec::new();
 
-        for &src in src_instantiated.r(s).iter() {
-            match src {
+        for &lhs in lhs_instantiated.r(s).iter() {
+            match lhs {
                 TraitClause::Outlives(_) => {
                     // (regions are ignored)
                 }
-                TraitClause::Trait(src_def, src_params) => {
-                    if src_def != onto_def {
+                TraitClause::Trait(lhs_def, lhs_params) => {
+                    if lhs_def != rhs_def {
                         continue;
                     }
 
                     let mut sub_failures = Vec::new();
-                    let mut sub_inferences = infer_var_inferences.clone();
+                    let mut sub_inferences = inferences.clone();
 
-                    for (src_param, onto_param) in src_params.r(s).iter().zip(onto_params.r(s)) {
-                        let TraitParam::Equals(src) = *src_param else {
+                    for (lhs_param, rhs_param) in lhs_params.r(s).iter().zip(rhs_params.r(s)) {
+                        let TraitParam::Equals(lhs) = *lhs_param else {
                             unreachable!();
                         };
 
-                        let TyOrRe::Ty(src) = src else {
+                        let TyOrRe::Ty(lhs) = lhs else {
                             // (regions are ignored)
                             continue;
                         };
 
-                        match onto_param {
-                            TraitParam::Equals(onto_ty) => {
+                        match rhs_param {
+                            TraitParam::Equals(rhs_ty) => {
                                 self.check_type_assignability_erase_regions(
-                                    src,
-                                    onto_ty.unwrap_ty(),
-                                    binder,
-                                    infer_var_clause_stack,
+                                    lhs,
+                                    rhs_ty.unwrap_ty(),
                                     &mut sub_inferences,
                                     &mut sub_failures,
                                 );
                             }
-                            TraitParam::Unspecified(clauses) => {
+                            TraitParam::Unspecified(rhs_clauses) => {
                                 self.check_clause_list_assignability_erase_regions(
-                                    src,
-                                    *clauses,
+                                    lhs,
+                                    *rhs_clauses,
                                     binder,
-                                    infer_var_clause_stack,
                                     &mut sub_inferences,
                                     &mut sub_failures,
                                 );
@@ -637,24 +668,24 @@ impl TyCtxt {
 
                     if !sub_failures.is_empty() {
                         direct_failures.push(DirectFailure {
-                            src_def,
-                            src_params,
+                            lhs_def,
+                            lhs_params,
                             cause: sub_failures,
                         });
 
                         continue;
                     }
 
-                    *infer_var_inferences = sub_inferences;
+                    *inferences = sub_inferences;
                     return;
                 }
             }
         }
 
         failures.push(SatisfiabilityFailure::CannotDirect {
-            src_instantiated,
-            onto_def,
-            onto_params,
+            lhs_instantiated,
+            rhs_def,
+            rhs_params,
             direct_failures,
         });
     }
@@ -663,20 +694,20 @@ impl TyCtxt {
 #[derive(Debug, Clone)]
 pub enum SatisfiabilityFailure {
     Structural {
-        src: Ty,
-        onto: Ty,
+        lhs: Ty,
+        rhs: Ty,
     },
     CannotSatisfy {
-        src: Ty,
-        onto_def: Obj<TraitDef>,
-        onto_params: TraitParamList,
+        lhs: Ty,
+        rhs_def: Obj<TraitDef>,
+        rhs_params: TraitParamList,
         direct_satisfy_failures: Option<Vec<SatisfiabilityFailure>>,
         impl_failures: Vec<ImplFailure>,
     },
     CannotDirect {
-        src_instantiated: TraitClauseList,
-        onto_def: Obj<TraitDef>,
-        onto_params: TraitParamList,
+        lhs_instantiated: TraitClauseList,
+        rhs_def: Obj<TraitDef>,
+        rhs_params: TraitParamList,
         direct_failures: Vec<DirectFailure>,
     },
 }
@@ -689,9 +720,56 @@ pub struct ImplFailure {
 
 #[derive(Debug, Clone)]
 pub struct DirectFailure {
-    pub src_def: Obj<TraitDef>,
-    pub src_params: TraitParamList,
+    pub lhs_def: Obj<TraitDef>,
+    pub lhs_params: TraitParamList,
     pub cause: Vec<SatisfiabilityFailure>,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct ImplFreshInfer {
+    pub target: Ty,
+    pub trait_instance: TyOrReList,
+    pub inf_var_clauses: ListOfTraitClauseList,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct InferVarInferences {
+    disjoint: DisjointSetVec<Option<Ty>>,
+}
+
+impl InferVarInferences {
+    pub fn next_infer_var(&self) -> InferTyVar {
+        InferTyVar(self.disjoint.len() as u32)
+    }
+
+    pub fn define_infer_vars(&mut self, count: usize) {
+        for _ in 0..count {
+            self.disjoint.push(None);
+        }
+    }
+
+    pub fn assign(&mut self, var: InferTyVar, ty: Ty) {
+        let root = self.disjoint.root_of(var.0 as usize);
+        let root = &mut self.disjoint[root];
+
+        debug_assert!(root.is_none());
+        *root = Some(ty);
+    }
+
+    pub fn lookup(&self, var: InferTyVar) -> Option<Ty> {
+        self.disjoint[self.disjoint.root_of(var.0 as usize)]
+    }
+
+    pub fn union(&mut self, lhs: InferTyVar, rhs: InferTyVar) {
+        let lhs_ty = self.lookup(lhs);
+
+        debug_assert!(lhs_ty.is_none() || self.lookup(lhs).is_none());
+
+        self.disjoint.join(lhs.0 as usize, rhs.0 as usize);
+
+        let new_root = self.disjoint.root_of(lhs.0 as usize);
+        self.disjoint[new_root] = lhs_ty;
+    }
 }
 
 #[cfg(test)]
@@ -780,13 +858,12 @@ mod tests {
         tcx.check_trait_assignability_erase_regions(
             tcx.intern_ty(TyKind::Tuple(tcx.intern_tys(&[
                 tcx.intern_ty(TyKind::Simple(SimpleTyKind::Bool)),
-                tcx.intern_ty(TyKind::Simple(SimpleTyKind::Char)),
+                tcx.intern_ty(TyKind::Simple(SimpleTyKind::Bool)),
             ]))),
             my_trait,
             tcx.intern_trait_param_list(&[]),
             &mut synthetic_binder,
-            &mut Vec::new(),
-            &mut FxHashMap::default(),
+            &mut InferVarInferences::default(),
             &mut failures,
         );
 
