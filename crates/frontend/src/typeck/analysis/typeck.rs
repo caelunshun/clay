@@ -81,8 +81,7 @@ impl TyCtxt {
                         def,
                         self.substitute_ty_or_re_list(tys, self_ty, generics),
                     )),
-                    TyKind::Trait(def, clauses) => self.intern_ty(TyKind::Trait(
-                        def,
+                    TyKind::Trait(clauses) => self.intern_ty(TyKind::Trait(
                         self.substitute_clause_list(clauses, self_ty, generics),
                     )),
                     TyKind::Tuple(tys) => self.intern_ty(TyKind::Tuple(
@@ -399,23 +398,55 @@ impl TyCtxt {
     ) {
         let s = &self.session;
 
-        // See if the type inherently implements it.
+        // See whether the type itself can provide the implementation.
         match *src.r(s) {
-            TyKind::Trait(obj, intern) => todo!(),
-            TyKind::Universal(obj) => todo!(),
+            TyKind::Trait(clauses) => {
+                if self.check_clause_satisfies_clause_erase_regions(clauses, onto_def, onto_params)
+                {
+                    return;
+                }
+            }
+            TyKind::Universal(generic) => {
+                let clauses = generic.r(s).uninstantiated_clauses;
+
+                if self.check_clause_satisfies_clause_erase_regions(clauses, onto_def, onto_params)
+                {
+                    return;
+                }
+            }
             _ => {}
         }
 
-        // Otherwise, see if an `impl` block can provide it.
+        // Otherwise, attempt to provide the implementation through an implementation block.
         let mut impl_failures = Vec::new();
 
         for &candidate in onto_def.r(s).impls.iter() {
-            let mut sub_results = AssignabilityResult::new_fast();
+            let mut max_infer_var = max_infer_var;
 
-            // TODO
+            // TODO: Perform substitutions.
+            let mapped_target = candidate.r(s).target;
+
+            let mut sub_results = AssignabilityResult::default();
+
+            self.check_type_assignability_erase_regions(
+                src,
+                mapped_target,
+                binder,
+                &mut sub_results,
+                max_infer_var,
+            );
+
+            if sub_results.failures.is_empty() {
+                return;
+            }
+
+            impl_failures.push(ImplFailure {
+                impl_: candidate,
+                cause: sub_results.failures,
+            });
         }
 
-        results.reject(AssignFailure::NoImpls {
+        results.reject(AssignFailure::CannotSatisfy {
             src,
             onto_def,
             onto_params,
@@ -429,14 +460,28 @@ impl TyCtxt {
         onto_def: Obj<TraitDef>,
         onto_params: TraitParamList,
     ) -> bool {
-        todo!()
+        let s = &self.session;
+
+        let mut satisfied = false;
+
+        for &src in src.r(s).iter() {
+            match src {
+                TraitClause::Outlives(_) => {
+                    // (regions are ignored)
+                }
+                TraitClause::Trait(src_def, src_params) => {
+                    todo!();
+                }
+            }
+        }
+
+        satisfied
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AssignabilityResult {
-    was_successful: bool,
-    failures: Option<Vec<AssignFailure>>,
+    failures: Vec<AssignFailure>,
     onto_inferences: FxHashMap<OntoInferTyVar, Ty>,
 }
 
@@ -446,7 +491,7 @@ pub enum AssignFailure {
         src: Ty,
         onto: Ty,
     },
-    NoImpls {
+    CannotSatisfy {
         src: Ty,
         onto_def: Obj<TraitDef>,
         onto_params: TraitParamList,
@@ -457,40 +502,12 @@ pub enum AssignFailure {
 #[derive(Debug, Clone)]
 pub struct ImplFailure {
     pub impl_: Obj<ImplDef>,
-    pub inner: Vec<AssignFailure>,
+    pub cause: Vec<AssignFailure>,
 }
 
 impl AssignabilityResult {
-    pub fn new_fast() -> Self {
-        Self {
-            was_successful: true,
-            failures: None,
-            onto_inferences: FxHashMap::default(),
-        }
-    }
-
-    pub fn new_slow() -> Self {
-        Self {
-            was_successful: true,
-            failures: Some(Vec::new()),
-            onto_inferences: FxHashMap::default(),
-        }
-    }
-
-    pub fn was_successful(&self) -> bool {
-        self.was_successful
-    }
-
-    pub fn unwrap_failures(self) -> Vec<AssignFailure> {
-        self.failures.unwrap()
-    }
-
     pub fn reject(&mut self, failure: AssignFailure) {
-        self.was_successful = false;
-
-        if let Some(failures) = &mut self.failures {
-            failures.push(failure);
-        }
+        self.failures.push(failure);
     }
 
     pub fn record_onto_inference(&mut self, onto: OntoInferTyVar, ty: Ty) {

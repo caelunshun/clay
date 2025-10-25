@@ -207,7 +207,7 @@ pub enum TyKind {
     Adt(Obj<AdtDef>, TyOrReList),
 
     /// A `dyn Trait` object.
-    Trait(Obj<TraitDef>, TraitClauseList),
+    Trait(TraitClauseList),
 
     /// A tuple.
     Tuple(TyList),
