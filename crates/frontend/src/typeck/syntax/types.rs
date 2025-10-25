@@ -4,6 +4,7 @@ use crate::{
         syntax::Span,
     },
     parse::token::Ident,
+    typeck::syntax::Func,
 };
 
 // === AdtDef === //
@@ -34,6 +35,8 @@ pub struct TraitDef {
     pub methods: LateInit<Vec<()>>,
     pub impls: LateInit<Vec<Obj<ImplDef>>>,
 }
+
+pub type ListOfTraitClauseList = Intern<[TraitClauseList]>;
 
 /// A trait clause with multiple parts (e.g. `'a + Foo<u32> + Bar<Item = Baz>`).
 pub type TraitClauseList = Intern<[TraitClause]>;
@@ -129,13 +132,14 @@ pub struct TypeGeneric {
     pub ident: Ident,
     pub binder: LateInit<BinderSpec>,
 
-    /// All knowable facts about which traits the generic parameter implements.
-    pub uninstantiated_clauses: TraitClauseList,
+    /// The user-specified clauses on a generic type.
+    pub user_clauses: TraitClauseList,
 
     /// All knowable facts about which traits the generic parameter implements.
     ///
-    /// Unlike `uninstantiated_clauses`, `instantiated_clauses` ensures that all generic parameters
-    /// supplied to each trait clause will be of the form [`TraitParam::Equals`].
+    /// Unlike `user_clauses`, `instantiated_clauses` ensures that all generic parameters
+    /// supplied to each trait clause will be of the form [`TraitParam::Equals`] and that all
+    /// implicit bounds (including super-trait bounds) will be written out.
     pub instantiated_clauses: LateInit<TraitClauseList>,
 
     /// Whether this generic was implicitly created rather than defined explicitly by the user.
@@ -213,7 +217,7 @@ pub enum TyKind {
     Tuple(TyList),
 
     /// A statically-known function type. This can be coerced into a functional interface.
-    FnDef(),
+    FnDef(Obj<Func>),
 
     /// A user's explicit request to infer a type (i.e. `_`)
     ExplicitInfer,
@@ -222,8 +226,9 @@ pub enum TyKind {
     Universal(Obj<TypeGeneric>),
 
     /// An inference variable in the destination of a type assignability check. Used for inference
-    /// of types in a trait implementation candidate.
-    OntoInferVar(OntoInferTyVar, TraitClauseList),
+    /// of types in a trait implementation candidate. The second value indicates the generic from
+    /// which this variable was derived for diagnostic purposes.
+    OntoInferVar(OntoInferTyVar, Obj<TypeGeneric>),
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

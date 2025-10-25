@@ -2,11 +2,11 @@ use crate::{
     base::{
         Session,
         analysis::Memo,
-        arena::{Interner, ListInterner},
+        arena::{Interner, ListInterner, Obj},
     },
     typeck::syntax::{
-        GenericInstance, TraitClause, TraitClauseList, TraitParam, TraitParamList, Ty, TyKind,
-        TyList, TyOrRe, TyOrReList,
+        GenericInstance, ImplDef, OntoInferTyVar, ListOfTraitClauseList, TraitClause, TraitClauseList,
+        TraitParam, TraitParamList, Ty, TyKind, TyList, TyOrRe, TyOrReList,
     },
     utils::hash::FxHashSet,
 };
@@ -41,6 +41,7 @@ pub struct Interners {
     pub ty_or_re_list: ListInterner<TyOrRe>,
     pub trait_param_list: ListInterner<TraitParam>,
     pub trait_clause_list: ListInterner<TraitClause>,
+    pub list_of_trait_clause_list: ListInterner<TraitClauseList>,
 }
 
 #[derive(Debug, Default)]
@@ -50,6 +51,8 @@ pub struct Queries {
     pub substitute_ty_or_re_list: Memo<(TyOrReList, Ty, GenericInstance), TyOrReList>,
     pub substitute_clause_list: Memo<(TraitClauseList, Ty, GenericInstance), TraitClauseList>,
     pub substitute_trait_param_list: Memo<(TraitParamList, Ty, GenericInstance), TraitParamList>,
+    pub instantiate_fresh_target_infers:
+        Memo<(Obj<ImplDef>, OntoInferTyVar), (Ty, ListOfTraitClauseList)>,
 }
 
 impl Deref for TyCtxt {
@@ -91,6 +94,15 @@ impl TyCtxt {
     pub fn intern_trait_clause_list(&self, elems: &[TraitClause]) -> TraitClauseList {
         self.interners
             .trait_clause_list
+            .intern(elems, &self.session)
+    }
+
+    pub fn intern_list_of_trait_clause_list(
+        &self,
+        elems: &[TraitClauseList],
+    ) -> ListOfTraitClauseList {
+        self.interners
+            .list_of_trait_clause_list
             .intern(elems, &self.session)
     }
 
