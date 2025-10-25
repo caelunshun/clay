@@ -92,6 +92,29 @@ impl TyCtxt {
             .intern(elems, &self.session)
     }
 
+    pub fn join_trait_clause_lists(
+        &self,
+        lhs: TraitClauseList,
+        rhs: TraitClauseList,
+    ) -> TraitClauseList {
+        let s = &self.session;
+
+        if lhs.r(s).is_empty() {
+            return rhs;
+        }
+
+        if rhs.r(s).is_empty() {
+            return lhs;
+        }
+
+        self.intern_trait_clause_list(
+            &[lhs.r(s).iter().copied(), rhs.r(s).iter().copied()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>(),
+        )
+    }
+
     pub fn queue_wf(&self, req: WfRequirement) {
         let mut state = self.wf_state.borrow_mut();
 

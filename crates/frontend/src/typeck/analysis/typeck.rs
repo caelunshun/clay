@@ -9,10 +9,13 @@ use crate::{
         analysis::TyCtxt,
         syntax::{
             AnyGeneric, BinderSpec, GenericBinder, GenericInstance, Re, TraitClause,
-            TraitClauseList, TraitParam, Ty, TyKind, TyList, TyOrRe, TyOrReList, TypeGeneric,
+            TraitClauseList, TraitDef, TraitParam, TraitParamList, Ty, TyKind, TyList, TyOrRe,
+            TyOrReList, TypeGeneric,
         },
     },
+    utils::hash::FxHashMap,
 };
+use disjoint::DisjointSetVec;
 
 impl TyCtxt {
     pub fn substitute_ty(&self, target: Ty, self_ty: Ty, generics: GenericInstance) -> Ty {
@@ -71,7 +74,7 @@ impl TyCtxt {
         let s = &self.session;
 
         match re {
-            Re::Gc | Re::Infer | Re::Erased => re,
+            Re::Gc | Re::ExplicitInfer | Re::Erased => re,
             Re::Generic(generic) => {
                 if generic.r(s).binder.def == generics.binder {
                     generics.substs.r(s)[generic.r(s).binder.idx as usize].unwrap_re()
@@ -79,7 +82,7 @@ impl TyCtxt {
                     re
                 }
             }
-            Re::Internal(_) => unreachable!(),
+            Re::InferVar(_) => unreachable!(),
         }
     }
 
@@ -115,6 +118,7 @@ impl TyCtxt {
                     target
                 }
             }
+            TyKind::ExplicitInfer | TyKind::InferVar(_) => unreachable!(),
         }
     }
 
@@ -146,10 +150,10 @@ impl TyCtxt {
                         .map(|(&param, def)| {
                             let clauses = match param {
                                 TraitParam::Equals(_) => return param,
-                                TraitParam::Implements(clauses) => clauses,
-                                TraitParam::Unspecified => {
-                                    def.unwrap_ty().r(s).uninstantiated_clauses
-                                }
+                                TraitParam::Unspecified(clauses) => self.join_trait_clause_lists(
+                                    def.unwrap_ty().r(s).uninstantiated_clauses,
+                                    clauses,
+                                ),
                             };
 
                             let generic = Obj::new(
@@ -205,5 +209,84 @@ impl TyCtxt {
         }
 
         binder
+    }
+
+    pub fn check_type_assignability_erase_regions(
+        &self,
+        src: Ty,
+        onto: Ty,
+        binder: &mut GenericBinder,
+    ) -> MatchTypesResult {
+        let s = &self.session;
+
+        let mut results = MatchTypesResult::default();
+
+        if src == onto {
+            return results;
+        }
+
+        match (*src.r(s), *onto.r(s)) {
+            (_, TyKind::Generic(generic)) => {
+                results.union_generic(generic, src);
+
+                for &clause in generic.r(s).uninstantiated_clauses.r(s) {
+                    match clause {
+                        TraitClause::Outlives(_) => {
+                            // (regions are ignored)
+                        }
+                        TraitClause::Trait(onto_def, onto_params) => {
+                            results.join(&self.check_trait_assignability_erase_regions(
+                                src,
+                                onto_def,
+                                onto_params,
+                                binder,
+                            ));
+                        }
+                    }
+                }
+            }
+            _ => {
+                results.report_mismatch(src, onto);
+            }
+        }
+
+        results
+    }
+
+    pub fn check_trait_assignability_erase_regions(
+        &self,
+        src: Ty,
+        onto_def: Obj<TraitDef>,
+        onto_params: TraitParamList,
+        binder: &mut GenericBinder,
+    ) -> MatchTypesResult {
+        let mut results = MatchTypesResult::default();
+
+        results
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MatchTypesResult {
+    concrete_mismatches: Vec<(Ty, Ty)>,
+    concrete_no_impls: Vec<(Ty, Obj<TraitDef>, TraitParamList)>,
+    generic_unions: DisjointSetVec<Obj<TypeGeneric>>,
+    generic_unions_map: FxHashMap<Obj<TypeGeneric>, usize>,
+    generic_equalities: FxHashMap<Obj<TypeGeneric>, Ty>,
+}
+
+impl MatchTypesResult {
+    pub fn report_mismatch(&mut self, src: Ty, onto: Ty) {
+        self.concrete_mismatches.push((src, onto));
+    }
+
+    pub fn report_no_impls(&mut self, src: Ty) {}
+
+    pub fn union_generic(&self, generic: Obj<TypeGeneric>, to: Ty) {
+        todo!()
+    }
+
+    pub fn join(&mut self, other: &MatchTypesResult) {
+        todo!()
     }
 }

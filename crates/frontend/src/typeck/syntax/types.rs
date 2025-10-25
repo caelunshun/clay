@@ -31,7 +31,8 @@ pub struct TraitDef {
     pub span: Span,
     pub ident: Ident,
     pub generics: Obj<GenericBinder>,
-    pub methods: Vec<()>,
+    pub methods: LateInit<Vec<()>>,
+    pub impls: LateInit<Vec<Obj<ImplDef>>>,
 }
 
 /// A trait clause with multiple parts (e.g. `'a + Foo<u32> + Bar<Item = Baz>`).
@@ -49,13 +50,29 @@ pub type TraitParamList = Intern<[TraitParam]>;
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TraitParam {
     Equals(TyOrRe),
-    Implements(TraitClauseList),
-    Unspecified,
+    Unspecified(TraitClauseList),
+}
+
+// === Impls === //
+
+#[derive(Debug, Clone)]
+pub struct ImplDef {
+    pub span: Span,
+    pub generics: Obj<GenericBinder>,
+    pub trait_: Option<TraitSpec>,
+    pub target: Ty,
+    pub methods: LateInit<Vec<()>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TraitSpec {
+    pub def: Obj<TraitDef>,
+    pub params: TyOrReList,
 }
 
 // === Generics === //
 
-/// A definition site for multiple generics.
+/// A container for a list of generics which can be substituted all at once.
 #[derive(Debug, Clone)]
 pub struct GenericBinder {
     pub span: Span,
@@ -74,7 +91,6 @@ pub struct GenericInstance {
     pub substs: TyOrReList,
 }
 
-/// A definition for any type of generic.
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum AnyGeneric {
     Re(Obj<RegionGeneric>),
@@ -99,24 +115,30 @@ impl AnyGeneric {
     }
 }
 
-/// A definition for a generic region parameter.
 #[derive(Debug, Clone)]
 pub struct RegionGeneric {
     pub span: Span,
     pub ident: Ident,
     pub binder: LateInit<BinderSpec>,
-    pub clause: TraitClauseList,
-    pub variance: Variance,
+    pub clauses: TraitClauseList,
 }
 
-/// A definition for a generic type parameter.
 #[derive(Debug, Clone)]
 pub struct TypeGeneric {
     pub span: Span,
     pub ident: Ident,
     pub binder: LateInit<BinderSpec>,
+
+    /// All knowable facts about which traits the generic parameter implements.
     pub uninstantiated_clauses: TraitClauseList,
+
+    /// All knowable facts about which traits the generic parameter implements.
+    ///
+    /// Unlike `uninstantiated_clauses`, `instantiated_clauses` ensures that all generic parameters
+    /// supplied to each trait clause will be of the form [`TraitParam::Equals`].
     pub instantiated_clauses: LateInit<TraitClauseList>,
+
+    /// Whether this generic was implicitly created rather than defined explicitly by the user.
     pub is_synthetic: bool,
 }
 
@@ -158,10 +180,10 @@ pub enum Re {
     Generic(Obj<RegionGeneric>),
 
     /// An internal lifetime parameter within the body.
-    Internal(i32),
+    InferVar(i32),
 
     /// An explicit request to infer the lifetime.
-    Infer,
+    ExplicitInfer,
 
     /// The lifetime used when we don't want to worry about lifetimes.
     Erased,
@@ -174,12 +196,14 @@ pub type TyList = Intern<[Ty]>;
 pub enum TyKind {
     This,
     Simple(SimpleTyKind),
+    Reference(Re, Ty),
     RawSlice(Ty),
     Adt(Obj<AdtDef>, TyOrReList),
     Trait(Obj<TraitDef>, TyOrReList),
     Tuple(TyList),
     FnDef(),
-    Reference(Re, Ty),
+    InferVar(i32),
+    ExplicitInfer,
     Generic(Obj<TypeGeneric>),
 }
 
