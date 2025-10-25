@@ -194,18 +194,44 @@ pub type TyList = Intern<[Ty]>;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TyKind {
+    /// The `Self`-type. This is expected to be substituted away before most analyses.
     This,
+
+    /// A simple primitive non-composite type living for `'gc`.
     Simple(SimpleTyKind),
+
+    /// A reference type.
     Reference(Re, Ty),
-    RawSlice(Ty),
+
+    /// An instantiation of an ADT.
     Adt(Obj<AdtDef>, TyOrReList),
-    Trait(Obj<TraitDef>, TyOrReList),
+
+    /// A `dyn Trait` object.
+    Trait(Obj<TraitDef>, TraitClauseList),
+
+    /// A tuple.
     Tuple(TyList),
+
+    /// A statically-known function type. This can be coerced into a functional interface.
     FnDef(),
-    InferVar(i32),
+
+    /// A user's explicit request to infer a type (i.e. `_`)
     ExplicitInfer,
-    Generic(Obj<TypeGeneric>),
+
+    /// The universal type quantification produced by a generic parameter.
+    Universal(Obj<TypeGeneric>),
+
+    /// An inference variable in the source of a type assignability check. Used for inference of
+    /// types within a function body.
+    SrcInferVar(InferTy),
+
+    /// An inference variable in the destination of a type assignability check. Used for inference
+    /// of types in a trait implementation candidate.
+    DstInferVar(InferTy, TraitClauseList),
 }
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct InferTy(u32);
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum SimpleTyKind {

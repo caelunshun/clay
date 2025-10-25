@@ -48,6 +48,8 @@ pub struct Queries {
     pub substitute_ty: Memo<(Ty, Ty, GenericInstance), Ty>,
     pub substitute_ty_list: Memo<(TyList, Ty, GenericInstance), TyList>,
     pub substitute_ty_or_re_list: Memo<(TyOrReList, Ty, GenericInstance), TyOrReList>,
+    pub substitute_clause_list: Memo<(TraitClauseList, Ty, GenericInstance), TraitClauseList>,
+    pub substitute_trait_param_list: Memo<(TraitParamList, Ty, GenericInstance), TraitParamList>,
 }
 
 impl Deref for TyCtxt {
