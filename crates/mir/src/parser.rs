@@ -2,10 +2,11 @@ use crate::{
     Func, TypeKind, ValId,
     builder::FuncBuilder,
     ir::{
-        AlgebraicType, AlgebraicTypeId, AlgebraicTypeInstance, AlgebraicTypeKind, BasicBlockId,
-        Constant, ConstantValue, Context, ContextBuilder, Field, FuncHeader, FuncId, FuncInstance,
-        MaybeAssocFunc, StructTypeData, TraitId, TraitInstance, Type, TypeArgs, TypeParam,
-        TypeParamId, TypeParamIndex, TypeParamScope, TypeParams, instr::CompareMode,
+        AlgebraicType, AlgebraicTypeId, AlgebraicTypeInstance, AlgebraicTypeKind, AssocFunc,
+        BasicBlockId, Constant, ConstantValue, Context, ContextBuilder, Field, FuncHeader, FuncId,
+        FuncInstance, MaybeAssocFunc, StructTypeData, Trait, TraitData, TraitId, TraitInstance,
+        Type, TypeArgs, TypeParam, TypeParamId, TypeParamIndex, TypeParamScope, TypeParams,
+        instr::CompareMode,
     },
 };
 use SExprRef::*;
@@ -89,15 +90,114 @@ impl<'a, 'db> Parser<'a, 'db> {
             _ => return Err(ParseError::new("expected `mir` expression")),
         };
 
+        self.parse_traits_initial(items)?;
         self.parse_adts_initial(items)?;
         self.parse_funcs_initial(items)?;
+        self.parse_traits_full(items)?;
         self.parse_adts_full(items)?;
         self.parse_funcs_full(items)?;
+
+        assert!(self.current_type_param_scopes.is_empty());
 
         Ok(())
     }
 
-    /// Initial pass that allocates TypeRefs
+    /// Initial pass that allocates TraitIds for each declared
+    /// trait, and determines the type parameter names of each trait,
+    /// but does not parse the trait definitions yet. We do this
+    /// in two phases to support cycles.
+    fn parse_traits_initial(&mut self, items: &[SExprRef<'a>]) -> Result<(), ParseError> {
+        for item in items {
+            if let List([Symbol("trait"), Symbol(trait_name), decls @ ..]) = item {
+                let trait_id = self.cx.alloc_trait();
+                self.traits.insert(*trait_name, trait_id);
+
+                self.parse_type_params_initial(decls, TypeParamScope::Trait(trait_id))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_traits_full(&mut self, items: &[SExprRef<'a>]) -> Result<(), ParseError> {
+        for item in items {
+            if let List([Symbol("trait"), Symbol(trait_name), decls @ ..]) = item {
+                let trait_id = self.get_trait(trait_name)?;
+
+                let tp_scope = TypeParamScope::Trait(trait_id);
+                self.push_type_param_scope(tp_scope);
+                let type_params = self.parse_type_params(decls, tp_scope)?;
+                let mut assoc_funcs = PrimaryMap::new();
+
+                for decl in decls {
+                    match decl {
+                        List(
+                            [
+                                Symbol("assoc_func"),
+                                Symbol(assoc_func_name),
+                                assoc_func_decls @ ..,
+                            ],
+                        ) => {
+                            let assoc_func_id = assoc_funcs.next_key();
+
+                            let tp_scope = TypeParamScope::AssocFunc(trait_id, assoc_func_id);
+                            self.parse_type_params_initial(assoc_func_decls, tp_scope)?;
+
+                            self.push_type_param_scope(tp_scope);
+
+                            let type_params = self.parse_type_params(assoc_func_decls, tp_scope)?;
+
+                            let mut param_types = Vec::new();
+                            let mut return_type = None;
+                            for assoc_func_decl in assoc_func_decls {
+                                match assoc_func_decl {
+                                    List([Symbol("return_type"), ret_type_expr]) => {
+                                        return_type = Some(self.parse_type(ret_type_expr)?);
+                                    }
+                                    List([Symbol("param"), param_type]) => {
+                                        param_types.push(self.parse_type(param_type)?);
+                                    }
+                                    // Already parsed by parse_type_params
+                                    List([Symbol("type_param"), ..]) => {}
+                                    _ => return Err(ParseError::new("invalid decl in assoc func")),
+                                }
+                            }
+
+                            assoc_funcs.push(AssocFunc {
+                                name: assoc_func_name.to_compact_string(),
+                                type_params,
+                                param_types,
+                                return_type: return_type.ok_or_else(|| {
+                                    ParseError::new("missing return type for assoc func")
+                                })?,
+                            });
+
+                            self.pop_type_param_scope(tp_scope);
+                        }
+                        // Already parsed by parse_type_params
+                        List([Symbol("type_param"), ..]) => {}
+                        _ => return Err(ParseError::new("invalid decl in trait")),
+                    }
+                }
+
+                self.cx.bind_trait(
+                    trait_id,
+                    Trait::new(
+                        self.db,
+                        TraitData {
+                            name: trait_name.to_compact_string(),
+                            type_params,
+                            assoc_funcs,
+                        },
+                    ),
+                );
+
+                self.pop_type_param_scope(tp_scope);
+            }
+        }
+        Ok(())
+    }
+
+    /// Initial pass that allocates AlgebraicTypeIds
     /// for each declared type, but does not
     /// parse the actual types yet. We do this
     /// in two phases to support cyclic types.
