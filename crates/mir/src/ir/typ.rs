@@ -1,4 +1,4 @@
-use crate::ir::{AlgebraicTypeId, TypeArgs, TypeParamId};
+use crate::ir::{AlgebraicTypeId, TypeArgs, TypeParamId, TypeParams};
 use compact_str::CompactString;
 use cranelift_entity::{PrimaryMap, SecondaryMap};
 use salsa::Database;

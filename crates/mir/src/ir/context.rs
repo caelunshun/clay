@@ -4,15 +4,22 @@ use crate::{
 };
 use cranelift_entity::PrimaryMap;
 use salsa::Database;
+use std::borrow::Cow;
 
 pub mod builder;
 
 pub use builder::ContextBuilder;
+use fir_core::{HashMap, IndexMap};
 
 pub trait ContextLike<'db> {
     fn resolve_adt(&self, db: &'db dyn Database, adt: AlgebraicTypeId) -> AlgebraicType<'db>;
     fn resolve_func(&self, db: &'db dyn Database, func: FuncId) -> Func<'db>;
     fn resolve_trait(&self, db: &'db dyn Database, trait_: TraitId) -> Trait<'db>;
+    fn trait_impls_for_trait(
+        &self,
+        db: &'db dyn Database,
+        trait_: TraitId,
+    ) -> Cow<[TraitImpl<'db>]>;
 }
 
 impl<'a, 'db, C> ContextLike<'db> for &'a C
@@ -30,6 +37,14 @@ where
     fn resolve_trait(&self, db: &'db dyn Database, trait_: TraitId) -> Trait<'db> {
         C::resolve_trait(self, db, trait_)
     }
+
+    fn trait_impls_for_trait(
+        &self,
+        db: &'db dyn Database,
+        trait_: TraitId,
+    ) -> Cow<[TraitImpl<'db>]> {
+        C::trait_impls_for_trait(self, db, trait_)
+    }
 }
 
 impl<'a, 'db, C> ContextLike<'db> for &'a mut C
@@ -46,6 +61,14 @@ where
 
     fn resolve_trait(&self, db: &'db dyn Database, trait_: TraitId) -> Trait<'db> {
         C::resolve_trait(self, db, trait_)
+    }
+
+    fn trait_impls_for_trait(
+        &self,
+        db: &'db dyn Database,
+        trait_: TraitId,
+    ) -> Cow<[TraitImpl<'db>]> {
+        C::trait_impls_for_trait(self, db, trait_)
     }
 }
 
@@ -95,6 +118,35 @@ impl<'db> ContextLike<'db> for Context<'db> {
         }
         resolve_helper(db, *self, trait_)
     }
+
+    fn trait_impls_for_trait(
+        &self,
+        db: &'db dyn Database,
+        trait_: TraitId,
+    ) -> Cow<[TraitImpl<'db>]> {
+        #[salsa::tracked]
+        struct TraitImplVec<'db> {
+            #[returns(ref)]
+            impls: Vec<TraitImpl<'db>>,
+        }
+
+        #[salsa::tracked]
+        fn resolve_helper<'db>(
+            db: &'db dyn Database,
+            cx: Context<'db>,
+            trait_: TraitId,
+        ) -> TraitImplVec<'db> {
+            let impls = cx
+                .data(db)
+                .trait_impls
+                .get(&trait_)
+                .cloned()
+                .unwrap_or_default();
+            TraitImplVec::new(db, impls)
+        }
+
+        Cow::Borrowed(resolve_helper(db, *self, trait_).impls(db).as_slice())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, salsa::Update)]
@@ -102,7 +154,7 @@ pub struct ContextData<'db> {
     pub adts: PrimaryMap<AlgebraicTypeId, AlgebraicType<'db>>,
     pub funcs: PrimaryMap<FuncId, Func<'db>>,
     pub traits: PrimaryMap<TraitId, Trait<'db>>,
-    pub trait_impls: Vec<TraitImpl<'db>>,
+    pub trait_impls: IndexMap<TraitId, Vec<TraitImpl<'db>>>,
 }
 
 entity_ref! {

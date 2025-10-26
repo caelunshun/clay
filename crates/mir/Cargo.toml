@@ -5,12 +5,10 @@ edition = "2024"
 
 [dependencies]
 cranelift-entity.workspace = true
-hashbrown.workspace = true
 compact_str.workspace = true
 bytemuck.workspace = true
 fir-core.workspace = true
 salsa.workspace = true
-indexmap.workspace = true
 bumpalo.workspace = true
 
 [dev-dependencies]

@@ -6,7 +6,9 @@ use crate::{
     },
 };
 use cranelift_entity::{PrimaryMap, SecondaryMap};
+use fir_core::IndexMap;
 use salsa::Database;
+use std::borrow::Cow;
 
 /// Builder for `ContextData` that allows
 /// lazy initialization of each type and function.
@@ -15,7 +17,7 @@ pub struct ContextBuilder<'db> {
     adts: PrimaryMap<AlgebraicTypeId, Option<AlgebraicType<'db>>>,
     funcs: PrimaryMap<FuncId, Option<Func<'db>>>,
     traits: PrimaryMap<TraitId, Option<Trait<'db>>>,
-    trait_impls: Vec<TraitImpl<'db>>,
+    trait_impls: IndexMap<TraitId, Vec<TraitImpl<'db>>>,
     /// A function header can be known before
     /// the function body. This allows resolving
     /// recursive or mutually recursive functions.
@@ -28,7 +30,7 @@ impl<'db> ContextBuilder<'db> {
             adts: Default::default(),
             funcs: Default::default(),
             func_headers: Default::default(),
-            trait_impls: Vec::new(),
+            trait_impls: Default::default(),
             traits: Default::default(),
         }
     }
@@ -83,8 +85,11 @@ impl<'db> ContextBuilder<'db> {
         self.traits[ref_] = Some(trait_);
     }
 
-    pub fn add_trait_impl(&mut self, trait_impl: TraitImpl<'db>) {
-        self.trait_impls.push(trait_impl);
+    pub fn add_trait_impl(&mut self, db: &'db dyn Database, trait_impl: TraitImpl<'db>) {
+        self.trait_impls
+            .entry(trait_impl.data(db).trait_.trait_(db))
+            .or_default()
+            .push(trait_impl);
     }
 
     pub fn finish(self) -> ContextData<'db> {
@@ -130,5 +135,18 @@ impl<'db> ContextLike<'db> for ContextBuilder<'db> {
 
     fn resolve_trait(&self, _db: &'db dyn Database, ref_: TraitId) -> Trait<'db> {
         self.traits[ref_].expect("attempted to resolve unbound trait")
+    }
+
+    fn trait_impls_for_trait(
+        &self,
+        db: &'db dyn Database,
+        trait_: TraitId,
+    ) -> Cow<[TraitImpl<'db>]> {
+        Cow::Borrowed(
+            self.trait_impls
+                .get(&trait_)
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
+        )
     }
 }

@@ -6,7 +6,7 @@ macro_rules! entity_ref {
         $(#[$attr:meta])*
         pub struct $ident:ident;
     } => {
-        #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default, PartialOrd, Ord, bytemuck::Pod, bytemuck::Zeroable)]
+        #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default, PartialOrd, Ord, bytemuck::Pod, bytemuck::Zeroable, salsa::Update)]
         #[repr(transparent)]
         $(#[$attr])*
         pub struct $ident(u32);
@@ -43,7 +43,7 @@ macro_rules! entity_ref_16bit {
          $(#[$attr:meta])*
         pub struct $ident:ident;
     } => {
-        #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default, PartialOrd, Ord, bytemuck::Pod, bytemuck::Zeroable)]
+        #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default, PartialOrd, Ord, bytemuck::Pod, bytemuck::Zeroable, salsa::Update)]
         #[repr(transparent)]
             $(#[$attr])*
         pub struct $ident(u16);
@@ -79,6 +79,7 @@ pub mod builder;
 pub mod ir;
 //pub mod parser;
 pub mod passes;
+pub mod trait_resolution;
 pub mod validation;
 
 pub use ir::{Func, PrimType, TypeKind, ValId, instr::InstrData};
