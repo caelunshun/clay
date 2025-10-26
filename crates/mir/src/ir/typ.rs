@@ -90,13 +90,7 @@ impl<'db> TypeKind<'db> {
                     type_args: algebraic_type_instance
                         .type_args
                         .iter()
-                        .map(|(arg, ty)| {
-                            if let Some(ty) = ty {
-                                (arg, Some(map(*ty)))
-                            } else {
-                                (arg, None)
-                            }
-                        })
+                        .map(|(arg, ty)| (*arg, map(*ty)))
                         .collect(),
                 })
             }
@@ -115,7 +109,7 @@ impl<'db> Type<'db> {
         type_args: &TypeArgs<'db>,
     ) -> Type<'db> {
         if let TypeKind::TypeParam(param_id) = self.kind(db) {
-            return type_args[*param_id].expect("missing type argument");
+            return type_args[param_id];
         }
 
         let updated_kind = self

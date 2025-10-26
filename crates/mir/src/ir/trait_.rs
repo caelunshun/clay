@@ -1,4 +1,4 @@
-use crate::ir::{Type, TypeArgs, TypeParam, TypeParamId, TypeParams, context::TraitId};
+use crate::ir::{Type, TypeArgs, TypeParams, context::TraitId};
 use compact_str::CompactString;
 use cranelift_entity::PrimaryMap;
 
@@ -44,7 +44,7 @@ pub struct TraitImpl<'db> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct TraitImplData<'db> {
-    pub type_params: PrimaryMap<TypeParamId, TypeParam<'db>>,
+    pub type_params: TypeParams<'db>,
     /// Note: can refer to a type parameter....
     pub impl_for_type: Type<'db>,
     pub trait_: TraitInstance<'db>,

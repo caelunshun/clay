@@ -2,7 +2,7 @@ use crate::{
     InstrData, TypeKind, ValId,
     ir::{
         AlgebraicTypeKind, BasicBlock, BasicBlockId, Constant, ContextBuilder, FieldId, FuncData,
-        FuncHeader, FuncInstance, Type, TypeParam, TypeParamId, TypeParams, Val,
+        FuncHeader, FuncInstance, Type, TypeParam, TypeParamIndex, TypeParams, Val,
         instr::{self, CompareMode},
     },
 };
@@ -62,7 +62,7 @@ impl<'db> FuncBuilder<'db> {
         }
     }
 
-    pub fn append_type_param(&mut self, type_param: TypeParam<'db>) -> TypeParamId {
+    pub fn append_type_param(&mut self, type_param: TypeParam<'db>) -> TypeParamIndex {
         self.func.header.type_params.push(type_param)
     }
 

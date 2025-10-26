@@ -2,7 +2,7 @@ use crate::{
     InstrData, PrimType, TypeKind, ValId,
     ir::{
         AlgebraicTypeKind, BasicBlockId, Context, FuncData, FuncInstance, StructTypeData, Type,
-        TypeArgs,
+        TypeArgs, TypeParamId,
     },
     trait_resolution,
     validation::ValidationError,
@@ -361,20 +361,18 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
         let type_params = func_instance.type_params(self.db, &self.cx);
         let type_args = func_instance.type_args(self.db);
 
-        for (type_param_id, type_param) in &type_params {
-            let type_arg = type_args[type_param_id]
+        for (type_param_idx, type_param) in &type_params {
+            let type_param_id = TypeParamId {
+                idx: type_param_idx,
+                scope: func_instance.type_param_scope(self.db),
+            };
+            let type_arg = *type_args
+                .get(&type_param_id)
                 .ok_or_else(|| ValidationError::new("missing type argument"))?;
 
             if !type_param.is_mirage {
                 for bound in &type_param.trait_bounds {
-                    if !trait_resolution::does_impl_trait(
-                        self.db,
-                        self.cx,
-                        type_arg,
-                        *bound,
-                        self.func.header.type_params.clone(),
-                        type_params.clone(),
-                    ) {
+                    if !trait_resolution::does_impl_trait(self.db, self.cx, type_arg, *bound) {
                         return Err(ValidationError::new("could not satisfy trait bound"));
                     }
                 }

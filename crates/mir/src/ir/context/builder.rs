@@ -2,7 +2,7 @@ use crate::{
     Func,
     ir::{
         AlgebraicType, AlgebraicTypeId, ContextData, ContextLike, FuncHeader, FuncId, Trait,
-        TraitId, TraitImpl,
+        TraitId, TraitImpl, TraitImplId,
     },
 };
 use cranelift_entity::{PrimaryMap, SecondaryMap};
@@ -17,7 +17,8 @@ pub struct ContextBuilder<'db> {
     adts: PrimaryMap<AlgebraicTypeId, Option<AlgebraicType<'db>>>,
     funcs: PrimaryMap<FuncId, Option<Func<'db>>>,
     traits: PrimaryMap<TraitId, Option<Trait<'db>>>,
-    trait_impls: IndexMap<TraitId, Vec<TraitImpl<'db>>>,
+    trait_impls: PrimaryMap<TraitImplId, TraitImpl<'db>>,
+    trait_impls_by_trait: IndexMap<TraitId, Vec<TraitImpl<'db>>>,
     /// A function header can be known before
     /// the function body. This allows resolving
     /// recursive or mutually recursive functions.
@@ -32,6 +33,7 @@ impl<'db> ContextBuilder<'db> {
             func_headers: Default::default(),
             trait_impls: Default::default(),
             traits: Default::default(),
+            trait_impls_by_trait: Default::default(),
         }
     }
 
@@ -74,11 +76,16 @@ impl<'db> ContextBuilder<'db> {
         self.traits[ref_] = Some(trait_);
     }
 
-    pub fn add_trait_impl(&mut self, db: &'db dyn Database, trait_impl: TraitImpl<'db>) {
-        self.trait_impls
+    pub fn add_trait_impl(
+        &mut self,
+        db: &'db dyn Database,
+        trait_impl: TraitImpl<'db>,
+    ) -> TraitImplId {
+        self.trait_impls_by_trait
             .entry(trait_impl.data(db).trait_.trait_(db))
             .or_default()
             .push(trait_impl);
+        self.trait_impls.push(trait_impl)
     }
 
     pub fn finish(self) -> ContextData<'db> {
@@ -109,6 +116,7 @@ impl<'db> ContextBuilder<'db> {
             funcs,
             traits,
             trait_impls: self.trait_impls,
+            trait_impls_by_trait: self.trait_impls_by_trait,
         }
     }
 }
@@ -132,7 +140,7 @@ impl<'db> ContextLike<'db> for ContextBuilder<'db> {
         trait_: TraitId,
     ) -> Cow<'a, [TraitImpl<'db>]> {
         Cow::Borrowed(
-            self.trait_impls
+            self.trait_impls_by_trait
                 .get(&trait_)
                 .map(Vec::as_slice)
                 .unwrap_or_default(),
@@ -148,5 +156,13 @@ impl<'db> ContextLike<'db> for ContextBuilder<'db> {
                     "attempted to resolve header of a func whose header is not yet resolved",
                 )
             })
+    }
+
+    fn resolve_trait_impl(
+        &self,
+        _db: &'db dyn Database,
+        trait_impl: TraitImplId,
+    ) -> TraitImpl<'db> {
+        self.trait_impls[trait_impl]
     }
 }

@@ -1,6 +1,6 @@
 use crate::{
     TypeKind,
-    ir::{Context, ContextLike, TraitImpl, TraitInstance, Type, TypeParams},
+    ir::{Context, ContextLike, TraitImpl, TraitInstance, Type},
 };
 use salsa::Database;
 
@@ -9,18 +9,8 @@ pub fn does_impl_trait<'db>(
     cx: Context<'db>,
     typ: Type<'db>,
     trait_instance: TraitInstance<'db>,
-    type_scope_type_params: TypeParams<'db>,
-    trait_instance_scope_type_params: TypeParams<'db>,
 ) -> bool {
-    find_trait_impl(
-        db,
-        cx,
-        typ,
-        trait_instance,
-        type_scope_type_params,
-        trait_instance_scope_type_params,
-    )
-    .is_some()
+    find_trait_impl(db, cx, typ, trait_instance).is_some()
 }
 
 /// Finds a TraitImpl in the given Context satisfying the following constraints:
@@ -44,8 +34,6 @@ pub fn find_trait_impl<'db>(
     cx: Context<'db>,
     typ: Type<'db>,
     trait_instance: TraitInstance<'db>,
-    type_scope_type_params: TypeParams<'db>,
-    trait_instance_scope_type_params: TypeParams<'db>,
 ) -> Option<TraitImpl<'db>> {
     for candidate_impl in cx
         .trait_impls_for_trait(db, trait_instance.trait_(db))
@@ -54,23 +42,13 @@ pub fn find_trait_impl<'db>(
         // Check that trait instance matches
         let mut trait_instance_match = true;
         for (type_param_id, arg) in trait_instance.type_args(db).iter() {
-            // If arg.is_none(), then this is a wildcard so always satisfied
-            if let Some(arg) = *arg {
-                let impl_arg = candidate_impl.data(db).trait_.type_args(db)[type_param_id].unwrap();
-                if !can_type_satisfy(
-                    db,
-                    CanTypeSatisfyArgs::new(
-                        db,
-                        cx,
-                        arg,
-                        trait_instance_scope_type_params.clone(),
-                        impl_arg.substitute_self_type(db, typ),
-                        candidate_impl.data(db).type_params.clone(),
-                    ),
-                ) {
-                    trait_instance_match = false;
-                    break;
-                }
+            let impl_arg = candidate_impl.data(db).trait_.type_args(db)[type_param_id];
+            if !can_type_satisfy(
+                db,
+                CanTypeSatisfyArgs::new(db, cx, arg, impl_arg.substitute_self_type(db, typ)),
+            ) {
+                trait_instance_match = false;
+                break;
             }
         }
         if !trait_instance_match {
@@ -84,12 +62,10 @@ pub fn find_trait_impl<'db>(
                 db,
                 cx,
                 typ,
-                type_scope_type_params.clone(),
                 candidate_impl
                     .data(db)
                     .impl_for_type
                     .substitute_self_type(db, typ),
-                candidate_impl.data(db).type_params.clone(),
             ),
         ) {
             continue;
@@ -105,11 +81,7 @@ pub fn find_trait_impl<'db>(
 pub struct CanTypeSatisfyArgs<'db> {
     pub cx: Context<'db>,
     pub t1: Type<'db>,
-    #[returns(ref)]
-    pub p1: TypeParams<'db>,
     pub t2: Type<'db>,
-    #[returns(ref)]
-    pub p2: TypeParams<'db>,
 }
 
 /// Given a type `t1` in scope `S1`, a type `t2` in scope `S2`,
@@ -124,17 +96,15 @@ pub fn can_type_satisfy<'db>(db: &'db dyn Database, args: CanTypeSatisfyArgs<'db
     let cx = args.cx(db);
     let t1 = args.t1(db);
     let t2 = args.t2(db);
-    let p1 = args.p1(db);
-    let p2 = args.p2(db);
 
     match (t1.kind(db), t2.kind(db)) {
         (_, TypeKind::TypeParam(t2_param_id)) => {
-            let t2_param = &p2[*t2_param_id];
+            let t2_param = t2_param_id.resolve(db, &cx);
 
             // t1_kind must satisfy the trait bounds of t2_param.
             let mut satisfies = true;
             for trait_bound in &t2_param.trait_bounds {
-                if !does_impl_trait(db, cx, t1, *trait_bound, p1.clone(), p2.clone()) {
+                if !does_impl_trait(db, cx, t1, *trait_bound) {
                     satisfies = false;
                     break;
                 }
@@ -142,29 +112,17 @@ pub fn can_type_satisfy<'db>(db: &'db dyn Database, args: CanTypeSatisfyArgs<'db
             satisfies
         }
         (TypeKind::MRef(inner1), TypeKind::MRef(inner2))
-        | (TypeKind::List(inner1), TypeKind::List(inner2)) => can_type_satisfy(
-            db,
-            CanTypeSatisfyArgs::new(db, cx, *inner1, p1.clone(), *inner2, p2.clone()),
-        ),
+        | (TypeKind::List(inner1), TypeKind::List(inner2)) => {
+            can_type_satisfy(db, CanTypeSatisfyArgs::new(db, cx, *inner1, *inner2))
+        }
         (TypeKind::Algebraic(a1), TypeKind::Algebraic(a2)) => {
             // Must be same ADT and parameters must be satisfiable
             if a1.adt == a2.adt {
                 let mut satisfies = true;
                 for (type_param_id, a1_arg) in a1.type_args.iter() {
-                    if let Some(a1_arg) = a1_arg
-                        && let Some(a2_arg) = a2.type_args[type_param_id]
-                    {
-                        satisfies |= can_type_satisfy(
-                            db,
-                            CanTypeSatisfyArgs::new(
-                                db,
-                                cx,
-                                *a1_arg,
-                                p1.clone(),
-                                a2_arg,
-                                p2.clone(),
-                            ),
-                        );
+                    if let Some(a2_arg) = a2.type_args.get(type_param_id) {
+                        satisfies |=
+                            can_type_satisfy(db, CanTypeSatisfyArgs::new(db, cx, *a1_arg, a2_arg));
                     }
                 }
                 satisfies

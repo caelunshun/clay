@@ -1,7 +1,7 @@
 use crate::{
     InstrData,
     ir::{
-        ContextLike, TypeArgs, TypeParams,
+        ContextLike, TypeArgs, TypeParamScope, TypeParams,
         context::{FuncId, TraitId},
         trait_::AssocFuncId,
         typ::Type,
@@ -198,6 +198,15 @@ pub struct FuncInstance<'db> {
 }
 
 impl<'db> FuncInstance<'db> {
+    pub fn type_param_scope(&self, db: &'db dyn Database) -> TypeParamScope {
+        match self.func(db) {
+            MaybeAssocFunc::Func(func_id) => TypeParamScope::Func(func_id),
+            MaybeAssocFunc::AssocFunc {
+                trait_, assoc_func, ..
+            } => TypeParamScope::AssocFunc(trait_, assoc_func),
+        }
+    }
+
     pub fn type_params(
         &self,
         db: &'db dyn Database,

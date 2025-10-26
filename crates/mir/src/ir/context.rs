@@ -16,6 +16,7 @@ pub trait ContextLike<'db> {
     fn resolve_func(&self, db: &'db dyn Database, func: FuncId) -> Func<'db>;
     fn resolve_func_header(&self, db: &'db dyn Database, func: FuncId) -> &FuncHeader<'db>;
     fn resolve_trait(&self, db: &'db dyn Database, trait_: TraitId) -> Trait<'db>;
+    fn resolve_trait_impl(&self, db: &'db dyn Database, trait_impl: TraitImplId) -> TraitImpl<'db>;
     fn trait_impls_for_trait<'a>(
         &'a self,
         db: &'db dyn Database,
@@ -50,6 +51,10 @@ where
     fn resolve_func_header(&self, db: &'db dyn Database, func: FuncId) -> &FuncHeader<'db> {
         C::resolve_func_header(self, db, func)
     }
+
+    fn resolve_trait_impl(&self, db: &'db dyn Database, trait_impl: TraitImplId) -> TraitImpl<'db> {
+        C::resolve_trait_impl(self, db, trait_impl)
+    }
 }
 
 impl<'db, C> ContextLike<'db> for &'_ mut C
@@ -78,6 +83,10 @@ where
 
     fn resolve_func_header(&self, db: &'db dyn Database, func: FuncId) -> &FuncHeader<'db> {
         C::resolve_func_header(self, db, func)
+    }
+
+    fn resolve_trait_impl(&self, db: &'db dyn Database, trait_impl: TraitImplId) -> TraitImpl<'db> {
+        C::resolve_trait_impl(self, db, trait_impl)
     }
 }
 
@@ -147,7 +156,7 @@ impl<'db> ContextLike<'db> for Context<'db> {
         ) -> TraitImplVec<'db> {
             let impls = cx
                 .data(db)
-                .trait_impls
+                .trait_impls_by_trait
                 .get(&trait_)
                 .cloned()
                 .unwrap_or_default();
@@ -160,6 +169,10 @@ impl<'db> ContextLike<'db> for Context<'db> {
     fn resolve_func_header(&self, db: &'db dyn Database, func: FuncId) -> &FuncHeader<'db> {
         &self.resolve_func(db, func).data(db).header
     }
+
+    fn resolve_trait_impl(&self, db: &'db dyn Database, trait_impl: TraitImplId) -> TraitImpl<'db> {
+        self.data(db).trait_impls[trait_impl]
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, salsa::Update)]
@@ -167,7 +180,8 @@ pub struct ContextData<'db> {
     pub adts: PrimaryMap<AlgebraicTypeId, AlgebraicType<'db>>,
     pub funcs: PrimaryMap<FuncId, Func<'db>>,
     pub traits: PrimaryMap<TraitId, Trait<'db>>,
-    pub trait_impls: IndexMap<TraitId, Vec<TraitImpl<'db>>>,
+    pub trait_impls: PrimaryMap<TraitImplId, TraitImpl<'db>>,
+    pub trait_impls_by_trait: IndexMap<TraitId, Vec<TraitImpl<'db>>>,
 }
 
 entity_ref! {
@@ -237,5 +251,15 @@ entity_ref! {
 impl TraitId {
     pub fn resolve<'db>(&self, db: &'db dyn Database, cx: impl ContextLike<'db>) -> Trait<'db> {
         cx.resolve_trait(db, *self)
+    }
+}
+
+entity_ref! {
+    pub struct TraitImplId;
+}
+
+impl TraitImplId {
+    pub fn resolve<'db>(&self, db: &'db dyn Database, cx: impl ContextLike<'db>) -> TraitImpl<'db> {
+        cx.resolve_trait_impl(db, *self)
     }
 }
