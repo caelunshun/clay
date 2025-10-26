@@ -238,25 +238,6 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         );
     }
 
-    pub fn call_indirect(
-        mut self,
-        return_value_dst: ValId,
-        func_object: ValId,
-        args: impl IntoIterator<Item = ValId>,
-    ) {
-        let args = EntityList::from_iter(args, &mut self.func.val_lists);
-        self.instr(InstrData::CallIndirect(instr::CallIndirect {
-            func: func_object,
-            args,
-            return_value_dst,
-        }));
-        let TypeKind::Func(func) = self.val_types[func_object].clone().unwrap().kind(self.db)
-        else {
-            panic!("not a func")
-        };
-        self.set_val_type(return_value_dst, func.return_type);
-    }
-
     pub fn return_(mut self, return_value: ValId) {
         self.instr(InstrData::Return(instr::Return { return_value }));
     }
@@ -461,24 +442,6 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             .typ
             .substitute_type_args(self.db, &adt_instance.type_args);
         self.set_val_type(dst, typ);
-    }
-
-    pub fn make_function_object(
-        mut self,
-        dst: ValId,
-        func: FuncInstance<'db>,
-        captures_ref: ValId,
-    ) {
-        self.instr(InstrData::MakeFunctionObject(instr::MakeFunctionObject {
-            dst,
-            func,
-            captures_ref,
-        }));
-        let typ = TypeKind::Func(FuncTypeData {
-            param_types: func.resolve_header(self.db, self.cx).param_types.clone(),
-            return_type: func.resolve_header(self.db, self.cx).return_type.clone(),
-        });
-        self.set_val_type(dst, Type::new(self.db, typ));
     }
 
     pub fn make_list(mut self, dst: ValId, element_type: Type<'db>) {

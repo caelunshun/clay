@@ -44,7 +44,6 @@ pub enum TypeKind<'db> {
     /// or to an element of a list.
     /// It has indefinite lifetime.
     MRef(Type<'db>),
-    Func(FuncTypeData<'db>),
     /// Dynamically resized array.
     List(Type<'db>),
     Algebraic(AlgebraicTypeInstance<'db>),
@@ -84,15 +83,6 @@ impl<'db> TypeKind<'db> {
         match self {
             TypeKind::Prim(_) | TypeKind::TypeParam(_) | TypeKind::Self_ => self.clone(),
             TypeKind::MRef(type_kind) => TypeKind::MRef(map(*type_kind)),
-            TypeKind::Func(func_type_data) => TypeKind::Func(FuncTypeData {
-                param_types: func_type_data
-                    .param_types
-                    .iter()
-                    .copied()
-                    .map(&mut map)
-                    .collect(),
-                return_type: map(func_type_data.return_type),
-            }),
             TypeKind::List(type_kind) => TypeKind::List(map(*type_kind)),
             TypeKind::Algebraic(algebraic_type_instance) => {
                 TypeKind::Algebraic(AlgebraicTypeInstance {
@@ -164,15 +154,6 @@ pub enum PrimType {
     Str,
     /// The empty type, having only one value.
     Unit,
-}
-
-/// A closure object, consisting of a dynamic
-/// function reference and a reference to an opaque
-/// captures struct.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub struct FuncTypeData<'db> {
-    pub param_types: Vec<Type<'db>>,
-    pub return_type: Type<'db>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]

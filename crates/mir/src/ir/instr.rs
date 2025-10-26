@@ -9,7 +9,6 @@ pub enum InstrData<'db> {
     Jump(Jump),
     Branch(Branch),
     Call(Call<'db>),
-    CallIndirect(CallIndirect),
     Return(Return),
     Copy(Unary),
 
@@ -49,8 +48,6 @@ pub enum InstrData<'db> {
     Load(Load),
     Store(Store),
     MakeFieldMRef(MakeFieldMRef),
-
-    MakeFunctionObject(MakeFunctionObject<'db>),
 
     MakeList(MakeList<'db>),
     ListPush(ListPush),
@@ -110,12 +107,6 @@ impl InstrData<'_> {
                     *arg = map(*arg);
                 }
             }
-            InstrData::CallIndirect(ins) => {
-                ins.func = map(ins.func);
-                for arg in ins.args.as_mut_slice(val_lists) {
-                    *arg = map(*arg);
-                }
-            }
             InstrData::Return(ins) => {
                 ins.return_value = map(ins.return_value);
             }
@@ -171,9 +162,6 @@ impl InstrData<'_> {
             InstrData::MakeFieldMRef(ins) => {
                 ins.src_ref = map(ins.src_ref);
             }
-            InstrData::MakeFunctionObject(ins) => {
-                ins.captures_ref = map(ins.captures_ref);
-            }
             InstrData::MakeList(_) => {}
             InstrData::ListPush(ins) => {
                 ins.src_list = map(ins.src_list);
@@ -213,9 +201,6 @@ impl InstrData<'_> {
             InstrData::Jump(_) => {}
             InstrData::Branch(_) => {}
             InstrData::Call(ins) => {
-                ins.return_value_dst = map(ins.return_value_dst);
-            }
-            InstrData::CallIndirect(ins) => {
                 ins.return_value_dst = map(ins.return_value_dst);
             }
             InstrData::Return(_) => {}
@@ -264,9 +249,6 @@ impl InstrData<'_> {
             InstrData::Store(_) => {}
             InstrData::MakeFieldMRef(ins) => {
                 ins.dst_ref = map(ins.dst_ref);
-            }
-            InstrData::MakeFunctionObject(ins) => {
-                ins.dst = map(ins.dst);
             }
             InstrData::MakeList(ins) => {
                 ins.dst = map(ins.dst);
@@ -329,9 +311,6 @@ impl InstrData<'_> {
             InstrData::Call(ins) => {
                 mv(&mut ins.args, old_pool, new_pool);
             }
-            InstrData::CallIndirect(ins) => {
-                mv(&mut ins.args, old_pool, new_pool);
-            }
             _ => {}
         }
         this
@@ -388,17 +367,6 @@ pub struct Call<'db> {
     /// It must have a unit captures type (i.e.
     /// be a top-level function).
     pub func: FuncInstance<'db>,
-    /// Arguments to pass to the function.
-    pub args: EntityList<ValId>,
-    /// Destination for the return value.
-    pub return_value_dst: ValId,
-}
-
-/// Indirectly call a function object.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
-pub struct CallIndirect {
-    /// Function object to call.
-    pub func: ValId,
     /// Arguments to pass to the function.
     pub args: EntityList<ValId>,
     /// Destination for the return value.
@@ -522,20 +490,6 @@ pub struct MakeFieldMRef {
     pub dst_ref: ValId,
     pub src_ref: ValId,
     pub field: FieldId,
-}
-
-/// Construct a function object, given the function
-/// implementation (as a `Func` id) and a value containing
-/// a reference to the captures for the function.
-///
-/// The captures must have
-/// the same type as the `captures_type` field of the corresponding
-/// `FuncData`.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
-pub struct MakeFunctionObject<'db> {
-    pub dst: ValId,
-    pub func: FuncInstance<'db>,
-    pub captures_ref: ValId,
 }
 
 /// Create an empty list.
