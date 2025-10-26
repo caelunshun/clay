@@ -126,11 +126,11 @@ impl<'db> ContextLike<'db> for ContextBuilder<'db> {
         self.traits[ref_].expect("attempted to resolve unbound trait")
     }
 
-    fn trait_impls_for_trait(
-        &self,
+    fn trait_impls_for_trait<'a>(
+        &'a self,
         _db: &'db dyn Database,
         trait_: TraitId,
-    ) -> Cow<[TraitImpl<'db>]> {
+    ) -> Cow<'a, [TraitImpl<'db>]> {
         Cow::Borrowed(
             self.trait_impls
                 .get(&trait_)

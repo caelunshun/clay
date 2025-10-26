@@ -1,6 +1,10 @@
 use crate::{
     InstrData, PrimType, TypeKind, ValId,
-    ir::{BasicBlockId, Context, FuncData, FuncTypeData, StructTypeData, Type},
+    ir::{
+        AlgebraicTypeKind, BasicBlockId, Context, FuncData, FuncInstance, StructTypeData, Type,
+        TypeArgs,
+    },
+    trait_resolution,
     validation::ValidationError,
 };
 use cranelift_entity::EntityList;
@@ -41,29 +45,13 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 self.verify_basic_block_args(ins.target_false, &ins.args_false)?;
             }
             InstrData::Call(ins) => {
-                if ins.func.data(self.db, self.cx).header.captures_type != Type::unit(self.db) {
-                    return Err(ValidationError::new(
-                        "can't make a direct call to a function with non-unit captures type",
-                    ));
-                }
+                self.verify_func_instance(ins.func)?;
 
-                self.verify_function_args(
-                    &ins.func.data(self.db, self.cx).header.param_types,
-                    &ins.args,
-                )?;
+                self.verify_function_args(&ins.func.param_types(self.db, &self.cx), &ins.args)?;
                 self.verify_type_equals(
                     ins.return_value_dst,
-                    ins.func.data(self.db, self.cx).header.return_type,
+                    ins.func.return_type(self.db, &self.cx),
                 )?;
-            }
-            InstrData::CallIndirect(ins) => {
-                let TypeKind::Func(func_typ) = self.type_data_of(ins.func) else {
-                    return Err(ValidationError::new(
-                        "CallIndirect requires a function object",
-                    ));
-                };
-                self.verify_function_args(&func_typ.param_types, &ins.args)?;
-                self.verify_type_equals(ins.return_value_dst, func_typ.return_type)?;
             }
             InstrData::Return(ins) => {
                 self.verify_type_equals(ins.return_value, self.func.header.return_type)?;
@@ -126,9 +114,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 self.verify_type_data_matches(ins.dst, &[TypeKind::Prim(PrimType::Bool)])?;
             }
             InstrData::InitStruct(ins) => {
-                let TypeKind::Struct(struct_data) = self.type_data_of(ins.dst) else {
-                    return Err(ValidationError::new("expected struct type"));
-                };
+                let (struct_data, type_args) = self.expect_struct(ins.dst)?;
                 let field_vals = ins.fields.as_slice(&self.func.val_lists);
                 if field_vals.len() != struct_data.fields.len() {
                     return Err(ValidationError::new(
@@ -139,18 +125,27 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 for (field_val, field) in
                     field_vals.iter().copied().zip(struct_data.fields.values())
                 {
-                    self.verify_type_equals(field_val, field.typ)?;
+                    self.verify_type_equals(
+                        field_val,
+                        field.typ.substitute_type_args(self.db, type_args),
+                    )?;
                 }
             }
             InstrData::GetField(ins) => {
-                let struct_data = self.expect_struct(ins.src_struct)?;
+                let (struct_data, type_args) = self.expect_struct(ins.src_struct)?;
                 let field = &struct_data.fields[ins.field];
-                self.verify_type_equals(ins.dst, field.typ)?;
+                self.verify_type_equals(
+                    ins.dst,
+                    field.typ.substitute_type_args(self.db, type_args),
+                )?;
             }
             InstrData::SetField(ins) => {
-                let struct_data = self.expect_struct(ins.src_struct)?;
+                let (struct_data, type_args) = self.expect_struct(ins.src_struct)?;
                 let field = &struct_data.fields[ins.field];
-                self.verify_type_equals(ins.src_field_val, field.typ)?;
+                self.verify_type_equals(
+                    ins.src_field_val,
+                    field.typ.substitute_type_args(self.db, type_args),
+                )?;
                 self.verify_type_equals(ins.dst_struct, self.type_of(ins.src_struct))?;
             }
             InstrData::Alloc(ins) => {
@@ -168,25 +163,13 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
             }
             InstrData::MakeFieldMRef(ins) => {
                 let pointee = self.expect_any_ref(ins.src_ref)?;
-                let struct_data = match pointee.kind(self.db) {
-                    TypeKind::Struct(s) => s,
-                    _ => return Err(ValidationError::new("expected reference to struct")),
-                };
+                let (struct_data, type_args) = self.expect_struct_kind(pointee)?;
                 let field = &struct_data.fields[ins.field];
-                self.verify_type_data_matches(ins.dst_ref, &[TypeKind::MRef(field.typ)])?;
-            }
-            InstrData::MakeFunctionObject(ins) => {
-                let func_object_data = ins.func.data(self.db, self.cx);
                 self.verify_type_data_matches(
-                    ins.dst,
-                    &[TypeKind::Func(FuncTypeData {
-                        param_types: func_object_data.header.param_types.clone(),
-                        return_type: func_object_data.header.return_type,
-                    })],
-                )?;
-                self.verify_type_data_matches(
-                    ins.captures_ref,
-                    &[TypeKind::MRef(func_object_data.header.captures_type)],
+                    ins.dst_ref,
+                    &[TypeKind::MRef(
+                        field.typ.substitute_type_args(self.db, type_args),
+                    )],
                 )?;
             }
             InstrData::MakeList(ins) => {
@@ -371,10 +354,53 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
         Ok(())
     }
 
+    fn verify_func_instance(
+        &self,
+        func_instance: FuncInstance<'db>,
+    ) -> Result<(), ValidationError> {
+        let type_params = func_instance.type_params(self.db, &self.cx);
+        let type_args = func_instance.type_args(self.db);
+
+        for (type_param_id, type_param) in &type_params {
+            let type_arg = type_args[type_param_id]
+                .ok_or_else(|| ValidationError::new("missing type argument"))?;
+
+            if !type_param.is_mirage {
+                for bound in &type_param.trait_bounds {
+                    if !trait_resolution::does_impl_trait(
+                        self.db,
+                        self.cx,
+                        type_arg,
+                        *bound,
+                        self.func.header.type_params.clone(),
+                        type_params.clone(),
+                    ) {
+                        return Err(ValidationError::new("could not satisfy trait bound"));
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     #[track_caller]
-    fn expect_struct(&self, val: ValId) -> Result<&'db StructTypeData, ValidationError> {
-        match self.type_data_of(val) {
-            TypeKind::Struct(s) => Ok(s),
+    fn expect_struct(
+        &self,
+        val: ValId,
+    ) -> Result<(&'db StructTypeData<'db>, &'db TypeArgs<'db>), ValidationError> {
+        self.expect_struct_kind(self.type_of(val))
+    }
+
+    #[track_caller]
+    fn expect_struct_kind(
+        &self,
+        typ: Type<'db>,
+    ) -> Result<(&'db StructTypeData<'db>, &'db TypeArgs<'db>), ValidationError> {
+        match typ.kind(self.db) {
+            TypeKind::Algebraic(s) => match s.adt.resolve(self.db, self.cx).kind(self.db) {
+                AlgebraicTypeKind::Struct(strukt) => Ok((strukt, &s.type_args)),
+            },
             _ => Err(ValidationError::new("expected struct type")),
         }
     }

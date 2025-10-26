@@ -23,6 +23,7 @@ entity_ref_16bit! {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct AssocFunc<'db> {
     pub name: CompactString,
+    pub type_params: TypeParams<'db>,
     pub param_types: Vec<Type<'db>>,
     pub return_type: Type<'db>,
 }

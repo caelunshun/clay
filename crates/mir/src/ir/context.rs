@@ -16,14 +16,14 @@ pub trait ContextLike<'db> {
     fn resolve_func(&self, db: &'db dyn Database, func: FuncId) -> Func<'db>;
     fn resolve_func_header(&self, db: &'db dyn Database, func: FuncId) -> &FuncHeader<'db>;
     fn resolve_trait(&self, db: &'db dyn Database, trait_: TraitId) -> Trait<'db>;
-    fn trait_impls_for_trait(
-        &self,
+    fn trait_impls_for_trait<'a>(
+        &'a self,
         db: &'db dyn Database,
         trait_: TraitId,
-    ) -> Cow<[TraitImpl<'db>]>;
+    ) -> Cow<'a, [TraitImpl<'db>]>;
 }
 
-impl<'a, 'db, C> ContextLike<'db> for &'a C
+impl<'db, C> ContextLike<'db> for &'_ C
 where
     C: ContextLike<'db>,
 {
@@ -39,11 +39,11 @@ where
         C::resolve_trait(self, db, trait_)
     }
 
-    fn trait_impls_for_trait(
-        &self,
+    fn trait_impls_for_trait<'a>(
+        &'a self,
         db: &'db dyn Database,
         trait_: TraitId,
-    ) -> Cow<[TraitImpl<'db>]> {
+    ) -> Cow<'a, [TraitImpl<'db>]> {
         C::trait_impls_for_trait(self, db, trait_)
     }
 
@@ -52,7 +52,7 @@ where
     }
 }
 
-impl<'a, 'db, C> ContextLike<'db> for &'a mut C
+impl<'db, C> ContextLike<'db> for &'_ mut C
 where
     C: ContextLike<'db>,
 {
@@ -68,11 +68,11 @@ where
         C::resolve_trait(self, db, trait_)
     }
 
-    fn trait_impls_for_trait(
-        &self,
+    fn trait_impls_for_trait<'a>(
+        &'a self,
         db: &'db dyn Database,
         trait_: TraitId,
-    ) -> Cow<[TraitImpl<'db>]> {
+    ) -> Cow<'a, [TraitImpl<'db>]> {
         C::trait_impls_for_trait(self, db, trait_)
     }
 
@@ -128,11 +128,11 @@ impl<'db> ContextLike<'db> for Context<'db> {
         resolve_helper(db, *self, trait_)
     }
 
-    fn trait_impls_for_trait(
-        &self,
+    fn trait_impls_for_trait<'a>(
+        &'a self,
         db: &'db dyn Database,
         trait_: TraitId,
-    ) -> Cow<[TraitImpl<'db>]> {
+    ) -> Cow<'a, [TraitImpl<'db>]> {
         #[salsa::tracked]
         struct TraitImplVec<'db> {
             #[returns(ref)]

@@ -34,7 +34,7 @@ impl<'db> FuncBuilder<'db> {
         let mut val_lists = ListPool::new();
         let mut val_types = PrimaryMap::new();
 
-        let captures_val = val_types.push(Some(captures_type.clone()));
+        let captures_val = val_types.push(Some(captures_type));
         basic_blocks[entry_block]
             .params
             .push(captures_val, &mut val_lists);
@@ -240,7 +240,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
 
     pub fn copy(mut self, dst: ValId, src: ValId) {
         self.instr(InstrData::Copy(instr::Unary { dst, src }));
-        self.set_val_type(dst, self.val_types[src].clone().unwrap());
+        self.set_val_type(dst, self.val_types[src].unwrap());
     }
 
     pub fn constant(mut self, dst: ValId, constant: Constant<'db>) {
@@ -395,12 +395,12 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             src_field_val,
             field,
         }));
-        self.set_val_type(dst, self.val_types[src_struct].clone().unwrap());
+        self.set_val_type(dst, self.val_types[src_struct].unwrap());
     }
 
     pub fn alloc(mut self, dst: ValId, src: ValId) {
         self.instr(InstrData::Alloc(instr::Alloc { dst_ref: dst, src }));
-        let typ = TypeKind::MRef(self.val_types[src].clone().unwrap());
+        let typ = TypeKind::MRef(self.val_types[src].unwrap());
         self.set_val_type(dst, Type::new(self.db, typ));
     }
 
@@ -452,7 +452,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             src_list,
             src_element,
         }));
-        self.set_val_type(dst, self.val_types[src_list].clone().unwrap());
+        self.set_val_type(dst, self.val_types[src_list].unwrap());
     }
 
     pub fn list_ref_push(mut self, src_list: ValId, src_element: ValId) {
@@ -470,7 +470,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             src_list,
             src_index,
         }));
-        self.set_val_type(dst, self.val_types[src_list].clone().unwrap());
+        self.set_val_type(dst, self.val_types[src_list].unwrap());
     }
 
     pub fn list_ref_remove(mut self, src_list: ValId, src_index: ValId) {
@@ -488,7 +488,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             src_list,
             new_len,
         }));
-        self.set_val_type(dst, self.val_types[src_list].as_ref().unwrap().clone());
+        self.set_val_type(dst, self.val_types[src_list].unwrap());
     }
 
     pub fn list_ref_trunc(mut self, src_list: ValId, new_len: ValId) {
@@ -516,8 +516,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         }));
         self.set_val_type(
             dst,
-            self.get_list_element_type(self.val_types[src_list].unwrap().kind(self.db))
-                .clone(),
+            self.get_list_element_type(self.val_types[src_list].unwrap().kind(self.db)),
         );
     }
 
@@ -528,13 +527,12 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             src_index,
         }));
         let typ = TypeKind::MRef(
-            self.get_list_element_type(self.val_types[src_list].unwrap().kind(self.db))
-                .clone(),
+            self.get_list_element_type(self.val_types[src_list].unwrap().kind(self.db)),
         );
         self.set_val_type(dst, Type::new(self.db, typ));
     }
 
-    fn get_list_element_type<'b>(&self, t: &TypeKind<'db>) -> Type<'db> {
+    fn get_list_element_type(&self, t: &TypeKind<'db>) -> Type<'db> {
         match t {
             TypeKind::List(el) => *el,
             TypeKind::MRef(l) => match l.kind(self.db) {

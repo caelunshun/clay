@@ -198,6 +198,21 @@ pub struct FuncInstance<'db> {
 }
 
 impl<'db> FuncInstance<'db> {
+    pub fn type_params(
+        &self,
+        db: &'db dyn Database,
+        cx: &impl ContextLike<'db>,
+    ) -> TypeParams<'db> {
+        match self.func(db) {
+            MaybeAssocFunc::Func(func_id) => func_id.resolve_header(db, cx).type_params.clone(),
+            MaybeAssocFunc::AssocFunc {
+                trait_, assoc_func, ..
+            } => trait_.resolve(db, cx).data(db).assoc_funcs[assoc_func]
+                .type_params
+                .clone(),
+        }
+    }
+
     /// Resolves the concrete return type of the function.
     pub fn return_type(&self, db: &'db dyn Database, cx: &impl ContextLike<'db>) -> Type<'db> {
         match self.func(db) {

@@ -134,7 +134,7 @@ pub fn can_type_satisfy<'db>(db: &'db dyn Database, args: CanTypeSatisfyArgs<'db
             // t1_kind must satisfy the trait bounds of t2_param.
             let mut satisfies = true;
             for trait_bound in &t2_param.trait_bounds {
-                if !does_impl_trait(db, cx, t1, trait_bound.clone(), p1.clone(), p2.clone()) {
+                if !does_impl_trait(db, cx, t1, *trait_bound, p1.clone(), p2.clone()) {
                     satisfies = false;
                     break;
                 }
@@ -151,20 +151,20 @@ pub fn can_type_satisfy<'db>(db: &'db dyn Database, args: CanTypeSatisfyArgs<'db
             if a1.adt == a2.adt {
                 let mut satisfies = true;
                 for (type_param_id, a1_arg) in a1.type_args.iter() {
-                    if let Some(a1_arg) = a1_arg {
-                        if let Some(a2_arg) = a2.type_args[type_param_id] {
-                            satisfies |= can_type_satisfy(
+                    if let Some(a1_arg) = a1_arg
+                        && let Some(a2_arg) = a2.type_args[type_param_id]
+                    {
+                        satisfies |= can_type_satisfy(
+                            db,
+                            CanTypeSatisfyArgs::new(
                                 db,
-                                CanTypeSatisfyArgs::new(
-                                    db,
-                                    cx,
-                                    *a1_arg,
-                                    p1.clone(),
-                                    a2_arg,
-                                    p2.clone(),
-                                ),
-                            );
-                        }
+                                cx,
+                                *a1_arg,
+                                p1.clone(),
+                                a2_arg,
+                                p2.clone(),
+                            ),
+                        );
                     }
                 }
                 satisfies
