@@ -1,14 +1,18 @@
 use crate::{
     Func, InstrData, PrimType, TypeKind, ValId,
     ir::{
-        BasicBlockId, ConstantValue, Context, FieldId, FuncData, Type,
+        AlgebraicType, AlgebraicTypeKind, BasicBlockId, ConstantValue, Context, FieldId, FuncData,
+        Trait, TraitInstance, Type, TypeArgs, TypeParams,
         instr::{self, CompareMode},
     },
 };
 use cranelift_entity::EntityRef;
-use fir_core::sexpr::{SExpr, float, int, list, string, symbol};
-use hashbrown::HashMap;
+use fir_core::{
+    HashMap,
+    sexpr::{SExpr, float, int, list, string, symbol},
+};
 use salsa::Database;
+use std::cell::RefCell;
 
 /// Converts an mir Context and all its contents to an S-expression.
 #[salsa::tracked]
@@ -21,6 +25,7 @@ pub fn format_context<'db>(db: &'db dyn Database, cx: Context<'db>) -> SExpr {
         basic_block_names: Default::default(),
         next_basic_block_index: 0,
         current_func: None,
+        scoped_type_param_stack: Default::default(),
     }
     .format_all()
 }
@@ -33,17 +38,76 @@ struct Formatter<'db> {
     basic_block_names: HashMap<BasicBlockId, SExpr>,
     next_basic_block_index: usize,
     current_func: Option<Func<'db>>,
+    scoped_type_param_stack: RefCell<Vec<TypeParams<'db>>>,
 }
 
 impl<'db> Formatter<'db> {
     pub fn format_all(mut self) -> SExpr {
         let mut items = vec![symbol("mir")];
 
+        for (_, adt) in &self.cx.data(self.db).adts {
+            items.push(self.format_adt(*adt));
+        }
+
         for (_, func) in &self.cx.data(self.db).funcs {
             items.push(self.format_func(*func));
         }
 
         SExpr::List(items.into_boxed_slice())
+    }
+
+    fn format_trait(&self, trait_: Trait<'db>) -> SExpr {
+        let data = trait_.data(self.db);
+
+        self.push_scope_type_params(data.type_params.clone());
+
+        let mut items = vec![symbol("trait"), symbol(data.name.clone())];
+        items.extend(self.format_type_params(&data.type_params));
+
+        for assoc_func in data.assoc_funcs.values() {
+            let mut assoc_func_items = vec![symbol("assoc_func"), symbol(assoc_func.name.clone())];
+
+            assoc_func_items.push(list([
+                symbol("return_type"),
+                self.format_type(assoc_func.return_type),
+            ]));
+
+            items.push(list(assoc_func_items));
+        }
+
+        self.pop_scope_type_params();
+
+        list(items)
+    }
+
+    fn format_adt(&self, adt: AlgebraicType<'db>) -> SExpr {
+        let mut decls = Vec::new();
+
+        decls.extend(self.format_type_params(adt.type_params(self.db)));
+
+        self.push_scope_type_params(adt.type_params(self.db).clone());
+
+        match adt.kind(self.db) {
+            AlgebraicTypeKind::Struct(struct_data) => {
+                let mut struct_decls = Vec::new();
+
+                for (_, field) in &struct_data.fields {
+                    struct_decls.push(list([
+                        symbol("field"),
+                        symbol(field.name.clone()),
+                        self.format_type(field.typ),
+                    ]));
+                }
+
+                decls.push(list([symbol("struct"), list(struct_decls)]));
+            }
+        }
+
+        self.pop_scope_type_params();
+
+        let mut items = vec![symbol("adt"), symbol(adt.name(self.db).clone())];
+        items.extend(decls);
+        list(items)
     }
 
     fn format_type(&self, typ: Type<'db>) -> SExpr {
@@ -57,23 +121,107 @@ impl<'db> Formatter<'db> {
                 PrimType::Unit => symbol("unit"),
             },
             TypeKind::MRef(p) => list([symbol("mref"), self.format_type(*p)]),
-            TypeKind::Func(f) => {
-                let mut items = vec![
-                    symbol("func"),
-                    list([symbol("returns"), self.format_type(f.return_type)]),
-                ];
-
-                for param in &f.param_types {
-                    items.push(list([symbol("param"), self.format_type(*param)]));
-                }
-
-                SExpr::List(items.into_boxed_slice())
-            }
             TypeKind::List(t) => list([symbol("list"), self.format_type(*t)]),
-            TypeKind::Algebraic(_) => todo!(),
-            TypeKind::TypeParam(_) => todo!(),
+            TypeKind::Algebraic(adt_instance) => {
+                let name = adt_instance
+                    .adt
+                    .resolve(self.db, self.cx)
+                    .name(self.db)
+                    .clone();
+                if adt_instance.type_args.is_empty() {
+                    symbol(name)
+                } else {
+                    let mut items = vec![symbol(name)];
+                    items.extend(
+                        self.format_type_args(
+                            &adt_instance.type_args,
+                            adt_instance
+                                .adt
+                                .resolve(self.db, self.cx)
+                                .type_params(self.db),
+                        ),
+                    );
+                    list(items)
+                }
+            }
+            TypeKind::TypeParam(param) => {
+                symbol(self.current_scope_type_params()[*param].name.clone())
+            }
             TypeKind::Self_ => symbol("Self"),
         }
+    }
+
+    fn format_type_params(&self, type_params: &TypeParams<'db>) -> Vec<SExpr> {
+        let mut items = Vec::new();
+
+        for (_, type_param) in type_params {
+            let mut param_items = vec![symbol("type_param"), symbol(type_param.name.clone())];
+
+            if type_param.is_mirage {
+                param_items.push(symbol("mirage"));
+            }
+            if type_param.is_assoc_type {
+                param_items.push(symbol("assoc_type"));
+            }
+
+            for &bound in &type_param.trait_bounds {
+                param_items.push(list([
+                    symbol("requires"),
+                    self.format_trait_instance(bound),
+                ]));
+            }
+
+            items.push(list(param_items));
+        }
+
+        items
+    }
+
+    fn format_trait_instance(&self, trait_instance: TraitInstance<'db>) -> SExpr {
+        let name = trait_instance
+            .trait_(self.db)
+            .resolve(self.db, self.cx)
+            .data(self.db)
+            .name
+            .clone();
+
+        if trait_instance.type_args(self.db).is_empty() {
+            return symbol(name);
+        }
+
+        let mut items = vec![symbol(name)];
+        items.extend(
+            self.format_type_args(
+                trait_instance.type_args(self.db),
+                &trait_instance
+                    .trait_(self.db)
+                    .resolve(self.db, self.cx)
+                    .data(self.db)
+                    .type_params,
+            ),
+        );
+        list(items)
+    }
+
+    fn format_type_args(
+        &self,
+        type_args: &TypeArgs<'db>,
+        dst_type_params: &TypeParams<'db>,
+    ) -> Vec<SExpr> {
+        let mut items = Vec::new();
+
+        for (type_param, arg) in type_args.iter() {
+            if let Some(arg) = arg {
+                let name = dst_type_params[type_param].name.clone();
+                items.push(list([
+                    symbol("type_arg"),
+                    symbol(name),
+                    self.format_type(*arg),
+                ]));
+            }
+        }
+
+        items
     }
 
     fn format_func(&mut self, func: Func<'db>) -> SExpr {
@@ -109,7 +257,7 @@ impl<'db> Formatter<'db> {
         SExpr::List(items.into_boxed_slice())
     }
 
-    fn format_block(&mut self, func_data: &FuncData, block: BasicBlockId) -> SExpr {
+    fn format_block(&mut self, func_data: &FuncData<'db>, block: BasicBlockId) -> SExpr {
         let mut items = vec![symbol("block"), self.basic_block_name(block)];
 
         let block_data = &func_data.basic_blocks[block];
@@ -446,6 +594,22 @@ impl<'db> Formatter<'db> {
                 }
             })
             .clone()
+    }
+
+    fn current_scope_type_params(&self) -> TypeParams<'db> {
+        self.scoped_type_param_stack
+            .borrow()
+            .last()
+            .unwrap()
+            .clone()
+    }
+
+    fn push_scope_type_params(&self, params: TypeParams<'db>) {
+        self.scoped_type_param_stack.borrow_mut().push(params);
+    }
+
+    fn pop_scope_type_params(&self) {
+        self.scoped_type_param_stack.borrow_mut().pop();
     }
 }
 
