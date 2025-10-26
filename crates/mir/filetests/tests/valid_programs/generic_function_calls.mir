@@ -13,5 +13,5 @@
         (entry block0)
         (block block0
             (constant x (0))
-            (call y ((identity (type_arg T int)) x))
+            (call y ((identity (type_arg T int)) (x)))
             (return (y)))))

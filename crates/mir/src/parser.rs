@@ -606,20 +606,16 @@ impl<'a, 'db> Parser<'a, 'db> {
                 );
             }
             "call" => {
-                let [Symbol(dst), List([Symbol(func), List(args)])] = args else {
+                let [Symbol(dst), List([func_instance, List(args)])] = args else {
                     return Err(ParseError::new("invalid instr arguments"));
                 };
                 let dst = state.get_or_create_val(dst);
-                let func = self
-                    .funcs
-                    .get(func)
-                    .ok_or_else(|| ParseError::new(format!("undefined func `{func}`")))?;
+                let func_instance = self.parse_func_instance(func_instance)?;
                 let args = state.get_val_list(args)?;
-                state.func_builder.instr(self.cx).call(
-                    dst,
-                    FuncInstance::new(self.db, MaybeAssocFunc::Func(*func), TypeArgs::new()),
-                    args,
-                );
+                state
+                    .func_builder
+                    .instr(self.cx)
+                    .call(dst, func_instance, args);
             }
             "return" => {
                 let [List([Symbol(return_value)])] = args else {
@@ -940,6 +936,13 @@ impl<'a, 'db> Parser<'a, 'db> {
             .ok_or_else(|| ParseError::new(format!("unknown trait `{name}`")))
     }
 
+    fn get_func(&self, name: &str) -> Result<FuncId, ParseError> {
+        self.funcs
+            .get(&name)
+            .copied()
+            .ok_or_else(|| ParseError::new(format!("unknown func `{name}`")))
+    }
+
     fn push_type_param_scope(&mut self, scope: TypeParamScope) {
         self.current_type_param_scopes.push(scope);
     }
@@ -954,7 +957,99 @@ impl<'a, 'db> Parser<'a, 'db> {
         self.current_type_param_scopes
             .iter()
             .rev() // prefer top of scope stack
-            .find_map(|scope| self.type_params.get(&(*scope, name)).copied())
+            .find_map(|scope| self.search_type_param_in_scope(name, *scope))
+    }
+
+    fn search_type_param_in_scope(&self, name: &str, scope: TypeParamScope) -> Option<TypeParamId> {
+        self.type_params.get(&(scope, name)).copied()
+    }
+
+    fn parse_func_instance(
+        &mut self,
+        expr: &SExprRef<'a>,
+    ) -> Result<FuncInstance<'db>, ParseError> {
+        match expr {
+            Symbol(func_name) => {
+                let func_id = self.get_func(func_name)?;
+                Ok(FuncInstance::new(
+                    self.db,
+                    MaybeAssocFunc::Func(func_id),
+                    TypeArgs::default(),
+                ))
+            }
+            List(
+                [
+                    Symbol("assoc_func"),
+                    of_type,
+                    for_trait_instance,
+                    Symbol(assoc_func_name),
+                    decls @ ..,
+                ],
+            ) => {
+                let of_type = self.parse_type(of_type)?;
+                let for_trait_instance = self.parse_trait_instance(for_trait_instance)?;
+
+                let assoc_func = for_trait_instance
+                    .trait_(self.db)
+                    .resolve(self.db, &self.cx)
+                    .data(self.db)
+                    .assoc_funcs
+                    .iter()
+                    .find_map(|(id, assoc_func)| {
+                        if assoc_func.name == assoc_func_name {
+                            Some(id)
+                        } else {
+                            None
+                        }
+                    })
+                    .ok_or_else(|| {
+                        ParseError::new(format!(
+                            "could not find associated function '{assoc_func_name}'"
+                        ))
+                    })?;
+
+                let type_args = self.parse_type_args(
+                    decls,
+                    TypeParamScope::AssocFunc(for_trait_instance.trait_(self.db), assoc_func),
+                )?;
+
+                Ok(FuncInstance::new(
+                    self.db,
+                    MaybeAssocFunc::AssocFunc {
+                        trait_: for_trait_instance,
+                        assoc_func,
+                        typ: of_type,
+                    },
+                    type_args,
+                ))
+            }
+            List([Symbol(func_name), decls @ ..]) => {
+                let func_id = self.get_func(func_name)?;
+                let type_args = self.parse_type_args(decls, TypeParamScope::Func(func_id))?;
+                Ok(FuncInstance::new(
+                    self.db,
+                    MaybeAssocFunc::Func(func_id),
+                    type_args,
+                ))
+            }
+            _ => Err(ParseError::new("invalid func instance")),
+        }
+    }
+
+    fn parse_type_args(
+        &mut self,
+        items: &[SExprRef<'a>],
+        target_scope: TypeParamScope,
+    ) -> Result<TypeArgs<'db>, ParseError> {
+        let mut type_args = TypeArgs::new();
+        for item in items {
+            if let List([Symbol("type_arg"), Symbol(dst_type_param_name), arg]) = item {
+                let dst_type_param = self.search_type_param_in_scope(dst_type_param_name, target_scope)
+                .ok_or_else(|| ParseError::new(format!("unknown type parameter '{dst_type_param_name}' for scope '{target_scope:?}'")))?;
+                type_args.insert(dst_type_param, self.parse_type(arg)?);
+            }
+        }
+        Ok(type_args)
     }
 }
 

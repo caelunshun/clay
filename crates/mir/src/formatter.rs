@@ -218,36 +218,41 @@ impl<'db> Formatter<'db> {
     }
 
     fn format_func_instance(&self, func_instance: FuncInstance<'db>) -> SExpr {
-        let name = match func_instance.func(self.db) {
+        match func_instance.func(self.db) {
             MaybeAssocFunc::Func(func_id) => {
-                symbol(func_id.resolve_header(self.db, &self.cx).name.clone())
+                let name = symbol(func_id.resolve_header(self.db, &self.cx).name.clone());
+
+                if func_instance.type_args(self.db).is_empty() {
+                    name
+                } else {
+                    let mut items = vec![name];
+                    items.extend(self.format_type_args(func_instance.type_args(self.db)));
+                    list(items)
+                }
             }
             MaybeAssocFunc::AssocFunc {
                 trait_,
                 typ,
                 assoc_func,
-            } => list([
-                symbol("assoc_func"),
-                self.format_type(typ),
-                self.format_trait_instance(trait_),
-                symbol(
-                    trait_
-                        .trait_(self.db)
-                        .resolve(self.db, self.cx)
-                        .data(self.db)
-                        .assoc_funcs[assoc_func]
-                        .name
-                        .clone(),
-                ),
-            ]),
-        };
+            } => {
+                let mut items = vec![
+                    symbol("assoc_func"),
+                    self.format_type(typ),
+                    self.format_trait_instance(trait_),
+                    symbol(
+                        trait_
+                            .trait_(self.db)
+                            .resolve(self.db, self.cx)
+                            .data(self.db)
+                            .assoc_funcs[assoc_func]
+                            .name
+                            .clone(),
+                    ),
+                ];
+                items.extend(self.format_type_args(func_instance.type_args(self.db)));
 
-        if func_instance.type_args(self.db).is_empty() {
-            name
-        } else {
-            let mut items = vec![name];
-            items.extend(self.format_type_args(func_instance.type_args(self.db)));
-            list(items)
+                list(items)
+            }
         }
     }
 
