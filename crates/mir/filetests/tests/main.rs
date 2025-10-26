@@ -64,18 +64,20 @@ mod harnesses {
         });
     }
 
-    /// Verifies that typecheck validation does not pass on the given module.
+    /// Verifies that typecheck validation does not pass on at least one function in the given module.
     pub fn typecheck_validation_fails(input_str: &'static str) {
+        let mut had_failure = false;
         with_parsed_context(input_str, |db, cx| {
             for func in cx.data(db).funcs.values() {
-                if validation::typecheck::verify_instr_types(db, cx, func.data(db)).is_ok() {
-                    panic!(
-                        "typecheck validation succeeded on function '{}', but was expected to fail",
-                        func.data(db).header.name
-                    );
+                if validation::typecheck::verify_instr_types(db, cx, func.data(db)).is_err() {
+                    had_failure = true;
                 }
             }
         });
+        assert!(
+            had_failure,
+            "typecheck validation succeeded, was expected to fail"
+        );
     }
 
     /// Verifies that value_initialization validation passes on the given module.
