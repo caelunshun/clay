@@ -1,10 +1,8 @@
 use crate::{
     InstrData,
     ir::{
-        ContextLike, TypeArgs, TypeParamScope, TypeParams,
-        context::{FuncId, TraitId},
-        trait_::AssocFuncId,
-        typ::Type,
+        ContextLike, TraitInstance, TypeArgs, TypeParamScope, TypeParams, context::FuncId,
+        trait_::AssocFuncId, typ::Type,
     },
 };
 use compact_str::CompactString;
@@ -203,7 +201,7 @@ impl<'db> FuncInstance<'db> {
             MaybeAssocFunc::Func(func_id) => TypeParamScope::Func(func_id),
             MaybeAssocFunc::AssocFunc {
                 trait_, assoc_func, ..
-            } => TypeParamScope::AssocFunc(trait_, assoc_func),
+            } => TypeParamScope::AssocFunc(trait_.trait_(db), assoc_func),
         }
     }
 
@@ -216,7 +214,7 @@ impl<'db> FuncInstance<'db> {
             MaybeAssocFunc::Func(func_id) => func_id.resolve_header(db, cx).type_params.clone(),
             MaybeAssocFunc::AssocFunc {
                 trait_, assoc_func, ..
-            } => trait_.resolve(db, cx).data(db).assoc_funcs[assoc_func]
+            } => trait_.trait_(db).resolve(db, cx).data(db).assoc_funcs[assoc_func]
                 .type_params
                 .clone(),
         }
@@ -234,7 +232,7 @@ impl<'db> FuncInstance<'db> {
                 typ,
                 assoc_func,
             } => {
-                let trait_ = trait_.resolve(db, cx);
+                let trait_ = trait_.trait_(db).resolve(db, cx);
                 let assoc_func = &trait_.data(db).assoc_funcs[assoc_func];
                 assoc_func
                     .return_type
@@ -259,7 +257,7 @@ impl<'db> FuncInstance<'db> {
                 typ,
                 assoc_func,
             } => {
-                let trait_ = trait_.resolve(db, cx);
+                let trait_ = trait_.trait_(db).resolve(db, cx);
                 let assoc_func = &trait_.data(db).assoc_funcs[assoc_func];
                 assoc_func
                     .param_types
@@ -280,7 +278,7 @@ impl<'db> FuncInstance<'db> {
 pub enum MaybeAssocFunc<'db> {
     Func(FuncId),
     AssocFunc {
-        trait_: TraitId,
+        trait_: TraitInstance<'db>,
         typ: Type<'db>,
         assoc_func: AssocFuncId,
     },

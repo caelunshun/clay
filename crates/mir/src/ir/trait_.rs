@@ -1,6 +1,6 @@
-use crate::ir::{Type, TypeArgs, TypeParams, context::TraitId};
+use crate::ir::{FuncInstance, Type, TypeArgs, TypeParams, context::TraitId};
 use compact_str::CompactString;
-use cranelift_entity::PrimaryMap;
+use cranelift_entity::{PrimaryMap, SecondaryMap};
 
 #[salsa::tracked(debug)]
 pub struct Trait<'db> {
@@ -48,4 +48,7 @@ pub struct TraitImplData<'db> {
     /// Note: can refer to a type parameter....
     pub impl_for_type: Type<'db>,
     pub trait_: TraitInstance<'db>,
+    /// Binds associated functions in the trait
+    /// to the FuncInstances they should reference.
+    pub assoc_func_bindings: SecondaryMap<AssocFuncId, Option<FuncInstance<'db>>>,
 }

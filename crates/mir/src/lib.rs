@@ -1,4 +1,7 @@
 #![feature(if_let_guard)]
+// We plan to expand various enums
+// to have more variants
+#![allow(irrefutable_let_patterns)]
 
 #[macro_export]
 macro_rules! entity_ref {
@@ -75,7 +78,7 @@ macro_rules! entity_ref_16bit {
 }
 
 pub mod builder;
-// pub mod formatter;
+pub mod formatter;
 pub mod ir;
 //pub mod parser;
 pub mod passes;

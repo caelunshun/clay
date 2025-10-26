@@ -2,7 +2,7 @@ use crate::{
     Func, InstrData, PrimType, TypeKind, ValId,
     ir::{
         AlgebraicType, AlgebraicTypeKind, BasicBlockId, ConstantValue, Context, FieldId, FuncData,
-        Trait, TraitInstance, Type, TypeArgs, TypeParams,
+        FuncInstance, MaybeAssocFunc, Trait, TraitImpl, TraitInstance, Type, TypeArgs, TypeParams,
         instr::{self, CompareMode},
     },
 };
@@ -12,7 +12,6 @@ use fir_core::{
     sexpr::{SExpr, float, int, list, string, symbol},
 };
 use salsa::Database;
-use std::cell::RefCell;
 
 /// Converts an mir Context and all its contents to an S-expression.
 #[salsa::tracked]
@@ -25,7 +24,6 @@ pub fn format_context<'db>(db: &'db dyn Database, cx: Context<'db>) -> SExpr {
         basic_block_names: Default::default(),
         next_basic_block_index: 0,
         current_func: None,
-        scoped_type_param_stack: Default::default(),
     }
     .format_all()
 }
@@ -38,7 +36,6 @@ struct Formatter<'db> {
     basic_block_names: HashMap<BasicBlockId, SExpr>,
     next_basic_block_index: usize,
     current_func: Option<Func<'db>>,
-    scoped_type_param_stack: RefCell<Vec<TypeParams<'db>>>,
 }
 
 impl<'db> Formatter<'db> {
@@ -47,6 +44,14 @@ impl<'db> Formatter<'db> {
 
         for (_, adt) in &self.cx.data(self.db).adts {
             items.push(self.format_adt(*adt));
+        }
+
+        for (_, trait_) in &self.cx.data(self.db).traits {
+            items.push(self.format_trait(*trait_));
+        }
+
+        for (_, trait_impl) in &self.cx.data(self.db).trait_impls {
+            items.push(self.format_trait_impl(*trait_impl));
         }
 
         for (_, func) in &self.cx.data(self.db).funcs {
@@ -59,23 +64,55 @@ impl<'db> Formatter<'db> {
     fn format_trait(&self, trait_: Trait<'db>) -> SExpr {
         let data = trait_.data(self.db);
 
-        self.push_scope_type_params(data.type_params.clone());
-
         let mut items = vec![symbol("trait"), symbol(data.name.clone())];
         items.extend(self.format_type_params(&data.type_params));
 
         for assoc_func in data.assoc_funcs.values() {
             let mut assoc_func_items = vec![symbol("assoc_func"), symbol(assoc_func.name.clone())];
 
+            assoc_func_items.extend(self.format_type_params(&assoc_func.type_params));
+
             assoc_func_items.push(list([
                 symbol("return_type"),
                 self.format_type(assoc_func.return_type),
             ]));
 
+            for &param_type in &assoc_func.param_types {
+                assoc_func_items.push(list([symbol("param"), self.format_type(param_type)]));
+            }
+
             items.push(list(assoc_func_items));
         }
 
-        self.pop_scope_type_params();
+        list(items)
+    }
+
+    fn format_trait_impl(&self, trait_impl: TraitImpl<'db>) -> SExpr {
+        let data = trait_impl.data(self.db);
+        let trait_data = data
+            .trait_
+            .trait_(self.db)
+            .resolve(self.db, self.cx)
+            .data(self.db);
+
+        let mut items = vec![symbol("trait_impl")];
+
+        items.extend(self.format_type_params(&data.type_params));
+        items.push(list([
+            symbol("trait"),
+            self.format_trait_instance(data.trait_),
+        ]));
+        items.push(list([symbol("type"), self.format_type(data.impl_for_type)]));
+
+        for (assoc_func, func_binding) in data.assoc_func_bindings.iter() {
+            if let Some(func_binding) = func_binding {
+                items.push(list([
+                    symbol("assoc_func"),
+                    symbol(trait_data.assoc_funcs[assoc_func].name.clone()),
+                    self.format_func_instance(*func_binding),
+                ]));
+            }
+        }
 
         list(items)
     }
@@ -84,8 +121,6 @@ impl<'db> Formatter<'db> {
         let mut decls = Vec::new();
 
         decls.extend(self.format_type_params(adt.type_params(self.db)));
-
-        self.push_scope_type_params(adt.type_params(self.db).clone());
 
         match adt.kind(self.db) {
             AlgebraicTypeKind::Struct(struct_data) => {
@@ -102,8 +137,6 @@ impl<'db> Formatter<'db> {
                 decls.push(list([symbol("struct"), list(struct_decls)]));
             }
         }
-
-        self.pop_scope_type_params();
 
         let mut items = vec![symbol("adt"), symbol(adt.name(self.db).clone())];
         items.extend(decls);
@@ -132,21 +165,11 @@ impl<'db> Formatter<'db> {
                     symbol(name)
                 } else {
                     let mut items = vec![symbol(name)];
-                    items.extend(
-                        self.format_type_args(
-                            &adt_instance.type_args,
-                            adt_instance
-                                .adt
-                                .resolve(self.db, self.cx)
-                                .type_params(self.db),
-                        ),
-                    );
+                    items.extend(self.format_type_args(&adt_instance.type_args));
                     list(items)
                 }
             }
-            TypeKind::TypeParam(param) => {
-                symbol(self.current_scope_type_params()[*param].name.clone())
-            }
+            TypeKind::TypeParam(param) => symbol(param.resolve(self.db, &self.cx).name.clone()),
             TypeKind::Self_ => symbol("Self"),
         }
     }
@@ -190,35 +213,54 @@ impl<'db> Formatter<'db> {
         }
 
         let mut items = vec![symbol(name)];
-        items.extend(
-            self.format_type_args(
-                trait_instance.type_args(self.db),
-                &trait_instance
-                    .trait_(self.db)
-                    .resolve(self.db, self.cx)
-                    .data(self.db)
-                    .type_params,
-            ),
-        );
+        items.extend(self.format_type_args(trait_instance.type_args(self.db)));
         list(items)
     }
 
-    fn format_type_args(
-        &self,
-        type_args: &TypeArgs<'db>,
-        dst_type_params: &TypeParams<'db>,
-    ) -> Vec<SExpr> {
+    fn format_func_instance(&self, func_instance: FuncInstance<'db>) -> SExpr {
+        let name = match func_instance.func(self.db) {
+            MaybeAssocFunc::Func(func_id) => {
+                symbol(func_id.resolve_header(self.db, &self.cx).name.clone())
+            }
+            MaybeAssocFunc::AssocFunc {
+                trait_,
+                typ,
+                assoc_func,
+            } => list([
+                symbol("assoc_func"),
+                self.format_type(typ),
+                self.format_trait_instance(trait_),
+                symbol(
+                    trait_
+                        .trait_(self.db)
+                        .resolve(self.db, self.cx)
+                        .data(self.db)
+                        .assoc_funcs[assoc_func]
+                        .name
+                        .clone(),
+                ),
+            ]),
+        };
+
+        if func_instance.type_args(self.db).is_empty() {
+            name
+        } else {
+            let mut items = vec![name];
+            items.extend(self.format_type_args(func_instance.type_args(self.db)));
+            list(items)
+        }
+    }
+
+    fn format_type_args(&self, type_args: &TypeArgs<'db>) -> Vec<SExpr> {
         let mut items = Vec::new();
 
         for (type_param, arg) in type_args.iter() {
-            if let Some(arg) = arg {
-                let name = dst_type_params[type_param].name.clone();
-                items.push(list([
-                    symbol("type_arg"),
-                    symbol(name),
-                    self.format_type(*arg),
-                ]));
-            }
+            let name = type_param.resolve(self.db, &self.cx).name.clone();
+            items.push(list([
+                symbol("type_arg"),
+                symbol(name),
+                self.format_type(*arg),
+            ]));
         }
 
         items
@@ -325,21 +367,7 @@ impl<'db> Formatter<'db> {
                 list([
                     symbol("call"),
                     self.val_name(ins.return_value_dst),
-                    list([
-                        symbol(ins.func.data(self.db, self.cx).header.name.clone()),
-                        list(args),
-                    ]),
-                ])
-            }
-            InstrData::CallIndirect(ins) => {
-                let mut args = Vec::new();
-                for &arg in ins.args.as_slice(&func_data.val_lists) {
-                    args.push(self.val_name(arg));
-                }
-                list([
-                    symbol("call_indirect"),
-                    self.val_name(ins.return_value_dst),
-                    list([self.val_name(ins.func), list(args)]),
+                    list([self.format_func_instance(ins.func), list(args)]),
                 ])
             }
             InstrData::Return(ins) => {
@@ -348,10 +376,10 @@ impl<'db> Formatter<'db> {
             InstrData::Copy(ins) => self.format_instr_unary("copy", ins),
             InstrData::Constant(ins) => {
                 let constant = match ins.constant.value(self.db) {
-                    ConstantValue::Int(x) => int(x),
-                    ConstantValue::Real(x) => float(x),
+                    ConstantValue::Int(x) => int(*x),
+                    ConstantValue::Real(x) => float(*x),
                     ConstantValue::Bool(x) => symbol(x.to_string()),
-                    ConstantValue::Str(x) => string(x),
+                    ConstantValue::Str(x) => string(x.clone()),
                 };
                 list([symbol("constant"), self.val_name(ins.dst), list([constant])])
             }
@@ -374,8 +402,12 @@ impl<'db> Formatter<'db> {
             InstrData::BoolXor(ins) => self.format_instr_binary("bool.xor", ins),
             InstrData::BoolNot(ins) => self.format_instr_unary("bool.not", ins),
             InstrData::InitStruct(ins) => {
-                let TypeKind::Struct(strukt) = ins.typ.data(self.db, self.cx) else {
-                    panic!("init_struct requires struct type")
+                let TypeKind::Algebraic(adt_instance) = ins.typ.kind(self.db) else {
+                    panic!("struct.init requires struct type")
+                };
+                let adt = adt_instance.adt.resolve(self.db, self.cx);
+                let AlgebraicTypeKind::Struct(strukt) = adt.kind(self.db) else {
+                    panic!("struct.init requires struct type")
                 };
 
                 let mut fields = Vec::new();
@@ -388,18 +420,19 @@ impl<'db> Formatter<'db> {
                     ]));
                 }
 
-                fields.insert(
-                    0,
-                    self.type_names[&ins.typ.resolve(self.db, self.cx)].clone(),
-                );
+                fields.insert(0, self.format_type(ins.typ));
 
                 list([symbol("struct.init"), self.val_name(ins.dst), list(fields)])
             }
             InstrData::GetField(ins) => {
-                let TypeKind::Struct(strukt) =
-                    func_data.vals[ins.src_struct].typ.data(self.db, self.cx)
+                let TypeKind::Algebraic(adt_instance) =
+                    func_data.vals[ins.src_struct].typ.kind(self.db)
                 else {
-                    panic!("not a struct type");
+                    panic!("struct.init requires struct type")
+                };
+                let adt = adt_instance.adt.resolve(self.db, self.cx);
+                let AlgebraicTypeKind::Struct(strukt) = adt.kind(self.db) else {
+                    panic!("struct.init requires struct type")
                 };
 
                 list([
@@ -412,10 +445,14 @@ impl<'db> Formatter<'db> {
                 ])
             }
             InstrData::SetField(ins) => {
-                let TypeKind::Struct(strukt) =
-                    func_data.vals[ins.src_struct].typ.data(self.db, self.cx)
+                let TypeKind::Algebraic(adt_instance) =
+                    func_data.vals[ins.src_struct].typ.kind(self.db)
                 else {
-                    panic!("not a struct type");
+                    panic!("struct.init requires struct type")
+                };
+                let adt = adt_instance.adt.resolve(self.db, self.cx);
+                let AlgebraicTypeKind::Struct(strukt) = adt.kind(self.db) else {
+                    panic!("struct.init requires struct type")
                 };
 
                 list([
@@ -443,12 +480,15 @@ impl<'db> Formatter<'db> {
                 list([self.val_name(ins.val), self.val_name(ins.ref_)]),
             ]),
             InstrData::MakeFieldMRef(ins) => {
-                let TypeKind::MRef(r) = func_data.vals[ins.src_ref].typ.data(self.db, self.cx)
-                else {
+                let TypeKind::MRef(r) = func_data.vals[ins.src_ref].typ.kind(self.db) else {
                     panic!("not a ref type");
                 };
-                let TypeKind::Struct(strukt) = r.data(self.db, self.cx) else {
-                    panic!("not a struct type");
+                let TypeKind::Algebraic(adt_instance) = r.kind(self.db) else {
+                    panic!("struct.init requires struct type")
+                };
+                let adt = adt_instance.adt.resolve(self.db, self.cx);
+                let AlgebraicTypeKind::Struct(strukt) = adt.kind(self.db) else {
+                    panic!("struct.init requires struct type")
                 };
 
                 list([
@@ -460,14 +500,6 @@ impl<'db> Formatter<'db> {
                     ]),
                 ])
             }
-            InstrData::MakeFunctionObject(ins) => list([
-                symbol("func.init"),
-                self.val_name(ins.dst),
-                list([
-                    symbol(ins.func.data(self.db, self.cx).header.name.clone()),
-                    self.val_name(ins.captures_ref),
-                ]),
-            ]),
             InstrData::MakeList(ins) => list([
                 symbol("list.init"),
                 self.val_name(ins.dst),
@@ -595,38 +627,19 @@ impl<'db> Formatter<'db> {
             })
             .clone()
     }
-
-    fn current_scope_type_params(&self) -> TypeParams<'db> {
-        self.scoped_type_param_stack
-            .borrow()
-            .last()
-            .unwrap()
-            .clone()
-    }
-
-    fn push_scope_type_params(&self, params: TypeParams<'db>) {
-        self.scoped_type_param_stack.borrow_mut().push(params);
-    }
-
-    fn pop_scope_type_params(&self) {
-        self.scoped_type_param_stack.borrow_mut().pop();
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        builder::FuncBuilder,
-        ir,
-        ir::{FuncId, ir::ContextBuilder},
-    };
+    use crate::{builder::FuncBuilder, ir::ContextBuilder};
     use fir_core::Db;
     use indoc::indoc;
+    use pretty_assertions::assert_eq;
 
     #[salsa::tracked]
     fn make_basic_func<'db>(db: &'db dyn Database) -> Context<'db> {
-        let mut cx = ir::ContextBuilder::new(db);
+        let mut cx = ContextBuilder::new(db);
         let mut func = FuncBuilder::new(db, "add", Type::unit(db), Type::int(db), &mut cx);
         let param0 = func.append_param(Type::int(db));
         let param1 = func.append_param(Type::int(db));
@@ -634,7 +647,8 @@ mod tests {
         func.instr(&mut cx).int_add(ret_val, param0, param1);
         func.instr(&mut cx).return_(ret_val);
         let func = func.build(&mut cx);
-        FuncId::create(db, func, &mut cx);
+        let func_id = cx.alloc_func();
+        cx.bind_func(func_id, Func::new(db, func));
         Context::new(db, cx.finish())
     }
 

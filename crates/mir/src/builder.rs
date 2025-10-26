@@ -34,7 +34,7 @@ impl<'db> FuncBuilder<'db> {
         let mut val_lists = ListPool::new();
         let mut val_types = PrimaryMap::new();
 
-        let captures_val = val_types.push(Some(captures_type));
+        let captures_val = val_types.push(Some(Type::new(db, TypeKind::MRef(captures_type))));
         basic_blocks[entry_block]
             .params
             .push(captures_val, &mut val_lists);

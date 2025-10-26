@@ -170,6 +170,7 @@ dependencies = [
  "cranelift-entity",
  "fir-core",
  "indoc",
+ "pretty_assertions",
  "salsa",
 ]
 
