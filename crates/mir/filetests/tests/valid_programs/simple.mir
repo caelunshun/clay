@@ -6,11 +6,8 @@
 (mir
     (func foo
         (return_type int)
-        (captures_type unit)
         (entry block0)
         (block block0
-            (param c
-                (mref unit))
             (param v0 int)
             (param v1 int)
             (int.add v2

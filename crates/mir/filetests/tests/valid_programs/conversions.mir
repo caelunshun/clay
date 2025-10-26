@@ -6,11 +6,8 @@
 (mir
     (func conversions
         (return_type bool)
-        (captures_type unit)
         (entry block0)
         (block block0
-            (param c
-                (mref unit))
             (param v0 int)
             (param v1 real)
             (param v2 byte)

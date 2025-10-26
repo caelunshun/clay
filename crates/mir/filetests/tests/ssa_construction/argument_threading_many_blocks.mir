@@ -4,10 +4,8 @@
 (mir
     (func argument_threading
         (return_type int)
-        (captures_type unit)
         (entry block0)
         (block block0
-            (param captures (mref unit))
             (param x int)
             (jump (block1 ())))
         (block block1

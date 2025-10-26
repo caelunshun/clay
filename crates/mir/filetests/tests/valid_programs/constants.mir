@@ -6,11 +6,8 @@
 (mir
     (func constants
         (return_type int)
-        (captures_type unit)
         (entry block0)
         (block block0
-            (param c
-                (mref unit))
             (constant v0 (10))
             (constant v1 (10.5))
             (constant v2 (true))

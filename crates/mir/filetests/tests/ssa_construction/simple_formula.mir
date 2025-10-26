@@ -4,10 +4,8 @@
 (mir
     (func formula
         (return_type int)
-        (captures_type unit)
         (entry block0)
         (block block0
-            (param captures (mref unit))
             (param x int)
             (int.add x (x x))
             (return (x)))))

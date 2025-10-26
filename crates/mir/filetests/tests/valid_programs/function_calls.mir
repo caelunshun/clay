@@ -6,10 +6,8 @@
 (mir
     (func caller
         (return_type int)
-        (captures_type unit)
         (entry block0)
         (block block0
-            (param captures (mref unit))
             (param a int)
             (param b int)
             (call v0 (callee (a)))
@@ -18,10 +16,8 @@
             (return (v2))))
     (func callee
         (return_type int)
-        (captures_type unit)
         (entry block0)
         (block block0
-            (param captures (mref unit))
             (param x int)
             (constant v0 (2))
             (int.mul v1 (x v0))

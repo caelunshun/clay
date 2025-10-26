@@ -3,8 +3,7 @@
 (mir
     (func foo
         (return_type int)
-        (captures_type unit)
         (entry block0)
         (block block0
-            (param captures (mref unit))
-            (return (captures)))))
+            (constant x (1.5))
+            (return (x)))))

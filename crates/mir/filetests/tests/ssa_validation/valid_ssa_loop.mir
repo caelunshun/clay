@@ -4,10 +4,8 @@
 (mir
     (func count_to_n
         (return_type int)
-        (captures_type unit)
         (entry block0)
         (block block0
-            (param captures (mref unit))
             (param n int)
             (constant i (0))
             (jump (loop (i n))))

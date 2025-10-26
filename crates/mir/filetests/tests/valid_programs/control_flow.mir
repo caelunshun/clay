@@ -11,10 +11,8 @@
 (mir
     (func control_flow
         (return_type int)
-        (captures_type unit)
         (entry block0)
         (block block0
-            (param captures (mref unit))
             (param v0 int)
             (constant t0 (10))
             (int.cmp cond (< v0 t0))

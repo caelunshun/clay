@@ -6,10 +6,8 @@
 (mir
     (func make_list
         (return_type (mref (list int)))
-        (captures_type unit)
         (entry block0)
         (block block0
-            (param captures (mref unit))
             (param el0 int)
             (param el1 int)
             (list.init l (int))
@@ -19,10 +17,8 @@
             (return (l_ref))))
     (func sum_list
         (return_type int)
-        (captures_type unit)
         (entry block0)
         (block block0
-            (param captures (mref unit))
             (param l (mref (list int)))
             (constant i (0))
             (constant sum (0))

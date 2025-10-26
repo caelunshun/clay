@@ -6,11 +6,8 @@
 (mir
     (func real_ops
         (return_type bool)
-        (captures_type unit)
         (entry block0)
         (block block0
-            (param c
-                (mref unit))
             (param a real)
             (param b real)
             (real.add v0 

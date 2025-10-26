@@ -281,10 +281,6 @@ impl<'db> Formatter<'db> {
                 symbol("return_type"),
                 self.format_type(func_data.header.return_type),
             ]),
-            list([
-                symbol("captures_type"),
-                self.format_type(func_data.header.captures_type),
-            ]),
         ];
 
         items.push(list([
@@ -640,7 +636,7 @@ mod tests {
     #[salsa::tracked]
     fn make_basic_func<'db>(db: &'db dyn Database) -> Context<'db> {
         let mut cx = ContextBuilder::new(db);
-        let mut func = FuncBuilder::new(db, "add", Type::unit(db), Type::int(db), &mut cx);
+        let mut func = FuncBuilder::new(db, "add", Type::int(db), &mut cx);
         let param0 = func.append_param(Type::int(db));
         let param1 = func.append_param(Type::int(db));
         let ret_val = func.val();
@@ -663,17 +659,14 @@ mod tests {
             (mir
                 (func add
                     (return_type int)
-                    (captures_type unit)
                     (entry block0)
                     (block block0
-                        (param v0
-                            (mref unit))
+                        (param v0 int)
                         (param v1 int)
-                        (param v2 int)
-                        (int.add v3
-                            (v1 v2))
+                        (int.add v2
+                            (v0 v1))
                         (return
-                            (v3)))))
+                            (v2)))))
         "#}
         )
     }

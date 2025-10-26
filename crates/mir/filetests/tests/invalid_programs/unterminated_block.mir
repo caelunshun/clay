@@ -3,7 +3,5 @@
 (mir
     (func foo
         (return_type int)
-        (captures_type unit)
         (entry block0)
-        (block block0
-            (param captures (mref unit)))))
+        (block block0)))

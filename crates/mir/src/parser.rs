@@ -180,7 +180,6 @@ impl<'a, 'db> Parser<'a, 'db> {
             match item {
                 List([Symbol("func"), Symbol(func_name), decls @ ..]) => {
                     let mut return_type = None;
-                    let mut captures_type = None;
                     let mut entry_block = None;
                     let mut blocks = HashMap::default();
 
@@ -193,9 +192,6 @@ impl<'a, 'db> Parser<'a, 'db> {
                         match decl {
                             List([Symbol("return_type"), expr]) => {
                                 return_type = Some(self.parse_type(expr)?);
-                            }
-                            List([Symbol("captures_type"), expr]) => {
-                                captures_type = Some(self.parse_type(expr)?);
                             }
                             List([Symbol("entry"), Symbol(entry)]) => {
                                 entry_block = Some(entry.to_owned());
@@ -224,16 +220,14 @@ impl<'a, 'db> Parser<'a, 'db> {
 
                     let header = FuncHeader {
                         name: func_name.to_compact_string(),
-                        captures_type: captures_type
-                            .ok_or_else(|| ParseError::new("missing captures type"))?,
                         param_types: blocks
                             .get(
                                 &entry_block
                                     .ok_or_else(|| ParseError::new("missing entry block"))?,
                             )
                             .ok_or_else(|| ParseError::new("entry block not defined"))?
-                            .params[1..] // skip captures parameter passed to the entry block
-                            .to_vec(),
+                            .params
+                            .clone(),
                         return_type: return_type
                             .ok_or_else(|| ParseError::new("missing return type"))?,
                         type_params: Default::default(),
@@ -260,7 +254,6 @@ impl<'a, 'db> Parser<'a, 'db> {
                     let mut func_builder = FuncBuilder::new(
                         self.db,
                         func_name.to_compact_string(),
-                        header.captures_type,
                         header.return_type,
                         self.cx,
                     );
@@ -855,11 +848,8 @@ mod tests {
         (mir
             (func foo
                 (return_type int)
-                (captures_type unit)
                 (entry block0)
                 (block block0
-                    (param v0
-                        (mref unit))
                     (param v1 int)
                     (int.add v2 (v1 v1))
                     (return (v2)))))
@@ -875,7 +865,7 @@ mod tests {
         let func_data = func.data(&db);
 
         assert_eq!(func_data.header.param_types, vec![Type::int(&db)]);
-        assert_eq!(func_data.header.captures_type, Type::unit(&db));
+        assert_eq!(func_data.header.return_type, Type::int(&db));
         assert_eq!(func_data.basic_blocks.len(), 1);
 
         let block = &func_data.basic_blocks[func_data.entry_block];

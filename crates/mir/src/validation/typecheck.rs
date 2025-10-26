@@ -238,7 +238,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
     }
 
     fn verify_entry_block_params(&self) -> Result<(), ValidationError> {
-        let mut expected_param_types = vec![TypeKind::MRef(self.func.header.captures_type)];
+        let mut expected_param_types = vec![];
         expected_param_types.extend(
             self.func
                 .header

@@ -25,19 +25,13 @@ impl<'db> FuncBuilder<'db> {
     pub fn new(
         db: &'db dyn Database,
         name: impl Into<CompactString>,
-        captures_type: Type<'db>,
         return_type: Type<'db>,
         _cx: &mut ContextBuilder<'db>,
     ) -> Self {
         let mut basic_blocks = PrimaryMap::new();
         let entry_block = basic_blocks.push(BasicBlock::default());
-        let mut val_lists = ListPool::new();
-        let mut val_types = PrimaryMap::new();
-
-        let captures_val = val_types.push(Some(Type::new(db, TypeKind::MRef(captures_type))));
-        basic_blocks[entry_block]
-            .params
-            .push(captures_val, &mut val_lists);
+        let val_lists = ListPool::new();
+        let val_types = PrimaryMap::new();
 
         Self {
             db,
@@ -46,7 +40,6 @@ impl<'db> FuncBuilder<'db> {
                     param_types: vec![],
                     return_type,
                     name: name.into(),
-                    captures_type,
                     type_params: TypeParams::new(),
                 },
 

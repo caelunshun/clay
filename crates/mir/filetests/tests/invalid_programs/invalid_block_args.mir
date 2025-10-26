@@ -3,10 +3,8 @@
 (mir
     (func foo
         (return_type int)
-        (captures_type unit)
         (entry block0)
         (block block0
-            (param captures (mref unit))
             (jump (block1 ())))
         (block block1
             (param v0 int)

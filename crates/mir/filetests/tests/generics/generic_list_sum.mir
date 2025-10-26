@@ -7,11 +7,9 @@
         (trait Default)
         (assoc_func default int_default))
     (func int_default
-        (captures_type unit)
         (return_type int)
         (entry block0)
         (block block0
-            (param captures (mref unit))
             (constant v0 (0))
             (return (v0))))
     (trait Add
@@ -28,11 +26,9 @@
             (assoc_type Output int))
         (assoc_func add int_add))
     (func int_add
-        (captures_type unit)
         (return_type int)
         (entry block0)
         (block block0
-            (param captures (mref unit))
             (param lhs int)
             (param rhs int)
             (int.add res (lhs rhs))
@@ -55,13 +51,11 @@
         (type_param T)
         (requires
             (impls_trait T Default))
-        (captures_type unit)
         (return_type
             (Point2
                 (type_arg T T)))
         (entry block0)
         (block block0
-            (param captures (mref unit))
             (call x
                 ((get_assoc_func T Default default)))
             (call y
@@ -80,11 +74,9 @@
                 (Add
                     (type_arg Rhs T)
                     (assoc_type Output T))))
-        (captures_type unit)
         (return_type T)
         (entry block0)
         (block block0
-            (param captures (mref unit))
             (param list (mref (list T)))
             (call accum
                 ((get_assoc_func T Default default)))

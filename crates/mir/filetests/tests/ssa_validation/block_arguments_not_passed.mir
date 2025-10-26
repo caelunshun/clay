@@ -3,10 +3,8 @@
 (mir
     (func block_arguments_not_passed
         (return_type int)
-        (captures_type unit)
         (entry block0)
         (block block0
-            (param captures (mref unit))
             (param v0 int))
         (block block2
             (return (v0)))))

@@ -23,11 +23,6 @@ pub struct FuncHeader<'db> {
     /// Used for debugging; may be synthetic
     /// in the case of anonymous functions.
     pub name: CompactString,
-    /// Type used to store the captured variables
-    /// for the function. A managed reference
-    /// to the captures is the first argument
-    /// to the entry block of the function.
-    pub captures_type: Type<'db>,
     /// Parameters expected by the function, not including the captures.
     pub param_types: Vec<Type<'db>>,
     pub return_type: Type<'db>,
@@ -183,7 +178,7 @@ pub struct BasicBlock<'db> {
     pub name: Option<CompactString>,
     pub instrs: Vec<InstrData<'db>>,
     /// Only used after SSA transformation; empty before then, except for
-    /// the entry block, where the capture pointer followed by the function arguments are assigned
+    /// the entry block, where the function arguments are assigned
     /// here.
     pub params: EntityList<ValId>,
 }

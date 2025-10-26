@@ -1,10 +1,8 @@
 (mir
     (func critical_edge
         (return_type int)
-        (captures_type unit)
         (entry block0)
         (block block0
-            (param captures (mref unit))
             (constant x (0))
             (constant y (0))
             (int.cmp cond (== x y))
