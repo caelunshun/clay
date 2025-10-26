@@ -1,0 +1,10 @@
+// @harness parser_roundtrip
+// @harness typecheck_validation_succeeds
+(mir
+    (func identity
+        (type_param T)
+        (return_type T)
+        (entry block0)
+        (block block0
+            (param x T)
+            (return (x)))))
