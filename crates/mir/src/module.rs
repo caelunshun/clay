@@ -22,6 +22,8 @@ pub struct Context<'db> {
 pub struct ContextBuilder<'db> {
     adts: PrimaryMap<AlgebraicTypeRef, Option<AlgebraicType<'db>>>,
     funcs: PrimaryMap<FuncRef, Option<Func<'db>>>,
+    traits: PrimaryMap<TraitRef, Option<Trait<'db>>>,
+    trait_impls: Vec<TraitImpl<'db>>,
     /// A function header can be known before
     /// the function body. This allows resolving
     /// recursive or mutually recursive functions.
@@ -34,6 +36,8 @@ impl<'db> ContextBuilder<'db> {
             adts: Default::default(),
             funcs: Default::default(),
             func_headers: Default::default(),
+            trait_impls: Vec::new(),
+            traits: Default::default(),
         }
     }
 
@@ -87,9 +91,26 @@ impl<'db> ContextBuilder<'db> {
             })
     }
 
+    pub fn alloc_trait(&mut self) -> TraitRef {
+        self.traits.push(None)
+    }
+
+    pub fn bind_trait(&mut self, ref_: TraitRef, trait_: Trait<'db>) {
+        self.traits[ref_] = Some(trait_);
+    }
+
+    pub fn resolve_trait(&self, ref_: TraitRef) -> Trait<'db> {
+        self.traits[ref_].expect("attempted to resolve unbound trait")
+    }
+
+    pub fn add_trait_impl(&mut self, trait_impl: TraitImpl<'db>) {
+        self.trait_impls.push(trait_impl);
+    }
+
     pub fn finish(self) -> ContextData<'db> {
         let mut adts = PrimaryMap::new();
         let mut funcs = PrimaryMap::new();
+        let mut traits = PrimaryMap::new();
         for (type_ref, typ) in self.adts {
             assert_eq!(
                 adts.push(typ.expect("type not bound before finalization")),
@@ -102,8 +123,19 @@ impl<'db> ContextBuilder<'db> {
                 func_ref
             );
         }
+        for (trait_ref, trait_) in self.traits {
+            assert_eq!(
+                traits.push(trait_.expect("trait not bound before finalization")),
+                trait_ref
+            );
+        }
 
-        ContextData { adts, funcs }
+        ContextData {
+            adts,
+            funcs,
+            traits,
+            trait_impls: self.trait_impls,
+        }
     }
 }
 
@@ -111,6 +143,8 @@ impl<'db> ContextBuilder<'db> {
 pub struct ContextData<'db> {
     pub adts: PrimaryMap<AlgebraicTypeRef, AlgebraicType<'db>>,
     pub funcs: PrimaryMap<FuncRef, Func<'db>>,
+    pub traits: PrimaryMap<TraitRef, Trait<'db>>,
+    pub trait_impls: Vec<TraitImpl<'db>>,
 }
 
 entity_ref! {
@@ -209,6 +243,57 @@ impl FuncRef {
     }
 }
 
+entity_ref! {
+    /// ID of a trait within the same mir `Context`.
+    /// Enables circular references among traits.
+    pub struct TraitRef;
+}
+
+impl TraitRef {
+    pub fn resolve<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> Trait<'db> {
+        /// Wrapping this in a salsa::tracked
+        /// function allows salsa to avoid
+        /// recalculating a query when the returned
+        /// Trait doesn't change, even if the Context
+        /// was partially updated.
+        #[salsa::tracked]
+        fn resolve_helper<'db>(
+            db: &'db dyn Database,
+            cx: Context<'db>,
+            trait_ref: TraitRef,
+        ) -> Trait<'db> {
+            cx.data(db).traits[trait_ref]
+        }
+
+        resolve_helper(db, cx, *self)
+    }
+}
+
+#[salsa::tracked(debug)]
+pub struct Trait<'db> {
+    #[returns(ref)]
+    #[tracked]
+    pub data: TraitData<'db>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct TraitData<'db> {
+    pub name: CompactString,
+    pub type_params: PrimaryMap<TypeParam, TypeParamData<'db>>,
+    pub assoc_funcs: PrimaryMap<AssocFunc, AssocFuncData<'db>>,
+}
+
+entity_ref_16bit! {
+    pub struct AssocFunc;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct AssocFuncData<'db> {
+    pub name: CompactString,
+    pub param_types: Vec<Type<'db>>,
+    pub return_type: Type<'db>,
+}
+
 /// A type that can have generic parameters.
 #[salsa::tracked(debug)]
 pub struct AlgebraicType<'db> {
@@ -216,7 +301,7 @@ pub struct AlgebraicType<'db> {
     pub name: CompactString,
     #[tracked]
     #[returns(ref)]
-    pub type_params: PrimaryMap<TypeParam, ()>,
+    pub type_params: PrimaryMap<TypeParam, TypeParamData<'db>>,
     #[tracked]
     #[returns(ref)]
     pub data: AlgebraicTypeData<'db>,
@@ -224,6 +309,27 @@ pub struct AlgebraicType<'db> {
 
 entity_ref_16bit! {
     pub struct TypeParam;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct TypeParamData<'db> {
+    /// Only allowed on trait type parameters.
+    pub is_assoc_type: bool,
+    /// Whether this is a "mirage" type parameter.
+    /// Such a type is not allowed to be used
+    /// anywhere. It only exists to terminate
+    /// the otherwise infinite sequence of associated
+    /// types that can arise.
+    pub is_mirage: bool,
+    /// Traits which must be implemented by the substituted type.
+    pub trait_bounds: Vec<TraitInstance<'db>>,
+}
+
+#[salsa::interned(debug)]
+pub struct TraitInstance<'db> {
+    pub trait_: TraitRef,
+    #[returns(ref)]
+    pub type_args: SecondaryMap<TypeParam, Option<TypeKind<'db>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
@@ -261,6 +367,21 @@ impl<'db> Type<'db> {
     pub fn str(db: &'db dyn Database) -> Self {
         Type::new(db, TypeKind::str())
     }
+}
+
+#[salsa::tracked(debug)]
+pub struct TraitImpl<'db> {
+    #[returns(ref)]
+    #[tracked]
+    pub data: TraitImplData<'db>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct TraitImplData<'db> {
+    pub type_params: PrimaryMap<TypeParam, TypeParamData<'db>>,
+    /// Note: can refer to a type parameter....
+    pub impl_for_type: Type<'db>,
+    pub trait_: TraitInstance<'db>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
@@ -402,6 +523,7 @@ pub struct FieldData<'db> {
 
 #[salsa::tracked(debug)]
 pub struct Constant<'db> {
+    #[returns(ref)]
     pub data: ConstantData,
 }
 
@@ -474,6 +596,7 @@ pub struct FuncHeader<'db> {
     /// Parameters expected by the function, not including the captures.
     pub param_types: Vec<Type<'db>>,
     pub return_type: Type<'db>,
+    pub type_params: PrimaryMap<TypeParam, TypeParamData<'db>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Hash, salsa::Update)]
@@ -621,4 +744,20 @@ pub struct BasicBlockData<'db> {
     /// the entry block, where the capture pointer followed by the function arguments are assigned
     /// here.
     pub params: EntityList<Val>,
+}
+
+#[salsa::interned(debug)]
+pub struct FuncInstance<'db> {
+    pub func: MaybeAssocFunc<'db>,
+    pub type_args: SecondaryMap<TypeParam, Option<Type<'db>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub enum MaybeAssocFunc<'db> {
+    Func(FuncRef),
+    AssocFunc {
+        trait_: TraitRef,
+        typ: Type<'db>,
+        assoc_func: AssocFunc,
+    },
 }
