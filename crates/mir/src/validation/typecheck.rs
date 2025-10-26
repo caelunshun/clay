@@ -1,6 +1,6 @@
 use crate::{
-    InstrData, PrimType, TypeKind, Val,
-    module::{BasicBlock, Context, FuncData, FuncTypeData, StructTypeData, Type},
+    InstrData, PrimType, TypeKind, ValId,
+    module::{BasicBlockId, Context, FuncData, FuncTypeData, StructTypeData, Type},
     validation::ValidationError,
 };
 use cranelift_entity::EntityList;
@@ -72,7 +72,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 self.verify_type_equals(ins.dst, self.type_of(ins.src))?;
             }
             InstrData::Constant(ins) => {
-                self.verify_type_data_matches(ins.dst, &[ins.constant.data(self.db).typ()])?;
+                self.verify_type_data_matches(ins.dst, &[ins.constant.value(self.db).typ()])?;
             }
             InstrData::IntAdd(ins)
             | InstrData::IntSub(ins)
@@ -288,17 +288,17 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
         Ok(())
     }
 
-    fn type_of(&self, val: Val) -> Type<'db> {
+    fn type_of(&self, val: ValId) -> Type<'db> {
         self.func.vals[val].typ
     }
 
-    fn type_data_of(&self, val: Val) -> &TypeKind<'db> {
+    fn type_data_of(&self, val: ValId) -> &TypeKind<'db> {
         self.func.vals[val].typ.kind(self.db)
     }
 
     fn verify_type_data_matches(
         &self,
-        val: Val,
+        val: ValId,
         allowed_types: &[TypeKind],
     ) -> Result<(), ValidationError> {
         let typ = self.func.vals[val].typ;
@@ -311,7 +311,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
         Ok(())
     }
 
-    fn verify_type_equals(&self, val: Val, typ: Type<'db>) -> Result<(), ValidationError> {
+    fn verify_type_equals(&self, val: ValId, typ: Type<'db>) -> Result<(), ValidationError> {
         let actual_typ = self.func.vals[val].typ;
         if typ != actual_typ {
             return Err(ValidationError::new(format!(
@@ -324,8 +324,8 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
 
     fn verify_basic_block_args(
         &self,
-        block: BasicBlock,
-        args: &EntityList<Val>,
+        block: BasicBlockId,
+        args: &EntityList<ValId>,
     ) -> Result<(), ValidationError> {
         let params = self.func.basic_blocks[block]
             .params
@@ -352,7 +352,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
     fn verify_function_args(
         &self,
         param_types: &[Type<'db>],
-        args: &EntityList<Val>,
+        args: &EntityList<ValId>,
     ) -> Result<(), ValidationError> {
         let args = args.as_slice(&self.func.val_lists);
 
@@ -372,7 +372,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
     }
 
     #[track_caller]
-    fn expect_struct(&self, val: Val) -> Result<&'db StructTypeData, ValidationError> {
+    fn expect_struct(&self, val: ValId) -> Result<&'db StructTypeData, ValidationError> {
         match self.type_data_of(val) {
             TypeKind::Struct(s) => Ok(s),
             _ => Err(ValidationError::new("expected struct type")),
@@ -380,7 +380,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
     }
 
     #[track_caller]
-    fn expect_any_ref(&self, val: Val) -> Result<Type<'db>, ValidationError> {
+    fn expect_any_ref(&self, val: ValId) -> Result<Type<'db>, ValidationError> {
         match self.type_data_of(val) {
             TypeKind::MRef(t) => Ok(*t),
             _ => Err(ValidationError::new("expected mref or eref")),
@@ -388,7 +388,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
     }
 
     #[track_caller]
-    fn expect_list_or_list_ref(&self, val: Val) -> Result<Type<'db>, ValidationError> {
+    fn expect_list_or_list_ref(&self, val: ValId) -> Result<Type<'db>, ValidationError> {
         match self.type_data_of(val) {
             TypeKind::List(t) => Ok(*t),
             TypeKind::MRef(l) if let TypeKind::List(t) = l.kind(self.db) => Ok(*t),

@@ -1,6 +1,6 @@
 use crate::{
-    Val,
-    module::{BasicBlock, Constant, Field, FuncRef, Type},
+    ValId,
+    module::{BasicBlockId, Constant, FieldId, FuncId, Type},
 };
 use cranelift_entity::{EntityList, ListPool};
 
@@ -69,7 +69,7 @@ impl InstrData<'_> {
         )
     }
 
-    pub fn visit_successors(&self, mut visit: impl FnMut(BasicBlock)) {
+    pub fn visit_successors(&self, mut visit: impl FnMut(BasicBlockId)) {
         match self {
             InstrData::Jump(ins) => visit(ins.target),
             InstrData::Branch(ins) => {
@@ -80,7 +80,7 @@ impl InstrData<'_> {
         }
     }
 
-    pub fn visit_src_operands(&self, val_lists: &ListPool<Val>, mut visit: impl FnMut(Val)) {
+    pub fn visit_src_operands(&self, val_lists: &ListPool<ValId>, mut visit: impl FnMut(ValId)) {
         // TODO don't clone val_lists - keyword generics would make this easy but will never come :(
         let _ = self.map_src_operands(&mut val_lists.clone(), |val| {
             visit(val);
@@ -88,7 +88,7 @@ impl InstrData<'_> {
         });
     }
 
-    pub fn visit_dst_operands(&self, val_lists: &ListPool<Val>, mut visit: impl FnMut(Val)) {
+    pub fn visit_dst_operands(&self, val_lists: &ListPool<ValId>, mut visit: impl FnMut(ValId)) {
         let _ = self.map_dst_operands(&mut val_lists.clone(), |val| {
             visit(val);
             val
@@ -98,8 +98,8 @@ impl InstrData<'_> {
     #[must_use]
     pub fn map_src_operands(
         &self,
-        val_lists: &mut ListPool<Val>,
-        mut map: impl FnMut(Val) -> Val,
+        val_lists: &mut ListPool<ValId>,
+        mut map: impl FnMut(ValId) -> ValId,
     ) -> Self {
         let mut this = self.clone();
         match &mut this {
@@ -205,8 +205,8 @@ impl InstrData<'_> {
     #[must_use]
     pub fn map_dst_operands(
         &self,
-        _val_lists: &mut ListPool<Val>,
-        mut map: impl FnMut(Val) -> Val,
+        _val_lists: &mut ListPool<ValId>,
+        mut map: impl FnMut(ValId) -> ValId,
     ) -> Self {
         let mut this = self.clone();
         match &mut this {
@@ -302,10 +302,14 @@ impl InstrData<'_> {
     #[must_use]
     pub fn move_to_list_pool(
         &self,
-        old_pool: &ListPool<Val>,
-        new_pool: &mut ListPool<Val>,
+        old_pool: &ListPool<ValId>,
+        new_pool: &mut ListPool<ValId>,
     ) -> Self {
-        fn mv(list: &mut EntityList<Val>, old_pool: &ListPool<Val>, new_pool: &mut ListPool<Val>) {
+        fn mv(
+            list: &mut EntityList<ValId>,
+            old_pool: &ListPool<ValId>,
+            new_pool: &mut ListPool<ValId>,
+        ) {
             *list = EntityList::from_slice(list.as_slice(old_pool), new_pool);
         }
 
@@ -333,7 +337,7 @@ impl InstrData<'_> {
         this
     }
 
-    pub fn successor_args_mut(&mut self, successor: BasicBlock) -> &mut EntityList<Val> {
+    pub fn successor_args_mut(&mut self, successor: BasicBlockId) -> &mut EntityList<ValId> {
         match self {
             InstrData::Jump(j) => {
                 if j.target == successor {
@@ -359,22 +363,22 @@ impl InstrData<'_> {
 /// Unconditional jump to a basic block.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct Jump {
-    pub target: BasicBlock,
+    pub target: BasicBlockId,
     /// Only used after SSA transformation; empty before then.
-    pub args: EntityList<Val>,
+    pub args: EntityList<ValId>,
 }
 
 /// Conditional jump.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct Branch {
-    pub target_true: BasicBlock,
-    pub target_false: BasicBlock,
+    pub target_true: BasicBlockId,
+    pub target_false: BasicBlockId,
     /// Only used after SSA transformation; empty before then.
-    pub args_true: EntityList<Val>,
+    pub args_true: EntityList<ValId>,
     /// Only used after SSA transformation; empty before then.
-    pub args_false: EntityList<Val>,
+    pub args_false: EntityList<ValId>,
     /// Must be of type `PrimitiveType::Bool`.
-    pub condition: Val,
+    pub condition: ValId,
 }
 
 /// Directly call a top-level function.
@@ -383,34 +387,34 @@ pub struct Call {
     /// Statically known function to call.
     /// It must have a unit captures type (i.e.
     /// be a top-level function).
-    pub func: FuncRef,
+    pub func: FuncId,
     /// Arguments to pass to the function.
-    pub args: EntityList<Val>,
+    pub args: EntityList<ValId>,
     /// Destination for the return value.
-    pub return_value_dst: Val,
+    pub return_value_dst: ValId,
 }
 
 /// Indirectly call a function object.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct CallIndirect {
     /// Function object to call.
-    pub func: Val,
+    pub func: ValId,
     /// Arguments to pass to the function.
-    pub args: EntityList<Val>,
+    pub args: EntityList<ValId>,
     /// Destination for the return value.
-    pub return_value_dst: Val,
+    pub return_value_dst: ValId,
 }
 
 /// Return a value to the caller.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct Return {
-    pub return_value: Val,
+    pub return_value: ValId,
 }
 
 /// Copy a constant value into a local.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct ConstantInstr<'db> {
-    pub dst: Val,
+    pub dst: ValId,
     pub constant: Constant<'db>,
 }
 
@@ -418,25 +422,25 @@ pub struct ConstantInstr<'db> {
 /// and one destination.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct Binary {
-    pub dst: Val,
-    pub src1: Val,
-    pub src2: Val,
+    pub dst: ValId,
+    pub src1: ValId,
+    pub src2: ValId,
 }
 
 /// Instruction with one source operand
 /// and one destination.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct Unary {
-    pub dst: Val,
-    pub src: Val,
+    pub dst: ValId,
+    pub src: ValId,
 }
 
 /// Comparison of two values, resulting in a boolean.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct Cmp {
-    pub dst: Val,
-    pub src1: Val,
-    pub src2: Val,
+    pub dst: ValId,
+    pub src1: ValId,
+    pub src2: ValId,
     pub mode: CompareMode,
 }
 
@@ -454,21 +458,21 @@ pub enum CompareMode {
 /// by copying each field into the new struct.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct InitStruct<'db> {
-    pub dst: Val,
+    pub dst: ValId,
     /// Type of struct to initialize.
     pub typ: Type<'db>,
     /// Field values to initialize, in the same
     /// order as the struct fields are declared.
-    pub fields: EntityList<Val>,
+    pub fields: EntityList<ValId>,
 }
 
 /// Copy a field in a local struct into its own local.
 /// The struct should be a local, not a reference.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct GetField {
-    pub dst: Val,
-    pub src_struct: Val,
-    pub field: Field,
+    pub dst: ValId,
+    pub src_struct: ValId,
+    pub field: FieldId,
 }
 
 /// Overwrite the value of a struct field, writing
@@ -476,10 +480,10 @@ pub struct GetField {
 /// be a local, not behind a reference.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct SetField {
-    pub dst_struct: Val,
-    pub src_struct: Val,
-    pub src_field_val: Val,
-    pub field: Field,
+    pub dst_struct: ValId,
+    pub src_struct: ValId,
+    pub src_field_val: ValId,
+    pub field: FieldId,
 }
 
 /// Create a managed (garbage-collected / "heap"") object
@@ -488,8 +492,8 @@ pub struct SetField {
 /// Result type is Reference(typeof(src)).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct Alloc {
-    pub dst_ref: Val,
-    pub src: Val,
+    pub dst_ref: ValId,
+    pub src: ValId,
 }
 
 /// Copy a value behind a reference (managed or ephemeral)
@@ -498,8 +502,8 @@ pub struct Alloc {
 /// Type of `src` must be `Reference(?T)`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct Load {
-    pub dst: Val,
-    pub src_ref: Val,
+    pub dst: ValId,
+    pub src_ref: ValId,
 }
 
 /// Copy a local value into the memory pointed
@@ -507,17 +511,17 @@ pub struct Load {
 /// managed or ephemeral.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct Store {
-    pub ref_: Val,
-    pub val: Val,
+    pub ref_: ValId,
+    pub val: ValId,
 }
 
 /// Creates an MRef to a field of a struct,
 /// given a reference to the struct.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct MakeFieldMRef {
-    pub dst_ref: Val,
-    pub src_ref: Val,
-    pub field: Field,
+    pub dst_ref: ValId,
+    pub src_ref: ValId,
+    pub field: FieldId,
 }
 
 /// Construct a function object, given the function
@@ -529,15 +533,15 @@ pub struct MakeFieldMRef {
 /// `FuncData`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct MakeFunctionObject {
-    pub dst: Val,
-    pub func: FuncRef,
-    pub captures_ref: Val,
+    pub dst: ValId,
+    pub func: FuncId,
+    pub captures_ref: ValId,
 }
 
 /// Create an empty list.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct MakeList<'db> {
-    pub dst: Val,
+    pub dst: ValId,
     /// Type of the elements inside the list.
     pub element_type: Type<'db>,
 }
@@ -558,41 +562,41 @@ pub struct MakeList<'db> {
 /// Append a value onto the end of a list.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct ListPush {
-    pub dst_list: Option<Val>,
-    pub src_list: Val,
-    pub src_element: Val,
+    pub dst_list: Option<ValId>,
+    pub src_list: ValId,
+    pub src_element: ValId,
 }
 
 /// Copy a value in a list to a local value.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct ListGet {
-    pub dst_val: Val,
-    pub src_list: Val,
-    pub src_index: Val,
+    pub dst_val: ValId,
+    pub src_list: ValId,
+    pub src_index: ValId,
 }
 
 /// Create an MRef to a value inside a list.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct ListGetMRef {
-    pub dst_ref: Val,
-    pub src_list: Val,
-    pub src_index: Val,
+    pub dst_ref: ValId,
+    pub src_list: ValId,
+    pub src_index: ValId,
 }
 
 /// Get the length of a list, as an Int.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct ListLen {
-    pub dst_len: Val,
-    pub src_list: Val,
+    pub dst_len: ValId,
+    pub src_list: ValId,
 }
 
 /// Removes an element from a list by its index, moving elements
 /// from higher to lower indexes to fill the gap.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct ListRemove {
-    pub dst_list: Option<Val>,
-    pub src_list: Val,
-    pub src_index: Val,
+    pub dst_list: Option<ValId>,
+    pub src_list: ValId,
+    pub src_index: ValId,
 }
 
 /// Truncates a list to have the given updated size.
@@ -600,7 +604,7 @@ pub struct ListRemove {
 /// new size.)
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct ListTrunc {
-    pub dst_list: Option<Val>,
-    pub src_list: Val,
-    pub new_len: Val,
+    pub dst_list: Option<ValId>,
+    pub src_list: ValId,
+    pub new_len: ValId,
 }

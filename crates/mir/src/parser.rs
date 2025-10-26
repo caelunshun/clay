@@ -1,10 +1,10 @@
 use crate::{
-    Func, PrimType, TypeKind, Val,
+    Func, PrimType, TypeKind, ValId,
     builder::FuncBuilder,
     instr::CompareMode,
     module::{
-        BasicBlock, Constant, ConstantData, Context, ContextBuilder, FieldData, FuncHeader,
-        FuncRef, FuncTypeData, StructTypeData, TypeRef,
+        BasicBlockId, Constant, ConstantValue, Context, ContextBuilder, Field, FuncHeader, FuncId,
+        FuncTypeData, StructTypeData, TypeRef,
     },
 };
 use SExprRef::*;
@@ -65,7 +65,7 @@ struct Parser<'a, 'db> {
     /// after parse_funcs_initial is called, but implementations
     /// are not yet initialized (FuncRef::resolve will panic) until
     /// after parse_funcs_full is called.
-    funcs: HashMap<&'a str, FuncRef>,
+    funcs: HashMap<&'a str, FuncId>,
 }
 
 impl<'a, 'db> Parser<'a, 'db> {
@@ -183,7 +183,7 @@ impl<'a, 'db> Parser<'a, 'db> {
                 for decl in decls {
                     match decl {
                         List([Symbol("field"), Symbol(field_name), field_type]) => {
-                            fields.push(FieldData {
+                            fields.push(Field {
                                 name: field_name.to_compact_string(),
                                 typ: self.parse_type(field_type)?,
                             });
@@ -484,11 +484,11 @@ impl<'a, 'db> Parser<'a, 'db> {
                 };
                 let dst = state.get_or_create_val(dst);
                 let constant = match constant {
-                    Int(x) => ConstantData::Int(*x),
-                    Float(x) => ConstantData::Real(*x),
-                    String(s) => ConstantData::Str(s.to_compact_string()),
-                    Symbol("true") => ConstantData::Bool(true),
-                    Symbol("false") => ConstantData::Bool(false),
+                    Int(x) => ConstantValue::Int(*x),
+                    Float(x) => ConstantValue::Real(*x),
+                    String(s) => ConstantValue::Str(s.to_compact_string()),
+                    Symbol("true") => ConstantValue::Bool(true),
+                    Symbol("false") => ConstantValue::Bool(false),
                     _ => return Err(ParseError::new("invalid constant")),
                 };
                 let constant = Constant::new(self.db, constant);
@@ -798,12 +798,15 @@ impl<'a, 'db> Parser<'a, 'db> {
 struct FuncParserState<'a, 'db> {
     func_builder: FuncBuilder<'db>,
     entry_block_name: &'a str,
-    blocks: HashMap<&'a str, BasicBlock>,
-    vals: HashMap<&'a str, Val>,
+    blocks: HashMap<&'a str, BasicBlockId>,
+    vals: HashMap<&'a str, ValId>,
 }
 
 impl<'a, 'db> FuncParserState<'a, 'db> {
-    pub fn parse_args_unary(&mut self, args: &[SExprRef<'a>]) -> Result<(Val, Val), ParseError> {
+    pub fn parse_args_unary(
+        &mut self,
+        args: &[SExprRef<'a>],
+    ) -> Result<(ValId, ValId), ParseError> {
         let [Symbol(dst), List([Symbol(src)])] = args else {
             return Err(ParseError::new("invalid instruction arguments"));
         };
@@ -814,7 +817,7 @@ impl<'a, 'db> FuncParserState<'a, 'db> {
     pub fn parse_args_binary(
         &mut self,
         args: &[SExprRef<'a>],
-    ) -> Result<(Val, Val, Val), ParseError> {
+    ) -> Result<(ValId, ValId, ValId), ParseError> {
         let [Symbol(dst), List([Symbol(src1), Symbol(src2)])] = args else {
             return Err(ParseError::new("invalid instruction arguments"));
         };
@@ -829,7 +832,7 @@ impl<'a, 'db> FuncParserState<'a, 'db> {
     pub fn parse_args_cmp(
         &mut self,
         args: &[SExprRef<'a>],
-    ) -> Result<(Val, Val, Val, CompareMode), ParseError> {
+    ) -> Result<(ValId, ValId, ValId, CompareMode), ParseError> {
         let [
             Symbol(dst),
             List([Symbol(mode), Symbol(src1), Symbol(src2)]),
@@ -856,7 +859,7 @@ impl<'a, 'db> FuncParserState<'a, 'db> {
         ))
     }
 
-    pub fn get_val(&self, name: &str) -> Result<Val, ParseError> {
+    pub fn get_val(&self, name: &str) -> Result<ValId, ParseError> {
         self.vals
             .get(&name)
             .ok_or_else(|| {
@@ -865,21 +868,21 @@ impl<'a, 'db> FuncParserState<'a, 'db> {
             .copied()
     }
 
-    pub fn get_or_create_val(&mut self, name: &'a str) -> Val {
+    pub fn get_or_create_val(&mut self, name: &'a str) -> ValId {
         *self
             .vals
             .entry(name)
             .or_insert_with(|| self.func_builder.named_val(name))
     }
 
-    pub fn get_block(&self, name: &str) -> Result<BasicBlock, ParseError> {
+    pub fn get_block(&self, name: &str) -> Result<BasicBlockId, ParseError> {
         self.blocks
             .get(&name)
             .ok_or_else(|| ParseError::new(format!("undefined block `{name}`")))
             .copied()
     }
 
-    pub fn get_val_list(&self, vals: &[SExprRef<'a>]) -> Result<Vec<Val>, ParseError> {
+    pub fn get_val_list(&self, vals: &[SExprRef<'a>]) -> Result<Vec<ValId>, ParseError> {
         vals.iter()
             .map(|val| {
                 let Symbol(val) = val else {

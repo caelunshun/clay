@@ -1,11 +1,11 @@
-use crate::{Val, module::FuncData, validation::ValidationError};
+use crate::{ValId, module::FuncData, validation::ValidationError};
 use cranelift_entity::EntitySet;
 
 /// Verifies that the function has been correctly
 /// transformed to SSA form.
 pub fn verify_ssa(func: &FuncData) -> Result<(), ValidationError> {
     for (block, block_data) in &func.basic_blocks {
-        let mut written_vals = EntitySet::<Val>::new();
+        let mut written_vals = EntitySet::<ValId>::new();
         written_vals.extend(block_data.params.as_slice(&func.val_lists).iter().copied());
         for instr in &block_data.instrs {
             let mut error = None;

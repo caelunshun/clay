@@ -20,14 +20,14 @@ pub struct Context<'db> {
 /// lazy initialization of each type and function.
 #[derive(Debug, Clone)]
 pub struct ContextBuilder<'db> {
-    adts: PrimaryMap<AlgebraicTypeRef, Option<AlgebraicType<'db>>>,
-    funcs: PrimaryMap<FuncRef, Option<Func<'db>>>,
-    traits: PrimaryMap<TraitRef, Option<Trait<'db>>>,
+    adts: PrimaryMap<AlgebraicTypeId, Option<AlgebraicType<'db>>>,
+    funcs: PrimaryMap<FuncId, Option<Func<'db>>>,
+    traits: PrimaryMap<TraitId, Option<Trait<'db>>>,
     trait_impls: Vec<TraitImpl<'db>>,
     /// A function header can be known before
     /// the function body. This allows resolving
     /// recursive or mutually recursive functions.
-    func_headers: SecondaryMap<FuncRef, Option<FuncHeader<'db>>>,
+    func_headers: SecondaryMap<FuncId, Option<FuncHeader<'db>>>,
 }
 
 impl<'db> ContextBuilder<'db> {
@@ -44,7 +44,7 @@ impl<'db> ContextBuilder<'db> {
     /// Creates a `AlgebraicTypeRef` without binding the corresponding
     /// type data. It must be bound before finalization
     /// or a panic will occur.
-    pub fn alloc_adt(&mut self) -> AlgebraicTypeRef {
+    pub fn alloc_adt(&mut self) -> AlgebraicTypeId {
         self.adts.push(None)
     }
 
@@ -52,35 +52,35 @@ impl<'db> ContextBuilder<'db> {
     pub fn bind_adt(
         &mut self,
         _db: &'db dyn Database,
-        type_ref: AlgebraicTypeRef,
+        type_ref: AlgebraicTypeId,
         typ: AlgebraicType<'db>,
     ) {
         assert!(self.adts[type_ref].is_none(), "type bound twice");
         self.adts[type_ref] = Some(typ);
     }
 
-    pub fn resolve_adt(&self, r: AlgebraicTypeRef) -> AlgebraicType<'db> {
+    pub fn resolve_adt(&self, r: AlgebraicTypeId) -> AlgebraicType<'db> {
         self.adts[r].expect("attempted to resolve unbound ADT")
     }
 
-    pub fn alloc_func(&mut self) -> FuncRef {
+    pub fn alloc_func(&mut self) -> FuncId {
         self.funcs.push(None)
     }
 
-    pub fn bind_func_header(&mut self, func_ref: FuncRef, header: FuncHeader<'db>) {
+    pub fn bind_func_header(&mut self, func_ref: FuncId, header: FuncHeader<'db>) {
         self.func_headers[func_ref] = Some(header);
     }
 
-    pub fn bind_func(&mut self, func_ref: FuncRef, func: Func<'db>) {
+    pub fn bind_func(&mut self, func_ref: FuncId, func: Func<'db>) {
         assert!(self.funcs[func_ref].is_none(), "func bound twice");
         self.funcs[func_ref] = Some(func);
     }
 
-    pub fn resolve_func(&self, r: FuncRef) -> Func<'db> {
+    pub fn resolve_func(&self, r: FuncId) -> Func<'db> {
         self.funcs[r].expect("attempted to resolve unbound func")
     }
 
-    pub fn resolve_func_header(&self, db: &'db dyn Database, r: FuncRef) -> &FuncHeader<'db> {
+    pub fn resolve_func_header(&self, db: &'db dyn Database, r: FuncId) -> &FuncHeader<'db> {
         self.funcs[r]
             .as_ref()
             .map(|f| &f.data(db).header)
@@ -91,15 +91,15 @@ impl<'db> ContextBuilder<'db> {
             })
     }
 
-    pub fn alloc_trait(&mut self) -> TraitRef {
+    pub fn alloc_trait(&mut self) -> TraitId {
         self.traits.push(None)
     }
 
-    pub fn bind_trait(&mut self, ref_: TraitRef, trait_: Trait<'db>) {
+    pub fn bind_trait(&mut self, ref_: TraitId, trait_: Trait<'db>) {
         self.traits[ref_] = Some(trait_);
     }
 
-    pub fn resolve_trait(&self, ref_: TraitRef) -> Trait<'db> {
+    pub fn resolve_trait(&self, ref_: TraitId) -> Trait<'db> {
         self.traits[ref_].expect("attempted to resolve unbound trait")
     }
 
@@ -141,9 +141,9 @@ impl<'db> ContextBuilder<'db> {
 
 #[derive(Debug, Clone, PartialEq, Eq, salsa::Update)]
 pub struct ContextData<'db> {
-    pub adts: PrimaryMap<AlgebraicTypeRef, AlgebraicType<'db>>,
-    pub funcs: PrimaryMap<FuncRef, Func<'db>>,
-    pub traits: PrimaryMap<TraitRef, Trait<'db>>,
+    pub adts: PrimaryMap<AlgebraicTypeId, AlgebraicType<'db>>,
+    pub funcs: PrimaryMap<FuncId, Func<'db>>,
+    pub traits: PrimaryMap<TraitId, Trait<'db>>,
     pub trait_impls: Vec<TraitImpl<'db>>,
 }
 
@@ -155,10 +155,10 @@ entity_ref! {
 }
 
 entity_ref! {
-    pub struct AlgebraicTypeRef;
+    pub struct AlgebraicTypeId;
 }
 
-impl AlgebraicTypeRef {
+impl AlgebraicTypeId {
     pub fn resolve<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> AlgebraicType<'db> {
         /// Wrapping this in a salsa::tracked
         /// function allows salsa to avoid
@@ -169,7 +169,7 @@ impl AlgebraicTypeRef {
         fn resolve_helper<'db>(
             db: &'db dyn Database,
             cx: Context<'db>,
-            type_ref: AlgebraicTypeRef,
+            type_ref: AlgebraicTypeId,
         ) -> AlgebraicType<'db> {
             cx.data(db).adts[type_ref]
         }
@@ -194,10 +194,10 @@ entity_ref! {
     /// ID of a function within the same mir `Context`.
     /// Enables circular references (e.g. recursion or mutual
     /// recursion).
-    pub struct FuncRef;
+    pub struct FuncId;
 }
 
-impl FuncRef {
+impl FuncId {
     pub fn create<'db>(
         db: &'db dyn Database,
         func: FuncData<'db>,
@@ -218,7 +218,7 @@ impl FuncRef {
         fn resolve_helper<'db>(
             db: &'db dyn Database,
             cx: Context<'db>,
-            func_ref: FuncRef,
+            func_ref: FuncId,
         ) -> Func<'db> {
             cx.data(db).funcs[func_ref]
         }
@@ -246,10 +246,10 @@ impl FuncRef {
 entity_ref! {
     /// ID of a trait within the same mir `Context`.
     /// Enables circular references among traits.
-    pub struct TraitRef;
+    pub struct TraitId;
 }
 
-impl TraitRef {
+impl TraitId {
     pub fn resolve<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> Trait<'db> {
         /// Wrapping this in a salsa::tracked
         /// function allows salsa to avoid
@@ -260,7 +260,7 @@ impl TraitRef {
         fn resolve_helper<'db>(
             db: &'db dyn Database,
             cx: Context<'db>,
-            trait_ref: TraitRef,
+            trait_ref: TraitId,
         ) -> Trait<'db> {
             cx.data(db).traits[trait_ref]
         }
@@ -279,16 +279,16 @@ pub struct Trait<'db> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct TraitData<'db> {
     pub name: CompactString,
-    pub type_params: PrimaryMap<TypeParam, TypeParamData<'db>>,
-    pub assoc_funcs: PrimaryMap<AssocFunc, AssocFuncData<'db>>,
+    pub type_params: PrimaryMap<TypeParamId, TypeParam<'db>>,
+    pub assoc_funcs: PrimaryMap<AssocFuncId, AssocFunc<'db>>,
 }
 
 entity_ref_16bit! {
-    pub struct AssocFunc;
+    pub struct AssocFuncId;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub struct AssocFuncData<'db> {
+pub struct AssocFunc<'db> {
     pub name: CompactString,
     pub param_types: Vec<Type<'db>>,
     pub return_type: Type<'db>,
@@ -301,18 +301,18 @@ pub struct AlgebraicType<'db> {
     pub name: CompactString,
     #[tracked]
     #[returns(ref)]
-    pub type_params: PrimaryMap<TypeParam, TypeParamData<'db>>,
+    pub type_params: PrimaryMap<TypeParamId, TypeParam<'db>>,
     #[tracked]
     #[returns(ref)]
     pub data: AlgebraicTypeData<'db>,
 }
 
 entity_ref_16bit! {
-    pub struct TypeParam;
+    pub struct TypeParamId;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub struct TypeParamData<'db> {
+pub struct TypeParam<'db> {
     /// Only allowed on trait type parameters.
     pub is_assoc_type: bool,
     /// Whether this is a "mirage" type parameter.
@@ -327,9 +327,9 @@ pub struct TypeParamData<'db> {
 
 #[salsa::interned(debug)]
 pub struct TraitInstance<'db> {
-    pub trait_: TraitRef,
+    pub trait_: TraitId,
     #[returns(ref)]
-    pub type_args: SecondaryMap<TypeParam, Option<TypeKind<'db>>>,
+    pub type_args: SecondaryMap<TypeParamId, Option<TypeKind<'db>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
@@ -378,7 +378,7 @@ pub struct TraitImpl<'db> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct TraitImplData<'db> {
-    pub type_params: PrimaryMap<TypeParam, TypeParamData<'db>>,
+    pub type_params: PrimaryMap<TypeParamId, TypeParam<'db>>,
     /// Note: can refer to a type parameter....
     pub impl_for_type: Type<'db>,
     pub trait_: TraitInstance<'db>,
@@ -397,7 +397,7 @@ pub enum TypeKind<'db> {
     List(Type<'db>),
     Algebraic(AlgebraicTypeInstance<'db>),
     /// Generic type in the current scope.
-    TypeParam(TypeParam),
+    TypeParam(TypeParamId),
     /// Only valid inside a trait definition.
     Self_,
 }
@@ -463,8 +463,8 @@ impl<'db> TypeKind<'db> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct AlgebraicTypeInstance<'db> {
-    pub adt: AlgebraicTypeRef,
-    pub type_args: SecondaryMap<TypeParam, Option<Type<'db>>>,
+    pub adt: AlgebraicTypeId,
+    pub type_args: SecondaryMap<TypeParamId, Option<Type<'db>>>,
 }
 
 impl<'db> AlgebraicTypeInstance<'db> {
@@ -508,27 +508,27 @@ pub enum PrimType {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct StructTypeData<'db> {
-    pub fields: PrimaryMap<Field, FieldData<'db>>,
+    pub fields: PrimaryMap<FieldId, Field<'db>>,
 }
 
 entity_ref_16bit! {
-    pub struct Field;
+    pub struct FieldId;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub struct FieldData<'db> {
+pub struct Field<'db> {
     pub name: CompactString,
     pub typ: Type<'db>,
 }
 
-#[salsa::tracked(debug)]
+#[salsa::interned(debug)]
 pub struct Constant<'db> {
     #[returns(ref)]
-    pub data: ConstantData,
+    pub value: ConstantValue,
 }
 
 #[derive(Clone, Debug)]
-pub enum ConstantData {
+pub enum ConstantValue {
     Int(i64),
     Real(f64),
     Bool(bool),
@@ -537,39 +537,39 @@ pub enum ConstantData {
 
 /// Special PartialEq that compares floats
 /// with bitwise equality.
-impl PartialEq for ConstantData {
+impl PartialEq for ConstantValue {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (ConstantData::Int(a), ConstantData::Int(b)) => a == b,
-            (ConstantData::Real(a), ConstantData::Real(b)) => a.to_bits() == b.to_bits(),
-            (ConstantData::Bool(a), ConstantData::Bool(b)) => a == b,
-            (ConstantData::Str(a), ConstantData::Str(b)) => a == b,
+            (ConstantValue::Int(a), ConstantValue::Int(b)) => a == b,
+            (ConstantValue::Real(a), ConstantValue::Real(b)) => a.to_bits() == b.to_bits(),
+            (ConstantValue::Bool(a), ConstantValue::Bool(b)) => a == b,
+            (ConstantValue::Str(a), ConstantValue::Str(b)) => a == b,
             _ => false,
         }
     }
 }
 
-impl Eq for ConstantData {}
+impl Eq for ConstantValue {}
 
-impl Hash for ConstantData {
+impl Hash for ConstantValue {
     fn hash<H: Hasher>(&self, state: &mut H) {
         mem::discriminant(self).hash(state);
         match self {
-            ConstantData::Int(x) => x.hash(state),
-            ConstantData::Real(x) => x.to_bits().hash(state),
-            ConstantData::Bool(x) => x.hash(state),
-            ConstantData::Str(x) => x.hash(state),
+            ConstantValue::Int(x) => x.hash(state),
+            ConstantValue::Real(x) => x.to_bits().hash(state),
+            ConstantValue::Bool(x) => x.hash(state),
+            ConstantValue::Str(x) => x.hash(state),
         }
     }
 }
 
-impl ConstantData {
+impl ConstantValue {
     pub fn typ(&self) -> TypeKind<'static> {
         match self {
-            ConstantData::Int(_) => TypeKind::Prim(PrimType::Int),
-            ConstantData::Real(_) => TypeKind::Prim(PrimType::Real),
-            ConstantData::Bool(_) => TypeKind::Prim(PrimType::Bool),
-            ConstantData::Str(_) => TypeKind::Prim(PrimType::Str),
+            ConstantValue::Int(_) => TypeKind::Prim(PrimType::Int),
+            ConstantValue::Real(_) => TypeKind::Prim(PrimType::Real),
+            ConstantValue::Bool(_) => TypeKind::Prim(PrimType::Bool),
+            ConstantValue::Str(_) => TypeKind::Prim(PrimType::Str),
         }
     }
 }
@@ -596,7 +596,7 @@ pub struct FuncHeader<'db> {
     /// Parameters expected by the function, not including the captures.
     pub param_types: Vec<Type<'db>>,
     pub return_type: Type<'db>,
-    pub type_params: PrimaryMap<TypeParam, TypeParamData<'db>>,
+    pub type_params: PrimaryMap<TypeParamId, TypeParam<'db>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Hash, salsa::Update)]
@@ -604,16 +604,16 @@ pub struct FuncData<'db> {
     pub header: FuncHeader<'db>,
     /// Set of values used by the function. Values can be assigned
     /// multiple times until after the SSA lowering pass is applied.
-    pub vals: PrimaryMap<Val, ValData<'db>>,
+    pub vals: PrimaryMap<ValId, Val<'db>>,
 
     /// Basic blocks in the function instruction stream.
-    pub basic_blocks: PrimaryMap<BasicBlock, BasicBlockData<'db>>,
+    pub basic_blocks: PrimaryMap<BasicBlockId, BasicBlock<'db>>,
     /// Basic block where execution of this function starts.
-    pub entry_block: BasicBlock,
+    pub entry_block: BasicBlockId,
 
     /// Pool of `Local` references used for lists
     /// of locals in `instrs`.
-    pub val_lists: ListPool<Val>,
+    pub val_lists: ListPool<ValId>,
 }
 
 impl<'db> FuncData<'db> {
@@ -621,11 +621,11 @@ impl<'db> FuncData<'db> {
     /// a block B is not visited until after all blocks that
     /// appear in any *path* (not a walk) from the entry block to B (exclusive)
     /// are visited.
-    pub fn visit_basic_blocks_topological(&self, mut visit: impl FnMut(BasicBlock)) {
+    pub fn visit_basic_blocks_topological(&self, mut visit: impl FnMut(BasicBlockId)) {
         let acyclic_ancestors = self.compute_acyclic_ancestors();
 
         let mut stack = vec![self.entry_block];
-        let mut visited = EntitySet::<BasicBlock>::new();
+        let mut visited = EntitySet::<BasicBlockId>::new();
         while let Some(current) = stack.pop() {
             visit(current);
             visited.insert(current);
@@ -645,12 +645,12 @@ impl<'db> FuncData<'db> {
     /// Computes the set of blocks reachable by paths
     /// (not walks) from the entry block to each block
     /// (excluding the destination block).
-    pub fn compute_acyclic_ancestors(&self) -> SecondaryMap<BasicBlock, EntitySet<BasicBlock>> {
+    pub fn compute_acyclic_ancestors(&self) -> SecondaryMap<BasicBlockId, EntitySet<BasicBlockId>> {
         // For each block, calculate blocks that appear in a path from the entry block
-        let mut acyclic_ancestors: SecondaryMap<BasicBlock, EntitySet<BasicBlock>> =
+        let mut acyclic_ancestors: SecondaryMap<BasicBlockId, EntitySet<BasicBlockId>> =
             Default::default();
 
-        let mut stack = vec![(self.entry_block, EntitySet::<BasicBlock>::new())];
+        let mut stack = vec![(self.entry_block, EntitySet::<BasicBlockId>::new())];
         while let Some((current_block, mut current_path)) = stack.pop() {
             for ancestor in current_path.iter() {
                 acyclic_ancestors[current_block].insert(ancestor);
@@ -669,10 +669,13 @@ impl<'db> FuncData<'db> {
     /// Computes the set of paths from the entry block
     /// to each block. These paths do not include
     /// the destination blocks.
-    pub fn compute_paths_from_entry(&self) -> SecondaryMap<BasicBlock, Vec<EntitySet<BasicBlock>>> {
-        let mut paths: SecondaryMap<BasicBlock, Vec<EntitySet<BasicBlock>>> = SecondaryMap::new();
+    pub fn compute_paths_from_entry(
+        &self,
+    ) -> SecondaryMap<BasicBlockId, Vec<EntitySet<BasicBlockId>>> {
+        let mut paths: SecondaryMap<BasicBlockId, Vec<EntitySet<BasicBlockId>>> =
+            SecondaryMap::new();
 
-        let mut stack = vec![(self.entry_block, EntitySet::<BasicBlock>::new())];
+        let mut stack = vec![(self.entry_block, EntitySet::<BasicBlockId>::new())];
         while let Some((current_block, mut current_path)) = stack.pop() {
             paths[current_block].push(current_path.clone());
             current_path.insert(current_block);
@@ -686,7 +689,7 @@ impl<'db> FuncData<'db> {
         paths
     }
 
-    pub fn is_block_edge(&self, a: BasicBlock, b: BasicBlock) -> bool {
+    pub fn is_block_edge(&self, a: BasicBlockId, b: BasicBlockId) -> bool {
         let mut is_edge = false;
         self.visit_block_successors(a, |b2| {
             if b2 == b {
@@ -696,7 +699,7 @@ impl<'db> FuncData<'db> {
         is_edge
     }
 
-    pub fn visit_block_successors(&self, block: BasicBlock, visit: impl FnMut(BasicBlock)) {
+    pub fn visit_block_successors(&self, block: BasicBlockId, visit: impl FnMut(BasicBlockId)) {
         self.basic_blocks[block]
             .instrs
             .last()
@@ -704,7 +707,11 @@ impl<'db> FuncData<'db> {
             .visit_successors(visit)
     }
 
-    pub fn visit_block_predecessors(&self, block: BasicBlock, mut visit: impl FnMut(BasicBlock)) {
+    pub fn visit_block_predecessors(
+        &self,
+        block: BasicBlockId,
+        mut visit: impl FnMut(BasicBlockId),
+    ) {
         self.basic_blocks.keys().for_each(|block2| {
             let mut is_predecessor = false;
             self.visit_block_successors(block2, |b| {
@@ -720,11 +727,11 @@ impl<'db> FuncData<'db> {
 }
 
 entity_ref_16bit! {
-    pub struct Val;
+    pub struct ValId;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub struct ValData<'db> {
+pub struct Val<'db> {
     /// Type of the local.
     pub typ: Type<'db>,
     /// Optional name, for debugging and testing.
@@ -732,32 +739,32 @@ pub struct ValData<'db> {
 }
 
 entity_ref_16bit! {
-    pub struct BasicBlock;
+    pub struct BasicBlockId;
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, salsa::Update)]
-pub struct BasicBlockData<'db> {
+pub struct BasicBlock<'db> {
     /// Optional name, for debugging and testing.
     pub name: Option<CompactString>,
     pub instrs: Vec<InstrData<'db>>,
     /// Only used after SSA transformation; empty before then, except for
     /// the entry block, where the capture pointer followed by the function arguments are assigned
     /// here.
-    pub params: EntityList<Val>,
+    pub params: EntityList<ValId>,
 }
 
 #[salsa::interned(debug)]
 pub struct FuncInstance<'db> {
     pub func: MaybeAssocFunc<'db>,
-    pub type_args: SecondaryMap<TypeParam, Option<Type<'db>>>,
+    pub type_args: SecondaryMap<TypeParamId, Option<Type<'db>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub enum MaybeAssocFunc<'db> {
-    Func(FuncRef),
+    Func(FuncId),
     AssocFunc {
-        trait_: TraitRef,
+        trait_: TraitId,
         typ: Type<'db>,
-        assoc_func: AssocFunc,
+        assoc_func: AssocFuncId,
     },
 }

@@ -1,6 +1,6 @@
 use crate::{
-    Val,
-    module::{BasicBlock, FuncData},
+    ValId,
+    module::{BasicBlockId, FuncData},
     validation::ValidationError,
 };
 use cranelift_entity::{EntitySet, SecondaryMap};
@@ -12,7 +12,7 @@ use cranelift_entity::{EntitySet, SecondaryMap};
 /// then it must appear as a destination operand in all paths from the
 /// entry block to B_1.
 pub fn verify_value_initialization(func: &FuncData) -> Result<(), ValidationError> {
-    let mut values_written_by_blocks = SecondaryMap::<BasicBlock, EntitySet<Val>>::new();
+    let mut values_written_by_blocks = SecondaryMap::<BasicBlockId, EntitySet<ValId>>::new();
     for (block, block_data) in &func.basic_blocks {
         for &param in block_data.params.as_slice(&func.val_lists) {
             values_written_by_blocks[block].insert(param);

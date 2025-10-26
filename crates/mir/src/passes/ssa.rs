@@ -1,6 +1,6 @@
 use crate::{
-    Val,
-    module::{BasicBlock, BasicBlockData, FuncData, ValData},
+    ValId,
+    module::{BasicBlock, BasicBlockId, FuncData, Val},
 };
 use compact_str::{ToCompactString, format_compact};
 use cranelift_entity::{EntityList, ListPool, PrimaryMap, SecondaryMap};
@@ -31,9 +31,9 @@ struct SsaConverter<'db, 'a> {
     db: &'db dyn Database,
     func: &'a FuncData<'db>,
     new_func: FuncData<'db>,
-    vars_in_blocks: SecondaryMap<BasicBlock, SecondaryMap<Val, Option<Val>>>,
-    extra_terminator_args: Vec<(BasicBlock, BasicBlock, Val)>,
-    var_revision_counters: SecondaryMap<Val, u32>,
+    vars_in_blocks: SecondaryMap<BasicBlockId, SecondaryMap<ValId, Option<ValId>>>,
+    extra_terminator_args: Vec<(BasicBlockId, BasicBlockId, ValId)>,
+    var_revision_counters: SecondaryMap<ValId, u32>,
 }
 
 impl<'db, 'a> SsaConverter<'db, 'a> {
@@ -47,7 +47,7 @@ impl<'db, 'a> SsaConverter<'db, 'a> {
                 self.vars_in_blocks[block][*param_var] = Some(param_val);
             }
 
-            let new_block_id = self.new_func.basic_blocks.push(BasicBlockData {
+            let new_block_id = self.new_func.basic_blocks.push(BasicBlock {
                 instrs: vec![],
                 params,
                 name: block_data.name.clone(),
@@ -112,7 +112,7 @@ impl<'db, 'a> SsaConverter<'db, 'a> {
         }
     }
 
-    fn get_var_in_block(&mut self, block: BasicBlock, var: Val) -> Val {
+    fn get_var_in_block(&mut self, block: BasicBlockId, var: ValId) -> ValId {
         if let Some(val) = self.vars_in_blocks[block][var] {
             val
         } else {
@@ -134,9 +134,9 @@ impl<'db, 'a> SsaConverter<'db, 'a> {
         }
     }
 
-    fn make_new_val(&mut self, for_var: Val) -> Val {
+    fn make_new_val(&mut self, for_var: ValId) -> ValId {
         let revision = self.var_revision_counters[for_var];
-        let val = self.new_func.vals.push(ValData {
+        let val = self.new_func.vals.push(Val {
             name: match self.func.vals[for_var].name.as_deref() {
                 Some(name) => {
                     if revision == 0 {

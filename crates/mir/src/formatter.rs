@@ -1,7 +1,7 @@
 use crate::{
-    Func, InstrData, PrimType, TypeKind, Val,
+    Func, InstrData, PrimType, TypeKind, ValId,
     instr::{self, CompareMode},
-    module::{BasicBlock, ConstantData, Context, Field, FuncData, Type},
+    module::{BasicBlockId, ConstantValue, Context, FieldId, FuncData, Type},
 };
 use cranelift_entity::EntityRef;
 use fir_core::sexpr::{SExpr, float, int, list, string, symbol};
@@ -26,9 +26,9 @@ pub fn format_context<'db>(db: &'db dyn Database, cx: Context<'db>) -> SExpr {
 struct Formatter<'db> {
     db: &'db dyn Database,
     cx: Context<'db>,
-    val_names: HashMap<Val, SExpr>,
+    val_names: HashMap<ValId, SExpr>,
     next_val_index: usize,
-    basic_block_names: HashMap<BasicBlock, SExpr>,
+    basic_block_names: HashMap<BasicBlockId, SExpr>,
     next_basic_block_index: usize,
     current_func: Option<Func<'db>>,
 }
@@ -107,7 +107,7 @@ impl<'db> Formatter<'db> {
         SExpr::List(items.into_boxed_slice())
     }
 
-    fn format_block(&mut self, func_data: &FuncData, block: BasicBlock) -> SExpr {
+    fn format_block(&mut self, func_data: &FuncData, block: BasicBlockId) -> SExpr {
         let mut items = vec![symbol("block"), self.basic_block_name(block)];
 
         let block_data = &func_data.basic_blocks[block];
@@ -197,11 +197,11 @@ impl<'db> Formatter<'db> {
             }
             InstrData::Copy(ins) => self.format_instr_unary("copy", ins),
             InstrData::Constant(ins) => {
-                let constant = match ins.constant.data(self.db) {
-                    ConstantData::Int(x) => int(x),
-                    ConstantData::Real(x) => float(x),
-                    ConstantData::Bool(x) => symbol(x.to_string()),
-                    ConstantData::Str(x) => string(x),
+                let constant = match ins.constant.value(self.db) {
+                    ConstantValue::Int(x) => int(x),
+                    ConstantValue::Real(x) => float(x),
+                    ConstantValue::Bool(x) => symbol(x.to_string()),
+                    ConstantValue::Str(x) => string(x),
                 };
                 list([symbol("constant"), self.val_name(ins.dst), list([constant])])
             }
@@ -230,7 +230,7 @@ impl<'db> Formatter<'db> {
 
                 let mut fields = Vec::new();
                 for (i, &field) in ins.fields.as_slice(&func_data.val_lists).iter().enumerate() {
-                    let field_data = &strukt.fields[Field::new(i)];
+                    let field_data = &strukt.fields[FieldId::new(i)];
                     fields.push(list([
                         symbol("field"),
                         symbol(field_data.name.clone()),
@@ -415,7 +415,7 @@ impl<'db> Formatter<'db> {
         ])
     }
 
-    fn val_name(&mut self, val: Val) -> SExpr {
+    fn val_name(&mut self, val: ValId) -> SExpr {
         self.val_names
             .entry(val)
             .or_insert_with(|| {
@@ -430,7 +430,7 @@ impl<'db> Formatter<'db> {
             .clone()
     }
 
-    fn basic_block_name(&mut self, bb: BasicBlock) -> SExpr {
+    fn basic_block_name(&mut self, bb: BasicBlockId) -> SExpr {
         self.basic_block_names
             .entry(bb)
             .or_insert_with(|| {
@@ -452,7 +452,7 @@ mod tests {
     use super::*;
     use crate::{
         builder::FuncBuilder,
-        module::{ContextBuilder, FuncRef},
+        module::{ContextBuilder, FuncId},
     };
     use fir_core::Db;
     use indoc::indoc;
@@ -467,7 +467,7 @@ mod tests {
         func.instr(&mut cx).int_add(ret_val, param0, param1);
         func.instr(&mut cx).return_(ret_val);
         let func = func.build(&mut cx);
-        FuncRef::create(db, func, &mut cx);
+        FuncId::create(db, func, &mut cx);
         Context::new(db, cx.finish())
     }
 
