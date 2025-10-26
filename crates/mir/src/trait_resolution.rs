@@ -47,14 +47,55 @@ pub fn find_trait_impl<'db>(
     type_scope_type_params: TypeParams<'db>,
     trait_instance_scope_type_params: TypeParams<'db>,
 ) -> Option<TraitImpl<'db>> {
-    let trait_ = trait_instance.trait_(db).resolve(db, cx);
-    let trait_data = trait_.data(db);
     for candidate_impl in cx
         .trait_impls_for_trait(db, trait_instance.trait_(db))
         .iter()
-    {}
+    {
+        // Check that trait instance matches
+        let mut trait_instance_match = true;
+        for (type_param_id, arg) in trait_instance.type_args(db).iter() {
+            // If arg.is_none(), then this is a wildcard so always satisfied
+            if let Some(arg) = *arg {
+                let impl_arg = candidate_impl.data(db).trait_.type_args(db)[type_param_id].unwrap();
+                if !can_type_satisfy(
+                    db,
+                    CanTypeSatisfyArgs::new(
+                        db,
+                        cx,
+                        arg,
+                        trait_instance_scope_type_params.clone(),
+                        impl_arg,
+                        candidate_impl.data(db).type_params.clone(),
+                    ),
+                ) {
+                    trait_instance_match = false;
+                    break;
+                }
+            }
+        }
+        if !trait_instance_match {
+            continue;
+        }
 
-    todo!()
+        // Check that type implemented for matches
+        if !can_type_satisfy(
+            db,
+            CanTypeSatisfyArgs::new(
+                db,
+                cx,
+                typ,
+                type_scope_type_params.clone(),
+                candidate_impl.data(db).impl_for_type,
+                candidate_impl.data(db).type_params.clone(),
+            ),
+        ) {
+            continue;
+        }
+
+        return Some(*candidate_impl);
+    }
+
+    None
 }
 
 #[salsa::interned]
@@ -97,10 +138,37 @@ pub fn can_type_satisfy<'db>(db: &'db dyn Database, args: CanTypeSatisfyArgs<'db
             }
             satisfies
         }
-        ((TypeKind::MRef(inner1), TypeKind::MRef(inner2))) => can_type_satisfy(
+        (TypeKind::MRef(inner1), TypeKind::MRef(inner2))
+        | (TypeKind::List(inner1), TypeKind::List(inner2)) => can_type_satisfy(
             db,
             CanTypeSatisfyArgs::new(db, cx, *inner1, p1.clone(), *inner2, p2.clone()),
         ),
+        (TypeKind::Algebraic(a1), TypeKind::Algebraic(a2)) => {
+            // Must be same ADT and parameters must be satisfiable
+            if a1.adt == a2.adt {
+                let mut satisfies = true;
+                for (type_param_id, a1_arg) in a1.type_args.iter() {
+                    if let Some(a1_arg) = a1_arg {
+                        if let Some(a2_arg) = a2.type_args[type_param_id] {
+                            satisfies |= can_type_satisfy(
+                                db,
+                                CanTypeSatisfyArgs::new(
+                                    db,
+                                    cx,
+                                    *a1_arg,
+                                    p1.clone(),
+                                    a2_arg,
+                                    p2.clone(),
+                                ),
+                            );
+                        }
+                    }
+                }
+                satisfies
+            } else {
+                false
+            }
+        }
         (TypeKind::Prim(prim1), TypeKind::Prim(prim2)) => prim1 == prim2,
         _ => false,
     }
