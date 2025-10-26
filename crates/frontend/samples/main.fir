@@ -1,23 +1,8 @@
-mod glob_test;
+#![doc("Welcome to my module!")]
 
-use glob_test::*;
-
-pub struct MyStruct {
-    foo: &mut u32,
-    bar: &i32,
+mod whee {
+    pub mod waz;
 }
 
-impl MyStruct {
-    pub fn new() -> Self {
-        Self {
-            foo: &3,
-            bar: &2,
-        }
-    }
-}
-
-fn main() {
-    let foo = MyStruct {};
-
-    public();
-}
+#[foo("")]
+pub mod faz;

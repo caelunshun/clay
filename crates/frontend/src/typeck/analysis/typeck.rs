@@ -580,7 +580,12 @@ impl TyCtxt {
             {
                 let var_id = InferTyVar(var_id);
 
-                let resolved = sub_inferences.lookup(var_id).unwrap();
+                let Some(resolved) = sub_inferences.lookup(var_id) else {
+                    // This should only happen if a failure occurred elsewhere because of the
+                    // requirements on well-formed traits.
+                    debug_assert!(!sub_failures.is_empty());
+                    continue;
+                };
 
                 self.check_clause_list_assignability_erase_regions(
                     resolved, clauses, binder, inferences, failures,
@@ -854,6 +859,7 @@ mod tests {
         };
 
         let mut failures = Vec::new();
+        let mut inferences = InferVarInferences::default();
 
         tcx.check_trait_assignability_erase_regions(
             tcx.intern_ty(TyKind::Tuple(tcx.intern_tys(&[
@@ -863,10 +869,11 @@ mod tests {
             my_trait,
             tcx.intern_trait_param_list(&[]),
             &mut synthetic_binder,
-            &mut InferVarInferences::default(),
+            &mut inferences,
             &mut failures,
         );
 
         dbg!(failures);
+        dbg!(inferences);
     }
 }
