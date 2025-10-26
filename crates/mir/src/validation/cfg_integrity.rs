@@ -1,4 +1,4 @@
-use crate::{module::FuncData, validation::ValidationError};
+use crate::{ir::FuncData, validation::ValidationError};
 
 /// Verifies that basic blocks all end in terminators,
 /// and terminators only appear as the last instruction

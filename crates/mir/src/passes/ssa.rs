@@ -1,6 +1,6 @@
 use crate::{
     ValId,
-    module::{BasicBlock, BasicBlockId, FuncData, Val},
+    ir::{BasicBlock, BasicBlockId, FuncData, Val},
 };
 use compact_str::{ToCompactString, format_compact};
 use cranelift_entity::{EntityList, ListPool, PrimaryMap, SecondaryMap};

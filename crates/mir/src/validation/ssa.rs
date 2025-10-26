@@ -1,4 +1,4 @@
-use crate::{ValId, module::FuncData, validation::ValidationError};
+use crate::{ValId, ir::FuncData, validation::ValidationError};
 use cranelift_entity::EntitySet;
 
 /// Verifies that the function has been correctly

@@ -1,7 +1,9 @@
 use crate::{
     Func, InstrData, PrimType, TypeKind, ValId,
-    instr::{self, CompareMode},
-    module::{BasicBlockId, ConstantValue, Context, FieldId, FuncData, Type},
+    ir::{
+        BasicBlockId, ConstantValue, Context, FieldId, FuncData, Type,
+        instr::{self, CompareMode},
+    },
 };
 use cranelift_entity::EntityRef;
 use fir_core::sexpr::{SExpr, float, int, list, string, symbol};
@@ -452,14 +454,15 @@ mod tests {
     use super::*;
     use crate::{
         builder::FuncBuilder,
-        module::{ContextBuilder, FuncId},
+        ir,
+        ir::{FuncId, ir::ContextBuilder},
     };
     use fir_core::Db;
     use indoc::indoc;
 
     #[salsa::tracked]
     fn make_basic_func<'db>(db: &'db dyn Database) -> Context<'db> {
-        let mut cx = ContextBuilder::new(db);
+        let mut cx = ir::ContextBuilder::new(db);
         let mut func = FuncBuilder::new(db, "add", Type::unit(db), Type::int(db), &mut cx);
         let param0 = func.append_param(Type::int(db));
         let param1 = func.append_param(Type::int(db));

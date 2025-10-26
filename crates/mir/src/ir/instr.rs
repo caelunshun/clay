@@ -1,6 +1,6 @@
 use crate::{
     ValId,
-    module::{BasicBlockId, Constant, FieldId, FuncId, Type},
+    ir::{BasicBlockId, Constant, FieldId, FuncId, Type},
 };
 use cranelift_entity::{EntityList, ListPool};
 

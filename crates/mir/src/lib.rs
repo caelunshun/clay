@@ -76,11 +76,9 @@ macro_rules! entity_ref_16bit {
 
 pub mod builder;
 pub mod formatter;
-pub mod instr;
-pub mod module;
+pub mod ir;
 pub mod parser;
 pub mod passes;
 pub mod validation;
 
-pub use instr::InstrData;
-pub use module::{Func, PrimType, TypeKind, ValId};
+pub use ir::{Func, PrimType, TypeKind, ValId, instr::InstrData};

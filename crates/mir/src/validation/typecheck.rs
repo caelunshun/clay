@@ -1,6 +1,6 @@
 use crate::{
     InstrData, PrimType, TypeKind, ValId,
-    module::{BasicBlockId, Context, FuncData, FuncTypeData, StructTypeData, Type},
+    ir::{BasicBlockId, Context, FuncData, FuncTypeData, StructTypeData, Type},
     validation::ValidationError,
 };
 use cranelift_entity::EntityList;

@@ -1,9 +1,9 @@
 use crate::{
     InstrData, TypeKind, ValId,
-    instr::{self, CompareMode},
-    module::{
+    ir::{
         AlgebraicTypeData, BasicBlock, BasicBlockId, Constant, ContextBuilder, FieldId, FuncData,
         FuncHeader, FuncId, FuncTypeData, Type, Val,
+        instr::{self, CompareMode},
     },
 };
 use compact_str::CompactString;

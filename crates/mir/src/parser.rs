@@ -1,10 +1,9 @@
 use crate::{
     Func, PrimType, TypeKind, ValId,
     builder::FuncBuilder,
-    instr::CompareMode,
-    module::{
-        BasicBlockId, Constant, ConstantValue, Context, ContextBuilder, Field, FuncHeader, FuncId,
-        FuncTypeData, StructTypeData, TypeRef,
+    ir::{
+        BasicBlockId, Constant, ConstantValue, Context, Field, FuncHeader, FuncId, FuncTypeData,
+        StructTypeData, TypeRef, instr::CompareMode, ir::ContextBuilder,
     },
 };
 use SExprRef::*;
@@ -897,7 +896,7 @@ impl<'a, 'db> FuncParserState<'a, 'db> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{InstrData, module::Type};
+    use crate::{InstrData, ir::Type};
     use indoc::indoc;
     use salsa::DatabaseImpl;
 
