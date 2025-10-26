@@ -326,7 +326,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
 
     pub fn int_to_byte(mut self, dst: ValId, src: ValId) {
         self.instr(InstrData::IntToByte(instr::Unary { dst, src }));
-        self.set_val_type(dst, Type::bool(self.db));
+        self.set_val_type(dst, Type::byte(self.db));
     }
 
     pub fn bool_and(mut self, dst: ValId, src1: ValId, src2: ValId) {
@@ -437,6 +437,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         let typ = strukt_data.fields[field]
             .typ
             .substitute_type_args(self.db, &adt_instance.type_args);
+        let typ = Type::new(self.db, TypeKind::MRef(typ));
         self.set_val_type(dst, typ);
     }
 

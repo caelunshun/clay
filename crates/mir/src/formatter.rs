@@ -124,7 +124,7 @@ impl<'db> Formatter<'db> {
 
         match adt.kind(self.db) {
             AlgebraicTypeKind::Struct(struct_data) => {
-                let mut struct_decls = Vec::new();
+                let mut struct_decls = vec![symbol("struct")];
 
                 for (_, field) in &struct_data.fields {
                     struct_decls.push(list([
@@ -134,7 +134,7 @@ impl<'db> Formatter<'db> {
                     ]));
                 }
 
-                decls.push(list([symbol("struct"), list(struct_decls)]));
+                decls.push(list(struct_decls));
             }
         }
 

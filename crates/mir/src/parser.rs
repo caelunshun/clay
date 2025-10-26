@@ -1,17 +1,20 @@
 use crate::{
-    Func, PrimType, TypeKind, ValId,
+    Func, TypeKind, ValId,
     builder::FuncBuilder,
     ir::{
-        BasicBlockId, Constant, ConstantValue, Context, Field, FuncHeader, FuncId, FuncTypeData,
-        StructTypeData, TypeRef, instr::CompareMode, ir::ContextBuilder,
+        AlgebraicType, AlgebraicTypeId, AlgebraicTypeInstance, AlgebraicTypeKind, BasicBlockId,
+        Constant, ConstantValue, Context, ContextBuilder, Field, FuncHeader, FuncId, FuncInstance,
+        MaybeAssocFunc, StructTypeData, Type, TypeArgs, instr::CompareMode,
     },
 };
 use SExprRef::*;
 use bumpalo::Bump;
-use compact_str::{CompactString, ToCompactString};
+use compact_str::ToCompactString;
 use cranelift_entity::PrimaryMap;
-use fir_core::sexpr::{SExpr, SExprRef};
-use hashbrown::HashMap;
+use fir_core::{
+    HashMap,
+    sexpr::{SExpr, SExprRef},
+};
 use salsa::Database;
 use std::{fmt::Display, panic::Location};
 
@@ -41,7 +44,7 @@ pub fn parse_mir<'db>(db: &'db dyn Database, src: &str) -> Result<Context<'db>, 
         db,
         cx: &mut cx,
         mir_expr: sexpr,
-        types: Default::default(),
+        adts: Default::default(),
         funcs: Default::default(),
     };
     parser.parse_mir()?;
@@ -58,7 +61,7 @@ struct Parser<'a, 'db> {
     /// to their TypeRefs. Note that types aren't initialized
     /// (TypeRef::resolve will panic) until after parse_types_full
     /// is called.
-    types: HashMap<&'a str, TypeRef>,
+    adts: HashMap<&'a str, AlgebraicTypeId>,
     /// Maps function names in the s-expression representation
     /// to their FuncRefs. Note that function headers are initialized
     /// after parse_funcs_initial is called, but implementations
@@ -75,9 +78,8 @@ impl<'a, 'db> Parser<'a, 'db> {
             _ => return Err(ParseError::new("expected `mir` expression")),
         };
 
-        self.parse_types_initial(items)?;
-        self.parse_types_full(items)?;
-        self.deduplicate_types();
+        self.parse_adts_initial(items)?;
+        self.parse_adts_full(items)?;
         self.parse_funcs_initial(items)?;
         self.parse_funcs_full(items)?;
 
@@ -88,11 +90,11 @@ impl<'a, 'db> Parser<'a, 'db> {
     /// for each declared type, but does not
     /// parse the actual types yet. We do this
     /// in two phases to support cyclic types.
-    fn parse_types_initial(&mut self, items: &[SExprRef<'a>]) -> Result<(), ParseError> {
+    fn parse_adts_initial(&mut self, items: &[SExprRef<'a>]) -> Result<(), ParseError> {
         for item in items {
             match item {
-                List([Symbol("type"), Symbol(type_name), ..]) => {
-                    self.types.insert(*type_name, self.cx.alloc_type());
+                List([Symbol("adt"), Symbol(type_name), ..]) => {
+                    self.adts.insert(*type_name, self.cx.alloc_adt());
                 }
                 _ => continue,
             }
@@ -102,15 +104,20 @@ impl<'a, 'db> Parser<'a, 'db> {
 
     /// Initializes all defined types. Must be
     /// called after parse_types_initial.
-    fn parse_types_full(&mut self, items: &[SExprRef<'a>]) -> Result<(), ParseError> {
+    fn parse_adts_full(&mut self, items: &[SExprRef<'a>]) -> Result<(), ParseError> {
         for item in items {
             match item {
-                List([Symbol("type"), Symbol(type_name), type_data]) => {
-                    let type_ref = self.parse_named_type(type_data, Some(*type_name))?;
-                    self.cx.bind_type(
+                List([Symbol("adt"), Symbol(type_name), type_data]) => {
+                    let adt = self.parse_adt(type_data)?;
+                    self.cx.bind_adt(
                         self.db,
-                        self.types[type_name],
-                        type_ref.resolve_in_builder(self.cx),
+                        self.adts[type_name],
+                        AlgebraicType::new(
+                            self.db,
+                            type_name.to_compact_string(),
+                            Default::default(),
+                            adt,
+                        ),
                     );
                 }
                 _ => continue,
@@ -119,99 +126,53 @@ impl<'a, 'db> Parser<'a, 'db> {
         Ok(())
     }
 
-    fn parse_named_type(
-        &mut self,
-        expr: &SExprRef<'a>,
-        name: Option<&str>,
-    ) -> Result<TypeRef, ParseError> {
+    fn parse_adt(&mut self, expr: &SExprRef<'a>) -> Result<AlgebraicTypeKind<'db>, ParseError> {
+        match expr {
+            List([Symbol("struct"), decls @ ..]) => {
+                let mut fields = PrimaryMap::new();
+
+                for decl in decls {
+                    let List([Symbol("field"), Symbol(field_name), field_typ]) = decl else {
+                        return Err(ParseError::new("invalid decl in struct"));
+                    };
+                    fields.push(Field {
+                        name: field_name.to_compact_string(),
+                        typ: self.parse_type(field_typ)?,
+                    });
+                }
+
+                Ok(AlgebraicTypeKind::Struct(StructTypeData { fields }))
+            }
+            _ => Err(ParseError::new("invalid ADT")),
+        }
+    }
+
+    fn parse_type(&mut self, expr: &SExprRef<'a>) -> Result<Type<'db>, ParseError> {
         Ok(match expr {
-            Symbol(x) if let Some(type_ref) = self.types.get(x) => *type_ref,
-            Symbol("int") => self
-                .cx
-                .get_or_create_type_ref_with_data(self.db, TypeKind::Prim(PrimType::Int)),
-            Symbol("real") => self
-                .cx
-                .get_or_create_type_ref_with_data(self.db, TypeKind::Prim(PrimType::Real)),
-            Symbol("byte") => self
-                .cx
-                .get_or_create_type_ref_with_data(self.db, TypeKind::Prim(PrimType::Byte)),
-            Symbol("bool") => self
-                .cx
-                .get_or_create_type_ref_with_data(self.db, TypeKind::Prim(PrimType::Bool)),
-            Symbol("str") => self
-                .cx
-                .get_or_create_type_ref_with_data(self.db, TypeKind::Prim(PrimType::Str)),
-            Symbol("unit") => self
-                .cx
-                .get_or_create_type_ref_with_data(self.db, TypeKind::Prim(PrimType::Unit)),
+            Symbol(adt_name) if let Some(adt) = self.adts.get(adt_name) => Type::new(
+                self.db,
+                TypeKind::Algebraic(AlgebraicTypeInstance {
+                    adt: *adt,
+                    type_args: Default::default(),
+                }),
+            ),
+            Symbol("int") => Type::int(self.db),
+            Symbol("real") => Type::real(self.db),
+            Symbol("byte") => Type::byte(self.db),
+            Symbol("bool") => Type::bool(self.db),
+            Symbol("str") => Type::str(self.db),
+            Symbol("unit") => Type::unit(self.db),
             List([Symbol("mref"), pointee_type]) => {
                 let pointee_type = self.parse_type(pointee_type)?;
-                self.cx
-                    .get_or_create_type_ref_with_data(self.db, TypeKind::MRef(pointee_type))
+                Type::new(self.db, TypeKind::MRef(pointee_type))
             }
             List([Symbol("list"), element_type]) => {
                 let element_type = self.parse_type(element_type)?;
-                self.cx
-                    .get_or_create_type_ref_with_data(self.db, TypeKind::List(element_type))
+                Type::new(self.db, TypeKind::List(element_type))
             }
-            List([Symbol("func"), decls @ ..]) => {
-                let mut return_type = None;
-                let mut param_types = Vec::new();
-                for decl in decls {
-                    match decl {
-                        List([Symbol("returns"), expr]) => {
-                            return_type = Some(self.parse_type(expr)?);
-                        }
-                        List([Symbol("param"), expr]) => {
-                            param_types.push(self.parse_type(expr)?);
-                        }
-                        _ => return Err(ParseError::new("invalid declaration in func expr")),
-                    }
-                }
-                self.cx.get_or_create_type_ref_with_data(
-                    self.db,
-                    TypeKind::Func(FuncTypeData {
-                        param_types,
-                        return_type: return_type
-                            .ok_or_else(|| ParseError::new("missing return type"))?,
-                    }),
-                )
-            }
-            List([Symbol("struct"), decls @ ..]) => {
-                let mut fields = PrimaryMap::new();
-                for decl in decls {
-                    match decl {
-                        List([Symbol("field"), Symbol(field_name), field_type]) => {
-                            fields.push(Field {
-                                name: field_name.to_compact_string(),
-                                typ: self.parse_type(field_type)?,
-                            });
-                        }
-                        _ => return Err(ParseError::new("invalid declaration in struct expr ")),
-                    }
-                }
 
-                self.cx.get_or_create_type_ref_with_data(
-                    self.db,
-                    TypeKind::Struct(StructTypeData {
-                        fields,
-                        name: name.map(CompactString::from),
-                    }),
-                )
-            }
             _ => return Err(ParseError::new(format!("invalid type {expr:?}"))),
         })
-    }
-
-    fn parse_type(&mut self, expr: &SExprRef<'a>) -> Result<TypeRef, ParseError> {
-        self.parse_named_type(expr, None)
-    }
-
-    fn deduplicate_types(&mut self) {
-        let mapping = self.cx.deduplicate_types(self.db);
-        self.types
-            .values_mut()
-            .for_each(|type_ref| *type_ref = mapping[*type_ref]);
     }
 
     fn parse_funcs_initial(&mut self, items: &[SExprRef<'a>]) -> Result<(), ParseError> {
@@ -221,11 +182,11 @@ impl<'a, 'db> Parser<'a, 'db> {
                     let mut return_type = None;
                     let mut captures_type = None;
                     let mut entry_block = None;
-                    let mut blocks = HashMap::new();
+                    let mut blocks = HashMap::default();
 
                     #[derive(Default)]
-                    struct BlockHeader {
-                        params: Vec<TypeRef>,
+                    struct BlockHeader<'db> {
+                        params: Vec<Type<'db>>,
                     }
 
                     for decl in decls {
@@ -275,6 +236,7 @@ impl<'a, 'db> Parser<'a, 'db> {
                             .to_vec(),
                         return_type: return_type
                             .ok_or_else(|| ParseError::new("missing return type"))?,
+                        type_params: Default::default(),
                     };
 
                     let func_ref = self.cx.alloc_func();
@@ -452,19 +414,11 @@ impl<'a, 'db> Parser<'a, 'db> {
                     .get(func)
                     .ok_or_else(|| ParseError::new(format!("undefined func `{func}`")))?;
                 let args = state.get_val_list(args)?;
-                state.func_builder.instr(self.cx).call(dst, *func, args);
-            }
-            "call_indirect" => {
-                let [Symbol(dst), List([Symbol(func), List(args)])] = args else {
-                    return Err(ParseError::new("invalid instr arguments"));
-                };
-                let dst = state.get_or_create_val(dst);
-                let func = state.get_val(func)?;
-                let args = state.get_val_list(args)?;
-                state
-                    .func_builder
-                    .instr(self.cx)
-                    .call_indirect(dst, func, args);
+                state.func_builder.instr(self.cx).call(
+                    dst,
+                    FuncInstance::new(self.db, MaybeAssocFunc::Func(*func), TypeArgs::new()),
+                    args,
+                );
             }
             "return" => {
                 let [List([Symbol(return_value)])] = args else {
@@ -577,11 +531,12 @@ impl<'a, 'db> Parser<'a, 'db> {
                 };
                 let dst = state.get_or_create_val(dst);
                 let struct_type = self.parse_type(struct_type)?;
-                let TypeKind::Struct(struct_type_data) =
-                    struct_type.resolve_in_builder(self.cx).data(self.db)
-                else {
+                let TypeKind::Algebraic(adt_instance) = struct_type.kind(self.db) else {
                     return Err(ParseError::new("not a struct type"));
                 };
+                let AlgebraicTypeKind::Struct(struct_type_data) =
+                    adt_instance.adt.resolve(self.db, &self.cx).kind(self.db);
+
                 let mut fields = fields
                     .iter()
                     .map(|field| {
@@ -611,11 +566,11 @@ impl<'a, 'db> Parser<'a, 'db> {
                 let dst = state.get_or_create_val(dst);
                 let src = state.get_val(src)?;
                 let src_type = state.func_builder.val_type(src);
-                let TypeKind::Struct(struct_type_data) =
-                    src_type.resolve_in_builder(self.cx).data(self.db)
-                else {
+                let TypeKind::Algebraic(adt_instance) = src_type.kind(self.db) else {
                     return Err(ParseError::new("not a struct type"));
                 };
+                let AlgebraicTypeKind::Struct(struct_type_data) =
+                    adt_instance.adt.resolve(self.db, &self.cx).kind(self.db);
 
                 let field = struct_type_data
                     .fields
@@ -640,11 +595,11 @@ impl<'a, 'db> Parser<'a, 'db> {
                 let src = state.get_val(src)?;
                 let field_val = state.get_val(field_val)?;
                 let src_type = state.func_builder.val_type(src);
-                let TypeKind::Struct(struct_type_data) =
-                    src_type.resolve_in_builder(self.cx).data(self.db)
-                else {
+                let TypeKind::Algebraic(adt_instance) = src_type.kind(self.db) else {
                     return Err(ParseError::new("not a struct type"));
                 };
+                let AlgebraicTypeKind::Struct(struct_type_data) =
+                    adt_instance.adt.resolve(self.db, &self.cx).kind(self.db);
 
                 let field = struct_type_data
                     .fields
@@ -680,15 +635,14 @@ impl<'a, 'db> Parser<'a, 'db> {
                 let dst = state.get_or_create_val(dst);
                 let src = state.get_val(src)?;
                 let src_type = state.func_builder.val_type(src);
-                let TypeKind::MRef(pointee) = src_type.resolve_in_builder(self.cx).data(self.db)
-                else {
+                let TypeKind::MRef(pointee) = src_type.kind(self.db) else {
                     return Err(ParseError::new("not a reference to a struct type"));
                 };
-                let TypeKind::Struct(struct_type_data) =
-                    pointee.resolve_in_builder(self.cx).data(self.db)
-                else {
-                    return Err(ParseError::new("not a reference to a struct type"));
+                let TypeKind::Algebraic(adt_instance) = pointee.kind(self.db) else {
+                    return Err(ParseError::new("not a struct type"));
                 };
+                let AlgebraicTypeKind::Struct(struct_type_data) =
+                    adt_instance.adt.resolve(self.db, &self.cx).kind(self.db);
 
                 let field = struct_type_data
                     .fields
@@ -700,21 +654,6 @@ impl<'a, 'db> Parser<'a, 'db> {
                     .func_builder
                     .instr(self.cx)
                     .make_field_mref(dst, src, field.0);
-            }
-            "func.init" => {
-                let [Symbol(dst), List([Symbol(func_name), Symbol(captures)])] = args else {
-                    return Err(ParseError::new("invalid instr arguments"));
-                };
-                let dst = state.get_or_create_val(dst);
-                let captures = state.get_val(captures)?;
-                let func = self
-                    .funcs
-                    .get(func_name)
-                    .ok_or_else(|| ParseError::new("ndefined function"))?;
-                state
-                    .func_builder
-                    .instr(self.cx)
-                    .make_function_object(dst, *func, captures);
             }
             "list.init" => {
                 let [Symbol(dst), List([element_type])] = args else {

@@ -288,7 +288,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
         if !allowed_types.contains(typ.kind(self.db)) {
             return Err(ValidationError::new(format!(
                 "expected one of {allowed_types:?}, found {:?}",
-                typ
+                typ.kind(self.db)
             )));
         }
         Ok(())

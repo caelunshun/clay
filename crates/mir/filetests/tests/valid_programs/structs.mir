@@ -3,7 +3,7 @@
 // @harness value_initialization_validation_succeeds
 // @harness cfg_integrity_validation_succeeds
 (mir
-    (type Point
+    (adt Point
         (struct
             (field x real)
             (field y real)))
