@@ -64,7 +64,7 @@ pub fn find_trait_impl<'db>(
                         cx,
                         arg,
                         trait_instance_scope_type_params.clone(),
-                        impl_arg,
+                        impl_arg.substitute_self_type(db, typ),
                         candidate_impl.data(db).type_params.clone(),
                     ),
                 ) {
@@ -85,7 +85,10 @@ pub fn find_trait_impl<'db>(
                 cx,
                 typ,
                 type_scope_type_params.clone(),
-                candidate_impl.data(db).impl_for_type,
+                candidate_impl
+                    .data(db)
+                    .impl_for_type
+                    .substitute_self_type(db, typ),
                 candidate_impl.data(db).type_params.clone(),
             ),
         ) {

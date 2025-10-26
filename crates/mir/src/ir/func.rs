@@ -1,15 +1,15 @@
 use crate::{
     InstrData,
     ir::{
-        TypeArgs, TypeParams,
+        ContextLike, TypeArgs, TypeParams,
         context::{FuncId, TraitId},
         trait_::AssocFuncId,
         typ::Type,
-        type_param::{TypeParam, TypeParamId},
     },
 };
 use compact_str::CompactString;
 use cranelift_entity::{EntityList, EntitySet, ListPool, PrimaryMap, SecondaryMap};
+use salsa::Database;
 
 #[salsa::tracked(debug)]
 pub struct Func<'db> {
@@ -193,10 +193,66 @@ pub struct BasicBlock<'db> {
 #[salsa::interned(debug)]
 pub struct FuncInstance<'db> {
     pub func: MaybeAssocFunc<'db>,
+    #[returns(ref)]
     pub type_args: TypeArgs<'db>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+impl<'db> FuncInstance<'db> {
+    /// Resolves the concrete return type of the function.
+    pub fn return_type(&self, db: &'db dyn Database, cx: &impl ContextLike<'db>) -> Type<'db> {
+        match self.func(db) {
+            MaybeAssocFunc::Func(func_id) => func_id
+                .resolve_header(db, cx)
+                .return_type
+                .substitute_type_args(db, self.type_args(db)),
+            MaybeAssocFunc::AssocFunc {
+                trait_,
+                typ,
+                assoc_func,
+            } => {
+                let trait_ = trait_.resolve(db, cx);
+                let assoc_func = &trait_.data(db).assoc_funcs[assoc_func];
+                assoc_func
+                    .return_type
+                    .substitute_self_type(db, typ)
+                    .substitute_type_args(db, self.type_args(db))
+            }
+        }
+    }
+
+    /// Resolves the concrete parameter types of the function.
+    pub fn param_types(&self, db: &'db dyn Database, cx: &impl ContextLike<'db>) -> Vec<Type<'db>> {
+        match self.func(db) {
+            MaybeAssocFunc::Func(func_id) => func_id
+                .resolve_header(db, cx)
+                .param_types
+                .iter()
+                .copied()
+                .map(|param_type| param_type.substitute_type_args(db, self.type_args(db)))
+                .collect(),
+            MaybeAssocFunc::AssocFunc {
+                trait_,
+                typ,
+                assoc_func,
+            } => {
+                let trait_ = trait_.resolve(db, cx);
+                let assoc_func = &trait_.data(db).assoc_funcs[assoc_func];
+                assoc_func
+                    .param_types
+                    .iter()
+                    .copied()
+                    .map(|param_type| {
+                        param_type
+                            .substitute_self_type(db, typ)
+                            .substitute_type_args(db, self.type_args(db))
+                    })
+                    .collect()
+            }
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub enum MaybeAssocFunc<'db> {
     Func(FuncId),
     AssocFunc {

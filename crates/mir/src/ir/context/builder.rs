@@ -66,17 +66,6 @@ impl<'db> ContextBuilder<'db> {
         self.funcs[func_ref] = Some(func);
     }
 
-    pub fn resolve_func_header(&self, db: &'db dyn Database, r: FuncId) -> &FuncHeader<'db> {
-        self.funcs[r]
-            .as_ref()
-            .map(|f| &f.data(db).header)
-            .unwrap_or_else(|| {
-                self.func_headers[r].as_ref().expect(
-                    "attempted to resolve header of a func whose header is not yet resolved",
-                )
-            })
-    }
-
     pub fn alloc_trait(&mut self) -> TraitId {
         self.traits.push(None)
     }
@@ -139,7 +128,7 @@ impl<'db> ContextLike<'db> for ContextBuilder<'db> {
 
     fn trait_impls_for_trait(
         &self,
-        db: &'db dyn Database,
+        _db: &'db dyn Database,
         trait_: TraitId,
     ) -> Cow<[TraitImpl<'db>]> {
         Cow::Borrowed(
@@ -148,5 +137,16 @@ impl<'db> ContextLike<'db> for ContextBuilder<'db> {
                 .map(Vec::as_slice)
                 .unwrap_or_default(),
         )
+    }
+
+    fn resolve_func_header(&self, db: &'db dyn Database, func: FuncId) -> &FuncHeader<'db> {
+        self.funcs[func]
+            .as_ref()
+            .map(|f: &Func<'_>| &f.data(db).header)
+            .unwrap_or_else(|| {
+                self.func_headers[func].as_ref().expect(
+                    "attempted to resolve header of a func whose header is not yet resolved",
+                )
+            })
     }
 }

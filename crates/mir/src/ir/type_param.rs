@@ -1,9 +1,5 @@
-use crate::{
-    TypeKind,
-    ir::{Type, trait_::TraitInstance},
-};
+use crate::ir::{Type, trait_::TraitInstance};
 use cranelift_entity::{PrimaryMap, SecondaryMap};
-use salsa::Database;
 
 entity_ref_16bit! {
     pub struct TypeParamId;

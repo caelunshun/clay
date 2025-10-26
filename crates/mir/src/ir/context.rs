@@ -9,11 +9,12 @@ use std::borrow::Cow;
 pub mod builder;
 
 pub use builder::ContextBuilder;
-use fir_core::{HashMap, IndexMap};
+use fir_core::IndexMap;
 
 pub trait ContextLike<'db> {
     fn resolve_adt(&self, db: &'db dyn Database, adt: AlgebraicTypeId) -> AlgebraicType<'db>;
     fn resolve_func(&self, db: &'db dyn Database, func: FuncId) -> Func<'db>;
+    fn resolve_func_header(&self, db: &'db dyn Database, func: FuncId) -> &FuncHeader<'db>;
     fn resolve_trait(&self, db: &'db dyn Database, trait_: TraitId) -> Trait<'db>;
     fn trait_impls_for_trait(
         &self,
@@ -45,6 +46,10 @@ where
     ) -> Cow<[TraitImpl<'db>]> {
         C::trait_impls_for_trait(self, db, trait_)
     }
+
+    fn resolve_func_header(&self, db: &'db dyn Database, func: FuncId) -> &FuncHeader<'db> {
+        C::resolve_func_header(self, db, func)
+    }
 }
 
 impl<'a, 'db, C> ContextLike<'db> for &'a mut C
@@ -69,6 +74,10 @@ where
         trait_: TraitId,
     ) -> Cow<[TraitImpl<'db>]> {
         C::trait_impls_for_trait(self, db, trait_)
+    }
+
+    fn resolve_func_header(&self, db: &'db dyn Database, func: FuncId) -> &FuncHeader<'db> {
+        C::resolve_func_header(self, db, func)
     }
 }
 
@@ -147,6 +156,10 @@ impl<'db> ContextLike<'db> for Context<'db> {
 
         Cow::Borrowed(resolve_helper(db, *self, trait_).impls(db).as_slice())
     }
+
+    fn resolve_func_header(&self, db: &'db dyn Database, func: FuncId) -> &FuncHeader<'db> {
+        &self.resolve_func(db, func).data(db).header
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, salsa::Update)]
@@ -201,7 +214,7 @@ impl FuncId {
     pub fn resolve_header<'cx, 'db>(
         &self,
         db: &'db dyn Database,
-        cx: &'cx ContextBuilder<'db>,
+        cx: &'cx impl ContextLike<'db>,
     ) -> &'cx FuncHeader<'db> {
         cx.resolve_func_header(db, *self)
     }

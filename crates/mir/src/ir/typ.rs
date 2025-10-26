@@ -1,6 +1,6 @@
-use crate::ir::{AlgebraicTypeId, TypeArgs, TypeParamId, TypeParams};
+use crate::ir::{AlgebraicTypeId, TypeArgs, TypeParamId};
 use compact_str::CompactString;
-use cranelift_entity::{PrimaryMap, SecondaryMap};
+use cranelift_entity::PrimaryMap;
 use salsa::Database;
 
 /// An interned version of `TypeKind`.

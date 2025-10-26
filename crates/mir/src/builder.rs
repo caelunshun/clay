@@ -2,8 +2,7 @@ use crate::{
     InstrData, TypeKind, ValId,
     ir::{
         AlgebraicTypeKind, BasicBlock, BasicBlockId, Constant, ContextBuilder, FieldId, FuncData,
-        FuncHeader, FuncId, FuncInstance, FuncTypeData, Type, TypeParam, TypeParamId, TypeParams,
-        Val,
+        FuncHeader, FuncInstance, Type, TypeParam, TypeParamId, TypeParams, Val,
         instr::{self, CompareMode},
     },
 };
@@ -232,10 +231,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             args,
             return_value_dst,
         }));
-        self.set_val_type(
-            return_value_dst,
-            func.resolve_header(self.db, self.cx).return_type,
-        );
+        self.set_val_type(return_value_dst, func.return_type(self.db, &self.cx));
     }
 
     pub fn return_(mut self, return_value: ValId) {
@@ -432,7 +428,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         let TypeKind::MRef(pointee) = self.val_types[src].unwrap().kind(self.db) else {
             panic!("not a reference")
         };
-        let TypeKind::Algebraic(adt_instance) = self.val_types[src].unwrap().kind(self.db) else {
+        let TypeKind::Algebraic(adt_instance) = pointee.kind(self.db) else {
             panic!("not an ADT")
         };
 

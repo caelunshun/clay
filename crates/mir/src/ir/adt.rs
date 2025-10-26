@@ -1,10 +1,5 @@
-use crate::ir::{
-    TypeParams,
-    typ::{StructTypeData, Type, TypeKind},
-    type_param::{TypeParam, TypeParamId},
-};
+use crate::ir::{TypeParams, typ::StructTypeData};
 use compact_str::CompactString;
-use cranelift_entity::PrimaryMap;
 
 /// A type that can have generic parameters.
 #[salsa::tracked(debug)]
