@@ -1,8 +1,9 @@
 use crate::{
     InstrData, TypeKind, ValId,
     ir::{
-        AlgebraicTypeData, BasicBlock, BasicBlockId, Constant, ContextBuilder, FieldId, FuncData,
-        FuncHeader, FuncId, FuncTypeData, Type, Val,
+        AlgebraicTypeKind, BasicBlock, BasicBlockId, Constant, ContextBuilder, FieldId, FuncData,
+        FuncHeader, FuncId, FuncInstance, FuncTypeData, Type, TypeParam, TypeParamId, TypeParams,
+        Val,
         instr::{self, CompareMode},
     },
 };
@@ -47,6 +48,7 @@ impl<'db> FuncBuilder<'db> {
                     return_type,
                     name: name.into(),
                     captures_type,
+                    type_params: TypeParams::new(),
                 },
 
                 vals: PrimaryMap::default(),
@@ -59,6 +61,10 @@ impl<'db> FuncBuilder<'db> {
             val_types,
             val_names: SecondaryMap::new(),
         }
+    }
+
+    pub fn append_type_param(&mut self, type_param: TypeParam<'db>) -> TypeParamId {
+        self.func.header.type_params.push(type_param)
     }
 
     pub fn append_param(&mut self, typ: Type<'db>) -> ValId {
@@ -217,7 +223,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
     pub fn call(
         mut self,
         return_value_dst: ValId,
-        func: FuncId,
+        func: FuncInstance<'db>,
         args: impl IntoIterator<Item = ValId>,
     ) {
         let args = EntityList::from_iter(args, &mut self.func.val_lists);
@@ -387,17 +393,16 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
             src_struct: src,
             field,
         }));
-        let TypeKind::Algebraic(adt) = self.val_types[src].unwrap().kind(self.db) else {
+        let TypeKind::Algebraic(adt_instance) = self.val_types[src].unwrap().kind(self.db) else {
             panic!("not an ADT")
         };
 
-        let AlgebraicTypeData::Struct(strukt_data) =
-            adt.adt.resolve_in_builder(&self.cx).data(self.db);
+        let AlgebraicTypeKind::Struct(strukt_data) = adt_instance.adt.kind(self.db, &self.cx);
 
-        self.set_val_type(
-            dst,
-            adt.substitute_type_args(strukt_data.fields[field].typ, self.db),
-        );
+        let typ = strukt_data.fields[field]
+            .typ
+            .substitute_type_args(self.db, &adt_instance.type_args);
+        self.set_val_type(dst, typ);
     }
 
     pub fn set_field(
@@ -446,18 +451,24 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         let TypeKind::MRef(pointee) = self.val_types[src].unwrap().kind(self.db) else {
             panic!("not a reference")
         };
-        let TypeKind::Algebraic(adt) = pointee.kind(self.db) else {
-            panic!("not a reference to an ADT")
+        let TypeKind::Algebraic(adt_instance) = self.val_types[src].unwrap().kind(self.db) else {
+            panic!("not an ADT")
         };
 
-        let AlgebraicTypeData::Struct(strukt_data) =
-            adt.adt.resolve_in_builder(&self.cx).data(self.db);
+        let AlgebraicTypeKind::Struct(strukt_data) = adt_instance.adt.kind(self.db, &self.cx);
 
-        let typ = TypeKind::MRef(adt.substitute_type_args(strukt_data.fields[field].typ, self.db));
-        self.set_val_type(dst, Type::new(self.db, typ));
+        let typ = strukt_data.fields[field]
+            .typ
+            .substitute_type_args(self.db, &adt_instance.type_args);
+        self.set_val_type(dst, typ);
     }
 
-    pub fn make_function_object(mut self, dst: ValId, func: FuncId, captures_ref: ValId) {
+    pub fn make_function_object(
+        mut self,
+        dst: ValId,
+        func: FuncInstance<'db>,
+        captures_ref: ValId,
+    ) {
         self.instr(InstrData::MakeFunctionObject(instr::MakeFunctionObject {
             dst,
             func,
@@ -471,10 +482,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
     }
 
     pub fn make_list(mut self, dst: ValId, element_type: Type<'db>) {
-        self.instr(InstrData::MakeList(instr::MakeList {
-            dst,
-            element_type: element_type,
-        }));
+        self.instr(InstrData::MakeList(instr::MakeList { dst, element_type }));
         let typ = Type::new(self.db, TypeKind::List(element_type));
         self.set_val_type(dst, typ);
     }

@@ -1,9 +1,6 @@
-use crate::{
-    TypeKind,
-    ir::{Type, TypeParam, TypeParamId, context::TraitId},
-};
+use crate::ir::{Type, TypeArgs, TypeParam, TypeParamId, TypeParams, context::TraitId};
 use compact_str::CompactString;
-use cranelift_entity::{PrimaryMap, SecondaryMap};
+use cranelift_entity::PrimaryMap;
 
 #[salsa::tracked(debug)]
 pub struct Trait<'db> {
@@ -15,7 +12,7 @@ pub struct Trait<'db> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct TraitData<'db> {
     pub name: CompactString,
-    pub type_params: PrimaryMap<TypeParamId, TypeParam<'db>>,
+    pub type_params: TypeParams<'db>,
     pub assoc_funcs: PrimaryMap<AssocFuncId, AssocFunc<'db>>,
 }
 
@@ -34,7 +31,7 @@ pub struct AssocFunc<'db> {
 pub struct TraitInstance<'db> {
     pub trait_: TraitId,
     #[returns(ref)]
-    pub type_args: SecondaryMap<TypeParamId, Option<TypeKind<'db>>>,
+    pub type_args: TypeArgs<'db>,
 }
 
 #[salsa::tracked(debug)]

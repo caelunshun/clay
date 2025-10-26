@@ -1,6 +1,6 @@
 use crate::{
     ValId,
-    ir::{BasicBlockId, Constant, FieldId, FuncId, Type},
+    ir::{BasicBlockId, Constant, FieldId, FuncId, FuncInstance, Type},
 };
 use cranelift_entity::{EntityList, ListPool};
 
@@ -8,7 +8,7 @@ use cranelift_entity::{EntityList, ListPool};
 pub enum InstrData<'db> {
     Jump(Jump),
     Branch(Branch),
-    Call(Call),
+    Call(Call<'db>),
     CallIndirect(CallIndirect),
     Return(Return),
     Copy(Unary),
@@ -50,7 +50,7 @@ pub enum InstrData<'db> {
     Store(Store),
     MakeFieldMRef(MakeFieldMRef),
 
-    MakeFunctionObject(MakeFunctionObject),
+    MakeFunctionObject(MakeFunctionObject<'db>),
 
     MakeList(MakeList<'db>),
     ListPush(ListPush),
@@ -383,11 +383,11 @@ pub struct Branch {
 
 /// Directly call a top-level function.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
-pub struct Call {
+pub struct Call<'db> {
     /// Statically known function to call.
     /// It must have a unit captures type (i.e.
     /// be a top-level function).
-    pub func: FuncId,
+    pub func: FuncInstance<'db>,
     /// Arguments to pass to the function.
     pub args: EntityList<ValId>,
     /// Destination for the return value.
@@ -532,9 +532,9 @@ pub struct MakeFieldMRef {
 /// the same type as the `captures_type` field of the corresponding
 /// `FuncData`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
-pub struct MakeFunctionObject {
+pub struct MakeFunctionObject<'db> {
     pub dst: ValId,
-    pub func: FuncId,
+    pub func: FuncInstance<'db>,
     pub captures_ref: ValId,
 }
 

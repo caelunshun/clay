@@ -1,9 +1,53 @@
 use crate::{
     Func,
-    ir::{AlgebraicType, AlgebraicTypeData, FuncData, FuncHeader, Trait, TraitImpl},
+    ir::{AlgebraicType, AlgebraicTypeKind, FuncData, FuncHeader, Trait, TraitImpl},
 };
-use cranelift_entity::{PrimaryMap, SecondaryMap};
+use cranelift_entity::PrimaryMap;
 use salsa::Database;
+
+pub mod builder;
+
+pub use builder::ContextBuilder;
+
+pub trait ContextLike<'db> {
+    fn resolve_adt(&self, db: &'db dyn Database, adt: AlgebraicTypeId) -> AlgebraicType<'db>;
+    fn resolve_func(&self, db: &'db dyn Database, func: FuncId) -> Func<'db>;
+    fn resolve_trait(&self, db: &'db dyn Database, trait_: TraitId) -> Trait<'db>;
+}
+
+impl<'a, 'db, C> ContextLike<'db> for &'a C
+where
+    C: ContextLike<'db>,
+{
+    fn resolve_adt(&self, db: &'db dyn Database, adt: AlgebraicTypeId) -> AlgebraicType<'db> {
+        C::resolve_adt(self, db, adt)
+    }
+
+    fn resolve_func(&self, db: &'db dyn Database, func: FuncId) -> Func<'db> {
+        C::resolve_func(self, db, func)
+    }
+
+    fn resolve_trait(&self, db: &'db dyn Database, trait_: TraitId) -> Trait<'db> {
+        C::resolve_trait(self, db, trait_)
+    }
+}
+
+impl<'a, 'db, C> ContextLike<'db> for &'a mut C
+where
+    C: ContextLike<'db>,
+{
+    fn resolve_adt(&self, db: &'db dyn Database, adt: AlgebraicTypeId) -> AlgebraicType<'db> {
+        C::resolve_adt(self, db, adt)
+    }
+
+    fn resolve_func(&self, db: &'db dyn Database, func: FuncId) -> Func<'db> {
+        C::resolve_func(self, db, func)
+    }
+
+    fn resolve_trait(&self, db: &'db dyn Database, trait_: TraitId) -> Trait<'db> {
+        C::resolve_trait(self, db, trait_)
+    }
+}
 
 /// An mir context is a collection of functions and types
 /// that can refer to each other.
@@ -14,126 +58,42 @@ pub struct Context<'db> {
     pub data: ContextData<'db>,
 }
 
-/// Builder for `ContextData` that allows
-/// lazy initialization of each type and function.
-#[derive(Debug, Clone)]
-pub struct ContextBuilder<'db> {
-    adts: PrimaryMap<AlgebraicTypeId, Option<AlgebraicType<'db>>>,
-    funcs: PrimaryMap<FuncId, Option<Func<'db>>>,
-    traits: PrimaryMap<TraitId, Option<Trait<'db>>>,
-    trait_impls: Vec<TraitImpl<'db>>,
-    /// A function header can be known before
-    /// the function body. This allows resolving
-    /// recursive or mutually recursive functions.
-    func_headers: SecondaryMap<FuncId, Option<FuncHeader<'db>>>,
-}
-
-impl<'db> ContextBuilder<'db> {
-    pub fn new(_db: &'db dyn Database) -> Self {
-        Self {
-            adts: Default::default(),
-            funcs: Default::default(),
-            func_headers: Default::default(),
-            trait_impls: Vec::new(),
-            traits: Default::default(),
+impl<'db> ContextLike<'db> for Context<'db> {
+    fn resolve_adt(&self, db: &'db dyn Database, adt: AlgebraicTypeId) -> AlgebraicType<'db> {
+        /// Wrapping this in a salsa::tracked
+        /// function allows salsa to avoid
+        /// recalculating a query when the returned
+        /// value doesn't change, even if others
+        /// did change.
+        #[salsa::tracked]
+        fn resolve_helper<'db>(
+            db: &'db dyn Database,
+            cx: Context<'db>,
+            adt: AlgebraicTypeId,
+        ) -> AlgebraicType<'db> {
+            cx.data(db).adts[adt]
         }
+        resolve_helper(db, *self, adt)
     }
 
-    /// Creates a `AlgebraicTypeRef` without binding the corresponding
-    /// type data. It must be bound before finalization
-    /// or a panic will occur.
-    pub fn alloc_adt(&mut self) -> AlgebraicTypeId {
-        self.adts.push(None)
-    }
-
-    /// Binds the value of an ADT.
-    pub fn bind_adt(
-        &mut self,
-        _db: &'db dyn Database,
-        type_ref: AlgebraicTypeId,
-        typ: AlgebraicType<'db>,
-    ) {
-        assert!(self.adts[type_ref].is_none(), "type bound twice");
-        self.adts[type_ref] = Some(typ);
-    }
-
-    pub fn resolve_adt(&self, r: AlgebraicTypeId) -> AlgebraicType<'db> {
-        self.adts[r].expect("attempted to resolve unbound ADT")
-    }
-
-    pub fn alloc_func(&mut self) -> FuncId {
-        self.funcs.push(None)
-    }
-
-    pub fn bind_func_header(&mut self, func_ref: FuncId, header: FuncHeader<'db>) {
-        self.func_headers[func_ref] = Some(header);
-    }
-
-    pub fn bind_func(&mut self, func_ref: FuncId, func: Func<'db>) {
-        assert!(self.funcs[func_ref].is_none(), "func bound twice");
-        self.funcs[func_ref] = Some(func);
-    }
-
-    pub fn resolve_func(&self, r: FuncId) -> Func<'db> {
-        self.funcs[r].expect("attempted to resolve unbound func")
-    }
-
-    pub fn resolve_func_header(&self, db: &'db dyn Database, r: FuncId) -> &FuncHeader<'db> {
-        self.funcs[r]
-            .as_ref()
-            .map(|f| &f.data(db).header)
-            .unwrap_or_else(|| {
-                self.func_headers[r].as_ref().expect(
-                    "attempted to resolve header of a func whose header is not yet resolved",
-                )
-            })
-    }
-
-    pub fn alloc_trait(&mut self) -> TraitId {
-        self.traits.push(None)
-    }
-
-    pub fn bind_trait(&mut self, ref_: TraitId, trait_: Trait<'db>) {
-        self.traits[ref_] = Some(trait_);
-    }
-
-    pub fn resolve_trait(&self, ref_: TraitId) -> Trait<'db> {
-        self.traits[ref_].expect("attempted to resolve unbound trait")
-    }
-
-    pub fn add_trait_impl(&mut self, trait_impl: TraitImpl<'db>) {
-        self.trait_impls.push(trait_impl);
-    }
-
-    pub fn finish(self) -> ContextData<'db> {
-        let mut adts = PrimaryMap::new();
-        let mut funcs = PrimaryMap::new();
-        let mut traits = PrimaryMap::new();
-        for (type_ref, typ) in self.adts {
-            assert_eq!(
-                adts.push(typ.expect("type not bound before finalization")),
-                type_ref
-            );
+    fn resolve_func(&self, db: &'db dyn Database, func: FuncId) -> Func<'db> {
+        #[salsa::tracked]
+        fn resolve_helper<'db>(db: &'db dyn Database, cx: Context<'db>, func: FuncId) -> Func<'db> {
+            cx.data(db).funcs[func]
         }
-        for (func_ref, func) in self.funcs {
-            assert_eq!(
-                funcs.push(func.expect("func not bound before finalization")),
-                func_ref
-            );
-        }
-        for (trait_ref, trait_) in self.traits {
-            assert_eq!(
-                traits.push(trait_.expect("trait not bound before finalization")),
-                trait_ref
-            );
-        }
+        resolve_helper(db, *self, func)
+    }
 
-        ContextData {
-            adts,
-            funcs,
-            traits,
-            trait_impls: self.trait_impls,
+    fn resolve_trait(&self, db: &'db dyn Database, trait_: TraitId) -> Trait<'db> {
+        #[salsa::tracked]
+        fn resolve_helper<'db>(
+            db: &'db dyn Database,
+            cx: Context<'db>,
+            trait_: TraitId,
+        ) -> Trait<'db> {
+            cx.data(db).traits[trait_]
         }
+        resolve_helper(db, *self, trait_)
     }
 }
 
@@ -157,34 +117,20 @@ entity_ref! {
 }
 
 impl AlgebraicTypeId {
-    pub fn resolve<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> AlgebraicType<'db> {
-        /// Wrapping this in a salsa::tracked
-        /// function allows salsa to avoid
-        /// recalculating a query when the returned
-        /// Type doesn't change, even if the Context
-        /// was partially updated.
-        #[salsa::tracked]
-        fn resolve_helper<'db>(
-            db: &'db dyn Database,
-            cx: Context<'db>,
-            type_ref: AlgebraicTypeId,
-        ) -> AlgebraicType<'db> {
-            cx.data(db).adts[type_ref]
-        }
-
-        resolve_helper(db, cx, *self)
-    }
-
-    pub fn resolve_in_builder<'db>(&self, cx: &ContextBuilder<'db>) -> AlgebraicType<'db> {
-        cx.resolve_adt(*self)
-    }
-
-    pub fn data<'db>(
+    pub fn resolve<'db>(
         &self,
         db: &'db dyn Database,
-        cx: Context<'db>,
-    ) -> &'db AlgebraicTypeData<'db> {
-        self.resolve(db, cx).data(db)
+        cx: impl ContextLike<'db>,
+    ) -> AlgebraicType<'db> {
+        cx.resolve_adt(db, *self)
+    }
+
+    pub fn kind<'db>(
+        &self,
+        db: &'db dyn Database,
+        cx: impl ContextLike<'db>,
+    ) -> &'db AlgebraicTypeKind<'db> {
+        self.resolve(db, cx).kind(db)
     }
 }
 
@@ -196,26 +142,8 @@ entity_ref! {
 }
 
 impl FuncId {
-    pub fn resolve<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> Func<'db> {
-        /// Wrapping this in a salsa::tracked
-        /// function allows salsa to avoid
-        /// recalculating a query when the returned
-        /// Func doesn't change, even if the Context
-        /// was partially updated.
-        #[salsa::tracked]
-        fn resolve_helper<'db>(
-            db: &'db dyn Database,
-            cx: Context<'db>,
-            func_ref: FuncId,
-        ) -> Func<'db> {
-            cx.data(db).funcs[func_ref]
-        }
-
-        resolve_helper(db, cx, *self)
-    }
-
-    pub fn resolve_in_builder<'db>(&self, cx: &ContextBuilder<'db>) -> Func<'db> {
-        cx.resolve_func(*self)
+    pub fn resolve<'db>(&self, db: &'db dyn Database, cx: impl ContextLike<'db>) -> Func<'db> {
+        cx.resolve_func(db, *self)
     }
 
     pub fn resolve_header<'cx, 'db>(
@@ -226,7 +154,11 @@ impl FuncId {
         cx.resolve_func_header(db, *self)
     }
 
-    pub fn data<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> &'db FuncData<'db> {
+    pub fn data<'db>(
+        &self,
+        db: &'db dyn Database,
+        cx: impl ContextLike<'db>,
+    ) -> &'db FuncData<'db> {
         self.resolve(db, cx).data(db)
     }
 }
@@ -238,21 +170,7 @@ entity_ref! {
 }
 
 impl TraitId {
-    pub fn resolve<'db>(&self, db: &'db dyn Database, cx: Context<'db>) -> Trait<'db> {
-        /// Wrapping this in a salsa::tracked
-        /// function allows salsa to avoid
-        /// recalculating a query when the returned
-        /// Trait doesn't change, even if the Context
-        /// was partially updated.
-        #[salsa::tracked]
-        fn resolve_helper<'db>(
-            db: &'db dyn Database,
-            cx: Context<'db>,
-            trait_ref: TraitId,
-        ) -> Trait<'db> {
-            cx.data(db).traits[trait_ref]
-        }
-
-        resolve_helper(db, cx, *self)
+    pub fn resolve<'db>(&self, db: &'db dyn Database, cx: impl ContextLike<'db>) -> Trait<'db> {
+        cx.resolve_trait(db, *self)
     }
 }

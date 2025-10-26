@@ -1,4 +1,9 @@
-use crate::ir::trait_::TraitInstance;
+use crate::{
+    TypeKind,
+    ir::{Type, trait_::TraitInstance},
+};
+use cranelift_entity::{PrimaryMap, SecondaryMap};
+use salsa::Database;
 
 entity_ref_16bit! {
     pub struct TypeParamId;
@@ -17,3 +22,9 @@ pub struct TypeParam<'db> {
     /// Traits which must be implemented by the substituted type.
     pub trait_bounds: Vec<TraitInstance<'db>>,
 }
+
+/// List of type parameters for some item (trait impl, function, ADT, or trait).
+pub type TypeParams<'db> = PrimaryMap<TypeParamId, TypeParam<'db>>;
+
+/// Type arguments passed as type parameters.
+pub type TypeArgs<'db> = SecondaryMap<TypeParamId, Option<Type<'db>>>;

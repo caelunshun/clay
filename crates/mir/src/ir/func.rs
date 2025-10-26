@@ -1,6 +1,7 @@
 use crate::{
     InstrData,
     ir::{
+        TypeArgs, TypeParams,
         context::{FuncId, TraitId},
         trait_::AssocFuncId,
         typ::Type,
@@ -32,7 +33,7 @@ pub struct FuncHeader<'db> {
     /// Parameters expected by the function, not including the captures.
     pub param_types: Vec<Type<'db>>,
     pub return_type: Type<'db>,
-    pub type_params: PrimaryMap<TypeParamId, TypeParam<'db>>,
+    pub type_params: TypeParams<'db>,
 }
 
 #[derive(Debug, Clone, PartialEq, Hash, salsa::Update)]
@@ -192,7 +193,7 @@ pub struct BasicBlock<'db> {
 #[salsa::interned(debug)]
 pub struct FuncInstance<'db> {
     pub func: MaybeAssocFunc<'db>,
-    pub type_args: SecondaryMap<TypeParamId, Option<Type<'db>>>,
+    pub type_args: TypeArgs<'db>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]

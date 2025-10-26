@@ -1,6 +1,6 @@
-use crate::ir::{AlgebraicTypeInstance, TypeParamId};
+use crate::ir::{AlgebraicTypeId, TypeArgs, TypeParamId};
 use compact_str::CompactString;
-use cranelift_entity::PrimaryMap;
+use cranelift_entity::{PrimaryMap, SecondaryMap};
 use salsa::Database;
 
 /// An interned version of `TypeKind`.
@@ -79,6 +79,7 @@ impl<'db> TypeKind<'db> {
         Self::Prim(PrimType::Unit)
     }
 
+    #[must_use]
     pub fn map_inner_types(&self, mut map: impl FnMut(Type<'db>) -> Type<'db>) -> Self {
         match self {
             TypeKind::Prim(_) | TypeKind::TypeParam(_) | TypeKind::Self_ => self.clone(),
@@ -110,6 +111,41 @@ impl<'db> TypeKind<'db> {
                 })
             }
         }
+    }
+}
+
+impl<'db> Type<'db> {
+    /// Performs substitution of concrete types in scope A
+    /// (given by type_args) into a generic type in scope B
+    /// (given by `self`).
+    #[must_use]
+    pub fn substitute_type_args(
+        &self,
+        db: &'db dyn Database,
+        type_args: &TypeArgs<'db>,
+    ) -> Type<'db> {
+        if let TypeKind::TypeParam(param_id) = self.kind(db) {
+            return type_args[*param_id].expect("missing type argument");
+        }
+
+        let updated_kind = self
+            .kind(db)
+            .map_inner_types(|inner_type| inner_type.substitute_type_args(db, type_args));
+        Type::new(db, updated_kind)
+    }
+
+    /// Replaces occurrences of the `Self` type with a known concrete
+    /// type where it is known at a use site.
+    #[must_use]
+    pub fn substitute_self_type(&self, db: &'db dyn Database, self_type: Type<'db>) -> Type<'db> {
+        if let TypeKind::Self_ = self.kind(db) {
+            return self_type;
+        }
+
+        let updated_kind = self
+            .kind(db)
+            .map_inner_types(|inner_type| inner_type.substitute_self_type(db, self_type));
+        Type::new(db, updated_kind)
     }
 }
 
@@ -152,4 +188,10 @@ entity_ref_16bit! {
 pub struct Field<'db> {
     pub name: CompactString,
     pub typ: Type<'db>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct AlgebraicTypeInstance<'db> {
+    pub adt: AlgebraicTypeId,
+    pub type_args: TypeArgs<'db>,
 }
