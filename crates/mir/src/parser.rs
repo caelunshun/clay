@@ -4,13 +4,14 @@ use crate::{
     ir::{
         AlgebraicType, AlgebraicTypeId, AlgebraicTypeInstance, AlgebraicTypeKind, BasicBlockId,
         Constant, ConstantValue, Context, ContextBuilder, Field, FuncHeader, FuncId, FuncInstance,
-        MaybeAssocFunc, StructTypeData, Type, TypeArgs, instr::CompareMode,
+        MaybeAssocFunc, StructTypeData, TraitId, TraitInstance, Type, TypeArgs, TypeParam,
+        TypeParamId, TypeParamIndex, TypeParamScope, TypeParams, instr::CompareMode,
     },
 };
 use SExprRef::*;
 use bumpalo::Bump;
 use compact_str::ToCompactString;
-use cranelift_entity::PrimaryMap;
+use cranelift_entity::{EntityRef, PrimaryMap};
 use fir_core::{
     HashMap,
     sexpr::{SExpr, SExprRef},
@@ -46,6 +47,9 @@ pub fn parse_mir<'db>(db: &'db dyn Database, src: &str) -> Result<Context<'db>, 
         mir_expr: sexpr,
         adts: Default::default(),
         funcs: Default::default(),
+        traits: Default::default(),
+        type_params: Default::default(),
+        current_type_param_scopes: Default::default(),
     };
     parser.parse_mir()?;
 
@@ -68,6 +72,13 @@ struct Parser<'a, 'db> {
     /// are not yet initialized (FuncRef::resolve will panic) until
     /// after parse_funcs_full is called.
     funcs: HashMap<&'a str, FuncId>,
+    traits: HashMap<&'a str, TraitId>,
+    /// Maps type parameter scopes and the corresponding type parameter
+    /// names to type parameter IDs.
+    type_params: HashMap<(TypeParamScope, &'a str), TypeParamId>,
+
+    /// TypeParamScopes accessible in the current scope being parsed.
+    current_type_param_scopes: Vec<TypeParamScope>,
 }
 
 impl<'a, 'db> Parser<'a, 'db> {
@@ -79,8 +90,8 @@ impl<'a, 'db> Parser<'a, 'db> {
         };
 
         self.parse_adts_initial(items)?;
-        self.parse_adts_full(items)?;
         self.parse_funcs_initial(items)?;
+        self.parse_adts_full(items)?;
         self.parse_funcs_full(items)?;
 
         Ok(())
@@ -149,6 +160,11 @@ impl<'a, 'db> Parser<'a, 'db> {
 
     fn parse_type(&mut self, expr: &SExprRef<'a>) -> Result<Type<'db>, ParseError> {
         Ok(match expr {
+            Symbol(type_param_name)
+                if let Some(type_param) = self.search_type_param(type_param_name) =>
+            {
+                Type::new(self.db, TypeKind::TypeParam(type_param))
+            }
             Symbol(adt_name) if let Some(adt) = self.adts.get(adt_name) => Type::new(
                 self.db,
                 TypeKind::Algebraic(AlgebraicTypeInstance {
@@ -175,10 +191,89 @@ impl<'a, 'db> Parser<'a, 'db> {
         })
     }
 
+    /// Populates self.type_params with type parameter ID mappings,
+    /// but does not parse the parameters yet.
+    fn parse_type_params_initial(
+        &mut self,
+        items: &[SExprRef<'a>],
+        scope: TypeParamScope,
+    ) -> Result<(), ParseError> {
+        let mut idx = 0;
+        for decl in items {
+            if let List([Symbol("type_param"), Symbol(name), ..]) = decl {
+                self.type_params.insert(
+                    (scope, *name),
+                    TypeParamId {
+                        scope,
+                        idx: TypeParamIndex::new(idx),
+                    },
+                );
+                idx += 1;
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_type_params(
+        &mut self,
+        items: &[SExprRef<'a>],
+        scope: TypeParamScope,
+    ) -> Result<TypeParams<'db>, ParseError> {
+        let mut type_params = TypeParams::new();
+
+        for decl in items {
+            if let List([Symbol("type_param"), Symbol(name), type_param_decls @ ..]) = decl {
+                let mut is_assoc_type = false;
+                let mut is_mirage = false;
+                let mut trait_bounds = Vec::new();
+
+                for type_param_decl in type_param_decls {
+                    match type_param_decl {
+                        Symbol("mirage") => is_mirage = true,
+                        Symbol("assoc_type") => is_assoc_type = true,
+                        List([Symbol("requires"), trait_instance]) => {
+                            trait_bounds.push(self.parse_trait_instance(trait_instance)?);
+                        }
+                        _ => return Err(ParseError::new("unknown decl in type param")),
+                    }
+                }
+
+                let idx = type_params.push(TypeParam {
+                    is_assoc_type,
+                    is_mirage,
+                    trait_bounds,
+                    name: name.to_compact_string(),
+                });
+                assert_eq!(self.type_params[&(scope, *name)].idx, idx);
+            }
+        }
+
+        Ok(type_params)
+    }
+
+    fn parse_trait_instance(
+        &mut self,
+        expr: &SExprRef<'a>,
+    ) -> Result<TraitInstance<'db>, ParseError> {
+        match expr {
+            Symbol(trait_name) => Ok(TraitInstance::new(
+                self.db,
+                self.get_trait(trait_name)?,
+                TypeArgs::default(),
+            )),
+            _ => todo!(),
+        }
+    }
+
     fn parse_funcs_initial(&mut self, items: &[SExprRef<'a>]) -> Result<(), ParseError> {
         for item in items {
             match item {
                 List([Symbol("func"), Symbol(func_name), decls @ ..]) => {
+                    let func_id = self.cx.alloc_func();
+
+                    self.parse_type_params_initial(decls, TypeParamScope::Func(func_id))?;
+                    self.push_type_param_scope(TypeParamScope::Func(func_id));
+
                     let mut return_type = None;
                     let mut entry_block = None;
                     let mut blocks = HashMap::default();
@@ -214,6 +309,8 @@ impl<'a, 'db> Parser<'a, 'db> {
 
                                 blocks.insert(*block_name, block_header);
                             }
+                            // already parsed by parse_type_params
+                            List([Symbol("type_param"), ..]) => {}
                             _ => return Err(ParseError::new("invalid decl in func expr")),
                         }
                     }
@@ -233,9 +330,10 @@ impl<'a, 'db> Parser<'a, 'db> {
                         type_params: Default::default(),
                     };
 
-                    let func_ref = self.cx.alloc_func();
-                    self.cx.bind_func_header(func_ref, header);
-                    self.funcs.insert(*func_name, func_ref);
+                    self.cx.bind_func_header(func_id, header);
+                    self.funcs.insert(*func_name, func_id);
+
+                    self.pop_type_param_scope(TypeParamScope::Func(func_id));
                 }
                 _ => continue,
             }
@@ -248,8 +346,13 @@ impl<'a, 'db> Parser<'a, 'db> {
         for item in items {
             match item {
                 List([Symbol("func"), Symbol(func_name), decls @ ..]) => {
-                    let func_ref = self.funcs[func_name];
-                    let header = func_ref.resolve_header(self.db, self.cx).clone();
+                    let func_id = self.funcs[func_name];
+                    let header = func_id.resolve_header(self.db, self.cx).clone();
+
+                    self.push_type_param_scope(TypeParamScope::Func(func_id));
+
+                    let type_params =
+                        self.parse_type_params(decls, TypeParamScope::Func(func_id))?;
 
                     let mut func_builder = FuncBuilder::new(
                         self.db,
@@ -257,6 +360,9 @@ impl<'a, 'db> Parser<'a, 'db> {
                         header.return_type,
                         self.cx,
                     );
+                    for type_param in type_params.values() {
+                        func_builder.append_type_param(type_param.clone());
+                    }
                     for &param in &header.param_types {
                         func_builder.append_param(param);
                     }
@@ -272,7 +378,9 @@ impl<'a, 'db> Parser<'a, 'db> {
                     self.parse_blocks_full(decls, &mut state)?;
 
                     let func = state.func_builder.build(self.cx);
-                    self.cx.bind_func(func_ref, Func::new(self.db, func));
+                    self.cx.bind_func(func_id, Func::new(self.db, func));
+
+                    self.pop_type_param_scope(TypeParamScope::Func(func_id));
                 }
                 _ => continue,
             }
@@ -723,6 +831,30 @@ impl<'a, 'db> Parser<'a, 'db> {
         }
 
         Ok(())
+    }
+
+    fn get_trait(&self, name: &str) -> Result<TraitId, ParseError> {
+        self.traits
+            .get(&name)
+            .copied()
+            .ok_or_else(|| ParseError::new(format!("unknown trait `{name}`")))
+    }
+
+    fn push_type_param_scope(&mut self, scope: TypeParamScope) {
+        self.current_type_param_scopes.push(scope);
+    }
+
+    fn pop_type_param_scope(&mut self, scope: TypeParamScope) {
+        assert_eq!(self.current_type_param_scopes.pop(), Some(scope));
+    }
+
+    /// Searches for a named type parameter in the current
+    /// set of type parameter scopes.
+    fn search_type_param(&self, name: &str) -> Option<TypeParamId> {
+        self.current_type_param_scopes
+            .iter()
+            .rev() // prefer top of scope stack
+            .find_map(|scope| self.type_params.get(&(*scope, name)).copied())
     }
 }
 

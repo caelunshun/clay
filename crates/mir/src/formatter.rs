@@ -274,14 +274,12 @@ impl<'db> Formatter<'db> {
         self.current_func = Some(func);
 
         let func_data = func.data(self.db);
-        let mut items = vec![
-            symbol("func"),
-            symbol(func_data.header.name.clone()),
-            list([
-                symbol("return_type"),
-                self.format_type(func_data.header.return_type),
-            ]),
-        ];
+        let mut items = vec![symbol("func"), symbol(func_data.header.name.clone())];
+        items.extend(self.format_type_params(&func_data.header.type_params));
+        items.push(list([
+            symbol("return_type"),
+            self.format_type(func_data.header.return_type),
+        ]));
 
         items.push(list([
             symbol("entry"),
