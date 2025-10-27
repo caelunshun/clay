@@ -1,5 +1,5 @@
 // @harness parser_roundtrip
-// @harness typecheck_validation_fails
+// @harness typecheck_validation_succeeds
 (mir
     (trait One
         (assoc_func one

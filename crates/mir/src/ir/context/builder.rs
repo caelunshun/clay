@@ -88,6 +88,10 @@ impl<'db> ContextBuilder<'db> {
         self.trait_impls.push(trait_impl)
     }
 
+    pub fn next_trait_impl_id(&self) -> TraitImplId {
+        self.trait_impls.next_key()
+    }
+
     pub fn finish(self) -> ContextData<'db> {
         let mut adts = PrimaryMap::new();
         let mut funcs = PrimaryMap::new();

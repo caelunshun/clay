@@ -4,15 +4,15 @@ use crate::{
     ir::{
         AlgebraicType, AlgebraicTypeId, AlgebraicTypeInstance, AlgebraicTypeKind, AssocFunc,
         BasicBlockId, Constant, ConstantValue, Context, ContextBuilder, Field, FuncHeader, FuncId,
-        FuncInstance, MaybeAssocFunc, StructTypeData, Trait, TraitData, TraitId, TraitInstance,
-        Type, TypeArgs, TypeParam, TypeParamId, TypeParamIndex, TypeParamScope, TypeParams,
-        instr::CompareMode,
+        FuncInstance, MaybeAssocFunc, StructTypeData, Trait, TraitData, TraitId, TraitImpl,
+        TraitImplData, TraitInstance, Type, TypeArgs, TypeParam, TypeParamId, TypeParamIndex,
+        TypeParamScope, TypeParams, instr::CompareMode,
     },
 };
 use SExprRef::*;
 use bumpalo::Bump;
 use compact_str::ToCompactString;
-use cranelift_entity::{EntityRef, PrimaryMap};
+use cranelift_entity::{EntityRef, PrimaryMap, SecondaryMap};
 use fir_core::{
     HashMap,
     sexpr::{SExpr, SExprRef},
@@ -96,6 +96,7 @@ impl<'a, 'db> Parser<'a, 'db> {
         self.parse_traits_full(items)?;
         self.parse_adts_full(items)?;
         self.parse_funcs_full(items)?;
+        self.parse_trait_impls(items)?;
 
         assert!(self.current_type_param_scopes.is_empty());
 
@@ -272,6 +273,7 @@ impl<'a, 'db> Parser<'a, 'db> {
                     type_args: Default::default(),
                 }),
             ),
+            Symbol("Self") => Type::new(self.db, TypeKind::Self_),
             Symbol("int") => Type::int(self.db),
             Symbol("real") => Type::real(self.db),
             Symbol("byte") => Type::byte(self.db),
@@ -363,6 +365,86 @@ impl<'a, 'db> Parser<'a, 'db> {
             )),
             _ => todo!(),
         }
+    }
+
+    fn parse_trait_impls(&mut self, items: &[SExprRef<'a>]) -> Result<(), ParseError> {
+        for item in items {
+            if let List([Symbol("trait_impl"), decls @ ..]) = item {
+                let tp_scope = TypeParamScope::TraitImpl(self.cx.next_trait_impl_id());
+                self.parse_type_params_initial(decls, tp_scope)?;
+
+                self.push_type_param_scope(tp_scope);
+                let type_params = self.parse_type_params(decls, tp_scope)?;
+
+                let mut trait_instance = None;
+                let mut impl_for_type = None;
+                let mut assoc_func_bindings = SecondaryMap::new();
+
+                for decl in decls {
+                    match decl {
+                        List([Symbol("trait"), trait_instance_expr]) => {
+                            trait_instance = Some(self.parse_trait_instance(trait_instance_expr)?);
+                        }
+                        List([Symbol("type"), impl_for_type_expr]) => {
+                            impl_for_type = Some(self.parse_type(impl_for_type_expr)?);
+                        }
+                        List(
+                            [
+                                Symbol("assoc_func"),
+                                Symbol(assoc_func_name),
+                                bound_func_instance,
+                            ],
+                        ) => {
+                            let trait_instance = trait_instance.ok_or_else(|| {
+                                ParseError::new("assoc_func decl cannot appear before trait decl in a trait_impl")
+                            })?;
+                            let assoc_func = trait_instance
+                                .trait_(self.db)
+                                .resolve(self.db, &self.cx)
+                                .data(self.db)
+                                .assoc_funcs
+                                .iter()
+                                .find_map(|(id, assoc_func)| {
+                                    if assoc_func.name == assoc_func_name {
+                                        Some(id)
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .ok_or_else(|| {
+                                    ParseError::new(format!(
+                                        "could not find assoc func '{assoc_func_name}'"
+                                    ))
+                                })?;
+
+                            assoc_func_bindings[assoc_func] =
+                                Some(self.parse_func_instance(bound_func_instance)?);
+                        }
+                        _ => return Err(ParseError::new("invalid trait_impl decl")),
+                    }
+                }
+
+                self.cx.add_trait_impl(
+                    self.db,
+                    TraitImpl::new(
+                        self.db,
+                        TraitImplData {
+                            type_params,
+                            impl_for_type: impl_for_type.ok_or_else(|| {
+                                ParseError::new("missing type decl for trait impl")
+                            })?,
+                            trait_: trait_instance.ok_or_else(|| {
+                                ParseError::new("missing trait decl for trait_impl")
+                            })?,
+                            assoc_func_bindings,
+                        },
+                    ),
+                );
+
+                self.pop_type_param_scope(tp_scope);
+            }
+        }
+        Ok(())
     }
 
     fn parse_funcs_initial(&mut self, items: &[SExprRef<'a>]) -> Result<(), ParseError> {
