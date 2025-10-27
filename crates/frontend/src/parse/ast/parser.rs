@@ -1,17 +1,19 @@
 use crate::{
     base::{
-        LeafDiag, Level, Session,
+        ErrorGuaranteed, LeafDiag, Level, Session,
         syntax::{Matcher as _, Span},
     },
     kw,
     parse::{
         ast::{
-            AstAttribute, AstItem, AstItemKind, AstItemModule, AstItemModuleContents,
-            AstSimplePath, AstVisibility, AstVisibilityKind, Keyword, PunctSeq,
+            AstAttribute, AstGenericDef, AstGenericDefKind, AstGenericDefList, AstItem,
+            AstItemKind, AstItemModule, AstItemModuleContents, AstItemTrait, AstSimplePath,
+            AstTraitClause, AstTraitClauseKind, AstTraitClauseList, AstTraitParam, AstVisibility,
+            AstVisibilityKind, Keyword, PunctSeq,
         },
         token::{
-            GroupDelimiter, Ident, Punct, TokenCharLit, TokenCursor, TokenGroup, TokenMatcher,
-            TokenNumLit, TokenParser, TokenPunct, TokenStrLit, token_matcher,
+            GroupDelimiter, Ident, Lifetime, Punct, TokenCharLit, TokenCursor, TokenGroup,
+            TokenMatcher, TokenNumLit, TokenParser, TokenPunct, TokenStrLit, token_matcher,
         },
     },
     punct, puncts, symbol,
@@ -28,7 +30,7 @@ pub fn parse_file(tokens: &TokenGroup) -> AstItemModuleContents {
     parse_mod_contents(&mut p)
 }
 
-pub fn parse_mod_contents(p: P) -> AstItemModuleContents {
+fn parse_mod_contents(p: P) -> AstItemModuleContents {
     let mut inner_attrs = Vec::new();
     let mut items = Vec::new();
 
@@ -66,7 +68,7 @@ pub fn parse_mod_contents(p: P) -> AstItemModuleContents {
     AstItemModuleContents { inner_attrs, items }
 }
 
-pub fn parse_visibility(p: P) -> AstVisibility {
+fn parse_visibility(p: P) -> AstVisibility {
     let start = p.next_span();
 
     if match_kw(kw!("pub")).expect(p).is_some() {
@@ -103,7 +105,7 @@ pub fn parse_visibility(p: P) -> AstVisibility {
     }
 }
 
-pub fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
+fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
     let start = p.next_span();
 
     let vis = parse_visibility(p);
@@ -150,6 +152,29 @@ pub fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
         }
     }
 
+    if match_kw(kw!("trait")).expect(p).is_some() {
+        let Some(name) = match_ident().expect(p) else {
+            return Some(make_item(
+                AstItemKind::Error(p.stuck_recover_with(|_| {
+                    // TODO: Recover more intelligently
+                })),
+                p,
+            ));
+        };
+
+        let generics = parse_generic_def_list(p);
+
+        return Some(make_item(
+            AstItemKind::Trait(AstItemTrait {
+                name,
+                generics,
+                // TODO: parse members
+                members: Vec::new(),
+            }),
+            p,
+        ));
+    }
+
     if !uncommitted {
         return Some(make_item(
             AstItemKind::Error(p.stuck_recover_with(|_| {
@@ -162,7 +187,7 @@ pub fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
     None
 }
 
-pub fn parse_attributes(p: P) -> Vec<AstAttribute> {
+fn parse_attributes(p: P) -> Vec<AstAttribute> {
     let mut attrs = Vec::new();
 
     while let Some(attr) = parse_attribute(p) {
@@ -172,7 +197,7 @@ pub fn parse_attributes(p: P) -> Vec<AstAttribute> {
     attrs
 }
 
-pub fn parse_attribute(p: P) -> Option<AstAttribute> {
+fn parse_attribute(p: P) -> Option<AstAttribute> {
     let start = p.next_span();
 
     match_punct(punct!('#')).expect(p)?;
@@ -217,7 +242,7 @@ pub fn parse_attribute(p: P) -> Option<AstAttribute> {
     })
 }
 
-pub fn parse_simple_path(p: P) -> Option<AstSimplePath> {
+fn parse_simple_path(p: P) -> Option<AstSimplePath> {
     let start = p.next_span();
 
     let mut parts = Vec::new();
@@ -250,7 +275,7 @@ pub fn parse_simple_path(p: P) -> Option<AstSimplePath> {
     })
 }
 
-pub fn parse_path_part(p: P) -> Option<Ident> {
+fn parse_path_part(p: P) -> Option<Ident> {
     if let Some(ident) = match_ident().expect(p) {
         return Some(ident);
     }
@@ -262,6 +287,121 @@ pub fn parse_path_part(p: P) -> Option<Ident> {
     }
 
     None
+}
+
+// === Type Parsing === //
+
+fn parse_generic_def_list(p: P) -> Option<AstGenericDefList> {
+    let start = match_punct(punct!('<')).expect(p)?;
+
+    let defs = parse_delimited_until_terminator(
+        p,
+        &mut (),
+        |p, ()| parse_generic_def(p),
+        |p, ()| match_punct(punct!(',')).expect(p).is_some(),
+        |p, ()| match_punct(punct!('>')).expect(p).is_some(),
+    );
+
+    Some(AstGenericDefList {
+        span: start.span.to(p.prev_span()),
+        defs: defs.elems,
+    })
+}
+
+fn parse_generic_def(p: P) -> Result<AstGenericDef, ErrorGuaranteed> {
+    let start = p.next_span();
+
+    let kind = 'kind: {
+        if let Some(name) = match_ident().expect(p) {
+            break 'kind AstGenericDefKind::Type(name);
+        }
+
+        if let Some(name) = match_lifetime().expect(p) {
+            break 'kind AstGenericDefKind::Lifetime(name);
+        }
+
+        return Err(p.stuck_recover_with(|_| {
+            // TODO: Recover more intelligently
+        }));
+    };
+
+    if match_punct(punct!(':')).expect(p).is_none() {
+        return Ok(AstGenericDef {
+            span: start.to(p.prev_span()),
+            kind,
+            clauses: None,
+        });
+    }
+
+    let clauses = parse_trait_clause_list(p);
+
+    Ok(AstGenericDef {
+        span: start.to(p.prev_span()),
+        kind,
+        clauses: Some(clauses),
+    })
+}
+
+fn parse_trait_clause_list(p: P) -> AstTraitClauseList {
+    let start = p.next_span();
+
+    let mut clauses = Vec::new();
+
+    loop {
+        clauses.push(parse_trait_clause(p));
+
+        if match_punct(punct!('+')).expect(p).is_none() {
+            break;
+        }
+    }
+
+    AstTraitClauseList {
+        span: start.to(p.prev_span()),
+        clauses,
+    }
+}
+
+fn parse_trait_clause(p: P) -> Result<AstTraitClause, ErrorGuaranteed> {
+    let start = p.next_span();
+
+    if let Some(lifetime) = match_lifetime().expect(p) {
+        return Ok(AstTraitClause {
+            span: start.to(p.prev_span()),
+            kind: AstTraitClauseKind::Outlives(lifetime),
+        });
+    }
+
+    if let Some(path) = parse_simple_path(p) {
+        let params = parse_trait_param_list(p);
+
+        return Ok(AstTraitClause {
+            span: start.to(p.prev_span()),
+            kind: AstTraitClauseKind::Trait(path, params),
+        });
+    }
+
+    Err(p.stuck_recover_with(|_| {
+        // TODO: Recover more intelligently
+    }))
+}
+
+fn parse_trait_param_list(p: P) -> Vec<AstTraitParam> {
+    if match_punct(punct!('<')).expect(p).is_none() {
+        return Vec::new();
+    }
+
+    parse_delimited_until_terminator(
+        p,
+        &mut (),
+        |p, ()| parse_trait_param(p),
+        |p, ()| match_punct(punct!(',')).expect(p).is_some(),
+        |p, ()| match_punct(punct!('>')).expect(p).is_some(),
+    )
+    .elems
+}
+
+fn parse_trait_param(p: P) -> AstTraitParam {
+    todo!();
 }
 
 // === Helpers === //
@@ -352,6 +492,12 @@ fn match_num_lit() -> impl TokenMatcher<Output = Option<TokenNumLit>> {
     })
 }
 
+fn match_lifetime() -> impl TokenMatcher<Output = Option<Lifetime>> {
+    token_matcher(symbol!("lifetime"), |c, _| {
+        c.eat().and_then(|v| v.lifetime()).copied()
+    })
+}
+
 struct Delimited<E> {
     elems: Vec<E>,
     trailing: bool,
@@ -371,28 +517,28 @@ impl<E> Delimited<E> {
     }
 }
 
-fn parse_delimited<C: ?Sized, E>(
+fn parse_delimited_until_terminator<C: ?Sized, E>(
     p: P,
     cx: &mut C,
     mut match_elem: impl FnMut(P, &mut C) -> E,
     mut match_delimiter: impl FnMut(P, &mut C) -> bool,
-    mut match_eos: impl FnMut(P, &mut C) -> bool,
+    mut match_terminator: impl FnMut(P, &mut C) -> bool,
 ) -> Delimited<E> {
     let mut elems = Vec::new();
 
     let trailing = loop {
-        if match_eos(p, cx) {
+        if match_terminator(p, cx) {
             break !elems.is_empty();
         }
 
         elems.push(match_elem(p, cx));
 
-        if match_eos(p, cx) {
+        if match_terminator(p, cx) {
             break false;
         }
 
         if !match_delimiter(p, cx) {
-            if !match_eos(p, cx) {
+            if !match_terminator(p, cx) {
                 // Recovery strategy: ignore.
                 p.stuck_recover_with(|_| {});
             }
@@ -405,7 +551,7 @@ fn parse_delimited<C: ?Sized, E>(
 }
 
 fn parse_comma_group<E>(p: P, mut match_elem: impl FnMut(P) -> E) -> Delimited<E> {
-    parse_delimited(
+    parse_delimited_until_terminator(
         p,
         &mut (),
         |p, _| match_elem(p),

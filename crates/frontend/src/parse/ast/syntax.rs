@@ -1,6 +1,7 @@
 use crate::{
     base::{ErrorGuaranteed, syntax::Span},
     parse::token::{Ident, Lifetime, TokenStream},
+    typeck::syntax::TraitClauseList,
 };
 
 // === Item === //
@@ -16,6 +17,7 @@ pub struct AstItem {
 #[derive(Debug, Clone)]
 pub enum AstItemKind {
     Mod(AstItemModule),
+    Trait(AstItemTrait),
     Error(ErrorGuaranteed),
 }
 
@@ -34,6 +36,19 @@ pub struct AstItemModuleContents {
 #[derive(Debug, Clone)]
 pub struct AstItemTrait {
     pub name: Ident,
+    pub generics: Option<AstGenericDefList>,
+    pub members: Vec<AstTraitMember>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AstTraitMember {
+    pub span: Span,
+    pub kind: AstTraitMemberKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum AstTraitMemberKind {
+    AssocType(Ident, TraitClauseList),
 }
 
 // === Item Helpers === //
@@ -69,16 +84,28 @@ pub struct AstSimplePath {
 // === Clauses === //
 
 #[derive(Debug, Clone)]
+pub struct AstGenericDefList {
+    pub span: Span,
+    pub defs: Vec<Result<AstGenericDef, ErrorGuaranteed>>,
+}
+
+#[derive(Debug, Clone)]
 pub struct AstGenericDef {
     pub span: Span,
-    pub name: Ident,
-    pub clauses: AstTraitClauseList,
+    pub kind: AstGenericDefKind,
+    pub clauses: Option<AstTraitClauseList>,
+}
+
+#[derive(Debug, Clone)]
+pub enum AstGenericDefKind {
+    Lifetime(Lifetime),
+    Type(Ident),
 }
 
 #[derive(Debug, Clone)]
 pub struct AstTraitClauseList {
     pub span: Span,
-    pub clauses: Vec<AstTraitClause>,
+    pub clauses: Vec<Result<AstTraitClause, ErrorGuaranteed>>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,5 +117,42 @@ pub struct AstTraitClause {
 #[derive(Debug, Clone)]
 pub enum AstTraitClauseKind {
     Outlives(Lifetime),
-    Trait(),
+    Trait(AstSimplePath, Vec<AstTraitParam>),
+}
+
+#[derive(Debug, Clone)]
+pub struct AstTraitParam {
+    pub span: Span,
+    pub kind: AstTraitParamKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum AstTraitParamKind {
+    PositionalEquals(AstTyOrRe),
+    NamedEquals(Ident, AstTyOrRe),
+    Unspecified(Ident, AstTraitClauseList),
+}
+
+// === Types === //
+
+#[derive(Debug, Clone)]
+pub enum AstTyOrRe {
+    Re(Lifetime),
+    Ty(AstTy),
+}
+
+#[derive(Debug, Clone)]
+pub struct AstTy {
+    pub span: Span,
+    pub kind: AstTyKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum AstTyKind {
+    This,
+    Name(AstSimplePath, Vec<AstTyOrRe>),
+    Reference(Option<Lifetime>, Box<AstTy>),
+    Trait(AstTraitClauseList),
+    Tuple(Vec<AstTy>),
+    Infer,
 }
