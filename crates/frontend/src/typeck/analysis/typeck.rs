@@ -284,7 +284,7 @@ impl TyCtxt {
         binder
     }
 
-    pub fn wf_check_impl_regular_generic_solve_order(&self, def: Obj<ImplDef>) {
+    pub fn wf_check_impl_generic_solve_order(&self, def: Obj<ImplDef>) {
         todo!();
     }
 
@@ -890,7 +890,7 @@ mod tests {
             )
         };
 
-        tcx.wf_check_impl_regular_generic_solve_order(my_impl);
+        tcx.wf_check_impl_generic_solve_order(my_impl);
 
         LateInit::init(&my_trait.r(s).impls, vec![my_impl]);
 

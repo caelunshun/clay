@@ -7,7 +7,7 @@ use crate::{
         Diag, LeafDiag, Session,
         syntax::{CharCursor, CharParser, Parser, RawCharCursor, Span, Symbol},
     },
-    parse::token::{NumLitBase, TokenNumLit, punct},
+    parse::token::{Lifetime, NumLitBase, TokenNumLit, punct},
     symbol,
 };
 use unicode_xid::UnicodeXID;
@@ -195,9 +195,9 @@ fn parse_group(p: P, group_start: Span, delimiter: GroupDelimiter) -> TokenGroup
             continue;
         }
 
-        // Parse character
-        if let Some(ch) = parse_char_lit(p) {
-            builder.push(ch);
+        // Parse character or lifetime
+        if let Some(v) = parse_char_lit_or_lifetime(p) {
+            builder.push(v);
             continue;
         }
 
@@ -398,39 +398,85 @@ fn parse_string_lit(
     })
 }
 
-fn parse_char_lit(p: P) -> Option<TokenCharLit> {
+fn parse_char_lit_or_lifetime(p: P) -> Option<TokenTree> {
     let start = p.next_span();
 
     if !p.expect(symbol!("`'`"), |c| match_ch(c, '\'')) {
         return None;
     }
 
-    let value = 'parse_ch: {
+    let mut accum = String::new();
+    let mut accum_no_escapes = true;
+
+    loop {
+        // Match closing quote
+        if p.expect_covert(accum.len() == 1, symbol!("`'`"), |c| match_ch(c, '\'')) {
+            if accum.len() != 1 {
+                _ = p.err(Diag::span_err(
+                    start.to(p.prev_span()),
+                    "expected single character in character literal",
+                ));
+            }
+
+            return Some(
+                TokenCharLit {
+                    span: start.to(p.prev_span()),
+                    value: accum.chars().next().unwrap_or('?'),
+                }
+                .into(),
+            );
+        }
+
+        // Match escape
         if let Some(ch) = parse_char_escape(p) {
-            break 'parse_ch ch;
+            accum.push(ch);
+            accum_no_escapes = false;
+            continue;
         }
 
-        if let Some(ch) = parse_regular_char(p) {
-            break 'parse_ch ch;
+        // Match first character (can be anything)
+        if accum.is_empty() {
+            if let Some(ch) = parse_regular_char(p) {
+                accum.push(ch);
+                continue;
+            } else {
+                // Recovery strategy: none
+                p.stuck_recover_with(|_| {});
+                return None;
+            }
         }
 
-        // Recovery strategy: parse this unexpected character (EOF, probably) as a token.
-        let _ = p.stuck();
+        // Match subsequent lifetime characters.
+        if let Some(ch) = p.expect(symbol!("lifetime character"), |c| {
+            c.eat().filter(|c| c.is_xid_continue())
+        }) {
+            accum.push(ch);
+            continue;
+        }
 
-        '?'
-    };
+        // Otherwise, we've finished our lifetime.
+        if !accum_no_escapes {
+            _ = p.err(Diag::span_err(
+                start.to(p.prev_span()),
+                "lifetime cannot contain escapes",
+            ));
+        }
 
-    if !p.expect(symbol!("`'`"), |c| match_ch(c, '\'')) {
-        // Recovery strategy: parse this unexpected character as the next token.
-        let _ = p.stuck();
+        if !accum.chars().next().unwrap().is_xid_start() {
+            _ = p.err(Diag::span_err(
+                start.to(p.prev_span()),
+                "lifetime cannot start with that character",
+            ));
+        }
 
-        // (fallthrough)
+        return Some(
+            Lifetime {
+                span: start.to(p.prev_span()),
+                name: Symbol::new(&accum),
+            }
+            .into(),
+        );
     }
-
-    Some(TokenCharLit {
-        span: start.to(p.prev_span()),
-        value,
-    })
 }
 
 fn parse_char_escape(p: P) -> Option<char> {

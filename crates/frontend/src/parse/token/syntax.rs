@@ -53,6 +53,7 @@ impl<'a> IntoIterator for &'a TokenStream {
 pub enum TokenTree {
     Group(TokenGroup),
     Ident(Ident),
+    Lifetime(Lifetime),
     Punct(TokenPunct),
     NumLit(TokenNumLit),
     StrLit(TokenStrLit),
@@ -72,6 +73,7 @@ impl Spanned for TokenTree {
         match self {
             Self::Group(v) => v.span(),
             Self::Ident(v) => v.span(),
+            Self::Lifetime(v) => v.span(),
             Self::Punct(v) => v.span(),
             Self::NumLit(v) => v.span(),
             Self::StrLit(v) => v.span(),
@@ -122,6 +124,7 @@ macro_rules! token_tree_converters {
 token_tree_converters! {
     Group: TokenGroup,
     Ident: Ident,
+    Lifetime: Lifetime,
     Punct: TokenPunct,
     NumLit: TokenNumLit,
     StrLit: TokenStrLit,
@@ -201,6 +204,18 @@ pub struct Ident {
 }
 
 impl Spanned for Ident {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct Lifetime {
+    pub span: Span,
+    pub name: Symbol,
+}
+
+impl Spanned for Lifetime {
     fn span(&self) -> Span {
         self.span
     }

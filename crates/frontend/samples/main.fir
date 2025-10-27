@@ -1,4 +1,4 @@
-#![doc("Welcome to my module!")]
+#![doc("Welcome to my module!" 'wazoo)]
 
 mod whee {
     pub mod waz;

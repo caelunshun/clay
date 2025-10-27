@@ -1,6 +1,6 @@
 use crate::{
     base::{ErrorGuaranteed, syntax::Span},
-    parse::token::{Ident, TokenStream},
+    parse::token::{Ident, Lifetime, TokenStream},
 };
 
 // === Item === //
@@ -32,6 +32,13 @@ pub struct AstItemModuleContents {
 }
 
 #[derive(Debug, Clone)]
+pub struct AstItemTrait {
+    pub name: Ident,
+}
+
+// === Item Helpers === //
+
+#[derive(Debug, Clone)]
 pub struct AstVisibility {
     pub span: Span,
     pub kind: AstVisibilityKind,
@@ -46,15 +53,42 @@ pub enum AstVisibilityKind {
 }
 
 #[derive(Debug, Clone)]
-pub struct AstSimplePath {
-    pub span: Span,
-    pub parts: Vec<Ident>,
-}
-
-#[derive(Debug, Clone)]
 pub struct AstAttribute {
     pub span: Span,
     pub is_inner: bool,
     pub path: AstSimplePath,
     pub args: TokenStream,
+}
+
+#[derive(Debug, Clone)]
+pub struct AstSimplePath {
+    pub span: Span,
+    pub parts: Vec<Ident>,
+}
+
+// === Clauses === //
+
+#[derive(Debug, Clone)]
+pub struct AstGenericDef {
+    pub span: Span,
+    pub name: Ident,
+    pub clauses: AstTraitClauseList,
+}
+
+#[derive(Debug, Clone)]
+pub struct AstTraitClauseList {
+    pub span: Span,
+    pub clauses: Vec<AstTraitClause>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AstTraitClause {
+    pub span: Span,
+    pub kind: AstTraitClauseKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum AstTraitClauseKind {
+    Outlives(Lifetime),
+    Trait(),
 }
