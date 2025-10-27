@@ -2,13 +2,25 @@ use crate::{
     InstrData, PrimType, TypeKind, ValId,
     ir::{
         AlgebraicTypeKind, BasicBlockId, Context, FuncData, FuncInstance, MaybeAssocFunc,
-        StructTypeData, Type, TypeArgs, TypeParamId,
+        StructTypeData, TraitImpl, Type, TypeArgs, TypeParamId,
     },
     trait_resolution,
     validation::ValidationError,
 };
 use cranelift_entity::EntityList;
 use salsa::Database;
+
+pub fn verify_all<'db>(db: &'db dyn Database, cx: Context<'db>) -> Result<(), ValidationError> {
+    for func in cx.data(db).funcs.values() {
+        verify_instr_types(db, cx, func.data(db))?;
+    }
+
+    for trait_impl in cx.data(db).trait_impls.values() {
+        verify_trait_impl(db, cx, *trait_impl)?;
+    }
+
+    Ok(())
+}
 
 /// Verifies that operands have the correct type for each instruction.
 pub fn verify_instr_types<'db>(
@@ -436,4 +448,69 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
     fn is_ref(&self, t: Type<'db>) -> bool {
         matches!(t.kind(self.db), TypeKind::MRef(_))
     }
+}
+
+/// Verifies that a trait_impl is well-formed.
+pub fn verify_trait_impl<'db>(
+    db: &'db dyn Database,
+    cx: Context<'db>,
+    trait_impl: TraitImpl<'db>,
+) -> Result<(), ValidationError> {
+    let trait_instance = trait_impl.data(db).trait_;
+    let trait_data = trait_instance.trait_(db).resolve(db, cx).data(db);
+
+    for (assoc_func, binding) in trait_impl.data(db).assoc_func_bindings.iter() {
+        if !trait_data.assoc_funcs.is_valid(assoc_func) {
+            continue;
+        }
+
+        let assoc_func_data = &trait_data.assoc_funcs[assoc_func];
+
+        let Some(binding) = *binding else {
+            return Err(ValidationError::new(format!(
+                "missing binding for assoc_func '{}'",
+                assoc_func_data.name
+            )));
+        };
+
+        let bound_ret_type = binding.return_type(db, &cx);
+        let expected_ret_type = assoc_func_data
+            .return_type
+            .substitute_type_args(db, trait_instance.type_args(db))
+            .substitute_self_type(db, trait_impl.data(db).impl_for_type);
+
+        if bound_ret_type != expected_ret_type {
+            return Err(ValidationError::new(format!(
+                "return type for assoc func does not match: expected {:?}, found {:?}",
+                expected_ret_type.kind(db),
+                bound_ret_type.kind(db)
+            )));
+        }
+
+        if assoc_func_data.param_types.len() != binding.param_types(db, &cx).len() {
+            return Err(ValidationError::new(
+                "wrong number of parameters for assoc_func binding",
+            ));
+        }
+
+        for (expected_type, actual_type) in assoc_func_data
+            .param_types
+            .iter()
+            .copied()
+            .zip(binding.param_types(db, &cx))
+        {
+            let expected_type = expected_type
+                .substitute_type_args(db, trait_instance.type_args(db))
+                .substitute_self_type(db, trait_impl.data(db).impl_for_type);
+            if actual_type != expected_type {
+                return Err(ValidationError::new(format!(
+                    "parameter type for assoc func does not match: expected {:?}, found {:?}",
+                    expected_type.kind(db),
+                    actual_type.kind(db),
+                )));
+            }
+        }
+    }
+
+    Ok(())
 }

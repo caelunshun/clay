@@ -51,16 +51,8 @@ mod harnesses {
     /// Verifies that typecheck validation passes on the given module.
     pub fn typecheck_validation_succeeds(input_str: &'static str) {
         with_parsed_context(input_str, |db, cx| {
-            for func in cx.data(db).funcs.values() {
-                validation::typecheck::verify_instr_types(db, cx, func.data(db)).unwrap_or_else(
-                    |e| {
-                        panic!(
-                            "failed typecheck for func '{}': {e:?}",
-                            func.data(db).header.name
-                        )
-                    },
-                );
-            }
+            validation::typecheck::verify_all(db, cx)
+                .unwrap_or_else(|e| panic!("failed typecheck: {e:?}",));
         });
     }
 
@@ -68,10 +60,8 @@ mod harnesses {
     pub fn typecheck_validation_fails(input_str: &'static str) {
         let mut had_failure = false;
         with_parsed_context(input_str, |db, cx| {
-            for func in cx.data(db).funcs.values() {
-                if validation::typecheck::verify_instr_types(db, cx, func.data(db)).is_err() {
-                    had_failure = true;
-                }
+            if validation::typecheck::verify_all(db, cx).is_err() {
+                had_failure = true;
             }
         });
         assert!(
