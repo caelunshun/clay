@@ -407,11 +407,12 @@ fn parse_char_lit_or_lifetime(p: P) -> Option<TokenTree> {
 
     let mut accum = String::new();
     let mut accum_no_escapes = true;
+    let mut char_count = 0;
 
     loop {
         // Match closing quote
-        if p.expect_covert(accum.len() == 1, symbol!("`'`"), |c| match_ch(c, '\'')) {
-            if accum.len() != 1 {
+        if p.expect_covert(char_count == 1, symbol!("`'`"), |c| match_ch(c, '\'')) {
+            if char_count != 1 {
                 _ = p.err(Diag::span_err(
                     start.to(p.prev_span()),
                     "expected single character in character literal",
@@ -430,6 +431,7 @@ fn parse_char_lit_or_lifetime(p: P) -> Option<TokenTree> {
         // Match escape
         if let Some(ch) = parse_char_escape(p) {
             accum.push(ch);
+            char_count += 1;
             accum_no_escapes = false;
             continue;
         }
@@ -438,6 +440,7 @@ fn parse_char_lit_or_lifetime(p: P) -> Option<TokenTree> {
         if accum.is_empty() {
             if let Some(ch) = parse_regular_char(p) {
                 accum.push(ch);
+                char_count += 1;
                 continue;
             } else {
                 // Recovery strategy: none
@@ -451,6 +454,7 @@ fn parse_char_lit_or_lifetime(p: P) -> Option<TokenTree> {
             c.eat().filter(|c| c.is_xid_continue())
         }) {
             accum.push(ch);
+            char_count += 1;
             continue;
         }
 
