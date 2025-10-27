@@ -478,6 +478,10 @@ impl TyCtxt {
         }
     }
 
+    // FIXME: Multiple traits may be applicable if inference variables are involved in the `lhs`
+    //  type or `rhs_params` parameter list. We should report those situations and use the
+    //  `ImplDef::generic_solve_order` to ensure that we never unnecessarily create them in nested
+    //  inferences.
     pub fn check_trait_assignability_erase_regions(
         &self,
         lhs: Ty,
@@ -846,6 +850,7 @@ mod tests {
                         tcx.intern_ty(TyKind::Universal(type_t)),
                     ]))),
                     methods: LateInit::new(Vec::new()),
+                    generic_solve_order: LateInit::uninit(),
                 },
                 s,
             )
