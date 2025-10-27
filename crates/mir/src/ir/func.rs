@@ -2,7 +2,7 @@ use crate::{
     InstrData,
     ir::{
         ContextLike, TraitInstance, TypeArgs, TypeParamScope, TypeParams, context::FuncId,
-        trait_::AssocFuncId, typ::Type,
+        merge_type_args, trait_::AssocFuncId, typ::Type,
     },
 };
 use compact_str::CompactString;
@@ -223,16 +223,19 @@ impl<'db> FuncInstance<'db> {
                 .return_type
                 .substitute_type_args(db, self.type_args(db)),
             MaybeAssocFunc::AssocFunc {
-                trait_,
+                trait_: trait_instance,
                 typ,
                 assoc_func,
             } => {
-                let trait_ = trait_.trait_(db).resolve(db, cx);
+                let trait_ = trait_instance.trait_(db).resolve(db, cx);
                 let assoc_func = &trait_.data(db).assoc_funcs[assoc_func];
+
+                let type_args = merge_type_args(trait_instance.type_args(db), self.type_args(db));
+
                 assoc_func
                     .return_type
+                    .substitute_type_args(db, &type_args)
                     .substitute_self_type(db, typ)
-                    .substitute_type_args(db, self.type_args(db))
             }
         }
     }
@@ -248,20 +251,23 @@ impl<'db> FuncInstance<'db> {
                 .map(|param_type| param_type.substitute_type_args(db, self.type_args(db)))
                 .collect(),
             MaybeAssocFunc::AssocFunc {
-                trait_,
+                trait_: trait_instance,
                 typ,
                 assoc_func,
             } => {
-                let trait_ = trait_.trait_(db).resolve(db, cx);
+                let trait_ = trait_instance.trait_(db).resolve(db, cx);
                 let assoc_func = &trait_.data(db).assoc_funcs[assoc_func];
+
+                let type_args = merge_type_args(trait_instance.type_args(db), self.type_args(db));
+
                 assoc_func
                     .param_types
                     .iter()
                     .copied()
                     .map(|param_type| {
                         param_type
+                            .substitute_type_args(db, &type_args)
                             .substitute_self_type(db, typ)
-                            .substitute_type_args(db, self.type_args(db))
                     })
                     .collect()
             }

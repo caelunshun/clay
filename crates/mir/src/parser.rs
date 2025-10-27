@@ -205,8 +205,10 @@ impl<'a, 'db> Parser<'a, 'db> {
     fn parse_adts_initial(&mut self, items: &[SExprRef<'a>]) -> Result<(), ParseError> {
         for item in items {
             match item {
-                List([Symbol("adt"), Symbol(type_name), ..]) => {
-                    self.adts.insert(*type_name, self.cx.alloc_adt());
+                List([Symbol("adt"), Symbol(type_name), decls @ ..]) => {
+                    let adt_id = self.cx.alloc_adt();
+                    self.adts.insert(*type_name, adt_id);
+                    self.parse_type_params_initial(decls, TypeParamScope::Adt(adt_id))?;
                 }
                 _ => continue,
             }
@@ -214,23 +216,34 @@ impl<'a, 'db> Parser<'a, 'db> {
         Ok(())
     }
 
-    /// Initializes all defined types. Must be
-    /// called after parse_types_initial.
+    /// Initializes all defined ADTs. Must be
+    /// called after parse_adts_initial.
     fn parse_adts_full(&mut self, items: &[SExprRef<'a>]) -> Result<(), ParseError> {
         for item in items {
             match item {
-                List([Symbol("adt"), Symbol(type_name), type_data]) => {
-                    let adt = self.parse_adt(type_data)?;
+                List([Symbol("adt"), Symbol(type_name), decls @ ..]) => {
+                    let adt_id = self.adts[type_name];
+
+                    let tp_scope = TypeParamScope::Adt(adt_id);
+
+                    self.push_type_param_scope(tp_scope);
+
+                    let type_params = self.parse_type_params(decls, tp_scope)?;
+
+                    let adt = self.parse_adt(decls)?;
+
                     self.cx.bind_adt(
                         self.db,
-                        self.adts[type_name],
+                        adt_id,
                         AlgebraicType::new(
                             self.db,
                             type_name.to_compact_string(),
-                            Default::default(),
+                            type_params,
                             adt,
                         ),
                     );
+
+                    self.pop_type_param_scope(tp_scope);
                 }
                 _ => continue,
             }
@@ -238,9 +251,9 @@ impl<'a, 'db> Parser<'a, 'db> {
         Ok(())
     }
 
-    fn parse_adt(&mut self, expr: &SExprRef<'a>) -> Result<AlgebraicTypeKind<'db>, ParseError> {
-        match expr {
-            List([Symbol("struct"), decls @ ..]) => {
+    fn parse_adt(&mut self, decls: &[SExprRef<'a>]) -> Result<AlgebraicTypeKind<'db>, ParseError> {
+        for decl in decls {
+            if let List([Symbol("struct"), decls @ ..]) = decl {
                 let mut fields = PrimaryMap::new();
 
                 for decl in decls {
@@ -253,10 +266,13 @@ impl<'a, 'db> Parser<'a, 'db> {
                     });
                 }
 
-                Ok(AlgebraicTypeKind::Struct(StructTypeData { fields }))
+                return Ok(AlgebraicTypeKind::Struct(StructTypeData { fields }));
             }
-            _ => Err(ParseError::new("invalid ADT")),
         }
+
+        Err(ParseError::new(
+            "could not find a valid ADT kind for ADT item",
+        ))
     }
 
     fn parse_type(&mut self, expr: &SExprRef<'a>) -> Result<Type<'db>, ParseError> {
@@ -273,6 +289,7 @@ impl<'a, 'db> Parser<'a, 'db> {
                     type_args: Default::default(),
                 }),
             ),
+
             Symbol("Self") => Type::new(self.db, TypeKind::Self_),
             Symbol("int") => Type::int(self.db),
             Symbol("real") => Type::real(self.db),
@@ -288,7 +305,15 @@ impl<'a, 'db> Parser<'a, 'db> {
                 let element_type = self.parse_type(element_type)?;
                 Type::new(self.db, TypeKind::List(element_type))
             }
-
+            List([Symbol(adt_name), type_args @ ..])
+                if let Some(adt) = self.adts.get(adt_name).copied() =>
+            {
+                let type_args = self.parse_type_args(type_args, TypeParamScope::Adt(adt))?;
+                Type::new(
+                    self.db,
+                    TypeKind::Algebraic(AlgebraicTypeInstance { adt, type_args }),
+                )
+            }
             _ => return Err(ParseError::new(format!("invalid type {expr:?}"))),
         })
     }
@@ -363,7 +388,12 @@ impl<'a, 'db> Parser<'a, 'db> {
                 self.get_trait(trait_name)?,
                 TypeArgs::default(),
             )),
-            _ => todo!(),
+            List([Symbol(trait_name), decls @ ..]) => {
+                let trait_id = self.get_trait(trait_name)?;
+                let type_args = self.parse_type_args(decls, TypeParamScope::Trait(trait_id))?;
+                Ok(TraitInstance::new(self.db, trait_id, type_args))
+            }
+            _ => Err(ParseError::new("invalid trait instance")),
         }
     }
 
@@ -420,7 +450,13 @@ impl<'a, 'db> Parser<'a, 'db> {
                             assoc_func_bindings[assoc_func] =
                                 Some(self.parse_func_instance(bound_func_instance)?);
                         }
-                        _ => return Err(ParseError::new("invalid trait_impl decl")),
+                        // already parsed
+                        List([Symbol("type_param"), ..]) => {}
+                        _ => {
+                            return Err(ParseError::new(format!(
+                                "invalid trait_impl decl {decl:?}"
+                            )));
+                        }
                     }
                 }
 

@@ -72,14 +72,14 @@ impl<'db> Formatter<'db> {
 
             assoc_func_items.extend(self.format_type_params(&assoc_func.type_params));
 
+            for &param_type in &assoc_func.param_types {
+                assoc_func_items.push(list([symbol("param"), self.format_type(param_type)]));
+            }
+
             assoc_func_items.push(list([
                 symbol("return_type"),
                 self.format_type(assoc_func.return_type),
             ]));
-
-            for &param_type in &assoc_func.param_types {
-                assoc_func_items.push(list([symbol("param"), self.format_type(param_type)]));
-            }
 
             items.push(list(assoc_func_items));
         }
@@ -98,6 +98,7 @@ impl<'db> Formatter<'db> {
         let mut items = vec![symbol("trait_impl")];
 
         items.extend(self.format_type_params(&data.type_params));
+
         items.push(list([
             symbol("trait"),
             self.format_trait_instance(data.trait_),

@@ -4,12 +4,22 @@ use crate::{
 };
 use salsa::Database;
 
+#[salsa::tracked]
 pub fn does_impl_trait<'db>(
     db: &'db dyn Database,
     cx: Context<'db>,
     typ: Type<'db>,
     trait_instance: TraitInstance<'db>,
 ) -> bool {
+    if let TypeKind::TypeParam(type_param) = typ.kind(db)
+        && type_param
+            .resolve(db, &cx)
+            .trait_bounds
+            .contains(&trait_instance)
+    {
+        return true;
+    }
+
     find_trait_impl(db, cx, typ, trait_instance).is_some()
 }
 

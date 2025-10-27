@@ -385,9 +385,11 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
         if let MaybeAssocFunc::AssocFunc { trait_, typ, .. } = func_instance.func(self.db)
             && !trait_resolution::does_impl_trait(self.db, self.cx, typ, trait_)
         {
-            return Err(ValidationError::new(
-                "could not satisfy trait bound on assoc func access",
-            ));
+            return Err(ValidationError::new(format!(
+                "could not satisfy trait bound [{:?}: {:?}] on assoc func access",
+                typ.kind(self.db),
+                trait_.trait_(self.db),
+            )));
         }
 
         Ok(())

@@ -1,30 +1,48 @@
+// @harness parser_roundtrip
+// @harness typecheck_validation_succeeds
 (mir
+    (adt Point2
+        (type_param T)
+        (struct
+            (field x T)
+            (field y T)))
     (trait Default
         (assoc_func default
             (return_type Self)))
+    (trait Add
+        (type_param Rhs)
+        (type_param Output assoc_type)
+        (assoc_func add
+            (param Self)
+            (param Rhs)
+            (return_type Output)))
     (trait_impl
-        (type int)
         (trait Default)
+        (type int)
         (assoc_func default int_default))
+    (trait_impl
+        (trait 
+            (Add
+                (type_arg Rhs int)
+                (type_arg Output int)))
+        (type int)
+        (assoc_func add int_add))
+    (trait_impl
+        (type_param T
+            (requires Default))
+        (trait Default)
+        (type
+            (Point2
+                (type_arg T T)))
+        (assoc_func default 
+            (point2_default
+                (type_arg T T))))
     (func int_default
         (return_type int)
         (entry block0)
         (block block0
             (constant v0 (0))
             (return (v0))))
-    (trait Add
-        (type_param Rhs)
-        (assoc_type Output)
-        (assoc_func add
-            (param lhs Self)
-            (param rhs Rhs)
-            (return_type Output)))
-    (trait_impl
-        (type int)
-        (trait Add
-            (type_arg Rhs int)
-            (assoc_type Output int))
-        (assoc_func add int_add))
     (func int_add
         (return_type int)
         (entry block0)
@@ -33,53 +51,36 @@
             (param rhs int)
             (int.add res (lhs rhs))
             (return (res))))
-    (type Point2
-        (struct
-            (type_param T)
-            (field x T)
-            (field y T)))
-    (trait_impl
-        (type_param T)
-        (requires
-            (impls_trait T Default))
-        (type
-            (Point2
-                (type_arg T T)))
-        (trait Default)
-        (assoc_func default point2_default))
     (func point2_default
-        (type_param T)
-        (requires
-            (impls_trait T Default))
+        (type_param T
+            (requires Default))
         (return_type
             (Point2
                 (type_arg T T)))
         (entry block0)
         (block block0
             (call x
-                ((get_assoc_func T Default default)))
+                ((assoc_func T Default default) ()))
             (call y
-                ((get_assoc_func T Default default))
+                ((assoc_func T Default default) ()))
             (struct.init pt
-                ((Point (type_arg T T))
+                ((Point2 (type_arg T T))
                     (field x x)
-                    (field y y))))
+                    (field y y)))
             (return (pt))))
     (func list_sum
-        (type_param T)
-        (requires
-            (impls_trait T Default))
-        (requires
-            (impls_trait T 
+        (type_param T
+            (requires Default)
+            (requires
                 (Add
                     (type_arg Rhs T)
-                    (assoc_type Output T))))
+                    (type_arg Output T))))
         (return_type T)
         (entry block0)
         (block block0
             (param list (mref (list T)))
             (call accum
-                ((get_assoc_func T Default default)))
+                ((assoc_func T Default default) ()))
             (constant i (0))
             (jump (loop ())))
         (block loop
@@ -92,8 +93,8 @@
         (block loop_body
             (list.get element (list i))
             (call accum
-                ((get_assoc_func T (Add (type_arg Rhs T) (assoc_type Output T)) add)
-                    accum element))
+                ((assoc_func T (Add (type_arg Rhs T) (type_arg Output T)) add)
+                    (accum element)))
             (constant one (1))
             (int.add i (i one))
             (jump (loop ())))
