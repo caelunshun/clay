@@ -1,0 +1,15 @@
+// @harness typecheck_validation_fails
+(mir
+    (trait Default
+        (assoc_func default
+            (return_type Self)))
+    (trait_impl
+        (trait Default)
+        (type int)
+        (assoc_func default bad_int_default))
+    (func bad_int_default
+        (return_type int)
+        (entry block0)
+        (block block0
+            (param x int)
+            (return (x)))))
