@@ -62,6 +62,7 @@ pub enum TraitParam {
 pub struct ImplDef {
     pub span: Span,
     pub generics: Obj<GenericBinder>,
+    pub regular_generic_count: u32,
     pub trait_: Option<TraitInstance>,
     pub target: Ty,
     pub methods: LateInit<Vec<()>>,

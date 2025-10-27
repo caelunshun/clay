@@ -284,6 +284,10 @@ impl TyCtxt {
         binder
     }
 
+    pub fn wf_check_impl_regular_generic_solve_order(&self, def: Obj<ImplDef>) {
+        todo!();
+    }
+
     pub fn instantiate_fresh_target_infers(
         &self,
         candidate: Obj<ImplDef>,
@@ -546,17 +550,63 @@ impl TyCtxt {
             );
 
             // See whether our specific target trait clauses can be covered by the inferred
-            // generics.
+            // generics. We only check the regular generics at this stage since associated types are
+            // defined entirely from our solved regular generics.
             for (&instance_ty, &required_param) in candidate_fresh
                 .trait_instance
                 .r(s)
                 .iter()
                 .zip(rhs_params.r(s))
+                .take(candidate.r(s).regular_generic_count as usize)
             {
                 let TyOrRe::Ty(instance_ty) = instance_ty else {
                     // (regions are ignored)
                     continue;
                 };
+
+                match required_param {
+                    TraitParam::Equals(required_ty) => {
+                        self.check_type_assignability_erase_regions(
+                            instance_ty,
+                            required_ty.unwrap_ty(),
+                            &mut sub_inferences,
+                            &mut sub_failures,
+                        );
+                    }
+                    TraitParam::Unspecified(_) => {
+                        unreachable!()
+                    }
+                }
+            }
+
+            // See whether the inferences we made for all our variables are valid.
+            // See `ImplDef::generic_solve_order` on why the specific solving order is important.
+            for infer_step in candidate.r(s).generic_solve_order.iter() {
+                let var_id = InferTyVar(min_infer_var.0 + infer_step.generic_idx);
+                let clauses = candidate_fresh.inf_var_clauses.r(s)[infer_step.clause_idx as usize];
+
+                let Some(resolved) = sub_inferences.lookup(var_id) else {
+                    // This should only happen if a failure occurred elsewhere because of the
+                    // requirements on well-formed traits.
+                    debug_assert!(!sub_failures.is_empty());
+                    continue;
+                };
+
+                self.check_clause_list_assignability_erase_regions(
+                    resolved, clauses, binder, inferences, failures,
+                );
+            }
+
+            // See whether the user-supplied associated type constraints match what we inferred.
+            for (&instance_ty, &required_param) in candidate_fresh
+                .trait_instance
+                .r(s)
+                .iter()
+                .zip(rhs_params.r(s))
+                .skip(candidate.r(s).regular_generic_count as usize)
+            {
+                // Associated types are never regions.
+                let instance_ty = instance_ty.unwrap_ty();
 
                 match required_param {
                     TraitParam::Equals(required_ty) => {
@@ -577,23 +627,6 @@ impl TyCtxt {
                         );
                     }
                 }
-            }
-
-            // See whether the inferences we made for all our variables are valid.
-            for (var_id, &clauses) in (min_infer_var.0..).zip(candidate_fresh.inf_var_clauses.r(s))
-            {
-                let var_id = InferTyVar(var_id);
-
-                let Some(resolved) = sub_inferences.lookup(var_id) else {
-                    // This should only happen if a failure occurred elsewhere because of the
-                    // requirements on well-formed traits.
-                    debug_assert!(!sub_failures.is_empty());
-                    continue;
-                };
-
-                self.check_clause_list_assignability_erase_regions(
-                    resolved, clauses, binder, inferences, failures,
-                );
             }
 
             // If the impl match was successful, commit the inferences and stop scanning for more
@@ -841,6 +874,7 @@ mod tests {
                 ImplDef {
                     span: Span::DUMMY,
                     generics: tcx.seal_generic_binder(binder),
+                    regular_generic_count: 1,
                     trait_: Some(TraitInstance {
                         def: my_trait,
                         params: tcx.intern_ty_or_re_list(&[]),
@@ -855,6 +889,8 @@ mod tests {
                 s,
             )
         };
+
+        tcx.wf_check_impl_regular_generic_solve_order(my_impl);
 
         LateInit::init(&my_trait.r(s).impls, vec![my_impl]);
 
