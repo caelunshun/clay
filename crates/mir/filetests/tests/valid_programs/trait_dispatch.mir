@@ -1,0 +1,22 @@
+// @harness parser_roundtrip
+// @harness typecheck_validation_fails
+(mir
+    (trait One
+        (assoc_func one
+            (return_type Self)))
+    (trait_impl
+        (trait One)
+        (type int)
+        (assoc_func one int_one))
+    (func int_one
+        (return_type int)
+        (entry block0)
+        (block block0
+            (constant x (1))
+            (return (x))))
+    (func main
+        (return_type int)
+        (entry block0)
+        (block block0
+            (call x ((assoc_func int One one) ()))
+            (return (x)))))
