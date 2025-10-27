@@ -1,8 +1,8 @@
 use crate::{
     InstrData, PrimType, TypeKind, ValId,
     ir::{
-        AlgebraicTypeKind, BasicBlockId, Context, FuncData, FuncInstance, StructTypeData, Type,
-        TypeArgs, TypeParamId,
+        AlgebraicTypeKind, BasicBlockId, Context, FuncData, FuncInstance, MaybeAssocFunc,
+        StructTypeData, Type, TypeArgs, TypeParamId,
     },
     trait_resolution,
     validation::ValidationError,
@@ -374,10 +374,20 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
             if !type_param.is_mirage {
                 for bound in &type_param.trait_bounds {
                     if !trait_resolution::does_impl_trait(self.db, self.cx, type_arg, *bound) {
-                        return Err(ValidationError::new("could not satisfy trait bound"));
+                        return Err(ValidationError::new(
+                            "could not satisfy trait bound on func call",
+                        ));
                     }
                 }
             }
+        }
+
+        if let MaybeAssocFunc::AssocFunc { trait_, typ, .. } = func_instance.func(self.db)
+            && !trait_resolution::does_impl_trait(self.db, self.cx, typ, trait_)
+        {
+            return Err(ValidationError::new(
+                "could not satisfy trait bound on assoc func access",
+            ));
         }
 
         Ok(())
