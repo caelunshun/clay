@@ -299,7 +299,8 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
         if typ != actual_typ {
             return Err(ValidationError::new(format!(
                 "wrong type: expected {:?}, found {:?}",
-                typ, actual_typ
+                typ.kind(self.db),
+                actual_typ.kind(self.db)
             )));
         }
         Ok(())
