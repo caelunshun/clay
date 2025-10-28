@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        Diag, ErrorGuaranteed, LeafDiag,
+        Diag, ErrorGuaranteed, LeafDiag, Session,
         syntax::{Span, Symbol},
     },
     parse::{
@@ -31,7 +31,14 @@ pub struct ModuleTree<T> {
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum ModuleResolution<T> {
     Module(ModuleId),
-    Item(T),
+    Item(ItemResolution<T>),
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct ItemResolution<T> {
+    pub owner: ModuleId,
+    pub name: Symbol,
+    pub value: T,
 }
 
 struct Module<T> {
@@ -239,8 +246,7 @@ impl<T: Clone + Eq> ModuleTree<T> {
     pub fn module_path(
         &self,
         prefix: Symbol,
-        target: ModuleId,
-        suffix: Option<Symbol>,
+        target: ModuleResolution<T>,
     ) -> impl 'static + Copy + fmt::Display {
         #[derive(Copy, Clone)]
         struct ModulePathFmt {
@@ -251,13 +257,45 @@ impl<T: Clone + Eq> ModuleTree<T> {
 
         impl fmt::Display for ModulePathFmt {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                todo!()
+                let s = &Session::fetch();
+
+                let parts = [
+                    self.prefix.as_str(s),
+                    self.main_part.as_str(s),
+                    self.suffix.map_or("", |sym| sym.as_str(s)),
+                ];
+
+                let mut wrote_something = false;
+
+                for part in parts {
+                    if part.is_empty() {
+                        continue;
+                    }
+
+                    if wrote_something {
+                        f.write_str("::")?;
+                    }
+
+                    f.write_str(part)?;
+                    wrote_something = true;
+                }
+
+                Ok(())
             }
         }
 
+        let (main_part, suffix) = match target {
+            ModuleResolution::Module(module) => (module, None),
+            ModuleResolution::Item(ItemResolution {
+                owner,
+                name,
+                value: _,
+            }) => (owner, Some(name)),
+        };
+
         ModulePathFmt {
             prefix,
-            main_part: self.modules[target].public_path.unwrap(),
+            main_part: self.modules[main_part].public_path.unwrap(),
             suffix,
         }
     }
@@ -267,7 +305,29 @@ impl<T: Clone + Eq> ModuleTree<T> {
         self.frozen = true;
 
         // Begin by determining public paths for each module.
-        // TODO
+        // TODO: improve this algorithm.
+        for module_id in self.modules.indices() {
+            let s = &Session::fetch();
+
+            let mut parts = Vec::new();
+            let mut finger = Some(module_id);
+
+            while let Some(curr) = finger {
+                let curr = &self.modules[curr];
+
+                if let Some(name) = curr.name {
+                    parts.push(name.text.as_str(s));
+                } else {
+                    debug_assert!(curr.parent.is_none());
+                }
+
+                finger = curr.parent;
+            }
+
+            parts.reverse();
+
+            self.modules[module_id].public_path = Some(Symbol::new(&parts.join("::")));
+        }
 
         // Next, normalize all visibilities.
         for module_id in self.modules.indices() {
@@ -443,7 +503,11 @@ impl<T: Clone + Eq> ModuleTree<T> {
                         }
                     }
                     DirectItemKind::Item(item) => {
-                        finger = ModuleResolution::Item(item.clone());
+                        finger = ModuleResolution::Item(ItemResolution {
+                            owner: curr,
+                            name: part.text,
+                            value: item.clone(),
+                        });
                         continue 'traverse;
                     }
                 };
@@ -510,9 +574,20 @@ impl<T: Clone + Eq> ModuleTree<T> {
                                 part.span,
                                 format_args!("resolutions for `{}` are ambiguous", part.text),
                             )
-                            // TODO: Print out what they resolve to.
-                            .child(LeafDiag::span_note(*first_span, "first glob import here"))
-                            .child(LeafDiag::span_note(*other_span, "second glob import here"))
+                            .child(LeafDiag::span_note(
+                                *first_span,
+                                format_args!(
+                                    "first glob import resolves to `{}`",
+                                    self.module_path(symbol!("crate"), first.clone())
+                                ),
+                            ))
+                            .child(LeafDiag::span_note(
+                                *other_span,
+                                format_args!(
+                                    "second glob import resolves to `{}`",
+                                    self.module_path(symbol!("crate"), other.clone())
+                                ),
+                            ))
                         });
                     }
                 }
@@ -528,7 +603,7 @@ impl<T: Clone + Eq> ModuleTree<T> {
                     format_args!(
                         "`{}` not found in `{}`",
                         part.text,
-                        self.module_path(symbol!("crate"), curr, None),
+                        self.module_path(symbol!("crate"), finger),
                     ),
                 )
             });
