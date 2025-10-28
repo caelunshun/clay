@@ -1,10 +1,13 @@
 use hashbrown::{HashMap, HashSet};
+use indexmap::{IndexMap, IndexSet};
 pub use rustc_hash::FxHasher;
 use std::hash::{self, BuildHasher, BuildHasherDefault, Hash, Hasher};
 
 pub type FxBuildHasher = BuildHasherDefault<FxHasher>;
 pub type FxHashMap<K, V> = HashMap<K, V, FxBuildHasher>;
 pub type FxHashSet<T> = HashSet<T, FxBuildHasher>;
+pub type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
+pub type FxIndexSet<T> = IndexSet<T, FxBuildHasher>;
 
 pub fn fx_hash_one(v: impl hash::Hash) -> u64 {
     let mut hasher = FxHasher::default();

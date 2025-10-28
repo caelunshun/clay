@@ -226,6 +226,7 @@ dependencies = [
  "disjoint",
  "hashbrown 0.16.1",
  "index_vec",
+ "indexmap",
  "paste",
  "rustc-hash",
  "scopeguard",
