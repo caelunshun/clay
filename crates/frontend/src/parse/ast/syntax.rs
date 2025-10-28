@@ -3,6 +3,7 @@ use crate::{
     parse::token::{Ident, Lifetime, TokenStream},
     typeck::syntax::TraitClauseList,
 };
+use std::rc::Rc;
 
 // === Item === //
 
@@ -64,7 +65,7 @@ pub enum AstVisibilityKind {
     Implicit,
     Priv,
     Pub,
-    PubIn(Vec<AstSimplePath>),
+    PubIn(AstSimplePath),
 }
 
 #[derive(Debug, Clone)]
@@ -78,7 +79,7 @@ pub struct AstAttribute {
 #[derive(Debug, Clone)]
 pub struct AstSimplePath {
     pub span: Span,
-    pub parts: Vec<Ident>,
+    pub parts: Rc<[Ident]>,
 }
 
 // === Clauses === //

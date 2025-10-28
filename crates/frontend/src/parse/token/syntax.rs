@@ -203,6 +203,12 @@ pub struct Ident {
     pub raw: bool,
 }
 
+impl Ident {
+    pub fn matches_kw(self, kw: Symbol) -> bool {
+        !self.raw && self.text == kw
+    }
+}
+
 impl Spanned for Ident {
     fn span(&self) -> Span {
         self.span

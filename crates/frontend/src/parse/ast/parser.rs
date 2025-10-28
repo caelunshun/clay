@@ -18,6 +18,7 @@ use crate::{
     },
     punct, puncts, symbol,
 };
+use std::rc::Rc;
 
 // === Items === //
 
@@ -73,18 +74,24 @@ fn parse_visibility(p: P) -> AstVisibility {
 
     if match_kw(kw!("pub")).expect(p).is_some() {
         if let Some(group) = match_group(GroupDelimiter::Paren).expect(p) {
-            let paths = parse_comma_group(&mut p.enter(&group), |p| {
-                let path = parse_simple_path(p);
-                if path.is_none() {
-                    p.stuck_recover_with(|_| {});
-                }
+            let mut p2 = p.enter(&group);
 
-                path
-            });
+            let Some(path) = parse_simple_path(&mut p2) else {
+                p2.stuck_recover_with(|_| {});
+
+                return AstVisibility {
+                    span: start.to(p.prev_span()),
+                    kind: AstVisibilityKind::Pub,
+                };
+            };
+
+            if !match_eos(&mut p2) {
+                p2.stuck_recover_with(|_| {});
+            }
 
             AstVisibility {
                 span: start.to(p.prev_span()),
-                kind: AstVisibilityKind::PubIn(paths.elems.into_iter().flatten().collect()),
+                kind: AstVisibilityKind::PubIn(path),
             }
         } else {
             AstVisibility {
@@ -271,7 +278,7 @@ fn parse_simple_path(p: P) -> Option<AstSimplePath> {
 
     Some(AstSimplePath {
         span: start.to(p.prev_span()),
-        parts,
+        parts: Rc::from(parts),
     })
 }
 
