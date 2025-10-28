@@ -42,7 +42,7 @@ struct Module<T> {
     inner_span: Span,
     glob_imports: Vec<GlobImport<T>>,
     direct_items: FxIndexMap<Symbol, DirectItem<T>>,
-    glob_lookup_cache: FxIndexMap<Symbol, ModuleResolution<T>>,
+    actively_performing_glob_resolution: bool,
 }
 
 struct GlobImport<T> {
@@ -68,11 +68,13 @@ enum CachedPath<T> {
     Resolved(ModuleResolution<T>),
 }
 
+#[derive(Clone)]
 struct Visibility {
     span: Span,
     kind: VisibilityKind,
 }
 
+#[derive(Clone)]
 enum VisibilityKind {
     Priv,
     Pub,
@@ -82,12 +84,31 @@ enum VisibilityKind {
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 enum ResolverMode {
+    /// Don't follow global imports, ignore visibility, and ignore unresolved imports (i.e.
+    /// everything that's not a module ownership link).
     Visibility,
+
+    /// Follow everything, keep visibility in mind, and resolve unresolved imports.
     Solve,
+
+    /// Follow everything, keep visibility in mind, and panic on unresolved imports since they
+    /// shouldn't exist at this stage.
     Lookup,
 }
 
-impl<T: Clone> ModuleTree<T> {
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+enum EmitErrors {
+    Yes,
+    No,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+enum MustBeModule {
+    Yes,
+    No,
+}
+
+impl<T: Clone + Eq> ModuleTree<T> {
     pub fn new(root_span: Span) -> Self {
         Self {
             modules: IndexVec::from_iter([Module {
@@ -98,7 +119,7 @@ impl<T: Clone> ModuleTree<T> {
                 inner_span: root_span,
                 glob_imports: Vec::new(),
                 direct_items: FxIndexMap::default(),
-                glob_lookup_cache: FxIndexMap::default(),
+                actively_performing_glob_resolution: false,
             }]),
             frozen: false,
         }
@@ -146,7 +167,7 @@ impl<T: Clone> ModuleTree<T> {
             inner_span,
             glob_imports: Vec::new(),
             direct_items: FxIndexMap::default(),
-            glob_lookup_cache: FxIndexMap::default(),
+            actively_performing_glob_resolution: false,
         });
 
         let err = self.push_direct(
@@ -250,59 +271,14 @@ impl<T: Clone> ModuleTree<T> {
 
         // Next, normalize all visibilities.
         for module_id in self.modules.indices() {
-            fn resolve_visibility<T: Clone>(
-                tree: &mut ModuleTree<T>,
-                within: ModuleId,
-                fetch: impl Fn(&mut ModuleTree<T>) -> &mut Visibility,
-            ) {
-                let vis = &mut fetch(tree).kind;
-
-                if !matches!(vis, VisibilityKind::PubInUnresolved(_)) {
-                    return;
-                }
-
-                let VisibilityKind::PubInUnresolved(path) = mem::replace(vis, VisibilityKind::Pub)
-                else {
-                    return;
-                };
-
-                let target = match tree.resolve_inner(within, &path.parts, ResolverMode::Visibility)
-                {
-                    Ok(ModuleResolution::Module(target)) => target,
-                    Ok(ModuleResolution::Item(_)) => {
-                        _ = Diag::span_err(
-                            path.parts.last().unwrap().span,
-                            "must refer to a module",
-                        )
-                        .emit();
-
-                        // (leave the visibility as `pub`)
-                        return;
-                    }
-                    Err(_) => {
-                        // (leave the visibility as `pub`)
-                        return;
-                    }
-                };
-
-                if !tree.is_descendant(within, target) {
-                    _ = Diag::span_err(path.span, "not an ancestor of the current module").emit();
-
-                    // (leave the visibility as `pub`)
-                    return;
-                }
-
-                fetch(tree).kind = VisibilityKind::PubInResolved(target);
-            }
-
             for use_idx in 0..self.modules[module_id].direct_items.len() {
-                resolve_visibility(self, module_id, |tree| {
+                self.resolve_visibility(module_id, |tree| {
                     &mut tree.modules[module_id].direct_items[use_idx].visibility
                 });
             }
 
             for use_idx in 0..self.modules[module_id].glob_imports.len() {
-                resolve_visibility(self, module_id, |tree| {
+                self.resolve_visibility(module_id, |tree| {
                     &mut tree.modules[module_id].glob_imports[use_idx].visibility
                 });
             }
@@ -310,30 +286,6 @@ impl<T: Clone> ModuleTree<T> {
 
         // Finally, resolve each module's use paths.
         for module_id in self.modules.indices() {
-            fn resolve_path<T: Clone>(
-                tree: &mut ModuleTree<T>,
-                within: ModuleId,
-                fetch: impl Fn(&mut ModuleTree<T>) -> &mut CachedPath<T>,
-            ) {
-                let path = fetch(tree);
-
-                if !matches!(path, CachedPath::Unresolved(_)) {
-                    return;
-                }
-
-                let CachedPath::Unresolved(path) = mem::replace(path, CachedPath::Ignore) else {
-                    return;
-                };
-
-                let Ok(target) = tree.resolve_inner(within, &path.parts, ResolverMode::Solve)
-                else {
-                    // (leave the path as `Ignore`)
-                    return;
-                };
-
-                *fetch(tree) = CachedPath::Resolved(target);
-            }
-
             for use_idx in 0..self.modules[module_id].direct_items.len() {
                 if !matches!(
                     self.modules[module_id].direct_items[use_idx].kind,
@@ -342,21 +294,29 @@ impl<T: Clone> ModuleTree<T> {
                     continue;
                 }
 
-                resolve_path(self, module_id, |tree| {
-                    let DirectItemKind::Link(v) =
-                        &mut tree.modules[module_id].direct_items[use_idx].kind
-                    else {
-                        unreachable!()
-                    };
+                _ = self.resolve_path(
+                    module_id,
+                    |tree| {
+                        let DirectItemKind::Link(v) =
+                            &mut tree.modules[module_id].direct_items[use_idx].kind
+                        else {
+                            unreachable!()
+                        };
 
-                    v
-                });
+                        v
+                    },
+                    ResolverMode::Solve,
+                    MustBeModule::No,
+                );
             }
 
             for use_idx in 0..self.modules[module_id].glob_imports.len() {
-                resolve_path(self, module_id, |tree| {
-                    &mut tree.modules[module_id].glob_imports[use_idx].path
-                });
+                _ = self.resolve_path(
+                    module_id,
+                    |tree| &mut tree.modules[module_id].glob_imports[use_idx].path,
+                    ResolverMode::Solve,
+                    MustBeModule::Yes,
+                );
             }
         }
     }
@@ -368,18 +328,37 @@ impl<T: Clone> ModuleTree<T> {
     ) -> Result<ModuleResolution<T>, ErrorGuaranteed> {
         debug_assert!(self.frozen);
 
-        self.resolve_inner(within, &path.parts, ResolverMode::Lookup)
+        self.resolve_inner(
+            within,
+            within,
+            &path.parts,
+            ResolverMode::Lookup,
+            EmitErrors::Yes,
+        )
+        .map_err(Option::unwrap)
     }
 
     fn resolve_inner(
         &mut self,
-        within: ModuleId,
+        visibility_cx: ModuleId,
+        finger: ModuleId,
         path: &[Ident],
         mode: ResolverMode,
-    ) -> Result<ModuleResolution<T>, ErrorGuaranteed> {
-        let mut finger = ModuleResolution::Module(within);
+        emit_errors: EmitErrors,
+    ) -> Result<ModuleResolution<T>, Option<ErrorGuaranteed>> {
+        let mut finger = ModuleResolution::Module(finger);
 
         let mut parts_iter = path.iter();
+
+        fn make_err<T>(
+            emit_errors: EmitErrors,
+            f: impl FnOnce() -> Diag<ErrorGuaranteed>,
+        ) -> Result<ModuleResolution<T>, Option<ErrorGuaranteed>> {
+            match emit_errors {
+                EmitErrors::Yes => Err(Some(f().emit())),
+                EmitErrors::No => Err(None),
+            }
+        }
 
         'traverse: while let (Some(part), &ModuleResolution::Module(curr)) =
             (parts_iter.next(), &finger)
@@ -397,9 +376,9 @@ impl<T: Clone> ModuleTree<T> {
 
             if part.matches_kw(symbol!("super")) {
                 let Some(parent) = self.modules[curr].parent else {
-                    return Err(
-                        Diag::span_err(part.span, "`super` cannot apply to crate root").emit(),
-                    );
+                    return make_err(emit_errors, || {
+                        Diag::span_err(part.span, "`super` cannot apply to crate root")
+                    });
                 };
 
                 finger = ModuleResolution::Module(parent);
@@ -407,7 +386,9 @@ impl<T: Clone> ModuleTree<T> {
             }
 
             // Attempt to resolve a direct link.
-            if let Some(item) = self.modules[curr].direct_items.get_mut(&part.text) {
+            if let Some(item_idx) = self.modules[curr].direct_items.get_index_of(&part.text) {
+                let item = &self.modules[curr].direct_items[item_idx];
+
                 // Check visibility
                 'vis_check: {
                     if mode == ResolverMode::Visibility {
@@ -422,7 +403,7 @@ impl<T: Clone> ModuleTree<T> {
                             break 'vis_check;
                         }
                         VisibilityKind::PubInResolved(visible_to) => {
-                            if self.is_descendant(within, visible_to) {
+                            if self.is_descendant(visibility_cx, visible_to) {
                                 break 'vis_check;
                             }
 
@@ -432,74 +413,34 @@ impl<T: Clone> ModuleTree<T> {
                     }
 
                     // The check failed!
-                    return Err(Diag::span_err(
-                        part.span,
-                        "item is not visible to the current module",
-                    )
-                    .emit());
+                    return make_err(emit_errors, || {
+                        Diag::span_err(part.span, "item is not visible to the current module")
+                    });
                 }
 
                 // Find resolution. This may require resolving an unresolved path if we're still in
                 // the freeze-and-check phase.
-                let item = self.modules[curr].direct_items.get_mut(&part.text).unwrap();
+                match &self.modules[curr].direct_items[item_idx].kind {
+                    DirectItemKind::Link(_) => {
+                        let resolution = self.resolve_path(
+                            curr,
+                            |tree| {
+                                let DirectItemKind::Link(v) =
+                                    &mut tree.modules[curr].direct_items[item_idx].kind
+                                else {
+                                    unreachable!()
+                                };
 
-                match &mut item.kind {
-                    DirectItemKind::Link(CachedPath::Ignore) => {
-                        // We cannot use a `use` in its own resolution.
-                        // (fallthrough)
-                    }
-                    DirectItemKind::Link(CachedPath::Unresolved(_)) => 'resolve: {
-                        match mode {
-                            ResolverMode::Visibility => {
-                                // We don't resolve unresolved paths while solving for visibility
-                                // paths, effectively limiting us to referring to the module tree.
-                                //
-                                // This seems to be Rust's behavior as well. From [the spec]...
-                                //
-                                // ```
-                                // pub(in path) makes an item visible within the provided path.
-                                // path must be a simple path which resolves to an ancestor module
-                                // of the item whose visibility is being declared. Each identifier
-                                // in path must refer directly to a module (not to a name
-                                // introduced by a use statement).
-                                // ```
-                                //
-                                // [the spec]: https://doc.rust-lang.org/reference/visibility-and-privacy.html#r-vis.scoped.in
-                                break 'resolve;
-                            }
-                            ResolverMode::Solve => {
-                                // (fallthrough)
-                            }
-                            ResolverMode::Lookup => unreachable!(),
-                        }
+                                v
+                            },
+                            mode,
+                            MustBeModule::No,
+                        );
 
-                        let DirectItemKind::Link(CachedPath::Unresolved(path)) =
-                            mem::replace(&mut item.kind, DirectItemKind::Link(CachedPath::Ignore))
-                        else {
-                            unreachable!()
-                        };
-
-                        if let Ok(resolution) = self.resolve_inner(within, &path.parts, mode) {
-                            // Record the resolution.
-                            self.modules[curr]
-                                .direct_items
-                                .get_mut(&part.text)
-                                .unwrap()
-                                .kind =
-                                DirectItemKind::Link(CachedPath::Resolved(resolution.clone()));
-
+                        if let Some(resolution) = resolution {
                             finger = resolution;
-
                             continue 'traverse;
-                        } else {
-                            // Let the path part stay as `Ignore` since it couldn't resolve to
-                            // anything.
-                            // (fallthrough)
                         }
-                    }
-                    DirectItemKind::Link(CachedPath::Resolved(resolution)) => {
-                        finger = resolution.clone();
-                        continue 'traverse;
                     }
                     DirectItemKind::Item(item) => {
                         finger = ModuleResolution::Item(item.clone());
@@ -509,31 +450,88 @@ impl<T: Clone> ModuleTree<T> {
             }
 
             // Otherwise, attempt to follow a global import.
-            if mode != ResolverMode::Visibility {
-                if let Some(cached) = self.modules[curr].glob_lookup_cache.get(&part.text) {
-                    finger = cached.clone();
-                    continue 'traverse;
+            'glob_import: {
+                if mode == ResolverMode::Visibility {
+                    break 'glob_import;
                 }
 
-                // let mut resolutions = Vec::new();
-                //
-                // for import in self.modules[curr].glob_imports {
-                //     self.resolve_inner(within, &[*part], mode);
-                // }
+                // Ensure that we're not reentrantly trying to glob-import from the same module.
+                let curr_mod = &mut self.modules[curr];
 
-                // TODO
+                if curr_mod.actively_performing_glob_resolution {
+                    break 'glob_import;
+                }
+
+                curr_mod.actively_performing_glob_resolution = true;
+
+                // Collect resolutions
+                let mut resolutions = Vec::new();
+
+                for use_idx in 0..curr_mod.glob_imports.len() {
+                    let resolution = self.resolve_path(
+                        curr,
+                        |tree| &mut tree.modules[curr].glob_imports[use_idx].path,
+                        mode,
+                        MustBeModule::Yes,
+                    );
+
+                    let Some(resolution) = resolution else {
+                        continue;
+                    };
+
+                    let ModuleResolution::Module(resolution) = resolution else {
+                        unreachable!()
+                    };
+
+                    if let Ok(resolution) = self.resolve_inner(
+                        visibility_cx,
+                        resolution,
+                        &[*part],
+                        mode,
+                        EmitErrors::No,
+                    ) {
+                        let span = self.modules[curr].glob_imports[use_idx].span;
+
+                        resolutions.push((resolution, span));
+                    }
+                }
+
+                self.modules[curr].actively_performing_glob_resolution = false;
+
+                // Ensure that our resolution is unambiguous.
+                let Some(((first, first_span), remainder)) = resolutions.split_first() else {
+                    break 'glob_import;
+                };
+
+                for (other, other_span) in remainder {
+                    if first != other {
+                        return make_err(emit_errors, || {
+                            Diag::span_err(
+                                part.span,
+                                format_args!("resolutions for `{}` are ambiguous", part.text),
+                            )
+                            // TODO: Print out what they resolve to.
+                            .child(LeafDiag::span_note(*first_span, "first glob import here"))
+                            .child(LeafDiag::span_note(*other_span, "second glob import here"))
+                        });
+                    }
+                }
+
+                finger = resolutions.into_iter().next().unwrap().0;
+                continue 'traverse;
             }
 
             // Nothing could provide this path part!
-            return Err(Diag::span_err(
-                part.span,
-                format_args!(
-                    "`{}` not found in `{}`",
-                    part.text,
-                    self.module_path(symbol!("crate"), curr, None),
-                ),
-            )
-            .emit());
+            return make_err(emit_errors, || {
+                Diag::span_err(
+                    part.span,
+                    format_args!(
+                        "`{}` not found in `{}`",
+                        part.text,
+                        self.module_path(symbol!("crate"), curr, None),
+                    ),
+                )
+            });
         }
 
         match finger {
@@ -542,14 +540,146 @@ impl<T: Clone> ModuleTree<T> {
                 if parts_iter.len() == 0 {
                     Ok(ModuleResolution::Item(item.clone()))
                 } else {
-                    Err(Diag::span_err(
-                        path[path.len() - parts_iter.len() - 1].span,
-                        "not a module",
-                    )
-                    .emit())
+                    make_err(emit_errors, || {
+                        Diag::span_err(path[path.len() - parts_iter.len() - 1].span, "not a module")
+                    })
                 }
             }
         }
+    }
+
+    fn resolve_path(
+        &mut self,
+        path_owner: ModuleId,
+        fetch: impl Fn(&mut Self) -> &mut CachedPath<T>,
+        mode: ResolverMode,
+        must_be_module: MustBeModule,
+    ) -> Option<ModuleResolution<T>> {
+        let path = fetch(self);
+
+        match path {
+            CachedPath::Ignore => {
+                return None;
+            }
+            CachedPath::Unresolved(_) => {
+                match mode {
+                    ResolverMode::Visibility => {
+                        // We don't resolve unresolved paths while solving for visibility
+                        // paths, effectively limiting us to referring to the module tree.
+                        //
+                        // This seems to be Rust's behavior as well. From [the spec]...
+                        //
+                        // ```
+                        // pub(in path) makes an item visible within the provided path.
+                        // path must be a simple path which resolves to an ancestor module
+                        // of the item whose visibility is being declared. Each identifier
+                        // in path must refer directly to a module (not to a name
+                        // introduced by a use statement).
+                        // ```
+                        //
+                        // [the spec]: https://doc.rust-lang.org/reference/visibility-and-privacy.html#r-vis.scoped.in
+                        return None;
+                    }
+                    ResolverMode::Solve => {
+                        // (fallthrough)
+                    }
+                    ResolverMode::Lookup => {
+                        unreachable!()
+                    }
+                }
+                // (fallthrough)
+            }
+            CachedPath::Resolved(resolved) => {
+                return Some(resolved.clone());
+            }
+        }
+
+        let CachedPath::Unresolved(path) = mem::replace(path, CachedPath::Ignore) else {
+            unreachable!()
+        };
+
+        let Ok(target) = self.resolve_inner(
+            path_owner,
+            path_owner,
+            &path.parts,
+            ResolverMode::Solve,
+            EmitErrors::Yes,
+        ) else {
+            // (leave the path as `Ignore`)
+            return None;
+        };
+
+        match (must_be_module, &target) {
+            (MustBeModule::Yes, ModuleResolution::Item(_)) => {
+                Diag::span_err(path.span, "path must resolve to a module");
+
+                // (leave the path as `Ignore`)
+                return None;
+            }
+            (MustBeModule::Yes, ModuleResolution::Module(_)) | (MustBeModule::No, _) => {
+                // (fallthrough)
+            }
+        }
+
+        *fetch(self) = CachedPath::Resolved(target.clone());
+
+        Some(target)
+    }
+
+    fn resolve_visibility(
+        &mut self,
+        within: ModuleId,
+        fetch: impl Fn(&mut Self) -> &mut Visibility,
+    ) {
+        let vis = &mut fetch(self).kind;
+
+        if !matches!(vis, VisibilityKind::PubInUnresolved(_)) {
+            return;
+        }
+
+        let VisibilityKind::PubInUnresolved(path) = mem::replace(vis, VisibilityKind::Pub) else {
+            return;
+        };
+
+        let target = match self.resolve_inner(
+            within,
+            within,
+            &path.parts,
+            ResolverMode::Visibility,
+            EmitErrors::Yes,
+        ) {
+            Ok(ModuleResolution::Module(target)) => target,
+            Ok(ModuleResolution::Item(_)) => {
+                _ = Diag::span_err(path.parts.last().unwrap().span, "must refer to a module")
+                    .emit();
+
+                // (leave the visibility as `pub`)
+                return;
+            }
+            Err(_) => {
+                // (leave the visibility as `pub`)
+                return;
+            }
+        };
+
+        if target == within {
+            fetch(self).kind = VisibilityKind::Priv;
+            return;
+        }
+
+        if target == ModuleId::ROOT {
+            // (leave the visibility as `pub`)
+            return;
+        }
+
+        if !self.is_descendant(within, target) {
+            _ = Diag::span_err(path.span, "not an ancestor of the current module").emit();
+
+            // (leave the visibility as `pub`)
+            return;
+        }
+
+        fetch(self).kind = VisibilityKind::PubInResolved(target);
     }
 
     pub fn is_descendant(&self, src: ModuleId, maybe_ancestor: ModuleId) -> bool {
