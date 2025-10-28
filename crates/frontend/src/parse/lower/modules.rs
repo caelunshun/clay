@@ -532,6 +532,25 @@ impl<T: Clone + Eq> ModuleTree<T> {
                 let mut resolutions = Vec::new();
 
                 for use_idx in 0..curr_mod.glob_imports.len() {
+                    // Ensure that the glob-import is visible.
+                    match self.modules[curr].glob_imports[use_idx].visibility.kind {
+                        VisibilityKind::Priv => {
+                            continue;
+                        }
+                        VisibilityKind::Pub => {
+                            // (fallthrough)
+                        }
+                        VisibilityKind::PubInResolved(visible_to) => {
+                            if !self.is_descendant(visibility_cx, visible_to) {
+                                continue;
+                            }
+
+                            // (fallthrough)
+                        }
+                        VisibilityKind::PubInUnresolved(_) => unreachable!(),
+                    }
+
+                    // Determine what the glob-import is importing.
                     let resolution = self.resolve_path(
                         curr,
                         |tree| &mut tree.modules[curr].glob_imports[use_idx].path,
@@ -547,6 +566,7 @@ impl<T: Clone + Eq> ModuleTree<T> {
                         unreachable!()
                     };
 
+                    // Attempt to resolve the item in that module.
                     if let Ok(resolution) = self.resolve_inner(
                         visibility_cx,
                         resolution,
