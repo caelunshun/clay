@@ -45,8 +45,6 @@ struct Module<T> {
     parent: Option<ModuleId>,
     name: Option<Ident>,
     public_path: Option<Symbol>,
-    outer_span: Span,
-    inner_span: Span,
     glob_imports: Vec<GlobImport<T>>,
     direct_items: FxIndexMap<Symbol, DirectItem<T>>,
     actively_performing_glob_resolution: bool,
@@ -115,15 +113,13 @@ enum MustBeModule {
     No,
 }
 
-impl<T: Clone + Eq> ModuleTree<T> {
-    pub fn new(root_span: Span) -> Self {
+impl<T> Default for ModuleTree<T> {
+    fn default() -> Self {
         Self {
             modules: IndexVec::from_iter([Module {
                 parent: None,
                 name: None,
                 public_path: None,
-                outer_span: root_span,
-                inner_span: root_span,
                 glob_imports: Vec::new(),
                 direct_items: FxIndexMap::default(),
                 actively_performing_glob_resolution: false,
@@ -131,7 +127,9 @@ impl<T: Clone + Eq> ModuleTree<T> {
             frozen: false,
         }
     }
+}
 
+impl<T: Clone + Eq> ModuleTree<T> {
     fn push_direct(
         &mut self,
         target: ModuleId,
@@ -161,8 +159,6 @@ impl<T: Clone + Eq> ModuleTree<T> {
         parent: ModuleId,
         visibility: AstVisibility,
         name: Ident,
-        outer_span: Span,
-        inner_span: Span,
     ) -> (ModuleId, Result<(), ErrorGuaranteed>) {
         debug_assert!(!self.frozen);
 
@@ -170,8 +166,6 @@ impl<T: Clone + Eq> ModuleTree<T> {
             parent: Some(parent),
             name: Some(name),
             public_path: None,
-            outer_span,
-            inner_span,
             glob_imports: Vec::new(),
             direct_items: FxIndexMap::default(),
             actively_performing_glob_resolution: false,
@@ -193,13 +187,12 @@ impl<T: Clone + Eq> ModuleTree<T> {
         &mut self,
         parent: ModuleId,
         visibility: AstVisibility,
-        span: Span,
         path: AstSimplePath,
     ) {
         debug_assert!(!self.frozen);
 
         self.modules[parent].glob_imports.push(GlobImport {
-            span,
+            span: path.span,
             visibility: visibility.into(),
             path: CachedPath::Unresolved(path),
         });

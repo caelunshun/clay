@@ -1,5 +1,8 @@
 use crate::{
-    base::{ErrorGuaranteed, syntax::Span},
+    base::{
+        ErrorGuaranteed,
+        syntax::{Span, Spanned},
+    },
     parse::token::{Ident, Lifetime, TokenStream},
     typeck::syntax::TraitClauseList,
 };
@@ -18,6 +21,7 @@ pub struct AstItem {
 #[derive(Debug, Clone)]
 pub enum AstItemKind {
     Mod(AstItemModule),
+    Use(AstItemUse),
     Trait(AstItemTrait),
     Error(ErrorGuaranteed),
 }
@@ -32,6 +36,11 @@ pub struct AstItemModule {
 pub struct AstItemModuleContents {
     pub inner_attrs: Vec<AstAttribute>,
     pub items: Vec<AstItem>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AstItemUse {
+    pub path: AstUsePathOrWild,
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +89,34 @@ pub struct AstAttribute {
 pub struct AstSimplePath {
     pub span: Span,
     pub parts: Rc<[Ident]>,
+}
+
+#[derive(Debug, Clone)]
+pub enum AstUsePathOrWild {
+    Path(AstUsePath),
+    Wildcard(Span),
+}
+
+impl Spanned for AstUsePathOrWild {
+    fn span(&self) -> Span {
+        match self {
+            AstUsePathOrWild::Path(path) => path.span,
+            AstUsePathOrWild::Wildcard(span) => *span,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AstUsePath {
+    pub span: Span,
+    pub base: Rc<[Ident]>,
+    pub kind: AstUsePathKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum AstUsePathKind {
+    Direct(Option<Ident>),
+    Tree(Vec<AstUsePathOrWild>),
 }
 
 // === Clauses === //

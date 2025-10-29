@@ -3,7 +3,7 @@ use fir_frontend::{
         Session,
         syntax::{NaiveSegmenter, SourceFileOrigin},
     },
-    parse::{ast::parse_file, token::tokenize},
+    parse::{ast::parse_file, lower::driver::lower_full_ast, token::tokenize},
 };
 use std::{env, fs, path::Path, rc::Rc, time::Instant};
 
@@ -17,7 +17,7 @@ fn main() {
     };
 
     let session = Session::new();
-    let _guard = session.bind();
+    let _guard = session.clone().bind();
 
     let path = Path::new(entrypoint);
 
@@ -31,6 +31,5 @@ fn main() {
     let tokens = tokenize(span);
     let ast = parse_file(&tokens);
 
-    dbg!(start.elapsed());
-    dbg!(&ast);
+    lower_full_ast(&ast, &session);
 }
