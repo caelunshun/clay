@@ -6,6 +6,7 @@ use crate::{
             StuckHinter, Symbol,
         },
     },
+    parse::ast::Keyword,
     symbol,
     utils::lang::ConstFmt,
 };
@@ -204,8 +205,12 @@ pub struct Ident {
 }
 
 impl Ident {
-    pub fn matches_kw(self, kw: Symbol) -> bool {
+    pub fn matches_unescaped(self, kw: Symbol) -> bool {
         !self.raw && self.text == kw
+    }
+
+    pub fn matches_kw(self, kw: Keyword) -> bool {
+        self.matches_unescaped(kw.symbol())
     }
 }
 

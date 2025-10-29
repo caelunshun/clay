@@ -1,3 +1,5 @@
+use {{{{{{{{{self}}}}}}}}};
+
 pub mod meow {
     pub use super::thump::*;
 
@@ -17,4 +19,4 @@ pub mod res {
     pub use {crate::meow::*, crate::thump::*};
 }
 
-use res::whee as third;
+use res::{whee as third};

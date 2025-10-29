@@ -1,5 +1,6 @@
 use crate::{
-    base::Session,
+    base::{Diag, Session},
+    kw,
     parse::{
         ast::{
             AstItemKind, AstItemModuleContents, AstSimplePath, AstUsePath, AstUsePathKind,
@@ -23,7 +24,7 @@ fn lower_initial_tree(tree: &mut ModuleTree<()>, mod_id: ModuleId, ast: &AstItem
     for item in &ast.items {
         match &item.kind {
             AstItemKind::Mod(item_mod) => {
-                let (item_mod_id, _) = tree.push_module(mod_id, item.vis.clone(), item_mod.name);
+                let item_mod_id = tree.push_module(mod_id, item.vis.clone(), item_mod.name);
 
                 lower_initial_tree(tree, item_mod_id, item_mod.contents.as_ref().unwrap());
             }
@@ -52,15 +53,24 @@ fn lower_use(
 
     match &ast.kind {
         AstUsePathKind::Direct(rename) => {
-            tree.push_single_use(
-                mod_id,
-                visibility.clone(),
-                rename.unwrap_or(prefix.last().copied().unwrap()),
-                AstSimplePath {
-                    span: ast.span,
-                    parts: Rc::from(prefix.as_slice()),
-                },
-            );
+            let name = rename.unwrap_or(prefix.last().copied().unwrap());
+
+            if name.matches_kw(kw!("self"))
+                || name.matches_kw(kw!("crate"))
+                || name.matches_kw(kw!("super"))
+            {
+                _ = Diag::span_err(name.span, "invalid name for import").emit();
+            } else {
+                tree.push_single_use(
+                    mod_id,
+                    visibility.clone(),
+                    name,
+                    AstSimplePath {
+                        span: ast.span,
+                        parts: Rc::from(prefix.as_slice()),
+                    },
+                );
+            }
         }
         AstUsePathKind::Wild(span) => {
             tree.push_glob_use(

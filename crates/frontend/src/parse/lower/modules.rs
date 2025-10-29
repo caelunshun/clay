@@ -3,6 +3,7 @@ use crate::{
         Diag, ErrorGuaranteed, LeafDiag, Session,
         syntax::{Span, Symbol},
     },
+    kw,
     parse::{
         ast::{AstSimplePath, AstVisibility, AstVisibilityKind},
         token::Ident,
@@ -129,27 +130,24 @@ impl<T> Default for ModuleTree<T> {
 }
 
 impl<T: Clone + Eq> ModuleTree<T> {
-    fn push_direct(
-        &mut self,
-        target: ModuleId,
-        direct: DirectItem<T>,
-    ) -> Result<(), ErrorGuaranteed> {
+    fn push_direct(&mut self, target: ModuleId, direct: DirectItem<T>) {
         debug_assert!(!self.frozen);
 
         match self.modules[target].direct_items.entry(direct.name.text) {
             indexmap::map::Entry::Vacant(entry) => {
                 entry.insert(direct);
-                Ok(())
             }
-            indexmap::map::Entry::Occupied(entry) => Err(Diag::span_err(
-                direct.name.span,
-                format_args!("name `{}` used more than once in module", direct.name.text),
-            )
-            .child(LeafDiag::span_note(
-                entry.get().name.span,
-                "name previously used here",
-            ))
-            .emit()),
+            indexmap::map::Entry::Occupied(entry) => {
+                Diag::span_err(
+                    direct.name.span,
+                    format_args!("name `{}` used more than once in module", direct.name.text),
+                )
+                .child(LeafDiag::span_note(
+                    entry.get().name.span,
+                    "name previously used here",
+                ))
+                .emit();
+            }
         }
     }
 
@@ -158,7 +156,7 @@ impl<T: Clone + Eq> ModuleTree<T> {
         parent: ModuleId,
         visibility: AstVisibility,
         name: Ident,
-    ) -> (ModuleId, Result<(), ErrorGuaranteed>) {
+    ) -> ModuleId {
         debug_assert!(!self.frozen);
 
         let child = self.modules.push(Module {
@@ -170,7 +168,7 @@ impl<T: Clone + Eq> ModuleTree<T> {
             actively_performing_glob_resolution: false,
         });
 
-        let err = self.push_direct(
+        self.push_direct(
             parent,
             DirectItem {
                 name,
@@ -179,7 +177,7 @@ impl<T: Clone + Eq> ModuleTree<T> {
             },
         );
 
-        (child, err)
+        child
     }
 
     pub fn push_glob_use(
@@ -203,7 +201,7 @@ impl<T: Clone + Eq> ModuleTree<T> {
         visibility: AstVisibility,
         name: Ident,
         path: AstSimplePath,
-    ) -> Result<(), ErrorGuaranteed> {
+    ) {
         debug_assert!(!self.frozen);
 
         self.push_direct(
@@ -216,13 +214,7 @@ impl<T: Clone + Eq> ModuleTree<T> {
         )
     }
 
-    pub fn push_item(
-        &mut self,
-        parent: ModuleId,
-        visibility: AstVisibility,
-        name: Ident,
-        data: T,
-    ) -> Result<(), ErrorGuaranteed> {
+    pub fn push_item(&mut self, parent: ModuleId, visibility: AstVisibility, name: Ident, data: T) {
         debug_assert!(!self.frozen);
 
         self.push_direct(
@@ -232,7 +224,7 @@ impl<T: Clone + Eq> ModuleTree<T> {
                 visibility: convert_visibility(parent, visibility),
                 kind: DirectItemKind::Item(data),
             },
-        )
+        );
     }
 
     pub fn module_path(
@@ -416,17 +408,17 @@ impl<T: Clone + Eq> ModuleTree<T> {
             (parts_iter.next(), &finger)
         {
             // Handle special path parts.
-            if part.matches_kw(symbol!("self")) {
+            if part.matches_kw(kw!("self")) {
                 // (leave `curr` unchanged)
                 continue 'traverse;
             }
 
-            if part.matches_kw(symbol!("crate")) {
+            if part.matches_kw(kw!("crate")) {
                 finger = ModuleResolution::Module(ModuleId::ROOT);
                 continue 'traverse;
             }
 
-            if part.matches_kw(symbol!("super")) {
+            if part.matches_kw(kw!("super")) {
                 let Some(parent) = self.modules[curr].parent else {
                     return make_err(emit_errors, || {
                         Diag::span_err(part.span, "`super` cannot apply to crate root")
