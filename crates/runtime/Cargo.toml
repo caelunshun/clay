@@ -4,17 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+fir-core.workspace = true
 fir-mir.workspace = true
-cranelift-entity.workspace = true
-compact_str.workspace = true
-hashbrown.workspace = true
-crossbeam-utils.workspace = true
-thread_local.workspace = true
-parking_lot.workspace = true
-bytemuck.workspace = true
 tracing.workspace = true
-thiserror.workspace = true
-portable-atomic.workspace = true
+salsa.workspace = true
 
 [dev-dependencies]
 tracing-subscriber.workspace = true
