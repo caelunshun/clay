@@ -13,10 +13,9 @@ use crate::{
 use std::rc::Rc;
 
 pub fn lower_full_ast(ast: &AstItemModuleContents, s: &Session) {
+    // Create the module tree
     let mut tree = ModuleTree::<()>::default();
-
     lower_initial_tree(&mut tree, ModuleId::ROOT, ast);
-
     tree.freeze_and_check();
 }
 

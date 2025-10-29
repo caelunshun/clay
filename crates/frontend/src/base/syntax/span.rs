@@ -53,8 +53,16 @@ impl FilePos {
         self.0.get() - 1
     }
 
+    pub fn is_dummy(self) -> bool {
+        self == Self::DUMMY
+    }
+
     #[must_use]
     pub fn map_usize(self, f: impl FnOnce(usize) -> usize) -> Self {
+        if self.is_dummy() {
+            return Self::DUMMY;
+        }
+
         Self::new(f(self.usize()))
     }
 
@@ -67,6 +75,10 @@ impl FilePos {
 
     #[must_use]
     pub fn map_u32(self, f: impl FnOnce(u32) -> u32) -> Self {
+        if self.is_dummy() {
+            return Self::DUMMY;
+        }
+
         Self::new_u32(f(self.u32()))
     }
 
@@ -78,19 +90,27 @@ impl FilePos {
     }
 
     pub fn delta(self, other: Self) -> u32 {
+        if self.is_dummy() || other.is_dummy() {
+            return 0;
+        }
+
         other.u32() - self.u32()
     }
 
     pub fn delta_signed(self, other: Self) -> i32 {
+        if self.is_dummy() || other.is_dummy() {
+            return 0;
+        }
+
         other.u32().wrapping_sub(self.u32()) as i32
     }
 
     pub fn delta_usize(self, other: Self) -> usize {
-        (other.u32() - self.u32()) as usize
-    }
+        if self.is_dummy() || other.is_dummy() {
+            return 0;
+        }
 
-    pub fn is_dummy(self) -> bool {
-        self == Self::DUMMY
+        (other.u32() - self.u32()) as usize
     }
 
     pub fn file(self) -> Rc<SourceMapFile> {
@@ -116,7 +136,7 @@ impl Sub<u32> for FilePos {
     type Output = Self;
 
     fn sub(self, rhs: u32) -> Self::Output {
-        self.map_u32(|lhs| lhs - rhs)
+        self.map_u32(|lhs| lhs.saturating_sub(rhs))
     }
 }
 
@@ -144,7 +164,7 @@ impl Sub<usize> for FilePos {
     type Output = Self;
 
     fn sub(self, rhs: usize) -> Self::Output {
-        self.map_usize(|lhs| lhs - rhs)
+        self.map_usize(|lhs| lhs.saturating_sub(rhs))
     }
 }
 
