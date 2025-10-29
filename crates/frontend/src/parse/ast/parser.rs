@@ -9,8 +9,7 @@ use crate::{
             AstAttribute, AstGenericDef, AstGenericDefKind, AstGenericDefList, AstItem,
             AstItemKind, AstItemModule, AstItemModuleContents, AstItemTrait, AstItemUse,
             AstSimplePath, AstTraitClause, AstTraitClauseKind, AstTraitClauseList, AstTraitParam,
-            AstUsePath, AstUsePathKind, AstUsePathOrWild, AstVisibility, AstVisibilityKind,
-            Keyword, PunctSeq,
+            AstUsePath, AstUsePathKind, AstVisibility, AstVisibilityKind, Keyword, PunctSeq,
         },
         token::{
             GroupDelimiter, Ident, Lifetime, Punct, TokenCharLit, TokenCursor, TokenGroup,
@@ -316,12 +315,8 @@ fn parse_path_part(p: P) -> Option<Ident> {
     None
 }
 
-fn parse_tree_path(p: P) -> Option<AstUsePathOrWild> {
+fn parse_tree_path(p: P) -> Option<AstUsePath> {
     let start = p.next_span();
-
-    if let Some(punct) = match_punct(punct!('*')).expect(p) {
-        return Some(AstUsePathOrWild::Wildcard(punct.span));
-    }
 
     let mut parts = Vec::new();
 
@@ -337,49 +332,61 @@ fn parse_tree_path(p: P) -> Option<AstUsePathOrWild> {
         }
     };
 
-    if parts.is_empty() {
-        return None;
+    if (parts.is_empty() || had_trailing_turbo)
+        && let Some(punct) = match_punct(punct!('*')).expect(p)
+    {
+        return Some(AstUsePath {
+            span: start.to(p.prev_span()),
+            base: Rc::from(parts),
+            kind: AstUsePathKind::Wild(punct.span),
+        });
     }
 
-    if !had_trailing_turbo {
+    if !parts.is_empty() && !had_trailing_turbo {
         let rename = match_kw(kw!("as"))
             .expect(p)
             .and_then(|_| match_ident().expect(p));
 
-        return Some(AstUsePathOrWild::Path(AstUsePath {
+        return Some(AstUsePath {
             span: start.to(p.prev_span()),
             base: Rc::from(parts),
             kind: AstUsePathKind::Direct(rename),
-        }));
+        });
     }
 
-    let Some(group) = match_group(GroupDelimiter::Brace).expect(p) else {
-        p.stuck_recover_with(|_| {
-            // TODO: Recover more intelligently
-        });
+    if (parts.is_empty() || had_trailing_turbo)
+        && let Some(group) = match_group(GroupDelimiter::Brace).expect(p)
+    {
+        let mut p2 = p.enter(&group);
 
-        return Some(AstUsePathOrWild::Path(AstUsePath {
+        let children = parse_delimited_until_terminator(
+            &mut p2,
+            &mut (),
+            |p, ()| parse_tree_path(p),
+            |p, ()| match_punct(punct!(',')).expect(p).is_some(),
+            |p, ()| match_eos(p),
+        );
+
+        return Some(AstUsePath {
             span: start.to(p.prev_span()),
             base: Rc::from(parts),
-            kind: AstUsePathKind::Direct(None),
-        }));
-    };
+            kind: AstUsePathKind::Tree(children.elems.into_iter().flatten().collect()),
+        });
+    }
 
-    let mut p2 = p.enter(&group);
+    if parts.is_empty() {
+        return None;
+    }
 
-    let children = parse_delimited_until_terminator(
-        &mut p2,
-        &mut (),
-        |p, ()| parse_tree_path(p),
-        |p, ()| match_punct(punct!(',')).expect(p).is_some(),
-        |p, ()| match_eos(p),
-    );
+    p.stuck_recover_with(|_| {
+        // TODO: Recover more intelligently
+    });
 
-    Some(AstUsePathOrWild::Path(AstUsePath {
+    Some(AstUsePath {
         span: start.to(p.prev_span()),
         base: Rc::from(parts),
-        kind: AstUsePathKind::Tree(children.elems.into_iter().flatten().collect()),
-    }))
+        kind: AstUsePathKind::Direct(None),
+    })
 }
 
 // === Type Parsing === //

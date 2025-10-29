@@ -2,7 +2,7 @@ use crate::{
     base::Session,
     parse::{
         ast::{
-            AstItemKind, AstItemModuleContents, AstSimplePath, AstUsePathKind, AstUsePathOrWild,
+            AstItemKind, AstItemModuleContents, AstSimplePath, AstUsePath, AstUsePathKind,
             AstVisibility,
         },
         lower::modules::{ModuleId, ModuleTree},
@@ -45,35 +45,24 @@ fn lower_use(
     mod_id: ModuleId,
     visibility: &AstVisibility,
     prefix: &mut Vec<Ident>,
-    ast: &AstUsePathOrWild,
+    ast: &AstUsePath,
 ) {
-    match ast {
-        AstUsePathOrWild::Path(path) => {
-            let old_len = prefix.len();
-            prefix.extend_from_slice(&path.base);
+    let old_len = prefix.len();
+    prefix.extend_from_slice(&ast.base);
 
-            match &path.kind {
-                AstUsePathKind::Direct(rename) => {
-                    tree.push_single_use(
-                        mod_id,
-                        visibility.clone(),
-                        rename.unwrap_or(prefix.last().copied().unwrap()),
-                        AstSimplePath {
-                            span: path.span,
-                            parts: Rc::from(prefix.as_slice()),
-                        },
-                    );
-                }
-                AstUsePathKind::Tree(children) => {
-                    for child in children.iter() {
-                        lower_use(tree, mod_id, visibility, prefix, child);
-                    }
-                }
-            }
-
-            prefix.truncate(old_len);
+    match &ast.kind {
+        AstUsePathKind::Direct(rename) => {
+            tree.push_single_use(
+                mod_id,
+                visibility.clone(),
+                rename.unwrap_or(prefix.last().copied().unwrap()),
+                AstSimplePath {
+                    span: ast.span,
+                    parts: Rc::from(prefix.as_slice()),
+                },
+            );
         }
-        AstUsePathOrWild::Wildcard(span) => {
+        AstUsePathKind::Wild(span) => {
             tree.push_glob_use(
                 mod_id,
                 visibility.clone(),
@@ -83,5 +72,12 @@ fn lower_use(
                 },
             );
         }
+        AstUsePathKind::Tree(children) => {
+            for child in children.iter() {
+                lower_use(tree, mod_id, visibility, prefix, child);
+            }
+        }
     }
+
+    prefix.truncate(old_len);
 }

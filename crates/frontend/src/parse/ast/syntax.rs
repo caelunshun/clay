@@ -1,8 +1,5 @@
 use crate::{
-    base::{
-        ErrorGuaranteed,
-        syntax::{Span, Spanned},
-    },
+    base::{ErrorGuaranteed, syntax::Span},
     parse::token::{Ident, Lifetime, TokenStream},
     typeck::syntax::TraitClauseList,
 };
@@ -40,7 +37,7 @@ pub struct AstItemModuleContents {
 
 #[derive(Debug, Clone)]
 pub struct AstItemUse {
-    pub path: AstUsePathOrWild,
+    pub path: AstUsePath,
 }
 
 #[derive(Debug, Clone)]
@@ -92,21 +89,6 @@ pub struct AstSimplePath {
 }
 
 #[derive(Debug, Clone)]
-pub enum AstUsePathOrWild {
-    Path(AstUsePath),
-    Wildcard(Span),
-}
-
-impl Spanned for AstUsePathOrWild {
-    fn span(&self) -> Span {
-        match self {
-            AstUsePathOrWild::Path(path) => path.span,
-            AstUsePathOrWild::Wildcard(span) => *span,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct AstUsePath {
     pub span: Span,
     pub base: Rc<[Ident]>,
@@ -116,7 +98,8 @@ pub struct AstUsePath {
 #[derive(Debug, Clone)]
 pub enum AstUsePathKind {
     Direct(Option<Ident>),
-    Tree(Vec<AstUsePathOrWild>),
+    Wild(Span),
+    Tree(Vec<AstUsePath>),
 }
 
 // === Clauses === //

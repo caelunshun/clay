@@ -1,9 +1,20 @@
-pub mod whee {
-    pub mod woo {}
+pub mod meow {
+    pub use super::thump::*;
+
+    pub mod whee {}
 }
 
-use self::whee::woo as fo;
+pub mod thump {
+    pub use super::meow::*;
 
-mod child {
-    use crate::fo as bo;
+    pub mod whee {}
 }
+
+pub use meow::whee as first;
+pub use thump::whee as second;
+
+pub mod res {
+    pub use {crate::meow::*, crate::thump::*};
+}
+
+use res::whee as third;
