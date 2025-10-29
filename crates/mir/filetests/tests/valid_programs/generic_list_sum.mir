@@ -78,20 +78,20 @@
         (return_type T)
         (entry block0)
         (block block0
-            (param list (mref (list T)))
+            (param list (bufref T))
             (call accum
                 ((assoc_func T Default default) ()))
             (constant i (0))
             (jump (loop ())))
         (block loop
-            (list.len len (list))
+            (bufref.len len (list))
             (int.cmp done (== i len))
             (branch
                 (done
                     (true exit ())
                     (false loop_body ()))))
         (block loop_body
-            (list.get element (list i))
+            (bufref.get element (list i))
             (call accum
                 ((assoc_func T (Add (type_arg Rhs T) (type_arg Output T)) add)
                     (accum element)))

@@ -301,9 +301,9 @@ impl<'a, 'db> Parser<'a, 'db> {
                 let pointee_type = self.parse_type(pointee_type)?;
                 Type::new(self.db, TypeKind::MRef(pointee_type))
             }
-            List([Symbol("list"), element_type]) => {
+            List([Symbol("bufref"), element_type]) => {
                 let element_type = self.parse_type(element_type)?;
-                Type::new(self.db, TypeKind::List(element_type))
+                Type::new(self.db, TypeKind::Bufref(element_type))
             }
             List([Symbol(adt_name), type_args @ ..])
                 if let Some(adt) = self.adts.get(adt_name).copied() =>
@@ -970,7 +970,7 @@ impl<'a, 'db> Parser<'a, 'db> {
                     .instr(self.cx)
                     .make_field_mref(dst, src, field.0);
             }
-            "list.init" => {
+            "bufref.init" => {
                 let [Symbol(dst), List([element_type])] = args else {
                     return Err(ParseError::new("invalid instr arguments"));
                 };
@@ -979,67 +979,46 @@ impl<'a, 'db> Parser<'a, 'db> {
                 state
                     .func_builder
                     .instr(self.cx)
-                    .make_list(dst, element_type);
+                    .make_bufref(dst, element_type);
             }
-            "list.push" => {
-                let (dst, src1, src2) = state.parse_args_binary(args)?;
-                state.func_builder.instr(self.cx).list_push(dst, src1, src2);
-            }
-            "list.ref.push" => {
-                let [List([Symbol(src1), Symbol(src2)])] = args else {
-                    return Err(ParseError::new("invalid instr arguments"));
-                };
-                let src1 = state.get_val(src1)?;
-                let src2 = state.get_val(src2)?;
-                state.func_builder.instr(self.cx).list_ref_push(src1, src2);
-            }
-            "list.remove" => {
+            "bufref.push" => {
                 let (dst, src1, src2) = state.parse_args_binary(args)?;
                 state
                     .func_builder
                     .instr(self.cx)
-                    .list_remove(dst, src1, src2);
+                    .bufref_push(dst, src1, src2);
             }
-            "list.ref.remove" => {
-                let [List([Symbol(src1), Symbol(src2)])] = args else {
-                    return Err(ParseError::new("invalid instr arguments"));
-                };
-                let src1 = state.get_val(src1)?;
-                let src2 = state.get_val(src2)?;
-                state
-                    .func_builder
-                    .instr(self.cx)
-                    .list_ref_remove(src1, src2);
-            }
-            "list.trunc" => {
+            "bufref.remove" => {
                 let (dst, src1, src2) = state.parse_args_binary(args)?;
                 state
                     .func_builder
                     .instr(self.cx)
-                    .list_trunc(dst, src1, src2);
+                    .bufref_remove(dst, src1, src2);
             }
-            "list.ref.trunc" => {
-                let [List([Symbol(src1), Symbol(src2)])] = args else {
-                    return Err(ParseError::new("invalid instr arguments"));
-                };
-                let src1 = state.get_val(src1)?;
-                let src2 = state.get_val(src2)?;
-                state.func_builder.instr(self.cx).list_ref_trunc(src1, src2);
+            "bufref.trunc" => {
+                let (dst, src1, src2) = state.parse_args_binary(args)?;
+                state
+                    .func_builder
+                    .instr(self.cx)
+                    .bufref_trunc(dst, src1, src2);
             }
-            "list.len" => {
+            "bufref.len" => {
                 let (dst, src) = state.parse_args_unary(args)?;
-                state.func_builder.instr(self.cx).list_len(dst, src);
+                state.func_builder.instr(self.cx).bufref_len(dst, src);
             }
-            "list.get" => {
-                let (dst, src1, src2) = state.parse_args_binary(args)?;
-                state.func_builder.instr(self.cx).list_get(dst, src1, src2);
-            }
-            "list.get_mref" => {
+            "bufref.get" => {
                 let (dst, src1, src2) = state.parse_args_binary(args)?;
                 state
                     .func_builder
                     .instr(self.cx)
-                    .list_get_mref(dst, src1, src2);
+                    .bufref_get(dst, src1, src2);
+            }
+            "bufref.get_mref" => {
+                let (dst, src1, src2) = state.parse_args_binary(args)?;
+                state
+                    .func_builder
+                    .instr(self.cx)
+                    .bufref_get_mref(dst, src1, src2);
             }
             _ => return Err(ParseError::new(format!("unknown instruction `{instr}`"))),
         }

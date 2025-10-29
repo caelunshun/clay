@@ -184,64 +184,40 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                     )],
                 )?;
             }
-            InstrData::MakeList(ins) => {
-                self.verify_type_data_matches(ins.dst, &[TypeKind::List(ins.element_type)])?;
+            InstrData::MakeBufref(ins) => {
+                self.verify_type_data_matches(ins.dst, &[TypeKind::Bufref(ins.element_type)])?;
             }
-            InstrData::ListPush(ins) => {
-                let element_type = self.expect_list_or_list_ref(ins.src_list)?;
+            InstrData::BufrefPush(ins) => {
+                let element_type = self.expect_bufref(ins.src_bufref)?;
                 self.verify_type_equals(ins.src_element, element_type)?;
-                if self.is_ref(self.type_of(ins.src_list)) {
-                    if ins.dst_list.is_some() {
-                        return Err(ValidationError::new(
-                            "for list modifying instructions operating on a reference, dst_list must be None",
-                        ));
-                    }
-                } else {
-                    let dst_list = ins.dst_list.ok_or_else(|| ValidationError::new("for list modifying instructions operating on values, dst_list must be Some"))?;
-                    self.verify_type_data_matches(dst_list, &[TypeKind::List(element_type)])?;
-                }
+
+                self.verify_type_data_matches(ins.dst_bufref, &[TypeKind::Bufref(element_type)])?;
             }
-            InstrData::ListRemove(ins) => {
+            InstrData::BufrefRemove(ins) => {
                 self.verify_type_data_matches(ins.src_index, &[TypeKind::Prim(PrimType::Int)])?;
 
-                let element_type = self.expect_list_or_list_ref(ins.src_list)?;
-                if self.is_ref(self.type_of(ins.src_list)) {
-                    if ins.dst_list.is_some() {
-                        return Err(ValidationError::new(
-                            "for list modifying instructions operating on a reference, dst_list must be None",
-                        ));
-                    }
-                } else {
-                    let dst_list = ins.dst_list.ok_or_else(|| ValidationError::new("for list modifying instructions operating on values, dst_list must be Some"))?;
-                    self.verify_type_data_matches(dst_list, &[TypeKind::List(element_type)])?;
-                }
+                let element_type = self.expect_bufref(ins.src_bufref)?;
+
+                self.verify_type_data_matches(ins.dst_bufref, &[TypeKind::Bufref(element_type)])?;
             }
-            InstrData::ListTrunc(ins) => {
+            InstrData::BufrefTrunc(ins) => {
                 self.verify_type_data_matches(ins.new_len, &[TypeKind::Prim(PrimType::Int)])?;
 
-                let element_type = self.expect_list_or_list_ref(ins.src_list)?;
-                if self.is_ref(self.type_of(ins.src_list)) {
-                    if ins.dst_list.is_some() {
-                        return Err(ValidationError::new(
-                            "for list modifying instructions operating on a reference, dst_list must be None",
-                        ));
-                    }
-                } else {
-                    let dst_list = ins.dst_list.ok_or_else(|| ValidationError::new("for list modifying instructions operating on values, dst_list must be Some"))?;
-                    self.verify_type_data_matches(dst_list, &[TypeKind::List(element_type)])?;
-                }
+                let element_type = self.expect_bufref(ins.src_bufref)?;
+
+                self.verify_type_data_matches(ins.dst_bufref, &[TypeKind::Bufref(element_type)])?;
             }
-            InstrData::ListLen(ins) => {
-                self.expect_list_or_list_ref(ins.src_list)?;
+            InstrData::BufrefLen(ins) => {
+                self.expect_bufref(ins.src_bufref)?;
                 self.verify_type_data_matches(ins.dst_len, &[TypeKind::Prim(PrimType::Int)])?;
             }
-            InstrData::ListGet(ins) => {
-                let element_type = self.expect_list_or_list_ref(ins.src_list)?;
+            InstrData::BufrefGet(ins) => {
+                let element_type = self.expect_bufref(ins.src_bufref)?;
                 self.verify_type_data_matches(ins.src_index, &[TypeKind::Prim(PrimType::Int)])?;
                 self.verify_type_equals(ins.dst_val, element_type)?;
             }
-            InstrData::ListGetMRef(ins) => {
-                let element_type = self.expect_list_or_list_ref(ins.src_list)?;
+            InstrData::BufregGetMRef(ins) => {
+                let element_type = self.expect_bufref(ins.src_bufref)?;
                 self.verify_type_data_matches(ins.src_index, &[TypeKind::Prim(PrimType::Int)])?;
                 self.verify_type_data_matches(ins.dst_ref, &[TypeKind::MRef(element_type)])?;
             }
@@ -437,16 +413,11 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
     }
 
     #[track_caller]
-    fn expect_list_or_list_ref(&self, val: ValId) -> Result<Type<'db>, ValidationError> {
+    fn expect_bufref(&self, val: ValId) -> Result<Type<'db>, ValidationError> {
         match self.type_data_of(val) {
-            TypeKind::List(t) => Ok(*t),
-            TypeKind::MRef(l) if let TypeKind::List(t) = l.kind(self.db) => Ok(*t),
-            _ => Err(ValidationError::new("expected list or reference to list")),
+            TypeKind::Bufref(t) => Ok(*t),
+            _ => Err(ValidationError::new("expected bufref")),
         }
-    }
-
-    fn is_ref(&self, t: Type<'db>) -> bool {
-        matches!(t.kind(self.db), TypeKind::MRef(_))
     }
 }
 

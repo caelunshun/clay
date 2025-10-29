@@ -434,78 +434,54 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         self.set_val_type(dst, typ);
     }
 
-    pub fn make_list(mut self, dst: ValId, element_type: Type<'db>) {
-        self.instr(InstrData::MakeList(instr::MakeList { dst, element_type }));
-        let typ = Type::new(self.db, TypeKind::List(element_type));
+    pub fn make_bufref(mut self, dst: ValId, element_type: Type<'db>) {
+        self.instr(InstrData::MakeBufref(instr::MakeBufref {
+            dst,
+            element_type,
+        }));
+        let typ = Type::new(self.db, TypeKind::Bufref(element_type));
         self.set_val_type(dst, typ);
     }
 
-    pub fn list_push(mut self, dst: ValId, src_list: ValId, src_element: ValId) {
-        self.instr(InstrData::ListPush(instr::ListPush {
-            dst_list: Some(dst),
-            src_list,
+    pub fn bufref_push(mut self, dst: ValId, src_bufref: ValId, src_element: ValId) {
+        self.instr(InstrData::BufrefPush(instr::BufrefPush {
+            dst_bufref: dst,
+            src_bufref,
             src_element,
         }));
-        self.set_val_type(dst, self.val_types[src_list].unwrap());
+        self.set_val_type(dst, self.val_types[src_bufref].unwrap());
     }
 
-    pub fn list_ref_push(mut self, src_list: ValId, src_element: ValId) {
-        self.instr(InstrData::ListPush(instr::ListPush {
-            dst_list: None,
-            src_list,
-            src_element,
-        }));
-        // no set_val_type since no destination operands
-    }
-
-    pub fn list_remove(mut self, dst: ValId, src_list: ValId, src_index: ValId) {
-        self.instr(InstrData::ListRemove(instr::ListRemove {
-            dst_list: Some(dst),
-            src_list,
+    pub fn bufref_remove(mut self, dst: ValId, src_bufref: ValId, src_index: ValId) {
+        self.instr(InstrData::BufrefRemove(instr::BufrefRemove {
+            dst_bufref: dst,
+            src_bufref,
             src_index,
         }));
-        self.set_val_type(dst, self.val_types[src_list].unwrap());
+        self.set_val_type(dst, self.val_types[src_bufref].unwrap());
     }
 
-    pub fn list_ref_remove(mut self, src_list: ValId, src_index: ValId) {
-        self.instr(InstrData::ListRemove(instr::ListRemove {
-            dst_list: None,
-            src_list,
-            src_index,
-        }));
-        // no set_val_type since no destination operands
-    }
-
-    pub fn list_trunc(mut self, dst: ValId, src_list: ValId, new_len: ValId) {
-        self.instr(InstrData::ListTrunc(instr::ListTrunc {
-            dst_list: Some(dst),
-            src_list,
+    pub fn bufref_trunc(mut self, dst: ValId, src_bufref: ValId, new_len: ValId) {
+        self.instr(InstrData::BufrefTrunc(instr::BufrefTrunc {
+            dst_bufref: dst,
+            src_bufref,
             new_len,
         }));
-        self.set_val_type(dst, self.val_types[src_list].unwrap());
+        self.set_val_type(dst, self.val_types[src_bufref].unwrap());
     }
 
-    pub fn list_ref_trunc(mut self, src_list: ValId, new_len: ValId) {
-        self.instr(InstrData::ListTrunc(instr::ListTrunc {
-            dst_list: None,
-            src_list,
-            new_len,
-        }));
-        // no set_val_type since no destination operands
-    }
-
-    pub fn list_len(mut self, dst: ValId, src: ValId) {
-        self.instr(InstrData::ListLen(instr::ListLen {
+    pub fn bufref_len(mut self, dst: ValId, src: ValId) {
+        self.instr(InstrData::BufrefLen(instr::BufrefLen {
             dst_len: dst,
-            src_list: src,
+            src_bufref: src,
         }));
         self.set_val_type(dst, Type::int(self.db));
     }
 
-    pub fn list_get(mut self, dst: ValId, src_list: ValId, src_index: ValId) {
-        self.instr(InstrData::ListGet(instr::ListGet {
+    pub fn bufref_get(mut self, dst: ValId, src_list: ValId, src_index: ValId) {
+        self.instr(InstrData::BufrefGet(instr::BufrefGet {
             dst_val: dst,
-            src_list,
+            src_bufref: src_list,
             src_index,
         }));
         self.set_val_type(
@@ -514,10 +490,10 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
         );
     }
 
-    pub fn list_get_mref(mut self, dst: ValId, src_list: ValId, src_index: ValId) {
-        self.instr(InstrData::ListGetMRef(instr::ListGetMRef {
+    pub fn bufref_get_mref(mut self, dst: ValId, src_list: ValId, src_index: ValId) {
+        self.instr(InstrData::BufregGetMRef(instr::BufrefGetMRef {
             dst_ref: dst,
-            src_list,
+            src_bufref: src_list,
             src_index,
         }));
         let typ = TypeKind::MRef(
@@ -528,9 +504,9 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
 
     fn get_list_element_type(&self, t: &TypeKind<'db>) -> Type<'db> {
         match t {
-            TypeKind::List(el) => *el,
+            TypeKind::Bufref(el) => *el,
             TypeKind::MRef(l) => match l.kind(self.db) {
-                TypeKind::List(el) => *el,
+                TypeKind::Bufref(el) => *el,
                 _ => panic!("not a list"),
             },
             _ => panic!("not a list"),

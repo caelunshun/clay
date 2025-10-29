@@ -49,13 +49,13 @@ pub enum InstrData<'db> {
     Store(Store),
     MakeFieldMRef(MakeFieldMRef),
 
-    MakeList(MakeList<'db>),
-    ListPush(ListPush),
-    ListRemove(ListRemove),
-    ListTrunc(ListTrunc),
-    ListLen(ListLen),
-    ListGet(ListGet),
-    ListGetMRef(ListGetMRef),
+    MakeBufref(MakeBufref<'db>),
+    BufrefPush(BufrefPush),
+    BufrefRemove(BufrefRemove),
+    BufrefTrunc(BufrefTrunc),
+    BufrefLen(BufrefLen),
+    BufrefGet(BufrefGet),
+    BufregGetMRef(BufrefGetMRef),
 }
 
 impl InstrData<'_> {
@@ -162,28 +162,28 @@ impl InstrData<'_> {
             InstrData::MakeFieldMRef(ins) => {
                 ins.src_ref = map(ins.src_ref);
             }
-            InstrData::MakeList(_) => {}
-            InstrData::ListPush(ins) => {
-                ins.src_list = map(ins.src_list);
+            InstrData::MakeBufref(_) => {}
+            InstrData::BufrefPush(ins) => {
+                ins.src_bufref = map(ins.src_bufref);
                 ins.src_element = map(ins.src_element);
             }
-            InstrData::ListRemove(ins) => {
-                ins.src_list = map(ins.src_list);
+            InstrData::BufrefRemove(ins) => {
+                ins.src_bufref = map(ins.src_bufref);
                 ins.src_index = map(ins.src_index);
             }
-            InstrData::ListTrunc(ins) => {
-                ins.src_list = map(ins.src_list);
+            InstrData::BufrefTrunc(ins) => {
+                ins.src_bufref = map(ins.src_bufref);
                 ins.new_len = map(ins.new_len);
             }
-            InstrData::ListLen(ins) => {
-                ins.src_list = map(ins.src_list);
+            InstrData::BufrefLen(ins) => {
+                ins.src_bufref = map(ins.src_bufref);
             }
-            InstrData::ListGet(ins) => {
-                ins.src_list = map(ins.src_list);
+            InstrData::BufrefGet(ins) => {
+                ins.src_bufref = map(ins.src_bufref);
                 ins.src_index = map(ins.src_index);
             }
-            InstrData::ListGetMRef(ins) => {
-                ins.src_list = map(ins.src_list);
+            InstrData::BufregGetMRef(ins) => {
+                ins.src_bufref = map(ins.src_bufref);
                 ins.src_index = map(ins.src_index);
             }
         }
@@ -250,31 +250,25 @@ impl InstrData<'_> {
             InstrData::MakeFieldMRef(ins) => {
                 ins.dst_ref = map(ins.dst_ref);
             }
-            InstrData::MakeList(ins) => {
+            InstrData::MakeBufref(ins) => {
                 ins.dst = map(ins.dst);
             }
-            InstrData::ListPush(ins) => {
-                if let Some(dst_list) = &mut ins.dst_list {
-                    *dst_list = map(*dst_list);
-                }
+            InstrData::BufrefPush(ins) => {
+                ins.dst_bufref = map(ins.dst_bufref);
             }
-            InstrData::ListRemove(ins) => {
-                if let Some(dst_list) = &mut ins.dst_list {
-                    *dst_list = map(*dst_list);
-                }
+            InstrData::BufrefRemove(ins) => {
+                ins.dst_bufref = map(ins.dst_bufref);
             }
-            InstrData::ListTrunc(ins) => {
-                if let Some(dst_list) = &mut ins.dst_list {
-                    *dst_list = map(*dst_list);
-                }
+            InstrData::BufrefTrunc(ins) => {
+                ins.dst_bufref = map(ins.dst_bufref);
             }
-            InstrData::ListLen(ins) => {
+            InstrData::BufrefLen(ins) => {
                 ins.dst_len = map(ins.dst_len);
             }
-            InstrData::ListGet(ins) => {
+            InstrData::BufrefGet(ins) => {
                 ins.dst_val = map(ins.dst_val);
             }
-            InstrData::ListGetMRef(ins) => {
+            InstrData::BufregGetMRef(ins) => {
                 ins.dst_ref = map(ins.dst_ref);
             }
         }
@@ -492,73 +486,60 @@ pub struct MakeFieldMRef {
     pub field: FieldId,
 }
 
-/// Create an empty list.
+/// Create an empty bufref.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
-pub struct MakeList<'db> {
+pub struct MakeBufref<'db> {
     pub dst: ValId,
-    /// Type of the elements inside the list.
+    /// Type of the elements inside the bufref.
     pub element_type: Type<'db>,
 }
 
-// -------------------
-// Instructions that work with lists can support either local
-// (value) lists or lists behind a reference.
-//
-// For instructions that modify lists, the list is updated according
-// to these rules:
-// * For local lists, the updated list is placed in the `dst_list` value
-// of the instruction, which must be `Some(_)`. The old list is not modified,
-// to allow adherence to SSA.
-// * For referenced lists, the list is directly mutated in memory,
-// and the `dst_list` value of the instruction must be `None`.
-// -------------------
-
-/// Append a value onto the end of a list.
+/// Append a value onto the end of a bufref.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
-pub struct ListPush {
-    pub dst_list: Option<ValId>,
-    pub src_list: ValId,
+pub struct BufrefPush {
+    pub dst_bufref: ValId,
+    pub src_bufref: ValId,
     pub src_element: ValId,
 }
 
-/// Copy a value in a list to a local value.
+/// Copy a value in a bufref to a local value.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
-pub struct ListGet {
+pub struct BufrefGet {
     pub dst_val: ValId,
-    pub src_list: ValId,
+    pub src_bufref: ValId,
     pub src_index: ValId,
 }
 
-/// Create an MRef to a value inside a list.
+/// Create an MRef to a value inside a bufref.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
-pub struct ListGetMRef {
+pub struct BufrefGetMRef {
     pub dst_ref: ValId,
-    pub src_list: ValId,
+    pub src_bufref: ValId,
     pub src_index: ValId,
 }
 
-/// Get the length of a list, as an Int.
+/// Get the length of a bufref, as an Int.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
-pub struct ListLen {
+pub struct BufrefLen {
     pub dst_len: ValId,
-    pub src_list: ValId,
+    pub src_bufref: ValId,
 }
 
-/// Removes an element from a list by its index, moving elements
+/// Removes an element from a bufref by its index, moving elements
 /// from higher to lower indexes to fill the gap.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
-pub struct ListRemove {
-    pub dst_list: Option<ValId>,
-    pub src_list: ValId,
+pub struct BufrefRemove {
+    pub dst_bufref: ValId,
+    pub src_bufref: ValId,
     pub src_index: ValId,
 }
 
-/// Truncates a list to have the given updated size.
-/// (Panics if the list length was less than the requested
+/// Truncates a bufref to have the given updated size.
+/// (Panics if the bufref length was less than the requested
 /// new size.)
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
-pub struct ListTrunc {
-    pub dst_list: Option<ValId>,
-    pub src_list: ValId,
+pub struct BufrefTrunc {
+    pub dst_bufref: ValId,
+    pub src_bufref: ValId,
     pub new_len: ValId,
 }

@@ -5,24 +5,23 @@
 // @harness ssa_validation_fails
 (mir
     (func make_list
-        (return_type (mref (list int)))
+        (return_type (bufref int))
         (entry block0)
         (block block0
             (param el0 int)
             (param el1 int)
-            (list.init l (int))
-            (list.push l (l el0))
-            (alloc l_ref (l))
-            (list.ref.push (l_ref el1))
-            (return (l_ref))))
+            (bufref.init l (int))
+            (bufref.push l (l el0))
+            (bufref.push l (l el1))
+            (return (l))))
     (func sum_list
         (return_type int)
         (entry block0)
         (block block0
-            (param l (mref (list int)))
+            (param l (bufref int))
             (constant i (0))
             (constant sum (0))
-            (list.len len (l))
+            (bufref.len len (l))
             (jump (loop ())))
         (block loop
             (int.cmp done (>= i len))
@@ -30,13 +29,12 @@
                 (true exit ())
                 (false loop_body ()))))
         (block loop_body
-            (list.get x (l i))
-            (list.get_mref x_ref (l i)) // test this works too
+            (bufref.get x (l i))
             (int.add sum (sum x))
             (constant one (1))
             (int.add i (i one))
             (jump (loop ())))
         (block exit
             (constant zero (0))
-            (list.ref.trunc (l zero))
+            (bufref.trunc l (l zero))
             (return (sum)))))

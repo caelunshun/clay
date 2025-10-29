@@ -155,7 +155,7 @@ impl<'db> Formatter<'db> {
                 PrimType::Unit => symbol("unit"),
             },
             TypeKind::MRef(p) => list([symbol("mref"), self.format_type(*p)]),
-            TypeKind::List(t) => list([symbol("list"), self.format_type(*t)]),
+            TypeKind::Bufref(t) => list([symbol("bufref"), self.format_type(*t)]),
             TypeKind::Algebraic(adt_instance) => {
                 let name = adt_instance
                     .adt
@@ -500,67 +500,43 @@ impl<'db> Formatter<'db> {
                     ]),
                 ])
             }
-            InstrData::MakeList(ins) => list([
-                symbol("list.init"),
+            InstrData::MakeBufref(ins) => list([
+                symbol("bufref.init"),
                 self.val_name(ins.dst),
                 list([self.format_type(ins.element_type)]),
             ]),
-            InstrData::ListPush(ins) => {
-                if let Some(dst_list) = ins.dst_list {
-                    list([
-                        symbol("list.push"),
-                        self.val_name(dst_list),
-                        list([self.val_name(ins.src_list), self.val_name(ins.src_element)]),
-                    ])
-                } else {
-                    list([
-                        symbol("list.ref.push"),
-                        list([self.val_name(ins.src_list), self.val_name(ins.src_element)]),
-                    ])
-                }
-            }
-            InstrData::ListRemove(ins) => {
-                if let Some(dst_list) = ins.dst_list {
-                    list([
-                        symbol("list.remove"),
-                        self.val_name(dst_list),
-                        list([self.val_name(ins.src_list), self.val_name(ins.src_index)]),
-                    ])
-                } else {
-                    list([
-                        symbol("list.ref.remove"),
-                        list([self.val_name(ins.src_list), self.val_name(ins.src_index)]),
-                    ])
-                }
-            }
-            InstrData::ListTrunc(ins) => {
-                if let Some(dst_list) = ins.dst_list {
-                    list([
-                        symbol("list.trunc"),
-                        self.val_name(dst_list),
-                        list([self.val_name(ins.src_list), self.val_name(ins.new_len)]),
-                    ])
-                } else {
-                    list([
-                        symbol("list.ref.trunc"),
-                        list([self.val_name(ins.src_list), self.val_name(ins.new_len)]),
-                    ])
-                }
-            }
-            InstrData::ListLen(ins) => list([
-                symbol("list.len"),
+            InstrData::BufrefPush(ins) => list([
+                symbol("bufref.push"),
+                self.val_name(ins.dst_bufref),
+                list([
+                    self.val_name(ins.src_bufref),
+                    self.val_name(ins.src_element),
+                ]),
+            ]),
+            InstrData::BufrefRemove(ins) => list([
+                symbol("bufref.remove"),
+                self.val_name(ins.dst_bufref),
+                list([self.val_name(ins.src_bufref), self.val_name(ins.src_index)]),
+            ]),
+            InstrData::BufrefTrunc(ins) => list([
+                symbol("bufref.trunc"),
+                self.val_name(ins.dst_bufref),
+                list([self.val_name(ins.src_bufref), self.val_name(ins.new_len)]),
+            ]),
+            InstrData::BufrefLen(ins) => list([
+                symbol("bufref.len"),
                 self.val_name(ins.dst_len),
-                list([self.val_name(ins.src_list)]),
+                list([self.val_name(ins.src_bufref)]),
             ]),
-            InstrData::ListGet(ins) => list([
-                symbol("list.get"),
+            InstrData::BufrefGet(ins) => list([
+                symbol("bufref.get"),
                 self.val_name(ins.dst_val),
-                list([self.val_name(ins.src_list), self.val_name(ins.src_index)]),
+                list([self.val_name(ins.src_bufref), self.val_name(ins.src_index)]),
             ]),
-            InstrData::ListGetMRef(ins) => list([
-                symbol("list.get_mref"),
+            InstrData::BufregGetMRef(ins) => list([
+                symbol("bufref.get_mref"),
                 self.val_name(ins.dst_ref),
-                list([self.val_name(ins.src_list), self.val_name(ins.src_index)]),
+                list([self.val_name(ins.src_bufref), self.val_name(ins.src_index)]),
             ]),
         }
     }

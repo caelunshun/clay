@@ -44,8 +44,15 @@ pub enum TypeKind<'db> {
     /// or to an element of a list.
     /// It has indefinite lifetime.
     MRef(Type<'db>),
-    /// Dynamically resized array.
-    List(Type<'db>),
+    /// A dynamically resizable array of an inner element type.
+    /// Semantics in the IR are similar to Go slices. In particular,
+    /// mutating a bufref returns a new bufref that may or not share
+    /// the underlying buffer with the old value.
+    ///
+    /// Not intended for direct consumption in user code due to the resulting footguns.
+    /// This is a primitive on which we can build higher-level data structures
+    /// in the standard library.
+    Bufref(Type<'db>),
     Algebraic(AlgebraicTypeInstance<'db>),
     /// Generic type in the current scope.
     TypeParam(TypeParamId),
@@ -83,7 +90,7 @@ impl<'db> TypeKind<'db> {
         match self {
             TypeKind::Prim(_) | TypeKind::TypeParam(_) | TypeKind::Self_ => self.clone(),
             TypeKind::MRef(type_kind) => TypeKind::MRef(map(*type_kind)),
-            TypeKind::List(type_kind) => TypeKind::List(map(*type_kind)),
+            TypeKind::Bufref(type_kind) => TypeKind::Bufref(map(*type_kind)),
             TypeKind::Algebraic(algebraic_type_instance) => {
                 TypeKind::Algebraic(AlgebraicTypeInstance {
                     adt: algebraic_type_instance.adt,

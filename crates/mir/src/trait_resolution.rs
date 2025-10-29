@@ -122,7 +122,7 @@ pub fn can_type_satisfy<'db>(db: &'db dyn Database, args: CanTypeSatisfyArgs<'db
             satisfies
         }
         (TypeKind::MRef(inner1), TypeKind::MRef(inner2))
-        | (TypeKind::List(inner1), TypeKind::List(inner2)) => {
+        | (TypeKind::Bufref(inner1), TypeKind::Bufref(inner2)) => {
             can_type_satisfy(db, CanTypeSatisfyArgs::new(db, cx, *inner1, *inner2))
         }
         (TypeKind::Algebraic(a1), TypeKind::Algebraic(a2)) => {
