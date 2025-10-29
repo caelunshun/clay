@@ -81,7 +81,6 @@ struct Visibility {
 
 #[derive(Clone)]
 enum VisibilityKind {
-    Priv,
     Pub,
     PubInResolved(ModuleId),
     PubInUnresolved(AstSimplePath),
@@ -175,7 +174,7 @@ impl<T: Clone + Eq> ModuleTree<T> {
             parent,
             DirectItem {
                 name,
-                visibility: visibility.into(),
+                visibility: convert_visibility(parent, visibility),
                 kind: DirectItemKind::Link(CachedPath::Resolved(ModuleResolution::Module(child))),
             },
         );
@@ -193,7 +192,7 @@ impl<T: Clone + Eq> ModuleTree<T> {
 
         self.modules[parent].glob_imports.push(GlobImport {
             span: path.span,
-            visibility: visibility.into(),
+            visibility: convert_visibility(parent, visibility),
             path: CachedPath::Unresolved(path),
         });
     }
@@ -211,7 +210,7 @@ impl<T: Clone + Eq> ModuleTree<T> {
             parent,
             DirectItem {
                 name,
-                visibility: visibility.into(),
+                visibility: convert_visibility(parent, visibility),
                 kind: DirectItemKind::Link(CachedPath::Unresolved(path)),
             },
         )
@@ -230,7 +229,7 @@ impl<T: Clone + Eq> ModuleTree<T> {
             parent,
             DirectItem {
                 name,
-                visibility: visibility.into(),
+                visibility: convert_visibility(parent, visibility),
                 kind: DirectItemKind::Item(data),
             },
         )
@@ -449,9 +448,6 @@ impl<T: Clone + Eq> ModuleTree<T> {
                     }
 
                     match item.visibility.kind {
-                        VisibilityKind::Priv => {
-                            // (fallthrough)
-                        }
                         VisibilityKind::Pub => {
                             break 'vis_check;
                         }
@@ -527,9 +523,6 @@ impl<T: Clone + Eq> ModuleTree<T> {
                 for use_idx in 0..curr_mod.glob_imports.len() {
                     // Ensure that the glob-import is visible.
                     match self.modules[curr].glob_imports[use_idx].visibility.kind {
-                        VisibilityKind::Priv => {
-                            continue;
-                        }
                         VisibilityKind::Pub => {
                             // (fallthrough)
                         }
@@ -750,11 +743,6 @@ impl<T: Clone + Eq> ModuleTree<T> {
             }
         };
 
-        if target == within {
-            fetch(self).kind = VisibilityKind::Priv;
-            return;
-        }
-
         if target == ModuleId::ROOT {
             // (leave the visibility as `pub`)
             return;
@@ -785,17 +773,17 @@ impl<T: Clone + Eq> ModuleTree<T> {
     }
 }
 
-impl From<AstVisibility> for Visibility {
-    fn from(visibility: AstVisibility) -> Self {
-        let kind = match visibility.kind {
-            AstVisibilityKind::Implicit | AstVisibilityKind::Priv => VisibilityKind::Priv,
-            AstVisibilityKind::Pub => VisibilityKind::Pub,
-            AstVisibilityKind::PubIn(path) => VisibilityKind::PubInUnresolved(path),
-        };
-
-        Visibility {
-            span: visibility.span,
-            kind,
+fn convert_visibility(self_mod: ModuleId, ast: AstVisibility) -> Visibility {
+    let kind = match ast.kind {
+        AstVisibilityKind::Implicit | AstVisibilityKind::Priv => {
+            VisibilityKind::PubInResolved(self_mod)
         }
+        AstVisibilityKind::Pub => VisibilityKind::Pub,
+        AstVisibilityKind::PubIn(path) => VisibilityKind::PubInUnresolved(path),
+    };
+
+    Visibility {
+        span: ast.span,
+        kind,
     }
 }
