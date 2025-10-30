@@ -142,5 +142,23 @@ pub fn do_loop_analysis<'db>(db: &'db dyn Database, func: Func<'db>) -> LoopAnal
         }
     }
 
+    // Calculate depth by visiting loops from largest to smallest
+    // number of blocks and checking whether each loop is a subset
+    // of a previously visited loop.
+    let mut sorted_indices = (0..loops.len()).collect::<Vec<_>>();
+    sorted_indices.sort_unstable_by_key(|i| loops[*i].parts.iter().count());
+
+    for index in sorted_indices {
+        for index2 in 0..index {
+            if loops[index]
+                .parts
+                .iter()
+                .any(|part| loops[index2].parts.contains(part))
+            {
+                loops[index].depth = loops[index2].depth + 1;
+            }
+        }
+    }
+
     LoopAnalysis::new(db, func, loops)
 }
