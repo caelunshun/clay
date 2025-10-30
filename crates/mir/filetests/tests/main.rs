@@ -1,7 +1,12 @@
 mod harnesses {
     use fir_core::sexpr::SExpr;
     use fir_mir::{
-        Func, formatter::format_context, ir::Context, parser::parse_mir, passes, validation,
+        Func,
+        formatter::format_context,
+        ir::Context,
+        parser::parse_mir,
+        passes::{self, loop_analysis::do_loop_analysis},
+        validation,
     };
     use pretty_assertions::assert_eq;
     use salsa::{Database, DatabaseImpl};
@@ -152,6 +157,23 @@ mod harnesses {
             let formatted_module = format_context(db, ssa_cx).to_string();
             let expected_module_normalized = SExpr::parse(expected).unwrap().to_string();
             assert_eq!(formatted_module, expected_module_normalized);
+        });
+    }
+
+    /// Verifies that loop analysis results in the correct result.
+    pub fn loop_analysis_matches_expected(input: &'static str, expected: &'static str) {
+        with_parsed_context(input, |db, cx| {
+            let func = cx
+                .data(db)
+                .funcs
+                .values()
+                .find(|f| f.data(db).header.name == "loop_analysis_func")
+                .unwrap();
+
+            let loop_analysis = do_loop_analysis(db, *func);
+            let expected_normalized = SExpr::parse(expected).unwrap().to_string();
+            let actual = loop_analysis.to_sexpr(db, cx).to_string();
+            assert_eq!(actual, expected_normalized);
         });
     }
 }

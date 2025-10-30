@@ -1,0 +1,25 @@
+// @harness ssa_validation_succeeds
+// @harness(with_expected) loop_analysis_matches_expected
+(mir
+    (func loop_analysis_func
+        (return_type int)
+        (entry block0)
+        (block block0
+            (param i int)
+            (jump (loop_header (i))))
+        (block loop_header
+            (param i_current int)
+            (constant one (1))
+            (int.sub i_next (i_current one))
+            (constant zero (0))
+            (int.cmp done (== i_next zero))
+            (branch
+                (done
+                    (true exit (i_next))
+                    (false loop_continue (i_next)))))
+        (block loop_continue
+            (param i_next_r1 int)
+            (jump (loop_header (i_next_r1))))
+        (block exit
+            (param i_final int)
+            (return (i_final)))))
