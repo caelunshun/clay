@@ -1,0 +1,56 @@
+// @harness typecheck_validation_succeeds
+// @harness cfg_integrity_validation_succeeds
+// @harness ssa_validation_succeeds
+// @harness(with_expected) loop_analysis_matches_expected
+(mir
+    (func loop_analysis_func
+        (return_type int)
+        (entry block0)
+        (block block0
+            (param n int)
+            (param k int)
+            (constant i (0))
+            (jump (outer_loop_header (n k i))))
+        (block outer_loop_header
+            (param n_r1 int)
+            (param k_r1 int)
+            (param i_r1 int)
+            (int.cmp t0 (== i_r1 n_r1))
+            (branch
+                (t0
+                    (true done ())
+                    (false outer_loop_body (n_r1 k_r1 i_r1)))))
+        (block outer_loop_body
+            (param n_r2 int)
+            (param k_r2 int)
+            (param i_r2 int)
+            (constant j (0))
+            (jump (inner_loop_header (n_r2 k_r2 i_r2 j))))
+        (block inner_loop_header
+            (param n_r3 int)
+            (param k_r3 int)
+            (param i_r3 int)
+            (param j_r1 int)
+            (int.cmp t1 (== j_r1 k_r3))
+            (branch
+                (t1
+                    (true outer_loop_footer (n_r3 k_r3 i_r3))
+                    (false inner_loop_body (n_r3 k_r3 i_r3 j_r1)))))
+        (block inner_loop_body
+            (param n_r4 int)
+            (param k_r4 int)
+            (param i_r4 int)
+            (param j_r2 int)
+            (constant t2 (1))
+            (int.add j_r3 (j_r2 t2))
+            (jump (inner_loop_header (n_r4 k_r4 i_r4 j_r3))))
+        (block outer_loop_footer
+            (param n_r5 int)
+            (param k_r5 int)
+            (param i_r5 int)
+            (constant t3 (1))
+            (int.add i_r6 (i_r5 t3))
+            (jump (outer_loop_header (n_r5 k_r5 i_r6))))
+        (block done
+            (constant x (0))
+            (return (x)))))

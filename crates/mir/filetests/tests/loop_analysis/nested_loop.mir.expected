@@ -1,0 +1,11 @@
+(loops
+    (loop
+        (header outer_loop_header)
+        (depth 0)
+        (parts
+            (outer_loop_header outer_loop_body inner_loop_header inner_loop_body outer_loop_footer)))
+    (loop
+        (header inner_loop_header)
+        (depth 1)
+        (parts
+            (inner_loop_header inner_loop_body))))

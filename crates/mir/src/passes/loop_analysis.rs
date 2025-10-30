@@ -63,7 +63,6 @@ impl<'db> LoopAnalysis<'db> {
                     .unwrap_or_else(|| format_compact!("block{}", part.index()));
                 parts.push(name);
             }
-            parts.sort_unstable();
 
             loop_expr.push(list([symbol("parts"), list(parts.into_iter().map(symbol))]));
 
