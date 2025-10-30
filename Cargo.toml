@@ -3,7 +3,7 @@ members = ["crates/codegen","crates/core", "crates/mir", "crates/mir/filetests",
 resolver = "3"
 
 [workspace.dependencies]
-cranelift-entity = "0.124"
+cranelift-entity = "0.125"
 compact_str = "0.9"
 parking_lot = "0.12"
 thread_local = "1"
