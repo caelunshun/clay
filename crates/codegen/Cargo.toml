@@ -9,3 +9,4 @@ fir-mir.workspace = true
 salsa.workspace = true
 cranelift-entity.workspace = true
 bumpalo.workspace = true
+bytemuck.workspace = true

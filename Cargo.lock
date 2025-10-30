@@ -153,6 +153,7 @@ name = "fir-codegen"
 version = "0.1.0"
 dependencies = [
  "bumpalo",
+ "bytemuck",
  "cranelift-entity",
  "fir-core",
  "fir-mir",

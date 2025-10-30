@@ -543,3 +543,31 @@ pub struct BufrefTrunc {
     pub src_bufref: ValId,
     pub new_len: ValId,
 }
+
+/// A specified ordering for an atomic load.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
+pub enum LoadOrdering {
+    /// See LLVM's documentation on unordered atomics.
+    /// They are roughly equivalent to Java's non-atomic
+    /// loads and stores, in that there is no undefined behavior
+    /// with concurrent mutation, but there are not many other guarantees.
+    Unordered,
+    /// LLVM's monotonic ordering.
+    Relaxed,
+    Acquire,
+    SeqCst,
+}
+
+/// A specified ordering for an atomic store.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
+pub enum StoreOrdering {
+    /// See LLVM's documentation on unordered atomics.
+    /// They are roughly equivalent to Java's non-atomic
+    /// loads and stores, in that there is no undefined behavior
+    /// with concurrent mutation, but there are not many other guarantees.
+    Unordered,
+    /// LLVM's monotonic ordering.
+    Relaxed,
+    Release,
+    SeqCst,
+}

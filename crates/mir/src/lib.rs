@@ -85,4 +85,4 @@ pub mod passes;
 pub mod trait_resolution;
 pub mod validation;
 
-pub use ir::{Func, PrimType, TypeKind, ValId, instr::InstrData};
+pub use ir::{instr::InstrData, *};
