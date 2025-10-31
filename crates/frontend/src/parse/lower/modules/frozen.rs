@@ -1,0 +1,90 @@
+use crate::{
+    base::{
+        Session,
+        arena::Obj,
+        syntax::{Span, Symbol},
+    },
+    parse::lower::modules::{AnyDef, ModuleResolver, ParentKind, ParentResolver, StepLookupError},
+    typeck::syntax::{Item, Module, Visibility},
+};
+
+#[derive(Debug, Clone)]
+pub struct FrozenModuleResolver {
+    pub session: Session,
+}
+
+impl ParentResolver for FrozenModuleResolver {
+    type Module = Obj<Module>;
+
+    fn direct_parent(&self, def: Self::Module) -> ParentKind<Self::Module> {
+        def.r(&self.session).parent
+    }
+}
+
+impl ModuleResolver for FrozenModuleResolver {
+    type Item = Obj<Item>;
+
+    fn path(
+        &self,
+        def: super::AnyDef<Self::Module, Self::Item>,
+    ) -> impl 'static + Copy + std::fmt::Display {
+        match def {
+            AnyDef::Module(v) => v.r(&self.session).path,
+            AnyDef::Item(v) => v.r(&self.session).path,
+        }
+    }
+
+    fn global_use_count(&mut self, curr: Self::Module) -> u32 {
+        curr.r(&self.session).glob_uses.len() as u32
+    }
+
+    fn global_use_span(&mut self, curr: Self::Module, use_idx: u32) -> Span {
+        curr.r(&self.session).glob_uses[use_idx as usize].span
+    }
+
+    fn global_use_target(
+        &mut self,
+        vis_ctxt: Self::Module,
+        curr: Self::Module,
+        use_idx: u32,
+    ) -> Result<Self::Module, StepLookupError> {
+        let glob_use = &curr.r(&self.session).glob_uses[use_idx as usize];
+
+        match glob_use.visibility {
+            Visibility::Pub => {
+                // (fallthrough)
+            }
+            Visibility::PubIn(vis) => {
+                if !self.is_descendant(vis_ctxt, vis) {
+                    return Err(StepLookupError::NotVisible);
+                }
+            }
+        }
+
+        Ok(glob_use.target)
+    }
+
+    fn lookup_direct(
+        &mut self,
+        vis_ctxt: Self::Module,
+        curr: Self::Module,
+        name: Symbol,
+    ) -> Result<AnyDef<Self::Module, Self::Item>, StepLookupError> {
+        let Some(direct_use) = &curr.r(&self.session).direct_uses.get(&name) else {
+            return Err(StepLookupError::NotFound);
+        };
+
+        match direct_use.visibility {
+            Visibility::Pub => {
+                // (fallthrough)
+            }
+            Visibility::PubIn(vis) => {
+                if !self.is_descendant(vis_ctxt, vis) {
+                    return Err(StepLookupError::NotVisible);
+                }
+            }
+        }
+
+        Ok(direct_use.target)
+    }
+}

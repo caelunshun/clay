@@ -14,13 +14,14 @@ use std::rc::Rc;
 
 pub fn lower_full_ast(ast: &AstItemModuleContents, s: &Session) {
     // Create the module tree
-    let mut tree = BuilderModuleTree::<()>::default();
+    let mut tree = BuilderModuleTree::default();
     lower_initial_tree(&mut tree, BuilderModuleId::ROOT, ast);
-    tree.freeze_and_check();
+
+    let tree = tree.freeze_and_check(s);
 }
 
 fn lower_initial_tree(
-    tree: &mut BuilderModuleTree<()>,
+    tree: &mut BuilderModuleTree,
     mod_id: BuilderModuleId,
     ast: &AstItemModuleContents,
 ) {
@@ -45,7 +46,7 @@ fn lower_initial_tree(
 }
 
 fn lower_use(
-    tree: &mut BuilderModuleTree<()>,
+    tree: &mut BuilderModuleTree,
     mod_id: BuilderModuleId,
     visibility: &AstVisibility,
     prefix: &mut Vec<Ident>,

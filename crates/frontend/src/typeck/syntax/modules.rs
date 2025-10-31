@@ -1,12 +1,50 @@
-use crate::{base::syntax::Span, parse::token::Ident};
+use crate::{
+    base::{
+        arena::{LateInit, Obj},
+        syntax::{Span, Symbol},
+    },
+    parse::{
+        lower::modules::{AnyDef, ParentKind},
+        token::Ident,
+    },
+    utils::hash::FxIndexMap,
+};
 
 #[derive(Debug, Clone)]
 pub struct Module {
-    pub outer_span: Span,
-    pub inner_span: Span,
-    pub name: Ident,
-    pub items: Vec<ModuleItem>,
+    pub parent: ParentKind<Obj<Module>>,
+    pub name: Option<Ident>,
+    pub path: Symbol,
+    pub direct_uses: LateInit<FxIndexMap<Symbol, DirectUse>>,
+    pub glob_uses: LateInit<Vec<GlobUse>>,
 }
 
 #[derive(Debug, Clone)]
-pub enum ModuleItem {}
+pub enum Visibility {
+    Pub,
+    PubIn(Obj<Module>),
+}
+
+#[derive(Debug, Clone)]
+pub struct GlobUse {
+    pub span: Span,
+    pub visibility: Visibility,
+    pub target: Obj<Module>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DirectUse {
+    pub visibility: Visibility,
+    pub target: AnyDef<Obj<Module>, Obj<Item>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Item {
+    pub parent: Obj<Module>,
+    pub name: Ident,
+    pub path: Symbol,
+    pub kind: LateInit<ItemKind>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ItemKind {}

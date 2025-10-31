@@ -31,35 +31,30 @@ pub enum EmitErrors {
 
 #[derive(Debug, Copy, Clone)]
 pub enum ParentKind<M> {
-    Scoped(M),
     Real(Option<M>),
+    Scoped(M),
 }
 
-pub trait ModuleResolver {
+impl<M> ParentKind<M> {
+    pub fn as_option(self) -> Option<M> {
+        match self {
+            ParentKind::Real(v) => v,
+            ParentKind::Scoped(v) => Some(v),
+        }
+    }
+
+    pub fn map<N>(self, f: impl FnOnce(M) -> N) -> ParentKind<N> {
+        match self {
+            ParentKind::Real(v) => ParentKind::Real(v.map(f)),
+            ParentKind::Scoped(v) => ParentKind::Scoped(f(v)),
+        }
+    }
+}
+
+pub trait ParentResolver {
     type Module: Handle;
-    type Item: Handle;
 
     fn direct_parent(&self, def: Self::Module) -> ParentKind<Self::Module>;
-
-    fn path(&self, def: AnyDef<Self::Module, Self::Item>) -> impl 'static + Copy + fmt::Display;
-
-    fn global_use_count(&mut self, curr: Self::Module) -> u32;
-
-    fn global_use_span(&mut self, curr: Self::Module, use_idx: u32) -> Span;
-
-    fn global_use_target(
-        &mut self,
-        vis_ctxt: Self::Module,
-        curr: Self::Module,
-        use_idx: u32,
-    ) -> Result<Self::Module, StepLookupError>;
-
-    fn lookup_direct(
-        &mut self,
-        vis_ctxt: Self::Module,
-        curr: Self::Module,
-        name: Symbol,
-    ) -> Result<AnyDef<Self::Module, Self::Item>, StepLookupError>;
 
     fn module_root(&self, def: Self::Module) -> Self::Module {
         let mut curr = def;
@@ -100,6 +95,30 @@ pub trait ModuleResolver {
             descendant = parent;
         }
     }
+}
+
+pub trait ModuleResolver: ParentResolver {
+    type Item: Handle;
+
+    fn path(&self, def: AnyDef<Self::Module, Self::Item>) -> impl 'static + Copy + fmt::Display;
+
+    fn global_use_count(&mut self, curr: Self::Module) -> u32;
+
+    fn global_use_span(&mut self, curr: Self::Module, use_idx: u32) -> Span;
+
+    fn global_use_target(
+        &mut self,
+        vis_ctxt: Self::Module,
+        curr: Self::Module,
+        use_idx: u32,
+    ) -> Result<Self::Module, StepLookupError>;
+
+    fn lookup_direct(
+        &mut self,
+        vis_ctxt: Self::Module,
+        curr: Self::Module,
+        name: Symbol,
+    ) -> Result<AnyDef<Self::Module, Self::Item>, StepLookupError>;
 
     fn lookup(
         &mut self,
