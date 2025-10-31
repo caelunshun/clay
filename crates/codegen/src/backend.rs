@@ -240,3 +240,12 @@ pub struct Signature<'bump> {
     pub param_types: &'bump [ValTy],
     pub return_types: &'bump [ValTy],
 }
+
+impl<'bump> Signature<'bump> {
+    pub fn new(param_types: &'bump [ValTy], return_types: &'bump [ValTy]) -> Self {
+        Self {
+            param_types,
+            return_types,
+        }
+    }
+}
