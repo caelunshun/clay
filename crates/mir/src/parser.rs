@@ -493,7 +493,7 @@ impl<'a, 'db> Parser<'a, 'db> {
 
                     let mut return_type = None;
                     let mut entry_block = None;
-                    let mut blocks = HashMap::default();
+                    let mut blocks = HashMap::new();
 
                     #[derive(Default)]
                     struct BlockHeader<'db> {

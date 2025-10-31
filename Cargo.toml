@@ -24,13 +24,14 @@ salsa = { git = "https://github.com/caelunshun/salsa", branch = "cranelift-entit
     "compact_str",
     "cranelift-entity",
 ] }
-bumpalo = { version = "3", features = ["collections"] }
+bumpalo = { version = "3", features = ["collections", "allocator-api2"] }
 quote = "1"
 syn = "2"
 proc-macro2 = "1"
 pretty_assertions = "1"
-rustc-hash = "2"
 indexmap = "2"
+hashbrown = "0.16"
+allocator-api2 = "0.2" # needs to match hashbrown
 
 fir-core = { path = "crates/core" }
 fir-mir = { path = "crates/mir" }

@@ -1,4 +1,4 @@
-use crate::{backend, strand::GBasicBlockId};
+use crate::{backend, lowering::BbInstance, strand::GBasicBlockId};
 use bumpalo::Bump;
 use fir_core::HashMap;
 
@@ -6,12 +6,10 @@ use fir_core::HashMap;
 #[derive(Default)]
 pub struct LoweringCx {
     pub(super) bump: Bump,
-    pub(super) bb_mapping: HashMap<GBasicBlockId, backend::BasicBlockId>,
 }
 
 impl LoweringCx {
     pub(super) fn reset(&mut self) {
         self.bump.reset();
-        self.bb_mapping.clear();
     }
 }

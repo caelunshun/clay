@@ -112,3 +112,16 @@ pub fn scalarize_type<'bump, 'db>(
         mir::TypeKind::Self_ => panic!("Self type must be substituted during monomorphization"),
     }
 }
+
+pub fn scalarize_types<'bump, 'db>(
+    db: &'db dyn Database,
+    mir_cx: mir::Context<'db>,
+    types: impl IntoIterator<Item = mir::Type<'db>>,
+    bump: &'bump Bump,
+) -> &'bump [ValTy] {
+    let mut tys = bumpalo::collections::Vec::new_in(bump);
+    for ty in types {
+        tys.extend_from_slice_copy(scalarize_type(db, mir_cx, ty, bump));
+    }
+    tys.into_bump_slice()
+}
