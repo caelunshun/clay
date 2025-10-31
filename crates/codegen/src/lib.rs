@@ -30,8 +30,6 @@
 //!   the upper TAGGED_REFERENCE_RESERVED_BITS
 //!   bits of a pointer must be masked out
 //!   before using it for memory operations.
-//! * Struct layouts are are not defined in this crate. Instead, the caller provides
-//!   a callback to determine a struct layout.
 //! * We pass around a thread-local VM context pointer to every compiled strand as the first
 //!   argument. We also pass this pointer as the first argument to all host calls.
 //!   The offsets of relevant fields relative to this pointer are passed by the caller.
@@ -71,7 +69,10 @@
 
 #![cfg_attr(target_arch = "riscv64", feature(stdarch_riscv_feature_detection))]
 
+extern crate fir_mir as mir;
+
 pub mod backend;
 pub mod compiled_strand;
 pub mod isa;
+pub mod layout;
 pub mod strand;

@@ -1,5 +1,5 @@
 use crate::{
-    Func,
+    Context, Func,
     ir::{
         AlgebraicType, AlgebraicTypeId, ContextData, ContextLike, FuncHeader, FuncId, Trait,
         TraitId, TraitImpl, TraitImplId,
@@ -26,7 +26,7 @@ pub struct ContextBuilder<'db> {
 }
 
 impl<'db> ContextBuilder<'db> {
-    pub fn new(_db: &'db dyn Database) -> Self {
+    pub fn new() -> Self {
         Self {
             adts: Default::default(),
             funcs: Default::default(),
@@ -45,14 +45,15 @@ impl<'db> ContextBuilder<'db> {
     }
 
     /// Binds the value of an ADT.
-    pub fn bind_adt(
-        &mut self,
-        _db: &'db dyn Database,
-        type_ref: AlgebraicTypeId,
-        typ: AlgebraicType<'db>,
-    ) {
+    pub fn bind_adt(&mut self, type_ref: AlgebraicTypeId, typ: AlgebraicType<'db>) {
         assert!(self.adts[type_ref].is_none(), "type bound twice");
         self.adts[type_ref] = Some(typ);
+    }
+
+    pub fn add_adt(&mut self, adt: AlgebraicType<'db>) -> AlgebraicTypeId {
+        let id = self.alloc_adt();
+        self.bind_adt(id, adt);
+        id
     }
 
     pub fn alloc_func(&mut self) -> FuncId {
@@ -68,12 +69,24 @@ impl<'db> ContextBuilder<'db> {
         self.funcs[func_ref] = Some(func);
     }
 
+    pub fn add_func(&mut self, func: Func<'db>) -> FuncId {
+        let id = self.alloc_func();
+        self.bind_func(id, func);
+        id
+    }
+
     pub fn alloc_trait(&mut self) -> TraitId {
         self.traits.push(None)
     }
 
     pub fn bind_trait(&mut self, ref_: TraitId, trait_: Trait<'db>) {
         self.traits[ref_] = Some(trait_);
+    }
+
+    pub fn add_trait(&mut self, trait_: Trait<'db>) -> TraitId {
+        let id = self.alloc_trait();
+        self.bind_trait(id, trait_);
+        id
     }
 
     pub fn add_trait_impl(
@@ -92,7 +105,7 @@ impl<'db> ContextBuilder<'db> {
         self.trait_impls.next_key()
     }
 
-    pub fn finish(self) -> ContextData<'db> {
+    pub fn finish(self, db: &'db dyn Database) -> Context<'db> {
         let mut adts = PrimaryMap::new();
         let mut funcs = PrimaryMap::new();
         let mut traits = PrimaryMap::new();
@@ -115,13 +128,22 @@ impl<'db> ContextBuilder<'db> {
             );
         }
 
-        ContextData {
-            adts,
-            funcs,
-            traits,
-            trait_impls: self.trait_impls,
-            trait_impls_by_trait: self.trait_impls_by_trait,
-        }
+        Context::new(
+            db,
+            ContextData {
+                adts,
+                funcs,
+                traits,
+                trait_impls: self.trait_impls,
+                trait_impls_by_trait: self.trait_impls_by_trait,
+            },
+        )
+    }
+}
+
+impl<'db> Default for ContextBuilder<'db> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

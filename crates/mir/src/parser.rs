@@ -41,7 +41,7 @@ pub fn parse_mir<'db>(db: &'db dyn Database, src: &str) -> Result<Context<'db>, 
     let bump = &Bump::new();
     let sexpr = sexpr.to_ref(bump);
 
-    let mut cx = ContextBuilder::new(db);
+    let mut cx = ContextBuilder::new();
     let parser = Parser {
         db,
         cx: &mut cx,
@@ -54,7 +54,7 @@ pub fn parse_mir<'db>(db: &'db dyn Database, src: &str) -> Result<Context<'db>, 
     };
     parser.parse_mir()?;
 
-    Ok(Context::new(db, cx.finish()))
+    Ok(cx.finish(db))
 }
 
 struct Parser<'a, 'db> {
@@ -233,7 +233,6 @@ impl<'a, 'db> Parser<'a, 'db> {
                     let adt = self.parse_adt(decls)?;
 
                     self.cx.bind_adt(
-                        self.db,
                         adt_id,
                         AlgebraicType::new(
                             self.db,

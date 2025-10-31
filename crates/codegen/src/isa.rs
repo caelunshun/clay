@@ -15,6 +15,7 @@ impl Isa {
     ///
     /// Panics if this system is not supported by fir.
     #[allow(unreachable_code)]
+    #[allow(clippy::assertions_on_constants)]
     pub fn native() -> Self {
         #[cfg(target_arch = "x86_64")]
         {

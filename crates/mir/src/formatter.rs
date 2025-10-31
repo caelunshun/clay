@@ -615,7 +615,7 @@ mod tests {
 
     #[salsa::tracked]
     fn make_basic_func<'db>(db: &'db dyn Database) -> Context<'db> {
-        let mut cx = ContextBuilder::new(db);
+        let mut cx = ContextBuilder::new();
         let mut func = FuncBuilder::new(db, "add", Type::int(db), &mut cx);
         let param0 = func.append_param(Type::int(db));
         let param1 = func.append_param(Type::int(db));
@@ -625,7 +625,7 @@ mod tests {
         let func = func.build(&mut cx);
         let func_id = cx.alloc_func();
         cx.bind_func(func_id, Func::new(db, func));
-        Context::new(db, cx.finish())
+        cx.finish(db)
     }
 
     #[test]
