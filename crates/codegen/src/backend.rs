@@ -1,4 +1,4 @@
-use crate::compiled_strand::CompiledStrand;
+use crate::{compiled_strand::CompiledStrand, isa::Isa};
 use bumpalo::Bump;
 use fir_mir::{
     entity_ref,
@@ -9,6 +9,9 @@ use std::hash::Hash;
 /// Defines a backend that can produce machine code.
 pub trait CodegenBackend {
     type CodeBuilder<'bump>: CodeBuilder<'bump>;
+
+    /// Returns the ISA being compiled for.
+    fn isa(&self) -> &Isa;
 
     /// Creates a new builder for a machine-level function.
     ///

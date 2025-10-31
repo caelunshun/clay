@@ -1,5 +1,11 @@
 [workspace]
-members = ["crates/codegen","crates/core", "crates/mir", "crates/mir/filetests", "crates/runtime"]
+members = [
+    "crates/codegen",
+    "crates/core",
+    "crates/mir",
+    "crates/mir/filetests",
+    "crates/runtime",
+]
 resolver = "3"
 
 [workspace.dependencies]
@@ -18,7 +24,7 @@ salsa = { git = "https://github.com/caelunshun/salsa", branch = "cranelift-entit
     "compact_str",
     "cranelift-entity",
 ] }
-bumpalo = "3"
+bumpalo = { version = "3", features = ["collections"] }
 quote = "1"
 syn = "2"
 proc-macro2 = "1"
