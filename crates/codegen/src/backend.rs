@@ -1,4 +1,7 @@
-use crate::{compiled_strand::CompiledStrand, isa::Isa};
+use crate::{
+    compiled_strand::{CompiledStrand, Symbol},
+    isa::Isa,
+};
 use bumpalo::Bump;
 use fir_mir::{
     entity_ref,
@@ -164,6 +167,10 @@ pub trait CodeBuilder<'bump> {
     /// Instruction that tells the processor we are in a spin-wait loop.
     /// Implementation as a no-op is valid.
     fn hint_spin_loop(&mut self);
+
+    /// Call a function whose address will be provided by the given
+    /// relocation symbol.
+    fn call(&mut self, symbol: Symbol, sig: Signature, args: &[ValId]) -> &'bump [ValId];
 
     /// Call a function whose address is given as a pointer-sized
     /// integer in `addr`, and whose signature must match the given signature.

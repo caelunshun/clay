@@ -1,4 +1,4 @@
-use crate::intrinsic::IntrinsicCall;
+use crate::{intrinsic::IntrinsicCall, strand::GBasicBlockId};
 
 /// Contains machine code for a strand,
 /// along with metadata for relocations, GC
@@ -69,4 +69,8 @@ pub enum RelocationKind {
 pub enum Symbol {
     /// Intrinsic host call, used to implement internal runtime features.
     Intrinsic(IntrinsicCall),
+    /// Address of the GOT entry storing the address
+    /// of the compiled strand whose entry is the given
+    /// basic block.
+    StrandForBlock(GBasicBlockId),
 }

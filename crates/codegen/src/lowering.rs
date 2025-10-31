@@ -5,7 +5,7 @@ use crate::{
     compiled_strand::CompiledStrand,
     isa::Isa,
     lowering::{
-        compound_val::{scalarize_type, scalarize_types},
+        compound_val::{Compound, scalarize_type, scalarize_types},
         context::LoweringCx,
         env::Env,
     },
@@ -13,9 +13,12 @@ use crate::{
 };
 use bumpalo::Bump;
 use fir_core::HashMap;
-use mir::FuncId;
+use mir::{FuncData, FuncId};
 use salsa::Database;
-use std::cell::{LazyCell, RefCell};
+use std::{
+    cell::{LazyCell, RefCell},
+    iter,
+};
 
 mod compound_val;
 mod context;
@@ -64,7 +67,13 @@ where
                 backend: backend.make_code_builder(&cx.bump, sig),
                 strand,
                 bump: &cx.bump,
-                bb_mapping: HashMap::new_in(&cx.bump),
+                bb_map: HashMap::new_in(&cx.bump),
+                val_map: HashMap::new_in(&cx.bump),
+                current_bb: BbInstance {
+                    bb: strand.entry_block(),
+                    call_stack: &[],
+                },
+                current_func: entry_block_func,
             };
         }
 
@@ -82,7 +91,10 @@ struct Lowerer<'db, 'a, B> {
     backend: B,
     strand: &'a Strand,
     bump: &'a Bump,
-    bb_mapping: HashMap<BbInstance<'a>, backend::BasicBlockId, &'a Bump>,
+    bb_map: HashMap<BbInstance<'a>, backend::BasicBlockId, &'a Bump>,
+    val_map: HashMap<GValId, Compound<'a>, &'a Bump>,
+    current_bb: BbInstance<'a>,
+    current_func: &'a FuncData<'db>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -91,17 +103,116 @@ struct BbInstance<'bump> {
     call_stack: &'bump [FuncId],
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+struct GValId {
+    func: mir::FuncId,
+    val: mir::ValId,
+}
+
 impl<'db, 'a, B> Lowerer<'db, 'a, B>
 where
     B: CodeBuilder<'a>,
 {
     fn lower_bb(&mut self, instance: BbInstance<'a>, bb: &'db mir::BasicBlock<'db>) {
-        self.backend.switch_to_block(self.bb_mapping[&instance]);
+        self.backend.switch_to_block(self.bb_map[&instance]);
+        self.current_bb = instance;
+        self.current_func = instance.bb.func.resolve(self.db, self.mir_cx).data(self.db);
 
         for instr in &bb.instrs {
-            
+            self.lower_instr(instr);
         }
 
         todo!()
+    }
+
+    fn lower_instr(&mut self, instr: &mir::InstrData) {
+        match instr {
+            mir::InstrData::Jump(jump) => {
+                let target = GBasicBlockId::new(self.current_bb.bb.func, jump.target);
+                if self.strand.contains_block(target) {
+                    let dst_instance = BbInstance {
+                        bb: target,
+                        call_stack: self.current_bb.call_stack,
+                    };
+                    self.backend.jump(
+                        self.bb_map[&dst_instance],
+                        self.get_flattened_vals(
+                            jump.args
+                                .as_slice(&self.current_func.val_lists)
+                                .iter()
+                                .copied(),
+                        ),
+                    );
+                } else {
+                }
+            }
+            mir::InstrData::Branch(branch) => todo!(),
+            mir::InstrData::Call(call) => todo!(),
+            mir::InstrData::Return(_) => todo!(),
+            mir::InstrData::Copy(unary) => todo!(),
+            mir::InstrData::Constant(constant_instr) => todo!(),
+            mir::InstrData::IntAdd(binary) => todo!(),
+            mir::InstrData::IntSub(binary) => todo!(),
+            mir::InstrData::IntMul(binary) => todo!(),
+            mir::InstrData::IntDiv(binary) => todo!(),
+            mir::InstrData::IntCmp(cmp) => todo!(),
+            mir::InstrData::RealAdd(binary) => todo!(),
+            mir::InstrData::RealSub(binary) => todo!(),
+            mir::InstrData::RealMul(binary) => todo!(),
+            mir::InstrData::RealDiv(binary) => todo!(),
+            mir::InstrData::RealCmp(cmp) => todo!(),
+            mir::InstrData::RealToInt(unary) => todo!(),
+            mir::InstrData::IntToReal(unary) => todo!(),
+            mir::InstrData::ByteToInt(unary) => todo!(),
+            mir::InstrData::IntToByte(unary) => todo!(),
+            mir::InstrData::BoolAnd(binary) => todo!(),
+            mir::InstrData::BoolOr(binary) => todo!(),
+            mir::InstrData::BoolXor(binary) => todo!(),
+            mir::InstrData::BoolNot(unary) => todo!(),
+            mir::InstrData::InitStruct(init_struct) => todo!(),
+            mir::InstrData::GetField(get_field) => todo!(),
+            mir::InstrData::SetField(set_field) => todo!(),
+            mir::InstrData::Alloc(alloc) => todo!(),
+            mir::InstrData::Load(load) => todo!(),
+            mir::InstrData::Store(store) => todo!(),
+            mir::InstrData::MakeFieldMRef(make_field_mref) => todo!(),
+            mir::InstrData::MakeBufref(make_bufref) => todo!(),
+            mir::InstrData::BufrefPush(bufref_push) => todo!(),
+            mir::InstrData::BufrefRemove(bufref_remove) => todo!(),
+            mir::InstrData::BufrefTrunc(bufref_trunc) => todo!(),
+            mir::InstrData::BufrefLen(bufref_len) => todo!(),
+            mir::InstrData::BufrefGet(bufref_get) => todo!(),
+            mir::InstrData::BufregGetMRef(bufref_get_mref) => todo!(),
+        }
+    }
+
+    /// Gets the Compound corresponding to the given
+    /// mir in the current function.
+    fn get_val(&self, val: mir::ValId) -> Compound<'a> {
+        self.val_map[&GValId {
+            val,
+            func: self.current_bb.bb.func,
+        }]
+    }
+
+    fn get_flattened_vals(
+        &self,
+        vals: impl IntoIterator<Item = mir::ValId>,
+    ) -> &'a [backend::ValId] {
+        let mut vec = bumpalo::collections::Vec::new_in(self.bump);
+
+        for val in vals {
+            vec.extend_from_slice_copy(self.get_val(val).flatten(self.bump));
+        }
+
+        vec.into_bump_slice()
+    }
+
+    fn bump_slice_append<T: Copy>(&self, slice: &[T], val: T) -> &'a [T] {
+        let vec = bumpalo::collections::Vec::from_iter_in(
+            slice.iter().copied().chain(iter::once(val)),
+            self.bump,
+        );
+        vec.into_bump_slice()
     }
 }

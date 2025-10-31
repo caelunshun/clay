@@ -1,10 +1,11 @@
+use fir_core::IndexSet;
 use fir_mir::ir::{BasicBlockId, FuncId};
 use salsa::Database;
 
 /// A strand of basic blocks: the unit of compilation.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Strand {
-    blocks: Vec<GBasicBlockId>,
+    blocks: IndexSet<GBasicBlockId>,
     entry_block: GBasicBlockId,
 }
 
@@ -13,7 +14,7 @@ impl Strand {
         blocks: impl IntoIterator<Item = GBasicBlockId>,
         entry_block: GBasicBlockId,
     ) -> Self {
-        let blocks = blocks.into_iter().collect::<Vec<_>>();
+        let blocks = blocks.into_iter().collect::<IndexSet<_>>();
         assert!(
             blocks.contains(&entry_block),
             "entry block must be part of the strand"
@@ -29,6 +30,10 @@ impl Strand {
         self.blocks.iter().copied()
     }
 
+    pub fn contains_block(&self, block: GBasicBlockId) -> bool {
+        self.blocks.contains(&block)
+    }
+
     pub fn entry_block(&self) -> GBasicBlockId {
         self.entry_block
     }
@@ -42,6 +47,10 @@ pub struct GBasicBlockId {
 }
 
 impl GBasicBlockId {
+    pub fn new(func: FuncId, bb: BasicBlockId) -> Self {
+        Self { func, bb }
+    }
+
     pub fn resolve<'db>(
         &self,
         db: &'db dyn Database,
