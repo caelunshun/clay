@@ -132,8 +132,8 @@ pub trait CodeBuilder<'bump> {
     // to soundly implement certain runtime
     // features (e.g. fat pointers).
     // These instructions operate on double-values,
-    // where the first corresponds to the low bits and the
-    // second the high bits.
+    // where the first corresponds to the low 64 bits and the
+    // second the high 64 bits.
     fn mem_load128(&mut self, addr: ValId, ordering: LoadOrdering) -> [ValId; 2];
     fn mem_store128(&mut self, val: [ValId; 2], addr: ValId, ordering: StoreOrdering);
     fn mem_compare_exchange128(

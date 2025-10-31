@@ -17,7 +17,7 @@ impl Strand {
     }
 }
 
-/// An MIR basic block ID and the function it's associated with.
+/// "Global" basic block. An MIR basic block ID and the function it's associated with.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct GBasicBlockId {
     pub func: FuncId,

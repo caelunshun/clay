@@ -26,8 +26,9 @@
 //! * High-level MIR types like bufrefs and futexes
 //!   use representations given in the runtime docs.
 //! * Managed references are implemented with pointer tagging
-//!   as described in the runtime docs. In particular, on 64-bit
-//!   platforms, the upper 16 bits of a pointer must be masked out
+//!   as described in the runtime docs. In particular,
+//!   the upper TAGGED_REFERENCE_RESERVED_BITS
+//!   bits of a pointer must be masked out
 //!   before using it for memory operations.
 //! * Struct layouts are are not defined in this crate. Instead, the caller provides
 //!   a callback to determine a struct layout.
@@ -64,7 +65,13 @@
 //!   check a boolean flag (address provided by the caller). If the flag is true, then we
 //!   build a data structure on the stack containing all the arguments to the loop iteration,
 //!   and finally pass this to the on_stack_replace host call.
+//! * We require 64- and 128-bit atomics for various operations. If not supported
+//!   by the ISA, then we polyfill these using a global hash table of spinlocks.
+//!   The address of this `spinlock_table` is provided by the caller.
+
+#![cfg_attr(target_arch = "riscv64", feature(stdarch_riscv_feature_detection))]
 
 pub mod backend;
 pub mod compiled_strand;
+pub mod isa;
 pub mod strand;
