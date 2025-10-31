@@ -6,7 +6,7 @@ use crate::{
             AstItemKind, AstItemModuleContents, AstSimplePath, AstUsePath, AstUsePathKind,
             AstVisibility,
         },
-        lower::modules::{ModuleId, ModuleTree},
+        lower::modules::{BuilderModuleId, BuilderModuleTree},
         token::Ident,
     },
 };
@@ -14,12 +14,16 @@ use std::rc::Rc;
 
 pub fn lower_full_ast(ast: &AstItemModuleContents, s: &Session) {
     // Create the module tree
-    let mut tree = ModuleTree::<()>::default();
-    lower_initial_tree(&mut tree, ModuleId::ROOT, ast);
+    let mut tree = BuilderModuleTree::<()>::default();
+    lower_initial_tree(&mut tree, BuilderModuleId::ROOT, ast);
     tree.freeze_and_check();
 }
 
-fn lower_initial_tree(tree: &mut ModuleTree<()>, mod_id: ModuleId, ast: &AstItemModuleContents) {
+fn lower_initial_tree(
+    tree: &mut BuilderModuleTree<()>,
+    mod_id: BuilderModuleId,
+    ast: &AstItemModuleContents,
+) {
     for item in &ast.items {
         match &item.kind {
             AstItemKind::Mod(item_mod) => {
@@ -41,8 +45,8 @@ fn lower_initial_tree(tree: &mut ModuleTree<()>, mod_id: ModuleId, ast: &AstItem
 }
 
 fn lower_use(
-    tree: &mut ModuleTree<()>,
-    mod_id: ModuleId,
+    tree: &mut BuilderModuleTree<()>,
+    mod_id: BuilderModuleId,
     visibility: &AstVisibility,
     prefix: &mut Vec<Ident>,
     ast: &AstUsePath,
