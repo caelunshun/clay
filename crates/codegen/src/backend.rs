@@ -112,8 +112,14 @@ pub trait CodeBuilder<'bump> {
     // Obviously, load and store addresses need to point to valid memory
     // or the behavior is undefined.
 
-    fn mem_load(&mut self, addr: ValId, ty: ValTy, ordering: LoadOrdering) -> ValId;
-    fn mem_store(&mut self, val: ValId, addr: ValId, ordering: StoreOrdering);
+    fn mem_load(
+        &mut self,
+        addr: ValId,
+        imm_offset: i32,
+        ty: ValTy,
+        ordering: LoadOrdering,
+    ) -> ValId;
+    fn mem_store(&mut self, val: ValId, addr: ValId, imm_offset: i32, ordering: StoreOrdering);
     /// Atomic compare-exchange.
     ///
     /// Returns a boolean indicating whether the exchange succeeded,
@@ -122,6 +128,7 @@ pub trait CodeBuilder<'bump> {
         &mut self,
         val: ValId,
         addr: ValId,
+        imm_offset: i32,
         load_ordering: LoadOrdering,
         store_ordering: StoreOrdering,
     ) -> CompareExchangeResult;
@@ -134,12 +141,19 @@ pub trait CodeBuilder<'bump> {
     // These instructions operate on double-values,
     // where the first corresponds to the low 64 bits and the
     // second the high 64 bits.
-    fn mem_load128(&mut self, addr: ValId, ordering: LoadOrdering) -> [ValId; 2];
-    fn mem_store128(&mut self, val: [ValId; 2], addr: ValId, ordering: StoreOrdering);
+    fn mem_load128(&mut self, addr: ValId, imm_offset: i32, ordering: LoadOrdering) -> [ValId; 2];
+    fn mem_store128(
+        &mut self,
+        val: [ValId; 2],
+        addr: ValId,
+        imm_offset: i32,
+        ordering: StoreOrdering,
+    );
     fn mem_compare_exchange128(
         &mut self,
         val: [ValId; 2],
         addr: ValId,
+        imm_offset: i32,
         load_ordering: LoadOrdering,
         store_ordering: StoreOrdering,
     ) -> CompareExchangeResult128;
