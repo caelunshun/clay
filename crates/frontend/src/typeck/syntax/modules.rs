@@ -3,9 +3,10 @@ use crate::{
         arena::{LateInit, Obj},
         syntax::{Span, Symbol},
     },
-    parse::{
+    parse::token::Ident,
+    typeck::{
         lower::modules::{AnyDef, ParentKind},
-        token::Ident,
+        syntax::TraitDef,
     },
     utils::hash::FxIndexMap,
 };
@@ -46,5 +47,7 @@ pub struct Item {
     pub kind: LateInit<ItemKind>,
 }
 
-#[derive(Debug, Clone)]
-pub enum ItemKind {}
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum ItemKind {
+    Trait(Obj<TraitDef>),
+}

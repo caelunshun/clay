@@ -4,8 +4,10 @@ use crate::{
         arena::Obj,
         syntax::{Span, Symbol},
     },
-    parse::lower::modules::{AnyDef, ModuleResolver, ParentKind, ParentResolver, StepLookupError},
-    typeck::syntax::{Item, Module, Visibility},
+    typeck::{
+        lower::modules::{AnyDef, ModuleResolver, ParentKind, ParentResolver, StepLookupError},
+        syntax::{Item, Module, Visibility},
+    },
 };
 
 #[derive(Debug, Clone)]

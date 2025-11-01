@@ -6,13 +6,15 @@ use crate::{
     },
     parse::{
         ast::{AstSimplePath, AstVisibility, AstVisibilityKind},
-        lower::modules::{
-            AnyDef, EmitErrors, ModuleResolver, ParentKind, ParentResolver, StepLookupError,
-        },
         token::Ident,
     },
     symbol,
-    typeck::syntax::{DirectUse, GlobUse, Item, Module, Visibility},
+    typeck::{
+        lower::modules::{
+            AnyDef, EmitErrors, ModuleResolver, ParentKind, ParentResolver, StepLookupError,
+        },
+        syntax::{DirectUse, GlobUse, Item, Module, Visibility},
+    },
     utils::hash::FxIndexMap,
 };
 use index_vec::{IndexVec, define_index_type};
@@ -216,7 +218,8 @@ impl BuilderModuleTree {
                     let parent_name = self.modules[parent].public_path.unwrap().as_str(s);
 
                     if parent_name.is_empty() {
-                        self.modules[module_id].public_path = Some(Symbol::new(parent_name));
+                        self.modules[module_id].public_path =
+                            Some(self.modules[module_id].name.unwrap().text);
                     } else {
                         self.modules[module_id].public_path = Some(Symbol::new(&format!(
                             "{parent_name}::{}",
@@ -235,7 +238,7 @@ impl BuilderModuleTree {
             let parent_name = self.modules[parent].public_path.unwrap().as_str(s);
 
             if parent_name.is_empty() {
-                self.items[item_id].public_path = Some(Symbol::new(parent_name));
+                self.items[item_id].public_path = Some(self.items[item_id].name.text);
             } else {
                 self.items[item_id].public_path = Some(Symbol::new(&format!(
                     "{parent_name}::{}",
@@ -431,47 +434,30 @@ impl BuilderModuleTree {
         struct ModulePathFmt {
             prefix: Symbol,
             main_part: Symbol,
-            suffix: Option<Symbol>,
         }
 
         impl fmt::Display for ModulePathFmt {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 let s = &Session::fetch();
 
-                let parts = [
-                    self.prefix.as_str(s),
-                    self.main_part.as_str(s),
-                    self.suffix.map_or("", |sym| sym.as_str(s)),
-                ];
+                f.write_str(self.prefix.as_str(s))?;
 
-                let mut wrote_something = false;
-
-                for part in parts {
-                    if part.is_empty() {
-                        continue;
-                    }
-
-                    if wrote_something {
-                        f.write_str("::")?;
-                    }
-
-                    f.write_str(part)?;
-                    wrote_something = true;
+                let main_part = self.main_part.as_str(s);
+                if !main_part.is_empty() {
+                    f.write_str("::")?;
+                    f.write_str(main_part)?;
                 }
 
                 Ok(())
             }
         }
 
-        let (main_part, suffix) = match target {
-            AnyDef::Module(module) => (module, None),
-            AnyDef::Item(item) => (self.items[item].parent, Some(self.items[item].name.text)),
-        };
-
         ModulePathFmt {
             prefix,
-            main_part: self.modules[main_part].public_path.unwrap(),
-            suffix,
+            main_part: match target {
+                AnyDef::Module(module) => self.modules[module].public_path.unwrap(),
+                AnyDef::Item(item) => self.items[item].public_path.unwrap(),
+            },
         }
     }
 }

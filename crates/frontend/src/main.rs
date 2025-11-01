@@ -3,9 +3,10 @@ use fir_frontend::{
         Session,
         syntax::{NaiveSegmenter, SourceFileOrigin},
     },
-    parse::{ast::parse_file, lower::driver::lower_full_ast, token::tokenize},
+    parse::{ast::parse_file, token::tokenize},
+    typeck::analysis::TyCtxt,
 };
-use std::{env, fs, path::Path, rc::Rc, time::Instant};
+use std::{env, fs, path::Path, rc::Rc};
 
 fn main() {
     let args = env::args().collect::<Vec<String>>();
@@ -27,9 +28,10 @@ fn main() {
         Rc::new(String::from_utf8(fs::read(path).unwrap()).unwrap()),
     );
 
-    let start = Instant::now();
     let tokens = tokenize(span);
     let ast = parse_file(&tokens);
 
-    lower_full_ast(&ast, &session);
+    let tcx = TyCtxt::new(session);
+
+    tcx.lower_full_ast(&ast);
 }

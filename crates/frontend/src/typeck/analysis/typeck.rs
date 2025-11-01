@@ -831,12 +831,6 @@ mod tests {
 
         let my_trait = Obj::new(
             TraitDef {
-                span: Span::DUMMY,
-                ident: Ident {
-                    span: Span::DUMMY,
-                    text: symbol!("MyTrait"),
-                    raw: false,
-                },
                 generics: tcx.seal_generic_binder(GenericBinder {
                     span: Span::DUMMY,
                     generics: Vec::new(),

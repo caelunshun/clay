@@ -29,8 +29,6 @@ pub struct AdtField {
 
 #[derive(Debug, Clone)]
 pub struct TraitDef {
-    pub span: Span,
-    pub ident: Ident,
     pub generics: Obj<GenericBinder>,
     pub methods: LateInit<Vec<()>>,
     pub impls: LateInit<Vec<Obj<ImplDef>>>,
