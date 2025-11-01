@@ -9,7 +9,7 @@ use crate::{
         analysis::TyCtxt,
         syntax::{
             AnyGeneric, GenericBinder, GenericInstance, ImplDef, InferTyVar, ListOfTraitClauseList,
-            PosInBinder, Re, TraitClause, TraitClauseList, TraitDef, TraitParam, TraitParamList,
+            PosInBinder, Re, TraitClause, TraitClauseList, TraitParam, TraitParamList, TraitSpec,
             Ty, TyKind, TyList, TyOrRe, TyOrReList, TypeGeneric,
         },
     },
@@ -132,10 +132,10 @@ impl TyCtxt {
     ) -> TraitClause {
         match target {
             TraitClause::Outlives(re) => TraitClause::Outlives(self.substitute_re(re, generics)),
-            TraitClause::Trait(def, params) => TraitClause::Trait(
-                def,
-                self.substitute_trait_param_list(params, self_ty, generics),
-            ),
+            TraitClause::Trait(spec) => TraitClause::Trait(TraitSpec {
+                def: spec.def,
+                params: self.substitute_trait_param_list(spec.params, self_ty, generics),
+            }),
         }
     }
 
@@ -210,18 +210,19 @@ impl TyCtxt {
             .iter()
             .map(|clause| match *clause {
                 TraitClause::Outlives(re) => TraitClause::Outlives(re),
-                TraitClause::Trait(def, params) => {
-                    let params = params
+                TraitClause::Trait(spec) => {
+                    let params = spec
+                        .params
                         .r(s)
                         .iter()
-                        .zip(&def.r(s).generics.r(s).generics)
+                        .zip(&spec.def.r(s).generics.r(s).generics)
                         .map(|(&param, def)| {
                             let clauses = match param {
                                 TraitParam::Equals(_) => return param,
                                 TraitParam::Unspecified(clauses) => self.join_trait_clause_lists(
                                     // TODO: These require some substitutions and super-traits
                                     //  should be revealed.
-                                    def.unwrap_ty().r(s).user_clauses,
+                                    *def.unwrap_ty().r(s).user_clauses,
                                     clauses,
                                 ),
                             };
@@ -236,7 +237,7 @@ impl TyCtxt {
                                         raw: false,
                                     },
                                     binder: LateInit::uninit(),
-                                    user_clauses: clauses,
+                                    user_clauses: LateInit::new(clauses),
                                     instantiated_clauses: LateInit::uninit(),
                                     is_synthetic: true,
                                 },
@@ -251,7 +252,10 @@ impl TyCtxt {
                         })
                         .collect::<Vec<_>>();
 
-                    TraitClause::Trait(def, self.intern_trait_param_list(&params))
+                    TraitClause::Trait(TraitSpec {
+                        def: spec.def,
+                        params: self.intern_trait_param_list(&params),
+                    })
                 }
             })
             .collect::<Vec<_>>();
@@ -331,7 +335,7 @@ impl TyCtxt {
                     .filter_map(|generic| match generic {
                         AnyGeneric::Re(_generic) => None,
                         AnyGeneric::Ty(generic) => Some(self.substitute_clause_list(
-                            generic.r(s).user_clauses,
+                            *generic.r(s).user_clauses,
                             target,
                             substs,
                         )),
@@ -473,9 +477,9 @@ impl TyCtxt {
                 TraitClause::Outlives(_) => {
                     // (regions are ignored)
                 }
-                TraitClause::Trait(rhs_def, rhs_params) => {
+                TraitClause::Trait(rhs) => {
                     self.check_trait_assignability_erase_regions(
-                        lhs, rhs_def, rhs_params, binder, inferences, failures,
+                        lhs, rhs, binder, inferences, failures,
                     );
                 }
             }
@@ -489,8 +493,7 @@ impl TyCtxt {
     pub fn check_trait_assignability_erase_regions(
         &self,
         lhs: Ty,
-        rhs_def: Obj<TraitDef>,
-        rhs_params: TraitParamList,
+        rhs: TraitSpec,
         binder: &mut GenericBinder,
         inferences: &mut InferVarInferences,
         failures: &mut Vec<SatisfiabilityFailure>,
@@ -510,8 +513,7 @@ impl TyCtxt {
 
                 self.check_clause_satisfies_clause_erase_regions(
                     lhs_instantiated,
-                    rhs_def,
-                    rhs_params,
+                    rhs,
                     binder,
                     &mut sub_inferences,
                     &mut sub_failures,
@@ -530,7 +532,7 @@ impl TyCtxt {
         // Otherwise, attempt to provide the implementation through an implementation block.
         let mut impl_failures = Vec::new();
 
-        for &candidate in rhs_def.r(s).impls.iter() {
+        for &candidate in rhs.def.r(s).impls.iter() {
             // Replace universal qualifications in `impl` with inference variables
             let min_infer_var = inferences.next_infer_var();
             let candidate_fresh = self.instantiate_fresh_target_infers(candidate, min_infer_var);
@@ -556,8 +558,8 @@ impl TyCtxt {
                 .trait_instance
                 .r(s)
                 .iter()
-                .zip(rhs_params.r(s))
-                .take(rhs_def.r(s).regular_generic_count as usize)
+                .zip(rhs.params.r(s))
+                .take(rhs.def.r(s).regular_generic_count as usize)
             {
                 let TyOrRe::Ty(instance_ty) = instance_ty else {
                     // (regions are ignored)
@@ -602,8 +604,8 @@ impl TyCtxt {
                 .trait_instance
                 .r(s)
                 .iter()
-                .zip(rhs_params.r(s))
-                .skip(rhs_def.r(s).regular_generic_count as usize)
+                .zip(rhs.params.r(s))
+                .skip(rhs.def.r(s).regular_generic_count as usize)
             {
                 // Associated types are never regions.
                 let instance_ty = instance_ty.unwrap_ty();
@@ -644,8 +646,7 @@ impl TyCtxt {
 
         failures.push(SatisfiabilityFailure::CannotSatisfy {
             lhs,
-            rhs_def,
-            rhs_params,
+            rhs,
             direct_satisfy_failures,
             impl_failures,
         });
@@ -654,8 +655,7 @@ impl TyCtxt {
     pub fn check_clause_satisfies_clause_erase_regions(
         &self,
         lhs_instantiated: TraitClauseList,
-        rhs_def: Obj<TraitDef>,
-        rhs_params: TraitParamList,
+        rhs: TraitSpec,
         binder: &mut GenericBinder,
         inferences: &mut InferVarInferences,
         failures: &mut Vec<SatisfiabilityFailure>,
@@ -669,15 +669,15 @@ impl TyCtxt {
                 TraitClause::Outlives(_) => {
                     // (regions are ignored)
                 }
-                TraitClause::Trait(lhs_def, lhs_params) => {
-                    if lhs_def != rhs_def {
+                TraitClause::Trait(lhs) => {
+                    if lhs.def != rhs.def {
                         continue;
                     }
 
                     let mut sub_failures = Vec::new();
                     let mut sub_inferences = inferences.clone();
 
-                    for (lhs_param, rhs_param) in lhs_params.r(s).iter().zip(rhs_params.r(s)) {
+                    for (lhs_param, rhs_param) in lhs.params.r(s).iter().zip(rhs.params.r(s)) {
                         let TraitParam::Equals(lhs) = *lhs_param else {
                             unreachable!();
                         };
@@ -710,8 +710,7 @@ impl TyCtxt {
 
                     if !sub_failures.is_empty() {
                         direct_failures.push(DirectFailure {
-                            lhs_def,
-                            lhs_params,
+                            lhs,
                             cause: sub_failures,
                         });
 
@@ -726,8 +725,7 @@ impl TyCtxt {
 
         failures.push(SatisfiabilityFailure::CannotDirect {
             lhs_instantiated,
-            rhs_def,
-            rhs_params,
+            rhs,
             direct_failures,
         });
     }
@@ -741,15 +739,13 @@ pub enum SatisfiabilityFailure {
     },
     CannotSatisfy {
         lhs: Ty,
-        rhs_def: Obj<TraitDef>,
-        rhs_params: TraitParamList,
+        rhs: TraitSpec,
         direct_satisfy_failures: Option<Vec<SatisfiabilityFailure>>,
         impl_failures: Vec<ImplFailure>,
     },
     CannotDirect {
         lhs_instantiated: TraitClauseList,
-        rhs_def: Obj<TraitDef>,
-        rhs_params: TraitParamList,
+        rhs: TraitSpec,
         direct_failures: Vec<DirectFailure>,
     },
 }
@@ -762,8 +758,7 @@ pub struct ImplFailure {
 
 #[derive(Debug, Clone)]
 pub struct DirectFailure {
-    pub lhs_def: Obj<TraitDef>,
-    pub lhs_params: TraitParamList,
+    pub lhs: TraitSpec,
     pub cause: Vec<SatisfiabilityFailure>,
 }
 

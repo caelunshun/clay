@@ -136,6 +136,26 @@ pub trait ModuleResolver: ParentResolver {
         name: Symbol,
     ) -> Result<AnyDef<Self::Module, Self::Item>, StepLookupError>;
 
+    fn lookup_noisy(
+        &mut self,
+        module_root: Self::Module,
+        origin: Self::Module,
+        path: &[Ident],
+    ) -> Result<AnyDef<Self::Module, Self::Item>, ErrorGuaranteed> {
+        self.lookup(module_root, origin, origin, path, EmitErrors::Yes)
+            .map_err(Option::unwrap)
+    }
+
+    fn lookup_silent(
+        &mut self,
+        module_root: Self::Module,
+        origin: Self::Module,
+        path: &[Ident],
+    ) -> Option<AnyDef<Self::Module, Self::Item>> {
+        self.lookup(module_root, origin, origin, path, EmitErrors::No)
+            .ok()
+    }
+
     fn lookup(
         &mut self,
         module_root: Self::Module,

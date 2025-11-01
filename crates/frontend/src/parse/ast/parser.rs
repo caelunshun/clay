@@ -9,7 +9,8 @@ use crate::{
             AstAttribute, AstGenericDef, AstGenericDefKind, AstGenericDefList, AstItem,
             AstItemKind, AstItemModule, AstItemModuleContents, AstItemTrait, AstItemUse,
             AstSimplePath, AstTraitClause, AstTraitClauseKind, AstTraitClauseList, AstTraitParam,
-            AstUsePath, AstUsePathKind, AstVisibility, AstVisibilityKind, Keyword, PunctSeq,
+            AstTraitSpec, AstUsePath, AstUsePathKind, AstVisibility, AstVisibilityKind, Keyword,
+            PunctSeq,
         },
         token::{
             GroupDelimiter, Ident, Lifetime, Punct, TokenCharLit, TokenCursor, TokenGroup,
@@ -476,7 +477,7 @@ fn parse_trait_clause(p: P) -> Result<AstTraitClause, ErrorGuaranteed> {
 
         return Ok(AstTraitClause {
             span: start.to(p.prev_span()),
-            kind: AstTraitClauseKind::Trait(path, params),
+            kind: AstTraitClauseKind::Trait(AstTraitSpec { path, params }),
         });
     }
 

@@ -7,7 +7,7 @@ use crate::{
     typeck::{
         analysis::ImplFreshInfer,
         syntax::{
-            GenericInstance, ImplDef, ListOfTraitClauseList, InferTyVar, TraitClause,
+            GenericInstance, ImplDef, InferTyVar, ListOfTraitClauseList, TraitClause,
             TraitClauseList, TraitParam, TraitParamList, Ty, TyKind, TyList, TyOrRe, TyOrReList,
         },
     },

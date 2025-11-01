@@ -35,26 +35,19 @@ pub struct TraitDef {
 
     /// The set of parameter generics and associated types defined by this trait. This list starts
     /// with a `regular_generic_count` number of generic parameters followed by associated types.
-    pub generics: LateInit<Obj<GenericBinder>>,
+    pub generics: Obj<GenericBinder>,
 
     /// The number of generic parameters taken by this trait.
     pub regular_generic_count: u32,
 
-    /// Maps associated type names to the index of that parameters in the combined `generics`
-    /// binder.
-    pub associated_type_to_index: FxHashMap<Symbol, AssocType>,
+    /// Maps associated type names to their generic parameter as bound in `generics`.
+    pub associated_types: FxHashMap<Symbol, Obj<TypeGeneric>>,
 
     /// The set of methods defined by this trait.
     pub methods: LateInit<Vec<()>>,
 
     /// All known implementations of this trait.
     pub impls: LateInit<Vec<Obj<ImplDef>>>,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub struct AssocType {
-    pub span: Span,
-    pub idx: u32,
 }
 
 pub type ListOfTraitClauseList = Intern<[TraitClauseList]>;
@@ -66,7 +59,7 @@ pub type TraitClauseList = Intern<[TraitClause]>;
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TraitClause {
     Outlives(Re),
-    Trait(Obj<TraitDef>, TraitParamList),
+    Trait(TraitSpec),
 }
 
 pub type TraitParamList = Intern<[TraitParam]>;
@@ -130,6 +123,12 @@ pub struct GenericSolveStep {
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct TraitSpec {
+    pub def: Obj<TraitDef>,
+    pub params: TraitParamList,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct TraitInstance {
     pub def: Obj<TraitDef>,
     pub params: TyOrReList,
@@ -173,7 +172,7 @@ pub struct RegionGeneric {
     pub span: Span,
     pub lifetime: Lifetime,
     pub binder: LateInit<PosInBinder>,
-    pub clauses: TraitClauseList,
+    pub clauses: LateInit<TraitClauseList>,
 }
 
 #[derive(Debug, Clone)]
@@ -183,7 +182,7 @@ pub struct TypeGeneric {
     pub binder: LateInit<PosInBinder>,
 
     /// The user-specified clauses on a generic type.
-    pub user_clauses: TraitClauseList,
+    pub user_clauses: LateInit<TraitClauseList>,
 
     /// All knowable facts about which traits the generic parameter implements.
     ///

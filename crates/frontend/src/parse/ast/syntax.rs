@@ -137,7 +137,13 @@ pub struct AstTraitClause {
 #[derive(Debug, Clone)]
 pub enum AstTraitClauseKind {
     Outlives(Lifetime),
-    Trait(AstSimplePath, Vec<AstTraitParam>),
+    Trait(AstTraitSpec),
+}
+
+#[derive(Debug, Clone)]
+pub struct AstTraitSpec {
+    pub path: AstSimplePath,
+    pub params: Vec<AstTraitParam>,
 }
 
 #[derive(Debug, Clone)]
