@@ -202,9 +202,12 @@ where
         }
     }
 
-    'traverse: while let (Some(part), &AnyDef::Module(curr_scope_start)) =
-        (parts_iter.next(), &finger)
-    {
+    'traverse: while let &AnyDef::Module(curr_scope_start) = &finger {
+        // N.B. We have to ensure that the `finger` is on a module before consuming the next part.
+        let Some(part) = parts_iter.next() else {
+            break;
+        };
+
         // Handle special path parts.
         if part.matches_kw(kw!("self")) {
             finger = AnyDef::Module(resolver.module_root(curr_scope_start));

@@ -129,19 +129,14 @@ pub struct AstTraitClauseList {
 }
 
 #[derive(Debug, Clone)]
-pub struct AstTraitClause {
-    pub span: Span,
-    pub kind: AstTraitClauseKind,
-}
-
-#[derive(Debug, Clone)]
-pub enum AstTraitClauseKind {
+pub enum AstTraitClause {
     Outlives(Lifetime),
     Trait(AstTraitSpec),
 }
 
 #[derive(Debug, Clone)]
 pub struct AstTraitSpec {
+    pub span: Span,
     pub path: AstSimplePath,
     pub params: Vec<AstTraitParam>,
 }
@@ -156,7 +151,7 @@ pub struct AstTraitParam {
 pub enum AstTraitParamKind {
     PositionalEquals(AstTyOrRe),
     NamedEquals(Ident, AstTyOrRe),
-    Unspecified(Ident, AstTraitClauseList),
+    NamedUnspecified(Ident, AstTraitClauseList),
 }
 
 // === Types === //

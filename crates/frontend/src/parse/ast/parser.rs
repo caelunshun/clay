@@ -8,9 +8,8 @@ use crate::{
         ast::{
             AstAttribute, AstGenericDef, AstGenericDefKind, AstGenericDefList, AstItem,
             AstItemKind, AstItemModule, AstItemModuleContents, AstItemTrait, AstItemUse,
-            AstSimplePath, AstTraitClause, AstTraitClauseKind, AstTraitClauseList, AstTraitParam,
-            AstTraitSpec, AstUsePath, AstUsePathKind, AstVisibility, AstVisibilityKind, Keyword,
-            PunctSeq,
+            AstSimplePath, AstTraitClause, AstTraitClauseList, AstTraitParam, AstTraitSpec,
+            AstUsePath, AstUsePathKind, AstVisibility, AstVisibilityKind, Keyword, PunctSeq,
         },
         token::{
             GroupDelimiter, Ident, Lifetime, Punct, TokenCharLit, TokenCursor, TokenGroup,
@@ -466,19 +465,17 @@ fn parse_trait_clause(p: P) -> Result<AstTraitClause, ErrorGuaranteed> {
     let start = p.next_span();
 
     if let Some(lifetime) = match_lifetime().expect(p) {
-        return Ok(AstTraitClause {
-            span: start.to(p.prev_span()),
-            kind: AstTraitClauseKind::Outlives(lifetime),
-        });
+        return Ok(AstTraitClause::Outlives(lifetime));
     }
 
     if let Some(path) = parse_simple_path(p) {
         let params = parse_trait_param_list(p);
 
-        return Ok(AstTraitClause {
+        return Ok(AstTraitClause::Trait(AstTraitSpec {
             span: start.to(p.prev_span()),
-            kind: AstTraitClauseKind::Trait(AstTraitSpec { path, params }),
-        });
+            path,
+            params,
+        }));
     }
 
     Err(p.stuck_recover_with(|_| {

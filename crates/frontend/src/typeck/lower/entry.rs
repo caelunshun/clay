@@ -133,25 +133,55 @@ impl<'ast> UseLowerCtxt<'ast> {
         prefix.extend_from_slice(&ast.base);
 
         match &ast.kind {
-            AstUsePathKind::Direct(rename) => {
-                let name = rename.unwrap_or(prefix.last().copied().unwrap());
+            AstUsePathKind::Direct(rename) => 'direct: {
+                let mut name = rename.unwrap_or(prefix.last().copied().unwrap());
 
-                if name.matches_kw(kw!("self"))
-                    || name.matches_kw(kw!("crate"))
-                    || name.matches_kw(kw!("super"))
-                {
-                    _ = Diag::span_err(name.span, "invalid name for import").emit();
-                } else {
-                    self.tree.push_single_use(
-                        mod_id,
-                        visibility.clone(),
-                        name,
-                        AstSimplePath {
-                            span: ast.span,
-                            parts: Rc::from(prefix.as_slice()),
-                        },
-                    );
+                if name.matches_kw(kw!("crate")) {
+                    Diag::span_err(name.span, "crate root imports need to be explicitly named")
+                        .emit();
+
+                    break 'direct;
                 }
+
+                if name.matches_kw(kw!("super")) {
+                    Diag::span_err(name.span, "invalid name for import").emit();
+
+                    break 'direct;
+                }
+
+                if name.matches_kw(kw!("self")) {
+                    let Some(new_name) =
+                        prefix[..prefix.len() - 1].last().copied().filter(|name| {
+                            !name.matches_kw(kw!("self"))
+                                && !name.matches_kw(kw!("crate"))
+                                && !name.matches_kw(kw!("super"))
+                        })
+                    else {
+                        Diag::span_err(
+                            name.span,
+                            "`self` imports are only allowed after an identifier",
+                        )
+                        .emit();
+
+                        break 'direct;
+                    };
+
+                    name = Ident {
+                        span: name.span,
+                        text: new_name.text,
+                        raw: new_name.raw,
+                    };
+                }
+
+                self.tree.push_single_use(
+                    mod_id,
+                    visibility.clone(),
+                    name,
+                    AstSimplePath {
+                        span: ast.span,
+                        parts: Rc::from(prefix.as_slice()),
+                    },
+                );
             }
             AstUsePathKind::Wild(span) => {
                 self.tree.push_glob_use(
@@ -289,7 +319,7 @@ impl IntraItemLowerCtxt<'_> {
     }
 
     pub fn lower_trait(&mut self, target: Obj<TraitDef>, ast: &AstItemTrait) {
-        // todo!();
+        // Reveal all names.
         // TODO
     }
 }

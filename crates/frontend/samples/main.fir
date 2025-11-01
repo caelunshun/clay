@@ -18,4 +18,10 @@ pub trait MyTrait<T> {}
 impl<Q: Generic<T>, R: Associated<T = T>, S, T> MyTrait<()> for (Q, R, S) {}
 */
 
-trait Whee<A, B, C>
+mod whee {
+    use super::woo::{self, super::woo as foo};
+}
+
+mod woo {}
+
+pub trait Whee<A, B, C>
