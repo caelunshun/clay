@@ -1,5 +1,5 @@
 use crate::{
-    base::{Diag, ErrorGuaranteed},
+    base::{Diag, ErrorGuaranteed, LeafDiag, arena::Obj},
     parse::{
         ast::{
             AstTraitClause, AstTraitClauseList, AstTraitParamKind, AstTraitSpec, AstTy, AstTyOrRe,
@@ -8,12 +8,46 @@ use crate::{
     },
     typeck::{
         lower::entry::IntraItemLowerCtxt,
-        syntax::{Re, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyOrRe},
+        syntax::{
+            AnyGeneric, GenericBinder, Re, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty,
+            TyOrRe,
+        },
     },
 };
 
 impl IntraItemLowerCtxt<'_> {
-    fn lower_clauses(&mut self, ast: Option<&AstTraitClauseList>) -> TraitClauseList {
+    pub fn define_generics_in_binder(&mut self, binder: Obj<GenericBinder>) {
+        let s = &self.tcx.session;
+
+        for generic in &binder.r(s).generics {
+            match generic {
+                AnyGeneric::Re(generic) => {
+                    self.generic_re_names
+                        .define(generic.r(s).lifetime.name, *generic, |other| {
+                            Diag::span_err(generic.r(s).span, "generic name used more than once")
+                                .child(LeafDiag::span_note(
+                                    other.r(s).span,
+                                    "name previously used here",
+                                ))
+                                .emit()
+                        });
+                }
+                AnyGeneric::Ty(generic) => {
+                    self.generic_ty_names
+                        .define(generic.r(s).ident.text, *generic, |other| {
+                            Diag::span_err(generic.r(s).span, "generic name used more than once")
+                                .child(LeafDiag::span_note(
+                                    other.r(s).span,
+                                    "name previously used here",
+                                ))
+                                .emit()
+                        });
+                }
+            }
+        }
+    }
+
+    pub fn lower_clauses(&mut self, ast: Option<&AstTraitClauseList>) -> TraitClauseList {
         let Some(ast) = ast else {
             return self.tcx.intern_trait_clause_list(&[]);
         };
@@ -35,14 +69,14 @@ impl IntraItemLowerCtxt<'_> {
         self.tcx.intern_trait_clause_list(&clauses)
     }
 
-    fn lower_clause(&mut self, ast: &AstTraitClause) -> Result<TraitClause, ErrorGuaranteed> {
+    pub fn lower_clause(&mut self, ast: &AstTraitClause) -> Result<TraitClause, ErrorGuaranteed> {
         match ast {
             AstTraitClause::Outlives(lt) => Ok(TraitClause::Outlives(self.lower_re(lt))),
             AstTraitClause::Trait(spec) => Ok(TraitClause::Trait(self.lower_trait_spec(spec)?)),
         }
     }
 
-    fn lower_trait_spec(&mut self, ast: &AstTraitSpec) -> Result<TraitSpec, ErrorGuaranteed> {
+    pub fn lower_trait_spec(&mut self, ast: &AstTraitSpec) -> Result<TraitSpec, ErrorGuaranteed> {
         let s = &self.tcx.session;
 
         let def = self
@@ -124,18 +158,18 @@ impl IntraItemLowerCtxt<'_> {
         })
     }
 
-    fn lower_ty_or_re(&mut self, ast: &AstTyOrRe) -> TyOrRe {
+    pub fn lower_ty_or_re(&mut self, ast: &AstTyOrRe) -> TyOrRe {
         match ast {
             AstTyOrRe::Re(ast) => TyOrRe::Re(self.lower_re(ast)),
             AstTyOrRe::Ty(ast) => TyOrRe::Ty(self.lower_ty(ast)),
         }
     }
 
-    fn lower_re(&mut self, ast: &Lifetime) -> Re {
+    pub fn lower_re(&mut self, ast: &Lifetime) -> Re {
         todo!();
     }
 
-    fn lower_ty(&mut self, ast: &AstTy) -> Ty {
+    pub fn lower_ty(&mut self, ast: &AstTy) -> Ty {
         todo!();
     }
 }

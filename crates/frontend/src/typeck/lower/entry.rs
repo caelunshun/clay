@@ -9,7 +9,8 @@ use crate::{
     parse::{
         ast::{
             AstGenericDefKind, AstItem, AstItemKind, AstItemModuleContents, AstItemTrait,
-            AstSimplePath, AstTraitMemberKind, AstUsePath, AstUsePathKind, AstVisibility,
+            AstSimplePath, AstTraitClauseList, AstTraitMemberKind, AstUsePath, AstUsePathKind,
+            AstVisibility,
         },
         token::Ident,
     },
@@ -29,6 +30,8 @@ use hashbrown::hash_map;
 use index_vec::IndexVec;
 use std::rc::Rc;
 
+// === Driver === //
+
 impl TyCtxt {
     pub fn lower_full_ast(&self, ast: &AstItemModuleContents) -> Obj<Module> {
         let s = &self.session;
@@ -45,13 +48,19 @@ impl TyCtxt {
         let root = modules[BuilderModuleId::ROOT];
         drop(modules);
 
-        let item_ast_iter = items.iter().copied().zip(ctxt.item_asts.iter().copied());
-
         // Lower inter-item properties.
-        for (target, ast) in item_ast_iter.clone() {
+        let mut tasks = Vec::new();
+
+        for (target, ast) in items.iter().copied().zip(ctxt.item_asts.iter().copied()) {
+            let mut ctxt = InterItemLowerCtxt {
+                tcx: self,
+                item: target,
+                tasks: &mut tasks,
+            };
+
             match &ast.kind {
                 AstItemKind::Trait(ast) => {
-                    inter_item_lower_trait(self, target, ast);
+                    ctxt.lower_trait(target, ast);
                 }
                 AstItemKind::Mod(_) | AstItemKind::Use(_) | AstItemKind::Error(_) => {
                     unreachable!()
@@ -60,20 +69,18 @@ impl TyCtxt {
         }
 
         // Lower intra-item properties.
-        for (item, ast) in item_ast_iter.clone() {
-            let mut ctxt = IntraItemLowerCtxt {
+        for (item, task) in tasks {
+            let ctxt = IntraItemLowerCtxt {
                 tcx: self,
                 root,
                 scope: item.r(s).parent,
-                names: NameResolver::new(),
+                generic_ty_names: NameResolver::new(),
+                generic_re_names: NameResolver::new(),
             };
 
-            match &ast.kind {
-                AstItemKind::Trait(ast) => {
-                    ctxt.lower_trait(item.r(s).kind.as_trait().unwrap(), ast);
-                }
-                AstItemKind::Mod(_) | AstItemKind::Use(_) | AstItemKind::Error(_) => {
-                    unreachable!()
+            match task {
+                IntraLowerTask::Trait(clause_lists) => {
+                    ctxt.lower_trait(item.r(s).kind.as_trait().unwrap(), clause_lists);
                 }
             }
         }
@@ -206,94 +213,121 @@ impl<'ast> UseLowerCtxt<'ast> {
 
 // === Second Phase === //
 
-pub fn inter_item_lower_trait(tcx: &TyCtxt, target: Obj<Item>, ast: &AstItemTrait) {
-    let s = &tcx.session;
+pub struct InterItemLowerCtxt<'a, 'ast> {
+    tcx: &'a TyCtxt,
+    item: Obj<Item>,
+    tasks: &'a mut Vec<(Obj<Item>, IntraLowerTask<'ast>)>,
+}
 
-    let mut binder = GenericBinder {
-        span: Span::DUMMY,
-        generics: Vec::new(),
-    };
+pub enum IntraLowerTask<'ast> {
+    Trait(Vec<Option<&'ast AstTraitClauseList>>),
+}
 
-    if let Some(generics) = &ast.generics {
-        for def in &generics.defs {
-            let Ok(def) = def else {
-                continue;
-            };
+impl<'ast> InterItemLowerCtxt<'_, 'ast> {
+    pub fn push_task(&mut self, task: IntraLowerTask<'ast>) {
+        self.tasks.push((self.item, task));
+    }
 
-            match def.kind {
-                AstGenericDefKind::Lifetime(lifetime) => {
-                    binder.generics.push(AnyGeneric::Re(Obj::new(
-                        RegionGeneric {
-                            span: def.span,
-                            lifetime,
-                            binder: LateInit::uninit(),
-                            clauses: LateInit::uninit(),
-                        },
-                        s,
-                    )));
-                }
-                AstGenericDefKind::Type(ident) => {
-                    binder.generics.push(AnyGeneric::Ty(Obj::new(
-                        TypeGeneric {
-                            span: def.span,
-                            ident,
-                            binder: LateInit::uninit(),
-                            user_clauses: LateInit::uninit(),
-                            instantiated_clauses: LateInit::uninit(),
-                            is_synthetic: false,
-                        },
-                        s,
-                    )));
+    pub fn lower_trait(&mut self, target: Obj<Item>, ast: &'ast AstItemTrait) {
+        let s = &self.tcx.session;
+
+        let mut binder = GenericBinder {
+            span: Span::DUMMY,
+            generics: Vec::new(),
+        };
+
+        let mut generic_clause_lists = Vec::new();
+
+        if let Some(generics) = &ast.generics {
+            for def in &generics.defs {
+                let Ok(def) = def else {
+                    continue;
+                };
+
+                match def.kind {
+                    AstGenericDefKind::Lifetime(lifetime) => {
+                        binder.generics.push(AnyGeneric::Re(Obj::new(
+                            RegionGeneric {
+                                span: def.span,
+                                lifetime,
+                                binder: LateInit::uninit(),
+                                clauses: LateInit::uninit(),
+                            },
+                            s,
+                        )));
+
+                        generic_clause_lists.push(def.clauses.as_ref());
+                    }
+                    AstGenericDefKind::Type(ident) => {
+                        binder.generics.push(AnyGeneric::Ty(Obj::new(
+                            TypeGeneric {
+                                span: def.span,
+                                ident,
+                                binder: LateInit::uninit(),
+                                user_clauses: LateInit::uninit(),
+                                instantiated_clauses: LateInit::uninit(),
+                                is_synthetic: false,
+                            },
+                            s,
+                        )));
+
+                        generic_clause_lists.push(def.clauses.as_ref());
+                    }
                 }
             }
         }
-    }
 
-    let regular_generic_count = binder.generics.len() as u32;
-    let mut associated_types = FxHashMap::default();
+        let regular_generic_count = binder.generics.len() as u32;
+        let mut associated_types = FxHashMap::default();
 
-    for member in &ast.members {
-        match &member.kind {
-            AstTraitMemberKind::AssocType(name, _) => match associated_types.entry(name.text) {
-                hash_map::Entry::Vacant(entry) => {
-                    entry.insert(Obj::new(
-                        TypeGeneric {
-                            span: member.span,
-                            ident: *name,
-                            binder: LateInit::uninit(),
-                            user_clauses: LateInit::uninit(),
-                            instantiated_clauses: LateInit::uninit(),
-                            is_synthetic: false,
-                        },
-                        s,
-                    ));
+        for member in &ast.members {
+            match &member.kind {
+                AstTraitMemberKind::AssocType(name, clauses) => {
+                    match associated_types.entry(name.text) {
+                        hash_map::Entry::Vacant(entry) => {
+                            entry.insert(Obj::new(
+                                TypeGeneric {
+                                    span: member.span,
+                                    ident: *name,
+                                    binder: LateInit::uninit(),
+                                    user_clauses: LateInit::uninit(),
+                                    instantiated_clauses: LateInit::uninit(),
+                                    is_synthetic: false,
+                                },
+                                s,
+                            ));
+
+                            generic_clause_lists.push(Some(clauses));
+                        }
+                        hash_map::Entry::Occupied(entry) => {
+                            Diag::span_err(name.span, "name already used")
+                                .child(LeafDiag::span_note(
+                                    entry.get().r(s).ident.span,
+                                    "first definition here",
+                                ))
+                                .emit();
+                        }
+                    }
                 }
-                hash_map::Entry::Occupied(entry) => {
-                    Diag::span_err(name.span, "name already used")
-                        .child(LeafDiag::span_note(
-                            entry.get().r(s).ident.span,
-                            "first definition here",
-                        ))
-                        .emit();
-                }
-            },
+            }
         }
-    }
 
-    LateInit::init(
-        &target.r(s).kind,
-        ItemKind::Trait(Obj::new(
+        let trait_target = Obj::new(
             TraitDef {
                 item: target,
-                generics: tcx.seal_generic_binder(binder),
+                generics: self.tcx.seal_generic_binder(binder),
                 regular_generic_count,
                 associated_types,
                 methods: LateInit::uninit(),
                 impls: LateInit::uninit(),
             },
             s,
-        )),
-    );
+        );
+
+        LateInit::init(&target.r(s).kind, ItemKind::Trait(trait_target));
+
+        self.push_task(IntraLowerTask::Trait(generic_clause_lists));
+    }
 }
 
 // === Third Phase === //
@@ -302,7 +336,8 @@ pub struct IntraItemLowerCtxt<'a> {
     pub tcx: &'a TyCtxt,
     pub root: Obj<Module>,
     pub scope: Obj<Module>,
-    pub names: NameResolver<BoundName>,
+    pub generic_ty_names: NameResolver<Obj<TypeGeneric>>,
+    pub generic_re_names: NameResolver<Obj<RegionGeneric>>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -318,8 +353,34 @@ impl IntraItemLowerCtxt<'_> {
         FrozenModuleResolver(&self.tcx.session).lookup_noisy(self.root, self.scope, &path.parts)
     }
 
-    pub fn lower_trait(&mut self, target: Obj<TraitDef>, ast: &AstItemTrait) {
-        // Reveal all names.
-        // TODO
+    pub fn scoped<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        self.generic_ty_names.push_rib();
+        self.generic_re_names.push_rib();
+        let ret = f(self);
+        self.generic_ty_names.pop_rib();
+        self.generic_re_names.pop_rib();
+
+        ret
+    }
+
+    pub fn lower_trait(
+        mut self,
+        item: Obj<TraitDef>,
+        clause_lists: Vec<Option<&AstTraitClauseList>>,
+    ) {
+        let s = &self.tcx.session;
+
+        self.define_generics_in_binder(item.r(s).generics);
+
+        for (&generic, clause_list) in item.r(s).generics.r(s).generics.iter().zip(clause_lists) {
+            match generic {
+                AnyGeneric::Re(generic) => {
+                    LateInit::init(&generic.r(s).clauses, self.lower_clauses(clause_list));
+                }
+                AnyGeneric::Ty(generic) => {
+                    LateInit::init(&generic.r(s).user_clauses, self.lower_clauses(clause_list));
+                }
+            }
+        }
     }
 }
