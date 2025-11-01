@@ -17,6 +17,22 @@ pub enum AnyDef<M, I> {
     Item(I),
 }
 
+impl<M, I> AnyDef<M, I> {
+    pub fn as_module(self) -> Option<M> {
+        match self {
+            AnyDef::Module(v) => Some(v),
+            AnyDef::Item(_) => None,
+        }
+    }
+
+    pub fn as_item(self) -> Option<I> {
+        match self {
+            AnyDef::Item(v) => Some(v),
+            AnyDef::Module(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum StepLookupError {
     NotFound,

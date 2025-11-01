@@ -51,3 +51,12 @@ pub struct Item {
 pub enum ItemKind {
     Trait(Obj<TraitDef>),
 }
+
+impl ItemKind {
+    pub fn as_trait(self) -> Option<Obj<TraitDef>> {
+        match self {
+            ItemKind::Trait(v) => Some(v),
+            _ => None,
+        }
+    }
+}

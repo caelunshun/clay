@@ -1,7 +1,6 @@
 use crate::{
     base::{ErrorGuaranteed, syntax::Span},
     parse::token::{Ident, Lifetime, TokenStream},
-    typeck::syntax::TraitClauseList,
 };
 use std::rc::Rc;
 
@@ -55,7 +54,7 @@ pub struct AstTraitMember {
 
 #[derive(Debug, Clone)]
 pub enum AstTraitMemberKind {
-    AssocType(Ident, TraitClauseList),
+    AssocType(Ident, AstTraitClauseList),
 }
 
 // === Item Helpers === //

@@ -11,19 +11,17 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct FrozenModuleResolver {
-    pub session: Session,
-}
+pub struct FrozenModuleResolver<'a>(pub &'a Session);
 
-impl ParentResolver for FrozenModuleResolver {
+impl ParentResolver for FrozenModuleResolver<'_> {
     type Module = Obj<Module>;
 
     fn direct_parent(&self, def: Self::Module) -> ParentKind<Self::Module> {
-        def.r(&self.session).parent
+        def.r(self.0).parent
     }
 }
 
-impl ModuleResolver for FrozenModuleResolver {
+impl ModuleResolver for FrozenModuleResolver<'_> {
     type Item = Obj<Item>;
 
     fn path(
@@ -31,17 +29,17 @@ impl ModuleResolver for FrozenModuleResolver {
         def: super::AnyDef<Self::Module, Self::Item>,
     ) -> impl 'static + Copy + std::fmt::Display {
         match def {
-            AnyDef::Module(v) => v.r(&self.session).path,
-            AnyDef::Item(v) => v.r(&self.session).path,
+            AnyDef::Module(v) => v.r(self.0).path,
+            AnyDef::Item(v) => v.r(self.0).path,
         }
     }
 
     fn global_use_count(&mut self, curr: Self::Module) -> u32 {
-        curr.r(&self.session).glob_uses.len() as u32
+        curr.r(self.0).glob_uses.len() as u32
     }
 
     fn global_use_span(&mut self, curr: Self::Module, use_idx: u32) -> Span {
-        curr.r(&self.session).glob_uses[use_idx as usize].span
+        curr.r(self.0).glob_uses[use_idx as usize].span
     }
 
     fn global_use_target(
@@ -50,7 +48,7 @@ impl ModuleResolver for FrozenModuleResolver {
         curr: Self::Module,
         use_idx: u32,
     ) -> Result<Self::Module, StepLookupError> {
-        let glob_use = &curr.r(&self.session).glob_uses[use_idx as usize];
+        let glob_use = &curr.r(self.0).glob_uses[use_idx as usize];
 
         match glob_use.visibility {
             Visibility::Pub => {
@@ -72,7 +70,7 @@ impl ModuleResolver for FrozenModuleResolver {
         curr: Self::Module,
         name: Symbol,
     ) -> Result<AnyDef<Self::Module, Self::Item>, StepLookupError> {
-        let Some(direct_use) = &curr.r(&self.session).direct_uses.get(&name) else {
+        let Some(direct_use) = &curr.r(self.0).direct_uses.get(&name) else {
             return Err(StepLookupError::NotFound);
         };
 

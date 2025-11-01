@@ -1,22 +1,21 @@
-use {{{{{{{{{self}}}}}}}}};
+/*
+pub trait Generic<T> {}
 
-pub mod meow {
-    pub use super::thump::*;
+impl<T> Generic<T> for T {}
 
-    pub mod whee {}
+impl Generic<i32> for u32 {}
+
+pub trait Associated {
+    type T;
 }
 
-pub mod thump {
-    pub use super::meow::*;
-
-    pub mod whee {}
+impl<V> Associated for V {
+    type T = V;
 }
 
-pub use meow::whee as first;
-pub use thump::whee as second;
+pub trait MyTrait<T> {}
 
-pub mod res {
-    pub use {crate::meow::*, crate::thump::*};
-}
+impl<Q: Generic<T>, R: Associated<T = T>, S, T> MyTrait<()> for (Q, R, S) {}
+*/
 
-use res::{whee as third};
+trait Whee<A, B, C>

@@ -1,10 +1,11 @@
 use crate::{
     base::{
         arena::{Intern, LateInit, Obj},
-        syntax::Span,
+        syntax::{Span, Symbol},
     },
-    parse::token::Ident,
-    typeck::syntax::Func,
+    parse::token::{Ident, Lifetime},
+    typeck::syntax::{Func, Item},
+    utils::hash::FxHashMap,
 };
 
 // === AdtDef === //
@@ -29,9 +30,31 @@ pub struct AdtField {
 
 #[derive(Debug, Clone)]
 pub struct TraitDef {
-    pub generics: Obj<GenericBinder>,
+    /// The item defining this trait.
+    pub item: Obj<Item>,
+
+    /// The set of parameter generics and associated types defined by this trait. This list starts
+    /// with a `regular_generic_count` number of generic parameters followed by associated types.
+    pub generics: LateInit<Obj<GenericBinder>>,
+
+    /// The number of generic parameters taken by this trait.
+    pub regular_generic_count: u32,
+
+    /// Maps associated type names to the index of that parameters in the combined `generics`
+    /// binder.
+    pub associated_type_to_index: FxHashMap<Symbol, AssocType>,
+
+    /// The set of methods defined by this trait.
     pub methods: LateInit<Vec<()>>,
+
+    /// All known implementations of this trait.
     pub impls: LateInit<Vec<Obj<ImplDef>>>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct AssocType {
+    pub span: Span,
+    pub idx: u32,
 }
 
 pub type ListOfTraitClauseList = Intern<[TraitClauseList]>;
@@ -60,7 +83,6 @@ pub enum TraitParam {
 pub struct ImplDef {
     pub span: Span,
     pub generics: Obj<GenericBinder>,
-    pub regular_generic_count: u32,
     pub trait_: Option<TraitInstance>,
     pub target: Ty,
     pub methods: LateInit<Vec<()>>,
@@ -123,18 +145,6 @@ pub struct GenericBinder {
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct BinderSpec {
-    pub def: Obj<GenericBinder>,
-    pub idx: u32,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct GenericInstance {
-    pub binder: Obj<GenericBinder>,
-    pub substs: TyOrReList,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum AnyGeneric {
     Re(Obj<RegionGeneric>),
     Ty(Obj<TypeGeneric>),
@@ -161,8 +171,8 @@ impl AnyGeneric {
 #[derive(Debug, Clone)]
 pub struct RegionGeneric {
     pub span: Span,
-    pub ident: Ident,
-    pub binder: LateInit<BinderSpec>,
+    pub lifetime: Lifetime,
+    pub binder: LateInit<PosInBinder>,
     pub clauses: TraitClauseList,
 }
 
@@ -170,7 +180,7 @@ pub struct RegionGeneric {
 pub struct TypeGeneric {
     pub span: Span,
     pub ident: Ident,
-    pub binder: LateInit<BinderSpec>,
+    pub binder: LateInit<PosInBinder>,
 
     /// The user-specified clauses on a generic type.
     pub user_clauses: TraitClauseList,
@@ -184,6 +194,18 @@ pub struct TypeGeneric {
 
     /// Whether this generic was implicitly created rather than defined explicitly by the user.
     pub is_synthetic: bool,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct PosInBinder {
+    pub def: Obj<GenericBinder>,
+    pub idx: u32,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct GenericInstance {
+    pub binder: Obj<GenericBinder>,
+    pub substs: TyOrReList,
 }
 
 // === Type === //

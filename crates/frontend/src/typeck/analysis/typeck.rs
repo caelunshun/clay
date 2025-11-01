@@ -8,9 +8,9 @@ use crate::{
     typeck::{
         analysis::TyCtxt,
         syntax::{
-            AnyGeneric, BinderSpec, GenericBinder, GenericInstance, ImplDef, InferTyVar,
-            ListOfTraitClauseList, Re, TraitClause, TraitClauseList, TraitDef, TraitParam,
-            TraitParamList, Ty, TyKind, TyList, TyOrRe, TyOrReList, TypeGeneric,
+            AnyGeneric, GenericBinder, GenericInstance, ImplDef, InferTyVar, ListOfTraitClauseList,
+            PosInBinder, Re, TraitClause, TraitClauseList, TraitDef, TraitParam, TraitParamList,
+            Ty, TyKind, TyList, TyOrRe, TyOrReList, TypeGeneric,
         },
     },
 };
@@ -274,7 +274,7 @@ impl TyCtxt {
                     AnyGeneric::Re(generic) => &generic.r(s).binder,
                     AnyGeneric::Ty(generic) => &generic.r(s).binder,
                 },
-                BinderSpec {
+                PosInBinder {
                     def: binder,
                     idx: i as u32,
                 },
@@ -557,7 +557,7 @@ impl TyCtxt {
                 .r(s)
                 .iter()
                 .zip(rhs_params.r(s))
-                .take(candidate.r(s).regular_generic_count as usize)
+                .take(rhs_def.r(s).regular_generic_count as usize)
             {
                 let TyOrRe::Ty(instance_ty) = instance_ty else {
                     // (regions are ignored)
@@ -603,7 +603,7 @@ impl TyCtxt {
                 .r(s)
                 .iter()
                 .zip(rhs_params.r(s))
-                .skip(candidate.r(s).regular_generic_count as usize)
+                .skip(rhs_def.r(s).regular_generic_count as usize)
             {
                 // Associated types are never regions.
                 let instance_ty = instance_ty.unwrap_ty();
@@ -811,104 +811,5 @@ impl InferVarInferences {
 
         let new_root = self.disjoint.root_of(lhs.0 as usize);
         self.disjoint[new_root] = lhs_ty;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        base::Session,
-        typeck::syntax::{SimpleTyKind, TraitInstance},
-    };
-
-    #[test]
-    fn trait_check() {
-        let session = Session::new();
-        let _guard = session.clone().bind();
-        let tcx = TyCtxt::new(session);
-        let s = &tcx.session;
-
-        let my_trait = Obj::new(
-            TraitDef {
-                generics: tcx.seal_generic_binder(GenericBinder {
-                    span: Span::DUMMY,
-                    generics: Vec::new(),
-                }),
-                methods: LateInit::new(Vec::new()),
-                impls: LateInit::uninit(),
-            },
-            s,
-        );
-
-        let my_impl = {
-            let mut binder = GenericBinder {
-                span: Span::DUMMY,
-                generics: Vec::new(),
-            };
-
-            let type_t = Obj::new(
-                TypeGeneric {
-                    span: Span::DUMMY,
-                    ident: Ident {
-                        span: Span::DUMMY,
-                        text: symbol!("T"),
-                        raw: false,
-                    },
-                    binder: LateInit::uninit(),
-                    user_clauses: tcx.intern_trait_clause_list(&[]),
-                    instantiated_clauses: LateInit::uninit(),
-                    is_synthetic: false,
-                },
-                s,
-            );
-            binder.generics.push(AnyGeneric::Ty(type_t));
-
-            Obj::new(
-                ImplDef {
-                    span: Span::DUMMY,
-                    generics: tcx.seal_generic_binder(binder),
-                    regular_generic_count: 1,
-                    trait_: Some(TraitInstance {
-                        def: my_trait,
-                        params: tcx.intern_ty_or_re_list(&[]),
-                    }),
-                    target: tcx.intern_ty(TyKind::Tuple(tcx.intern_tys(&[
-                        tcx.intern_ty(TyKind::Universal(type_t)),
-                        tcx.intern_ty(TyKind::Universal(type_t)),
-                    ]))),
-                    methods: LateInit::new(Vec::new()),
-                    generic_solve_order: LateInit::uninit(),
-                },
-                s,
-            )
-        };
-
-        tcx.wf_check_impl_generic_solve_order(my_impl);
-
-        LateInit::init(&my_trait.r(s).impls, vec![my_impl]);
-
-        let mut synthetic_binder = GenericBinder {
-            span: Span::DUMMY,
-            generics: Vec::new(),
-        };
-
-        let mut failures = Vec::new();
-        let mut inferences = InferVarInferences::default();
-
-        tcx.check_trait_assignability_erase_regions(
-            tcx.intern_ty(TyKind::Tuple(tcx.intern_tys(&[
-                tcx.intern_ty(TyKind::Simple(SimpleTyKind::Bool)),
-                tcx.intern_ty(TyKind::Simple(SimpleTyKind::Bool)),
-            ]))),
-            my_trait,
-            tcx.intern_trait_param_list(&[]),
-            &mut synthetic_binder,
-            &mut inferences,
-            &mut failures,
-        );
-
-        dbg!(failures);
-        dbg!(inferences);
     }
 }
