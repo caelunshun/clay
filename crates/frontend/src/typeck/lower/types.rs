@@ -2,7 +2,8 @@ use crate::{
     base::{Diag, ErrorGuaranteed, LeafDiag, arena::Obj},
     parse::{
         ast::{
-            AstTraitClause, AstTraitClauseList, AstTraitParamKind, AstTraitSpec, AstTy, AstTyOrRe,
+            AstTraitClause, AstTraitClauseList, AstTraitParamKind, AstTraitSpec, AstTy, AstTyKind,
+            AstTyOrRe,
         },
         token::Lifetime,
     },
@@ -10,7 +11,7 @@ use crate::{
         lower::entry::IntraItemLowerCtxt,
         syntax::{
             AnyGeneric, GenericBinder, Re, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty,
-            TyOrRe,
+            TyKind, TyOrRe,
         },
     },
 };
@@ -86,7 +87,7 @@ impl IntraItemLowerCtxt<'_> {
             .ok_or_else(|| Diag::span_err(ast.path.span, "expected a trait").emit())?;
 
         let mut params = Vec::new();
-        let mut reader = ast.params.iter();
+        let mut reader = ast.params.as_ref().map_or(&[][..], |v| &v.list).iter();
 
         // Lower positional arguments
         if reader.len() < def.r(s).regular_generic_count as usize {
@@ -143,7 +144,7 @@ impl IntraItemLowerCtxt<'_> {
 
             params[idx] = match &param.kind {
                 AstTraitParamKind::NamedEquals(_, ast) => {
-                    TraitParam::Equals(self.lower_ty_or_re(ast))
+                    TraitParam::Equals(TyOrRe::Ty(self.lower_ty(ast)))
                 }
                 AstTraitParamKind::NamedUnspecified(_, ast) => {
                     TraitParam::Unspecified(self.lower_clauses(Some(ast)))
@@ -170,6 +171,37 @@ impl IntraItemLowerCtxt<'_> {
     }
 
     pub fn lower_ty(&mut self, ast: &AstTy) -> Ty {
-        todo!();
+        match &ast.kind {
+            AstTyKind::This => self.tcx.intern_ty(TyKind::This),
+            AstTyKind::Name(path, generics) => {
+                if let Some(generic) = self.generic_ty_names.lookup(path.parts[0].text) {
+                    if let Some(subsequent) = path.parts.get(1) {
+                        Diag::span_err(
+                            subsequent.span,
+                            "generic types cannot be accessed like modules",
+                        )
+                        .emit();
+                    } else if let Some(generics) = generics
+                        && let Some(para) = generics.list.first()
+                    {
+                        Diag::span_err(
+                            para.span,
+                            "generic types cannot be instantiated with further generic parameters",
+                        )
+                        .emit();
+                    }
+
+                    return self.tcx.intern_ty(TyKind::Universal(*generic));
+                }
+
+                todo!()
+            }
+            AstTyKind::Reference(lifetime, ast_ty) => todo!(),
+            AstTyKind::Trait(ast_trait_clause_list) => todo!(),
+            AstTyKind::Tuple(items) => todo!(),
+            AstTyKind::Option(item) => todo!(),
+            AstTyKind::Infer => self.tcx.intern_ty(TyKind::ExplicitInfer),
+            AstTyKind::Error(error) => self.tcx.intern_ty(TyKind::Error(*error)),
+        }
     }
 }

@@ -1,5 +1,8 @@
 use crate::{
-    base::{ErrorGuaranteed, syntax::Span},
+    base::{
+        ErrorGuaranteed,
+        syntax::{Span, Spanned},
+    },
     parse::token::{Ident, Lifetime, TokenStream},
 };
 use std::rc::Rc;
@@ -138,7 +141,13 @@ pub enum AstTraitClause {
 pub struct AstTraitSpec {
     pub span: Span,
     pub path: AstSimplePath,
-    pub params: Vec<AstTraitParam>,
+    pub params: Option<AstTraitParamList>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AstTraitParamList {
+    pub span: Span,
+    pub list: Vec<AstTraitParam>,
 }
 
 #[derive(Debug, Clone)]
@@ -150,7 +159,7 @@ pub struct AstTraitParam {
 #[derive(Debug, Clone)]
 pub enum AstTraitParamKind {
     PositionalEquals(AstTyOrRe),
-    NamedEquals(Ident, AstTyOrRe),
+    NamedEquals(Ident, AstTy),
     NamedUnspecified(Ident, AstTraitClauseList),
 }
 
@@ -162,6 +171,15 @@ pub enum AstTyOrRe {
     Ty(AstTy),
 }
 
+impl Spanned for AstTyOrRe {
+    fn span(&self) -> Span {
+        match self {
+            AstTyOrRe::Re(v) => v.span,
+            AstTyOrRe::Ty(v) => v.span,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AstTy {
     pub span: Span,
@@ -171,9 +189,11 @@ pub struct AstTy {
 #[derive(Debug, Clone)]
 pub enum AstTyKind {
     This,
-    Name(AstSimplePath, Vec<AstTyOrRe>),
+    Name(AstSimplePath, Option<AstTraitParamList>),
     Reference(Option<Lifetime>, Box<AstTy>),
-    Trait(AstTraitClauseList),
+    Trait(AstTraitSpec),
     Tuple(Vec<AstTy>),
+    Option(Box<AstTy>),
     Infer,
+    Error(ErrorGuaranteed),
 }

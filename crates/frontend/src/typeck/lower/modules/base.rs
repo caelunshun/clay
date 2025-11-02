@@ -268,6 +268,8 @@ where
                             }
                         };
 
+                    // FIXME: If this resolves to ambiguous, no additional resolutions will be
+                    //  pushed, which is wrong.
                     let resolution = lookup_inner(
                         resolver,
                         module_root,

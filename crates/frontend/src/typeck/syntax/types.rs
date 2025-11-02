@@ -1,5 +1,6 @@
 use crate::{
     base::{
+        ErrorGuaranteed,
         arena::{Intern, LateInit, Obj},
         syntax::{Span, Symbol},
     },
@@ -289,6 +290,8 @@ pub enum TyKind {
     /// An inference variable used in trait solving. The second parameter is used in diagnostics to
     /// indicate the generic that led to the generation of this variable.
     InferVar(InferTyVar, Obj<TypeGeneric>),
+
+    Error(ErrorGuaranteed),
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

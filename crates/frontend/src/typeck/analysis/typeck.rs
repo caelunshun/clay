@@ -76,7 +76,7 @@ impl TyCtxt {
 
                 match *target.r(s) {
                     TyKind::This => self_ty,
-                    TyKind::Simple(..) => target,
+                    TyKind::Simple(..) | TyKind::Error(..) => target,
                     TyKind::Adt(def, tys) => self.intern_ty(TyKind::Adt(
                         def,
                         self.substitute_ty_or_re_list(tys, self_ty, generics),

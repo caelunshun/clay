@@ -1,15 +1,16 @@
 use crate::{
     base::{
         ErrorGuaranteed, LeafDiag, Level, Session,
-        syntax::{Matcher as _, Span},
+        syntax::{Bp, Matcher as _, Span},
     },
     kw,
     parse::{
         ast::{
             AstAttribute, AstGenericDef, AstGenericDefKind, AstGenericDefList, AstItem,
             AstItemKind, AstItemModule, AstItemModuleContents, AstItemTrait, AstItemUse,
-            AstSimplePath, AstTraitClause, AstTraitClauseList, AstTraitParam, AstTraitSpec,
-            AstUsePath, AstUsePathKind, AstVisibility, AstVisibilityKind, Keyword, PunctSeq,
+            AstSimplePath, AstTraitClause, AstTraitClauseList, AstTraitParam, AstTraitParamKind,
+            AstTraitParamList, AstTraitSpec, AstTy, AstTyKind, AstTyOrRe, AstUsePath,
+            AstUsePathKind, AstVisibility, AstVisibilityKind, Keyword, PunctSeq,
         },
         token::{
             GroupDelimiter, Ident, Lifetime, Punct, TokenCharLit, TokenCursor, TokenGroup,
@@ -483,23 +484,187 @@ fn parse_trait_clause(p: P) -> Result<AstTraitClause, ErrorGuaranteed> {
     }))
 }
 
-fn parse_trait_param_list(p: P) -> Vec<AstTraitParam> {
-    if match_punct(punct!('<')).expect(p).is_none() {
-        return Vec::new();
-    }
+fn parse_trait_param_list(p: P) -> Option<AstTraitParamList> {
+    let start = p.next_span();
 
-    parse_delimited_until_terminator(
+    match_punct(punct!('<')).expect(p)?;
+
+    let list = parse_delimited_until_terminator(
         p,
         &mut (),
         |p, ()| parse_trait_param(p),
         |p, ()| match_punct(punct!(',')).expect(p).is_some(),
         |p, ()| match_punct(punct!('>')).expect(p).is_some(),
     )
-    .elems
+    .elems;
+
+    Some(AstTraitParamList {
+        span: start.to(p.prev_span()),
+        list,
+    })
 }
 
 fn parse_trait_param(p: P) -> AstTraitParam {
-    todo!();
+    let start = p.next_span();
+
+    if let Some(path) = parse_simple_path(p) {
+        if let Some(part) = path.parts.first().filter(|_| path.parts.len() == 1)
+            && !part.matches_kw(kw!("crate"))
+            && !part.matches_kw(kw!("super"))
+            && !part.matches_kw(kw!("self"))
+        {
+            if match_punct(punct!(':')).expect(p).is_some() {
+                let clauses = parse_trait_clause_list(p);
+
+                return AstTraitParam {
+                    span: start.to(p.prev_span()),
+                    kind: AstTraitParamKind::NamedUnspecified(*part, clauses),
+                };
+            }
+
+            if match_punct(punct!('=')).expect(p).is_some() {
+                let ty = parse_ty(p);
+
+                return AstTraitParam {
+                    span: start.to(p.prev_span()),
+                    kind: AstTraitParamKind::NamedEquals(*part, ty),
+                };
+            }
+        }
+
+        let params = parse_trait_param_list(p);
+        let seed = AstTy {
+            span: start.to(p.prev_span()),
+            kind: AstTyKind::Name(path, params),
+        };
+
+        let ty = parse_ty_pratt_chain(p, Bp::MIN, seed);
+
+        return AstTraitParam {
+            span: start.to(p.prev_span()),
+            kind: AstTraitParamKind::PositionalEquals(AstTyOrRe::Ty(ty)),
+        };
+    }
+
+    if let Some(lt) = match_lifetime().expect(p) {
+        return AstTraitParam {
+            span: lt.span,
+            kind: AstTraitParamKind::PositionalEquals(AstTyOrRe::Re(lt)),
+        };
+    }
+
+    let ty = parse_ty(p);
+
+    AstTraitParam {
+        span: ty.span,
+        kind: AstTraitParamKind::PositionalEquals(AstTyOrRe::Ty(ty)),
+    }
+}
+
+// === Types === //
+
+fn parse_ty_full(p: P) -> AstTy {
+    let expr = parse_ty(p);
+
+    if !match_eos(p) {
+        // Recovery strategy: ignore
+        let _ = p.stuck();
+    }
+
+    expr
+}
+
+fn parse_ty(p: P) -> AstTy {
+    parse_ty_pratt(p, Bp::MIN)
+}
+
+fn parse_ty_pratt(p: P, min_bp: Bp) -> AstTy {
+    let seed = parse_ty_pratt_seed(p);
+
+    parse_ty_pratt_chain(p, min_bp, seed)
+}
+
+fn parse_ty_pratt_seed(p: P) -> AstTy {
+    let seed_start = p.next_span();
+    let build_ty = move |kind: AstTyKind, p: P| AstTy {
+        span: seed_start.to(p.prev_span()),
+        kind,
+    };
+
+    // Parse path
+    if let Some(path) = parse_simple_path(p) {
+        return build_ty(AstTyKind::Name(path, parse_trait_param_list(p)), p);
+    }
+
+    // Parse `dyn` trait
+    if match_kw(kw!("dyn")).expect(p).is_some() {
+        let Some(path) = parse_simple_path(p) else {
+            return build_ty(
+                AstTyKind::Error(p.stuck_recover_with(|_| {
+                    // TODO: Recover more intelligently
+                })),
+                p,
+            );
+        };
+
+        let params = parse_trait_param_list(p);
+
+        return build_ty(
+            AstTyKind::Trait(AstTraitSpec {
+                span: path.span.to(p.prev_span()),
+                path,
+                params,
+            }),
+            p,
+        );
+    }
+
+    // Parse reference
+    if match_punct(punct!('&')).expect(p).is_some() {
+        return build_ty(
+            AstTyKind::Reference(
+                match_lifetime().expect(p),
+                Box::new(parse_ty_pratt(p, bps::PRE_TY_REF.right)),
+            ),
+            p,
+        );
+    }
+
+    // Parse tuple
+    // TODO
+
+    // Parse infer
+    if match_kw(kw!("_")).expect(p).is_some() {
+        return build_ty(AstTyKind::Infer, p);
+    }
+
+    // Recovery strategy: eat a token
+    build_ty(
+        AstTyKind::Error(p.stuck_recover_with(|c| {
+            c.eat();
+        })),
+        p,
+    )
+}
+
+fn parse_ty_pratt_chain(p: P, min_bp: Bp, mut seed: AstTy) -> AstTy {
+    'chaining: loop {
+        if match_punct(punct!('?'))
+            .maybe_expect(p, bps::POST_TY_OPT.left >= min_bp)
+            .is_some()
+        {
+            seed = AstTy {
+                span: seed.span.to(p.prev_span()),
+                kind: AstTyKind::Option(Box::new(seed)),
+            };
+
+            continue 'chaining;
+        }
+
+        break;
+    }
+
+    seed
 }
 
 // === Helpers === //
@@ -656,4 +821,13 @@ fn parse_comma_group<E>(p: P, mut match_elem: impl FnMut(P) -> E) -> Delimited<E
         |p, _| match_punct(punct!(',')).expect(p).is_some(),
         |p, _| match_eos(p),
     )
+}
+
+// === Binding Powers === //
+
+pub mod bps {
+    use crate::base::syntax::{PostfixBp, PrefixBp};
+
+    pub const PRE_TY_REF: PrefixBp = PrefixBp::new(2);
+    pub const POST_TY_OPT: PostfixBp = PostfixBp::new(1);
 }
