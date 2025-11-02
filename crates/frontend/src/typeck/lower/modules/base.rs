@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        Diag, ErrorGuaranteed, LeafDiag,
+        Diag, ErrorGuaranteed, LeafDiag, Session,
         syntax::{Span, Symbol},
     },
     kw,
@@ -359,5 +359,29 @@ where
                 })
             }
         }
+    }
+}
+
+// === Helpers === //
+
+#[derive(Copy, Clone)]
+pub struct ModulePathFmt {
+    pub prefix: Symbol,
+    pub main_part: Symbol,
+}
+
+impl fmt::Display for ModulePathFmt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = &Session::fetch();
+
+        f.write_str(self.prefix.as_str(s))?;
+
+        let main_part = self.main_part.as_str(s);
+        if !main_part.is_empty() {
+            f.write_str("::")?;
+            f.write_str(main_part)?;
+        }
+
+        Ok(())
     }
 }

@@ -4,6 +4,10 @@ pub trait Associated {
     type T;
 }
 
-pub trait MyTrait<T: V> {
-    type V: Generic<T>;
+mod whee {
+    use super::*;
+
+    pub trait MyTrait<T: V22> {
+        type V: Generic<T>;
+    }
 }

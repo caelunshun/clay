@@ -11,9 +11,10 @@ use crate::{
     symbol,
     typeck::{
         lower::modules::{
-            AnyDef, EmitErrors, ModuleResolver, ParentKind, ParentResolver, StepLookupError,
+            AnyDef, EmitErrors, ModulePathFmt, ModuleResolver, ParentKind, ParentResolver,
+            StepLookupError,
         },
-        syntax::{DirectUse, GlobUse, Item, Module, Visibility},
+        syntax::{Crate, DirectUse, GlobUse, Item, Module, Visibility},
     },
     utils::hash::FxIndexMap,
 };
@@ -205,6 +206,7 @@ impl BuilderModuleTree {
 
     pub fn freeze_and_check(
         mut self,
+        krate: Obj<Crate>,
         s: &Session,
     ) -> (
         IndexVec<BuilderModuleId, Obj<Module>>,
@@ -343,6 +345,7 @@ impl BuilderModuleTree {
         for in_module in &self.modules {
             out_modules.push(Obj::new(
                 Module {
+                    krate,
                     parent: in_module.parent.map(|v| out_modules[v]),
                     name: in_module.name,
                     path: in_module.public_path.unwrap(),
@@ -359,6 +362,7 @@ impl BuilderModuleTree {
             .map(|item| {
                 Obj::new(
                     Item {
+                        krate,
                         parent: out_modules[item.parent],
                         name: item.name,
                         path: item.public_path.unwrap(),
@@ -426,32 +430,12 @@ impl BuilderModuleTree {
             LateInit::init(&out_modules[idx].r(s).glob_uses, glob_uses);
         }
 
+        LateInit::init(&krate.r(s).root, out_modules[BuilderModuleId::ROOT]);
+
         (out_modules, out_items)
     }
 
     fn path(&self, prefix: Symbol, target: BuilderAnyDef) -> impl 'static + Copy + fmt::Display {
-        #[derive(Copy, Clone)]
-        struct ModulePathFmt {
-            prefix: Symbol,
-            main_part: Symbol,
-        }
-
-        impl fmt::Display for ModulePathFmt {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                let s = &Session::fetch();
-
-                f.write_str(self.prefix.as_str(s))?;
-
-                let main_part = self.main_part.as_str(s);
-                if !main_part.is_empty() {
-                    f.write_str("::")?;
-                    f.write_str(main_part)?;
-                }
-
-                Ok(())
-            }
-        }
-
         ModulePathFmt {
             prefix,
             main_part: match target {

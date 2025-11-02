@@ -4,8 +4,11 @@ use crate::{
         arena::Obj,
         syntax::{Span, Symbol},
     },
+    symbol,
     typeck::{
-        lower::modules::{AnyDef, ModuleResolver, ParentKind, ParentResolver, StepLookupError},
+        lower::modules::{
+            AnyDef, ModulePathFmt, ModuleResolver, ParentKind, ParentResolver, StepLookupError,
+        },
         syntax::{Item, Module, Visibility},
     },
 };
@@ -28,9 +31,20 @@ impl ModuleResolver for FrozenModuleResolver<'_> {
         &self,
         def: super::AnyDef<Self::Module, Self::Item>,
     ) -> impl 'static + Copy + std::fmt::Display {
-        match def {
-            AnyDef::Module(v) => v.r(self.0).path,
-            AnyDef::Item(v) => v.r(self.0).path,
+        let s = &self.0;
+
+        let (krate, main_part) = match def {
+            AnyDef::Module(v) => (v.r(s).krate, v.r(s).path),
+            AnyDef::Item(v) => (v.r(s).krate, v.r(s).path),
+        };
+
+        ModulePathFmt {
+            prefix: if krate.r(s).is_local {
+                symbol!("crate")
+            } else {
+                krate.r(s).name
+            },
+            main_part,
         }
     }
 

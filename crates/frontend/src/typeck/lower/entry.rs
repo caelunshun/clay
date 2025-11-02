@@ -14,6 +14,7 @@ use crate::{
         },
         token::Ident,
     },
+    symbol,
     typeck::{
         analysis::TyCtxt,
         lower::modules::{
@@ -21,7 +22,8 @@ use crate::{
             ModuleResolver,
         },
         syntax::{
-            AnyGeneric, GenericBinder, Item, ItemKind, Module, RegionGeneric, TraitDef, TypeGeneric,
+            AnyGeneric, Crate, GenericBinder, Item, ItemKind, Module, RegionGeneric, TraitDef,
+            TypeGeneric,
         },
     },
     utils::hash::FxHashMap,
@@ -43,7 +45,15 @@ impl TyCtxt {
 
         ctxt.lower_initial_tree(BuilderModuleId::ROOT, ast);
 
-        let (modules, items) = ctxt.tree.freeze_and_check(&self.session);
+        let krate = Obj::new(
+            Crate {
+                name: symbol!("demo"),
+                is_local: true,
+                root: LateInit::uninit(),
+            },
+            s,
+        );
+        let (modules, items) = ctxt.tree.freeze_and_check(krate, s);
         let root = modules[BuilderModuleId::ROOT];
         drop(modules);
 
@@ -346,11 +356,6 @@ pub struct IntraItemLowerCtxt<'a> {
     pub scope: Obj<Module>,
     pub generic_ty_names: NameResolver<Obj<TypeGeneric>>,
     pub generic_re_names: NameResolver<Obj<RegionGeneric>>,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum BoundName {
-    Generic(AnyGeneric),
 }
 
 impl IntraItemLowerCtxt<'_> {

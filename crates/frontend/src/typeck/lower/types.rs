@@ -11,7 +11,7 @@ use crate::{
         lower::entry::IntraItemLowerCtxt,
         syntax::{
             AnyGeneric, GenericBinder, Re, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty,
-            TyKind, TyOrRe,
+            TyKind, TyList, TyOrRe,
         },
     },
 };
@@ -79,6 +79,14 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn lower_trait_spec(&mut self, ast: &AstNamedSpec) -> Result<TraitSpec, ErrorGuaranteed> {
         let s = &self.tcx.session;
+
+        if let Some(path) = ast.path.as_ident()
+            && self.generic_ty_names.lookup(path.text).is_some()
+        {
+            return Err(
+                Diag::span_err(path.span, "expected a trait but got a generic type").emit(),
+            );
+        }
 
         let def = self
             .lookup(&ast.path)?
@@ -213,12 +221,20 @@ impl IntraItemLowerCtxt<'_> {
 
                 todo!()
             }
-            AstTyKind::Reference(lifetime, ast_ty) => todo!(),
+            AstTyKind::Reference(lifetime, pointee) => self.tcx.intern_ty(TyKind::Reference(
+                lifetime.map_or(Re::ExplicitInfer, |ast| self.lower_re(&ast)),
+                self.lower_ty(pointee),
+            )),
             AstTyKind::Trait(ast_trait_clause_list) => todo!(),
-            AstTyKind::Tuple(items) => todo!(),
+            AstTyKind::Tuple(items) => self.tcx.intern_ty(TyKind::Tuple(self.lower_tys(items))),
             AstTyKind::Option(item) => todo!(),
             AstTyKind::Infer => self.tcx.intern_ty(TyKind::ExplicitInfer),
             AstTyKind::Error(error) => self.tcx.intern_ty(TyKind::Error(*error)),
         }
+    }
+
+    pub fn lower_tys(&mut self, ast: &[AstTy]) -> TyList {
+        self.tcx
+            .intern_tys(&ast.iter().map(|ast| self.lower_ty(ast)).collect::<Vec<_>>())
     }
 }

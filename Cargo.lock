@@ -65,17 +65,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cbit"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba3c8275566a6e4344abb17860ae817b3d549c865862071963b3f42810280d81"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -220,7 +209,6 @@ version = "0.1.0"
 dependencies = [
  "bitflags",
  "bumpalo",
- "cbit",
  "codespan-reporting",
  "derive-where",
  "disjoint",

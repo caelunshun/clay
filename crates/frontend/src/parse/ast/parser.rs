@@ -613,7 +613,16 @@ fn parse_ty_pratt_seed(p: P) -> AstTy {
     }
 
     // Parse tuple
-    // TODO
+    if let Some(group) = match_group(GroupDelimiter::Paren).expect(p) {
+        let p = &mut p.enter(&group);
+
+        let parts = parse_comma_group(p, parse_ty);
+
+        match parts.into_singleton() {
+            Ok(singleton) => return singleton,
+            Err(parts) => return build_ty(AstTyKind::Tuple(parts), p),
+        }
+    }
 
     // Parse infer
     if match_kw(kw!("_")).expect(p).is_some() {

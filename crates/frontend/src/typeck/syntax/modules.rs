@@ -12,7 +12,15 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
+pub struct Crate {
+    pub name: Symbol,
+    pub is_local: bool,
+    pub root: LateInit<Obj<Module>>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Module {
+    pub krate: Obj<Crate>,
     pub parent: ParentKind<Obj<Module>>,
     pub name: Option<Ident>,
     pub path: Symbol,
@@ -41,6 +49,7 @@ pub struct DirectUse {
 
 #[derive(Debug, Clone)]
 pub struct Item {
+    pub krate: Obj<Crate>,
     pub parent: Obj<Module>,
     pub name: Ident,
     pub path: Symbol,
