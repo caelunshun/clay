@@ -6,7 +6,8 @@ use crate::{
     kw,
     parse::{
         ast::{
-            AstAttribute, AstGenericParam, AstGenericParamKind, AstGenericParamList, AstItem,
+            AstAttribute, AstGenericParam, AstGenericParamKind, AstGenericParamList,
+            AstImplLikeBody, AstImplLikeMember, AstImplLikeMemberKind, AstItem, AstItemImpl,
             AstItemKind, AstItemModule, AstItemModuleContents, AstItemTrait, AstItemUse,
             AstNamedSpec, AstSimplePath, AstTraitClause, AstTraitClauseList, AstTy, AstTyKind,
             AstUsePath, AstUsePathKind, AstVisibility, AstVisibilityKind, Keyword, PunctSeq,
@@ -20,7 +21,7 @@ use crate::{
 };
 use std::rc::Rc;
 
-// === Items === //
+// === Driver === //
 
 type P<'a, 'g> = &'a mut TokenParser<'g>;
 type C<'a, 'g> = &'a mut TokenCursor<'g>;
@@ -30,6 +31,8 @@ pub fn parse_file(tokens: &TokenGroup) -> AstItemModuleContents {
 
     parse_mod_contents(&mut p)
 }
+
+// === Items === //
 
 fn parse_mod_contents(p: P) -> AstItemModuleContents {
     let mut inner_attrs = Vec::new();
@@ -170,13 +173,35 @@ fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
         };
 
         let generics = parse_generic_param_list(p);
+        let body = parse_impl_ish_body(p);
 
         return Some(make_item(
             AstItemKind::Trait(AstItemTrait {
                 name,
                 generics,
-                // TODO: parse members
-                members: Vec::new(),
+                body,
+            }),
+            p,
+        ));
+    }
+
+    if match_kw(kw!("impl")).expect(p).is_some() {
+        let generics = parse_generic_param_list(p);
+
+        let first_ty = parse_ty(p);
+        let second_ty = match_kw(kw!("for"))
+            .expect(p)
+            .is_some()
+            .then(|| parse_ty(p));
+
+        let body = parse_impl_ish_body(p);
+
+        return Some(make_item(
+            AstItemKind::Impl(AstItemImpl {
+                generics,
+                first_ty,
+                second_ty,
+                body,
             }),
             p,
         ));
@@ -212,6 +237,8 @@ fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
 
     None
 }
+
+// === Paths and Attributes === //
 
 fn parse_attributes(p: P) -> Vec<AstAttribute> {
     let mut attrs = Vec::new();
@@ -389,7 +416,7 @@ fn parse_tree_path(p: P) -> Option<AstUsePath> {
     })
 }
 
-// === Type Parsing === //
+// === Trait Clauses === //
 
 fn parse_trait_clause_list(p: P) -> AstTraitClauseList {
     let start = p.next_span();
@@ -431,6 +458,8 @@ fn parse_trait_clause(p: P) -> Result<AstTraitClause, ErrorGuaranteed> {
         // TODO: Recover more intelligently
     }))
 }
+
+// === Generic Parameters === //
 
 fn parse_generic_param_list(p: P) -> Option<AstGenericParamList> {
     let start = p.next_span();
@@ -618,6 +647,109 @@ fn parse_ty_pratt_chain(p: P, min_bp: Bp, mut seed: AstTy) -> AstTy {
     }
 
     seed
+}
+
+// === Impl-like Bodies === //
+
+fn parse_impl_ish_body(p: P) -> AstImplLikeBody {
+    let Some(group) = match_group(GroupDelimiter::Brace).expect(p) else {
+        p.stuck_recover_with(|_| {
+            // TODO: Recover more intelligently
+        });
+
+        return AstImplLikeBody {
+            span: p.next_span(),
+            members: Vec::new(),
+        };
+    };
+
+    let p = &mut p.enter(&group);
+    let mut members = Vec::new();
+
+    loop {
+        if match_eos(p) {
+            break;
+        }
+
+        members.push(parse_impl_ish_member(p));
+    }
+
+    AstImplLikeBody {
+        span: group.span,
+        members,
+    }
+}
+
+fn parse_impl_ish_member(p: P) -> AstImplLikeMember {
+    let start = p.next_span();
+
+    let vis = parse_visibility(p);
+
+    let make_member = |kind: AstImplLikeMemberKind, p: P| AstImplLikeMember {
+        span: start.to(p.prev_span()),
+        vis,
+        kind,
+    };
+
+    if match_kw(kw!("type")).expect(p).is_some() {
+        let Some(name) = match_ident().expect(p) else {
+            return make_member(
+                AstImplLikeMemberKind::Error(p.stuck_recover_with(|_| {
+                    // TODO: Recover more intelligently
+                })),
+                p,
+            );
+        };
+
+        if match_punct(punct!('=')).expect(p).is_some() {
+            let ty = parse_ty(p);
+
+            if match_punct(punct!(';')).expect(p).is_none() {
+                p.stuck_recover_with(|_| {
+                    // TODO: Recover more intelligently
+                });
+            }
+
+            return make_member(AstImplLikeMemberKind::TypeEquals(name, ty), p);
+        }
+
+        if match_punct(punct!(':')).expect(p).is_some() {
+            let clauses = parse_trait_clause_list(p);
+
+            if match_punct(punct!(';')).expect(p).is_none() {
+                p.stuck_recover_with(|_| {
+                    // TODO: Recover more intelligently
+                });
+            }
+
+            return make_member(AstImplLikeMemberKind::TypeInherits(name, clauses), p);
+        }
+
+        if match_punct(punct!(';')).expect(p).is_none() {
+            p.stuck_recover_with(|_| {
+                // TODO: Recover more intelligently
+            });
+        }
+
+        return make_member(
+            AstImplLikeMemberKind::TypeInherits(
+                name,
+                AstTraitClauseList {
+                    span: Span::DUMMY,
+                    clauses: Vec::new(),
+                },
+            ),
+            p,
+        );
+    }
+
+    make_member(
+        AstImplLikeMemberKind::Error(p.stuck_recover_with(|c| {
+            // TODO: Recover more intelligently
+            c.eat();
+        })),
+        p,
+    )
 }
 
 // === Helpers === //

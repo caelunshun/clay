@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        Diag, ErrorGuaranteed, LeafDiag,
+        Diag, ErrorGuaranteed,
         analysis::NameResolver,
         arena::{LateInit, Obj},
         syntax::Span,
@@ -8,9 +8,9 @@ use crate::{
     kw,
     parse::{
         ast::{
-            AstGenericDef, AstItem, AstItemKind, AstItemModuleContents, AstItemTrait,
-            AstSimplePath, AstTraitClauseList, AstTraitMemberKind, AstUsePath, AstUsePathKind,
-            AstVisibility,
+            AstGenericDef, AstImplLikeMemberKind, AstItem, AstItemKind, AstItemModuleContents,
+            AstItemTrait, AstSimplePath, AstTraitClauseList, AstUsePath, AstUsePathKind,
+            AstVisibility, AstVisibilityKind,
         },
         token::Ident,
     },
@@ -26,7 +26,6 @@ use crate::{
     },
     utils::hash::FxHashMap,
 };
-use hashbrown::hash_map;
 use index_vec::IndexVec;
 use std::rc::Rc;
 
@@ -62,7 +61,10 @@ impl TyCtxt {
                 AstItemKind::Trait(ast) => {
                     ctxt.lower_trait(target, ast);
                 }
-                AstItemKind::Mod(_) | AstItemKind::Use(_) | AstItemKind::Error(_) => {
+                AstItemKind::Mod(_)
+                | AstItemKind::Use(_)
+                | AstItemKind::Impl(_)
+                | AstItemKind::Error(_) => {
                     unreachable!()
                 }
             }
@@ -121,6 +123,14 @@ impl<'ast> UseLowerCtxt<'ast> {
                         .push_item(parent_id, item.vis.clone(), item_trait.name);
 
                     self.item_asts.push(item);
+                }
+                AstItemKind::Impl(_) => {
+                    if !matches!(item.vis.kind, AstVisibilityKind::Implicit) {
+                        Diag::span_err(item.vis.span, "`impl` blocks cannot have visibilities")
+                            .emit();
+                    }
+
+                    // TODO: Push somewhere.
                 }
                 AstItemKind::Error(_) => {
                     // (ignored)
@@ -281,34 +291,31 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let regular_generic_count = binder.generics.len() as u32;
         let mut associated_types = FxHashMap::default();
 
-        for member in &ast.members {
+        for member in &ast.body.members {
             match &member.kind {
-                AstTraitMemberKind::AssocType(name, clauses) => {
-                    match associated_types.entry(name.text) {
-                        hash_map::Entry::Vacant(entry) => {
-                            entry.insert(Obj::new(
-                                TypeGeneric {
-                                    span: member.span,
-                                    ident: *name,
-                                    binder: LateInit::uninit(),
-                                    user_clauses: LateInit::uninit(),
-                                    instantiated_clauses: LateInit::uninit(),
-                                    is_synthetic: false,
-                                },
-                                s,
-                            ));
+                AstImplLikeMemberKind::TypeInherits(name, clauses) => {
+                    let generic = Obj::new(
+                        TypeGeneric {
+                            span: member.span,
+                            ident: *name,
+                            binder: LateInit::uninit(),
+                            user_clauses: LateInit::uninit(),
+                            instantiated_clauses: LateInit::uninit(),
+                            is_synthetic: false,
+                        },
+                        s,
+                    );
 
-                            generic_clause_lists.push(Some(clauses));
-                        }
-                        hash_map::Entry::Occupied(entry) => {
-                            Diag::span_err(name.span, "name already used")
-                                .child(LeafDiag::span_note(
-                                    entry.get().r(s).ident.span,
-                                    "first definition here",
-                                ))
-                                .emit();
-                        }
-                    }
+                    binder.generics.push(AnyGeneric::Ty(generic));
+                    generic_clause_lists.push(Some(clauses));
+                    associated_types.insert(name.text, generic);
+                }
+                AstImplLikeMemberKind::TypeEquals(..) => {
+                    Diag::span_err(member.span, "default associated types are not supported")
+                        .emit();
+                }
+                AstImplLikeMemberKind::Error(_) => {
+                    // (ignored)
                 }
             }
         }

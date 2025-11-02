@@ -1,3 +1,9 @@
-pub trait Positional<'a>
+pub trait Generic<T> {}
 
-pub trait Whee<'a: 'b, 'b, T: Positional<'a>>
+pub trait Associated {
+    type T;
+}
+
+pub trait MyTrait<T: V> {
+    type V: Generic<T>;
+}

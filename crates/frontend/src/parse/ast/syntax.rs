@@ -23,6 +23,7 @@ pub enum AstItemKind {
     Mod(AstItemModule),
     Use(AstItemUse),
     Trait(AstItemTrait),
+    Impl(AstItemImpl),
     Error(ErrorGuaranteed),
 }
 
@@ -47,18 +48,15 @@ pub struct AstItemUse {
 pub struct AstItemTrait {
     pub name: Ident,
     pub generics: Option<AstGenericParamList>,
-    pub members: Vec<AstTraitMember>,
+    pub body: AstImplLikeBody,
 }
 
 #[derive(Debug, Clone)]
-pub struct AstTraitMember {
-    pub span: Span,
-    pub kind: AstTraitMemberKind,
-}
-
-#[derive(Debug, Clone)]
-pub enum AstTraitMemberKind {
-    AssocType(Ident, AstTraitClauseList),
+pub struct AstItemImpl {
+    pub generics: Option<AstGenericParamList>,
+    pub first_ty: AstTy,
+    pub second_ty: Option<AstTy>,
+    pub body: AstImplLikeBody,
 }
 
 // === Item Helpers === //
@@ -177,11 +175,7 @@ impl AstGenericParamKind {
     pub fn as_generic_def(&self) -> Option<AstGenericDef<'_>> {
         match self {
             AstGenericParamKind::PositionalTy(ty) => {
-                if let Some(ident) = ty.as_ident() {
-                    Some(AstGenericDef::Ty(ident, None))
-                } else {
-                    None
-                }
+                ty.as_ident().map(|ident| AstGenericDef::Ty(ident, None))
             }
             AstGenericParamKind::PositionalRe(re) => Some(AstGenericDef::Re(*re, None)),
             AstGenericParamKind::InheritTy(ident, clauses) => {
@@ -237,4 +231,26 @@ impl AstTy {
             _ => None,
         }
     }
+}
+
+// === Impl-like Bodies === //
+
+#[derive(Debug, Clone)]
+pub struct AstImplLikeBody {
+    pub span: Span,
+    pub members: Vec<AstImplLikeMember>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AstImplLikeMember {
+    pub span: Span,
+    pub vis: AstVisibility,
+    pub kind: AstImplLikeMemberKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum AstImplLikeMemberKind {
+    TypeEquals(Ident, AstTy),
+    TypeInherits(Ident, AstTraitClauseList),
+    Error(ErrorGuaranteed),
 }
