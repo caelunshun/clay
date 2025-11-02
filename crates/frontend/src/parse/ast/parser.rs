@@ -6,11 +6,10 @@ use crate::{
     kw,
     parse::{
         ast::{
-            AstAttribute, AstGenericDef, AstGenericDefKind, AstGenericDefList, AstItem,
+            AstAttribute, AstGenericParam, AstGenericParamKind, AstGenericParamList, AstItem,
             AstItemKind, AstItemModule, AstItemModuleContents, AstItemTrait, AstItemUse,
-            AstSimplePath, AstTraitClause, AstTraitClauseList, AstTraitParam, AstTraitParamKind,
-            AstTraitParamList, AstTraitSpec, AstTy, AstTyKind, AstTyOrRe, AstUsePath,
-            AstUsePathKind, AstVisibility, AstVisibilityKind, Keyword, PunctSeq,
+            AstNamedSpec, AstSimplePath, AstTraitClause, AstTraitClauseList, AstTy, AstTyKind,
+            AstUsePath, AstUsePathKind, AstVisibility, AstVisibilityKind, Keyword, PunctSeq,
         },
         token::{
             GroupDelimiter, Ident, Lifetime, Punct, TokenCharLit, TokenCursor, TokenGroup,
@@ -170,7 +169,7 @@ fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
             ));
         };
 
-        let generics = parse_generic_def_list(p);
+        let generics = parse_generic_param_list(p);
 
         return Some(make_item(
             AstItemKind::Trait(AstItemTrait {
@@ -392,57 +391,6 @@ fn parse_tree_path(p: P) -> Option<AstUsePath> {
 
 // === Type Parsing === //
 
-fn parse_generic_def_list(p: P) -> Option<AstGenericDefList> {
-    let start = match_punct(punct!('<')).expect(p)?;
-
-    let defs = parse_delimited_until_terminator(
-        p,
-        &mut (),
-        |p, ()| parse_generic_def(p),
-        |p, ()| match_punct(punct!(',')).expect(p).is_some(),
-        |p, ()| match_punct(punct!('>')).expect(p).is_some(),
-    );
-
-    Some(AstGenericDefList {
-        span: start.span.to(p.prev_span()),
-        defs: defs.elems,
-    })
-}
-
-fn parse_generic_def(p: P) -> Result<AstGenericDef, ErrorGuaranteed> {
-    let start = p.next_span();
-
-    let kind = 'kind: {
-        if let Some(name) = match_ident().expect(p) {
-            break 'kind AstGenericDefKind::Type(name);
-        }
-
-        if let Some(name) = match_lifetime().expect(p) {
-            break 'kind AstGenericDefKind::Lifetime(name);
-        }
-
-        return Err(p.stuck_recover_with(|_| {
-            // TODO: Recover more intelligently
-        }));
-    };
-
-    if match_punct(punct!(':')).expect(p).is_none() {
-        return Ok(AstGenericDef {
-            span: start.to(p.prev_span()),
-            kind,
-            clauses: None,
-        });
-    }
-
-    let clauses = parse_trait_clause_list(p);
-
-    Ok(AstGenericDef {
-        span: start.to(p.prev_span()),
-        kind,
-        clauses: Some(clauses),
-    })
-}
-
 fn parse_trait_clause_list(p: P) -> AstTraitClauseList {
     let start = p.next_span();
 
@@ -470,9 +418,9 @@ fn parse_trait_clause(p: P) -> Result<AstTraitClause, ErrorGuaranteed> {
     }
 
     if let Some(path) = parse_simple_path(p) {
-        let params = parse_trait_param_list(p);
+        let params = parse_generic_param_list(p);
 
-        return Ok(AstTraitClause::Trait(AstTraitSpec {
+        return Ok(AstTraitClause::Trait(AstNamedSpec {
             span: start.to(p.prev_span()),
             path,
             params,
@@ -484,7 +432,7 @@ fn parse_trait_clause(p: P) -> Result<AstTraitClause, ErrorGuaranteed> {
     }))
 }
 
-fn parse_trait_param_list(p: P) -> Option<AstTraitParamList> {
+fn parse_generic_param_list(p: P) -> Option<AstGenericParamList> {
     let start = p.next_span();
 
     match_punct(punct!('<')).expect(p)?;
@@ -492,47 +440,43 @@ fn parse_trait_param_list(p: P) -> Option<AstTraitParamList> {
     let list = parse_delimited_until_terminator(
         p,
         &mut (),
-        |p, ()| parse_trait_param(p),
+        |p, ()| parse_generic_param(p),
         |p, ()| match_punct(punct!(',')).expect(p).is_some(),
         |p, ()| match_punct(punct!('>')).expect(p).is_some(),
     )
     .elems;
 
-    Some(AstTraitParamList {
+    Some(AstGenericParamList {
         span: start.to(p.prev_span()),
         list,
     })
 }
 
-fn parse_trait_param(p: P) -> AstTraitParam {
+fn parse_generic_param(p: P) -> AstGenericParam {
     let start = p.next_span();
 
     if let Some(path) = parse_simple_path(p) {
-        if let Some(part) = path.parts.first().filter(|_| path.parts.len() == 1)
-            && !part.matches_kw(kw!("crate"))
-            && !part.matches_kw(kw!("super"))
-            && !part.matches_kw(kw!("self"))
-        {
+        if let Some(part) = path.as_ident() {
             if match_punct(punct!(':')).expect(p).is_some() {
                 let clauses = parse_trait_clause_list(p);
 
-                return AstTraitParam {
+                return AstGenericParam {
                     span: start.to(p.prev_span()),
-                    kind: AstTraitParamKind::NamedUnspecified(*part, clauses),
+                    kind: AstGenericParamKind::InheritTy(part, clauses),
                 };
             }
 
             if match_punct(punct!('=')).expect(p).is_some() {
                 let ty = parse_ty(p);
 
-                return AstTraitParam {
+                return AstGenericParam {
                     span: start.to(p.prev_span()),
-                    kind: AstTraitParamKind::NamedEquals(*part, ty),
+                    kind: AstGenericParamKind::TyEquals(part, ty),
                 };
             }
         }
 
-        let params = parse_trait_param_list(p);
+        let params = parse_generic_param_list(p);
         let seed = AstTy {
             span: start.to(p.prev_span()),
             kind: AstTyKind::Name(path, params),
@@ -540,24 +484,33 @@ fn parse_trait_param(p: P) -> AstTraitParam {
 
         let ty = parse_ty_pratt_chain(p, Bp::MIN, seed);
 
-        return AstTraitParam {
+        return AstGenericParam {
             span: start.to(p.prev_span()),
-            kind: AstTraitParamKind::PositionalEquals(AstTyOrRe::Ty(ty)),
+            kind: AstGenericParamKind::PositionalTy(ty),
         };
     }
 
     if let Some(lt) = match_lifetime().expect(p) {
-        return AstTraitParam {
-            span: lt.span,
-            kind: AstTraitParamKind::PositionalEquals(AstTyOrRe::Re(lt)),
-        };
+        if match_punct(punct!(':')).expect(p).is_some() {
+            let clauses = parse_trait_clause_list(p);
+
+            return AstGenericParam {
+                span: lt.span,
+                kind: AstGenericParamKind::InheritRe(lt, clauses),
+            };
+        } else {
+            return AstGenericParam {
+                span: lt.span,
+                kind: AstGenericParamKind::PositionalRe(lt),
+            };
+        }
     }
 
     let ty = parse_ty(p);
 
-    AstTraitParam {
+    AstGenericParam {
         span: ty.span,
-        kind: AstTraitParamKind::PositionalEquals(AstTyOrRe::Ty(ty)),
+        kind: AstGenericParamKind::PositionalTy(ty),
     }
 }
 
@@ -593,7 +546,7 @@ fn parse_ty_pratt_seed(p: P) -> AstTy {
 
     // Parse path
     if let Some(path) = parse_simple_path(p) {
-        return build_ty(AstTyKind::Name(path, parse_trait_param_list(p)), p);
+        return build_ty(AstTyKind::Name(path, parse_generic_param_list(p)), p);
     }
 
     // Parse `dyn` trait
@@ -607,10 +560,10 @@ fn parse_ty_pratt_seed(p: P) -> AstTy {
             );
         };
 
-        let params = parse_trait_param_list(p);
+        let params = parse_generic_param_list(p);
 
         return build_ty(
-            AstTyKind::Trait(AstTraitSpec {
+            AstTyKind::Trait(AstNamedSpec {
                 span: path.span.to(p.prev_span()),
                 path,
                 params,

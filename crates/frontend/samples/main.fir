@@ -1,1 +1,3 @@
-pub trait Whee<A: Whee<A, B, dyn Whee<A, B, C>>, B, C>
+pub trait Positional<'a>
+
+pub trait Whee<'a: 'b, 'b, T: Positional<'a>>

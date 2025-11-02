@@ -2,8 +2,8 @@ use crate::{
     base::{Diag, ErrorGuaranteed, LeafDiag, arena::Obj},
     parse::{
         ast::{
-            AstTraitClause, AstTraitClauseList, AstTraitParamKind, AstTraitSpec, AstTy, AstTyKind,
-            AstTyOrRe,
+            AstGenericParamKind, AstNamedSpec, AstTraitClause, AstTraitClauseList, AstTy,
+            AstTyKind, AstTyOrRe,
         },
         token::Lifetime,
     },
@@ -77,7 +77,7 @@ impl IntraItemLowerCtxt<'_> {
         }
     }
 
-    pub fn lower_trait_spec(&mut self, ast: &AstTraitSpec) -> Result<TraitSpec, ErrorGuaranteed> {
+    pub fn lower_trait_spec(&mut self, ast: &AstNamedSpec) -> Result<TraitSpec, ErrorGuaranteed> {
         let s = &self.tcx.session;
 
         let def = self
@@ -96,10 +96,17 @@ impl IntraItemLowerCtxt<'_> {
 
         for param in (&mut reader).take(def.r(s).regular_generic_count as usize) {
             match &param.kind {
-                AstTraitParamKind::PositionalEquals(ty_or_re) => {
-                    params.push(TraitParam::Equals(self.lower_ty_or_re(ty_or_re)));
+                AstGenericParamKind::PositionalTy(ty) => {
+                    params.push(TraitParam::Equals(TyOrRe::Ty(self.lower_ty(ty))));
                 }
-                AstTraitParamKind::NamedEquals(..) | AstTraitParamKind::NamedUnspecified(..) => {
+                AstGenericParamKind::PositionalRe(ty) => {
+                    params.push(TraitParam::Equals(TyOrRe::Re(self.lower_re(ty))));
+                }
+                AstGenericParamKind::InheritRe(..) => {
+                    Diag::span_err(param.span, "cannot name lifetime parameters").emit();
+                    continue;
+                }
+                AstGenericParamKind::TyEquals(..) | AstGenericParamKind::InheritTy(..) => {
                     return Err(Diag::span_err(ast.span, "missing generic parameters").emit());
                 }
             }
@@ -112,10 +119,14 @@ impl IntraItemLowerCtxt<'_> {
 
         for param in &mut reader {
             let name = match &param.kind {
-                AstTraitParamKind::NamedEquals(name, _) => name,
-                AstTraitParamKind::NamedUnspecified(name, _) => name,
-                AstTraitParamKind::PositionalEquals(..) => {
+                AstGenericParamKind::TyEquals(name, _) => name,
+                AstGenericParamKind::InheritTy(name, _) => name,
+                AstGenericParamKind::PositionalTy(..) | AstGenericParamKind::PositionalRe(..) => {
                     return Err(Diag::span_err(param.span, "too many generic parameters").emit());
+                }
+                AstGenericParamKind::InheritRe(..) => {
+                    Diag::span_err(param.span, "cannot name lifetime parameters").emit();
+                    continue;
                 }
             };
 
@@ -143,13 +154,15 @@ impl IntraItemLowerCtxt<'_> {
             }
 
             params[idx] = match &param.kind {
-                AstTraitParamKind::NamedEquals(_, ast) => {
+                AstGenericParamKind::TyEquals(_, ast) => {
                     TraitParam::Equals(TyOrRe::Ty(self.lower_ty(ast)))
                 }
-                AstTraitParamKind::NamedUnspecified(_, ast) => {
+                AstGenericParamKind::InheritTy(_, ast) => {
                     TraitParam::Unspecified(self.lower_clauses(Some(ast)))
                 }
-                AstTraitParamKind::PositionalEquals(..) => unreachable!(),
+                AstGenericParamKind::PositionalTy(..)
+                | AstGenericParamKind::PositionalRe(..)
+                | AstGenericParamKind::InheritRe(..) => unreachable!(),
             };
         }
 
@@ -167,7 +180,11 @@ impl IntraItemLowerCtxt<'_> {
     }
 
     pub fn lower_re(&mut self, ast: &Lifetime) -> Re {
-        todo!();
+        if let Some(generic) = self.generic_re_names.lookup(ast.name) {
+            return Re::Generic(*generic);
+        }
+
+        todo!()
     }
 
     pub fn lower_ty(&mut self, ast: &AstTy) -> Ty {

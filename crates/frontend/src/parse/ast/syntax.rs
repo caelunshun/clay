@@ -3,6 +3,7 @@ use crate::{
         ErrorGuaranteed,
         syntax::{Span, Spanned},
     },
+    kw,
     parse::token::{Ident, Lifetime, TokenStream},
 };
 use std::rc::Rc;
@@ -45,7 +46,7 @@ pub struct AstItemUse {
 #[derive(Debug, Clone)]
 pub struct AstItemTrait {
     pub name: Ident,
-    pub generics: Option<AstGenericDefList>,
+    pub generics: Option<AstGenericParamList>,
     pub members: Vec<AstTraitMember>,
 }
 
@@ -90,6 +91,17 @@ pub struct AstSimplePath {
     pub parts: Rc<[Ident]>,
 }
 
+impl AstSimplePath {
+    pub fn as_ident(&self) -> Option<Ident> {
+        self.parts.first().copied().filter(|v| {
+            self.parts.len() == 1
+                && !v.matches_kw(kw!("crate"))
+                && !v.matches_kw(kw!("super"))
+                && !v.matches_kw(kw!("self"))
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AstUsePath {
     pub span: Span,
@@ -107,22 +119,10 @@ pub enum AstUsePathKind {
 // === Clauses === //
 
 #[derive(Debug, Clone)]
-pub struct AstGenericDefList {
+pub struct AstNamedSpec {
     pub span: Span,
-    pub defs: Vec<Result<AstGenericDef, ErrorGuaranteed>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AstGenericDef {
-    pub span: Span,
-    pub kind: AstGenericDefKind,
-    pub clauses: Option<AstTraitClauseList>,
-}
-
-#[derive(Debug, Clone)]
-pub enum AstGenericDefKind {
-    Lifetime(Lifetime),
-    Type(Ident),
+    pub path: AstSimplePath,
+    pub params: Option<AstGenericParamList>,
 }
 
 #[derive(Debug, Clone)]
@@ -134,33 +134,65 @@ pub struct AstTraitClauseList {
 #[derive(Debug, Clone)]
 pub enum AstTraitClause {
     Outlives(Lifetime),
-    Trait(AstTraitSpec),
+    Trait(AstNamedSpec),
 }
 
 #[derive(Debug, Clone)]
-pub struct AstTraitSpec {
+pub struct AstGenericParamList {
     pub span: Span,
-    pub path: AstSimplePath,
-    pub params: Option<AstTraitParamList>,
+    pub list: Vec<AstGenericParam>,
 }
 
 #[derive(Debug, Clone)]
-pub struct AstTraitParamList {
+pub struct AstGenericParam {
     pub span: Span,
-    pub list: Vec<AstTraitParam>,
+    pub kind: AstGenericParamKind,
 }
 
 #[derive(Debug, Clone)]
-pub struct AstTraitParam {
-    pub span: Span,
-    pub kind: AstTraitParamKind,
+pub enum AstGenericParamKind {
+    /// A bare type (e.g. `u32`, `(u32, &'a i32)?`).
+    PositionalTy(AstTy),
+
+    /// A bare region (e.g. `'a`, `'_`)
+    PositionalRe(Lifetime),
+
+    /// A name with a clause list (e.g. `MyAssoc: Foo + Bar`, `T: 'gc`).
+    InheritTy(Ident, AstTraitClauseList),
+
+    /// A region with a clause list (e.g. `'a: 'b + 'c`).
+    InheritRe(Lifetime, AstTraitClauseList),
+
+    /// A name with an equality to a type (e.g. `MyAssoc = u32`).
+    TyEquals(Ident, AstTy),
 }
 
 #[derive(Debug, Clone)]
-pub enum AstTraitParamKind {
-    PositionalEquals(AstTyOrRe),
-    NamedEquals(Ident, AstTy),
-    NamedUnspecified(Ident, AstTraitClauseList),
+pub enum AstGenericDef<'a> {
+    Ty(Ident, Option<&'a AstTraitClauseList>),
+    Re(Lifetime, Option<&'a AstTraitClauseList>),
+}
+
+impl AstGenericParamKind {
+    pub fn as_generic_def(&self) -> Option<AstGenericDef<'_>> {
+        match self {
+            AstGenericParamKind::PositionalTy(ty) => {
+                if let Some(ident) = ty.as_ident() {
+                    Some(AstGenericDef::Ty(ident, None))
+                } else {
+                    None
+                }
+            }
+            AstGenericParamKind::PositionalRe(re) => Some(AstGenericDef::Re(*re, None)),
+            AstGenericParamKind::InheritTy(ident, clauses) => {
+                Some(AstGenericDef::Ty(*ident, Some(clauses)))
+            }
+            AstGenericParamKind::InheritRe(re, clauses) => {
+                Some(AstGenericDef::Re(*re, Some(clauses)))
+            }
+            AstGenericParamKind::TyEquals(..) => None,
+        }
+    }
 }
 
 // === Types === //
@@ -189,11 +221,20 @@ pub struct AstTy {
 #[derive(Debug, Clone)]
 pub enum AstTyKind {
     This,
-    Name(AstSimplePath, Option<AstTraitParamList>),
+    Name(AstSimplePath, Option<AstGenericParamList>),
     Reference(Option<Lifetime>, Box<AstTy>),
-    Trait(AstTraitSpec),
+    Trait(AstNamedSpec),
     Tuple(Vec<AstTy>),
     Option(Box<AstTy>),
     Infer,
     Error(ErrorGuaranteed),
+}
+
+impl AstTy {
+    pub fn as_ident(&self) -> Option<Ident> {
+        match &self.kind {
+            AstTyKind::Name(path, list) if list.is_none() => path.as_ident(),
+            _ => None,
+        }
+    }
 }

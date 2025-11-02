@@ -8,7 +8,7 @@ use crate::{
     kw,
     parse::{
         ast::{
-            AstGenericDefKind, AstItem, AstItemKind, AstItemModuleContents, AstItemTrait,
+            AstGenericDef, AstItem, AstItemKind, AstItemModuleContents, AstItemTrait,
             AstSimplePath, AstTraitClauseList, AstTraitMemberKind, AstUsePath, AstUsePathKind,
             AstVisibility,
         },
@@ -239,13 +239,14 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let mut generic_clause_lists = Vec::new();
 
         if let Some(generics) = &ast.generics {
-            for def in &generics.defs {
-                let Ok(def) = def else {
+            for def in &generics.list {
+                let Some(def_kind) = def.kind.as_generic_def() else {
+                    Diag::span_err(def.span, "expected generic parameter definition").emit();
                     continue;
                 };
 
-                match def.kind {
-                    AstGenericDefKind::Lifetime(lifetime) => {
+                match def_kind {
+                    AstGenericDef::Re(lifetime, clauses) => {
                         binder.generics.push(AnyGeneric::Re(Obj::new(
                             RegionGeneric {
                                 span: def.span,
@@ -256,9 +257,9 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                             s,
                         )));
 
-                        generic_clause_lists.push(def.clauses.as_ref());
+                        generic_clause_lists.push(clauses);
                     }
-                    AstGenericDefKind::Type(ident) => {
+                    AstGenericDef::Ty(ident, clauses) => {
                         binder.generics.push(AnyGeneric::Ty(Obj::new(
                             TypeGeneric {
                                 span: def.span,
@@ -271,7 +272,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                             s,
                         )));
 
-                        generic_clause_lists.push(def.clauses.as_ref());
+                        generic_clause_lists.push(clauses);
                     }
                 }
             }
