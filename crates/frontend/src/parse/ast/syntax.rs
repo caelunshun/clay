@@ -218,7 +218,7 @@ pub enum AstTyKind {
     This,
     Name(AstSimplePath, Option<AstGenericParamList>),
     Reference(Option<Lifetime>, Box<AstTy>),
-    Trait(AstNamedSpec),
+    Trait(AstTraitClauseList),
     Tuple(Vec<AstTy>),
     Option(Box<AstTy>),
     Infer,

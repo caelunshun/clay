@@ -585,25 +585,7 @@ fn parse_ty_pratt_seed(p: P) -> AstTy {
 
     // Parse `dyn` trait
     if match_kw(kw!("dyn")).expect(p).is_some() {
-        let Some(path) = parse_simple_path(p) else {
-            return build_ty(
-                AstTyKind::Error(p.stuck_recover_with(|_| {
-                    // TODO: Recover more intelligently
-                })),
-                p,
-            );
-        };
-
-        let params = parse_generic_param_list(p);
-
-        return build_ty(
-            AstTyKind::Trait(AstNamedSpec {
-                span: path.span.to(p.prev_span()),
-                path,
-                params,
-            }),
-            p,
-        );
+        return build_ty(AstTyKind::Trait(parse_trait_clause_list(p)), p);
     }
 
     // Parse reference

@@ -236,7 +236,9 @@ impl IntraItemLowerCtxt<'_> {
                 lifetime.map_or(Re::ExplicitInfer, |ast| self.lower_re(&ast)),
                 self.lower_ty(pointee),
             )),
-            AstTyKind::Trait(ast_trait_clause_list) => todo!(),
+            AstTyKind::Trait(spec) => self
+                .tcx
+                .intern_ty(TyKind::Trait(self.lower_clauses(Some(spec)))),
             AstTyKind::Tuple(items) => self.tcx.intern_ty(TyKind::Tuple(self.lower_tys(items))),
             AstTyKind::Option(item) => todo!(),
             AstTyKind::Infer => self.tcx.intern_ty(TyKind::ExplicitInfer),
