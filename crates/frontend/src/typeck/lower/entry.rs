@@ -91,8 +91,15 @@ impl TyCtxt {
             };
 
             match task {
-                IntraLowerTask::Trait(clause_lists) => {
-                    ctxt.lower_trait(item.r(s).kind.as_trait().unwrap(), clause_lists);
+                IntraLowerTask::Trait {
+                    inherits,
+                    generic_clause_lists,
+                } => {
+                    ctxt.lower_trait(
+                        item.r(s).kind.as_trait().unwrap(),
+                        inherits,
+                        generic_clause_lists,
+                    );
                 }
             }
         }
@@ -240,7 +247,10 @@ pub struct InterItemLowerCtxt<'a, 'ast> {
 }
 
 pub enum IntraLowerTask<'ast> {
-    Trait(Vec<Option<&'ast AstTraitClauseList>>),
+    Trait {
+        inherits: Option<&'ast AstTraitClauseList>,
+        generic_clause_lists: Vec<Option<&'ast AstTraitClauseList>>,
+    },
 }
 
 impl<'ast> InterItemLowerCtxt<'_, 'ast> {
@@ -334,6 +344,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
             TraitDef {
                 item: target,
                 generics: self.tcx.seal_generic_binder(binder),
+                inherits: LateInit::uninit(),
                 regular_generic_count,
                 associated_types,
                 methods: LateInit::uninit(),
@@ -344,7 +355,10 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
 
         LateInit::init(&target.r(s).kind, ItemKind::Trait(trait_target));
 
-        self.push_task(IntraLowerTask::Trait(generic_clause_lists));
+        self.push_task(IntraLowerTask::Trait {
+            inherits: ast.inherits.as_ref(),
+            generic_clause_lists,
+        });
     }
 }
 
@@ -379,6 +393,7 @@ impl IntraItemLowerCtxt<'_> {
     pub fn lower_trait(
         mut self,
         item: Obj<TraitDef>,
+        inherits: Option<&AstTraitClauseList>,
         clause_lists: Vec<Option<&AstTraitClauseList>>,
     ) {
         let s = &self.tcx.session;
@@ -395,5 +410,7 @@ impl IntraItemLowerCtxt<'_> {
                 }
             }
         }
+
+        LateInit::init(&item.r(s).inherits, self.lower_clauses(inherits));
     }
 }

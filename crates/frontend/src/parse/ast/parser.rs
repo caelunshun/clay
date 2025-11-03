@@ -173,12 +173,17 @@ fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
         };
 
         let generics = parse_generic_param_list(p);
+        let inherits = match_punct(punct!(':'))
+            .expect(p)
+            .map(|_| parse_trait_clause_list(p));
+
         let body = parse_impl_ish_body(p);
 
         return Some(make_item(
             AstItemKind::Trait(AstItemTrait {
                 name,
                 generics,
+                inherits,
                 body,
             }),
             p,

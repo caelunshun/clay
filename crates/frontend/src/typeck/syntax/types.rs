@@ -13,8 +13,7 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct AdtDef {
-    pub span: Span,
-    pub ident: Ident,
+    pub item: Obj<Item>,
     pub generics: Obj<GenericBinder>,
     pub fields: Vec<AdtField>,
 }
@@ -37,6 +36,9 @@ pub struct TraitDef {
     /// The set of parameter generics and associated types defined by this trait. This list starts
     /// with a `regular_generic_count` number of generic parameters followed by associated types.
     pub generics: Obj<GenericBinder>,
+
+    /// The set of traits inherited by the current trait.
+    pub inherits: LateInit<TraitClauseList>,
 
     /// The number of generic parameters taken by this trait.
     pub regular_generic_count: u32,

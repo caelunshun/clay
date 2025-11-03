@@ -102,12 +102,23 @@ impl IntraItemLowerCtxt<'_> {
             return Err(Diag::span_err(ast.span, "missing generic parameters").emit());
         }
 
-        for param in (&mut reader).take(def.r(s).regular_generic_count as usize) {
+        for (param, generic) in (&mut reader)
+            .zip(&def.r(s).generics.r(s).generics)
+            .take(def.r(s).regular_generic_count as usize)
+        {
             match &param.kind {
                 AstGenericParamKind::PositionalTy(ty) => {
+                    if !matches!(generic, AnyGeneric::Ty(_)) {
+                        return Err(Diag::span_err(ty.span, "expected lifetime parameter").emit());
+                    }
+
                     params.push(TraitParam::Equals(TyOrRe::Ty(self.lower_ty(ty))));
                 }
                 AstGenericParamKind::PositionalRe(ty) => {
+                    if !matches!(generic, AnyGeneric::Re(_)) {
+                        return Err(Diag::span_err(ty.span, "expected type parameter").emit());
+                    }
+
                     params.push(TraitParam::Equals(TyOrRe::Re(self.lower_re(ty))));
                 }
                 AstGenericParamKind::InheritRe(..) => {

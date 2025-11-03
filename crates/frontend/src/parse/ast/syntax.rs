@@ -48,6 +48,7 @@ pub struct AstItemUse {
 pub struct AstItemTrait {
     pub name: Ident,
     pub generics: Option<AstGenericParamList>,
+    pub inherits: Option<AstTraitClauseList>,
     pub body: AstImplLikeBody,
 }
 

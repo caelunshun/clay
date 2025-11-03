@@ -6,7 +6,7 @@ use crate::{
     parse::token::Ident,
     typeck::{
         lower::modules::{AnyDef, ParentKind},
-        syntax::TraitDef,
+        syntax::{AdtDef, TraitDef},
     },
     utils::hash::FxIndexMap,
 };
@@ -59,6 +59,7 @@ pub struct Item {
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum ItemKind {
     Trait(Obj<TraitDef>),
+    Adt(Obj<AdtDef>),
 }
 
 impl ItemKind {
