@@ -3,12 +3,11 @@ use crate::{
         Diag, ErrorGuaranteed,
         analysis::NameResolver,
         arena::{LateInit, Obj},
-        syntax::Span,
     },
     kw,
     parse::{
         ast::{
-            AstGenericDef, AstImplLikeMemberKind, AstItem, AstItemKind, AstItemModuleContents,
+            AstGenericDef, AstImplLikeMemberKind, AstItem, AstItemImpl, AstItemModuleContents,
             AstItemTrait, AstSimplePath, AstTraitClauseList, AstUsePath, AstUsePathKind,
             AstVisibility, AstVisibilityKind,
         },
@@ -22,11 +21,11 @@ use crate::{
             ModuleResolver,
         },
         syntax::{
-            AnyGeneric, Crate, GenericBinder, Item, ItemKind, Module, RegionGeneric, TraitDef,
-            TypeGeneric,
+            AnyGeneric, Crate, GenericBinder, ImplDef, Item, ItemKind, Module, RegionGeneric,
+            TraitDef, TypeGeneric,
         },
     },
-    utils::hash::FxHashMap,
+    utils::{hash::FxHashMap, mem::CellVec},
 };
 use index_vec::IndexVec;
 use std::rc::Rc;
@@ -41,6 +40,7 @@ impl TyCtxt {
         let mut ctxt = UseLowerCtxt {
             tree: BuilderModuleTree::default(),
             item_asts: IndexVec::new(),
+            impls: Vec::new(),
         };
 
         ctxt.lower_initial_tree(BuilderModuleId::ROOT, ast);
@@ -55,53 +55,63 @@ impl TyCtxt {
         );
         let (modules, items) = ctxt.tree.freeze_and_check(krate, s);
         let root = modules[BuilderModuleId::ROOT];
-        drop(modules);
+
+        let UseLowerCtxt {
+            tree: _,
+            item_asts,
+            impls,
+        } = ctxt;
 
         // Lower inter-item properties.
         let mut tasks = Vec::new();
 
-        for (target, ast) in items.iter().copied().zip(ctxt.item_asts.iter().copied()) {
+        for (target, ast) in items.iter().copied().zip(item_asts.iter().copied()) {
             let mut ctxt = InterItemLowerCtxt {
                 tcx: self,
                 item: target,
                 tasks: &mut tasks,
             };
 
-            match &ast.kind {
-                AstItemKind::Trait(ast) => {
+            match &ast {
+                AstItem::Trait(ast) => {
                     ctxt.lower_trait(target, ast);
                 }
-                AstItemKind::Mod(_)
-                | AstItemKind::Use(_)
-                | AstItemKind::Impl(_)
-                | AstItemKind::Error(_) => {
+                AstItem::Mod(_) | AstItem::Use(_) | AstItem::Impl(_) | AstItem::Error(_, _) => {
                     unreachable!()
                 }
             }
         }
 
         // Lower intra-item properties.
-        for (item, task) in tasks {
+        for (scope, kind) in tasks {
             let ctxt = IntraItemLowerCtxt {
                 tcx: self,
                 root,
-                scope: item.r(s).parent,
+                scope,
                 generic_ty_names: NameResolver::new(),
                 generic_re_names: NameResolver::new(),
             };
 
-            match task {
+            match kind {
                 IntraLowerTask::Trait {
+                    item,
                     inherits,
                     generic_clause_lists,
                 } => {
-                    ctxt.lower_trait(
-                        item.r(s).kind.as_trait().unwrap(),
-                        inherits,
-                        generic_clause_lists,
-                    );
+                    ctxt.lower_trait(item, inherits, generic_clause_lists);
                 }
             }
+        }
+
+        for (scope, impl_) in impls {
+            IntraItemLowerCtxt {
+                tcx: self,
+                root,
+                scope: modules[scope],
+                generic_ty_names: NameResolver::new(),
+                generic_re_names: NameResolver::new(),
+            }
+            .lower_impl(impl_);
         }
 
         root
@@ -113,6 +123,7 @@ impl TyCtxt {
 pub struct UseLowerCtxt<'ast> {
     tree: BuilderModuleTree,
     item_asts: IndexVec<BuilderItemId, &'ast AstItem>,
+    impls: Vec<(BuilderModuleId, &'ast AstItemImpl)>,
 }
 
 impl<'ast> UseLowerCtxt<'ast> {
@@ -121,35 +132,38 @@ impl<'ast> UseLowerCtxt<'ast> {
         parent_id: BuilderModuleId,
         ast: &'ast AstItemModuleContents,
     ) {
-        for item in &ast.items {
-            match &item.kind {
-                AstItemKind::Mod(item_mod) => {
+        for item_enum in &ast.items {
+            match item_enum {
+                AstItem::Mod(item) => {
                     let item_mod_id =
                         self.tree
-                            .push_module(parent_id, item.vis.clone(), item_mod.name);
+                            .push_module(parent_id, item.base.vis.clone(), item.name);
 
-                    self.lower_initial_tree(item_mod_id, item_mod.contents.as_ref().unwrap());
+                    self.lower_initial_tree(item_mod_id, item.contents.as_ref().unwrap());
                 }
-                AstItemKind::Use(item_use) => {
+                AstItem::Use(item) => {
                     let mut prefix = Vec::new();
 
-                    self.lower_use(parent_id, &item.vis, &mut prefix, &item_use.path);
+                    self.lower_use(parent_id, &item.base.vis, &mut prefix, &item.path);
                 }
-                AstItemKind::Trait(item_trait) => {
+                AstItem::Trait(item) => {
                     self.tree
-                        .push_item(parent_id, item.vis.clone(), item_trait.name);
+                        .push_item(parent_id, item.base.vis.clone(), item.name);
 
-                    self.item_asts.push(item);
+                    self.item_asts.push(item_enum);
                 }
-                AstItemKind::Impl(_) => {
-                    if !matches!(item.vis.kind, AstVisibilityKind::Implicit) {
-                        Diag::span_err(item.vis.span, "`impl` blocks cannot have visibilities")
-                            .emit();
+                AstItem::Impl(item) => {
+                    if !matches!(item.base.vis.kind, AstVisibilityKind::Implicit) {
+                        Diag::span_err(
+                            item.base.vis.span,
+                            "`impl` blocks cannot have visibilities",
+                        )
+                        .emit();
                     }
 
-                    // TODO: Push somewhere.
+                    self.impls.push((parent_id, item));
                 }
-                AstItemKind::Error(_) => {
+                AstItem::Error(_, _) => {
                     // (ignored)
                 }
             }
@@ -243,28 +257,19 @@ impl<'ast> UseLowerCtxt<'ast> {
 pub struct InterItemLowerCtxt<'a, 'ast> {
     tcx: &'a TyCtxt,
     item: Obj<Item>,
-    tasks: &'a mut Vec<(Obj<Item>, IntraLowerTask<'ast>)>,
-}
-
-pub enum IntraLowerTask<'ast> {
-    Trait {
-        inherits: Option<&'ast AstTraitClauseList>,
-        generic_clause_lists: Vec<Option<&'ast AstTraitClauseList>>,
-    },
+    tasks: &'a mut Vec<(Obj<Module>, IntraLowerTask<'ast>)>,
 }
 
 impl<'ast> InterItemLowerCtxt<'_, 'ast> {
-    pub fn push_task(&mut self, task: IntraLowerTask<'ast>) {
-        self.tasks.push((self.item, task));
+    pub fn push_task(&mut self, kind: IntraLowerTask<'ast>) {
+        self.tasks
+            .push((self.item.r(&self.tcx.session).parent, kind));
     }
 
     pub fn lower_trait(&mut self, target: Obj<Item>, ast: &'ast AstItemTrait) {
         let s = &self.tcx.session;
 
-        let mut binder = GenericBinder {
-            span: Span::DUMMY,
-            generics: Vec::new(),
-        };
+        let mut binder = GenericBinder::default();
 
         let mut generic_clause_lists = Vec::new();
 
@@ -348,7 +353,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                 regular_generic_count,
                 associated_types,
                 methods: LateInit::uninit(),
-                impls: LateInit::uninit(),
+                impls: CellVec::default(),
             },
             s,
         );
@@ -356,6 +361,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         LateInit::init(&target.r(s).kind, ItemKind::Trait(trait_target));
 
         self.push_task(IntraLowerTask::Trait {
+            item: trait_target,
             inherits: ast.inherits.as_ref(),
             generic_clause_lists,
         });
@@ -370,6 +376,14 @@ pub struct IntraItemLowerCtxt<'a> {
     pub scope: Obj<Module>,
     pub generic_ty_names: NameResolver<Obj<TypeGeneric>>,
     pub generic_re_names: NameResolver<Obj<RegionGeneric>>,
+}
+
+pub enum IntraLowerTask<'ast> {
+    Trait {
+        item: Obj<TraitDef>,
+        inherits: Option<&'ast AstTraitClauseList>,
+        generic_clause_lists: Vec<Option<&'ast AstTraitClauseList>>,
+    },
 }
 
 impl IntraItemLowerCtxt<'_> {
@@ -412,5 +426,89 @@ impl IntraItemLowerCtxt<'_> {
         }
 
         LateInit::init(&item.r(s).inherits, self.lower_clauses(inherits));
+    }
+
+    pub fn lower_impl(mut self, ast: &AstItemImpl) {
+        let s = &self.tcx.session;
+
+        // Lower generics
+        let mut binder = GenericBinder::default();
+        let mut generic_clause_lists = Vec::new();
+
+        if let Some(generics) = &ast.generics {
+            for def in &generics.list {
+                let Some(def_kind) = def.kind.as_generic_def() else {
+                    Diag::span_err(def.span, "expected generic parameter definition").emit();
+                    continue;
+                };
+
+                match def_kind {
+                    AstGenericDef::Re(lifetime, clauses) => {
+                        binder.generics.push(AnyGeneric::Re(Obj::new(
+                            RegionGeneric {
+                                span: def.span,
+                                lifetime,
+                                binder: LateInit::uninit(),
+                                clauses: LateInit::uninit(),
+                            },
+                            s,
+                        )));
+
+                        generic_clause_lists.push(clauses);
+                    }
+                    AstGenericDef::Ty(ident, clauses) => {
+                        binder.generics.push(AnyGeneric::Ty(Obj::new(
+                            TypeGeneric {
+                                span: def.span,
+                                ident,
+                                binder: LateInit::uninit(),
+                                user_clauses: LateInit::uninit(),
+                                instantiated_clauses: LateInit::uninit(),
+                                is_synthetic: false,
+                            },
+                            s,
+                        )));
+
+                        generic_clause_lists.push(clauses);
+                    }
+                }
+            }
+        }
+
+        let binder = self.tcx.seal_generic_binder(binder);
+        self.define_generics_in_binder(binder);
+
+        // Lower source trait
+        let item = match (&ast.first_ty, &ast.second_ty) {
+            (for_trait, Some(for_ty)) => {
+                let Ok(for_trait) = self.lower_trait_instance(for_trait, &ast.body) else {
+                    return;
+                };
+
+                let for_ty = self.lower_ty(for_ty);
+
+                let item = Obj::new(
+                    ImplDef {
+                        span: ast.base.span,
+                        generics: binder,
+                        trait_: Some(for_trait),
+                        target: for_ty,
+                        methods: LateInit::uninit(),
+                        generic_solve_order: LateInit::uninit(),
+                    },
+                    s,
+                );
+
+                for_trait.def.r(s).impls.mutate(|v| v.push(item));
+
+                item
+            }
+            (for_ty, None) => {
+                todo!()
+            }
+        };
+
+        // Lower methods
+        // TODO
     }
 }

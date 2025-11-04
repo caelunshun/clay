@@ -150,6 +150,16 @@ impl BuilderModuleTree {
         child
     }
 
+    pub fn push_scope(&mut self, parent: BuilderModuleId, name: Ident) -> BuilderModuleId {
+        self.modules.push(BuilderModule {
+            parent: ParentKind::Scoped(parent),
+            name: Some(name),
+            public_path: None,
+            glob_uses: Vec::new(),
+            direct_uses: FxIndexMap::default(),
+        })
+    }
+
     pub fn push_glob_use(
         &mut self,
         parent: BuilderModuleId,

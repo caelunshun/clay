@@ -6,7 +6,7 @@ use crate::{
     },
     parse::token::{Ident, Lifetime},
     typeck::syntax::{Func, Item},
-    utils::hash::FxHashMap,
+    utils::{hash::FxHashMap, mem::CellVec},
 };
 
 // === AdtDef === //
@@ -50,7 +50,7 @@ pub struct TraitDef {
     pub methods: LateInit<Vec<()>>,
 
     /// All known implementations of this trait.
-    pub impls: LateInit<Vec<Obj<ImplDef>>>,
+    pub impls: CellVec<Obj<ImplDef>>,
 }
 
 pub type ListOfTraitClauseList = Intern<[TraitClauseList]>;
@@ -140,9 +140,8 @@ pub struct TraitInstance {
 // === Generics === //
 
 /// A container for a list of generics which can be substituted all at once.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct GenericBinder {
-    pub span: Span,
     pub generics: Vec<AnyGeneric>,
 }
 

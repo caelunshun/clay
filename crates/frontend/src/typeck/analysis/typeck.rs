@@ -532,7 +532,7 @@ impl TyCtxt {
         // Otherwise, attempt to provide the implementation through an implementation block.
         let mut impl_failures = Vec::new();
 
-        for &candidate in rhs.def.r(s).impls.iter() {
+        for &candidate in rhs.def.r(s).impls.read().iter() {
             // Replace universal qualifications in `impl` with inference variables
             let min_infer_var = inferences.next_infer_var();
             let candidate_fresh = self.instantiate_fresh_target_infers(candidate, min_infer_var);
