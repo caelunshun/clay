@@ -6,7 +6,7 @@ use crate::{
     parse::token::Ident,
     typeck::{
         lower::modules::{AnyDef, ParentKind},
-        syntax::{AdtDef, TraitDef},
+        syntax::{AdtDef, ImplDef, TraitDef},
     },
     utils::hash::FxIndexMap,
 };
@@ -16,6 +16,8 @@ pub struct Crate {
     pub name: Symbol,
     pub is_local: bool,
     pub root: LateInit<Obj<Module>>,
+    pub items: LateInit<Vec<Obj<Item>>>,
+    pub impls: LateInit<Vec<Obj<ImplDef>>>,
 }
 
 #[derive(Debug, Clone)]

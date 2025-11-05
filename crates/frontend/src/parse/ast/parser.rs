@@ -544,17 +544,6 @@ fn parse_generic_param(p: P) -> AstGenericParam {
 
 // === Types === //
 
-fn parse_ty_full(p: P) -> AstTy {
-    let expr = parse_ty(p);
-
-    if !match_eos(p) {
-        // Recovery strategy: ignore
-        let _ = p.stuck();
-    }
-
-    expr
-}
-
 fn parse_ty(p: P) -> AstTy {
     parse_ty_pratt(p, Bp::MIN)
 }

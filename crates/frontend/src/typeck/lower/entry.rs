@@ -33,7 +33,7 @@ use std::rc::Rc;
 // === Driver === //
 
 impl TyCtxt {
-    pub fn lower_full_ast(&self, ast: &AstItemModuleContents) -> Obj<Module> {
+    pub fn lower_full_ast(&self, ast: &AstItemModuleContents) -> Obj<Crate> {
         let s = &self.session;
 
         // Build the module tree.
@@ -50,6 +50,8 @@ impl TyCtxt {
                 name: symbol!("demo"),
                 is_local: true,
                 root: LateInit::uninit(),
+                items: LateInit::uninit(),
+                impls: LateInit::uninit(),
             },
             s,
         );
@@ -103,18 +105,25 @@ impl TyCtxt {
             }
         }
 
-        for (scope, impl_) in impls {
-            IntraItemLowerCtxt {
-                tcx: self,
-                root,
-                scope: modules[scope],
-                generic_ty_names: NameResolver::new(),
-                generic_re_names: NameResolver::new(),
-            }
-            .lower_impl(impl_);
-        }
+        let impls = impls
+            .into_iter()
+            .map(|(scope, impl_)| {
+                IntraItemLowerCtxt {
+                    tcx: self,
+                    root,
+                    scope: modules[scope],
+                    generic_ty_names: NameResolver::new(),
+                    generic_re_names: NameResolver::new(),
+                }
+                .lower_impl(impl_)
+            })
+            .filter_map(Result::ok)
+            .collect::<Vec<_>>();
 
-        root
+        LateInit::init(&krate.r(s).items, items.raw);
+        LateInit::init(&krate.r(s).impls, impls);
+
+        krate
     }
 }
 
@@ -428,7 +437,7 @@ impl IntraItemLowerCtxt<'_> {
         LateInit::init(&item.r(s).inherits, self.lower_clauses(inherits));
     }
 
-    pub fn lower_impl(mut self, ast: &AstItemImpl) {
+    pub fn lower_impl(mut self, ast: &AstItemImpl) -> Result<Obj<ImplDef>, ErrorGuaranteed> {
         let s = &self.tcx.session;
 
         // Lower generics
@@ -479,11 +488,9 @@ impl IntraItemLowerCtxt<'_> {
         self.define_generics_in_binder(binder);
 
         // Lower source trait
-        let item = match (&ast.first_ty, &ast.second_ty) {
+        let impl_ = match (&ast.first_ty, &ast.second_ty) {
             (for_trait, Some(for_ty)) => {
-                let Ok(for_trait) = self.lower_trait_instance(for_trait, &ast.body) else {
-                    return;
-                };
+                let for_trait = self.lower_trait_instance(for_trait, &ast.body)?;
 
                 let for_ty = self.lower_ty(for_ty);
 
@@ -510,5 +517,7 @@ impl IntraItemLowerCtxt<'_> {
 
         // Lower methods
         // TODO
+
+        Ok(impl_)
     }
 }

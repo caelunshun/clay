@@ -32,6 +32,6 @@ fn main() {
     let ast = parse_file(&tokens);
 
     let tcx = TyCtxt::new(session);
-
-    tcx.lower_full_ast(&ast);
+    let krate = tcx.lower_full_ast(&ast);
+    tcx.wf_check_crate(krate);
 }

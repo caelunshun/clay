@@ -8,15 +8,27 @@ use crate::{
     typeck::{
         analysis::TyCtxt,
         syntax::{
-            AnyGeneric, GenericBinder, GenericInstance, ImplDef, InferTyVar, ListOfTraitClauseList,
-            PosInBinder, Re, TraitClause, TraitClauseList, TraitParam, TraitParamList, TraitSpec,
-            Ty, TyKind, TyList, TyOrRe, TyOrReList, TypeGeneric,
+            AnyGeneric, Crate, GenericBinder, GenericInstance, ImplDef, InferTyVar,
+            ListOfTraitClauseList, PosInBinder, Re, TraitClause, TraitClauseList, TraitParam,
+            TraitParamList, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReList, TypeGeneric,
         },
     },
 };
 use disjoint::DisjointSetVec;
 
 impl TyCtxt {
+    pub fn wf_check_crate(&self, krate: Obj<Crate>) {
+        let s = &self.session;
+
+        for &impl_ in &**krate.r(s).impls {
+            self.wf_check_impl_generic_solve_order(impl_);
+        }
+
+        // TODO: WF checks
+
+        // TODO: Function type checks
+    }
+
     pub fn substitute_ty_or_re_list(
         &self,
         target: TyOrReList,

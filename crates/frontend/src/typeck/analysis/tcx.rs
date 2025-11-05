@@ -11,9 +11,8 @@ use crate::{
             TraitClauseList, TraitParam, TraitParamList, Ty, TyKind, TyList, TyOrRe, TyOrReList,
         },
     },
-    utils::hash::FxHashSet,
 };
-use std::{cell::RefCell, ops::Deref, rc::Rc};
+use std::{ops::Deref, rc::Rc};
 
 #[derive(Debug, Clone)]
 pub struct TyCtxt {
@@ -23,19 +22,9 @@ pub struct TyCtxt {
 #[derive(Debug)]
 pub struct TyCtxtInner {
     pub session: Session,
-    pub wf_state: RefCell<WfState>,
     pub interners: Interners,
     pub queries: Queries,
 }
-
-#[derive(Debug, Default)]
-pub struct WfState {
-    pub validated: FxHashSet<WfRequirement>,
-    pub queue: Vec<WfRequirement>,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum WfRequirement {}
 
 #[derive(Debug, Default)]
 pub struct Interners {
@@ -70,7 +59,6 @@ impl TyCtxt {
         Self {
             inner: Rc::new(TyCtxtInner {
                 session,
-                wf_state: RefCell::default(),
                 interners: Interners::default(),
                 queries: Queries::default(),
             }),
@@ -129,26 +117,5 @@ impl TyCtxt {
                 .flatten()
                 .collect::<Vec<_>>(),
         )
-    }
-
-    pub fn queue_wf(&self, req: WfRequirement) {
-        let mut state = self.wf_state.borrow_mut();
-
-        if state.validated.insert(req) {
-            state.queue.push(req);
-        }
-    }
-
-    #[expect(clippy::never_loop)]
-    pub fn flush_wf(&self) {
-        let s = &self.session;
-
-        loop {
-            let Some(req) = self.wf_state.borrow_mut().queue.pop() else {
-                break;
-            };
-
-            match req {}
-        }
     }
 }
