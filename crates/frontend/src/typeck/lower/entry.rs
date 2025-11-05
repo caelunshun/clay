@@ -487,6 +487,18 @@ impl IntraItemLowerCtxt<'_> {
         let binder = self.tcx.seal_generic_binder(binder);
         self.define_generics_in_binder(binder);
 
+        // Lower clauses
+        for (&generic, clause_list) in binder.r(s).generics.iter().zip(generic_clause_lists) {
+            match generic {
+                AnyGeneric::Re(generic) => {
+                    LateInit::init(&generic.r(s).clauses, self.lower_clauses(clause_list));
+                }
+                AnyGeneric::Ty(generic) => {
+                    LateInit::init(&generic.r(s).user_clauses, self.lower_clauses(clause_list));
+                }
+            }
+        }
+
         // Lower source trait
         let impl_ = match (&ast.first_ty, &ast.second_ty) {
             (for_trait, Some(for_ty)) => {

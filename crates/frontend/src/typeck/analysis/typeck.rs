@@ -494,18 +494,22 @@ impl TyCtxt {
 
         // N.B. only generic types are counted towards the generic index but all clauses are indexed
         // equally.
-        for (step_generic_idx, generic_def) in
+        for (step_generic_idx, main_generic_def) in
             generic_defs.iter().filter_map(|v| v.as_ty()).enumerate()
         {
             for (step_clause_idx, clause_def) in
-                generic_def.r(s).user_clauses.r(s).iter().enumerate()
+                main_generic_def.r(s).user_clauses.r(s).iter().enumerate()
             {
                 let TraitClause::Trait(spec) = *clause_def else {
                     continue;
                 };
 
                 let clause_state_idx = clause_states.next_idx();
-                let mut blockers = 0;
+                let mut blockers = 1;
+
+                generic_states[main_generic_def.r(s).binder.idx as usize]
+                    .deps
+                    .push(clause_state_idx);
 
                 for &param in &spec.params.r(s)[..spec.def.r(s).regular_generic_count as usize] {
                     let TraitParam::Equals(ty) = param else {
