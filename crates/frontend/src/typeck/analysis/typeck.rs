@@ -1,5 +1,6 @@
 use crate::{
     base::{
+        Diag,
         arena::{LateInit, Obj},
         syntax::Span,
     },
@@ -8,13 +9,16 @@ use crate::{
     typeck::{
         analysis::TyCtxt,
         syntax::{
-            AnyGeneric, Crate, GenericBinder, GenericInstance, ImplDef, InferTyVar,
-            ListOfTraitClauseList, PosInBinder, Re, TraitClause, TraitClauseList, TraitParam,
-            TraitParamList, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReList, TypeGeneric,
+            AnyGeneric, Crate, GenericBinder, GenericInstance, GenericSolveStep, ImplDef,
+            InferTyVar, ListOfTraitClauseList, PosInBinder, Re, TraitClause, TraitClauseList,
+            TraitParam, TraitParamList, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReList,
+            TypeGeneric,
         },
     },
 };
 use disjoint::DisjointSetVec;
+use index_vec::{IndexVec, define_index_type};
+use std::ops::ControlFlow;
 
 impl TyCtxt {
     pub fn wf_check_crate(&self, krate: Obj<Crate>) {
@@ -300,8 +304,356 @@ impl TyCtxt {
         binder
     }
 
+    pub fn mentioned_generics<B>(
+        &self,
+        ty: TyOrRe,
+        mut f: impl FnMut(AnyGeneric) -> ControlFlow<B>,
+    ) -> ControlFlow<B> {
+        fn recurse_ty_or_re_list<B>(
+            tcx: &TyCtxt,
+            ty: TyOrReList,
+            f: &mut impl FnMut(AnyGeneric) -> ControlFlow<B>,
+        ) -> ControlFlow<B> {
+            for &elem in ty.r(&tcx.session) {
+                recurse_ty_or_re(tcx, elem, f)?;
+            }
+
+            ControlFlow::Continue(())
+        }
+
+        fn recurse_ty_list<B>(
+            tcx: &TyCtxt,
+            ty: TyList,
+            f: &mut impl FnMut(AnyGeneric) -> ControlFlow<B>,
+        ) -> ControlFlow<B> {
+            for &elem in ty.r(&tcx.session) {
+                recurse_ty(tcx, elem, f)?;
+            }
+
+            ControlFlow::Continue(())
+        }
+
+        fn recurse_clauses<B>(
+            tcx: &TyCtxt,
+            clauses: TraitClauseList,
+            f: &mut impl FnMut(AnyGeneric) -> ControlFlow<B>,
+        ) -> ControlFlow<B> {
+            for &clause in clauses.r(&tcx.session) {
+                recurse_clause(tcx, clause, f)?;
+            }
+
+            ControlFlow::Continue(())
+        }
+
+        fn recurse_clause<B>(
+            tcx: &TyCtxt,
+            clause: TraitClause,
+            f: &mut impl FnMut(AnyGeneric) -> ControlFlow<B>,
+        ) -> ControlFlow<B> {
+            match clause {
+                TraitClause::Outlives(re) => {
+                    recurse_re(tcx, re, f)?;
+                }
+                TraitClause::Trait(spec) => {
+                    recurse_trait_spec(tcx, spec, f)?;
+                }
+            }
+
+            ControlFlow::Continue(())
+        }
+
+        fn recurse_trait_spec<B>(
+            tcx: &TyCtxt,
+            spec: TraitSpec,
+            f: &mut impl FnMut(AnyGeneric) -> ControlFlow<B>,
+        ) -> ControlFlow<B> {
+            for &param in spec.params.r(&tcx.session) {
+                recurse_param(tcx, param, f)?;
+            }
+
+            ControlFlow::Continue(())
+        }
+
+        fn recurse_param<B>(
+            tcx: &TyCtxt,
+            param: TraitParam,
+            f: &mut impl FnMut(AnyGeneric) -> ControlFlow<B>,
+        ) -> ControlFlow<B> {
+            match param {
+                TraitParam::Equals(ty_or_re) => {
+                    recurse_ty_or_re(tcx, ty_or_re, f)?;
+                }
+                TraitParam::Unspecified(clauses) => {
+                    recurse_clauses(tcx, clauses, f)?;
+                }
+            }
+
+            ControlFlow::Continue(())
+        }
+
+        fn recurse_ty_or_re<B>(
+            tcx: &TyCtxt,
+            ty_or_re: TyOrRe,
+            f: &mut impl FnMut(AnyGeneric) -> ControlFlow<B>,
+        ) -> ControlFlow<B> {
+            match ty_or_re {
+                TyOrRe::Re(re) => recurse_re(tcx, re, f),
+                TyOrRe::Ty(ty) => recurse_ty(tcx, ty, f),
+            }
+        }
+
+        fn recurse_re<B>(
+            _tcx: &TyCtxt,
+            re: Re,
+            f: &mut impl FnMut(AnyGeneric) -> ControlFlow<B>,
+        ) -> ControlFlow<B> {
+            match re {
+                Re::Gc | Re::InferVar(_) | Re::ExplicitInfer | Re::Erased => {
+                    // (empty)
+                }
+                Re::Generic(generic) => {
+                    f(AnyGeneric::Re(generic))?;
+                }
+            }
+
+            ControlFlow::Continue(())
+        }
+
+        fn recurse_ty<B>(
+            tcx: &TyCtxt,
+            ty: Ty,
+            f: &mut impl FnMut(AnyGeneric) -> ControlFlow<B>,
+        ) -> ControlFlow<B> {
+            match *ty.r(&tcx.session) {
+                TyKind::This
+                | TyKind::Simple(_)
+                | TyKind::FnDef(_)
+                | TyKind::ExplicitInfer
+                | TyKind::InferVar(_, _)
+                | TyKind::Error(_) => {
+                    // (empty)
+                }
+                TyKind::Reference(re, pointee) => {
+                    recurse_re(tcx, re, f)?;
+                    recurse_ty(tcx, pointee, f)?;
+                }
+                TyKind::Adt(_, args) => {
+                    recurse_ty_or_re_list(tcx, args, f)?;
+                }
+                TyKind::Trait(clauses) => {
+                    recurse_clauses(tcx, clauses, f)?;
+                }
+                TyKind::Tuple(tys) => {
+                    recurse_ty_list(tcx, tys, f)?;
+                }
+                TyKind::Universal(generic) => {
+                    f(AnyGeneric::Ty(generic))?;
+                }
+            }
+
+            ControlFlow::Continue(())
+        }
+
+        recurse_ty_or_re(self, ty, &mut f)
+    }
+
     pub fn wf_check_impl_generic_solve_order(&self, def: Obj<ImplDef>) {
-        todo!();
+        let s = &self.session;
+
+        define_index_type! {
+            struct GenericIdx = u32;
+        }
+
+        define_index_type! {
+            struct ClauseIndex = u32;
+        }
+
+        struct GenericState {
+            covered: bool,
+            deps: Vec<ClauseIndex>,
+        }
+
+        struct ClauseState {
+            blockers: u32,
+            step_idx: GenericSolveStep,
+            spec: TraitSpec,
+        }
+
+        let generic_defs = &def.r(s).generics.r(s).generics;
+
+        // Populate clauses
+        let mut generic_states = generic_defs
+            .iter()
+            .map(|_| GenericState {
+                covered: false,
+                deps: Vec::new(),
+            })
+            .collect::<IndexVec<GenericIdx, _>>();
+
+        let mut clause_states = IndexVec::<ClauseIndex, ClauseState>::new();
+
+        // N.B. only generic types are counted towards the generic index but all clauses are indexed
+        // equally.
+        for (step_generic_idx, generic_def) in
+            generic_defs.iter().filter_map(|v| v.as_ty()).enumerate()
+        {
+            for (step_clause_idx, clause_def) in
+                generic_def.r(s).user_clauses.r(s).iter().enumerate()
+            {
+                let TraitClause::Trait(spec) = *clause_def else {
+                    continue;
+                };
+
+                let clause_state_idx = clause_states.next_idx();
+                let mut blockers = 0;
+
+                for &param in &spec.params.r(s)[..spec.def.r(s).regular_generic_count as usize] {
+                    let TraitParam::Equals(ty) = param else {
+                        unreachable!()
+                    };
+
+                    cbit::cbit!(for generic in self.mentioned_generics(ty) {
+                        let Some(generic) = generic.as_ty() else {
+                            continue;
+                        };
+
+                        debug_assert_eq!(generic.r(s).binder.def, def.r(s).generics);
+
+                        generic_states[generic.r(s).binder.idx as usize]
+                            .deps
+                            .push(clause_state_idx);
+
+                        blockers += 1;
+                    });
+                }
+
+                clause_states.push(ClauseState {
+                    step_idx: GenericSolveStep {
+                        generic_idx: step_generic_idx as u32,
+                        clause_idx: step_clause_idx as u32,
+                    },
+                    blockers,
+                    spec,
+                });
+            }
+        }
+
+        // Iteratively mark covered generics.
+        let mut solve_queue = Vec::new();
+        let mut solve_order = Vec::new();
+
+        fn cover_idx(
+            solve_queue: &mut Vec<TraitSpec>,
+            solve_order: &mut Vec<GenericSolveStep>,
+            generic_states: &mut IndexVec<GenericIdx, GenericState>,
+            clause_states: &mut IndexVec<ClauseIndex, ClauseState>,
+            idx: GenericIdx,
+        ) {
+            let generic = &mut generic_states[idx];
+
+            if generic.covered {
+                return;
+            }
+
+            generic.covered = true;
+
+            for &dep in &generic.deps {
+                let clause = &mut clause_states[dep];
+                clause.blockers -= 1;
+
+                if clause.blockers > 0 {
+                    continue;
+                }
+
+                solve_queue.push(clause.spec);
+                solve_order.push(clause.step_idx);
+            }
+        }
+
+        fn cover_ty(
+            tcx: &TyCtxt,
+            solve_queue: &mut Vec<TraitSpec>,
+            solve_order: &mut Vec<GenericSolveStep>,
+            generic_states: &mut IndexVec<GenericIdx, GenericState>,
+            clause_states: &mut IndexVec<ClauseIndex, ClauseState>,
+            binder: Obj<GenericBinder>,
+            ty: Ty,
+        ) {
+            let s = &tcx.session;
+
+            cbit::cbit!(for generic in tcx.mentioned_generics(TyOrRe::Ty(ty)) {
+                let Some(generic) = generic.as_ty() else {
+                    continue;
+                };
+
+                debug_assert_eq!(generic.r(s).binder.def, binder);
+
+                cover_idx(
+                    solve_queue,
+                    solve_order,
+                    generic_states,
+                    clause_states,
+                    GenericIdx::from_raw(generic.r(s).binder.idx),
+                );
+            });
+        }
+
+        // Cover generics appearing in the target type and trait.
+        cover_ty(
+            self,
+            &mut solve_queue,
+            &mut solve_order,
+            &mut generic_states,
+            &mut clause_states,
+            def.r(s).generics,
+            def.r(s).target,
+        );
+
+        if let Some(trait_) = def.r(s).trait_ {
+            for param in trait_.params.r(s).iter().filter_map(|v| v.as_ty()) {
+                cover_ty(
+                    self,
+                    &mut solve_queue,
+                    &mut solve_order,
+                    &mut generic_states,
+                    &mut clause_states,
+                    def.r(s).generics,
+                    param,
+                );
+            }
+        }
+
+        // Recursively uncover more generics.
+        while let Some(clause) = solve_queue.pop() {
+            for param in &clause.params.r(s)[(clause.def.r(s).regular_generic_count as usize)..] {
+                match param {
+                    TraitParam::Equals(eq) => {
+                        // We can use this to reveal more equalities!
+                        cover_ty(
+                            self,
+                            &mut solve_queue,
+                            &mut solve_order,
+                            &mut generic_states,
+                            &mut clause_states,
+                            def.r(s).generics,
+                            eq.unwrap_ty(),
+                        );
+                    }
+                    TraitParam::Unspecified(_) => {
+                        // (does not contribute to solve order)
+                    }
+                }
+            }
+        }
+
+        // Ensure that all generics are covered.
+        for (state, def) in generic_states.iter().zip(generic_defs) {
+            if !state.covered {
+                Diag::span_err(def.span(s), "generic parameter not covered by `impl`").emit();
+            }
+        }
+
+        LateInit::init(&def.r(s).generic_solve_order, solve_order);
     }
 
     pub fn instantiate_fresh_target_infers(

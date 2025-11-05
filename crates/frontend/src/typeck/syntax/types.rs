@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        ErrorGuaranteed,
+        ErrorGuaranteed, Session,
         arena::{Intern, LateInit, Obj},
         syntax::{Span, Symbol},
     },
@@ -152,20 +152,33 @@ pub enum AnyGeneric {
 }
 
 impl AnyGeneric {
-    pub fn unwrap_re(self) -> Obj<RegionGeneric> {
-        let Self::Re(v) = self else {
-            unreachable!();
-        };
+    pub fn as_re(self) -> Option<Obj<RegionGeneric>> {
+        match self {
+            AnyGeneric::Re(v) => Some(v),
+            _ => None,
+        }
+    }
 
-        v
+    pub fn as_ty(self) -> Option<Obj<TypeGeneric>> {
+        match self {
+            AnyGeneric::Ty(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn unwrap_re(self) -> Obj<RegionGeneric> {
+        self.as_re().unwrap()
     }
 
     pub fn unwrap_ty(self) -> Obj<TypeGeneric> {
-        let Self::Ty(v) = self else {
-            unreachable!();
-        };
+        self.as_ty().unwrap()
+    }
 
-        v
+    pub fn span(self, s: &Session) -> Span {
+        match self {
+            AnyGeneric::Re(v) => v.r(s).span,
+            AnyGeneric::Ty(v) => v.r(s).span,
+        }
     }
 }
 
@@ -220,20 +233,26 @@ pub enum TyOrRe {
 }
 
 impl TyOrRe {
-    pub fn unwrap_re(self) -> Re {
-        let Self::Re(v) = self else {
-            unreachable!();
-        };
+    pub fn as_re(self) -> Option<Re> {
+        match self {
+            TyOrRe::Re(v) => Some(v),
+            TyOrRe::Ty(_) => None,
+        }
+    }
 
-        v
+    pub fn as_ty(self) -> Option<Ty> {
+        match self {
+            TyOrRe::Ty(v) => Some(v),
+            TyOrRe::Re(_) => None,
+        }
+    }
+
+    pub fn unwrap_re(self) -> Re {
+        self.as_re().unwrap()
     }
 
     pub fn unwrap_ty(self) -> Ty {
-        let Self::Ty(v) = self else {
-            unreachable!();
-        };
-
-        v
+        self.as_ty().unwrap()
     }
 }
 
