@@ -1,5 +1,11 @@
 mod tcx;
 pub use tcx::*;
 
-mod typeck;
-pub use typeck::*;
+mod tyops;
+pub use tyops::*;
+
+mod traits;
+pub use traits::*;
+
+mod wf;
+pub use wf::*;
