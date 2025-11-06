@@ -4,7 +4,7 @@ use crate::{
         analysis::Memo,
         arena::{Interner, ListInterner, Obj},
     },
-    typeck::{
+    semantic::{
         analysis::ImplFreshInfer,
         syntax::{
             GenericInstance, ImplDef, InferTyVar, ListOfTraitClauseList, TraitClause,

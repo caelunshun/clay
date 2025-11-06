@@ -1,6 +1,6 @@
 use crate::{
     base::{Diag, arena::Obj, syntax::Span},
-    typeck::{
+    semantic::{
         analysis::{InferVarInferences, TyCtxt},
         syntax::{
             AnyGeneric, Crate, GenericBinder, ImplDef, Item, TraitClause, TraitClauseList,

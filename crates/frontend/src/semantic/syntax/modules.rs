@@ -1,13 +1,13 @@
 use crate::{
+    semantic::{
+        lower::modules::{AnyDef, ParentKind},
+        syntax::{AdtDef, ImplDef, TraitDef},
+    },
     base::{
         arena::{LateInit, Obj},
         syntax::{Span, Symbol},
     },
     parse::token::Ident,
-    typeck::{
-        lower::modules::{AnyDef, ParentKind},
-        syntax::{AdtDef, ImplDef, TraitDef},
-    },
     utils::hash::FxIndexMap,
 };
 

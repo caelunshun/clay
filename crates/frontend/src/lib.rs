@@ -2,5 +2,5 @@
 
 pub mod base;
 pub mod parse;
-pub mod typeck;
+pub mod semantic;
 pub mod utils;

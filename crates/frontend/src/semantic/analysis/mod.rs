@@ -4,8 +4,8 @@ pub use tcx::*;
 mod tyops;
 pub use tyops::*;
 
-mod traits;
-pub use traits::*;
+mod typeck;
+pub use typeck::*;
 
 mod wf;
 pub use wf::*;

@@ -1,11 +1,11 @@
 use crate::{
+    semantic::syntax::{Func, Item},
     base::{
         ErrorGuaranteed, Session,
         arena::{Intern, LateInit, Obj},
         syntax::{Span, Symbol},
     },
     parse::token::{Ident, Lifetime},
-    typeck::syntax::{Func, Item},
     utils::{hash::FxHashMap, mem::CellVec},
 };
 

@@ -1,4 +1,11 @@
 use crate::{
+    semantic::{
+        lower::entry::IntraItemLowerCtxt,
+        syntax::{
+            AnyGeneric, GenericBinder, Re, TraitClause, TraitClauseList, TraitInstance, TraitParam,
+            TraitSpec, Ty, TyKind, TyList, TyOrRe,
+        },
+    },
     base::{Diag, ErrorGuaranteed, LeafDiag, arena::Obj},
     parse::{
         ast::{
@@ -6,13 +13,6 @@ use crate::{
             AstTraitClause, AstTraitClauseList, AstTy, AstTyKind, AstTyOrRe,
         },
         token::Lifetime,
-    },
-    typeck::{
-        lower::entry::IntraItemLowerCtxt,
-        syntax::{
-            AnyGeneric, GenericBinder, Re, TraitClause, TraitClauseList, TraitInstance, TraitParam,
-            TraitSpec, Ty, TyKind, TyList, TyOrRe,
-        },
     },
     utils::hash::FxHashMap,
 };

@@ -1,16 +1,16 @@
 use crate::{
+    semantic::{
+        lower::modules::{
+            AnyDef, ModulePathFmt, ModuleResolver, ParentKind, ParentResolver, StepLookupError,
+        },
+        syntax::{Item, Module, Visibility},
+    },
     base::{
         Session,
         arena::Obj,
         syntax::{Span, Symbol},
     },
     symbol,
-    typeck::{
-        lower::modules::{
-            AnyDef, ModulePathFmt, ModuleResolver, ParentKind, ParentResolver, StepLookupError,
-        },
-        syntax::{Item, Module, Visibility},
-    },
 };
 
 #[derive(Debug, Clone)]

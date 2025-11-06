@@ -2,6 +2,8 @@ pub trait Generic<T> {}
 
 impl<T, V: Associated<T = T>> Generic<(V,)> for () {}
 
+impl<T, V: Associated<T = T>> Generic<(V,)> for ((),) {}
+
 pub trait Associated {
     type T;
 }
@@ -18,4 +20,4 @@ pub trait Demo<T: MyTrait> {}
 
 pub trait Dummy {}
 
-impl<T: Demo<((), (), ((),))>> Dummy for T {}
+impl<T: Demo<((), ((),), ((),))>> Dummy for T {}

@@ -5,8 +5,7 @@ use crate::{
         syntax::Span,
     },
     parse::token::Ident,
-    symbol,
-    typeck::{
+    semantic::{
         analysis::TyCtxt,
         syntax::{
             AnyGeneric, GenericBinder, GenericInstance, GenericSolveStep, ImplDef, InferTyVar,
@@ -14,6 +13,7 @@ use crate::{
             TyKind, TyOrRe, TyOrReList, TypeGeneric,
         },
     },
+    symbol,
 };
 use disjoint::DisjointSetVec;
 use index_vec::{IndexVec, define_index_type};

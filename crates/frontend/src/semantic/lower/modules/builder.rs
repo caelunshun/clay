@@ -1,4 +1,11 @@
 use crate::{
+    semantic::{
+        lower::modules::{
+            AnyDef, EmitErrors, ModulePathFmt, ModuleResolver, ParentKind, ParentResolver,
+            StepLookupError,
+        },
+        syntax::{Crate, DirectUse, GlobUse, Item, Module, Visibility},
+    },
     base::{
         Diag, LeafDiag, Session,
         arena::{LateInit, Obj},
@@ -9,13 +16,6 @@ use crate::{
         token::Ident,
     },
     symbol,
-    typeck::{
-        lower::modules::{
-            AnyDef, EmitErrors, ModulePathFmt, ModuleResolver, ParentKind, ParentResolver,
-            StepLookupError,
-        },
-        syntax::{Crate, DirectUse, GlobUse, Item, Module, Visibility},
-    },
     utils::hash::FxIndexMap,
 };
 use index_vec::{IndexVec, define_index_type};

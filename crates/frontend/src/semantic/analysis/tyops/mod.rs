@@ -1,6 +1,6 @@
 use crate::{
     base::arena::{LateInit, Obj},
-    typeck::{
+    semantic::{
         analysis::TyCtxt,
         syntax::{
             AnyGeneric, GenericBinder, GenericInstance, PosInBinder, Re, TraitClause,

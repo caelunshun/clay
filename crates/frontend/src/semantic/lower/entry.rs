@@ -13,8 +13,7 @@ use crate::{
         },
         token::Ident,
     },
-    symbol,
-    typeck::{
+    semantic::{
         analysis::TyCtxt,
         lower::modules::{
             AnyDef, BuilderItemId, BuilderModuleId, BuilderModuleTree, FrozenModuleResolver,
@@ -25,6 +24,7 @@ use crate::{
             TraitDef, TypeGeneric,
         },
     },
+    symbol,
     utils::{hash::FxHashMap, mem::CellVec},
 };
 use index_vec::IndexVec;
