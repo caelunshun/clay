@@ -6,7 +6,7 @@ use crate::{
     },
     parse::token::Ident,
     semantic::{
-        analysis::{BinderSubstitution, SubstitutionFolder, TyCtxt, TyFolder},
+        analysis::{BinderSubstitution, InfallibleTyFolder as _, SubstitutionFolder, TyCtxt},
         syntax::{
             AnyGeneric, GenericBinder, GenericSolveStep, ImplDef, InferTyVar,
             ListOfTraitClauseList, Re, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty,
@@ -331,8 +331,7 @@ impl TyCtxt {
 
                 // Substitute the target type
                 let target = SubstitutionFolder::new(self, self.intern_ty(TyKind::This), substs)
-                    .visit_ty(candidate.r(s).target)
-                    .unwrap();
+                    .fold_ty(candidate.r(s).target);
 
                 let inf_var_clauses = binder
                     .r(s)
@@ -342,8 +341,7 @@ impl TyCtxt {
                         AnyGeneric::Re(_generic) => None,
                         AnyGeneric::Ty(generic) => Some(
                             SubstitutionFolder::new(self, target, substs)
-                                .visit_clause_list(*generic.r(s).user_clauses)
-                                .unwrap(),
+                                .fold_clause_list(*generic.r(s).user_clauses),
                         ),
                     })
                     .collect::<Vec<_>>();
@@ -351,8 +349,7 @@ impl TyCtxt {
                 let inf_var_clauses = self.intern_list_of_trait_clause_list(&inf_var_clauses);
 
                 let trait_instance = SubstitutionFolder::new(self, target, substs)
-                    .walk_ty_or_re_list(candidate.r(s).trait_.unwrap().params)
-                    .unwrap();
+                    .fold_ty_or_re_list(candidate.r(s).trait_.unwrap().params);
 
                 ImplFreshInfer {
                     target,

@@ -40,7 +40,7 @@ impl TyCtxt {
             tcx: self,
             f,
         }
-        .walk_ty_or_re(ty)
+        .visit_ty_or_re(ty)
     }
 }
 

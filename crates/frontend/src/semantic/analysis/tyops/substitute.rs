@@ -1,7 +1,7 @@
 use crate::{
     base::arena::Obj,
     semantic::{
-        analysis::{TyCtxt, TyFolder},
+        analysis::{TyCtxt, TyFolder, TyFolderSuper as _},
         syntax::{GenericBinder, Re, RegionGeneric, Ty, TyKind, TyOrReList, TypeGeneric},
     },
 };
@@ -37,19 +37,19 @@ impl<'tcx> TyFolder<'tcx> for SubstitutionFolder<'tcx> {
         self.tcx
     }
 
-    fn visit_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
+    fn try_fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
         let mapped = self
             .tcx
             .queries
             .substitute_ty
             .compute_infallible((ty, self.self_ty, self.substitution), |_| {
-                self.walk_ty(ty).unwrap()
+                self.super_ty(ty).unwrap()
             });
 
         Ok(mapped)
     }
 
-    fn visit_ty_generic_use(&mut self, generic: Obj<TypeGeneric>) -> Result<Ty, Self::Error> {
+    fn try_fold_ty_generic_use(&mut self, generic: Obj<TypeGeneric>) -> Result<Ty, Self::Error> {
         let s = &self.tcx.session;
 
         let pos_in_binder = *generic.r(s).binder;
@@ -61,7 +61,7 @@ impl<'tcx> TyFolder<'tcx> for SubstitutionFolder<'tcx> {
         Ok(self.substitution.substs.r(s)[pos_in_binder.idx as usize].unwrap_ty())
     }
 
-    fn visit_re_generic_use(&mut self, generic: Obj<RegionGeneric>) -> Result<Re, Self::Error> {
+    fn try_fold_re_generic_use(&mut self, generic: Obj<RegionGeneric>) -> Result<Re, Self::Error> {
         let s = &self.tcx.session;
 
         let pos_in_binder = *generic.r(s).binder;
@@ -73,7 +73,7 @@ impl<'tcx> TyFolder<'tcx> for SubstitutionFolder<'tcx> {
         Ok(self.substitution.substs.r(s)[pos_in_binder.idx as usize].unwrap_re())
     }
 
-    fn visit_self_ty_use(&mut self) -> Result<Ty, Self::Error> {
+    fn try_fold_self_ty_use(&mut self) -> Result<Ty, Self::Error> {
         Ok(self.self_ty)
     }
 }
