@@ -209,6 +209,16 @@ impl<T: ?Sized + 'static> Intern<T> {
 
 // === Interner === //
 
+pub trait HasInterner<T: 'static + hash::Hash + Eq> {
+    fn session(&self) -> &Session;
+
+    fn interner(&self) -> &Interner<T>;
+
+    fn intern(&self, value: T) -> Intern<T> {
+        self.interner().intern(value, self.session())
+    }
+}
+
 #[derive_where(Default)]
 pub struct Interner<T: 'static> {
     interns: RefCell<FxHashMap<(Intern<T>, u64), ()>>,
@@ -244,6 +254,19 @@ where
 }
 
 // === ListInterner === //
+
+pub trait HasListInterner<T: 'static + hash::Hash + Eq + Clone> {
+    fn session(&self) -> &Session;
+
+    fn interner(&self) -> &ListInterner<T>;
+
+    fn intern(&self, values: &[T]) -> Intern<[T]>
+    where
+        T: Clone,
+    {
+        self.interner().intern(values, self.session())
+    }
+}
 
 #[derive_where(Default)]
 pub struct ListInterner<T: 'static> {

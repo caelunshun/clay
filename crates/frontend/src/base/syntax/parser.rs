@@ -1,4 +1,4 @@
-use super::{Span, Spanned, Symbol};
+use super::{HasSpan, Span, Symbol};
 use crate::{
     base::{Diag, ErrorGuaranteed, HardDiag, LeafDiag},
     utils::lang::Extension,
@@ -480,7 +480,7 @@ pub trait Delimited {
 }
 
 pub trait CursorIter:
-    Sized + Iterator<Item: AtomSimplify<Simplified = Self::Simplified> + Spanned> + Clone + Delimited
+    Sized + Iterator<Item: AtomSimplify<Simplified = Self::Simplified> + HasSpan> + Clone + Delimited
 {
     type Simplified;
 }
@@ -488,7 +488,7 @@ pub trait CursorIter:
 impl<I, A, S> CursorIter for I
 where
     I: Clone + Iterator<Item = A> + Delimited,
-    A: AtomSimplify<Simplified = S> + Spanned,
+    A: AtomSimplify<Simplified = S> + HasSpan,
 {
     type Simplified = S;
 }
@@ -559,7 +559,7 @@ impl AtomSimplify for SpannedChar {
     }
 }
 
-impl Spanned for SpannedChar {
+impl HasSpan for SpannedChar {
     fn span(&self) -> Span {
         self.span
     }

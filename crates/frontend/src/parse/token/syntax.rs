@@ -2,7 +2,7 @@ use crate::{
     base::{
         Session,
         syntax::{
-            AtomSimplify, Cursor, Delimited, LookaheadResult, Matcher, Parser, Span, Spanned,
+            AtomSimplify, Cursor, Delimited, HasSpan, LookaheadResult, Matcher, Parser, Span,
             StuckHinter, Symbol,
         },
     },
@@ -69,7 +69,7 @@ impl AtomSimplify for TokenTree {
     }
 }
 
-impl Spanned for TokenTree {
+impl HasSpan for TokenTree {
     fn span(&self) -> Span {
         match self {
             Self::Group(v) => v.span(),
@@ -139,7 +139,7 @@ pub struct TokenGroup {
     pub tokens: TokenStream,
 }
 
-impl Spanned for TokenGroup {
+impl HasSpan for TokenGroup {
     fn span(&self) -> Span {
         self.span
     }
@@ -214,7 +214,7 @@ impl Ident {
     }
 }
 
-impl Spanned for Ident {
+impl HasSpan for Ident {
     fn span(&self) -> Span {
         self.span
     }
@@ -226,7 +226,7 @@ pub struct Lifetime {
     pub name: Symbol,
 }
 
-impl Spanned for Lifetime {
+impl HasSpan for Lifetime {
     fn span(&self) -> Span {
         self.span
     }
@@ -239,7 +239,7 @@ pub struct TokenPunct {
     pub glued: bool,
 }
 
-impl Spanned for TokenPunct {
+impl HasSpan for TokenPunct {
     fn span(&self) -> Span {
         self.span
     }
@@ -252,7 +252,7 @@ pub struct TokenStrLit {
     pub value: Symbol,
 }
 
-impl Spanned for TokenStrLit {
+impl HasSpan for TokenStrLit {
     fn span(&self) -> Span {
         self.span
     }
@@ -304,7 +304,7 @@ impl TokenNumLit {
     }
 }
 
-impl Spanned for TokenNumLit {
+impl HasSpan for TokenNumLit {
     fn span(&self) -> Span {
         self.span
     }
@@ -344,7 +344,7 @@ pub struct TokenCharLit {
     pub value: char,
 }
 
-impl Spanned for TokenCharLit {
+impl HasSpan for TokenCharLit {
     fn span(&self) -> Span {
         self.span
     }
@@ -494,7 +494,7 @@ pub enum TokenCursorElement<'a> {
     Token(&'a TokenTree),
 }
 
-impl Spanned for TokenCursorElement<'_> {
+impl HasSpan for TokenCursorElement<'_> {
     fn span(&self) -> Span {
         match *self {
             TokenCursorElement::Ending(span) => span,

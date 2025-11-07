@@ -1,7 +1,7 @@
 use crate::{
     base::{
         ErrorGuaranteed,
-        syntax::{Span, Spanned},
+        syntax::{Span, HasSpan},
     },
     kw,
     parse::token::{Ident, Lifetime, TokenStream},
@@ -213,7 +213,7 @@ pub enum AstTyOrRe {
     Ty(AstTy),
 }
 
-impl Spanned for AstTyOrRe {
+impl HasSpan for AstTyOrRe {
     fn span(&self) -> Span {
         match self {
             AstTyOrRe::Re(v) => v.span,
