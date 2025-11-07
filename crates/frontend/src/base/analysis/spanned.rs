@@ -30,16 +30,17 @@ impl<T> Spanned<T> {
         self.span_info.own_span()
     }
 
-    pub fn new_view<C>(own_span: Span, view: T::View, cx: &C) -> Self
-    where
-        T: SpannedView<C>,
-    {
-        T::encode(own_span, view, cx)
+    pub fn new_view<C>(
+        own_span: Span,
+        view: impl SpannedViewEncode<C, Unspanned = T>,
+        cx: &C,
+    ) -> Self {
+        view.encode(own_span, cx)
     }
 
     pub fn view<C>(&self, cx: &C) -> T::View
     where
-        T: SpannedView<C>,
+        T: SpannedViewDecode<C>,
     {
         T::decode(&self.value, self.span_info, cx)
     }
@@ -144,10 +145,14 @@ impl SpannedInfo {
     }
 }
 
-pub trait SpannedView<C>: Sized {
-    type View;
+pub trait SpannedViewDecode<C>: Sized {
+    type View: SpannedViewEncode<C, Unspanned = Self>;
 
     fn decode(value: &Self, span_info: SpannedInfo, cx: &C) -> Self::View;
+}
 
-    fn encode(own_span: Span, view: Self::View, cx: &C) -> Spanned<Self>;
+pub trait SpannedViewEncode<C>: Sized {
+    type Unspanned: SpannedViewDecode<C, View = Self>;
+
+    fn encode(self, own_span: Span, cx: &C) -> Spanned<Self::Unspanned>;
 }

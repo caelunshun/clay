@@ -1,7 +1,7 @@
 use crate::{
     base::{
         ErrorGuaranteed,
-        syntax::{Span, HasSpan},
+        syntax::{HasSpan, Span},
     },
     kw,
     parse::token::{Ident, Lifetime, TokenStream},

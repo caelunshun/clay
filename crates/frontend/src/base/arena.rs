@@ -1,5 +1,5 @@
 use crate::{
-    base::Session,
+    base::{HasSession, Session},
     utils::hash::{FxBuildHasher, FxHashMap, FxHashSet, hash_map},
 };
 use bumpalo::Bump;
@@ -209,9 +209,7 @@ impl<T: ?Sized + 'static> Intern<T> {
 
 // === Interner === //
 
-pub trait HasInterner<T: 'static + hash::Hash + Eq> {
-    fn session(&self) -> &Session;
-
+pub trait HasInterner<T: 'static + hash::Hash + Eq>: HasSession {
     fn interner(&self) -> &Interner<T>;
 
     fn intern(&self, value: T) -> Intern<T> {
@@ -255,9 +253,7 @@ where
 
 // === ListInterner === //
 
-pub trait HasListInterner<T: 'static + hash::Hash + Eq + Clone> {
-    fn session(&self) -> &Session;
-
+pub trait HasListInterner<T: 'static + hash::Hash + Eq + Clone>: HasSession {
     fn interner(&self) -> &ListInterner<T>;
 
     fn intern(&self, values: &[T]) -> Intern<[T]>

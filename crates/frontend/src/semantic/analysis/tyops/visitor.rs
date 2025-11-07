@@ -1,10 +1,15 @@
 use crate::{
-    base::{Session, arena::Obj},
+    base::{Session, analysis::Spanned, arena::Obj, syntax::Span},
     semantic::{
         analysis::TyCtxt,
         syntax::{
             AdtDef, AdtInstance, AnyGeneric, Crate, GenericBinder, ImplDef, Item, ItemKind, Re,
-            RegionGeneric, TraitClause, TraitClauseList, TraitDef, TraitInstance, TraitParam,
+            RegionGeneric, SpannedAdtInstance, SpannedAdtInstanceView, SpannedRe,
+            SpannedTraitClause, SpannedTraitClauseList, SpannedTraitClauseView,
+            SpannedTraitInstance, SpannedTraitInstanceView, SpannedTraitParam,
+            SpannedTraitParamList, SpannedTraitParamView, SpannedTraitSpec, SpannedTraitSpecView,
+            SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView,
+            SpannedTyView, TraitClause, TraitClauseList, TraitDef, TraitInstance, TraitParam,
             TraitParamList, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReList, TypeGeneric,
         },
     },
@@ -62,70 +67,92 @@ pub trait TyVisitor<'tcx> {
 
     // === Clauses === //
 
-    fn visit_clause_list(&mut self, clauses: TraitClauseList) -> ControlFlow<Self::Break> {
+    fn visit_spanned_clause_list(
+        &mut self,
+        clauses: SpannedTraitClauseList,
+    ) -> ControlFlow<Self::Break> {
         self.walk_clause_list(clauses)
     }
 
-    fn visit_clause(&mut self, clause: TraitClause) -> ControlFlow<Self::Break> {
+    fn visit_spanned_clause(&mut self, clause: SpannedTraitClause) -> ControlFlow<Self::Break> {
         self.walk_clause(clause)
     }
 
-    fn visit_param_list(&mut self, params: TraitParamList) -> ControlFlow<Self::Break> {
+    fn visit_spanned_param_list(
+        &mut self,
+        params: SpannedTraitParamList,
+    ) -> ControlFlow<Self::Break> {
         self.walk_param_list(params)
     }
 
-    fn visit_param(&mut self, param: TraitParam) -> ControlFlow<Self::Break> {
+    fn visit_spanned_param(&mut self, param: SpannedTraitParam) -> ControlFlow<Self::Break> {
         self.walk_param(param)
     }
 
     // === Instances === //
 
-    fn visit_trait_spec(&mut self, spec: TraitSpec) -> ControlFlow<Self::Break> {
+    fn visit_spanned_trait_spec(&mut self, spec: SpannedTraitSpec) -> ControlFlow<Self::Break> {
         self.walk_trait_spec(spec)
     }
 
-    fn visit_trait_instance(&mut self, instance: TraitInstance) -> ControlFlow<Self::Break> {
+    fn visit_spanned_trait_instance(
+        &mut self,
+        instance: SpannedTraitInstance,
+    ) -> ControlFlow<Self::Break> {
         self.walk_trait_instance(instance)
     }
 
-    fn visit_adt_instance(&mut self, instance: AdtInstance) -> ControlFlow<Self::Break> {
+    fn visit_spanned_adt_instance(
+        &mut self,
+        instance: SpannedAdtInstance,
+    ) -> ControlFlow<Self::Break> {
         self.walk_adt_instance(instance)
     }
 
     // === Types === //
 
-    fn visit_ty_or_re(&mut self, ty_or_re: TyOrRe) -> ControlFlow<Self::Break> {
+    fn visit_spanned_ty_or_re(&mut self, ty_or_re: SpannedTyOrRe) -> ControlFlow<Self::Break> {
         self.walk_ty_or_re(ty_or_re)
     }
 
-    fn visit_ty_or_re_list(&mut self, list: TyOrReList) -> ControlFlow<Self::Break> {
+    fn visit_spanned_ty_or_re_list(&mut self, list: SpannedTyOrReList) -> ControlFlow<Self::Break> {
         self.walk_ty_or_re_list(list)
     }
 
-    fn visit_ty_list(&mut self, list: TyList) -> ControlFlow<Self::Break> {
+    fn visit_spanned_ty_list(&mut self, list: SpannedTyList) -> ControlFlow<Self::Break> {
         self.walk_ty_list(list)
     }
 
-    fn visit_re(&mut self, re: Re) -> ControlFlow<Self::Break> {
+    fn visit_spanned_re(&mut self, re: SpannedRe) -> ControlFlow<Self::Break> {
         self.walk_re(re)
     }
 
-    fn visit_ty(&mut self, ty: Ty) -> ControlFlow<Self::Break> {
+    fn visit_spanned_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
         self.walk_ty(ty)
     }
 
-    fn visit_self_ty_use(&mut self) -> ControlFlow<Self::Break> {
-        ControlFlow::Continue(())
-    }
-
-    fn visit_re_generic_use(&mut self, generic: Obj<RegionGeneric>) -> ControlFlow<Self::Break> {
-        _ = generic;
+    fn visit_spanned_self_ty_use(&mut self, span: Option<Span>) -> ControlFlow<Self::Break> {
+        _ = span;
 
         ControlFlow::Continue(())
     }
 
-    fn visit_ty_generic_use(&mut self, generic: Obj<TypeGeneric>) -> ControlFlow<Self::Break> {
-        _ = generic;
+    fn visit_spanned_re_generic_use(
+        &mut self,
+        span: Option<Span>,
+        generic: Obj<RegionGeneric>,
+    ) -> ControlFlow<Self::Break> {
+        _ = (span, generic);
+
+        ControlFlow::Continue(())
+    }
+
+    fn visit_spanned_ty_generic_use(
+        &mut self,
+        span: Option<Span>,
+        generic: Obj<TypeGeneric>,
+    ) -> ControlFlow<Self::Break> {
+        _ = (span, generic);
 
         ControlFlow::Continue(())
     }
@@ -177,7 +204,7 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
         } = def.r(s);
 
         self.visit_generic_binder(*generics)?;
-        self.visit_clause_list(**inherits)?;
+        self.visit_spanned_clause_list(**inherits)?;
 
         // TODO: `methods`
 
@@ -200,10 +227,10 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
         } = def.r(s);
 
         self.visit_generic_binder(*generics)?;
-        self.visit_ty(*target)?;
+        self.visit_spanned_ty(*target)?;
 
         if let Some(trait_) = *trait_ {
-            self.visit_trait_instance(trait_)?;
+            self.visit_spanned_trait_instance(trait_)?;
         }
 
         // TODO: `methods`
@@ -240,7 +267,7 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
             is_synthetic: _,
         } = generic.r(s);
 
-        self.visit_clause_list(**user_clauses)?;
+        self.visit_spanned_clause_list(**user_clauses)?;
 
         ControlFlow::Continue(())
     }
@@ -255,49 +282,49 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
             clauses,
         } = generic.r(s);
 
-        self.visit_clause_list(**clauses)?;
+        self.visit_spanned_clause_list(**clauses)?;
 
         ControlFlow::Continue(())
     }
 
     // === Clauses === //
 
-    fn walk_clause_list(&mut self, clauses: TraitClauseList) -> ControlFlow<Self::Break> {
-        for &clause in clauses.r(self.session()) {
-            self.visit_clause(clause)?;
+    fn walk_clause_list(&mut self, clauses: SpannedTraitClauseList) -> ControlFlow<Self::Break> {
+        for clause in clauses.iter(self.session()) {
+            self.visit_spanned_clause(clause)?;
         }
 
         ControlFlow::Continue(())
     }
 
-    fn walk_clause(&mut self, clause: TraitClause) -> ControlFlow<Self::Break> {
-        match clause {
-            TraitClause::Outlives(re) => {
-                self.visit_re(re)?;
+    fn walk_clause(&mut self, clause: SpannedTraitClause) -> ControlFlow<Self::Break> {
+        match clause.view(self.tcx()) {
+            SpannedTraitClauseView::Outlives(re) => {
+                self.visit_spanned_re(re)?;
             }
-            TraitClause::Trait(spec) => {
-                self.visit_trait_spec(spec)?;
+            SpannedTraitClauseView::Trait(spec) => {
+                self.visit_spanned_trait_spec(spec)?;
             }
         }
 
         ControlFlow::Continue(())
     }
 
-    fn walk_param_list(&mut self, params: TraitParamList) -> ControlFlow<Self::Break> {
-        for &param in params.r(self.session()) {
-            self.visit_param(param)?;
+    fn walk_param_list(&mut self, params: SpannedTraitParamList) -> ControlFlow<Self::Break> {
+        for param in params.iter(self.session()) {
+            self.visit_spanned_param(param)?;
         }
 
         ControlFlow::Continue(())
     }
 
-    fn walk_param(&mut self, param: TraitParam) -> ControlFlow<Self::Break> {
-        match param {
-            TraitParam::Equals(ty_or_re) => {
+    fn walk_param(&mut self, param: SpannedTraitParam) -> ControlFlow<Self::Break> {
+        match param.view(self.tcx()) {
+            SpannedTraitParamView::Equals(ty_or_re) => {
                 self.walk_ty_or_re(ty_or_re)?;
             }
-            TraitParam::Unspecified(clauses) => {
-                self.visit_clause_list(clauses)?;
+            SpannedTraitParamView::Unspecified(clauses) => {
+                self.visit_spanned_clause_list(clauses)?;
             }
         }
 
@@ -306,94 +333,92 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
 
     // === Instances === //
 
-    fn walk_trait_spec(&mut self, spec: TraitSpec) -> ControlFlow<Self::Break> {
-        let TraitSpec { def: _, params } = spec;
-        self.visit_param_list(params)?;
+    fn walk_trait_spec(&mut self, spec: SpannedTraitSpec) -> ControlFlow<Self::Break> {
+        let SpannedTraitSpecView { def: _, params } = spec.view(self.tcx());
+        self.visit_spanned_param_list(params)?;
 
         ControlFlow::Continue(())
     }
 
-    fn walk_trait_instance(&mut self, instance: TraitInstance) -> ControlFlow<Self::Break> {
-        let TraitInstance { def: _, params } = instance;
-        self.visit_ty_or_re_list(params)?;
+    fn walk_trait_instance(&mut self, instance: SpannedTraitInstance) -> ControlFlow<Self::Break> {
+        let SpannedTraitInstanceView { def: _, params } = instance.view(self.tcx());
+        self.visit_spanned_ty_or_re_list(params)?;
 
         ControlFlow::Continue(())
     }
 
-    fn walk_adt_instance(&mut self, instance: AdtInstance) -> ControlFlow<Self::Break> {
-        let AdtInstance { def: _, params } = instance;
-        self.visit_ty_or_re_list(params)?;
+    fn walk_adt_instance(&mut self, instance: SpannedAdtInstance) -> ControlFlow<Self::Break> {
+        let SpannedAdtInstanceView { def: _, params } = instance.view(self.tcx());
+        self.visit_spanned_ty_or_re_list(params)?;
 
         ControlFlow::Continue(())
     }
 
     // === Types === //
 
-    fn walk_ty_or_re(&mut self, ty_or_re: TyOrRe) -> ControlFlow<Self::Break> {
-        match ty_or_re {
-            TyOrRe::Re(re) => self.visit_re(re),
-            TyOrRe::Ty(ty) => self.visit_ty(ty),
+    fn walk_ty_or_re(&mut self, ty_or_re: SpannedTyOrRe) -> ControlFlow<Self::Break> {
+        match ty_or_re.view(self.tcx()) {
+            SpannedTyOrReView::Re(re) => self.visit_spanned_re(re),
+            SpannedTyOrReView::Ty(ty) => self.visit_spanned_ty(ty),
         }
     }
 
-    fn walk_ty_or_re_list(&mut self, list: TyOrReList) -> ControlFlow<Self::Break> {
-        for &ty_or_re in list.r(self.session()) {
-            self.visit_ty_or_re(ty_or_re)?;
-        }
-
-        ControlFlow::Continue(())
-    }
-
-    fn walk_ty_list(&mut self, list: TyList) -> ControlFlow<Self::Break> {
-        for &ty in list.r(self.session()) {
-            self.visit_ty(ty)?;
+    fn walk_ty_or_re_list(&mut self, list: SpannedTyOrReList) -> ControlFlow<Self::Break> {
+        for ty_or_re in list.iter(self.session()) {
+            self.visit_spanned_ty_or_re(ty_or_re)?;
         }
 
         ControlFlow::Continue(())
     }
 
-    fn walk_re(&mut self, re: Re) -> ControlFlow<Self::Break> {
-        match re {
+    fn walk_ty_list(&mut self, list: SpannedTyList) -> ControlFlow<Self::Break> {
+        for ty in list.iter(self.session()) {
+            self.visit_spanned_ty(ty)?;
+        }
+
+        ControlFlow::Continue(())
+    }
+
+    fn walk_re(&mut self, re: SpannedRe) -> ControlFlow<Self::Break> {
+        match re.value {
             Re::Gc | Re::InferVar(_) | Re::ExplicitInfer | Re::Erased => {
                 // (dead end)
             }
             Re::Universal(generic) => {
-                self.visit_re_generic_use(generic)?;
+                self.visit_spanned_re_generic_use(re.own_span(), generic)?;
             }
         }
 
         ControlFlow::Continue(())
     }
 
-    fn walk_ty(&mut self, ty: Ty) -> ControlFlow<Self::Break> {
-        let s = self.session();
-
-        match *ty.r(s) {
-            TyKind::Simple(..)
-            | TyKind::FnDef(..)
-            | TyKind::ExplicitInfer
-            | TyKind::InferVar(..)
-            | TyKind::Error(..) => {
+    fn walk_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
+        match ty.view(self.tcx()) {
+            SpannedTyView::Simple(..)
+            | SpannedTyView::FnDef(..)
+            | SpannedTyView::ExplicitInfer
+            | SpannedTyView::InferVar(..)
+            | SpannedTyView::Error(..) => {
                 // (dead end)
             }
-            TyKind::This => {
-                self.visit_self_ty_use()?;
+            SpannedTyView::This => {
+                self.visit_spanned_self_ty_use(ty.own_span())?;
             }
-            TyKind::Reference(re, pointee) => {
-                self.visit_re(re)?;
-                self.visit_ty(pointee)?;
+            SpannedTyView::Reference(re, pointee) => {
+                self.visit_spanned_re(re)?;
+                self.visit_spanned_ty(pointee)?;
             }
-            TyKind::Adt(instance) => {
-                self.visit_adt_instance(instance)?;
+            SpannedTyView::Adt(instance) => {
+                self.visit_spanned_adt_instance(instance)?;
             }
-            TyKind::Trait(clause_list) => {
-                self.visit_clause_list(clause_list)?;
+            SpannedTyView::Trait(clause_list) => {
+                self.visit_spanned_clause_list(clause_list)?;
             }
-            TyKind::Tuple(tys) => {
-                self.visit_ty_list(tys)?;
+            SpannedTyView::Tuple(tys) => {
+                self.visit_spanned_ty_list(tys)?;
             }
-            TyKind::Universal(generic) => {
-                self.visit_ty_generic_use(generic)?;
+            SpannedTyView::Universal(generic) => {
+                self.visit_spanned_ty_generic_use(ty.own_span(), generic)?;
             }
         }
 
@@ -402,6 +427,76 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
 }
 
 impl<'tcx, T: ?Sized + TyVisitor<'tcx>> TyVisitorWalk<'tcx> for T {}
+
+pub trait TyVisitorUnspanned<'tcx>: TyVisitor<'tcx> {
+    // === Clauses === //
+
+    fn visit_clause_list(&mut self, clauses: TraitClauseList) -> ControlFlow<Self::Break> {
+        self.visit_spanned_clause_list(Spanned::new_unspanned(clauses))
+    }
+
+    fn visit_clause(&mut self, clause: TraitClause) -> ControlFlow<Self::Break> {
+        self.visit_spanned_clause(Spanned::new_unspanned(clause))
+    }
+
+    fn visit_param_list(&mut self, params: TraitParamList) -> ControlFlow<Self::Break> {
+        self.visit_spanned_param_list(Spanned::new_unspanned(params))
+    }
+
+    fn visit_param(&mut self, param: TraitParam) -> ControlFlow<Self::Break> {
+        self.visit_spanned_param(Spanned::new_unspanned(param))
+    }
+
+    // === Instances === //
+
+    fn visit_trait_spec(&mut self, spec: TraitSpec) -> ControlFlow<Self::Break> {
+        self.visit_spanned_trait_spec(Spanned::new_unspanned(spec))
+    }
+
+    fn visit_trait_instance(&mut self, instance: TraitInstance) -> ControlFlow<Self::Break> {
+        self.visit_spanned_trait_instance(Spanned::new_unspanned(instance))
+    }
+
+    fn visit_adt_instance(&mut self, instance: AdtInstance) -> ControlFlow<Self::Break> {
+        self.visit_spanned_adt_instance(Spanned::new_unspanned(instance))
+    }
+
+    // === Types === //
+
+    fn visit_ty_or_re(&mut self, ty_or_re: TyOrRe) -> ControlFlow<Self::Break> {
+        self.visit_spanned_ty_or_re(Spanned::new_unspanned(ty_or_re))
+    }
+
+    fn visit_ty_or_re_list(&mut self, list: TyOrReList) -> ControlFlow<Self::Break> {
+        self.visit_spanned_ty_or_re_list(Spanned::new_unspanned(list))
+    }
+
+    fn visit_ty_list(&mut self, list: TyList) -> ControlFlow<Self::Break> {
+        self.visit_spanned_ty_list(Spanned::new_unspanned(list))
+    }
+
+    fn visit_re(&mut self, re: Re) -> ControlFlow<Self::Break> {
+        self.visit_spanned_re(Spanned::new_unspanned(re))
+    }
+
+    fn visit_ty(&mut self, ty: Ty) -> ControlFlow<Self::Break> {
+        self.visit_spanned_ty(Spanned::new_unspanned(ty))
+    }
+
+    fn visit_self_ty_use(&mut self) -> ControlFlow<Self::Break> {
+        self.visit_spanned_self_ty_use(None)
+    }
+
+    fn visit_re_generic_use(&mut self, generic: Obj<RegionGeneric>) -> ControlFlow<Self::Break> {
+        self.visit_spanned_re_generic_use(None, generic)
+    }
+
+    fn visit_ty_generic_use(&mut self, generic: Obj<TypeGeneric>) -> ControlFlow<Self::Break> {
+        self.visit_spanned_ty_generic_use(None, generic)
+    }
+}
+
+impl<'tcx, T: ?Sized + TyVisitor<'tcx>> TyVisitorUnspanned<'tcx> for T {}
 
 // === Folder === //
 
@@ -640,7 +735,7 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
 
 impl<'tcx, T: ?Sized + TyFolder<'tcx>> TyFolderSuper<'tcx> for T {}
 
-pub trait InfallibleTyFolder<'tcx>: TyFolder<'tcx, Error = Infallible> {
+pub trait TyFolderInfallible<'tcx>: TyFolder<'tcx, Error = Infallible> {
     fn fold_clause_list(&mut self, clauses: TraitClauseList) -> TraitClauseList {
         self.try_fold_clause_list(clauses).unwrap()
     }
@@ -706,4 +801,4 @@ pub trait InfallibleTyFolder<'tcx>: TyFolder<'tcx, Error = Infallible> {
     }
 }
 
-impl<'tcx, T: ?Sized + TyFolder<'tcx, Error = Infallible>> InfallibleTyFolder<'tcx> for T {}
+impl<'tcx, T: ?Sized + TyFolder<'tcx, Error = Infallible>> TyFolderInfallible<'tcx> for T {}

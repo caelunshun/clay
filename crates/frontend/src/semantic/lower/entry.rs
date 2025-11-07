@@ -518,7 +518,7 @@ impl IntraItemLowerCtxt<'_> {
                     s,
                 );
 
-                for_trait.def.r(s).impls.mutate(|v| v.push(item));
+                for_trait.value.def.r(s).impls.mutate(|v| v.push(item));
 
                 item
             }

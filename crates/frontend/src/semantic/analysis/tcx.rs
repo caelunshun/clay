@@ -1,8 +1,8 @@
 use crate::{
     base::{
-        Session,
+        HasSession, Session,
         analysis::Memo,
-        arena::{Interner, ListInterner, Obj},
+        arena::{HasInterner, HasListInterner, Interner, ListInterner, Obj},
     },
     semantic::{
         analysis::{BinderSubstitution, ImplFreshInfer},
@@ -113,5 +113,47 @@ impl TyCtxt {
                 .flatten()
                 .collect::<Vec<_>>(),
         )
+    }
+}
+
+impl HasSession for TyCtxt {
+    fn session(&self) -> &Session {
+        &self.session
+    }
+}
+
+impl HasInterner<TyKind> for TyCtxt {
+    fn interner(&self) -> &Interner<TyKind> {
+        &self.interners.ty
+    }
+}
+
+impl HasListInterner<Ty> for TyCtxt {
+    fn interner(&self) -> &ListInterner<Ty> {
+        &self.interners.ty_list
+    }
+}
+
+impl HasListInterner<TyOrRe> for TyCtxt {
+    fn interner(&self) -> &ListInterner<TyOrRe> {
+        &self.interners.ty_or_re_list
+    }
+}
+
+impl HasListInterner<TraitParam> for TyCtxt {
+    fn interner(&self) -> &ListInterner<TraitParam> {
+        &self.interners.trait_param_list
+    }
+}
+
+impl HasListInterner<TraitClause> for TyCtxt {
+    fn interner(&self) -> &ListInterner<TraitClause> {
+        &self.interners.trait_clause_list
+    }
+}
+
+impl HasListInterner<TraitClauseList> for TyCtxt {
+    fn interner(&self) -> &ListInterner<TraitClauseList> {
+        &self.interners.list_of_trait_clause_list
     }
 }

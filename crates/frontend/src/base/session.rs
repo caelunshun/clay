@@ -9,6 +9,10 @@ thread_local! {
     static SESSION_TLS: RefCell<Option<Session>> = const { RefCell::new(None) };
 }
 
+pub trait HasSession {
+    fn session(&self) -> &Session;
+}
+
 #[derive(Debug, Clone)]
 pub struct Session(Rc<SessionInner>);
 
@@ -52,5 +56,11 @@ impl Deref for Session {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl HasSession for Session {
+    fn session(&self) -> &Session {
+        self
     }
 }

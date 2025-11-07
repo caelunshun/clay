@@ -1,5 +1,7 @@
 use crate::{
-    base::{Diag, ErrorGuaranteed, LeafDiag, arena::Obj},
+    base::{
+        Diag, ErrorGuaranteed, LeafDiag, analysis::SpannedViewEncode, arena::Obj, syntax::Span,
+    },
     parse::{
         ast::{
             AstGenericParamKind, AstImplLikeBody, AstImplLikeMemberKind, AstNamedSpec,
@@ -10,8 +12,11 @@ use crate::{
     semantic::{
         lower::entry::IntraItemLowerCtxt,
         syntax::{
-            AnyGeneric, GenericBinder, Re, TraitClause, TraitClauseList, TraitInstance, TraitParam,
-            TraitSpec, Ty, TyKind, TyList, TyOrRe,
+            AnyGeneric, GenericBinder, Re, SpannedRe, SpannedTraitClause, SpannedTraitClauseList,
+            SpannedTraitClauseView, SpannedTraitInstance, SpannedTraitInstanceView,
+            SpannedTraitParam, SpannedTraitParamList, SpannedTraitParamView, SpannedTraitSpec,
+            SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReList,
+            SpannedTyOrReView, SpannedTyView, TraitParam,
         },
     },
     utils::hash::FxHashMap,
@@ -50,9 +55,9 @@ impl IntraItemLowerCtxt<'_> {
         }
     }
 
-    pub fn lower_clauses(&mut self, ast: Option<&AstTraitClauseList>) -> TraitClauseList {
+    pub fn lower_clauses(&mut self, ast: Option<&AstTraitClauseList>) -> SpannedTraitClauseList {
         let Some(ast) = ast else {
-            return self.tcx.intern_trait_clause_list(&[]);
+            return SpannedTraitClauseList::new_unspanned(self.tcx.intern_trait_clause_list(&[]));
         };
 
         let mut clauses = Vec::new();
@@ -69,17 +74,28 @@ impl IntraItemLowerCtxt<'_> {
             clauses.push(clause);
         }
 
-        self.tcx.intern_trait_clause_list(&clauses)
+        SpannedTraitClauseList::alloc_list(ast.span, &clauses, self.tcx)
     }
 
-    pub fn lower_clause(&mut self, ast: &AstTraitClause) -> Result<TraitClause, ErrorGuaranteed> {
+    pub fn lower_clause(
+        &mut self,
+        ast: &AstTraitClause,
+    ) -> Result<SpannedTraitClause, ErrorGuaranteed> {
         match ast {
-            AstTraitClause::Outlives(lt) => Ok(TraitClause::Outlives(self.lower_re(lt))),
-            AstTraitClause::Trait(spec) => Ok(TraitClause::Trait(self.lower_trait_spec(spec)?)),
+            AstTraitClause::Outlives(lt) => {
+                Ok(SpannedTraitClauseView::Outlives(self.lower_re(lt)).encode(lt.span, self.tcx))
+            }
+            AstTraitClause::Trait(spec) => {
+                Ok(SpannedTraitClauseView::Trait(self.lower_trait_spec(spec)?)
+                    .encode(spec.span, self.tcx))
+            }
         }
     }
 
-    pub fn lower_trait_spec(&mut self, ast: &AstNamedSpec) -> Result<TraitSpec, ErrorGuaranteed> {
+    pub fn lower_trait_spec(
+        &mut self,
+        ast: &AstNamedSpec,
+    ) -> Result<SpannedTraitSpec, ErrorGuaranteed> {
         let s = &self.tcx.session;
 
         if let Some(path) = ast.path.as_ident()
@@ -114,14 +130,24 @@ impl IntraItemLowerCtxt<'_> {
                         return Err(Diag::span_err(ty.span, "expected lifetime parameter").emit());
                     }
 
-                    params.push(TraitParam::Equals(TyOrRe::Ty(self.lower_ty(ty))));
+                    params.push(
+                        SpannedTraitParamView::Equals(
+                            SpannedTyOrReView::Ty(self.lower_ty(ty)).encode(ty.span, self.tcx),
+                        )
+                        .encode(param.span, self.tcx),
+                    );
                 }
-                AstGenericParamKind::PositionalRe(ty) => {
+                AstGenericParamKind::PositionalRe(re) => {
                     if !matches!(generic, AnyGeneric::Re(_)) {
-                        return Err(Diag::span_err(ty.span, "expected type parameter").emit());
+                        return Err(Diag::span_err(re.span, "expected type parameter").emit());
                     }
 
-                    params.push(TraitParam::Equals(TyOrRe::Re(self.lower_re(ty))));
+                    params.push(
+                        SpannedTraitParamView::Equals(
+                            SpannedTyOrReView::Re(self.lower_re(re)).encode(re.span, self.tcx),
+                        )
+                        .encode(re.span, self.tcx),
+                    );
                 }
                 AstGenericParamKind::InheritRe(..) => {
                     Diag::span_err(param.span, "cannot name lifetime parameters").emit();
@@ -135,7 +161,9 @@ impl IntraItemLowerCtxt<'_> {
 
         // Lower trait clauses
         params.resize_with(def.r(s).generics.r(s).generics.len(), || {
-            TraitParam::Unspecified(self.tcx.intern_trait_clause_list(&[]))
+            SpannedTraitParam::new_unspanned(TraitParam::Unspecified(
+                self.tcx.intern_trait_clause_list(&[]),
+            ))
         });
 
         for param in &mut reader {
@@ -161,7 +189,7 @@ impl IntraItemLowerCtxt<'_> {
 
             let idx = generic.r(s).binder.idx as usize;
 
-            match params[idx] {
+            match params[idx].value {
                 TraitParam::Unspecified(list) if list.r(s).is_empty() => {
                     // (fallthrough)
                 }
@@ -175,11 +203,13 @@ impl IntraItemLowerCtxt<'_> {
             }
 
             params[idx] = match &param.kind {
-                AstGenericParamKind::TyEquals(_, ast) => {
-                    TraitParam::Equals(TyOrRe::Ty(self.lower_ty(ast)))
-                }
+                AstGenericParamKind::TyEquals(_, ast) => SpannedTraitParamView::Equals(
+                    SpannedTyOrReView::Ty(self.lower_ty(ast)).encode(ast.span, self.tcx),
+                )
+                .encode(param.span, self.tcx),
                 AstGenericParamKind::InheritTy(_, ast) => {
-                    TraitParam::Unspecified(self.lower_clauses(Some(ast)))
+                    SpannedTraitParamView::Unspecified(self.lower_clauses(Some(ast)))
+                        .encode(param.span, self.tcx)
                 }
                 AstGenericParamKind::PositionalTy(..)
                 | AstGenericParamKind::PositionalRe(..)
@@ -187,17 +217,18 @@ impl IntraItemLowerCtxt<'_> {
             };
         }
 
-        Ok(TraitSpec {
+        Ok(SpannedTraitSpecView {
             def,
-            params: self.tcx.intern_trait_param_list(&params),
-        })
+            params: SpannedTraitParamList::alloc_list(ast.span, &params, self.tcx),
+        }
+        .encode(ast.span, self.tcx))
     }
 
     pub fn lower_trait_instance(
         &mut self,
         main_ty: &AstTy,
         body: &AstImplLikeBody,
-    ) -> Result<TraitInstance, ErrorGuaranteed> {
+    ) -> Result<SpannedTraitInstance, ErrorGuaranteed> {
         let s = &self.tcx.session;
 
         let AstTyKind::Name(path, generics) = &main_ty.kind else {
@@ -261,14 +292,14 @@ impl IntraItemLowerCtxt<'_> {
                         return Err(Diag::span_err(ty.span, "expected lifetime parameter").emit());
                     }
 
-                    params.push(TyOrRe::Ty(self.lower_ty(ty)));
+                    params.push(SpannedTyOrReView::Ty(self.lower_ty(ty)).encode(ty.span, self.tcx));
                 }
-                AstGenericParamKind::PositionalRe(ty) => {
+                AstGenericParamKind::PositionalRe(re) => {
                     if !matches!(generic, AnyGeneric::Re(_)) {
-                        return Err(Diag::span_err(ty.span, "expected type parameter").emit());
+                        return Err(Diag::span_err(re.span, "expected type parameter").emit());
                     }
 
-                    params.push(TyOrRe::Re(self.lower_re(ty)));
+                    params.push(SpannedTyOrReView::Re(self.lower_re(re)).encode(re.span, self.tcx));
                 }
                 AstGenericParamKind::InheritRe(..)
                 | AstGenericParamKind::TyEquals(..)
@@ -328,33 +359,38 @@ impl IntraItemLowerCtxt<'_> {
                 .emit());
             };
 
-            params.push(TyOrRe::Ty(*assoc));
+            params.push(SpannedTyOrReView::Ty(*assoc).encode(generic.r(s).span, self.tcx));
         }
 
-        Ok(TraitInstance {
+        Ok(SpannedTraitInstanceView {
             def,
-            params: self.tcx.intern_ty_or_re_list(&params),
-        })
+            params: SpannedTyOrReList::alloc_list(main_ty.span, &params, self.tcx),
+        }
+        .encode(main_ty.span, self.tcx))
     }
 
-    pub fn lower_ty_or_re(&mut self, ast: &AstTyOrRe) -> TyOrRe {
+    pub fn lower_ty_or_re(&mut self, ast: &AstTyOrRe) -> SpannedTyOrRe {
         match ast {
-            AstTyOrRe::Re(ast) => TyOrRe::Re(self.lower_re(ast)),
-            AstTyOrRe::Ty(ast) => TyOrRe::Ty(self.lower_ty(ast)),
+            AstTyOrRe::Re(ast) => {
+                SpannedTyOrReView::Re(self.lower_re(ast)).encode(ast.span, self.tcx)
+            }
+            AstTyOrRe::Ty(ast) => {
+                SpannedTyOrReView::Ty(self.lower_ty(ast)).encode(ast.span, self.tcx)
+            }
         }
     }
 
-    pub fn lower_re(&mut self, ast: &Lifetime) -> Re {
+    pub fn lower_re(&mut self, ast: &Lifetime) -> SpannedRe {
         if let Some(generic) = self.generic_re_names.lookup(ast.name) {
-            return Re::Universal(*generic);
+            return Re::Universal(*generic).encode(ast.span, self.tcx);
         }
 
         todo!()
     }
 
-    pub fn lower_ty(&mut self, ast: &AstTy) -> Ty {
+    pub fn lower_ty(&mut self, ast: &AstTy) -> SpannedTy {
         match &ast.kind {
-            AstTyKind::This => self.tcx.intern_ty(TyKind::This),
+            AstTyKind::This => SpannedTyView::This.encode(ast.span, self.tcx),
             AstTyKind::Name(path, generics) => {
                 if let Some(generic) = self.generic_ty_names.lookup(path.parts[0].text) {
                     if let Some(subsequent) = path.parts.get(1) {
@@ -373,27 +409,36 @@ impl IntraItemLowerCtxt<'_> {
                         .emit();
                     }
 
-                    return self.tcx.intern_ty(TyKind::Universal(*generic));
+                    return SpannedTyView::Universal(*generic).encode(ast.span, self.tcx);
                 }
 
                 todo!()
             }
-            AstTyKind::Reference(lifetime, pointee) => self.tcx.intern_ty(TyKind::Reference(
-                lifetime.map_or(Re::ExplicitInfer, |ast| self.lower_re(&ast)),
+            AstTyKind::Reference(lifetime, pointee) => SpannedTyView::Reference(
+                match lifetime {
+                    Some(ast) => self.lower_re(&ast),
+                    None => Re::ExplicitInfer.encode(ast.span.shrink_to_lo(), self.tcx),
+                },
                 self.lower_ty(pointee),
-            )),
-            AstTyKind::Trait(spec) => self
-                .tcx
-                .intern_ty(TyKind::Trait(self.lower_clauses(Some(spec)))),
-            AstTyKind::Tuple(items) => self.tcx.intern_ty(TyKind::Tuple(self.lower_tys(items))),
+            )
+            .encode(ast.span, self.tcx),
+            AstTyKind::Trait(spec) => {
+                SpannedTyView::Trait(self.lower_clauses(Some(spec))).encode(ast.span, self.tcx)
+            }
+            AstTyKind::Tuple(items) => {
+                SpannedTyView::Tuple(self.lower_tys(items)).encode(ast.span, self.tcx)
+            }
             AstTyKind::Option(item) => todo!(),
-            AstTyKind::Infer => self.tcx.intern_ty(TyKind::ExplicitInfer),
-            AstTyKind::Error(error) => self.tcx.intern_ty(TyKind::Error(*error)),
+            AstTyKind::Infer => SpannedTyView::ExplicitInfer.encode(ast.span, self.tcx),
+            AstTyKind::Error(error) => SpannedTyView::Error(*error).encode(ast.span, self.tcx),
         }
     }
 
-    pub fn lower_tys(&mut self, ast: &[AstTy]) -> TyList {
-        self.tcx
-            .intern_ty_list(&ast.iter().map(|ast| self.lower_ty(ast)).collect::<Vec<_>>())
+    pub fn lower_tys(&mut self, ast: &[AstTy]) -> SpannedTyList {
+        SpannedTyList::alloc_list(
+            Span::DUMMY,
+            &ast.iter().map(|ast| self.lower_ty(ast)).collect::<Vec<_>>(),
+            self.tcx,
+        )
     }
 }

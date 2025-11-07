@@ -1,11 +1,12 @@
 use crate::{
     base::{
+        analysis::Spanned,
         arena::{LateInit, Obj},
         syntax::Span,
     },
     parse::token::Ident,
     semantic::{
-        analysis::{TyCtxt, TyVisitor},
+        analysis::{TyCtxt, TyVisitor, TyVisitorUnspanned},
         syntax::{
             AnyGeneric, GenericBinder, PosInBinder, RegionGeneric, TraitClause, TraitClauseList,
             TraitParam, TraitSpec, TyKind, TyOrRe, TypeGeneric,
@@ -66,6 +67,7 @@ impl TyCtxt {
 
         let clauses = generic
             .user_clauses
+            .value
             .r(s)
             .iter()
             .map(|clause| match *clause {
@@ -82,7 +84,7 @@ impl TyCtxt {
                                 TraitParam::Unspecified(clauses) => self.join_trait_clause_lists(
                                     // TODO: These require some substitutions and super-traits
                                     //  should be revealed.
-                                    *def.unwrap_ty().r(s).user_clauses,
+                                    def.unwrap_ty().r(s).user_clauses.value,
                                     clauses,
                                 ),
                             };
@@ -97,7 +99,7 @@ impl TyCtxt {
                                         raw: false,
                                     },
                                     binder: LateInit::uninit(),
-                                    user_clauses: LateInit::new(clauses),
+                                    user_clauses: LateInit::new(Spanned::new_unspanned(clauses)),
                                     elaborated_clauses: LateInit::uninit(),
                                     is_synthetic: true,
                                 },
@@ -158,11 +160,19 @@ where
         self.tcx
     }
 
-    fn visit_re_generic_use(&mut self, generic: Obj<RegionGeneric>) -> ControlFlow<Self::Break> {
+    fn visit_spanned_re_generic_use(
+        &mut self,
+        _span: Option<Span>,
+        generic: Obj<RegionGeneric>,
+    ) -> ControlFlow<Self::Break> {
         (self.f)(AnyGeneric::Re(generic))
     }
 
-    fn visit_ty_generic_use(&mut self, generic: Obj<TypeGeneric>) -> ControlFlow<Self::Break> {
+    fn visit_spanned_ty_generic_use(
+        &mut self,
+        _span: Option<Span>,
+        generic: Obj<TypeGeneric>,
+    ) -> ControlFlow<Self::Break> {
         (self.f)(AnyGeneric::Ty(generic))
     }
 }

@@ -5,7 +5,7 @@ use crate::{
         syntax::{Span, Symbol},
     },
     parse::token::{Ident, Lifetime},
-    semantic::syntax::{Func, Item},
+    semantic::syntax::{Func, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy},
     utils::{hash::FxHashMap, mem::CellVec},
 };
 
@@ -44,7 +44,7 @@ pub struct TraitDef {
     pub generics: Obj<GenericBinder>,
 
     /// The set of traits inherited by the current trait.
-    pub inherits: LateInit<TraitClauseList>,
+    pub inherits: LateInit<SpannedTraitClauseList>,
 
     /// The number of generic parameters taken by this trait.
     pub regular_generic_count: u32,
@@ -85,8 +85,8 @@ pub enum TraitParam {
 pub struct ImplDef {
     pub span: Span,
     pub generics: Obj<GenericBinder>,
-    pub trait_: Option<TraitInstance>,
-    pub target: Ty,
+    pub trait_: Option<SpannedTraitInstance>,
+    pub target: SpannedTy,
     pub methods: LateInit<Vec<()>>,
 
     // We can't simply solve for stuff like `u32: Id<{T}>` where `{T}` is still unknown because
@@ -193,7 +193,7 @@ pub struct RegionGeneric {
     pub span: Span,
     pub lifetime: Lifetime,
     pub binder: LateInit<PosInBinder>,
-    pub clauses: LateInit<TraitClauseList>,
+    pub clauses: LateInit<SpannedTraitClauseList>,
 }
 
 #[derive(Debug, Clone)]
@@ -203,7 +203,7 @@ pub struct TypeGeneric {
     pub binder: LateInit<PosInBinder>,
 
     /// The user-specified clauses on a generic type.
-    pub user_clauses: LateInit<TraitClauseList>,
+    pub user_clauses: LateInit<SpannedTraitClauseList>,
 
     /// All knowable facts about which traits the generic parameter implements.
     ///

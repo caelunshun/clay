@@ -3,12 +3,12 @@ use crate::{
     semantic::{
         analysis::{InferVarInferences, TyCtxt, TyVisitor, TyVisitorWalk},
         syntax::{
-            AdtInstance, AnyGeneric, Crate, GenericBinder, ImplDef, Item, TraitInstance,
-            TraitParam, TraitSpec, TyOrRe,
+            AnyGeneric, Crate, GenericBinder, ImplDef, SpannedAdtInstance, SpannedTraitInstance,
+            SpannedTraitSpec, TraitParam, TyOrRe,
         },
     },
 };
-use std::{convert::Infallible, mem, ops::ControlFlow};
+use std::{convert::Infallible, ops::ControlFlow};
 
 impl TyCtxt {
     pub fn wf_check_crate(&self, krate: Obj<Crate>) {
@@ -18,27 +18,13 @@ impl TyCtxt {
             self.determine_impl_generic_solve_order(impl_);
         }
 
-        _ = SignatureWfVisitor {
-            tcx: self,
-            ctx_span: Span::DUMMY,
-        }
-        .visit_crate(krate);
+        _ = SignatureWfVisitor { tcx: self }.visit_crate(krate);
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct SignatureWfVisitor<'tcx> {
     pub tcx: &'tcx TyCtxt,
-    pub ctx_span: Span,
-}
-
-impl SignatureWfVisitor<'_> {
-    pub fn wrap_cx<R>(&mut self, sp: Span, f: impl FnOnce(&mut Self) -> R) -> R {
-        let old = mem::replace(&mut self.ctx_span, sp);
-        let res = f(self);
-        self.ctx_span = old;
-        res
-    }
 }
 
 impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
@@ -48,43 +34,23 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
         self.tcx
     }
 
-    // === Span annotators === //
-
-    fn visit_item(&mut self, item: Obj<Item>) -> ControlFlow<Self::Break> {
-        self.wrap_cx(item.r(self.session()).name.span, |this| {
-            this.walk_item(item)
-        })?;
-
-        ControlFlow::Continue(())
-    }
-
-    fn visit_any_generic_def(&mut self, generic: AnyGeneric) -> ControlFlow<Self::Break> {
-        self.wrap_cx(generic.span(self.session()), |this| {
-            this.walk_any_generic_def(generic)
-        })?;
-
-        ControlFlow::Continue(())
-    }
-
     // === WF checks === //
 
     fn visit_impl(&mut self, item: Obj<ImplDef>) -> ControlFlow<Self::Break> {
-        self.wrap_cx(item.r(self.session()).span.truncate_left(4), |this| {
-            this.walk_impl(item)
-        })?;
-
         // TODO: Check super-traits
+
+        self.walk_impl(item)?;
 
         ControlFlow::Continue(())
     }
 
-    fn visit_trait_spec(&mut self, spec: TraitSpec) -> ControlFlow<Self::Break> {
+    fn visit_spanned_trait_spec(&mut self, spec: SpannedTraitSpec) -> ControlFlow<Self::Break> {
         let tcx = self.tcx();
         let s = &self.session();
 
-        let generics = &spec.def.r(s).generics.r(s).generics;
+        let generics = &spec.value.def.r(s).generics.r(s).generics;
 
-        for (&def, &param) in generics.iter().zip(spec.params.r(s)) {
+        for (&def, &param) in generics.iter().zip(spec.value.params.r(s)) {
             match param {
                 TraitParam::Equals(param) => match (def, param) {
                     (AnyGeneric::Re(def), TyOrRe::Re(param)) => {
@@ -97,15 +63,18 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
 
                         tcx.check_clause_list_assignability_erase_regions(
                             param,
-                            *def.r(s).user_clauses,
+                            def.r(s).user_clauses.value,
                             &mut binder,
                             &mut InferVarInferences::default(),
                             &mut failures,
                         );
 
                         if !failures.is_empty() {
-                            Diag::span_err(self.ctx_span, "malformed parameters for trait clause")
-                                .emit();
+                            Diag::span_err(
+                                spec.own_span().unwrap_or(Span::DUMMY),
+                                "malformed parameters for trait clause",
+                            )
+                            .emit();
                         }
                     }
                     _ => unreachable!(),
@@ -119,13 +88,19 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
         ControlFlow::Continue(())
     }
 
-    fn visit_trait_instance(&mut self, instance: TraitInstance) -> ControlFlow<Self::Break> {
+    fn visit_spanned_trait_instance(
+        &mut self,
+        instance: SpannedTraitInstance,
+    ) -> ControlFlow<Self::Break> {
         // TODO
 
         ControlFlow::Continue(())
     }
 
-    fn visit_adt_instance(&mut self, instance: AdtInstance) -> ControlFlow<Self::Break> {
+    fn visit_spanned_adt_instance(
+        &mut self,
+        instance: SpannedAdtInstance,
+    ) -> ControlFlow<Self::Break> {
         // TODO
 
         ControlFlow::Continue(())
