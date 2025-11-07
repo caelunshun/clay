@@ -20,4 +20,18 @@ pub trait Demo<T: MyTrait> {}
 
 pub trait Dummy {}
 
-impl<T: Demo<((), (((),),), ((),))>> Dummy for T {}
+impl<T: Associated<T: Demo<((), (((),),), ((),))>>> Dummy for T {}
+
+impl Demo<((), (((),),), ((),))> for () {}
+
+pub trait Hehe {
+    type IHahThe: Demo<((), (((),),), ((),))>;
+}
+
+pub trait Whee {
+    type Woo: MyTrait;
+}
+
+impl Whee for () {
+    type Woo = ((), (((),),), ((),));
+}

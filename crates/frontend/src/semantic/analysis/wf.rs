@@ -4,7 +4,7 @@ use crate::{
         analysis::{InferVarInferences, TyCtxt, TyVisitor, TyVisitorWalk},
         syntax::{
             AnyGeneric, Crate, GenericBinder, ImplDef, SpannedAdtInstance, SpannedTraitInstance,
-            SpannedTraitSpec, TraitParam, TyOrRe,
+            SpannedTraitParamView, SpannedTraitSpec, SpannedTyOrReView,
         },
     },
 };
@@ -46,23 +46,23 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
 
     fn visit_spanned_trait_spec(&mut self, spec: SpannedTraitSpec) -> ControlFlow<Self::Break> {
         let tcx = self.tcx();
-        let s = &self.session();
+        let s = self.session();
 
         let generics = &spec.value.def.r(s).generics.r(s).generics;
 
-        for (&def, &param) in generics.iter().zip(spec.value.params.r(s)) {
-            match param {
-                TraitParam::Equals(param) => match (def, param) {
-                    (AnyGeneric::Re(def), TyOrRe::Re(param)) => {
+        for (&def, param) in generics.iter().zip(spec.view(tcx).params.iter(s)) {
+            match param.view(tcx) {
+                SpannedTraitParamView::Equals(param) => match (def, param.view(tcx)) {
+                    (AnyGeneric::Re(def), SpannedTyOrReView::Re(param)) => {
                         // TODO
                     }
-                    (AnyGeneric::Ty(def), TyOrRe::Ty(param)) => {
+                    (AnyGeneric::Ty(def), SpannedTyOrReView::Ty(param)) => {
                         let mut binder = GenericBinder::default();
 
                         let mut failures = Vec::new();
 
                         tcx.check_clause_list_assignability_erase_regions(
-                            param,
+                            param.value,
                             def.r(s).user_clauses.value,
                             &mut binder,
                             &mut InferVarInferences::default(),
@@ -71,19 +71,21 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
 
                         if !failures.is_empty() {
                             Diag::span_err(
-                                spec.own_span().unwrap_or(Span::DUMMY),
-                                "malformed parameters for trait clause",
+                                param.own_span().unwrap_or(Span::DUMMY),
+                                "malformed parameter for trait parameter",
                             )
                             .emit();
                         }
                     }
                     _ => unreachable!(),
                 },
-                TraitParam::Unspecified(_) => {
+                SpannedTraitParamView::Unspecified(_) => {
                     // (these are always fine)
                 }
             }
         }
+
+        self.walk_trait_spec(spec)?;
 
         ControlFlow::Continue(())
     }
@@ -92,7 +94,39 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
         &mut self,
         instance: SpannedTraitInstance,
     ) -> ControlFlow<Self::Break> {
-        // TODO
+        let tcx = self.tcx();
+        let s = self.session();
+
+        let generics = &instance.value.def.r(s).generics.r(s).generics;
+
+        for (&def, param) in generics.iter().zip(instance.view(tcx).params.iter(s)) {
+            let SpannedTyOrReView::Ty(param) = param.view(tcx) else {
+                // TODO
+                continue;
+            };
+
+            let mut binder = GenericBinder::default();
+
+            let mut failures = Vec::new();
+
+            tcx.check_clause_list_assignability_erase_regions(
+                param.value,
+                def.unwrap_ty().r(s).user_clauses.value,
+                &mut binder,
+                &mut InferVarInferences::default(),
+                &mut failures,
+            );
+
+            if !failures.is_empty() {
+                Diag::span_err(
+                    param.own_span().unwrap_or(Span::DUMMY),
+                    "malformed parameter for trait parameter",
+                )
+                .emit();
+            }
+        }
+
+        self.walk_trait_instance(instance)?;
 
         ControlFlow::Continue(())
     }
