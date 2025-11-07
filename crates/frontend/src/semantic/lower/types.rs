@@ -1,11 +1,4 @@
 use crate::{
-    semantic::{
-        lower::entry::IntraItemLowerCtxt,
-        syntax::{
-            AnyGeneric, GenericBinder, Re, TraitClause, TraitClauseList, TraitInstance, TraitParam,
-            TraitSpec, Ty, TyKind, TyList, TyOrRe,
-        },
-    },
     base::{Diag, ErrorGuaranteed, LeafDiag, arena::Obj},
     parse::{
         ast::{
@@ -13,6 +6,13 @@ use crate::{
             AstTraitClause, AstTraitClauseList, AstTy, AstTyKind, AstTyOrRe,
         },
         token::Lifetime,
+    },
+    semantic::{
+        lower::entry::IntraItemLowerCtxt,
+        syntax::{
+            AnyGeneric, GenericBinder, Re, TraitClause, TraitClauseList, TraitInstance, TraitParam,
+            TraitSpec, Ty, TyKind, TyList, TyOrRe,
+        },
     },
     utils::hash::FxHashMap,
 };
@@ -346,7 +346,7 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn lower_re(&mut self, ast: &Lifetime) -> Re {
         if let Some(generic) = self.generic_re_names.lookup(ast.name) {
-            return Re::Generic(*generic);
+            return Re::Universal(*generic);
         }
 
         todo!()
@@ -394,6 +394,6 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn lower_tys(&mut self, ast: &[AstTy]) -> TyList {
         self.tcx
-            .intern_tys(&ast.iter().map(|ast| self.lower_ty(ast)).collect::<Vec<_>>())
+            .intern_ty_list(&ast.iter().map(|ast| self.lower_ty(ast)).collect::<Vec<_>>())
     }
 }

@@ -1,11 +1,11 @@
 use crate::{
-    semantic::syntax::{Func, Item},
     base::{
         ErrorGuaranteed, Session,
         arena::{Intern, LateInit, Obj},
         syntax::{Span, Symbol},
     },
     parse::token::{Ident, Lifetime},
+    semantic::syntax::{Func, Item},
     utils::{hash::FxHashMap, mem::CellVec},
 };
 
@@ -24,6 +24,12 @@ pub struct AdtField {
     pub idx: u32,
     pub ident: Span,
     pub ty: Ty,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct AdtInstance {
+    pub def: Obj<AdtDef>,
+    pub params: TyOrReList,
 }
 
 // === Traits === //
@@ -216,12 +222,6 @@ pub struct PosInBinder {
     pub idx: u32,
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct GenericInstance {
-    pub binder: Obj<GenericBinder>,
-    pub substs: TyOrReList,
-}
-
 // === Type === //
 
 pub type TyOrReList = Intern<[TyOrRe]>;
@@ -263,7 +263,7 @@ pub enum Re {
     Gc,
 
     /// Refers to a generic lifetime parameter.
-    Generic(Obj<RegionGeneric>),
+    Universal(Obj<RegionGeneric>),
 
     /// An internal lifetime parameter within the body.
     InferVar(i32),
@@ -290,7 +290,7 @@ pub enum TyKind {
     Reference(Re, Ty),
 
     /// An instantiation of an ADT.
-    Adt(Obj<AdtDef>, TyOrReList),
+    Adt(AdtInstance),
 
     /// A `dyn Trait` object.
     Trait(TraitClauseList),

@@ -6,9 +6,9 @@ use crate::{
     },
     parse::token::Ident,
     semantic::{
-        analysis::TyCtxt,
+        analysis::{BinderSubstitution, SubstitutionFolder, TyCtxt, TyFolder},
         syntax::{
-            AnyGeneric, GenericBinder, GenericInstance, GenericSolveStep, ImplDef, InferTyVar,
+            AnyGeneric, GenericBinder, GenericSolveStep, ImplDef, InferTyVar,
             ListOfTraitClauseList, Re, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty,
             TyKind, TyOrRe, TyOrReList, TypeGeneric,
         },
@@ -327,11 +327,12 @@ impl TyCtxt {
                     .collect::<Vec<_>>();
 
                 let substs = self.intern_ty_or_re_list(&substs);
-                let substs = GenericInstance { binder, substs };
+                let substs = BinderSubstitution { binder, substs };
 
                 // Substitute the target type
-                let target =
-                    self.substitute_ty(candidate.r(s).target, self.intern_ty(TyKind::This), substs);
+                let target = SubstitutionFolder::new(self, self.intern_ty(TyKind::This), substs)
+                    .visit_ty(candidate.r(s).target)
+                    .unwrap();
 
                 let inf_var_clauses = binder
                     .r(s)
@@ -339,21 +340,19 @@ impl TyCtxt {
                     .iter()
                     .filter_map(|generic| match generic {
                         AnyGeneric::Re(_generic) => None,
-                        AnyGeneric::Ty(generic) => Some(self.substitute_clause_list(
-                            *generic.r(s).user_clauses,
-                            target,
-                            substs,
-                        )),
+                        AnyGeneric::Ty(generic) => Some(
+                            SubstitutionFolder::new(self, target, substs)
+                                .visit_clause_list(*generic.r(s).user_clauses)
+                                .unwrap(),
+                        ),
                     })
                     .collect::<Vec<_>>();
 
                 let inf_var_clauses = self.intern_list_of_trait_clause_list(&inf_var_clauses);
 
-                let trait_instance = self.substitute_ty_or_re_list(
-                    candidate.r(s).trait_.unwrap().params,
-                    target,
-                    substs,
-                );
+                let trait_instance = SubstitutionFolder::new(self, target, substs)
+                    .walk_ty_or_re_list(candidate.r(s).trait_.unwrap().params)
+                    .unwrap();
 
                 ImplFreshInfer {
                     target,
@@ -390,10 +389,8 @@ impl TyCtxt {
                     failures,
                 );
             }
-            (TyKind::Adt(lhs_def, lhs_args), TyKind::Adt(rhs_def, rhs_args))
-                if lhs_def == rhs_def =>
-            {
-                for (&lhs, &rhs) in lhs_args.r(s).iter().zip(rhs_args.r(s)) {
+            (TyKind::Adt(lhs), TyKind::Adt(rhs)) if lhs.def == rhs.def => {
+                for (&lhs, &rhs) in lhs.params.r(s).iter().zip(rhs.params.r(s)) {
                     let (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) = (lhs, rhs) else {
                         continue;
                     };

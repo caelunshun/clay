@@ -5,10 +5,10 @@ use crate::{
         arena::{Interner, ListInterner, Obj},
     },
     semantic::{
-        analysis::ImplFreshInfer,
+        analysis::{BinderSubstitution, ImplFreshInfer},
         syntax::{
-            GenericInstance, ImplDef, InferTyVar, ListOfTraitClauseList, TraitClause,
-            TraitClauseList, TraitParam, TraitParamList, Ty, TyKind, TyList, TyOrRe, TyOrReList,
+            ImplDef, InferTyVar, ListOfTraitClauseList, TraitClause, TraitClauseList, TraitParam,
+            TraitParamList, Ty, TyKind, TyList, TyOrRe, TyOrReList,
         },
     },
 };
@@ -38,11 +38,7 @@ pub struct Interners {
 
 #[derive(Debug, Default)]
 pub struct Queries {
-    pub substitute_ty: Memo<(Ty, Ty, GenericInstance), Ty>,
-    pub substitute_ty_list: Memo<(TyList, Ty, GenericInstance), TyList>,
-    pub substitute_ty_or_re_list: Memo<(TyOrReList, Ty, GenericInstance), TyOrReList>,
-    pub substitute_clause_list: Memo<(TraitClauseList, Ty, GenericInstance), TraitClauseList>,
-    pub substitute_trait_param_list: Memo<(TraitParamList, Ty, GenericInstance), TraitParamList>,
+    pub substitute_ty: Memo<(Ty, Ty, BinderSubstitution), Ty>,
     pub instantiate_fresh_target_infers: Memo<(Obj<ImplDef>, InferTyVar), ImplFreshInfer>,
 }
 
@@ -69,7 +65,7 @@ impl TyCtxt {
         self.interners.ty.intern(ty, &self.session)
     }
 
-    pub fn intern_tys(&self, ty: &[Ty]) -> TyList {
+    pub fn intern_ty_list(&self, ty: &[Ty]) -> TyList {
         self.interners.ty_list.intern(ty, &self.session)
     }
 
