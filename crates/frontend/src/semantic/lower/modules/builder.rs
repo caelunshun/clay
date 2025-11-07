@@ -1,11 +1,4 @@
 use crate::{
-    semantic::{
-        lower::modules::{
-            AnyDef, EmitErrors, ModulePathFmt, ModuleResolver, ParentKind, ParentResolver,
-            StepLookupError,
-        },
-        syntax::{Crate, DirectUse, GlobUse, Item, Module, Visibility},
-    },
     base::{
         Diag, LeafDiag, Session,
         arena::{LateInit, Obj},
@@ -14,6 +7,13 @@ use crate::{
     parse::{
         ast::{AstSimplePath, AstVisibility, AstVisibilityKind},
         token::Ident,
+    },
+    semantic::{
+        lower::modules::{
+            AnyDef, EmitErrors, ModulePathFmt, ModuleResolver, ParentKind, ParentResolver,
+            StepLookupError,
+        },
+        syntax::{Crate, DirectUse, GlobUse, Item, Module, Visibility},
     },
     symbol,
     utils::hash::FxIndexMap,

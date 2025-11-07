@@ -2,18 +2,15 @@ use crate::{
     base::{
         Diag,
         arena::{LateInit, Obj},
-        syntax::Span,
     },
-    parse::token::Ident,
     semantic::{
         analysis::{BinderSubstitution, InfallibleTyFolder as _, SubstitutionFolder, TyCtxt},
         syntax::{
             AnyGeneric, GenericBinder, GenericSolveStep, ImplDef, InferTyVar,
             ListOfTraitClauseList, Re, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty,
-            TyKind, TyOrRe, TyOrReList, TypeGeneric,
+            TyKind, TyOrRe, TyOrReList,
         },
     },
-    symbol,
 };
 use disjoint::DisjointSetVec;
 use index_vec::{IndexVec, define_index_type};
@@ -219,82 +216,6 @@ impl TyCtxt {
         }
 
         LateInit::init(&def.r(s).generic_solve_order, solve_order);
-    }
-
-    pub fn instantiate_generic_clauses(
-        &self,
-        generic: Obj<TypeGeneric>,
-        binder: &mut GenericBinder,
-    ) -> TraitClauseList {
-        let s = &self.session;
-
-        let generic = generic.r(s);
-
-        if let Some(v) = LateInit::get(&generic.instantiated_clauses) {
-            return *v;
-        }
-
-        let clauses = generic
-            .user_clauses
-            .r(s)
-            .iter()
-            .map(|clause| match *clause {
-                TraitClause::Outlives(re) => TraitClause::Outlives(re),
-                TraitClause::Trait(spec) => {
-                    let params = spec
-                        .params
-                        .r(s)
-                        .iter()
-                        .zip(&spec.def.r(s).generics.r(s).generics)
-                        .map(|(&param, def)| {
-                            let clauses = match param {
-                                TraitParam::Equals(_) => return param,
-                                TraitParam::Unspecified(clauses) => self.join_trait_clause_lists(
-                                    // TODO: These require some substitutions and super-traits
-                                    //  should be revealed.
-                                    *def.unwrap_ty().r(s).user_clauses,
-                                    clauses,
-                                ),
-                            };
-
-                            // TODO: Better debug names.
-                            let generic = Obj::new(
-                                TypeGeneric {
-                                    span: Span::DUMMY,
-                                    ident: Ident {
-                                        span: Span::DUMMY,
-                                        text: symbol!("?"),
-                                        raw: false,
-                                    },
-                                    binder: LateInit::uninit(),
-                                    user_clauses: LateInit::new(clauses),
-                                    instantiated_clauses: LateInit::uninit(),
-                                    is_synthetic: true,
-                                },
-                                s,
-                            );
-
-                            binder.generics.push(AnyGeneric::Ty(generic));
-
-                            TraitParam::Equals(TyOrRe::Ty(
-                                self.intern_ty(TyKind::Universal(generic)),
-                            ))
-                        })
-                        .collect::<Vec<_>>();
-
-                    TraitClause::Trait(TraitSpec {
-                        def: spec.def,
-                        params: self.intern_trait_param_list(&params),
-                    })
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let clauses = self.intern_trait_clause_list(&clauses);
-
-        LateInit::init(&generic.instantiated_clauses, clauses);
-
-        clauses
     }
 
     pub fn instantiate_fresh_target_infers(
@@ -505,13 +426,13 @@ impl TyCtxt {
                 todo!()
             }
             TyKind::Universal(generic) => {
-                let lhs_instantiated = self.instantiate_generic_clauses(generic, binder);
+                let lhs_elaborated = self.elaborate_generic_clauses(generic, binder);
 
                 let mut sub_failures = Vec::new();
                 let mut sub_inferences = inferences.clone();
 
                 self.check_clause_satisfies_clause_erase_regions(
-                    lhs_instantiated,
+                    lhs_elaborated,
                     rhs,
                     binder,
                     &mut sub_inferences,
@@ -657,7 +578,7 @@ impl TyCtxt {
 
     pub fn check_clause_satisfies_clause_erase_regions(
         &self,
-        lhs_instantiated: TraitClauseList,
+        lhs_elaborated: TraitClauseList,
         rhs: TraitSpec,
         binder: &mut GenericBinder,
         inferences: &mut InferVarInferences,
@@ -667,7 +588,7 @@ impl TyCtxt {
 
         let mut direct_failures = Vec::new();
 
-        for &lhs in lhs_instantiated.r(s).iter() {
+        for &lhs in lhs_elaborated.r(s).iter() {
             match lhs {
                 TraitClause::Outlives(_) => {
                     // (regions are ignored)
@@ -727,7 +648,7 @@ impl TyCtxt {
         }
 
         failures.push(SatisfiabilityFailure::CannotDirect {
-            lhs_instantiated,
+            lhs_elaborated,
             rhs,
             direct_failures,
         });
@@ -747,7 +668,7 @@ pub enum SatisfiabilityFailure {
         impl_failures: Vec<ImplFailure>,
     },
     CannotDirect {
-        lhs_instantiated: TraitClauseList,
+        lhs_elaborated: TraitClauseList,
         rhs: TraitSpec,
         direct_failures: Vec<DirectFailure>,
     },

@@ -1,13 +1,14 @@
 use crate::{
     base::{Diag, arena::Obj, syntax::Span},
     semantic::{
-        analysis::{InferVarInferences, TyCtxt},
+        analysis::{InferVarInferences, TyCtxt, TyVisitor, TyVisitorWalk},
         syntax::{
-            AnyGeneric, Crate, GenericBinder, ImplDef, Item, TraitClause, TraitClauseList,
-            TraitParam, TraitSpec, Ty, TyOrRe,
+            AdtInstance, AnyGeneric, Crate, GenericBinder, ImplDef, Item, TraitInstance,
+            TraitParam, TraitSpec, TyOrRe,
         },
     },
 };
+use std::{convert::Infallible, mem, ops::ControlFlow};
 
 impl TyCtxt {
     pub fn wf_check_crate(&self, krate: Obj<Crate>) {
@@ -17,67 +18,69 @@ impl TyCtxt {
             self.determine_impl_generic_solve_order(impl_);
         }
 
-        for &item in &**krate.r(s).items {
-            self.wf_check_item(item);
+        _ = SignatureWfVisitor {
+            tcx: self,
+            ctx_span: Span::DUMMY,
         }
+        .visit_crate(krate);
+    }
+}
 
-        for &impl_ in &**krate.r(s).impls {
-            self.wf_check_impl(impl_);
-        }
+#[derive(Debug, Clone)]
+pub struct SignatureWfVisitor<'tcx> {
+    pub tcx: &'tcx TyCtxt,
+    pub ctx_span: Span,
+}
+
+impl SignatureWfVisitor<'_> {
+    pub fn wrap_cx<R>(&mut self, sp: Span, f: impl FnOnce(&mut Self) -> R) -> R {
+        let old = mem::replace(&mut self.ctx_span, sp);
+        let res = f(self);
+        self.ctx_span = old;
+        res
+    }
+}
+
+impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
+    type Break = Infallible;
+
+    fn tcx(&self) -> &'tcx TyCtxt {
+        self.tcx
     }
 
-    pub fn wf_check_item(&self, item: Obj<Item>) {
-        let s = &self.session;
+    // === Span annotators === //
 
-        // TODO
+    fn visit_item(&mut self, item: Obj<Item>) -> ControlFlow<Self::Break> {
+        self.wrap_cx(item.r(self.session()).name.span, |this| {
+            this.walk_item(item)
+        })?;
+
+        ControlFlow::Continue(())
     }
 
-    pub fn wf_check_impl(&self, impl_: Obj<ImplDef>) {
-        let s = &self.session;
+    fn visit_any_generic_def(&mut self, generic: AnyGeneric) -> ControlFlow<Self::Break> {
+        self.wrap_cx(generic.span(self.session()), |this| {
+            this.walk_any_generic_def(generic)
+        })?;
 
-        self.wf_check_binder(impl_.r(s).generics);
+        ControlFlow::Continue(())
     }
 
-    pub fn wf_check_binder(&self, binder: Obj<GenericBinder>) {
-        let s = &self.session;
+    // === WF checks === //
 
-        for &generic in &binder.r(s).generics {
-            self.wf_check_generic(generic);
-        }
+    fn visit_impl(&mut self, item: Obj<ImplDef>) -> ControlFlow<Self::Break> {
+        self.wrap_cx(item.r(self.session()).span.truncate_left(4), |this| {
+            this.walk_impl(item)
+        })?;
+
+        // TODO: Check super-traits
+
+        ControlFlow::Continue(())
     }
 
-    pub fn wf_check_generic(&self, generic: AnyGeneric) {
-        let s = &self.session;
-
-        match generic {
-            AnyGeneric::Re(generic) => {
-                self.wf_check_clauses(*generic.r(s).clauses);
-            }
-            AnyGeneric::Ty(generic) => {
-                self.wf_check_clauses(*generic.r(s).user_clauses);
-            }
-        }
-    }
-
-    pub fn wf_check_clauses(&self, clauses: TraitClauseList) {
-        for &clause in clauses.r(&self.session) {
-            self.wf_check_clause(clause);
-        }
-    }
-
-    pub fn wf_check_clause(&self, clause: TraitClause) {
-        match clause {
-            TraitClause::Outlives(re) => {
-                // TODO
-            }
-            TraitClause::Trait(spec) => {
-                self.wf_check_trait_spec(Span::DUMMY, spec);
-            }
-        }
-    }
-
-    pub fn wf_check_trait_spec(&self, span: Span, spec: TraitSpec) {
-        let s = &self.session;
+    fn visit_trait_spec(&mut self, spec: TraitSpec) -> ControlFlow<Self::Break> {
+        let tcx = self.tcx();
+        let s = &self.session();
 
         let generics = &spec.def.r(s).generics.r(s).generics;
 
@@ -92,7 +95,7 @@ impl TyCtxt {
 
                         let mut failures = Vec::new();
 
-                        self.check_clause_list_assignability_erase_regions(
+                        tcx.check_clause_list_assignability_erase_regions(
                             param,
                             *def.r(s).user_clauses,
                             &mut binder,
@@ -101,7 +104,8 @@ impl TyCtxt {
                         );
 
                         if !failures.is_empty() {
-                            Diag::span_err(span, "malformed >:3").emit();
+                            Diag::span_err(self.ctx_span, "malformed parameters for trait clause")
+                                .emit();
                         }
                     }
                     _ => unreachable!(),
@@ -111,9 +115,19 @@ impl TyCtxt {
                 }
             }
         }
+
+        ControlFlow::Continue(())
     }
 
-    pub fn wf_check_ty_self_satisfies(&self, ty: Ty) {
+    fn visit_trait_instance(&mut self, instance: TraitInstance) -> ControlFlow<Self::Break> {
         // TODO
+
+        ControlFlow::Continue(())
+    }
+
+    fn visit_adt_instance(&mut self, instance: AdtInstance) -> ControlFlow<Self::Break> {
+        // TODO
+
+        ControlFlow::Continue(())
     }
 }

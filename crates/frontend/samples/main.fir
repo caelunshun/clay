@@ -20,4 +20,4 @@ pub trait Demo<T: MyTrait> {}
 
 pub trait Dummy {}
 
-impl<T: Demo<((), ((),), ((),))>> Dummy for T {}
+impl<T: Demo<((), (((),),), ((),))>> Dummy for T {}

@@ -236,7 +236,7 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
             ident: _,
             binder: _,
             user_clauses,
-            instantiated_clauses: _,
+            elaborated_clauses: _,
             is_synthetic: _,
         } = generic.r(s);
 

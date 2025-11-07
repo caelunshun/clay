@@ -1,9 +1,17 @@
 use crate::{
-    base::arena::{LateInit, Obj},
+    base::{
+        arena::{LateInit, Obj},
+        syntax::Span,
+    },
+    parse::token::Ident,
     semantic::{
         analysis::{TyCtxt, TyVisitor},
-        syntax::{AnyGeneric, GenericBinder, PosInBinder, RegionGeneric, TyOrRe, TypeGeneric},
+        syntax::{
+            AnyGeneric, GenericBinder, PosInBinder, RegionGeneric, TraitClause, TraitClauseList,
+            TraitParam, TraitSpec, TyKind, TyOrRe, TypeGeneric,
+        },
     },
+    symbol,
 };
 use derive_where::derive_where;
 use std::{marker::PhantomData, ops::ControlFlow};
@@ -41,6 +49,82 @@ impl TyCtxt {
             f,
         }
         .visit_ty_or_re(ty)
+    }
+
+    pub fn elaborate_generic_clauses(
+        &self,
+        generic: Obj<TypeGeneric>,
+        binder: &mut GenericBinder,
+    ) -> TraitClauseList {
+        let s = &self.session;
+
+        let generic = generic.r(s);
+
+        if let Some(v) = LateInit::get(&generic.elaborated_clauses) {
+            return *v;
+        }
+
+        let clauses = generic
+            .user_clauses
+            .r(s)
+            .iter()
+            .map(|clause| match *clause {
+                TraitClause::Outlives(re) => TraitClause::Outlives(re),
+                TraitClause::Trait(spec) => {
+                    let params = spec
+                        .params
+                        .r(s)
+                        .iter()
+                        .zip(&spec.def.r(s).generics.r(s).generics)
+                        .map(|(&param, def)| {
+                            let clauses = match param {
+                                TraitParam::Equals(_) => return param,
+                                TraitParam::Unspecified(clauses) => self.join_trait_clause_lists(
+                                    // TODO: These require some substitutions and super-traits
+                                    //  should be revealed.
+                                    *def.unwrap_ty().r(s).user_clauses,
+                                    clauses,
+                                ),
+                            };
+
+                            // TODO: Better debug names.
+                            let generic = Obj::new(
+                                TypeGeneric {
+                                    span: Span::DUMMY,
+                                    ident: Ident {
+                                        span: Span::DUMMY,
+                                        text: symbol!("?"),
+                                        raw: false,
+                                    },
+                                    binder: LateInit::uninit(),
+                                    user_clauses: LateInit::new(clauses),
+                                    elaborated_clauses: LateInit::uninit(),
+                                    is_synthetic: true,
+                                },
+                                s,
+                            );
+
+                            binder.generics.push(AnyGeneric::Ty(generic));
+
+                            TraitParam::Equals(TyOrRe::Ty(
+                                self.intern_ty(TyKind::Universal(generic)),
+                            ))
+                        })
+                        .collect::<Vec<_>>();
+
+                    TraitClause::Trait(TraitSpec {
+                        def: spec.def,
+                        params: self.intern_trait_param_list(&params),
+                    })
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let clauses = self.intern_trait_clause_list(&clauses);
+
+        LateInit::init(&generic.elaborated_clauses, clauses);
+
+        clauses
     }
 }
 
