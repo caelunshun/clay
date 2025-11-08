@@ -266,7 +266,7 @@ pub enum Re {
     Universal(Obj<RegionGeneric>),
 
     /// An internal lifetime parameter within the body.
-    InferVar(i32),
+    InferVar(InferReVar),
 
     /// An explicit request to infer the lifetime.
     ExplicitInfer,
@@ -309,10 +309,13 @@ pub enum TyKind {
 
     /// An inference variable used in trait solving. The second parameter is used in diagnostics to
     /// indicate the generic that led to the generation of this variable.
-    InferVar(InferTyVar, Obj<TypeGeneric>),
+    InferVar(InferTyVar),
 
     Error(ErrorGuaranteed),
 }
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct InferReVar(pub u32);
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct InferTyVar(pub u32);
@@ -343,21 +346,30 @@ pub enum FloatKind {
     S64,
 }
 
-// === Variance === //
+// === ReVariance === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum Variance {
+pub enum ReVariance {
     Invariant,
     Covariant,
     Contravariant,
 }
 
-impl Variance {
+impl ReVariance {
     pub fn rev(self) -> Self {
         match self {
-            Variance::Invariant => Variance::Invariant,
-            Variance::Covariant => Variance::Contravariant,
-            Variance::Contravariant => Variance::Covariant,
+            ReVariance::Invariant => ReVariance::Invariant,
+            ReVariance::Covariant => ReVariance::Contravariant,
+            ReVariance::Contravariant => ReVariance::Covariant,
         }
     }
+}
+
+// === RelationMode === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum RelationMode {
+    LhsOntoRhs,
+    RhsOntoLhs,
+    Equate,
 }

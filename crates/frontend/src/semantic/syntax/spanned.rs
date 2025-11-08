@@ -77,7 +77,7 @@ pub enum SpannedTyView {
     FnDef(Obj<Func>),
     ExplicitInfer,
     Universal(Obj<TypeGeneric>),
-    InferVar(InferTyVar, Obj<TypeGeneric>),
+    InferVar(InferTyVar),
     Error(ErrorGuaranteed),
 }
 
@@ -106,9 +106,7 @@ impl SpannedViewDecode<TyCtxt> for Ty {
             TyKind::FnDef(def) => SpannedTyView::FnDef(def),
             TyKind::ExplicitInfer => SpannedTyView::ExplicitInfer,
             TyKind::Universal(generic) => SpannedTyView::Universal(generic),
-            TyKind::InferVar(infer_ty_var, generic) => {
-                SpannedTyView::InferVar(infer_ty_var, generic)
-            }
+            TyKind::InferVar(infer_ty_var) => SpannedTyView::InferVar(infer_ty_var),
             TyKind::Error(error) => SpannedTyView::Error(error),
         }
     }
@@ -157,8 +155,8 @@ impl SpannedViewEncode<TyCtxt> for SpannedTyView {
                 tcx.intern_ty(TyKind::Universal(generic)),
                 SpannedInfo::new_terminal(own_span, s),
             ),
-            SpannedTyView::InferVar(infer_ty_var, generic) => Spanned::new_raw(
-                tcx.intern_ty(TyKind::InferVar(infer_ty_var, generic)),
+            SpannedTyView::InferVar(infer_ty_var) => Spanned::new_raw(
+                tcx.intern_ty(TyKind::InferVar(infer_ty_var)),
                 SpannedInfo::new_terminal(own_span, s),
             ),
             SpannedTyView::Error(error_guaranteed) => Spanned::new_raw(

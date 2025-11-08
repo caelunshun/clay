@@ -238,8 +238,8 @@ impl TyCtxt {
                     .iter()
                     .map(|generic| match generic {
                         AnyGeneric::Re(_) => TyOrRe::Re(Re::Erased),
-                        AnyGeneric::Ty(generic) => {
-                            let ty = self.intern_ty(TyKind::InferVar(min_infer_var, *generic));
+                        AnyGeneric::Ty(_) => {
+                            let ty = self.intern_ty(TyKind::InferVar(min_infer_var));
                             min_infer_var.0 += 1;
 
                             TyOrRe::Ty(ty)
@@ -331,7 +331,7 @@ impl TyCtxt {
                     );
                 }
             }
-            (TyKind::InferVar(lhs_var, _), TyKind::InferVar(rhs_var, _)) => {
+            (TyKind::InferVar(lhs_var), TyKind::InferVar(rhs_var)) => {
                 if let (Some(lhs_ty), Some(rhs_ty)) = (
                     infer_var_inferences.lookup(lhs_var),
                     infer_var_inferences.lookup(rhs_var),
@@ -346,7 +346,7 @@ impl TyCtxt {
                     infer_var_inferences.union(lhs_var, rhs_var);
                 }
             }
-            (TyKind::InferVar(lhs_var, _), _) => {
+            (TyKind::InferVar(lhs_var), _) => {
                 if let Some(known_lhs) = infer_var_inferences.lookup(lhs_var) {
                     self.check_type_assignability_erase_regions(
                         known_lhs,
@@ -358,7 +358,7 @@ impl TyCtxt {
                     infer_var_inferences.assign(lhs_var, rhs);
                 }
             }
-            (_, TyKind::InferVar(rhs_var, _)) => {
+            (_, TyKind::InferVar(rhs_var)) => {
                 if let Some(known_rhs) = infer_var_inferences.lookup(rhs_var) {
                     self.check_type_assignability_erase_regions(
                         lhs,
