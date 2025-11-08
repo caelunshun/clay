@@ -34,8 +34,6 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
         self.tcx
     }
 
-    // === WF checks === //
-
     fn visit_impl(&mut self, item: Obj<ImplDef>) -> ControlFlow<Self::Break> {
         // TODO: Check super-traits
 
@@ -139,4 +137,6 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
 
         ControlFlow::Continue(())
     }
+
+    // TODO: Check outlives constraints for lifetimes
 }

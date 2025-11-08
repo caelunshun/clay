@@ -3,8 +3,9 @@ use crate::{
     semantic::{
         analysis::{TyCtxt, TyVisitor, TyVisitorWalk},
         syntax::{
-            InferTyVar, Re, RelationMode, SpannedRe, SpannedTy, SpannedTyOrReView, SpannedTyView,
-            Ty,
+            InferTyVar, Re, RelationMode, SpannedRe, SpannedTraitClauseList,
+            SpannedTraitClauseView, SpannedTraitParam, SpannedTraitParamView, SpannedTy,
+            SpannedTyOrReView, SpannedTyView, Ty,
         },
     },
 };
@@ -17,7 +18,14 @@ use std::{convert::Infallible, ops::ControlFlow};
 pub struct TyEquateError {
     pub origin_lhs: SpannedTy,
     pub origin_rhs: SpannedTy,
-    pub culprits: Vec<(SpannedTy, SpannedTy)>,
+    pub culprits: Vec<TyEquateCulprit>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum TyEquateCulprit {
+    Types(SpannedTy, SpannedTy),
+    ClauseLists(SpannedTraitClauseList, SpannedTraitClauseList),
+    Params(SpannedTraitParam, SpannedTraitParam),
 }
 
 #[derive(Debug)]
@@ -61,6 +69,10 @@ impl<'tcx> InferCx<'tcx> {
     }
 
     pub fn fresh_re(&mut self) -> Re {
+        let Some(re_inf) = &mut self.re_inf else {
+            return Re::Erased;
+        };
+
         todo!()
     }
 
@@ -105,6 +117,10 @@ impl<'tcx> InferCx<'tcx> {
         }
     }
 
+    pub fn relate_wf_ty(&mut self, ty: SpannedTy) {
+        todo!()
+    }
+
     pub fn relate_ty(
         &mut self,
         lhs: SpannedTy,
@@ -113,6 +129,8 @@ impl<'tcx> InferCx<'tcx> {
     ) -> Result<(), TyEquateError> {
         let mut culprits = Vec::new();
 
+        self.relate_wf_ty(lhs);
+        self.relate_wf_ty(rhs);
         self.relate_ty_inner(lhs, rhs, &mut culprits, mode);
 
         if !culprits.is_empty() {
@@ -130,7 +148,7 @@ impl<'tcx> InferCx<'tcx> {
         &mut self,
         lhs: SpannedTy,
         rhs: SpannedTy,
-        culprits: &mut Vec<(SpannedTy, SpannedTy)>,
+        culprits: &mut Vec<TyEquateCulprit>,
         mode: RelationMode,
     ) {
         let tcx = self.tcx();
@@ -146,7 +164,7 @@ impl<'tcx> InferCx<'tcx> {
             | (_, SpannedTyView::This)
             | (SpannedTyView::ExplicitInfer, _)
             | (_, SpannedTyView::ExplicitInfer) => {
-                unreachable!("explicit inference types should have been instantiated")
+                unreachable!()
             }
             (
                 SpannedTyView::Reference(lhs_re, lhs_pointee),
@@ -172,6 +190,9 @@ impl<'tcx> InferCx<'tcx> {
                         _ => unreachable!(),
                     }
                 }
+            }
+            (SpannedTyView::Trait(lhs), SpannedTyView::Trait(rhs)) => {
+                self.relate_ty_trait_clauses_inner(lhs, rhs, culprits, mode);
             }
             (SpannedTyView::Tuple(lhs), SpannedTyView::Tuple(rhs)) if lhs.len(s) == rhs.len(s) => {
                 for (lhs, rhs) in lhs.iter(s).zip(rhs.iter(s)) {
@@ -209,17 +230,87 @@ impl<'tcx> InferCx<'tcx> {
                     self.ty_inf.assign(rhs_var, lhs.value);
                 }
             }
-            // Omissions okay because of intern equality fast-path and the fact that all lifetimes
-            // are erased:
+            // Omissions okay because of intern equality fast-path:
             //
             // - `(Simple, Simple)`
             // - `(FnDef, FnDef)`
             // - `(Universal, Universal)`
-            // - `(Trait, Trait)`
             //
             // TODO: Check exhaustiveness automatically.
             _ => {
-                culprits.push((lhs, rhs));
+                culprits.push(TyEquateCulprit::Types(lhs, rhs));
+            }
+        }
+    }
+
+    fn relate_ty_trait_clauses_inner(
+        &mut self,
+        lhs: SpannedTraitClauseList,
+        rhs: SpannedTraitClauseList,
+        culprits: &mut Vec<TyEquateCulprit>,
+        mode: RelationMode,
+    ) {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        if lhs.len(s) != rhs.len(s) {
+            culprits.push(TyEquateCulprit::ClauseLists(lhs, rhs));
+            return;
+        }
+
+        for (lhs_clause, rhs_clause) in lhs.iter(s).zip(rhs.iter(s)) {
+            match (lhs_clause.view(tcx), rhs_clause.view(tcx)) {
+                (SpannedTraitClauseView::Outlives(lhs), SpannedTraitClauseView::Outlives(rhs)) => {
+                    // Technically, `MyTrait + 'a + 'b: 'c` could imply either `'a: 'c` or
+                    // `'b: 'c`, meaning that relating both would be unnecessary but this
+                    // logic will produce constraints for both. This isn't a problem because
+                    // we only ever lower trait objects with *exactly one* outlives
+                    // constraint.
+                    self.relate_re(lhs, rhs, mode);
+                }
+                (SpannedTraitClauseView::Trait(lhs), SpannedTraitClauseView::Trait(rhs))
+                    if lhs.value.def == rhs.value.def =>
+                {
+                    for (lhs, rhs) in lhs
+                        .view(tcx)
+                        .params
+                        .iter(s)
+                        .zip(rhs.view(tcx).params.iter(s))
+                    {
+                        match (lhs.view(tcx), rhs.view(tcx)) {
+                            (
+                                SpannedTraitParamView::Equals(lhs),
+                                SpannedTraitParamView::Equals(rhs),
+                            ) => match (lhs.view(tcx), rhs.view(tcx)) {
+                                (SpannedTyOrReView::Re(lhs), SpannedTyOrReView::Re(rhs)) => {
+                                    self.relate_re(lhs, rhs, RelationMode::Equate);
+                                }
+                                (SpannedTyOrReView::Ty(lhs), SpannedTyOrReView::Ty(rhs)) => {
+                                    self.relate_ty_inner(lhs, rhs, culprits, RelationMode::Equate);
+                                }
+                                _ => unreachable!(),
+                            },
+                            (
+                                SpannedTraitParamView::Unspecified(lhs),
+                                SpannedTraitParamView::Unspecified(rhs),
+                            ) => {
+                                self.relate_ty_trait_clauses_inner(
+                                    lhs,
+                                    rhs,
+                                    culprits,
+                                    RelationMode::Equate,
+                                );
+                            }
+                            _ => {
+                                culprits.push(TyEquateCulprit::Params(lhs, rhs));
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    culprits.push(TyEquateCulprit::ClauseLists(lhs, rhs));
+                    return;
+                }
             }
         }
     }
