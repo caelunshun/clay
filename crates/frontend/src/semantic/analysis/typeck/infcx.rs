@@ -1,7 +1,7 @@
 use crate::{
     base::Session,
     semantic::{
-        analysis::{TyCtxt, TyVisitor, TyVisitorWalk},
+        analysis::TyCtxt,
         syntax::{
             InferTyVar, Re, RelationMode, SpannedRe, SpannedTraitClauseList,
             SpannedTraitClauseView, SpannedTraitParam, SpannedTraitParamView, SpannedTy,
@@ -10,7 +10,6 @@ use crate::{
     },
 };
 use disjoint::DisjointSetVec;
-use std::{convert::Infallible, ops::ControlFlow};
 
 // === InferCx === //
 
@@ -28,6 +27,54 @@ pub enum TyEquateCulprit {
     Params(SpannedTraitParam, SpannedTraitParam),
 }
 
+/// A type inference context for solving type equations of the form...
+///
+/// - `Region: Region`
+/// - `Type = Type`
+/// - `Type: Clauses`
+/// - `Clauses entail Clauses`
+///
+/// This context has two modes: region unaware and region aware.
+///
+/// - The region unaware mode just solves for type equalities, making it ideal for a first pass of
+///   type-checker where one just wants to solve for type inference variables. This process is
+///   allowed to fail.
+///
+/// - The region aware mode can take the solved inference types and, after replacing all the erased
+///   regions with fresh region inference variables, it can come up with a list of region
+///   constraints that have to be true in order for the program to region-check.
+///
+/// If all the types checked with a region aware check were obtained by a prior region unaware
+/// type-check, the inference methods will never return errors. Indeed, region relations will never
+/// produce errors. After all, one can always solve all region errors by inferring everything to
+/// `'gc`.
+///
+/// Region checking is done in a separate pass involving a region lattice obtained with
+/// [`InferCx::make_region_lattice`], which allows a user to quickly determine...
+///
+/// - Whether some pair of regions (which could be universal, inferred, or `'gc`), are forced to
+///   outlive or equal one another.
+///
+/// - The bounds required for a given universal region.
+///
+/// This second bit of information is useful for region checking. All region errors secretly involve
+/// the relationship between a universal region and another region. For example, if an inference
+/// finds that some region variable `'a` has to live for `'b` but `'a` doesn't have a `'a: 'b`
+/// constraint, that would be an error. Likewise with `'a: 'gc` constraints.
+///
+/// There are two types of well-formedness requirements a type may have...
+///
+/// - A type WF requirement where a generic parameter must implement a trait (e.g. if `Foo<T>` has a
+///   clause stipulating that `T: MyTrait`)
+///
+/// - A region WF constraint where a lifetime must outlive another lifetime (e.g. `&'a T` would
+///   imply that `T: 'a`).
+///
+/// Relational methods never check type WF requirements or push region WF constraints by
+/// themselves but will never crash if these WF requirements aren't met. You can "bolt on" these WF
+/// requirements at the end of a region-aware inference session by calling `wf_ty` on all the types
+/// the programmer has created. This has to be done at the end of an inference session since
+/// inferred types must all be solved by this point.
 #[derive(Debug)]
 pub struct InferCx<'tcx> {
     tcx: &'tcx TyCtxt,
@@ -62,6 +109,10 @@ impl<'tcx> InferCx<'tcx> {
 
     pub fn reject(&mut self) {
         todo!();
+    }
+
+    pub fn make_region_lattice(&self) {
+        todo!()
     }
 
     pub fn fresh_ty(&mut self) -> InferTyVar {
@@ -117,29 +168,32 @@ impl<'tcx> InferCx<'tcx> {
         }
     }
 
-    pub fn relate_wf_ty(&mut self, ty: SpannedTy) {
-        todo!()
-    }
-
+    /// Relates two types such that they match. The `mode` specifies how the regions inside the
+    /// types should be related. For example, if it is `RelationMode::LhsOntoRhs`, relating
+    /// `&'0 u32` and `&'1 u32` will result in the region relation `'0: '1`.
     pub fn relate_ty(
         &mut self,
         lhs: SpannedTy,
         rhs: SpannedTy,
         mode: RelationMode,
     ) -> Result<(), TyEquateError> {
+        self.fork();
+
         let mut culprits = Vec::new();
 
-        self.relate_wf_ty(lhs);
-        self.relate_wf_ty(rhs);
         self.relate_ty_inner(lhs, rhs, &mut culprits, mode);
 
         if !culprits.is_empty() {
+            self.reject();
+
             return Err(TyEquateError {
                 origin_lhs: lhs,
                 origin_rhs: rhs,
                 culprits,
             });
         }
+
+        self.apply();
 
         Ok(())
     }
@@ -315,38 +369,8 @@ impl<'tcx> InferCx<'tcx> {
         }
     }
 
-    pub fn relate_ty_and_re(&mut self, lhs: SpannedTy, rhs: SpannedRe, mode: RelationMode) {
-        if self.re_inf.is_none() {
-            return;
-        }
-
-        struct MentionVisitor<'a, 'tcx> {
-            icx: &'a mut InferCx<'tcx>,
-            rhs: SpannedRe,
-            mode: RelationMode,
-        }
-
-        impl<'tcx> TyVisitor<'tcx> for MentionVisitor<'_, 'tcx> {
-            type Break = Infallible;
-
-            fn tcx(&self) -> &'tcx TyCtxt {
-                self.icx.tcx()
-            }
-
-            fn visit_spanned_re(&mut self, re: SpannedRe) -> ControlFlow<Self::Break> {
-                self.icx.relate_re(re, self.rhs, self.mode);
-                self.walk_re(re)?;
-
-                ControlFlow::Continue(())
-            }
-        }
-
-        _ = MentionVisitor {
-            icx: self,
-            rhs,
-            mode,
-        }
-        .visit_spanned_ty(lhs);
+    pub fn wf_ty(&mut self, ty: SpannedTy) {
+        todo!()
     }
 }
 
