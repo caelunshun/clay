@@ -113,10 +113,11 @@ impl TyCtxt {
             .collect::<IndexVec<GenericIdx, _>>();
 
         let mut clause_states = IndexVec::<ClauseIndex, ClauseState>::new();
-        let mut step_clause_idx = 0;
 
         for (step_generic_idx, main_generic_def) in generic_defs.iter().enumerate() {
-            for clause_def in main_generic_def.clauses(s).value.r(s) {
+            for (step_clause_idx, clause_def) in
+                main_generic_def.clauses(s).value.r(s).iter().enumerate()
+            {
                 let TraitClause::Trait(spec) = *clause_def else {
                     continue;
                 };
@@ -147,13 +148,11 @@ impl TyCtxt {
                 clause_states.push(ClauseState {
                     step_idx: GenericSolveStep {
                         generic_idx: step_generic_idx as u32,
-                        clause_idx: step_clause_idx,
+                        clause_idx: step_clause_idx as u32,
                     },
                     blockers,
                     spec,
                 });
-
-                step_clause_idx += 1;
             }
         }
 
@@ -549,7 +548,10 @@ impl InferCx<'_> {
         // See `ImplDef::generic_solve_order` on why the specific solving order is important.
         for &infer_step in rhs.r(s).generic_solve_order.iter() {
             let var = rhs_fresh.impl_generics.r(s)[infer_step.generic_idx as usize];
-            let clauses = rhs_fresh.impl_generic_clauses.r(s)[infer_step.clause_idx as usize];
+            let clause = rhs_fresh.impl_generic_clauses.r(s)[infer_step.generic_idx as usize].r(s)
+                [infer_step.clause_idx as usize];
+
+            let clause = tcx.intern_trait_clause_list(&[clause]);
 
             match var {
                 TyOrRe::Re(re) => {
@@ -558,7 +560,7 @@ impl InferCx<'_> {
                         // so this is okay for diagnostics.
                         SpannedRe::new_unspanned(re),
                         // Same here.
-                        SpannedTraitClauseList::new_unspanned(clauses),
+                        SpannedTraitClauseList::new_unspanned(clause),
                     );
                 }
                 TyOrRe::Ty(ty) => {
@@ -567,7 +569,7 @@ impl InferCx<'_> {
                         // so this is okay for diagnostics.
                         SpannedTy::new_unspanned(ty),
                         // Same here.
-                        SpannedTraitClauseList::new_unspanned(clauses),
+                        SpannedTraitClauseList::new_unspanned(clause),
                         binder,
                     ) {
                         error.had_ambiguity |= err.had_ambiguity;
