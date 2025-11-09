@@ -544,82 +544,90 @@ impl InferCx<'_> {
             }
         }
 
-        // See whether the inferences we made for all our variables are valid.
-        // See `ImplDef::generic_solve_order` on why the specific solving order is important.
-        for &infer_step in rhs.r(s).generic_solve_order.iter() {
-            let var = rhs_fresh.impl_generics.r(s)[infer_step.generic_idx as usize];
-            let clause = rhs_fresh.impl_generic_clauses.r(s)[infer_step.generic_idx as usize].r(s)
-                [infer_step.clause_idx as usize];
+        // Skip nested trait checks if we failed to match the target since...
+        //
+        // a) it causes unnecessary ambiguities
+        // b) it can cause trait-check overflows which could otherwise be avoided
+        // c) it's not even needed for diagnostics
+        //
+        if error.bad_target.is_none() && error.bad_trait_args.is_empty() {
+            // See whether the inferences we made for all our variables are valid.
+            // See `ImplDef::generic_solve_order` on why the specific solving order is important.
+            for &infer_step in rhs.r(s).generic_solve_order.iter() {
+                let var = rhs_fresh.impl_generics.r(s)[infer_step.generic_idx as usize];
+                let clause = rhs_fresh.impl_generic_clauses.r(s)[infer_step.generic_idx as usize]
+                    .r(s)[infer_step.clause_idx as usize];
 
-            let clause = tcx.intern_trait_clause_list(&[clause]);
+                let clause = tcx.intern_trait_clause_list(&[clause]);
 
-            match var {
-                TyOrRe::Re(re) => {
-                    self.relate_re_and_clause(
-                        // We don't really care about the spans of types outside our main body
-                        // so this is okay for diagnostics.
-                        SpannedRe::new_unspanned(re),
-                        // Same here.
-                        SpannedTraitClauseList::new_unspanned(clause),
-                    );
-                }
-                TyOrRe::Ty(ty) => {
-                    if let Err(err) = self.relate_ty_and_clause(
-                        // We don't really care about the spans of types outside our main body
-                        // so this is okay for diagnostics.
-                        SpannedTy::new_unspanned(ty),
-                        // Same here.
-                        SpannedTraitClauseList::new_unspanned(clause),
-                        binder,
-                    ) {
-                        error.had_ambiguity |= err.had_ambiguity;
-                        error.bad_trait_clauses.push(TyAndImplGenericClauseError {
-                            step: infer_step,
-                            error: err,
-                        });
+                match var {
+                    TyOrRe::Re(re) => {
+                        self.relate_re_and_clause(
+                            // We don't really care about the spans of types outside our main body
+                            // so this is okay for diagnostics.
+                            SpannedRe::new_unspanned(re),
+                            // Same here.
+                            SpannedTraitClauseList::new_unspanned(clause),
+                        );
+                    }
+                    TyOrRe::Ty(ty) => {
+                        if let Err(err) = self.relate_ty_and_clause(
+                            // We don't really care about the spans of types outside our main body
+                            // so this is okay for diagnostics.
+                            SpannedTy::new_unspanned(ty),
+                            // Same here.
+                            SpannedTraitClauseList::new_unspanned(clause),
+                            binder,
+                        ) {
+                            error.had_ambiguity |= err.had_ambiguity;
+                            error.bad_trait_clauses.push(TyAndImplGenericClauseError {
+                                step: infer_step,
+                                error: err,
+                            });
+                        }
                     }
                 }
             }
-        }
 
-        // See whether the user-supplied associated type constraints match what we inferred.
-        for (idx, (&instance_ty, required_param)) in rhs_fresh
-            .trait_
-            .r(s)
-            .iter()
-            .zip(spec.view(tcx).params.iter(s))
-            .enumerate()
-            .skip(spec.value.def.r(s).regular_generic_count as usize)
-        {
-            // Associated types are never regions.
-            let instance_ty = instance_ty.unwrap_ty();
+            // See whether the user-supplied associated type constraints match what we inferred.
+            for (idx, (&instance_ty, required_param)) in rhs_fresh
+                .trait_
+                .r(s)
+                .iter()
+                .zip(spec.view(tcx).params.iter(s))
+                .enumerate()
+                .skip(spec.value.def.r(s).regular_generic_count as usize)
+            {
+                // Associated types are never regions.
+                let instance_ty = instance_ty.unwrap_ty();
 
-            match required_param.view(tcx) {
-                SpannedTraitParamView::Equals(required_ty) => {
-                    let SpannedTyOrReView::Ty(required_ty) = required_ty.view(tcx) else {
-                        unreachable!()
-                    };
+                match required_param.view(tcx) {
+                    SpannedTraitParamView::Equals(required_ty) => {
+                        let SpannedTyOrReView::Ty(required_ty) = required_ty.view(tcx) else {
+                            unreachable!()
+                        };
 
-                    if let Err(err) = self.relate_ty_and_ty(
-                        SpannedTy::new_unspanned(instance_ty),
-                        required_ty,
-                        RelationMode::Equate,
-                    ) {
-                        error
-                            .bad_trait_assoc_types
-                            .push((idx as u32, TyAndImplAssocRelateError::TyAndTy(err)));
+                        if let Err(err) = self.relate_ty_and_ty(
+                            SpannedTy::new_unspanned(instance_ty),
+                            required_ty,
+                            RelationMode::Equate,
+                        ) {
+                            error
+                                .bad_trait_assoc_types
+                                .push((idx as u32, TyAndImplAssocRelateError::TyAndTy(err)));
+                        }
                     }
-                }
-                SpannedTraitParamView::Unspecified(additional_clauses) => {
-                    if let Err(err) = self.relate_ty_and_clause(
-                        SpannedTy::new_unspanned(instance_ty),
-                        additional_clauses,
-                        binder,
-                    ) {
-                        error.had_ambiguity |= err.had_ambiguity;
-                        error
-                            .bad_trait_assoc_types
-                            .push((idx as u32, TyAndImplAssocRelateError::TyAndClause(err)));
+                    SpannedTraitParamView::Unspecified(additional_clauses) => {
+                        if let Err(err) = self.relate_ty_and_clause(
+                            SpannedTy::new_unspanned(instance_ty),
+                            additional_clauses,
+                            binder,
+                        ) {
+                            error.had_ambiguity |= err.had_ambiguity;
+                            error
+                                .bad_trait_assoc_types
+                                .push((idx as u32, TyAndImplAssocRelateError::TyAndClause(err)));
+                        }
                     }
                 }
             }

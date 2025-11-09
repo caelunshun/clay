@@ -258,7 +258,7 @@ impl<'tcx> InferCx<'tcx> {
                 }
             }
             (SpannedTyView::Trait(lhs), SpannedTyView::Trait(rhs)) => {
-                self.relate_trait_clauses_inner(lhs, rhs, culprits, mode);
+                self.relate_dyn_trait_clauses_inner(lhs, rhs, culprits, mode);
             }
             (SpannedTyView::Tuple(lhs), SpannedTyView::Tuple(rhs)) if lhs.len(s) == rhs.len(s) => {
                 for (lhs, rhs) in lhs.iter(s).zip(rhs.iter(s)) {
@@ -316,7 +316,7 @@ impl<'tcx> InferCx<'tcx> {
         }
     }
 
-    fn relate_trait_clauses_inner(
+    fn relate_dyn_trait_clauses_inner(
         &mut self,
         lhs: SpannedTraitClauseList,
         rhs: SpannedTraitClauseList,
@@ -372,7 +372,7 @@ impl<'tcx> InferCx<'tcx> {
                                 SpannedTraitParamView::Unspecified(lhs),
                                 SpannedTraitParamView::Unspecified(rhs),
                             ) => {
-                                self.relate_trait_clauses_inner(
+                                self.relate_dyn_trait_clauses_inner(
                                     lhs,
                                     rhs,
                                     culprits,
