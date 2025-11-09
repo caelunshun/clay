@@ -35,3 +35,7 @@ pub trait Whee {
 impl Whee for () {
     type Woo = ((), (((),),), ((),));
 }
+
+impl<T: Associated<T = ((),)>> Whee for (T,) {
+    type Woo = ((), ((),), T);
+}

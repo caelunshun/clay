@@ -81,12 +81,8 @@ impl TyCtxt {
                         .map(|(&param, def)| {
                             let clauses = match param {
                                 TraitParam::Equals(_) => return param,
-                                TraitParam::Unspecified(clauses) => self.join_trait_clause_lists(
-                                    // TODO: These require some substitutions and super-traits
-                                    //  should be revealed.
-                                    def.unwrap_ty().r(s).user_clauses.value,
-                                    clauses,
-                                ),
+                                // TODO: Actually elaborate :)
+                                TraitParam::Unspecified(clauses) => clauses,
                             };
 
                             // TODO: Better debug names.

@@ -6,12 +6,18 @@ use crate::{
     },
     utils::lang::IterEither,
 };
-use std::{array, hash, iter};
+use std::{array, fmt, hash, iter};
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub struct Spanned<T> {
     pub value: T,
     pub span_info: SpannedInfo,
+}
+
+impl<T: fmt::Debug> fmt::Debug for Spanned<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.value.fmt(f)
+    }
 }
 
 impl<T> Spanned<T> {

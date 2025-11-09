@@ -113,11 +113,10 @@ impl TyCtxt {
             .collect::<IndexVec<GenericIdx, _>>();
 
         let mut clause_states = IndexVec::<ClauseIndex, ClauseState>::new();
+        let mut step_clause_idx = 0;
 
         for (step_generic_idx, main_generic_def) in generic_defs.iter().enumerate() {
-            for (step_clause_idx, clause_def) in
-                main_generic_def.clauses(s).value.r(s).iter().enumerate()
-            {
+            for clause_def in main_generic_def.clauses(s).value.r(s) {
                 let TraitClause::Trait(spec) = *clause_def else {
                     continue;
                 };
@@ -148,11 +147,13 @@ impl TyCtxt {
                 clause_states.push(ClauseState {
                     step_idx: GenericSolveStep {
                         generic_idx: step_generic_idx as u32,
-                        clause_idx: step_clause_idx as u32,
+                        clause_idx: step_clause_idx,
                     },
                     blockers,
                     spec,
                 });
+
+                step_clause_idx += 1;
             }
         }
 
