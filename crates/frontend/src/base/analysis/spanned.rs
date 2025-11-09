@@ -26,6 +26,21 @@ impl<T> Spanned<T> {
         }
     }
 
+    pub fn new_saturated(value: T, span: Span) -> Self {
+        Self {
+            value,
+            span_info: SpannedInfo::Saturated(span),
+        }
+    }
+
+    pub fn new_maybe_saturated(value: T, span: Option<Span>) -> Self {
+        if let Some(span) = span {
+            Self::new_saturated(value, span)
+        } else {
+            Self::new_unspanned(value)
+        }
+    }
+
     pub fn own_span(&self) -> Option<Span> {
         self.span_info.own_span()
     }
@@ -85,6 +100,7 @@ impl<T: Clone> Spanned<Intern<[T]>> {
 #[derive(Debug, Copy, Clone)]
 pub enum SpannedInfo {
     Untracked,
+    Saturated(Span),
     Tracked(Span, Obj<[SpannedInfo]>),
 }
 
@@ -100,6 +116,7 @@ impl SpannedInfo {
     pub fn own_span(self) -> Option<Span> {
         match self {
             SpannedInfo::Untracked => None,
+            SpannedInfo::Saturated(span) => Some(span),
             SpannedInfo::Tracked(span, _) => Some(span),
         }
     }
@@ -107,6 +124,7 @@ impl SpannedInfo {
     pub fn child_spans<const N: usize>(self, s: &Session) -> [SpannedInfo; N] {
         match self {
             SpannedInfo::Untracked => [SpannedInfo::Untracked; N],
+            SpannedInfo::Saturated(span) => [SpannedInfo::Saturated(span); N],
             SpannedInfo::Tracked(_, spans) => array::from_fn(|i| spans.r(s)[i]),
         }
     }
@@ -114,6 +132,7 @@ impl SpannedInfo {
     pub fn child_span_at(self, n: usize, s: &Session) -> SpannedInfo {
         match self {
             SpannedInfo::Untracked => SpannedInfo::Untracked,
+            SpannedInfo::Saturated(span) => SpannedInfo::Saturated(span),
             SpannedInfo::Tracked(_, spans) => spans.r(s)[n],
         }
     }
@@ -126,6 +145,9 @@ impl SpannedInfo {
         let spans = match self {
             SpannedInfo::Untracked => {
                 return IterEither::Left(iter::repeat_n(SpannedInfo::Untracked, len));
+            }
+            SpannedInfo::Saturated(span) => {
+                return IterEither::Left(iter::repeat_n(SpannedInfo::Saturated(span), len));
             }
             SpannedInfo::Tracked(_, spans) => spans.r(s),
         };

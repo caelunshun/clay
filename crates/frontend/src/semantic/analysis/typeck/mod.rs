@@ -6,3 +6,6 @@ pub use infcx::*;
 
 mod traits;
 pub use traits::*;
+
+mod traits2;
+pub use traits2::*;

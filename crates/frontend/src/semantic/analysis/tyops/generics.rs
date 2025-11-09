@@ -8,8 +8,8 @@ use crate::{
     semantic::{
         analysis::{TyCtxt, TyVisitor, TyVisitorUnspanned},
         syntax::{
-            AnyGeneric, GenericBinder, PosInBinder, RegionGeneric, TraitClause, TraitClauseList,
-            TraitParam, TraitSpec, TyKind, TyOrRe, TypeGeneric,
+            AnyGeneric, GenericBinder, PosInBinder, RegionGeneric, SpannedTraitClauseList,
+            TraitClause, TraitParam, TraitSpec, TyKind, TyOrRe, TypeGeneric,
         },
     },
     symbol,
@@ -56,7 +56,7 @@ impl TyCtxt {
         &self,
         generic: Obj<TypeGeneric>,
         binder: &mut GenericBinder,
-    ) -> TraitClauseList {
+    ) -> SpannedTraitClauseList {
         let s = &self.session;
 
         let generic = generic.r(s);
@@ -123,6 +123,9 @@ impl TyCtxt {
             .collect::<Vec<_>>();
 
         let clauses = self.intern_trait_clause_list(&clauses);
+
+        // TODO: Inherit spans
+        let clauses = Spanned::new_unspanned(clauses);
 
         LateInit::init(&generic.elaborated_clauses, clauses);
 

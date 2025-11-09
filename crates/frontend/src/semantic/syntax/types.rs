@@ -210,7 +210,7 @@ pub struct TypeGeneric {
     /// Unlike `user_clauses`, `elaborated_clauses` ensures that all generic parameters
     /// supplied to each trait clause will be of the form [`TraitParam::Equals`] and that all
     /// implicit bounds (including super-trait bounds) will be written out.
-    pub elaborated_clauses: LateInit<TraitClauseList>,
+    pub elaborated_clauses: LateInit<SpannedTraitClauseList>,
 
     /// Whether this generic was implicitly created rather than defined explicitly by the user.
     pub is_synthetic: bool,

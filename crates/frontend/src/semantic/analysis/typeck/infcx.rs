@@ -5,34 +5,40 @@ use crate::{
         syntax::{
             InferTyVar, Re, RelationMode, SpannedRe, SpannedTraitClauseList,
             SpannedTraitClauseView, SpannedTraitParam, SpannedTraitParamView, SpannedTy,
-            SpannedTyOrReView, SpannedTyView, Ty,
+            SpannedTyOrReView, SpannedTyView, Ty, TyKind,
         },
     },
 };
 use disjoint::DisjointSetVec;
 
-// === InferCx === //
+// === Errors === //
 
 #[derive(Debug, Clone)]
-pub struct TyEquateError {
+pub struct TyAndTyRelateError {
     pub origin_lhs: SpannedTy,
     pub origin_rhs: SpannedTy,
-    pub culprits: Vec<TyEquateCulprit>,
+    pub culprits: Vec<TyAndTyRelateCulprit>,
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum TyEquateCulprit {
+pub enum TyAndTyRelateCulprit {
     Types(SpannedTy, SpannedTy),
     ClauseLists(SpannedTraitClauseList, SpannedTraitClauseList),
     Params(SpannedTraitParam, SpannedTraitParam),
 }
+
+// === InferCx === //
 
 /// A type inference context for solving type equations of the form...
 ///
 /// - `Region: Region`
 /// - `Type = Type`
 /// - `Type: Clauses`
+///
+/// Using the above equations, it can also solve equations of the form...
+///
 /// - `Clauses entail Clauses`
+/// - `is-well-formed Type`
 ///
 /// This context has two modes: region unaware and region aware.
 ///
@@ -49,8 +55,8 @@ pub enum TyEquateCulprit {
 /// produce errors. After all, one can always solve all region errors by inferring everything to
 /// `'gc`.
 ///
-/// Region checking is done in a separate pass involving a region lattice obtained with
-/// [`InferCx::make_region_lattice`], which allows a user to quickly determine...
+/// Region checking is done in a separate pass involving a region graph obtained with
+/// `make_region_graph`, which allows a user to quickly determine...
 ///
 /// - Whether some pair of regions (which could be universal, inferred, or `'gc`), are forced to
 ///   outlive or equal one another.
@@ -75,7 +81,9 @@ pub enum TyEquateCulprit {
 /// requirements at the end of a region-aware inference session by calling `wf_ty` on all the types
 /// the programmer has created. This has to be done at the end of an inference session since
 /// inferred types must all be solved by this point.
-#[derive(Debug)]
+///
+/// You can turn types with inference variables into their normalized form with `subst_infer`.
+#[derive(Debug, Clone)]
 pub struct InferCx<'tcx> {
     tcx: &'tcx TyCtxt,
     ty_inf: TyInferCx,
@@ -99,24 +107,31 @@ impl<'tcx> InferCx<'tcx> {
         &self.tcx.session
     }
 
-    pub fn fork(&mut self) {
-        todo!()
-    }
-
-    pub fn apply(&mut self) {
-        todo!()
-    }
-
-    pub fn reject(&mut self) {
-        todo!();
-    }
-
-    pub fn make_region_lattice(&self) {
-        todo!()
-    }
-
-    pub fn fresh_ty(&mut self) -> InferTyVar {
+    pub fn fresh_ty_var(&mut self) -> InferTyVar {
         self.ty_inf.fresh()
+    }
+
+    pub fn fresh_ty(&mut self) -> Ty {
+        self.tcx().intern_ty(TyKind::InferVar(self.fresh_ty_var()))
+    }
+
+    pub fn lookup_ty(&self, var: InferTyVar) -> Option<Ty> {
+        self.ty_inf.lookup(var)
+    }
+
+    pub fn try_peel_ty_var(&self, ty: SpannedTy) -> SpannedTy {
+        let tcx = self.tcx();
+
+        match ty.view(tcx) {
+            SpannedTyView::InferVar(var) => {
+                if let Some(var) = self.lookup_ty(var) {
+                    SpannedTy::new_maybe_saturated(var, ty.own_span())
+                } else {
+                    ty
+                }
+            }
+            _ => ty,
+        }
     }
 
     pub fn fresh_re(&mut self) -> Re {
@@ -127,7 +142,7 @@ impl<'tcx> InferCx<'tcx> {
         todo!()
     }
 
-    pub fn relate_re(&mut self, lhs: SpannedRe, rhs: SpannedRe, mode: RelationMode) {
+    pub fn relate_re_and_re(&mut self, lhs: SpannedRe, rhs: SpannedRe, mode: RelationMode) {
         let tcx = self.tcx();
 
         let Some(re_inf) = &mut self.re_inf else {
@@ -162,7 +177,7 @@ impl<'tcx> InferCx<'tcx> {
                 | (Re::ExplicitInfer, _)
                 | (_, Re::ExplicitInfer) => unreachable!(),
                 _ => {
-                    // TODO: Push it!
+                    todo!()
                 }
             }
         }
@@ -171,38 +186,35 @@ impl<'tcx> InferCx<'tcx> {
     /// Relates two types such that they match. The `mode` specifies how the regions inside the
     /// types should be related. For example, if it is `RelationMode::LhsOntoRhs`, relating
     /// `&'0 u32` and `&'1 u32` will result in the region relation `'0: '1`.
-    pub fn relate_ty(
+    pub fn relate_ty_and_ty(
         &mut self,
         lhs: SpannedTy,
         rhs: SpannedTy,
         mode: RelationMode,
-    ) -> Result<(), TyEquateError> {
-        self.fork();
-
+    ) -> Result<(), Box<TyAndTyRelateError>> {
+        let mut fork = self.clone();
         let mut culprits = Vec::new();
 
-        self.relate_ty_inner(lhs, rhs, &mut culprits, mode);
+        fork.relate_ty_and_ty_inner(lhs, rhs, &mut culprits, mode);
 
         if !culprits.is_empty() {
-            self.reject();
-
-            return Err(TyEquateError {
+            return Err(Box::new(TyAndTyRelateError {
                 origin_lhs: lhs,
                 origin_rhs: rhs,
                 culprits,
-            });
+            }));
         }
 
-        self.apply();
+        *self = fork;
 
         Ok(())
     }
 
-    fn relate_ty_inner(
+    fn relate_ty_and_ty_inner(
         &mut self,
         lhs: SpannedTy,
         rhs: SpannedTy,
-        culprits: &mut Vec<TyEquateCulprit>,
+        culprits: &mut Vec<TyAndTyRelateCulprit>,
         mode: RelationMode,
     ) {
         let tcx = self.tcx();
@@ -224,8 +236,8 @@ impl<'tcx> InferCx<'tcx> {
                 SpannedTyView::Reference(lhs_re, lhs_pointee),
                 SpannedTyView::Reference(rhs_re, rhs_pointee),
             ) => {
-                self.relate_re(lhs_re, rhs_re, mode);
-                self.relate_ty_inner(lhs_pointee, rhs_pointee, culprits, mode);
+                self.relate_re_and_re(lhs_re, rhs_re, mode);
+                self.relate_ty_and_ty_inner(lhs_pointee, rhs_pointee, culprits, mode);
             }
             (SpannedTyView::Adt(lhs), SpannedTyView::Adt(rhs))
                 if lhs.value.def == rhs.value.def =>
@@ -236,31 +248,30 @@ impl<'tcx> InferCx<'tcx> {
                 for (lhs, rhs) in lhs.params.iter(s).zip(rhs.params.iter(s)) {
                     match (lhs.view(tcx), rhs.view(tcx)) {
                         (SpannedTyOrReView::Re(lhs), SpannedTyOrReView::Re(rhs)) => {
-                            self.relate_re(lhs, rhs, mode);
+                            self.relate_re_and_re(lhs, rhs, mode);
                         }
                         (SpannedTyOrReView::Ty(lhs), SpannedTyOrReView::Ty(rhs)) => {
-                            self.relate_ty_inner(lhs, rhs, culprits, mode);
+                            self.relate_ty_and_ty_inner(lhs, rhs, culprits, mode);
                         }
                         _ => unreachable!(),
                     }
                 }
             }
             (SpannedTyView::Trait(lhs), SpannedTyView::Trait(rhs)) => {
-                self.relate_ty_trait_clauses_inner(lhs, rhs, culprits, mode);
+                self.relate_trait_clauses_inner(lhs, rhs, culprits, mode);
             }
             (SpannedTyView::Tuple(lhs), SpannedTyView::Tuple(rhs)) if lhs.len(s) == rhs.len(s) => {
                 for (lhs, rhs) in lhs.iter(s).zip(rhs.iter(s)) {
-                    self.relate_ty_inner(lhs, rhs, culprits, mode);
+                    self.relate_ty_and_ty_inner(lhs, rhs, culprits, mode);
                 }
             }
             (SpannedTyView::InferVar(lhs_var), SpannedTyView::InferVar(rhs_var)) => {
                 if let (Some(lhs_ty), Some(rhs_ty)) =
                     (self.ty_inf.lookup(lhs_var), self.ty_inf.lookup(rhs_var))
                 {
-                    // TODO: Saturating spanned types?
-                    self.relate_ty_inner(
-                        SpannedTy::new_unspanned(lhs_ty),
-                        SpannedTy::new_unspanned(rhs_ty),
+                    self.relate_ty_and_ty_inner(
+                        SpannedTy::new_maybe_saturated(lhs_ty, lhs.own_span()),
+                        SpannedTy::new_maybe_saturated(rhs_ty, rhs.own_span()),
                         culprits,
                         mode,
                     );
@@ -270,16 +281,24 @@ impl<'tcx> InferCx<'tcx> {
             }
             (SpannedTyView::InferVar(lhs_var), _) => {
                 if let Some(known_lhs) = self.ty_inf.lookup(lhs_var) {
-                    // TODO: Saturating spanned types?
-                    self.relate_ty_inner(SpannedTy::new_unspanned(known_lhs), rhs, culprits, mode);
+                    self.relate_ty_and_ty_inner(
+                        SpannedTy::new_maybe_saturated(known_lhs, lhs.own_span()),
+                        rhs,
+                        culprits,
+                        mode,
+                    );
                 } else {
                     self.ty_inf.assign(lhs_var, rhs.value);
                 }
             }
             (_, SpannedTyView::InferVar(rhs_var)) => {
                 if let Some(known_rhs) = self.ty_inf.lookup(rhs_var) {
-                    // TODO: Saturating spanned types?
-                    self.relate_ty_inner(lhs, SpannedTy::new_unspanned(known_rhs), culprits, mode);
+                    self.relate_ty_and_ty_inner(
+                        lhs,
+                        SpannedTy::new_maybe_saturated(known_rhs, rhs.own_span()),
+                        culprits,
+                        mode,
+                    );
                 } else {
                     self.ty_inf.assign(rhs_var, lhs.value);
                 }
@@ -292,23 +311,23 @@ impl<'tcx> InferCx<'tcx> {
             //
             // TODO: Check exhaustiveness automatically.
             _ => {
-                culprits.push(TyEquateCulprit::Types(lhs, rhs));
+                culprits.push(TyAndTyRelateCulprit::Types(lhs, rhs));
             }
         }
     }
 
-    fn relate_ty_trait_clauses_inner(
+    fn relate_trait_clauses_inner(
         &mut self,
         lhs: SpannedTraitClauseList,
         rhs: SpannedTraitClauseList,
-        culprits: &mut Vec<TyEquateCulprit>,
+        culprits: &mut Vec<TyAndTyRelateCulprit>,
         mode: RelationMode,
     ) {
         let s = self.session();
         let tcx = self.tcx();
 
         if lhs.len(s) != rhs.len(s) {
-            culprits.push(TyEquateCulprit::ClauseLists(lhs, rhs));
+            culprits.push(TyAndTyRelateCulprit::ClauseLists(lhs, rhs));
             return;
         }
 
@@ -320,7 +339,7 @@ impl<'tcx> InferCx<'tcx> {
                     // logic will produce constraints for both. This isn't a problem because
                     // we only ever lower trait objects with *exactly one* outlives
                     // constraint.
-                    self.relate_re(lhs, rhs, mode);
+                    self.relate_re_and_re(lhs, rhs, mode);
                 }
                 (SpannedTraitClauseView::Trait(lhs), SpannedTraitClauseView::Trait(rhs))
                     if lhs.value.def == rhs.value.def =>
@@ -337,10 +356,15 @@ impl<'tcx> InferCx<'tcx> {
                                 SpannedTraitParamView::Equals(rhs),
                             ) => match (lhs.view(tcx), rhs.view(tcx)) {
                                 (SpannedTyOrReView::Re(lhs), SpannedTyOrReView::Re(rhs)) => {
-                                    self.relate_re(lhs, rhs, RelationMode::Equate);
+                                    self.relate_re_and_re(lhs, rhs, RelationMode::Equate);
                                 }
                                 (SpannedTyOrReView::Ty(lhs), SpannedTyOrReView::Ty(rhs)) => {
-                                    self.relate_ty_inner(lhs, rhs, culprits, RelationMode::Equate);
+                                    self.relate_ty_and_ty_inner(
+                                        lhs,
+                                        rhs,
+                                        culprits,
+                                        RelationMode::Equate,
+                                    );
                                 }
                                 _ => unreachable!(),
                             },
@@ -348,7 +372,7 @@ impl<'tcx> InferCx<'tcx> {
                                 SpannedTraitParamView::Unspecified(lhs),
                                 SpannedTraitParamView::Unspecified(rhs),
                             ) => {
-                                self.relate_ty_trait_clauses_inner(
+                                self.relate_trait_clauses_inner(
                                     lhs,
                                     rhs,
                                     culprits,
@@ -356,13 +380,13 @@ impl<'tcx> InferCx<'tcx> {
                                 );
                             }
                             _ => {
-                                culprits.push(TyEquateCulprit::Params(lhs, rhs));
+                                culprits.push(TyAndTyRelateCulprit::Params(lhs, rhs));
                             }
                         }
                     }
                 }
                 _ => {
-                    culprits.push(TyEquateCulprit::ClauseLists(lhs, rhs));
+                    culprits.push(TyAndTyRelateCulprit::ClauseLists(lhs, rhs));
                     return;
                 }
             }
@@ -372,23 +396,31 @@ impl<'tcx> InferCx<'tcx> {
     pub fn wf_ty(&mut self, ty: SpannedTy) {
         todo!()
     }
+
+    pub fn subst_infer(&mut self, ty: Ty) -> Ty {
+        todo!()
+    }
+
+    pub fn make_region_graph(&self) {
+        todo!()
+    }
 }
 
 // === TyInferCx === //
 
 #[derive(Debug, Clone, Default)]
-pub struct TyInferCx {
+struct TyInferCx {
     disjoint: DisjointSetVec<Option<Ty>>,
 }
 
 impl TyInferCx {
-    pub fn fresh(&mut self) -> InferTyVar {
+    fn fresh(&mut self) -> InferTyVar {
         let var = InferTyVar(self.disjoint.len() as u32);
         self.disjoint.push(None);
         var
     }
 
-    pub fn assign(&mut self, var: InferTyVar, ty: Ty) {
+    fn assign(&mut self, var: InferTyVar, ty: Ty) {
         let root = self.disjoint.root_of(var.0 as usize);
         let root = &mut self.disjoint[root];
 
@@ -396,11 +428,11 @@ impl TyInferCx {
         *root = Some(ty);
     }
 
-    pub fn lookup(&self, var: InferTyVar) -> Option<Ty> {
+    fn lookup(&self, var: InferTyVar) -> Option<Ty> {
         self.disjoint[self.disjoint.root_of(var.0 as usize)]
     }
 
-    pub fn union(&mut self, lhs: InferTyVar, rhs: InferTyVar) {
+    fn union(&mut self, lhs: InferTyVar, rhs: InferTyVar) {
         let lhs_ty = self.lookup(lhs);
         let rhs_ty = self.lookup(rhs);
 
@@ -415,7 +447,7 @@ impl TyInferCx {
 
 // === ReInferCx === //
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ReInferCx {
     // TODO
 }

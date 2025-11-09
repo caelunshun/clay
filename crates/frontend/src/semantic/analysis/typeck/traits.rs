@@ -432,7 +432,7 @@ impl TyCtxt {
                 let mut sub_inferences = inferences.clone();
 
                 self.check_clause_satisfies_clause_erase_regions(
-                    lhs_elaborated,
+                    lhs_elaborated.value,
                     rhs,
                     binder,
                     &mut sub_inferences,
