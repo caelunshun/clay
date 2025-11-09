@@ -76,5 +76,6 @@ pub mod compiled_strand;
 pub mod intrinsic;
 pub mod isa;
 pub mod layout;
-pub mod lowering;
+// pub mod lowering;
+pub mod continuation;
 pub mod strand;
