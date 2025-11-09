@@ -120,12 +120,13 @@ impl<'tcx> InferCx<'tcx> {
     }
 
     pub fn try_peel_ty_var(&self, ty: SpannedTy) -> SpannedTy {
+        let s = self.session();
         let tcx = self.tcx();
 
         match ty.view(tcx) {
             SpannedTyView::InferVar(var) => {
                 if let Some(var) = self.lookup_ty(var) {
-                    SpannedTy::new_maybe_saturated(var, ty.own_span())
+                    SpannedTy::new_maybe_saturated(var, ty.own_span(), s)
                 } else {
                     ty
                 }
@@ -270,8 +271,8 @@ impl<'tcx> InferCx<'tcx> {
                     (self.ty_inf.lookup(lhs_var), self.ty_inf.lookup(rhs_var))
                 {
                     self.relate_ty_and_ty_inner(
-                        SpannedTy::new_maybe_saturated(lhs_ty, lhs.own_span()),
-                        SpannedTy::new_maybe_saturated(rhs_ty, rhs.own_span()),
+                        SpannedTy::new_maybe_saturated(lhs_ty, lhs.own_span(), s),
+                        SpannedTy::new_maybe_saturated(rhs_ty, rhs.own_span(), s),
                         culprits,
                         mode,
                     );
@@ -282,7 +283,7 @@ impl<'tcx> InferCx<'tcx> {
             (SpannedTyView::InferVar(lhs_var), _) => {
                 if let Some(known_lhs) = self.ty_inf.lookup(lhs_var) {
                     self.relate_ty_and_ty_inner(
-                        SpannedTy::new_maybe_saturated(known_lhs, lhs.own_span()),
+                        SpannedTy::new_maybe_saturated(known_lhs, lhs.own_span(), s),
                         rhs,
                         culprits,
                         mode,
@@ -295,7 +296,7 @@ impl<'tcx> InferCx<'tcx> {
                 if let Some(known_rhs) = self.ty_inf.lookup(rhs_var) {
                     self.relate_ty_and_ty_inner(
                         lhs,
-                        SpannedTy::new_maybe_saturated(known_rhs, rhs.own_span()),
+                        SpannedTy::new_maybe_saturated(known_rhs, rhs.own_span(), s),
                         culprits,
                         mode,
                     );
@@ -388,6 +389,68 @@ impl<'tcx> InferCx<'tcx> {
                 _ => {
                     culprits.push(TyAndTyRelateCulprit::ClauseLists(lhs, rhs));
                     return;
+                }
+            }
+        }
+    }
+
+    pub fn relate_ty_and_re(&mut self, lhs: SpannedTy, rhs: SpannedRe) {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        match lhs.view(tcx) {
+            SpannedTyView::This | SpannedTyView::ExplicitInfer => unreachable!(),
+            SpannedTyView::FnDef(_) | SpannedTyView::Simple(_) | SpannedTyView::Error(_) => {
+                // (trivial)
+            }
+            SpannedTyView::Reference(lhs, _pointee) => {
+                // No need to relate the pointee since WF checks already ensure that it outlives
+                // `lhs`.
+                self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs);
+            }
+            SpannedTyView::Adt(lhs) => {
+                // ADTs are bounded by which regions they mention.
+                for lhs in lhs.view(tcx).params.iter(s) {
+                    match lhs.view(tcx) {
+                        SpannedTyOrReView::Re(lhs) => {
+                            self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs);
+                        }
+                        SpannedTyOrReView::Ty(lhs) => {
+                            self.relate_ty_and_re(lhs, rhs);
+                        }
+                    }
+                }
+            }
+            SpannedTyView::Trait(lhs) => {
+                for lhs in lhs.iter(s) {
+                    match lhs.view(tcx) {
+                        SpannedTraitClauseView::Outlives(lhs) => {
+                            // There is guaranteed to be exactly one outlives constraint for a trait
+                            // object so relating these constraints is sufficient to ensure that the
+                            // object outlives the `rhs`.
+                            self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs);
+                        }
+                        SpannedTraitClauseView::Trait(_) => {
+                            // (if the outlives constraint says the trait is okay, it's okay)
+                        }
+                    }
+                }
+            }
+            SpannedTyView::Tuple(lhs) => {
+                for lhs in lhs.iter(s) {
+                    self.relate_ty_and_re(lhs, rhs);
+                }
+            }
+            SpannedTyView::Universal(_) => todo!(),
+            SpannedTyView::InferVar(inf_lhs) => {
+                if let Some(inf_lhs) = self.lookup_ty(inf_lhs) {
+                    self.relate_ty_and_re(
+                        SpannedTy::new_maybe_saturated(inf_lhs, lhs.own_span(), s),
+                        rhs,
+                    );
+                } else {
+                    // Defer the check.
+                    todo!();
                 }
             }
         }

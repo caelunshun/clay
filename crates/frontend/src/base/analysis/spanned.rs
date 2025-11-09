@@ -32,16 +32,16 @@ impl<T> Spanned<T> {
         }
     }
 
-    pub fn new_saturated(value: T, span: Span) -> Self {
+    pub fn new_saturated(value: T, span: Span, s: &Session) -> Self {
         Self {
             value,
-            span_info: SpannedInfo::Saturated(span),
+            span_info: SpannedInfo::Tracked(span, Obj::new_slice(&[], s)),
         }
     }
 
-    pub fn new_maybe_saturated(value: T, span: Option<Span>) -> Self {
+    pub fn new_maybe_saturated(value: T, span: Option<Span>, s: &Session) -> Self {
         if let Some(span) = span {
-            Self::new_saturated(value, span)
+            Self::new_saturated(value, span, s)
         } else {
             Self::new_unspanned(value)
         }
@@ -106,7 +106,6 @@ impl<T: Clone> Spanned<Intern<[T]>> {
 #[derive(Debug, Copy, Clone)]
 pub enum SpannedInfo {
     Untracked,
-    Saturated(Span),
     Tracked(Span, Obj<[SpannedInfo]>),
 }
 
@@ -122,7 +121,6 @@ impl SpannedInfo {
     pub fn own_span(self) -> Option<Span> {
         match self {
             SpannedInfo::Untracked => None,
-            SpannedInfo::Saturated(span) => Some(span),
             SpannedInfo::Tracked(span, _) => Some(span),
         }
     }
@@ -130,16 +128,30 @@ impl SpannedInfo {
     pub fn child_spans<const N: usize>(self, s: &Session) -> [SpannedInfo; N] {
         match self {
             SpannedInfo::Untracked => [SpannedInfo::Untracked; N],
-            SpannedInfo::Saturated(span) => [SpannedInfo::Saturated(span); N],
-            SpannedInfo::Tracked(_, spans) => array::from_fn(|i| spans.r(s)[i]),
+            SpannedInfo::Tracked(own_span, child_spans) => {
+                let child_spans = child_spans.r(s);
+
+                if child_spans.is_empty() {
+                    [SpannedInfo::Tracked(own_span, Obj::new_slice(&[], s)); N]
+                } else {
+                    array::from_fn(|i| child_spans[i])
+                }
+            }
         }
     }
 
     pub fn child_span_at(self, n: usize, s: &Session) -> SpannedInfo {
         match self {
             SpannedInfo::Untracked => SpannedInfo::Untracked,
-            SpannedInfo::Saturated(span) => SpannedInfo::Saturated(span),
-            SpannedInfo::Tracked(_, spans) => spans.r(s)[n],
+            SpannedInfo::Tracked(own_span, child_spans) => {
+                let child_spans = child_spans.r(s);
+
+                if child_spans.is_empty() {
+                    SpannedInfo::Tracked(own_span, Obj::new_slice(&[], s))
+                } else {
+                    child_spans[n]
+                }
+            }
         }
     }
 
@@ -148,19 +160,23 @@ impl SpannedInfo {
         len: usize,
         s: &'s Session,
     ) -> impl 's + Clone + ExactSizeIterator<Item = SpannedInfo> {
-        let spans = match self {
-            SpannedInfo::Untracked => {
-                return IterEither::Left(iter::repeat_n(SpannedInfo::Untracked, len));
-            }
-            SpannedInfo::Saturated(span) => {
-                return IterEither::Left(iter::repeat_n(SpannedInfo::Saturated(span), len));
-            }
-            SpannedInfo::Tracked(_, spans) => spans.r(s),
-        };
+        match self {
+            SpannedInfo::Untracked => IterEither::Left(iter::repeat_n(SpannedInfo::Untracked, len)),
+            SpannedInfo::Tracked(own_span, child_spans) => {
+                let child_spans = child_spans.r(s);
 
-        debug_assert_eq!(spans.len(), len);
+                if child_spans.is_empty() {
+                    IterEither::Left(iter::repeat_n(
+                        SpannedInfo::Tracked(own_span, Obj::new_slice(&[], s)),
+                        len,
+                    ))
+                } else {
+                    debug_assert_eq!(child_spans.len(), len);
 
-        IterEither::Right(spans.iter().copied())
+                    IterEither::Right(child_spans.iter().copied())
+                }
+            }
+        }
     }
 
     pub fn wrap(self, own_span: Span, s: &Session) -> Self {

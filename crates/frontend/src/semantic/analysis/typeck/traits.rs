@@ -349,6 +349,8 @@ impl InferCx<'_> {
         let tcx = self.tcx();
         let s = self.session();
 
+        let mut fork = self.clone();
+
         let mut error = TyAndClauseRelateError {
             lhs,
             rhs,
@@ -358,11 +360,11 @@ impl InferCx<'_> {
 
         for (idx, clause) in rhs.iter(s).enumerate() {
             match clause.view(tcx) {
-                SpannedTraitClauseView::Outlives(_) => {
-                    todo!()
+                SpannedTraitClauseView::Outlives(rhs) => {
+                    fork.relate_ty_and_re(lhs, rhs);
                 }
                 SpannedTraitClauseView::Trait(rhs) => {
-                    if let Err(err) = self.relate_ty_and_trait(lhs, rhs, binder) {
+                    if let Err(err) = fork.relate_ty_and_trait(lhs, rhs, binder) {
                         error.had_ambiguity |= err.had_ambiguity;
                         error.errors.push((idx as u32, err));
                     }
@@ -373,6 +375,8 @@ impl InferCx<'_> {
         if error.had_ambiguity || !error.errors.is_empty() {
             return Err(Box::new(error));
         }
+
+        *self = fork;
 
         Ok(())
     }
