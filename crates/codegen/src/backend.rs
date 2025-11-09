@@ -172,6 +172,9 @@ pub trait CodeBuilder<'bump> {
     /// relocation symbol.
     fn call(&mut self, symbol: Symbol, sig: Signature, args: &[ValId]) -> &'bump [ValId];
 
+    /// Tail call. This is a block terminator.
+    fn tailcall(&mut self, symbol: Symbol, sig: Signature, args: &[ValId]);
+
     /// Call a function whose address is given as a pointer-sized
     /// integer in `addr`, and whose signature must match the given signature.
     /// Assumes SystemV calling convention. Return values are returned

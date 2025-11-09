@@ -215,4 +215,32 @@ where
         );
         vec.into_bump_slice()
     }
+
+    fn sig_for_bb_tailcall(&self, bb: GBasicBlockId) -> Signature<'a> {
+        let func = bb.func.data(self.db, self.mir_cx);
+        Signature::new(
+            scalarize_types(
+                self.db,
+                self.mir_cx,
+                bb.resolve(self.db, self.mir_cx)
+                    .params
+                    .as_slice(&func.val_lists)
+                    .iter()
+                    .map(|&val| func.vals[val].typ),
+                self.bump,
+            ),
+            // Tail-called block has to have same returns as current function....
+            scalarize_type(
+                self.db,
+                self.mir_cx,
+                self.current_func.header.return_type,
+                self.bump,
+            ),
+        )
+    }
+
+    fn sig_for_func_call(&self, func: FuncId) -> Signature<'a> {
+        let func = func.data(self.db, self.mir_cx);
+        Signature::new()
+    }
 }
