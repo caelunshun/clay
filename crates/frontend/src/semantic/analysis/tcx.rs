@@ -2,13 +2,13 @@ use crate::{
     base::{
         HasSession, Session,
         analysis::Memo,
-        arena::{HasInterner, HasListInterner, Interner, ListInterner, Obj},
+        arena::{HasInterner, HasListInterner, Interner, ListInterner},
     },
     semantic::{
-        analysis::{BinderSubstitution, ImplFreshInfer},
+        analysis::BinderSubstitution,
         syntax::{
-            ImplDef, InferTyVar, ListOfTraitClauseList, TraitClause, TraitClauseList, TraitParam,
-            TraitParamList, Ty, TyKind, TyList, TyOrRe, TyOrReList,
+            ListOfTraitClauseList, TraitClause, TraitClauseList, TraitParam, TraitParamList, Ty,
+            TyKind, TyList, TyOrRe, TyOrReList,
         },
     },
 };
@@ -39,7 +39,6 @@ pub struct Interners {
 #[derive(Debug, Default)]
 pub struct Queries {
     pub substitute_ty: Memo<(Ty, Ty, BinderSubstitution), Ty>,
-    pub instantiate_fresh_target_infers: Memo<(Obj<ImplDef>, InferTyVar), ImplFreshInfer>,
 }
 
 impl Deref for TyCtxt {

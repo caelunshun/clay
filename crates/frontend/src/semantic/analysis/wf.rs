@@ -1,7 +1,7 @@
 use crate::{
     base::{Diag, arena::Obj, syntax::Span},
     semantic::{
-        analysis::{InferVarInferences, TyCtxt, TyVisitor, TyVisitorWalk},
+        analysis::{InferCx, TyCtxt, TyVisitor, TyVisitorWalk},
         syntax::{
             AnyGeneric, Crate, GenericBinder, ImplDef, SpannedAdtInstance, SpannedTraitInstance,
             SpannedTraitParamView, SpannedTraitSpec, SpannedTyOrReView,
@@ -57,17 +57,11 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
                     (AnyGeneric::Ty(def), SpannedTyOrReView::Ty(param)) => {
                         let mut binder = GenericBinder::default();
 
-                        let mut failures = Vec::new();
-
-                        tcx.check_clause_list_assignability_erase_regions(
-                            param.value,
-                            def.r(s).user_clauses.value,
+                        if let Err(err) = InferCx::new(self.tcx(), false).relate_ty_and_clause(
+                            param,
+                            *def.r(s).user_clauses,
                             &mut binder,
-                            &mut InferVarInferences::default(),
-                            &mut failures,
-                        );
-
-                        if !failures.is_empty() {
+                        ) {
                             Diag::span_err(
                                 param.own_span().unwrap_or(Span::DUMMY),
                                 "malformed parameter for trait parameter",
@@ -105,17 +99,11 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
 
             let mut binder = GenericBinder::default();
 
-            let mut failures = Vec::new();
-
-            tcx.check_clause_list_assignability_erase_regions(
-                param.value,
-                def.unwrap_ty().r(s).user_clauses.value,
+            if let Err(err) = InferCx::new(self.tcx(), false).relate_ty_and_clause(
+                param,
+                *def.unwrap_ty().r(s).user_clauses,
                 &mut binder,
-                &mut InferVarInferences::default(),
-                &mut failures,
-            );
-
-            if !failures.is_empty() {
+            ) {
                 Diag::span_err(
                     param.own_span().unwrap_or(Span::DUMMY),
                     "malformed parameter for trait parameter",

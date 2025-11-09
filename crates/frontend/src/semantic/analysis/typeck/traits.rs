@@ -4,16 +4,79 @@ use crate::{
         arena::{LateInit, Obj},
     },
     semantic::{
-        analysis::{BinderSubstitution, SubstitutionFolder, TyCtxt, TyFolderInfallible as _},
+        analysis::{
+            BinderSubstitution, InferCx, SubstitutionFolder, TyAndTyRelateError, TyCtxt,
+            TyFolderInfallible as _,
+        },
         syntax::{
-            AnyGeneric, GenericBinder, GenericSolveStep, ImplDef, InferTyVar,
-            ListOfTraitClauseList, Re, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty,
-            TyKind, TyOrRe, TyOrReList,
+            AnyGeneric, GenericBinder, GenericSolveStep, ImplDef, ListOfTraitClauseList,
+            RelationMode, SpannedRe, SpannedTraitClauseList, SpannedTraitClauseView,
+            SpannedTraitParamView, SpannedTraitSpec, SpannedTy, SpannedTyOrReView, SpannedTyView,
+            TraitClause, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReList,
         },
     },
 };
-use disjoint::DisjointSetVec;
 use index_vec::{IndexVec, define_index_type};
+
+// === Errors === //
+
+#[derive(Debug, Clone)]
+pub struct TyAndClauseRelateError {
+    pub lhs: SpannedTy,
+    pub rhs: SpannedTraitClauseList,
+    pub errors: Vec<(u32, Box<TyAndTraitRelateError>)>,
+    pub had_ambiguity: bool,
+}
+
+#[derive(Debug, Clone)]
+#[must_use]
+pub enum TyAndTraitRelateResolution {
+    Impl(TyAndImplResolution),
+    Inherent,
+}
+
+#[derive(Debug, Clone)]
+pub struct TyAndTraitRelateError {
+    pub lhs: SpannedTy,
+    pub rhs: SpannedTraitSpec,
+    pub resolutions: Vec<TyAndImplResolution>,
+    pub rejections: Vec<Box<TyAndImplRelateError>>,
+    pub had_ambiguity: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct TyAndImplResolution {
+    pub impl_def: Obj<ImplDef>,
+    pub impl_generics: TyOrReList,
+}
+
+#[derive(Debug, Clone)]
+pub struct TyAndImplRelateError {
+    pub lhs: SpannedTy,
+    pub rhs: Obj<ImplDef>,
+    pub bad_target: Option<Box<TyAndTyRelateError>>,
+    pub bad_trait_args: Vec<(u32, Box<TyAndTyRelateError>)>,
+    pub bad_trait_clauses: Vec<TyAndImplGenericClauseError>,
+    pub bad_trait_assoc_types: Vec<(u32, TyAndImplAssocRelateError)>,
+    pub had_ambiguity: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct TyAndImplGenericClauseError {
+    pub step: GenericSolveStep,
+    pub error: Box<TyAndClauseRelateError>,
+}
+
+#[derive(Debug, Clone)]
+pub enum TyAndImplAssocRelateError {
+    TyAndTy(Box<TyAndTyRelateError>),
+    TyAndClause(Box<TyAndClauseRelateError>),
+}
+
+#[derive(Debug, Clone)]
+pub struct RelateClauseAndTraitError;
+
+// === Order Solving === //
 
 impl TyCtxt {
     pub fn determine_impl_generic_solve_order(&self, def: Obj<ImplDef>) {
@@ -50,12 +113,11 @@ impl TyCtxt {
             .collect::<IndexVec<GenericIdx, _>>();
 
         let mut clause_states = IndexVec::<ClauseIndex, ClauseState>::new();
-        let mut step_clause_idx = 0;
 
-        for (step_generic_idx, main_generic_def) in
-            generic_defs.iter().filter_map(|v| v.as_ty()).enumerate()
-        {
-            for clause_def in main_generic_def.r(s).user_clauses.value.r(s) {
+        for (step_generic_idx, main_generic_def) in generic_defs.iter().enumerate() {
+            for (step_clause_idx, clause_def) in
+                main_generic_def.clauses(s).value.r(s).iter().enumerate()
+            {
                 let TraitClause::Trait(spec) = *clause_def else {
                     continue;
                 };
@@ -63,7 +125,7 @@ impl TyCtxt {
                 let clause_state_idx = clause_states.next_idx();
                 let mut blockers = 1;
 
-                generic_states[main_generic_def.r(s).binder.idx as usize]
+                generic_states[main_generic_def.binder(s).idx as usize]
                     .deps
                     .push(clause_state_idx);
 
@@ -73,13 +135,9 @@ impl TyCtxt {
                     };
 
                     cbit::cbit!(for generic in self.mentioned_generics(ty) {
-                        let Some(generic) = generic.as_ty() else {
-                            continue;
-                        };
+                        debug_assert_eq!(generic.binder(s).def, def.r(s).generics);
 
-                        debug_assert_eq!(generic.r(s).binder.def, def.r(s).generics);
-
-                        generic_states[generic.r(s).binder.idx as usize]
+                        generic_states[generic.binder(s).idx as usize]
                             .deps
                             .push(clause_state_idx);
 
@@ -95,8 +153,6 @@ impl TyCtxt {
                     blockers,
                     spec,
                 });
-
-                step_clause_idx += 1;
             }
         }
 
@@ -217,519 +273,439 @@ impl TyCtxt {
 
         LateInit::init(&def.r(s).generic_solve_order, solve_order);
     }
-
-    pub fn instantiate_fresh_target_infers(
-        &self,
-        candidate: Obj<ImplDef>,
-        min_infer_var: InferTyVar,
-    ) -> ImplFreshInfer {
-        let s = &self.session;
-
-        self.queries
-            .instantiate_fresh_target_infers
-            .compute_infallible((candidate, min_infer_var), |_| {
-                let mut min_infer_var = min_infer_var;
-
-                // Define fresh variables describing the substitutions to be made.
-                let binder = candidate.r(s).generics;
-                let substs = binder
-                    .r(s)
-                    .generics
-                    .iter()
-                    .map(|generic| match generic {
-                        AnyGeneric::Re(_) => TyOrRe::Re(Re::Erased),
-                        AnyGeneric::Ty(_) => {
-                            let ty = self.intern_ty(TyKind::InferVar(min_infer_var));
-                            min_infer_var.0 += 1;
-
-                            TyOrRe::Ty(ty)
-                        }
-                    })
-                    .collect::<Vec<_>>();
-
-                let substs = self.intern_ty_or_re_list(&substs);
-                let substs = BinderSubstitution { binder, substs };
-
-                // Substitute the target type
-                let target = SubstitutionFolder::new(self, self.intern_ty(TyKind::This), substs)
-                    .fold_ty(candidate.r(s).target.value);
-
-                let inf_var_clauses = binder
-                    .r(s)
-                    .generics
-                    .iter()
-                    .filter_map(|generic| match generic {
-                        AnyGeneric::Re(_generic) => None,
-                        AnyGeneric::Ty(generic) => Some(
-                            SubstitutionFolder::new(self, target, substs)
-                                .fold_clause_list(generic.r(s).user_clauses.value),
-                        ),
-                    })
-                    .collect::<Vec<_>>();
-
-                let inf_var_clauses = self.intern_list_of_trait_clause_list(&inf_var_clauses);
-
-                let trait_instance = SubstitutionFolder::new(self, target, substs)
-                    .fold_ty_or_re_list(candidate.r(s).trait_.unwrap().value.params);
-
-                ImplFreshInfer {
-                    target,
-                    trait_instance,
-                    inf_var_clauses,
-                }
-            })
-    }
-
-    pub fn check_type_assignability_erase_regions(
-        &self,
-        lhs: Ty,
-        rhs: Ty,
-        infer_var_inferences: &mut InferVarInferences,
-        failures: &mut Vec<SatisfiabilityFailure>,
-    ) {
-        let s = &self.session;
-
-        if lhs == rhs {
-            // The types are compatible!
-            return;
-        }
-
-        match (*lhs.r(s), *rhs.r(s)) {
-            (TyKind::This, _)
-            | (_, TyKind::This)
-            | (TyKind::ExplicitInfer, _)
-            | (_, TyKind::ExplicitInfer) => unreachable!(),
-            (TyKind::Reference(_, lhs), TyKind::Reference(_, rhs)) => {
-                self.check_type_assignability_erase_regions(
-                    lhs,
-                    rhs,
-                    infer_var_inferences,
-                    failures,
-                );
-            }
-            (TyKind::Adt(lhs), TyKind::Adt(rhs)) if lhs.def == rhs.def => {
-                for (&lhs, &rhs) in lhs.params.r(s).iter().zip(rhs.params.r(s)) {
-                    let (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) = (lhs, rhs) else {
-                        continue;
-                    };
-
-                    self.check_type_assignability_erase_regions(
-                        lhs,
-                        rhs,
-                        infer_var_inferences,
-                        failures,
-                    );
-                }
-            }
-            (TyKind::Tuple(lhs), TyKind::Tuple(rhs)) if lhs.r(s).len() == rhs.r(s).len() => {
-                for (&lhs, &rhs) in lhs.r(s).iter().zip(rhs.r(s)) {
-                    self.check_type_assignability_erase_regions(
-                        lhs,
-                        rhs,
-                        infer_var_inferences,
-                        failures,
-                    );
-                }
-            }
-            (TyKind::InferVar(lhs_var), TyKind::InferVar(rhs_var)) => {
-                if let (Some(lhs_ty), Some(rhs_ty)) = (
-                    infer_var_inferences.lookup(lhs_var),
-                    infer_var_inferences.lookup(rhs_var),
-                ) {
-                    self.check_type_assignability_erase_regions(
-                        lhs_ty,
-                        rhs_ty,
-                        infer_var_inferences,
-                        failures,
-                    );
-                } else {
-                    infer_var_inferences.union(lhs_var, rhs_var);
-                }
-            }
-            (TyKind::InferVar(lhs_var), _) => {
-                if let Some(known_lhs) = infer_var_inferences.lookup(lhs_var) {
-                    self.check_type_assignability_erase_regions(
-                        known_lhs,
-                        rhs,
-                        infer_var_inferences,
-                        failures,
-                    );
-                } else {
-                    infer_var_inferences.assign(lhs_var, rhs);
-                }
-            }
-            (_, TyKind::InferVar(rhs_var)) => {
-                if let Some(known_rhs) = infer_var_inferences.lookup(rhs_var) {
-                    self.check_type_assignability_erase_regions(
-                        lhs,
-                        known_rhs,
-                        infer_var_inferences,
-                        failures,
-                    );
-                } else {
-                    infer_var_inferences.assign(rhs_var, lhs);
-                }
-            }
-            // Omissions okay because of intern equality fast-path and the fact that all lifetimes
-            // are erased:
-            //
-            // - `(Simple, Simple)`
-            // - `(FnDef, FnDef)`
-            // - `(Universal, Universal)`
-            // - `(Trait, Trait)`
-            //
-            _ => {
-                failures.push(SatisfiabilityFailure::Structural { lhs, rhs });
-            }
-        }
-    }
-
-    pub fn check_clause_list_assignability_erase_regions(
-        &self,
-        lhs: Ty,
-        rhs: TraitClauseList,
-        binder: &mut GenericBinder,
-        inferences: &mut InferVarInferences,
-        failures: &mut Vec<SatisfiabilityFailure>,
-    ) {
-        for &clause in rhs.r(&self.session).iter() {
-            match clause {
-                TraitClause::Outlives(_) => {
-                    // (regions are ignored)
-                }
-                TraitClause::Trait(rhs) => {
-                    self.check_trait_assignability_erase_regions(
-                        lhs, rhs, binder, inferences, failures,
-                    );
-                }
-            }
-        }
-    }
-
-    // FIXME: Multiple traits may be applicable if inference variables are involved in the `lhs`
-    //  type or `rhs_params` parameter list. We should report those situations and use the
-    //  `ImplDef::generic_solve_order` to ensure that we never unnecessarily create them in nested
-    //  inferences.
-    pub fn check_trait_assignability_erase_regions(
-        &self,
-        lhs: Ty,
-        rhs: TraitSpec,
-        binder: &mut GenericBinder,
-        inferences: &mut InferVarInferences,
-        failures: &mut Vec<SatisfiabilityFailure>,
-    ) {
-        let s = &self.session;
-
-        // See whether the type itself can provide the implementation.
-        let direct_satisfy_failures = match *lhs.r(s) {
-            TyKind::Trait(clauses) => {
-                todo!()
-            }
-            TyKind::Universal(generic) => {
-                let lhs_elaborated = self.elaborate_generic_clauses(generic, binder);
-
-                let mut sub_failures = Vec::new();
-                let mut sub_inferences = inferences.clone();
-
-                self.check_clause_satisfies_clause_erase_regions(
-                    lhs_elaborated.value,
-                    rhs,
-                    binder,
-                    &mut sub_inferences,
-                    &mut sub_failures,
-                );
-
-                if sub_failures.is_empty() {
-                    *inferences = sub_inferences;
-                    return;
-                }
-
-                Some(sub_failures)
-            }
-            _ => None,
-        };
-
-        // Otherwise, attempt to provide the implementation through an implementation block.
-        let mut impl_failures = Vec::new();
-
-        for &candidate in rhs.def.r(s).impls.read().iter() {
-            // Replace universal qualifications in `impl` with inference variables
-            let min_infer_var = inferences.next_infer_var();
-            let candidate_fresh = self.instantiate_fresh_target_infers(candidate, min_infer_var);
-
-            // Check impl candidate.
-            let mut sub_failures = Vec::new();
-            let mut sub_inferences = inferences.clone();
-
-            sub_inferences.define_infer_vars(candidate_fresh.inf_var_clauses.r(s).len());
-
-            // See whether our target type can even match this `impl` block.
-            self.check_type_assignability_erase_regions(
-                lhs,
-                candidate_fresh.target,
-                &mut sub_inferences,
-                &mut sub_failures,
-            );
-
-            // See whether our specific target trait clauses can be covered by the inferred
-            // generics. We only check the regular generics at this stage since associated types are
-            // defined entirely from our solved regular generics.
-            for (&instance_ty, &required_param) in candidate_fresh
-                .trait_instance
-                .r(s)
-                .iter()
-                .zip(rhs.params.r(s))
-                .take(rhs.def.r(s).regular_generic_count as usize)
-            {
-                let TyOrRe::Ty(instance_ty) = instance_ty else {
-                    // (regions are ignored)
-                    continue;
-                };
-
-                match required_param {
-                    TraitParam::Equals(required_ty) => {
-                        self.check_type_assignability_erase_regions(
-                            instance_ty,
-                            required_ty.unwrap_ty(),
-                            &mut sub_inferences,
-                            &mut sub_failures,
-                        );
-                    }
-                    TraitParam::Unspecified(_) => {
-                        unreachable!()
-                    }
-                }
-            }
-
-            // See whether the inferences we made for all our variables are valid.
-            // See `ImplDef::generic_solve_order` on why the specific solving order is important.
-            for infer_step in candidate.r(s).generic_solve_order.iter() {
-                let var_id = InferTyVar(min_infer_var.0 + infer_step.generic_idx);
-                let clauses = candidate_fresh.inf_var_clauses.r(s)[infer_step.clause_idx as usize];
-
-                let Some(resolved) = sub_inferences.lookup(var_id) else {
-                    // This should only happen if a failure occurred elsewhere because of the
-                    // requirements on well-formed traits.
-                    debug_assert!(!sub_failures.is_empty());
-                    continue;
-                };
-
-                self.check_clause_list_assignability_erase_regions(
-                    resolved,
-                    clauses,
-                    binder,
-                    &mut sub_inferences,
-                    failures,
-                );
-            }
-
-            // See whether the user-supplied associated type constraints match what we inferred.
-            for (&instance_ty, &required_param) in candidate_fresh
-                .trait_instance
-                .r(s)
-                .iter()
-                .zip(rhs.params.r(s))
-                .skip(rhs.def.r(s).regular_generic_count as usize)
-            {
-                // Associated types are never regions.
-                let instance_ty = instance_ty.unwrap_ty();
-
-                match required_param {
-                    TraitParam::Equals(required_ty) => {
-                        self.check_type_assignability_erase_regions(
-                            instance_ty,
-                            required_ty.unwrap_ty(),
-                            &mut sub_inferences,
-                            &mut sub_failures,
-                        );
-                    }
-                    TraitParam::Unspecified(additional_clauses) => {
-                        self.check_clause_list_assignability_erase_regions(
-                            instance_ty,
-                            additional_clauses,
-                            binder,
-                            &mut sub_inferences,
-                            &mut sub_failures,
-                        );
-                    }
-                }
-            }
-
-            // If the impl match was successful, commit the inferences and stop scanning for more
-            // candidates. Otherwise, report the failure and continue scanning.
-            if sub_failures.is_empty() {
-                *inferences = sub_inferences;
-                return;
-            }
-
-            impl_failures.push(ImplFailure {
-                impl_: candidate,
-                cause: sub_failures,
-            });
-        }
-
-        failures.push(SatisfiabilityFailure::CannotSatisfy {
-            lhs,
-            rhs,
-            direct_satisfy_failures,
-            impl_failures,
-        });
-    }
-
-    pub fn check_clause_satisfies_clause_erase_regions(
-        &self,
-        lhs_elaborated: TraitClauseList,
-        rhs: TraitSpec,
-        binder: &mut GenericBinder,
-        inferences: &mut InferVarInferences,
-        failures: &mut Vec<SatisfiabilityFailure>,
-    ) {
-        let s = &self.session;
-
-        let mut direct_failures = Vec::new();
-
-        for &lhs in lhs_elaborated.r(s).iter() {
-            match lhs {
-                TraitClause::Outlives(_) => {
-                    // (regions are ignored)
-                }
-                TraitClause::Trait(lhs) => {
-                    if lhs.def != rhs.def {
-                        continue;
-                    }
-
-                    let mut sub_failures = Vec::new();
-                    let mut sub_inferences = inferences.clone();
-
-                    for (lhs_param, rhs_param) in lhs.params.r(s).iter().zip(rhs.params.r(s)) {
-                        let TraitParam::Equals(lhs) = *lhs_param else {
-                            unreachable!();
-                        };
-
-                        let TyOrRe::Ty(lhs) = lhs else {
-                            // (regions are ignored)
-                            continue;
-                        };
-
-                        match rhs_param {
-                            TraitParam::Equals(rhs_ty) => {
-                                self.check_type_assignability_erase_regions(
-                                    lhs,
-                                    rhs_ty.unwrap_ty(),
-                                    &mut sub_inferences,
-                                    &mut sub_failures,
-                                );
-                            }
-                            TraitParam::Unspecified(rhs_clauses) => {
-                                self.check_clause_list_assignability_erase_regions(
-                                    lhs,
-                                    *rhs_clauses,
-                                    binder,
-                                    &mut sub_inferences,
-                                    &mut sub_failures,
-                                );
-                            }
-                        }
-                    }
-
-                    if !sub_failures.is_empty() {
-                        direct_failures.push(DirectFailure {
-                            lhs,
-                            cause: sub_failures,
-                        });
-
-                        continue;
-                    }
-
-                    *inferences = sub_inferences;
-                    return;
-                }
-            }
-        }
-
-        failures.push(SatisfiabilityFailure::CannotDirect {
-            lhs_elaborated,
-            rhs,
-            direct_failures,
-        });
-    }
 }
 
-#[derive(Debug, Clone)]
-pub enum SatisfiabilityFailure {
-    Structural {
-        lhs: Ty,
-        rhs: Ty,
-    },
-    CannotSatisfy {
-        lhs: Ty,
-        rhs: TraitSpec,
-        direct_satisfy_failures: Option<Vec<SatisfiabilityFailure>>,
-        impl_failures: Vec<ImplFailure>,
-    },
-    CannotDirect {
-        lhs_elaborated: TraitClauseList,
-        rhs: TraitSpec,
-        direct_failures: Vec<DirectFailure>,
-    },
-}
-
-#[derive(Debug, Clone)]
-pub struct ImplFailure {
-    pub impl_: Obj<ImplDef>,
-    pub cause: Vec<SatisfiabilityFailure>,
-}
-
-#[derive(Debug, Clone)]
-pub struct DirectFailure {
-    pub lhs: TraitSpec,
-    pub cause: Vec<SatisfiabilityFailure>,
-}
+// === Inference Context === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct ImplFreshInfer {
-    pub target: Ty,
-    pub trait_instance: TyOrReList,
-    pub inf_var_clauses: ListOfTraitClauseList,
+struct ImplFreshInfer {
+    target: Ty,
+    trait_: TyOrReList,
+    impl_generics: TyOrReList,
+    impl_generic_clauses: ListOfTraitClauseList,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct InferVarInferences {
-    disjoint: DisjointSetVec<Option<Ty>>,
-}
+impl InferCx<'_> {
+    fn instantiate_fresh_impl_vars(&mut self, candidate: Obj<ImplDef>) -> ImplFreshInfer {
+        let tcx = self.tcx();
+        let s = self.session();
 
-impl InferVarInferences {
-    pub fn next_infer_var(&self) -> InferTyVar {
-        InferTyVar(self.disjoint.len() as u32)
-    }
+        // Define fresh variables describing the substitutions to be made.
+        let binder = candidate.r(s).generics;
+        let impl_generics = binder
+            .r(s)
+            .generics
+            .iter()
+            .map(|generic| match generic {
+                AnyGeneric::Re(_) => TyOrRe::Re(self.fresh_re()),
+                AnyGeneric::Ty(_) => TyOrRe::Ty(self.fresh_ty()),
+            })
+            .collect::<Vec<_>>();
 
-    pub fn define_infer_vars(&mut self, count: usize) {
-        for _ in 0..count {
-            self.disjoint.push(None);
+        let impl_generics = tcx.intern_ty_or_re_list(&impl_generics);
+        let substs = BinderSubstitution {
+            binder,
+            substs: impl_generics,
+        };
+
+        // Substitute the target type
+        let target = SubstitutionFolder::new(tcx, tcx.intern_ty(TyKind::This), substs)
+            .fold_ty(candidate.r(s).target.value);
+
+        // Substitute inference clauses
+        let inf_var_clauses = binder
+            .r(s)
+            .generics
+            .iter()
+            .map(|generic| {
+                let clauses = match generic {
+                    AnyGeneric::Re(generic) => generic.r(s).clauses.value,
+                    AnyGeneric::Ty(generic) => generic.r(s).user_clauses.value,
+                };
+
+                SubstitutionFolder::new(tcx, target, substs).fold_clause_list(clauses)
+            })
+            .collect::<Vec<_>>();
+
+        let impl_generic_clauses = tcx.intern_list_of_trait_clause_list(&inf_var_clauses);
+
+        let trait_ = SubstitutionFolder::new(tcx, target, substs)
+            .fold_ty_or_re_list(candidate.r(s).trait_.unwrap().value.params);
+
+        ImplFreshInfer {
+            target,
+            trait_,
+            impl_generics,
+            impl_generic_clauses,
         }
     }
 
-    pub fn assign(&mut self, var: InferTyVar, ty: Ty) {
-        let root = self.disjoint.root_of(var.0 as usize);
-        let root = &mut self.disjoint[root];
+    pub fn relate_ty_and_clause(
+        &mut self,
+        lhs: SpannedTy,
+        rhs: SpannedTraitClauseList,
+        binder: &mut GenericBinder,
+    ) -> Result<(), Box<TyAndClauseRelateError>> {
+        let tcx = self.tcx();
+        let s = self.session();
 
-        debug_assert!(root.is_none());
-        *root = Some(ty);
+        let mut error = TyAndClauseRelateError {
+            lhs,
+            rhs,
+            errors: Vec::new(),
+            had_ambiguity: false,
+        };
+
+        for (idx, clause) in rhs.iter(s).enumerate() {
+            match clause.view(tcx) {
+                SpannedTraitClauseView::Outlives(_) => {
+                    todo!()
+                }
+                SpannedTraitClauseView::Trait(rhs) => {
+                    if let Err(err) = self.relate_ty_and_trait(lhs, rhs, binder) {
+                        error.had_ambiguity |= err.had_ambiguity;
+                        error.errors.push((idx as u32, err));
+                    }
+                }
+            }
+        }
+
+        if error.had_ambiguity || !error.errors.is_empty() {
+            return Err(Box::new(error));
+        }
+
+        Ok(())
     }
 
-    pub fn lookup(&self, var: InferTyVar) -> Option<Ty> {
-        self.disjoint[self.disjoint.root_of(var.0 as usize)]
+    pub fn relate_re_and_clause(&mut self, lhs: SpannedRe, rhs: SpannedTraitClauseList) {
+        let tcx = self.tcx();
+        let s = self.session();
+
+        for clause in rhs.iter(s) {
+            match clause.view(tcx) {
+                SpannedTraitClauseView::Outlives(rhs) => {
+                    self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs);
+                }
+                SpannedTraitClauseView::Trait(_) => {
+                    unreachable!()
+                }
+            }
+        }
     }
 
-    pub fn union(&mut self, lhs: InferTyVar, rhs: InferTyVar) {
-        let lhs_ty = self.lookup(lhs);
-        let rhs_ty = self.lookup(rhs);
+    pub fn relate_ty_and_trait(
+        &mut self,
+        lhs: SpannedTy,
+        rhs: SpannedTraitSpec,
+        binder: &mut GenericBinder,
+    ) -> Result<TyAndTraitRelateResolution, Box<TyAndTraitRelateError>> {
+        let tcx = self.tcx();
+        let s = self.session();
 
-        debug_assert!(lhs_ty.is_none() || rhs_ty.is_none());
+        // See whether the type itself can provide the implementation.
+        match self.try_peel_ty_var(lhs).view(tcx) {
+            SpannedTyView::Trait(clauses) => {
+                todo!()
+            }
+            SpannedTyView::Universal(generic) => {
+                match self.relate_clause_and_trait(
+                    tcx.elaborate_generic_clauses(generic, binder),
+                    rhs.value,
+                    binder,
+                ) {
+                    Ok(()) => {
+                        return Ok(TyAndTraitRelateResolution::Inherent);
+                    }
+                    Err(RelateClauseAndTraitError) => {
+                        // (fallthrough)
+                    }
+                }
+            }
+            _ => {
+                // (no other types can inherently fulfill a trait requirement without an `impl`)
+            }
+        }
 
-        self.disjoint.join(lhs.0 as usize, rhs.0 as usize);
+        // Otherwise, attempt to provide the implementation through an implementation block.
+        let mut error = TyAndTraitRelateError {
+            lhs,
+            rhs,
+            resolutions: Vec::new(),
+            rejections: Vec::new(),
+            had_ambiguity: false,
+        };
 
-        let new_root = self.disjoint.root_of(lhs.0 as usize);
-        self.disjoint[new_root] = lhs_ty.or(rhs_ty);
+        let mut accepted_fork = None;
+
+        for &candidate in rhs.value.def.r(s).impls.read().iter() {
+            let mut fork = self.clone();
+
+            match fork.relate_ty_and_impl_no_fork(lhs, candidate, rhs, binder) {
+                Ok(resolution) => {
+                    error.resolutions.push(resolution);
+                    accepted_fork = Some(fork);
+                }
+                Err(rejection) => {
+                    error.had_ambiguity |= rejection.had_ambiguity;
+                    error.rejections.push(rejection);
+                }
+            }
+        }
+
+        if error.resolutions.len() > 1 {
+            error.had_ambiguity = true;
+        }
+
+        if error.had_ambiguity || error.resolutions.is_empty() {
+            return Err(Box::new(error));
+        }
+
+        *self = accepted_fork.unwrap();
+
+        Ok(TyAndTraitRelateResolution::Impl(
+            error.resolutions.into_iter().next().unwrap(),
+        ))
+    }
+
+    fn relate_ty_and_impl_no_fork(
+        &mut self,
+        lhs: SpannedTy,
+        rhs: Obj<ImplDef>,
+        spec: SpannedTraitSpec,
+        binder: &mut GenericBinder,
+    ) -> Result<TyAndImplResolution, Box<TyAndImplRelateError>> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let mut error = TyAndImplRelateError {
+            lhs,
+            rhs,
+            bad_target: None,
+            bad_trait_args: Vec::new(),
+            bad_trait_clauses: Vec::new(),
+            bad_trait_assoc_types: Vec::new(),
+            had_ambiguity: false,
+        };
+
+        // Replace universal qualifications in `impl` with inference variables
+        let rhs_fresh = self.instantiate_fresh_impl_vars(rhs);
+
+        // See whether our target type can even match this `impl` block.
+        if let Err(err) = self.relate_ty_and_ty(
+            lhs,
+            // We don't really care about the spans of types outside our main body so this is
+            // okay for diagnostics.
+            SpannedTy::new_unspanned(rhs_fresh.target),
+            RelationMode::Equate,
+        ) {
+            error.bad_target = Some(err);
+        }
+
+        // See whether our specific target trait clauses can be covered by the inferred
+        // generics. We only check the regular generics at this stage since associated types are
+        // defined entirely from our solved regular generics.
+        for (idx, (&instance, required_param)) in rhs_fresh
+            .trait_
+            .r(s)
+            .iter()
+            .zip(spec.view(tcx).params.iter(s))
+            .take(spec.value.def.r(s).regular_generic_count as usize)
+            .enumerate()
+        {
+            match required_param.view(tcx) {
+                SpannedTraitParamView::Equals(required) => {
+                    match (instance, required.view(tcx)) {
+                        (TyOrRe::Re(instance), SpannedTyOrReView::Re(required)) => {
+                            self.relate_re_and_re(
+                                // We don't really care about the spans of types outside our main body
+                                // so this is okay for diagnostics.
+                                SpannedRe::new_unspanned(instance),
+                                required,
+                                RelationMode::Equate,
+                            );
+                        }
+                        (TyOrRe::Ty(instance), SpannedTyOrReView::Ty(required)) => {
+                            if let Err(err) = self.relate_ty_and_ty(
+                                // We don't really care about the spans of types outside our main body
+                                // so this is okay for diagnostics.
+                                SpannedTy::new_unspanned(instance),
+                                required,
+                                RelationMode::Equate,
+                            ) {
+                                error.bad_trait_args.push((idx as u32, err));
+                            }
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                SpannedTraitParamView::Unspecified(_) => {
+                    unreachable!()
+                }
+            }
+        }
+
+        // See whether the inferences we made for all our variables are valid.
+        // See `ImplDef::generic_solve_order` on why the specific solving order is important.
+        for &infer_step in rhs.r(s).generic_solve_order.iter() {
+            let var = rhs_fresh.impl_generics.r(s)[infer_step.generic_idx as usize];
+            let clauses = rhs_fresh.impl_generic_clauses.r(s)[infer_step.clause_idx as usize];
+
+            match var {
+                TyOrRe::Re(re) => {
+                    self.relate_re_and_clause(
+                        // We don't really care about the spans of types outside our main body
+                        // so this is okay for diagnostics.
+                        SpannedRe::new_unspanned(re),
+                        // Same here.
+                        SpannedTraitClauseList::new_unspanned(clauses),
+                    );
+                }
+                TyOrRe::Ty(ty) => {
+                    if let Err(err) = self.relate_ty_and_clause(
+                        // We don't really care about the spans of types outside our main body
+                        // so this is okay for diagnostics.
+                        SpannedTy::new_unspanned(ty),
+                        // Same here.
+                        SpannedTraitClauseList::new_unspanned(clauses),
+                        binder,
+                    ) {
+                        error.had_ambiguity |= err.had_ambiguity;
+                        error.bad_trait_clauses.push(TyAndImplGenericClauseError {
+                            step: infer_step,
+                            error: err,
+                        });
+                    }
+                }
+            }
+        }
+
+        // See whether the user-supplied associated type constraints match what we inferred.
+        for (idx, (&instance_ty, required_param)) in rhs_fresh
+            .trait_
+            .r(s)
+            .iter()
+            .zip(spec.view(tcx).params.iter(s))
+            .enumerate()
+            .skip(spec.value.def.r(s).regular_generic_count as usize)
+        {
+            // Associated types are never regions.
+            let instance_ty = instance_ty.unwrap_ty();
+
+            match required_param.view(tcx) {
+                SpannedTraitParamView::Equals(required_ty) => {
+                    let SpannedTyOrReView::Ty(required_ty) = required_ty.view(tcx) else {
+                        unreachable!()
+                    };
+
+                    if let Err(err) = self.relate_ty_and_ty(
+                        SpannedTy::new_unspanned(instance_ty),
+                        required_ty,
+                        RelationMode::Equate,
+                    ) {
+                        error
+                            .bad_trait_assoc_types
+                            .push((idx as u32, TyAndImplAssocRelateError::TyAndTy(err)));
+                    }
+                }
+                SpannedTraitParamView::Unspecified(additional_clauses) => {
+                    if let Err(err) = self.relate_ty_and_clause(
+                        SpannedTy::new_unspanned(instance_ty),
+                        additional_clauses,
+                        binder,
+                    ) {
+                        error.had_ambiguity |= err.had_ambiguity;
+                        error
+                            .bad_trait_assoc_types
+                            .push((idx as u32, TyAndImplAssocRelateError::TyAndClause(err)));
+                    }
+                }
+            }
+        }
+
+        // Do some error checking.
+        if error.had_ambiguity
+            || error.bad_target.is_some()
+            || !error.bad_trait_args.is_empty()
+            || !error.bad_trait_clauses.is_empty()
+            || !error.bad_trait_assoc_types.is_empty()
+        {
+            return Err(Box::new(error));
+        }
+
+        Ok(TyAndImplResolution {
+            impl_def: rhs,
+            impl_generics: rhs_fresh.impl_generics,
+        })
+    }
+
+    fn relate_clause_and_trait(
+        &mut self,
+        lhs_elaborated: SpannedTraitClauseList,
+        rhs: TraitSpec,
+        binder: &mut GenericBinder,
+    ) -> Result<(), RelateClauseAndTraitError> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        // Find the clause that could prove our trait.
+        let lhs = lhs_elaborated.iter(s).find(|clause| match clause.value {
+            TraitClause::Outlives(_) => false,
+            TraitClause::Trait(lhs) => lhs.def == rhs.def,
+        });
+
+        let Some(lhs) = lhs else {
+            return Err(RelateClauseAndTraitError {});
+        };
+
+        let SpannedTraitClauseView::Trait(lhs) = lhs.view(tcx) else {
+            unreachable!()
+        };
+
+        let mut fork = self.clone();
+
+        for (lhs_param, &rhs_param) in lhs.view(tcx).params.iter(s).zip(rhs.params.r(s)) {
+            let SpannedTraitParamView::Equals(lhs) = lhs_param.view(tcx) else {
+                unreachable!();
+            };
+
+            match rhs_param {
+                TraitParam::Equals(rhs) => match (lhs.view(tcx), rhs) {
+                    (SpannedTyOrReView::Re(lhs), TyOrRe::Re(rhs)) => {
+                        fork.relate_re_and_re(
+                            lhs,
+                            SpannedRe::new_unspanned(rhs),
+                            RelationMode::Equate,
+                        );
+                    }
+                    (SpannedTyOrReView::Ty(lhs), TyOrRe::Ty(rhs)) => {
+                        if let Err(_err) = fork.relate_ty_and_ty(
+                            lhs,
+                            SpannedTy::new_unspanned(rhs),
+                            RelationMode::Equate,
+                        ) {
+                            return Err(RelateClauseAndTraitError);
+                        }
+                    }
+                    _ => unreachable!(),
+                },
+                TraitParam::Unspecified(rhs_clauses) => {
+                    let SpannedTyOrReView::Ty(lhs) = lhs.view(tcx) else {
+                        unreachable!()
+                    };
+
+                    if let Err(_err) = fork.relate_ty_and_clause(
+                        lhs,
+                        SpannedTraitClauseList::new_unspanned(rhs_clauses),
+                        binder,
+                    ) {
+                        return Err(RelateClauseAndTraitError);
+                    }
+                }
+            }
+        }
+
+        *self = fork;
+
+        Ok(())
     }
 }

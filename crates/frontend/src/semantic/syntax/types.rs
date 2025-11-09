@@ -158,6 +158,20 @@ pub enum AnyGeneric {
 }
 
 impl AnyGeneric {
+    pub fn binder(self, s: &Session) -> PosInBinder {
+        match self {
+            AnyGeneric::Re(re) => *re.r(s).binder,
+            AnyGeneric::Ty(ty) => *ty.r(s).binder,
+        }
+    }
+
+    pub fn clauses(self, s: &Session) -> SpannedTraitClauseList {
+        match self {
+            AnyGeneric::Re(re) => *re.r(s).clauses,
+            AnyGeneric::Ty(ty) => *ty.r(s).user_clauses,
+        }
+    }
+
     pub fn as_re(self) -> Option<Obj<RegionGeneric>> {
         match self {
             AnyGeneric::Re(v) => Some(v),
