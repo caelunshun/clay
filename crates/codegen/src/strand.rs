@@ -2,6 +2,11 @@ use fir_mir::ir::{BasicBlockId, FuncId};
 use salsa::Database;
 use std::collections::BTreeSet;
 
+#[salsa::interned]
+pub struct InternedStrand {
+    pub data: Strand,
+}
+
 /// A strand of basic blocks: the unit of compilation.
 ///
 /// This consists of a tree of "strand atoms", each of which
@@ -25,6 +30,18 @@ impl Strand {
 
     pub fn root_atom(&self) -> &StrandAtom {
         &self.root_atom
+    }
+
+    pub fn of_single_block(gbb: GBasicBlockId) -> Self {
+        Self::new(StrandAtom::new(gbb.func, gbb.bb, [gbb.bb]))
+    }
+
+    pub fn of_single_func(
+        func: FuncId,
+        entry: BasicBlockId,
+        blocks: impl IntoIterator<Item = BasicBlockId>,
+    ) -> Self {
+        Self::new(StrandAtom::new(func, entry, blocks))
     }
 }
 

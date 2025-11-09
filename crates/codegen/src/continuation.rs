@@ -35,10 +35,10 @@
 //! a continuation; instead, it can be tail-called and then return directly.
 //! In the example above, this would occur if the loop did not contain a break statement.
 
-use crate::strand::GBasicBlockId;
-use mir::BasicBlockId;
+use crate::strand::InternedStrand;
+use mir::{BasicBlockId, InstrData, TypeArgs};
 use salsa::Database;
-use std::alloc::Layout;
+use std::{alloc::Layout, collections::BTreeSet};
 
 /// Layout of a continuation returned by a strand.
 ///
@@ -68,6 +68,7 @@ impl ContLayout {
 pub struct ContVariant {
     tag: u32,
     destination: Destination,
+    layout: Layout,
 }
 
 impl ContVariant {
@@ -105,19 +106,123 @@ pub enum StrandRetMechanism {
 }
 
 /// Computes the continuation layout that must be returned
-/// by a strand whose entry point is the given block.
+/// by a strand.
 #[salsa::tracked]
 pub fn get_strand_ret_mechanism<'db>(
     db: &'db dyn Database,
     mir_cx: mir::Context<'db>,
-    strand_entrypoint: GBasicBlockId,
+    strand: InternedStrand<'db>,
+    type_args: TypeArgs<'db>,
 ) -> StrandRetMechanism {
-    todo!()
+    let strand = strand.data(db);
+    let func_data = strand.root_atom().func().data(db, mir_cx);
+
+    if strand.root_atom().entry() == func_data.entry_block {
+        return StrandRetMechanism::Function;
+    }
+
+    let mut variants: Vec<ContVariant> = Vec::new();
+
+    let mut stack = vec![strand.root_atom().entry()];
+    let mut visited = BTreeSet::new();
+    visited.insert(strand.root_atom().entry());
+
+    while let Some(current_id) = stack.pop() {
+        if matches!(
+            func_data.basic_blocks[current_id].instrs.last().unwrap(),
+            InstrData::Return { .. }
+        ) {
+            if !variants
+                .iter()
+                .any(|v| matches!(v.destination(), Destination::Return { .. }))
+            {
+                let tag = u32::try_from(variants.len()).unwrap();
+                let return_type_layout = crate::layout::layout_of(
+                    db,
+                    mir_cx,
+                    func_data.header.return_type,
+                    type_args.clone(),
+                );
+                let (variant_layout, return_val_offset) =
+                    Layout::new::<u32>().extend(return_type_layout).unwrap();
+
+                variants.push(ContVariant {
+                    tag,
+                    layout: variant_layout,
+                    destination: Destination::Return {
+                        return_val_offset: return_val_offset.try_into().unwrap(),
+                    },
+                });
+            }
+
+            continue;
+        }
+
+        func_data.visit_block_successors(current_id, |succ| {
+            if !strand.root_atom().contains_bb(succ) {
+                if variants.iter().any(
+                    |v| matches!(v.destination(), Destination::BasicBlock { bb, .. } if *bb == succ),
+                ) {
+                    return;
+                }
+
+                let tag = u32::try_from(variants.len()).unwrap();
+                let mut arg_offsets = Vec::new();
+                let mut variant_layout = Layout::new::<u32>();
+                for param_val in func_data.basic_blocks[succ]
+                    .params
+                    .as_slice(&func_data.val_lists)
+                {
+                    let param_type = func_data.vals[*param_val].typ;
+                    let param_layout =
+                        crate::layout::layout_of(db, mir_cx, param_type, type_args.clone());
+                    let (new_variant_layout, arg_offset) =
+                        variant_layout.extend(param_layout).unwrap();
+                    arg_offsets.push(arg_offset.try_into().unwrap());
+                    variant_layout = new_variant_layout;
+                }
+
+                variants.push(ContVariant {
+                    tag,
+                    layout: variant_layout,
+                    destination: Destination::BasicBlock {
+                        bb: succ,
+                        arg_offsets,
+                    },
+                });
+            } else if visited.insert(succ) {
+                stack.push(succ);
+            }
+        });
+    }
+
+    if variants
+        .iter()
+        .all(|v| matches!(v.destination(), Destination::Return { .. }))
+    {
+        return StrandRetMechanism::TailCall;
+    }
+
+    let mut overall_layout = Layout::new::<()>();
+    for variant in &variants {
+        overall_layout = Layout::from_size_align(
+            overall_layout.size().max(variant.layout.size()),
+            overall_layout.align().max(variant.layout.align()),
+        )
+        .unwrap();
+    }
+
+    StrandRetMechanism::Cont(ContLayout {
+        overall: overall_layout,
+        tag_offset: 0,
+        variants,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::strand::{GBasicBlockId, Strand};
     use mir::parser::parse_mir;
     use salsa::DatabaseImpl;
 
@@ -152,7 +257,12 @@ mod tests {
         };
 
         assert_eq!(
-            get_strand_ret_mechanism(db, mir_cx, gbb),
+            get_strand_ret_mechanism(
+                db,
+                mir_cx,
+                InternedStrand::new(db, Strand::of_single_block(gbb)),
+                TypeArgs::default()
+            ),
             StrandRetMechanism::Function
         );
     }
@@ -176,22 +286,16 @@ mod tests {
         let (func_id, func) = mir_cx.data(db).funcs.iter().next().unwrap();
         let gbb = GBasicBlockId {
             func: func_id,
-            bb: func
-                .data(db)
-                .basic_blocks
-                .iter()
-                .find_map(|(bb, data)| {
-                    if data.name.as_deref() == Some("block1") {
-                        Some(bb)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap(),
+            bb: func.data(db).block_by_name("block1").unwrap(),
         };
 
         assert_eq!(
-            get_strand_ret_mechanism(db, mir_cx, gbb),
+            get_strand_ret_mechanism(
+                db,
+                mir_cx,
+                InternedStrand::new(db, Strand::of_single_block(gbb)),
+                TypeArgs::default()
+            ),
             StrandRetMechanism::TailCall
         );
     }
@@ -221,23 +325,19 @@ mod tests {
         let mir_cx = must_parse_mir(db, Input::new(db, mir));
 
         let (func_id, func) = mir_cx.data(db).funcs.iter().next().unwrap();
-        let gbb = GBasicBlockId {
-            func: func_id,
-            bb: func
-                .data(db)
-                .basic_blocks
-                .iter()
-                .find_map(|(bb, data)| {
-                    if data.name.as_deref() == Some("block1") {
-                        Some(bb)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap(),
-        };
 
-        let StrandRetMechanism::Cont(cont) = get_strand_ret_mechanism(db, mir_cx, gbb) else {
+        let blocks = [
+            func.data(db).block_by_name("block1").unwrap(),
+            func.data(db).block_by_name("block2").unwrap(),
+            func.data(db).block_by_name("block3").unwrap(),
+        ];
+
+        let StrandRetMechanism::Cont(cont) = get_strand_ret_mechanism(
+            db,
+            mir_cx,
+            InternedStrand::new(db, Strand::of_single_func(func_id, blocks[0], blocks)),
+            TypeArgs::default(),
+        ) else {
             panic!("not a cont")
         };
 

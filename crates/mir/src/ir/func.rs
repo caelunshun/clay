@@ -47,6 +47,16 @@ pub struct FuncData<'db> {
 }
 
 impl<'db> FuncData<'db> {
+    pub fn block_by_name(&self, name: &str) -> Option<BasicBlockId> {
+        self.basic_blocks.iter().find_map(|(bb, data)| {
+            if data.name.as_deref() == Some(name) {
+                Some(bb)
+            } else {
+                None
+            }
+        })
+    }
+
     /// Visits all basic blocks in an order such that
     /// a block B is not visited until after all blocks that
     /// appear in any *path* (not a walk) from the entry block to B (exclusive)
