@@ -1,5 +1,5 @@
-pub trait Demo<'a> {
-    type Foo: 'a;
+pub trait Demo<'c> {
+    type Foo: 'c;
 }
 
 // Accepted
@@ -10,6 +10,11 @@ impl<'a> Demo<'a> for () {
 // Accepted
 impl<'a> Demo<'a> for () {
     type Foo = &'a ();
+}
+
+// Accepted
+impl<'a, 'b: 'a> Demo<'a> for &'b () {
+    type Foo = &'b ();
 }
 
 // Rejected

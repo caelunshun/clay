@@ -14,7 +14,6 @@ use bit_set::BitSet;
 use disjoint::DisjointSetVec;
 use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
-use std::ops::ControlFlow;
 
 // === Errors === //
 
@@ -151,7 +150,11 @@ impl<'tcx> InferCx<'tcx> {
     }
 
     pub fn relate_re_and_re(&mut self, lhs: SpannedRe, rhs: SpannedRe, mode: RelationMode) {
-        let tcx = self.tcx();
+        let Some(regions) = &mut self.regions else {
+            return;
+        };
+
+        let tcx = self.tcx;
 
         let tmp1;
         let tmp2;
@@ -170,6 +173,8 @@ impl<'tcx> InferCx<'tcx> {
             }
         };
 
+        let mut errors = Vec::new();
+
         for &(lhs, rhs) in equivalences {
             if lhs.value == rhs.value {
                 continue;
@@ -181,10 +186,17 @@ impl<'tcx> InferCx<'tcx> {
                 | (Re::ExplicitInfer, _)
                 | (_, Re::ExplicitInfer) => unreachable!(),
                 _ => {
-                    todo!()
+                    regions.relate(lhs.value, rhs.value, self.tcx, &mut errors);
+
+                    if !errors.is_empty() {
+                        // TODO: Actually return an error.
+                        panic!("oh no\nlhs: {lhs:#?}\n\nrhs: {rhs:#?}");
+                    }
                 }
             }
         }
+
+        // TODO: errors
     }
 
     /// Relates two types such that they match. The `mode` specifies how the regions inside the
@@ -594,12 +606,17 @@ impl ReInferTracker {
                         entry.insert(TrackedUniversal {
                             generic,
                             index,
-                            outlives: BitSet::new(),
+                            outlives: {
+                                let mut outlives = BitSet::new();
+                                outlives.insert(new_universal_idx);
+                                outlives
+                            },
                         });
 
                         // Introduce universal outlives without reporting their relations to the user.
                         // That way, the only errors that can be produced originate from discovering new
                         // constraints beyond that.
+                        // FIXME: Strongly connected components won't get the correct outlives set.
                         for outlives in generic.r(s).clauses.iter(s) {
                             let SpannedTraitClauseView::Outlives(outlives) = outlives.view(tcx)
                             else {
@@ -643,19 +660,23 @@ impl ReInferTracker {
         }
     }
 
-    pub fn relate<B>(
+    pub fn relate(
         &mut self,
         lhs: Re,
         rhs: Re,
         tcx: &TyCtxt,
-        mut new_constraint: impl FnMut((Obj<RegionGeneric>, Re)) -> ControlFlow<B>,
-    ) -> ControlFlow<B> {
+        error_accum: &mut Vec<(Obj<RegionGeneric>, Re)>,
+    ) {
+        if lhs == rhs {
+            return;
+        }
+
         let lhs = self.region_to_idx(lhs, tcx);
         let rhs = self.region_to_idx(rhs, tcx);
 
         // Ensure that we don't perform a relation more than once.
         if !self.related_pairs.insert((lhs, rhs)) {
-            return ControlFlow::Continue(());
+            return;
         }
 
         // Record the outlives constraint.
@@ -688,7 +709,7 @@ impl ReInferTracker {
                 };
 
                 if let Some(offending_re) = offending_re {
-                    new_constraint((generic, offending_re))?;
+                    error_accum.push((generic, offending_re));
                 }
 
                 for &outlived_by in &self.tracked_any[top].outlived_by {
@@ -703,7 +724,5 @@ impl ReInferTracker {
                 }
             }
         }
-
-        ControlFlow::Continue(())
     }
 }
