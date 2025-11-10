@@ -561,6 +561,11 @@ fn parse_ty_pratt_seed(p: P) -> AstTy {
         kind,
     };
 
+    // Parse self
+    if match_kw(kw!("Self")).expect(p).is_some() {
+        return build_ty(AstTyKind::This, p);
+    }
+
     // Parse path
     if let Some(path) = parse_simple_path(p) {
         return build_ty(AstTyKind::Name(path, parse_generic_param_list(p)), p);
