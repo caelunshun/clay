@@ -57,7 +57,7 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
                     (AnyGeneric::Ty(def), SpannedTyOrReView::Ty(param)) => {
                         let mut binder = GenericBinder::default();
 
-                        if let Err(err) = InferCx::new(self.tcx(), false).relate_ty_and_clause(
+                        if let Err(err) = InferCx::new(self.tcx()).relate_ty_and_clause(
                             param,
                             *def.r(s).user_clauses,
                             &mut binder,
@@ -99,7 +99,7 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
 
             let mut binder = GenericBinder::default();
 
-            if let Err(err) = InferCx::new(self.tcx(), false).relate_ty_and_clause(
+            if let Err(err) = InferCx::new(self.tcx()).relate_ty_and_clause(
                 param,
                 *def.unwrap_ty().r(s).user_clauses,
                 &mut binder,
