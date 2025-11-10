@@ -9,7 +9,7 @@ use crate::{
             TyFolderInfallible as _,
         },
         syntax::{
-            AnyGeneric, GenericBinder, GenericSolveStep, ImplDef, ListOfTraitClauseList,
+            AnyGeneric, GenericBinder, GenericSolveStep, ImplDef, ListOfTraitClauseList, Re,
             RelationMode, SpannedRe, SpannedTraitClauseList, SpannedTraitClauseView,
             SpannedTraitParamView, SpannedTraitSpec, SpannedTy, SpannedTyOrReView, SpannedTyView,
             TraitClause, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReList,
@@ -200,18 +200,14 @@ impl TyCtxt {
             let s = &tcx.session;
 
             cbit::cbit!(for generic in tcx.mentioned_generics(TyOrRe::Ty(ty)) {
-                let Some(generic) = generic.as_ty() else {
-                    continue;
-                };
-
-                debug_assert_eq!(generic.r(s).binder.def, binder);
+                debug_assert_eq!(generic.binder(s).def, binder);
 
                 cover_idx(
                     solve_queue,
                     solve_order,
                     generic_states,
                     clause_states,
-                    GenericIdx::from_raw(generic.r(s).binder.idx),
+                    GenericIdx::from_raw(generic.binder(s).idx),
                 );
             });
         }
@@ -228,16 +224,37 @@ impl TyCtxt {
         );
 
         if let Some(trait_) = def.r(s).trait_ {
-            for param in trait_.value.params.r(s).iter().filter_map(|v| v.as_ty()) {
-                cover_ty(
-                    self,
-                    &mut solve_queue,
-                    &mut solve_order,
-                    &mut generic_states,
-                    &mut clause_states,
-                    def.r(s).generics,
-                    param,
-                );
+            for &param in trait_.value.params.r(s) {
+                match param {
+                    TyOrRe::Re(param) => {
+                        match param {
+                            Re::Gc => {
+                                // (nothing mentioned)
+                            }
+                            Re::Universal(param) => {
+                                cover_idx(
+                                    &mut solve_queue,
+                                    &mut solve_order,
+                                    &mut generic_states,
+                                    &mut clause_states,
+                                    GenericIdx::from_raw(param.r(s).binder.idx),
+                                );
+                            }
+                            Re::InferVar(_) | Re::ExplicitInfer | Re::Erased => unreachable!(),
+                        }
+                    }
+                    TyOrRe::Ty(param) => {
+                        cover_ty(
+                            self,
+                            &mut solve_queue,
+                            &mut solve_order,
+                            &mut generic_states,
+                            &mut clause_states,
+                            def.r(s).generics,
+                            param,
+                        );
+                    }
+                }
             }
         }
 

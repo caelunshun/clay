@@ -1,7 +1,7 @@
 use crate::{
     base::{Session, arena::Obj},
     semantic::{
-        analysis::{TyCtxt, TyFolder, TyFolderSuper},
+        analysis::TyCtxt,
         syntax::{
             InferReVar, InferTyVar, Re, RegionGeneric, RelationMode, SpannedRe,
             SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParam,
@@ -14,7 +14,7 @@ use bit_set::BitSet;
 use disjoint::DisjointSetVec;
 use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
-use std::{convert::Infallible, ops::ControlFlow};
+use std::ops::ControlFlow;
 
 // === Errors === //
 
@@ -148,10 +148,6 @@ impl<'tcx> InferCx<'tcx> {
         } else {
             Re::Erased
         }
-    }
-
-    pub fn fresh_re_subst(&mut self) -> InferCxFreshReSubst<'_, 'tcx> {
-        InferCxFreshReSubst(self)
     }
 
     pub fn relate_re_and_re(&mut self, lhs: SpannedRe, rhs: SpannedRe, mode: RelationMode) {
@@ -709,28 +705,5 @@ impl ReInferTracker {
         }
 
         ControlFlow::Continue(())
-    }
-}
-
-// === Substitutions === //
-
-#[derive(Debug)]
-pub struct InferCxFreshReSubst<'icx, 'tcx>(pub &'icx mut InferCx<'tcx>);
-
-// TODO
-// impl<'tcx> TyFolderPreservesSpans<'tcx> for InferCxFreshReSubst<'_, 'tcx> {}
-
-impl<'tcx> TyFolder<'tcx> for InferCxFreshReSubst<'_, 'tcx> {
-    type Error = Infallible;
-
-    fn tcx(&self) -> &'tcx TyCtxt {
-        self.0.tcx
-    }
-
-    fn try_fold_re(&mut self, re: Re) -> Result<Re, Self::Error> {
-        match re {
-            Re::ExplicitInfer | Re::Erased => Ok(self.0.fresh_re()),
-            _ => self.super_re(re),
-        }
     }
 }
