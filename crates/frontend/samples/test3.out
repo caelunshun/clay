@@ -1,0 +1,5 @@
+error: malformed parameter for trait parameter
+   ┌─ crates/frontend/samples/test3.fir:28:16
+   │
+28 │     type Woo = ((D, D), V, T);
+   │                ^^^^^^^^^^^^^^
