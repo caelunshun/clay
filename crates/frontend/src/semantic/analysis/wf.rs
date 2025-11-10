@@ -1,7 +1,7 @@
 use crate::{
     base::{Diag, arena::Obj, syntax::Span},
     semantic::{
-        analysis::{InferCx, TyCtxt, TyVisitor, TyVisitorWalk},
+        analysis::{InferCx, InferCxMode, TyCtxt, TyVisitor, TyVisitorWalk},
         syntax::{
             AnyGeneric, Crate, GenericBinder, ImplDef, SpannedAdtInstance, SpannedTraitInstance,
             SpannedTraitParamView, SpannedTraitSpec, SpannedTyOrReView,
@@ -57,11 +57,9 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
                     (AnyGeneric::Ty(def), SpannedTyOrReView::Ty(param)) => {
                         let mut binder = GenericBinder::default();
 
-                        if let Err(err) = InferCx::new(self.tcx()).relate_ty_and_clause(
-                            param,
-                            *def.r(s).user_clauses,
-                            &mut binder,
-                        ) {
+                        if let Err(err) = InferCx::new(self.tcx(), InferCxMode::RegionAware)
+                            .relate_ty_and_clause(param, *def.r(s).user_clauses, &mut binder)
+                        {
                             Diag::span_err(
                                 param.own_span().unwrap_or(Span::DUMMY),
                                 "malformed parameter for trait parameter",
@@ -99,11 +97,9 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
 
             let mut binder = GenericBinder::default();
 
-            if let Err(err) = InferCx::new(self.tcx()).relate_ty_and_clause(
-                param,
-                *def.unwrap_ty().r(s).user_clauses,
-                &mut binder,
-            ) {
+            if let Err(err) = InferCx::new(self.tcx(), InferCxMode::RegionAware)
+                .relate_ty_and_clause(param, *def.unwrap_ty().r(s).user_clauses, &mut binder)
+            {
                 Diag::span_err(
                     param.own_span().unwrap_or(Span::DUMMY),
                     "malformed parameter for trait parameter",

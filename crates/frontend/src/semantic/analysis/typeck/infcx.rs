@@ -34,19 +34,82 @@ pub enum TyAndTyRelateCulprit {
 
 // === InferCx === //
 
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum InferCxMode {
+    RegionBlind,
+    RegionAware,
+}
+
+/// A type inference context for solving type equations of the form...
+///
+/// - `Region: Region`
+/// - `Type = Type`
+/// - `Type: Clauses`
+///
+/// Using the above equations, it can also solve equations of the form...
+///
+/// - `Clauses entail Clauses`
+/// - `is-well-formed Type`
+///
+/// ## Multi-pass Checking
+///
+/// This context has two modes: region unaware and region aware.
+///
+/// - The region unaware mode just solves for type equalities, making it ideal for a first pass of
+///   type-checker where one just wants to solve for type inference variables. This process is
+///   allowed to fail.
+///
+/// - The region aware mode can take the solved inference types and, after replacing all the erased
+///   regions within those solved inference types with fresh region inference variables, it can run
+///   a second pass of type-checking to ensure that region inference is correct.
+///
+/// If all the types checked with a region aware check were obtained by a prior region unaware
+/// type-check, the inference methods will never return type errors—only region errors.
+///
+/// This two-pass design is necessary because we want each inferred expression type to have its own
+/// set of fresh region inference variables. If we instead tried to do type solving in a single
+/// pass, we'd either have to...
+///
+/// a) Wait until a source expression's type is fully solved so that we can replace all its regions
+///    with fresh region variables, which could prevent us from properly inferring certain patterns.
+///
+/// b) Equate source expression types without instantiating fresh new inference variable for each of
+///    them, preventing us from handling region-based sub-typing.
+///
+/// Note that, if there are no type inference variables involved in your seed queries (e.g. when
+/// WF-checking traits), you can immediately skip to region aware checking.
+///
+/// ## Well-formedness checks
+///
+/// There are two types of well-formedness requirements a type may have...
+///
+/// - A type WF requirement where a generic parameter must implement a trait (e.g. if `Foo<T>` has a
+///   clause stipulating that `T: MyTrait`)
+///
+/// - A region WF constraint where a lifetime must outlive another lifetime (e.g. `&'a T` would
+///   imply that `T: 'a`).
+///
+/// Relational methods never check type WF requirements or push region WF constraints by
+/// themselves but will never crash if these WF requirements aren't met. You can "bolt on" these WF
+/// requirements at the end of a region-aware inference session by calling `wf_ty` on all the types
+/// the programmer has created. This has to be done at the end of an inference session since
+/// inferred types must all be solved by this point.
 #[derive(Debug, Clone)]
 pub struct InferCx<'tcx> {
     tcx: &'tcx TyCtxt,
     types: TyInferTracker,
-    regions: ReInferTracker,
+    regions: Option<ReInferTracker>,
 }
 
 impl<'tcx> InferCx<'tcx> {
-    pub fn new(tcx: &'tcx TyCtxt) -> Self {
+    pub fn new(tcx: &'tcx TyCtxt, mode: InferCxMode) -> Self {
         Self {
             tcx,
             types: TyInferTracker::default(),
-            regions: ReInferTracker::default(),
+            regions: match mode {
+                InferCxMode::RegionBlind => None,
+                InferCxMode::RegionAware => Some(ReInferTracker::default()),
+            },
         }
     }
 
@@ -58,16 +121,8 @@ impl<'tcx> InferCx<'tcx> {
         &self.tcx.session
     }
 
-    pub fn fresh_ty_var(&mut self) -> InferTyVar {
-        self.types.fresh()
-    }
-
     pub fn fresh_ty(&mut self) -> Ty {
-        self.tcx().intern_ty(TyKind::InferVar(self.fresh_ty_var()))
-    }
-
-    pub fn lookup_ty(&self, var: InferTyVar) -> Option<Ty> {
-        self.types.lookup(var)
+        self.tcx().intern_ty(TyKind::InferVar(self.types.fresh()))
     }
 
     pub fn try_peel_ty_var(&self, ty: SpannedTy) -> SpannedTy {
@@ -76,7 +131,7 @@ impl<'tcx> InferCx<'tcx> {
 
         match ty.view(tcx) {
             SpannedTyView::InferVar(var) => {
-                if let Some(var) = self.lookup_ty(var) {
+                if let Some(var) = self.types.lookup(var) {
                     SpannedTy::new_maybe_saturated(var, ty.own_span(), s)
                 } else {
                     ty
@@ -87,6 +142,14 @@ impl<'tcx> InferCx<'tcx> {
     }
 
     pub fn fresh_re(&mut self) -> Re {
+        if let Some(regions) = &mut self.regions {
+            Re::InferVar(regions.fresh())
+        } else {
+            Re::Erased
+        }
+    }
+
+    pub fn fresh_re_substitution(&mut self) {
         todo!()
     }
 
@@ -386,7 +449,7 @@ impl<'tcx> InferCx<'tcx> {
             }
             SpannedTyView::Universal(_) => todo!(),
             SpannedTyView::InferVar(inf_lhs) => {
-                if let Some(inf_lhs) = self.lookup_ty(inf_lhs) {
+                if let Some(inf_lhs) = self.types.lookup(inf_lhs) {
                     self.relate_ty_and_re(
                         SpannedTy::new_maybe_saturated(inf_lhs, lhs.own_span(), s),
                         rhs,
