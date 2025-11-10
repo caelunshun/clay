@@ -1,20 +1,20 @@
 use crate::{
     base::{Session, arena::Obj},
     semantic::{
-        analysis::TyCtxt,
+        analysis::{TyCtxt, TyFolder, TyFolderSuper},
         syntax::{
             InferReVar, InferTyVar, Re, RegionGeneric, RelationMode, SpannedRe,
             SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParam,
             SpannedTraitParamView, SpannedTy, SpannedTyOrReView, SpannedTyView, Ty, TyKind,
         },
     },
-    utils::hash::{FxHashMap, FxHashSet},
+    utils::hash::{FxHashSet, FxIndexMap},
 };
 use bit_set::BitSet;
 use disjoint::DisjointSetVec;
 use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
-use std::ops::ControlFlow;
+use std::{convert::Infallible, ops::ControlFlow};
 
 // === Errors === //
 
@@ -74,7 +74,8 @@ pub enum InferCxMode {
 ///    with fresh region variables, which could prevent us from properly inferring certain patterns.
 ///
 /// b) Equate source expression types without instantiating fresh new inference variable for each of
-///    them, preventing us from handling region-based sub-typing.
+///    them, preventing us from handling region-based sub-typing. This is what using a region-aware
+///    mode for the first inference pass would accomplish.
 ///
 /// Note that, if there are no type inference variables involved in your seed queries (e.g. when
 /// WF-checking traits), you can immediately skip to region aware checking.
@@ -149,8 +150,8 @@ impl<'tcx> InferCx<'tcx> {
         }
     }
 
-    pub fn fresh_re_substitution(&mut self) {
-        todo!()
+    pub fn fresh_re_subst(&mut self) -> InferCxFreshReSubst<'_, 'tcx> {
+        InferCxFreshReSubst(self)
     }
 
     pub fn relate_re_and_re(&mut self, lhs: SpannedRe, rhs: SpannedRe, mode: RelationMode) {
@@ -515,10 +516,7 @@ impl TyInferTracker {
 #[derive(Debug, Clone)]
 pub struct ReInferTracker {
     /// The set of universal regions we're tracking.
-    tracked_universals: FxHashMap<Obj<RegionGeneric>, TrackedUniversal>,
-
-    /// An out-of-band storage for `Obj<RegionGeneric>`s to minimize the size of `TrackedAny`.
-    outlined_re_generics: IndexVec<OutlinedReGeneric, Obj<RegionGeneric>>,
+    tracked_universals: FxIndexMap<Obj<RegionGeneric>, TrackedUniversal>,
 
     /// A map from `ReInferIndex` (which represents either the `'gc` region, a tracked inference
     /// region, or a tracked universal region) to the actual region being represented.
@@ -534,10 +532,6 @@ define_index_type! {
 
 impl AnyReIndex {
     const GC: Self = Self { _raw: 0 };
-}
-
-define_index_type! {
-    struct OutlinedReGeneric = u32;
 }
 
 #[derive(Debug, Clone)]
@@ -557,14 +551,13 @@ struct TrackedAny {
 enum TrackedAnyKind {
     Gc,
     Inference,
-    Universal(OutlinedReGeneric),
+    Universal(u32),
 }
 
 impl Default for ReInferTracker {
     fn default() -> Self {
         Self {
-            tracked_universals: FxHashMap::default(),
-            outlined_re_generics: IndexVec::new(),
+            tracked_universals: FxIndexMap::default(),
             tracked_any: IndexVec::from_iter([TrackedAny {
                 kind: TrackedAnyKind::Gc,
                 outlived_by: SmallVec::new(),
@@ -586,27 +579,68 @@ impl ReInferTracker {
         var
     }
 
-    fn region_to_idx(&mut self, re: Re) -> AnyReIndex {
+    fn region_to_idx(&mut self, re: Re, tcx: &TyCtxt) -> AnyReIndex {
+        let s = &tcx.session;
+
         match re {
             Re::Gc => AnyReIndex::GC,
             Re::Universal(generic) => {
-                self.tracked_universals
-                    .entry(generic)
-                    .or_insert_with(|| {
+                let new_universal_idx = self.tracked_universals.len();
+
+                match self.tracked_universals.entry(generic) {
+                    indexmap::map::Entry::Occupied(entry) => entry.get().index,
+                    indexmap::map::Entry::Vacant(entry) => {
                         let index = self.tracked_any.push(TrackedAny {
-                            kind: TrackedAnyKind::Universal(
-                                self.outlined_re_generics.push(generic),
-                            ),
+                            kind: TrackedAnyKind::Universal(new_universal_idx as u32),
                             outlived_by: SmallVec::new(),
                         });
 
-                        TrackedUniversal {
+                        entry.insert(TrackedUniversal {
                             generic,
                             index,
                             outlives: BitSet::new(),
+                        });
+
+                        // Introduce universal outlives without reporting their relations to the user.
+                        // That way, the only errors that can be produced originate from discovering new
+                        // constraints beyond that.
+                        for outlives in generic.r(s).clauses.iter(s) {
+                            let SpannedTraitClauseView::Outlives(outlives) = outlives.view(tcx)
+                            else {
+                                unreachable!()
+                            };
+
+                            let outlives = self.region_to_idx(outlives.value, tcx);
+
+                            self.related_pairs.insert((index, outlives));
+                            self.tracked_any[outlives].outlived_by.push(index);
+
+                            match self.tracked_any[outlives].kind {
+                                TrackedAnyKind::Gc => {
+                                    self.tracked_universals[new_universal_idx]
+                                        .outlives
+                                        .insert(outlives.index());
+                                }
+                                TrackedAnyKind::Universal(outlives_universal_idx) => {
+                                    let [(_, new_universal), (_, outlives_universal)] = self
+                                        .tracked_universals
+                                        .get_disjoint_indices_mut([
+                                            new_universal_idx,
+                                            outlives_universal_idx as usize,
+                                        ])
+                                        .unwrap();
+
+                                    new_universal
+                                        .outlives
+                                        .union_with(&outlives_universal.outlives);
+                                }
+                                TrackedAnyKind::Inference => unreachable!(),
+                            }
                         }
-                    })
-                    .index
+
+                        index
+                    }
+                }
             }
             Re::InferVar(idx) => AnyReIndex::from_raw(idx.0),
             Re::ExplicitInfer | Re::Erased => unreachable!(),
@@ -617,10 +651,11 @@ impl ReInferTracker {
         &mut self,
         lhs: Re,
         rhs: Re,
-        mut discovered_outlives: impl FnMut((Obj<RegionGeneric>, Re)) -> ControlFlow<B>,
+        tcx: &TyCtxt,
+        mut new_constraint: impl FnMut((Obj<RegionGeneric>, Re)) -> ControlFlow<B>,
     ) -> ControlFlow<B> {
-        let lhs = self.region_to_idx(lhs);
-        let rhs = self.region_to_idx(rhs);
+        let lhs = self.region_to_idx(lhs, tcx);
+        let rhs = self.region_to_idx(rhs, tcx);
 
         // Ensure that we don't perform a relation more than once.
         if !self.related_pairs.insert((lhs, rhs)) {
@@ -631,26 +666,40 @@ impl ReInferTracker {
         self.tracked_any[rhs].outlived_by.push(lhs);
 
         // For every universal region, update the outlives graph.
-        for universal in self.tracked_universals.values_mut() {
-            if !universal.outlives.contains(lhs.index()) {
+        for universal_idx in 0..self.tracked_universals.len() {
+            if !self.tracked_universals[universal_idx]
+                .outlives
+                .contains(lhs.index())
+            {
                 continue;
             }
+
+            let generic = self.tracked_universals[universal_idx].generic;
 
             let mut dfs_stack = vec![rhs];
 
             while let Some(top) = dfs_stack.pop() {
-                universal.outlives.insert(top.index());
+                self.tracked_universals[universal_idx]
+                    .outlives
+                    .insert(top.index());
 
-                let top_as_re = match self.tracked_any[top].kind {
-                    TrackedAnyKind::Gc => Re::Gc,
-                    TrackedAnyKind::Inference => Re::InferVar(InferReVar(top.raw())),
-                    TrackedAnyKind::Universal(idx) => Re::Universal(self.outlined_re_generics[idx]),
+                let offending_re = match self.tracked_any[top].kind {
+                    TrackedAnyKind::Gc => Some(Re::Gc),
+                    TrackedAnyKind::Inference => None,
+                    TrackedAnyKind::Universal(idx) => {
+                        Some(Re::Universal(self.tracked_universals[idx as usize].generic))
+                    }
                 };
 
-                discovered_outlives((universal.generic, top_as_re))?;
+                if let Some(offending_re) = offending_re {
+                    new_constraint((generic, offending_re))?;
+                }
 
                 for &outlived_by in &self.tracked_any[top].outlived_by {
-                    if universal.outlives.contains(outlived_by.index()) {
+                    if self.tracked_universals[universal_idx]
+                        .outlives
+                        .contains(outlived_by.index())
+                    {
                         continue;
                     }
 
@@ -660,5 +709,28 @@ impl ReInferTracker {
         }
 
         ControlFlow::Continue(())
+    }
+}
+
+// === Substitutions === //
+
+#[derive(Debug)]
+pub struct InferCxFreshReSubst<'icx, 'tcx>(pub &'icx mut InferCx<'tcx>);
+
+// TODO
+// impl<'tcx> TyFolderPreservesSpans<'tcx> for InferCxFreshReSubst<'_, 'tcx> {}
+
+impl<'tcx> TyFolder<'tcx> for InferCxFreshReSubst<'_, 'tcx> {
+    type Error = Infallible;
+
+    fn tcx(&self) -> &'tcx TyCtxt {
+        self.0.tcx
+    }
+
+    fn try_fold_re(&mut self, re: Re) -> Result<Re, Self::Error> {
+        match re {
+            Re::ExplicitInfer | Re::Erased => Ok(self.0.fresh_re()),
+            _ => self.super_re(re),
+        }
     }
 }
