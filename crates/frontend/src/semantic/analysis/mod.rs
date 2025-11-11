@@ -6,6 +6,3 @@ pub use tyops::*;
 
 mod typeck;
 pub use typeck::*;
-
-mod wf;
-pub use wf::*;

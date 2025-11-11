@@ -11,30 +11,14 @@ use crate::{
             TyFolderInfalliblePreservesSpans as _, TyVisitor, TyVisitorWalk,
         },
         syntax::{
-            AnyGeneric, Crate, ImplDef, SpannedAdtInstance, SpannedTraitClauseList,
-            SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec, SpannedTy,
-            SpannedTyOrReView, TraitClause, TraitDef, TraitParam, TraitSpec, TyKind, TypeGeneric,
+            AnyGeneric, ImplDef, SpannedAdtInstance, SpannedTraitClauseList, SpannedTraitInstance,
+            SpannedTraitParamView, SpannedTraitSpec, SpannedTy, SpannedTyOrReView, TraitClause,
+            TraitDef, TraitParam, TraitSpec, TyKind, TypeGeneric,
         },
     },
     symbol,
 };
 use std::{convert::Infallible, ops::ControlFlow};
-
-impl TyCtxt {
-    pub fn wf_check_crate(&self, krate: Obj<Crate>) {
-        let s = &self.session;
-
-        for &def in &**krate.r(s).impls {
-            self.determine_impl_generic_solve_order(def);
-        }
-
-        _ = SignatureWfVisitor {
-            tcx: self,
-            self_ty: None,
-        }
-        .visit_crate(krate);
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct SignatureWfVisitor<'tcx> {

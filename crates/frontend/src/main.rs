@@ -33,5 +33,5 @@ fn main() {
 
     let tcx = TyCtxt::new(session);
     let krate = tcx.lower_full_ast(&ast);
-    tcx.wf_check_crate(krate);
+    tcx.check_crate(krate);
 }

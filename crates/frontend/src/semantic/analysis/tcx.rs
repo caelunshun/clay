@@ -2,13 +2,13 @@ use crate::{
     base::{
         HasSession, Session,
         analysis::Memo,
-        arena::{HasInterner, HasListInterner, Interner, ListInterner},
+        arena::{HasInterner, HasListInterner, Interner, ListInterner, Obj},
     },
     semantic::{
-        analysis::BinderSubstitution,
+        analysis::{BinderSubstitution, SignatureWfVisitor, TyVisitor as _},
         syntax::{
-            ListOfTraitClauseList, TraitClause, TraitClauseList, TraitParam, TraitParamList, Ty,
-            TyKind, TyList, TyOrRe, TyOrReList,
+            Crate, ListOfTraitClauseList, TraitClause, TraitClauseList, TraitParam, TraitParamList,
+            Ty, TyKind, TyList, TyOrRe, TyOrReList,
         },
     },
 };
@@ -91,27 +91,18 @@ impl TyCtxt {
             .intern(elems, &self.session)
     }
 
-    pub fn join_trait_clause_lists(
-        &self,
-        lhs: TraitClauseList,
-        rhs: TraitClauseList,
-    ) -> TraitClauseList {
+    pub fn check_crate(&self, krate: Obj<Crate>) {
         let s = &self.session;
 
-        if lhs.r(s).is_empty() {
-            return rhs;
+        for &def in &**krate.r(s).impls {
+            self.determine_impl_generic_solve_order(def);
         }
 
-        if rhs.r(s).is_empty() {
-            return lhs;
+        _ = SignatureWfVisitor {
+            tcx: self,
+            self_ty: None,
         }
-
-        self.intern_trait_clause_list(
-            &[lhs.r(s).iter().copied(), rhs.r(s).iter().copied()]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>(),
-        )
+        .visit_crate(krate);
     }
 }
 
