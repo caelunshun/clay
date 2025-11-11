@@ -326,7 +326,7 @@ impl InferCx<'_> {
         };
 
         // Substitute the target type
-        let target = SubstitutionFolder::new(tcx, tcx.intern_ty(TyKind::This), substs)
+        let target = SubstitutionFolder::new(tcx, tcx.intern_ty(TyKind::This), Some(substs))
             .fold_ty(candidate.r(s).target.value);
 
         // Substitute inference clauses
@@ -340,13 +340,13 @@ impl InferCx<'_> {
                     AnyGeneric::Ty(generic) => generic.r(s).user_clauses.value,
                 };
 
-                SubstitutionFolder::new(tcx, target, substs).fold_clause_list(clauses)
+                SubstitutionFolder::new(tcx, target, Some(substs)).fold_clause_list(clauses)
             })
             .collect::<Vec<_>>();
 
         let impl_generic_clauses = tcx.intern_list_of_trait_clause_list(&inf_var_clauses);
 
-        let trait_ = SubstitutionFolder::new(tcx, target, substs)
+        let trait_ = SubstitutionFolder::new(tcx, target, Some(substs))
             .fold_ty_or_re_list(candidate.r(s).trait_.unwrap().value.params);
 
         ImplFreshInfer {

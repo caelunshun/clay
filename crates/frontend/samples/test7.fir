@@ -19,3 +19,11 @@ pub trait Foo {
 pub trait Bar {
     type Foo_: Foo<Bar_ = Self>;
 }
+
+pub trait Baz {
+    type Whee: Baz;
+}
+
+impl Baz for () {
+    type Whee = Self;
+}

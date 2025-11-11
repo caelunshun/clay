@@ -737,68 +737,258 @@ impl<'tcx, T: ?Sized + TyFolder<'tcx>> TyFolderSuper<'tcx> for T {}
 
 pub trait TyFolderInfallible<'tcx>: TyFolder<'tcx, Error = Infallible> {
     fn fold_clause_list(&mut self, clauses: TraitClauseList) -> TraitClauseList {
-        self.try_fold_clause_list(clauses).unwrap()
+        let Ok(v) = self.try_fold_clause_list(clauses);
+        v
     }
 
     fn fold_clause(&mut self, clause: TraitClause) -> TraitClause {
-        self.try_fold_clause(clause).unwrap()
+        let Ok(v) = self.try_fold_clause(clause);
+        v
     }
 
     fn fold_param_list(&mut self, params: TraitParamList) -> TraitParamList {
-        self.try_fold_param_list(params).unwrap()
+        let Ok(v) = self.try_fold_param_list(params);
+        v
     }
 
     fn fold_param(&mut self, param: TraitParam) -> TraitParam {
-        self.try_fold_param(param).unwrap()
+        let Ok(v) = self.try_fold_param(param);
+        v
     }
 
     // === Instances === //
 
     fn fold_trait_spec(&mut self, spec: TraitSpec) -> TraitSpec {
-        self.try_fold_trait_spec(spec).unwrap()
+        let Ok(v) = self.try_fold_trait_spec(spec);
+        v
     }
 
     fn fold_trait_instance(&mut self, instance: TraitInstance) -> TraitInstance {
-        self.try_fold_trait_instance(instance).unwrap()
+        let Ok(v) = self.try_fold_trait_instance(instance);
+        v
     }
 
     fn fold_adt_instance(&mut self, instance: AdtInstance) -> AdtInstance {
-        self.try_fold_adt_instance(instance).unwrap()
+        let Ok(v) = self.try_fold_adt_instance(instance);
+        v
     }
 
     // === Types === //
 
     fn fold_ty_or_re(&mut self, ty_or_re: TyOrRe) -> TyOrRe {
-        self.try_fold_ty_or_re(ty_or_re).unwrap()
+        let Ok(v) = self.try_fold_ty_or_re(ty_or_re);
+        v
     }
 
     fn fold_ty_or_re_list(&mut self, list: TyOrReList) -> TyOrReList {
-        self.try_fold_ty_or_re_list(list).unwrap()
+        let Ok(v) = self.try_fold_ty_or_re_list(list);
+        v
     }
 
     fn fold_ty_list(&mut self, list: TyList) -> TyList {
-        self.try_fold_ty_list(list).unwrap()
+        let Ok(v) = self.try_fold_ty_list(list);
+        v
     }
 
     fn fold_re(&mut self, re: Re) -> Re {
-        self.try_fold_re(re).unwrap()
+        let Ok(v) = self.try_fold_re(re);
+        v
     }
 
     fn fold_ty(&mut self, ty: Ty) -> Ty {
-        self.try_fold_ty(ty).unwrap()
+        let Ok(v) = self.try_fold_ty(ty);
+        v
     }
 
     fn fold_self_ty_use(&mut self) -> Ty {
-        self.try_fold_self_ty_use().unwrap()
+        let Ok(v) = self.try_fold_self_ty_use();
+        v
     }
 
     fn fold_re_generic_use(&mut self, generic: Obj<RegionGeneric>) -> Re {
-        self.try_fold_re_generic_use(generic).unwrap()
+        let Ok(v) = self.try_fold_re_generic_use(generic);
+        v
     }
 
     fn fold_ty_generic_use(&mut self, generic: Obj<TypeGeneric>) -> Ty {
-        self.try_fold_ty_generic_use(generic).unwrap()
+        let Ok(v) = self.try_fold_ty_generic_use(generic);
+        v
     }
 }
 
 impl<'tcx, T: ?Sized + TyFolder<'tcx, Error = Infallible>> TyFolderInfallible<'tcx> for T {}
+
+pub trait TyFolderPreservesSpans<'tcx>: TyFolder<'tcx> {
+    fn try_fold_spanned_clause_list(
+        &mut self,
+        clauses: SpannedTraitClauseList,
+    ) -> Result<SpannedTraitClauseList, Self::Error> {
+        self.try_fold_clause_list(clauses.value)
+            .map(|value| Spanned::new_raw(value, clauses.span_info))
+    }
+
+    fn try_fold_spanned_clause(
+        &mut self,
+        clause: SpannedTraitClause,
+    ) -> Result<SpannedTraitClause, Self::Error> {
+        self.try_fold_clause(clause.value)
+            .map(|value| Spanned::new_raw(value, clause.span_info))
+    }
+
+    fn try_fold_spanned_param_list(
+        &mut self,
+        params: SpannedTraitParamList,
+    ) -> Result<SpannedTraitParamList, Self::Error> {
+        self.try_fold_param_list(params.value)
+            .map(|value| Spanned::new_raw(value, params.span_info))
+    }
+
+    fn try_fold_spanned_param(
+        &mut self,
+        param: SpannedTraitParam,
+    ) -> Result<SpannedTraitParam, Self::Error> {
+        self.try_fold_param(param.value)
+            .map(|value| Spanned::new_raw(value, param.span_info))
+    }
+
+    // === Instances === //
+
+    fn try_fold_spanned_trait_spec(
+        &mut self,
+        spec: SpannedTraitSpec,
+    ) -> Result<SpannedTraitSpec, Self::Error> {
+        self.try_fold_trait_spec(spec.value)
+            .map(|value| Spanned::new_raw(value, spec.span_info))
+    }
+
+    fn try_fold_spanned_trait_instance(
+        &mut self,
+        instance: SpannedTraitInstance,
+    ) -> Result<SpannedTraitInstance, Self::Error> {
+        self.try_fold_trait_instance(instance.value)
+            .map(|value| Spanned::new_raw(value, instance.span_info))
+    }
+
+    fn try_fold_spanned_adt_instance(
+        &mut self,
+        instance: SpannedAdtInstance,
+    ) -> Result<SpannedAdtInstance, Self::Error> {
+        self.try_fold_adt_instance(instance.value)
+            .map(|value| Spanned::new_raw(value, instance.span_info))
+    }
+
+    // === Types === //
+
+    fn try_fold_spanned_ty_or_re(
+        &mut self,
+        ty_or_re: SpannedTyOrRe,
+    ) -> Result<SpannedTyOrRe, Self::Error> {
+        self.try_fold_ty_or_re(ty_or_re.value)
+            .map(|value| Spanned::new_raw(value, ty_or_re.span_info))
+    }
+
+    fn try_fold_spanned_ty_or_re_list(
+        &mut self,
+        list: SpannedTyOrReList,
+    ) -> Result<SpannedTyOrReList, Self::Error> {
+        self.try_fold_ty_or_re_list(list.value)
+            .map(|value| Spanned::new_raw(value, list.span_info))
+    }
+
+    fn try_fold_spanned_ty_list(
+        &mut self,
+        list: SpannedTyList,
+    ) -> Result<SpannedTyList, Self::Error> {
+        self.try_fold_ty_list(list.value)
+            .map(|value| Spanned::new_raw(value, list.span_info))
+    }
+
+    fn try_fold_spanned_re(&mut self, re: SpannedRe) -> Result<SpannedRe, Self::Error> {
+        self.try_fold_re(re.value)
+            .map(|value| Spanned::new_raw(value, re.span_info))
+    }
+
+    fn try_fold_spanned_ty(&mut self, ty: SpannedTy) -> Result<SpannedTy, Self::Error> {
+        self.try_fold_ty(ty.value)
+            .map(|value| Spanned::new_raw(value, ty.span_info))
+    }
+}
+
+pub trait TyFolderInfalliblePreservesSpans<'tcx>:
+    TyFolderPreservesSpans<'tcx, Error = Infallible>
+{
+    fn fold_spanned_clause_list(
+        &mut self,
+        clauses: SpannedTraitClauseList,
+    ) -> SpannedTraitClauseList {
+        let Ok(v) = self.try_fold_spanned_clause_list(clauses);
+        v
+    }
+
+    fn fold_spanned_clause(&mut self, clause: SpannedTraitClause) -> SpannedTraitClause {
+        let Ok(v) = self.try_fold_spanned_clause(clause);
+        v
+    }
+
+    fn fold_spanned_param_list(&mut self, params: SpannedTraitParamList) -> SpannedTraitParamList {
+        let Ok(v) = self.try_fold_spanned_param_list(params);
+        v
+    }
+
+    fn fold_spanned_param(&mut self, param: SpannedTraitParam) -> SpannedTraitParam {
+        let Ok(v) = self.try_fold_spanned_param(param);
+        v
+    }
+
+    // === Instances === //
+
+    fn fold_spanned_trait_spec(&mut self, spec: SpannedTraitSpec) -> SpannedTraitSpec {
+        let Ok(v) = self.try_fold_spanned_trait_spec(spec);
+        v
+    }
+
+    fn fold_spanned_trait_instance(
+        &mut self,
+        instance: SpannedTraitInstance,
+    ) -> SpannedTraitInstance {
+        let Ok(v) = self.try_fold_spanned_trait_instance(instance);
+        v
+    }
+
+    fn fold_spanned_adt_instance(&mut self, instance: SpannedAdtInstance) -> SpannedAdtInstance {
+        let Ok(v) = self.try_fold_spanned_adt_instance(instance);
+        v
+    }
+
+    // === Types === //
+
+    fn fold_spanned_ty_or_re(&mut self, ty_or_re: SpannedTyOrRe) -> SpannedTyOrRe {
+        let Ok(v) = self.try_fold_spanned_ty_or_re(ty_or_re);
+        v
+    }
+
+    fn fold_spanned_ty_or_re_list(&mut self, list: SpannedTyOrReList) -> SpannedTyOrReList {
+        let Ok(v) = self.try_fold_spanned_ty_or_re_list(list);
+        v
+    }
+
+    fn fold_spanned_ty_list(&mut self, list: SpannedTyList) -> SpannedTyList {
+        let Ok(v) = self.try_fold_spanned_ty_list(list);
+        v
+    }
+
+    fn fold_spanned_re(&mut self, re: SpannedRe) -> SpannedRe {
+        let Ok(v) = self.try_fold_spanned_re(re);
+        v
+    }
+
+    fn fold_spanned_ty(&mut self, ty: SpannedTy) -> SpannedTy {
+        let Ok(v) = self.try_fold_spanned_ty(ty);
+        v
+    }
+}
+
+impl<'tcx, T> TyFolderInfalliblePreservesSpans<'tcx> for T where
+    T: ?Sized + TyFolderPreservesSpans<'tcx, Error = Infallible>
+{
+}

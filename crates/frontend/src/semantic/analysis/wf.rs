@@ -1,7 +1,6 @@
 use crate::{
     base::{
         Diag,
-        analysis::Spanned,
         arena::{LateInit, Obj},
         syntax::Span,
     },
@@ -9,12 +8,12 @@ use crate::{
     semantic::{
         analysis::{
             BinderSubstitution, InferCx, InferCxMode, SubstitutionFolder, TyCtxt,
-            TyFolderInfallible, TyVisitor, TyVisitorWalk,
+            TyFolderInfalliblePreservesSpans as _, TyVisitor, TyVisitorWalk,
         },
         syntax::{
             AnyGeneric, Crate, GenericBinder, ImplDef, SpannedAdtInstance, SpannedTraitClauseList,
-            SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec, SpannedTyOrReView,
-            TraitClause, TraitParam, TraitSpec, TyKind, TypeGeneric,
+            SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec, SpannedTy,
+            SpannedTyOrReView, TraitClause, TraitDef, TraitParam, TraitSpec, TyKind, TypeGeneric,
         },
     },
     symbol,
@@ -29,13 +28,18 @@ impl TyCtxt {
             self.determine_impl_generic_solve_order(def);
         }
 
-        _ = SignatureWfVisitor { tcx: self }.visit_crate(krate);
+        _ = SignatureWfVisitor {
+            tcx: self,
+            self_ty: None,
+        }
+        .visit_crate(krate);
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct SignatureWfVisitor<'tcx> {
     pub tcx: &'tcx TyCtxt,
+    pub self_ty: Option<SpannedTy>,
 }
 
 impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
@@ -46,9 +50,20 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
     }
 
     fn visit_impl(&mut self, item: Obj<ImplDef>) -> ControlFlow<Self::Break> {
+        let s = self.session();
+
         // TODO: Check super-traits
 
+        let old_self_ty = self.self_ty.replace(item.r(s).target);
         self.walk_impl(item)?;
+        self.self_ty = old_self_ty;
+
+        ControlFlow::Continue(())
+    }
+
+    fn visit_trait(&mut self, def: Obj<TraitDef>) -> ControlFlow<Self::Break> {
+        // TODO: Bind a self-type.
+        self.walk_trait(def)?;
 
         ControlFlow::Continue(())
     }
@@ -117,7 +132,7 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
                     raw: false,
                 },
                 binder: LateInit::uninit(),
-                user_clauses: LateInit::new(Spanned::new_unspanned(
+                user_clauses: LateInit::new(SpannedTraitClauseList::new_unspanned(
                     tcx.intern_trait_clause_list(&[TraitClause::Trait(TraitSpec {
                         def: instance.def,
                         params: tcx.intern_trait_param_list(
@@ -139,10 +154,16 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
 
         let trait_self_subst = tcx.intern_ty(TyKind::Universal(trait_self_subst));
 
+        let mut actual_subst = SubstitutionFolder {
+            tcx,
+            self_ty: self.self_ty.unwrap().value,
+            substitution: None,
+        };
+
         let mut trait_subst = SubstitutionFolder {
             tcx,
             self_ty: trait_self_subst,
-            substitution: trait_generic_subst,
+            substitution: Some(trait_generic_subst),
         };
 
         for (actual, requirements) in instance
@@ -150,26 +171,22 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
             .iter(s)
             .zip(&instance.def.r(s).generics.r(s).generics)
         {
+            let actual = actual_subst.fold_spanned_ty_or_re(actual);
+
             match (actual.view(tcx), requirements) {
                 (SpannedTyOrReView::Re(actual), AnyGeneric::Re(requirements)) => {
                     let requirements =
-                        trait_subst.fold_clause_list(requirements.r(s).clauses.value);
+                        trait_subst.fold_spanned_clause_list(*requirements.r(s).clauses);
 
-                    InferCx::new(tcx, InferCxMode::RegionAware).relate_re_and_clause(
-                        actual,
-                        SpannedTraitClauseList::new_unspanned(requirements),
-                    );
+                    InferCx::new(tcx, InferCxMode::RegionAware)
+                        .relate_re_and_clause(actual, requirements);
                 }
                 (SpannedTyOrReView::Ty(actual), AnyGeneric::Ty(requirements)) => {
                     let requirements =
-                        trait_subst.fold_clause_list(requirements.r(s).user_clauses.value);
+                        trait_subst.fold_spanned_clause_list(*requirements.r(s).user_clauses);
 
                     if let Err(_err) = InferCx::new(tcx, InferCxMode::RegionAware)
-                        .relate_ty_and_clause(
-                            actual,
-                            SpannedTraitClauseList::new_unspanned(requirements),
-                            &mut GenericBinder::default(),
-                        )
+                        .relate_ty_and_clause(actual, requirements, &mut GenericBinder::default())
                     {
                         Diag::span_err(
                             actual.own_span().unwrap(),
@@ -195,6 +212,4 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
 
         ControlFlow::Continue(())
     }
-
-    // TODO: Check outlives constraints for lifetimes
 }

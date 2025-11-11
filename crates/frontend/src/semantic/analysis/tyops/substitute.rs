@@ -1,7 +1,7 @@
 use crate::{
     base::arena::Obj,
     semantic::{
-        analysis::{TyCtxt, TyFolder, TyFolderSuper as _},
+        analysis::{TyCtxt, TyFolder, TyFolderPreservesSpans, TyFolderSuper as _},
         syntax::{GenericBinder, Re, RegionGeneric, Ty, TyKind, TyOrReList, TypeGeneric},
     },
 };
@@ -11,7 +11,7 @@ use std::convert::Infallible;
 pub struct SubstitutionFolder<'tcx> {
     pub tcx: &'tcx TyCtxt,
     pub self_ty: Ty,
-    pub substitution: BinderSubstitution,
+    pub substitution: Option<BinderSubstitution>,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -21,7 +21,7 @@ pub struct BinderSubstitution {
 }
 
 impl<'tcx> SubstitutionFolder<'tcx> {
-    pub fn new(tcx: &'tcx TyCtxt, self_ty: Ty, substitution: BinderSubstitution) -> Self {
+    pub fn new(tcx: &'tcx TyCtxt, self_ty: Ty, substitution: Option<BinderSubstitution>) -> Self {
         Self {
             tcx,
             self_ty,
@@ -29,6 +29,8 @@ impl<'tcx> SubstitutionFolder<'tcx> {
         }
     }
 }
+
+impl<'tcx> TyFolderPreservesSpans<'tcx> for SubstitutionFolder<'tcx> {}
 
 impl<'tcx> TyFolder<'tcx> for SubstitutionFolder<'tcx> {
     type Error = Infallible;
@@ -54,11 +56,13 @@ impl<'tcx> TyFolder<'tcx> for SubstitutionFolder<'tcx> {
 
         let pos_in_binder = *generic.r(s).binder;
 
-        if pos_in_binder.def != self.substitution.binder {
-            return Ok(self.tcx.intern_ty(TyKind::Universal(generic)));
+        if let Some(substitution) = self.substitution
+            && pos_in_binder.def == substitution.binder
+        {
+            Ok(substitution.substs.r(s)[pos_in_binder.idx as usize].unwrap_ty())
+        } else {
+            Ok(self.tcx.intern_ty(TyKind::Universal(generic)))
         }
-
-        Ok(self.substitution.substs.r(s)[pos_in_binder.idx as usize].unwrap_ty())
     }
 
     fn try_fold_re_generic_use(&mut self, generic: Obj<RegionGeneric>) -> Result<Re, Self::Error> {
@@ -66,11 +70,13 @@ impl<'tcx> TyFolder<'tcx> for SubstitutionFolder<'tcx> {
 
         let pos_in_binder = *generic.r(s).binder;
 
-        if pos_in_binder.def != self.substitution.binder {
-            return Ok(Re::Universal(generic));
+        if let Some(substitution) = self.substitution
+            && pos_in_binder.def == substitution.binder
+        {
+            Ok(substitution.substs.r(s)[pos_in_binder.idx as usize].unwrap_re())
+        } else {
+            Ok(Re::Universal(generic))
         }
-
-        Ok(self.substitution.substs.r(s)[pos_in_binder.idx as usize].unwrap_re())
     }
 
     fn try_fold_self_ty_use(&mut self) -> Result<Ty, Self::Error> {

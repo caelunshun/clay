@@ -38,7 +38,7 @@ pub struct Interners {
 
 #[derive(Debug, Default)]
 pub struct Queries {
-    pub substitute_ty: Memo<(Ty, Ty, BinderSubstitution), Ty>,
+    pub substitute_ty: Memo<(Ty, Ty, Option<BinderSubstitution>), Ty>,
 }
 
 impl Deref for TyCtxt {
