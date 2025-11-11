@@ -8,6 +8,8 @@ use crate::{
     semantic::syntax::{Func, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy},
     utils::{hash::FxHashMap, mem::CellVec},
 };
+use derive_where::derive_where;
+use std::fmt;
 
 // === AdtDef === //
 
@@ -131,16 +133,38 @@ pub struct GenericSolveStep {
     pub clause_idx: u32,
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct TraitSpec {
     pub def: Obj<TraitDef>,
     pub params: TraitParamList,
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+impl fmt::Debug for TraitSpec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = &Session::fetch();
+
+        f.debug_struct("TraitSpec")
+            .field("def", &self.def.r(s).item.r(s).name.text)
+            .field("params", &self.params)
+            .finish()
+    }
+}
+
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct TraitInstance {
     pub def: Obj<TraitDef>,
     pub params: TyOrReList,
+}
+
+impl fmt::Debug for TraitInstance {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = &Session::fetch();
+
+        f.debug_struct("TraitInstance")
+            .field("def", &self.def.r(s).item.r(s).name.text)
+            .field("params", &self.params)
+            .finish()
+    }
 }
 
 // === Generics === //
@@ -202,18 +226,31 @@ impl AnyGeneric {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive_where(Debug)]
+#[derive(Clone)]
 pub struct RegionGeneric {
+    #[derive_where(skip)]
     pub span: Span,
+
     pub lifetime: Lifetime,
+
+    #[derive_where(skip)]
     pub binder: LateInit<Option<PosInBinder>>,
+
     pub clauses: LateInit<SpannedTraitClauseList>,
+
+    pub is_synthetic: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive_where(Debug)]
+#[derive(Clone)]
 pub struct TypeGeneric {
+    #[derive_where(skip)]
     pub span: Span,
+
     pub ident: Ident,
+
+    #[derive_where(skip)]
     pub binder: LateInit<Option<PosInBinder>>,
 
     /// The user-specified clauses on a generic type.
@@ -227,6 +264,7 @@ pub struct TypeGeneric {
     ///
     /// The first element of the `elaborated_clauses` will always be an outlives constraint and
     /// there will always be exactly one such clause.
+    #[derive_where(skip)]
     pub elaborated_clauses: LateInit<SpannedTraitClauseList>,
 
     /// Whether this generic was implicitly created rather than defined explicitly by the user.

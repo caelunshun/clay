@@ -297,6 +297,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                                 lifetime,
                                 binder: LateInit::uninit(),
                                 clauses: LateInit::uninit(),
+                                is_synthetic: false,
                             },
                             s,
                         )));
@@ -459,6 +460,7 @@ impl IntraItemLowerCtxt<'_> {
                                 lifetime,
                                 binder: LateInit::uninit(),
                                 clauses: LateInit::uninit(),
+                                is_synthetic: false,
                             },
                             s,
                         )));

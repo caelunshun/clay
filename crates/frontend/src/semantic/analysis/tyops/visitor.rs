@@ -300,6 +300,7 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
             lifetime: _,
             binder: _,
             clauses,
+            is_synthetic: _,
         } = generic.r(s);
 
         self.visit_spanned_clause_list(**clauses)?;

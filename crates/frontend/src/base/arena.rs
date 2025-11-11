@@ -89,7 +89,7 @@ where
 
         let key = (TypeId::of::<T>(), self.ptr.cast());
 
-        write!(f, "{:?}", self.ptr.as_ptr())?;
+        write!(f, "{:?}", self.ptr.as_ptr().cast::<()>())?;
 
         if REENTRANT_FMT.with_borrow_mut(|v| v.insert(key)) {
             let _guard = scopeguard::guard((), |()| {
