@@ -6,10 +6,11 @@ use crate::{
     },
     parse::token::Ident,
     semantic::{
-        analysis::{TyCtxt, TyVisitor, TyVisitorUnspanned},
+        analysis::{TyCtxt, TyVisitor, TyVisitorUnspanned, TyVisitorWalk},
         syntax::{
-            AnyGeneric, GenericBinder, PosInBinder, RegionGeneric, SpannedTraitClauseList,
-            TraitClause, TraitParam, TraitSpec, TyKind, TyOrRe, TypeGeneric,
+            AnyGeneric, GenericBinder, PosInBinder, Re, RegionGeneric, SpannedRe,
+            SpannedTraitClauseList, SpannedTy, TraitClause, TraitParam, TraitSpec, TyKind, TyOrRe,
+            TypeGeneric,
         },
     },
     symbol,
@@ -175,5 +176,32 @@ where
         generic: Obj<TypeGeneric>,
     ) -> ControlFlow<Self::Break> {
         (self.f)(AnyGeneric::Ty(generic))
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct ExplicitInferVisitor<'tcx>(pub &'tcx TyCtxt);
+
+impl<'tcx> TyVisitor<'tcx> for ExplicitInferVisitor<'tcx> {
+    type Break = ();
+
+    fn tcx(&self) -> &'tcx TyCtxt {
+        self.0
+    }
+
+    fn visit_spanned_re(&mut self, re: SpannedRe) -> ControlFlow<Self::Break> {
+        if re.value == Re::ExplicitInfer {
+            return ControlFlow::Break(());
+        }
+
+        self.walk_re(re)
+    }
+
+    fn visit_spanned_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
+        if matches!(ty.value.r(self.session()), TyKind::ExplicitInfer) {
+            return ControlFlow::Break(());
+        }
+
+        self.walk_ty(ty)
     }
 }

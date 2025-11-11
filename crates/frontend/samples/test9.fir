@@ -35,5 +35,8 @@ mod part2 {
         // Oh. Rust just ignores this too. Guess we have to defer WF checks until we know the
         // dependent generic parameters. Weird.
         type Meow: Spec<Foo = ()>;
+
+        // But this should be properly rejected.
+        type Thump: Spec<Foo = (), Bar = ()>;
     }
 }

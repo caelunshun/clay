@@ -7,13 +7,15 @@ use crate::{
     parse::token::Ident,
     semantic::{
         analysis::{
-            BinderSubstitution, InferCx, InferCxMode, SubstitutionFolder, TyCtxt,
-            TyFolderInfalliblePreservesSpans as _, TyVisitor, TyVisitorWalk,
+            BinderSubstitution, ExplicitInferVisitor, InferCx, InferCxMode, SubstitutionFolder,
+            TyCtxt, TyFolderInfalliblePreservesSpans as _, TyVisitor, TyVisitorUnspanned,
+            TyVisitorWalk,
         },
         syntax::{
-            AnyGeneric, ImplDef, SpannedAdtInstance, SpannedTraitClauseList, SpannedTraitInstance,
-            SpannedTraitParamView, SpannedTraitSpec, SpannedTy, SpannedTyOrReView, TraitClause,
-            TraitDef, TraitParam, TraitSpec, TyKind, TypeGeneric,
+            AnyGeneric, ImplDef, Re, SpannedAdtInstance, SpannedTraitClauseList,
+            SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec, SpannedTy,
+            SpannedTyOrRe, SpannedTyOrReView, TraitClause, TraitDef, TraitParam, TraitParamList,
+            TraitSpec, TyKind, TyOrRe, TypeGeneric,
         },
     },
     symbol,
@@ -46,43 +48,79 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
     }
 
     fn visit_trait(&mut self, def: Obj<TraitDef>) -> ControlFlow<Self::Break> {
-        // TODO: Bind a self-type.
+        let tcx = self.tcx();
+        let s = self.session();
+
+        let new_self_ty_params = def
+            .r(s)
+            .generics
+            .r(s)
+            .defs
+            .iter()
+            .map(|&def| match def {
+                AnyGeneric::Re(generic) => TraitParam::Equals(TyOrRe::Re(Re::Universal(generic))),
+                AnyGeneric::Ty(generic) => {
+                    TraitParam::Equals(TyOrRe::Ty(tcx.intern_ty(TyKind::Universal(generic))))
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let new_self_ty_params = tcx.intern_trait_param_list(&new_self_ty_params);
+
+        let new_self_ty = Obj::new(
+            // TODO: better names
+            TypeGeneric {
+                span: Span::DUMMY,
+                ident: Ident {
+                    span: Span::DUMMY,
+                    text: symbol!("SelfHelper"),
+                    raw: false,
+                },
+                binder: LateInit::uninit(),
+                user_clauses: LateInit::new(SpannedTraitClauseList::new_unspanned(
+                    tcx.intern_trait_clause_list(&[TraitClause::Trait(TraitSpec {
+                        def,
+                        params: new_self_ty_params,
+                    })]),
+                )),
+                elaborated_clauses: LateInit::uninit(),
+                is_synthetic: true,
+            },
+            s,
+        );
+
+        let new_self_ty = tcx.intern_ty(TyKind::Universal(new_self_ty));
+
+        let old_self_ty = self.self_ty.replace(SpannedTy::new_saturated(
+            new_self_ty,
+            def.r(s).item.r(s).name.span,
+            s,
+        ));
         self.walk_trait(def)?;
+        self.self_ty = old_self_ty;
 
         ControlFlow::Continue(())
     }
 
-    // FIXME: Use the new solving model
     fn visit_spanned_trait_spec(&mut self, spec: SpannedTraitSpec) -> ControlFlow<Self::Break> {
         let tcx = self.tcx();
         let s = self.session();
 
-        let generics = &spec.value.def.r(s).generics.r(s).defs;
-
-        for (&def, param) in generics.iter().zip(spec.view(tcx).params.iter(s)) {
-            match param.view(tcx) {
-                SpannedTraitParamView::Equals(param) => match (def, param.view(tcx)) {
-                    (AnyGeneric::Re(def), SpannedTyOrReView::Re(param)) => {
-                        // TODO
-                    }
-                    (AnyGeneric::Ty(def), SpannedTyOrReView::Ty(param)) => {
-                        if let Err(err) = InferCx::new(self.tcx(), InferCxMode::RegionAware)
-                            .relate_ty_and_clause(param, *def.r(s).user_clauses)
-                        {
-                            Diag::span_err(
-                                param.own_span().unwrap_or(Span::DUMMY),
-                                "malformed parameter for trait parameter",
-                            )
-                            .emit();
-                        }
-                    }
-                    _ => unreachable!(),
-                },
-                SpannedTraitParamView::Unspecified(_) => {
-                    // (these are always fine)
-                }
-            }
-        }
+        self.check_trait_helper(
+            spec.value.def,
+            &spec
+                .view(tcx)
+                .params
+                .iter(s)
+                .map(|param| match param.view(tcx) {
+                    SpannedTraitParamView::Equals(v) => v,
+                    SpannedTraitParamView::Unspecified(_) => SpannedTyOrRe::new_unspanned(
+                        TyOrRe::Ty(tcx.intern_ty(TyKind::ExplicitInfer)),
+                    ),
+                })
+                .collect::<Vec<_>>(),
+            spec.value.params,
+        );
 
         self.walk_trait_spec(spec)?;
 
@@ -91,17 +129,54 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
 
     fn visit_spanned_trait_instance(
         &mut self,
-        instance_orig: SpannedTraitInstance,
+        instance: SpannedTraitInstance,
     ) -> ControlFlow<Self::Break> {
         let tcx = self.tcx();
         let s = self.session();
 
-        let instance = instance_orig.view(tcx);
+        self.check_trait_helper(
+            instance.value.def,
+            &instance.view(tcx).params.iter(s).collect::<Vec<_>>(),
+            tcx.intern_trait_param_list(
+                &instance
+                    .value
+                    .params
+                    .r(s)
+                    .iter()
+                    .map(|&v| TraitParam::Equals(v))
+                    .collect::<Vec<_>>(),
+            ),
+        );
 
-        // Ensure they meet their trait definition requirements.
+        self.walk_trait_instance(instance)?;
+
+        ControlFlow::Continue(())
+    }
+
+    fn visit_spanned_adt_instance(
+        &mut self,
+        instance: SpannedAdtInstance,
+    ) -> ControlFlow<Self::Break> {
+        // TODO
+
+        ControlFlow::Continue(())
+    }
+}
+
+impl SignatureWfVisitor<'_> {
+    fn check_trait_helper(
+        &mut self,
+        def: Obj<TraitDef>,
+        params_as_tys: &[SpannedTyOrRe],
+        params_as_params: TraitParamList,
+    ) {
+        let tcx = self.tcx();
+        let s = self.session();
+
         let trait_generic_subst = BinderSubstitution {
-            binder: instance.def.r(s).generics,
-            substs: instance.params.value,
+            binder: def.r(s).generics,
+            substs: tcx
+                .intern_ty_or_re_list(&params_as_tys.iter().map(|v| v.value).collect::<Vec<_>>()),
         };
 
         let trait_self_subst = Obj::new(
@@ -116,16 +191,8 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
                 binder: LateInit::uninit(),
                 user_clauses: LateInit::new(SpannedTraitClauseList::new_unspanned(
                     tcx.intern_trait_clause_list(&[TraitClause::Trait(TraitSpec {
-                        def: instance.def,
-                        params: tcx.intern_trait_param_list(
-                            &instance
-                                .params
-                                .value
-                                .r(s)
-                                .iter()
-                                .map(|&v| TraitParam::Equals(v))
-                                .collect::<Vec<_>>(),
-                        ),
+                        def,
+                        params: params_as_params,
                     })]),
                 )),
                 elaborated_clauses: LateInit::uninit(),
@@ -148,12 +215,15 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
             substitution: Some(trait_generic_subst),
         };
 
-        for (actual, requirements) in instance
-            .params
-            .iter(s)
-            .zip(&instance.def.r(s).generics.r(s).defs)
-        {
+        for (&actual, requirements) in params_as_tys.iter().zip(&def.r(s).generics.r(s).defs) {
             let actual = actual_subst.fold_spanned_ty_or_re(actual);
+
+            if ExplicitInferVisitor(tcx)
+                .visit_ty_or_re(actual.value)
+                .is_break()
+            {
+                continue;
+            }
 
             match (actual.view(tcx), requirements) {
                 (SpannedTyOrReView::Re(actual), AnyGeneric::Re(requirements)) => {
@@ -166,6 +236,13 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
                 (SpannedTyOrReView::Ty(actual), AnyGeneric::Ty(requirements)) => {
                     let requirements =
                         trait_subst.fold_spanned_clause_list(*requirements.r(s).user_clauses);
+
+                    if ExplicitInferVisitor(tcx)
+                        .visit_clause_list(requirements.value)
+                        .is_break()
+                    {
+                        continue;
+                    }
 
                     if let Err(_err) = InferCx::new(tcx, InferCxMode::RegionAware)
                         .relate_ty_and_clause(actual, requirements)
@@ -180,18 +257,5 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
                 _ => unreachable!(),
             }
         }
-
-        self.walk_trait_instance(instance_orig)?;
-
-        ControlFlow::Continue(())
-    }
-
-    fn visit_spanned_adt_instance(
-        &mut self,
-        instance: SpannedAdtInstance,
-    ) -> ControlFlow<Self::Break> {
-        // TODO
-
-        ControlFlow::Continue(())
     }
 }
