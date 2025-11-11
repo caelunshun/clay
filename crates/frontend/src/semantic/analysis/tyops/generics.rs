@@ -23,16 +23,16 @@ impl TyCtxt {
 
         let binder = Obj::new(binder, s);
 
-        for (i, generic) in binder.r(s).generics.iter().enumerate() {
+        for (i, generic) in binder.r(s).defs.iter().enumerate() {
             LateInit::init(
                 match generic {
                     AnyGeneric::Re(generic) => &generic.r(s).binder,
                     AnyGeneric::Ty(generic) => &generic.r(s).binder,
                 },
-                PosInBinder {
+                Some(PosInBinder {
                     def: binder,
                     idx: i as u32,
-                },
+                }),
             );
         }
 
@@ -55,7 +55,7 @@ impl TyCtxt {
     pub fn elaborate_generic_clauses(
         &self,
         generic: Obj<TypeGeneric>,
-        binder: &mut GenericBinder,
+        mut binder: Option<&mut GenericBinder>,
     ) -> SpannedTraitClauseList {
         let s = &self.session;
 
@@ -77,7 +77,7 @@ impl TyCtxt {
                         .params
                         .r(s)
                         .iter()
-                        .zip(&spec.def.r(s).generics.r(s).generics)
+                        .zip(&spec.def.r(s).generics.r(s).defs)
                         .map(|(&param, def)| {
                             let clauses = match param {
                                 TraitParam::Equals(_) => return param,
@@ -102,7 +102,9 @@ impl TyCtxt {
                                 s,
                             );
 
-                            binder.generics.push(AnyGeneric::Ty(generic));
+                            if let Some(binder) = &mut binder {
+                                binder.defs.push(AnyGeneric::Ty(generic));
+                            }
 
                             TraitParam::Equals(TyOrRe::Ty(
                                 self.intern_ty(TyKind::Universal(generic)),

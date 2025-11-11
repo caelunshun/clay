@@ -16,6 +16,10 @@ pub trait Foo {
     type Bar_: Bar<Foo_ = Self>;
 }
 
+impl<T> Foo for T {
+    type Bar_ = Self;
+}
+
 pub trait Bar {
     type Foo_: Foo<Bar_ = Self>;
 }

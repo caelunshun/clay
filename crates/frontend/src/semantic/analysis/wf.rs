@@ -11,7 +11,7 @@ use crate::{
             TyFolderInfalliblePreservesSpans as _, TyVisitor, TyVisitorWalk,
         },
         syntax::{
-            AnyGeneric, Crate, GenericBinder, ImplDef, SpannedAdtInstance, SpannedTraitClauseList,
+            AnyGeneric, Crate, ImplDef, SpannedAdtInstance, SpannedTraitClauseList,
             SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec, SpannedTy,
             SpannedTyOrReView, TraitClause, TraitDef, TraitParam, TraitSpec, TyKind, TypeGeneric,
         },
@@ -73,7 +73,7 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
         let tcx = self.tcx();
         let s = self.session();
 
-        let generics = &spec.value.def.r(s).generics.r(s).generics;
+        let generics = &spec.value.def.r(s).generics.r(s).defs;
 
         for (&def, param) in generics.iter().zip(spec.view(tcx).params.iter(s)) {
             match param.view(tcx) {
@@ -82,10 +82,8 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
                         // TODO
                     }
                     (AnyGeneric::Ty(def), SpannedTyOrReView::Ty(param)) => {
-                        let mut binder = GenericBinder::default();
-
                         if let Err(err) = InferCx::new(self.tcx(), InferCxMode::RegionAware)
-                            .relate_ty_and_clause(param, *def.r(s).user_clauses, &mut binder)
+                            .relate_ty_and_clause(param, *def.r(s).user_clauses)
                         {
                             Diag::span_err(
                                 param.own_span().unwrap_or(Span::DUMMY),
@@ -169,7 +167,7 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
         for (actual, requirements) in instance
             .params
             .iter(s)
-            .zip(&instance.def.r(s).generics.r(s).generics)
+            .zip(&instance.def.r(s).generics.r(s).defs)
         {
             let actual = actual_subst.fold_spanned_ty_or_re(actual);
 
@@ -186,7 +184,7 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
                         trait_subst.fold_spanned_clause_list(*requirements.r(s).user_clauses);
 
                     if let Err(_err) = InferCx::new(tcx, InferCxMode::RegionAware)
-                        .relate_ty_and_clause(actual, requirements, &mut GenericBinder::default())
+                        .relate_ty_and_clause(actual, requirements)
                     {
                         Diag::span_err(
                             actual.own_span().unwrap(),

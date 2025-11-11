@@ -291,7 +291,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
 
                 match def_kind {
                     AstGenericDef::Re(lifetime, clauses) => {
-                        binder.generics.push(AnyGeneric::Re(Obj::new(
+                        binder.defs.push(AnyGeneric::Re(Obj::new(
                             RegionGeneric {
                                 span: def.span,
                                 lifetime,
@@ -304,7 +304,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                         generic_clause_lists.push(clauses);
                     }
                     AstGenericDef::Ty(ident, clauses) => {
-                        binder.generics.push(AnyGeneric::Ty(Obj::new(
+                        binder.defs.push(AnyGeneric::Ty(Obj::new(
                             TypeGeneric {
                                 span: def.span,
                                 ident,
@@ -322,7 +322,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
             }
         }
 
-        let regular_generic_count = binder.generics.len() as u32;
+        let regular_generic_count = binder.defs.len() as u32;
         let mut associated_types = FxHashMap::default();
 
         for member in &ast.body.members {
@@ -340,7 +340,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                         s,
                     );
 
-                    binder.generics.push(AnyGeneric::Ty(generic));
+                    binder.defs.push(AnyGeneric::Ty(generic));
                     generic_clause_lists.push(Some(clauses));
                     associated_types.insert(name.text, generic);
                 }
@@ -423,7 +423,7 @@ impl IntraItemLowerCtxt<'_> {
 
         self.define_generics_in_binder(item.r(s).generics);
 
-        for (&generic, clause_list) in item.r(s).generics.r(s).generics.iter().zip(clause_lists) {
+        for (&generic, clause_list) in item.r(s).generics.r(s).defs.iter().zip(clause_lists) {
             match generic {
                 AnyGeneric::Re(generic) => {
                     LateInit::init(&generic.r(s).clauses, self.lower_clauses(clause_list));
@@ -453,7 +453,7 @@ impl IntraItemLowerCtxt<'_> {
 
                 match def_kind {
                     AstGenericDef::Re(lifetime, clauses) => {
-                        binder.generics.push(AnyGeneric::Re(Obj::new(
+                        binder.defs.push(AnyGeneric::Re(Obj::new(
                             RegionGeneric {
                                 span: def.span,
                                 lifetime,
@@ -466,7 +466,7 @@ impl IntraItemLowerCtxt<'_> {
                         generic_clause_lists.push(clauses);
                     }
                     AstGenericDef::Ty(ident, clauses) => {
-                        binder.generics.push(AnyGeneric::Ty(Obj::new(
+                        binder.defs.push(AnyGeneric::Ty(Obj::new(
                             TypeGeneric {
                                 span: def.span,
                                 ident,
@@ -488,7 +488,7 @@ impl IntraItemLowerCtxt<'_> {
         self.define_generics_in_binder(binder);
 
         // Lower clauses
-        for (&generic, clause_list) in binder.r(s).generics.iter().zip(generic_clause_lists) {
+        for (&generic, clause_list) in binder.r(s).defs.iter().zip(generic_clause_lists) {
             match generic {
                 AnyGeneric::Re(generic) => {
                     LateInit::init(&generic.r(s).clauses, self.lower_clauses(clause_list));

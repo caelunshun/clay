@@ -241,7 +241,7 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
     fn walk_generic_binder(&mut self, binder: Obj<GenericBinder>) -> ControlFlow<Self::Break> {
         let s = self.session();
 
-        for &generic in &binder.r(s).generics {
+        for &generic in &binder.r(s).defs {
             self.visit_any_generic_def(generic)?;
         }
 

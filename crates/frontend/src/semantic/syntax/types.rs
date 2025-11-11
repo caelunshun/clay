@@ -148,7 +148,7 @@ pub struct TraitInstance {
 /// A container for a list of generics which can be substituted all at once.
 #[derive(Debug, Clone, Default)]
 pub struct GenericBinder {
-    pub generics: Vec<AnyGeneric>,
+    pub defs: Vec<AnyGeneric>,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -158,7 +158,7 @@ pub enum AnyGeneric {
 }
 
 impl AnyGeneric {
-    pub fn binder(self, s: &Session) -> PosInBinder {
+    pub fn binder(self, s: &Session) -> Option<PosInBinder> {
         match self {
             AnyGeneric::Re(re) => *re.r(s).binder,
             AnyGeneric::Ty(ty) => *ty.r(s).binder,
@@ -206,7 +206,7 @@ impl AnyGeneric {
 pub struct RegionGeneric {
     pub span: Span,
     pub lifetime: Lifetime,
-    pub binder: LateInit<PosInBinder>,
+    pub binder: LateInit<Option<PosInBinder>>,
     pub clauses: LateInit<SpannedTraitClauseList>,
 }
 
@@ -214,7 +214,7 @@ pub struct RegionGeneric {
 pub struct TypeGeneric {
     pub span: Span,
     pub ident: Ident,
-    pub binder: LateInit<PosInBinder>,
+    pub binder: LateInit<Option<PosInBinder>>,
 
     /// The user-specified clauses on a generic type.
     pub user_clauses: LateInit<SpannedTraitClauseList>,
@@ -224,6 +224,9 @@ pub struct TypeGeneric {
     /// Unlike `user_clauses`, `elaborated_clauses` ensures that all generic parameters
     /// supplied to each trait clause will be of the form [`TraitParam::Equals`] and that all
     /// implicit bounds (including super-trait bounds) will be written out.
+    ///
+    /// The first element of the `elaborated_clauses` will always be an outlives constraint and
+    /// there will always be exactly one such clause.
     pub elaborated_clauses: LateInit<SpannedTraitClauseList>,
 
     /// Whether this generic was implicitly created rather than defined explicitly by the user.

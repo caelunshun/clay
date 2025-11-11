@@ -56,7 +56,8 @@ impl<'tcx> TyFolder<'tcx> for SubstitutionFolder<'tcx> {
 
         let pos_in_binder = *generic.r(s).binder;
 
-        if let Some(substitution) = self.substitution
+        if let Some(pos_in_binder) = pos_in_binder
+            && let Some(substitution) = self.substitution
             && pos_in_binder.def == substitution.binder
         {
             Ok(substitution.substs.r(s)[pos_in_binder.idx as usize].unwrap_ty())
@@ -70,7 +71,8 @@ impl<'tcx> TyFolder<'tcx> for SubstitutionFolder<'tcx> {
 
         let pos_in_binder = *generic.r(s).binder;
 
-        if let Some(substitution) = self.substitution
+        if let Some(pos_in_binder) = pos_in_binder
+            && let Some(substitution) = self.substitution
             && pos_in_binder.def == substitution.binder
         {
             Ok(substitution.substs.r(s)[pos_in_binder.idx as usize].unwrap_re())

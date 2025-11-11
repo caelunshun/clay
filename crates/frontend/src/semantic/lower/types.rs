@@ -27,7 +27,7 @@ impl IntraItemLowerCtxt<'_> {
     pub fn define_generics_in_binder(&mut self, binder: Obj<GenericBinder>) {
         let s = &self.tcx.session;
 
-        for generic in &binder.r(s).generics {
+        for generic in &binder.r(s).defs {
             match generic {
                 AnyGeneric::Re(generic) => {
                     self.generic_re_names
@@ -121,7 +121,7 @@ impl IntraItemLowerCtxt<'_> {
         }
 
         for (param, generic) in (&mut reader)
-            .zip(&def.r(s).generics.r(s).generics)
+            .zip(&def.r(s).generics.r(s).defs)
             .take(def.r(s).regular_generic_count as usize)
         {
             match &param.kind {
@@ -160,7 +160,7 @@ impl IntraItemLowerCtxt<'_> {
         }
 
         // Lower trait clauses
-        params.resize_with(def.r(s).generics.r(s).generics.len(), || {
+        params.resize_with(def.r(s).generics.r(s).defs.len(), || {
             SpannedTraitParam::new_unspanned(TraitParam::Unspecified(
                 self.tcx.intern_trait_clause_list(&[]),
             ))
@@ -187,7 +187,7 @@ impl IntraItemLowerCtxt<'_> {
                 .emit());
             };
 
-            let idx = generic.r(s).binder.idx as usize;
+            let idx = generic.r(s).binder.unwrap().idx as usize;
 
             match params[idx].value {
                 TraitParam::Unspecified(list) if list.r(s).is_empty() => {
@@ -285,7 +285,7 @@ impl IntraItemLowerCtxt<'_> {
             .emit());
         }
 
-        for (param, generic) in generics.iter().zip(&def.r(s).generics.r(s).generics) {
+        for (param, generic) in generics.iter().zip(&def.r(s).generics.r(s).defs) {
             match &param.kind {
                 AstGenericParamKind::PositionalTy(ty) => {
                     if !matches!(generic, AnyGeneric::Ty(_)) {
@@ -347,8 +347,7 @@ impl IntraItemLowerCtxt<'_> {
             }
         }
 
-        for generic in &def.r(s).generics.r(s).generics[(def.r(s).regular_generic_count as usize)..]
-        {
+        for generic in &def.r(s).generics.r(s).defs[(def.r(s).regular_generic_count as usize)..] {
             let generic = generic.unwrap_ty();
 
             let Some((_, assoc)) = associated.get(&generic) else {

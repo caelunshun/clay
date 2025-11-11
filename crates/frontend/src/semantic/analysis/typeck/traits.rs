@@ -101,7 +101,7 @@ impl TyCtxt {
             spec: TraitSpec,
         }
 
-        let generic_defs = &def.r(s).generics.r(s).generics;
+        let generic_defs = &def.r(s).generics.r(s).defs;
 
         // Populate clauses
         let mut generic_states = generic_defs
@@ -125,9 +125,7 @@ impl TyCtxt {
                 let clause_state_idx = clause_states.next_idx();
                 let mut blockers = 1;
 
-                generic_states[main_generic_def.binder(s).idx as usize]
-                    .deps
-                    .push(clause_state_idx);
+                generic_states[step_generic_idx].deps.push(clause_state_idx);
 
                 for &param in &spec.params.r(s)[..spec.def.r(s).regular_generic_count as usize] {
                     let TraitParam::Equals(ty) = param else {
@@ -135,9 +133,9 @@ impl TyCtxt {
                     };
 
                     cbit::cbit!(for generic in self.mentioned_generics(ty) {
-                        debug_assert_eq!(generic.binder(s).def, def.r(s).generics);
+                        debug_assert_eq!(generic.binder(s).unwrap().def, def.r(s).generics);
 
-                        generic_states[generic.binder(s).idx as usize]
+                        generic_states[generic.binder(s).unwrap().idx as usize]
                             .deps
                             .push(clause_state_idx);
 
@@ -200,14 +198,14 @@ impl TyCtxt {
             let s = &tcx.session;
 
             cbit::cbit!(for generic in tcx.mentioned_generics(TyOrRe::Ty(ty)) {
-                debug_assert_eq!(generic.binder(s).def, binder);
+                debug_assert_eq!(generic.binder(s).unwrap().def, binder);
 
                 cover_idx(
                     solve_queue,
                     solve_order,
                     generic_states,
                     clause_states,
-                    GenericIdx::from_raw(generic.binder(s).idx),
+                    GenericIdx::from_raw(generic.binder(s).unwrap().idx),
                 );
             });
         }
@@ -237,7 +235,7 @@ impl TyCtxt {
                                     &mut solve_order,
                                     &mut generic_states,
                                     &mut clause_states,
-                                    GenericIdx::from_raw(param.r(s).binder.idx),
+                                    GenericIdx::from_raw(param.r(s).binder.unwrap().idx),
                                 );
                             }
                             Re::InferVar(_) | Re::ExplicitInfer | Re::Erased => unreachable!(),
@@ -311,7 +309,7 @@ impl InferCx<'_> {
         let binder = candidate.r(s).generics;
         let impl_generics = binder
             .r(s)
-            .generics
+            .defs
             .iter()
             .map(|generic| match generic {
                 AnyGeneric::Re(_) => TyOrRe::Re(self.fresh_re()),
@@ -332,7 +330,7 @@ impl InferCx<'_> {
         // Substitute inference clauses
         let inf_var_clauses = binder
             .r(s)
-            .generics
+            .defs
             .iter()
             .map(|generic| {
                 let clauses = match generic {
@@ -361,7 +359,6 @@ impl InferCx<'_> {
         &mut self,
         lhs: SpannedTy,
         rhs: SpannedTraitClauseList,
-        binder: &mut GenericBinder,
     ) -> Result<(), Box<TyAndClauseRelateError>> {
         let tcx = self.tcx();
         let s = self.session();
@@ -381,7 +378,7 @@ impl InferCx<'_> {
                     fork.relate_ty_and_re(lhs, rhs);
                 }
                 SpannedTraitClauseView::Trait(rhs) => {
-                    if let Err(err) = fork.relate_ty_and_trait(lhs, rhs, binder) {
+                    if let Err(err) = fork.relate_ty_and_trait(lhs, rhs) {
                         error.had_ambiguity |= err.had_ambiguity;
                         error.errors.push((idx as u32, err));
                     }
@@ -418,7 +415,6 @@ impl InferCx<'_> {
         &mut self,
         lhs: SpannedTy,
         rhs: SpannedTraitSpec,
-        binder: &mut GenericBinder,
     ) -> Result<TyAndTraitRelateResolution, Box<TyAndTraitRelateError>> {
         let tcx = self.tcx();
         let s = self.session();
@@ -430,9 +426,8 @@ impl InferCx<'_> {
             }
             SpannedTyView::Universal(generic) => {
                 match self.relate_clause_and_trait(
-                    tcx.elaborate_generic_clauses(generic, binder),
+                    tcx.elaborate_generic_clauses(generic, None),
                     rhs.value,
-                    binder,
                 ) {
                     Ok(()) => {
                         return Ok(TyAndTraitRelateResolution::Inherent);
@@ -461,7 +456,7 @@ impl InferCx<'_> {
         for &candidate in rhs.value.def.r(s).impls.read().iter() {
             let mut fork = self.clone();
 
-            match fork.relate_ty_and_impl_no_fork(lhs, candidate, rhs, binder) {
+            match fork.relate_ty_and_impl_no_fork(lhs, candidate, rhs) {
                 Ok(resolution) => {
                     error.resolutions.push(resolution);
                     accepted_fork = Some(fork);
@@ -493,7 +488,6 @@ impl InferCx<'_> {
         lhs: SpannedTy,
         rhs: Obj<ImplDef>,
         spec: SpannedTraitSpec,
-        binder: &mut GenericBinder,
     ) -> Result<TyAndImplResolution, Box<TyAndImplRelateError>> {
         let s = self.session();
         let tcx = self.tcx();
@@ -598,7 +592,6 @@ impl InferCx<'_> {
                             SpannedTy::new_unspanned(ty),
                             // Same here.
                             SpannedTraitClauseList::new_unspanned(clause),
-                            binder,
                         ) {
                             error.had_ambiguity |= err.had_ambiguity;
                             error.bad_trait_clauses.push(TyAndImplGenericClauseError {
@@ -642,7 +635,6 @@ impl InferCx<'_> {
                         if let Err(err) = self.relate_ty_and_clause(
                             SpannedTy::new_unspanned(instance_ty),
                             additional_clauses,
-                            binder,
                         ) {
                             error.had_ambiguity |= err.had_ambiguity;
                             error
@@ -674,7 +666,6 @@ impl InferCx<'_> {
         &mut self,
         lhs_elaborated: SpannedTraitClauseList,
         rhs: TraitSpec,
-        binder: &mut GenericBinder,
     ) -> Result<(), RelateClauseAndTraitError> {
         let s = self.session();
         let tcx = self.tcx();
@@ -728,7 +719,6 @@ impl InferCx<'_> {
                     if let Err(_err) = fork.relate_ty_and_clause(
                         lhs,
                         SpannedTraitClauseList::new_unspanned(rhs_clauses),
-                        binder,
                     ) {
                         return Err(RelateClauseAndTraitError);
                     }
