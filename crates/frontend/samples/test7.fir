@@ -47,3 +47,13 @@ mod demo3 {
         type Bar: Foo<Bar = (Self,)>;
     }
 }
+
+mod demo4 {
+    pub trait Foo {
+        type Bar_: Bar<Foo_ = Self>;
+    }
+
+    pub trait Bar {
+        type Foo_: Foo<Bar_ = Self>;
+    }
+}
