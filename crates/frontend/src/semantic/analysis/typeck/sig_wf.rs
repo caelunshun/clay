@@ -341,8 +341,17 @@ impl SignatureWfVisitor<'_> {
                     let requirements =
                         trait_subst.fold_spanned_clause_list(*requirements.r(s).clauses);
 
-                    InferCx::new(tcx, InferCxMode::RegionAware)
-                        .relate_re_and_clause(actual, requirements);
+                    if let Err(err) = InferCx::new(tcx, InferCxMode::RegionAware)
+                        .relate_re_and_clause(actual, requirements)
+                    {
+                        Diag::span_err(
+                            actual.own_span().unwrap(),
+                            "malformed parameter for trait parameter",
+                        )
+                        .emit();
+
+                        // dbg!(err);
+                    }
                 }
                 (SpannedTyOrReView::Ty(actual), AnyGeneric::Ty(requirements)) => {
                     let requirements =
@@ -363,6 +372,8 @@ impl SignatureWfVisitor<'_> {
                             "malformed parameter for trait parameter",
                         )
                         .emit();
+
+                        // dbg!(err);
                     }
                 }
                 _ => unreachable!(),

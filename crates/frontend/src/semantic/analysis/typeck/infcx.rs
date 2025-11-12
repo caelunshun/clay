@@ -696,32 +696,9 @@ impl ReInferTracker {
                                 unreachable!()
                             };
 
-                            let outlives = self.region_to_idx(outlives.value, tcx);
+                            let rhs = self.region_to_idx(outlives.value, tcx);
 
-                            self.related_pairs.insert((index, outlives));
-                            self.tracked_any[outlives].outlived_by.push(index);
-
-                            match self.tracked_any[outlives].kind {
-                                TrackedAnyKind::Gc => {
-                                    self.tracked_universals[new_universal_idx]
-                                        .outlives
-                                        .insert(outlives.index());
-                                }
-                                TrackedAnyKind::Universal(outlives_universal_idx) => {
-                                    let [(_, new_universal), (_, outlives_universal)] = self
-                                        .tracked_universals
-                                        .get_disjoint_indices_mut([
-                                            new_universal_idx,
-                                            outlives_universal_idx as usize,
-                                        ])
-                                        .unwrap();
-
-                                    new_universal
-                                        .outlives
-                                        .union_with(&outlives_universal.outlives);
-                                }
-                                TrackedAnyKind::Inference => unreachable!(),
-                            }
+                            self.relate_inner(index, rhs, None);
                         }
 
                         index
@@ -747,6 +724,15 @@ impl ReInferTracker {
         let lhs = self.region_to_idx(lhs, tcx);
         let rhs = self.region_to_idx(rhs, tcx);
 
+        self.relate_inner(lhs, rhs, Some(offenses));
+    }
+
+    fn relate_inner(
+        &mut self,
+        lhs: AnyReIndex,
+        rhs: AnyReIndex,
+        mut offenses: Option<&mut Vec<ReAndReRelateOffense>>,
+    ) {
         // Ensure that we don't perform a relation more than once.
         if !self.related_pairs.insert((lhs, rhs)) {
             return;
@@ -759,14 +745,14 @@ impl ReInferTracker {
         for universal_idx in 0..self.tracked_universals.len() {
             if !self.tracked_universals[universal_idx]
                 .outlives
-                .contains(lhs.index())
+                .contains(rhs.index())
             {
                 continue;
             }
 
             let generic = self.tracked_universals[universal_idx].generic;
 
-            let mut dfs_stack = vec![rhs];
+            let mut dfs_stack = vec![lhs];
 
             while let Some(top) = dfs_stack.pop() {
                 self.tracked_universals[universal_idx]
@@ -781,7 +767,9 @@ impl ReInferTracker {
                     }
                 };
 
-                if let Some(offending_re) = offending_re {
+                if let Some(offenses) = &mut offenses
+                    && let Some(offending_re) = offending_re
+                {
                     offenses.push(ReAndReRelateOffense {
                         universal: generic,
                         forced_to_outlive: offending_re,
