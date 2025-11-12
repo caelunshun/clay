@@ -1,0 +1,5 @@
+error: malformed parameter for trait parameter
+   ┌─ crates/frontend/samples/test9.fir:40:32
+   │
+40 │         type Thump: Spec<Foo = (), Bar = ()>;
+   │                                ^^

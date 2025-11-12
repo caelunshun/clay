@@ -101,6 +101,7 @@ impl TyCtxt {
         _ = SignatureWfVisitor {
             tcx: self,
             self_ty: None,
+            clause_applies_to: None,
         }
         .visit_crate(krate);
     }

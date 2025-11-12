@@ -3,14 +3,14 @@ use crate::{
     semantic::{
         analysis::TyCtxt,
         syntax::{
-            AdtDef, AdtInstance, AnyGeneric, Crate, GenericBinder, ImplDef, InferReVar, InferTyVar,
-            Item, ItemKind, Re, RegionGeneric, SpannedAdtInstance, SpannedAdtInstanceView,
-            SpannedRe, SpannedTraitClause, SpannedTraitClauseList, SpannedTraitClauseView,
-            SpannedTraitInstance, SpannedTraitInstanceView, SpannedTraitParam,
-            SpannedTraitParamList, SpannedTraitParamView, SpannedTraitSpec, SpannedTraitSpecView,
-            SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView,
-            SpannedTyView, TraitClause, TraitClauseList, TraitDef, TraitInstance, TraitParam,
-            TraitParamList, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReList, TypeGeneric,
+            AdtInstance, InferReVar, InferTyVar, Re, RegionGeneric, SpannedAdtInstance,
+            SpannedAdtInstanceView, SpannedRe, SpannedTraitClause, SpannedTraitClauseList,
+            SpannedTraitClauseView, SpannedTraitInstance, SpannedTraitInstanceView,
+            SpannedTraitParam, SpannedTraitParamList, SpannedTraitParamView, SpannedTraitSpec,
+            SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReList,
+            SpannedTyOrReView, SpannedTyView, TraitClause, TraitClauseList, TraitInstance,
+            TraitParam, TraitParamList, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReList,
+            TypeGeneric,
         },
     },
 };
@@ -25,44 +25,6 @@ pub trait TyVisitor<'tcx> {
 
     fn session(&self) -> &'tcx Session {
         &self.tcx().session
-    }
-
-    // === Items === //
-
-    fn visit_crate(&mut self, krate: Obj<Crate>) -> ControlFlow<Self::Break> {
-        self.walk_crate(krate)
-    }
-
-    fn visit_item(&mut self, item: Obj<Item>) -> ControlFlow<Self::Break> {
-        self.walk_item(item)
-    }
-
-    fn visit_trait(&mut self, def: Obj<TraitDef>) -> ControlFlow<Self::Break> {
-        self.walk_trait(def)
-    }
-
-    fn visit_adt(&mut self, def: Obj<AdtDef>) -> ControlFlow<Self::Break> {
-        self.walk_adt(def)
-    }
-
-    fn visit_impl(&mut self, def: Obj<ImplDef>) -> ControlFlow<Self::Break> {
-        self.walk_impl(def)
-    }
-
-    fn visit_generic_binder(&mut self, binder: Obj<GenericBinder>) -> ControlFlow<Self::Break> {
-        self.walk_generic_binder(binder)
-    }
-
-    fn visit_any_generic_def(&mut self, generic: AnyGeneric) -> ControlFlow<Self::Break> {
-        self.walk_any_generic_def(generic)
-    }
-
-    fn visit_ty_generic_def(&mut self, generic: Obj<TypeGeneric>) -> ControlFlow<Self::Break> {
-        self.walk_ty_generic_def(generic)
-    }
-
-    fn visit_re_generic_def(&mut self, generic: Obj<RegionGeneric>) -> ControlFlow<Self::Break> {
-        self.walk_re_generic_def(generic)
     }
 
     // === Clauses === //
@@ -179,135 +141,6 @@ pub trait TyVisitor<'tcx> {
 }
 
 pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
-    // === Items === //
-
-    fn walk_crate(&mut self, krate: Obj<Crate>) -> ControlFlow<Self::Break> {
-        let s = self.session();
-
-        for &item in krate.r(s).items.iter() {
-            self.visit_item(item)?;
-        }
-
-        for &impl_ in krate.r(s).impls.iter() {
-            self.visit_impl(impl_)?;
-        }
-
-        ControlFlow::Continue(())
-    }
-
-    fn walk_item(&mut self, item: Obj<Item>) -> ControlFlow<Self::Break> {
-        let s = self.session();
-
-        match *item.r(s).kind {
-            ItemKind::Trait(def) => {
-                self.visit_trait(def)?;
-            }
-            ItemKind::Adt(def) => {
-                self.visit_adt(def)?;
-            }
-        }
-
-        ControlFlow::Continue(())
-    }
-
-    fn walk_trait(&mut self, def: Obj<TraitDef>) -> ControlFlow<Self::Break> {
-        let s = self.session();
-
-        let TraitDef {
-            item: _,
-            generics,
-            inherits,
-            regular_generic_count: _,
-            associated_types: _, // (in `generics`)
-            methods,
-            impls: _,
-        } = def.r(s);
-
-        self.visit_generic_binder(*generics)?;
-        self.visit_spanned_clause_list(**inherits)?;
-
-        // TODO: `methods`
-
-        ControlFlow::Continue(())
-    }
-
-    fn walk_adt(&mut self, def: Obj<AdtDef>) -> ControlFlow<Self::Break> {
-        todo!()
-    }
-
-    fn walk_impl(&mut self, def: Obj<ImplDef>) -> ControlFlow<Self::Break> {
-        let s = self.session();
-        let ImplDef {
-            span: _,
-            generics,
-            trait_,
-            target,
-            methods,
-            generic_solve_order: _,
-        } = def.r(s);
-
-        self.visit_generic_binder(*generics)?;
-        self.visit_spanned_ty(*target)?;
-
-        if let Some(trait_) = *trait_ {
-            self.visit_spanned_trait_instance(trait_)?;
-        }
-
-        // TODO: `methods`
-
-        ControlFlow::Continue(())
-    }
-
-    fn walk_generic_binder(&mut self, binder: Obj<GenericBinder>) -> ControlFlow<Self::Break> {
-        let s = self.session();
-
-        for &generic in &binder.r(s).defs {
-            self.visit_any_generic_def(generic)?;
-        }
-
-        ControlFlow::Continue(())
-    }
-
-    fn walk_any_generic_def(&mut self, generic: AnyGeneric) -> ControlFlow<Self::Break> {
-        match generic {
-            AnyGeneric::Re(def) => self.visit_re_generic_def(def),
-            AnyGeneric::Ty(def) => self.visit_ty_generic_def(def),
-        }
-    }
-
-    fn walk_ty_generic_def(&mut self, generic: Obj<TypeGeneric>) -> ControlFlow<Self::Break> {
-        let s = self.session();
-
-        let TypeGeneric {
-            span: _,
-            ident: _,
-            binder: _,
-            user_clauses,
-            elaborated_clauses: _,
-            is_synthetic: _,
-        } = generic.r(s);
-
-        self.visit_spanned_clause_list(**user_clauses)?;
-
-        ControlFlow::Continue(())
-    }
-
-    fn walk_re_generic_def(&mut self, generic: Obj<RegionGeneric>) -> ControlFlow<Self::Break> {
-        let s = self.session();
-
-        let RegionGeneric {
-            span: _,
-            lifetime: _,
-            binder: _,
-            clauses,
-            is_synthetic: _,
-        } = generic.r(s);
-
-        self.visit_spanned_clause_list(**clauses)?;
-
-        ControlFlow::Continue(())
-    }
-
     // === Clauses === //
 
     fn walk_clause_list(&mut self, clauses: SpannedTraitClauseList) -> ControlFlow<Self::Break> {

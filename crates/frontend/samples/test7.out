@@ -1,0 +1,5 @@
+error: malformed parameter for trait parameter
+   ┌─ crates/frontend/samples/test7.fir:47:29
+   │
+47 │         type Bar: Foo<Bar = (Self,)>;
+   │                             ^^^^^^^
