@@ -78,7 +78,11 @@ impl TyCtxt {
                 AstItem::Trait(ast) => {
                     ctxt.lower_trait(target, ast);
                 }
-                AstItem::Mod(_) | AstItem::Use(_) | AstItem::Impl(_) | AstItem::Error(_, _) => {
+                AstItem::Mod(_)
+                | AstItem::Use(_)
+                | AstItem::Impl(_)
+                | AstItem::Func(_)
+                | AstItem::Error(_, _) => {
                     unreachable!()
                 }
             }
@@ -171,6 +175,9 @@ impl<'ast> UseLowerCtxt<'ast> {
                     }
 
                     self.impls.push((parent_id, item));
+                }
+                AstItem::Func(_) => {
+                    todo!();
                 }
                 AstItem::Error(_, _) => {
                     // (ignored)
