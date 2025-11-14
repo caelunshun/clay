@@ -681,15 +681,14 @@ impl ReInferTracker {
                             index,
                             outlives: {
                                 let mut outlives = BitSet::new();
-                                outlives.insert(new_universal_idx);
+                                outlives.insert(index.index());
                                 outlives
                             },
                         });
 
-                        // Introduce universal outlives without reporting their relations to the user.
-                        // That way, the only errors that can be produced originate from discovering new
-                        // constraints beyond that.
-                        // FIXME: Strongly connected components won't get the correct outlives set.
+                        // Introduce universal outlives without reporting their relations to the
+                        // user. That way, the only errors that can be produced originate from
+                        // discovering new constraints beyond that.
                         for outlives in generic.r(s).clauses.iter(s) {
                             let SpannedTraitClauseView::Outlives(outlives) = outlives.view(tcx)
                             else {
@@ -698,7 +697,8 @@ impl ReInferTracker {
 
                             let rhs = self.region_to_idx(outlives.value, tcx);
 
-                            self.relate_inner(index, rhs, None);
+                            let mut errors = Vec::new();
+                            self.relate_inner(index, rhs, Some(&mut errors));
                         }
 
                         index
@@ -746,6 +746,13 @@ impl ReInferTracker {
             if !self.tracked_universals[universal_idx]
                 .outlives
                 .contains(rhs.index())
+            {
+                continue;
+            }
+
+            if self.tracked_universals[universal_idx]
+                .outlives
+                .contains(lhs.index())
             {
                 continue;
             }
