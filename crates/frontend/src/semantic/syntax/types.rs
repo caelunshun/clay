@@ -5,7 +5,7 @@ use crate::{
         syntax::{Span, Symbol},
     },
     parse::token::{Ident, Lifetime},
-    semantic::syntax::{Func, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy},
+    semantic::syntax::{FuncDef, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy},
     utils::{hash::FxHashMap, mem::CellVec},
 };
 use derive_where::derive_where;
@@ -55,10 +55,16 @@ pub struct TraitDef {
     pub associated_types: FxHashMap<Symbol, Obj<TypeGeneric>>,
 
     /// The set of methods defined by this trait.
-    pub methods: LateInit<Vec<()>>,
+    pub methods: LateInit<Vec<Obj<TraitMethod>>>,
 
     /// All known implementations of this trait.
     pub impls: CellVec<Obj<ImplDef>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TraitMethod {
+    pub owner: Obj<TraitDef>,
+    pub func: Obj<FuncDef>,
 }
 
 pub type ListOfTraitClauseList = Intern<[TraitClauseList]>;
@@ -89,7 +95,7 @@ pub struct ImplDef {
     pub generics: Obj<GenericBinder>,
     pub trait_: Option<SpannedTraitInstance>,
     pub target: SpannedTy,
-    pub methods: LateInit<Vec<()>>,
+    pub methods: LateInit<Vec<Obj<ImplFunc>>>,
 
     // We can't simply solve for stuff like `u32: Id<{T}>` where `{T}` is still unknown because
     // these impls could conflict...
@@ -125,6 +131,12 @@ pub struct ImplDef {
     //
     // Anyways, this field encodes the solving order we found as part of our WF checks.
     pub generic_solve_order: LateInit<Vec<GenericSolveStep>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImplFunc {
+    pub owner: Obj<ImplDef>,
+    pub func: Obj<FuncDef>,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -354,7 +366,7 @@ pub enum TyKind {
     Tuple(TyList),
 
     /// A statically-known function type. This can be coerced into a functional interface.
-    FnDef(Obj<Func>),
+    FnDef(Obj<FuncDef>),
 
     /// A user's explicit request to infer a type (i.e. `_`)
     ExplicitInfer,
@@ -401,7 +413,7 @@ pub enum FloatKind {
     S64,
 }
 
-// === ReVariance === //
+// === Misc Enums === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum ReVariance {
@@ -420,11 +432,15 @@ impl ReVariance {
     }
 }
 
-// === RelationMode === //
-
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum RelationMode {
     LhsOntoRhs,
     RhsOntoLhs,
     Equate,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum Mutability {
+    Mut,
+    Not,
 }

@@ -332,7 +332,7 @@ pub enum AstExprKind {
     Tuple(Vec<AstExpr>),
     Binary(AstBinOpKind, Box<AstExpr>, Box<AstExpr>),
     Unary(AstUnOpKind, Box<AstExpr>),
-    Lit(AstFnExprLit),
+    Lit(AstLit),
     Cast(Box<AstExpr>, Box<AstTy>),
     Let(Box<AstPat>, Box<AstExpr>, Span),
     If(Box<AstExpr>, Box<AstBlock>, Option<Box<AstExpr>>),
@@ -362,10 +362,17 @@ pub enum AstExprKind {
 }
 
 #[derive(Debug, Clone)]
-pub enum AstFnExprLit {
+pub enum AstLit {
     Number(TokenNumLit),
     Char(TokenCharLit),
     String(TokenStrLit),
+    Bool(AstBoolLit),
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct AstBoolLit {
+    pub span: Span,
+    pub value: bool,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

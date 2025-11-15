@@ -142,6 +142,14 @@ impl<'tcx> InferCx<'tcx> {
         &self.tcx.session
     }
 
+    pub fn mode(&self) -> InferCxMode {
+        if self.regions.is_some() {
+            InferCxMode::RegionAware
+        } else {
+            InferCxMode::RegionBlind
+        }
+    }
+
     pub fn fresh_ty(&mut self) -> Ty {
         self.tcx().intern_ty(TyKind::InferVar(self.types.fresh()))
     }
