@@ -187,7 +187,7 @@ impl SignatureWfVisitor<'_> {
             ])),
         );
 
-        let new_self_ty = SpannedTy::new_saturated(new_self_ty, def.r(s).item.r(s).name.span, s);
+        let new_self_ty = SpannedTy::new_saturated(new_self_ty, def.r(s).item.r(s).name.span, tcx);
 
         let old_self_ty = self.self_ty.replace(new_self_ty);
         {
@@ -247,14 +247,13 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
 
     fn visit_spanned_trait_spec(&mut self, spec: SpannedTraitSpec) -> ControlFlow<Self::Break> {
         let tcx = self.tcx();
-        let s = self.session();
 
         self.check_trait_helper(
             spec.value.def,
             &spec
                 .view(tcx)
                 .params
-                .iter(s)
+                .iter(tcx)
                 .map(|param| match param.view(tcx) {
                     SpannedTraitParamView::Equals(v) => v,
                     SpannedTraitParamView::Unspecified(_) => SpannedTyOrRe::new_unspanned(
@@ -274,11 +273,10 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
         instance: SpannedTraitInstance,
     ) -> ControlFlow<Self::Break> {
         let tcx = self.tcx();
-        let s = self.session();
 
         self.check_trait_helper(
             instance.value.def,
-            &instance.view(tcx).params.iter(s).collect::<Vec<_>>(),
+            &instance.view(tcx).params.iter(tcx).collect::<Vec<_>>(),
         );
 
         self.walk_trait_instance(instance)?;

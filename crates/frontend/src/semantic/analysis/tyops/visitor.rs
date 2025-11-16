@@ -144,7 +144,7 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
     // === Clauses === //
 
     fn walk_clause_list(&mut self, clauses: SpannedTraitClauseList) -> ControlFlow<Self::Break> {
-        for clause in clauses.iter(self.session()) {
+        for clause in clauses.iter(self.tcx()) {
             self.visit_spanned_clause(clause)?;
         }
 
@@ -165,7 +165,7 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
     }
 
     fn walk_param_list(&mut self, params: SpannedTraitParamList) -> ControlFlow<Self::Break> {
-        for param in params.iter(self.session()) {
+        for param in params.iter(self.tcx()) {
             self.visit_spanned_param(param)?;
         }
 
@@ -218,7 +218,7 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
     }
 
     fn walk_ty_or_re_list(&mut self, list: SpannedTyOrReList) -> ControlFlow<Self::Break> {
-        for ty_or_re in list.iter(self.session()) {
+        for ty_or_re in list.iter(self.tcx()) {
             self.visit_spanned_ty_or_re(ty_or_re)?;
         }
 
@@ -226,7 +226,7 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
     }
 
     fn walk_ty_list(&mut self, list: SpannedTyList) -> ControlFlow<Self::Break> {
-        for ty in list.iter(self.session()) {
+        for ty in list.iter(self.tcx()) {
             self.visit_spanned_ty(ty)?;
         }
 

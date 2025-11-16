@@ -1,7 +1,7 @@
 use crate::{
     base::{
         Session,
-        arena::{HasListInterner, Intern, Obj},
+        arena::{HasListInterner, Intern},
         syntax::Span,
     },
     utils::lang::IterEither,
@@ -32,16 +32,20 @@ impl<T> Spanned<T> {
         }
     }
 
-    pub fn new_saturated(value: T, span: Span, s: &Session) -> Self {
+    pub fn new_saturated(value: T, span: Span, cx: &impl HasListInterner<SpannedInfo>) -> Self {
         Self {
             value,
-            span_info: SpannedInfo::Tracked(span, Obj::new_slice(&[], s)),
+            span_info: SpannedInfo::Tracked(span, cx.intern(&[])),
         }
     }
 
-    pub fn new_maybe_saturated(value: T, span: Option<Span>, s: &Session) -> Self {
+    pub fn new_maybe_saturated(
+        value: T,
+        span: Option<Span>,
+        cx: &impl HasListInterner<SpannedInfo>,
+    ) -> Self {
         if let Some(span) = span {
-            Self::new_saturated(value, span, s)
+            Self::new_saturated(value, span, cx)
         } else {
             Self::new_unspanned(value)
         }
@@ -68,12 +72,15 @@ impl<T> Spanned<T> {
 }
 
 impl<T: Clone> Spanned<Intern<[T]>> {
-    pub fn alloc_list(own_span: Span, elems: &[Spanned<T>], cx: &impl HasListInterner<T>) -> Self
+    pub fn alloc_list(
+        own_span: Span,
+        elems: &[Spanned<T>],
+        cx: &(impl HasListInterner<T> + HasListInterner<SpannedInfo>),
+    ) -> Self
     where
         T: 'static + hash::Hash + Eq,
     {
-        let s = cx.session();
-        let span_info = Obj::new_iter(elems.iter().map(|v| v.span_info), s);
+        let span_info = cx.intern(&elems.iter().map(|v| v.span_info).collect::<Vec<_>>());
         let value = cx.intern(&elems.iter().map(|v| v.value.clone()).collect::<Vec<_>>());
 
         Self {
@@ -86,36 +93,43 @@ impl<T: Clone> Spanned<Intern<[T]>> {
         self.value.r(s).len()
     }
 
-    pub fn nth(self, at: usize, s: &Session) -> Spanned<T> {
+    pub fn nth(self, at: usize, cx: &impl HasListInterner<SpannedInfo>) -> Spanned<T> {
         Spanned::new_raw(
-            self.value.r(s)[at].clone(),
-            self.span_info.child_span_at(at, s),
+            self.value.r(cx.session())[at].clone(),
+            self.span_info.child_span_at(at, cx),
         )
     }
 
-    pub fn iter(self, s: &Session) -> impl '_ + ExactSizeIterator<Item = Spanned<T>> {
-        let values = self.value.r(s);
+    pub fn iter(
+        self,
+        cx: &impl HasListInterner<SpannedInfo>,
+    ) -> impl '_ + ExactSizeIterator<Item = Spanned<T>> {
+        let values = self.value.r(cx.session());
 
         values
             .iter()
-            .zip(self.span_info.child_span_iter(values.len(), s))
+            .zip(self.span_info.child_span_iter(values.len(), cx))
             .map(|(value, span_info)| Spanned::new_raw(value.clone(), span_info))
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum SpannedInfo {
     Untracked,
-    Tracked(Span, Obj<[SpannedInfo]>),
+    Tracked(Span, Intern<[SpannedInfo]>),
 }
 
 impl SpannedInfo {
-    pub fn new_list(own_span: Span, children: &[SpannedInfo], s: &Session) -> Self {
-        Self::Tracked(own_span, Obj::new_slice(children, s))
+    pub fn new_list(
+        own_span: Span,
+        children: &[SpannedInfo],
+        cx: &impl HasListInterner<SpannedInfo>,
+    ) -> Self {
+        Self::Tracked(own_span, cx.intern(children))
     }
 
-    pub fn new_terminal(own_span: Span, s: &Session) -> Self {
-        Self::new_list(own_span, &[], s)
+    pub fn new_terminal(own_span: Span, cx: &impl HasListInterner<SpannedInfo>) -> Self {
+        Self::new_list(own_span, &[], cx)
     }
 
     pub fn own_span(self) -> Option<Span> {
@@ -125,14 +139,17 @@ impl SpannedInfo {
         }
     }
 
-    pub fn child_spans<const N: usize>(self, s: &Session) -> [SpannedInfo; N] {
+    pub fn child_spans<const N: usize>(
+        self,
+        cx: &impl HasListInterner<SpannedInfo>,
+    ) -> [SpannedInfo; N] {
         match self {
             SpannedInfo::Untracked => [SpannedInfo::Untracked; N],
             SpannedInfo::Tracked(own_span, child_spans) => {
-                let child_spans = child_spans.r(s);
+                let child_spans = child_spans.r(cx.session());
 
                 if child_spans.is_empty() {
-                    [SpannedInfo::Tracked(own_span, Obj::new_slice(&[], s)); N]
+                    [SpannedInfo::Tracked(own_span, cx.intern(&[])); N]
                 } else {
                     array::from_fn(|i| child_spans[i])
                 }
@@ -140,14 +157,14 @@ impl SpannedInfo {
         }
     }
 
-    pub fn child_span_at(self, n: usize, s: &Session) -> SpannedInfo {
+    pub fn child_span_at(self, n: usize, cx: &impl HasListInterner<SpannedInfo>) -> SpannedInfo {
         match self {
             SpannedInfo::Untracked => SpannedInfo::Untracked,
             SpannedInfo::Tracked(own_span, child_spans) => {
-                let child_spans = child_spans.r(s);
+                let child_spans = child_spans.r(cx.session());
 
                 if child_spans.is_empty() {
-                    SpannedInfo::Tracked(own_span, Obj::new_slice(&[], s))
+                    SpannedInfo::Tracked(own_span, cx.intern(&[]))
                 } else {
                     child_spans[n]
                 }
@@ -158,16 +175,16 @@ impl SpannedInfo {
     pub fn child_span_iter<'s>(
         self,
         len: usize,
-        s: &'s Session,
+        cx: &'s impl HasListInterner<SpannedInfo>,
     ) -> impl 's + Clone + ExactSizeIterator<Item = SpannedInfo> {
         match self {
             SpannedInfo::Untracked => IterEither::Left(iter::repeat_n(SpannedInfo::Untracked, len)),
             SpannedInfo::Tracked(own_span, child_spans) => {
-                let child_spans = child_spans.r(s);
+                let child_spans = child_spans.r(cx.session());
 
                 if child_spans.is_empty() {
                     IterEither::Left(iter::repeat_n(
-                        SpannedInfo::Tracked(own_span, Obj::new_slice(&[], s)),
+                        SpannedInfo::Tracked(own_span, cx.intern(&[])),
                         len,
                     ))
                 } else {
@@ -179,12 +196,12 @@ impl SpannedInfo {
         }
     }
 
-    pub fn wrap(self, own_span: Span, s: &Session) -> Self {
-        Self::new_list(own_span, &[self], s)
+    pub fn wrap(self, own_span: Span, cx: &impl HasListInterner<SpannedInfo>) -> Self {
+        Self::new_list(own_span, &[self], cx)
     }
 
-    pub fn unwrap(self, s: &Session) -> SpannedInfo {
-        let [child] = self.child_spans(s);
+    pub fn unwrap(self, cx: &impl HasListInterner<SpannedInfo>) -> SpannedInfo {
+        let [child] = self.child_spans(cx);
         child
     }
 }

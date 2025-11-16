@@ -386,7 +386,6 @@ impl InferCx<'_> {
         rhs: SpannedTraitClauseList,
     ) -> Result<(), Box<TyAndClauseRelateError>> {
         let tcx = self.tcx();
-        let s = self.session();
 
         let mut fork = self.clone();
 
@@ -397,7 +396,7 @@ impl InferCx<'_> {
             had_ambiguity: false,
         };
 
-        for (idx, clause) in rhs.iter(s).enumerate() {
+        for (idx, clause) in rhs.iter(tcx).enumerate() {
             match clause.view(tcx) {
                 SpannedTraitClauseView::Outlives(rhs) => {
                     if let Err(err) = fork.relate_ty_and_re(lhs, rhs) {
@@ -432,12 +431,11 @@ impl InferCx<'_> {
         rhs: SpannedTraitClauseList,
     ) -> Result<(), Box<ReAndClauseRelateError>> {
         let tcx = self.tcx();
-        let s = self.session();
 
         let mut errors = Vec::new();
         let mut fork = self.clone();
 
-        for clause in rhs.iter(s) {
+        for clause in rhs.iter(tcx) {
             match clause.view(tcx) {
                 SpannedTraitClauseView::Outlives(rhs) => {
                     if let Err(err) = fork.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs) {
@@ -575,7 +573,7 @@ impl InferCx<'_> {
             .trait_
             .r(s)
             .iter()
-            .zip(spec.view(tcx).params.iter(s))
+            .zip(spec.view(tcx).params.iter(tcx))
             .take(spec.value.def.r(s).regular_generic_count as usize)
             .enumerate()
         {
@@ -671,7 +669,7 @@ impl InferCx<'_> {
                 .trait_
                 .r(s)
                 .iter()
-                .zip(spec.view(tcx).params.iter(s))
+                .zip(spec.view(tcx).params.iter(tcx))
                 .enumerate()
                 .skip(spec.value.def.r(s).regular_generic_count as usize)
             {
@@ -734,7 +732,7 @@ impl InferCx<'_> {
         let tcx = self.tcx();
 
         // Find the clause that could prove our trait.
-        let lhs = lhs_elaborated.iter(s).find(|clause| match clause.value {
+        let lhs = lhs_elaborated.iter(tcx).find(|clause| match clause.value {
             TraitClause::Outlives(_) => false,
             TraitClause::Trait(lhs) => lhs.def == rhs.def,
         });
@@ -749,7 +747,7 @@ impl InferCx<'_> {
 
         let mut fork = self.clone();
 
-        for (lhs_param, &rhs_param) in lhs.view(tcx).params.iter(s).zip(rhs.params.r(s)) {
+        for (lhs_param, &rhs_param) in lhs.view(tcx).params.iter(tcx).zip(rhs.params.r(s)) {
             let SpannedTraitParamView::Equals(lhs) = lhs_param.view(tcx) else {
                 unreachable!();
             };

@@ -155,13 +155,12 @@ impl<'tcx> InferCx<'tcx> {
     }
 
     pub fn try_peel_ty_var(&self, ty: SpannedTy) -> SpannedTy {
-        let s = self.session();
         let tcx = self.tcx();
 
         match ty.view(tcx) {
             SpannedTyView::InferVar(var) => {
                 if let Some(var) = self.types.lookup(var) {
-                    SpannedTy::new_maybe_saturated(var, ty.own_span(), s)
+                    SpannedTy::new_maybe_saturated(var, ty.own_span(), tcx)
                 } else {
                     ty
                 }
@@ -300,7 +299,7 @@ impl<'tcx> InferCx<'tcx> {
                 let lhs = lhs.view(tcx);
                 let rhs = rhs.view(tcx);
 
-                for (lhs, rhs) in lhs.params.iter(s).zip(rhs.params.iter(s)) {
+                for (lhs, rhs) in lhs.params.iter(tcx).zip(rhs.params.iter(tcx)) {
                     match (lhs.view(tcx), rhs.view(tcx)) {
                         (SpannedTyOrReView::Re(lhs), SpannedTyOrReView::Re(rhs)) => {
                             if let Err(err) = self.relate_re_and_re(lhs, rhs, mode) {
@@ -318,7 +317,7 @@ impl<'tcx> InferCx<'tcx> {
                 self.relate_dyn_trait_clauses_inner(lhs, rhs, culprits, mode);
             }
             (SpannedTyView::Tuple(lhs), SpannedTyView::Tuple(rhs)) if lhs.len(s) == rhs.len(s) => {
-                for (lhs, rhs) in lhs.iter(s).zip(rhs.iter(s)) {
+                for (lhs, rhs) in lhs.iter(tcx).zip(rhs.iter(tcx)) {
                     self.relate_ty_and_ty_inner(lhs, rhs, culprits, mode);
                 }
             }
@@ -327,8 +326,8 @@ impl<'tcx> InferCx<'tcx> {
                     (self.types.lookup(lhs_var), self.types.lookup(rhs_var))
                 {
                     self.relate_ty_and_ty_inner(
-                        SpannedTy::new_maybe_saturated(lhs_ty, lhs.own_span(), s),
-                        SpannedTy::new_maybe_saturated(rhs_ty, rhs.own_span(), s),
+                        SpannedTy::new_maybe_saturated(lhs_ty, lhs.own_span(), tcx),
+                        SpannedTy::new_maybe_saturated(rhs_ty, rhs.own_span(), tcx),
                         culprits,
                         mode,
                     );
@@ -339,7 +338,7 @@ impl<'tcx> InferCx<'tcx> {
             (SpannedTyView::InferVar(lhs_var), _) => {
                 if let Some(known_lhs) = self.types.lookup(lhs_var) {
                     self.relate_ty_and_ty_inner(
-                        SpannedTy::new_maybe_saturated(known_lhs, lhs.own_span(), s),
+                        SpannedTy::new_maybe_saturated(known_lhs, lhs.own_span(), tcx),
                         rhs,
                         culprits,
                         mode,
@@ -352,7 +351,7 @@ impl<'tcx> InferCx<'tcx> {
                 if let Some(known_rhs) = self.types.lookup(rhs_var) {
                     self.relate_ty_and_ty_inner(
                         lhs,
-                        SpannedTy::new_maybe_saturated(known_rhs, rhs.own_span(), s),
+                        SpannedTy::new_maybe_saturated(known_rhs, rhs.own_span(), tcx),
                         culprits,
                         mode,
                     );
@@ -388,7 +387,7 @@ impl<'tcx> InferCx<'tcx> {
             return;
         }
 
-        for (lhs_clause, rhs_clause) in lhs.iter(s).zip(rhs.iter(s)) {
+        for (lhs_clause, rhs_clause) in lhs.iter(tcx).zip(rhs.iter(tcx)) {
             match (lhs_clause.view(tcx), rhs_clause.view(tcx)) {
                 (SpannedTraitClauseView::Outlives(lhs), SpannedTraitClauseView::Outlives(rhs)) => {
                     // Technically, `MyTrait + 'a + 'b: 'c` could imply either `'a: 'c` or
@@ -406,8 +405,8 @@ impl<'tcx> InferCx<'tcx> {
                     for (lhs, rhs) in lhs
                         .view(tcx)
                         .params
-                        .iter(s)
-                        .zip(rhs.view(tcx).params.iter(s))
+                        .iter(tcx)
+                        .zip(rhs.view(tcx).params.iter(tcx))
                     {
                         match (lhs.view(tcx), rhs.view(tcx)) {
                             (
@@ -480,7 +479,6 @@ impl<'tcx> InferCx<'tcx> {
         rhs: SpannedRe,
         culprits: &mut Vec<Box<ReAndReRelateError>>,
     ) {
-        let s = self.session();
         let tcx = self.tcx();
 
         match lhs.view(tcx) {
@@ -497,7 +495,7 @@ impl<'tcx> InferCx<'tcx> {
             }
             SpannedTyView::Adt(lhs) => {
                 // ADTs are bounded by which regions they mention.
-                for lhs in lhs.view(tcx).params.iter(s) {
+                for lhs in lhs.view(tcx).params.iter(tcx) {
                     match lhs.view(tcx) {
                         SpannedTyOrReView::Re(lhs) => {
                             if let Err(err) =
@@ -513,7 +511,7 @@ impl<'tcx> InferCx<'tcx> {
                 }
             }
             SpannedTyView::Trait(lhs) => {
-                for lhs in lhs.iter(s) {
+                for lhs in lhs.iter(tcx) {
                     match lhs.view(tcx) {
                         SpannedTraitClauseView::Outlives(lhs) => {
                             // There is guaranteed to be exactly one outlives constraint for a trait
@@ -532,7 +530,7 @@ impl<'tcx> InferCx<'tcx> {
                 }
             }
             SpannedTyView::Tuple(lhs) => {
-                for lhs in lhs.iter(s) {
+                for lhs in lhs.iter(tcx) {
                     self.relate_ty_and_re_inner(lhs, rhs, culprits);
                 }
             }
@@ -540,7 +538,7 @@ impl<'tcx> InferCx<'tcx> {
             SpannedTyView::InferVar(inf_lhs) => {
                 if let Some(inf_lhs) = self.types.lookup(inf_lhs) {
                     self.relate_ty_and_re_inner(
-                        SpannedTy::new_maybe_saturated(inf_lhs, lhs.own_span(), s),
+                        SpannedTy::new_maybe_saturated(inf_lhs, lhs.own_span(), tcx),
                         rhs,
                         culprits,
                     );
@@ -697,7 +695,7 @@ impl ReInferTracker {
                         // Introduce universal outlives without reporting their relations to the
                         // user. That way, the only errors that can be produced originate from
                         // discovering new constraints beyond that.
-                        for outlives in generic.r(s).clauses.iter(s) {
+                        for outlives in generic.r(s).clauses.iter(tcx) {
                             let SpannedTraitClauseView::Outlives(outlives) = outlives.view(tcx)
                             else {
                                 unreachable!()

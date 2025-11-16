@@ -36,11 +36,9 @@ impl SpannedViewDecode<TyCtxt> for TyOrRe {
     type View = SpannedTyOrReView;
 
     fn decode(value: &Self, span_info: SpannedInfo, tcx: &TyCtxt) -> Self::View {
-        let s = &tcx.session;
-
         match *value {
-            TyOrRe::Re(re) => SpannedTyOrReView::Re(Spanned::new_raw(re, span_info.unwrap(s))),
-            TyOrRe::Ty(ty) => SpannedTyOrReView::Ty(Spanned::new_raw(ty, span_info.unwrap(s))),
+            TyOrRe::Re(re) => SpannedTyOrReView::Re(Spanned::new_raw(re, span_info.unwrap(tcx))),
+            TyOrRe::Ty(ty) => SpannedTyOrReView::Ty(Spanned::new_raw(ty, span_info.unwrap(tcx))),
         }
     }
 }
@@ -49,14 +47,12 @@ impl SpannedViewEncode<TyCtxt> for SpannedTyOrReView {
     type Unspanned = TyOrRe;
 
     fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
-        let s = &tcx.session;
-
         match self {
             SpannedTyOrReView::Re(re) => {
-                Spanned::new_raw(TyOrRe::Re(re.value), re.span_info.wrap(own_span, s))
+                Spanned::new_raw(TyOrRe::Re(re.value), re.span_info.wrap(own_span, tcx))
             }
             SpannedTyOrReView::Ty(ty) => {
-                Spanned::new_raw(TyOrRe::Ty(ty.value), ty.span_info.wrap(own_span, s))
+                Spanned::new_raw(TyOrRe::Ty(ty.value), ty.span_info.wrap(own_span, tcx))
             }
         }
     }
@@ -91,18 +87,20 @@ impl SpannedViewDecode<TyCtxt> for Ty {
             TyKind::This => SpannedTyView::This,
             TyKind::Simple(kind) => SpannedTyView::Simple(kind),
             TyKind::Reference(re, pointee) => {
-                let [re_span, pointee_span] = span_info.child_spans(s);
+                let [re_span, pointee_span] = span_info.child_spans(tcx);
 
                 SpannedTyView::Reference(
                     Spanned::new_raw(re, re_span),
                     Spanned::new_raw(pointee, pointee_span),
                 )
             }
-            TyKind::Adt(adt) => SpannedTyView::Adt(Spanned::new_raw(adt, span_info.unwrap(s))),
+            TyKind::Adt(adt) => SpannedTyView::Adt(Spanned::new_raw(adt, span_info.unwrap(tcx))),
             TyKind::Trait(clauses) => {
-                SpannedTyView::Trait(Spanned::new_raw(clauses, span_info.unwrap(s)))
+                SpannedTyView::Trait(Spanned::new_raw(clauses, span_info.unwrap(tcx)))
             }
-            TyKind::Tuple(tys) => SpannedTyView::Tuple(Spanned::new_raw(tys, span_info.unwrap(s))),
+            TyKind::Tuple(tys) => {
+                SpannedTyView::Tuple(Spanned::new_raw(tys, span_info.unwrap(tcx)))
+            }
             TyKind::FnDef(def) => SpannedTyView::FnDef(def),
             TyKind::ExplicitInfer => SpannedTyView::ExplicitInfer,
             TyKind::Universal(generic) => SpannedTyView::Universal(generic),
@@ -121,47 +119,47 @@ impl SpannedViewEncode<TyCtxt> for SpannedTyView {
         match self {
             SpannedTyView::This => Spanned::new_raw(
                 tcx.intern_ty(TyKind::This),
-                SpannedInfo::new_terminal(own_span, s),
+                SpannedInfo::new_terminal(own_span, tcx),
             ),
             SpannedTyView::Simple(kind) => Spanned::new_raw(
                 tcx.intern_ty(TyKind::Simple(kind)),
-                SpannedInfo::new_terminal(own_span, s),
+                SpannedInfo::new_terminal(own_span, tcx),
             ),
             SpannedTyView::Reference(re, pointee) => Spanned::new_raw(
                 tcx.intern_ty(TyKind::Reference(re.value, pointee.value)),
-                SpannedInfo::new_list(own_span, &[re.span_info, pointee.span_info], s),
+                SpannedInfo::new_list(own_span, &[re.span_info, pointee.span_info], tcx),
             ),
             SpannedTyView::Adt(adt) => Spanned::new_raw(
                 tcx.intern_ty(TyKind::Adt(adt.value)),
-                adt.span_info.wrap(own_span, s),
+                adt.span_info.wrap(own_span, tcx),
             ),
             SpannedTyView::Trait(clauses) => Spanned::new_raw(
                 tcx.intern_ty(TyKind::Trait(clauses.value)),
-                clauses.span_info.wrap(own_span, s),
+                clauses.span_info.wrap(own_span, tcx),
             ),
             SpannedTyView::Tuple(tys) => Spanned::new_raw(
                 tcx.intern_ty(TyKind::Tuple(tys.value)),
-                tys.span_info.wrap(own_span, s),
+                tys.span_info.wrap(own_span, tcx),
             ),
             SpannedTyView::FnDef(def) => Spanned::new_raw(
                 tcx.intern_ty(TyKind::FnDef(def)),
-                SpannedInfo::new_terminal(own_span, s),
+                SpannedInfo::new_terminal(own_span, tcx),
             ),
             SpannedTyView::ExplicitInfer => Spanned::new_raw(
                 tcx.intern_ty(TyKind::ExplicitInfer),
-                SpannedInfo::new_terminal(own_span, s),
+                SpannedInfo::new_terminal(own_span, tcx),
             ),
             SpannedTyView::Universal(generic) => Spanned::new_raw(
                 tcx.intern_ty(TyKind::Universal(generic)),
-                SpannedInfo::new_terminal(own_span, s),
+                SpannedInfo::new_terminal(own_span, tcx),
             ),
             SpannedTyView::InferVar(infer_ty_var) => Spanned::new_raw(
                 tcx.intern_ty(TyKind::InferVar(infer_ty_var)),
-                SpannedInfo::new_terminal(own_span, s),
+                SpannedInfo::new_terminal(own_span, tcx),
             ),
             SpannedTyView::Error(error_guaranteed) => Spanned::new_raw(
                 tcx.intern_ty(TyKind::Error(error_guaranteed)),
-                SpannedInfo::new_terminal(own_span, s),
+                SpannedInfo::new_terminal(own_span, tcx),
             ),
         }
     }
@@ -183,7 +181,7 @@ impl SpannedViewEncode<TyCtxt> for Re {
     type Unspanned = Re;
 
     fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
-        Spanned::new_raw(self, SpannedInfo::new_terminal(own_span, &tcx.session))
+        Spanned::new_raw(self, SpannedInfo::new_terminal(own_span, tcx))
     }
 }
 
@@ -205,10 +203,10 @@ impl SpannedViewDecode<TyCtxt> for TraitClause {
 
         match *value {
             TraitClause::Outlives(re) => {
-                SpannedTraitClauseView::Outlives(Spanned::new_raw(re, span_info.unwrap(s)))
+                SpannedTraitClauseView::Outlives(Spanned::new_raw(re, span_info.unwrap(tcx)))
             }
             TraitClause::Trait(spec) => {
-                SpannedTraitClauseView::Trait(Spanned::new_raw(spec, span_info.unwrap(s)))
+                SpannedTraitClauseView::Trait(Spanned::new_raw(spec, span_info.unwrap(tcx)))
             }
         }
     }
@@ -223,11 +221,11 @@ impl SpannedViewEncode<TyCtxt> for SpannedTraitClauseView {
         match self {
             SpannedTraitClauseView::Outlives(re) => Spanned::new_raw(
                 TraitClause::Outlives(re.value),
-                re.span_info.wrap(own_span, s),
+                re.span_info.wrap(own_span, tcx),
             ),
             SpannedTraitClauseView::Trait(spec) => Spanned::new_raw(
                 TraitClause::Trait(spec.value),
-                spec.span_info.wrap(own_span, s),
+                spec.span_info.wrap(own_span, tcx),
             ),
         }
     }
@@ -251,10 +249,10 @@ impl SpannedViewDecode<TyCtxt> for TraitParam {
 
         match *value {
             TraitParam::Equals(ty_or_re) => {
-                SpannedTraitParamView::Equals(Spanned::new_raw(ty_or_re, span_info.unwrap(s)))
+                SpannedTraitParamView::Equals(Spanned::new_raw(ty_or_re, span_info.unwrap(tcx)))
             }
             TraitParam::Unspecified(clauses) => {
-                SpannedTraitParamView::Unspecified(Spanned::new_raw(clauses, span_info.unwrap(s)))
+                SpannedTraitParamView::Unspecified(Spanned::new_raw(clauses, span_info.unwrap(tcx)))
             }
         }
     }
@@ -269,11 +267,11 @@ impl SpannedViewEncode<TyCtxt> for SpannedTraitParamView {
         match self {
             SpannedTraitParamView::Equals(ty_or_re) => Spanned::new_raw(
                 TraitParam::Equals(ty_or_re.value),
-                ty_or_re.span_info.wrap(own_span, s),
+                ty_or_re.span_info.wrap(own_span, tcx),
             ),
             SpannedTraitParamView::Unspecified(clauses) => Spanned::new_raw(
                 TraitParam::Unspecified(clauses.value),
-                clauses.span_info.wrap(own_span, s),
+                clauses.span_info.wrap(own_span, tcx),
             ),
         }
     }
@@ -297,7 +295,7 @@ impl SpannedViewDecode<TyCtxt> for AdtInstance {
 
         SpannedAdtInstanceView {
             def: value.def,
-            params: Spanned::new_raw(value.params, span_info.unwrap(s)),
+            params: Spanned::new_raw(value.params, span_info.unwrap(tcx)),
         }
     }
 }
@@ -313,7 +311,7 @@ impl SpannedViewEncode<TyCtxt> for SpannedAdtInstanceView {
                 def: self.def,
                 params: self.params.value,
             },
-            self.params.span_info.wrap(own_span, s),
+            self.params.span_info.wrap(own_span, tcx),
         )
     }
 }
@@ -336,7 +334,7 @@ impl SpannedViewDecode<TyCtxt> for TraitSpec {
 
         SpannedTraitSpecView {
             def: value.def,
-            params: Spanned::new_raw(value.params, span_info.unwrap(s)),
+            params: Spanned::new_raw(value.params, span_info.unwrap(tcx)),
         }
     }
 }
@@ -352,7 +350,7 @@ impl SpannedViewEncode<TyCtxt> for SpannedTraitSpecView {
                 def: self.def,
                 params: self.params.value,
             },
-            self.params.span_info.wrap(own_span, s),
+            self.params.span_info.wrap(own_span, tcx),
         )
     }
 }
@@ -375,7 +373,7 @@ impl SpannedViewDecode<TyCtxt> for TraitInstance {
 
         SpannedTraitInstanceView {
             def: value.def,
-            params: Spanned::new_raw(value.params, span_info.unwrap(s)),
+            params: Spanned::new_raw(value.params, span_info.unwrap(tcx)),
         }
     }
 }
@@ -391,7 +389,7 @@ impl SpannedViewEncode<TyCtxt> for SpannedTraitInstanceView {
                 def: self.def,
                 params: self.params.value,
             },
-            self.params.span_info.wrap(own_span, s),
+            self.params.span_info.wrap(own_span, tcx),
         )
     }
 }
