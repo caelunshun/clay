@@ -1,7 +1,9 @@
 use crate::{
     base::{ErrorGuaranteed, Session, arena::Obj},
     semantic::{
-        analysis::{TyCtxt, TyFolder},
+        analysis::{
+            TyCtxt, TyFolder, TyFolderInfallible, TyVisitor, TyVisitorUnspanned, TyVisitorWalk,
+        },
         syntax::{
             InferReVar, InferTyVar, Re, RegionGeneric, RelationMode, SpannedRe,
             SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParam,
@@ -14,7 +16,7 @@ use bit_set::BitSet;
 use disjoint::DisjointSetVec;
 use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
-use std::convert::Infallible;
+use std::{convert::Infallible, ops::ControlFlow};
 
 // === Errors === //
 
@@ -31,6 +33,7 @@ pub enum TyAndTyRelateCulprit {
     Regions(Box<ReAndReRelateError>),
     ClauseLists(SpannedTraitClauseList, SpannedTraitClauseList),
     Params(SpannedTraitParam, SpannedTraitParam),
+    RecursiveType(InferTyOccursError),
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +54,12 @@ pub struct TyAndReRelateError {
     pub lhs: SpannedTy,
     pub rhs: SpannedRe,
     pub culprits: Vec<Box<ReAndReRelateError>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct InferTyOccursError {
+    pub var: InferTyVar,
+    pub occurs_in: Ty,
 }
 
 // === InferCx === //
@@ -160,7 +169,7 @@ impl<'tcx> InferCx<'tcx> {
 
         match ty.view(tcx) {
             SpannedTyView::InferVar(var) => {
-                if let Some(var) = self.types.lookup(var) {
+                if let Ok(var) = self.types.lookup(var) {
                     SpannedTy::new_maybe_saturated(var, ty.own_span(), tcx)
                 } else {
                     ty
@@ -323,42 +332,54 @@ impl<'tcx> InferCx<'tcx> {
                 }
             }
             (SpannedTyView::InferVar(lhs_var), SpannedTyView::InferVar(rhs_var)) => {
-                if let (Some(lhs_ty), Some(rhs_ty)) =
-                    (self.types.lookup(lhs_var), self.types.lookup(rhs_var))
-                {
-                    self.relate_ty_and_ty_inner(
-                        SpannedTy::new_maybe_saturated(lhs_ty, lhs.own_span(), tcx),
-                        SpannedTy::new_maybe_saturated(rhs_ty, rhs.own_span(), tcx),
-                        culprits,
-                        mode,
-                    );
-                } else {
-                    self.types.union(lhs_var, rhs_var);
+                match (self.types.lookup(lhs_var), self.types.lookup(rhs_var)) {
+                    (Ok(lhs_ty), Ok(rhs_ty)) => {
+                        self.relate_ty_and_ty_inner(
+                            SpannedTy::new_maybe_saturated(lhs_ty, lhs.own_span(), tcx),
+                            SpannedTy::new_maybe_saturated(rhs_ty, rhs.own_span(), tcx),
+                            culprits,
+                            mode,
+                        );
+                    }
+                    (Ok(lhs_ty), Err(rhs_root)) => {
+                        if let Err(err) = self.relate_var_and_ty(rhs_root, lhs_ty) {
+                            culprits.push(TyAndTyRelateCulprit::RecursiveType(err));
+                        }
+                    }
+                    (Err(lhs_root), Ok(rhs_ty)) => {
+                        if let Err(err) = self.relate_var_and_ty(lhs_root, rhs_ty) {
+                            culprits.push(TyAndTyRelateCulprit::RecursiveType(err));
+                        }
+                    }
+                    (Err(_), Err(_)) => {
+                        // Cannot fail occurs check because neither type structurally includes the
+                        // other.
+                        self.types.union_unrelated(lhs_var, rhs_var);
+                    }
                 }
             }
-            // TODO: Occurs check
             (SpannedTyView::InferVar(lhs_var), _) => {
-                if let Some(known_lhs) = self.types.lookup(lhs_var) {
+                if let Ok(known_lhs) = self.types.lookup(lhs_var) {
                     self.relate_ty_and_ty_inner(
                         SpannedTy::new_maybe_saturated(known_lhs, lhs.own_span(), tcx),
                         rhs,
                         culprits,
                         mode,
                     );
-                } else {
-                    self.types.assign(lhs_var, rhs.value);
+                } else if let Err(err) = self.relate_var_and_ty(lhs_var, rhs.value) {
+                    culprits.push(TyAndTyRelateCulprit::RecursiveType(err));
                 }
             }
             (_, SpannedTyView::InferVar(rhs_var)) => {
-                if let Some(known_rhs) = self.types.lookup(rhs_var) {
+                if let Ok(known_rhs) = self.types.lookup(rhs_var) {
                     self.relate_ty_and_ty_inner(
                         lhs,
                         SpannedTy::new_maybe_saturated(known_rhs, rhs.own_span(), tcx),
                         culprits,
                         mode,
                     );
-                } else {
-                    self.types.assign(rhs_var, lhs.value);
+                } else if let Err(err) = self.relate_var_and_ty(rhs_var, lhs.value) {
+                    culprits.push(TyAndTyRelateCulprit::RecursiveType(err));
                 }
             }
             // Omissions okay because of intern equality fast-path:
@@ -372,6 +393,65 @@ impl<'tcx> InferCx<'tcx> {
                 culprits.push(TyAndTyRelateCulprit::Types(lhs, rhs));
             }
         }
+    }
+
+    pub fn relate_var_and_ty(
+        &mut self,
+        lhs_var_root: InferTyVar,
+        rhs_ty: Ty,
+    ) -> Result<(), InferTyOccursError> {
+        debug_assert!(self.types.lookup(lhs_var_root) == Err(lhs_var_root));
+
+        struct OccursVisitor<'a, 'tcx> {
+            icx: &'a InferCx<'tcx>,
+            reject: InferTyVar,
+        }
+
+        impl<'tcx> TyVisitor<'tcx> for OccursVisitor<'_, 'tcx> {
+            type Break = ();
+
+            fn tcx(&self) -> &'tcx TyCtxt {
+                self.icx.tcx()
+            }
+
+            fn visit_spanned_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
+                if let SpannedTyView::InferVar(var) = ty.view(self.tcx()) {
+                    match self.icx.types.lookup(var) {
+                        Ok(resolved) => self.visit_ty(resolved),
+                        Err(other_root) => {
+                            if self.reject == other_root {
+                                ControlFlow::Break(())
+                            } else {
+                                ControlFlow::Continue(())
+                            }
+                        }
+                    }
+                } else {
+                    self.walk_ty(ty)
+                }
+            }
+        }
+
+        let does_occur = OccursVisitor {
+            icx: self,
+            reject: lhs_var_root,
+        }
+        .visit_ty(rhs_ty)
+        .is_break();
+
+        if does_occur {
+            let occurs_in = InfTySubstitutor::new(self, UnboundVarHandlingMode::NormalizeToRoot)
+                .fold_ty(rhs_ty);
+
+            return Err(InferTyOccursError {
+                var: lhs_var_root,
+                occurs_in,
+            });
+        }
+
+        self.types.assign(lhs_var_root, rhs_ty);
+
+        Ok(())
     }
 
     fn relate_dyn_trait_clauses_inner(
@@ -538,7 +618,7 @@ impl<'tcx> InferCx<'tcx> {
             }
             SpannedTyView::Universal(_) => todo!(),
             SpannedTyView::InferVar(inf_lhs) => {
-                if let Some(inf_lhs) = self.types.lookup(inf_lhs) {
+                if let Ok(inf_lhs) = self.types.lookup(inf_lhs) {
                     self.relate_ty_and_re_inner(
                         SpannedTy::new_maybe_saturated(inf_lhs, lhs.own_span(), tcx),
                         rhs,
@@ -560,39 +640,88 @@ impl<'tcx> InferCx<'tcx> {
 // === TyInferTracker === //
 
 #[derive(Debug, Clone, Default)]
-struct TyInferTracker {
+pub struct TyInferTracker {
     disjoint: DisjointSetVec<Option<Ty>>,
 }
 
 impl TyInferTracker {
-    fn fresh(&mut self) -> InferTyVar {
+    pub fn fresh(&mut self) -> InferTyVar {
         let var = InferTyVar(self.disjoint.len() as u32);
         self.disjoint.push(None);
         var
     }
 
-    fn assign(&mut self, var: InferTyVar, ty: Ty) {
-        let root = self.disjoint.root_of(var.0 as usize);
-        let root = &mut self.disjoint[root];
+    pub fn lookup(&self, var: InferTyVar) -> Result<Ty, InferTyVar> {
+        let root_var = self.disjoint.root_of(var.0 as usize);
+
+        self.disjoint[root_var].ok_or(InferTyVar(root_var as u32))
+    }
+
+    pub fn assign(&mut self, var: InferTyVar, ty: Ty) {
+        let root_idx = self.disjoint.root_of(var.0 as usize);
+        let root = &mut self.disjoint[root_idx];
 
         debug_assert!(root.is_none());
+
         *root = Some(ty);
     }
 
-    fn lookup(&self, var: InferTyVar) -> Option<Ty> {
-        self.disjoint[self.disjoint.root_of(var.0 as usize)]
-    }
+    pub fn union_unrelated(&mut self, lhs: InferTyVar, rhs: InferTyVar) {
+        let lhs_ty = self.lookup(lhs).ok();
+        let rhs_ty = self.lookup(rhs).ok();
 
-    fn union(&mut self, lhs: InferTyVar, rhs: InferTyVar) {
-        let lhs_ty = self.lookup(lhs);
-        let rhs_ty = self.lookup(rhs);
-
-        debug_assert!(lhs_ty.is_none() || rhs_ty.is_none());
+        debug_assert!(lhs_ty.is_none() && rhs_ty.is_none());
 
         self.disjoint.join(lhs.0 as usize, rhs.0 as usize);
+    }
+}
 
-        let new_root = self.disjoint.root_of(lhs.0 as usize);
-        self.disjoint[new_root] = lhs_ty.or(rhs_ty);
+// === InfTySubstitutor === //
+
+#[derive(Debug, Copy, Clone)]
+pub struct InfTySubstitutor<'a, 'tcx> {
+    infer_types: &'a TyInferTracker,
+    tcx: &'tcx TyCtxt,
+    mode: UnboundVarHandlingMode,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum UnboundVarHandlingMode {
+    Error(ErrorGuaranteed),
+    NormalizeToRoot,
+    Panic,
+}
+
+impl<'a, 'tcx> InfTySubstitutor<'a, 'tcx> {
+    pub fn new(icx: &'a InferCx<'tcx>, mode: UnboundVarHandlingMode) -> Self {
+        Self {
+            infer_types: &icx.types,
+            tcx: icx.tcx,
+            mode,
+        }
+    }
+}
+
+impl<'tcx> TyFolder<'tcx> for InfTySubstitutor<'_, 'tcx> {
+    type Error = Infallible;
+
+    fn tcx(&self) -> &'tcx TyCtxt {
+        self.tcx
+    }
+
+    fn try_fold_ty_infer_use(&mut self, var: InferTyVar) -> Result<Ty, Self::Error> {
+        match self.infer_types.lookup(var) {
+            Ok(v) => self.try_fold_ty(v),
+            Err(normalized) => Ok(match self.mode {
+                UnboundVarHandlingMode::Error(error) => self.tcx().intern_ty(TyKind::Error(error)),
+                UnboundVarHandlingMode::NormalizeToRoot => {
+                    self.tcx().intern_ty(TyKind::InferVar(normalized))
+                }
+                UnboundVarHandlingMode::Panic => {
+                    unreachable!("unexpected ambiguous inference variable")
+                }
+            }),
+        }
     }
 }
 
@@ -798,31 +927,6 @@ impl ReInferTracker {
                     dfs_stack.push(outlived_by);
                 }
             }
-        }
-    }
-}
-
-// === Visitor === //
-
-#[derive(Debug, Copy, Clone)]
-pub struct InfVarSubstitutor<'a, 'tcx> {
-    pub icx: &'a InferCx<'tcx>,
-    pub had_ambiguities: Option<ErrorGuaranteed>,
-}
-
-impl<'tcx> TyFolder<'tcx> for InfVarSubstitutor<'_, 'tcx> {
-    type Error = Infallible;
-
-    fn tcx(&self) -> &'tcx TyCtxt {
-        self.icx.tcx()
-    }
-
-    fn try_fold_ty_infer_use(&mut self, var: InferTyVar) -> Result<Ty, Self::Error> {
-        match self.icx.types.lookup(var) {
-            Some(v) => Ok(v),
-            None => Ok(self
-                .tcx()
-                .intern_ty(TyKind::Error(self.had_ambiguities.unwrap()))),
         }
     }
 }
