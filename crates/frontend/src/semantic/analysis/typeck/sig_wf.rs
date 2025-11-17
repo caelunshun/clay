@@ -14,8 +14,8 @@ use crate::{
         syntax::{
             AnyGeneric, Crate, ImplDef, ItemKind, Re, RegionGeneric, SpannedAdtInstance,
             SpannedTraitClauseList, SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec,
-            SpannedTy, SpannedTyOrRe, SpannedTyOrReView, TraitClause, TraitDef, TraitParam,
-            TraitSpec, Ty, TyKind, TyOrRe, TypeGeneric,
+            SpannedTy, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView, TraitClause, TraitDef,
+            TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TypeGeneric,
         },
     },
     symbol,
@@ -248,20 +248,22 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
     fn visit_spanned_trait_spec(&mut self, spec: SpannedTraitSpec) -> ControlFlow<Self::Break> {
         let tcx = self.tcx();
 
-        self.check_trait_helper(
-            spec.value.def,
-            &spec
-                .view(tcx)
-                .params
-                .iter(tcx)
-                .map(|param| match param.view(tcx) {
-                    SpannedTraitParamView::Equals(v) => v,
-                    SpannedTraitParamView::Unspecified(_) => SpannedTyOrRe::new_unspanned(
-                        TyOrRe::Ty(tcx.intern_ty(TyKind::ExplicitInfer)),
-                    ),
-                })
-                .collect::<Vec<_>>(),
-        );
+        let params = spec
+            .view(tcx)
+            .params
+            .iter(tcx)
+            .map(|param| match param.view(tcx) {
+                SpannedTraitParamView::Equals(v) => v,
+                SpannedTraitParamView::Unspecified(_) => {
+                    SpannedTyOrRe::new_unspanned(TyOrRe::Ty(tcx.intern_ty(TyKind::ExplicitInfer)))
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let params =
+            SpannedTyOrReList::alloc_list(spec.own_span().unwrap_or(Span::DUMMY), &params, tcx);
+
+        self.check_trait_helper(spec.value.def, params);
 
         self.walk_trait_spec(spec)?;
 
@@ -274,11 +276,7 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
     ) -> ControlFlow<Self::Break> {
         let tcx = self.tcx();
 
-        self.check_trait_helper(
-            instance.value.def,
-            &instance.view(tcx).params.iter(tcx).collect::<Vec<_>>(),
-        );
-
+        self.check_trait_helper(instance.value.def, instance.view(tcx).params);
         self.walk_trait_instance(instance)?;
 
         ControlFlow::Continue(())
@@ -295,7 +293,7 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
 }
 
 impl SignatureWfVisitor<'_> {
-    fn check_trait_helper(&mut self, def: Obj<TraitDef>, params: &[SpannedTyOrRe]) {
+    fn check_trait_helper(&mut self, def: Obj<TraitDef>, params: SpannedTyOrReList) {
         let tcx = self.tcx();
         let s = self.session();
 
@@ -307,8 +305,8 @@ impl SignatureWfVisitor<'_> {
         };
 
         let params = params
-            .iter()
-            .map(|&v| input_subst.fold_spanned_ty_or_re(v))
+            .iter(tcx)
+            .map(|v| input_subst.fold_spanned_ty_or_re(v))
             .collect::<Vec<_>>();
 
         let params = &params;

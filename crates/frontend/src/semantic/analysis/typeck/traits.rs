@@ -470,7 +470,7 @@ impl InferCx<'_> {
         let s = self.session();
 
         // See whether the type itself can provide the implementation.
-        match self.try_peel_ty_var(lhs).view(tcx) {
+        match self.peel_ty_var(lhs).view(tcx) {
             SpannedTyView::Trait(clauses) => {
                 todo!()
             }

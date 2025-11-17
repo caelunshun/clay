@@ -1,8 +1,11 @@
 use crate::{
-    base::{Session, arena::Obj},
+    base::{Session, analysis::SpannedViewEncode, arena::Obj},
     semantic::{
         analysis::{InferCx, TyCtxt},
-        syntax::{Block, Expr, ExprKind, FuncLocal, RelationMode, SpannedTy, TyKind},
+        syntax::{
+            Block, Expr, ExprKind, FuncLocal, SimpleTyKind, SpannedTy, SpannedTyList,
+            SpannedTyView, TyKind,
+        },
     },
     utils::hash::FxHashMap,
 };
@@ -22,23 +25,18 @@ impl<'tcx> FnCtxt<'tcx> {
         self.icx.tcx()
     }
 
-    fn check_block(&mut self, block: Obj<Block>) {
+    fn check_block(&mut self, block: Obj<Block>) -> SpannedTy {
         let s = self.icx.session();
 
-        for stmt in &block.r(s).stmts {}
+        todo!()
     }
 
-    fn check_expr_demand(&mut self, expr: Obj<Expr>, demand: SpannedTy) {
-        let actual = self.check_expr(expr);
-
-        let Err(err) = self
-            .icx
-            .relate_ty_and_ty(actual, demand, RelationMode::LhsOntoRhs)
-        else {
-            return;
-        };
-
-        // TODO
+    fn check_exprs_with_equate(
+        &mut self,
+        expr: impl IntoIterator<Item = Obj<Expr>>,
+        demand: Option<SpannedTy>,
+    ) -> SpannedTy {
+        todo!()
     }
 
     fn check_expr(&mut self, expr: Obj<Expr>) -> SpannedTy {
@@ -46,14 +44,27 @@ impl<'tcx> FnCtxt<'tcx> {
         let tcx = self.tcx();
 
         let pre_coerce_expr_ty = match &expr.r(s).kind {
-            ExprKind::Array(elems) => todo!(),
-            ExprKind::Call(obj, obj1) => todo!(),
+            ExprKind::Array(elems) => {
+                let elem_ty = self.check_exprs_with_equate(elems.r(s).iter().copied(), None);
+
+                todo!();
+            }
+            ExprKind::Call(callee, args) => todo!(),
             ExprKind::Method {
                 callee,
                 generics,
                 args,
             } => todo!(),
-            ExprKind::Tuple(elems) => todo!(),
+            ExprKind::Tuple(elems) => {
+                let elems = elems
+                    .r(s)
+                    .iter()
+                    .map(|elem| self.check_expr(*elem))
+                    .collect::<Vec<_>>();
+
+                SpannedTyView::Tuple(SpannedTyList::alloc_list(expr.r(s).span, &elems, tcx))
+                    .encode(expr.r(s).span, tcx)
+            }
             ExprKind::Binary(ast_bin_op_kind, lhs, rhs) => todo!(),
             ExprKind::Unary(ast_un_op_kind, obj) => todo!(),
             ExprKind::Literal(ast_lit) => todo!(),
@@ -69,18 +80,40 @@ impl<'tcx> FnCtxt<'tcx> {
                 cond,
                 truthy,
                 falsy,
-            } => todo!(),
-            ExprKind::While(obj, obj1) => todo!(),
+            } => {
+                self.check_exprs_with_equate(
+                    [*cond],
+                    Some(SpannedTy::new_unspanned(
+                        tcx.intern_ty(TyKind::Simple(SimpleTyKind::Bool)),
+                    )),
+                );
+
+                self.check_exprs_with_equate([*truthy, *falsy], None)
+            }
+            ExprKind::While(cond, block) => {
+                self.check_exprs_with_equate(
+                    [*cond],
+                    Some(SpannedTy::new_unspanned(
+                        tcx.intern_ty(TyKind::Simple(SimpleTyKind::Bool)),
+                    )),
+                );
+
+                self.check_block(*block);
+
+                SpannedTy::new_unspanned(tcx.intern_ty(TyKind::Tuple(tcx.intern_ty_list(&[]))))
+            }
             ExprKind::ForLoop { pat, iter, body } => todo!(),
-            ExprKind::Loop(obj) => todo!(),
-            ExprKind::Block(obj) => todo!(),
-            ExprKind::Assign(obj, obj1) => todo!(),
-            ExprKind::AssignOp(ast_bin_op_kind, obj, obj1) => todo!(),
+            ExprKind::Loop(block) => todo!(),
+            ExprKind::Block(block) => self.check_block(*block),
+            ExprKind::Assign(lhs, rhs) => todo!(),
+            ExprKind::AssignOp(op, lhs, rhs) => todo!(),
             ExprKind::Field(obj, ident) => todo!(),
             ExprKind::Index(obj, obj1) => todo!(),
             ExprKind::Range(obj, obj1, ast_range_limits) => todo!(),
             ExprKind::Local(local) => self.local_types[local],
-            ExprKind::AddrOf(mutability, pointee) => self.check_expr(expr),
+            ExprKind::AddrOf(mutability, pointee) => SpannedTy::new_unspanned(tcx.intern_ty(
+                TyKind::Reference(self.icx.fresh_re(), self.check_expr(*pointee).value),
+            )),
             ExprKind::Break { label, expr } => todo!(),
             ExprKind::Continue { label } => todo!(),
             ExprKind::Return(obj) => todo!(),

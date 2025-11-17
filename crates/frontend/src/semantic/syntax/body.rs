@@ -112,7 +112,7 @@ pub enum ExprKind {
     Cast(Obj<Expr>, SpannedTy),
     If {
         cond: Obj<Expr>,
-        truthy: Obj<Block>,
+        truthy: Obj<Expr>,
         falsy: Obj<Expr>,
     },
     While(Obj<Expr>, Obj<Block>),

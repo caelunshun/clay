@@ -114,8 +114,6 @@ impl SpannedViewEncode<TyCtxt> for SpannedTyView {
     type Unspanned = Ty;
 
     fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
-        let s = &tcx.session;
-
         match self {
             SpannedTyView::This => Spanned::new_raw(
                 tcx.intern_ty(TyKind::This),
@@ -199,8 +197,6 @@ impl SpannedViewDecode<TyCtxt> for TraitClause {
     type View = SpannedTraitClauseView;
 
     fn decode(value: &Self, span_info: SpannedInfo, tcx: &TyCtxt) -> Self::View {
-        let s = &tcx.session;
-
         match *value {
             TraitClause::Outlives(re) => {
                 SpannedTraitClauseView::Outlives(Spanned::new_raw(re, span_info.unwrap(tcx)))
@@ -216,8 +212,6 @@ impl SpannedViewEncode<TyCtxt> for SpannedTraitClauseView {
     type Unspanned = TraitClause;
 
     fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
-        let s = &tcx.session;
-
         match self {
             SpannedTraitClauseView::Outlives(re) => Spanned::new_raw(
                 TraitClause::Outlives(re.value),
@@ -245,8 +239,6 @@ impl SpannedViewDecode<TyCtxt> for TraitParam {
     type View = SpannedTraitParamView;
 
     fn decode(value: &Self, span_info: SpannedInfo, tcx: &TyCtxt) -> Self::View {
-        let s = &tcx.session;
-
         match *value {
             TraitParam::Equals(ty_or_re) => {
                 SpannedTraitParamView::Equals(Spanned::new_raw(ty_or_re, span_info.unwrap(tcx)))
@@ -262,8 +254,6 @@ impl SpannedViewEncode<TyCtxt> for SpannedTraitParamView {
     type Unspanned = TraitParam;
 
     fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
-        let s = &tcx.session;
-
         match self {
             SpannedTraitParamView::Equals(ty_or_re) => Spanned::new_raw(
                 TraitParam::Equals(ty_or_re.value),
@@ -291,8 +281,6 @@ impl SpannedViewDecode<TyCtxt> for AdtInstance {
     type View = SpannedAdtInstanceView;
 
     fn decode(value: &Self, span_info: SpannedInfo, tcx: &TyCtxt) -> Self::View {
-        let s = &tcx.session;
-
         SpannedAdtInstanceView {
             def: value.def,
             params: Spanned::new_raw(value.params, span_info.unwrap(tcx)),
@@ -304,8 +292,6 @@ impl SpannedViewEncode<TyCtxt> for SpannedAdtInstanceView {
     type Unspanned = AdtInstance;
 
     fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
-        let s = &tcx.session;
-
         Spanned::new_raw(
             AdtInstance {
                 def: self.def,
@@ -330,8 +316,6 @@ impl SpannedViewDecode<TyCtxt> for TraitSpec {
     type View = SpannedTraitSpecView;
 
     fn decode(value: &Self, span_info: SpannedInfo, tcx: &TyCtxt) -> Self::View {
-        let s = &tcx.session;
-
         SpannedTraitSpecView {
             def: value.def,
             params: Spanned::new_raw(value.params, span_info.unwrap(tcx)),
@@ -343,8 +327,6 @@ impl SpannedViewEncode<TyCtxt> for SpannedTraitSpecView {
     type Unspanned = TraitSpec;
 
     fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
-        let s = &tcx.session;
-
         Spanned::new_raw(
             TraitSpec {
                 def: self.def,
@@ -369,8 +351,6 @@ impl SpannedViewDecode<TyCtxt> for TraitInstance {
     type View = SpannedTraitInstanceView;
 
     fn decode(value: &Self, span_info: SpannedInfo, tcx: &TyCtxt) -> Self::View {
-        let s = &tcx.session;
-
         SpannedTraitInstanceView {
             def: value.def,
             params: Spanned::new_raw(value.params, span_info.unwrap(tcx)),
@@ -382,8 +362,6 @@ impl SpannedViewEncode<TyCtxt> for SpannedTraitInstanceView {
     type Unspanned = TraitInstance;
 
     fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
-        let s = &tcx.session;
-
         Spanned::new_raw(
             TraitInstance {
                 def: self.def,

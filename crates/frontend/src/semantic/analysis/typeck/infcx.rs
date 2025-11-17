@@ -1,7 +1,7 @@
 use crate::{
-    base::{Session, arena::Obj},
+    base::{ErrorGuaranteed, Session, arena::Obj},
     semantic::{
-        analysis::TyCtxt,
+        analysis::{TyCtxt, TyFolder},
         syntax::{
             InferReVar, InferTyVar, Re, RegionGeneric, RelationMode, SpannedRe,
             SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParam,
@@ -14,6 +14,7 @@ use bit_set::BitSet;
 use disjoint::DisjointSetVec;
 use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
+use std::convert::Infallible;
 
 // === Errors === //
 
@@ -154,7 +155,7 @@ impl<'tcx> InferCx<'tcx> {
         self.tcx().intern_ty(TyKind::InferVar(self.types.fresh()))
     }
 
-    pub fn try_peel_ty_var(&self, ty: SpannedTy) -> SpannedTy {
+    pub fn peel_ty_var(&self, ty: SpannedTy) -> SpannedTy {
         let tcx = self.tcx();
 
         match ty.view(tcx) {
@@ -335,6 +336,7 @@ impl<'tcx> InferCx<'tcx> {
                     self.types.union(lhs_var, rhs_var);
                 }
             }
+            // TODO: Occurs check
             (SpannedTyView::InferVar(lhs_var), _) => {
                 if let Some(known_lhs) = self.types.lookup(lhs_var) {
                     self.relate_ty_and_ty_inner(
@@ -551,10 +553,6 @@ impl<'tcx> InferCx<'tcx> {
     }
 
     pub fn wf_ty(&mut self, ty: SpannedTy) {
-        todo!()
-    }
-
-    pub fn subst_infer(&mut self, ty: Ty) -> Ty {
         todo!()
     }
 }
@@ -800,6 +798,31 @@ impl ReInferTracker {
                     dfs_stack.push(outlived_by);
                 }
             }
+        }
+    }
+}
+
+// === Visitor === //
+
+#[derive(Debug, Copy, Clone)]
+pub struct InfVarSubstitutor<'a, 'tcx> {
+    pub icx: &'a InferCx<'tcx>,
+    pub had_ambiguities: Option<ErrorGuaranteed>,
+}
+
+impl<'tcx> TyFolder<'tcx> for InfVarSubstitutor<'_, 'tcx> {
+    type Error = Infallible;
+
+    fn tcx(&self) -> &'tcx TyCtxt {
+        self.icx.tcx()
+    }
+
+    fn try_fold_ty_infer_use(&mut self, var: InferTyVar) -> Result<Ty, Self::Error> {
+        match self.icx.types.lookup(var) {
+            Some(v) => Ok(v),
+            None => Ok(self
+                .tcx()
+                .intern_ty(TyKind::Error(self.had_ambiguities.unwrap()))),
         }
     }
 }
