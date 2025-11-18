@@ -8,7 +8,7 @@ use crate::{
     semantic::{
         analysis::TyCtxt,
         syntax::{
-            AdtDef, AdtInstance, FuncDef, InferTyVar, Re, SimpleTyKind, TraitClause,
+            AdtDef, AdtInstance, FuncDef, InferTyVar, Mutability, Re, SimpleTyKind, TraitClause,
             TraitClauseList, TraitDef, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty,
             TyKind, TyList, TyOrRe, TyOrReList, TypeGeneric,
         },
@@ -66,7 +66,7 @@ pub type SpannedTy = Spanned<Ty>;
 pub enum SpannedTyView {
     This,
     Simple(SimpleTyKind),
-    Reference(SpannedRe, SpannedTy),
+    Reference(SpannedRe, Mutability, SpannedTy),
     Adt(SpannedAdtInstance),
     Trait(SpannedTraitClauseList),
     Tuple(SpannedTyList),
@@ -86,11 +86,12 @@ impl SpannedViewDecode<TyCtxt> for Ty {
         match *value.r(s) {
             TyKind::This => SpannedTyView::This,
             TyKind::Simple(kind) => SpannedTyView::Simple(kind),
-            TyKind::Reference(re, pointee) => {
+            TyKind::Reference(re, muta, pointee) => {
                 let [re_span, pointee_span] = span_info.child_spans(tcx);
 
                 SpannedTyView::Reference(
                     Spanned::new_raw(re, re_span),
+                    muta,
                     Spanned::new_raw(pointee, pointee_span),
                 )
             }
@@ -123,8 +124,8 @@ impl SpannedViewEncode<TyCtxt> for SpannedTyView {
                 tcx.intern_ty(TyKind::Simple(kind)),
                 SpannedInfo::new_terminal(own_span, tcx),
             ),
-            SpannedTyView::Reference(re, pointee) => Spanned::new_raw(
-                tcx.intern_ty(TyKind::Reference(re.value, pointee.value)),
+            SpannedTyView::Reference(re, muta, pointee) => Spanned::new_raw(
+                tcx.intern_ty(TyKind::Reference(re.value, muta, pointee.value)),
                 SpannedInfo::new_list(own_span, &[re.span_info, pointee.span_info], tcx),
             ),
             SpannedTyView::Adt(adt) => Spanned::new_raw(

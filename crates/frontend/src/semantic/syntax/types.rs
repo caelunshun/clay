@@ -354,7 +354,7 @@ pub enum TyKind {
     Simple(SimpleTyKind),
 
     /// A reference type.
-    Reference(Re, Ty),
+    Reference(Re, Mutability, Ty),
 
     /// An instantiation of an ADT.
     Adt(AdtInstance),
@@ -437,6 +437,26 @@ pub enum RelationMode {
     LhsOntoRhs,
     RhsOntoLhs,
     Equate,
+}
+
+impl RelationMode {
+    #[must_use]
+    pub fn with_variance(self, variance: ReVariance) -> RelationMode {
+        match variance {
+            ReVariance::Invariant => RelationMode::Equate,
+            ReVariance::Covariant => self,
+            ReVariance::Contravariant => self.invert(),
+        }
+    }
+
+    #[must_use]
+    pub fn invert(self) -> RelationMode {
+        match self {
+            RelationMode::LhsOntoRhs => RelationMode::RhsOntoLhs,
+            RelationMode::RhsOntoLhs => RelationMode::LhsOntoRhs,
+            RelationMode::Equate => RelationMode::Equate,
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

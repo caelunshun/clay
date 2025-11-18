@@ -5,6 +5,7 @@ use crate::{
     },
     kw,
     parse::token::{Ident, Lifetime, TokenCharLit, TokenNumLit, TokenStrLit, TokenStream},
+    semantic::syntax::Mutability,
 };
 use std::rc::Rc;
 
@@ -240,7 +241,7 @@ pub struct AstTy {
 pub enum AstTyKind {
     This,
     Name(AstSimplePath, Option<AstGenericParamList>),
-    Reference(Option<Lifetime>, Box<AstTy>),
+    Reference(Option<Lifetime>, AstMutability, Box<AstTy>),
     Trait(AstTraitClauseList),
     Tuple(Vec<AstTy>),
     Option(Box<AstTy>),
@@ -438,6 +439,15 @@ pub enum AstMutability {
     Mut(Span),
     Ref(Span),
     Implicit,
+}
+
+impl AstMutability {
+    pub fn as_muta(self) -> Mutability {
+        match self {
+            AstMutability::Mut(_) => Mutability::Mut,
+            AstMutability::Ref(_) | AstMutability::Implicit => Mutability::Not,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

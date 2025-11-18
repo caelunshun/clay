@@ -5,8 +5,8 @@ use crate::{
             TyCtxt, TyFolder, TyFolderInfallible, TyVisitor, TyVisitorUnspanned, TyVisitorWalk,
         },
         syntax::{
-            InferReVar, InferTyVar, Re, RegionGeneric, RelationMode, SpannedRe,
-            SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParam,
+            InferReVar, InferTyVar, Mutability, Re, ReVariance, RegionGeneric, RelationMode,
+            SpannedRe, SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParam,
             SpannedTraitParamView, SpannedTy, SpannedTyOrReView, SpannedTyView, Ty, TyKind,
         },
     },
@@ -294,14 +294,24 @@ impl<'tcx> InferCx<'tcx> {
                 unreachable!()
             }
             (
-                SpannedTyView::Reference(lhs_re, lhs_pointee),
-                SpannedTyView::Reference(rhs_re, rhs_pointee),
-            ) => {
+                SpannedTyView::Reference(lhs_re, lhs_muta, lhs_pointee),
+                SpannedTyView::Reference(rhs_re, rhs_muta, rhs_pointee),
+            ) if lhs_muta == rhs_muta => {
                 if let Err(err) = self.relate_re_and_re(lhs_re, rhs_re, mode) {
                     culprits.push(TyAndTyRelateCulprit::Regions(err));
                 }
 
-                self.relate_ty_and_ty_inner(lhs_pointee, rhs_pointee, culprits, mode);
+                let variance = match lhs_muta {
+                    Mutability::Mut => ReVariance::Invariant,
+                    Mutability::Not => ReVariance::Covariant,
+                };
+
+                self.relate_ty_and_ty_inner(
+                    lhs_pointee,
+                    rhs_pointee,
+                    culprits,
+                    mode.with_variance(variance),
+                );
             }
             (SpannedTyView::Adt(lhs), SpannedTyView::Adt(rhs))
                 if lhs.value.def == rhs.value.def =>
@@ -317,6 +327,7 @@ impl<'tcx> InferCx<'tcx> {
                             }
                         }
                         (SpannedTyOrReView::Ty(lhs), SpannedTyOrReView::Ty(rhs)) => {
+                            // TODO: variance
                             self.relate_ty_and_ty_inner(lhs, rhs, culprits, mode);
                         }
                         _ => unreachable!(),
@@ -568,7 +579,7 @@ impl<'tcx> InferCx<'tcx> {
             SpannedTyView::FnDef(_) | SpannedTyView::Simple(_) | SpannedTyView::Error(_) => {
                 // (trivial)
             }
-            SpannedTyView::Reference(lhs, _pointee) => {
+            SpannedTyView::Reference(lhs, _muta, _pointee) => {
                 // No need to relate the pointee since WF checks already ensure that it outlives
                 // `lhs`.
                 if let Err(err) = self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs) {

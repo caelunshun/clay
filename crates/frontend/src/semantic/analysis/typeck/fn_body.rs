@@ -111,9 +111,13 @@ impl<'tcx> FnCtxt<'tcx> {
             ExprKind::Index(obj, obj1) => todo!(),
             ExprKind::Range(obj, obj1, ast_range_limits) => todo!(),
             ExprKind::Local(local) => self.local_types[local],
-            ExprKind::AddrOf(mutability, pointee) => SpannedTy::new_unspanned(tcx.intern_ty(
-                TyKind::Reference(self.icx.fresh_re(), self.check_expr(*pointee).value),
-            )),
+            ExprKind::AddrOf(mutability, pointee) => {
+                SpannedTy::new_unspanned(tcx.intern_ty(TyKind::Reference(
+                    self.icx.fresh_re(),
+                    *mutability,
+                    self.check_expr(*pointee).value,
+                )))
+            }
             ExprKind::Break { label, expr } => todo!(),
             ExprKind::Continue { label } => todo!(),
             ExprKind::Return(obj) => todo!(),

@@ -263,7 +263,7 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
             SpannedTyView::InferVar(var) => {
                 self.visit_spanned_ty_infer_use(ty.own_span(), var)?;
             }
-            SpannedTyView::Reference(re, pointee) => {
+            SpannedTyView::Reference(re, _muta, pointee) => {
                 self.visit_spanned_re(re)?;
                 self.visit_spanned_ty(pointee)?;
             }
@@ -580,8 +580,9 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
             | TyKind::InferVar(..)
             | TyKind::Error(..) => Ok(ty),
             TyKind::This => self.try_fold_self_ty_use(),
-            TyKind::Reference(re, pointee) => Ok(tcx.intern_ty(TyKind::Reference(
+            TyKind::Reference(re, muta, pointee) => Ok(tcx.intern_ty(TyKind::Reference(
                 self.try_fold_re(re)?,
+                muta,
                 self.try_fold_ty(pointee)?,
             ))),
             TyKind::Adt(instance) => {

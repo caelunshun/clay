@@ -9,9 +9,10 @@ use crate::{
             AstAttribute, AstExprPath, AstExprPathSegment, AstFnArg, AstFnDef, AstFnItem,
             AstGenericParam, AstGenericParamKind, AstGenericParamList, AstImplLikeBody,
             AstImplLikeMember, AstImplLikeMemberKind, AstItem, AstItemBase, AstItemImpl,
-            AstItemModule, AstItemModuleContents, AstItemTrait, AstItemUse, AstNamedSpec, AstPat,
-            AstPatKind, AstSimplePath, AstTraitClause, AstTraitClauseList, AstTy, AstTyKind,
-            AstUsePath, AstUsePathKind, AstVisibility, AstVisibilityKind, Keyword, PunctSeq,
+            AstItemModule, AstItemModuleContents, AstItemTrait, AstItemUse, AstMutability,
+            AstNamedSpec, AstPat, AstPatKind, AstSimplePath, AstTraitClause, AstTraitClauseList,
+            AstTy, AstTyKind, AstUsePath, AstUsePathKind, AstVisibility, AstVisibilityKind,
+            Keyword, PunctSeq,
         },
         token::{
             GroupDelimiter, Ident, Lifetime, Punct, TokenCharLit, TokenCursor, TokenGroup,
@@ -471,6 +472,18 @@ fn parse_expr_path(p: P) -> Option<AstExprPath> {
     })
 }
 
+fn parse_mutability(p: P) -> AstMutability {
+    if let Some(kw) = match_kw(kw!("mut")).expect(p) {
+        return AstMutability::Mut(kw.span);
+    }
+
+    if let Some(kw) = match_kw(kw!("ref")).expect(p) {
+        return AstMutability::Ref(kw.span);
+    }
+
+    AstMutability::Implicit
+}
+
 // === Trait Clauses === //
 
 fn parse_trait_clause_list(p: P) -> AstTraitClauseList {
@@ -637,6 +650,7 @@ fn parse_ty_pratt_seed(p: P) -> AstTy {
         return build_ty(
             AstTyKind::Reference(
                 match_lifetime().expect(p),
+                parse_mutability(p),
                 Box::new(parse_ty_pratt(p, bps::PRE_TY_REF.right)),
             ),
             p,

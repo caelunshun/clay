@@ -413,11 +413,12 @@ impl IntraItemLowerCtxt<'_> {
 
                 todo!()
             }
-            AstTyKind::Reference(lifetime, pointee) => SpannedTyView::Reference(
+            AstTyKind::Reference(lifetime, muta, pointee) => SpannedTyView::Reference(
                 match lifetime {
-                    Some(ast) => self.lower_re(&ast),
+                    Some(ast) => self.lower_re(ast),
                     None => Re::ExplicitInfer.encode(ast.span.shrink_to_lo(), self.tcx),
                 },
+                muta.as_muta(),
                 self.lower_ty(pointee),
             )
             .encode(ast.span, self.tcx),
