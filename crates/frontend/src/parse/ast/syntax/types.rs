@@ -1,0 +1,129 @@
+use crate::{
+    base::{
+        ErrorGuaranteed,
+        syntax::{HasSpan, Span},
+    },
+    parse::{
+        ast::{AstMutability, AstSimplePath},
+        token::{Ident, Lifetime},
+    },
+};
+
+// === Clauses === //
+
+#[derive(Debug, Clone)]
+pub struct AstNamedSpec {
+    pub span: Span,
+    pub path: AstSimplePath,
+    pub params: Option<AstGenericParamList>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AstTraitClauseList {
+    pub span: Span,
+    pub clauses: Vec<Result<AstTraitClause, ErrorGuaranteed>>,
+}
+
+#[derive(Debug, Clone)]
+pub enum AstTraitClause {
+    Outlives(Lifetime),
+    Trait(AstNamedSpec),
+}
+
+#[derive(Debug, Clone)]
+pub struct AstGenericParamList {
+    pub span: Span,
+    pub list: Vec<AstGenericParam>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AstGenericParam {
+    pub span: Span,
+    pub kind: AstGenericParamKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum AstGenericParamKind {
+    /// A bare type (e.g. `u32`, `(u32, &'a i32)?`).
+    PositionalTy(AstTy),
+
+    /// A bare region (e.g. `'a`, `'_`)
+    PositionalRe(Lifetime),
+
+    /// A name with a clause list (e.g. `MyAssoc: Foo + Bar`, `T: 'gc`).
+    InheritTy(Ident, AstTraitClauseList),
+
+    /// A region with a clause list (e.g. `'a: 'b + 'c`).
+    InheritRe(Lifetime, AstTraitClauseList),
+
+    /// A name with an equality to a type (e.g. `MyAssoc = u32`).
+    TyEquals(Ident, AstTy),
+}
+
+#[derive(Debug, Clone)]
+pub enum AstGenericDef<'a> {
+    Ty(Ident, Option<&'a AstTraitClauseList>),
+    Re(Lifetime, Option<&'a AstTraitClauseList>),
+}
+
+impl AstGenericParamKind {
+    pub fn as_generic_def(&self) -> Option<AstGenericDef<'_>> {
+        match self {
+            AstGenericParamKind::PositionalTy(ty) => {
+                ty.as_ident().map(|ident| AstGenericDef::Ty(ident, None))
+            }
+            AstGenericParamKind::PositionalRe(re) => Some(AstGenericDef::Re(*re, None)),
+            AstGenericParamKind::InheritTy(ident, clauses) => {
+                Some(AstGenericDef::Ty(*ident, Some(clauses)))
+            }
+            AstGenericParamKind::InheritRe(re, clauses) => {
+                Some(AstGenericDef::Re(*re, Some(clauses)))
+            }
+            AstGenericParamKind::TyEquals(..) => None,
+        }
+    }
+}
+
+// === Types === //
+
+#[derive(Debug, Clone)]
+pub enum AstTyOrRe {
+    Re(Lifetime),
+    Ty(AstTy),
+}
+
+impl HasSpan for AstTyOrRe {
+    fn span(&self) -> Span {
+        match self {
+            AstTyOrRe::Re(v) => v.span,
+            AstTyOrRe::Ty(v) => v.span,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AstTy {
+    pub span: Span,
+    pub kind: AstTyKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum AstTyKind {
+    This,
+    Name(AstSimplePath, Option<AstGenericParamList>),
+    Reference(Option<Lifetime>, AstMutability, Box<AstTy>),
+    Trait(AstTraitClauseList),
+    Tuple(Vec<AstTy>),
+    Option(Box<AstTy>),
+    Infer,
+    Error(ErrorGuaranteed),
+}
+
+impl AstTy {
+    pub fn as_ident(&self) -> Option<Ident> {
+        match &self.kind {
+            AstTyKind::Name(path, list) if list.is_none() => path.as_ident(),
+            _ => None,
+        }
+    }
+}

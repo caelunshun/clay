@@ -87,6 +87,7 @@ define_keywords! {
     Mut = "mut",
     Priv = "priv",
     Pub = "pub",
+    Ref = "ref",
     Return = "return",
     SelfLower = "self",
     SelfUpper = "Self",
