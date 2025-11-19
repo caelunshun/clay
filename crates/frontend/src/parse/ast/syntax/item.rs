@@ -18,6 +18,7 @@ pub enum AstItem {
     Trait(AstItemTrait),
     Impl(AstItemImpl),
     Func(AstFnItem),
+    Adt(AstAdtItem),
     Error(AstItemBase, ErrorGuaranteed),
 }
 
@@ -27,8 +28,9 @@ impl AstItem {
         | AstItem::Use(AstItemUse { base, .. })
         | AstItem::Trait(AstItemTrait { base, .. })
         | AstItem::Impl(AstItemImpl { base, .. })
-        | AstItem::Error(base, ..)
-        | AstItem::Func(AstFnItem { base, .. })) = self;
+        | AstItem::Func(AstFnItem { base, .. })
+        | AstItem::Adt(AstAdtItem { base, .. })
+        | AstItem::Error(base, ..)) = self;
 
         base
     }
@@ -84,6 +86,44 @@ pub struct AstFnItem {
     pub def: AstFnDef,
 }
 
+#[derive(Debug, Clone)]
+pub struct AstAdtItem {
+    pub base: AstItemBase,
+    pub name: Ident,
+    pub kind: AstAdtKind,
+    pub generics: Option<AstGenericParamList>,
+    pub fields: Vec<AstAdtField>,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum AstAdtKind {
+    Enum,
+    Struct,
+}
+
+#[derive(Debug, Clone)]
+pub struct AstAdtField {
+    pub span: Span,
+    pub vis: AstVisibility,
+    pub name: Ident,
+    pub kind: AstAdtFieldKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum AstAdtFieldKind {
+    Unit,
+    ColonTy(AstTy),
+    Tuple(Vec<AstTy>),
+    Braced(Vec<AstAdtFieldBracedField>),
+}
+
+#[derive(Debug, Clone)]
+pub struct AstAdtFieldBracedField {
+    pub span: Span,
+    pub name: Ident,
+    pub ty: AstTy,
+}
+
 // === Impl-like Bodies === //
 
 #[derive(Debug, Clone)]
@@ -103,5 +143,6 @@ pub struct AstImplLikeMember {
 pub enum AstImplLikeMemberKind {
     TypeEquals(Ident, AstTy),
     TypeInherits(Ident, AstTraitClauseList),
+    Func(AstFnDef),
     Error(ErrorGuaranteed),
 }

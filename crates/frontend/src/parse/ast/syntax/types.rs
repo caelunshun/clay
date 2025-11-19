@@ -126,4 +126,14 @@ impl AstTy {
             _ => None,
         }
     }
+
+    pub fn is_omitted(&self) -> bool {
+        matches!(self.kind, AstTyKind::Error(_))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum AstReturnTy {
+    Omitted,
+    Present(AstTy),
 }

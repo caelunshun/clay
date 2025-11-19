@@ -1,7 +1,7 @@
 use crate::{
     base::{ErrorGuaranteed, syntax::Span},
     parse::{
-        ast::{AstExprPath, AstGenericParamList, AstItem, AstMutability, AstTy},
+        ast::{AstExprPath, AstGenericParamList, AstItem, AstMutability, AstReturnTy, AstTy},
         token::{Ident, Lifetime, TokenCharLit, TokenNumLit, TokenStrLit},
     },
 };
@@ -14,7 +14,7 @@ pub struct AstFnDef {
     pub name: Ident,
     pub generics: Option<AstGenericParamList>,
     pub args: Vec<AstFnArg>,
-    pub ret_ty: Option<Box<AstTy>>,
+    pub ret_ty: AstReturnTy,
     pub body: Option<AstBlock>,
 }
 

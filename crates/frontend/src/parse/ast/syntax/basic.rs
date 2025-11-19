@@ -96,3 +96,9 @@ pub enum AstVisibilityKind {
     Pub,
     PubIn(AstSimplePath),
 }
+
+impl AstVisibilityKind {
+    pub fn is_omitted(&self) -> bool {
+        matches!(self, Self::Implicit)
+    }
+}

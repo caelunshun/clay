@@ -82,6 +82,7 @@ impl TyCtxt {
                 | AstItem::Use(_)
                 | AstItem::Impl(_)
                 | AstItem::Func(_)
+                | AstItem::Adt(_)
                 | AstItem::Error(_, _) => {
                     unreachable!()
                 }
@@ -166,7 +167,7 @@ impl<'ast> UseLowerCtxt<'ast> {
                     self.item_asts.push(item_enum);
                 }
                 AstItem::Impl(item) => {
-                    if !matches!(item.base.vis.kind, AstVisibilityKind::Implicit) {
+                    if !item.base.vis.kind.is_omitted() {
                         Diag::span_err(
                             item.base.vis.span,
                             "`impl` blocks cannot have visibilities",
@@ -177,6 +178,9 @@ impl<'ast> UseLowerCtxt<'ast> {
                     self.impls.push((parent_id, item));
                 }
                 AstItem::Func(_) => {
+                    todo!();
+                }
+                AstItem::Adt(_) => {
                     todo!();
                 }
                 AstItem::Error(_, _) => {
@@ -355,6 +359,9 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                 AstImplLikeMemberKind::TypeEquals(..) => {
                     Diag::span_err(member.span, "default associated types are not supported")
                         .emit();
+                }
+                AstImplLikeMemberKind::Func(..) => {
+                    todo!();
                 }
                 AstImplLikeMemberKind::Error(_) => {
                     // (ignored)

@@ -8,7 +8,7 @@ use crate::{
         ast::{
             AstFnArg, AstFnDef, AstPat, AstPatKind,
             entry::P,
-            types::parse_ty,
+            types::{parse_generic_param_list, parse_return_ty, parse_ty},
             utils::{match_group, match_ident, match_kw, match_punct, parse_comma_group},
         },
         token::GroupDelimiter,
@@ -31,6 +31,8 @@ pub fn parse_func(p: P) -> Result<Option<AstFnDef>, ErrorGuaranteed> {
         }));
     };
 
+    let generics = parse_generic_param_list(p);
+
     let Some(params) = match_group(GroupDelimiter::Paren).expect(p) else {
         return Err(p.stuck_recover_with(|_| {
             // TODO: Recover more intelligently
@@ -39,7 +41,18 @@ pub fn parse_func(p: P) -> Result<Option<AstFnDef>, ErrorGuaranteed> {
 
     let args = parse_comma_group(&mut p.enter(&params), parse_func_arg).elems;
 
-    todo!()
+    let ret_ty = parse_return_ty(p);
+
+    // TODO: Body
+
+    Ok(Some(AstFnDef {
+        span: start.to(p.prev_span()),
+        name,
+        generics,
+        args,
+        ret_ty,
+        body: None,
+    }))
 }
 
 pub fn parse_func_arg(p: P) -> AstFnArg {

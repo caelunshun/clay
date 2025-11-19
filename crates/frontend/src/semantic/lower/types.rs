@@ -341,6 +341,9 @@ impl IntraItemLowerCtxt<'_> {
                 AstImplLikeMemberKind::TypeInherits(..) => {
                     Diag::span_err(member.span, "associated type in `impl` without body").emit();
                 }
+                AstImplLikeMemberKind::Func(..) => {
+                    todo!();
+                }
                 AstImplLikeMemberKind::Error(_) => {
                     // (ignored)
                 }

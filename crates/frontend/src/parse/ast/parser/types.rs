@@ -6,19 +6,19 @@ use crate::{
     kw,
     parse::{
         ast::{
-            AstGenericParam, AstGenericParamKind, AstGenericParamList, AstNamedSpec,
+            AstGenericParam, AstGenericParamKind, AstGenericParamList, AstNamedSpec, AstReturnTy,
             AstTraitClause, AstTraitClauseList, AstTy, AstTyKind,
             basic::{parse_mutability, parse_simple_path},
             bp,
             entry::P,
             utils::{
-                match_group, match_kw, match_lifetime, match_punct, parse_comma_group,
-                parse_delimited_until_terminator,
+                match_group, match_kw, match_lifetime, match_punct, match_punct_seq,
+                parse_comma_group, parse_delimited_until_terminator,
             },
         },
         token::GroupDelimiter,
     },
-    punct,
+    punct, puncts,
 };
 
 // === Trait Clauses === //
@@ -238,4 +238,12 @@ pub fn parse_ty_pratt_chain(p: P, min_bp: Bp, mut seed: AstTy) -> AstTy {
     }
 
     seed
+}
+
+pub fn parse_return_ty(p: P) -> AstReturnTy {
+    if match_punct_seq(puncts!("->")).expect(p).is_none() {
+        return AstReturnTy::Omitted;
+    }
+
+    AstReturnTy::Present(parse_ty(p))
 }
