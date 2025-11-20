@@ -139,8 +139,7 @@ fn parse_group(p: P, group_start: Span, delimiter: GroupDelimiter) -> TokenGroup
                     continue;
                 }
 
-                // Recovery strategy: ignore;
-                p.stuck_recover_with(|_| {});
+                p.stuck();
                 break;
             }
 
@@ -222,11 +221,7 @@ fn parse_group(p: P, group_start: Span, delimiter: GroupDelimiter) -> TokenGroup
         }
 
         // We're stuck :(
-        let err = p.stuck();
-        let c = p.recover(err);
-
-        c.eat();
-
+        p.stuck();
         builder.push_space();
     }
 
@@ -444,8 +439,7 @@ fn parse_char_lit_or_lifetime(p: P) -> Option<TokenTree> {
                 char_count += 1;
                 continue;
             } else {
-                // Recovery strategy: none
-                p.stuck_recover_with(|_| {});
+                p.stuck();
                 return None;
             }
         }

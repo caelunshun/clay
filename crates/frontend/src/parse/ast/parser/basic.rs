@@ -37,32 +37,24 @@ pub fn parse_attribute(p: P) -> Option<AstAttribute> {
         let is_inner = match_punct(punct!('!')).expect(p).is_some();
 
         let Some(bracket) = match_group(GroupDelimiter::Bracket).expect(p) else {
-            p.stuck_recover_with(|_| {
-                // TODO: Recover more intelligently
-            });
+            p.stuck();
             return None;
         };
 
         let mut p2 = p.enter(&bracket);
 
         let Some(path) = parse_simple_path(&mut p2) else {
-            p2.stuck_recover_with(|_| {
-                // TODO: Recover more intelligently
-            });
+            p2.stuck();
             return None;
         };
 
         let Some(paren) = match_group(GroupDelimiter::Paren).expect(&mut p2) else {
-            p2.stuck_recover_with(|_| {
-                // TODO: Recover more intelligently
-            });
+            p2.stuck();
             return None;
         };
 
         if !match_eos(&mut p2) {
-            p2.stuck_recover_with(|_| {
-                // TODO: Recover more intelligently
-            });
+            p2.stuck();
             return None;
         }
 
@@ -83,9 +75,7 @@ pub fn parse_simple_path(p: P) -> Option<AstSimplePath> {
     loop {
         let Some(part) = parse_path_part(p) else {
             if !parts.is_empty() {
-                p.stuck_recover_with(|_| {
-                    // TODO: Recover more intelligently
-                });
+                p.stuck();
             }
 
             break;
@@ -185,9 +175,7 @@ pub fn parse_use_path(p: P) -> Option<AstUsePath> {
         return None;
     }
 
-    p.stuck_recover_with(|_| {
-        // TODO: Recover more intelligently
-    });
+    p.stuck();
 
     Some(AstUsePath {
         span: start.to(p.prev_span()),
@@ -204,9 +192,7 @@ pub fn parse_expr_path(p: P) -> Option<AstExprPath> {
     loop {
         let Some(part) = parse_path_part(p) else {
             if !parts.is_empty() {
-                p.stuck_recover_with(|_| {
-                    // TODO: Recover more intelligently
-                });
+                p.stuck();
             }
 
             break;
@@ -257,7 +243,7 @@ pub fn parse_visibility(p: P) -> AstVisibility {
                 let mut p2 = p.enter(&group);
 
                 let Some(path) = parse_simple_path(&mut p2) else {
-                    p2.stuck_recover_with(|_| {});
+                    p2.stuck();
 
                     return AstVisibility {
                         span: start.to(p.prev_span()),
@@ -266,7 +252,7 @@ pub fn parse_visibility(p: P) -> AstVisibility {
                 };
 
                 if !match_eos(&mut p2) {
-                    p2.stuck_recover_with(|_| {});
+                    p2.stuck();
                 }
 
                 AstVisibility {

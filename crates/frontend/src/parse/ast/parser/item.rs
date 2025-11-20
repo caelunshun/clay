@@ -53,9 +53,7 @@ pub fn parse_mod_contents(p: P) -> AstItemModuleContents {
             break;
         }
 
-        p.stuck_recover_with(|c| {
-            c.eat();
-        });
+        p.stuck();
     }
 
     AstItemModuleContents { inner_attrs, items }
@@ -80,12 +78,7 @@ fn parse_item_inner(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
 
     if match_kw(kw!("mod")).expect(p).is_some() {
         let Some(name) = match_ident().expect(p) else {
-            return Some(AstItem::Error(
-                make_base(p),
-                p.stuck_recover_with(|_| {
-                    // TODO: Recover more intelligently
-                }),
-            ));
+            return Some(AstItem::Error(make_base(p), p.stuck()));
         };
 
         if let Some(group) = match_group(GroupDelimiter::Brace).expect(p) {
@@ -96,7 +89,7 @@ fn parse_item_inner(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
             }));
         } else {
             if match_punct(punct!(';')).expect(p).is_none() {
-                p.stuck_recover_with(|_| {});
+                p.stuck();
             }
 
             return Some(AstItem::Mod(AstItemModule {
@@ -109,12 +102,7 @@ fn parse_item_inner(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
 
     if match_kw(kw!("trait")).expect(p).is_some() {
         let Some(name) = match_ident().expect(p) else {
-            return Some(AstItem::Error(
-                make_base(p),
-                p.stuck_recover_with(|_| {
-                    // TODO: Recover more intelligently
-                }),
-            ));
+            return Some(AstItem::Error(make_base(p), p.stuck()));
         };
 
         let generics = parse_generic_param_list(p);
@@ -155,18 +143,11 @@ fn parse_item_inner(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
 
     if match_kw(kw!("use")).expect(p).is_some() {
         let Some(path) = parse_use_path(p) else {
-            return Some(AstItem::Error(
-                make_base(p),
-                p.stuck_recover_with(|_| {
-                    // TODO: Recover more intelligently
-                }),
-            ));
+            return Some(AstItem::Error(make_base(p), p.stuck()));
         };
 
         if match_punct(punct!(';')).expect(p).is_none() {
-            p.stuck_recover_with(|_| {
-                // TODO: Recover more intelligently
-            });
+            p.stuck();
         }
 
         return Some(AstItem::Use(AstItemUse {
@@ -189,23 +170,13 @@ fn parse_item_inner(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
         };
 
         let Some(name) = match_ident().expect(p) else {
-            return Some(AstItem::Error(
-                make_base(p),
-                p.stuck_recover_with(|_| {
-                    // TODO: Recover more intelligently
-                }),
-            ));
+            return Some(AstItem::Error(make_base(p), p.stuck()));
         };
 
         let generics = parse_generic_param_list(p);
 
         let Some(group) = match_group(GroupDelimiter::Brace).expect(p) else {
-            return Some(AstItem::Error(
-                make_base(p),
-                p.stuck_recover_with(|_| {
-                    // TODO: Recover more intelligently
-                }),
-            ));
+            return Some(AstItem::Error(make_base(p), p.stuck()));
         };
 
         let fields = parse_adt_field_list(&mut p.enter(&group));
@@ -235,12 +206,7 @@ fn parse_item_inner(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
     }
 
     if !uncommitted {
-        return Some(AstItem::Error(
-            make_base(p),
-            p.stuck_recover_with(|_| {
-                // TODO: Recover more intelligently
-            }),
-        ));
+        return Some(AstItem::Error(make_base(p), p.stuck()));
     }
 
     None
@@ -248,9 +214,7 @@ fn parse_item_inner(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
 
 pub fn parse_impl_ish_body(p: P) -> AstImplLikeBody {
     let Some(group) = match_group(GroupDelimiter::Brace).expect(p) else {
-        p.stuck_recover_with(|_| {
-            // TODO: Recover more intelligently
-        });
+        p.stuck();
 
         return AstImplLikeBody {
             span: p.next_span(),
@@ -288,21 +252,14 @@ pub fn parse_impl_ish_member(p: P) -> AstImplLikeMember {
 
     if match_kw(kw!("type")).expect(p).is_some() {
         let Some(name) = match_ident().expect(p) else {
-            return make_member(
-                AstImplLikeMemberKind::Error(p.stuck_recover_with(|_| {
-                    // TODO: Recover more intelligently
-                })),
-                p,
-            );
+            return make_member(AstImplLikeMemberKind::Error(p.stuck()), p);
         };
 
         if match_punct(punct!('=')).expect(p).is_some() {
             let ty = parse_ty(p);
 
             if match_punct(punct!(';')).expect(p).is_none() {
-                p.stuck_recover_with(|_| {
-                    // TODO: Recover more intelligently
-                });
+                p.stuck();
             }
 
             return make_member(AstImplLikeMemberKind::TypeEquals(name, ty), p);
@@ -312,18 +269,14 @@ pub fn parse_impl_ish_member(p: P) -> AstImplLikeMember {
             let clauses = parse_trait_clause_list(p);
 
             if match_punct(punct!(';')).expect(p).is_none() {
-                p.stuck_recover_with(|_| {
-                    // TODO: Recover more intelligently
-                });
+                p.stuck();
             }
 
             return make_member(AstImplLikeMemberKind::TypeInherits(name, clauses), p);
         }
 
         if match_punct(punct!(';')).expect(p).is_none() {
-            p.stuck_recover_with(|_| {
-                // TODO: Recover more intelligently
-            });
+            p.stuck();
         }
 
         return make_member(
@@ -350,13 +303,7 @@ pub fn parse_impl_ish_member(p: P) -> AstImplLikeMember {
         }
     }
 
-    make_member(
-        AstImplLikeMemberKind::Error(p.stuck_recover_with(|c| {
-            // TODO: Recover more intelligently
-            c.eat();
-        })),
-        p,
-    )
+    make_member(AstImplLikeMemberKind::Error(p.stuck()), p)
 }
 
 pub fn parse_adt_field_list(p: P) -> Vec<AstAdtField> {
@@ -373,10 +320,7 @@ fn parse_adt_field(p: P) -> Result<AstAdtField, ErrorGuaranteed> {
     let vis = parse_visibility(p);
 
     let Some(name) = match_ident().expect(p) else {
-        return Err(p.stuck_recover_with(|c| {
-            // TODO: Recover more intelligently
-            c.eat();
-        }));
+        return Err(p.stuck());
     };
 
     let kind = 'kind: {
@@ -391,20 +335,12 @@ fn parse_adt_field(p: P) -> Result<AstAdtField, ErrorGuaranteed> {
                 let start = p.next_span();
 
                 let Some(name) = match_ident().expect(p) else {
-                    p.stuck_recover_with(|c| {
-                        // TODO: Recover more intelligently
-                        c.eat();
-                    });
-
+                    p.stuck();
                     return None;
                 };
 
                 if match_punct(punct!(':')).expect(p).is_none() {
-                    p.stuck_recover_with(|c| {
-                        // TODO: Recover more intelligently
-                        c.eat();
-                    });
-
+                    p.stuck();
                     return None;
                 }
 

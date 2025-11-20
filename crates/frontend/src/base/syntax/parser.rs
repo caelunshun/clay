@@ -3,33 +3,10 @@ use crate::{
     base::{Diag, ErrorGuaranteed, HardDiag, LeafDiag},
     utils::{
         hash::FxIndexMap,
-        lang::{Extension, FormatFn, ListFormatter, OR_LIST_GLUE, format_list_into},
+        lang::{FormatFn, ListFormatter, OR_LIST_GLUE, format_list_into},
     },
 };
 use std::fmt::Debug;
-
-// === Parse Error === //
-
-#[derive(Debug, Clone)]
-#[must_use]
-pub struct RecoveryRequired(pub ErrorGuaranteed);
-
-pub type PResult<T> = Result<T, RecoveryRequired>;
-pub type OptPResult<T> = PResult<Option<T>>;
-
-pub trait OptPResultExt: Sized + Extension<OptPResult<Self::Value>> {
-    type Value;
-
-    fn did_match(self) -> Option<PResult<Self::Value>>;
-}
-
-impl<T> OptPResultExt for OptPResult<T> {
-    type Value = T;
-
-    fn did_match(self) -> Option<PResult<Self::Value>> {
-        self.transpose()
-    }
-}
 
 // === Parser Core === //
 
@@ -40,6 +17,7 @@ pub struct Parser<I> {
     expected: Vec<Expectation>,
     to_produce: Option<Symbol>,
     stuck_hints: Vec<LeafDiag>,
+    needs_recovery: bool,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -56,6 +34,7 @@ impl<I: CursorIter> Parser<I> {
             to_produce: None,
             expected: Vec::new(),
             stuck_hints: Vec::new(),
+            needs_recovery: false,
         }
     }
 
@@ -69,6 +48,7 @@ impl<I: CursorIter> Parser<I> {
     }
 
     pub fn irrefutable<R>(&mut self, f: impl FnOnce(&mut Cursor<I>) -> R) -> R {
+        self.recover_chomp();
         self.moved_forwards();
         f(&mut self.cursor)
     }
@@ -83,6 +63,8 @@ impl<I: CursorIter> Parser<I> {
     where
         R: LookaheadResult,
     {
+        self.recover_chomp();
+
         let mut hinter = StuckHinter(Some(&mut self.stuck_hints));
         let res = self.cursor.lookahead(|c| f(c, &mut hinter));
 
@@ -214,7 +196,9 @@ impl<I: CursorIter> Parser<I> {
         self.stuck_hints.push(diag);
     }
 
-    pub fn stuck(&mut self) -> RecoveryRequired {
+    pub fn stuck(&mut self) -> ErrorGuaranteed {
+        self.needs_recovery = true;
+
         let mut msg = String::new();
 
         msg.push_str("expected ");
@@ -279,42 +263,40 @@ impl<I: CursorIter> Parser<I> {
 
         self.moved_forwards();
 
-        RecoveryRequired(diag.emit())
+        diag.emit()
     }
 
-    #[must_use]
-    pub fn stuck_recover(&mut self) -> &mut Cursor<I> {
+    pub fn err(&mut self, diag: HardDiag) -> ErrorGuaranteed {
+        self.needs_recovery = true;
+
+        diag.emit()
+    }
+
+    pub fn recover(&mut self, f: impl FnOnce(&mut Cursor<I>)) {
+        if !self.needs_recovery {
+            return;
+        }
+
+        self.needs_recovery = false;
+        f(&mut self.cursor);
+    }
+
+    pub fn recover_until<R: LookaheadResult>(&mut self, f: impl FnMut(&mut Cursor<I>) -> R) {
+        self.recover(|c| {
+            c.eat_until(f);
+        });
+    }
+
+    pub fn recover_chomp(&mut self) {
+        self.recover(|c| {
+            c.eat();
+        });
+    }
+
+    pub fn stuck_immediate_recover(&mut self, f: impl FnOnce(&mut Cursor<I>)) -> ErrorGuaranteed {
         let err = self.stuck();
-        self.recover(err)
-    }
-
-    pub fn stuck_recover_with(&mut self, f: impl FnOnce(&mut Cursor<I>)) -> ErrorGuaranteed {
-        let err = self.stuck();
-        self.recover_with(err, f)
-    }
-
-    #[must_use]
-    pub fn recover(&mut self, err: RecoveryRequired) -> &mut Cursor<I> {
-        let _ = err;
-        self.moved_forwards();
-
-        &mut self.cursor
-    }
-
-    pub fn recover_with(
-        &mut self,
-        err: RecoveryRequired,
-        f: impl FnOnce(&mut Cursor<I>),
-    ) -> ErrorGuaranteed {
-        let err_guar = err.0;
-
-        f(self.recover(err));
-
-        err_guar
-    }
-
-    pub fn err(&self, diag: HardDiag) -> RecoveryRequired {
-        RecoveryRequired(diag.emit())
+        self.recover(f);
+        err
     }
 
     pub fn cursor_unsafe(&self) -> &Cursor<I> {
@@ -464,6 +446,21 @@ impl<I: CursorIter> Cursor<I> {
         }
 
         res
+    }
+
+    pub fn eat_until<R>(&mut self, mut f: impl FnMut(&mut Self) -> R) -> R
+    where
+        R: LookaheadResult,
+    {
+        loop {
+            let res = self.lookahead(&mut f);
+
+            if res.is_ok() {
+                break res;
+            }
+
+            self.eat();
+        }
     }
 }
 

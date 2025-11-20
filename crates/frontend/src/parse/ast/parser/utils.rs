@@ -149,8 +149,7 @@ pub fn parse_delimited_until_terminator<C: ?Sized, E>(
 
         if !match_delimiter(p, cx) {
             if !match_terminator(p, cx) {
-                // Recovery strategy: ignore.
-                p.stuck_recover_with(|_| {});
+                p.stuck();
             }
 
             break false;

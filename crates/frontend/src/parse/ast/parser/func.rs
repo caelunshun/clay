@@ -26,17 +26,13 @@ pub fn parse_func(p: P) -> Result<Option<AstFnDef>, ErrorGuaranteed> {
     }
 
     let Some(name) = match_ident().expect(p) else {
-        return Err(p.stuck_recover_with(|_| {
-            // TODO: Recover more intelligently
-        }));
+        return Err(p.stuck());
     };
 
     let generics = parse_generic_param_list(p);
 
     let Some(params) = match_group(GroupDelimiter::Paren).expect(p) else {
-        return Err(p.stuck_recover_with(|_| {
-            // TODO: Recover more intelligently
-        }));
+        return Err(p.stuck());
     };
 
     let args = parse_comma_group(&mut p.enter(&params), parse_func_arg).elems;
@@ -61,9 +57,7 @@ pub fn parse_func_arg(p: P) -> AstFnArg {
     let pat = parse_pat(p);
 
     if match_punct(punct!(':')).expect(p).is_none() {
-        p.stuck_recover_with(|_| {
-            // TODO: Recover more intelligently
-        });
+        p.stuck();
     }
 
     let ty = parse_ty(p);
@@ -100,12 +94,7 @@ pub fn parse_pat_pratt_seed(p: P) -> AstPat {
 
     // TODO
 
-    build_pat(
-        AstPatKind::Error(p.stuck_recover_with(|_| {
-            // TODO: Recover more intelligently
-        })),
-        p,
-    )
+    build_pat(AstPatKind::Error(p.stuck()), p)
 }
 
 pub fn parse_pat_pratt_chain(p: P, min_bp: Bp, mut seed: AstPat) -> AstPat {

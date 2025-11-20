@@ -59,9 +59,7 @@ pub fn parse_trait_clause(p: P) -> Result<AstTraitClause, ErrorGuaranteed> {
         }));
     }
 
-    Err(p.stuck_recover_with(|_| {
-        // TODO: Recover more intelligently
-    }))
+    Err(p.stuck())
 }
 
 // === Generic Parameters === //
@@ -211,13 +209,7 @@ pub fn parse_ty_pratt_seed(p: P) -> AstTy {
         return build_ty(AstTyKind::Infer, p);
     }
 
-    // Recovery strategy: eat a token
-    build_ty(
-        AstTyKind::Error(p.stuck_recover_with(|c| {
-            c.eat();
-        })),
-        p,
-    )
+    build_ty(AstTyKind::Error(p.stuck()), p)
 }
 
 pub fn parse_ty_pratt_chain(p: P, min_bp: Bp, mut seed: AstTy) -> AstTy {
