@@ -9,7 +9,7 @@ mod b {
 }
 
 mod c {
-    fn whee< 
+    fn whee<
     
     ;
 }
@@ -28,4 +28,10 @@ mod f {
     pub whee
 
     pub fn whee()
+}
+
+mod g {
+    fn whee<Foo:
+    
+    ;
 }

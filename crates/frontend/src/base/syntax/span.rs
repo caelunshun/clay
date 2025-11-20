@@ -15,11 +15,10 @@ pub struct FilePos(NonZeroU32);
 
 impl fmt::Debug for FilePos {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_dummy() {
+        let Some(file) = self.file() else {
             return f.write_str("<dummy>");
-        }
+        };
 
-        let file = self.file();
         write!(f, "{}:{}", file.origin(), file.pos_to_loc(*self))
     }
 }
@@ -113,8 +112,12 @@ impl FilePos {
         (other.u32() - self.u32()) as usize
     }
 
-    pub fn file(self) -> Rc<SourceMapFile> {
-        Session::fetch().source_map.file(self)
+    pub fn file(self) -> Option<Rc<SourceMapFile>> {
+        (!self.is_dummy()).then(|| Session::fetch().source_map.file(self))
+    }
+
+    pub fn loc(self) -> Option<LineCol> {
+        self.file().map(|v| v.pos_to_loc(self))
     }
 }
 
@@ -188,11 +191,9 @@ pub struct Span {
 
 impl fmt::Debug for Span {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_dummy() {
+        let Some(file) = self.lo.file() else {
             return f.write_str("<dummy>");
-        }
-
-        let file = self.lo.file();
+        };
 
         let lo = file.pos_to_loc(self.lo);
         let hi = file.pos_to_loc(self.hi);

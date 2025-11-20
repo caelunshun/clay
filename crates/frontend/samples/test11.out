@@ -17,10 +17,15 @@ error: expected item (`mod`, `trait`, `impl`, `use`, `struct`, `enum`, or `fn`) 
   │        ^
 
 error: expected path part (identifier, `super`, `crate`, or `self`), type (`Self`, `dyn`, `&`, `(`, or `_`), `>`, or lifetime
+   ┌─ crates/frontend/samples/test11.fir:12:13
+   │
+12 │     fn whee<
+   │             ^
+   │
    ┌─ crates/frontend/samples/test11.fir:14:5
    │
 14 │     ;
-   │     ^
+   │     - unexpected syntax
 
 error: expected `<`, `:`, or `{`
    ┌─ crates/frontend/samples/test11.fir:18:19
@@ -47,3 +52,14 @@ error: expected `->`, `{`, or `;`
    │
 30 │     pub fn whee()
    │                  ^
+
+error: expected path part (identifier, `super`, `crate`, or `self`) or lifetime
+   ┌─ crates/frontend/samples/test11.fir:34:17
+   │
+34 │     fn whee<Foo:
+   │                 ^
+   │
+   ┌─ crates/frontend/samples/test11.fir:36:5
+   │
+36 │     ;
+   │     - unexpected syntax

@@ -142,6 +142,10 @@ impl<I: CursorIter> Parser<I> {
         self.cursor.prev_span()
     }
 
+    pub fn prev_span_not_sof(&self) -> Option<Span> {
+        self.cursor.prev_span_not_sof()
+    }
+
     pub fn to_parse_guard(&mut self, what: Symbol) -> ParserGuard<'_, I> {
         ParserGuard {
             old_to_parse: self.to_parse.replace((what, self.cursor.position)),
@@ -290,11 +294,32 @@ impl<I: CursorIter> Parser<I> {
 
         list_fmt.finish(&mut msg, OR_LIST_GLUE).unwrap();
 
-        let mut diag = Diag::span_err(
-            self.next_span_not_eos()
-                .unwrap_or(self.prev_span().shrink_to_hi()),
-            msg,
-        );
+        let (main_span, unexpected_secondary) = 'fmt: {
+            let Some(prev_span) = self.prev_span_not_sof() else {
+                break 'fmt (self.next_span(), None);
+            };
+
+            let Some(next_span) = self.next_span_not_eos() else {
+                break 'fmt (prev_span.shrink_to_hi(), None);
+            };
+
+            let (Some(prev_loc), Some(next_loc)) = (prev_span.hi.loc(), next_span.lo.loc()) else {
+                break 'fmt (prev_span.shrink_to_hi(), None);
+            };
+
+            if next_loc.line == prev_loc.line {
+                break 'fmt (next_span, None);
+            }
+
+            (prev_span.shrink_to_hi(), Some(next_span))
+        };
+
+        let mut diag = Diag::span_err(main_span, msg);
+
+        if let Some(unexpected_secondary) = unexpected_secondary {
+            diag.push_secondary(unexpected_secondary, "unexpected syntax");
+        }
+
         diag.children.extend_from_slice(&self.stuck_hints);
 
         self.moved_forwards();
@@ -587,6 +612,10 @@ impl<I: CursorIter> Cursor<I> {
 
     pub fn prev_span(&self) -> Span {
         self.prev_span
+    }
+
+    pub fn prev_span_not_sof(&self) -> Option<Span> {
+        (self.position > 0).then_some(self.prev_span)
     }
 
     pub fn lookahead<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R
