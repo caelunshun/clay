@@ -67,6 +67,10 @@ impl AtomSimplify for TokenTree {
     fn simplify(self) -> Self::Simplified {
         self
     }
+
+    fn is_eos(&self) -> bool {
+        false
+    }
 }
 
 impl HasSpan for TokenTree {
@@ -510,6 +514,13 @@ impl<'a> AtomSimplify for TokenCursorElement<'a> {
         match self {
             TokenCursorElement::Ending(_) => None,
             TokenCursorElement::Token(token) => Some(token),
+        }
+    }
+
+    fn is_eos(&self) -> bool {
+        match self {
+            TokenCursorElement::Ending(..) => true,
+            TokenCursorElement::Token(..) => false,
         }
     }
 }

@@ -143,6 +143,10 @@ impl<I: CursorIter> Parser<I> {
         self.cursor.next_span()
     }
 
+    pub fn next_span_not_eos(&self) -> Option<Span> {
+        self.cursor.next_span_not_eos()
+    }
+
     pub fn prev_span(&self) -> Span {
         self.cursor.prev_span()
     }
@@ -232,21 +236,16 @@ impl<I: CursorIter> Parser<I> {
 
         msg.push_str("expected ");
 
-        msg.push_str(match self.expected.len() {
-            0 => "nothing (this is likely a bug)",
-            _ => "",
-        });
+        if self.expected.is_empty() {
+            msg.push_str("nothing (this is likely a bug)");
+        }
 
         let mut to_start_expectations = FxIndexMap::<Symbol, Vec<Symbol>>::default();
         let mut to_continue_expectations = FxIndexMap::<Symbol, Vec<Symbol>>::default();
         let mut basic_expectations = Vec::new();
 
-        for &Expectation {
-            what,
-            to_parse: to_produce,
-        } in self.expected.iter()
-        {
-            match to_produce {
+        for &Expectation { what, to_parse } in self.expected.iter() {
+            match to_parse {
                 Some((category, mode)) => {
                     let map = match mode {
                         ToParseMode::Starting => &mut to_start_expectations,
@@ -271,36 +270,32 @@ impl<I: CursorIter> Parser<I> {
                 continue;
             }
 
-            list_fmt
-                .push(
-                    &mut msg,
-                    FormatFn(|f| {
-                        f.write_str(sub_list_prefix)?;
+            let sub_list_fmt = FormatFn(|f| {
+                f.write_str(sub_list_prefix)?;
 
-                        let mut list_fmt = ListFormatter::default();
+                let mut list_fmt = ListFormatter::default();
 
-                        for (&to_parse, whats) in sub_list {
-                            list_fmt
-                                .push(
-                                    f,
-                                    FormatFn(|f| {
-                                        write!(f, "{to_parse}")?;
-                                        f.write_str(" (")?;
-                                        format_list_into(f, whats, OR_LIST_GLUE)?;
-                                        f.write_str(")")?;
+                for (&to_parse, whats) in sub_list {
+                    list_fmt
+                        .push(
+                            f,
+                            FormatFn(|f| {
+                                write!(f, "{to_parse}")?;
+                                f.write_str(" (")?;
+                                format_list_into(f, whats, OR_LIST_GLUE)?;
+                                f.write_str(")")?;
 
-                                        Ok(())
-                                    }),
-                                    OR_LIST_GLUE,
-                                )
-                                .unwrap();
-                        }
+                                Ok(())
+                            }),
+                            OR_LIST_GLUE,
+                        )
+                        .unwrap();
+                }
 
-                        list_fmt.finish(f, OR_LIST_GLUE)
-                    }),
-                    OR_LIST_GLUE,
-                )
-                .unwrap();
+                list_fmt.finish(f, OR_LIST_GLUE)
+            });
+
+            list_fmt.push(&mut msg, sub_list_fmt, OR_LIST_GLUE).unwrap();
         }
 
         list_fmt
@@ -309,7 +304,11 @@ impl<I: CursorIter> Parser<I> {
 
         list_fmt.finish(&mut msg, OR_LIST_GLUE).unwrap();
 
-        let mut diag = Diag::span_err(self.next_span(), msg);
+        let mut diag = Diag::span_err(
+            self.next_span_not_eos()
+                .unwrap_or(self.prev_span().shrink_to_hi()),
+            msg,
+        );
         diag.children.extend_from_slice(&self.stuck_hints);
 
         self.moved_forwards();
@@ -465,7 +464,9 @@ impl<I: CursorIter> Cursor<I> {
     pub fn eat_full(&mut self) -> I::Item {
         let next = self.iter.next().unwrap();
         self.position += 1;
-        self.prev_span = next.span();
+        if !next.is_eos() {
+            self.prev_span = next.span();
+        }
         next
     }
 
@@ -483,6 +484,10 @@ impl<I: CursorIter> Cursor<I> {
 
     pub fn next_span(&self) -> Span {
         self.peek_full().span()
+    }
+
+    pub fn next_span_not_eos(&self) -> Option<Span> {
+        (!self.peek_full().is_eos()).then(|| self.next_span())
     }
 
     pub fn prev_span(&self) -> Span {
@@ -568,6 +573,8 @@ pub trait AtomSimplify {
     type Simplified;
 
     fn simplify(self) -> Self::Simplified;
+
+    fn is_eos(&self) -> bool;
 }
 
 pub trait Delimited {
@@ -653,6 +660,10 @@ impl AtomSimplify for SpannedChar {
 
     fn simplify(self) -> Self::Simplified {
         self.ch
+    }
+
+    fn is_eos(&self) -> bool {
+        self.ch.is_none()
     }
 }
 

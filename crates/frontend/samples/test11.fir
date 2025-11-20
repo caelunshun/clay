@@ -7,7 +7,7 @@ mod b {
 }
 
 mod c {
-    fn
+    fn whee<
 }
 
 mod d {
