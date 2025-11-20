@@ -5,7 +5,7 @@ use crate::{
         arena::{HasInterner, HasListInterner, Interner, ListInterner, Obj},
     },
     semantic::{
-        analysis::{BinderSubstitution, SignatureWfVisitor, TyVisitor as _},
+        analysis::{BinderSubstitution, SignatureWfVisitor},
         syntax::{
             Crate, ListOfTraitClauseList, TraitClause, TraitClauseList, TraitParam, TraitParamList,
             Ty, TyKind, TyList, TyOrRe, TyOrReList,

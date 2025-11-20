@@ -1,9 +1,12 @@
 use super::{HasSpan, Span, Symbol};
 use crate::{
     base::{Diag, ErrorGuaranteed, HardDiag, LeafDiag},
-    utils::lang::Extension,
+    utils::{
+        hash::FxIndexMap,
+        lang::{Extension, FormatFn, ListFormatter, OR_LIST_GLUE, format_list_into},
+    },
 };
-use std::fmt::Write as _;
+use std::fmt::Debug;
 
 // === Parse Error === //
 
@@ -33,16 +36,24 @@ impl<T> OptPResultExt for OptPResult<T> {
 #[derive(Debug)]
 pub struct Parser<I> {
     cursor: Cursor<I>,
-    context: Vec<(Span, Symbol)>,
-    expected: Vec<Symbol>,
+    while_doing: Vec<(Span, Symbol)>,
+    expected: Vec<Expectation>,
+    to_produce: Option<Symbol>,
     stuck_hints: Vec<LeafDiag>,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct Expectation {
+    what: Symbol,
+    to_produce: Option<Symbol>,
 }
 
 impl<I: CursorIter> Parser<I> {
     pub fn new(raw: impl Into<I>) -> Self {
         Self {
             cursor: Cursor::new(raw.into()),
-            context: Vec::new(),
+            while_doing: Vec::new(),
+            to_produce: None,
             expected: Vec::new(),
             stuck_hints: Vec::new(),
         }
@@ -78,7 +89,10 @@ impl<I: CursorIter> Parser<I> {
         if res.is_ok() {
             self.moved_forwards();
         } else if visible {
-            self.expected.push(what);
+            self.expected.push(Expectation {
+                what,
+                to_produce: self.to_produce,
+            });
         }
 
         res
@@ -126,9 +140,16 @@ impl<I: CursorIter> Parser<I> {
     }
 
     pub fn context<R>(&mut self, what: Symbol, f: impl FnOnce(&mut Self) -> R) -> R {
-        self.context.push((self.next_span(), what));
+        self.while_doing.push((self.next_span(), what));
         let res = f(self);
-        self.context.pop();
+        self.while_doing.pop();
+        res
+    }
+
+    pub fn to_produce<R>(&mut self, what: Symbol, f: impl FnOnce(&mut Self) -> R) -> R {
+        let old = self.to_produce.replace(what);
+        let res = f(self);
+        self.to_produce = old;
         res
     }
 
@@ -200,34 +221,59 @@ impl<I: CursorIter> Parser<I> {
 
         msg.push_str(match self.expected.len() {
             0 => "nothing (this is likely a bug)",
-            1..=2 => "",
-            3.. => "one of ",
+            _ => "",
         });
 
-        for (i, expectation) in self.expected.iter().copied().enumerate() {
-            if i > 0 && self.expected.len() > 2 {
-                msg.push(',');
-            }
+        let mut to_produce_expectations = FxIndexMap::<Symbol, Vec<Symbol>>::default();
+        let mut basic_expectations = Vec::new();
 
-            if i == self.expected.len() - 1 && self.expected.len() > 1 {
-                msg.push_str(" or");
+        for &Expectation { what, to_produce } in self.expected.iter() {
+            match to_produce {
+                Some(category) => {
+                    to_produce_expectations
+                        .entry(category)
+                        .or_default()
+                        .push(what);
+                }
+                None => {
+                    basic_expectations.push(what);
+                }
             }
-
-            if i > 0 {
-                msg.push(' ');
-            }
-
-            write!(msg, "{expectation}").unwrap();
         }
+
+        let mut list_fmt = ListFormatter::default();
+
+        for (to_produce, whats) in to_produce_expectations {
+            list_fmt
+                .push(
+                    &mut msg,
+                    FormatFn(|f| {
+                        write!(f, "{to_produce}")?;
+                        f.write_str(" (")?;
+                        format_list_into(f, &whats, OR_LIST_GLUE)?;
+                        f.write_str(")")?;
+
+                        Ok(())
+                    }),
+                    OR_LIST_GLUE,
+                )
+                .unwrap();
+        }
+
+        list_fmt
+            .push_many(&mut msg, basic_expectations, OR_LIST_GLUE)
+            .unwrap();
+
+        list_fmt.finish(&mut msg, OR_LIST_GLUE).unwrap();
 
         let mut diag = Diag::span_err(self.next_span(), msg);
 
         diag.children.extend_from_slice(&self.stuck_hints);
 
-        if let Some(&(cx_span, cx_what)) = self.context.last() {
+        if let Some(&(cx_span, cx_what)) = self.while_doing.last() {
             diag.push_child(LeafDiag::span_once_note(
                 cx_span,
-                format_args!("this error ocurred while {cx_what}"),
+                format_args!("this error occurred while {cx_what}"),
             ));
         }
 

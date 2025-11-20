@@ -9,7 +9,7 @@ use crate::{
         ast::{
             AstGenericDef, AstImplLikeMemberKind, AstItem, AstItemImpl, AstItemModuleContents,
             AstItemTrait, AstSimplePath, AstTraitClauseList, AstUsePath, AstUsePathKind,
-            AstVisibility, AstVisibilityKind,
+            AstVisibility,
         },
         token::Ident,
     },

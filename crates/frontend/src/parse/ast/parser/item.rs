@@ -20,7 +20,7 @@ use crate::{
         },
         token::{GroupDelimiter, TokenParser},
     },
-    punct,
+    punct, symbol,
 };
 
 pub fn parse_mod_contents(p: P) -> AstItemModuleContents {
@@ -61,7 +61,11 @@ pub fn parse_mod_contents(p: P) -> AstItemModuleContents {
     AstItemModuleContents { inner_attrs, items }
 }
 
-pub fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
+fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
+    p.to_produce(symbol!("item"), |p| parse_item_inner(p, outer_attrs))
+}
+
+fn parse_item_inner(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
     let start = p.next_span();
 
     let vis = parse_visibility(p);

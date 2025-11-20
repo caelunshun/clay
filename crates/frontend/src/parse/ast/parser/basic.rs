@@ -14,7 +14,7 @@ use crate::{
         },
         token::{GroupDelimiter, Ident},
     },
-    punct, puncts,
+    punct, puncts, symbol,
 };
 use std::rc::Rc;
 
@@ -31,45 +31,47 @@ pub fn parse_attributes(p: P) -> Vec<AstAttribute> {
 pub fn parse_attribute(p: P) -> Option<AstAttribute> {
     let start = p.next_span();
 
-    match_punct(punct!('#')).expect(p)?;
+    p.to_produce(symbol!("attribute"), |p| {
+        match_punct(punct!('#')).expect(p)?;
 
-    let is_inner = match_punct(punct!('!')).expect(p).is_some();
+        let is_inner = match_punct(punct!('!')).expect(p).is_some();
 
-    let Some(bracket) = match_group(GroupDelimiter::Bracket).expect(p) else {
-        p.stuck_recover_with(|_| {
-            // TODO: Recover more intelligently
-        });
-        return None;
-    };
+        let Some(bracket) = match_group(GroupDelimiter::Bracket).expect(p) else {
+            p.stuck_recover_with(|_| {
+                // TODO: Recover more intelligently
+            });
+            return None;
+        };
 
-    let mut p2 = p.enter(&bracket);
+        let mut p2 = p.enter(&bracket);
 
-    let Some(path) = parse_simple_path(&mut p2) else {
-        p2.stuck_recover_with(|_| {
-            // TODO: Recover more intelligently
-        });
-        return None;
-    };
+        let Some(path) = parse_simple_path(&mut p2) else {
+            p2.stuck_recover_with(|_| {
+                // TODO: Recover more intelligently
+            });
+            return None;
+        };
 
-    let Some(paren) = match_group(GroupDelimiter::Paren).expect(&mut p2) else {
-        p2.stuck_recover_with(|_| {
-            // TODO: Recover more intelligently
-        });
-        return None;
-    };
+        let Some(paren) = match_group(GroupDelimiter::Paren).expect(&mut p2) else {
+            p2.stuck_recover_with(|_| {
+                // TODO: Recover more intelligently
+            });
+            return None;
+        };
 
-    if !match_eos(&mut p2) {
-        p2.stuck_recover_with(|_| {
-            // TODO: Recover more intelligently
-        });
-        return None;
-    }
+        if !match_eos(&mut p2) {
+            p2.stuck_recover_with(|_| {
+                // TODO: Recover more intelligently
+            });
+            return None;
+        }
 
-    Some(AstAttribute {
-        span: start.to(p.prev_span()),
-        is_inner,
-        path,
-        args: paren.tokens,
+        Some(AstAttribute {
+            span: start.to(p.prev_span()),
+            is_inner,
+            path,
+            args: paren.tokens,
+        })
     })
 }
 
@@ -247,44 +249,46 @@ pub fn parse_mutability(p: P) -> AstMutability {
 }
 
 pub fn parse_visibility(p: P) -> AstVisibility {
-    let start = p.next_span();
+    p.to_produce(symbol!("visibility"), |p| {
+        let start = p.next_span();
 
-    if match_kw(kw!("pub")).expect(p).is_some() {
-        if let Some(group) = match_group(GroupDelimiter::Paren).expect(p) {
-            let mut p2 = p.enter(&group);
+        if match_kw(kw!("pub")).expect(p).is_some() {
+            if let Some(group) = match_group(GroupDelimiter::Paren).expect(p) {
+                let mut p2 = p.enter(&group);
 
-            let Some(path) = parse_simple_path(&mut p2) else {
-                p2.stuck_recover_with(|_| {});
+                let Some(path) = parse_simple_path(&mut p2) else {
+                    p2.stuck_recover_with(|_| {});
 
-                return AstVisibility {
+                    return AstVisibility {
+                        span: start.to(p.prev_span()),
+                        kind: AstVisibilityKind::Pub,
+                    };
+                };
+
+                if !match_eos(&mut p2) {
+                    p2.stuck_recover_with(|_| {});
+                }
+
+                AstVisibility {
+                    span: start.to(p.prev_span()),
+                    kind: AstVisibilityKind::PubIn(path),
+                }
+            } else {
+                AstVisibility {
                     span: start.to(p.prev_span()),
                     kind: AstVisibilityKind::Pub,
-                };
-            };
-
-            if !match_eos(&mut p2) {
-                p2.stuck_recover_with(|_| {});
+                }
             }
-
+        } else if match_kw(kw!("priv")).expect(p).is_some() {
             AstVisibility {
                 span: start.to(p.prev_span()),
-                kind: AstVisibilityKind::PubIn(path),
+                kind: AstVisibilityKind::Priv,
             }
         } else {
             AstVisibility {
-                span: start.to(p.prev_span()),
-                kind: AstVisibilityKind::Pub,
+                span: start.shrink_to_lo(),
+                kind: AstVisibilityKind::Implicit,
             }
         }
-    } else if match_kw(kw!("priv")).expect(p).is_some() {
-        AstVisibility {
-            span: start.to(p.prev_span()),
-            kind: AstVisibilityKind::Priv,
-        }
-    } else {
-        AstVisibility {
-            span: start.shrink_to_lo(),
-            kind: AstVisibilityKind::Implicit,
-        }
-    }
+    })
 }

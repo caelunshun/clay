@@ -86,6 +86,7 @@ fn parse_group(p: P, group_start: Span, delimiter: GroupDelimiter) -> TokenGroup
                         closing_del.closing_name()
                     ),
                 )
+                .child(LeafDiag::span_note(group_start, "opening delimiter here"))
                 .emit();
             }
 
