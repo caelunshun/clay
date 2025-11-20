@@ -26,20 +26,33 @@ pub fn parse_func(p: P) -> Result<Option<AstFnDef>, ErrorGuaranteed> {
     }
 
     let Some(name) = match_ident().expect(p) else {
-        return Err(p.stuck());
+        return Err(p.stuck().error());
     };
 
     let generics = parse_generic_param_list(p);
 
     let Some(params) = match_group(GroupDelimiter::Paren).expect(p) else {
-        return Err(p.stuck());
+        return Err(p.stuck().error());
     };
 
     let args = parse_comma_group(&mut p.enter(&params), parse_func_arg).elems;
 
     let ret_ty = parse_return_ty(p);
 
-    // TODO: Body
+    let body = 'body: {
+        if let Some(group) = match_group(GroupDelimiter::Brace).expect(p) {
+            // TODO
+            break 'body None;
+        }
+
+        if match_punct(punct!(';')).expect(p).is_some() {
+            break 'body None;
+        }
+
+        p.stuck().ignore_not_in_loop();
+
+        None
+    };
 
     Ok(Some(AstFnDef {
         span: start.to(p.prev_span()),
@@ -47,7 +60,7 @@ pub fn parse_func(p: P) -> Result<Option<AstFnDef>, ErrorGuaranteed> {
         generics,
         args,
         ret_ty,
-        body: None,
+        body,
     }))
 }
 
@@ -57,7 +70,7 @@ pub fn parse_func_arg(p: P) -> AstFnArg {
     let pat = parse_pat(p);
 
     if match_punct(punct!(':')).expect(p).is_none() {
-        p.stuck();
+        p.stuck().ignore_not_in_loop();
     }
 
     let ty = parse_ty(p);
@@ -94,7 +107,7 @@ pub fn parse_pat_pratt_seed(p: P) -> AstPat {
 
     // TODO
 
-    build_pat(AstPatKind::Error(p.stuck()), p)
+    build_pat(AstPatKind::Error(p.stuck().error()), p)
 }
 
 pub fn parse_pat_pratt_chain(p: P, min_bp: Bp, mut seed: AstPat) -> AstPat {

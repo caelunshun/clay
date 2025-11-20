@@ -13,9 +13,15 @@ use std::{
 
 // === Errors === //
 
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct ErrorGuaranteed;
+
+impl ErrorGuaranteed {
+    pub fn new_unchecked() -> Self {
+        Self
+    }
+}
 
 pub trait EmissionGuarantee {
     const REQUIRES_FATAL: bool;
@@ -58,7 +64,7 @@ impl DiagCtxt {
             diag.cast_ref(),
         );
 
-        E::new_result(diag.is_fatal().then_some(ErrorGuaranteed))
+        E::new_result(diag.is_fatal().then(ErrorGuaranteed::new_unchecked))
     }
 
     pub fn had_error(&self) -> bool {

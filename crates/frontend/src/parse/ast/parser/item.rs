@@ -1,7 +1,7 @@
 use crate::{
     base::{
         ErrorGuaranteed,
-        syntax::{Matcher as _, Span, ToParseMode},
+        syntax::{Matcher as _, Span},
     },
     kw,
     parse::{
@@ -28,6 +28,19 @@ pub fn parse_mod_contents(p: P) -> AstItemModuleContents {
     let mut items = Vec::new();
 
     loop {
+        p.recover_until(|c| {
+            [
+                kw!("pub"),
+                kw!("priv"),
+                kw!("struct"),
+                kw!("enum"),
+                kw!("use"),
+                kw!("mod"),
+            ]
+            .into_iter()
+            .any(|k| match_kw(k).consume(c).is_some())
+        });
+
         let outer_attrs = if items.is_empty() {
             let mut outer_attrs = Vec::new();
 
@@ -53,19 +66,15 @@ pub fn parse_mod_contents(p: P) -> AstItemModuleContents {
             break;
         }
 
-        p.stuck();
+        if p.stuck().should_break() {
+            break;
+        }
     }
 
     AstItemModuleContents { inner_attrs, items }
 }
 
 fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
-    p.to_parse(symbol!("item"), ToParseMode::Starting, |p| {
-        parse_item_inner(p, outer_attrs)
-    })
-}
-
-fn parse_item_inner(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
     let start = p.next_span();
 
     let vis = parse_visibility(p);
@@ -78,9 +87,12 @@ fn parse_item_inner(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
         vis,
     };
 
+    let mut p = p.to_parse_guard(symbol!("item"));
+    let p = &mut *p;
+
     if match_kw(kw!("mod")).expect(p).is_some() {
         let Some(name) = match_ident().expect(p) else {
-            return Some(AstItem::Error(make_base(p), p.stuck()));
+            return Some(AstItem::Error(make_base(p), p.stuck().error()));
         };
 
         if let Some(group) = match_group(GroupDelimiter::Brace).expect(p) {
@@ -91,7 +103,7 @@ fn parse_item_inner(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
             }));
         } else {
             if match_punct(punct!(';')).expect(p).is_none() {
-                p.stuck();
+                p.stuck().ignore_not_in_loop();
             }
 
             return Some(AstItem::Mod(AstItemModule {
@@ -104,7 +116,7 @@ fn parse_item_inner(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
 
     if match_kw(kw!("trait")).expect(p).is_some() {
         let Some(name) = match_ident().expect(p) else {
-            return Some(AstItem::Error(make_base(p), p.stuck()));
+            return Some(AstItem::Error(make_base(p), p.stuck().error()));
         };
 
         let generics = parse_generic_param_list(p);
@@ -145,11 +157,11 @@ fn parse_item_inner(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
 
     if match_kw(kw!("use")).expect(p).is_some() {
         let Some(path) = parse_use_path(p) else {
-            return Some(AstItem::Error(make_base(p), p.stuck()));
+            return Some(AstItem::Error(make_base(p), p.stuck().error()));
         };
 
         if match_punct(punct!(';')).expect(p).is_none() {
-            p.stuck();
+            p.stuck().ignore_not_in_loop();
         }
 
         return Some(AstItem::Use(AstItemUse {
@@ -172,13 +184,13 @@ fn parse_item_inner(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
         };
 
         let Some(name) = match_ident().expect(p) else {
-            return Some(AstItem::Error(make_base(p), p.stuck()));
+            return Some(AstItem::Error(make_base(p), p.stuck().error()));
         };
 
         let generics = parse_generic_param_list(p);
 
         let Some(group) = match_group(GroupDelimiter::Brace).expect(p) else {
-            return Some(AstItem::Error(make_base(p), p.stuck()));
+            return Some(AstItem::Error(make_base(p), p.stuck().error()));
         };
 
         let fields = parse_adt_field_list(&mut p.enter(&group));
@@ -208,7 +220,7 @@ fn parse_item_inner(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
     }
 
     if !uncommitted {
-        return Some(AstItem::Error(make_base(p), p.stuck()));
+        return Some(AstItem::Error(make_base(p), p.stuck().error()));
     }
 
     None
@@ -216,7 +228,7 @@ fn parse_item_inner(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
 
 pub fn parse_impl_ish_body(p: P) -> AstImplLikeBody {
     let Some(group) = match_group(GroupDelimiter::Brace).expect(p) else {
-        p.stuck();
+        p.stuck().ignore_not_in_loop();
 
         return AstImplLikeBody {
             span: p.next_span(),
@@ -254,14 +266,14 @@ pub fn parse_impl_ish_member(p: P) -> AstImplLikeMember {
 
     if match_kw(kw!("type")).expect(p).is_some() {
         let Some(name) = match_ident().expect(p) else {
-            return make_member(AstImplLikeMemberKind::Error(p.stuck()), p);
+            return make_member(AstImplLikeMemberKind::Error(p.stuck().error()), p);
         };
 
         if match_punct(punct!('=')).expect(p).is_some() {
             let ty = parse_ty(p);
 
             if match_punct(punct!(';')).expect(p).is_none() {
-                p.stuck();
+                p.stuck().ignore_not_in_loop();
             }
 
             return make_member(AstImplLikeMemberKind::TypeEquals(name, ty), p);
@@ -271,14 +283,14 @@ pub fn parse_impl_ish_member(p: P) -> AstImplLikeMember {
             let clauses = parse_trait_clause_list(p);
 
             if match_punct(punct!(';')).expect(p).is_none() {
-                p.stuck();
+                p.stuck().ignore_not_in_loop();
             }
 
             return make_member(AstImplLikeMemberKind::TypeInherits(name, clauses), p);
         }
 
         if match_punct(punct!(';')).expect(p).is_none() {
-            p.stuck();
+            p.stuck().ignore_not_in_loop();
         }
 
         return make_member(
@@ -305,7 +317,7 @@ pub fn parse_impl_ish_member(p: P) -> AstImplLikeMember {
         }
     }
 
-    make_member(AstImplLikeMemberKind::Error(p.stuck()), p)
+    make_member(AstImplLikeMemberKind::Error(p.stuck().error()), p)
 }
 
 pub fn parse_adt_field_list(p: P) -> Vec<AstAdtField> {
@@ -322,7 +334,7 @@ fn parse_adt_field(p: P) -> Result<AstAdtField, ErrorGuaranteed> {
     let vis = parse_visibility(p);
 
     let Some(name) = match_ident().expect(p) else {
-        return Err(p.stuck());
+        return Err(p.stuck().error());
     };
 
     let kind = 'kind: {
@@ -337,12 +349,12 @@ fn parse_adt_field(p: P) -> Result<AstAdtField, ErrorGuaranteed> {
                 let start = p.next_span();
 
                 let Some(name) = match_ident().expect(p) else {
-                    p.stuck();
+                    p.stuck().ignore_not_in_loop();
                     return None;
                 };
 
                 if match_punct(punct!(':')).expect(p).is_none() {
-                    p.stuck();
+                    p.stuck().ignore_not_in_loop();
                     return None;
                 }
 

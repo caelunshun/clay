@@ -6,7 +6,10 @@ use crate::{
         lang::{FormatFn, ListFormatter, OR_LIST_GLUE, format_list_into},
     },
 };
-use std::fmt::Debug;
+use std::{
+    fmt::Debug,
+    ops::{Deref, DerefMut},
+};
 
 // === Parser Core === //
 
@@ -21,28 +24,24 @@ pub struct Parser<I> {
     /// The set of hint diagnostics to emit if we get stuck on the current parse element.
     stuck_hints: Vec<LeafDiag>,
 
-    /// What we would parse if we met an expectation specified in a block with this set.
-    ///
-    /// The `u64` represents the position of the cursor at which this expectation would be a
-    /// `Starting` expectation. All other positions (especially `u64::MAX`) would lead to a
-    /// `Continuing` expectation.
+    /// What we would parse if we met an expectation specified in a block with this set. The `u64`
+    /// represents the position of the cursor at which this expectation was set.
     to_parse: Option<(Symbol, u64)>,
 
     /// Whether we've encountered an error that still needs to recovered from by realigning the
     /// parser with a sensible portion of the input stream.
     needs_recovery: bool,
+
+    /// The position at which the last stuck diagnostic was emitted. Ensures that we don't emit
+    /// multiple stuck diagnostics for the same position, which could happen if we're trying to
+    /// recover at an EOS. `u64::MAX` indicates the absence of a stuck diagnostic.
+    last_stuck_diagnostic: u64,
 }
 
 #[derive(Debug, Copy, Clone)]
 struct Expectation {
     what: Symbol,
-    to_parse: Option<(Symbol, ToParseMode)>,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum ToParseMode {
-    Starting,
-    Continuing,
+    to_parse: Option<Symbol>,
 }
 
 impl<I: CursorIter> Parser<I> {
@@ -53,6 +52,7 @@ impl<I: CursorIter> Parser<I> {
             expected: Vec::new(),
             stuck_hints: Vec::new(),
             needs_recovery: false,
+            last_stuck_diagnostic: u64::MAX,
         }
     }
 
@@ -65,12 +65,6 @@ impl<I: CursorIter> Parser<I> {
         self.stuck_hints.clear();
     }
 
-    pub fn irrefutable<R>(&mut self, f: impl FnOnce(&mut Cursor<I>) -> R) -> R {
-        self.recover_chomp();
-        self.moved_forwards();
-        f(&mut self.cursor)
-    }
-
     #[must_use]
     pub fn expect_covert_hinted<R>(
         &mut self,
@@ -79,9 +73,11 @@ impl<I: CursorIter> Parser<I> {
         f: impl FnOnce(&mut Cursor<I>, &mut StuckHinter<'_>) -> R,
     ) -> R
     where
-        R: LookaheadResult,
+        R: LookaheadResult + DefaultReject,
     {
-        self.recover_chomp();
+        if self.needs_recovery {
+            return R::default_reject();
+        }
 
         let mut hinter = StuckHinter(Some(&mut self.stuck_hints));
         let res = self.cursor.lookahead(|c| f(c, &mut hinter));
@@ -91,15 +87,10 @@ impl<I: CursorIter> Parser<I> {
         } else if visible {
             self.expected.push(Expectation {
                 what,
-                to_parse: self.to_parse.map(|(what, start_if_at_position)| {
-                    let mode = if self.cursor.position == start_if_at_position {
-                        ToParseMode::Starting
-                    } else {
-                        ToParseMode::Continuing
-                    };
-
-                    (what, mode)
-                }),
+                to_parse: self
+                    .to_parse
+                    .filter(|&(_, position)| self.cursor.position == position)
+                    .map(|(what, _)| what),
             });
         }
 
@@ -114,7 +105,7 @@ impl<I: CursorIter> Parser<I> {
         f: impl FnOnce(&mut Cursor<I>) -> R,
     ) -> R
     where
-        R: LookaheadResult,
+        R: LookaheadResult + DefaultReject,
     {
         self.expect_covert_hinted(visible, what, |c, _hinter| f(c))
     }
@@ -126,7 +117,7 @@ impl<I: CursorIter> Parser<I> {
         f: impl FnOnce(&mut Cursor<I>, &mut StuckHinter<'_>) -> R,
     ) -> R
     where
-        R: LookaheadResult,
+        R: LookaheadResult + DefaultReject,
     {
         self.expect_covert_hinted(true, what, f)
     }
@@ -134,7 +125,7 @@ impl<I: CursorIter> Parser<I> {
     #[must_use]
     pub fn expect<R>(&mut self, what: Symbol, f: impl FnOnce(&mut Cursor<I>) -> R) -> R
     where
-        R: LookaheadResult,
+        R: LookaheadResult + DefaultReject,
     {
         self.expect_covert_hinted(true, what, |c, _hinter| f(c))
     }
@@ -151,21 +142,15 @@ impl<I: CursorIter> Parser<I> {
         self.cursor.prev_span()
     }
 
-    pub fn to_parse<R>(
-        &mut self,
-        what: Symbol,
-        mode: ToParseMode,
-        f: impl FnOnce(&mut Self) -> R,
-    ) -> R {
-        let start_if_at_pos = match mode {
-            ToParseMode::Starting => self.cursor.position,
-            ToParseMode::Continuing => u64::MAX,
-        };
+    pub fn to_parse_guard(&mut self, what: Symbol) -> ParserGuard<'_, I> {
+        ParserGuard {
+            old_to_parse: self.to_parse.replace((what, self.cursor.position)),
+            parser: self,
+        }
+    }
 
-        let old = self.to_parse.replace((what, start_if_at_pos));
-        let res = f(self);
-        self.to_parse = old;
-        res
+    pub fn to_parse<R>(&mut self, what: Symbol, f: impl FnOnce(&mut Self) -> R) -> R {
+        f(&mut self.to_parse_guard(what))
     }
 
     pub fn hint_syntactic(&mut self, f: impl FnOnce(&mut Cursor<I>, &mut StuckHinter<'_>)) {
@@ -229,9 +214,25 @@ impl<I: CursorIter> Parser<I> {
         self.stuck_hints.push(diag);
     }
 
-    pub fn stuck(&mut self) -> ErrorGuaranteed {
+    pub fn stuck(&mut self) -> StuckResult {
+        if self.needs_recovery {
+            self.moved_forwards();
+
+            return StuckResult::NeverRecovered(ErrorGuaranteed::new_unchecked());
+        }
+
         self.needs_recovery = true;
 
+        // Ensure that we only emit a single diagnostic for this position.
+        if self.last_stuck_diagnostic == self.cursor.position {
+            self.moved_forwards();
+
+            return StuckResult::NeverRecovered(ErrorGuaranteed::new_unchecked());
+        }
+
+        self.last_stuck_diagnostic = self.cursor.position;
+
+        // Emit a diagnostic.
         let mut msg = String::new();
 
         msg.push_str("expected ");
@@ -240,19 +241,16 @@ impl<I: CursorIter> Parser<I> {
             msg.push_str("nothing (this is likely a bug)");
         }
 
-        let mut to_start_expectations = FxIndexMap::<Symbol, Vec<Symbol>>::default();
-        let mut to_continue_expectations = FxIndexMap::<Symbol, Vec<Symbol>>::default();
+        let mut categorized_expectations = FxIndexMap::<Symbol, Vec<Symbol>>::default();
         let mut basic_expectations = Vec::new();
 
         for &Expectation { what, to_parse } in self.expected.iter() {
             match to_parse {
-                Some((category, mode)) => {
-                    let map = match mode {
-                        ToParseMode::Starting => &mut to_start_expectations,
-                        ToParseMode::Continuing => &mut to_continue_expectations,
-                    };
-
-                    map.entry(category).or_default().push(what);
+                Some(category) => {
+                    categorized_expectations
+                        .entry(category)
+                        .or_default()
+                        .push(what);
                 }
                 None => {
                     basic_expectations.push(what);
@@ -262,40 +260,21 @@ impl<I: CursorIter> Parser<I> {
 
         let mut list_fmt = ListFormatter::default();
 
-        for (sub_list_prefix, sub_list) in [
-            ("start of ", &to_start_expectations),
-            ("next part of ", &to_continue_expectations),
-        ] {
-            if sub_list.is_empty() {
-                continue;
-            }
+        for (to_parse, whats) in categorized_expectations {
+            list_fmt
+                .push(
+                    &mut msg,
+                    FormatFn(|f| {
+                        write!(f, "{to_parse}")?;
+                        f.write_str(" (")?;
+                        format_list_into(f, &whats, OR_LIST_GLUE)?;
+                        f.write_str(")")?;
 
-            let sub_list_fmt = FormatFn(|f| {
-                f.write_str(sub_list_prefix)?;
-
-                let mut list_fmt = ListFormatter::default();
-
-                for (&to_parse, whats) in sub_list {
-                    list_fmt
-                        .push(
-                            f,
-                            FormatFn(|f| {
-                                write!(f, "{to_parse}")?;
-                                f.write_str(" (")?;
-                                format_list_into(f, whats, OR_LIST_GLUE)?;
-                                f.write_str(")")?;
-
-                                Ok(())
-                            }),
-                            OR_LIST_GLUE,
-                        )
-                        .unwrap();
-                }
-
-                list_fmt.finish(f, OR_LIST_GLUE)
-            });
-
-            list_fmt.push(&mut msg, sub_list_fmt, OR_LIST_GLUE).unwrap();
+                        Ok(())
+                    }),
+                    OR_LIST_GLUE,
+                )
+                .unwrap();
         }
 
         list_fmt
@@ -313,37 +292,64 @@ impl<I: CursorIter> Parser<I> {
 
         self.moved_forwards();
 
-        diag.emit()
+        StuckResult::RefutedAll(diag.emit())
     }
 
-    pub fn err(&mut self, diag: HardDiag) -> ErrorGuaranteed {
+    pub fn stuck_custom(&mut self, diag: HardDiag) -> StuckResult {
+        self.moved_forwards();
+
+        if self.needs_recovery {
+            return StuckResult::NeverRecovered(ErrorGuaranteed::new_unchecked());
+        }
+
         self.needs_recovery = true;
 
-        diag.emit()
+        if self.last_stuck_diagnostic == self.cursor.position {
+            return StuckResult::NeverRecovered(ErrorGuaranteed::new_unchecked());
+        }
+
+        StuckResult::RefutedAll(diag.emit())
     }
 
-    pub fn recover(&mut self, f: impl FnOnce(&mut Cursor<I>)) {
+    pub fn recover(&mut self, f: impl FnOnce(&mut Cursor<I>) -> RecoveryOutcome) {
         if !self.needs_recovery {
             return;
         }
 
-        self.needs_recovery = false;
-        f(&mut self.cursor);
+        let mut fork = self.cursor.clone();
+
+        match f(&mut fork) {
+            RecoveryOutcome::FullyRecovered => {
+                self.needs_recovery = false;
+                self.cursor = fork;
+            }
+            RecoveryOutcome::PartiallyRecovered => {
+                self.cursor = fork;
+            }
+            RecoveryOutcome::RecoveryAborted => {
+                _ = fork;
+            }
+        }
     }
 
-    pub fn recover_until<R: LookaheadResult>(&mut self, f: impl FnMut(&mut Cursor<I>) -> R) {
-        self.recover(|c| {
-            c.eat_until(f);
-        });
+    pub fn recover_until<R: LookaheadResult + DefaultReject>(
+        &mut self,
+        f: impl FnMut(&mut Cursor<I>) -> R,
+    ) {
+        self.recover(|c| RecoveryOutcome::full_or_abort(c.eat_until(f).is_ok()));
     }
 
     pub fn recover_chomp(&mut self) {
         self.recover(|c| {
             c.eat();
+            RecoveryOutcome::FullyRecovered
         });
     }
 
-    pub fn stuck_immediate_recover(&mut self, f: impl FnOnce(&mut Cursor<I>)) -> ErrorGuaranteed {
+    pub fn stuck_immediate_recover(
+        &mut self,
+        f: impl FnOnce(&mut Cursor<I>) -> RecoveryOutcome,
+    ) -> StuckResult {
         let err = self.stuck();
         self.recover(f);
         err
@@ -355,6 +361,74 @@ impl<I: CursorIter> Parser<I> {
 
     pub fn cursor_unsafe_mut(&mut self) -> &mut Cursor<I> {
         &mut self.cursor
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[must_use]
+pub enum StuckResult {
+    RefutedAll(ErrorGuaranteed),
+    NeverRecovered(ErrorGuaranteed),
+}
+
+impl StuckResult {
+    pub fn error(self) -> ErrorGuaranteed {
+        let (Self::RefutedAll(err) | Self::NeverRecovered(err)) = self;
+        err
+    }
+
+    pub fn should_break(self) -> bool {
+        match self {
+            Self::RefutedAll(..) => false,
+            Self::NeverRecovered(..) => true,
+        }
+    }
+
+    pub fn ignore_not_in_loop(self) {}
+
+    pub fn ignore_about_to_break(self) {}
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum RecoveryOutcome {
+    FullyRecovered,
+    PartiallyRecovered,
+    RecoveryAborted,
+}
+
+impl RecoveryOutcome {
+    pub fn full_or_abort(v: bool) -> Self {
+        if v {
+            Self::FullyRecovered
+        } else {
+            Self::RecoveryAborted
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ParserGuard<'a, I> {
+    parser: &'a mut Parser<I>,
+    old_to_parse: Option<(Symbol, u64)>,
+}
+
+impl<I> Deref for ParserGuard<'_, I> {
+    type Target = Parser<I>;
+
+    fn deref(&self) -> &Self::Target {
+        self.parser
+    }
+}
+
+impl<I> DerefMut for ParserGuard<'_, I> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.parser
+    }
+}
+
+impl<I> Drop for ParserGuard<'_, I> {
+    fn drop(&mut self) {
+        self.parser.to_parse = self.old_to_parse;
     }
 }
 
@@ -391,11 +465,17 @@ pub trait Matcher<I: CursorIter> {
         self.consume(c).is_ok()
     }
 
-    fn expect(&self, p: &mut Parser<I>) -> Self::Output {
+    fn expect(&self, p: &mut Parser<I>) -> Self::Output
+    where
+        Self::Output: DefaultReject,
+    {
         p.expect_hinted(self.expectation(), self.matcher())
     }
 
-    fn expect_covert(&self, visible: bool, p: &mut Parser<I>) -> Self::Output {
+    fn expect_covert(&self, visible: bool, p: &mut Parser<I>) -> Self::Output
+    where
+        Self::Output: DefaultReject,
+    {
         p.expect_covert_hinted(visible, self.expectation(), self.matcher())
     }
 
@@ -463,8 +543,8 @@ impl<I: CursorIter> Cursor<I> {
 
     pub fn eat_full(&mut self) -> I::Item {
         let next = self.iter.next().unwrap();
-        self.position += 1;
         if !next.is_eos() {
+            self.position += 1;
             self.prev_span = next.span();
         }
         next
@@ -509,10 +589,14 @@ impl<I: CursorIter> Cursor<I> {
 
     pub fn eat_until<R>(&mut self, mut f: impl FnMut(&mut Self) -> R) -> R
     where
-        R: LookaheadResult,
+        R: LookaheadResult + DefaultReject,
     {
         loop {
-            let res = self.lookahead(&mut f);
+            if self.peek_full().is_eos() {
+                break R::default_reject();
+            }
+
+            let res = f(&mut self.clone());
 
             if res.is_ok() {
                 break res;

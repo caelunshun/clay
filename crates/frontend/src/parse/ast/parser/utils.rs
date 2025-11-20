@@ -149,7 +149,7 @@ pub fn parse_delimited_until_terminator<C: ?Sized, E>(
 
         if !match_delimiter(p, cx) {
             if !match_terminator(p, cx) {
-                p.stuck();
+                p.stuck().ignore_about_to_break();
             }
 
             break false;

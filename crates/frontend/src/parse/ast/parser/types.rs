@@ -59,7 +59,7 @@ pub fn parse_trait_clause(p: P) -> Result<AstTraitClause, ErrorGuaranteed> {
         }));
     }
 
-    Err(p.stuck())
+    Err(p.stuck().error())
 }
 
 // === Generic Parameters === //
@@ -209,7 +209,7 @@ pub fn parse_ty_pratt_seed(p: P) -> AstTy {
         return build_ty(AstTyKind::Infer, p);
     }
 
-    build_ty(AstTyKind::Error(p.stuck()), p)
+    build_ty(AstTyKind::Error(p.stuck().error()), p)
 }
 
 pub fn parse_ty_pratt_chain(p: P, min_bp: Bp, mut seed: AstTy) -> AstTy {

@@ -64,6 +64,8 @@ fn parse_group(p: P, group_start: Span, delimiter: GroupDelimiter) -> TokenGroup
     'parse: loop {
         let token_start = p.next_span();
 
+        p.recover_chomp();
+
         // Parse closing group delimiters
         if let Some(closing_del) = p.expect(delimiter.closing_name(), |c| {
             GroupDelimiter::CLOSEABLE
@@ -138,7 +140,7 @@ fn parse_group(p: P, group_start: Span, delimiter: GroupDelimiter) -> TokenGroup
                     continue;
                 }
 
-                p.stuck();
+                p.stuck().ignore_about_to_break();
                 break;
             }
 
@@ -149,7 +151,7 @@ fn parse_group(p: P, group_start: Span, delimiter: GroupDelimiter) -> TokenGroup
         if let Some(ident) = parse_ident(p, builder.glued_num().is_none()) {
             if let Some(glued) = builder.glued_num() {
                 // Recovery strategy: ignore
-                let _ = p.err(
+                let _ = p.stuck_custom(
                     Diag::span_err(
                         ident.span,
                         "identifier cannot come immediately after numeric literal",
@@ -220,7 +222,10 @@ fn parse_group(p: P, group_start: Span, delimiter: GroupDelimiter) -> TokenGroup
         }
 
         // We're stuck :(
-        p.stuck();
+        if p.stuck().should_break() {
+            break;
+        }
+
         builder.push_space();
     }
 
@@ -286,7 +291,7 @@ fn parse_string_lit(
 
         if prefix.raw {
             // Recovery strategy: continue trying to parse this string as UTF-8
-            let _ = p.err(
+            let _ = p.stuck_custom(
                 Diag::span_err(prefix.span, "unknown string literal prefix").child(
                     LeafDiag::span_note(
                         prefix.span.truncate_left(1),
@@ -314,7 +319,7 @@ fn parse_string_lit(
             .find(|v| v.prefix() == prefix_sym)
         else {
             // Recovery strategy: continue trying to parse this string as UTF-8
-            let _ = p.err(Diag::span_err(
+            let _ = p.stuck_custom(Diag::span_err(
                 prefix.span,
                 format_args!("unknown string literal prefix `{prefix_sym}`"),
             ));
@@ -327,7 +332,7 @@ fn parse_string_lit(
 
     if pounds > 0 && !is_raw {
         // Recovery strategy: try parsing this string as if it didn't have pounds.
-        let _ = p.err(Diag::span_err(
+        let _ = p.stuck_custom(Diag::span_err(
             prefix_start.until(quote_start),
             "cannot surround a string literal with `#`s when the string is not raw",
         ));
@@ -408,7 +413,7 @@ fn parse_char_lit_or_lifetime(p: P) -> Option<TokenTree> {
         // Match closing quote
         if p.expect_covert(char_count == 1, symbol!("`'`"), |c| match_ch(c, '\'')) {
             if char_count != 1 {
-                _ = p.err(Diag::span_err(
+                _ = p.stuck_custom(Diag::span_err(
                     start.to(p.prev_span()),
                     "expected single character in character literal",
                 ));
@@ -438,7 +443,7 @@ fn parse_char_lit_or_lifetime(p: P) -> Option<TokenTree> {
                 char_count += 1;
                 continue;
             } else {
-                p.stuck();
+                p.stuck().ignore_about_to_break();
                 return None;
             }
         }
@@ -454,14 +459,14 @@ fn parse_char_lit_or_lifetime(p: P) -> Option<TokenTree> {
 
         // Otherwise, we've finished our lifetime.
         if !accum_no_escapes {
-            _ = p.err(Diag::span_err(
+            _ = p.stuck_custom(Diag::span_err(
                 start.to(p.prev_span()),
                 "lifetime cannot contain escapes",
             ));
         }
 
         if !accum.chars().next().unwrap().is_xid_start() {
-            _ = p.err(Diag::span_err(
+            _ = p.stuck_custom(Diag::span_err(
                 start.to(p.prev_span()),
                 "lifetime cannot start with that character",
             ));
@@ -522,7 +527,7 @@ fn parse_char_escape(p: P) -> Option<char> {
         if code > 0x7F {
             // Recovery strategy: pretend the code was valid but substitute it with a placeholder
             // character.
-            let _ = p.err(Diag::span_err(
+            let _ = p.stuck_custom(Diag::span_err(
                 start.to(p.prev_span()),
                 "ASCII escape code must be at most `\\x7F`",
             ));

@@ -1,5 +1,5 @@
 use crate::{
-    base::syntax::{Matcher as _, ToParseMode},
+    base::syntax::Matcher as _,
     kw,
     parse::{
         ast::{
@@ -31,39 +31,40 @@ pub fn parse_attributes(p: P) -> Vec<AstAttribute> {
 pub fn parse_attribute(p: P) -> Option<AstAttribute> {
     let start = p.next_span();
 
-    p.to_parse(symbol!("attribute"), ToParseMode::Starting, |p| {
-        match_punct(punct!('#')).expect(p)?;
+    let mut p = p.to_parse_guard(symbol!("attribute"));
+    let p = &mut p;
 
-        let is_inner = match_punct(punct!('!')).expect(p).is_some();
+    match_punct(punct!('#')).expect(p)?;
 
-        let Some(bracket) = match_group(GroupDelimiter::Bracket).expect(p) else {
-            p.stuck();
-            return None;
-        };
+    let is_inner = match_punct(punct!('!')).expect(p).is_some();
 
-        let mut p2 = p.enter(&bracket);
+    let Some(bracket) = match_group(GroupDelimiter::Bracket).expect(p) else {
+        p.stuck().ignore_not_in_loop();
+        return None;
+    };
 
-        let Some(path) = parse_simple_path(&mut p2) else {
-            p2.stuck();
-            return None;
-        };
+    let mut p2 = p.enter(&bracket);
 
-        let Some(paren) = match_group(GroupDelimiter::Paren).expect(&mut p2) else {
-            p2.stuck();
-            return None;
-        };
+    let Some(path) = parse_simple_path(&mut p2) else {
+        p2.stuck().ignore_not_in_loop();
+        return None;
+    };
 
-        if !match_eos(&mut p2) {
-            p2.stuck();
-            return None;
-        }
+    let Some(paren) = match_group(GroupDelimiter::Paren).expect(&mut p2) else {
+        p2.stuck().ignore_not_in_loop();
+        return None;
+    };
 
-        Some(AstAttribute {
-            span: start.to(p.prev_span()),
-            is_inner,
-            path,
-            args: paren.tokens,
-        })
+    if !match_eos(&mut p2) {
+        p2.stuck().ignore_not_in_loop();
+        return None;
+    }
+
+    Some(AstAttribute {
+        span: start.to(p.prev_span()),
+        is_inner,
+        path,
+        args: paren.tokens,
     })
 }
 
@@ -75,7 +76,7 @@ pub fn parse_simple_path(p: P) -> Option<AstSimplePath> {
     loop {
         let Some(part) = parse_path_part(p) else {
             if !parts.is_empty() {
-                p.stuck();
+                p.stuck().ignore_about_to_break();
             }
 
             break;
@@ -175,7 +176,7 @@ pub fn parse_use_path(p: P) -> Option<AstUsePath> {
         return None;
     }
 
-    p.stuck();
+    p.stuck().ignore_not_in_loop();
 
     Some(AstUsePath {
         span: start.to(p.prev_span()),
@@ -192,7 +193,7 @@ pub fn parse_expr_path(p: P) -> Option<AstExprPath> {
     loop {
         let Some(part) = parse_path_part(p) else {
             if !parts.is_empty() {
-                p.stuck();
+                p.stuck().ignore_about_to_break();
             }
 
             break;
@@ -235,46 +236,47 @@ pub fn parse_mutability(p: P) -> AstMutability {
 }
 
 pub fn parse_visibility(p: P) -> AstVisibility {
-    p.to_parse(symbol!("visibility"), ToParseMode::Starting, |p| {
-        let start = p.next_span();
+    let mut p = p.to_parse_guard(symbol!("visibility"));
+    let p = &mut *p;
 
-        if match_kw(kw!("pub")).expect(p).is_some() {
-            if let Some(group) = match_group(GroupDelimiter::Paren).expect(p) {
-                let mut p2 = p.enter(&group);
+    let start = p.next_span();
 
-                let Some(path) = parse_simple_path(&mut p2) else {
-                    p2.stuck();
+    if match_kw(kw!("pub")).expect(p).is_some() {
+        if let Some(group) = match_group(GroupDelimiter::Paren).expect(p) {
+            let mut p2 = p.enter(&group);
 
-                    return AstVisibility {
-                        span: start.to(p.prev_span()),
-                        kind: AstVisibilityKind::Pub,
-                    };
-                };
+            let Some(path) = parse_simple_path(&mut p2) else {
+                p2.stuck().ignore_not_in_loop();
 
-                if !match_eos(&mut p2) {
-                    p2.stuck();
-                }
-
-                AstVisibility {
-                    span: start.to(p.prev_span()),
-                    kind: AstVisibilityKind::PubIn(path),
-                }
-            } else {
-                AstVisibility {
+                return AstVisibility {
                     span: start.to(p.prev_span()),
                     kind: AstVisibilityKind::Pub,
-                }
+                };
+            };
+
+            if !match_eos(&mut p2) {
+                p2.stuck().ignore_not_in_loop();
             }
-        } else if match_kw(kw!("priv")).expect(p).is_some() {
+
             AstVisibility {
                 span: start.to(p.prev_span()),
-                kind: AstVisibilityKind::Priv,
+                kind: AstVisibilityKind::PubIn(path),
             }
         } else {
             AstVisibility {
-                span: start.shrink_to_lo(),
-                kind: AstVisibilityKind::Implicit,
+                span: start.to(p.prev_span()),
+                kind: AstVisibilityKind::Pub,
             }
         }
-    })
+    } else if match_kw(kw!("priv")).expect(p).is_some() {
+        AstVisibility {
+            span: start.to(p.prev_span()),
+            kind: AstVisibilityKind::Priv,
+        }
+    } else {
+        AstVisibility {
+            span: start.shrink_to_lo(),
+            kind: AstVisibilityKind::Implicit,
+        }
+    }
 }

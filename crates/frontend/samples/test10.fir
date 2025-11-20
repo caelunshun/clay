@@ -9,3 +9,11 @@ pub struct Woo<'a, T> {
     pub foo: &'a T,
     bar: (),
 }
+
+pub struct Waz(pub u32, pub (), pub(crate) ());
+
+pub struct Faz;
+
+fn whee() -> Whee<u32> {
+    // TODO
+}
