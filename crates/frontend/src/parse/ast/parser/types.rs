@@ -18,7 +18,7 @@ use crate::{
         },
         token::GroupDelimiter,
     },
-    punct, puncts,
+    punct, puncts, symbol,
 };
 
 // === Trait Clauses === //
@@ -159,6 +159,9 @@ pub fn parse_ty_pratt(p: P, min_bp: Bp) -> AstTy {
 }
 
 pub fn parse_ty_pratt_seed(p: P) -> AstTy {
+    let mut p = p.to_parse_guard(symbol!("type"));
+    let p = &mut p;
+
     let seed_start = p.next_span();
     let build_ty = move |kind: AstTyKind, p: P| AstTy {
         span: seed_start.to(p.prev_span()),

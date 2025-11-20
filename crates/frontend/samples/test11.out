@@ -16,7 +16,7 @@ error: expected item (`mod`, `trait`, `impl`, `use`, `struct`, `enum`, or `fn`) 
 8 │     pub
   │        ^
 
-error: expected `>`, identifier, `super`, `crate`, `self`, lifetime, `Self`, identifier, `super`, `crate`, `self`, `dyn`, `&`, `(`, or `_`
+error: expected path part (identifier, `super`, `crate`, or `self`), type (`Self`, `dyn`, `&`, `(`, or `_`), `>`, or lifetime
    ┌─ crates/frontend/samples/test11.fir:14:5
    │
 14 │     ;

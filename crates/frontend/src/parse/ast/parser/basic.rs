@@ -71,6 +71,9 @@ pub fn parse_attribute(p: P) -> Option<AstAttribute> {
 pub fn parse_simple_path(p: P) -> Option<AstSimplePath> {
     let start = p.next_span();
 
+    let mut p = p.to_parse_guard(symbol!("path"));
+    let p = &mut p;
+
     let mut parts = Vec::new();
 
     loop {
@@ -100,6 +103,9 @@ pub fn parse_simple_path(p: P) -> Option<AstSimplePath> {
 }
 
 pub fn parse_path_part(p: P) -> Option<Ident> {
+    let mut p = p.to_parse_guard(symbol!("path part"));
+    let p = &mut p;
+
     if let Some(ident) = match_ident().expect(p) {
         return Some(ident);
     }
@@ -115,6 +121,9 @@ pub fn parse_path_part(p: P) -> Option<Ident> {
 
 pub fn parse_use_path(p: P) -> Option<AstUsePath> {
     let start = p.next_span();
+
+    let mut p = p.to_parse_guard(symbol!("path"));
+    let p = &mut p;
 
     let mut parts = Vec::new();
 
@@ -188,6 +197,9 @@ pub fn parse_use_path(p: P) -> Option<AstUsePath> {
 pub fn parse_expr_path(p: P) -> Option<AstExprPath> {
     let start = p.next_span();
 
+    let mut p = p.to_parse_guard(symbol!("path"));
+    let p = &mut p;
+
     let mut parts = Vec::new();
 
     loop {
@@ -224,6 +236,9 @@ pub fn parse_expr_path(p: P) -> Option<AstExprPath> {
 }
 
 pub fn parse_mutability(p: P) -> AstMutability {
+    let mut p = p.to_parse_guard(symbol!("mutability"));
+    let p = &mut p;
+
     if let Some(kw) = match_kw(kw!("mut")).expect(p) {
         return AstMutability::Mut(kw.span);
     }

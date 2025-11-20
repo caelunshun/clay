@@ -2,7 +2,7 @@ use super::{HasSpan, Span, Symbol};
 use crate::{
     base::{Diag, ErrorGuaranteed, HardDiag, LeafDiag},
     utils::{
-        hash::FxIndexMap,
+        hash::{FxHashSet, FxIndexMap},
         lang::{FormatFn, ListFormatter, OR_LIST_GLUE, format_list_into},
     },
 };
@@ -241,6 +241,13 @@ impl<I: CursorIter> Parser<I> {
             msg.push_str("nothing (this is likely a bug)");
         }
 
+        // Filter out duplicate expectations, preferring earlier (and thus higher priority) attempts
+        // to match something over later ones.
+        {
+            let mut expected_names = FxHashSet::default();
+            self.expected.retain(|v| expected_names.insert(v.what));
+        }
+
         let mut categorized_expectations = FxIndexMap::<Symbol, Vec<Symbol>>::default();
         let mut basic_expectations = Vec::new();
 
@@ -470,6 +477,14 @@ pub trait Matcher<I: CursorIter> {
         Self::Output: DefaultReject,
     {
         p.expect_hinted(self.expectation(), self.matcher())
+    }
+
+    fn expect_to_parse(&self, p: &mut Parser<I>, to_parse: Symbol) -> Self::Output
+    where
+        Self::Output: DefaultReject,
+    {
+        let mut p = p.to_parse_guard(to_parse);
+        self.expect(&mut p)
     }
 
     fn expect_covert(&self, visible: bool, p: &mut Parser<I>) -> Self::Output

@@ -91,7 +91,7 @@ fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
     let p = &mut *p;
 
     if match_kw(kw!("mod")).expect(p).is_some() {
-        let Some(name) = match_ident().expect(p) else {
+        let Some(name) = match_ident().expect_to_parse(p, symbol!("module name")) else {
             return Some(AstItem::Error(make_base(p), p.stuck().error()));
         };
 
@@ -115,7 +115,7 @@ fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
     }
 
     if match_kw(kw!("trait")).expect(p).is_some() {
-        let Some(name) = match_ident().expect(p) else {
+        let Some(name) = match_ident().expect_to_parse(p, symbol!("trait name")) else {
             return Some(AstItem::Error(make_base(p), p.stuck().error()));
         };
 
@@ -183,7 +183,7 @@ fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
             break 'adt;
         };
 
-        let Some(name) = match_ident().expect(p) else {
+        let Some(name) = match_ident().expect_to_parse(p, symbol!("type name")) else {
             return Some(AstItem::Error(make_base(p), p.stuck().error()));
         };
 
