@@ -12,26 +12,44 @@ use std::fmt::Debug;
 
 #[derive(Debug)]
 pub struct Parser<I> {
+    /// The raw cursor to the stream we're parsing.
     cursor: Cursor<I>,
-    while_doing: Vec<(Span, Symbol)>,
+
+    /// The set of items we could expect at a given position.
     expected: Vec<Expectation>,
-    to_produce: Option<Symbol>,
+
+    /// The set of hint diagnostics to emit if we get stuck on the current parse element.
     stuck_hints: Vec<LeafDiag>,
+
+    /// What we would parse if we met an expectation specified in a block with this set.
+    ///
+    /// The `u64` represents the position of the cursor at which this expectation would be a
+    /// `Starting` expectation. All other positions (especially `u64::MAX`) would lead to a
+    /// `Continuing` expectation.
+    to_parse: Option<(Symbol, u64)>,
+
+    /// Whether we've encountered an error that still needs to recovered from by realigning the
+    /// parser with a sensible portion of the input stream.
     needs_recovery: bool,
 }
 
 #[derive(Debug, Copy, Clone)]
 struct Expectation {
     what: Symbol,
-    to_produce: Option<Symbol>,
+    to_parse: Option<(Symbol, ToParseMode)>,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum ToParseMode {
+    Starting,
+    Continuing,
 }
 
 impl<I: CursorIter> Parser<I> {
     pub fn new(raw: impl Into<I>) -> Self {
         Self {
             cursor: Cursor::new(raw.into()),
-            while_doing: Vec::new(),
-            to_produce: None,
+            to_parse: None,
             expected: Vec::new(),
             stuck_hints: Vec::new(),
             needs_recovery: false,
@@ -73,7 +91,15 @@ impl<I: CursorIter> Parser<I> {
         } else if visible {
             self.expected.push(Expectation {
                 what,
-                to_produce: self.to_produce,
+                to_parse: self.to_parse.map(|(what, start_if_at_position)| {
+                    let mode = if self.cursor.position == start_if_at_position {
+                        ToParseMode::Starting
+                    } else {
+                        ToParseMode::Continuing
+                    };
+
+                    (what, mode)
+                }),
             });
         }
 
@@ -121,17 +147,20 @@ impl<I: CursorIter> Parser<I> {
         self.cursor.prev_span()
     }
 
-    pub fn context<R>(&mut self, what: Symbol, f: impl FnOnce(&mut Self) -> R) -> R {
-        self.while_doing.push((self.next_span(), what));
-        let res = f(self);
-        self.while_doing.pop();
-        res
-    }
+    pub fn to_parse<R>(
+        &mut self,
+        what: Symbol,
+        mode: ToParseMode,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let start_if_at_pos = match mode {
+            ToParseMode::Starting => self.cursor.position,
+            ToParseMode::Continuing => u64::MAX,
+        };
 
-    pub fn to_produce<R>(&mut self, what: Symbol, f: impl FnOnce(&mut Self) -> R) -> R {
-        let old = self.to_produce.replace(what);
+        let old = self.to_parse.replace((what, start_if_at_pos));
         let res = f(self);
-        self.to_produce = old;
+        self.to_parse = old;
         res
     }
 
@@ -208,16 +237,23 @@ impl<I: CursorIter> Parser<I> {
             _ => "",
         });
 
-        let mut to_produce_expectations = FxIndexMap::<Symbol, Vec<Symbol>>::default();
+        let mut to_start_expectations = FxIndexMap::<Symbol, Vec<Symbol>>::default();
+        let mut to_continue_expectations = FxIndexMap::<Symbol, Vec<Symbol>>::default();
         let mut basic_expectations = Vec::new();
 
-        for &Expectation { what, to_produce } in self.expected.iter() {
+        for &Expectation {
+            what,
+            to_parse: to_produce,
+        } in self.expected.iter()
+        {
             match to_produce {
-                Some(category) => {
-                    to_produce_expectations
-                        .entry(category)
-                        .or_default()
-                        .push(what);
+                Some((category, mode)) => {
+                    let map = match mode {
+                        ToParseMode::Starting => &mut to_start_expectations,
+                        ToParseMode::Continuing => &mut to_continue_expectations,
+                    };
+
+                    map.entry(category).or_default().push(what);
                 }
                 None => {
                     basic_expectations.push(what);
@@ -227,17 +263,40 @@ impl<I: CursorIter> Parser<I> {
 
         let mut list_fmt = ListFormatter::default();
 
-        for (to_produce, whats) in to_produce_expectations {
+        for (sub_list_prefix, sub_list) in [
+            ("start of ", &to_start_expectations),
+            ("next part of ", &to_continue_expectations),
+        ] {
+            if sub_list.is_empty() {
+                continue;
+            }
+
             list_fmt
                 .push(
                     &mut msg,
                     FormatFn(|f| {
-                        write!(f, "{to_produce}")?;
-                        f.write_str(" (")?;
-                        format_list_into(f, &whats, OR_LIST_GLUE)?;
-                        f.write_str(")")?;
+                        f.write_str(sub_list_prefix)?;
 
-                        Ok(())
+                        let mut list_fmt = ListFormatter::default();
+
+                        for (&to_parse, whats) in sub_list {
+                            list_fmt
+                                .push(
+                                    f,
+                                    FormatFn(|f| {
+                                        write!(f, "{to_parse}")?;
+                                        f.write_str(" (")?;
+                                        format_list_into(f, whats, OR_LIST_GLUE)?;
+                                        f.write_str(")")?;
+
+                                        Ok(())
+                                    }),
+                                    OR_LIST_GLUE,
+                                )
+                                .unwrap();
+                        }
+
+                        list_fmt.finish(f, OR_LIST_GLUE)
                     }),
                     OR_LIST_GLUE,
                 )
@@ -251,15 +310,7 @@ impl<I: CursorIter> Parser<I> {
         list_fmt.finish(&mut msg, OR_LIST_GLUE).unwrap();
 
         let mut diag = Diag::span_err(self.next_span(), msg);
-
         diag.children.extend_from_slice(&self.stuck_hints);
-
-        if let Some(&(cx_span, cx_what)) = self.while_doing.last() {
-            diag.push_child(LeafDiag::span_once_note(
-                cx_span,
-                format_args!("this error occurred while {cx_what}"),
-            ));
-        }
 
         self.moved_forwards();
 
@@ -399,6 +450,7 @@ where
 pub struct Cursor<I> {
     pub iter: I,
     pub prev_span: Span,
+    pub position: u64,
 }
 
 impl<I: CursorIter> Cursor<I> {
@@ -406,11 +458,13 @@ impl<I: CursorIter> Cursor<I> {
         Self {
             prev_span: raw.start_span(),
             iter: raw,
+            position: 0,
         }
     }
 
     pub fn eat_full(&mut self) -> I::Item {
         let next = self.iter.next().unwrap();
+        self.position += 1;
         self.prev_span = next.span();
         next
     }

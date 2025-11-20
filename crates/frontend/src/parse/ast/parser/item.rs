@@ -1,7 +1,7 @@
 use crate::{
     base::{
         ErrorGuaranteed,
-        syntax::{Matcher as _, Span},
+        syntax::{Matcher as _, Span, ToParseMode},
     },
     kw,
     parse::{
@@ -60,7 +60,9 @@ pub fn parse_mod_contents(p: P) -> AstItemModuleContents {
 }
 
 fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
-    p.to_produce(symbol!("item"), |p| parse_item_inner(p, outer_attrs))
+    p.to_parse(symbol!("item"), ToParseMode::Starting, |p| {
+        parse_item_inner(p, outer_attrs)
+    })
 }
 
 fn parse_item_inner(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {

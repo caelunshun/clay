@@ -18,14 +18,13 @@ type C<'a, 'ch> = &'a mut CharCursor<'ch>;
 pub fn tokenize(span: Span) -> TokenGroup {
     let text = Session::fetch().source_map.file(span.lo).text(span);
     let mut parser = Parser::new(RawCharCursor::new(span, &text));
+    let p = &mut parser;
 
-    parser.context(symbol!("tokenizing the file"), |p| {
-        if p.expect(symbol!("byte order mark"), |c| match_ch(c, '\u{feff}')) {
-            // (ignore it)
-        }
+    if p.expect(symbol!("byte order mark"), |c| match_ch(c, '\u{feff}')) {
+        // (ignore it)
+    }
 
-        parse_group(p, p.next_span(), GroupDelimiter::File)
-    })
+    parse_group(p, p.next_span(), GroupDelimiter::File)
 }
 
 #[derive(Default)]

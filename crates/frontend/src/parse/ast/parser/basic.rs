@@ -1,5 +1,5 @@
 use crate::{
-    base::syntax::Matcher as _,
+    base::syntax::{Matcher as _, ToParseMode},
     kw,
     parse::{
         ast::{
@@ -31,7 +31,7 @@ pub fn parse_attributes(p: P) -> Vec<AstAttribute> {
 pub fn parse_attribute(p: P) -> Option<AstAttribute> {
     let start = p.next_span();
 
-    p.to_produce(symbol!("attribute"), |p| {
+    p.to_parse(symbol!("attribute"), ToParseMode::Starting, |p| {
         match_punct(punct!('#')).expect(p)?;
 
         let is_inner = match_punct(punct!('!')).expect(p).is_some();
@@ -235,7 +235,7 @@ pub fn parse_mutability(p: P) -> AstMutability {
 }
 
 pub fn parse_visibility(p: P) -> AstVisibility {
-    p.to_produce(symbol!("visibility"), |p| {
+    p.to_parse(symbol!("visibility"), ToParseMode::Starting, |p| {
         let start = p.next_span();
 
         if match_kw(kw!("pub")).expect(p).is_some() {
