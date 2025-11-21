@@ -218,6 +218,7 @@ impl<I: CursorIter> Parser<I> {
         self.stuck_hints.push(diag);
     }
 
+    #[track_caller]
     pub fn stuck(&mut self) -> StuckResult {
         if self.needs_recovery {
             self.moved_forwards();

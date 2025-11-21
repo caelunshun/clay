@@ -1,5 +1,5 @@
 use crate::{
-    base::syntax::Span,
+    base::syntax::{HasSpan, Span},
     kw,
     parse::{
         ast::{AstGenericParamList, AstTy},
@@ -71,14 +71,48 @@ pub struct AstExprQualification {
 pub enum AstMutability {
     Mut(Span),
     Ref(Span),
-    Implicit,
 }
 
 impl AstMutability {
+    pub fn strip_span(self) -> Mutability {
+        match self {
+            AstMutability::Mut(..) => Mutability::Mut,
+            AstMutability::Ref(..) => Mutability::Not,
+        }
+    }
+}
+
+impl HasSpan for AstMutability {
+    fn span(&self) -> Span {
+        let (AstMutability::Mut(span) | AstMutability::Ref(span)) = *self;
+        span
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum AstOptMutability {
+    Mut(Span),
+    Ref(Span),
+    Implicit,
+}
+
+impl AstOptMutability {
+    pub fn as_explicit(self) -> Option<AstMutability> {
+        match self {
+            AstOptMutability::Mut(span) => Some(AstMutability::Mut(span)),
+            AstOptMutability::Ref(span) => Some(AstMutability::Ref(span)),
+            AstOptMutability::Implicit => None,
+        }
+    }
+
+    pub fn was_explicit(self) -> bool {
+        self.as_explicit().is_some()
+    }
+
     pub fn as_muta(self) -> Mutability {
         match self {
-            AstMutability::Mut(_) => Mutability::Mut,
-            AstMutability::Ref(_) | AstMutability::Implicit => Mutability::Not,
+            AstOptMutability::Mut(_) => Mutability::Mut,
+            AstOptMutability::Ref(_) | AstOptMutability::Implicit => Mutability::Not,
         }
     }
 }

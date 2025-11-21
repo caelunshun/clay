@@ -669,7 +669,7 @@ fn parse_num_lit(p: P, builder: &mut GroupBuilder) -> bool {
             || p.expect(symbol!("`e`"), |c| match_ch(c, 'e'))
         {
             // Match the sign.
-            p.expect(symbol!("`+`"), |c| match_ch(c, '+'))
+            _ = p.expect(symbol!("`+`"), |c| match_ch(c, '+'))
                 || p.expect(symbol!("`-`"), |c| match_ch(c, '-'));
 
             // Match the exponential portion.

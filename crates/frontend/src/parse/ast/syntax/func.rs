@@ -1,7 +1,7 @@
 use crate::{
     base::{ErrorGuaranteed, syntax::Span},
     parse::{
-        ast::{AstExprPath, AstGenericParamList, AstItem, AstMutability, AstReturnTy, AstTy},
+        ast::{AstExprPath, AstGenericParamList, AstItem, AstOptMutability, AstReturnTy, AstTy},
         token::{Ident, Lifetime, TokenCharLit, TokenNumLit, TokenStrLit},
     },
 };
@@ -91,7 +91,7 @@ pub enum AstExprKind {
     Range(Option<Box<AstExpr>>, Option<Box<AstExpr>>, AstRangeLimits),
     Underscore,
     Path(AstExprPath),
-    AddrOf(AstMutability, Box<AstExpr>),
+    AddrOf(AstOptMutability, Box<AstExpr>),
     Break(Option<Lifetime>, Option<Box<AstExpr>>),
     Continue(Option<Lifetime>),
     Return(Option<Box<AstExpr>>),
@@ -236,9 +236,13 @@ pub struct AstPat {
 #[derive(Debug, Clone)]
 pub enum AstPatKind {
     Wild,
-    Ident(AstBindingMode, Ident, Option<Box<AstPat>>),
-    Struct(AstExprPath, Vec<AstPatField>, AstPatStructRest),
-    TupleStruct(AstExprPath, Vec<AstPat>),
+    Path {
+        binding_mode: AstBindingMode,
+        path: AstExprPath,
+        and_bind: Option<Box<AstPat>>,
+    },
+    PathAndBrace(AstExprPath, Vec<AstPatField>, AstPatStructRest),
+    PathAndParen(AstExprPath, Vec<AstPat>),
     Or(Vec<AstPat>),
     Tuple(Vec<AstPat>),
     Error(ErrorGuaranteed),
@@ -247,8 +251,14 @@ pub enum AstPatKind {
 
 #[derive(Debug, Copy, Clone)]
 pub struct AstBindingMode {
-    pub by_ref: Option<AstMutability>,
-    pub local_muta: AstMutability,
+    pub by_ref: AstOptMutability,
+    pub local_muta: AstOptMutability,
+}
+
+impl AstBindingMode {
+    pub fn was_specified(self) -> bool {
+        self.by_ref.was_explicit() || self.local_muta.was_explicit()
+    }
 }
 
 #[derive(Debug, Clone)]

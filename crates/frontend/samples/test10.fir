@@ -14,10 +14,15 @@ pub struct Waz(pub u32, pub (), pub(crate) ());
 
 pub struct Faz;
 
-pub fn fizz_buzz() {
+pub fn fizz_buzz(limit: u32?) {
     let mut sb = String::new();
 
-    for i in 0.. {
+    let range = match limit {
+        Some(v) => 0..v as dyn Iterator<Item = u32>,
+        None => 0.. as dyn Iterator<Item = u32>,
+    };
+
+    for i in range {
         let mut special = false;
 
         if i % 3 == 0 {

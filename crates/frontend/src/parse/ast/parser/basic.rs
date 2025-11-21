@@ -3,7 +3,7 @@ use crate::{
     kw,
     parse::{
         ast::{
-            AstAttribute, AstExprPath, AstExprPathSegment, AstMutability, AstSimplePath,
+            AstAttribute, AstExprPath, AstExprPathSegment, AstOptMutability, AstSimplePath,
             AstUsePath, AstUsePathKind, AstVisibility, AstVisibilityKind,
             entry::P,
             types::parse_generic_param_list,
@@ -212,15 +212,16 @@ pub fn parse_expr_path(p: P) -> Option<AstExprPath> {
         };
 
         if match_punct_seq(puncts!("::")).expect(p).is_none() {
+            parts.push(AstExprPathSegment { part, args: None });
             break;
         }
 
         let args = parse_generic_param_list(p).map(Box::new);
-        let args_is_none = args.is_none();
+        let args_is_some = args.is_some();
 
         parts.push(AstExprPathSegment { part, args });
 
-        if args_is_none && match_punct_seq(puncts!("::")).expect(p).is_none() {
+        if args_is_some && match_punct_seq(puncts!("::")).expect(p).is_none() {
             break;
         }
     }
@@ -235,19 +236,19 @@ pub fn parse_expr_path(p: P) -> Option<AstExprPath> {
     })
 }
 
-pub fn parse_mutability(p: P) -> AstMutability {
+pub fn parse_mutability(p: P) -> AstOptMutability {
     let mut p = p.to_parse_guard(symbol!("mutability"));
     let p = &mut p;
 
     if let Some(kw) = match_kw(kw!("mut")).expect(p) {
-        return AstMutability::Mut(kw.span);
+        return AstOptMutability::Mut(kw.span);
     }
 
     if let Some(kw) = match_kw(kw!("ref")).expect(p) {
-        return AstMutability::Ref(kw.span);
+        return AstOptMutability::Ref(kw.span);
     }
 
-    AstMutability::Implicit
+    AstOptMutability::Implicit
 }
 
 pub fn parse_visibility(p: P) -> AstVisibility {

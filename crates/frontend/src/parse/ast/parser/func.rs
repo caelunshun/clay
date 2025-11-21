@@ -1,26 +1,27 @@
 use crate::{
     base::{
         ErrorGuaranteed,
-        syntax::{Bp, Matcher, Span},
+        syntax::{Bp, InfixBp, Matcher, Span},
     },
     kw,
     parse::{
         ast::{
-            AstBlock, AstBoolLit, AstExpr, AstExprKind, AstFnArg, AstFnDef, AstLit, AstPat,
-            AstPatKind, AstStmt, AstStmtKind, AstUnOpKind,
-            basic::parse_expr_path,
-            bp::expr_bp,
+            AstBinOpKind, AstBindingMode, AstBlock, AstBoolLit, AstExpr, AstExprKind, AstFnArg,
+            AstFnDef, AstLit, AstOptMutability, AstPat, AstPatKind, AstStmt, AstStmtKind,
+            AstUnOpKind, PunctSeq,
+            basic::{parse_expr_path, parse_mutability},
+            bp::{expr_bp, pat_bp},
             entry::P,
             types::{parse_generic_param_list, parse_return_ty, parse_ty},
             utils::{
                 match_char_lit, match_eos, match_group, match_ident, match_kw, match_lifetime,
-                match_num_lit, match_punct, match_str_lit, parse_comma_group,
+                match_num_lit, match_punct, match_punct_seq, match_str_lit, parse_comma_group,
                 parse_delimited_until_terminator,
             },
         },
-        token::{GroupDelimiter, Lifetime},
+        token::{GroupDelimiter, Lifetime, Punct},
     },
-    punct, symbol,
+    punct, puncts, symbol,
 };
 use bitflags::bitflags;
 
@@ -99,6 +100,16 @@ bitflags! {
         const IN_SCRUTINEE = 0;
         const ALLOW_ALL = !0;
     }
+}
+
+pub fn parse_expr_full(p: P) -> AstExpr {
+    let expr = parse_expr_or_error(p, AstExprFlags::ALLOW_ALL);
+
+    if !match_eos(p) {
+        p.stuck().ignore_not_in_loop();
+    }
+
+    expr
 }
 
 pub fn parse_expr(p: P, flags: AstExprFlags) -> Option<AstExpr> {
@@ -268,6 +279,9 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
         }
     }
 
+    // Parse a constructor expression
+    // TODO
+
     None
 }
 
@@ -385,10 +399,132 @@ pub fn parse_expr_pratt_block_seed(
     None
 }
 
-pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, mut seed: AstExpr) -> AstExpr {
-    // TODO
+pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstExpr) -> AstExpr {
+    let mut lhs = seed;
 
-    seed
+    // Parse postfix and infix operations that bind tighter than our caller.
+    'chaining: loop {
+        // Match indexing
+        if let Some(group) = match_group(GroupDelimiter::Bracket)
+            .maybe_expect(p, expr_bp::POST_BRACKET.left >= min_bp)
+        {
+            let index = parse_expr_full(&mut p.enter(&group));
+
+            lhs = AstExpr {
+                span: group.span,
+                kind: AstExprKind::Index(Box::new(lhs), Box::new(index)),
+            };
+
+            continue 'chaining;
+        }
+
+        // Match calls
+        if let Some(paren) =
+            match_group(GroupDelimiter::Paren).maybe_expect(p, expr_bp::POST_CALL.left >= min_bp)
+        {
+            let res = parse_comma_group(&mut p.enter(&paren), |p| {
+                parse_expr_or_error(p, AstExprFlags::ALLOW_ALL)
+            });
+
+            lhs = AstExpr {
+                span: paren.span,
+                kind: AstExprKind::Call(Box::new(lhs), res.elems),
+            };
+
+            continue 'chaining;
+        }
+
+        // Match named indexes
+        if let Some(dot) =
+            match_punct(punct!('.')).maybe_expect(p, expr_bp::POST_DOT.left >= min_bp)
+        {
+            let Some(name) = match_ident().expect(p) else {
+                p.stuck().ignore_about_to_break();
+
+                break 'chaining;
+            };
+
+            lhs = AstExpr {
+                span: dot.span.to(name.span),
+                kind: AstExprKind::Field(Box::new(lhs), name),
+            };
+
+            continue 'chaining;
+        }
+
+        // Match infix assignment
+        if let Some(punct) =
+            match_punct(punct!('=')).maybe_expect(p, expr_bp::INFIX_ASSIGN.left >= min_bp)
+        {
+            lhs = AstExpr {
+                span: punct.span,
+                kind: AstExprKind::Assign(
+                    Box::new(lhs),
+                    Box::new(parse_expr_pratt_or_error(
+                        p,
+                        flags,
+                        expr_bp::INFIX_ASSIGN.right,
+                    )),
+                ),
+            };
+        }
+
+        // Match punctuation-demarcated infix operations
+        type PunctSeqInfixOp = (PunctSeq, InfixBp, AstBinOpKind);
+
+        const PUNCT_SEQ_INFIX_OPS: [PunctSeqInfixOp; 3] = [
+            (puncts!("&&"), expr_bp::INFIX_LOGICAL_AND, AstBinOpKind::And),
+            (puncts!("||"), expr_bp::INFIX_LOGICAL_OR, AstBinOpKind::Or),
+            (puncts!("=="), expr_bp::INFIX_EQ, AstBinOpKind::Eq),
+        ];
+
+        for (punct_seq, op_bp, kind) in PUNCT_SEQ_INFIX_OPS {
+            if let Some(span) = match_punct_seq(punct_seq).maybe_expect(p, op_bp.left >= min_bp) {
+                lhs = AstExpr {
+                    span,
+                    kind: AstExprKind::Binary(
+                        kind,
+                        Box::new(lhs),
+                        Box::new(parse_expr_pratt_or_error(p, flags, op_bp.right)),
+                    ),
+                };
+
+                continue 'chaining;
+            }
+        }
+
+        type PunctInfixOp = (Punct, InfixBp, AstBinOpKind);
+
+        const PUNCT_INFIX_OPS: [PunctInfixOp; 8] = [
+            (punct!('+'), expr_bp::INFIX_ADD, AstBinOpKind::Add),
+            (punct!('-'), expr_bp::INFIX_SUB, AstBinOpKind::Sub),
+            (punct!('*'), expr_bp::INFIX_MUL, AstBinOpKind::Mul),
+            (punct!('/'), expr_bp::INFIX_DIV, AstBinOpKind::Div),
+            (punct!('%'), expr_bp::INFIX_MOD, AstBinOpKind::Rem),
+            (punct!('&'), expr_bp::INFIX_BIT_AND, AstBinOpKind::BitAnd),
+            (punct!('|'), expr_bp::INFIX_BIT_OR, AstBinOpKind::BitOr),
+            (punct!('^'), expr_bp::INFIX_BIT_XOR, AstBinOpKind::BitXor),
+        ];
+
+        for (punct, op_bp, kind) in PUNCT_INFIX_OPS {
+            if let Some(op_punct) = match_punct(punct).maybe_expect(p, op_bp.left >= min_bp) {
+                lhs = AstExpr {
+                    span: op_punct.span,
+                    kind: AstExprKind::Binary(
+                        kind,
+                        Box::new(lhs),
+                        Box::new(parse_expr_pratt_or_error(p, flags, op_bp.right)),
+                    ),
+                };
+
+                continue 'chaining;
+            }
+        }
+
+        break;
+    }
+
+    lhs
 }
 
 // === Block === //
@@ -505,13 +641,75 @@ pub fn parse_pat_pratt_seed(p: P) -> AstPat {
         kind,
     };
 
-    // TODO
+    let binding_mode = parse_binding_mode(p);
+
+    if let Some(path) = parse_expr_path(p) {
+        let and_bind = match_punct(punct!('@'))
+            .expect(p)
+            .map(|_| Box::new(parse_pat_pratt(p, pat_bp::PRE_AT.right)));
+
+        return build_pat(
+            AstPatKind::Path {
+                binding_mode,
+                path,
+                and_bind,
+            },
+            p,
+        );
+    }
 
     build_pat(AstPatKind::Error(p.stuck().error()), p)
 }
 
-pub fn parse_pat_pratt_chain(p: P, min_bp: Bp, mut seed: AstPat) -> AstPat {
-    // TODO
+pub fn parse_binding_mode(p: P) -> AstBindingMode {
+    match parse_mutability(p) {
+        AstOptMutability::Mut(a) => {
+            match parse_mutability(p) {
+                // `mut mut`
+                AstOptMutability::Mut(b) => AstBindingMode {
+                    by_ref: AstOptMutability::Mut(a),
+                    local_muta: AstOptMutability::Mut(b),
+                },
+                // `mut ref`
+                AstOptMutability::Ref(b) => AstBindingMode {
+                    by_ref: AstOptMutability::Mut(a),
+                    local_muta: AstOptMutability::Ref(b),
+                },
+                // `mut`
+                AstOptMutability::Implicit => AstBindingMode {
+                    by_ref: AstOptMutability::Implicit,
+                    local_muta: AstOptMutability::Mut(a),
+                },
+            }
+        }
+        AstOptMutability::Ref(a) => {
+            match parse_mutability(p) {
+                // `ref mut`
+                AstOptMutability::Mut(b) => AstBindingMode {
+                    by_ref: AstOptMutability::Ref(a),
+                    local_muta: AstOptMutability::Mut(b),
+                },
+                // `ref ref`
+                AstOptMutability::Ref(b) => AstBindingMode {
+                    by_ref: AstOptMutability::Ref(a),
+                    local_muta: AstOptMutability::Ref(b),
+                },
+                // `ref`
+                AstOptMutability::Implicit => AstBindingMode {
+                    by_ref: AstOptMutability::Implicit,
+                    local_muta: AstOptMutability::Ref(a),
+                },
+            }
+        }
+        AstOptMutability::Implicit => AstBindingMode {
+            by_ref: AstOptMutability::Implicit,
+            local_muta: AstOptMutability::Implicit,
+        },
+    }
+}
 
-    seed
+pub fn parse_pat_pratt_chain(p: P, min_bp: Bp, seed: AstPat) -> AstPat {
+    let mut lhs = seed;
+
+    lhs
 }

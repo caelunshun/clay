@@ -53,7 +53,14 @@ pub struct DiagCtxt {
 }
 
 impl DiagCtxt {
-    pub fn emit<E: EmissionGuarantee>(&self, diag: Diag<E>) -> E {
+    #[track_caller]
+    pub fn emit<E: EmissionGuarantee>(&self, mut diag: Diag<E>) -> E {
+        #[cfg(debug_assertions)]
+        diag.push_child(LeafDiag::new(
+            Level::Note,
+            format_args!("diagnostic emitted by {}", std::panic::Location::caller()),
+        ));
+
         if diag.is_fatal() {
             self.error_guaranteed.store(true, Relaxed);
         }
@@ -128,6 +135,7 @@ impl<E: EmissionGuarantee> Diag<E> {
         }
     }
 
+    #[track_caller]
     pub fn emit(self) -> E {
         Session::fetch().diag.emit(self)
     }
