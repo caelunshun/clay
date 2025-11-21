@@ -197,9 +197,7 @@ pub fn parse_ty_pratt_seed(p: P) -> AstTy {
 
     // Parse tuple
     if let Some(group) = match_group(GroupDelimiter::Paren).expect(p) {
-        let p = &mut p.enter(&group);
-
-        let parts = parse_comma_group(p, parse_ty);
+        let parts = parse_comma_group(&mut p.enter(&group), parse_ty);
 
         match parts.into_singleton() {
             Ok(singleton) => return singleton,
@@ -215,15 +213,17 @@ pub fn parse_ty_pratt_seed(p: P) -> AstTy {
     build_ty(AstTyKind::Error(p.stuck().error()), p)
 }
 
-pub fn parse_ty_pratt_chain(p: P, min_bp: Bp, mut seed: AstTy) -> AstTy {
+pub fn parse_ty_pratt_chain(p: P, min_bp: Bp, seed: AstTy) -> AstTy {
+    let mut lhs = seed;
+
     'chaining: loop {
         if match_punct(punct!('?'))
             .maybe_expect(p, ty_bp::POST_TY_OPT.left >= min_bp)
             .is_some()
         {
-            seed = AstTy {
-                span: seed.span.to(p.prev_span()),
-                kind: AstTyKind::Option(Box::new(seed)),
+            lhs = AstTy {
+                span: lhs.span.to(p.prev_span()),
+                kind: AstTyKind::Option(Box::new(lhs)),
             };
 
             continue 'chaining;
@@ -232,7 +232,7 @@ pub fn parse_ty_pratt_chain(p: P, min_bp: Bp, mut seed: AstTy) -> AstTy {
         break;
     }
 
-    seed
+    lhs
 }
 
 pub fn parse_return_ty(p: P) -> AstReturnTy {

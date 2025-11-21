@@ -171,6 +171,7 @@ define_punct_seqs! {
     AssignMul = '*' '=',
     AssignRem = '%' '=',
     AssignSub = '-' '=',
+    BiDots = '.' '.',
     Geq = '>' '=',
     Leq = '<' '=',
     LogicalAnd = '&' '&',

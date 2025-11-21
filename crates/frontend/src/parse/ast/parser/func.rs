@@ -7,8 +7,8 @@ use crate::{
     parse::{
         ast::{
             AstAssignOpKind, AstBinOpKind, AstBindingMode, AstBlock, AstBoolLit, AstExpr,
-            AstExprKind, AstFnArg, AstFnDef, AstLit, AstMatchArm, AstOptMutability, AstPat,
-            AstPatKind, AstStmt, AstStmtKind, AstUnOpKind, PunctSeq,
+            AstExprField, AstExprKind, AstFnArg, AstFnDef, AstLit, AstMatchArm, AstOptMutability,
+            AstPat, AstPatKind, AstStmt, AstStmtKind, AstStructRest, AstUnOpKind, PunctSeq,
             basic::{parse_expr_path, parse_mutability},
             bp::{expr_bp, pat_bp},
             entry::P,
@@ -145,6 +145,54 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
 
     // Parse an expression path.
     if let Some(path) = parse_expr_path(p) {
+        if flags.contains(AstExprFlags::ALLOW_BLOCK)
+            && let Some(group) = match_group(GroupDelimiter::Brace).expect(p)
+        {
+            let p2 = &mut p.enter(&group);
+
+            let mut fields = Vec::new();
+
+            loop {
+                let Some(name) = match_ident().expect(p2) else {
+                    break;
+                };
+
+                if match_punct(punct!(',')).expect(p2).is_some() {
+                    fields.push(AstExprField { name, expr: None });
+                    continue;
+                }
+
+                if match_punct(punct!(':')).expect(p2).is_none() {
+                    break;
+                }
+
+                let expr = parse_expr_or_error(p2, AstExprFlags::ALLOW_ALL);
+
+                fields.push(AstExprField {
+                    name,
+                    expr: Some(Box::new(expr)),
+                });
+
+                if match_punct(punct!(',')).expect(p2).is_none() {
+                    break;
+                }
+            }
+
+            let rest = match match_punct_seq(puncts!("..")).expect(p) {
+                Some(sp) => match parse_expr(p, AstExprFlags::ALLOW_ALL) {
+                    Some(exp) => AstStructRest::Base(Box::new(exp)),
+                    None => AstStructRest::Rest(sp),
+                },
+                None => AstStructRest::None,
+            };
+
+            if !match_eos(p2) {
+                p2.stuck().ignore_not_in_loop();
+            }
+
+            return Some(build_expr(AstExprKind::Struct(path, fields, rest), p));
+        }
+
         return Some(build_expr(AstExprKind::Path(path), p));
     }
 
@@ -501,6 +549,9 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
 
             continue 'chaining;
         }
+
+        let mut p = p.to_parse_guard(symbol!("operator"));
+        let p = &mut *p;
 
         // Match punctuation-demarcated infix operations
         type PunctSeqInfixOp = (PunctSeq, InfixBp, AstBinOpKind);

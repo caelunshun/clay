@@ -234,9 +234,8 @@ pub enum AstRangeLimits {
 
 #[derive(Debug, Clone)]
 pub struct AstExprField {
-    pub ident: Ident,
-    pub expr: Box<AstExpr>,
-    pub is_shorthand: bool,
+    pub name: Ident,
+    pub expr: Option<Box<AstExpr>>,
 }
 
 #[derive(Debug, Clone)]

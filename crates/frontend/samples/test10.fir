@@ -22,6 +22,13 @@ pub fn fizz_buzz(limit: u32?) {
         None => 0.. as dyn Iterator<Item = u32>,
     };
 
+    let foo = (
+        Faz,
+        Woo { foo, bar: () },
+        Whee::Bar,
+        Whee::Maz { foo: 1, bar: 2 },
+    );
+
     for i in range {
         let mut special = false;
 
