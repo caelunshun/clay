@@ -1,6 +1,7 @@
 use super::Session;
 use crate::{
     base::syntax::{FilePos, SourceFileOrigin, SourceMap, SourceMapFile, Span},
+    flags::should_print_diagnostic_origins,
     utils::mem::MappedRc,
 };
 use derive_where::derive_where;
@@ -55,11 +56,12 @@ pub struct DiagCtxt {
 impl DiagCtxt {
     #[track_caller]
     pub fn emit<E: EmissionGuarantee>(&self, mut diag: Diag<E>) -> E {
-        #[cfg(debug_assertions)]
-        diag.push_child(LeafDiag::new(
-            Level::Note,
-            format_args!("diagnostic emitted by {}", std::panic::Location::caller()),
-        ));
+        if should_print_diagnostic_origins() {
+            diag.push_child(LeafDiag::new(
+                Level::Note,
+                format_args!("diagnostic emitted by {}", std::panic::Location::caller()),
+            ));
+        }
 
         if diag.is_fatal() {
             self.error_guaranteed.store(true, Relaxed);

@@ -431,7 +431,6 @@ impl IntraItemLowerCtxt<'_> {
             AstTyKind::Tuple(items) => {
                 SpannedTyView::Tuple(self.lower_tys(items)).encode(ast.span, self.tcx)
             }
-            AstTyKind::Option(item) => todo!(),
             AstTyKind::Infer => SpannedTyView::ExplicitInfer.encode(ast.span, self.tcx),
             AstTyKind::Error(error) => SpannedTyView::Error(*error).encode(ast.span, self.tcx),
         }

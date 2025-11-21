@@ -114,7 +114,6 @@ pub enum AstTyKind {
     Reference(Option<Lifetime>, AstOptMutability, Box<AstTy>),
     Trait(AstTraitClauseList),
     Tuple(Vec<AstTy>),
-    Option(Box<AstTy>),
     Infer,
     Error(ErrorGuaranteed),
 }

@@ -214,25 +214,8 @@ pub fn parse_ty_pratt_seed(p: P) -> AstTy {
 }
 
 pub fn parse_ty_pratt_chain(p: P, min_bp: Bp, seed: AstTy) -> AstTy {
-    let mut lhs = seed;
-
-    'chaining: loop {
-        if match_punct(punct!('?'))
-            .maybe_expect(p, ty_bp::POST_TY_OPT.left >= min_bp)
-            .is_some()
-        {
-            lhs = AstTy {
-                span: lhs.span.to(p.prev_span()),
-                kind: AstTyKind::Option(Box::new(lhs)),
-            };
-
-            continue 'chaining;
-        }
-
-        break;
-    }
-
-    lhs
+    _ = (p, min_bp);
+    seed
 }
 
 pub fn parse_return_ty(p: P) -> AstReturnTy {

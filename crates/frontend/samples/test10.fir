@@ -14,7 +14,7 @@ pub struct Waz(pub u32, pub (), pub(crate) ());
 
 pub struct Faz;
 
-pub fn fizz_buzz(limit: u32?) {
+pub fn fizz_buzz(limit: Option<u32>) {
     let mut sb = String::new();
 
     let range = match limit {

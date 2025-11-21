@@ -35,3 +35,17 @@ mod g {
     
     ;
 }
+
+mod h {
+    fn whee() {
+        let foo = 1;
+
+        $
+    }
+
+    fn woo() {
+        let foo = 1
+
+        $
+    }
+}
