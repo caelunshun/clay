@@ -85,7 +85,7 @@ pub enum AstExprKind {
     // Closure(Box<AstClosure>),
     Block(Box<AstBlock>, Option<Lifetime>),
     Assign(Box<AstExpr>, Box<AstExpr>),
-    AssignOp(AstBinOpKind, Box<AstExpr>, Box<AstExpr>),
+    AssignOp(AstAssignOpKind, Box<AstExpr>, Box<AstExpr>),
     Field(Box<AstExpr>, Ident),
     Index(Box<AstExpr>, Box<AstExpr>),
     Range(Option<Box<AstExpr>>, Option<Box<AstExpr>>, AstRangeLimits),
@@ -188,6 +188,30 @@ pub enum AstBinOpKind {
     Ge,
     /// The `>` operator (greater than)
     Gt,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum AstAssignOpKind {
+    /// The `+=` operator (addition)
+    Add,
+    /// The `-=` operator (subtraction)
+    Sub,
+    /// The `*=` operator (multiplication)
+    Mul,
+    /// The `/=` operator (division)
+    Div,
+    /// The `%=` operator (modulus)
+    Rem,
+    /// The `^=` operator (bitwise xor)
+    BitXor,
+    /// The `&=` operator (bitwise and)
+    BitAnd,
+    /// The `|=` operator (bitwise or)
+    BitOr,
+    /// The `<<=` operator (shift left)
+    Shl,
+    /// The `>>=` operator (shift right)
+    Shr,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

@@ -6,9 +6,9 @@ use crate::{
     kw,
     parse::{
         ast::{
-            AstBinOpKind, AstBindingMode, AstBlock, AstBoolLit, AstExpr, AstExprKind, AstFnArg,
-            AstFnDef, AstLit, AstMatchArm, AstOptMutability, AstPat, AstPatKind, AstStmt,
-            AstStmtKind, AstUnOpKind, PunctSeq,
+            AstAssignOpKind, AstBinOpKind, AstBindingMode, AstBlock, AstBoolLit, AstExpr,
+            AstExprKind, AstFnArg, AstFnDef, AstLit, AstMatchArm, AstOptMutability, AstPat,
+            AstPatKind, AstStmt, AstStmtKind, AstUnOpKind, PunctSeq,
             basic::{parse_expr_path, parse_mutability},
             bp::{expr_bp, pat_bp},
             entry::P,
@@ -505,13 +505,18 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
         // Match punctuation-demarcated infix operations
         type PunctSeqInfixOp = (PunctSeq, InfixBp, AstBinOpKind);
 
-        const PUNCT_SEQ_INFIX_OPS: [PunctSeqInfixOp; 3] = [
+        const PUNCT_SEQ_INFIX_COMPUTE_OPS: [PunctSeqInfixOp; 8] = [
             (puncts!("&&"), expr_bp::INFIX_LOGICAL_AND, AstBinOpKind::And),
             (puncts!("||"), expr_bp::INFIX_LOGICAL_OR, AstBinOpKind::Or),
             (puncts!("=="), expr_bp::INFIX_EQ, AstBinOpKind::Eq),
+            (puncts!("!="), expr_bp::INFIX_NEQ, AstBinOpKind::Ne),
+            (puncts!("<="), expr_bp::INFIX_LTE, AstBinOpKind::Le),
+            (puncts!(">="), expr_bp::INFIX_GTE, AstBinOpKind::Ge),
+            (puncts!("<<"), expr_bp::INFIX_BIT_SHL, AstBinOpKind::Shl),
+            (puncts!(">>"), expr_bp::INFIX_BIT_SHR, AstBinOpKind::Shr),
         ];
 
-        for (punct_seq, op_bp, kind) in PUNCT_SEQ_INFIX_OPS {
+        for (punct_seq, op_bp, kind) in PUNCT_SEQ_INFIX_COMPUTE_OPS {
             if let Some(span) = match_punct_seq(punct_seq).maybe_expect(p, op_bp.left >= min_bp) {
                 lhs = AstExpr {
                     span,
@@ -526,17 +531,89 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
             }
         }
 
+        type PunctSeqInfixAssignOp = (PunctSeq, InfixBp, AstAssignOpKind);
+
+        const PUNCT_SEQ_INFIX_ASSIGN_OPS: [PunctSeqInfixAssignOp; 10] = [
+            (
+                puncts!("+="),
+                expr_bp::INFIX_ASSIGN_ADD,
+                AstAssignOpKind::Add,
+            ),
+            (
+                puncts!("-="),
+                expr_bp::INFIX_ASSIGN_SUB,
+                AstAssignOpKind::Sub,
+            ),
+            (
+                puncts!("*="),
+                expr_bp::INFIX_ASSIGN_MUL,
+                AstAssignOpKind::Mul,
+            ),
+            (
+                puncts!("/="),
+                expr_bp::INFIX_ASSIGN_DIV,
+                AstAssignOpKind::Div,
+            ),
+            (
+                puncts!("%="),
+                expr_bp::INFIX_ASSIGN_REM,
+                AstAssignOpKind::Rem,
+            ),
+            (
+                puncts!("^="),
+                expr_bp::INFIX_ASSIGN_BIT_XOR,
+                AstAssignOpKind::BitXor,
+            ),
+            (
+                puncts!("&="),
+                expr_bp::INFIX_ASSIGN_BIT_AND,
+                AstAssignOpKind::BitAnd,
+            ),
+            (
+                puncts!("|="),
+                expr_bp::INFIX_ASSIGN_BIT_OR,
+                AstAssignOpKind::BitOr,
+            ),
+            (
+                puncts!("<<="),
+                expr_bp::INFIX_ASSIGN_SHL,
+                AstAssignOpKind::Shl,
+            ),
+            (
+                puncts!(">>="),
+                expr_bp::INFIX_ASSIGN_SHR,
+                AstAssignOpKind::Shr,
+            ),
+        ];
+
+        for (punct_seq, op_bp, kind) in PUNCT_SEQ_INFIX_ASSIGN_OPS {
+            if let Some(span) = match_punct_seq(punct_seq).maybe_expect(p, op_bp.left >= min_bp) {
+                lhs = AstExpr {
+                    span,
+                    kind: AstExprKind::AssignOp(
+                        kind,
+                        Box::new(lhs),
+                        Box::new(parse_expr_pratt_or_error(p, flags, op_bp.right)),
+                    ),
+                };
+
+                continue 'chaining;
+            }
+        }
+
         type PunctInfixOp = (Punct, InfixBp, AstBinOpKind);
 
-        const PUNCT_INFIX_OPS: [PunctInfixOp; 8] = [
+        const PUNCT_INFIX_OPS: [PunctInfixOp; 10] = [
             (punct!('+'), expr_bp::INFIX_ADD, AstBinOpKind::Add),
             (punct!('-'), expr_bp::INFIX_SUB, AstBinOpKind::Sub),
             (punct!('*'), expr_bp::INFIX_MUL, AstBinOpKind::Mul),
             (punct!('/'), expr_bp::INFIX_DIV, AstBinOpKind::Div),
-            (punct!('%'), expr_bp::INFIX_MOD, AstBinOpKind::Rem),
+            (punct!('%'), expr_bp::INFIX_REM, AstBinOpKind::Rem),
+            (punct!('^'), expr_bp::INFIX_BIT_XOR, AstBinOpKind::BitXor),
             (punct!('&'), expr_bp::INFIX_BIT_AND, AstBinOpKind::BitAnd),
             (punct!('|'), expr_bp::INFIX_BIT_OR, AstBinOpKind::BitOr),
-            (punct!('^'), expr_bp::INFIX_BIT_XOR, AstBinOpKind::BitXor),
+            (punct!('<'), expr_bp::INFIX_LT, AstBinOpKind::Lt),
+            (punct!('>'), expr_bp::INFIX_GT, AstBinOpKind::Gt),
         ];
 
         for (punct, op_bp, kind) in PUNCT_INFIX_OPS {
