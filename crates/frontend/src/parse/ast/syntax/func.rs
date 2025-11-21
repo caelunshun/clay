@@ -41,6 +41,7 @@ pub struct AstStmt {
 #[derive(Debug, Clone)]
 pub enum AstStmtKind {
     Expr(AstExpr),
+    Let(Box<AstPat>, Option<Box<AstExpr>>),
     Item(Box<AstItem>),
 }
 
@@ -56,14 +57,23 @@ pub enum AstExprKind {
     Array(Vec<AstExpr>),
     Call(Box<AstExpr>, Vec<AstExpr>),
     Method(),
+    Paren(Box<AstExpr>),
     Tuple(Vec<AstExpr>),
     Binary(AstBinOpKind, Box<AstExpr>, Box<AstExpr>),
     Unary(AstUnOpKind, Box<AstExpr>),
     Lit(AstLit),
     Cast(Box<AstExpr>, Box<AstTy>),
     Let(Box<AstPat>, Box<AstExpr>, Span),
-    If(Box<AstExpr>, Box<AstBlock>, Option<Box<AstExpr>>),
-    While(Box<AstExpr>, Box<AstBlock>, Option<Lifetime>),
+    If {
+        cond: Box<AstExpr>,
+        truthy: Box<AstBlock>,
+        falsy: Option<Box<AstExpr>>,
+    },
+    While {
+        cond: Box<AstExpr>,
+        block: Box<AstBlock>,
+        label: Option<Lifetime>,
+    },
     ForLoop {
         pat: Box<AstPat>,
         iter: Box<AstExpr>,
@@ -86,6 +96,44 @@ pub enum AstExprKind {
     Continue(Option<Lifetime>),
     Return(Option<Box<AstExpr>>),
     Struct(AstExprPath, Vec<AstExprField>, AstStructRest),
+    Error(ErrorGuaranteed),
+}
+
+impl AstExprKind {
+    pub fn needs_semi(&self) -> bool {
+        match self {
+            AstExprKind::Array(..)
+            | AstExprKind::Call(..)
+            | AstExprKind::Method(..)
+            | AstExprKind::Paren(..)
+            | AstExprKind::Tuple(..)
+            | AstExprKind::Binary(..)
+            | AstExprKind::Unary(..)
+            | AstExprKind::Lit(..)
+            | AstExprKind::Cast(..)
+            | AstExprKind::Let(..)
+            | AstExprKind::Assign(..)
+            | AstExprKind::AssignOp(..)
+            | AstExprKind::Field(..)
+            | AstExprKind::Index(..)
+            | AstExprKind::Range(..)
+            | AstExprKind::Underscore
+            | AstExprKind::Path(..)
+            | AstExprKind::AddrOf(..)
+            | AstExprKind::Break(..)
+            | AstExprKind::Continue(..)
+            | AstExprKind::Return(..)
+            | AstExprKind::Struct(..) => true,
+
+            AstExprKind::If { .. }
+            | AstExprKind::While { .. }
+            | AstExprKind::ForLoop { .. }
+            | AstExprKind::Loop(..)
+            | AstExprKind::Match(..)
+            | AstExprKind::Block(..)
+            | AstExprKind::Error(..) => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

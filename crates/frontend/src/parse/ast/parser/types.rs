@@ -9,7 +9,7 @@ use crate::{
             AstGenericParam, AstGenericParamKind, AstGenericParamList, AstNamedSpec, AstReturnTy,
             AstTraitClause, AstTraitClauseList, AstTy, AstTyKind,
             basic::{parse_mutability, parse_simple_path},
-            bp,
+            bp::ty_bp,
             entry::P,
             utils::{
                 match_group, match_kw, match_lifetime, match_punct, match_punct_seq,
@@ -189,7 +189,7 @@ pub fn parse_ty_pratt_seed(p: P) -> AstTy {
             AstTyKind::Reference(
                 match_lifetime().expect(p),
                 parse_mutability(p),
-                Box::new(parse_ty_pratt(p, bp::PRE_TY_REF.right)),
+                Box::new(parse_ty_pratt(p, ty_bp::PRE_TY_REF.right)),
             ),
             p,
         );
@@ -218,7 +218,7 @@ pub fn parse_ty_pratt_seed(p: P) -> AstTy {
 pub fn parse_ty_pratt_chain(p: P, min_bp: Bp, mut seed: AstTy) -> AstTy {
     'chaining: loop {
         if match_punct(punct!('?'))
-            .maybe_expect(p, bp::POST_TY_OPT.left >= min_bp)
+            .maybe_expect(p, ty_bp::POST_TY_OPT.left >= min_bp)
             .is_some()
         {
             seed = AstTy {

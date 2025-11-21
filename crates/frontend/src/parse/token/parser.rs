@@ -150,14 +150,12 @@ fn parse_group(p: P, group_start: Span, delimiter: GroupDelimiter) -> TokenGroup
         // Parse identifiers (and prefixed string literals)
         if let Some(ident) = parse_ident(p, builder.glued_num().is_none()) {
             if let Some(glued) = builder.glued_num() {
-                // Recovery strategy: ignore
-                let _ = p.stuck_custom(
-                    Diag::span_err(
-                        ident.span,
-                        "identifier cannot come immediately after numeric literal",
-                    )
-                    .secondary(glued.span, "numeric literal here"),
-                );
+                Diag::span_err(
+                    ident.span,
+                    "identifier cannot come immediately after numeric literal",
+                )
+                .secondary(glued.span, "numeric literal here")
+                .emit();
             }
 
             // Try to parse a string literal
@@ -179,8 +177,10 @@ fn parse_group(p: P, group_start: Span, delimiter: GroupDelimiter) -> TokenGroup
                 continue;
             } else {
                 // Has to be a string :(
-                // Recovery strategy: parse the expected string literal as a regular token.
-                let _ = p.stuck();
+                if p.stuck().should_break() {
+                    break;
+                }
+
                 continue;
             }
         }
@@ -290,15 +290,12 @@ fn parse_string_lit(
         };
 
         if prefix.raw {
-            // Recovery strategy: continue trying to parse this string as UTF-8
-            let _ = p.stuck_custom(
-                Diag::span_err(prefix.span, "unknown string literal prefix").child(
-                    LeafDiag::span_note(
-                        prefix.span.truncate_left(1),
-                        "`@`, the raw identifier indicator, is not expected in any string prefix",
-                    ),
-                ),
-            );
+            Diag::span_err(prefix.span, "unknown string literal prefix")
+                .child(LeafDiag::span_note(
+                    prefix.span.truncate_left(1),
+                    "`@`, the raw identifier indicator, is not expected in any string prefix",
+                ))
+                .emit();
 
             break 'prefix (StrLitKind::Utf8Slice, false);
         }
@@ -318,11 +315,11 @@ fn parse_string_lit(
             .into_iter()
             .find(|v| v.prefix() == prefix_sym)
         else {
-            // Recovery strategy: continue trying to parse this string as UTF-8
-            let _ = p.stuck_custom(Diag::span_err(
+            Diag::span_err(
                 prefix.span,
                 format_args!("unknown string literal prefix `{prefix_sym}`"),
-            ));
+            )
+            .emit();
 
             break 'prefix (StrLitKind::Utf8Slice, false);
         };
@@ -331,11 +328,11 @@ fn parse_string_lit(
     };
 
     if pounds > 0 && !is_raw {
-        // Recovery strategy: try parsing this string as if it didn't have pounds.
-        let _ = p.stuck_custom(Diag::span_err(
+        Diag::span_err(
             prefix_start.until(quote_start),
             "cannot surround a string literal with `#`s when the string is not raw",
-        ));
+        )
+        .emit();
 
         pounds = 0;
     }
@@ -385,8 +382,7 @@ fn parse_string_lit(
             continue;
         }
 
-        // Recovery strategy: parse this unexpected character (EOF, probably) as a token.
-        let _ = p.stuck();
+        p.stuck().ignore_about_to_break();
 
         break;
     }
@@ -413,10 +409,11 @@ fn parse_char_lit_or_lifetime(p: P) -> Option<TokenTree> {
         // Match closing quote
         if p.expect_covert(char_count == 1, symbol!("`'`"), |c| match_ch(c, '\'')) {
             if char_count != 1 {
-                _ = p.stuck_custom(Diag::span_err(
+                Diag::span_err(
                     start.to(p.prev_span()),
                     "expected single character in character literal",
-                ));
+                )
+                .emit();
             }
 
             return Some(
@@ -459,17 +456,15 @@ fn parse_char_lit_or_lifetime(p: P) -> Option<TokenTree> {
 
         // Otherwise, we've finished our lifetime.
         if !accum_no_escapes {
-            _ = p.stuck_custom(Diag::span_err(
-                start.to(p.prev_span()),
-                "lifetime cannot contain escapes",
-            ));
+            Diag::span_err(start.to(p.prev_span()), "lifetime cannot contain escapes").emit();
         }
 
         if !accum.chars().next().unwrap().is_xid_start() {
-            _ = p.stuck_custom(Diag::span_err(
+            Diag::span_err(
                 start.to(p.prev_span()),
                 "lifetime cannot start with that character",
-            ));
+            )
+            .emit();
         }
 
         return Some(
@@ -513,8 +508,7 @@ fn parse_char_escape(p: P) -> Option<char> {
                 c.eat().filter(|c| c.is_ascii_hexdigit())?,
             ])
         }) else {
-            // Recovery strategy: parse the unexpected hexcode as regular string characters.
-            let _ = p.stuck();
+            p.stuck().ignore_not_in_loop();
 
             return None;
         };
@@ -525,12 +519,11 @@ fn parse_char_escape(p: P) -> Option<char> {
         let code = u8::from_str_radix(hex_seq, 16).unwrap();
 
         if code > 0x7F {
-            // Recovery strategy: pretend the code was valid but substitute it with a placeholder
-            // character.
-            let _ = p.stuck_custom(Diag::span_err(
+            Diag::span_err(
                 start.to(p.prev_span()),
                 "ASCII escape code must be at most `\\x7F`",
-            ));
+            )
+            .emit();
 
             return Some('?');
         }
@@ -543,8 +536,7 @@ fn parse_char_escape(p: P) -> Option<char> {
         todo!()
     }
 
-    // Recovery strategy: parse the unexpected escape as a regular string character.
-    let _ = p.stuck();
+    p.stuck().ignore_not_in_loop();
 
     None
 }
@@ -677,7 +669,7 @@ fn parse_num_lit(p: P, builder: &mut GroupBuilder) -> bool {
             || p.expect(symbol!("`e`"), |c| match_ch(c, 'e'))
         {
             // Match the sign.
-            _ = p.expect(symbol!("`+`"), |c| match_ch(c, '+'))
+            p.expect(symbol!("`+`"), |c| match_ch(c, '+'))
                 || p.expect(symbol!("`-`"), |c| match_ch(c, '-'));
 
             // Match the exponential portion.

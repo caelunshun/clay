@@ -36,6 +36,7 @@ pub fn parse_mod_contents(p: P) -> AstItemModuleContents {
                 kw!("enum"),
                 kw!("use"),
                 kw!("mod"),
+                kw!("fn"),
             ]
             .into_iter()
             .any(|k| match_kw(k).consume(c).is_some())
