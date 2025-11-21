@@ -281,5 +281,5 @@ pub struct AstMatchArm {
     pub span: Span,
     pub pat: Box<AstPat>,
     pub guard: Option<Box<AstExpr>>,
-    pub body: Option<Box<AstExpr>>,
+    pub body: Box<AstExpr>,
 }

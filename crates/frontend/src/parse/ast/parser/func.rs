@@ -7,8 +7,8 @@ use crate::{
     parse::{
         ast::{
             AstBinOpKind, AstBindingMode, AstBlock, AstBoolLit, AstExpr, AstExprKind, AstFnArg,
-            AstFnDef, AstLit, AstOptMutability, AstPat, AstPatKind, AstStmt, AstStmtKind,
-            AstUnOpKind, PunctSeq,
+            AstFnDef, AstLit, AstMatchArm, AstOptMutability, AstPat, AstPatKind, AstStmt,
+            AstStmtKind, AstUnOpKind, PunctSeq,
             basic::{parse_expr_path, parse_mutability},
             bp::{expr_bp, pat_bp},
             entry::P,
@@ -221,27 +221,27 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
         }
     }
 
-    // // Parse a `match` expression
-    // if match_kw(kw!("match")).expect(p).is_some() {
-    //     let Some(scrutinee) = parse_expr(p, AstExprFlags::IN_SCRUTINEE) else {
-    //         return Some(build_expr(AstExprKind::Error(p.stuck().error()), p));
-    //     };
-    //
-    //     let Some(braced) = match_group(GroupDelimiter::Brace).expect(p) else {
-    //         return Some(build_expr(AstExprKind::Error(p.stuck().error()), p));
-    //     };
-    //
-    //     let arms = parse_delimited_until_terminator(
-    //         &mut p.enter(&braced),
-    //         &mut (),
-    //         |p, _| parse_match_arm(p),
-    //         |p, _| match_punct(punct!(',')).expect(p).is_some(),
-    //         |p, _| match_eos(p),
-    //     )
-    //     .elems;
-    //
-    //     return Some(build_expr(AstExprKind::Match(Box::new(scrutinee), arms), p));
-    // }
+    // Parse a `match` expression
+    if match_kw(kw!("match")).expect(p).is_some() {
+        let Some(scrutinee) = parse_expr(p, AstExprFlags::IN_SCRUTINEE) else {
+            return Some(build_expr(AstExprKind::Error(p.stuck().error()), p));
+        };
+
+        let Some(braced) = match_group(GroupDelimiter::Brace).expect(p) else {
+            return Some(build_expr(AstExprKind::Error(p.stuck().error()), p));
+        };
+
+        let arms = parse_delimited_until_terminator(
+            &mut p.enter(&braced),
+            &mut (),
+            |p, _| parse_match_arm(p),
+            |p, _| match_punct(punct!(',')).expect(p).is_some(),
+            |p, _| match_eos(p),
+        )
+        .elems;
+
+        return Some(build_expr(AstExprKind::Match(Box::new(scrutinee), arms), p));
+    }
 
     // Parse a `return` expression
     if match_kw(kw!("return")).expect(p).is_some() {
@@ -387,6 +387,33 @@ pub fn parse_expr_pratt_block_seed(
         );
     }
 
+    // Parse a `for` expression
+    if match_kw(kw!("for")).expect(p).is_some() {
+        let pat = parse_pat(p);
+
+        if match_kw(kw!("in")).expect(p).is_none() {
+            return build_expr(AstExprKind::Error(p.stuck().error()), p);
+        }
+
+        let Some(iter) = parse_expr(p, AstExprFlags::IN_SCRUTINEE) else {
+            return build_expr(AstExprKind::Error(p.stuck().error()), p);
+        };
+
+        let Some(block) = parse_brace_block(p) else {
+            return build_expr(AstExprKind::Error(p.stuck().error()), p);
+        };
+
+        return build_expr(
+            AstExprKind::ForLoop {
+                pat: Box::new(pat),
+                iter: Box::new(iter),
+                body: Box::new(block),
+                label,
+            },
+            p,
+        );
+    }
+
     // Parse a `loop` expression
     if match_kw(kw!("loop")).expect(p).is_some() {
         let Some(block) = parse_brace_block(p) else {
@@ -397,6 +424,29 @@ pub fn parse_expr_pratt_block_seed(
     }
 
     None
+}
+
+pub fn parse_match_arm(p: P) -> AstMatchArm {
+    let start = p.next_span();
+
+    let pat = parse_pat(p);
+
+    let guard = match_kw(kw!("if"))
+        .expect(p)
+        .map(|_| Box::new(parse_expr_or_error(p, AstExprFlags::IN_SCRUTINEE)));
+
+    if match_punct_seq(puncts!("=>")).expect(p).is_none() {
+        p.stuck().ignore_not_in_loop();
+    }
+
+    let expr = parse_expr_or_error(p, AstExprFlags::ALLOW_ALL);
+
+    AstMatchArm {
+        span: start.to(p.prev_span()),
+        pat: Box::new(pat),
+        guard,
+        body: Box::new(expr),
+    }
 }
 
 pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstExpr) -> AstExpr {
@@ -452,23 +502,6 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
             continue 'chaining;
         }
 
-        // Match infix assignment
-        if let Some(punct) =
-            match_punct(punct!('=')).maybe_expect(p, expr_bp::INFIX_ASSIGN.left >= min_bp)
-        {
-            lhs = AstExpr {
-                span: punct.span,
-                kind: AstExprKind::Assign(
-                    Box::new(lhs),
-                    Box::new(parse_expr_pratt_or_error(
-                        p,
-                        flags,
-                        expr_bp::INFIX_ASSIGN.right,
-                    )),
-                ),
-            };
-        }
-
         // Match punctuation-demarcated infix operations
         type PunctSeqInfixOp = (PunctSeq, InfixBp, AstBinOpKind);
 
@@ -519,6 +552,23 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
 
                 continue 'chaining;
             }
+        }
+
+        // Match infix assignment
+        if let Some(punct) =
+            match_punct(punct!('=')).maybe_expect(p, expr_bp::INFIX_ASSIGN.left >= min_bp)
+        {
+            lhs = AstExpr {
+                span: punct.span,
+                kind: AstExprKind::Assign(
+                    Box::new(lhs),
+                    Box::new(parse_expr_pratt_or_error(
+                        p,
+                        flags,
+                        expr_bp::INFIX_ASSIGN.right,
+                    )),
+                ),
+            };
         }
 
         break;
