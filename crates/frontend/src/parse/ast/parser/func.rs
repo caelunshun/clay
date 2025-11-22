@@ -1,16 +1,17 @@
 use crate::{
     base::{
-        ErrorGuaranteed,
-        syntax::{Bp, InfixBp, Matcher, Span},
+        ErrorGuaranteed, LeafDiag,
+        syntax::{Bp, HasSpan as _, InfixBp, Matcher, Span},
     },
     kw,
     parse::{
         ast::{
             AstAssignOpKind, AstBinOpKind, AstBindingMode, AstBlock, AstBoolLit, AstExpr,
             AstExprField, AstExprKind, AstFnArg, AstFnDef, AstLit, AstMatchArm, AstOptMutability,
-            AstPat, AstPatKind, AstStmt, AstStmtKind, AstStructRest, AstUnOpKind, PunctSeq,
+            AstPat, AstPatField, AstPatKind, AstPatStructRest, AstRangeLimits, AstStmt,
+            AstStmtKind, AstStructRest, AstUnOpKind, PunctSeq,
             basic::{parse_expr_path, parse_mutability},
-            bp::{expr_bp, pat_bp},
+            bp::expr_bp,
             entry::P,
             types::{parse_generic_param_list, parse_return_ty, parse_ty},
             utils::{
@@ -196,40 +197,9 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
         return Some(build_expr(AstExprKind::Path(path), p));
     }
 
-    // Parse a boolean literal.
-    if match_kw(kw!("true")).expect(p).is_some() {
-        return Some(build_expr(
-            AstExprKind::Lit(AstLit::Bool(AstBoolLit {
-                span: seed_start,
-                value: true,
-            })),
-            p,
-        ));
-    }
-
-    if match_kw(kw!("false")).expect(p).is_some() {
-        return Some(build_expr(
-            AstExprKind::Lit(AstLit::Bool(AstBoolLit {
-                span: seed_start,
-                value: false,
-            })),
-            p,
-        ));
-    }
-
-    // Parse a string literal.
-    if let Some(lit) = match_str_lit().expect(p) {
-        return Some(build_expr(AstExprKind::Lit(AstLit::String(lit)), p));
-    }
-
-    // Parse a character literal.
-    if let Some(lit) = match_char_lit().expect(p) {
-        return Some(build_expr(AstExprKind::Lit(AstLit::Char(lit)), p));
-    }
-
-    // Parse a numeric literal.
-    if let Some(lit) = match_num_lit().expect(p) {
-        return Some(build_expr(AstExprKind::Lit(AstLit::Number(lit)), p));
+    // Parse a literal
+    if let Some(lit) = parse_expr_literal_as_expr(p) {
+        return Some(lit);
     }
 
     // Parse an array.
@@ -326,9 +296,6 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
             return Some(build_expr(AstExprKind::Unary(op_kind, Box::new(lhs)), p));
         }
     }
-
-    // Parse a constructor expression
-    // TODO
 
     None
 }
@@ -474,6 +441,52 @@ pub fn parse_expr_pratt_block_seed(
     None
 }
 
+pub fn parse_expr_literal_as_expr(p: P) -> Option<AstExpr> {
+    parse_expr_literal(p).map(|lit| AstExpr {
+        span: lit.span(),
+        kind: AstExprKind::Lit(lit),
+    })
+}
+
+pub fn parse_expr_literal(p: P) -> Option<AstLit> {
+    let mut p = p.to_parse_guard(symbol!("literal expression"));
+    let p = &mut *p;
+
+    let start = p.next_span();
+
+    // Parse a boolean literal.
+    if match_kw(kw!("true")).expect(p).is_some() {
+        return Some(AstLit::Bool(AstBoolLit {
+            span: start,
+            value: true,
+        }));
+    }
+
+    if match_kw(kw!("false")).expect(p).is_some() {
+        return Some(AstLit::Bool(AstBoolLit {
+            span: start,
+            value: false,
+        }));
+    }
+
+    // Parse a string literal.
+    if let Some(lit) = match_str_lit().expect(p) {
+        return Some(AstLit::String(lit));
+    }
+
+    // Parse a character literal.
+    if let Some(lit) = match_char_lit().expect(p) {
+        return Some(AstLit::Char(lit));
+    }
+
+    // Parse a numeric literal.
+    if let Some(lit) = match_num_lit().expect(p) {
+        return Some(AstLit::Number(lit));
+    }
+
+    None
+}
+
 pub fn parse_match_arm(p: P) -> AstMatchArm {
     let start = p.next_span();
 
@@ -549,6 +562,9 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
 
             continue 'chaining;
         }
+
+        // Parse range expressions
+        // TODO
 
         let mut p = p.to_parse_guard(symbol!("operator"));
         let p = &mut *p;
@@ -705,6 +721,18 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
     lhs
 }
 
+pub fn parse_expr_range_limits(p: P) -> Option<AstRangeLimits> {
+    if match_punct_seq(puncts!("..=")).expect(p).is_some() {
+        return Some(AstRangeLimits::Closed);
+    }
+
+    if match_punct_seq(puncts!("..")).expect(p).is_some() {
+        return Some(AstRangeLimits::HalfOpen);
+    }
+
+    None
+}
+
 // === Block === //
 
 fn parse_brace_block(p: P) -> Option<AstBlock> {
@@ -803,28 +831,186 @@ fn parse_block(p: P) -> AstBlock {
 // === Patterns === //
 
 pub fn parse_pat(p: P) -> AstPat {
-    parse_pat_pratt(p, Bp::MIN)
+    _ = match_punct(punct!('|')).expect(p);
+
+    parse_pat_no_top_alt(p)
 }
 
-pub fn parse_pat_pratt(p: P, min_bp: Bp) -> AstPat {
-    let seed = parse_pat_pratt_seed(p);
+pub fn parse_pat_no_top_alt(p: P) -> AstPat {
+    let start = p.next_span();
 
-    parse_pat_pratt_chain(p, min_bp, seed)
+    let mut alts = Vec::new();
+
+    loop {
+        alts.push(parse_pat_single_arm(p));
+
+        if match_punct(punct!('|')).expect(p).is_none() {
+            break;
+        }
+    }
+
+    if alts.len() == 1 {
+        alts.into_iter().next().unwrap()
+    } else {
+        AstPat {
+            span: start.to(p.prev_span()),
+            kind: AstPatKind::Or(alts),
+        }
+    }
 }
 
-pub fn parse_pat_pratt_seed(p: P) -> AstPat {
+pub fn parse_pat_single_arm(p: P) -> AstPat {
     let seed_start = p.next_span();
     let build_pat = move |kind: AstPatKind, p: P| AstPat {
         span: seed_start.to(p.prev_span()),
         kind,
     };
 
+    // Parse wildcards
+    if match_kw(kw!("_")).expect(p).is_some() {
+        return build_pat(AstPatKind::Wild, p);
+    }
+
+    // Parse tuples
+    if let Some(group) = match_group(GroupDelimiter::Paren).expect(p) {
+        return match parse_comma_group(&mut p.enter(&group), parse_pat).into_singleton() {
+            Ok(singleton) => build_pat(AstPatKind::Paren(Box::new(singleton)), p),
+            Err(elems) => build_pat(AstPatKind::Tuple(elems), p),
+        };
+    }
+
+    // Parse slices
+    if let Some(group) = match_group(GroupDelimiter::Bracket).expect(p) {
+        return build_pat(
+            AstPatKind::Slice(parse_comma_group(&mut p.enter(&group), parse_pat).elems),
+            p,
+        );
+    }
+
+    // Parse references
+    if match_punct(punct!('&')).expect(p).is_some() {
+        let muta = parse_mutability(p);
+
+        return build_pat(AstPatKind::Ref(muta, Box::new(parse_pat_single_arm(p))), p);
+    }
+
+    // Parse literal variants
+    if let Some(lit) = parse_expr_literal_as_expr(p) {
+        if let Some(range) = parse_expr_range_limits(p) {
+            return build_pat(
+                AstPatKind::Range(
+                    Some(Box::new(lit)),
+                    parse_pat_lit_expr(p).map(Box::new),
+                    range,
+                ),
+                p,
+            );
+        }
+
+        return build_pat(AstPatKind::Lit(Box::new(lit)), p);
+    }
+
+    // Parse identifier variants
     let binding_mode = parse_binding_mode(p);
 
     if let Some(path) = parse_expr_path(p) {
         let and_bind = match_punct(punct!('@'))
             .expect(p)
-            .map(|_| Box::new(parse_pat_pratt(p, pat_bp::PRE_AT.right)));
+            .map(|_| Box::new(parse_pat_single_arm(p)));
+
+        if and_bind.is_none() {
+            let hint_muta_prefix = || {
+                LeafDiag::span_note(
+                    binding_mode.span(),
+                    "mutability prefix not allowed in front of match structures",
+                )
+            };
+
+            // Parse tuple struct pattern
+            if let Some(group) = match_group(GroupDelimiter::Paren).expect_or_hint(
+                p,
+                !binding_mode.was_specified(),
+                |_, _| hint_muta_prefix(),
+            ) {
+                return build_pat(
+                    AstPatKind::PathAndParen(
+                        path,
+                        parse_comma_group(&mut p.enter(&group), parse_pat).elems,
+                    ),
+                    p,
+                );
+            }
+
+            // Parse braced struct pattern
+            if let Some(group) = match_group(GroupDelimiter::Brace).expect_or_hint(
+                p,
+                !binding_mode.was_specified(),
+                |_, _| hint_muta_prefix(),
+            ) {
+                let p2 = &mut p.enter(&group);
+
+                let mut fields = Vec::new();
+
+                loop {
+                    let start = p.next_span();
+
+                    let Some(name) = match_ident().expect(p2) else {
+                        break;
+                    };
+
+                    if match_punct(punct!(',')).expect(p2).is_some() {
+                        fields.push(AstPatField {
+                            span: start.to(p.prev_span()),
+                            name,
+                            pat: None,
+                        });
+                        continue;
+                    }
+
+                    if match_punct(punct!(':')).expect(p2).is_none() {
+                        break;
+                    }
+
+                    let expr = parse_pat(p2);
+
+                    fields.push(AstPatField {
+                        span: start.to(p.prev_span()),
+                        name,
+                        pat: Some(Box::new(expr)),
+                    });
+
+                    if match_punct(punct!(',')).expect(p2).is_none() {
+                        break;
+                    }
+                }
+
+                let rest = match match_punct_seq(puncts!("..")).expect(p) {
+                    Some(sp) => AstPatStructRest::Rest(sp),
+                    None => AstPatStructRest::None,
+                };
+
+                if !match_eos(p2) {
+                    p2.stuck().ignore_not_in_loop();
+                }
+
+                return build_pat(AstPatKind::PathAndBrace(path, fields, rest), p);
+            }
+
+            // Parse range pattern
+            if let Some(range) = parse_expr_range_limits(p) {
+                return build_pat(
+                    AstPatKind::Range(
+                        Some(Box::new(AstExpr {
+                            span: path.span,
+                            kind: AstExprKind::Path(path),
+                        })),
+                        parse_pat_lit_expr(p).map(Box::new),
+                        range,
+                    ),
+                    p,
+                );
+            }
+        }
 
         return build_pat(
             AstPatKind::Path {
@@ -834,6 +1020,10 @@ pub fn parse_pat_pratt_seed(p: P) -> AstPat {
             },
             p,
         );
+    }
+
+    if binding_mode.was_specified() {
+        return build_pat(AstPatKind::Error(p.stuck().error()), p);
     }
 
     build_pat(AstPatKind::Error(p.stuck().error()), p)
@@ -886,8 +1076,17 @@ pub fn parse_binding_mode(p: P) -> AstBindingMode {
     }
 }
 
-pub fn parse_pat_pratt_chain(p: P, min_bp: Bp, seed: AstPat) -> AstPat {
-    let mut lhs = seed;
+pub fn parse_pat_lit_expr(p: P) -> Option<AstExpr> {
+    if let Some(lit) = parse_expr_literal_as_expr(p) {
+        return Some(lit);
+    }
 
-    lhs
+    if let Some(path) = parse_expr_path(p) {
+        return Some(AstExpr {
+            span: path.span,
+            kind: AstExprKind::Path(path),
+        });
+    }
+
+    None
 }

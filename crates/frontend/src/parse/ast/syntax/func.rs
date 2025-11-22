@@ -1,5 +1,8 @@
 use crate::{
-    base::{ErrorGuaranteed, syntax::Span},
+    base::{
+        ErrorGuaranteed,
+        syntax::{HasSpan, Span},
+    },
     parse::{
         ast::{AstExprPath, AstGenericParamList, AstItem, AstOptMutability, AstReturnTy, AstTy},
         token::{Ident, Lifetime, TokenCharLit, TokenNumLit, TokenStrLit},
@@ -144,6 +147,17 @@ pub enum AstLit {
     Bool(AstBoolLit),
 }
 
+impl HasSpan for AstLit {
+    fn span(&self) -> Span {
+        match self {
+            AstLit::Number(v) => v.span,
+            AstLit::Char(v) => v.span,
+            AstLit::String(v) => v.span,
+            AstLit::Bool(v) => v.span,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct AstBoolLit {
     pub span: Span,
@@ -268,8 +282,13 @@ pub enum AstPatKind {
     PathAndParen(AstExprPath, Vec<AstPat>),
     Or(Vec<AstPat>),
     Tuple(Vec<AstPat>),
+    Ref(AstOptMutability, Box<AstPat>),
+    Slice(Vec<AstPat>),
+    Rest,
+    Paren(Box<AstPat>),
+    Range(Option<Box<AstExpr>>, Option<Box<AstExpr>>, AstRangeLimits),
+    Lit(Box<AstExpr>),
     Error(ErrorGuaranteed),
-    // TODO
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -284,18 +303,26 @@ impl AstBindingMode {
     }
 }
 
+impl HasSpan for AstBindingMode {
+    fn span(&self) -> Span {
+        match (self.by_ref.as_explicit(), self.local_muta.as_explicit()) {
+            (Some(v), None) | (None, Some(v)) => v.span(),
+            (Some(lhs), Some(rhs)) => lhs.span().to(rhs.span()),
+            (None, None) => Span::DUMMY,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AstPatField {
     pub span: Span,
     pub name: Ident,
-    pub pat: Box<AstPat>,
-    pub is_shorthand: bool,
+    pub pat: Option<Box<AstPat>>,
 }
 
 #[derive(Debug, Copy, Clone)]
 pub enum AstPatStructRest {
     Rest(Span),
-    Recovered(ErrorGuaranteed),
     None,
 }
 

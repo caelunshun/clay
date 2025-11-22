@@ -172,6 +172,7 @@ define_punct_seqs! {
     AssignRem = '%' '=',
     AssignSub = '-' '=',
     BiDots = '.' '.',
+    DotDotEq = '.' '.' '=',
     Geq = '>' '=',
     Leq = '<' '=',
     LogicalAnd = '&' '&',

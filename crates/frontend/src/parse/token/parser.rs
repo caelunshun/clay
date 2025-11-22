@@ -148,7 +148,12 @@ fn parse_group(p: P, group_start: Span, delimiter: GroupDelimiter) -> TokenGroup
         }
 
         // Parse identifiers (and prefixed string literals)
-        if let Some(ident) = parse_ident(p, builder.glued_num().is_none()) {
+        if let Some(token) = parse_ident(p, builder.glued_num().is_none()) {
+            let TokenTree::Ident(ident) = token else {
+                builder.push(token);
+                continue;
+            };
+
             if let Some(glued) = builder.glued_num() {
                 Diag::span_err(
                     ident.span,
@@ -236,7 +241,7 @@ fn parse_group(p: P, group_start: Span, delimiter: GroupDelimiter) -> TokenGroup
     }
 }
 
-fn parse_ident(p: P, visible: bool) -> Option<Ident> {
+fn parse_ident(p: P, visible: bool) -> Option<TokenTree> {
     let start = p.next_span();
 
     let first_ch = p.expect_covert(visible, symbol!("identifier"), match_ident_first_char)?;
@@ -256,11 +261,25 @@ fn parse_ident(p: P, visible: bool) -> Option<Ident> {
         accum.push(ch);
     }
 
-    Some(Ident {
-        span: start.to(p.prev_span()),
-        text: Symbol::new(&accum),
-        raw,
-    })
+    if raw && accum.is_empty() {
+        return Some(
+            TokenPunct {
+                span: start,
+                ch: punct!('@'),
+                glued: false,
+            }
+            .into(),
+        );
+    }
+
+    Some(
+        Ident {
+            span: start.to(p.prev_span()),
+            text: Symbol::new(&accum),
+            raw,
+        }
+        .into(),
+    )
 }
 
 fn match_ident_first_char(c: C) -> Option<char> {
