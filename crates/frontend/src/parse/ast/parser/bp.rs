@@ -105,6 +105,12 @@ pub mod expr_bp {
     // `exp >>= exp`
     pub const INFIX_ASSIGN_SHR: InfixBp = InfixBp::new_right(1);
 
+    // `.. (exp)?`
+    pub const PRE_RANGE: PrefixBp = PrefixBp::new(1);
+
+    // `exp .. (exp)?`
+    pub const INFIX_RANGE: InfixBp = InfixBp::new_right(1);
+
     // `exp[exp]`
     pub const POST_BRACKET: PostfixBp = PostfixBp::new(11);
 

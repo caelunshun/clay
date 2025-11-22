@@ -1,15 +1,16 @@
 use crate::{
     base::{
-        ErrorGuaranteed, LeafDiag,
+        Diag, ErrorGuaranteed, LeafDiag,
         syntax::{Bp, HasSpan as _, InfixBp, Matcher, Span},
     },
     kw,
     parse::{
         ast::{
             AstAssignOpKind, AstBinOpKind, AstBindingMode, AstBlock, AstBoolLit, AstExpr,
-            AstExprField, AstExprKind, AstFnArg, AstFnDef, AstLit, AstMatchArm, AstOptMutability,
-            AstPat, AstPatField, AstPatKind, AstPatStructRest, AstRangeLimits, AstStmt,
-            AstStmtKind, AstStructRest, AstUnOpKind, PunctSeq,
+            AstExprField, AstExprKind, AstFnArg, AstFnDef, AstGenericParam, AstGenericParamKind,
+            AstLit, AstMatchArm, AstOptMutability, AstPat, AstPatField, AstPatKind,
+            AstPatStructRest, AstRangeLimits, AstStmt, AstStmtKind, AstStructRest, AstTy,
+            AstTyKind, AstUnOpKind, PunctSeq,
             basic::{parse_expr_path, parse_mutability},
             bp::expr_bp,
             entry::P,
@@ -144,6 +145,11 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
         kind,
     };
 
+    // Parse an `_` expression (useful for pattern-like expressions such as `(foo, _) = (1, 2);`).
+    if match_kw(kw!("_")).expect(p).is_some() {
+        return Some(build_expr(AstExprKind::Underscore, p));
+    }
+
     // Parse an expression path.
     if let Some(path) = parse_expr_path(p) {
         if flags.contains(AstExprFlags::ALLOW_BLOCK)
@@ -179,7 +185,7 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
                 }
             }
 
-            let rest = match match_punct_seq(puncts!("..")).expect(p) {
+            let rest = match match_punct_seq(puncts!("..")).expect(p2) {
                 Some(sp) => match parse_expr(p, AstExprFlags::ALLOW_ALL) {
                     Some(exp) => AstStructRest::Base(Box::new(exp)),
                     None => AstStructRest::Rest(sp),
@@ -228,7 +234,7 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
 
     // Parse a labelled block-like
     if flags.contains(AstExprFlags::ALLOW_BLOCK) {
-        let label = match_lifetime().expect_to_parse(p, symbol!("block label"));
+        let label = parse_label(p);
 
         if let Some(block) = parse_expr_pratt_block_seed(p, seed_start, label) {
             return Some(block);
@@ -282,6 +288,17 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
         let expr = parse_expr_pratt(p, flags, expr_bp::PRE_BREAK.right);
 
         return Some(build_expr(AstExprKind::Break(label, expr.map(Box::new)), p));
+    }
+
+    // Match prefix range expressions
+
+    if let Some((span, range)) = parse_expr_range_limits(p) {
+        let rhs = parse_expr_pratt(p, flags, expr_bp::PRE_RANGE.right);
+
+        return Some(AstExpr {
+            span,
+            kind: AstExprKind::Range(None, rhs.map(Box::new), range),
+        });
     }
 
     // Parse unary operations
@@ -487,6 +504,16 @@ pub fn parse_expr_literal(p: P) -> Option<AstLit> {
     None
 }
 
+pub fn parse_label(p: P) -> Option<Lifetime> {
+    let lt = match_lifetime().expect_to_parse(p, symbol!("block label"))?;
+
+    if match_punct(punct!(':')).expect(p).is_none() {
+        p.stuck().ignore_not_in_loop();
+    }
+
+    Some(lt)
+}
+
 pub fn parse_match_arm(p: P) -> AstMatchArm {
     let start = p.next_span();
 
@@ -515,6 +542,20 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
 
     // Parse postfix and infix operations that bind tighter than our caller.
     'chaining: loop {
+        // Match infix range expressions
+        if expr_bp::INFIX_RANGE.left >= min_bp
+            && let Some((span, range)) = parse_expr_range_limits(p)
+        {
+            let rhs = parse_expr_pratt(p, flags, expr_bp::INFIX_RANGE.right);
+
+            lhs = AstExpr {
+                span,
+                kind: AstExprKind::Range(Some(Box::new(lhs)), rhs.map(Box::new), range),
+            };
+
+            continue 'chaining;
+        }
+
         // Match indexing
         if let Some(group) = match_group(GroupDelimiter::Bracket)
             .maybe_expect(p, expr_bp::POST_BRACKET.left >= min_bp)
@@ -549,11 +590,80 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
         if let Some(dot) =
             match_punct(punct!('.')).maybe_expect(p, expr_bp::POST_DOT.left >= min_bp)
         {
+            if match_kw(kw!("as")).expect(p).is_some() {
+                if match_punct_seq(puncts!("::")).expect(p).is_none() {
+                    p.stuck().ignore_about_to_break();
+
+                    break 'chaining;
+                }
+
+                let Some(generics) = parse_generic_param_list(p) else {
+                    p.stuck().ignore_about_to_break();
+
+                    break 'chaining;
+                };
+
+                let ty = if let [
+                    AstGenericParam {
+                        kind: AstGenericParamKind::PositionalTy(ty),
+                        ..
+                    },
+                ] = generics.list.as_slice()
+                {
+                    ty.clone()
+                } else {
+                    AstTy {
+                        span: generics.span,
+                        kind: AstTyKind::Error(
+                            Diag::span_err(generics.span, "expected a single type").emit(),
+                        ),
+                    }
+                };
+
+                lhs = AstExpr {
+                    span: dot.span.to(p.prev_span()),
+                    kind: AstExprKind::Cast(Box::new(lhs), Box::new(ty)),
+                };
+
+                continue 'chaining;
+            }
+
             let Some(name) = match_ident().expect(p) else {
                 p.stuck().ignore_about_to_break();
 
                 break 'chaining;
             };
+
+            if match_punct_seq(puncts!("::")).expect(p).is_some() {
+                let Some(generics) = parse_generic_param_list(p) else {
+                    p.stuck().ignore_not_in_loop();
+
+                    continue 'chaining;
+                };
+
+                let Some(args) = match_group(GroupDelimiter::Paren).expect(p) else {
+                    p.stuck().ignore_not_in_loop();
+
+                    continue 'chaining;
+                };
+
+                let args = parse_comma_group(&mut p.enter(&args), |p| {
+                    parse_expr_or_error(p, AstExprFlags::ALLOW_ALL)
+                })
+                .elems;
+
+                lhs = AstExpr {
+                    span: dot.span.to(name.span),
+                    kind: AstExprKind::GenericMethod {
+                        target: Box::new(lhs),
+                        method: name,
+                        generics: Box::new(generics),
+                        args,
+                    },
+                };
+
+                continue 'chaining;
+            }
 
             lhs = AstExpr {
                 span: dot.span.to(name.span),
@@ -721,13 +831,15 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
     lhs
 }
 
-pub fn parse_expr_range_limits(p: P) -> Option<AstRangeLimits> {
+pub fn parse_expr_range_limits(p: P) -> Option<(Span, AstRangeLimits)> {
+    let start = p.next_span();
+
     if match_punct_seq(puncts!("..=")).expect(p).is_some() {
-        return Some(AstRangeLimits::Closed);
+        return Some((start.to(p.prev_span()), AstRangeLimits::Closed));
     }
 
     if match_punct_seq(puncts!("..")).expect(p).is_some() {
-        return Some(AstRangeLimits::HalfOpen);
+        return Some((start.to(p.prev_span()), AstRangeLimits::HalfOpen));
     }
 
     None
@@ -896,7 +1008,7 @@ pub fn parse_pat_single_arm(p: P) -> AstPat {
 
     // Parse literal variants
     if let Some(lit) = parse_expr_literal_as_expr(p) {
-        if let Some(range) = parse_expr_range_limits(p) {
+        if let Some((_sp, range)) = parse_expr_range_limits(p) {
             return build_pat(
                 AstPatKind::Range(
                     Some(Box::new(lit)),
@@ -984,7 +1096,7 @@ pub fn parse_pat_single_arm(p: P) -> AstPat {
                     }
                 }
 
-                let rest = match match_punct_seq(puncts!("..")).expect(p) {
+                let rest = match match_punct_seq(puncts!("..")).expect(p2) {
                     Some(sp) => AstPatStructRest::Rest(sp),
                     None => AstPatStructRest::None,
                 };
@@ -997,7 +1109,7 @@ pub fn parse_pat_single_arm(p: P) -> AstPat {
             }
 
             // Parse range pattern
-            if let Some(range) = parse_expr_range_limits(p) {
+            if let Some((_sp, range)) = parse_expr_range_limits(p) {
                 return build_pat(
                     AstPatKind::Range(
                         Some(Box::new(AstExpr {

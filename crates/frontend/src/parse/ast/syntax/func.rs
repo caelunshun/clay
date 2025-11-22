@@ -59,7 +59,6 @@ pub struct AstExpr {
 pub enum AstExprKind {
     Array(Vec<AstExpr>),
     Call(Box<AstExpr>, Vec<AstExpr>),
-    Method(),
     Paren(Box<AstExpr>),
     Tuple(Vec<AstExpr>),
     Binary(AstBinOpKind, Box<AstExpr>, Box<AstExpr>),
@@ -90,6 +89,12 @@ pub enum AstExprKind {
     Assign(Box<AstExpr>, Box<AstExpr>),
     AssignOp(AstAssignOpKind, Box<AstExpr>, Box<AstExpr>),
     Field(Box<AstExpr>, Ident),
+    GenericMethod {
+        target: Box<AstExpr>,
+        method: Ident,
+        generics: Box<AstGenericParamList>,
+        args: Vec<AstExpr>,
+    },
     Index(Box<AstExpr>, Box<AstExpr>),
     Range(Option<Box<AstExpr>>, Option<Box<AstExpr>>, AstRangeLimits),
     Underscore,
@@ -107,7 +112,6 @@ impl AstExprKind {
         match self {
             AstExprKind::Array(..)
             | AstExprKind::Call(..)
-            | AstExprKind::Method(..)
             | AstExprKind::Paren(..)
             | AstExprKind::Tuple(..)
             | AstExprKind::Binary(..)
@@ -118,6 +122,7 @@ impl AstExprKind {
             | AstExprKind::Assign(..)
             | AstExprKind::AssignOp(..)
             | AstExprKind::Field(..)
+            | AstExprKind::GenericMethod { .. }
             | AstExprKind::Index(..)
             | AstExprKind::Range(..)
             | AstExprKind::Underscore

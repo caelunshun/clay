@@ -18,11 +18,13 @@ pub fn fizz_buzz(limit: Option<u32>) {
     let mut sb = String::new();
 
     let range = match limit {
-        foo @ Some(v) | bar { .. } | 2..=WHEE | woo::WHEE.. | whee..=3.0 | true | 'f'
-            => (0..v).as::<dyn Iterator<Item = u32>>(),
-
+        Some(v) => (0..v).as::<dyn Iterator<Item = u32>>,
         None => (0..).as::<dyn Iterator<Item = u32>>,
     };
+
+    foo.bar::<u32>();
+
+    (foo, bar, Foo { a, b, .. }, _) = baz;
 
     let foo = (
         Faz,
