@@ -344,6 +344,10 @@ impl<I: CursorIter> Parser<I> {
         StuckResult::RefutedAll(diag.emit())
     }
 
+    pub fn needs_recovery(&self) -> bool {
+        self.needs_recovery
+    }
+
     pub fn recover(&mut self, f: impl FnOnce(&mut Cursor<I>) -> RecoveryOutcome) {
         if !self.needs_recovery {
             return;
@@ -369,7 +373,10 @@ impl<I: CursorIter> Parser<I> {
         &mut self,
         f: impl FnMut(&mut Cursor<I>) -> R,
     ) {
-        self.recover(|c| RecoveryOutcome::full_or_abort(c.eat_until(f).is_ok()));
+        self.recover(|c| {
+            c.eat();
+            RecoveryOutcome::full_or_abort(c.eat_until(f).is_ok())
+        });
     }
 
     pub fn recover_chomp(&mut self) {

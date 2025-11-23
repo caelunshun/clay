@@ -6,10 +6,11 @@ use crate::{
     kw,
     parse::{
         ast::{
-            AstAdtField, AstAdtFieldBracedField, AstAdtFieldKind, AstAdtItem, AstAdtKind,
-            AstAttribute, AstFnItem, AstImplLikeBody, AstImplLikeMember, AstImplLikeMemberKind,
-            AstItem, AstItemBase, AstItemImpl, AstItemModule, AstItemModuleContents, AstItemTrait,
-            AstItemUse, AstTraitClauseList,
+            AstAttribute, AstEnumItem, AstEnumVariant, AstEnumVariantBracedField,
+            AstEnumVariantKind, AstFnItem, AstImplLikeBody, AstImplLikeMember,
+            AstImplLikeMemberKind, AstItem, AstItemBase, AstItemImpl, AstItemModule,
+            AstItemModuleContents, AstItemTrait, AstItemUse, AstStructAnonField, AstStructItem,
+            AstStructKind, AstStructNamedField, AstTraitClauseList,
             basic::{parse_attributes, parse_use_path, parse_visibility},
             entry::P,
             func::parse_func,
@@ -171,20 +172,88 @@ fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
         }));
     }
 
-    'adt: {
-        let kind = 'kind: {
-            if match_kw(kw!("struct")).expect(p).is_some() {
-                break 'kind AstAdtKind::Struct;
-            }
-
-            if match_kw(kw!("enum")).expect(p).is_some() {
-                break 'kind AstAdtKind::Enum;
-            }
-
-            break 'adt;
+    if match_kw(kw!("struct")).expect(p).is_some() {
+        let Some(name) = match_ident().expect_to_parse(p, symbol!("struct name")) else {
+            return Some(AstItem::Error(make_base(p), p.stuck().error()));
         };
 
-        let Some(name) = match_ident().expect_to_parse(p, symbol!("type name")) else {
+        let generics = parse_generic_param_list(p);
+
+        if match_punct(punct!(';')).expect(p).is_some() {
+            return Some(AstItem::Struct(AstStructItem {
+                base: make_base(p),
+                name,
+                generics,
+                kind: AstStructKind::Unit,
+            }));
+        }
+
+        if let Some(paren) = match_group(GroupDelimiter::Paren).expect(p) {
+            let fields = parse_comma_group(&mut p.enter(&paren), |p| {
+                let start = p.next_span();
+                let vis = parse_visibility(p);
+                let ty = parse_ty(p);
+
+                AstStructAnonField {
+                    span: start.to(p.prev_span()),
+                    vis,
+                    ty,
+                }
+            });
+
+            if match_punct(punct!(';')).expect(p).is_none() {
+                p.stuck().ignore_not_in_loop();
+            }
+
+            return Some(AstItem::Struct(AstStructItem {
+                base: make_base(p),
+                name,
+                generics,
+                kind: AstStructKind::Tuple(fields.elems),
+            }));
+        }
+
+        if let Some(paren) = match_group(GroupDelimiter::Brace).expect(p) {
+            let fields = parse_comma_group(&mut p.enter(&paren), |p| {
+                let start = p.next_span();
+
+                let vis = parse_visibility(p);
+
+                let Some(name) = match_ident().expect(p) else {
+                    p.stuck().ignore_not_in_loop();
+                    return None;
+                };
+
+                if match_punct(punct!(':')).expect(p).is_none() {
+                    p.stuck().ignore_not_in_loop();
+                    return None;
+                }
+
+                let ty = parse_ty(p);
+
+                Some(AstStructNamedField {
+                    span: start.to(p.prev_span()),
+                    vis,
+                    name,
+                    ty,
+                })
+            });
+
+            let fields = fields.elems.into_iter().flatten().collect::<Vec<_>>();
+
+            return Some(AstItem::Struct(AstStructItem {
+                base: make_base(p),
+                name,
+                generics,
+                kind: AstStructKind::Struct(fields),
+            }));
+        }
+
+        return Some(AstItem::Error(make_base(p), p.stuck().error()));
+    }
+
+    if match_kw(kw!("enum")).expect(p).is_some() {
+        let Some(name) = match_ident().expect_to_parse(p, symbol!("enum name")) else {
             return Some(AstItem::Error(make_base(p), p.stuck().error()));
         };
 
@@ -194,14 +263,17 @@ fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
             return Some(AstItem::Error(make_base(p), p.stuck().error()));
         };
 
-        let fields = parse_adt_field_list(&mut p.enter(&group));
+        let variants = parse_comma_group(&mut p.enter(&group), parse_enum_variant)
+            .elems
+            .into_iter()
+            .filter_map(Result::ok)
+            .collect();
 
-        return Some(AstItem::Adt(AstAdtItem {
+        return Some(AstItem::Enum(AstEnumItem {
             base: make_base(p),
             name,
-            kind,
             generics,
-            fields,
+            variants,
         }));
     }
 
@@ -321,18 +393,8 @@ pub fn parse_impl_ish_member(p: P) -> AstImplLikeMember {
     make_member(AstImplLikeMemberKind::Error(p.stuck().error()), p)
 }
 
-pub fn parse_adt_field_list(p: P) -> Vec<AstAdtField> {
-    parse_comma_group(p, parse_adt_field)
-        .elems
-        .into_iter()
-        .filter_map(Result::ok)
-        .collect()
-}
-
-fn parse_adt_field(p: P) -> Result<AstAdtField, ErrorGuaranteed> {
+fn parse_enum_variant(p: P) -> Result<AstEnumVariant, ErrorGuaranteed> {
     let start = p.next_span();
-
-    let vis = parse_visibility(p);
 
     let Some(name) = match_ident().expect(p) else {
         return Err(p.stuck().error());
@@ -342,7 +404,7 @@ fn parse_adt_field(p: P) -> Result<AstAdtField, ErrorGuaranteed> {
         if let Some(paren) = match_group(GroupDelimiter::Paren).expect(p) {
             let fields = parse_comma_group(&mut p.enter(&paren), parse_ty);
 
-            break 'kind AstAdtFieldKind::Tuple(fields.elems);
+            break 'kind AstEnumVariantKind::Tuple(fields.elems);
         }
 
         if let Some(paren) = match_group(GroupDelimiter::Brace).expect(p) {
@@ -361,31 +423,21 @@ fn parse_adt_field(p: P) -> Result<AstAdtField, ErrorGuaranteed> {
 
                 let ty = parse_ty(p);
 
-                if vis.kind.is_omitted() && ty.is_omitted() {
-                    // Ensure that we advance the cursor.
-                    p.cursor_unsafe_mut().eat();
-                }
-
-                Some(AstAdtFieldBracedField {
+                Some(AstEnumVariantBracedField {
                     span: start.to(p.prev_span()),
                     name,
                     ty,
                 })
             });
 
-            break 'kind AstAdtFieldKind::Braced(fields.elems.into_iter().flatten().collect());
+            break 'kind AstEnumVariantKind::Braced(fields.elems.into_iter().flatten().collect());
         }
 
-        if match_punct(punct!(':')).expect(p).is_some() {
-            break 'kind AstAdtFieldKind::ColonTy(parse_ty(p));
-        }
-
-        AstAdtFieldKind::Unit
+        AstEnumVariantKind::Unit
     };
 
-    Ok(AstAdtField {
+    Ok(AstEnumVariant {
         span: start.to(p.prev_span()),
-        vis,
         name,
         kind,
     })

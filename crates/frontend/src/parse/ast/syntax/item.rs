@@ -18,7 +18,8 @@ pub enum AstItem {
     Trait(AstItemTrait),
     Impl(AstItemImpl),
     Func(AstFnItem),
-    Adt(AstAdtItem),
+    Struct(AstStructItem),
+    Enum(AstEnumItem),
     Error(AstItemBase, ErrorGuaranteed),
 }
 
@@ -29,7 +30,8 @@ impl AstItem {
         | AstItem::Trait(AstItemTrait { base, .. })
         | AstItem::Impl(AstItemImpl { base, .. })
         | AstItem::Func(AstFnItem { base, .. })
-        | AstItem::Adt(AstAdtItem { base, .. })
+        | AstItem::Struct(AstStructItem { base, .. })
+        | AstItem::Enum(AstEnumItem { base, .. })
         | AstItem::Error(base, ..)) = self;
 
         base
@@ -87,38 +89,59 @@ pub struct AstFnItem {
 }
 
 #[derive(Debug, Clone)]
-pub struct AstAdtItem {
+pub struct AstStructItem {
     pub base: AstItemBase,
     pub name: Ident,
-    pub kind: AstAdtKind,
     pub generics: Option<AstGenericParamList>,
-    pub fields: Vec<AstAdtField>,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum AstAdtKind {
-    Enum,
-    Struct,
+    pub kind: AstStructKind,
 }
 
 #[derive(Debug, Clone)]
-pub struct AstAdtField {
+pub enum AstStructKind {
+    Unit,
+    Tuple(Vec<AstStructAnonField>),
+    Struct(Vec<AstStructNamedField>),
+}
+
+#[derive(Debug, Clone)]
+pub struct AstStructAnonField {
+    pub span: Span,
+    pub vis: AstVisibility,
+    pub ty: AstTy,
+}
+
+#[derive(Debug, Clone)]
+pub struct AstStructNamedField {
     pub span: Span,
     pub vis: AstVisibility,
     pub name: Ident,
-    pub kind: AstAdtFieldKind,
+    pub ty: AstTy,
 }
 
 #[derive(Debug, Clone)]
-pub enum AstAdtFieldKind {
+pub struct AstEnumItem {
+    pub base: AstItemBase,
+    pub name: Ident,
+    pub generics: Option<AstGenericParamList>,
+    pub variants: Vec<AstEnumVariant>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AstEnumVariant {
+    pub span: Span,
+    pub name: Ident,
+    pub kind: AstEnumVariantKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum AstEnumVariantKind {
     Unit,
-    ColonTy(AstTy),
     Tuple(Vec<AstTy>),
-    Braced(Vec<AstAdtFieldBracedField>),
+    Braced(Vec<AstEnumVariantBracedField>),
 }
 
 #[derive(Debug, Clone)]
-pub struct AstAdtFieldBracedField {
+pub struct AstEnumVariantBracedField {
     pub span: Span,
     pub name: Ident,
     pub ty: AstTy,

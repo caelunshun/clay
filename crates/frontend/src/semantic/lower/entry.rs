@@ -82,7 +82,8 @@ impl TyCtxt {
                 | AstItem::Use(_)
                 | AstItem::Impl(_)
                 | AstItem::Func(_)
-                | AstItem::Adt(_)
+                | AstItem::Struct(_)
+                | AstItem::Enum(_)
                 | AstItem::Error(_, _) => {
                     unreachable!()
                 }
@@ -180,7 +181,10 @@ impl<'ast> UseLowerCtxt<'ast> {
                 AstItem::Func(_) => {
                     todo!();
                 }
-                AstItem::Adt(_) => {
+                AstItem::Struct(_) => {
+                    todo!();
+                }
+                AstItem::Enum(_) => {
                     todo!();
                 }
                 AstItem::Error(_, _) => {

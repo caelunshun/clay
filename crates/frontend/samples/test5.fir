@@ -7,7 +7,7 @@ pub impl MyTrait for () {}
 priv impl MyTrait for ((),) {}
 
 // And don't forget this!
-pub(self) impl MyTrait for ((),) {}
+pub(in self) impl MyTrait for ((),) {}
 
 // This is fine.
 impl MyTrait for (((),),) {}

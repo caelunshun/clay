@@ -1,10 +1,10 @@
 use crate::{
-    base::syntax::Matcher as _,
+    base::syntax::{Matcher as _, Symbol},
     kw,
     parse::{
         ast::{
             AstAttribute, AstExprPath, AstExprPathSegment, AstOptMutability, AstSimplePath,
-            AstUsePath, AstUsePathKind, AstVisibility, AstVisibilityKind,
+            AstUsePath, AstUsePathKind, AstVisibility, AstVisibilityKind, Keyword,
             entry::P,
             types::parse_generic_param_list,
             utils::{
@@ -12,7 +12,7 @@ use crate::{
                 parse_delimited_until_terminator,
             },
         },
-        token::{GroupDelimiter, Ident},
+        token::{GroupDelimiter, Ident, TokenCursor},
     },
     punct, puncts, symbol,
 };
@@ -257,42 +257,100 @@ pub fn parse_visibility(p: P) -> AstVisibility {
 
     let start = p.next_span();
 
+    if let Some(vis) = parse_visibility_shortcut(p, symbol!("`pub(crate)`"), kw!("crate")) {
+        return vis;
+    }
+
+    if let Some(vis) = parse_visibility_shortcut(p, symbol!("`pub(super)`"), kw!("super")) {
+        return vis;
+    }
+
+    if let Some(vis) = parse_visibility_in_path(p) {
+        return vis;
+    }
+
     if match_kw(kw!("pub")).expect(p).is_some() {
-        if let Some(group) = match_group(GroupDelimiter::Paren).expect(p) {
-            let mut p2 = p.enter(&group);
+        return AstVisibility {
+            span: start.to(p.prev_span()),
+            kind: AstVisibilityKind::Pub,
+        };
+    }
 
-            let Some(path) = parse_simple_path(&mut p2) else {
-                p2.stuck().ignore_not_in_loop();
-
-                return AstVisibility {
-                    span: start.to(p.prev_span()),
-                    kind: AstVisibilityKind::Pub,
-                };
-            };
-
-            if !match_eos(&mut p2) {
-                p2.stuck().ignore_not_in_loop();
-            }
-
-            AstVisibility {
-                span: start.to(p.prev_span()),
-                kind: AstVisibilityKind::PubIn(path),
-            }
-        } else {
-            AstVisibility {
-                span: start.to(p.prev_span()),
-                kind: AstVisibilityKind::Pub,
-            }
-        }
-    } else if match_kw(kw!("priv")).expect(p).is_some() {
-        AstVisibility {
+    if match_kw(kw!("priv")).expect(p).is_some() {
+        return AstVisibility {
             span: start.to(p.prev_span()),
             kind: AstVisibilityKind::Priv,
-        }
-    } else {
-        AstVisibility {
-            span: start.shrink_to_lo(),
-            kind: AstVisibilityKind::Implicit,
-        }
+        };
     }
+
+    AstVisibility {
+        span: start.shrink_to_lo(),
+        kind: AstVisibilityKind::Implicit,
+    }
+}
+
+pub fn parse_visibility_in_path(p: P) -> Option<AstVisibility> {
+    let start = p.next_span();
+
+    let mut group_keep_alive = None;
+
+    let path_cursor = p.expect(symbol!("`pub(in <...>)`"), |c| {
+        match_kw(kw!("pub")).consume(c)?;
+
+        let group = match_group(GroupDelimiter::Paren).consume(c)?;
+
+        let mut c = TokenCursor::new((&*group_keep_alive.insert(group)).into());
+
+        match_kw(kw!("in")).consume(&mut c)?;
+
+        Some(c)
+    })?;
+
+    let mut p_inner = p.enter(path_cursor.iter);
+
+    let Some(path) = parse_simple_path(&mut p_inner) else {
+        p_inner.stuck().ignore_not_in_loop();
+
+        return Some(AstVisibility {
+            span: start.to(p.prev_span()),
+            kind: AstVisibilityKind::Pub,
+        });
+    };
+
+    if !match_eos(&mut p_inner) {
+        p_inner.stuck().ignore_not_in_loop();
+    }
+
+    Some(AstVisibility {
+        span: start.to(p.prev_span()),
+        kind: AstVisibilityKind::PubIn(path),
+    })
+}
+
+pub fn parse_visibility_shortcut(p: P, name: Symbol, kw: Keyword) -> Option<AstVisibility> {
+    let start = p.next_span();
+
+    let ident = p.expect(name, |c| {
+        match_kw(kw!("pub")).consume(c)?;
+
+        let group = match_group(GroupDelimiter::Paren).consume(c)?;
+
+        let mut c = TokenCursor::new((&group).into());
+
+        let kw_ident = match_kw(kw).consume(&mut c)?;
+
+        if c.eat().is_some() {
+            return None;
+        }
+
+        Some(kw_ident)
+    })?;
+
+    Some(AstVisibility {
+        span: start.to(p.prev_span()),
+        kind: AstVisibilityKind::PubIn(AstSimplePath {
+            span: ident.span,
+            parts: Rc::from_iter([ident]),
+        }),
+    })
 }
