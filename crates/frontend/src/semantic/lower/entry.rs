@@ -78,13 +78,16 @@ impl TyCtxt {
                 AstItem::Trait(ast) => {
                     ctxt.lower_trait(target, ast);
                 }
-                AstItem::Mod(_)
-                | AstItem::Use(_)
-                | AstItem::Impl(_)
-                | AstItem::Func(_)
-                | AstItem::Struct(_)
-                | AstItem::Enum(_)
-                | AstItem::Error(_, _) => {
+                AstItem::Func(_) => {
+                    // TODO
+                }
+                AstItem::Struct(_) => {
+                    // TODO
+                }
+                AstItem::Enum(_) => {
+                    // TODO
+                }
+                AstItem::Mod(_) | AstItem::Use(_) | AstItem::Impl(_) | AstItem::Error(_, _) => {
                     unreachable!()
                 }
             }
@@ -178,14 +181,23 @@ impl<'ast> UseLowerCtxt<'ast> {
 
                     self.impls.push((parent_id, item));
                 }
-                AstItem::Func(_) => {
-                    todo!();
+                AstItem::Func(item) => {
+                    self.tree
+                        .push_item(parent_id, item.base.vis.clone(), item.def.name);
+
+                    self.item_asts.push(item_enum);
                 }
-                AstItem::Struct(_) => {
-                    todo!();
+                AstItem::Struct(item) => {
+                    self.tree
+                        .push_item(parent_id, item.base.vis.clone(), item.name);
+
+                    self.item_asts.push(item_enum);
                 }
-                AstItem::Enum(_) => {
-                    todo!();
+                AstItem::Enum(item) => {
+                    self.tree
+                        .push_item(parent_id, item.base.vis.clone(), item.name);
+
+                    self.item_asts.push(item_enum);
                 }
                 AstItem::Error(_, _) => {
                     // (ignored)

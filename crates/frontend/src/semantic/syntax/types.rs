@@ -413,6 +413,32 @@ pub enum FloatKind {
     S64,
 }
 
+// === Coherence === //
+
+pub type CoherenceTyList = Intern<[CoherenceTy]>;
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum CoherenceTy {
+    Universal,
+    Solid(SolidCoherenceTy),
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct SolidCoherenceTy {
+    pub kind: CoherenceTyKind,
+    pub children: CoherenceTyList,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum CoherenceTyKind {
+    Simple(SimpleTyKind),
+    Re(Mutability),
+    Adt(Obj<AdtDef>),
+    Trait,
+    Tuple(u32),
+    FnDef,
+}
+
 // === Misc Enums === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

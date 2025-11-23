@@ -1,3 +1,6 @@
+mod coherence;
+pub use coherence::*;
+
 mod fn_body;
 pub use fn_body::*;
 
