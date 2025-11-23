@@ -343,7 +343,7 @@ where
                     }
 
                     // Otherwise, advance all source iterators to the maximum seen element.
-                    for iter_idx in 0..own_idx {
+                    for iter_idx in first_iter_idx..own_idx {
                         if max_elem == iter_idx {
                             continue;
                         }
@@ -490,9 +490,7 @@ mod tests {
         }
 
         pub fn finish(self) {
-            let mut actual = self.actual.finish().copied().collect::<Vec<_>>();
-            actual.dedup();
-
+            let actual = self.actual.finish().copied().collect::<Vec<_>>();
             let expected = self.model.finish().into_iter().collect::<Vec<_>>();
 
             assert_eq!(actual, expected);
@@ -540,6 +538,8 @@ mod tests {
             let bump = Bump::new();
 
             fn fill_random<'b>(bump: &'b Bump, validator: &mut Validator<'b>, depth: u32) {
+                let indent = (0..depth).map(|_| "  ").collect::<Vec<_>>().join("");
+
                 match fastrand::u8(0..=if depth <= 5 { 7 } else { 5 }) {
                     0..=5 => {
                         let slice = bump.alloc_slice_copy(
@@ -548,17 +548,17 @@ mod tests {
                                 .collect::<Vec<_>>(),
                         );
 
-                        eprintln!("validator.push_iter(&{slice:?});");
+                        eprintln!("{indent}validator.push_iter(&{slice:?});");
                         validator.push_iter(slice);
                     }
                     v @ (6 | 7) => {
                         validator.push_op(match v {
                             6 => {
-                                eprintln!("validator.push_iter(UnionIsectOp::Union);");
+                                eprintln!("{indent}validator.push_iter(UnionIsectOp::Union);");
                                 UnionIsectOp::Union
                             }
                             7 => {
-                                eprintln!("validator.push_iter(UnionIsectOp::Intersect);");
+                                eprintln!("{indent}validator.push_iter(UnionIsectOp::Intersect);");
                                 UnionIsectOp::Intersect
                             }
                             _ => unreachable!(),
@@ -568,7 +568,7 @@ mod tests {
                             fill_random(bump, validator, depth + 1);
                         }
 
-                        eprintln!("validator.pop_op();");
+                        eprintln!("{indent}validator.pop_op();");
                         validator.pop_op();
                     }
                     _ => unreachable!(),
@@ -583,7 +583,7 @@ mod tests {
             eprintln!("validator.push_op(UnionIsectOp::Union);");
             validator.push_op(UnionIsectOp::Union);
 
-            fill_random(&bump, &mut validator, 0);
+            fill_random(&bump, &mut validator, 1);
 
             eprintln!("validator.pop_op();");
             validator.pop_op();
