@@ -1,5 +1,5 @@
 use derive_where::derive_where;
-use std::{cmp::Ordering, fmt::Debug, slice};
+use std::{cmp::Ordering, slice};
 
 // === IterEither === //
 
@@ -259,11 +259,17 @@ where
                             }
                         }
 
-                        while let Some(iter_elem) = &self.parts[curr_iter_idx].next_elem
-                            && iter_elem == &elem
-                        {
-                            self.parts[curr_iter_idx].next_elem = None;
+                        loop {
                             self.step(curr_iter_idx);
+
+                            if let Some(iter_elem) = &self.parts[curr_iter_idx].next_elem
+                                && iter_elem == &elem
+                            {
+                                self.parts[curr_iter_idx].next_elem = None;
+                                continue;
+                            }
+
+                            break;
                         }
                     }
 
