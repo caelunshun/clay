@@ -554,11 +554,11 @@ mod tests {
                     v @ (6 | 7) => {
                         validator.push_op(match v {
                             6 => {
-                                eprintln!("{indent}validator.push_iter(UnionIsectOp::Union);");
+                                eprintln!("{indent}validator.push_op(UnionIsectOp::Union);");
                                 UnionIsectOp::Union
                             }
                             7 => {
-                                eprintln!("{indent}validator.push_iter(UnionIsectOp::Intersect);");
+                                eprintln!("{indent}validator.push_op(UnionIsectOp::Intersect);");
                                 UnionIsectOp::Intersect
                             }
                             _ => unreachable!(),
@@ -591,5 +591,19 @@ mod tests {
             eprintln!("validator.finish();");
             validator.finish();
         }
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn weird_case() {
+        let mut validator = Validator::default();
+        validator.push_op(UnionIsectOp::Intersect);
+            validator.push_op(UnionIsectOp::Union);
+                validator.push_iter(&[1, 3]);
+                validator.push_iter(&[1]);
+            validator.pop_op();
+            validator.push_iter(&[2, 3]);
+        validator.pop_op();
+        validator.finish();
     }
 }
