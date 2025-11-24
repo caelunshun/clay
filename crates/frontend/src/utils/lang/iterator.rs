@@ -1,9 +1,13 @@
 use derive_where::derive_where;
-use std::{cmp::Ordering, slice};
+use std::{
+    cmp::Ordering,
+    fmt::{self, Write},
+    slice,
+};
 
 // === IterEither === //
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum IterEither<L, R> {
     Left(L),
     Right(R),
@@ -107,6 +111,69 @@ pub enum UnionIsectOp {
 pub struct UnionIsectBuilder<I: Iterator> {
     parts: Vec<UnionIsectPart<I>>,
     op_builder_stack: Vec<(UnionIsectOp, usize)>,
+}
+
+impl<I> fmt::Debug for UnionIsectBuilder<I>
+where
+    I: Iterator + fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        struct RichFmt<'a, I: Iterator> {
+            builder: &'a UnionIsectBuilder<I>,
+            idx: usize,
+        }
+
+        impl<I: Iterator + fmt::Debug> fmt::Debug for RichFmt<'_, I> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                match self.builder.parts[self.idx].kind {
+                    UnionIsectPartKind::Source(ref iter) => iter.fmt(f),
+                    UnionIsectPartKind::Empty => f.write_str("<empty>"),
+                    UnionIsectPartKind::Operation {
+                        kind,
+                        first_iter_idx,
+                    } => {
+                        let own_idx = self.idx;
+                        let mut next_iter_idx = own_idx.checked_sub(1);
+
+                        kind.fmt(f)?;
+                        f.write_char(' ')?;
+
+                        let mut f = f.debug_list();
+
+                        while let Some(curr_iter_idx) = next_iter_idx
+                            && curr_iter_idx >= first_iter_idx
+                        {
+                            match self.builder.parts[curr_iter_idx].kind {
+                                UnionIsectPartKind::Source(_) | UnionIsectPartKind::Empty => {
+                                    next_iter_idx = curr_iter_idx.checked_sub(1);
+                                }
+                                UnionIsectPartKind::Operation { first_iter_idx, .. } => {
+                                    next_iter_idx = first_iter_idx.checked_sub(1);
+                                }
+                            }
+
+                            f.entry(&RichFmt {
+                                builder: self.builder,
+                                idx: curr_iter_idx,
+                            });
+                        }
+
+                        f.finish()
+                    }
+                }
+            }
+        }
+
+        if self.op_builder_stack.is_empty() {
+            RichFmt {
+                builder: self,
+                idx: self.parts.len() - 1,
+            }
+            .fmt(f)
+        } else {
+            f.write_str("<unfinished>")
+        }
+    }
 }
 
 impl<I: Iterator> UnionIsectBuilder<I> {

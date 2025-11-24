@@ -7,8 +7,8 @@ use crate::{
     semantic::{
         analysis::{BinderSubstitution, SignatureWfVisitor},
         syntax::{
-            Crate, ListOfTraitClauseList, TraitClause, TraitClauseList, TraitParam, TraitParamList,
-            Ty, TyKind, TyList, TyOrRe, TyOrReList,
+            CoherenceTy, Crate, ListOfTraitClauseList, TraitClause, TraitClauseList, TraitParam,
+            TraitParamList, Ty, TyKind, TyList, TyOrRe, TyOrReList,
         },
     },
 };
@@ -35,6 +35,7 @@ pub struct Interners {
     pub trait_clause_list: ListInterner<TraitClause>,
     pub list_of_trait_clause_list: ListInterner<TraitClauseList>,
     pub spanned_info_list: ListInterner<SpannedInfo>,
+    pub coherence_ty_list: ListInterner<CoherenceTy>,
 }
 
 #[derive(Debug, Default)]
@@ -153,5 +154,11 @@ impl HasListInterner<TraitClauseList> for TyCtxt {
 impl HasListInterner<SpannedInfo> for TyCtxt {
     fn interner(&self) -> &ListInterner<SpannedInfo> {
         &self.interners.spanned_info_list
+    }
+}
+
+impl HasListInterner<CoherenceTy> for TyCtxt {
+    fn interner(&self) -> &ListInterner<CoherenceTy> {
+        &self.interners.coherence_ty_list
     }
 }
