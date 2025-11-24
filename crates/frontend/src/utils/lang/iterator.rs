@@ -66,36 +66,31 @@ pub trait BinarySeekIterator: Iterator {
 
 impl<T: Ord> BinarySeekIterator for slice::Iter<'_, T> {
     fn seek_geq_with(&mut self, mut cmp: impl FnMut(&Self::Item) -> Ordering) {
-        while self.as_slice().first().is_some_and(|v| cmp(&v).is_gt()) {
+        // Handle small-seek fast-path
+        if let Some(first) = self.as_slice().first() {
+            if cmp(&first).is_le() {
+                // `min_eq <= next`
+                return;
+            }
+
             self.next();
+
+            if let Some(next) = self.as_slice().first()
+                && cmp(&next).is_le()
+            {
+                return;
+            }
         }
 
-        // TODO: Use the optimized form.
-        // if self.as_slice().is_empty() {
-        //     return;
-        // }
-        //
-        // // Handle small-seek fast-path
-        // if let Some(first) = self.as_slice().first() {
-        //     if cmp(&first).is_le() {
-        //         // `min_eq <= next`
-        //         return;
-        //     }
-        //
-        //     self.next();
-        //
-        //     if let Some(next) = self.as_slice().first()
-        //         && cmp(&next).is_le()
-        //     {
-        //         return;
-        //     }
-        // }
-        //
-        // // Perform a binary search to find our seek location.
-        // let (Ok(idx) | Err(idx)) = self.as_slice().binary_search_by(|v| cmp(&v).reverse());
-        //
-        // debug_assert_ne!(idx, 0);
-        // self.nth(idx - 1);
+        if self.as_slice().is_empty() {
+            return;
+        }
+
+        // Perform a binary search to find our seek location.
+        let (Ok(idx) | Err(idx)) = self.as_slice().binary_search_by(|v| cmp(&v).reverse());
+
+        debug_assert_ne!(idx, 0);
+        self.nth(idx - 1);
     }
 }
 
