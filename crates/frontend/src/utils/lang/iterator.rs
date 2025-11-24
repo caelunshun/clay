@@ -2,6 +2,7 @@ use derive_where::derive_where;
 use std::{
     cmp::Ordering,
     fmt::{self, Write},
+    ops::ControlFlow,
     slice,
 };
 
@@ -250,6 +251,32 @@ impl<I> UnionIsectIter<I>
 where
     I: BinarySeekIterator<Item: Ord>,
 {
+    fn iter_children<B>(
+        &mut self,
+        own_idx: usize,
+        first_iter_idx: usize,
+        mut f: impl FnMut((&mut Self, usize)) -> ControlFlow<B>,
+    ) -> ControlFlow<B> {
+        let mut next_iter_idx = own_idx.checked_sub(1);
+
+        while let Some(curr_iter_idx) = next_iter_idx
+            && curr_iter_idx >= first_iter_idx
+        {
+            match self.parts[curr_iter_idx].kind {
+                UnionIsectPartKind::Source(_) | UnionIsectPartKind::Empty => {
+                    next_iter_idx = curr_iter_idx.checked_sub(1);
+                }
+                UnionIsectPartKind::Operation { first_iter_idx, .. } => {
+                    next_iter_idx = first_iter_idx.checked_sub(1);
+                }
+            }
+
+            f((self, curr_iter_idx))?;
+        }
+
+        ControlFlow::Continue(())
+    }
+
     fn step(&mut self, own_idx: usize) {
         let part = &mut self.parts[own_idx];
 
@@ -275,30 +302,19 @@ where
                 let mut min_elem = None::<usize>;
 
                 // Step all iterators and look for the minimum element.
-                let mut next_iter_idx = own_idx.checked_sub(1);
+                cbit::cbit! {
+                    for (this, curr_iter_idx) in self.iter_children(own_idx, first_iter_idx) {
+                        this.step(curr_iter_idx);
 
-                while let Some(curr_iter_idx) = next_iter_idx
-                    && curr_iter_idx >= first_iter_idx
-                {
-                    match self.parts[curr_iter_idx].kind {
-                        UnionIsectPartKind::Source(_) | UnionIsectPartKind::Empty => {
-                            next_iter_idx = curr_iter_idx.checked_sub(1);
+                        let Some(iter_elem) = &this.parts[curr_iter_idx].next_elem else {
+                            continue;
+                        };
+
+                        if min_elem.is_none_or(|min_idx| {
+                            iter_elem < this.parts[min_idx].next_elem.as_ref().unwrap()
+                        }) {
+                            min_elem = Some(curr_iter_idx);
                         }
-                        UnionIsectPartKind::Operation { first_iter_idx, .. } => {
-                            next_iter_idx = first_iter_idx.checked_sub(1);
-                        }
-                    }
-
-                    self.step(curr_iter_idx);
-
-                    let Some(iter_elem) = &self.parts[curr_iter_idx].next_elem else {
-                        continue;
-                    };
-
-                    if min_elem.is_none_or(|min_idx| {
-                        iter_elem < self.parts[min_idx].next_elem.as_ref().unwrap()
-                    }) {
-                        min_elem = Some(curr_iter_idx);
                     }
                 }
 
@@ -307,31 +323,20 @@ where
                     let elem = self.parts[min_elem].next_elem.take().unwrap();
 
                     // Eat all duplicates of the element.
-                    let mut next_iter_idx = own_idx.checked_sub(1);
+                    cbit::cbit! {
+                        for (this, curr_iter_idx) in self.iter_children(own_idx, first_iter_idx) {
+                            loop {
+                                this.step(curr_iter_idx);
 
-                    while let Some(curr_iter_idx) = next_iter_idx
-                        && curr_iter_idx >= first_iter_idx
-                    {
-                        match self.parts[curr_iter_idx].kind {
-                            UnionIsectPartKind::Source(_) | UnionIsectPartKind::Empty => {
-                                next_iter_idx = curr_iter_idx.checked_sub(1);
+                                if let Some(iter_elem) = &this.parts[curr_iter_idx].next_elem
+                                    && iter_elem == &elem
+                                {
+                                    this.parts[curr_iter_idx].next_elem = None;
+                                    continue;
+                                }
+
+                                break;
                             }
-                            UnionIsectPartKind::Operation { first_iter_idx, .. } => {
-                                next_iter_idx = first_iter_idx.checked_sub(1);
-                            }
-                        }
-
-                        loop {
-                            self.step(curr_iter_idx);
-
-                            if let Some(iter_elem) = &self.parts[curr_iter_idx].next_elem
-                                && iter_elem == &elem
-                            {
-                                self.parts[curr_iter_idx].next_elem = None;
-                                continue;
-                            }
-
-                            break;
                         }
                     }
 
@@ -348,38 +353,30 @@ where
                     let mut max_elem = None::<usize>;
                     let mut all_equal = true;
 
-                    let mut next_iter_idx = own_idx.checked_sub(1);
+                    cbit::cbit! {
+                        for (this, curr_iter_idx) in
+                            self.iter_children(own_idx, first_iter_idx)
+                            break 'intersect
+                        {
+                            this.step(curr_iter_idx);
 
-                    while let Some(curr_iter_idx) = next_iter_idx
-                        && curr_iter_idx >= first_iter_idx
-                    {
-                        match self.parts[curr_iter_idx].kind {
-                            UnionIsectPartKind::Source(_) | UnionIsectPartKind::Empty => {
-                                next_iter_idx = curr_iter_idx.checked_sub(1);
+                            let Some(iter_elem) = &this.parts[curr_iter_idx].next_elem else {
+                                break 'intersect;
+                            };
+
+                            if max_elem.is_none_or(|max_idx| {
+                                let max_elem = this.parts[max_idx].next_elem.as_ref().unwrap();
+
+                                let cmp = iter_elem.cmp(max_elem);
+
+                                if cmp.is_ne() {
+                                    all_equal = false;
+                                }
+
+                                cmp.is_ge()
+                            }) {
+                                max_elem = Some(curr_iter_idx);
                             }
-                            UnionIsectPartKind::Operation { first_iter_idx, .. } => {
-                                next_iter_idx = first_iter_idx.checked_sub(1);
-                            }
-                        }
-
-                        self.step(curr_iter_idx);
-
-                        let Some(iter_elem) = &self.parts[curr_iter_idx].next_elem else {
-                            break 'intersect;
-                        };
-
-                        if max_elem.is_none_or(|max_idx| {
-                            let max_elem = self.parts[max_idx].next_elem.as_ref().unwrap();
-
-                            let cmp = iter_elem.cmp(max_elem);
-
-                            if cmp.is_ne() {
-                                all_equal = false;
-                            }
-
-                            cmp.is_ge()
-                        }) {
-                            max_elem = Some(curr_iter_idx);
                         }
                     }
 
@@ -389,21 +386,12 @@ where
                     if all_equal {
                         let next_elem = self.parts[max_elem].next_elem.take().unwrap();
 
-                        let mut next_iter_idx = own_idx.checked_sub(1);
-
-                        while let Some(curr_iter_idx) = next_iter_idx
-                            && curr_iter_idx >= first_iter_idx
-                        {
-                            match self.parts[curr_iter_idx].kind {
-                                UnionIsectPartKind::Source(_) | UnionIsectPartKind::Empty => {
-                                    next_iter_idx = curr_iter_idx.checked_sub(1);
-                                }
-                                UnionIsectPartKind::Operation { first_iter_idx, .. } => {
-                                    next_iter_idx = first_iter_idx.checked_sub(1);
-                                }
+                        cbit::cbit! {
+                            for (this, curr_iter_idx) in
+                                self.iter_children(own_idx, first_iter_idx)
+                            {
+                                this.parts[curr_iter_idx].next_elem = None;
                             }
-
-                            self.parts[curr_iter_idx].next_elem = None;
                         }
 
                         self.parts[own_idx].next_elem = Some(next_elem);

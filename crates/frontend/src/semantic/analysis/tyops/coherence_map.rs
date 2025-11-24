@@ -1,6 +1,9 @@
 use crate::{
-    base::Session,
-    semantic::syntax::{CoherenceTy, CoherenceTyKind, SolidCoherenceTy},
+    base::{Session, arena::HasListInterner as _},
+    semantic::{
+        analysis::TyCtxt,
+        syntax::{AdtInstance, CoherenceTy, CoherenceTyKind, SolidCoherenceTy, Ty, TyKind},
+    },
     utils::{
         hash::FxHashMap,
         lang::{UnionIsectBuilder, UnionIsectOp},
@@ -9,6 +12,53 @@ use crate::{
 use derive_where::derive_where;
 use index_vec::{IndexVec, define_index_type};
 use std::slice;
+
+// === Erasure === //
+
+impl TyCtxt {
+    pub fn erase_ty_for_coherence(&self, ty: Ty) -> CoherenceTy {
+        let s = &self.session;
+
+        match *ty.r(s) {
+            TyKind::This | TyKind::ExplicitInfer | TyKind::InferVar(_) => {
+                unreachable!()
+            }
+            TyKind::Simple(kind) => CoherenceTy::Solid(SolidCoherenceTy {
+                kind: CoherenceTyKind::Simple(kind),
+                children: self.intern(&[]),
+            }),
+            TyKind::Reference(_re, mutability, pointee) => CoherenceTy::Solid(SolidCoherenceTy {
+                kind: CoherenceTyKind::Re(mutability),
+                children: self.intern(&[self.erase_ty_for_coherence(pointee)]),
+            }),
+            TyKind::Adt(AdtInstance { def, params }) => CoherenceTy::Solid(SolidCoherenceTy {
+                kind: CoherenceTyKind::Adt(def),
+                children: self.intern(
+                    &params
+                        .r(s)
+                        .iter()
+                        .filter_map(|ty| ty.as_ty())
+                        .map(|ty| self.erase_ty_for_coherence(ty))
+                        .collect::<Vec<_>>(),
+                ),
+            }),
+            TyKind::Trait(intern) => todo!(),
+            TyKind::Tuple(children) => CoherenceTy::Solid(SolidCoherenceTy {
+                kind: CoherenceTyKind::Tuple(children.r(s).len() as u32),
+                children: self.intern(
+                    &children
+                        .r(s)
+                        .iter()
+                        .map(|&ty| self.erase_ty_for_coherence(ty))
+                        .collect::<Vec<_>>(),
+                ),
+            }),
+            TyKind::FnDef(obj) => todo!(),
+            TyKind::Universal(_) => CoherenceTy::Universal,
+            TyKind::Error(_) => CoherenceTy::Universal,
+        }
+    }
+}
 
 // === CoherenceMap === //
 
@@ -149,7 +199,6 @@ impl CoherenceMapLayer {
 mod tests {
     use super::*;
     use crate::{
-        base::arena::HasListInterner as _,
         semantic::{analysis::TyCtxt, syntax::SimpleTyKind},
         utils::hash::FxHashSet,
     };

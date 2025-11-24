@@ -1,3 +1,6 @@
+mod coherence_map;
+pub use coherence_map::*;
+
 mod generics;
 pub use generics::*;
 
