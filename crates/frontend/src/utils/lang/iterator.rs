@@ -1,5 +1,5 @@
 use derive_where::derive_where;
-use std::{cmp::Ordering, slice};
+use std::{cmp::Ordering, fmt::Debug, slice};
 
 // === IterEither === //
 
@@ -356,7 +356,7 @@ where
 
                         let max_elem = max_elem.next_elem.as_ref().unwrap();
 
-                        if iter.next_elem.as_ref() == Some(max_elem) {
+                        if iter.next_elem.as_ref().is_none_or(|v| v >= max_elem) {
                             continue;
                         }
 
@@ -534,7 +534,7 @@ mod tests {
     fn prop_test() {
         fastrand::seed(4);
 
-        for _ in 0..10_000 {
+        for _ in 0..50_000 {
             let bump = Bump::new();
 
             fn fill_random<'b>(bump: &'b Bump, validator: &mut Validator<'b>, depth: u32) {
@@ -594,15 +594,18 @@ mod tests {
     }
 
     #[test]
-    #[rustfmt::skip]
     fn weird_case() {
         let mut validator = Validator::default();
         validator.push_op(UnionIsectOp::Intersect);
+        {
             validator.push_op(UnionIsectOp::Union);
+            {
                 validator.push_iter(&[1, 3]);
                 validator.push_iter(&[1]);
+            }
             validator.pop_op();
             validator.push_iter(&[2, 3]);
+        }
         validator.pop_op();
         validator.finish();
     }
