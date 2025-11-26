@@ -1,10 +1,4 @@
 error: malformed parameter for trait parameter
-   ┌─ crates/frontend/samples/test1.fir:28:24
-   │
-28 │     type IHahThe: Demo<((), (((),),), ((),))>;
-   │                        ^^^^^^^^^^^^^^^^^^^^^
-
-error: malformed parameter for trait parameter
    ┌─ crates/frontend/samples/test1.fir:23:28
    │
 23 │ impl<T: Associated<T: Demo<((), (((),),), ((),))>>> Dummy for T {}
@@ -15,6 +9,12 @@ error: malformed parameter for trait parameter
    │
 25 │ impl Demo<((), (((),),), ((),))> for () {}
    │           ^^^^^^^^^^^^^^^^^^^^^
+
+error: malformed parameter for trait parameter
+   ┌─ crates/frontend/samples/test1.fir:28:24
+   │
+28 │     type IHahThe: Demo<((), (((),),), ((),))>;
+   │                        ^^^^^^^^^^^^^^^^^^^^^
 
 error: malformed parameter for trait parameter
    ┌─ crates/frontend/samples/test1.fir:36:16

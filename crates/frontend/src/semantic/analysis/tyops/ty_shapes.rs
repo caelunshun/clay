@@ -46,7 +46,7 @@ impl TyCtxt {
 
         match *ty.r(s) {
             TyKind::This | TyKind::InferVar(_) => {
-                unreachable!();
+                unreachable!("unexpected {ty:?}");
             }
             TyKind::Universal(_) | TyKind::ExplicitInfer | TyKind::Error(_) => TyShape::Hole,
             TyKind::Simple(kind) => TyShape::Solid(SolidTyShape {

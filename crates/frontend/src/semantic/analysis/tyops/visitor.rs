@@ -565,7 +565,8 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
 
     fn super_re(&mut self, re: Re) -> Result<Re, Self::Error> {
         match re {
-            Re::Gc | Re::InferVar(_) | Re::ExplicitInfer | Re::Erased => Ok(re),
+            Re::Gc | Re::ExplicitInfer | Re::Erased => Ok(re),
+            Re::InferVar(var) => self.try_fold_re_infer_use(var),
             Re::Universal(generic) => self.try_fold_re_generic_use(generic),
         }
     }
@@ -574,11 +575,10 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
         let tcx = self.tcx();
 
         match *ty.r(&tcx.session) {
-            TyKind::Simple(..)
-            | TyKind::FnDef(..)
-            | TyKind::ExplicitInfer
-            | TyKind::InferVar(..)
-            | TyKind::Error(..) => Ok(ty),
+            TyKind::Simple(..) | TyKind::FnDef(..) | TyKind::ExplicitInfer | TyKind::Error(..) => {
+                Ok(ty)
+            }
+            TyKind::InferVar(var) => self.try_fold_ty_infer_use(var),
             TyKind::This => self.try_fold_self_ty_use(),
             TyKind::Reference(re, muta, pointee) => Ok(tcx.intern_ty(TyKind::Reference(
                 self.try_fold_re(re)?,
