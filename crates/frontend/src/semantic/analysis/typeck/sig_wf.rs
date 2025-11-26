@@ -7,9 +7,9 @@ use crate::{
     parse::token::Ident,
     semantic::{
         analysis::{
-            BinderSubstitution, ExplicitInferVisitor, InferCx, InferCxMode, SubstitutionFolder,
-            TyCtxt, TyFolderInfalliblePreservesSpans as _, TyVisitor, TyVisitorUnspanned,
-            TyVisitorWalk,
+            BinderSubstitution, CoherenceMap, ExplicitInferVisitor, InferCx, InferCxMode,
+            SubstitutionFolder, TyCtxt, TyFolderInfalliblePreservesSpans as _, TyVisitor,
+            TyVisitorUnspanned, TyVisitorWalk,
         },
         syntax::{
             AnyGeneric, Crate, ImplDef, ItemKind, Re, RegionGeneric, SpannedAdtInstance,
@@ -25,6 +25,7 @@ use std::{convert::Infallible, ops::ControlFlow};
 #[derive(Debug, Clone)]
 pub struct SignatureWfVisitor<'tcx> {
     pub tcx: &'tcx TyCtxt,
+    pub coherence: &'tcx CoherenceMap,
     pub self_ty: Option<SpannedTy>,
     pub clause_applies_to: Option<Ty>,
 }
@@ -38,20 +39,18 @@ impl SignatureWfVisitor<'_> {
             is_local: _,
             root: _,
             items,
-            impls,
         } = krate.r(s);
 
         for &item in &**items {
             match *item.r(s).kind {
+                ItemKind::Adt(obj) => todo!(),
                 ItemKind::Trait(def) => {
                     self.visit_trait(def)?;
                 }
-                ItemKind::Adt(obj) => todo!(),
+                ItemKind::Impl(def) => {
+                    self.visit_impl(def)?;
+                }
             }
-        }
-
-        for &impl_ in &**impls {
-            self.visit_impl(impl_)?;
         }
 
         ControlFlow::Continue(())
@@ -63,7 +62,7 @@ impl SignatureWfVisitor<'_> {
         let old_self_ty = self.self_ty.replace(item.r(s).target);
         {
             let ImplDef {
-                span: _,
+                item: _,
                 generics,
                 trait_,
                 target,
@@ -198,7 +197,6 @@ impl SignatureWfVisitor<'_> {
                 regular_generic_count: _,
                 associated_types: _,
                 methods,
-                impls: _,
             } = def.r(s);
 
             let old_clause_applies_to = self.clause_applies_to.replace(new_self_ty.value);
@@ -337,7 +335,7 @@ impl SignatureWfVisitor<'_> {
                     let requirements =
                         trait_subst.fold_spanned_clause_list(*requirements.r(s).clauses);
 
-                    if let Err(err) = InferCx::new(tcx, InferCxMode::RegionAware)
+                    if let Err(err) = InferCx::new(tcx, self.coherence, InferCxMode::RegionAware)
                         .relate_re_and_clause(actual, requirements)
                     {
                         Diag::span_err(
@@ -360,7 +358,7 @@ impl SignatureWfVisitor<'_> {
                         continue;
                     }
 
-                    if let Err(err) = InferCx::new(tcx, InferCxMode::RegionAware)
+                    if let Err(err) = InferCx::new(tcx, self.coherence, InferCxMode::RegionAware)
                         .relate_ty_and_clause(actual, requirements)
                     {
                         Diag::span_err(

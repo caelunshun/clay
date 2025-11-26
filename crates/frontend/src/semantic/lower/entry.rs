@@ -25,7 +25,7 @@ use crate::{
         },
     },
     symbol,
-    utils::{hash::FxHashMap, mem::CellVec},
+    utils::hash::FxHashMap,
 };
 use index_vec::IndexVec;
 use std::rc::Rc;
@@ -40,7 +40,6 @@ impl TyCtxt {
         let mut ctxt = UseLowerCtxt {
             tree: BuilderModuleTree::default(),
             item_asts: IndexVec::new(),
-            impls: Vec::new(),
         };
 
         ctxt.lower_initial_tree(BuilderModuleId::ROOT, ast);
@@ -51,18 +50,13 @@ impl TyCtxt {
                 is_local: true,
                 root: LateInit::uninit(),
                 items: LateInit::uninit(),
-                impls: LateInit::uninit(),
             },
             s,
         );
         let (modules, items) = ctxt.tree.freeze_and_check(krate, s);
         let root = modules[BuilderModuleId::ROOT];
 
-        let UseLowerCtxt {
-            tree: _,
-            item_asts,
-            impls,
-        } = ctxt;
+        let UseLowerCtxt { tree: _, item_asts } = ctxt;
 
         // Lower inter-item properties.
         let mut tasks = Vec::new();
@@ -78,6 +72,9 @@ impl TyCtxt {
                 AstItem::Trait(ast) => {
                     ctxt.lower_trait(target, ast);
                 }
+                AstItem::Impl(ast) => {
+                    ctxt.lower_impl(target, ast);
+                }
                 AstItem::Func(_) => {
                     // TODO
                 }
@@ -87,7 +84,7 @@ impl TyCtxt {
                 AstItem::Enum(_) => {
                     // TODO
                 }
-                AstItem::Mod(_) | AstItem::Use(_) | AstItem::Impl(_) | AstItem::Error(_, _) => {
+                AstItem::Mod(_) | AstItem::Use(_) | AstItem::Error(_, _) => {
                     unreachable!()
                 }
             }
@@ -111,26 +108,13 @@ impl TyCtxt {
                 } => {
                     ctxt.lower_trait(item, inherits, generic_clause_lists);
                 }
+                IntraLowerTask::Impl { item, ast } => {
+                    ctxt.lower_impl(item, ast);
+                }
             }
         }
 
-        let impls = impls
-            .into_iter()
-            .map(|(scope, impl_)| {
-                IntraItemLowerCtxt {
-                    tcx: self,
-                    root,
-                    scope: modules[scope],
-                    generic_ty_names: NameResolver::new(),
-                    generic_re_names: NameResolver::new(),
-                }
-                .lower_impl(impl_)
-            })
-            .filter_map(Result::ok)
-            .collect::<Vec<_>>();
-
         LateInit::init(&krate.r(s).items, items.raw);
-        LateInit::init(&krate.r(s).impls, impls);
 
         krate
     }
@@ -141,7 +125,6 @@ impl TyCtxt {
 pub struct UseLowerCtxt<'ast> {
     tree: BuilderModuleTree,
     item_asts: IndexVec<BuilderItemId, &'ast AstItem>,
-    impls: Vec<(BuilderModuleId, &'ast AstItemImpl)>,
 }
 
 impl<'ast> UseLowerCtxt<'ast> {
@@ -166,7 +149,7 @@ impl<'ast> UseLowerCtxt<'ast> {
                 }
                 AstItem::Trait(item) => {
                     self.tree
-                        .push_item(parent_id, item.base.vis.clone(), item.name);
+                        .push_nameable_item(parent_id, item.base.vis.clone(), item.name);
 
                     self.item_asts.push(item_enum);
                 }
@@ -179,23 +162,32 @@ impl<'ast> UseLowerCtxt<'ast> {
                         .emit();
                     }
 
-                    self.impls.push((parent_id, item));
+                    self.tree.push_unnamed_item(
+                        parent_id,
+                        Ident {
+                            span: item.base.span,
+                            text: symbol!("<impl>"),
+                            raw: false,
+                        },
+                    );
+
+                    self.item_asts.push(item_enum);
                 }
                 AstItem::Func(item) => {
                     self.tree
-                        .push_item(parent_id, item.base.vis.clone(), item.def.name);
+                        .push_nameable_item(parent_id, item.base.vis.clone(), item.def.name);
 
                     self.item_asts.push(item_enum);
                 }
                 AstItem::Struct(item) => {
                     self.tree
-                        .push_item(parent_id, item.base.vis.clone(), item.name);
+                        .push_nameable_item(parent_id, item.base.vis.clone(), item.name);
 
                     self.item_asts.push(item_enum);
                 }
                 AstItem::Enum(item) => {
                     self.tree
-                        .push_item(parent_id, item.base.vis.clone(), item.name);
+                        .push_nameable_item(parent_id, item.base.vis.clone(), item.name);
 
                     self.item_asts.push(item_enum);
                 }
@@ -393,7 +385,6 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                 regular_generic_count,
                 associated_types,
                 methods: LateInit::uninit(),
-                impls: CellVec::default(),
             },
             s,
         );
@@ -405,6 +396,10 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
             inherits: ast.inherits.as_ref(),
             generic_clause_lists,
         });
+    }
+
+    pub fn lower_impl(&mut self, target: Obj<Item>, ast: &'ast AstItemImpl) {
+        self.push_task(IntraLowerTask::Impl { item: target, ast });
     }
 }
 
@@ -423,6 +418,10 @@ pub enum IntraLowerTask<'ast> {
         item: Obj<TraitDef>,
         inherits: Option<&'ast AstTraitClauseList>,
         generic_clause_lists: Vec<Option<&'ast AstTraitClauseList>>,
+    },
+    Impl {
+        item: Obj<Item>,
+        ast: &'ast AstItemImpl,
     },
 }
 
@@ -468,7 +467,7 @@ impl IntraItemLowerCtxt<'_> {
         LateInit::init(&item.r(s).inherits, self.lower_clauses(inherits));
     }
 
-    pub fn lower_impl(mut self, ast: &AstItemImpl) -> Result<Obj<ImplDef>, ErrorGuaranteed> {
+    pub fn lower_impl(mut self, item: Obj<Item>, ast: &AstItemImpl) {
         let s = &self.tcx.session;
 
         // Lower generics
@@ -532,15 +531,17 @@ impl IntraItemLowerCtxt<'_> {
         }
 
         // Lower source trait
-        let impl_ = match (&ast.first_ty, &ast.second_ty) {
+        match (&ast.first_ty, &ast.second_ty) {
             (for_trait, Some(for_ty)) => {
-                let for_trait = self.lower_trait_instance(for_trait, &ast.body)?;
+                let Ok(for_trait) = self.lower_trait_instance(for_trait, &ast.body) else {
+                    return;
+                };
 
                 let for_ty = self.lower_ty(for_ty);
 
-                let item = Obj::new(
+                let item_spec = Obj::new(
                     ImplDef {
-                        span: ast.base.span,
+                        item,
                         generics: binder,
                         trait_: Some(for_trait),
                         target: for_ty,
@@ -550,18 +551,14 @@ impl IntraItemLowerCtxt<'_> {
                     s,
                 );
 
-                for_trait.value.def.r(s).impls.mutate(|v| v.push(item));
-
-                item
+                LateInit::init(&item.r(s).kind, ItemKind::Impl(item_spec));
             }
             (for_ty, None) => {
                 todo!()
             }
-        };
+        }
 
         // Lower methods
         // TODO
-
-        Ok(impl_)
     }
 }

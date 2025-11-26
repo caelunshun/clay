@@ -2,7 +2,8 @@ use crate::{
     base::{ErrorGuaranteed, Session, arena::Obj},
     semantic::{
         analysis::{
-            TyCtxt, TyFolder, TyFolderInfallible, TyVisitor, TyVisitorUnspanned, TyVisitorWalk,
+            CoherenceMap, TyCtxt, TyFolder, TyFolderInfallible, TyVisitor, TyVisitorUnspanned,
+            TyVisitorWalk,
         },
         syntax::{
             InferReVar, InferTyVar, Mutability, Re, ReVariance, RegionGeneric, RelationMode,
@@ -128,14 +129,16 @@ pub enum InferCxMode {
 #[derive(Debug, Clone)]
 pub struct InferCx<'tcx> {
     tcx: &'tcx TyCtxt,
+    coherence: &'tcx CoherenceMap,
     types: TyInferTracker,
     regions: Option<ReInferTracker>,
 }
 
 impl<'tcx> InferCx<'tcx> {
-    pub fn new(tcx: &'tcx TyCtxt, mode: InferCxMode) -> Self {
+    pub fn new(tcx: &'tcx TyCtxt, coherence: &'tcx CoherenceMap, mode: InferCxMode) -> Self {
         Self {
             tcx,
+            coherence,
             types: TyInferTracker::default(),
             regions: match mode {
                 InferCxMode::RegionBlind => None,
@@ -150,6 +153,10 @@ impl<'tcx> InferCx<'tcx> {
 
     pub fn session(&self) -> &'tcx Session {
         &self.tcx.session
+    }
+
+    pub fn coherence(&self) -> &'tcx CoherenceMap {
+        &self.coherence
     }
 
     pub fn mode(&self) -> InferCxMode {
@@ -700,6 +707,7 @@ pub struct InfTySubstitutor<'a, 'tcx> {
 pub enum UnboundVarHandlingMode {
     Error(ErrorGuaranteed),
     NormalizeToRoot,
+    EraseToExplicitInfer,
     Panic,
 }
 
@@ -727,6 +735,9 @@ impl<'tcx> TyFolder<'tcx> for InfTySubstitutor<'_, 'tcx> {
                 UnboundVarHandlingMode::Error(error) => self.tcx().intern_ty(TyKind::Error(error)),
                 UnboundVarHandlingMode::NormalizeToRoot => {
                     self.tcx().intern_ty(TyKind::InferVar(normalized))
+                }
+                UnboundVarHandlingMode::EraseToExplicitInfer => {
+                    self.tcx().intern_ty(TyKind::ExplicitInfer)
                 }
                 UnboundVarHandlingMode::Panic => {
                     unreachable!("unexpected ambiguous inference variable")

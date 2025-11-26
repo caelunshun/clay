@@ -5,8 +5,8 @@ use crate::{
         token::Ident,
     },
     semantic::syntax::{
-        AdtDef, GenericBinder, Item, Mutability, SpannedTraitParamList, SpannedTy, SpannedTyOrRe,
-        TraitMethod,
+        AdtDef, GenericBinder, ImplDef, Item, Mutability, SpannedTraitParamList, SpannedTy,
+        SpannedTyOrRe, TraitMethod,
     },
 };
 
@@ -26,7 +26,14 @@ pub struct FuncDef {
     pub self_ty: Option<SpannedTy>,
     pub args: Obj<[FuncArg]>,
     pub ret_ty: Option<SpannedTy>,
-    pub body: Obj<Block>,
+    pub kind: FuncDefKind,
+    pub body: Option<Obj<Block>>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum FuncDefKind {
+    Func(Obj<FuncItem>),
+    Method(Obj<ImplDef>, u32),
 }
 
 #[derive(Debug, Clone)]

@@ -5,10 +5,10 @@ use crate::{
         arena::{HasInterner, HasListInterner, Interner, ListInterner, Obj},
     },
     semantic::{
-        analysis::{BinderSubstitution, SignatureWfVisitor},
+        analysis::{BinderSubstitution, CoherenceMap, SignatureWfVisitor},
         syntax::{
-            CoherenceTy, Crate, ListOfTraitClauseList, TraitClause, TraitClauseList, TraitParam,
-            TraitParamList, Ty, TyKind, TyList, TyOrRe, TyOrReList,
+            Crate, ListOfTraitClauseList, TraitClause, TraitClauseList, TraitParam, TraitParamList,
+            Ty, TyKind, TyList, TyOrRe, TyOrReList, TyShape,
         },
     },
 };
@@ -35,7 +35,7 @@ pub struct Interners {
     pub trait_clause_list: ListInterner<TraitClause>,
     pub list_of_trait_clause_list: ListInterner<TraitClauseList>,
     pub spanned_info_list: ListInterner<SpannedInfo>,
-    pub coherence_ty_list: ListInterner<CoherenceTy>,
+    pub coherence_ty_list: ListInterner<TyShape>,
 }
 
 #[derive(Debug, Default)]
@@ -96,7 +96,15 @@ impl TyCtxt {
     pub fn check_crate(&self, krate: Obj<Crate>) {
         let s = &self.session;
 
-        for &def in &**krate.r(s).impls {
+        let mut coherence = CoherenceMap::default();
+
+        coherence.populate(self, krate);
+
+        for &def in &**krate.r(s).items {
+            let Some(def) = def.r(s).kind.as_impl() else {
+                continue;
+            };
+
             self.determine_impl_generic_solve_order(def);
         }
 
@@ -104,6 +112,7 @@ impl TyCtxt {
             tcx: self,
             self_ty: None,
             clause_applies_to: None,
+            coherence: &coherence,
         }
         .visit_crate(krate);
     }
@@ -157,8 +166,8 @@ impl HasListInterner<SpannedInfo> for TyCtxt {
     }
 }
 
-impl HasListInterner<CoherenceTy> for TyCtxt {
-    fn interner(&self) -> &ListInterner<CoherenceTy> {
+impl HasListInterner<TyShape> for TyCtxt {
+    fn interner(&self) -> &ListInterner<TyShape> {
         &self.interners.coherence_ty_list
     }
 }

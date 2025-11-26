@@ -1,18 +1,20 @@
 use crate::{
     base::{
         Diag,
-        arena::{LateInit, Obj},
+        arena::{HasListInterner, LateInit, Obj},
     },
     semantic::{
         analysis::{
-            BinderSubstitution, InferCx, ReAndReRelateError, SubstitutionFolder,
-            TyAndReRelateError, TyAndTyRelateError, TyCtxt, TyFolderInfallible as _,
+            BinderSubstitution, InfTySubstitutor, InferCx, ReAndReRelateError, SubstitutionFolder,
+            TyAndReRelateError, TyAndTyRelateError, TyCtxt, TyFolderInfallible as _, TyShapeMap,
+            UnboundVarHandlingMode,
         },
         syntax::{
-            AnyGeneric, GenericBinder, GenericSolveStep, ImplDef, ListOfTraitClauseList, Re,
-            RelationMode, SpannedRe, SpannedTraitClauseList, SpannedTraitClauseView,
-            SpannedTraitParamView, SpannedTraitSpec, SpannedTy, SpannedTyOrReView, SpannedTyView,
-            TraitClause, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReList,
+            AnyGeneric, Crate, FuncDef, GenericBinder, GenericSolveStep, ImplDef,
+            ListOfTraitClauseList, Re, RelationMode, SolidTyShape, SolidTyShapeKind, SpannedRe,
+            SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParamView,
+            SpannedTraitSpec, SpannedTy, SpannedTyOrReView, SpannedTyView, TraitClause, TraitParam,
+            TraitSpec, Ty, TyKind, TyOrRe, TyOrReList, TyShape,
         },
     },
 };
@@ -315,6 +317,63 @@ impl TyCtxt {
     }
 }
 
+// === CoherenceMap === //
+
+#[derive(Debug, Default)]
+pub struct CoherenceMap {
+    by_shape: TyShapeMap<CoherenceMapEntry>,
+}
+
+#[derive(Debug, Copy, Clone)]
+enum CoherenceMapEntry {
+    TraitImpl(Obj<ImplDef>),
+    InherentMethod(Obj<FuncDef>),
+}
+
+impl CoherenceMap {
+    pub fn populate(&mut self, tcx: &TyCtxt, krate: Obj<Crate>) {
+        let s = &tcx.session;
+
+        // Extend map with all `impl`s.
+        for &item in &**krate.r(s).items {
+            let Some(item) = item.r(s).kind.as_impl() else {
+                continue;
+            };
+
+            match item.r(s).trait_ {
+                Some(trait_) => {
+                    let arg_count = trait_.value.def.r(s).regular_generic_count as usize;
+                    self.by_shape.insert(
+                        tcx.shape_of_trait_def(
+                            trait_.value.def,
+                            &trait_.value.params.r(s)[..arg_count],
+                            item.r(s).target.value,
+                        ),
+                        CoherenceMapEntry::TraitImpl(item),
+                        s,
+                    );
+                }
+                None => {
+                    for &method in &**item.r(s).methods {
+                        self.by_shape.insert(
+                            TyShape::Solid(SolidTyShape {
+                                kind: SolidTyShapeKind::InherentMethodImpl(method.r(s).name.text),
+                                children: tcx
+                                    .intern(&[tcx.erase_ty_to_shape(item.r(s).target.value)]),
+                            }),
+                            CoherenceMapEntry::InherentMethod(method),
+                            s,
+                        );
+                    }
+                }
+            }
+        }
+
+        // Perform coherence checks
+        // TODO
+    }
+}
+
 // === Inference Context === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -325,7 +384,7 @@ struct ImplFreshInfer {
     impl_generic_clauses: ListOfTraitClauseList,
 }
 
-impl InferCx<'_> {
+impl<'tcx> InferCx<'tcx> {
     fn instantiate_fresh_impl_vars(&mut self, candidate: Obj<ImplDef>) -> ImplFreshInfer {
         let tcx = self.tcx();
         let s = self.session();
@@ -503,7 +562,7 @@ impl InferCx<'_> {
 
         let mut accepted_fork = None;
 
-        for &candidate in rhs.value.def.r(s).impls.read().iter() {
+        for candidate in self.gather_impl_candidates(lhs.value, rhs.value) {
             let mut fork = self.clone();
 
             match fork.relate_ty_and_impl_no_fork(lhs, candidate, rhs) {
@@ -531,6 +590,44 @@ impl InferCx<'_> {
         Ok(TyAndTraitRelateResolution::Impl(
             error.resolutions.into_iter().next().unwrap(),
         ))
+    }
+
+    pub fn gather_impl_candidates<'a>(
+        &'a self,
+        lhs: Ty,
+        rhs: TraitSpec,
+    ) -> impl Iterator<Item = Obj<ImplDef>> + 'tcx {
+        let tcx = self.tcx();
+        let s = self.session();
+
+        self.coherence()
+            .by_shape
+            .lookup(
+                tcx.shape_of_trait_def(
+                    rhs.def,
+                    &rhs.params.r(s)[..rhs.def.r(s).regular_generic_count as usize]
+                        .iter()
+                        .map(|&v| match v {
+                            TraitParam::Equals(v) => InfTySubstitutor::new(
+                                self,
+                                UnboundVarHandlingMode::EraseToExplicitInfer,
+                            )
+                            .fold_ty_or_re(v),
+                            TraitParam::Unspecified(_) => unreachable!(),
+                        })
+                        .collect::<Vec<_>>(),
+                    InfTySubstitutor::new(self, UnboundVarHandlingMode::EraseToExplicitInfer)
+                        .fold_ty(lhs),
+                ),
+                s,
+            )
+            .map(|v| {
+                let CoherenceMapEntry::TraitImpl(v) = *v else {
+                    unreachable!()
+                };
+
+                v
+            })
     }
 
     fn relate_ty_and_impl_no_fork(

@@ -17,7 +17,6 @@ pub struct Crate {
     pub is_local: bool,
     pub root: LateInit<Obj<Module>>,
     pub items: LateInit<Vec<Obj<Item>>>,
-    pub impls: LateInit<Vec<Obj<ImplDef>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -60,14 +59,29 @@ pub struct Item {
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum ItemKind {
-    Trait(Obj<TraitDef>),
     Adt(Obj<AdtDef>),
+    Trait(Obj<TraitDef>),
+    Impl(Obj<ImplDef>),
 }
 
 impl ItemKind {
+    pub fn as_adt(self) -> Option<Obj<AdtDef>> {
+        match self {
+            ItemKind::Adt(v) => Some(v),
+            _ => None,
+        }
+    }
+
     pub fn as_trait(self) -> Option<Obj<TraitDef>> {
         match self {
             ItemKind::Trait(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn as_impl(self) -> Option<Obj<ImplDef>> {
+        match self {
+            ItemKind::Impl(v) => Some(v),
             _ => None,
         }
     }

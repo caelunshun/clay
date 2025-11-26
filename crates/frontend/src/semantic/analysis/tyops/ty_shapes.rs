@@ -1,12 +1,17 @@
 use crate::{
-    base::{Session, arena::HasListInterner as _},
+    base::{
+        Session,
+        arena::{HasListInterner as _, Obj},
+    },
     semantic::{
         analysis::TyCtxt,
-        syntax::{AdtInstance, CoherenceTy, CoherenceTyKind, SolidCoherenceTy, Ty, TyKind},
+        syntax::{
+            AdtInstance, SolidTyShape, SolidTyShapeKind, TraitDef, Ty, TyKind, TyOrRe, TyShape,
+        },
     },
     utils::{
         hash::FxHashMap,
-        lang::{UnionIsectBuilder, UnionIsectOp},
+        lang::{UnionIsectBuilder, UnionIsectIter, UnionIsectOp},
     },
 };
 use derive_where::derive_where;
@@ -16,97 +21,134 @@ use std::slice;
 // === Erasure === //
 
 impl TyCtxt {
-    pub fn erase_ty_for_coherence(&self, ty: Ty) -> CoherenceTy {
+    pub fn shape_of_trait_def(&self, def: Obj<TraitDef>, args: &[TyOrRe], target: Ty) -> TyShape {
+        let s = &self.session;
+
+        debug_assert_eq!(args.len(), def.r(s).regular_generic_count as usize);
+
+        TyShape::Solid(SolidTyShape {
+            kind: SolidTyShapeKind::TraitImpl(def),
+            children: self.intern(
+                &([self.erase_ty_to_shape(target)]
+                    .into_iter()
+                    .chain(
+                        args.iter()
+                            .filter_map(|ty| ty.as_ty())
+                            .map(|ty| self.erase_ty_to_shape(ty)),
+                    )
+                    .collect::<Vec<_>>()),
+            ),
+        })
+    }
+
+    pub fn erase_ty_to_shape(&self, ty: Ty) -> TyShape {
         let s = &self.session;
 
         match *ty.r(s) {
-            TyKind::This | TyKind::ExplicitInfer | TyKind::InferVar(_) => {
-                unreachable!()
+            TyKind::This | TyKind::InferVar(_) => {
+                unreachable!();
             }
-            TyKind::Simple(kind) => CoherenceTy::Solid(SolidCoherenceTy {
-                kind: CoherenceTyKind::Simple(kind),
+            TyKind::Universal(_) | TyKind::ExplicitInfer | TyKind::Error(_) => TyShape::Hole,
+            TyKind::Simple(kind) => TyShape::Solid(SolidTyShape {
+                kind: SolidTyShapeKind::Simple(kind),
                 children: self.intern(&[]),
             }),
-            TyKind::Reference(_re, mutability, pointee) => CoherenceTy::Solid(SolidCoherenceTy {
-                kind: CoherenceTyKind::Re(mutability),
-                children: self.intern(&[self.erase_ty_for_coherence(pointee)]),
+            TyKind::Reference(_re, mutability, pointee) => TyShape::Solid(SolidTyShape {
+                kind: SolidTyShapeKind::Re(mutability),
+                children: self.intern(&[self.erase_ty_to_shape(pointee)]),
             }),
-            TyKind::Adt(AdtInstance { def, params }) => CoherenceTy::Solid(SolidCoherenceTy {
-                kind: CoherenceTyKind::Adt(def),
+            TyKind::Adt(AdtInstance { def, params }) => TyShape::Solid(SolidTyShape {
+                kind: SolidTyShapeKind::Adt(def),
                 children: self.intern(
                     &params
                         .r(s)
                         .iter()
                         .filter_map(|ty| ty.as_ty())
-                        .map(|ty| self.erase_ty_for_coherence(ty))
+                        .map(|ty| self.erase_ty_to_shape(ty))
                         .collect::<Vec<_>>(),
                 ),
             }),
             TyKind::Trait(intern) => todo!(),
-            TyKind::Tuple(children) => CoherenceTy::Solid(SolidCoherenceTy {
-                kind: CoherenceTyKind::Tuple(children.r(s).len() as u32),
+            TyKind::Tuple(children) => TyShape::Solid(SolidTyShape {
+                kind: SolidTyShapeKind::Tuple(children.r(s).len() as u32),
                 children: self.intern(
                     &children
                         .r(s)
                         .iter()
-                        .map(|&ty| self.erase_ty_for_coherence(ty))
+                        .map(|&ty| self.erase_ty_to_shape(ty))
                         .collect::<Vec<_>>(),
                 ),
             }),
             TyKind::FnDef(obj) => todo!(),
-            TyKind::Universal(_) => CoherenceTy::Universal,
-            TyKind::Error(_) => CoherenceTy::Universal,
         }
     }
 }
 
-// === CoherenceMap === //
+// === TyShapeMap === //
 
 #[derive(Debug)]
 #[derive_where(Default)]
-pub struct CoherenceMap<T> {
-    entries: IndexVec<CoherenceEntryIdx, T>,
-    root_layer: CoherenceMapLayer,
+pub struct TyShapeMap<T> {
+    entries: IndexVec<EntryIdx, T>,
+    root_layer: MapLayer,
 }
 
-impl<T> CoherenceMap<T> {
-    pub fn insert(&mut self, ty: CoherenceTy, entry: T, s: &Session) {
+impl<T> TyShapeMap<T> {
+    pub fn insert(&mut self, ty: TyShape, entry: T, s: &Session) {
         let index = self.entries.push(entry);
         self.root_layer.insert(ty, index, s);
     }
 
-    pub fn lookup(&self, ty: CoherenceTy, s: &Session) -> impl Iterator<Item = &T> {
+    pub fn lookup(&self, ty: TyShape, s: &Session) -> TyShapeMapIter<'_, T> {
         let mut set = UnionIsectBuilder::default();
+
         self.root_layer.lookup(ty, &mut set, s);
-        set.finish().map(|&idx| &self.entries[idx])
+
+        TyShapeMapIter {
+            entries: &self.entries,
+            iter: set.finish(),
+        }
     }
 }
 
-// === CoherenceMapLayer === //
-
-#[derive(Debug, Default)]
-pub struct CoherenceMapLayer {
-    universally_matched_by: Vec<CoherenceEntryIdx>,
-    conditionally_matched_by: FxHashMap<CoherenceTyKind, ConditionalMatcher>,
+pub struct TyShapeMapIter<'a, T> {
+    entries: &'a IndexVec<EntryIdx, T>,
+    iter: UnionIsectIter<slice::Iter<'a, EntryIdx>>,
 }
+
+impl<'a, T> Iterator for TyShapeMapIter<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|&v| &self.entries[v])
+    }
+}
+
+// === MapLayer === //
 
 define_index_type! {
-    pub struct CoherenceEntryIdx = u32;
+    struct EntryIdx = u32;
 }
 
-#[derive(Debug)]
-pub enum ConditionalMatcher {
-    Terminal(Vec<CoherenceEntryIdx>),
-    RequiresChildren(Box<[CoherenceMapLayer]>),
+#[derive(Debug, Clone, Default)]
+struct MapLayer {
+    universally_matched_by: Vec<EntryIdx>,
+    conditionally_matched_by: FxHashMap<SolidTyShapeKind, ConditionalMatcher>,
 }
 
-impl CoherenceMapLayer {
-    pub fn insert(&mut self, ty: CoherenceTy, index: CoherenceEntryIdx, s: &Session) {
+#[derive(Debug, Clone)]
+enum ConditionalMatcher {
+    Terminal(Vec<EntryIdx>),
+    RequiresChildren(Box<[MapLayer]>),
+}
+
+impl MapLayer {
+    fn insert(&mut self, ty: TyShape, index: EntryIdx, s: &Session) {
         match ty {
-            CoherenceTy::Universal => {
+            TyShape::Hole => {
                 self.universally_matched_by.push(index);
             }
-            CoherenceTy::Solid(SolidCoherenceTy { kind, children }) => {
+            TyShape::Solid(SolidTyShape { kind, children }) => {
                 let child_tys = children.r(s);
 
                 if child_tys.is_empty() {
@@ -125,10 +167,7 @@ impl CoherenceMapLayer {
                         .entry(kind)
                         .or_insert_with(|| {
                             ConditionalMatcher::RequiresChildren(
-                                child_tys
-                                    .iter()
-                                    .map(|_| CoherenceMapLayer::default())
-                                    .collect(),
+                                child_tys.iter().map(|_| MapLayer::default()).collect(),
                             )
                         })
                     else {
@@ -143,10 +182,10 @@ impl CoherenceMapLayer {
         }
     }
 
-    pub fn lookup<'a>(
+    fn lookup<'a>(
         &'a self,
-        ty: CoherenceTy,
-        set: &mut UnionIsectBuilder<slice::Iter<'a, CoherenceEntryIdx>>,
+        ty: TyShape,
+        set: &mut UnionIsectBuilder<slice::Iter<'a, EntryIdx>>,
         s: &Session,
     ) {
         set.push_op(UnionIsectOp::Union);
@@ -155,7 +194,7 @@ impl CoherenceMapLayer {
             set.push_iter(self.universally_matched_by.iter());
         }
 
-        if let CoherenceTy::Solid(ty) = ty {
+        if let TyShape::Solid(ty) = ty {
             if let Some(matched_by) = self.conditionally_matched_by.get(&ty.kind) {
                 match matched_by {
                     ConditionalMatcher::Terminal(items) => {
@@ -182,7 +221,7 @@ impl CoherenceMapLayer {
                     }
                     ConditionalMatcher::RequiresChildren(layers) => {
                         for layer in layers {
-                            layer.lookup(CoherenceTy::Universal, set, s);
+                            layer.lookup(TyShape::Hole, set, s);
                         }
                     }
                 }
@@ -210,16 +249,16 @@ mod tests {
 
         let tcx = TyCtxt::new(session);
 
-        let mut map = CoherenceMap::<&'static str>::default();
+        let mut map = TyShapeMap::<&'static str>::default();
 
-        map.insert(CoherenceTy::Universal, "_", &tcx.session);
+        map.insert(TyShape::Hole, "_", &tcx.session);
         map.insert(
-            CoherenceTy::Solid(SolidCoherenceTy {
-                kind: CoherenceTyKind::Tuple(2),
+            TyShape::Solid(SolidTyShape {
+                kind: SolidTyShapeKind::Tuple(2),
                 children: tcx.intern(&[
-                    CoherenceTy::Universal,
-                    CoherenceTy::Solid(SolidCoherenceTy {
-                        kind: CoherenceTyKind::Simple(SimpleTyKind::Bool),
+                    TyShape::Hole,
+                    TyShape::Solid(SolidTyShape {
+                        kind: SolidTyShapeKind::Simple(SimpleTyKind::Bool),
                         children: tcx.intern(&[]),
                     }),
                 ]),
@@ -228,14 +267,14 @@ mod tests {
             &tcx.session,
         );
         map.insert(
-            CoherenceTy::Solid(SolidCoherenceTy {
-                kind: CoherenceTyKind::Tuple(2),
+            TyShape::Solid(SolidTyShape {
+                kind: SolidTyShapeKind::Tuple(2),
                 children: tcx.intern(&[
-                    CoherenceTy::Solid(SolidCoherenceTy {
-                        kind: CoherenceTyKind::Simple(SimpleTyKind::Str),
+                    TyShape::Solid(SolidTyShape {
+                        kind: SolidTyShapeKind::Simple(SimpleTyKind::Str),
                         children: tcx.intern(&[]),
                     }),
-                    CoherenceTy::Universal,
+                    TyShape::Hole,
                 ]),
             }),
             "(str, _)",
@@ -244,9 +283,9 @@ mod tests {
 
         assert_eq!(
             map.lookup(
-                CoherenceTy::Solid(SolidCoherenceTy {
-                    kind: CoherenceTyKind::Tuple(2),
-                    children: tcx.intern(&[CoherenceTy::Universal, CoherenceTy::Universal]),
+                TyShape::Solid(SolidTyShape {
+                    kind: SolidTyShapeKind::Tuple(2),
+                    children: tcx.intern(&[TyShape::Hole, TyShape::Hole]),
                 }),
                 &tcx.session,
             )
@@ -257,12 +296,12 @@ mod tests {
 
         assert_eq!(
             map.lookup(
-                CoherenceTy::Solid(SolidCoherenceTy {
-                    kind: CoherenceTyKind::Tuple(2),
+                TyShape::Solid(SolidTyShape {
+                    kind: SolidTyShapeKind::Tuple(2),
                     children: tcx.intern(&[
-                        CoherenceTy::Universal,
-                        CoherenceTy::Solid(SolidCoherenceTy {
-                            kind: CoherenceTyKind::Simple(SimpleTyKind::Bool),
+                        TyShape::Hole,
+                        TyShape::Solid(SolidTyShape {
+                            kind: SolidTyShapeKind::Simple(SimpleTyKind::Bool),
                             children: tcx.intern(&[])
                         })
                     ]),
@@ -276,12 +315,12 @@ mod tests {
 
         assert_eq!(
             map.lookup(
-                CoherenceTy::Solid(SolidCoherenceTy {
-                    kind: CoherenceTyKind::Tuple(2),
+                TyShape::Solid(SolidTyShape {
+                    kind: SolidTyShapeKind::Tuple(2),
                     children: tcx.intern(&[
-                        CoherenceTy::Universal,
-                        CoherenceTy::Solid(SolidCoherenceTy {
-                            kind: CoherenceTyKind::Simple(SimpleTyKind::Str),
+                        TyShape::Hole,
+                        TyShape::Solid(SolidTyShape {
+                            kind: SolidTyShapeKind::Simple(SimpleTyKind::Str),
                             children: tcx.intern(&[])
                         })
                     ]),

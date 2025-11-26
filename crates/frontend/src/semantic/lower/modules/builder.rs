@@ -190,7 +190,15 @@ impl BuilderModuleTree {
         )
     }
 
-    pub fn push_item(
+    pub fn push_unnamed_item(&mut self, parent: BuilderModuleId, name: Ident) -> BuilderItemId {
+        self.items.push(BuilderItem {
+            parent,
+            name,
+            public_path: None,
+        })
+    }
+
+    pub fn push_nameable_item(
         &mut self,
         parent: BuilderModuleId,
         visibility: AstVisibility,

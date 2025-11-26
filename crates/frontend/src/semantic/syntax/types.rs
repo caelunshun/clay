@@ -6,7 +6,7 @@ use crate::{
     },
     parse::token::{Ident, Lifetime},
     semantic::syntax::{FuncDef, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy},
-    utils::{hash::FxHashMap, mem::CellVec},
+    utils::hash::FxHashMap,
 };
 use derive_where::derive_where;
 use std::fmt;
@@ -17,15 +17,42 @@ use std::fmt;
 pub struct AdtDef {
     pub item: Obj<Item>,
     pub generics: Obj<GenericBinder>,
-    pub fields: Vec<AdtField>,
+    pub kind: AdtKind,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum AdtKind {
+    Enum(Obj<[AdtEnumVariant]>),
+    Struct(AdtStructFieldList),
 }
 
 #[derive(Debug, Clone)]
-pub struct AdtField {
+pub struct AdtEnumVariant {
+    pub def: LateInit<Obj<AdtDef>>,
+    pub idx: u32,
+    pub ident: Span,
+    pub kind: AdtStructFieldList,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct AdtStructFieldList {
+    pub syntax: AdtStructFieldSyntax,
+    pub fields: Obj<[AdtStructField]>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AdtStructField {
     pub def: LateInit<Obj<AdtDef>>,
     pub idx: u32,
     pub ident: Span,
     pub ty: Ty,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum AdtStructFieldSyntax {
+    Unit,
+    Tuple,
+    Named,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -56,9 +83,6 @@ pub struct TraitDef {
 
     /// The set of methods defined by this trait.
     pub methods: LateInit<Vec<Obj<TraitMethod>>>,
-
-    /// All known implementations of this trait.
-    pub impls: CellVec<Obj<ImplDef>>,
 }
 
 #[derive(Debug, Clone)]
@@ -91,11 +115,11 @@ pub enum TraitParam {
 
 #[derive(Debug, Clone)]
 pub struct ImplDef {
-    pub span: Span,
+    pub item: Obj<Item>,
     pub generics: Obj<GenericBinder>,
     pub trait_: Option<SpannedTraitInstance>,
     pub target: SpannedTy,
-    pub methods: LateInit<Vec<Obj<ImplFunc>>>,
+    pub methods: LateInit<Vec<Obj<FuncDef>>>,
 
     // We can't simply solve for stuff like `u32: Id<{T}>` where `{T}` is still unknown because
     // these impls could conflict...
@@ -131,12 +155,6 @@ pub struct ImplDef {
     //
     // Anyways, this field encodes the solving order we found as part of our WF checks.
     pub generic_solve_order: LateInit<Vec<GenericSolveStep>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ImplFunc {
-    pub owner: Obj<ImplDef>,
-    pub func: Obj<FuncDef>,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -415,22 +433,36 @@ pub enum FloatKind {
 
 // === Coherence === //
 
-pub type CoherenceTyList = Intern<[CoherenceTy]>;
+pub type TyShapeList = Intern<[TyShape]>;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum CoherenceTy {
-    Universal,
-    Solid(SolidCoherenceTy),
+pub enum TyShape {
+    Hole,
+    Solid(SolidTyShape),
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct SolidCoherenceTy {
-    pub kind: CoherenceTyKind,
-    pub children: CoherenceTyList,
+pub struct SolidTyShape {
+    pub kind: SolidTyShapeKind,
+    pub children: TyShapeList,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum CoherenceTyKind {
+pub enum SolidTyShapeKind {
+    /// A top-level coherence type indicating the implementation of a trait.
+    ///
+    /// The type's children are organized into two parts:
+    ///
+    /// - The first child is the target type.
+    /// - The remaining `trait_def.regular_generic_count` child types (minus the number of region
+    ///   generics) represent the trait arguments.
+    ///
+    TraitImpl(Obj<TraitDef>),
+
+    /// A top-level coherence type indicating the implementation of a specific method in an inherent
+    /// `impl` block. This type has exactly one child type indicating the implementation target.
+    InherentMethodImpl(Symbol),
+
     Simple(SimpleTyKind),
     Re(Mutability),
     Adt(Obj<AdtDef>),
