@@ -9,105 +9,52 @@ pub struct InternedStrand {
 
 /// A strand of basic blocks: the unit of compilation.
 ///
-/// This consists of a tree of "strand atoms", each of which
-/// is a tuple (function, bbs) corresponding to one or more
-/// basic blocks in the same function.
-///
-/// The children of a strand atom represent calls to effectively-inlined
-/// functions.
+/// A strand has a single entry block, and a set of jump targets
+/// that are considered exits.,
+/// The strand then contains all reachable blocks between the entry
+/// and the exits.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Strand {
-    /// Boxed to ensure `StrandAtomId` remains stable.
-    root_atom: Box<StrandAtom>,
+    entry: GBasicBlockId,
+    exits: BTreeSet<Exit>,
 }
 
 impl Strand {
-    pub fn new(root_atom: StrandAtom) -> Self {
+    pub fn new(entry: GBasicBlockId, exits: impl IntoIterator<Item = Exit>) -> Self {
         Self {
-            root_atom: Box::new(root_atom),
-        }
-    }
-
-    pub fn root_atom(&self) -> &StrandAtom {
-        &self.root_atom
-    }
-
-    pub fn of_single_block(gbb: GBasicBlockId) -> Self {
-        Self::new(StrandAtom::new(gbb.func, gbb.bb, [gbb.bb]))
-    }
-
-    pub fn of_single_func(
-        func: FuncId,
-        entry: BasicBlockId,
-        blocks: impl IntoIterator<Item = BasicBlockId>,
-    ) -> Self {
-        Self::new(StrandAtom::new(func, entry, blocks))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StrandAtom {
-    func: FuncId,
-    entry: BasicBlockId,
-    bbs: BTreeSet<BasicBlockId>,
-    children: Vec<StrandAtom>,
-}
-
-impl StrandAtom {
-    pub fn new(
-        func: FuncId,
-        entry: BasicBlockId,
-        bbs: impl IntoIterator<Item = BasicBlockId>,
-    ) -> Self {
-        let bbs: BTreeSet<_> = bbs.into_iter().collect();
-        assert!(bbs.contains(&entry), "entry block must be in the atom");
-        Self {
-            func,
             entry,
-            bbs,
-            children: Vec::new(),
+            exits: exits.into_iter().collect(),
         }
     }
 
-    pub fn push_child(&mut self, child: StrandAtom) {
-        self.children.push(child);
-    }
-
-    pub fn func(&self) -> FuncId {
-        self.func
-    }
-
-    pub fn entry(&self) -> BasicBlockId {
+    pub fn entry(&self) -> GBasicBlockId {
         self.entry
     }
 
-    pub fn bbs(&self) -> impl Iterator<Item = BasicBlockId> {
-        self.bbs.iter().copied()
+    pub fn entry_func(&self) -> FuncId {
+        self.entry.func
     }
 
-    pub fn bbs_as_global(&self) -> impl Iterator<Item = GBasicBlockId> {
-        self.bbs().map(|bb| GBasicBlockId {
-            func: self.func,
-            bb,
-        })
+    pub fn exits(&self) -> impl Iterator<Item = Exit> {
+        self.exits.iter().copied()
     }
 
-    pub fn contains_bb(&self, bb: BasicBlockId) -> bool {
-        self.bbs.contains(&bb)
-    }
-
-    pub fn children(&self) -> impl Iterator<Item = &StrandAtom> {
-        self.children.iter()
-    }
-
-    pub fn id(&self) -> StrandAtomId {
-        StrandAtomId(self as *const _)
+    pub fn is_exit(&self, exit: Exit) -> bool {
+        self.exits.contains(&exit)
     }
 }
 
-/// Identifies a `StrandAtom` within a strand.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct StrandAtomId(*const StrandAtom);
+/// An exit of a strand.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Exit {
+    /// The block the exit instruction is in.
+    pub block: GBasicBlockId,
+    /// The target block being jumped to or called.
+    /// For instructions with multiple targets (e.g. branch),
+    /// this allows representing strands that exit only
+    /// for a subset of the targets.
+    pub target: GBasicBlockId,
+}
 
 /// "Global" basic block. An MIR basic block ID and the function it's associated with.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
