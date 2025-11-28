@@ -1,4 +1,5 @@
 use crate::{intrinsic::IntrinsicCall, strand::GBasicBlockId};
+use mir::FuncId;
 
 /// Contains machine code for a strand,
 /// along with metadata for relocations, GC
@@ -73,4 +74,7 @@ pub enum Symbol {
     /// of the compiled strand whose entry is the given
     /// basic block.
     StrandForBlock(GBasicBlockId),
+    /// Address of the GOT entry for the continuation router implementation
+    /// for a particular function.
+    RouterForFunc(FuncId),
 }
