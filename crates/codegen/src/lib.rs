@@ -77,5 +77,5 @@ pub mod intrinsic;
 pub mod isa;
 pub mod layout;
 // pub mod lowering;
-// pub mod continuation;
+pub mod continuation;
 pub mod strand;
