@@ -1251,7 +1251,7 @@ impl<'a, 'db> FuncParserState<'a, 'db> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{InstrData, ir::Type};
+    use crate::{InstrData, InstrId, ir::Type};
     use indoc::indoc;
     use salsa::DatabaseImpl;
 
@@ -1294,7 +1294,13 @@ mod tests {
         let block = &func_data.basic_blocks[func_data.entry_block];
 
         assert_eq!(block.instrs.len(), 2);
-        assert!(matches!(block.instrs[0], InstrData::IntAdd(_)));
-        assert!(matches!(block.instrs[1], InstrData::Return(_)));
+        assert!(matches!(
+            block.instrs[InstrId::new(0)],
+            InstrData::IntAdd(_)
+        ));
+        assert!(matches!(
+            block.instrs[InstrId::new(1)],
+            InstrData::Return(_)
+        ));
     }
 }

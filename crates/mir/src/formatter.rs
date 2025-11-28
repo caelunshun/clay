@@ -312,7 +312,7 @@ impl<'db> Formatter<'db> {
             ]));
         }
 
-        for instr in &block_data.instrs {
+        for (_, instr) in &block_data.instrs {
             items.push(self.format_instr(func_data, instr));
         }
 

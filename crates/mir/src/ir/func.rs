@@ -144,6 +144,7 @@ impl<'db> FuncData<'db> {
             .instrs
             .last()
             .unwrap()
+            .1
             .visit_successors(visit)
     }
 
@@ -182,11 +183,15 @@ entity_ref_16bit! {
     pub struct BasicBlockId;
 }
 
+entity_ref! {
+    pub struct InstrId;
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, salsa::Update)]
 pub struct BasicBlock<'db> {
     /// Optional name, for debugging and testing.
     pub name: Option<CompactString>,
-    pub instrs: Vec<InstrData<'db>>,
+    pub instrs: PrimaryMap<InstrId, InstrData<'db>>,
     /// Only used after SSA transformation; empty before then, except for
     /// the entry block, where the function arguments are assigned
     /// here.

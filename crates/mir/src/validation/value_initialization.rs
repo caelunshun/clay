@@ -18,7 +18,7 @@ pub fn verify_value_initialization(func: &FuncData) -> Result<(), ValidationErro
             values_written_by_blocks[block].insert(param);
         }
 
-        for instr in &block_data.instrs {
+        for (_, instr) in &block_data.instrs {
             instr.visit_dst_operands(&func.val_lists, |val| {
                 values_written_by_blocks[block].insert(val);
             });
@@ -32,7 +32,7 @@ pub fn verify_value_initialization(func: &FuncData) -> Result<(), ValidationErro
             written_this_block.insert(param);
         }
 
-        for instr in &block_data.instrs {
+        for (_, instr) in &block_data.instrs {
             let mut error = None;
             instr.visit_src_operands(&func.val_lists, |val| {
                     if !written_this_block.contains(val) && paths[block]

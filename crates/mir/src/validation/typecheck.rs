@@ -31,7 +31,7 @@ pub fn verify_instr_types<'db>(
     let verifier = InstrTypeVerifier { func, db, cx };
     verifier.verify_entry_block_params()?;
     for (_, block) in &func.basic_blocks {
-        for instr in &block.instrs {
+        for (_, instr) in &block.instrs {
             verifier.verify_types_for_instr(instr)?;
         }
     }
