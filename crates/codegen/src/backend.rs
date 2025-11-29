@@ -49,6 +49,7 @@ where
 
     /// Gets the value at the given index for a parameter of the current block.
     fn block_param(&self, index: u32) -> ValId;
+    fn block_params(&self) -> &[ValId];
 
     /// Creates a new basic block.
     fn create_block(&mut self) -> BasicBlockId;

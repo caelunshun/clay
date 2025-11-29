@@ -170,13 +170,16 @@ impl<'db> FuncData<'db> {
     pub fn visit_block_called_funcs(
         &self,
         block: BasicBlockId,
-        mut visit: impl FnMut(AbstractFuncInstance<'db>),
+        mut visit: impl FnMut(InstrId, AbstractFuncInstance<'db>),
     ) {
-        self.basic_blocks[block].instrs.values().for_each(|instr| {
-            if let InstrData::Call(call) = instr {
-                visit(call.func);
-            }
-        })
+        self.basic_blocks[block]
+            .instrs
+            .iter()
+            .for_each(|(id, instr)| {
+                if let InstrData::Call(call) = instr {
+                    visit(id, call.func);
+                }
+            })
     }
 }
 

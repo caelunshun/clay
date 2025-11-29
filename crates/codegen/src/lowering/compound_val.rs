@@ -65,6 +65,56 @@ impl<'bump> Compound<'bump> {
             }
         }
     }
+
+    /// Inverse of `flatten`.
+    pub fn from_flat<'db>(
+        db: &'db dyn Database,
+        mir_cx: mir::Context<'db>,
+        bump: &'bump Bump,
+        flat: &mut impl Iterator<Item = ValId>,
+        ty: mir::Type<'db>,
+    ) -> Self {
+        match ty.kind(db) {
+            mir::TypeKind::Prim(prim_type) => match *prim_type {
+                mir::PrimType::Int => Self::Int(flat.next().unwrap()),
+                mir::PrimType::Real => Self::Real(flat.next().unwrap()),
+                mir::PrimType::Byte => Self::Byte(flat.next().unwrap()),
+                mir::PrimType::Bool => Self::Bool(flat.next().unwrap()),
+                mir::PrimType::Str => Self::Str {
+                    part0: flat.next().unwrap(),
+                    part1: flat.next().unwrap(),
+                },
+                mir::PrimType::Unit => Self::Unit,
+            },
+            mir::TypeKind::MRef(_) => Self::MRef {
+                tagged: flat.next().unwrap(),
+                untagged: flat.next().unwrap(),
+            },
+            mir::TypeKind::Bufref(_) => Self::Bufref {
+                ptr_tagged: flat.next().unwrap(),
+                ptr_untagged: flat.next().unwrap(),
+                len: flat.next().unwrap(),
+            },
+            mir::TypeKind::Algebraic(algebraic_type_instance) => {
+                let AlgebraicTypeKind::Struct(struct_) =
+                    algebraic_type_instance.adt.kind(db, mir_cx);
+
+                let mut fields =
+                    bumpalo::collections::Vec::with_capacity_in(struct_.fields.len(), bump);
+
+                for field in struct_.fields.values() {
+                    fields.push(Self::from_flat(db, mir_cx, bump, flat, field.typ));
+                }
+
+                Self::Struct {
+                    fields: fields.into_bump_slice(),
+                }
+            }
+            mir::TypeKind::TypeParam(_) | mir::TypeKind::Self_ => {
+                panic!("types must be substituted")
+            }
+        }
+    }
 }
 
 /// Returns a flat representation of the ValTys corresponding to the given

@@ -1,5 +1,5 @@
 use fir_mir::ir::{BasicBlockId, FuncId};
-use mir::{FuncInstance, TypeArgs};
+use mir::{FuncInstance, InstrId, TypeArgs};
 use salsa::Database;
 
 #[salsa::interned]
@@ -46,8 +46,8 @@ impl<'db> Strand<'db> {
         self.entry.func
     }
 
-    pub fn exits(&self) -> impl Iterator<Item = Exit> {
-        self.exits.iter().copied()
+    pub fn exits(&self) -> impl Iterator<Item = &Exit> {
+        self.exits.iter()
     }
 
     pub fn is_exit(&self, exit: Exit) -> bool {
@@ -56,15 +56,22 @@ impl<'db> Strand<'db> {
 }
 
 /// An exit of a strand.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Exit<'db> {
-    /// The block the exit instruction is in.
-    pub block: GBasicBlockId<'db>,
+    pub call_site: Vec<CallStackEntry>,
+    /// The location of the exit instruction.
     /// The target block being jumped to or called.
     /// For instructions with multiple targets (e.g. branch),
     /// this allows representing strands that exit only
     /// for a subset of the targets.
     pub target: GBasicBlockId<'db>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct CallStackEntry {
+    pub func: FuncId,
+    pub jump_bb: BasicBlockId,
+    pub jump_instr: InstrId,
 }
 
 /// "Global" basic block. An MIR basic block ID and the function it's associated with.

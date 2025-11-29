@@ -9,11 +9,12 @@ use crate::{
         context::LoweringCx,
         env::Env,
     },
-    strand::{self, GBasicBlockId, Strand},
+    strand::{self, CallStackEntry, GBasicBlockId, Strand},
 };
 use bumpalo::Bump;
+use cranelift_entity::SecondaryMap;
 use fir_core::{HashMap, HashSet};
-use mir::{FuncData, FuncId, FuncInstance, TypeArgs};
+use mir::{FuncData, TypeArgs};
 use salsa::Database;
 use std::{
     cell::{LazyCell, RefCell},
@@ -56,10 +57,10 @@ where
                 strand,
                 bump: &cx.bump,
                 bb_map: HashMap::new_in(&cx.bump),
-                val_map: HashMap::new_in(&cx.bump),
+                current_vals: SecondaryMap::default(),
                 current_bb: BbInstance {
                     bb: strand.entry(),
-                    call_stack: &[],
+                    call_site: &[],
                 },
                 current_func: entry_block_func,
                 current_type_args: strand.entry_type_args().clone(),
@@ -134,9 +135,9 @@ struct Lowerer<'db, 'tmp, B> {
     /// branches. In these cases, the bb_map entry points to the "entry"/"initial"
     /// block of the mir basic block, which is always unique.
     bb_map: HashMap<BbInstance<'db, 'tmp>, backend::BasicBlockId, &'tmp Bump>,
-    val_map: HashMap<GValId, Compound<'tmp>, &'tmp Bump>,
     current_bb: BbInstance<'db, 'tmp>,
     current_func: &'tmp FuncData<'db>,
+    current_vals: SecondaryMap<mir::ValId, Option<Compound<'tmp>>>,
     /// Type arguments in the current function.
     current_type_args: TypeArgs<'db>,
 }
@@ -144,13 +145,7 @@ struct Lowerer<'db, 'tmp, B> {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 struct BbInstance<'db, 'tmp> {
     bb: GBasicBlockId<'db>,
-    call_stack: &'tmp [FuncInstance<'db>],
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-struct GValId {
-    func: mir::FuncId,
-    val: mir::ValId,
+    call_site: &'tmp [CallStackEntry],
 }
 
 impl<'db, 'tmp, B> Lowerer<'db, 'tmp, B>
@@ -164,7 +159,7 @@ where
         let mut stack = bumpalo::collections::Vec::new_in(self.bump);
         stack.push(BbInstance::<'db, 'tmp> {
             bb: self.strand.entry(),
-            call_stack: &[],
+            call_site: &[],
         });
 
         let mut visited = HashSet::new_in(self.bump);
@@ -189,34 +184,53 @@ where
             // Traverse successors within this strand
             let mut successors = bumpalo::collections::Vec::new_in(self.bump);
             func_data.visit_block_successors(current.bb.bb, |successor| {
-                successors.push(GBasicBlockId {
-                    func: current.bb.func,
-                    bb: successor,
-                });
+                successors.push((
+                    GBasicBlockId {
+                        func: current.bb.func,
+                        bb: successor,
+                    },
+                    func_data.basic_blocks[current.bb.bb]
+                        .instrs
+                        .last()
+                        .unwrap()
+                        .0,
+                ));
             });
-            func_data.visit_block_called_funcs(current.bb.bb, |abstract_func| {
+            func_data.visit_block_called_funcs(current.bb.bb, |instr, abstract_func| {
                 let func = abstract_func
                     .resolve(self.db, self.mir_cx, &self.current_type_args)
                     .expect("assoc func unresolved?");
-                successors.push(GBasicBlockId {
-                    func,
-                    bb: func.id(self.db).data(self.db, self.mir_cx).entry_block,
-                });
+                successors.push((
+                    GBasicBlockId {
+                        func,
+                        bb: func.id(self.db).data(self.db, self.mir_cx).entry_block,
+                    },
+                    instr,
+                ));
             });
 
-            for successor in successors {
+            for (successor, instr) in successors {
+                let call_site = if successor.func == current.bb.func {
+                    current.call_site
+                } else {
+                    self.bump_slice_append(
+                        current.call_site,
+                        CallStackEntry {
+                            func: current.bb.func.id(self.db),
+                            jump_bb: current.bb.bb,
+                            jump_instr: instr,
+                        },
+                    )
+                };
+
                 let target = strand::Exit {
-                    block: current.bb,
+                    call_site: call_site.to_vec(),
                     target: successor,
                 };
                 if !self.strand.is_exit(target) {
                     let bb_instance = BbInstance {
                         bb: successor,
-                        call_stack: if successor.func == current.bb.func {
-                            current.call_stack
-                        } else {
-                            self.bump_slice_append(current.call_stack, successor.func)
-                        },
+                        call_site,
                     };
                     if visited.insert(bb_instance) {
                         stack.push(bb_instance);
@@ -235,6 +249,24 @@ where
             .id(self.db)
             .resolve(self.db, self.mir_cx)
             .data(self.db);
+
+        self.current_vals.clear();
+
+        let mut bb_params = self.backend.block_params().iter().copied();
+
+        for param in self.current_func.basic_blocks[self.current_bb.bb.bb]
+            .params
+            .as_slice(&self.current_func.val_lists)
+        {
+            let param_val = Compound::from_flat(
+                self.db,
+                self.mir_cx,
+                self.bump,
+                &mut bb_params,
+                self.current_func.vals[*param].typ,
+            );
+            self.current_vals[*param] = Some(param_val);
+        }
 
         for (_, instr) in &bb.instrs {
             self.lower_instr(instr);
@@ -291,7 +323,7 @@ where
     /// Gets the Compound corresponding to the given
     /// mir in the current function.
     fn get_val(&self, val: mir::ValId) -> Compound<'tmp> {
-        todo!()
+        self.current_vals[val].expect("value not in current_vals? maybe not SSA?")
     }
 
     fn get_flattened_vals(
