@@ -1,7 +1,6 @@
 use fir_mir::ir::{BasicBlockId, FuncId};
-use mir::TypeArgs;
+use mir::{FuncInstance, TypeArgs};
 use salsa::Database;
-use std::collections::BTreeSet;
 
 #[salsa::interned]
 pub struct InternedStrand<'db> {
@@ -16,17 +15,17 @@ pub struct InternedStrand<'db> {
 /// and the exits.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Strand<'db> {
-    entry: GBasicBlockId,
+    entry: GBasicBlockId<'db>,
     /// Function type arguments in the entry function.
     entry_type_args: TypeArgs<'db>,
-    exits: BTreeSet<Exit>,
+    exits: Vec<Exit<'db>>,
 }
 
 impl<'db> Strand<'db> {
     pub fn new(
-        entry: GBasicBlockId,
+        entry: GBasicBlockId<'db>,
         entry_type_args: TypeArgs<'db>,
-        exits: impl IntoIterator<Item = Exit>,
+        exits: impl IntoIterator<Item = Exit<'db>>,
     ) -> Self {
         Self {
             entry,
@@ -43,7 +42,7 @@ impl<'db> Strand<'db> {
         &self.entry_type_args
     }
 
-    pub fn entry_func(&self) -> FuncId {
+    pub fn entry_func(&self) -> FuncInstance<'db> {
         self.entry.func
     }
 
@@ -57,34 +56,34 @@ impl<'db> Strand<'db> {
 }
 
 /// An exit of a strand.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Exit {
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Exit<'db> {
     /// The block the exit instruction is in.
-    pub block: GBasicBlockId,
+    pub block: GBasicBlockId<'db>,
     /// The target block being jumped to or called.
     /// For instructions with multiple targets (e.g. branch),
     /// this allows representing strands that exit only
     /// for a subset of the targets.
-    pub target: GBasicBlockId,
+    pub target: GBasicBlockId<'db>,
 }
 
 /// "Global" basic block. An MIR basic block ID and the function it's associated with.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct GBasicBlockId {
-    pub func: FuncId,
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct GBasicBlockId<'db> {
+    pub func: FuncInstance<'db>,
     pub bb: BasicBlockId,
 }
 
-impl GBasicBlockId {
-    pub fn new(func: FuncId, bb: BasicBlockId) -> Self {
+impl<'db> GBasicBlockId<'db> {
+    pub fn new(func: FuncInstance<'db>, bb: BasicBlockId) -> Self {
         Self { func, bb }
     }
 
-    pub fn resolve<'db>(
+    pub fn resolve(
         &self,
         db: &'db dyn Database,
         cx: mir::Context<'db>,
     ) -> &'db mir::BasicBlock<'db> {
-        &self.func.resolve(db, cx).data(db).basic_blocks[self.bb]
+        &self.func.id(db).resolve(db, cx).data(db).basic_blocks[self.bb]
     }
 }

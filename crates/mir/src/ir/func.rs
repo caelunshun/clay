@@ -1,9 +1,10 @@
 use crate::{
-    InstrData,
+    Context, InstrData,
     ir::{
         ContextLike, TraitInstance, TypeArgs, TypeParamScope, TypeParams, context::FuncId,
         merge_type_args, trait_::AssocFuncId, typ::Type,
     },
+    trait_resolution::find_trait_impl,
 };
 use compact_str::CompactString;
 use cranelift_entity::{EntityList, EntitySet, ListPool, PrimaryMap, SecondaryMap};
@@ -169,7 +170,7 @@ impl<'db> FuncData<'db> {
     pub fn visit_block_called_funcs(
         &self,
         block: BasicBlockId,
-        mut visit: impl FnMut(FuncInstance),
+        mut visit: impl FnMut(AbstractFuncInstance<'db>),
     ) {
         self.basic_blocks[block].instrs.values().for_each(|instr| {
             if let InstrData::Call(call) = instr {
@@ -210,14 +211,15 @@ pub struct BasicBlock<'db> {
     pub params: EntityList<ValId>,
 }
 
+/// A function, or a reference to an associated function, and its type arguments.
 #[salsa::interned(debug)]
-pub struct FuncInstance<'db> {
+pub struct AbstractFuncInstance<'db> {
     pub func: MaybeAssocFunc<'db>,
     #[returns(ref)]
     pub type_args: TypeArgs<'db>,
 }
 
-impl<'db> FuncInstance<'db> {
+impl<'db> AbstractFuncInstance<'db> {
     pub fn type_param_scope(&self, db: &'db dyn Database) -> TypeParamScope {
         match self.func(db) {
             MaybeAssocFunc::Func(func_id) => TypeParamScope::Func(func_id),
@@ -300,6 +302,30 @@ impl<'db> FuncInstance<'db> {
             }
         }
     }
+
+    pub fn resolve(
+        &self,
+        db: &'db dyn Database,
+        cx: Context<'db>,
+        type_args: &TypeArgs<'db>,
+    ) -> Option<FuncInstance<'db>> {
+        match self.func(db) {
+            MaybeAssocFunc::Func(func_id) => {
+                Some(FuncInstance::new(db, func_id, self.type_args(db).clone()))
+            }
+            MaybeAssocFunc::AssocFunc {
+                trait_,
+                typ,
+                assoc_func,
+            } => {
+                let trait_ = trait_.substitute_type_args(db, type_args);
+                let trait_impl = find_trait_impl(db, cx, typ, trait_)?;
+
+                let binding = trait_impl.data(db).assoc_func_bindings[assoc_func]?;
+                binding.resolve(db, cx, trait_.type_args(db))
+            }
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, salsa::Update)]
@@ -310,4 +336,12 @@ pub enum MaybeAssocFunc<'db> {
         typ: Type<'db>,
         assoc_func: AssocFuncId,
     },
+}
+
+/// A concrete function (not an associated function)
+/// and its type arguments.
+#[salsa::interned(debug)]
+pub struct FuncInstance<'db> {
+    pub id: FuncId,
+    pub type_args: TypeArgs<'db>,
 }

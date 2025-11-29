@@ -1,7 +1,7 @@
 use crate::{
     InstrData, PrimType, TypeKind, ValId,
     ir::{
-        AlgebraicTypeKind, BasicBlockId, Context, FuncData, FuncInstance, MaybeAssocFunc,
+        AbstractFuncInstance, AlgebraicTypeKind, BasicBlockId, Context, FuncData, MaybeAssocFunc,
         StructTypeData, TraitImpl, Type, TypeArgs, TypeParamId,
     },
     trait_resolution,
@@ -345,7 +345,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
 
     fn verify_func_instance(
         &self,
-        func_instance: FuncInstance<'db>,
+        func_instance: AbstractFuncInstance<'db>,
     ) -> Result<(), ValidationError> {
         let type_params = func_instance.type_params(self.db, &self.cx);
         let type_args = func_instance.type_args(self.db);

@@ -7,11 +7,12 @@ use fir_mir::{
     entity_ref,
     instr::{CompareMode, LoadOrdering, StoreOrdering},
 };
+use salsa::Database;
 use std::hash::Hash;
 
 /// Defines a backend that can produce machine code.
 pub trait CodegenBackend {
-    type CodeBuilder<'bump>: CodeBuilder<'bump>;
+    type CodeBuilder<'db, 'bump>: CodeBuilder<'db, 'bump>;
 
     /// Returns the ISA being compiled for.
     fn isa(&self) -> &Isa;
@@ -20,19 +21,20 @@ pub trait CodegenBackend {
     ///
     /// It will be initialized with an entry block having arguments matching
     /// the provided signature.
-    fn make_code_builder<'bump>(
+    fn make_code_builder<'db, 'bump>(
         &self,
+        db: &'db dyn Database,
         bump: &'bump Bump,
         signature: Signature<'bump>,
-    ) -> Self::CodeBuilder<'bump>;
+    ) -> Self::CodeBuilder<'db, 'bump>;
 }
 
 /// Builder for a CompiledStrand (machine-level function).
-pub trait CodeBuilder<'bump> {
+pub trait CodeBuilder<'db, 'bump> {
     type Backend: CodegenBackend;
 
     /// Finishes compilation of this function.
-    fn finish(self) -> CompiledStrand;
+    fn finish(self) -> CompiledStrand<'db>;
 
     /// Gets the ID of the current block.
     /// This is the entry block initially.

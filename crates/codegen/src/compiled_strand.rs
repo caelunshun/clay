@@ -5,13 +5,13 @@ use mir::FuncId;
 /// along with metadata for relocations, GC
 /// stack maps, etc.
 #[derive(Debug, Clone)]
-pub struct CompiledStrand {
+pub struct CompiledStrand<'db> {
     code: Vec<u8>,
-    metadata: CompiledStrandMetadata,
+    metadata: CompiledStrandMetadata<'db>,
 }
 
-impl CompiledStrand {
-    pub fn new(code: impl Into<Vec<u8>>, metadata: CompiledStrandMetadata) -> Self {
+impl<'db> CompiledStrand<'db> {
+    pub fn new(code: impl Into<Vec<u8>>, metadata: CompiledStrandMetadata<'db>) -> Self {
         Self {
             code: code.into(),
             metadata,
@@ -28,16 +28,16 @@ impl CompiledStrand {
 }
 
 #[derive(Debug, Clone)]
-pub struct CompiledStrandMetadata {
-    relocations: Vec<Relocation>,
+pub struct CompiledStrandMetadata<'db> {
+    relocations: Vec<Relocation<'db>>,
 }
 
-impl CompiledStrandMetadata {
-    pub fn new(relocations: Vec<Relocation>) -> Self {
+impl<'db> CompiledStrandMetadata<'db> {
+    pub fn new(relocations: Vec<Relocation<'db>>) -> Self {
         Self { relocations }
     }
 
-    pub fn relocations(&self) -> &[Relocation] {
+    pub fn relocations(&self) -> &[Relocation<'db>] {
         &self.relocations
     }
 }
@@ -46,10 +46,10 @@ impl CompiledStrandMetadata {
 /// that needs to be modified at runtime to point to the address
 /// of some function or global value.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Relocation {
+pub struct Relocation<'db> {
     kind: RelocationKind,
     offset_in_code: usize,
-    symbol: Symbol,
+    symbol: Symbol<'db>,
 }
 
 /// Specifies how the code needs to be updated for a relocation.
@@ -67,13 +67,13 @@ pub enum RelocationKind {
 
 /// Specifies what entity's address to use for a relocation.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Symbol {
+pub enum Symbol<'db> {
     /// Intrinsic host call, used to implement internal runtime features.
     Intrinsic(IntrinsicCall),
     /// Address of the GOT entry storing the address
     /// of the compiled strand whose entry is the given
     /// basic block.
-    StrandForBlock(GBasicBlockId),
+    StrandForBlock(GBasicBlockId<'db>),
     /// Address of the GOT entry for the continuation router implementation
     /// for a particular function.
     RouterForFunc(FuncId),

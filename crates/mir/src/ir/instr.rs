@@ -1,6 +1,6 @@
 use crate::{
     ValId,
-    ir::{BasicBlockId, Constant, FieldId, FuncInstance, Type},
+    ir::{AbstractFuncInstance, BasicBlockId, Constant, FieldId, Type},
 };
 use cranelift_entity::{EntityList, ListPool};
 
@@ -360,7 +360,7 @@ pub struct Call<'db> {
     /// Statically known function to call.
     /// It must have a unit captures type (i.e.
     /// be a top-level function).
-    pub func: FuncInstance<'db>,
+    pub func: AbstractFuncInstance<'db>,
     /// Arguments to pass to the function.
     pub args: EntityList<ValId>,
     /// Destination for the return value.

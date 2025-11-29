@@ -1,8 +1,9 @@
 use crate::{
     InstrData, TypeKind, ValId,
     ir::{
-        AlgebraicTypeKind, BasicBlock, BasicBlockId, Constant, ContextBuilder, FieldId, FuncData,
-        FuncHeader, FuncInstance, Type, TypeParam, TypeParamIndex, TypeParams, Val,
+        AbstractFuncInstance, AlgebraicTypeKind, BasicBlock, BasicBlockId, Constant,
+        ContextBuilder, FieldId, FuncData, FuncHeader, Type, TypeParam, TypeParamIndex, TypeParams,
+        Val,
         instr::{self, CompareMode},
     },
 };
@@ -215,7 +216,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
     pub fn call(
         mut self,
         return_value_dst: ValId,
-        func: FuncInstance<'db>,
+        func: AbstractFuncInstance<'db>,
         args: impl IntoIterator<Item = ValId>,
     ) {
         let args = EntityList::from_iter(args, &mut self.func.val_lists);

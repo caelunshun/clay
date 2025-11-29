@@ -2,11 +2,11 @@ use crate::{
     Func, TypeKind, ValId,
     builder::FuncBuilder,
     ir::{
-        AlgebraicType, AlgebraicTypeId, AlgebraicTypeInstance, AlgebraicTypeKind, AssocFunc,
-        BasicBlockId, Constant, ConstantValue, Context, ContextBuilder, Field, FuncHeader, FuncId,
-        FuncInstance, MaybeAssocFunc, StructTypeData, Trait, TraitData, TraitId, TraitImpl,
-        TraitImplData, TraitInstance, Type, TypeArgs, TypeParam, TypeParamId, TypeParamIndex,
-        TypeParamScope, TypeParams, instr::CompareMode,
+        AbstractFuncInstance, AlgebraicType, AlgebraicTypeId, AlgebraicTypeInstance,
+        AlgebraicTypeKind, AssocFunc, BasicBlockId, Constant, ConstantValue, Context,
+        ContextBuilder, Field, FuncHeader, FuncId, MaybeAssocFunc, StructTypeData, Trait,
+        TraitData, TraitId, TraitImpl, TraitImplData, TraitInstance, Type, TypeArgs, TypeParam,
+        TypeParamId, TypeParamIndex, TypeParamScope, TypeParams, instr::CompareMode,
     },
 };
 use SExprRef::*;
@@ -1063,11 +1063,11 @@ impl<'a, 'db> Parser<'a, 'db> {
     fn parse_func_instance(
         &mut self,
         expr: &SExprRef<'a>,
-    ) -> Result<FuncInstance<'db>, ParseError> {
+    ) -> Result<AbstractFuncInstance<'db>, ParseError> {
         match expr {
             Symbol(func_name) => {
                 let func_id = self.get_func(func_name)?;
-                Ok(FuncInstance::new(
+                Ok(AbstractFuncInstance::new(
                     self.db,
                     MaybeAssocFunc::Func(func_id),
                     TypeArgs::default(),
@@ -1109,7 +1109,7 @@ impl<'a, 'db> Parser<'a, 'db> {
                     TypeParamScope::AssocFunc(for_trait_instance.trait_(self.db), assoc_func),
                 )?;
 
-                Ok(FuncInstance::new(
+                Ok(AbstractFuncInstance::new(
                     self.db,
                     MaybeAssocFunc::AssocFunc {
                         trait_: for_trait_instance,
@@ -1122,7 +1122,7 @@ impl<'a, 'db> Parser<'a, 'db> {
             List([Symbol(func_name), decls @ ..]) => {
                 let func_id = self.get_func(func_name)?;
                 let type_args = self.parse_type_args(decls, TypeParamScope::Func(func_id))?;
-                Ok(FuncInstance::new(
+                Ok(AbstractFuncInstance::new(
                     self.db,
                     MaybeAssocFunc::Func(func_id),
                     type_args,

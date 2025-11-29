@@ -9,11 +9,11 @@ use crate::{
         context::LoweringCx,
         env::Env,
     },
-    strand::{ GBasicBlockId, Strand},
+    strand::{self, GBasicBlockId, Strand},
 };
 use bumpalo::Bump;
 use fir_core::{HashMap, HashSet};
-use mir::{FuncData, FuncId, TypeArgs};
+use mir::{FuncData, FuncId, FuncInstance, TypeArgs};
 use salsa::Database;
 use std::{
     cell::{LazyCell, RefCell},
@@ -30,7 +30,7 @@ pub fn compile_strand<'db, B>(
     backend: &B,
     env: &dyn Env,
     strand: &Strand,
-) -> CompiledStrand
+) -> CompiledStrand<'db>
 where
     B: CodegenBackend,
 {
@@ -42,7 +42,7 @@ where
         let mut cx = cx_cell.borrow_mut();
 
         let entry_block = strand.entry().resolve(db, mir_cx);
-        let entry_block_func = strand.entry().func.resolve(db, mir_cx).data(db);
+        let entry_block_func = strand.entry_func().id(db).data(db, mir_cx);
 
         let sig = sig_for_strand(db, mir_cx, &cx, strand.entry());
 
@@ -52,7 +52,7 @@ where
                 mir_cx,
                 env,
                 isa: backend.isa(),
-                backend: backend.make_code_builder(&cx.bump, sig),
+                backend: backend.make_code_builder(db, &cx.bump, sig),
                 strand,
                 bump: &cx.bump,
                 bb_map: HashMap::new_in(&cx.bump),
@@ -77,7 +77,7 @@ fn does_strand_return_continuation<'db>(
     mir_cx: mir::Context<'db>,
     strand_entry: GBasicBlockId,
 ) -> bool {
-    strand_entry.bb != strand_entry.func.data(db, mir_cx).entry_block
+    strand_entry.bb != strand_entry.func.id(db).data(db, mir_cx).entry_block
 }
 
 /// Returns the signature of the strand having the given entry point.
@@ -100,7 +100,7 @@ fn sig_for_strand<'db, 'bump>(
     }
 
     // Basic block parameters
-    let func_data = strand_entry.func.data(db, mir_cx);
+    let func_data = strand_entry.func.id(db).data(db, mir_cx);
     let bb_data = &func_data.basic_blocks[strand_entry.bb];
     let param_iter = bb_data
         .params
@@ -133,18 +133,18 @@ struct Lowerer<'db, 'a, B> {
     /// basic blocks, e.g. for certain high-level instructions that produce
     /// branches. In these cases, the bb_map entry points to the "entry"/"initial"
     /// block of the mir basic block, which is always unique.
-    bb_map: HashMap<BbInstance<'a>, backend::BasicBlockId, &'a Bump>,
+    bb_map: HashMap<BbInstance<'db, 'a>, backend::BasicBlockId, &'a Bump>,
     val_map: HashMap<GValId, Compound<'a>, &'a Bump>,
-    current_bb: BbInstance<'a>,
+    current_bb: BbInstance<'db, 'a>,
     current_func: &'a FuncData<'db>,
     /// Type arguments in the current function.
     current_type_args: TypeArgs<'db>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-struct BbInstance<'bump> {
-    bb: GBasicBlockId,
-    call_stack: &'bump [FuncId],
+struct BbInstance<'db, 'bump> {
+    bb: GBasicBlockId<'db>,
+    call_stack: &'bump [FuncInstance<'db>],
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -155,12 +155,12 @@ struct GValId {
 
 impl<'db, 'a, B> Lowerer<'db, 'a, B>
 where
-    B: CodeBuilder<'a>,
+    B: CodeBuilder<'db, 'a>,
 {
     /// Performs an initial traversal of the BbInstances to compile,
     /// populating bb_map with their mapping to backend BasicBlocks.
     pub fn populate_bbs(&mut self) {
-        let mut stack = bumpalo::collections::Vec::new_in(self.bump);
+        let mut stack = bumpalo::collections::Vec::<'a, BbInstance<'db, 'a>>::new_in(self.bump);
         stack.push(BbInstance {
             bb: self.strand.entry(),
             call_stack: &[],
@@ -174,7 +174,7 @@ where
             self.bb_map.insert(current, backend_bb);
 
             // Populate parameter types
-            let func_data = current.bb.func.data(self.db, self.mir_cx);
+            let func_data = current.bb.func.id(self.db).data(self.db, self.mir_cx);
             let param_types = func_data.basic_blocks[current.bb.bb]
                 .params
                 .as_slice(&func_data.val_lists)
@@ -193,16 +193,47 @@ where
                     bb: successor,
                 });
             });
-            func_data.visit_block_called_funcs(current.bb.bb, |func_instance| {
-                successors.push(GBasicBlockId { func: func_instance., bb: () })
+            func_data.visit_block_called_funcs(current.bb.bb, |abstract_func| {
+                let func = abstract_func
+                    .resolve(self.db, self.mir_cx, &self.current_type_args)
+                    .expect("assoc func unresolved?");
+                successors.push(GBasicBlockId {
+                    func,
+                    bb: func.id(self.db).data(self.db, self.mir_cx).entry_block,
+                });
             });
+
+            for successor in successors {
+                let target = strand::Exit {
+                    block: current.bb,
+                    target: successor,
+                };
+                if !self.strand.is_exit(target) {
+                    let bb_instance = BbInstance {
+                        bb: successor,
+                        call_stack: if successor.func == current.bb.func {
+                            current.call_stack
+                        } else {
+                            self.bump_slice_append(current.call_stack, successor.func)
+                        },
+                    };
+                    if visited.insert(bb_instance) {
+                        stack.push(bb_instance);
+                    }
+                }
+            }
         }
     }
 
-    fn lower_bb(&mut self, instance: BbInstance<'a>, bb: &'db mir::BasicBlock<'db>) {
+    fn lower_bb(&mut self, instance: BbInstance<'db, 'a>, bb: &'db mir::BasicBlock<'db>) {
         self.backend.switch_to_block(self.bb_map[&instance]);
         self.current_bb = instance;
-        self.current_func = instance.bb.func.resolve(self.db, self.mir_cx).data(self.db);
+        self.current_func = instance
+            .bb
+            .func
+            .id(self.db)
+            .resolve(self.db, self.mir_cx)
+            .data(self.db);
 
         for (_, instr) in &bb.instrs {
             self.lower_instr(instr);
@@ -259,10 +290,7 @@ where
     /// Gets the Compound corresponding to the given
     /// mir in the current function.
     fn get_val(&self, val: mir::ValId) -> Compound<'a> {
-        self.val_map[&GValId {
-            val,
-            func: self.current_bb.bb.func,
-        }]
+        todo!()
     }
 
     fn get_flattened_vals(
