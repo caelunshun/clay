@@ -18,8 +18,8 @@ pub enum AstItem {
     Trait(AstItemTrait),
     Impl(AstItemImpl),
     Func(AstFnItem),
-    Struct(AstStructItem),
-    Enum(AstEnumItem),
+    Struct(AstItemStruct),
+    Enum(AstItemEnum),
     Error(AstItemBase, ErrorGuaranteed),
 }
 
@@ -30,8 +30,8 @@ impl AstItem {
         | AstItem::Trait(AstItemTrait { base, .. })
         | AstItem::Impl(AstItemImpl { base, .. })
         | AstItem::Func(AstFnItem { base, .. })
-        | AstItem::Struct(AstStructItem { base, .. })
-        | AstItem::Enum(AstEnumItem { base, .. })
+        | AstItem::Struct(AstItemStruct { base, .. })
+        | AstItem::Enum(AstItemEnum { base, .. })
         | AstItem::Error(base, ..)) = self;
 
         base
@@ -89,7 +89,7 @@ pub struct AstFnItem {
 }
 
 #[derive(Debug, Clone)]
-pub struct AstStructItem {
+pub struct AstItemStruct {
     pub base: AstItemBase,
     pub name: Ident,
     pub generics: Option<AstGenericParamList>,
@@ -101,6 +101,16 @@ pub enum AstStructKind {
     Unit,
     Tuple(Vec<AstStructAnonField>),
     Struct(Vec<AstStructNamedField>),
+}
+
+impl AstStructKind {
+    pub fn needs_semi(&self) -> bool {
+        match self {
+            AstStructKind::Unit => true,
+            AstStructKind::Tuple(..) => true,
+            AstStructKind::Struct(..) => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -119,7 +129,7 @@ pub struct AstStructNamedField {
 }
 
 #[derive(Debug, Clone)]
-pub struct AstEnumItem {
+pub struct AstItemEnum {
     pub base: AstItemBase,
     pub name: Ident,
     pub generics: Option<AstGenericParamList>,
@@ -130,21 +140,7 @@ pub struct AstEnumItem {
 pub struct AstEnumVariant {
     pub span: Span,
     pub name: Ident,
-    pub kind: AstEnumVariantKind,
-}
-
-#[derive(Debug, Clone)]
-pub enum AstEnumVariantKind {
-    Unit,
-    Tuple(Vec<AstTy>),
-    Braced(Vec<AstEnumVariantBracedField>),
-}
-
-#[derive(Debug, Clone)]
-pub struct AstEnumVariantBracedField {
-    pub span: Span,
-    pub name: Ident,
-    pub ty: AstTy,
+    pub kind: AstStructKind,
 }
 
 // === Impl-like Bodies === //

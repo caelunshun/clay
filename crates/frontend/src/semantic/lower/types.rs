@@ -1,27 +1,82 @@
 use crate::{
     base::{
-        Diag, ErrorGuaranteed, LeafDiag, analysis::SpannedViewEncode, arena::Obj, syntax::Span,
+        Diag, ErrorGuaranteed, LeafDiag,
+        analysis::SpannedViewEncode,
+        arena::{LateInit, Obj},
+        syntax::Span,
     },
     parse::{
         ast::{
-            AstGenericParamKind, AstImplLikeBody, AstImplLikeMemberKind, AstNamedSpec,
-            AstTraitClause, AstTraitClauseList, AstTy, AstTyKind, AstTyOrRe,
+            AstGenericDef, AstGenericParamKind, AstGenericParamList, AstImplLikeBody,
+            AstImplLikeMemberKind, AstNamedSpec, AstTraitClause, AstTraitClauseList, AstTy,
+            AstTyKind, AstTyOrRe,
         },
         token::Lifetime,
     },
     semantic::{
-        lower::entry::IntraItemLowerCtxt,
+        lower::entry::{InterItemLowerCtxt, IntraItemLowerCtxt},
         syntax::{
-            AnyGeneric, GenericBinder, Re, SpannedRe, SpannedTraitClause, SpannedTraitClauseList,
-            SpannedTraitClauseView, SpannedTraitInstance, SpannedTraitInstanceView,
-            SpannedTraitParam, SpannedTraitParamList, SpannedTraitParamView, SpannedTraitSpec,
-            SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReList,
-            SpannedTyOrReView, SpannedTyView, TraitParam,
+            AnyGeneric, GenericBinder, Re, RegionGeneric, SpannedRe, SpannedTraitClause,
+            SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitInstance,
+            SpannedTraitInstanceView, SpannedTraitParam, SpannedTraitParamList,
+            SpannedTraitParamView, SpannedTraitSpec, SpannedTraitSpecView, SpannedTy,
+            SpannedTyList, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView, SpannedTyView,
+            TraitParam, TypeGeneric,
         },
     },
     utils::hash::FxHashMap,
 };
 use hashbrown::hash_map;
+
+impl<'ast> InterItemLowerCtxt<'_, 'ast> {
+    pub fn lower_generic_defs(
+        &mut self,
+        binder: &mut GenericBinder,
+        ast: &'ast AstGenericParamList,
+        generic_clause_lists: &mut Vec<Option<&'ast AstTraitClauseList>>,
+    ) {
+        let s = &self.tcx.session;
+
+        for def in &ast.list {
+            let Some(def_kind) = def.kind.as_generic_def() else {
+                Diag::span_err(def.span, "expected generic parameter definition").emit();
+                continue;
+            };
+
+            match def_kind {
+                AstGenericDef::Re(lifetime, clauses) => {
+                    binder.defs.push(AnyGeneric::Re(Obj::new(
+                        RegionGeneric {
+                            span: def.span,
+                            lifetime,
+                            binder: LateInit::uninit(),
+                            clauses: LateInit::uninit(),
+                            is_synthetic: false,
+                        },
+                        s,
+                    )));
+
+                    generic_clause_lists.push(clauses);
+                }
+                AstGenericDef::Ty(ident, clauses) => {
+                    binder.defs.push(AnyGeneric::Ty(Obj::new(
+                        TypeGeneric {
+                            span: def.span,
+                            ident,
+                            binder: LateInit::uninit(),
+                            user_clauses: LateInit::uninit(),
+                            elaborated_clauses: LateInit::uninit(),
+                            is_synthetic: false,
+                        },
+                        s,
+                    )));
+
+                    generic_clause_lists.push(clauses);
+                }
+            }
+        }
+    }
+}
 
 impl IntraItemLowerCtxt<'_> {
     pub fn define_generics_in_binder(&mut self, binder: Obj<GenericBinder>) {
@@ -50,6 +105,25 @@ impl IntraItemLowerCtxt<'_> {
                                 ))
                                 .emit()
                         });
+                }
+            }
+        }
+    }
+
+    pub fn lower_generic_def_clauses(
+        &mut self,
+        generics: Obj<GenericBinder>,
+        clause_lists: &[Option<&AstTraitClauseList>],
+    ) {
+        let s = &self.tcx.session;
+
+        for (&generic, &clause_list) in generics.r(s).defs.iter().zip(clause_lists) {
+            match generic {
+                AnyGeneric::Re(generic) => {
+                    LateInit::init(&generic.r(s).clauses, self.lower_clauses(clause_list));
+                }
+                AnyGeneric::Ty(generic) => {
+                    LateInit::init(&generic.r(s).user_clauses, self.lower_clauses(clause_list));
                 }
             }
         }

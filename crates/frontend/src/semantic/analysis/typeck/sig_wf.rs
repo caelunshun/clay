@@ -12,7 +12,7 @@ use crate::{
             TyVisitorUnspanned, TyVisitorWalk,
         },
         syntax::{
-            AnyGeneric, Crate, ImplDef, ItemKind, Re, RegionGeneric, SpannedAdtInstance,
+            AdtDef, AnyGeneric, Crate, ImplDef, ItemKind, Re, RegionGeneric, SpannedAdtInstance,
             SpannedTraitClauseList, SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec,
             SpannedTy, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView, TraitClause, TraitDef,
             TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TypeGeneric,
@@ -43,7 +43,9 @@ impl SignatureWfVisitor<'_> {
 
         for &item in &**items {
             match *item.r(s).kind {
-                ItemKind::Adt(obj) => todo!(),
+                ItemKind::Adt(def) => {
+                    self.visit_adt(def)?;
+                }
                 ItemKind::Trait(def) => {
                     self.visit_trait(def)?;
                 }
@@ -55,49 +57,9 @@ impl SignatureWfVisitor<'_> {
 
         ControlFlow::Continue(())
     }
-    pub fn visit_impl(&mut self, item: Obj<ImplDef>) -> ControlFlow<Infallible> {
-        let s = self.session();
-        let tcx = self.tcx();
 
-        let old_self_ty = self.self_ty.replace(item.r(s).target);
-        {
-            let ImplDef {
-                item: _,
-                generics,
-                trait_,
-                target,
-                methods,
-                generic_solve_order: _,
-            } = item.r(s);
-
-            if let Some(trait_) = *trait_ {
-                let old_clause_applies_to = self.clause_applies_to.replace(item.r(s).target.value);
-                self.visit_spanned_trait_instance(trait_)?;
-                self.clause_applies_to = old_clause_applies_to;
-            }
-
-            self.visit_spanned_ty(*target)?;
-
-            for &generic in &generics.r(s).defs {
-                match generic {
-                    AnyGeneric::Re(generic) => {
-                        self.visit_spanned_clause_list(*generic.r(s).clauses)?;
-                    }
-                    AnyGeneric::Ty(generic) => {
-                        let old_clause_applies_to = self
-                            .clause_applies_to
-                            .replace(tcx.intern_ty(TyKind::Universal(generic)));
-
-                        self.visit_spanned_clause_list(*generic.r(s).user_clauses)?;
-
-                        self.clause_applies_to = old_clause_applies_to;
-                    }
-                }
-            }
-
-            // TODO: Visit methods
-        }
-        self.self_ty = old_self_ty;
+    pub fn visit_adt(&mut self, def: Obj<AdtDef>) -> ControlFlow<Infallible> {
+        // TODO
 
         ControlFlow::Continue(())
     }
@@ -223,6 +185,53 @@ impl SignatureWfVisitor<'_> {
 
                         let old_clause_applies_to = self.clause_applies_to.replace(param);
                         self.visit_spanned_clause_list(*generic.r(s).user_clauses)?;
+                        self.clause_applies_to = old_clause_applies_to;
+                    }
+                }
+            }
+
+            // TODO: Visit methods
+        }
+        self.self_ty = old_self_ty;
+
+        ControlFlow::Continue(())
+    }
+
+    pub fn visit_impl(&mut self, item: Obj<ImplDef>) -> ControlFlow<Infallible> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let old_self_ty = self.self_ty.replace(item.r(s).target);
+        {
+            let ImplDef {
+                item: _,
+                generics,
+                trait_,
+                target,
+                methods,
+                generic_solve_order: _,
+            } = item.r(s);
+
+            if let Some(trait_) = *trait_ {
+                let old_clause_applies_to = self.clause_applies_to.replace(item.r(s).target.value);
+                self.visit_spanned_trait_instance(trait_)?;
+                self.clause_applies_to = old_clause_applies_to;
+            }
+
+            self.visit_spanned_ty(*target)?;
+
+            for &generic in &generics.r(s).defs {
+                match generic {
+                    AnyGeneric::Re(generic) => {
+                        self.visit_spanned_clause_list(*generic.r(s).clauses)?;
+                    }
+                    AnyGeneric::Ty(generic) => {
+                        let old_clause_applies_to = self
+                            .clause_applies_to
+                            .replace(tcx.intern_ty(TyKind::Universal(generic)));
+
+                        self.visit_spanned_clause_list(*generic.r(s).user_clauses)?;
+
                         self.clause_applies_to = old_clause_applies_to;
                     }
                 }

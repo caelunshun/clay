@@ -1,15 +1,15 @@
 use crate::{
     base::{
-        Diag, ErrorGuaranteed,
+        Diag, ErrorGuaranteed, LeafDiag,
         analysis::NameResolver,
         arena::{LateInit, Obj},
     },
     kw,
     parse::{
         ast::{
-            AstGenericDef, AstImplLikeMemberKind, AstItem, AstItemImpl, AstItemModuleContents,
-            AstItemTrait, AstSimplePath, AstTraitClauseList, AstUsePath, AstUsePathKind,
-            AstVisibility,
+            AstGenericDef, AstImplLikeMemberKind, AstItem, AstItemEnum, AstItemImpl,
+            AstItemModuleContents, AstItemStruct, AstItemTrait, AstSimplePath, AstStructKind,
+            AstTraitClauseList, AstTy, AstUsePath, AstUsePathKind, AstVisibility,
         },
         token::Ident,
     },
@@ -20,13 +20,15 @@ use crate::{
             ModuleResolver,
         },
         syntax::{
-            AnyGeneric, Crate, GenericBinder, ImplDef, Item, ItemKind, Module, RegionGeneric,
-            TraitDef, TypeGeneric,
+            AdtDef, AdtEnumVariant, AdtKind, AdtKindEnum, AdtKindStruct, AdtStructField,
+            AdtStructFieldSyntax, AnyGeneric, Crate, GenericBinder, ImplDef, Item, ItemKind,
+            Module, RegionGeneric, SpannedTy, TraitDef, TypeGeneric, Visibility,
         },
     },
     symbol,
     utils::hash::FxHashMap,
 };
+use hashbrown::hash_map;
 use index_vec::IndexVec;
 use std::rc::Rc;
 
@@ -78,11 +80,11 @@ impl TyCtxt {
                 AstItem::Func(_) => {
                     // TODO
                 }
-                AstItem::Struct(_) => {
-                    // TODO
+                AstItem::Struct(ast) => {
+                    ctxt.lower_struct(target, ast);
                 }
-                AstItem::Enum(_) => {
-                    // TODO
+                AstItem::Enum(ast) => {
+                    ctxt.lower_enum(target, ast);
                 }
                 AstItem::Mod(_) | AstItem::Use(_) | AstItem::Error(_, _) => {
                     unreachable!()
@@ -110,6 +112,13 @@ impl TyCtxt {
                 }
                 IntraLowerTask::Impl { item, ast } => {
                     ctxt.lower_impl(item, ast);
+                }
+                IntraLowerTask::Adt {
+                    item,
+                    generic_clause_lists,
+                    field_tys_to_extend,
+                } => {
+                    ctxt.lower_adt(item, generic_clause_lists, field_tys_to_extend);
                 }
             }
         }
@@ -283,9 +292,9 @@ impl<'ast> UseLowerCtxt<'ast> {
 // === Second Phase === //
 
 pub struct InterItemLowerCtxt<'a, 'ast> {
-    tcx: &'a TyCtxt,
-    item: Obj<Item>,
-    tasks: &'a mut Vec<(Obj<Module>, IntraLowerTask<'ast>)>,
+    pub tcx: &'a TyCtxt,
+    pub item: Obj<Item>,
+    pub tasks: &'a mut Vec<(Obj<Module>, IntraLowerTask<'ast>)>,
 }
 
 impl<'ast> InterItemLowerCtxt<'_, 'ast> {
@@ -302,44 +311,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let mut generic_clause_lists = Vec::new();
 
         if let Some(generics) = &ast.generics {
-            for def in &generics.list {
-                let Some(def_kind) = def.kind.as_generic_def() else {
-                    Diag::span_err(def.span, "expected generic parameter definition").emit();
-                    continue;
-                };
-
-                match def_kind {
-                    AstGenericDef::Re(lifetime, clauses) => {
-                        binder.defs.push(AnyGeneric::Re(Obj::new(
-                            RegionGeneric {
-                                span: def.span,
-                                lifetime,
-                                binder: LateInit::uninit(),
-                                clauses: LateInit::uninit(),
-                                is_synthetic: false,
-                            },
-                            s,
-                        )));
-
-                        generic_clause_lists.push(clauses);
-                    }
-                    AstGenericDef::Ty(ident, clauses) => {
-                        binder.defs.push(AnyGeneric::Ty(Obj::new(
-                            TypeGeneric {
-                                span: def.span,
-                                ident,
-                                binder: LateInit::uninit(),
-                                user_clauses: LateInit::uninit(),
-                                elaborated_clauses: LateInit::uninit(),
-                                is_synthetic: false,
-                            },
-                            s,
-                        )));
-
-                        generic_clause_lists.push(clauses);
-                    }
-                }
-            }
+            self.lower_generic_defs(&mut binder, generics, &mut generic_clause_lists);
         }
 
         let regular_generic_count = binder.defs.len() as u32;
@@ -401,12 +373,213 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
     pub fn lower_impl(&mut self, target: Obj<Item>, ast: &'ast AstItemImpl) {
         self.push_task(IntraLowerTask::Impl { item: target, ast });
     }
+
+    pub fn lower_struct(&mut self, target: Obj<Item>, ast: &'ast AstItemStruct) {
+        let s = &self.tcx.session;
+
+        let mut generics = GenericBinder::default();
+        let mut generic_clause_lists = Vec::new();
+        let mut field_tys_to_extend = Vec::new();
+
+        if let Some(ast) = &ast.generics {
+            self.lower_generic_defs(&mut generics, ast, &mut generic_clause_lists);
+        }
+
+        let kind = self.lower_struct_kind(
+            &ast.kind,
+            &mut field_tys_to_extend,
+            /* allow_visibilities */ true,
+        );
+
+        let target_def = Obj::new(
+            AdtDef {
+                item: target,
+                generics: self.tcx.seal_generic_binder(generics),
+                kind: AdtKind::Struct(kind),
+            },
+            s,
+        );
+
+        LateInit::init(&target.r(s).kind, ItemKind::Adt(target_def));
+
+        self.push_task(IntraLowerTask::Adt {
+            item: target_def,
+            generic_clause_lists,
+            field_tys_to_extend,
+        });
+    }
+
+    pub fn lower_enum(&mut self, target: Obj<Item>, ast: &'ast AstItemEnum) {
+        let s = &self.tcx.session;
+
+        let mut generics = GenericBinder::default();
+        let mut generic_clause_lists = Vec::new();
+        let mut field_tys_to_extend = Vec::new();
+
+        if let Some(ast) = &ast.generics {
+            self.lower_generic_defs(&mut generics, ast, &mut generic_clause_lists);
+        }
+
+        let mut by_name = FxHashMap::default();
+        let variants = ast
+            .variants
+            .iter()
+            .enumerate()
+            .map(|(idx, variant)| {
+                match by_name.entry(variant.name.text) {
+                    hash_map::Entry::Occupied(entry) => {
+                        Diag::span_err(variant.span, "duplicate variant name")
+                            .child(LeafDiag::span_note(
+                                ast.variants[*entry.get() as usize].name.span,
+                                "name first used here",
+                            ))
+                            .emit();
+                    }
+                    hash_map::Entry::Vacant(entry) => {
+                        entry.insert(idx as u32);
+                    }
+                }
+
+                AdtEnumVariant {
+                    idx: idx as u32,
+                    span: variant.span,
+                    ident: variant.name,
+                    kind: self.lower_struct_kind(
+                        &variant.kind,
+                        &mut field_tys_to_extend,
+                        /* allow_visibilities */ false,
+                    ),
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let target_def = Obj::new(
+            AdtDef {
+                item: target,
+                generics: self.tcx.seal_generic_binder(generics),
+                kind: AdtKind::Enum(Obj::new(AdtKindEnum { variants, by_name }, s)),
+            },
+            s,
+        );
+
+        LateInit::init(&target.r(s).kind, ItemKind::Adt(target_def));
+
+        self.push_task(IntraLowerTask::Adt {
+            item: target_def,
+            generic_clause_lists,
+            field_tys_to_extend,
+        });
+    }
+
+    pub fn lower_struct_kind(
+        &mut self,
+        ast: &'ast AstStructKind,
+        field_tys_to_extend: &mut Vec<(&'ast AstTy, Obj<LateInit<SpannedTy>>)>,
+        allow_visibilities: bool,
+    ) -> Obj<AdtKindStruct> {
+        let s = &self.tcx.session;
+
+        let resolve_vis = move |this: &mut Self, vis: &AstVisibility| -> Visibility {
+            if !allow_visibilities {
+                if !vis.kind.is_omitted() {
+                    Diag::span_err(vis.span, "enum fields are all implicitly public").emit();
+                }
+
+                return Visibility::Pub;
+            }
+
+            // TODO: Resolve this
+            Visibility::Pub
+        };
+
+        match ast {
+            AstStructKind::Unit => Obj::new(
+                AdtKindStruct {
+                    syntax: AdtStructFieldSyntax::Unit,
+                    fields: Vec::new(),
+                },
+                s,
+            ),
+            AstStructKind::Tuple(ast) => {
+                let fields = ast
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, field)| AdtStructField {
+                        span: field.span,
+                        idx: idx as u32,
+                        vis: resolve_vis(self, &field.vis),
+                        ident: None,
+                        ty: LateInit::uninit(),
+                    })
+                    .collect::<Vec<_>>();
+
+                let kind = Obj::new(
+                    AdtKindStruct {
+                        syntax: AdtStructFieldSyntax::Tuple,
+                        fields,
+                    },
+                    s,
+                );
+
+                field_tys_to_extend.extend(ast.iter().enumerate().map(|(idx, ast)| {
+                    (&ast.ty, Obj::map(kind, move |kind| &kind.fields[idx].ty, s))
+                }));
+
+                kind
+            }
+            AstStructKind::Struct(ast) => {
+                let mut by_name = FxHashMap::default();
+
+                let fields = ast
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, field)| {
+                        match by_name.entry(field.name.text) {
+                            hash_map::Entry::Occupied(entry) => {
+                                Diag::span_err(field.span, "duplicate field name")
+                                    .child(LeafDiag::span_note(
+                                        ast[*entry.get() as usize].name.span,
+                                        "name first used here",
+                                    ))
+                                    .emit();
+                            }
+                            hash_map::Entry::Vacant(entry) => {
+                                entry.insert(idx as u32);
+                            }
+                        }
+
+                        AdtStructField {
+                            span: field.span,
+                            idx: idx as u32,
+                            vis: resolve_vis(self, &field.vis),
+                            ident: Some(field.name),
+                            ty: LateInit::uninit(),
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                let kind = Obj::new(
+                    AdtKindStruct {
+                        syntax: AdtStructFieldSyntax::Named(by_name),
+                        fields,
+                    },
+                    s,
+                );
+
+                field_tys_to_extend.extend(ast.iter().enumerate().map(|(idx, ast)| {
+                    (&ast.ty, Obj::map(kind, move |kind| &kind.fields[idx].ty, s))
+                }));
+
+                kind
+            }
+        }
+    }
 }
 
 // === Third Phase === //
 
-pub struct IntraItemLowerCtxt<'a> {
-    pub tcx: &'a TyCtxt,
+pub struct IntraItemLowerCtxt<'tcx> {
+    pub tcx: &'tcx TyCtxt,
     pub root: Obj<Module>,
     pub scope: Obj<Module>,
     pub generic_ty_names: NameResolver<Obj<TypeGeneric>>,
@@ -422,6 +595,11 @@ pub enum IntraLowerTask<'ast> {
     Impl {
         item: Obj<Item>,
         ast: &'ast AstItemImpl,
+    },
+    Adt {
+        item: Obj<AdtDef>,
+        generic_clause_lists: Vec<Option<&'ast AstTraitClauseList>>,
+        field_tys_to_extend: Vec<(&'ast AstTy, Obj<LateInit<SpannedTy>>)>,
     },
 }
 
@@ -447,22 +625,12 @@ impl IntraItemLowerCtxt<'_> {
         mut self,
         item: Obj<TraitDef>,
         inherits: Option<&AstTraitClauseList>,
-        clause_lists: Vec<Option<&AstTraitClauseList>>,
+        generic_clause_lists: Vec<Option<&AstTraitClauseList>>,
     ) {
         let s = &self.tcx.session;
 
         self.define_generics_in_binder(item.r(s).generics);
-
-        for (&generic, clause_list) in item.r(s).generics.r(s).defs.iter().zip(clause_lists) {
-            match generic {
-                AnyGeneric::Re(generic) => {
-                    LateInit::init(&generic.r(s).clauses, self.lower_clauses(clause_list));
-                }
-                AnyGeneric::Ty(generic) => {
-                    LateInit::init(&generic.r(s).user_clauses, self.lower_clauses(clause_list));
-                }
-            }
-        }
+        self.lower_generic_def_clauses(item.r(s).generics, &generic_clause_lists);
 
         LateInit::init(&item.r(s).inherits, self.lower_clauses(inherits));
     }
@@ -560,5 +728,21 @@ impl IntraItemLowerCtxt<'_> {
 
         // Lower methods
         // TODO
+    }
+
+    pub fn lower_adt(
+        mut self,
+        item: Obj<AdtDef>,
+        generic_clause_lists: Vec<Option<&AstTraitClauseList>>,
+        field_tys_to_extend: Vec<(&AstTy, Obj<LateInit<SpannedTy>>)>,
+    ) {
+        let s = &self.tcx.session;
+
+        self.define_generics_in_binder(item.r(s).generics);
+        self.lower_generic_def_clauses(item.r(s).generics, &generic_clause_lists);
+
+        for (ast, to_init) in field_tys_to_extend {
+            LateInit::init(to_init.r(s), self.lower_ty(ast));
+        }
     }
 }

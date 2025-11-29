@@ -5,7 +5,9 @@ use crate::{
         syntax::{Span, Symbol},
     },
     parse::token::{Ident, Lifetime},
-    semantic::syntax::{FuncDef, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy},
+    semantic::syntax::{
+        FuncDef, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy, Visibility,
+    },
     utils::hash::FxHashMap,
 };
 use derive_where::derive_where;
@@ -22,37 +24,44 @@ pub struct AdtDef {
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum AdtKind {
-    Enum(Obj<[AdtEnumVariant]>),
-    Struct(AdtStructFieldList),
+    Enum(Obj<AdtKindEnum>),
+    Struct(Obj<AdtKindStruct>),
+}
+
+#[derive(Debug, Clone)]
+pub struct AdtKindEnum {
+    pub variants: Vec<AdtEnumVariant>,
+    pub by_name: FxHashMap<Symbol, u32>,
 }
 
 #[derive(Debug, Clone)]
 pub struct AdtEnumVariant {
-    pub def: LateInit<Obj<AdtDef>>,
     pub idx: u32,
-    pub ident: Span,
-    pub kind: AdtStructFieldList,
+    pub span: Span,
+    pub ident: Ident,
+    pub kind: Obj<AdtKindStruct>,
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct AdtStructFieldList {
+#[derive(Debug, Clone)]
+pub struct AdtKindStruct {
     pub syntax: AdtStructFieldSyntax,
-    pub fields: Obj<[AdtStructField]>,
+    pub fields: Vec<AdtStructField>,
+}
+
+#[derive(Debug, Clone)]
+pub enum AdtStructFieldSyntax {
+    Unit,
+    Tuple,
+    Named(FxHashMap<Symbol, u32>),
 }
 
 #[derive(Debug, Clone)]
 pub struct AdtStructField {
-    pub def: LateInit<Obj<AdtDef>>,
+    pub span: Span,
     pub idx: u32,
-    pub ident: Span,
-    pub ty: Ty,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum AdtStructFieldSyntax {
-    Unit,
-    Tuple,
-    Named,
+    pub vis: Visibility,
+    pub ident: Option<Ident>,
+    pub ty: LateInit<SpannedTy>,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
