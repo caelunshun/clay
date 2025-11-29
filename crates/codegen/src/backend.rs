@@ -12,7 +12,9 @@ use std::hash::Hash;
 
 /// Defines a backend that can produce machine code.
 pub trait CodegenBackend {
-    type CodeBuilder<'db, 'bump>: CodeBuilder<'db, 'bump>;
+    type CodeBuilder<'db, 'bump>: CodeBuilder<'db, 'bump>
+    where
+        'db: 'bump;
 
     /// Returns the ISA being compiled for.
     fn isa(&self) -> &Isa;
@@ -26,11 +28,16 @@ pub trait CodegenBackend {
         db: &'db dyn Database,
         bump: &'bump Bump,
         signature: Signature<'bump>,
-    ) -> Self::CodeBuilder<'db, 'bump>;
+    ) -> Self::CodeBuilder<'db, 'bump>
+    where
+        'db: 'bump;
 }
 
 /// Builder for a CompiledStrand (machine-level function).
-pub trait CodeBuilder<'db, 'bump> {
+pub trait CodeBuilder<'db, 'bump>
+where
+    'db: 'bump,
+{
     type Backend: CodegenBackend;
 
     /// Finishes compilation of this function.

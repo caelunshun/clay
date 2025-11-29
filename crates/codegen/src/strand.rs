@@ -34,7 +34,7 @@ impl<'db> Strand<'db> {
         }
     }
 
-    pub fn entry(&self) -> GBasicBlockId {
+    pub fn entry(&self) -> GBasicBlockId<'db> {
         self.entry
     }
 

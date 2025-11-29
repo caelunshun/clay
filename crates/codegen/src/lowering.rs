@@ -120,31 +120,31 @@ fn sig_for_strand<'db, 'bump>(
     Signature::new(param_types.into_bump_slice(), return_types)
 }
 
-struct Lowerer<'db, 'a, B> {
+struct Lowerer<'db, 'tmp, B> {
     db: &'db dyn Database,
     mir_cx: mir::Context<'db>,
-    env: &'a dyn Env,
-    isa: &'a Isa,
+    env: &'tmp dyn Env,
+    isa: &'tmp Isa,
     backend: B,
-    strand: &'a Strand<'db>,
-    bump: &'a Bump,
+    strand: &'tmp Strand<'db>,
+    bump: &'tmp Bump,
     /// Maps mir basic blocks to the corresponding blocks in the backend.
     /// Note that in some cases, a mir block can generate multiple backend
     /// basic blocks, e.g. for certain high-level instructions that produce
     /// branches. In these cases, the bb_map entry points to the "entry"/"initial"
     /// block of the mir basic block, which is always unique.
-    bb_map: HashMap<BbInstance<'db, 'a>, backend::BasicBlockId, &'a Bump>,
-    val_map: HashMap<GValId, Compound<'a>, &'a Bump>,
-    current_bb: BbInstance<'db, 'a>,
-    current_func: &'a FuncData<'db>,
+    bb_map: HashMap<BbInstance<'db, 'tmp>, backend::BasicBlockId, &'tmp Bump>,
+    val_map: HashMap<GValId, Compound<'tmp>, &'tmp Bump>,
+    current_bb: BbInstance<'db, 'tmp>,
+    current_func: &'tmp FuncData<'db>,
     /// Type arguments in the current function.
     current_type_args: TypeArgs<'db>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-struct BbInstance<'db, 'bump> {
+struct BbInstance<'db, 'tmp> {
     bb: GBasicBlockId<'db>,
-    call_stack: &'bump [FuncInstance<'db>],
+    call_stack: &'tmp [FuncInstance<'db>],
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -153,15 +153,16 @@ struct GValId {
     val: mir::ValId,
 }
 
-impl<'db, 'a, B> Lowerer<'db, 'a, B>
+impl<'db, 'tmp, B> Lowerer<'db, 'tmp, B>
 where
-    B: CodeBuilder<'db, 'a>,
+    B: CodeBuilder<'db, 'tmp>,
+    'db: 'tmp,
 {
     /// Performs an initial traversal of the BbInstances to compile,
     /// populating bb_map with their mapping to backend BasicBlocks.
     pub fn populate_bbs(&mut self) {
-        let mut stack = bumpalo::collections::Vec::<'a, BbInstance<'db, 'a>>::new_in(self.bump);
-        stack.push(BbInstance {
+        let mut stack = bumpalo::collections::Vec::new_in(self.bump);
+        stack.push(BbInstance::<'db, 'tmp> {
             bb: self.strand.entry(),
             call_stack: &[],
         });
@@ -169,7 +170,7 @@ where
         let mut visited = HashSet::new_in(self.bump);
         visited.insert(stack[0]);
 
-        while let Some(current) = stack.pop() {
+        while let Option::<BbInstance<'db, 'tmp>>::Some(current) = stack.pop() {
             let backend_bb = self.backend.create_block();
             self.bb_map.insert(current, backend_bb);
 
@@ -225,7 +226,7 @@ where
         }
     }
 
-    fn lower_bb(&mut self, instance: BbInstance<'db, 'a>, bb: &'db mir::BasicBlock<'db>) {
+    fn lower_bb(&mut self, instance: BbInstance<'db, 'tmp>, bb: &'db mir::BasicBlock<'db>) {
         self.backend.switch_to_block(self.bb_map[&instance]);
         self.current_bb = instance;
         self.current_func = instance
@@ -289,14 +290,14 @@ where
 
     /// Gets the Compound corresponding to the given
     /// mir in the current function.
-    fn get_val(&self, val: mir::ValId) -> Compound<'a> {
+    fn get_val(&self, val: mir::ValId) -> Compound<'tmp> {
         todo!()
     }
 
     fn get_flattened_vals(
         &self,
         vals: impl IntoIterator<Item = mir::ValId>,
-    ) -> &'a [backend::ValId] {
+    ) -> &'tmp [backend::ValId] {
         let mut vec = bumpalo::collections::Vec::new_in(self.bump);
 
         for val in vals {
@@ -306,7 +307,7 @@ where
         vec.into_bump_slice()
     }
 
-    fn bump_slice_append<T: Copy>(&self, slice: &[T], val: T) -> &'a [T] {
+    fn bump_slice_append<T: Copy>(&self, slice: &[T], val: T) -> &'tmp [T] {
         let vec = bumpalo::collections::Vec::from_iter_in(
             slice.iter().copied().chain(iter::once(val)),
             self.bump,
