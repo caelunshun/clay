@@ -41,8 +41,8 @@ where
     LOWERING_CX.with(|cx_cell| {
         let mut cx = cx_cell.borrow_mut();
 
-        let entry_block = strand.entry_block().resolve(db, mir_cx);
-        let entry_block_func = strand.entry_block().func.resolve(db, mir_cx).data(db);
+        let entry_block = strand.entry().resolve(db, mir_cx);
+        let entry_block_func = strand.entry().func.resolve(db, mir_cx).data(db);
 
         let sig = Signature::new(
             scalarize_types(
@@ -70,7 +70,7 @@ where
                 bb_map: HashMap::new_in(&cx.bump),
                 val_map: HashMap::new_in(&cx.bump),
                 current_bb: BbInstance {
-                    bb: strand.entry_block(),
+                    bb: strand.entry(),
                     call_stack: &[],
                 },
                 current_func: entry_block_func,
@@ -118,7 +118,7 @@ where
         self.current_bb = instance;
         self.current_func = instance.bb.func.resolve(self.db, self.mir_cx).data(self.db);
 
-        for instr in &bb.instrs {
+        for (_, instr) in &bb.instrs {
             self.lower_instr(instr);
         }
 
@@ -128,23 +128,7 @@ where
     fn lower_instr(&mut self, instr: &mir::InstrData) {
         match instr {
             mir::InstrData::Jump(jump) => {
-                let target = GBasicBlockId::new(self.current_bb.bb.func, jump.target);
-                if self.strand.contains_block(target) {
-                    let dst_instance = BbInstance {
-                        bb: target,
-                        call_stack: self.current_bb.call_stack,
-                    };
-                    self.backend.jump(
-                        self.bb_map[&dst_instance],
-                        self.get_flattened_vals(
-                            jump.args
-                                .as_slice(&self.current_func.val_lists)
-                                .iter()
-                                .copied(),
-                        ),
-                    );
-                } else {
-                }
+                todo!()
             }
             mir::InstrData::Branch(branch) => todo!(),
             mir::InstrData::Call(call) => todo!(),
@@ -216,31 +200,20 @@ where
         vec.into_bump_slice()
     }
 
-    fn sig_for_bb_tailcall(&self, bb: GBasicBlockId) -> Signature<'a> {
-        let func = bb.func.data(self.db, self.mir_cx);
+    fn sig_for_func_call(&self, func: FuncId) -> Signature<'a> {
+        let func = func.data(self.db, self.mir_cx);
         Signature::new(
             scalarize_types(
                 self.db,
                 self.mir_cx,
-                bb.resolve(self.db, self.mir_cx)
+                func.basic_blocks[func.entry_block]
                     .params
                     .as_slice(&func.val_lists)
                     .iter()
-                    .map(|&val| func.vals[val].typ),
-                self.bump,
+                    .map(|val_id| func.vals[*val_id].typ),
+                &self.bump,
             ),
-            // Tail-called block has to have same returns as current function....
-            scalarize_type(
-                self.db,
-                self.mir_cx,
-                self.current_func.header.return_type,
-                self.bump,
-            ),
+            scalarize_type(self.db, self.mir_cx, func.header.return_type, &self.bump),
         )
-    }
-
-    fn sig_for_func_call(&self, func: FuncId) -> Signature<'a> {
-        let func = func.data(self.db, self.mir_cx);
-        Signature::new()
     }
 }
