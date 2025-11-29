@@ -1,7 +1,7 @@
 //! Lowering of MIR strands to the codegen backend.
 
 use crate::{
-    backend::{self, CodeBuilder, CodegenBackend, Signature, ValTy},
+    backend::{self, CodeBuilder, CodegenBackend, IntBitness, Signature, ValTy},
     compiled_strand::CompiledStrand,
     isa::Isa,
     lowering::{
@@ -44,19 +44,7 @@ where
         let entry_block = strand.entry().resolve(db, mir_cx);
         let entry_block_func = strand.entry().func.resolve(db, mir_cx).data(db);
 
-        let sig = Signature::new(
-            scalarize_types(
-                db,
-                mir_cx,
-                entry_block
-                    .params
-                    .as_slice(&entry_block_func.val_lists)
-                    .iter()
-                    .map(|val_id| entry_block_func.vals[*val_id].typ),
-                &cx.bump,
-            ),
-            scalarize_type(db, mir_cx, entry_block_func.header.return_type, &cx.bump),
-        );
+        let sig = sig_for_strand(db, mir_cx, &cx, strand.entry());
 
         {
             let mut lowerer = Lowerer {
@@ -81,6 +69,54 @@ where
 
         todo!()
     })
+}
+
+fn does_strand_return_continuation<'db>(
+    db: &'db dyn Database,
+    mir_cx: mir::Context<'db>,
+    strand_entry: GBasicBlockId,
+) -> bool {
+    strand_entry.bb != strand_entry.func.data(db, mir_cx).entry_block
+}
+
+/// Returns the signature of the strand having the given entry point.
+fn sig_for_strand<'db, 'bump>(
+    db: &'db dyn Database,
+    mir_cx: mir::Context<'db>,
+    cx: &'bump LoweringCx,
+    strand_entry: GBasicBlockId,
+) -> Signature<'bump> {
+    let mut param_types = bumpalo::collections::Vec::new_in(&cx.bump);
+
+    // VM context
+    param_types.push(ValTy::Int(IntBitness::B64));
+
+    // If the strand is not a function entry, then
+    // we pass an out pointer
+    // for the returned continuation
+    if does_strand_return_continuation(db, mir_cx, strand_entry) {
+        param_types.push(ValTy::Int(IntBitness::B64));
+    }
+
+    // Basic block parameters
+    let func_data = strand_entry.func.data(db, mir_cx);
+    let bb_data = &func_data.basic_blocks[strand_entry.bb];
+    let param_iter = bb_data
+        .params
+        .as_slice(&func_data.val_lists)
+        .iter()
+        .map(|&val| func_data.vals[val].typ);
+    param_types.extend_from_slice(scalarize_types(db, mir_cx, param_iter, &cx.bump));
+
+    let return_types = if does_strand_return_continuation(db, mir_cx, strand_entry) {
+        // Returns the continuation tag
+        cx.bump.alloc_slice_copy(&[ValTy::Int(IntBitness::B32)])
+    } else {
+        // Returns the function return value
+        scalarize_type(db, mir_cx, func_data.header.return_type, &cx.bump)
+    };
+
+    Signature::new(param_types.into_bump_slice(), return_types)
 }
 
 struct Lowerer<'db, 'a, B> {
@@ -198,22 +234,5 @@ where
             self.bump,
         );
         vec.into_bump_slice()
-    }
-
-    fn sig_for_func_call(&self, func: FuncId) -> Signature<'a> {
-        let func = func.data(self.db, self.mir_cx);
-        Signature::new(
-            scalarize_types(
-                self.db,
-                self.mir_cx,
-                func.basic_blocks[func.entry_block]
-                    .params
-                    .as_slice(&func.val_lists)
-                    .iter()
-                    .map(|val_id| func.vals[*val_id].typ),
-                &self.bump,
-            ),
-            scalarize_type(self.db, self.mir_cx, func.header.return_type, &self.bump),
-        )
     }
 }
