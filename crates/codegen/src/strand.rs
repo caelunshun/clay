@@ -1,10 +1,11 @@
 use fir_mir::ir::{BasicBlockId, FuncId};
+use mir::TypeArgs;
 use salsa::Database;
 use std::collections::BTreeSet;
 
 #[salsa::interned]
-pub struct InternedStrand {
-    pub data: Strand,
+pub struct InternedStrand<'db> {
+    pub data: Strand<'db>,
 }
 
 /// A strand of basic blocks: the unit of compilation.
@@ -14,21 +15,32 @@ pub struct InternedStrand {
 /// The strand then contains all reachable blocks between the entry
 /// and the exits.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Strand {
+pub struct Strand<'db> {
     entry: GBasicBlockId,
+    /// Function type arguments in the entry function.
+    entry_type_args: TypeArgs<'db>,
     exits: BTreeSet<Exit>,
 }
 
-impl Strand {
-    pub fn new(entry: GBasicBlockId, exits: impl IntoIterator<Item = Exit>) -> Self {
+impl<'db> Strand<'db> {
+    pub fn new(
+        entry: GBasicBlockId,
+        entry_type_args: TypeArgs<'db>,
+        exits: impl IntoIterator<Item = Exit>,
+    ) -> Self {
         Self {
             entry,
+            entry_type_args,
             exits: exits.into_iter().collect(),
         }
     }
 
     pub fn entry(&self) -> GBasicBlockId {
         self.entry
+    }
+
+    pub fn entry_type_args(&self) -> &TypeArgs<'db> {
+        &self.entry_type_args
     }
 
     pub fn entry_func(&self) -> FuncId {

@@ -9,11 +9,11 @@ use crate::{
         context::LoweringCx,
         env::Env,
     },
-    strand::{GBasicBlockId, Strand},
+    strand::{ GBasicBlockId, Strand},
 };
 use bumpalo::Bump;
-use fir_core::HashMap;
-use mir::{FuncData, FuncId};
+use fir_core::{HashMap, HashSet};
+use mir::{FuncData, FuncId, TypeArgs};
 use salsa::Database;
 use std::{
     cell::{LazyCell, RefCell},
@@ -62,6 +62,7 @@ where
                     call_stack: &[],
                 },
                 current_func: entry_block_func,
+                current_type_args: strand.entry_type_args().clone(),
             };
         }
 
@@ -125,12 +126,19 @@ struct Lowerer<'db, 'a, B> {
     env: &'a dyn Env,
     isa: &'a Isa,
     backend: B,
-    strand: &'a Strand,
+    strand: &'a Strand<'db>,
     bump: &'a Bump,
+    /// Maps mir basic blocks to the corresponding blocks in the backend.
+    /// Note that in some cases, a mir block can generate multiple backend
+    /// basic blocks, e.g. for certain high-level instructions that produce
+    /// branches. In these cases, the bb_map entry points to the "entry"/"initial"
+    /// block of the mir basic block, which is always unique.
     bb_map: HashMap<BbInstance<'a>, backend::BasicBlockId, &'a Bump>,
     val_map: HashMap<GValId, Compound<'a>, &'a Bump>,
     current_bb: BbInstance<'a>,
     current_func: &'a FuncData<'db>,
+    /// Type arguments in the current function.
+    current_type_args: TypeArgs<'db>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -149,6 +157,48 @@ impl<'db, 'a, B> Lowerer<'db, 'a, B>
 where
     B: CodeBuilder<'a>,
 {
+    /// Performs an initial traversal of the BbInstances to compile,
+    /// populating bb_map with their mapping to backend BasicBlocks.
+    pub fn populate_bbs(&mut self) {
+        let mut stack = bumpalo::collections::Vec::new_in(self.bump);
+        stack.push(BbInstance {
+            bb: self.strand.entry(),
+            call_stack: &[],
+        });
+
+        let mut visited = HashSet::new_in(self.bump);
+        visited.insert(stack[0]);
+
+        while let Some(current) = stack.pop() {
+            let backend_bb = self.backend.create_block();
+            self.bb_map.insert(current, backend_bb);
+
+            // Populate parameter types
+            let func_data = current.bb.func.data(self.db, self.mir_cx);
+            let param_types = func_data.basic_blocks[current.bb.bb]
+                .params
+                .as_slice(&func_data.val_lists)
+                .iter()
+                .map(|&val| func_data.vals[val].typ);
+            let param_types = scalarize_types(self.db, self.mir_cx, param_types, self.bump);
+            for &param_ty in param_types {
+                self.backend.append_block_param(backend_bb, param_ty);
+            }
+
+            // Traverse successors within this strand
+            let mut successors = bumpalo::collections::Vec::new_in(self.bump);
+            func_data.visit_block_successors(current.bb.bb, |successor| {
+                successors.push(GBasicBlockId {
+                    func: current.bb.func,
+                    bb: successor,
+                });
+            });
+            func_data.visit_block_called_funcs(current.bb.bb, |func_instance| {
+                successors.push(GBasicBlockId { func: func_instance., bb: () })
+            });
+        }
+    }
+
     fn lower_bb(&mut self, instance: BbInstance<'a>, bb: &'db mir::BasicBlock<'db>) {
         self.backend.switch_to_block(self.bb_map[&instance]);
         self.current_bb = instance;
