@@ -60,10 +60,16 @@ pub enum AstGenericParamKind {
     TyEquals(Ident, AstTy),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum AstGenericDef<'a> {
     Ty(Ident, Option<&'a AstTraitClauseList>),
     Re(Lifetime, Option<&'a AstTraitClauseList>),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum AstGenericPositional<'a> {
+    Ty(&'a AstTy),
+    Re(&'a Lifetime),
 }
 
 impl AstGenericParamKind {
@@ -80,6 +86,16 @@ impl AstGenericParamKind {
                 Some(AstGenericDef::Re(*re, Some(clauses)))
             }
             AstGenericParamKind::TyEquals(..) => None,
+        }
+    }
+
+    pub fn as_positional(&self) -> Option<AstGenericPositional<'_>> {
+        match self {
+            AstGenericParamKind::PositionalTy(ty) => Some(AstGenericPositional::Ty(ty)),
+            AstGenericParamKind::PositionalRe(re) => Some(AstGenericPositional::Re(re)),
+            AstGenericParamKind::InheritTy(..)
+            | AstGenericParamKind::InheritRe(..)
+            | AstGenericParamKind::TyEquals(..) => None,
         }
     }
 }

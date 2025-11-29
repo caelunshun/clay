@@ -7,26 +7,27 @@ use crate::{
     },
     parse::{
         ast::{
-            AstGenericDef, AstGenericParamKind, AstGenericParamList, AstImplLikeBody,
-            AstImplLikeMemberKind, AstNamedSpec, AstTraitClause, AstTraitClauseList, AstTy,
-            AstTyKind, AstTyOrRe,
+            AstGenericDef, AstGenericParamKind, AstGenericParamList, AstGenericPositional,
+            AstImplLikeBody, AstImplLikeMemberKind, AstNamedSpec, AstTraitClause,
+            AstTraitClauseList, AstTy, AstTyKind, AstTyOrRe,
         },
         token::Lifetime,
     },
     semantic::{
         lower::entry::{InterItemLowerCtxt, IntraItemLowerCtxt},
         syntax::{
-            AnyGeneric, GenericBinder, Re, RegionGeneric, SpannedRe, SpannedTraitClause,
-            SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitInstance,
-            SpannedTraitInstanceView, SpannedTraitParam, SpannedTraitParamList,
-            SpannedTraitParamView, SpannedTraitSpec, SpannedTraitSpecView, SpannedTy,
-            SpannedTyList, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView, SpannedTyView,
-            TraitParam, TypeGeneric,
+            AnyGeneric, GenericBinder, Re, RegionGeneric, SpannedAdtInstanceView, SpannedRe,
+            SpannedTraitClause, SpannedTraitClauseList, SpannedTraitClauseView,
+            SpannedTraitInstance, SpannedTraitInstanceView, SpannedTraitParam,
+            SpannedTraitParamList, SpannedTraitParamView, SpannedTraitSpec, SpannedTraitSpecView,
+            SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView,
+            SpannedTyView, TraitParam, TypeGeneric,
         },
     },
     utils::hash::FxHashMap,
 };
 use hashbrown::hash_map;
+use std::cmp::Ordering;
 
 impl<'ast> InterItemLowerCtxt<'_, 'ast> {
     pub fn lower_generic_defs(
@@ -465,6 +466,8 @@ impl IntraItemLowerCtxt<'_> {
     }
 
     pub fn lower_ty(&mut self, ast: &AstTy) -> SpannedTy {
+        let s = &self.tcx.session;
+
         match &ast.kind {
             AstTyKind::This => SpannedTyView::This.encode(ast.span, self.tcx),
             AstTyKind::Name(path, generics) => {
@@ -475,11 +478,9 @@ impl IntraItemLowerCtxt<'_> {
                             "generic types cannot be accessed like modules",
                         )
                         .emit();
-                    } else if let Some(generics) = generics
-                        && let Some(para) = generics.list.first()
-                    {
+                    } else if let Some(generics) = generics {
                         Diag::span_err(
-                            para.span,
+                            generics.span,
                             "generic types cannot be instantiated with further generic parameters",
                         )
                         .emit();
@@ -488,7 +489,91 @@ impl IntraItemLowerCtxt<'_> {
                     return SpannedTyView::Universal(*generic).encode(ast.span, self.tcx);
                 }
 
-                todo!()
+                let generics = generics.as_ref().map_or(&[][..], |v| v.list.as_slice());
+
+                let def = match self.lookup(path) {
+                    Ok(def) => def,
+                    Err(err) => {
+                        return SpannedTyView::Error(err).encode(ast.span, self.tcx);
+                    }
+                };
+
+                let Some(def) = def.as_item().and_then(|v| v.r(s).kind.as_adt()) else {
+                    return SpannedTyView::Error(
+                        Diag::span_err(path.span, "expected enum or struct").emit(),
+                    )
+                    .encode(ast.span, self.tcx);
+                };
+
+                let mut had_error = None;
+
+                match generics.len().cmp(&def.r(s).generics.r(s).defs.len()) {
+                    Ordering::Equal => {
+                        // (fallthrough)
+                    }
+                    Ordering::Less => {
+                        had_error =
+                            Some(Diag::span_err(ast.span, "missing generic parameters").emit());
+                    }
+                    Ordering::Greater => {
+                        had_error = Some(
+                            Diag::span_err(
+                                generics[def.r(s).generics.r(s).defs.len()].span,
+                                "too many generic parameters",
+                            )
+                            .emit(),
+                        );
+                    }
+                }
+
+                let mut params = Vec::new();
+
+                for (actual, expected) in generics.iter().zip(&def.r(s).generics.r(s).defs) {
+                    let actual_span = actual.span;
+
+                    let Some(actual) = actual.kind.as_positional() else {
+                        had_error = Some(
+                            Diag::span_err(actual.span, "expected a generic parameter").emit(),
+                        );
+
+                        continue;
+                    };
+
+                    match (actual, expected) {
+                        (AstGenericPositional::Ty(actual), AnyGeneric::Ty(_)) => {
+                            params.push(
+                                SpannedTyOrReView::Ty(self.lower_ty(actual))
+                                    .encode(actual_span, self.tcx),
+                            );
+                        }
+                        (AstGenericPositional::Re(actual), AnyGeneric::Re(_)) => {
+                            params.push(
+                                SpannedTyOrReView::Re(self.lower_re(actual))
+                                    .encode(actual_span, self.tcx),
+                            );
+                        }
+                        (_, AnyGeneric::Ty(_)) => {
+                            had_error = Some(Diag::span_err(actual_span, "expected a type").emit());
+                        }
+                        (_, AnyGeneric::Re(_)) => {
+                            had_error =
+                                Some(Diag::span_err(actual_span, "expected a lifetime").emit());
+                        }
+                    }
+                }
+
+                if let Some(err) = had_error {
+                    return SpannedTyView::Error(err).encode(ast.span, self.tcx);
+                }
+
+                SpannedTyView::Adt(
+                    SpannedAdtInstanceView {
+                        def,
+                        params: SpannedTyOrReList::alloc_list(ast.span, &params, self.tcx),
+                    }
+                    .encode(ast.span, self.tcx),
+                )
+                .encode(ast.span, self.tcx)
             }
             AstTyKind::Reference(lifetime, muta, pointee) => SpannedTyView::Reference(
                 match lifetime {
