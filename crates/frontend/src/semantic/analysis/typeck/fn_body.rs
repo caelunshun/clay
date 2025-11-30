@@ -110,7 +110,6 @@ impl<'tcx> FnCtxt<'tcx> {
             ExprKind::Loop(block) => todo!(),
             ExprKind::Block(block) => self.check_block(*block),
             ExprKind::Assign(lhs, rhs) => todo!(),
-            ExprKind::Destructure(lhs, rhs) => todo!(),
             ExprKind::AssignOp(op, lhs, rhs) => todo!(),
             ExprKind::Field(obj, ident) => todo!(),
             ExprKind::Index(obj, obj1) => todo!(),

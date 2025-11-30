@@ -63,9 +63,31 @@ pub struct Pat {
 
 #[derive(Debug, Clone)]
 pub enum PatKind {
-    Wild,
-    Name(Obj<FuncLocal>),
+    /// Ignore the destructure target.
+    Hole,
+
+    /// Ignore the remainder of a structure.
+    Rest,
+
+    /// Define a new local. Only available in defining patterns.
+    NewName(Obj<FuncLocal>),
+
+    /// Match an array or slice of patterns.
+    Array(Obj<[Obj<Pat>]>),
+
+    /// Match a tuple of patterns.
+    Tuple(Obj<[Obj<Pat>]>),
+
+    /// Match a literal.
+    Lit(AstLit),
+
+    /// Match a variety of options.
     Or(Obj<[Obj<Pat>]>),
+
+    /// Bind to a target place expression. Only available in destructuring patterns.
+    PlaceExpr(Obj<Expr>),
+
+    /// Failed to lower the pattern.
     Error(ErrorGuaranteed),
 }
 
@@ -138,9 +160,8 @@ pub enum ExprKind {
     Loop(Obj<Block>),
     // TODO
     Block(Obj<Block>),
-    Assign(Obj<Expr>, Obj<Expr>),
-    Destructure(Obj<Pat>, Obj<Expr>),
-    AssignOp(AstAssignOpKind, Obj<Expr>, Obj<Expr>),
+    Assign(Obj<Pat>, Obj<Expr>),
+    AssignOp(AstAssignOpKind, Obj<Pat>, Obj<Expr>),
     Field(Obj<Expr>, Ident),
     Index(Obj<Expr>, Obj<Expr>),
     Range(Option<Obj<Expr>>, Option<Obj<Expr>>, AstRangeLimits),

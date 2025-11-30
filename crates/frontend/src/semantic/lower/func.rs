@@ -173,30 +173,11 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::Block(block, label) => {
                 ExprKind::Block(self.lower_block_with_label(expr, *label, block))
             }
-            AstExprKind::Assign(lhs, rhs) => match self.categorize_lvalue(lhs) {
-                LValueCategory::Pattern => {
-                    let lhs = self.convert_lvalue_expr_to_pat(lhs);
-
-                    ExprKind::Destructure(
-                        self.lower_pat(&lhs, PatLoweringMode::Destructuring),
-                        self.lower_expr(rhs),
-                    )
-                }
-                LValueCategory::AssignTarget => {
-                    ExprKind::Assign(self.lower_expr(lhs), self.lower_expr(rhs))
-                }
-                LValueCategory::Neither => ExprKind::Error(
-                    Diag::span_err(lhs.span, "invalid left-hand side of assignment").emit(),
-                ),
-            },
+            AstExprKind::Assign(lhs, rhs) => {
+                ExprKind::Assign(self.lower_lvalue_as_pat(lhs), self.lower_expr(rhs))
+            }
             AstExprKind::AssignOp(op, lhs, rhs) => {
-                if self.categorize_lvalue(&lhs) == LValueCategory::AssignTarget {
-                    ExprKind::AssignOp(*op, self.lower_expr(lhs), self.lower_expr(rhs))
-                } else {
-                    ExprKind::Error(
-                        Diag::span_err(lhs.span, "invalid left-hand side of assignment").emit(),
-                    )
-                }
+                ExprKind::AssignOp(*op, self.lower_lvalue_as_pat(lhs), self.lower_expr(rhs))
             }
             AstExprKind::Field(expr, name) => ExprKind::Field(self.lower_expr(expr), *name),
             AstExprKind::GenericMethod {
@@ -253,7 +234,7 @@ impl IntraItemLowerCtxt<'_> {
         let s = &self.tcx.session;
 
         let kind = match &ast.kind {
-            AstPatKind::Wild => PatKind::Wild,
+            AstPatKind::Wild => PatKind::Hole,
             AstPatKind::Path {
                 binding_mode,
                 path,
@@ -281,26 +262,66 @@ impl IntraItemLowerCtxt<'_> {
         )
     }
 
-    pub fn categorize_lvalue(&mut self, expr: &AstExpr) -> LValueCategory {
-        match &expr.kind {
-            AstExprKind::Paren(expr) => self.categorize_lvalue(expr),
+    pub fn lower_lvalue_list_as_pat<'a>(
+        &mut self,
+        exprs: impl IntoIterator<Item = &'a AstExpr, IntoIter: ExactSizeIterator>,
+    ) -> Obj<[Obj<Pat>]> {
+        let s = &self.tcx.session;
 
-            AstExprKind::Array(..)
-            | AstExprKind::Tuple(..)
-            | AstExprKind::Binary(AstBinOpKind::BitOr, ..)
-            | AstExprKind::Lit(..)
-            | AstExprKind::Underscore
-            | AstExprKind::Struct(..)
+        Obj::new_iter(
+            exprs.into_iter().map(|expr| self.lower_lvalue_as_pat(expr)),
+            s,
+        )
+    }
+
+    pub fn lower_lvalue_as_pat(&mut self, expr: &AstExpr) -> Obj<Pat> {
+        let s = &self.tcx.session;
+
+        let kind = match &expr.kind {
+            AstExprKind::Paren(expr) => {
+                return self.lower_lvalue_as_pat(expr);
+            }
+
+            AstExprKind::Array(elems) => PatKind::Array(self.lower_lvalue_list_as_pat(elems)),
+            AstExprKind::Tuple(elems) => PatKind::Tuple(self.lower_lvalue_list_as_pat(elems)),
+            AstExprKind::Lit(lit) => PatKind::Lit(*lit),
+            AstExprKind::Underscore => PatKind::Hole,
+
+            AstExprKind::Binary(AstBinOpKind::BitOr, lhs, rhs) => {
+                let mut accum = Vec::new();
+
+                fn fold_or_pat(
+                    ctxt: &mut IntraItemLowerCtxt<'_>,
+                    accum: &mut Vec<Obj<Pat>>,
+                    expr: &AstExpr,
+                ) {
+                    if let AstExprKind::Binary(AstBinOpKind::BitOr, lhs, rhs) = &expr.kind {
+                        fold_or_pat(ctxt, accum, lhs);
+                        fold_or_pat(ctxt, accum, rhs);
+                    } else {
+                        accum.push(ctxt.lower_lvalue_as_pat(expr));
+                    }
+                }
+
+                fold_or_pat(self, &mut accum, lhs);
+                fold_or_pat(self, &mut accum, rhs);
+
+                PatKind::Or(Obj::new_slice(&accum, s))
+            }
+
+            AstExprKind::Struct(..)
             | AstExprKind::AddrOf(..)
             | AstExprKind::Range(..)
             | AstExprKind::Unary(AstUnOpKind::Neg, ..)
-            | AstExprKind::Call(..) => LValueCategory::Pattern,
+            | AstExprKind::Call(..) => todo!(),
 
             AstExprKind::Block(..)
             | AstExprKind::Field(..)
             | AstExprKind::Index(..)
             | AstExprKind::Path(..)
-            | AstExprKind::Unary(AstUnOpKind::Deref, ..) => LValueCategory::AssignTarget,
+            | AstExprKind::Unary(AstUnOpKind::Deref, ..) => {
+                PatKind::PlaceExpr(self.lower_expr(expr))
+            }
 
             AstExprKind::Cast(..)
             | AstExprKind::Let(..)
@@ -332,22 +353,21 @@ impl IntraItemLowerCtxt<'_> {
             | AstExprKind::Binary(AstBinOpKind::Le, ..)
             | AstExprKind::Binary(AstBinOpKind::Ne, ..)
             | AstExprKind::Binary(AstBinOpKind::Ge, ..)
-            | AstExprKind::Binary(AstBinOpKind::Gt, ..) => LValueCategory::Neither,
+            | AstExprKind::Binary(AstBinOpKind::Gt, ..) => PatKind::Error(
+                Diag::span_err(expr.span, "invalid left-hand side of assignment").emit(),
+            ),
 
-            AstExprKind::Error(_) => LValueCategory::AssignTarget,
-        }
+            AstExprKind::Error(err) => PatKind::Error(*err),
+        };
+
+        Obj::new(
+            Pat {
+                span: expr.span,
+                kind,
+            },
+            s,
+        )
     }
-
-    pub fn convert_lvalue_expr_to_pat(&mut self, expr: &AstExpr) -> AstPat {
-        todo!()
-    }
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum LValueCategory {
-    Pattern,
-    AssignTarget,
-    Neither,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
