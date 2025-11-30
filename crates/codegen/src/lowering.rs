@@ -1,7 +1,7 @@
 //! Lowering of MIR strands to the codegen backend.
 
 use crate::{
-    backend::{self, CodeBuilder, CodegenBackend, IntBitness, Signature, ValTy},
+    backend::{self, BasicBlockId, CodeBuilder, CodegenBackend, IntBitness, Signature, ValTy},
     compiled_strand::CompiledStrand,
     isa::Isa,
     lowering::{
@@ -140,6 +140,8 @@ struct Lowerer<'db, 'tmp, B> {
     current_vals: SecondaryMap<mir::ValId, Option<Compound<'tmp>>>,
     /// Type arguments in the current function.
     current_type_args: TypeArgs<'db>,
+
+    /// Collection of callbacks to initialize 
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -318,6 +320,28 @@ where
             mir::InstrData::BufrefGet(bufref_get) => todo!(),
             mir::InstrData::BufregGetMRef(bufref_get_mref) => todo!(),
         }
+    }
+
+    /// Gets the basic block that should be jumped to for a particular
+    /// jump target.
+    /// * If the target block is inside the current strand and current function, then
+    /// we just return that block.
+    /// * If the target block is outside the current strand, but in the current function,
+    /// then we generate a new block that calls the sub-strand and return that block.
+    fn get_jump_target(&mut self, mir_target: mir::BasicBlockId) -> BasicBlockId {
+        let query_instance = BbInstance {
+            bb: GBasicBlockId { func: self.current_bb.bb.func, bb: mir_target  },
+            call_site: self.current_bb.call_site,
+        };
+
+        if let Some(mapped_bb) = self.bb_map.get(&query_instance) {
+            return *mapped_bb;
+        }
+
+        // Not in current strand/function; generate a new block that produces a call.
+
+
+        todo!()
     }
 
     /// Gets the Compound corresponding to the given
