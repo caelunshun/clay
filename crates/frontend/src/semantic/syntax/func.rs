@@ -5,7 +5,7 @@ use crate::{
         syntax::Span,
     },
     parse::{
-        ast::{AstBinOpKind, AstLit, AstRangeLimits, AstUnOpKind},
+        ast::{AstAssignOpKind, AstBinOpKind, AstLit, AstRangeLimits, AstUnOpKind},
         token::Ident,
     },
     semantic::syntax::{
@@ -65,6 +65,7 @@ pub struct Pat {
 pub enum PatKind {
     Wild,
     Name(Obj<FuncLocal>),
+    Or(Obj<[Obj<Pat>]>),
     Error(ErrorGuaranteed),
 }
 
@@ -137,8 +138,9 @@ pub enum ExprKind {
     Loop(Obj<Block>),
     // TODO
     Block(Obj<Block>),
-    Assign(Obj<Pat>, Obj<Expr>),
-    AssignOp(AstBinOpKind, Obj<Expr>, Obj<Expr>),
+    Assign(Obj<Expr>, Obj<Expr>),
+    Destructure(Obj<Pat>, Obj<Expr>),
+    AssignOp(AstAssignOpKind, Obj<Expr>, Obj<Expr>),
     Field(Obj<Expr>, Ident),
     Index(Obj<Expr>, Obj<Expr>),
     Range(Option<Obj<Expr>>, Option<Obj<Expr>>, AstRangeLimits),

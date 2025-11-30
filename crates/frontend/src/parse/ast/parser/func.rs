@@ -1025,6 +1025,11 @@ pub fn parse_pat_single_arm(p: P) -> AstPat {
         return build_pat(AstPatKind::Wild, p);
     }
 
+    // Parse rest
+    if match_punct_seq(puncts!("..")).expect(p).is_some() {
+        return build_pat(AstPatKind::Rest, p);
+    }
+
     // Parse tuples
     if let Some(group) = match_group(GroupDelimiter::Paren).expect(p) {
         return match parse_comma_group(&mut p.enter(&group), parse_pat).into_singleton() {

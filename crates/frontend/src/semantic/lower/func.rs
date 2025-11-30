@@ -5,7 +5,8 @@ use crate::{
     },
     parse::{
         ast::{
-            AstBlock, AstExpr, AstExprKind, AstPat, AstPatKind, AstStmt, AstStmtKind, AstStmtLet,
+            AstBinOpKind, AstBlock, AstExpr, AstExprKind, AstPat, AstPatKind, AstStmt, AstStmtKind,
+            AstStmtLet, AstUnOpKind,
         },
         token::Lifetime,
     },
@@ -87,7 +88,7 @@ impl IntraItemLowerCtxt<'_> {
             }) => Some(Stmt::Let(Obj::new(
                 LetStmt {
                     span: stmt.span,
-                    pat: self.lower_defining_pat(pat),
+                    pat: self.lower_pat(pat, PatLoweringMode::Defining),
                     ascription: self.lower_opt_ty(ascription.as_deref()),
                     init: self.lower_opt_expr(init.as_deref()),
                     else_clause: self.lower_opt_block(else_clause.as_deref()),
@@ -160,7 +161,11 @@ impl IntraItemLowerCtxt<'_> {
                 iter,
                 body,
                 label,
-            } => todo!(),
+            } => ExprKind::ForLoop {
+                pat: self.lower_pat(pat, PatLoweringMode::Defining),
+                iter: self.lower_expr(iter),
+                body: self.lower_block_with_label(expr, *label, &body),
+            },
             AstExprKind::Loop(block, label) => {
                 ExprKind::Loop(self.lower_block_with_label(expr, *label, block))
             }
@@ -168,9 +173,30 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::Block(block, label) => {
                 ExprKind::Block(self.lower_block_with_label(expr, *label, block))
             }
-            AstExprKind::Assign(ast_expr, ast_expr1) => todo!(),
-            AstExprKind::AssignOp(ast_assign_op_kind, ast_expr, ast_expr1) => {
-                todo!()
+            AstExprKind::Assign(lhs, rhs) => match self.categorize_lvalue(lhs) {
+                LValueCategory::Pattern => {
+                    let lhs = self.convert_lvalue_expr_to_pat(lhs);
+
+                    ExprKind::Destructure(
+                        self.lower_pat(&lhs, PatLoweringMode::Destructuring),
+                        self.lower_expr(rhs),
+                    )
+                }
+                LValueCategory::AssignTarget => {
+                    ExprKind::Assign(self.lower_expr(lhs), self.lower_expr(rhs))
+                }
+                LValueCategory::Neither => ExprKind::Error(
+                    Diag::span_err(lhs.span, "invalid left-hand side of assignment").emit(),
+                ),
+            },
+            AstExprKind::AssignOp(op, lhs, rhs) => {
+                if self.categorize_lvalue(&lhs) == LValueCategory::AssignTarget {
+                    ExprKind::AssignOp(*op, self.lower_expr(lhs), self.lower_expr(rhs))
+                } else {
+                    ExprKind::Error(
+                        Diag::span_err(lhs.span, "invalid left-hand side of assignment").emit(),
+                    )
+                }
             }
             AstExprKind::Field(expr, name) => ExprKind::Field(self.lower_expr(expr), *name),
             AstExprKind::GenericMethod {
@@ -217,7 +243,13 @@ impl IntraItemLowerCtxt<'_> {
         expr
     }
 
-    pub fn lower_defining_pat(&mut self, ast: &AstPat) -> Obj<Pat> {
+    pub fn lower_pat_list(&mut self, asts: &[AstPat], mode: PatLoweringMode) -> Obj<[Obj<Pat>]> {
+        let s = &self.tcx.session;
+
+        Obj::new_iter(asts.iter().map(|ast| self.lower_pat(ast, mode)), s)
+    }
+
+    pub fn lower_pat(&mut self, ast: &AstPat, mode: PatLoweringMode) -> Obj<Pat> {
         let s = &self.tcx.session;
 
         let kind = match &ast.kind {
@@ -229,8 +261,8 @@ impl IntraItemLowerCtxt<'_> {
             } => todo!(),
             AstPatKind::PathAndBrace(ast_expr_path, ast_pat_fields, ast_pat_struct_rest) => todo!(),
             AstPatKind::PathAndParen(ast_expr_path, ast_pats) => todo!(),
-            AstPatKind::Or(ast_pats) => todo!(),
-            AstPatKind::Tuple(ast_pats) => todo!(),
+            AstPatKind::Or(pats) => PatKind::Or(self.lower_pat_list(pats, mode)),
+            AstPatKind::Tuple(pats) => todo!(),
             AstPatKind::Ref(ast_opt_mutability, ast_pat) => todo!(),
             AstPatKind::Slice(ast_pats) => todo!(),
             AstPatKind::Rest => todo!(),
@@ -248,4 +280,78 @@ impl IntraItemLowerCtxt<'_> {
             s,
         )
     }
+
+    pub fn categorize_lvalue(&mut self, expr: &AstExpr) -> LValueCategory {
+        match &expr.kind {
+            AstExprKind::Paren(expr) => self.categorize_lvalue(expr),
+
+            AstExprKind::Array(..)
+            | AstExprKind::Tuple(..)
+            | AstExprKind::Binary(AstBinOpKind::BitOr, ..)
+            | AstExprKind::Lit(..)
+            | AstExprKind::Underscore
+            | AstExprKind::Struct(..)
+            | AstExprKind::AddrOf(..)
+            | AstExprKind::Range(..)
+            | AstExprKind::Unary(AstUnOpKind::Neg, ..)
+            | AstExprKind::Call(..) => LValueCategory::Pattern,
+
+            AstExprKind::Block(..)
+            | AstExprKind::Field(..)
+            | AstExprKind::Index(..)
+            | AstExprKind::Path(..)
+            | AstExprKind::Unary(AstUnOpKind::Deref, ..) => LValueCategory::AssignTarget,
+
+            AstExprKind::Cast(..)
+            | AstExprKind::Let(..)
+            | AstExprKind::If { .. }
+            | AstExprKind::While { .. }
+            | AstExprKind::ForLoop { .. }
+            | AstExprKind::Loop(..)
+            | AstExprKind::Match(..)
+            | AstExprKind::Assign(..)
+            | AstExprKind::AssignOp(..)
+            | AstExprKind::GenericMethod { .. }
+            | AstExprKind::Break(..)
+            | AstExprKind::Continue(..)
+            | AstExprKind::Return(..)
+            | AstExprKind::Unary(AstUnOpKind::Not, ..)
+            | AstExprKind::Binary(AstBinOpKind::Add, ..)
+            | AstExprKind::Binary(AstBinOpKind::Sub, ..)
+            | AstExprKind::Binary(AstBinOpKind::Mul, ..)
+            | AstExprKind::Binary(AstBinOpKind::Div, ..)
+            | AstExprKind::Binary(AstBinOpKind::Rem, ..)
+            | AstExprKind::Binary(AstBinOpKind::And, ..)
+            | AstExprKind::Binary(AstBinOpKind::Or, ..)
+            | AstExprKind::Binary(AstBinOpKind::BitXor, ..)
+            | AstExprKind::Binary(AstBinOpKind::BitAnd, ..)
+            | AstExprKind::Binary(AstBinOpKind::Shl, ..)
+            | AstExprKind::Binary(AstBinOpKind::Shr, ..)
+            | AstExprKind::Binary(AstBinOpKind::Eq, ..)
+            | AstExprKind::Binary(AstBinOpKind::Lt, ..)
+            | AstExprKind::Binary(AstBinOpKind::Le, ..)
+            | AstExprKind::Binary(AstBinOpKind::Ne, ..)
+            | AstExprKind::Binary(AstBinOpKind::Ge, ..)
+            | AstExprKind::Binary(AstBinOpKind::Gt, ..) => LValueCategory::Neither,
+
+            AstExprKind::Error(_) => LValueCategory::AssignTarget,
+        }
+    }
+
+    pub fn convert_lvalue_expr_to_pat(&mut self, expr: &AstExpr) -> AstPat {
+        todo!()
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum LValueCategory {
+    Pattern,
+    AssignTarget,
+    Neither,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum PatLoweringMode {
+    Defining,
+    Destructuring,
 }
