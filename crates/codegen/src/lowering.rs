@@ -1,7 +1,9 @@
 //! Lowering of MIR strands to the codegen backend.
 
 use crate::{
-    backend::{self, BasicBlockId, CodeBuilder, CodegenBackend, IntBitness, Signature, ValTy},
+    backend::{
+        self, BasicBlockId, CodeBuilder, CodegenBackend, FloatBitness, IntBitness, Signature, ValTy,
+    },
     compiled_strand::{CompiledStrand, Symbol},
     isa::Isa,
     lowering::{
@@ -278,8 +280,6 @@ where
         for (_, instr) in &bb.instrs {
             self.lower_instr(instr);
         }
-
-        todo!()
     }
 
     fn lower_instr(&mut self, instr: &mir::InstrData) {
@@ -355,22 +355,136 @@ where
                 let vals = self.get_flattened_vals([ret.return_value]);
                 self.backend.return_(vals);
             }
-            mir::InstrData::Copy(unary) => todo!(),
-            mir::InstrData::Constant(constant_instr) => todo!(),
-            mir::InstrData::IntAdd(binary) => todo!(),
-            mir::InstrData::IntSub(binary) => todo!(),
-            mir::InstrData::IntMul(binary) => todo!(),
-            mir::InstrData::IntDiv(binary) => todo!(),
-            mir::InstrData::IntCmp(cmp) => todo!(),
-            mir::InstrData::RealAdd(binary) => todo!(),
-            mir::InstrData::RealSub(binary) => todo!(),
-            mir::InstrData::RealMul(binary) => todo!(),
-            mir::InstrData::RealDiv(binary) => todo!(),
+            mir::InstrData::Copy(unary) => {
+                self.current_vals[unary.dst] = self.current_vals[unary.src];
+            }
+            mir::InstrData::Constant(constant_instr) => {
+                let val = match constant_instr.constant.value(self.db) {
+                    mir::ConstantValue::Int(x) => {
+                        Compound::Int(self.backend.int_const(*x, IntBitness::B64))
+                    }
+                    mir::ConstantValue::Real(x) => {
+                        Compound::Real(self.backend.float_const(*x, FloatBitness::B64))
+                    }
+                    mir::ConstantValue::Bool(x) => {
+                        Compound::Bool(self.backend.int_const(*x as i64, IntBitness::B8))
+                    }
+                    mir::ConstantValue::Str(_x) => {
+                        todo!()
+                    }
+                };
+                self.current_vals[constant_instr.dst] = Some(val);
+            }
+            mir::InstrData::IntAdd(binary) => {
+                let Compound::Int(lhs) = self.get_val(binary.src1) else {
+                    panic!("not an int")
+                };
+                let Compound::Int(rhs) = self.get_val(binary.src2) else {
+                    panic!("not an int")
+                };
+                let dst = Compound::Int(self.backend.int_add(lhs, rhs));
+                self.current_vals[binary.dst] = Some(dst);
+            }
+            mir::InstrData::IntSub(binary) => {
+                let Compound::Int(lhs) = self.get_val(binary.src1) else {
+                    panic!("not an int")
+                };
+                let Compound::Int(rhs) = self.get_val(binary.src2) else {
+                    panic!("not an int")
+                };
+                let dst = Compound::Int(self.backend.int_sub(lhs, rhs));
+                self.current_vals[binary.dst] = Some(dst);
+            }
+            mir::InstrData::IntMul(binary) => {
+                let Compound::Int(lhs) = self.get_val(binary.src1) else {
+                    panic!("not an int")
+                };
+                let Compound::Int(rhs) = self.get_val(binary.src2) else {
+                    panic!("not an int")
+                };
+                let dst = Compound::Int(self.backend.int_mul(lhs, rhs));
+                self.current_vals[binary.dst] = Some(dst);
+            }
+            mir::InstrData::IntDiv(binary) => {
+                let Compound::Int(lhs) = self.get_val(binary.src1) else {
+                    panic!("not an int")
+                };
+                let Compound::Int(rhs) = self.get_val(binary.src2) else {
+                    panic!("not an int")
+                };
+                let dst = Compound::Int(self.backend.int_sdiv(lhs, rhs));
+                self.current_vals[binary.dst] = Some(dst);
+            }
+            mir::InstrData::IntCmp(cmp) => {}
+            mir::InstrData::RealAdd(binary) => {
+                let Compound::Real(lhs) = self.get_val(binary.src1) else {
+                    panic!("not a real")
+                };
+                let Compound::Real(rhs) = self.get_val(binary.src2) else {
+                    panic!("not a real")
+                };
+                let dst = Compound::Real(self.backend.float_add(lhs, rhs));
+                self.current_vals[binary.dst] = Some(dst);
+            }
+            mir::InstrData::RealSub(binary) => {
+                let Compound::Real(lhs) = self.get_val(binary.src1) else {
+                    panic!("not a real")
+                };
+                let Compound::Real(rhs) = self.get_val(binary.src2) else {
+                    panic!("not a real")
+                };
+                let dst = Compound::Real(self.backend.float_sub(lhs, rhs));
+                self.current_vals[binary.dst] = Some(dst);
+            }
+            mir::InstrData::RealMul(binary) => {
+                let Compound::Real(lhs) = self.get_val(binary.src1) else {
+                    panic!("not a real")
+                };
+                let Compound::Real(rhs) = self.get_val(binary.src2) else {
+                    panic!("not a real")
+                };
+                let dst = Compound::Real(self.backend.float_mul(lhs, rhs));
+                self.current_vals[binary.dst] = Some(dst);
+            }
+            mir::InstrData::RealDiv(binary) => {
+                let Compound::Real(lhs) = self.get_val(binary.src1) else {
+                    panic!("not a real")
+                };
+                let Compound::Real(rhs) = self.get_val(binary.src2) else {
+                    panic!("not a real")
+                };
+                let dst = Compound::Real(self.backend.float_div(lhs, rhs));
+                self.current_vals[binary.dst] = Some(dst);
+            }
             mir::InstrData::RealCmp(cmp) => todo!(),
-            mir::InstrData::RealToInt(unary) => todo!(),
-            mir::InstrData::IntToReal(unary) => todo!(),
-            mir::InstrData::ByteToInt(unary) => todo!(),
-            mir::InstrData::IntToByte(unary) => todo!(),
+            mir::InstrData::RealToInt(unary) => {
+                let Compound::Real(src) = self.get_val(unary.src) else {
+                    panic!("not a real")
+                };
+                let dst = Compound::Int(self.backend.float_sat_trunc_to_int(src, IntBitness::B64));
+                self.current_vals[unary.dst] = Some(dst);
+            }
+            mir::InstrData::IntToReal(unary) => {
+                let Compound::Int(src) = self.get_val(unary.src) else {
+                    panic!("not an int")
+                };
+                let dst = Compound::Real(self.backend.int_to_nearest_float(src, FloatBitness::B64));
+                self.current_vals[unary.dst] = Some(dst);
+            }
+            mir::InstrData::ByteToInt(unary) => {
+                let Compound::Byte(src) = self.get_val(unary.src) else {
+                    panic!("not a byte")
+                };
+                let dst = Compound::Int(self.backend.int_zext(src, IntBitness::B64));
+                self.current_vals[unary.dst] = Some(dst);
+            }
+            mir::InstrData::IntToByte(unary) => {
+                let Compound::Int(src) = self.get_val(unary.src) else {
+                    panic!("not an int")
+                };
+                let dst = Compound::Byte(self.backend.int_trunc(src, IntBitness::B8));
+                self.current_vals[unary.dst] = Some(dst);
+            }
             mir::InstrData::BoolAnd(binary) => todo!(),
             mir::InstrData::BoolOr(binary) => todo!(),
             mir::InstrData::BoolXor(binary) => todo!(),
