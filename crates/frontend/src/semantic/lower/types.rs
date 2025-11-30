@@ -465,6 +465,10 @@ impl IntraItemLowerCtxt<'_> {
         todo!()
     }
 
+    pub fn lower_opt_ty(&mut self, ast: Option<&AstTy>) -> Option<SpannedTy> {
+        ast.map(|ast| self.lower_ty(ast))
+    }
+
     pub fn lower_ty(&mut self, ast: &AstTy) -> SpannedTy {
         let s = &self.tcx.session;
 

@@ -4,7 +4,9 @@ use crate::{
         arena::{LateInit, Obj},
     },
     parse::{
-        ast::{AstBlock, AstExpr, AstExprKind, AstPat, AstPatKind, AstStmt, AstStmtKind},
+        ast::{
+            AstBlock, AstExpr, AstExprKind, AstPat, AstPatKind, AstStmt, AstStmtKind, AstStmtLet,
+        },
         token::Lifetime,
     },
     semantic::{
@@ -28,6 +30,10 @@ impl IntraItemLowerCtxt<'_> {
 
             this.lower_block_inner(block)
         })
+    }
+
+    pub fn lower_opt_block(&mut self, block: Option<&AstBlock>) -> Option<Obj<Block>> {
+        block.map(|block| self.lower_block(block))
     }
 
     pub fn lower_block(&mut self, block: &AstBlock) -> Obj<Block> {
@@ -73,13 +79,18 @@ impl IntraItemLowerCtxt<'_> {
 
         match &stmt.kind {
             AstStmtKind::Expr(expr) => Some(Stmt::Expr(self.lower_expr(expr))),
-            AstStmtKind::Let(ast_pat, rhs) => Some(Stmt::Let(Obj::new(
+            AstStmtKind::Let(AstStmtLet {
+                pat,
+                ascription,
+                init,
+                else_clause,
+            }) => Some(Stmt::Let(Obj::new(
                 LetStmt {
                     span: stmt.span,
-                    lhs: todo!(),
-                    ascription: todo!(),
-                    rhs: self.lower_opt_expr(rhs.as_deref()),
-                    else_clause: todo!(),
+                    pat: self.lower_defining_pat(pat),
+                    ascription: self.lower_opt_ty(ascription.as_deref()),
+                    init: self.lower_opt_expr(init.as_deref()),
+                    else_clause: self.lower_opt_block(else_clause.as_deref()),
                 },
                 s,
             ))),
@@ -206,7 +217,7 @@ impl IntraItemLowerCtxt<'_> {
         expr
     }
 
-    pub fn lower_pat(&mut self, ast: &AstPat) -> Obj<Pat> {
+    pub fn lower_defining_pat(&mut self, ast: &AstPat) -> Obj<Pat> {
         let s = &self.tcx.session;
 
         let kind = match &ast.kind {

@@ -9,16 +9,16 @@ use crate::{
             AstAssignOpKind, AstBinOpKind, AstBindingMode, AstBlock, AstBoolLit, AstExpr,
             AstExprField, AstExprKind, AstFnArg, AstFnDef, AstGenericParam, AstGenericParamKind,
             AstLit, AstMatchArm, AstOptMutability, AstPat, AstPatField, AstPatKind,
-            AstPatStructRest, AstRangeLimits, AstStmt, AstStmtKind, AstStructRest, AstTy,
-            AstTyKind, AstUnOpKind, PunctSeq,
+            AstPatStructRest, AstRangeLimits, AstStmt, AstStmtKind, AstStmtLet, AstStructRest,
+            AstTy, AstTyKind, AstUnOpKind, PunctSeq,
             basic::{parse_expr_path, parse_mutability},
             bp::expr_bp,
             entry::P,
             types::{parse_generic_param_list, parse_return_ty, parse_ty},
             utils::{
                 match_char_lit, match_eos, match_group, match_ident, match_kw, match_lifetime,
-                match_num_lit, match_punct, match_punct_seq, match_str_lit, parse_comma_group,
-                parse_delimited_until_terminator,
+                match_num_lit, match_punct, match_punct_disambiguate, match_punct_seq,
+                match_str_lit, parse_comma_group, parse_delimited_until_terminator,
             },
         },
         token::{GroupDelimiter, Lifetime, Punct},
@@ -98,14 +98,17 @@ bitflags! {
     #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
     pub struct AstExprFlags: u32 {
         const ALLOW_BLOCK = 1 << 0;
+        const ALLOW_STRUCT_CTOR = 1 << 1;
+        const ALLOW_LET_EXPR = 1 << 2;
 
         const IN_SCRUTINEE = 0;
-        const ALLOW_ALL = !0;
+        const IN_COND = Self::ALLOW_LET_EXPR.bits();
+        const ALLOW_REGULAR = Self::ALLOW_BLOCK.bits() | Self::ALLOW_STRUCT_CTOR.bits();
     }
 }
 
 pub fn parse_expr_full(p: P) -> AstExpr {
-    let expr = parse_expr_or_error(p, AstExprFlags::ALLOW_ALL);
+    let expr = parse_expr_or_error(p, AstExprFlags::ALLOW_REGULAR);
 
     if !match_eos(p) {
         p.stuck().ignore_not_in_loop();
@@ -152,7 +155,7 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
 
     // Parse an expression path.
     if let Some(path) = parse_expr_path(p) {
-        if flags.contains(AstExprFlags::ALLOW_BLOCK)
+        if flags.contains(AstExprFlags::ALLOW_STRUCT_CTOR)
             && let Some(group) = match_group(GroupDelimiter::Brace).expect(p)
         {
             let p2 = &mut p.enter(&group);
@@ -173,7 +176,7 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
                     break;
                 }
 
-                let expr = parse_expr_or_error(p2, AstExprFlags::ALLOW_ALL);
+                let expr = parse_expr_or_error(p2, AstExprFlags::ALLOW_REGULAR);
 
                 fields.push(AstExprField {
                     name,
@@ -186,7 +189,7 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
             }
 
             let rest = match match_punct_seq(puncts!("..")).expect(p2) {
-                Some(sp) => match parse_expr(p, AstExprFlags::ALLOW_ALL) {
+                Some(sp) => match parse_expr(p, AstExprFlags::ALLOW_REGULAR) {
                     Some(exp) => AstStructRest::Base(Box::new(exp)),
                     None => AstStructRest::Rest(sp),
                 },
@@ -211,7 +214,7 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
     // Parse an array.
     if let Some(group) = match_group(GroupDelimiter::Bracket).expect(p) {
         let res = parse_comma_group(&mut p.enter(&group), |p| {
-            parse_expr_or_error(p, AstExprFlags::ALLOW_ALL)
+            parse_expr_or_error(p, AstExprFlags::ALLOW_REGULAR)
         });
 
         return Some(build_expr(AstExprKind::Array(res.elems), p));
@@ -220,7 +223,7 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
     // Parse a parenthesis or tuple.
     if let Some(paren) = match_group(GroupDelimiter::Paren).expect(p) {
         let res = parse_comma_group(&mut p.enter(&paren), |p| {
-            parse_expr_or_error(p, AstExprFlags::ALLOW_ALL)
+            parse_expr_or_error(p, AstExprFlags::ALLOW_REGULAR)
         });
 
         return Some(build_expr(
@@ -265,6 +268,24 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
         .elems;
 
         return Some(build_expr(AstExprKind::Match(Box::new(scrutinee), arms), p));
+    }
+
+    // Match `let` expressions in `if` conditions.
+    if flags.contains(AstExprFlags::ALLOW_LET_EXPR) && match_kw(kw!("let")).expect(p).is_some() {
+        let pat = parse_pat(p);
+
+        let Some(eq) = match_punct(punct!('=')).expect(p) else {
+            return Some(build_expr(AstExprKind::Error(p.stuck().error()), p));
+        };
+
+        let Some(rhs) = parse_expr(p, AstExprFlags::IN_SCRUTINEE) else {
+            return Some(build_expr(AstExprKind::Error(p.stuck().error()), p));
+        };
+
+        return Some(build_expr(
+            AstExprKind::Let(Box::new(pat), Box::new(rhs), eq.span),
+            p,
+        ));
     }
 
     // Parse a `return` expression
@@ -337,7 +358,7 @@ pub fn parse_expr_pratt_block_seed(
     // Parse an `if` expression
     if match_kw(kw!("if")).expect(p).is_some() {
         fn parse_after_if(if_span: Span, p: P) -> AstExpr {
-            let cond = parse_expr_or_error(p, AstExprFlags::IN_SCRUTINEE);
+            let cond = parse_expr_or_error(p, AstExprFlags::IN_COND);
 
             let Some(truthy) = parse_brace_block(p) else {
                 return AstExpr {
@@ -401,7 +422,7 @@ pub fn parse_expr_pratt_block_seed(
 
     // Parse a `while` expression
     if match_kw(kw!("while")).expect(p).is_some() {
-        let Some(cond) = parse_expr(p, AstExprFlags::IN_SCRUTINEE) else {
+        let Some(cond) = parse_expr(p, AstExprFlags::IN_COND) else {
             return build_expr(AstExprKind::Error(p.stuck().error()), p);
         };
 
@@ -521,13 +542,13 @@ pub fn parse_match_arm(p: P) -> AstMatchArm {
 
     let guard = match_kw(kw!("if"))
         .expect(p)
-        .map(|_| Box::new(parse_expr_or_error(p, AstExprFlags::IN_SCRUTINEE)));
+        .map(|_| Box::new(parse_expr_or_error(p, AstExprFlags::IN_COND)));
 
     if match_punct_seq(puncts!("=>")).expect(p).is_none() {
         p.stuck().ignore_not_in_loop();
     }
 
-    let expr = parse_expr_or_error(p, AstExprFlags::ALLOW_ALL);
+    let expr = parse_expr_or_error(p, AstExprFlags::ALLOW_REGULAR);
 
     AstMatchArm {
         span: start.to(p.prev_span()),
@@ -575,7 +596,7 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
             match_group(GroupDelimiter::Paren).maybe_expect(p, expr_bp::POST_CALL.left >= min_bp)
         {
             let res = parse_comma_group(&mut p.enter(&paren), |p| {
-                parse_expr_or_error(p, AstExprFlags::ALLOW_ALL)
+                parse_expr_or_error(p, AstExprFlags::ALLOW_REGULAR)
             });
 
             lhs = AstExpr {
@@ -648,7 +669,7 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
                 };
 
                 let args = parse_comma_group(&mut p.enter(&args), |p| {
-                    parse_expr_or_error(p, AstExprFlags::ALLOW_ALL)
+                    parse_expr_or_error(p, AstExprFlags::ALLOW_REGULAR)
                 })
                 .elems;
 
@@ -672,9 +693,6 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
 
             continue 'chaining;
         }
-
-        // Parse range expressions
-        // TODO
 
         let mut p = p.to_parse_guard(symbol!("operator"));
         let p = &mut *p;
@@ -809,8 +827,8 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
         }
 
         // Match infix assignment
-        if let Some(punct) =
-            match_punct(punct!('=')).maybe_expect(p, expr_bp::INFIX_ASSIGN.left >= min_bp)
+        if let Some(punct) = match_punct_disambiguate(punct!('='), &[puncts!("=>")])
+            .maybe_expect(p, expr_bp::INFIX_ASSIGN.left >= min_bp)
         {
             lhs = AstExpr {
                 span: punct.span,
@@ -877,6 +895,10 @@ fn parse_block(p: P) -> AstBlock {
             if let Some(let_kw) = match_kw(kw!("let")).expect(p) {
                 let binding = parse_pat(p);
 
+                let ascription = match_punct(punct!(':'))
+                    .expect(p)
+                    .map(|_| Box::new(parse_ty(p)));
+
                 if match_punct(punct!('=')).expect(p).is_none() {
                     if match_punct(punct!(';')).expect(p).is_none() {
                         p.stuck().ignore_not_in_loop();
@@ -884,13 +906,28 @@ fn parse_block(p: P) -> AstBlock {
 
                     stmts.push(AstStmt {
                         span: let_kw.span.to(p.prev_span()),
-                        kind: AstStmtKind::Let(Box::new(binding), None),
+                        kind: AstStmtKind::Let(AstStmtLet {
+                            pat: Box::new(binding),
+                            ascription,
+                            init: None,
+                            else_clause: None,
+                        }),
                     });
 
                     continue;
                 }
 
-                let init = parse_expr_or_error(p, AstExprFlags::ALLOW_ALL);
+                let init = parse_expr_or_error(p, AstExprFlags::ALLOW_REGULAR);
+
+                let else_clause = match_kw(kw!("else")).expect(p).and_then(|_| {
+                    let block = parse_brace_block(p).map(Box::new);
+
+                    if block.is_none() {
+                        p.stuck().ignore_not_in_loop();
+                    }
+
+                    block
+                });
 
                 if match_punct(punct!(';')).expect(p).is_none() {
                     p.stuck().ignore_not_in_loop();
@@ -898,14 +935,19 @@ fn parse_block(p: P) -> AstBlock {
 
                 stmts.push(AstStmt {
                     span: let_kw.span.to(p.prev_span()),
-                    kind: AstStmtKind::Let(Box::new(binding), Some(Box::new(init))),
+                    kind: AstStmtKind::Let(AstStmtLet {
+                        pat: Box::new(binding),
+                        ascription,
+                        init: Some(Box::new(init)),
+                        else_clause,
+                    }),
                 });
 
                 continue 'stmt;
             }
 
             // Parse as an expression.
-            parse_expr(p, AstExprFlags::ALLOW_ALL)
+            parse_expr(p, AstExprFlags::ALLOW_REGULAR)
         };
 
         let Some(expr) = expr else {

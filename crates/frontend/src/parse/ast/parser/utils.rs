@@ -68,6 +68,25 @@ pub fn match_punct(punct: Punct) -> impl TokenMatcher<Output = Option<TokenPunct
     })
 }
 
+pub fn match_punct_disambiguate(
+    punct: Punct,
+    with: &'static [PunctSeq],
+) -> impl TokenMatcher<Output = Option<TokenPunct>> {
+    token_matcher(punct.expectation_name(), move |c, _| {
+        let orig = c.clone();
+        let matched = match_punct(punct).consume(c)?;
+
+        if with
+            .iter()
+            .any(|&seq| match_punct_seq(seq).peek(&orig).is_some())
+        {
+            return None;
+        }
+
+        Some(matched)
+    })
+}
+
 pub fn match_punct_seq(punct: PunctSeq) -> impl TokenMatcher<Output = Option<Span>> {
     token_matcher(punct.expectation_name(), move |c, _| {
         let start = c.next_span();

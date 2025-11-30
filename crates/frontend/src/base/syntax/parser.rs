@@ -501,6 +501,10 @@ pub trait Matcher<I: CursorIter> {
         c.lookahead(|c| self.matcher()(c, &mut StuckHinter::new_dummy()))
     }
 
+    fn peek(&self, c: &Cursor<I>) -> Self::Output {
+        self.matcher()(&mut c.clone(), &mut StuckHinter::new_dummy())
+    }
+
     fn did_consume(&self, c: &mut Cursor<I>) -> bool {
         self.consume(c).is_ok()
     }

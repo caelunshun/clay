@@ -192,6 +192,7 @@ where
 
     let mut parts_iter = path.iter();
 
+    #[track_caller]
     fn make_err<M, I>(
         emit_errors: EmitErrors,
         f: impl FnOnce() -> Diag<ErrorGuaranteed>,

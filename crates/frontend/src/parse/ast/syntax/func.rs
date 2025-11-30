@@ -44,8 +44,16 @@ pub struct AstStmt {
 #[derive(Debug, Clone)]
 pub enum AstStmtKind {
     Expr(AstExpr),
-    Let(Box<AstPat>, Option<Box<AstExpr>>),
+    Let(AstStmtLet),
     Item(Box<AstItem>),
+}
+
+#[derive(Debug, Clone)]
+pub struct AstStmtLet {
+    pub pat: Box<AstPat>,
+    pub ascription: Option<Box<AstTy>>,
+    pub init: Option<Box<AstExpr>>,
+    pub else_clause: Option<Box<AstBlock>>,
 }
 
 #[derive(Debug, Clone)]

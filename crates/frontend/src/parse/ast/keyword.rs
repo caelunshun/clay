@@ -3,7 +3,7 @@ use crate::{
     parse::token::{Punct, punct},
     utils::lang::{ConstFmt, const_str_eq},
 };
-use std::fmt;
+use std::{fmt, iter, slice};
 
 // === Keywords === //
 
@@ -121,6 +121,10 @@ macro_rules! define_punct_seqs {
         }
 
         impl PunctSeq {
+            #[allow(non_snake_case)]
+            pub const VARIANTS: [Self; 0 $(+ { let $name = (); _ = $name; 1 })*]
+                = [$(Self::$name,)*];
+
             pub const fn new(v: &str) -> Self {
                 $(if const_str_eq(v, concat!($($text),*)) {
                     return Self::$name;
@@ -156,6 +160,10 @@ macro_rules! define_punct_seqs {
                         "`"
                     )),)*
                 }
+            }
+
+            pub fn variants() -> iter::Copied<slice::Iter<'static, PunctSeq>> {
+                Self::VARIANTS.iter().copied()
             }
         }
     };

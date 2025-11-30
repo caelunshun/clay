@@ -18,7 +18,7 @@ pub fn fizz_buzz(limit: Option<u32>) {
     let mut sb = String::new();
 
     let range = match limit {
-        Some(v) => (0..v).as::<dyn Iterator<Item = u32>>,
+        v @ Some(_) if let Some(v) = v => (0..v).as::<dyn Iterator<Item = u32>>,
         None => (0..).as::<dyn Iterator<Item = u32>>,
     };
 

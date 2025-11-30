@@ -86,9 +86,9 @@ pub enum Stmt {
 #[derive(Debug, Clone)]
 pub struct LetStmt {
     pub span: Span,
-    pub lhs: Obj<Pat>,
+    pub pat: Obj<Pat>,
     pub ascription: Option<SpannedTy>,
-    pub rhs: Option<Obj<Expr>>,
+    pub init: Option<Obj<Expr>>,
     pub else_clause: Option<Obj<Block>>,
 }
 
