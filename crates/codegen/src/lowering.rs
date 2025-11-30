@@ -2,7 +2,7 @@
 
 use crate::{
     backend::{self, BasicBlockId, CodeBuilder, CodegenBackend, IntBitness, Signature, ValTy},
-    compiled_strand::CompiledStrand,
+    compiled_strand::{CompiledStrand, Symbol},
     isa::Isa,
     lowering::{
         compound_val::{Compound, scalarize_type, scalarize_types},
@@ -45,7 +45,7 @@ where
         let entry_block = strand.entry().resolve(db, mir_cx);
         let entry_block_func = strand.entry_func().id(db).data(db, mir_cx);
 
-        let sig = sig_for_strand(db, mir_cx, &cx, strand.entry());
+        let sig = sig_for_strand(db, mir_cx, &cx.bump, strand.entry());
 
         {
             let mut lowerer = Lowerer {
@@ -58,12 +58,14 @@ where
                 bump: &cx.bump,
                 bb_map: HashMap::new_in(&cx.bump),
                 current_vals: SecondaryMap::default(),
-                current_bb: BbInstance {
+                current_mir_bb: BbInstance {
                     bb: strand.entry(),
                     call_site: &[],
                 },
+                current_backend_bb: Default::default(),
                 current_func: entry_block_func,
                 current_type_args: strand.entry_type_args().clone(),
+                initialize_aux_blocks: Vec::new(),
             };
         }
 
@@ -85,10 +87,10 @@ fn does_strand_return_continuation<'db>(
 fn sig_for_strand<'db, 'bump>(
     db: &'db dyn Database,
     mir_cx: mir::Context<'db>,
-    cx: &'bump LoweringCx,
+    bump: &'bump Bump,
     strand_entry: GBasicBlockId,
 ) -> Signature<'bump> {
-    let mut param_types = bumpalo::collections::Vec::new_in(&cx.bump);
+    let mut param_types = bumpalo::collections::Vec::new_in(bump);
 
     // VM context
     param_types.push(ValTy::Int(IntBitness::B64));
@@ -108,14 +110,14 @@ fn sig_for_strand<'db, 'bump>(
         .as_slice(&func_data.val_lists)
         .iter()
         .map(|&val| func_data.vals[val].typ);
-    param_types.extend_from_slice(scalarize_types(db, mir_cx, param_iter, &cx.bump));
+    param_types.extend_from_slice(scalarize_types(db, mir_cx, param_iter, bump));
 
     let return_types = if does_strand_return_continuation(db, mir_cx, strand_entry) {
         // Returns the continuation tag
-        cx.bump.alloc_slice_copy(&[ValTy::Int(IntBitness::B32)])
+        bump.alloc_slice_copy(&[ValTy::Int(IntBitness::B32)])
     } else {
         // Returns the function return value
-        scalarize_type(db, mir_cx, func_data.header.return_type, &cx.bump)
+        scalarize_type(db, mir_cx, func_data.header.return_type, bump)
     };
 
     Signature::new(param_types.into_bump_slice(), return_types)
@@ -135,13 +137,15 @@ struct Lowerer<'db, 'tmp, B> {
     /// branches. In these cases, the bb_map entry points to the "entry"/"initial"
     /// block of the mir basic block, which is always unique.
     bb_map: HashMap<BbInstance<'db, 'tmp>, backend::BasicBlockId, &'tmp Bump>,
-    current_bb: BbInstance<'db, 'tmp>,
+    current_mir_bb: BbInstance<'db, 'tmp>,
+    current_backend_bb: BasicBlockId,
     current_func: &'tmp FuncData<'db>,
     current_vals: SecondaryMap<mir::ValId, Option<Compound<'tmp>>>,
     /// Type arguments in the current function.
     current_type_args: TypeArgs<'db>,
 
-    /// Collection of callbacks to initialize 
+    /// Collection of callbacks to initialize extra basic blocks at the end.
+    initialize_aux_blocks: Vec<Box<dyn FnOnce(&mut Self)>>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -244,7 +248,8 @@ where
 
     fn lower_bb(&mut self, instance: BbInstance<'db, 'tmp>, bb: &'db mir::BasicBlock<'db>) {
         self.backend.switch_to_block(self.bb_map[&instance]);
-        self.current_bb = instance;
+        self.current_backend_bb = self.bb_map[&instance];
+        self.current_mir_bb = instance;
         self.current_func = instance
             .bb
             .func
@@ -256,7 +261,7 @@ where
 
         let mut bb_params = self.backend.block_params().iter().copied();
 
-        for param in self.current_func.basic_blocks[self.current_bb.bb.bb]
+        for param in self.current_func.basic_blocks[self.current_mir_bb.bb.bb]
             .params
             .as_slice(&self.current_func.val_lists)
         {
@@ -280,11 +285,76 @@ where
     fn lower_instr(&mut self, instr: &mir::InstrData) {
         match instr {
             mir::InstrData::Jump(jump) => {
-                todo!()
+                let target = self.get_jump_target(jump.target);
+                let args = self.get_flattened_vals(
+                    jump.args
+                        .as_slice(&self.current_func.val_lists)
+                        .iter()
+                        .copied(),
+                );
+                self.backend.jump(target, args);
             }
-            mir::InstrData::Branch(branch) => todo!(),
-            mir::InstrData::Call(call) => todo!(),
-            mir::InstrData::Return(_) => todo!(),
+            mir::InstrData::Branch(branch) => {
+                let target_true = self.get_jump_target(branch.target_true);
+                let args_true = self.get_flattened_vals(
+                    branch
+                        .args_true
+                        .as_slice(&self.current_func.val_lists)
+                        .iter()
+                        .copied(),
+                );
+
+                let target_false = self.get_jump_target(branch.target_false);
+                let args_false = self.get_flattened_vals(
+                    branch
+                        .args_false
+                        .as_slice(&self.current_func.val_lists)
+                        .iter()
+                        .copied(),
+                );
+
+                let Compound::Bool(condition) = self.get_val(branch.condition) else {
+                    panic!("expected condition to be a bool");
+                };
+
+                self.backend
+                    .branch(condition, target_true, args_true, target_false, args_false);
+            }
+            mir::InstrData::Call(call) => {
+                // TODO strand inline logic
+                // For now, always assume not inlined
+                let target_func = call
+                    .func
+                    .resolve(self.db, self.mir_cx, &self.current_type_args)
+                    .expect("unresolved assoc func");
+                let strand_entry = GBasicBlockId {
+                    func: target_func,
+                    bb: target_func
+                        .id(self.db)
+                        .data(self.db, self.mir_cx)
+                        .entry_block,
+                };
+                let sig = sig_for_strand(self.db, self.mir_cx, self.bump, strand_entry);
+                let args = self.get_flattened_vals(
+                    call.args
+                        .as_slice(&self.current_func.val_lists)
+                        .iter()
+                        .copied(),
+                );
+                self.backend.call(
+                    Symbol::StrandForBlock {
+                        block: strand_entry,
+                    },
+                    sig,
+                    args,
+                );
+            }
+            mir::InstrData::Return(ret) => {
+                // TODO non-root strand logic
+                // For now, assume strand is the function root
+                let vals = self.get_flattened_vals([ret.return_value]);
+                self.backend.return_(vals);
+            }
             mir::InstrData::Copy(unary) => todo!(),
             mir::InstrData::Constant(constant_instr) => todo!(),
             mir::InstrData::IntAdd(binary) => todo!(),
@@ -330,8 +400,11 @@ where
     /// then we generate a new block that calls the sub-strand and return that block.
     fn get_jump_target(&mut self, mir_target: mir::BasicBlockId) -> BasicBlockId {
         let query_instance = BbInstance {
-            bb: GBasicBlockId { func: self.current_bb.bb.func, bb: mir_target  },
-            call_site: self.current_bb.call_site,
+            bb: GBasicBlockId {
+                func: self.current_mir_bb.bb.func,
+                bb: mir_target,
+            },
+            call_site: self.current_mir_bb.call_site,
         };
 
         if let Some(mapped_bb) = self.bb_map.get(&query_instance) {
@@ -339,7 +412,6 @@ where
         }
 
         // Not in current strand/function; generate a new block that produces a call.
-
 
         todo!()
     }

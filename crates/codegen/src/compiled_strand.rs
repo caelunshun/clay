@@ -1,5 +1,5 @@
 use crate::{intrinsic::IntrinsicCall, strand::GBasicBlockId};
-use mir::FuncId;
+use mir::{FuncId, TypeArgs};
 
 /// Contains machine code for a strand,
 /// along with metadata for relocations, GC
@@ -45,7 +45,7 @@ impl<'db> CompiledStrandMetadata<'db> {
 /// Specifies a portion of the compiled machine code
 /// that needs to be modified at runtime to point to the address
 /// of some function or global value.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Relocation<'db> {
     kind: RelocationKind,
     offset_in_code: usize,
@@ -66,14 +66,14 @@ pub enum RelocationKind {
 }
 
 /// Specifies what entity's address to use for a relocation.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Symbol<'db> {
     /// Intrinsic host call, used to implement internal runtime features.
     Intrinsic(IntrinsicCall),
     /// Address of the GOT entry storing the address
     /// of the compiled strand whose entry is the given
     /// basic block.
-    StrandForBlock(GBasicBlockId<'db>),
+    StrandForBlock { block: GBasicBlockId<'db> },
     /// Address of the GOT entry for the continuation router implementation
     /// for a particular function.
     RouterForFunc(FuncId),
