@@ -1,5 +1,9 @@
 use crate::{
-    base::{arena::Obj, syntax::Span},
+    base::{
+        ErrorGuaranteed,
+        arena::{LateInit, Obj},
+        syntax::Span,
+    },
     parse::{
         ast::{AstBinOpKind, AstLit, AstRangeLimits, AstUnOpKind},
         token::Ident,
@@ -13,26 +17,26 @@ use crate::{
 // === FuncItem === //
 
 #[derive(Debug, Clone)]
-pub struct FuncItem {
+pub struct FnItem {
     pub item: Obj<Item>,
-    pub def: Obj<FuncDef>,
+    pub def: LateInit<Obj<FnDef>>,
 }
 
 #[derive(Debug, Clone)]
-pub struct FuncDef {
+pub struct FnDef {
     pub span: Span,
+    pub owner: FuncDefOwner,
     pub name: Ident,
     pub generics: Obj<GenericBinder>,
-    pub self_ty: Option<SpannedTy>,
-    pub args: Obj<[FuncArg]>,
-    pub ret_ty: Option<SpannedTy>,
-    pub kind: FuncDefKind,
-    pub body: Option<Obj<Block>>,
+    pub self_param: LateInit<Option<SpannedTy>>,
+    pub args: LateInit<Obj<[FuncArg]>>,
+    pub ret_ty: LateInit<Option<SpannedTy>>,
+    pub body: LateInit<Option<Obj<Block>>>,
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum FuncDefKind {
-    Func(Obj<FuncItem>),
+pub enum FuncDefOwner {
+    Func(Obj<FnItem>),
     Method(Obj<ImplDef>, u32),
 }
 
@@ -54,12 +58,14 @@ pub struct FuncLocal {
 #[derive(Debug, Clone)]
 pub struct Pat {
     pub span: Span,
-    pub kind: Obj<PatKind>,
+    pub kind: PatKind,
 }
 
 #[derive(Debug, Clone)]
 pub enum PatKind {
+    Wild,
     Name(Obj<FuncLocal>),
+    Error(ErrorGuaranteed),
 }
 
 // === Block === //
@@ -82,14 +88,14 @@ pub struct LetStmt {
     pub span: Span,
     pub lhs: Obj<Pat>,
     pub ascription: Option<SpannedTy>,
-    pub rhs: Obj<Expr>,
+    pub rhs: Option<Obj<Expr>>,
     pub else_clause: Option<Obj<Block>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Expr {
     pub span: Span,
-    pub kind: ExprKind,
+    pub kind: LateInit<ExprKind>,
 }
 
 #[derive(Debug, Clone)]
@@ -105,7 +111,7 @@ pub enum ExprKind {
     Binary(AstBinOpKind, Obj<Expr>, Obj<Expr>),
     Unary(AstUnOpKind, Obj<Expr>),
     Literal(AstLit),
-    FuncLit(Obj<FuncDef>, SpannedTyOrRe),
+    FuncLit(Obj<FnDef>, SpannedTyOrRe),
     TraitMethodLit {
         method: Obj<TraitMethod>,
         trait_params: Option<SpannedTraitParamList>,
@@ -120,7 +126,7 @@ pub enum ExprKind {
     If {
         cond: Obj<Expr>,
         truthy: Obj<Expr>,
-        falsy: Obj<Expr>,
+        falsy: Option<Obj<Expr>>,
     },
     While(Obj<Expr>, Obj<Block>),
     ForLoop {
@@ -140,11 +146,12 @@ pub enum ExprKind {
     AddrOf(Mutability, Obj<Expr>),
     Break {
         label: Option<Obj<Expr>>,
-        expr: Obj<Expr>,
+        expr: Option<Obj<Expr>>,
     },
     Continue {
         label: Option<Obj<Expr>>,
     },
-    Return(Obj<Expr>),
+    Return(Option<Obj<Expr>>),
     Struct(Obj<AdtDef>), // TODO
+    Error(ErrorGuaranteed),
 }

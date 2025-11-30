@@ -3,15 +3,17 @@ use crate::{
         Diag, ErrorGuaranteed, LeafDiag,
         analysis::NameResolver,
         arena::{LateInit, Obj},
+        syntax::Span,
     },
     kw,
     parse::{
         ast::{
-            AstGenericDef, AstImplLikeMemberKind, AstItem, AstItemEnum, AstItemImpl,
-            AstItemModuleContents, AstItemStruct, AstItemTrait, AstSimplePath, AstStructKind,
-            AstTraitClauseList, AstTy, AstUsePath, AstUsePathKind, AstVisibility,
+            AstFnDef, AstGenericDef, AstImplLikeMemberKind, AstItem, AstItemEnum, AstItemFn,
+            AstItemImpl, AstItemModuleContents, AstItemStruct, AstItemTrait, AstReturnTy,
+            AstSimplePath, AstStructKind, AstTraitClauseList, AstTy, AstUsePath, AstUsePathKind,
+            AstVisibility,
         },
-        token::Ident,
+        token::{Ident, Lifetime},
     },
     semantic::{
         analysis::TyCtxt,
@@ -21,8 +23,9 @@ use crate::{
         },
         syntax::{
             AdtDef, AdtEnumVariant, AdtKind, AdtKindEnum, AdtKindStruct, AdtStructField,
-            AdtStructFieldSyntax, AnyGeneric, Crate, GenericBinder, ImplDef, Item, ItemKind,
-            Module, RegionGeneric, SpannedTy, TraitDef, TypeGeneric, Visibility,
+            AdtStructFieldSyntax, AnyGeneric, Crate, Expr, FnDef, FnItem, FuncDefOwner,
+            GenericBinder, ImplDef, Item, ItemKind, Module, RegionGeneric, SpannedTy, TraitDef,
+            TypeGeneric, Visibility,
         },
     },
     symbol,
@@ -77,8 +80,8 @@ impl TyCtxt {
                 AstItem::Impl(ast) => {
                     ctxt.lower_impl(target, ast);
                 }
-                AstItem::Func(_) => {
-                    // TODO
+                AstItem::Func(ast) => {
+                    ctxt.lower_fn_item(target, ast);
                 }
                 AstItem::Struct(ast) => {
                     ctxt.lower_struct(target, ast);
@@ -100,6 +103,7 @@ impl TyCtxt {
                 scope,
                 generic_ty_names: NameResolver::new(),
                 generic_re_names: NameResolver::new(),
+                block_label_names: NameResolver::new(),
             };
 
             match kind {
@@ -120,6 +124,11 @@ impl TyCtxt {
                 } => {
                     ctxt.lower_adt(item, generic_clause_lists, field_tys_to_extend);
                 }
+                IntraLowerTask::FnDef {
+                    item,
+                    ast,
+                    generic_clause_lists,
+                } => ctxt.lower_fn_def(item, ast, generic_clause_lists),
             }
         }
 
@@ -370,10 +379,6 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         });
     }
 
-    pub fn lower_impl(&mut self, target: Obj<Item>, ast: &'ast AstItemImpl) {
-        self.push_task(IntraLowerTask::Impl { item: target, ast });
-    }
-
     pub fn lower_struct(&mut self, target: Obj<Item>, ast: &'ast AstItemStruct) {
         let s = &self.tcx.session;
 
@@ -574,6 +579,61 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
             }
         }
     }
+
+    pub fn lower_impl(&mut self, target: Obj<Item>, ast: &'ast AstItemImpl) {
+        self.push_task(IntraLowerTask::Impl { item: target, ast });
+    }
+
+    pub fn lower_fn_item(&mut self, target: Obj<Item>, ast: &'ast AstItemFn) {
+        let s = &self.tcx.session;
+
+        let target_def = Obj::new(
+            FnItem {
+                item: target,
+                def: LateInit::uninit(),
+            },
+            s,
+        );
+
+        LateInit::init(
+            &target_def.r(s).def,
+            self.lower_fn_def(FuncDefOwner::Func(target_def), &ast.def),
+        );
+
+        LateInit::init(&target.r(s).kind, ItemKind::Func(target_def));
+    }
+
+    pub fn lower_fn_def(&mut self, owner: FuncDefOwner, ast: &'ast AstFnDef) -> Obj<FnDef> {
+        let s = &self.tcx.session;
+        let mut generics = GenericBinder::default();
+        let mut generic_clause_lists = Vec::new();
+
+        if let Some(ast) = &ast.generics {
+            self.lower_generic_defs(&mut generics, ast, &mut generic_clause_lists);
+        }
+
+        let def = Obj::new(
+            FnDef {
+                span: ast.span,
+                owner,
+                name: ast.name,
+                generics: self.tcx.seal_generic_binder(generics),
+                self_param: LateInit::uninit(),
+                args: LateInit::uninit(),
+                ret_ty: LateInit::uninit(),
+                body: LateInit::uninit(),
+            },
+            s,
+        );
+
+        self.push_task(IntraLowerTask::FnDef {
+            item: def,
+            ast,
+            generic_clause_lists,
+        });
+
+        def
+    }
 }
 
 // === Third Phase === //
@@ -584,6 +644,7 @@ pub struct IntraItemLowerCtxt<'tcx> {
     pub scope: Obj<Module>,
     pub generic_ty_names: NameResolver<Obj<TypeGeneric>>,
     pub generic_re_names: NameResolver<Obj<RegionGeneric>>,
+    pub block_label_names: NameResolver<(Span, Obj<Expr>)>,
 }
 
 pub enum IntraLowerTask<'ast> {
@@ -601,22 +662,40 @@ pub enum IntraLowerTask<'ast> {
         generic_clause_lists: Vec<Option<&'ast AstTraitClauseList>>,
         field_tys_to_extend: Vec<(&'ast AstTy, Obj<LateInit<SpannedTy>>)>,
     },
+    FnDef {
+        item: Obj<FnDef>,
+        ast: &'ast AstFnDef,
+        generic_clause_lists: Vec<Option<&'ast AstTraitClauseList>>,
+    },
 }
 
 impl IntraItemLowerCtxt<'_> {
-    pub fn lookup(
+    pub fn lookup_path(
         &self,
         path: &AstSimplePath,
     ) -> Result<AnyDef<Obj<Module>, Obj<Item>>, ErrorGuaranteed> {
         FrozenModuleResolver(&self.tcx.session).lookup_noisy(self.root, self.scope, &path.parts)
     }
 
+    pub fn lookup_label(&mut self, label: Option<Lifetime>) -> Option<Obj<Expr>> {
+        let label = label?;
+        let resolved = self.block_label_names.lookup(label.name).map(|v| v.1);
+
+        if resolved.is_none() {
+            Diag::span_err(label.span, "block label not found").emit();
+        }
+
+        resolved
+    }
+
     pub fn scoped<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
         self.generic_ty_names.push_rib();
         self.generic_re_names.push_rib();
+        self.block_label_names.push_rib();
         let ret = f(self);
         self.generic_ty_names.pop_rib();
         self.generic_re_names.pop_rib();
+        self.block_label_names.pop_rib();
 
         ret
     }
@@ -744,5 +823,32 @@ impl IntraItemLowerCtxt<'_> {
         for (ast, to_init) in field_tys_to_extend {
             LateInit::init(to_init.r(s), self.lower_ty(ast));
         }
+    }
+
+    pub fn lower_fn_def(
+        mut self,
+        item: Obj<FnDef>,
+        ast: &AstFnDef,
+        generic_clause_lists: Vec<Option<&AstTraitClauseList>>,
+    ) {
+        let s = &self.tcx.session;
+
+        self.define_generics_in_binder(item.r(s).generics);
+        self.lower_generic_def_clauses(item.r(s).generics, &generic_clause_lists);
+
+        // TODO: Lower signature
+
+        LateInit::init(
+            &item.r(s).ret_ty,
+            match &ast.ret_ty {
+                AstReturnTy::Omitted => None,
+                AstReturnTy::Present(ty) => Some(self.lower_ty(ty)),
+            },
+        );
+
+        LateInit::init(
+            &item.r(s).body,
+            ast.body.as_ref().map(|body| self.lower_block(body)),
+        );
     }
 }

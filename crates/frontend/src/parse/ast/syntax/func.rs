@@ -144,7 +144,7 @@ impl AstExprKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum AstLit {
     Number(TokenNumLit),
     Char(TokenCharLit),

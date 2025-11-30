@@ -43,7 +43,7 @@ impl<'tcx> FnCtxt<'tcx> {
         let s = self.session();
         let tcx = self.tcx();
 
-        let pre_coerce_expr_ty = match &expr.r(s).kind {
+        let pre_coerce_expr_ty = match &*expr.r(s).kind {
             ExprKind::Array(elems) => {
                 let elem_ty = self.check_exprs_with_equate(elems.r(s).iter().copied(), None);
 
@@ -88,7 +88,11 @@ impl<'tcx> FnCtxt<'tcx> {
                     )),
                 );
 
-                self.check_exprs_with_equate([*truthy, *falsy], None)
+                if let Some(falsy) = falsy {
+                    self.check_exprs_with_equate([*truthy, *falsy], None)
+                } else {
+                    self.check_expr(*truthy)
+                }
             }
             ExprKind::While(cond, block) => {
                 self.check_exprs_with_equate(
@@ -122,6 +126,7 @@ impl<'tcx> FnCtxt<'tcx> {
             ExprKind::Continue { label } => todo!(),
             ExprKind::Return(obj) => todo!(),
             ExprKind::Struct(obj) => todo!(),
+            ExprKind::Error(error_guaranteed) => todo!(),
         };
 
         debug_assert!(

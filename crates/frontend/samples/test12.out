@@ -7,7 +7,7 @@ error: duplicate field name
 note: name first used here
   ┌─ crates/frontend/samples/test12.fir:2:9
   │
-2 │     pub foo: (),
+2 │     pub foo: T,
   │         ^^^
 
 error: enum fields are all implicitly public
@@ -44,4 +44,4 @@ error: enum fields are all implicitly public
    ┌─ crates/frontend/samples/test12.fir:10:13
    │
 10 │     Foo((), pub (), ()),
-   │             ^^^
+   │

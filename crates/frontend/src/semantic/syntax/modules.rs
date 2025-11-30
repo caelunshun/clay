@@ -6,7 +6,7 @@ use crate::{
     parse::token::Ident,
     semantic::{
         lower::modules::{AnyDef, ParentKind},
-        syntax::{AdtDef, ImplDef, TraitDef},
+        syntax::{AdtDef, FnItem, ImplDef, TraitDef},
     },
     utils::hash::FxIndexMap,
 };
@@ -62,6 +62,7 @@ pub enum ItemKind {
     Adt(Obj<AdtDef>),
     Trait(Obj<TraitDef>),
     Impl(Obj<ImplDef>),
+    Func(Obj<FnItem>),
 }
 
 impl ItemKind {
@@ -82,6 +83,13 @@ impl ItemKind {
     pub fn as_impl(self) -> Option<Obj<ImplDef>> {
         match self {
             ItemKind::Impl(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn as_func(self) -> Option<Obj<FnItem>> {
+        match self {
+            ItemKind::Func(v) => Some(v),
             _ => None,
         }
     }

@@ -8,7 +8,7 @@ use crate::{
     semantic::{
         analysis::TyCtxt,
         syntax::{
-            AdtDef, AdtInstance, FuncDef, InferTyVar, Mutability, Re, SimpleTyKind, TraitClause,
+            AdtDef, AdtInstance, FnDef, InferTyVar, Mutability, Re, SimpleTyKind, TraitClause,
             TraitClauseList, TraitDef, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty,
             TyKind, TyList, TyOrRe, TyOrReList, TypeGeneric,
         },
@@ -70,7 +70,7 @@ pub enum SpannedTyView {
     Adt(SpannedAdtInstance),
     Trait(SpannedTraitClauseList),
     Tuple(SpannedTyList),
-    FnDef(Obj<FuncDef>),
+    FnDef(Obj<FnDef>),
     ExplicitInfer,
     Universal(Obj<TypeGeneric>),
     InferVar(InferTyVar),

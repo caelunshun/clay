@@ -17,7 +17,7 @@ pub enum AstItem {
     Use(AstItemUse),
     Trait(AstItemTrait),
     Impl(AstItemImpl),
-    Func(AstFnItem),
+    Func(AstItemFn),
     Struct(AstItemStruct),
     Enum(AstItemEnum),
     Error(AstItemBase, ErrorGuaranteed),
@@ -29,7 +29,7 @@ impl AstItem {
         | AstItem::Use(AstItemUse { base, .. })
         | AstItem::Trait(AstItemTrait { base, .. })
         | AstItem::Impl(AstItemImpl { base, .. })
-        | AstItem::Func(AstFnItem { base, .. })
+        | AstItem::Func(AstItemFn { base, .. })
         | AstItem::Struct(AstItemStruct { base, .. })
         | AstItem::Enum(AstItemEnum { base, .. })
         | AstItem::Error(base, ..)) = self;
@@ -83,7 +83,7 @@ pub struct AstItemImpl {
 }
 
 #[derive(Debug, Clone)]
-pub struct AstFnItem {
+pub struct AstItemFn {
     pub base: AstItemBase,
     pub def: AstFnDef,
 }

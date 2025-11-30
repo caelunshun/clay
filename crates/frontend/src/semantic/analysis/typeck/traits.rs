@@ -10,7 +10,7 @@ use crate::{
             UnboundVarHandlingMode,
         },
         syntax::{
-            AnyGeneric, Crate, FuncDef, GenericBinder, GenericSolveStep, ImplDef,
+            AnyGeneric, Crate, FnDef, GenericBinder, GenericSolveStep, ImplDef,
             ListOfTraitClauseList, Re, RelationMode, SolidTyShape, SolidTyShapeKind, SpannedRe,
             SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParamView,
             SpannedTraitSpec, SpannedTy, SpannedTyOrReView, SpannedTyView, TraitClause, TraitParam,
@@ -327,7 +327,7 @@ pub struct CoherenceMap {
 #[derive(Debug, Copy, Clone)]
 enum CoherenceMapEntry {
     TraitImpl(Obj<ImplDef>),
-    InherentMethod(Obj<FuncDef>),
+    InherentMethod(Obj<FnDef>),
 }
 
 impl CoherenceMap {

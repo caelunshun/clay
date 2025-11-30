@@ -3,7 +3,7 @@ use crate::{
     kw,
     parse::{
         ast::{
-            AstAttribute, AstEnumVariant, AstFnItem, AstImplLikeBody, AstImplLikeMember,
+            AstAttribute, AstEnumVariant, AstItemFn, AstImplLikeBody, AstImplLikeMember,
             AstImplLikeMemberKind, AstItem, AstItemBase, AstItemEnum, AstItemImpl, AstItemModule,
             AstItemModuleContents, AstItemStruct, AstItemTrait, AstItemUse, AstStructAnonField,
             AstStructKind, AstStructNamedField, AstTraitClauseList,
@@ -229,7 +229,7 @@ fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
 
     match parse_func(p) {
         Ok(Some(def)) => {
-            return Some(AstItem::Func(AstFnItem {
+            return Some(AstItem::Func(AstItemFn {
                 base: make_base(p),
                 def,
             }));

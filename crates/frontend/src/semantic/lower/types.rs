@@ -182,7 +182,7 @@ impl IntraItemLowerCtxt<'_> {
         }
 
         let def = self
-            .lookup(&ast.path)?
+            .lookup_path(&ast.path)?
             .as_item()
             .and_then(|v| v.r(s).kind.as_trait())
             .ok_or_else(|| Diag::span_err(ast.path.span, "expected a trait").emit())?;
@@ -319,7 +319,7 @@ impl IntraItemLowerCtxt<'_> {
         }
 
         let def = self
-            .lookup(path)?
+            .lookup_path(path)?
             .as_item()
             .and_then(|v| v.r(s).kind.as_trait())
             .ok_or_else(|| Diag::span_err(path.span, "expected a trait").emit())?;
@@ -491,7 +491,7 @@ impl IntraItemLowerCtxt<'_> {
 
                 let generics = generics.as_ref().map_or(&[][..], |v| v.list.as_slice());
 
-                let def = match self.lookup(path) {
+                let def = match self.lookup_path(path) {
                     Ok(def) => def,
                     Err(err) => {
                         return SpannedTyView::Error(err).encode(ast.span, self.tcx);
