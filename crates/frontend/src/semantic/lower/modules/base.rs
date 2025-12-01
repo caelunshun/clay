@@ -10,25 +10,6 @@ use std::fmt;
 
 // === Generic === //
 
-#[derive(Debug, Copy, Clone)]
-pub struct ResolutionResult<M, I> {
-    pub consume_count: usize,
-    pub left_off_on: AnyDef<M, I>,
-    pub stop_cause: ResolutionStopCause,
-}
-
-impl<M, I> ResolutionResult<M, I> {
-    // TODO
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum ResolutionStopCause {
-    Done,
-    NotFound,
-    NotVisible,
-    Ambiguous,
-}
-
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum AnyDef<M, I> {
     Module(M),
@@ -49,6 +30,19 @@ impl<M, I> AnyDef<M, I> {
             AnyDef::Module(_) => None,
         }
     }
+}
+
+pub type StepResolveResult<R> = Result<
+    AnyDef<<R as ParentResolver>::Module, <R as ModuleResolver>::Item>,
+    StepResolveError<<R as ParentResolver>::Module, <R as ModuleResolver>::Item>,
+>;
+
+#[derive(Debug, Clone)]
+pub enum StepResolveError<M, I> {
+    CannotSuperInRoot,
+    DeniedVisibility,
+    Ambiguous(Vec<(AnyDef<M, I>, Span)>),
+    NotFound,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -154,27 +148,27 @@ pub trait ModuleResolver: ParentResolver {
         name: Symbol,
     ) -> Result<AnyDef<Self::Module, Self::Item>, StepLookupError>;
 
-    fn lookup_noisy(
+    fn resolve_noisy(
         &mut self,
         module_root: Self::Module,
         origin: Self::Module,
         path: &[AstPathPart],
     ) -> Result<AnyDef<Self::Module, Self::Item>, ErrorGuaranteed> {
-        self.lookup(module_root, origin, origin, path, EmitErrors::Yes)
+        self.resolve(module_root, origin, origin, path, EmitErrors::Yes)
             .map_err(Option::unwrap)
     }
 
-    fn lookup_silent(
+    fn resolve_silent(
         &mut self,
         module_root: Self::Module,
         origin: Self::Module,
         path: &[AstPathPart],
     ) -> Option<AnyDef<Self::Module, Self::Item>> {
-        self.lookup(module_root, origin, origin, path, EmitErrors::No)
+        self.resolve(module_root, origin, origin, path, EmitErrors::No)
             .ok()
     }
 
-    fn lookup(
+    fn resolve(
         &mut self,
         module_root: Self::Module,
         vis_ctxt: Self::Module,
@@ -182,207 +176,235 @@ pub trait ModuleResolver: ParentResolver {
         path: &[AstPathPart],
         emit_errors: EmitErrors,
     ) -> Result<AnyDef<Self::Module, Self::Item>, Option<ErrorGuaranteed>> {
-        lookup_inner(
+        let mut finger = AnyDef::Module(origin);
+        let mut parts_iter = path.iter();
+
+        #[track_caller]
+        fn make_err<M, I>(
+            emit_errors: EmitErrors,
+            f: impl FnOnce() -> Diag<ErrorGuaranteed>,
+        ) -> Result<AnyDef<M, I>, Option<ErrorGuaranteed>> {
+            match emit_errors {
+                EmitErrors::Yes => Err(Some(f().emit())),
+                EmitErrors::No => Err(None),
+            }
+        }
+
+        while let &AnyDef::Module(curr) = &finger {
+            // N.B. We have to ensure that the `finger` is on a module before consuming the next part.
+            let Some(&part) = parts_iter.next() else {
+                break;
+            };
+
+            match self.resolve_step(module_root, vis_ctxt, curr, part) {
+                Ok(next) => finger = next,
+                Err(StepResolveError::CannotSuperInRoot) => {
+                    return make_err(emit_errors, || {
+                        Diag::span_err(part.span(), "`super` cannot apply to crate root")
+                    });
+                }
+                Err(StepResolveError::DeniedVisibility) => {
+                    return make_err(emit_errors, || {
+                        Diag::span_err(part.span(), "item is not visible to the current module")
+                    });
+                }
+                Err(StepResolveError::Ambiguous(conflicts)) => {
+                    let [(first, first_span), (other, other_span), ..] = conflicts.as_slice()
+                    else {
+                        unreachable!()
+                    };
+
+                    return make_err(emit_errors, || {
+                        Diag::span_err(
+                            part.span(),
+                            format_args!("resolutions for `{}` are ambiguous", part.raw().text),
+                        )
+                        .child(LeafDiag::span_note(
+                            *first_span,
+                            format_args!("first glob import resolves to `{}`", self.path(*first)),
+                        ))
+                        .child(LeafDiag::span_note(
+                            *other_span,
+                            format_args!("second glob import resolves to `{}`", self.path(*other)),
+                        ))
+                    });
+                }
+                Err(StepResolveError::NotFound) => {
+                    return make_err(emit_errors, || {
+                        Diag::span_err(
+                            part.span(),
+                            format_args!(
+                                "`{}` not found in `{}`",
+                                part.raw().text,
+                                self.path(AnyDef::Module(curr))
+                            ),
+                        )
+                    });
+                }
+            }
+        }
+
+        match finger {
+            AnyDef::Module(module) => {
+                debug_assert_eq!(self.module_root(module), module);
+                Ok(AnyDef::Module(module))
+            }
+            AnyDef::Item(item) => {
+                if parts_iter.len() == 0 {
+                    Ok(AnyDef::Item(item))
+                } else {
+                    make_err(emit_errors, || {
+                        Diag::span_err(
+                            path[path.len() - parts_iter.len() - 1].span(),
+                            "not a module",
+                        )
+                    })
+                }
+            }
+        }
+    }
+
+    fn resolve_step(
+        &mut self,
+        module_root: Self::Module,
+        vis_ctxt: Self::Module,
+        finger: Self::Module,
+        part: AstPathPart,
+    ) -> StepResolveResult<Self> {
+        resolve_step_inner(
             self,
             module_root,
             vis_ctxt,
-            origin,
-            path,
-            emit_errors,
+            finger,
+            part,
             &mut FxHashSet::default(),
         )
     }
 }
 
-fn lookup_inner<R>(
+fn resolve_step_inner<R>(
     resolver: &mut R,
     module_root: R::Module,
     vis_ctxt: R::Module,
-    origin: R::Module,
-    path: &[AstPathPart],
-    emit_errors: EmitErrors,
+    finger: R::Module,
+    part: AstPathPart,
     reentrant_glob_lookups: &mut FxHashSet<R::Module>,
-) -> Result<AnyDef<R::Module, R::Item>, Option<ErrorGuaranteed>>
+) -> StepResolveResult<R>
 where
     R: ?Sized + ModuleResolver,
 {
-    let mut finger = AnyDef::Module(origin);
-
-    let mut parts_iter = path.iter();
-
-    #[track_caller]
-    fn make_err<M, I>(
-        emit_errors: EmitErrors,
-        f: impl FnOnce() -> Diag<ErrorGuaranteed>,
-    ) -> Result<AnyDef<M, I>, Option<ErrorGuaranteed>> {
-        match emit_errors {
-            EmitErrors::Yes => Err(Some(f().emit())),
-            EmitErrors::No => Err(None),
+    // Handle special path parts.
+    let part = match part.kind() {
+        AstPathPartKind::Keyword(_, AstPathPartKw::Self_) => {
+            return Ok(AnyDef::Module(resolver.module_root(finger)));
         }
-    }
-
-    'traverse: while let &AnyDef::Module(curr_scope_start) = &finger {
-        // N.B. We have to ensure that the `finger` is on a module before consuming the next part.
-        let Some(part) = parts_iter.next() else {
-            break;
-        };
-
-        // Handle special path parts.
-        let part = match part.kind() {
-            AstPathPartKind::Keyword(_, AstPathPartKw::Self_) => {
-                finger = AnyDef::Module(resolver.module_root(curr_scope_start));
-                continue 'traverse;
-            }
-            AstPathPartKind::Keyword(_, AstPathPartKw::Crate) => {
-                finger = AnyDef::Module(module_root);
-                continue 'traverse;
-            }
-            AstPathPartKind::Keyword(_, AstPathPartKw::Super) => {
-                let Some(parent) = resolver.module_parent(curr_scope_start) else {
-                    return make_err(emit_errors, || {
-                        Diag::span_err(part.span(), "`super` cannot apply to crate root")
-                    });
-                };
-
-                finger = AnyDef::Module(parent);
-                continue 'traverse;
-            }
-            AstPathPartKind::Regular(ident) => ident,
-        };
-
-        let mut curr_scope_curr = curr_scope_start;
-
-        loop {
-            // Attempt to resolve a direct link.
-            match resolver.lookup_direct(vis_ctxt, curr_scope_curr, part.text) {
-                Ok(link) => {
-                    finger = link;
-                    continue 'traverse;
-                }
-                Err(StepLookupError::NotVisible) => {
-                    return make_err(emit_errors, || {
-                        Diag::span_err(part.span, "item is not visible to the current module")
-                    });
-                }
-                Err(StepLookupError::NotFound) => {
-                    // (fallthrough)
-                }
-            }
-
-            // Otherwise, attempt to follow a global import.
-            'glob_import: {
-                // Ensure that we're not reentrantly trying to glob-import from the same module.
-                if !reentrant_glob_lookups.insert(curr_scope_curr) {
-                    break 'glob_import;
-                }
-
-                // Collect resolutions
-                let mut resolutions = Vec::new();
-
-                for use_idx in 0..resolver.global_use_count(curr_scope_curr) {
-                    let target =
-                        match resolver.global_use_target(vis_ctxt, curr_scope_curr, use_idx) {
-                            Ok(target) => target,
-                            Err(StepLookupError::NotFound) | Err(StepLookupError::NotVisible) => {
-                                continue;
-                            }
-                        };
-
-                    // FIXME: If this resolves to ambiguous, no additional resolutions will be
-                    //  pushed, which is wrong.
-                    let resolution = lookup_inner(
-                        resolver,
-                        module_root,
-                        vis_ctxt,
-                        target,
-                        &[AstPathPart::new_ident(part)],
-                        EmitErrors::No,
-                        reentrant_glob_lookups,
-                    );
-
-                    let Ok(resolution) = resolution else {
-                        continue;
-                    };
-
-                    resolutions.push((
-                        resolution,
-                        resolver.global_use_span(curr_scope_curr, use_idx),
-                    ));
-                }
-
-                reentrant_glob_lookups.remove(&curr_scope_curr);
-
-                // Ensure that our resolution is unambiguous.
-                let Some(((first, first_span), remainder)) = resolutions.split_first() else {
-                    break 'glob_import;
-                };
-
-                for (other, other_span) in remainder {
-                    if first != other {
-                        return make_err(emit_errors, || {
-                            Diag::span_err(
-                                part.span,
-                                format_args!("resolutions for `{}` are ambiguous", part.text),
-                            )
-                            .child(LeafDiag::span_note(
-                                *first_span,
-                                format_args!(
-                                    "first glob import resolves to `{}`",
-                                    resolver.path(*first),
-                                ),
-                            ))
-                            .child(LeafDiag::span_note(
-                                *other_span,
-                                format_args!(
-                                    "second glob import resolves to `{}`",
-                                    resolver.path(*other),
-                                ),
-                            ))
-                        });
-                    }
-                }
-
-                finger = resolutions.into_iter().next().unwrap().0;
-                continue 'traverse;
-            }
-
-            curr_scope_curr = match resolver.direct_parent(curr_scope_curr) {
-                ParentKind::Scoped(next) => next,
-                ParentKind::Real(_) => break,
+        AstPathPartKind::Keyword(_, AstPathPartKw::Crate) => {
+            return Ok(AnyDef::Module(module_root));
+        }
+        AstPathPartKind::Keyword(_, AstPathPartKw::Super) => {
+            let Some(parent) = resolver.module_parent(finger) else {
+                return Err(StepResolveError::CannotSuperInRoot);
             };
-        }
 
-        // Nothing could provide this path part!
-        return make_err(emit_errors, || {
-            Diag::span_err(
-                part.span,
-                format_args!(
-                    "`{}` not found in `{}`",
-                    part.text,
-                    resolver.path(AnyDef::Module(curr_scope_start))
-                ),
-            )
-        });
-    }
-
-    match finger {
-        AnyDef::Module(module) => {
-            debug_assert_eq!(resolver.module_root(module), module);
-            Ok(AnyDef::Module(module))
+            return Ok(AnyDef::Module(parent));
         }
-        AnyDef::Item(item) => {
-            if parts_iter.len() == 0 {
-                Ok(AnyDef::Item(item))
-            } else {
-                make_err(emit_errors, || {
-                    Diag::span_err(
-                        path[path.len() - parts_iter.len() - 1].span(),
-                        "not a module",
-                    )
-                })
+        AstPathPartKind::Regular(ident) => ident,
+    };
+
+    let mut scope_finger = finger;
+
+    // Otherwise, walk the scopes and attempt to find a suitable link.
+    loop {
+        // Attempt to resolve a direct link.
+        match resolver.lookup_direct(vis_ctxt, scope_finger, part.text) {
+            Ok(link) => {
+                return Ok(link);
+            }
+            Err(StepLookupError::NotVisible) => {
+                return Err(StepResolveError::DeniedVisibility);
+            }
+            Err(StepLookupError::NotFound) => {
+                // (fallthrough)
             }
         }
+
+        // Otherwise, attempt to follow a global import.
+        'glob_import: {
+            // Ensure that we're not reentrantly trying to glob-import from the same module.
+            if !reentrant_glob_lookups.insert(scope_finger) {
+                break 'glob_import;
+            }
+
+            // Collect resolutions
+            let mut resolutions = Vec::new();
+
+            for use_idx in 0..resolver.global_use_count(scope_finger) {
+                let target = match resolver.global_use_target(vis_ctxt, scope_finger, use_idx) {
+                    Ok(target) => target,
+                    Err(StepLookupError::NotFound) | Err(StepLookupError::NotVisible) => {
+                        continue;
+                    }
+                };
+
+                let resolution = resolve_step_inner(
+                    resolver,
+                    module_root,
+                    vis_ctxt,
+                    target,
+                    AstPathPart::new_ident(part),
+                    reentrant_glob_lookups,
+                );
+
+                let resolution = match resolution {
+                    Ok(v) => v,
+                    Err(StepResolveError::CannotSuperInRoot) => {
+                        unreachable!()
+                    }
+                    Err(StepResolveError::Ambiguous(other_resolutions)) => {
+                        resolutions.extend_from_slice(&other_resolutions);
+                        continue;
+                    }
+                    Err(StepResolveError::DeniedVisibility | StepResolveError::NotFound) => {
+                        continue;
+                    }
+                };
+
+                resolutions.push((resolution, resolver.global_use_span(scope_finger, use_idx)));
+            }
+
+            reentrant_glob_lookups.remove(&scope_finger);
+
+            // Ensure that our resolution is unambiguous.
+            let Some(&(first, _first_span)) = resolutions.first() else {
+                break 'glob_import;
+            };
+
+            let mut is_first = true;
+
+            resolutions.retain(|(other, _other_span)| {
+                if is_first {
+                    is_first = false;
+                    return true;
+                }
+
+                first != *other
+            });
+
+            if resolutions.len() > 1 {
+                return Err(StepResolveError::Ambiguous(resolutions));
+            }
+
+            return Ok(resolutions.into_iter().next().unwrap().0);
+        }
+
+        scope_finger = match resolver.direct_parent(scope_finger) {
+            ParentKind::Scoped(next) => next,
+            ParentKind::Real(_) => break,
+        };
     }
+
+    // Nothing could provide this path part!
+    Err(StepResolveError::NotFound)
 }
 
 // === Helpers === //

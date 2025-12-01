@@ -1,0 +1,17 @@
+error: resolutions for `A` are ambiguous
+   ┌─ crates/frontend/samples/test4.fir:24:10
+   │
+24 │ use baz::A;
+   │          ^
+
+note: first glob import resolves to `crate::baz::foo::a::A`
+   ┌─ crates/frontend/samples/test4.fir:11:20
+   │
+11 │         pub use a::*;
+   │                    ^
+
+note: second glob import resolves to `crate::baz::foo::b::A`
+   ┌─ crates/frontend/samples/test4.fir:12:20
+   │
+12 │         pub use b::*;
+   │                    ^

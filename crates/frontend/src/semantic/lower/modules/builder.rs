@@ -286,7 +286,7 @@ impl BuilderModuleTree {
                     return;
                 };
 
-                let target = match ModuleTreeVisibilityCx(tree).lookup(
+                let target = match ModuleTreeVisibilityCx(tree).resolve(
                     /* root */ BuilderModuleId::ROOT,
                     /* vis_ctxt */ within,
                     /* origin */ within,
@@ -648,7 +648,7 @@ impl ModuleTreeSolverCx<'_> {
             unreachable!()
         };
 
-        let Ok(target) = self.lookup(
+        let Ok(target) = self.resolve(
             BuilderModuleId::ROOT,
             path_owner,
             path_owner,

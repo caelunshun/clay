@@ -677,7 +677,7 @@ impl IntraItemLowerCtxt<'_> {
         &self,
         path: &AstSimplePath,
     ) -> Result<AnyDef<Obj<Module>, Obj<Item>>, ErrorGuaranteed> {
-        FrozenModuleResolver(&self.tcx.session).lookup_noisy(self.root, self.scope, &path.parts)
+        FrozenModuleResolver(&self.tcx.session).resolve_noisy(self.root, self.scope, &path.parts)
     }
 
     pub fn lookup_label(&mut self, label: Option<Lifetime>) -> Option<Obj<Expr>> {
