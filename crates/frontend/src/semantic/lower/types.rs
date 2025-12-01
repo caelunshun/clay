@@ -3,7 +3,7 @@ use crate::{
         Diag, ErrorGuaranteed, LeafDiag,
         analysis::SpannedViewEncode,
         arena::{LateInit, Obj},
-        syntax::Span,
+        syntax::{HasSpan as _, Span},
     },
     parse::{
         ast::{
@@ -475,10 +475,12 @@ impl IntraItemLowerCtxt<'_> {
         match &ast.kind {
             AstTyKind::This => SpannedTyView::This.encode(ast.span, self.tcx),
             AstTyKind::Name(path, generics) => {
-                if let Some(generic) = self.generic_ty_names.lookup(path.parts[0].text) {
+                if let Some(name) = path.parts[0].ident()
+                    && let Some(generic) = self.generic_ty_names.lookup(name.text)
+                {
                     if let Some(subsequent) = path.parts.get(1) {
                         Diag::span_err(
-                            subsequent.span,
+                            subsequent.span(),
                             "generic types cannot be accessed like modules",
                         )
                         .emit();

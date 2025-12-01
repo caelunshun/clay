@@ -3,15 +3,14 @@ use crate::{
         Diag, ErrorGuaranteed, LeafDiag,
         analysis::NameResolver,
         arena::{LateInit, Obj},
-        syntax::Span,
+        syntax::{HasSpan as _, Span},
     },
-    kw,
     parse::{
         ast::{
             AstFnDef, AstGenericDef, AstImplLikeMemberKind, AstItem, AstItemEnum, AstItemFn,
-            AstItemImpl, AstItemModuleContents, AstItemStruct, AstItemTrait, AstReturnTy,
-            AstSimplePath, AstStructKind, AstTraitClauseList, AstTy, AstUsePath, AstUsePathKind,
-            AstVisibility,
+            AstItemImpl, AstItemModuleContents, AstItemStruct, AstItemTrait, AstPathPart,
+            AstPathPartKind, AstPathPartKw, AstReturnTy, AstSimplePath, AstStructKind,
+            AstTraitClauseList, AstTy, AstUsePath, AstUsePathKind, AstVisibility,
         },
         token::{Ident, Lifetime},
     },
@@ -220,7 +219,7 @@ impl<'ast> UseLowerCtxt<'ast> {
         &mut self,
         mod_id: BuilderModuleId,
         visibility: &AstVisibility,
-        prefix: &mut Vec<Ident>,
+        prefix: &mut Vec<AstPathPart>,
         ast: &AstUsePath,
     ) {
         let old_len = prefix.len();
@@ -228,44 +227,48 @@ impl<'ast> UseLowerCtxt<'ast> {
 
         match &ast.kind {
             AstUsePathKind::Direct(rename) => 'direct: {
-                let mut name = rename.unwrap_or(prefix.last().copied().unwrap());
+                let name = rename
+                    .map(AstPathPart::new_ident)
+                    .unwrap_or(prefix.last().copied().unwrap());
 
-                if name.matches_kw(kw!("crate")) {
-                    Diag::span_err(name.span, "crate root imports need to be explicitly named")
-                        .emit();
-
-                    break 'direct;
-                }
-
-                if name.matches_kw(kw!("super")) {
-                    Diag::span_err(name.span, "invalid name for import").emit();
-
-                    break 'direct;
-                }
-
-                if name.matches_kw(kw!("self")) {
-                    let Some(new_name) =
-                        prefix[..prefix.len() - 1].last().copied().filter(|name| {
-                            !name.matches_kw(kw!("self"))
-                                && !name.matches_kw(kw!("crate"))
-                                && !name.matches_kw(kw!("super"))
-                        })
-                    else {
+                let name = match name.kind() {
+                    AstPathPartKind::Keyword(_, AstPathPartKw::Crate) => {
                         Diag::span_err(
-                            name.span,
-                            "`self` imports are only allowed after an identifier",
+                            name.span(),
+                            "crate root imports need to be explicitly named",
                         )
                         .emit();
 
                         break 'direct;
-                    };
+                    }
+                    AstPathPartKind::Keyword(_, AstPathPartKw::Super) => {
+                        Diag::span_err(name.span(), "invalid name for import").emit();
 
-                    name = Ident {
-                        span: name.span,
-                        text: new_name.text,
-                        raw: new_name.raw,
-                    };
-                }
+                        break 'direct;
+                    }
+                    AstPathPartKind::Keyword(_, AstPathPartKw::Self_) => {
+                        let Some(new_name) = prefix[..prefix.len() - 1]
+                            .last()
+                            .copied()
+                            .and_then(|name| name.ident())
+                        else {
+                            Diag::span_err(
+                                name.span(),
+                                "`self` imports are only allowed after an identifier",
+                            )
+                            .emit();
+
+                            break 'direct;
+                        };
+
+                        Ident {
+                            span: name.span(),
+                            text: new_name.text,
+                            raw: new_name.raw,
+                        }
+                    }
+                    AstPathPartKind::Regular(ident) => ident,
+                };
 
                 self.tree.push_single_use(
                     mod_id,

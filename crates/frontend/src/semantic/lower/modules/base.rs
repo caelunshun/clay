@@ -1,15 +1,33 @@
 use crate::{
     base::{
         Diag, ErrorGuaranteed, LeafDiag, Session,
-        syntax::{Span, Symbol},
+        syntax::{HasSpan as _, Span, Symbol},
     },
-    kw,
-    parse::token::Ident,
+    parse::ast::{AstPathPart, AstPathPartKind, AstPathPartKw},
     utils::{hash::FxHashSet, mem::Handle},
 };
 use std::fmt;
 
 // === Generic === //
+
+#[derive(Debug, Copy, Clone)]
+pub struct ResolutionResult<M, I> {
+    pub consume_count: usize,
+    pub left_off_on: AnyDef<M, I>,
+    pub stop_cause: ResolutionStopCause,
+}
+
+impl<M, I> ResolutionResult<M, I> {
+    // TODO
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum ResolutionStopCause {
+    Done,
+    NotFound,
+    NotVisible,
+    Ambiguous,
+}
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum AnyDef<M, I> {
@@ -140,7 +158,7 @@ pub trait ModuleResolver: ParentResolver {
         &mut self,
         module_root: Self::Module,
         origin: Self::Module,
-        path: &[Ident],
+        path: &[AstPathPart],
     ) -> Result<AnyDef<Self::Module, Self::Item>, ErrorGuaranteed> {
         self.lookup(module_root, origin, origin, path, EmitErrors::Yes)
             .map_err(Option::unwrap)
@@ -150,7 +168,7 @@ pub trait ModuleResolver: ParentResolver {
         &mut self,
         module_root: Self::Module,
         origin: Self::Module,
-        path: &[Ident],
+        path: &[AstPathPart],
     ) -> Option<AnyDef<Self::Module, Self::Item>> {
         self.lookup(module_root, origin, origin, path, EmitErrors::No)
             .ok()
@@ -161,7 +179,7 @@ pub trait ModuleResolver: ParentResolver {
         module_root: Self::Module,
         vis_ctxt: Self::Module,
         origin: Self::Module,
-        path: &[Ident],
+        path: &[AstPathPart],
         emit_errors: EmitErrors,
     ) -> Result<AnyDef<Self::Module, Self::Item>, Option<ErrorGuaranteed>> {
         lookup_inner(
@@ -181,7 +199,7 @@ fn lookup_inner<R>(
     module_root: R::Module,
     vis_ctxt: R::Module,
     origin: R::Module,
-    path: &[Ident],
+    path: &[AstPathPart],
     emit_errors: EmitErrors,
     reentrant_glob_lookups: &mut FxHashSet<R::Module>,
 ) -> Result<AnyDef<R::Module, R::Item>, Option<ErrorGuaranteed>>
@@ -210,26 +228,27 @@ where
         };
 
         // Handle special path parts.
-        if part.matches_kw(kw!("self")) {
-            finger = AnyDef::Module(resolver.module_root(curr_scope_start));
-            continue 'traverse;
-        }
+        let part = match part.kind() {
+            AstPathPartKind::Keyword(_, AstPathPartKw::Self_) => {
+                finger = AnyDef::Module(resolver.module_root(curr_scope_start));
+                continue 'traverse;
+            }
+            AstPathPartKind::Keyword(_, AstPathPartKw::Crate) => {
+                finger = AnyDef::Module(module_root);
+                continue 'traverse;
+            }
+            AstPathPartKind::Keyword(_, AstPathPartKw::Super) => {
+                let Some(parent) = resolver.module_parent(curr_scope_start) else {
+                    return make_err(emit_errors, || {
+                        Diag::span_err(part.span(), "`super` cannot apply to crate root")
+                    });
+                };
 
-        if part.matches_kw(kw!("crate")) {
-            finger = AnyDef::Module(module_root);
-            continue 'traverse;
-        }
-
-        if part.matches_kw(kw!("super")) {
-            let Some(parent) = resolver.module_parent(curr_scope_start) else {
-                return make_err(emit_errors, || {
-                    Diag::span_err(part.span, "`super` cannot apply to crate root")
-                });
-            };
-
-            finger = AnyDef::Module(parent);
-            continue 'traverse;
-        }
+                finger = AnyDef::Module(parent);
+                continue 'traverse;
+            }
+            AstPathPartKind::Regular(ident) => ident,
+        };
 
         let mut curr_scope_curr = curr_scope_start;
 
@@ -276,7 +295,7 @@ where
                         module_root,
                         vis_ctxt,
                         target,
-                        &[*part],
+                        &[AstPathPart::new_ident(part)],
                         EmitErrors::No,
                         reentrant_glob_lookups,
                     );
@@ -356,7 +375,10 @@ where
                 Ok(AnyDef::Item(item))
             } else {
                 make_err(emit_errors, || {
-                    Diag::span_err(path[path.len() - parts_iter.len() - 1].span, "not a module")
+                    Diag::span_err(
+                        path[path.len() - parts_iter.len() - 1].span(),
+                        "not a module",
+                    )
                 })
             }
         }

@@ -2,7 +2,7 @@ use crate::{
     base::{
         Diag, LeafDiag, Session,
         arena::{LateInit, Obj},
-        syntax::{Span, Symbol},
+        syntax::{HasSpan as _, Span, Symbol},
     },
     parse::{
         ast::{AstSimplePath, AstVisibility, AstVisibilityKind},
@@ -296,7 +296,7 @@ impl BuilderModuleTree {
                     Ok(AnyDef::Module(target)) => target,
                     Ok(AnyDef::Item(_)) => {
                         _ = Diag::span_err(
-                            path.parts.last().unwrap().span,
+                            path.parts.last().unwrap().span(),
                             "must refer to a module",
                         )
                         .emit();

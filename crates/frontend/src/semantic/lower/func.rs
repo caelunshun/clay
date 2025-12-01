@@ -164,7 +164,7 @@ impl IntraItemLowerCtxt<'_> {
             } => ExprKind::ForLoop {
                 pat: self.lower_pat(pat, PatLoweringMode::Defining),
                 iter: self.lower_expr(iter),
-                body: self.lower_block_with_label(expr, *label, &body),
+                body: self.lower_block_with_label(expr, *label, body),
             },
             AstExprKind::Loop(block, label) => {
                 ExprKind::Loop(self.lower_block_with_label(expr, *label, block))

@@ -3,8 +3,8 @@ use crate::{
     kw,
     parse::{
         ast::{
-            AstAttribute, AstExprPath, AstExprPathSegment, AstOptMutability, AstSimplePath,
-            AstUsePath, AstUsePathKind, AstVisibility, AstVisibilityKind, Keyword,
+            AstAttribute, AstExprPath, AstExprPathSegment, AstOptMutability, AstPathPart,
+            AstSimplePath, AstUsePath, AstUsePathKind, AstVisibility, AstVisibilityKind, Keyword,
             entry::P,
             types::parse_generic_param_list,
             utils::{
@@ -12,7 +12,7 @@ use crate::{
                 parse_delimited_until_terminator,
             },
         },
-        token::{GroupDelimiter, Ident, TokenCursor},
+        token::{GroupDelimiter, TokenCursor},
     },
     punct, puncts, symbol,
 };
@@ -102,17 +102,17 @@ pub fn parse_simple_path(p: P) -> Option<AstSimplePath> {
     })
 }
 
-pub fn parse_path_part(p: P) -> Option<Ident> {
+pub fn parse_path_part(p: P) -> Option<AstPathPart> {
     let mut p = p.to_parse_guard(symbol!("path part"));
     let p = &mut p;
 
     if let Some(ident) = match_ident().expect(p) {
-        return Some(ident);
+        return Some(AstPathPart::wrap_raw(ident));
     }
 
     for kw in [kw!("super"), kw!("crate"), kw!("self")] {
         if let Some(ident) = match_kw(kw).expect(p) {
-            return Some(ident);
+            return Some(AstPathPart::wrap_raw(ident));
         }
     }
 
@@ -350,7 +350,7 @@ pub fn parse_visibility_shortcut(p: P, name: Symbol, kw: Keyword) -> Option<AstV
         span: start.to(p.prev_span()),
         kind: AstVisibilityKind::PubIn(AstSimplePath {
             span: ident.span,
-            parts: Rc::from_iter([ident]),
+            parts: Rc::from_iter([AstPathPart::wrap_raw(ident)]),
         }),
     })
 }

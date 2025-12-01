@@ -9,6 +9,8 @@ use crate::{
 };
 use std::rc::Rc;
 
+// === Attributes === //
+
 #[derive(Debug, Clone)]
 pub struct AstAttribute {
     pub span: Span,
@@ -17,27 +19,28 @@ pub struct AstAttribute {
     pub args: TokenStream,
 }
 
+// === Paths === //
+
 #[derive(Debug, Clone)]
 pub struct AstSimplePath {
     pub span: Span,
-    pub parts: Rc<[Ident]>,
+    pub parts: Rc<[AstPathPart]>,
 }
 
 impl AstSimplePath {
     pub fn as_ident(&self) -> Option<Ident> {
-        self.parts.first().copied().filter(|v| {
-            self.parts.len() == 1
-                && !v.matches_kw(kw!("crate"))
-                && !v.matches_kw(kw!("super"))
-                && !v.matches_kw(kw!("self"))
-        })
+        self.parts
+            .first()
+            .copied()
+            .filter(|_| self.parts.len() == 1)
+            .and_then(|v| v.ident())
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct AstUsePath {
     pub span: Span,
-    pub base: Rc<[Ident]>,
+    pub base: Rc<[AstPathPart]>,
     pub kind: AstUsePathKind,
 }
 
@@ -56,7 +59,7 @@ pub struct AstExprPath {
 
 #[derive(Debug, Clone)]
 pub struct AstExprPathSegment {
-    pub part: Ident,
+    pub part: AstPathPart,
     pub args: Option<Box<AstGenericParamList>>,
 }
 
@@ -66,6 +69,90 @@ pub struct AstExprQualification {
     pub src_ty: AstTy,
     pub as_trait: Option<AstTy>,
 }
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct AstPathPart {
+    raw: Ident,
+}
+
+impl HasSpan for AstPathPart {
+    fn span(&self) -> Span {
+        self.raw.span
+    }
+}
+
+impl AstPathPart {
+    pub fn wrap_raw(raw: Ident) -> Self {
+        Self { raw }
+    }
+
+    pub fn new_ident(mut ident: Ident) -> Self {
+        if Self::wrap_raw(ident).keyword().is_some() {
+            ident.raw = true;
+        }
+
+        Self::wrap_raw(ident)
+    }
+
+    pub fn raw(self) -> Ident {
+        self.raw
+    }
+
+    pub fn kind(self) -> AstPathPartKind {
+        if self.raw.matches_kw(kw!("crate")) {
+            return AstPathPartKind::Keyword(self.raw.span, AstPathPartKw::Crate);
+        }
+
+        if self.raw.matches_kw(kw!("super")) {
+            return AstPathPartKind::Keyword(self.raw.span, AstPathPartKw::Super);
+        }
+
+        if self.raw.matches_kw(kw!("self")) {
+            return AstPathPartKind::Keyword(self.raw.span, AstPathPartKw::Self_);
+        }
+
+        AstPathPartKind::Regular(self.raw)
+    }
+
+    pub fn keyword(self) -> Option<AstPathPartKw> {
+        self.kind().as_keyword()
+    }
+
+    pub fn ident(self) -> Option<Ident> {
+        self.kind().as_regular()
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum AstPathPartKind {
+    Keyword(Span, AstPathPartKw),
+    Regular(Ident),
+}
+
+impl AstPathPartKind {
+    pub fn as_keyword(self) -> Option<AstPathPartKw> {
+        match self {
+            AstPathPartKind::Keyword(_, kw) => Some(kw),
+            _ => None,
+        }
+    }
+
+    pub fn as_regular(self) -> Option<Ident> {
+        match self {
+            AstPathPartKind::Regular(ident) => Some(ident),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum AstPathPartKw {
+    Crate,
+    Super,
+    Self_,
+}
+
+// === Mutability === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum AstMutability {
@@ -116,6 +203,8 @@ impl AstOptMutability {
         }
     }
 }
+
+// === Visibility === //
 
 #[derive(Debug, Clone)]
 pub struct AstVisibility {
