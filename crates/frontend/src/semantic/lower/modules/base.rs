@@ -41,7 +41,7 @@ pub type StepResolveResult<R> = Result<
 pub enum StepResolveError<M, I> {
     CannotSuperInRoot,
     DeniedVisibility,
-    Ambiguous(Vec<(AnyDef<M, I>, Span)>),
+    Ambiguous([(AnyDef<M, I>, Span); 2]),
     NotFound,
 }
 
@@ -209,10 +209,7 @@ pub trait ModuleResolver: ParentResolver {
                     });
                 }
                 Err(StepResolveError::Ambiguous(conflicts)) => {
-                    let [(first, first_span), (other, other_span), ..] = conflicts.as_slice()
-                    else {
-                        unreachable!()
-                    };
+                    let [(first, first_span), (other, other_span)] = conflicts;
 
                     return make_err(emit_errors, || {
                         Diag::span_err(
@@ -220,12 +217,12 @@ pub trait ModuleResolver: ParentResolver {
                             format_args!("resolutions for `{}` are ambiguous", part.raw().text),
                         )
                         .child(LeafDiag::span_note(
-                            *first_span,
-                            format_args!("first glob import resolves to `{}`", self.path(*first)),
+                            first_span,
+                            format_args!("first glob import resolves to `{}`", self.path(first)),
                         ))
                         .child(LeafDiag::span_note(
-                            *other_span,
-                            format_args!("second glob import resolves to `{}`", self.path(*other)),
+                            other_span,
+                            format_args!("second glob import resolves to `{}`", self.path(other)),
                         ))
                     });
                 }
@@ -336,7 +333,7 @@ where
             }
 
             // Collect resolutions
-            let mut resolutions = Vec::new();
+            let mut first_resolution = None::<(AnyDef<R::Module, R::Item>, Span)>;
 
             for use_idx in 0..resolver.global_use_count(scope_finger) {
                 let target = match resolver.global_use_target(vis_ctxt, scope_finger, use_idx) {
@@ -361,40 +358,35 @@ where
                         unreachable!()
                     }
                     Err(StepResolveError::Ambiguous(other_resolutions)) => {
-                        resolutions.extend_from_slice(&other_resolutions);
-                        continue;
+                        return Err(StepResolveError::Ambiguous(other_resolutions));
                     }
                     Err(StepResolveError::DeniedVisibility | StepResolveError::NotFound) => {
                         continue;
                     }
                 };
 
-                resolutions.push((resolution, resolver.global_use_span(scope_finger, use_idx)));
+                let resolution_span = resolver.global_use_span(scope_finger, use_idx);
+
+                if let Some((first_resolution, first_resolution_span)) = first_resolution {
+                    if resolution != first_resolution {
+                        return Err(StepResolveError::Ambiguous([
+                            (first_resolution, first_resolution_span),
+                            (resolution, resolution_span),
+                        ]));
+                    }
+                } else {
+                    first_resolution = Some((resolution, resolution_span));
+                }
             }
 
             reentrant_glob_lookups.remove(&scope_finger);
 
             // Ensure that our resolution is unambiguous.
-            let Some(&(first, _first_span)) = resolutions.first() else {
+            let Some((first, _first_span)) = first_resolution else {
                 break 'glob_import;
             };
 
-            let mut is_first = true;
-
-            resolutions.retain(|(other, _other_span)| {
-                if is_first {
-                    is_first = false;
-                    return true;
-                }
-
-                first != *other
-            });
-
-            if resolutions.len() > 1 {
-                return Err(StepResolveError::Ambiguous(resolutions));
-            }
-
-            return Ok(resolutions.into_iter().next().unwrap().0);
+            return Ok(first);
         }
 
         scope_finger = match resolver.direct_parent(scope_finger) {
