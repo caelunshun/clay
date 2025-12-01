@@ -11,6 +11,7 @@ use crate::{
             AstItemImpl, AstItemModuleContents, AstItemStruct, AstItemTrait, AstPathPart,
             AstPathPartKind, AstPathPartKw, AstReturnTy, AstSimplePath, AstStructKind,
             AstTraitClauseList, AstTy, AstUsePath, AstUsePathKind, AstVisibility,
+            AstVisibilityKind,
         },
         token::{Ident, Lifetime},
     },
@@ -18,7 +19,7 @@ use crate::{
         analysis::TyCtxt,
         lower::modules::{
             AnyDef, BuilderItemId, BuilderModuleId, BuilderModuleTree, FrozenModuleResolver,
-            ModuleResolver,
+            FrozenVisibilityResolver, ModuleResolver, VisibilityResolver,
         },
         syntax::{
             AdtDef, AdtEnumVariant, AdtKind, AdtKindEnum, AdtKindStruct, AdtStructField,
@@ -68,6 +69,8 @@ impl TyCtxt {
         for (target, ast) in items.iter().copied().zip(item_asts.iter().copied()) {
             let mut ctxt = InterItemLowerCtxt {
                 tcx: self,
+                root,
+                scope: target.r(s).parent,
                 item: target,
                 tasks: &mut tasks,
             };
@@ -305,14 +308,30 @@ impl<'ast> UseLowerCtxt<'ast> {
 
 pub struct InterItemLowerCtxt<'a, 'ast> {
     pub tcx: &'a TyCtxt,
+    pub root: Obj<Module>,
+    pub scope: Obj<Module>,
     pub item: Obj<Item>,
     pub tasks: &'a mut Vec<(Obj<Module>, IntraLowerTask<'ast>)>,
 }
 
 impl<'ast> InterItemLowerCtxt<'_, 'ast> {
     pub fn push_task(&mut self, kind: IntraLowerTask<'ast>) {
-        self.tasks
-            .push((self.item.r(&self.tcx.session).parent, kind));
+        self.tasks.push((self.scope, kind));
+    }
+
+    pub fn resolve_visibility(&self, vis: &AstVisibility) -> Visibility {
+        match &vis.kind {
+            AstVisibilityKind::Implicit | AstVisibilityKind::Priv => Visibility::PubIn(self.scope),
+            AstVisibilityKind::Pub => Visibility::Pub,
+            AstVisibilityKind::PubIn(path) => {
+                match FrozenVisibilityResolver(&self.tcx.session)
+                    .resolve_visibility_target(self.root, self.scope, path)
+                {
+                    Ok(target) => Visibility::PubIn(target),
+                    Err(_) => Visibility::Pub,
+                }
+            }
+        }
     }
 
     pub fn lower_trait(&mut self, target: Obj<Item>, ast: &'ast AstItemTrait) {
@@ -496,8 +515,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                 return Visibility::Pub;
             }
 
-            // TODO: Resolve this
-            Visibility::Pub
+            this.resolve_visibility(vis)
         };
 
         match ast {
@@ -673,11 +691,11 @@ pub enum IntraLowerTask<'ast> {
 }
 
 impl IntraItemLowerCtxt<'_> {
-    pub fn lookup_path(
+    pub fn resolve_simple_path(
         &self,
         path: &AstSimplePath,
     ) -> Result<AnyDef<Obj<Module>, Obj<Item>>, ErrorGuaranteed> {
-        FrozenModuleResolver(&self.tcx.session).resolve_noisy(self.root, self.scope, &path.parts)
+        FrozenModuleResolver(&self.tcx.session).resolve_simple_path(self.root, self.scope, path)
     }
 
     pub fn lookup_label(&mut self, label: Option<Lifetime>) -> Option<Obj<Expr>> {

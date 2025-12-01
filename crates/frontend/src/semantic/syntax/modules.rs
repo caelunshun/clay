@@ -46,6 +46,7 @@ pub struct GlobUse {
 pub struct DirectUse {
     pub visibility: Visibility,
     pub target: AnyDef<Obj<Module>, Obj<Item>>,
+    pub is_direct_child: bool,
 }
 
 #[derive(Debug, Clone)]

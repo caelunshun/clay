@@ -2,7 +2,7 @@ use crate::{
     base::{
         Diag, LeafDiag, Session,
         arena::{LateInit, Obj},
-        syntax::{HasSpan as _, Span, Symbol},
+        syntax::{Span, Symbol},
     },
     parse::{
         ast::{AstSimplePath, AstVisibility, AstVisibilityKind},
@@ -10,8 +10,8 @@ use crate::{
     },
     semantic::{
         lower::modules::{
-            AnyDef, EmitErrors, ModulePathFmt, ModuleResolver, ParentKind, ParentResolver,
-            StepLookupError,
+            AnyDef, ModulePathFmt, ModuleResolver, ParentKind, ParentResolver, StepLookupError,
+            VisibilityResolver,
         },
         syntax::{Crate, DirectUse, GlobUse, Item, Module, Visibility},
     },
@@ -68,6 +68,7 @@ struct BuilderDirectUse {
     name: Ident,
     visibility: BuilderVisibility,
     target: CachedPath,
+    is_direct_child: bool,
 }
 
 enum CachedPath {
@@ -144,6 +145,7 @@ impl BuilderModuleTree {
                 name,
                 visibility: convert_visibility(parent, visibility),
                 target: CachedPath::Resolved(AnyDef::Module(child)),
+                is_direct_child: true,
             },
         );
 
@@ -186,6 +188,7 @@ impl BuilderModuleTree {
                 name,
                 visibility: convert_visibility(parent, visibility),
                 target: CachedPath::Unresolved(path),
+                is_direct_child: false,
             },
         )
     }
@@ -216,6 +219,7 @@ impl BuilderModuleTree {
                 name,
                 visibility: convert_visibility(parent, visibility),
                 target: CachedPath::Resolved(AnyDef::Item(item)),
+                is_direct_child: true,
             },
         );
 
@@ -267,6 +271,23 @@ impl BuilderModuleTree {
             }
         }
 
+        // Construct a frozen graph.
+        let mut out_modules = IndexVec::new();
+
+        for in_module in &self.modules {
+            out_modules.push(Obj::new(
+                Module {
+                    krate,
+                    parent: in_module.parent.map(|v| out_modules[v]),
+                    name: in_module.name,
+                    path: in_module.public_path.unwrap(),
+                    direct_uses: LateInit::uninit(),
+                    glob_uses: LateInit::uninit(),
+                },
+                s,
+            ));
+        }
+
         // Normalize all visibilities.
         for module_id in self.modules.indices() {
             fn resolve_visibility(
@@ -286,41 +307,14 @@ impl BuilderModuleTree {
                     return;
                 };
 
-                let target = match ModuleTreeVisibilityCx(tree).resolve(
-                    /* root */ BuilderModuleId::ROOT,
-                    /* vis_ctxt */ within,
-                    /* origin */ within,
-                    &path.parts,
-                    EmitErrors::Yes,
-                ) {
-                    Ok(AnyDef::Module(target)) => target,
-                    Ok(AnyDef::Item(_)) => {
-                        _ = Diag::span_err(
-                            path.parts.last().unwrap().span(),
-                            "must refer to a module",
-                        )
-                        .emit();
-
-                        // (leave the visibility as `pub`)
-                        return;
-                    }
-                    Err(_) => {
-                        // (leave the visibility as `pub`)
-                        return;
-                    }
+                let Ok(target) = ModuleTreeVisibilityCx(tree).resolve_visibility_target(
+                    BuilderModuleId::ROOT,
+                    within,
+                    &path,
+                ) else {
+                    // (leave the visibility as `pub`)
+                    return;
                 };
-
-                if target == BuilderModuleId::ROOT {
-                    // (leave the visibility as `pub`)
-                    return;
-                }
-
-                if !ModuleTreeVisibilityCx(tree).is_descendant(within, target) {
-                    _ = Diag::span_err(path.span, "not an ancestor of the current module").emit();
-
-                    // (leave the visibility as `pub`)
-                    return;
-                }
 
                 *fetch(tree) = BuilderVisibility::PubInResolved(target);
             }
@@ -357,23 +351,7 @@ impl BuilderModuleTree {
             }
         }
 
-        // Construct a frozen graph.
-        let mut out_modules = IndexVec::new();
-
-        for in_module in &self.modules {
-            out_modules.push(Obj::new(
-                Module {
-                    krate,
-                    parent: in_module.parent.map(|v| out_modules[v]),
-                    name: in_module.name,
-                    path: in_module.public_path.unwrap(),
-                    direct_uses: LateInit::uninit(),
-                    glob_uses: LateInit::uninit(),
-                },
-                s,
-            ));
-        }
-
+        // Link up the frozen module.
         let out_items = self
             .items
             .iter()
@@ -414,6 +392,7 @@ impl BuilderModuleTree {
                                     AnyDef::Module(module) => AnyDef::Module(out_modules[module]),
                                 },
                             },
+                            is_direct_child: item.is_direct_child,
                         },
                     ))
                 })
@@ -492,6 +471,8 @@ impl ParentResolver for ModuleTreeVisibilityCx<'_> {
         self.0.modules[def].parent
     }
 }
+
+impl VisibilityResolver for ModuleTreeVisibilityCx<'_> {}
 
 impl ModuleResolver for ModuleTreeVisibilityCx<'_> {
     type Item = BuilderItemId;
@@ -648,13 +629,7 @@ impl ModuleTreeSolverCx<'_> {
             unreachable!()
         };
 
-        let Ok(target) = self.resolve(
-            BuilderModuleId::ROOT,
-            path_owner,
-            path_owner,
-            &path.parts,
-            EmitErrors::Yes,
-        ) else {
+        let Ok(target) = self.resolve_simple_path(BuilderModuleId::ROOT, path_owner, &path) else {
             // (leave the path as `Ignore`)
             return None;
         };

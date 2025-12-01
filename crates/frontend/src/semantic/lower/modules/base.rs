@@ -3,7 +3,7 @@ use crate::{
         Diag, ErrorGuaranteed, LeafDiag, Session,
         syntax::{HasSpan as _, Span, Symbol},
     },
-    parse::ast::{AstPathPart, AstPathPartKind, AstPathPartKw},
+    parse::ast::{AstPathPart, AstPathPartKind, AstPathPartKw, AstSimplePath},
     utils::{hash::FxHashSet, mem::Handle},
 };
 use std::fmt;
@@ -45,16 +45,58 @@ pub enum StepResolveError<M, I> {
     NotFound,
 }
 
+impl<M, I> StepResolveError<M, I>
+where
+    M: Handle,
+    I: Handle,
+{
+    pub fn emit(
+        self,
+        resolver: &(impl ?Sized + ModuleResolver<Module = M, Item = I>),
+        curr: M,
+        part: AstPathPart,
+    ) -> ErrorGuaranteed {
+        match self {
+            StepResolveError::CannotSuperInRoot => {
+                Diag::span_err(part.span(), "`super` cannot apply to crate root").emit()
+            }
+            StepResolveError::DeniedVisibility => {
+                Diag::span_err(part.span(), "item is not visible to the current module").emit()
+            }
+            StepResolveError::Ambiguous(conflicts) => {
+                let [(first, first_span), (other, other_span)] = conflicts;
+
+                Diag::span_err(
+                    part.span(),
+                    format_args!("resolutions for `{}` are ambiguous", part.raw().text),
+                )
+                .child(LeafDiag::span_note(
+                    first_span,
+                    format_args!("first glob import resolves to `{}`", resolver.path(first)),
+                ))
+                .child(LeafDiag::span_note(
+                    other_span,
+                    format_args!("second glob import resolves to `{}`", resolver.path(other)),
+                ))
+                .emit()
+            }
+            StepResolveError::NotFound => Diag::span_err(
+                part.span(),
+                format_args!(
+                    "`{}` not found in `{}`",
+                    part.raw().text,
+                    resolver.path(AnyDef::Module(curr))
+                ),
+            )
+            .emit(),
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum StepLookupError {
     NotFound,
     NotVisible,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum EmitErrors {
-    Yes,
-    No,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -148,47 +190,31 @@ pub trait ModuleResolver: ParentResolver {
         name: Symbol,
     ) -> Result<AnyDef<Self::Module, Self::Item>, StepLookupError>;
 
-    fn resolve_noisy(
+    fn resolve_step(
         &mut self,
-        module_root: Self::Module,
-        origin: Self::Module,
-        path: &[AstPathPart],
-    ) -> Result<AnyDef<Self::Module, Self::Item>, ErrorGuaranteed> {
-        self.resolve(module_root, origin, origin, path, EmitErrors::Yes)
-            .map_err(Option::unwrap)
-    }
-
-    fn resolve_silent(
-        &mut self,
-        module_root: Self::Module,
-        origin: Self::Module,
-        path: &[AstPathPart],
-    ) -> Option<AnyDef<Self::Module, Self::Item>> {
-        self.resolve(module_root, origin, origin, path, EmitErrors::No)
-            .ok()
-    }
-
-    fn resolve(
-        &mut self,
-        module_root: Self::Module,
+        local_crate_root: Self::Module,
         vis_ctxt: Self::Module,
-        origin: Self::Module,
-        path: &[AstPathPart],
-        emit_errors: EmitErrors,
-    ) -> Result<AnyDef<Self::Module, Self::Item>, Option<ErrorGuaranteed>> {
-        let mut finger = AnyDef::Module(origin);
-        let mut parts_iter = path.iter();
+        finger: Self::Module,
+        part: AstPathPart,
+    ) -> StepResolveResult<Self> {
+        resolve_step_inner(
+            self,
+            local_crate_root,
+            vis_ctxt,
+            finger,
+            part,
+            &mut FxHashSet::default(),
+        )
+    }
 
-        #[track_caller]
-        fn make_err<M, I>(
-            emit_errors: EmitErrors,
-            f: impl FnOnce() -> Diag<ErrorGuaranteed>,
-        ) -> Result<AnyDef<M, I>, Option<ErrorGuaranteed>> {
-            match emit_errors {
-                EmitErrors::Yes => Err(Some(f().emit())),
-                EmitErrors::No => Err(None),
-            }
-        }
+    fn resolve_simple_path(
+        &mut self,
+        local_crate_root: Self::Module,
+        origin: Self::Module,
+        path: &AstSimplePath,
+    ) -> Result<AnyDef<Self::Module, Self::Item>, ErrorGuaranteed> {
+        let mut finger = AnyDef::Module(origin);
+        let mut parts_iter = path.parts.iter();
 
         while let &AnyDef::Module(curr) = &finger {
             // N.B. We have to ensure that the `finger` is on a module before consuming the next part.
@@ -196,48 +222,9 @@ pub trait ModuleResolver: ParentResolver {
                 break;
             };
 
-            match self.resolve_step(module_root, vis_ctxt, curr, part) {
+            match self.resolve_step(local_crate_root, origin, curr, part) {
                 Ok(next) => finger = next,
-                Err(StepResolveError::CannotSuperInRoot) => {
-                    return make_err(emit_errors, || {
-                        Diag::span_err(part.span(), "`super` cannot apply to crate root")
-                    });
-                }
-                Err(StepResolveError::DeniedVisibility) => {
-                    return make_err(emit_errors, || {
-                        Diag::span_err(part.span(), "item is not visible to the current module")
-                    });
-                }
-                Err(StepResolveError::Ambiguous(conflicts)) => {
-                    let [(first, first_span), (other, other_span)] = conflicts;
-
-                    return make_err(emit_errors, || {
-                        Diag::span_err(
-                            part.span(),
-                            format_args!("resolutions for `{}` are ambiguous", part.raw().text),
-                        )
-                        .child(LeafDiag::span_note(
-                            first_span,
-                            format_args!("first glob import resolves to `{}`", self.path(first)),
-                        ))
-                        .child(LeafDiag::span_note(
-                            other_span,
-                            format_args!("second glob import resolves to `{}`", self.path(other)),
-                        ))
-                    });
-                }
-                Err(StepResolveError::NotFound) => {
-                    return make_err(emit_errors, || {
-                        Diag::span_err(
-                            part.span(),
-                            format_args!(
-                                "`{}` not found in `{}`",
-                                part.raw().text,
-                                self.path(AnyDef::Module(curr))
-                            ),
-                        )
-                    });
-                }
+                Err(err) => return Err(err.emit(self, curr, part)),
             }
         }
 
@@ -250,38 +237,46 @@ pub trait ModuleResolver: ParentResolver {
                 if parts_iter.len() == 0 {
                     Ok(AnyDef::Item(item))
                 } else {
-                    make_err(emit_errors, || {
-                        Diag::span_err(
-                            path[path.len() - parts_iter.len() - 1].span(),
-                            "not a module",
-                        )
-                    })
+                    Err(Diag::span_err(
+                        path.parts[path.parts.len() - parts_iter.len() - 1].span(),
+                        "not a module",
+                    )
+                    .emit())
                 }
             }
         }
     }
+}
 
-    fn resolve_step(
+pub trait VisibilityResolver: ModuleResolver {
+    fn resolve_visibility_target(
         &mut self,
-        module_root: Self::Module,
-        vis_ctxt: Self::Module,
-        finger: Self::Module,
-        part: AstPathPart,
-    ) -> StepResolveResult<Self> {
-        resolve_step_inner(
-            self,
-            module_root,
-            vis_ctxt,
-            finger,
-            part,
-            &mut FxHashSet::default(),
-        )
+        local_crate_root: Self::Module,
+        origin: Self::Module,
+        path: &AstSimplePath,
+    ) -> Result<Self::Module, ErrorGuaranteed> {
+        let target = match self.resolve_simple_path(local_crate_root, origin, path)? {
+            AnyDef::Module(target) => target,
+            AnyDef::Item(_) => {
+                return Err(Diag::span_err(
+                    path.parts.last().unwrap().span(),
+                    "must refer to a module",
+                )
+                .emit());
+            }
+        };
+
+        if !self.is_descendant(origin, target) {
+            return Err(Diag::span_err(path.span, "not an ancestor of the current module").emit());
+        }
+
+        Ok(target)
     }
 }
 
 fn resolve_step_inner<R>(
     resolver: &mut R,
-    module_root: R::Module,
+    local_crate_root: R::Module,
     vis_ctxt: R::Module,
     finger: R::Module,
     part: AstPathPart,
@@ -296,7 +291,7 @@ where
             return Ok(AnyDef::Module(resolver.module_root(finger)));
         }
         AstPathPartKind::Keyword(_, AstPathPartKw::Crate) => {
-            return Ok(AnyDef::Module(module_root));
+            return Ok(AnyDef::Module(local_crate_root));
         }
         AstPathPartKind::Keyword(_, AstPathPartKw::Super) => {
             let Some(parent) = resolver.module_parent(finger) else {
@@ -345,7 +340,7 @@ where
 
                 let resolution = resolve_step_inner(
                     resolver,
-                    module_root,
+                    local_crate_root,
                     vis_ctxt,
                     target,
                     AstPathPart::new_ident(part),

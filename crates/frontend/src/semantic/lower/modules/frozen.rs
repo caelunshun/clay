@@ -7,11 +7,90 @@ use crate::{
     semantic::{
         lower::modules::{
             AnyDef, ModulePathFmt, ModuleResolver, ParentKind, ParentResolver, StepLookupError,
+            VisibilityResolver,
         },
         syntax::{Item, Module, Visibility},
     },
     symbol,
 };
+
+// === Common === //
+
+fn def_display_path(
+    def: AnyDef<Obj<Module>, Obj<Item>>,
+    s: &Session,
+) -> impl 'static + Copy + std::fmt::Display {
+    let (krate, main_part) = match def {
+        AnyDef::Module(v) => (v.r(s).krate, v.r(s).path),
+        AnyDef::Item(v) => (v.r(s).krate, v.r(s).path),
+    };
+
+    ModulePathFmt {
+        prefix: if krate.r(s).is_local {
+            symbol!("crate")
+        } else {
+            krate.r(s).name
+        },
+        main_part,
+    }
+}
+
+// === Visibility Resolver === //
+
+#[derive(Debug, Clone)]
+pub struct FrozenVisibilityResolver<'a>(pub &'a Session);
+
+impl VisibilityResolver for FrozenVisibilityResolver<'_> {}
+
+impl ParentResolver for FrozenVisibilityResolver<'_> {
+    type Module = Obj<Module>;
+
+    fn direct_parent(&self, def: Self::Module) -> ParentKind<Self::Module> {
+        def.r(self.0).parent
+    }
+}
+
+impl ModuleResolver for FrozenVisibilityResolver<'_> {
+    type Item = Obj<Item>;
+
+    fn path(
+        &self,
+        def: super::AnyDef<Self::Module, Self::Item>,
+    ) -> impl 'static + Copy + std::fmt::Display {
+        def_display_path(def, self.0)
+    }
+
+    fn global_use_count(&mut self, _curr: Self::Module) -> u32 {
+        0
+    }
+
+    fn global_use_span(&mut self, _curr: Self::Module, _use_idx: u32) -> Span {
+        unreachable!()
+    }
+
+    fn global_use_target(
+        &mut self,
+        _vis_ctxt: Self::Module,
+        _curr: Self::Module,
+        _use_idx: u32,
+    ) -> Result<Self::Module, StepLookupError> {
+        unreachable!()
+    }
+
+    fn lookup_direct(
+        &mut self,
+        _vis_ctxt: Self::Module,
+        curr: Self::Module,
+        name: Symbol,
+    ) -> Result<AnyDef<Self::Module, Self::Item>, StepLookupError> {
+        match curr.r(self.0).direct_uses.get(&name) {
+            Some(child) if child.is_direct_child => Ok(child.target),
+            _ => Err(StepLookupError::NotFound),
+        }
+    }
+}
+
+// === Module Resolver === //
 
 #[derive(Debug, Clone)]
 pub struct FrozenModuleResolver<'a>(pub &'a Session);
@@ -31,21 +110,7 @@ impl ModuleResolver for FrozenModuleResolver<'_> {
         &self,
         def: super::AnyDef<Self::Module, Self::Item>,
     ) -> impl 'static + Copy + std::fmt::Display {
-        let s = &self.0;
-
-        let (krate, main_part) = match def {
-            AnyDef::Module(v) => (v.r(s).krate, v.r(s).path),
-            AnyDef::Item(v) => (v.r(s).krate, v.r(s).path),
-        };
-
-        ModulePathFmt {
-            prefix: if krate.r(s).is_local {
-                symbol!("crate")
-            } else {
-                krate.r(s).name
-            },
-            main_part,
-        }
+        def_display_path(def, self.0)
     }
 
     fn global_use_count(&mut self, curr: Self::Module) -> u32 {
