@@ -4,56 +4,148 @@ use crate::{
         syntax::{HasSpan as _, Span, Symbol},
     },
     parse::ast::{AstPathPart, AstPathPartKind, AstPathPartKw, AstSimplePath},
+    symbol,
     utils::{hash::FxHashSet, mem::Handle},
 };
 use std::fmt;
 
-// === Generic === //
+// === ItemCategory === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum AnyDef<M, I> {
-    Module(M),
-    Item(I),
+pub enum ItemCategoryUse {
+    VisibilityTarget,
+    GlobUseTarget,
 }
 
-impl<M, I> AnyDef<M, I> {
-    pub fn as_module(self) -> Option<M> {
+impl ItemCategoryUse {
+    pub fn as_a_what(self) -> Symbol {
         match self {
-            AnyDef::Module(v) => Some(v),
-            AnyDef::Item(_) => None,
-        }
-    }
-
-    pub fn as_item(self) -> Option<I> {
-        match self {
-            AnyDef::Item(v) => Some(v),
-            AnyDef::Module(_) => None,
+            ItemCategoryUse::VisibilityTarget => symbol!("visibility target"),
+            ItemCategoryUse::GlobUseTarget => symbol!("glob-use target"),
         }
     }
 }
 
-pub type StepResolveResult<R> = Result<
-    AnyDef<<R as ParentResolver>::Module, <R as ModuleResolver>::Item>,
-    StepResolveError<<R as ParentResolver>::Module, <R as ModuleResolver>::Item>,
->;
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum ItemCategory {
+    Module,
+    Scope,
+    Impl,
+    Trait,
+    Struct,
+    Enum,
+    EnumVariant,
+    Func,
+}
+
+impl ItemCategory {
+    pub fn bare_what(self) -> Symbol {
+        match self {
+            ItemCategory::Module | ItemCategory::Scope => symbol!("module"),
+            ItemCategory::Impl => symbol!("impl"),
+            ItemCategory::Trait => symbol!("trait"),
+            ItemCategory::Struct => symbol!("struct"),
+            ItemCategory::Enum => symbol!("enum"),
+            ItemCategory::EnumVariant => symbol!("enum variant"),
+            ItemCategory::Func => symbol!("function"),
+        }
+    }
+
+    pub fn a_what(self) -> Symbol {
+        match self {
+            ItemCategory::Module | ItemCategory::Scope => symbol!("a module"),
+            ItemCategory::Impl => symbol!("an impl"),
+            ItemCategory::Trait => symbol!("a trait"),
+            ItemCategory::Struct => symbol!("a struct"),
+            ItemCategory::Enum => symbol!("an enum"),
+            ItemCategory::EnumVariant => symbol!("an enum variant"),
+            ItemCategory::Func => symbol!("a function"),
+        }
+    }
+
+    pub fn is_valid_for_use(self, for_use: ItemCategoryUse) -> bool {
+        match for_use {
+            ItemCategoryUse::VisibilityTarget => match self {
+                ItemCategory::Module | ItemCategory::Scope => true,
+                ItemCategory::Impl
+                | ItemCategory::Trait
+                | ItemCategory::Struct
+                | ItemCategory::Enum
+                | ItemCategory::EnumVariant
+                | ItemCategory::Func => false,
+            },
+            ItemCategoryUse::GlobUseTarget => match self {
+                ItemCategory::Module | ItemCategory::Scope | ItemCategory::Enum => true,
+                ItemCategory::Impl
+                | ItemCategory::Trait
+                | ItemCategory::Struct
+                | ItemCategory::EnumVariant
+                | ItemCategory::Func => false,
+            },
+        }
+    }
+}
+
+// === Resolver === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum ParentKind {
+    Real,
+    Scope,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum ParentRef<T> {
+    Real(Option<T>),
+    Scoped(T),
+}
+
+impl<T> ParentRef<T> {
+    pub fn new(kind: ParentKind, parent: T) -> Self {
+        match kind {
+            ParentKind::Real => Self::Real(Some(parent)),
+            ParentKind::Scope => Self::Scoped(parent),
+        }
+    }
+
+    pub fn as_option(self) -> Option<T> {
+        match self {
+            ParentRef::Real(v) => v,
+            ParentRef::Scoped(v) => Some(v),
+        }
+    }
+
+    pub fn unwrap(self) -> T {
+        self.as_option().unwrap()
+    }
+
+    pub fn map<V>(self, f: impl FnOnce(T) -> V) -> ParentRef<V> {
+        match self {
+            ParentRef::Real(v) => ParentRef::Real(v.map(f)),
+            ParentRef::Scoped(v) => ParentRef::Scoped(f(v)),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum StepLookupError {
+    NotFound,
+    NotVisible,
+}
 
 #[derive(Debug, Clone)]
-pub enum StepResolveError<M, I> {
+pub enum StepResolveError<T> {
     CannotSuperInRoot,
     DeniedVisibility,
-    Ambiguous([(AnyDef<M, I>, Span); 2]),
+    Ambiguous([(T, Span); 2]),
     NotFound,
 }
 
-impl<M, I> StepResolveError<M, I>
-where
-    M: Handle,
-    I: Handle,
-{
+impl<T: Handle> StepResolveError<T> {
     pub fn emit(
         self,
-        resolver: &(impl ?Sized + ModuleResolver<Module = M, Item = I>),
-        curr: M,
+        resolver: &(impl ?Sized + PathResolver<Item = T>),
+        curr: T,
         part: AstPathPart,
     ) -> ErrorGuaranteed {
         match self {
@@ -85,7 +177,7 @@ where
                 format_args!(
                     "`{}` not found in `{}`",
                     part.raw().text,
-                    resolver.path(AnyDef::Module(curr))
+                    resolver.path(curr),
                 ),
             )
             .emit(),
@@ -93,72 +185,68 @@ where
     }
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum StepLookupError {
-    NotFound,
-    NotVisible,
+#[derive(Copy, Clone)]
+pub struct ItemPathFmt {
+    pub prefix: Symbol,
+    pub main_part: Symbol,
 }
 
-#[derive(Debug, Copy, Clone)]
-pub enum ParentKind<M> {
-    Real(Option<M>),
-    Scoped(M),
-}
+impl fmt::Display for ItemPathFmt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = &Session::fetch();
 
-impl<M> ParentKind<M> {
-    pub fn as_option(self) -> Option<M> {
-        match self {
-            ParentKind::Real(v) => v,
-            ParentKind::Scoped(v) => Some(v),
-        }
-    }
+        f.write_str(self.prefix.as_str(s))?;
 
-    pub fn map<N>(self, f: impl FnOnce(M) -> N) -> ParentKind<N> {
-        match self {
-            ParentKind::Real(v) => ParentKind::Real(v.map(f)),
-            ParentKind::Scoped(v) => ParentKind::Scoped(f(v)),
+        let main_part = self.main_part.as_str(s);
+        if !main_part.is_empty() {
+            f.write_str("::")?;
+            f.write_str(main_part)?;
         }
+
+        Ok(())
     }
 }
 
 pub trait ParentResolver {
-    type Module: Handle;
+    type Item: Handle;
 
-    fn direct_parent(&self, def: Self::Module) -> ParentKind<Self::Module>;
+    fn categorize(&self, def: Self::Item) -> ItemCategory;
 
-    fn module_root(&self, def: Self::Module) -> Self::Module {
+    fn direct_parent(&self, def: Self::Item) -> ParentRef<Self::Item>;
+
+    fn scope_root(&self, def: Self::Item) -> Self::Item {
         let mut curr = def;
 
         loop {
             match self.direct_parent(curr) {
-                ParentKind::Scoped(next) => {
+                ParentRef::Scoped(next) => {
                     curr = next;
                 }
-                ParentKind::Real(_) => return curr,
+                ParentRef::Real(_) => return curr,
             }
         }
     }
 
-    fn module_parent(&self, def: Self::Module) -> Option<Self::Module> {
+    fn parent_module(&self, def: Self::Item) -> Option<Self::Item> {
         let mut curr = self.direct_parent(def);
 
         loop {
             match curr {
-                ParentKind::Scoped(next) => {
+                ParentRef::Scoped(next) => {
                     curr = self.direct_parent(next);
                 }
-                ParentKind::Real(out) => break out,
+                ParentRef::Real(out) => break out,
             }
         }
     }
 
-    fn is_descendant(&self, mut descendant: Self::Module, ancestor: Self::Module) -> bool {
+    fn is_descendant(&self, mut descendant: Self::Item, ancestor: Self::Item) -> bool {
         loop {
             if descendant == ancestor {
                 return true;
             }
 
-            let Some(parent) = self.module_parent(descendant) else {
+            let Some(parent) = self.parent_module(descendant) else {
                 return false;
             };
 
@@ -167,36 +255,34 @@ pub trait ParentResolver {
     }
 }
 
-pub trait ModuleResolver: ParentResolver {
-    type Item: Handle;
+pub trait PathResolver: ParentResolver {
+    fn path(&self, def: Self::Item) -> ItemPathFmt;
 
-    fn path(&self, def: AnyDef<Self::Module, Self::Item>) -> impl 'static + Copy + fmt::Display;
+    fn global_use_count(&mut self, curr: Self::Item) -> u32;
 
-    fn global_use_count(&mut self, curr: Self::Module) -> u32;
-
-    fn global_use_span(&mut self, curr: Self::Module, use_idx: u32) -> Span;
+    fn global_use_span(&mut self, curr: Self::Item, use_idx: u32) -> Span;
 
     fn global_use_target(
         &mut self,
-        vis_ctxt: Self::Module,
-        curr: Self::Module,
+        vis_ctxt: Self::Item,
+        curr: Self::Item,
         use_idx: u32,
-    ) -> Result<Self::Module, StepLookupError>;
+    ) -> Result<Self::Item, StepLookupError>;
 
     fn lookup_direct(
         &mut self,
-        vis_ctxt: Self::Module,
-        curr: Self::Module,
+        vis_ctxt: Self::Item,
+        curr: Self::Item,
         name: Symbol,
-    ) -> Result<AnyDef<Self::Module, Self::Item>, StepLookupError>;
+    ) -> Result<Self::Item, StepLookupError>;
 
     fn resolve_step(
         &mut self,
-        local_crate_root: Self::Module,
-        vis_ctxt: Self::Module,
-        finger: Self::Module,
+        local_crate_root: Self::Item,
+        vis_ctxt: Self::Item,
+        finger: Self::Item,
         part: AstPathPart,
-    ) -> StepResolveResult<Self> {
+    ) -> Result<Self::Item, StepResolveError<Self::Item>> {
         resolve_step_inner(
             self,
             local_crate_root,
@@ -207,67 +293,76 @@ pub trait ModuleResolver: ParentResolver {
         )
     }
 
-    fn resolve_simple_path(
+    fn resolve_path(
         &mut self,
-        local_crate_root: Self::Module,
-        origin: Self::Module,
+        local_crate_root: Self::Item,
+        origin: Self::Item,
         path: &AstSimplePath,
-    ) -> Result<AnyDef<Self::Module, Self::Item>, ErrorGuaranteed> {
-        let mut finger = AnyDef::Module(origin);
-        let mut parts_iter = path.parts.iter();
+    ) -> Result<Self::Item, ErrorGuaranteed> {
+        let mut finger = origin;
 
-        while let &AnyDef::Module(curr) = &finger {
-            // N.B. We have to ensure that the `finger` is on a module before consuming the next part.
-            let Some(&part) = parts_iter.next() else {
-                break;
-            };
-
-            match self.resolve_step(local_crate_root, origin, curr, part) {
+        for &part in path.parts.iter() {
+            match self.resolve_step(local_crate_root, origin, finger, part) {
                 Ok(next) => finger = next,
-                Err(err) => return Err(err.emit(self, curr, part)),
+                Err(err) => return Err(err.emit(self, finger, part)),
             }
         }
 
-        match finger {
-            AnyDef::Module(module) => {
-                debug_assert_eq!(self.module_root(module), module);
-                Ok(AnyDef::Module(module))
-            }
-            AnyDef::Item(item) => {
-                if parts_iter.len() == 0 {
-                    Ok(AnyDef::Item(item))
-                } else {
-                    Err(Diag::span_err(
-                        path.parts[path.parts.len() - parts_iter.len() - 1].span(),
-                        "not a module",
-                    )
-                    .emit())
-                }
-            }
+        Ok(finger)
+    }
+
+    fn resolve_path_for_use(
+        &mut self,
+        local_crate_root: Self::Item,
+        origin: Self::Item,
+        path: &AstSimplePath,
+        for_use: Option<ItemCategoryUse>,
+    ) -> Result<Self::Item, ErrorGuaranteed> {
+        let target = self.resolve_path(local_crate_root, origin, path)?;
+        let category = self.categorize(target);
+
+        if let Some(for_use) = for_use
+            && !category.is_valid_for_use(for_use)
+        {
+            return Err(Diag::span_err(
+                path.span,
+                format_args!(
+                    "{} cannot be used as {}",
+                    category.bare_what(),
+                    for_use.as_a_what()
+                ),
+            )
+            .emit());
         }
+
+        Ok(target)
     }
 }
 
-pub trait VisibilityResolver: ModuleResolver {
+pub trait VisibilityResolver: PathResolver {
     fn resolve_visibility_target(
         &mut self,
-        local_crate_root: Self::Module,
-        origin: Self::Module,
+        local_crate_root: Self::Item,
+        origin: Self::Item,
         path: &AstSimplePath,
-    ) -> Result<Self::Module, ErrorGuaranteed> {
-        let target = match self.resolve_simple_path(local_crate_root, origin, path)? {
-            AnyDef::Module(target) => target,
-            AnyDef::Item(_) => {
-                return Err(Diag::span_err(
-                    path.parts.last().unwrap().span(),
-                    "must refer to a module",
-                )
-                .emit());
-            }
-        };
+    ) -> Result<Self::Item, ErrorGuaranteed> {
+        let target = self.resolve_path_for_use(
+            local_crate_root,
+            origin,
+            path,
+            Some(ItemCategoryUse::VisibilityTarget),
+        )?;
 
         if !self.is_descendant(origin, target) {
-            return Err(Diag::span_err(path.span, "not an ancestor of the current module").emit());
+            return Err(Diag::span_err(
+                path.span,
+                format_args!(
+                    "`{}` is not an ancestor of the current module (`{}`)",
+                    self.path(target),
+                    self.path(origin),
+                ),
+            )
+            .emit());
         }
 
         Ok(target)
@@ -276,29 +371,29 @@ pub trait VisibilityResolver: ModuleResolver {
 
 fn resolve_step_inner<R>(
     resolver: &mut R,
-    local_crate_root: R::Module,
-    vis_ctxt: R::Module,
-    finger: R::Module,
+    local_crate_root: R::Item,
+    vis_ctxt: R::Item,
+    finger: R::Item,
     part: AstPathPart,
-    reentrant_glob_lookups: &mut FxHashSet<R::Module>,
-) -> StepResolveResult<R>
+    reentrant_glob_lookups: &mut FxHashSet<R::Item>,
+) -> Result<R::Item, StepResolveError<R::Item>>
 where
-    R: ?Sized + ModuleResolver,
+    R: ?Sized + PathResolver,
 {
     // Handle special path parts.
     let part = match part.kind() {
         AstPathPartKind::Keyword(_, AstPathPartKw::Self_) => {
-            return Ok(AnyDef::Module(resolver.module_root(finger)));
+            return Ok(resolver.scope_root(finger));
         }
         AstPathPartKind::Keyword(_, AstPathPartKw::Crate) => {
-            return Ok(AnyDef::Module(local_crate_root));
+            return Ok(local_crate_root);
         }
         AstPathPartKind::Keyword(_, AstPathPartKw::Super) => {
-            let Some(parent) = resolver.module_parent(finger) else {
+            let Some(parent) = resolver.parent_module(finger) else {
                 return Err(StepResolveError::CannotSuperInRoot);
             };
 
-            return Ok(AnyDef::Module(parent));
+            return Ok(parent);
         }
         AstPathPartKind::Regular(ident) => ident,
     };
@@ -328,7 +423,7 @@ where
             }
 
             // Collect resolutions
-            let mut first_resolution = None::<(AnyDef<R::Module, R::Item>, Span)>;
+            let mut first_resolution = None::<(R::Item, Span)>;
 
             for use_idx in 0..resolver.global_use_count(scope_finger) {
                 let target = match resolver.global_use_target(vis_ctxt, scope_finger, use_idx) {
@@ -385,35 +480,11 @@ where
         }
 
         scope_finger = match resolver.direct_parent(scope_finger) {
-            ParentKind::Scoped(next) => next,
-            ParentKind::Real(_) => break,
+            ParentRef::Scoped(next) => next,
+            ParentRef::Real(_) => break,
         };
     }
 
     // Nothing could provide this path part!
     Err(StepResolveError::NotFound)
-}
-
-// === Helpers === //
-
-#[derive(Copy, Clone)]
-pub struct ModulePathFmt {
-    pub prefix: Symbol,
-    pub main_part: Symbol,
-}
-
-impl fmt::Display for ModulePathFmt {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = &Session::fetch();
-
-        f.write_str(self.prefix.as_str(s))?;
-
-        let main_part = self.main_part.as_str(s);
-        if !main_part.is_empty() {
-            f.write_str("::")?;
-            f.write_str(main_part)?;
-        }
-
-        Ok(())
-    }
 }

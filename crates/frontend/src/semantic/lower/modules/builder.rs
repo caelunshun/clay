@@ -10,52 +10,40 @@ use crate::{
     },
     semantic::{
         lower::modules::{
-            AnyDef, ModulePathFmt, ModuleResolver, ParentKind, ParentResolver, StepLookupError,
-            VisibilityResolver,
+            ItemCategory, ItemCategoryUse, ItemPathFmt, ParentKind, ParentRef, ParentResolver,
+            PathResolver, StepLookupError, VisibilityResolver,
         },
-        syntax::{Crate, DirectUse, GlobUse, Item, Module, Visibility},
+        syntax::{Crate, DirectUse, GlobUse, Item, Visibility},
     },
     symbol,
     utils::hash::FxIndexMap,
 };
 use index_vec::{IndexVec, define_index_type};
-use std::{fmt, mem};
+use std::mem;
 
 // === Handles === //
-
-type BuilderAnyDef = AnyDef<BuilderModuleId, BuilderItemId>;
-
-define_index_type! {
-    pub struct BuilderModuleId = u32;
-}
-
-impl BuilderModuleId {
-    pub const ROOT: Self = BuilderModuleId { _raw: 0 };
-}
 
 define_index_type! {
     pub struct BuilderItemId = u32;
 }
 
+impl BuilderItemId {
+    pub const ROOT: Self = BuilderItemId { _raw: 0 };
+}
+
 // === BuilderModuleTree === //
 
 pub struct BuilderModuleTree {
-    modules: IndexVec<BuilderModuleId, BuilderModule>,
     items: IndexVec<BuilderItemId, BuilderItem>,
 }
 
-struct BuilderModule {
-    parent: ParentKind<BuilderModuleId>,
+struct BuilderItem {
+    direct_parent: ParentRef<BuilderItemId>,
+    category: ItemCategory,
     name: Option<Ident>,
     public_path: Option<Symbol>,
     glob_uses: Vec<BuilderGlobUse>,
     direct_uses: FxIndexMap<Symbol, BuilderDirectUse>,
-}
-
-struct BuilderItem {
-    parent: BuilderModuleId,
-    name: Ident,
-    public_path: Option<Symbol>,
 }
 
 struct BuilderGlobUse {
@@ -74,47 +62,47 @@ struct BuilderDirectUse {
 enum CachedPath {
     Ignore,
     Unresolved(AstSimplePath),
-    Resolved(BuilderAnyDef),
+    Resolved(BuilderItemId),
 }
 
 #[derive(Clone)]
 enum BuilderVisibility {
     Pub,
-    PubInResolved(BuilderModuleId),
+    PubInResolved(BuilderItemId),
     PubInUnresolved(AstSimplePath),
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-enum MustBeModule {
-    Yes,
-    No,
 }
 
 impl Default for BuilderModuleTree {
     fn default() -> Self {
         Self {
-            modules: IndexVec::from_iter([BuilderModule {
-                parent: ParentKind::Real(None),
+            items: IndexVec::from_iter([BuilderItem {
+                direct_parent: ParentRef::Real(None),
+                category: ItemCategory::Module,
                 name: None,
                 public_path: None,
                 glob_uses: Vec::new(),
                 direct_uses: FxIndexMap::default(),
             }]),
-            items: IndexVec::new(),
         }
     }
 }
 
 impl BuilderModuleTree {
-    fn push_direct(&mut self, target: BuilderModuleId, direct: BuilderDirectUse) {
-        match self.modules[target].direct_uses.entry(direct.name.text) {
+    fn push_direct_use(&mut self, target: BuilderItemId, direct: BuilderDirectUse) {
+        let target_category = self.categorize(target);
+
+        match self.items[target].direct_uses.entry(direct.name.text) {
             indexmap::map::Entry::Vacant(entry) => {
                 entry.insert(direct);
             }
             indexmap::map::Entry::Occupied(entry) => {
                 Diag::span_err(
                     direct.name.span,
-                    format_args!("name `{}` used more than once in module", direct.name.text),
+                    format_args!(
+                        "name `{}` used more than once in {}",
+                        direct.name.text,
+                        target_category.bare_what(),
+                    ),
                 )
                 .child(LeafDiag::span_note(
                     entry.get().name.span,
@@ -125,26 +113,29 @@ impl BuilderModuleTree {
         }
     }
 
-    pub fn push_module(
+    pub fn push_named_item(
         &mut self,
-        parent: BuilderModuleId,
+        parent: BuilderItemId,
+        parent_kind: ParentKind,
         visibility: AstVisibility,
+        category: ItemCategory,
         name: Ident,
-    ) -> BuilderModuleId {
-        let child = self.modules.push(BuilderModule {
-            parent: ParentKind::Real(Some(parent)),
+    ) -> BuilderItemId {
+        let child = self.items.push(BuilderItem {
+            direct_parent: ParentRef::new(parent_kind, parent),
+            category,
             name: Some(name),
             public_path: None,
             glob_uses: Vec::new(),
             direct_uses: FxIndexMap::default(),
         });
 
-        self.push_direct(
+        self.push_direct_use(
             parent,
             BuilderDirectUse {
                 name,
                 visibility: convert_visibility(parent, visibility),
-                target: CachedPath::Resolved(AnyDef::Module(child)),
+                target: CachedPath::Resolved(child),
                 is_direct_child: true,
             },
         );
@@ -152,10 +143,17 @@ impl BuilderModuleTree {
         child
     }
 
-    pub fn push_scope(&mut self, parent: BuilderModuleId, name: Ident) -> BuilderModuleId {
-        self.modules.push(BuilderModule {
-            parent: ParentKind::Scoped(parent),
-            name: Some(name),
+    pub fn push_unnamed_item(
+        &mut self,
+        parent: BuilderItemId,
+        parent_kind: ParentKind,
+        category: ItemCategory,
+        name: Option<Ident>,
+    ) -> BuilderItemId {
+        self.items.push(BuilderItem {
+            direct_parent: ParentRef::new(parent_kind, parent),
+            category,
+            name,
             public_path: None,
             glob_uses: Vec::new(),
             direct_uses: FxIndexMap::default(),
@@ -164,11 +162,11 @@ impl BuilderModuleTree {
 
     pub fn push_glob_use(
         &mut self,
-        parent: BuilderModuleId,
+        parent: BuilderItemId,
         visibility: AstVisibility,
         path: AstSimplePath,
     ) {
-        self.modules[parent].glob_uses.push(BuilderGlobUse {
+        self.items[parent].glob_uses.push(BuilderGlobUse {
             span: path.span,
             visibility: convert_visibility(parent, visibility),
             target: CachedPath::Unresolved(path),
@@ -177,12 +175,12 @@ impl BuilderModuleTree {
 
     pub fn push_single_use(
         &mut self,
-        parent: BuilderModuleId,
+        parent: BuilderItemId,
         visibility: AstVisibility,
         name: Ident,
         path: AstSimplePath,
     ) {
-        self.push_direct(
+        self.push_direct_use(
             parent,
             BuilderDirectUse {
                 name,
@@ -193,106 +191,40 @@ impl BuilderModuleTree {
         )
     }
 
-    pub fn push_unnamed_item(&mut self, parent: BuilderModuleId, name: Ident) -> BuilderItemId {
-        self.items.push(BuilderItem {
-            parent,
-            name,
-            public_path: None,
-        })
-    }
-
-    pub fn push_nameable_item(
-        &mut self,
-        parent: BuilderModuleId,
-        visibility: AstVisibility,
-        name: Ident,
-    ) -> BuilderItemId {
-        let item = self.items.push(BuilderItem {
-            parent,
-            name,
-            public_path: None,
-        });
-
-        self.push_direct(
-            parent,
-            BuilderDirectUse {
-                name,
-                visibility: convert_visibility(parent, visibility),
-                target: CachedPath::Resolved(AnyDef::Item(item)),
-                is_direct_child: true,
-            },
-        );
-
-        item
-    }
-
     pub fn freeze_and_check(
         mut self,
         krate: Obj<Crate>,
         s: &Session,
-    ) -> (
-        IndexVec<BuilderModuleId, Obj<Module>>,
-        IndexVec<BuilderItemId, Obj<Item>>,
-    ) {
+    ) -> IndexVec<BuilderItemId, Obj<Item>> {
         // Determine public paths for each module.
         // TODO: improve this algorithm.
-        for module_id in self.modules.indices() {
-            match self.modules[module_id].parent.as_option() {
+        for item_id in self.items.indices() {
+            match self.items[item_id].direct_parent.as_option() {
                 Some(parent) => {
-                    let parent_name = self.modules[parent].public_path.unwrap().as_str(s);
+                    let parent_name = self.items[parent].public_path.unwrap();
 
-                    if parent_name.is_empty() {
-                        self.modules[module_id].public_path =
-                            Some(self.modules[module_id].name.unwrap().text);
+                    if let Some(own_name) = self.items[item_id].name {
+                        if parent_name.as_str(s).is_empty() {
+                            self.items[item_id].public_path = Some(own_name.text);
+                        } else {
+                            self.items[item_id].public_path =
+                                Some(Symbol::new(&format!("{parent_name}::{}", own_name.text)));
+                        }
                     } else {
-                        self.modules[module_id].public_path = Some(Symbol::new(&format!(
-                            "{parent_name}::{}",
-                            self.modules[module_id].name.unwrap().text,
-                        )));
+                        self.items[item_id].public_path = Some(parent_name);
                     }
                 }
                 None => {
-                    self.modules[module_id].public_path = Some(symbol!(""));
+                    self.items[item_id].public_path = Some(symbol!(""));
                 }
             }
         }
 
-        for item_id in self.items.indices() {
-            let parent = self.items[item_id].parent;
-            let parent_name = self.modules[parent].public_path.unwrap().as_str(s);
-
-            if parent_name.is_empty() {
-                self.items[item_id].public_path = Some(self.items[item_id].name.text);
-            } else {
-                self.items[item_id].public_path = Some(Symbol::new(&format!(
-                    "{parent_name}::{}",
-                    self.items[item_id].name.text,
-                )));
-            }
-        }
-
-        // Construct a frozen graph.
-        let mut out_modules = IndexVec::new();
-
-        for in_module in &self.modules {
-            out_modules.push(Obj::new(
-                Module {
-                    krate,
-                    parent: in_module.parent.map(|v| out_modules[v]),
-                    name: in_module.name,
-                    path: in_module.public_path.unwrap(),
-                    direct_uses: LateInit::uninit(),
-                    glob_uses: LateInit::uninit(),
-                },
-                s,
-            ));
-        }
-
         // Normalize all visibilities.
-        for module_id in self.modules.indices() {
+        for item_id in self.items.indices() {
             fn resolve_visibility(
                 tree: &mut BuilderModuleTree,
-                within: BuilderModuleId,
+                within: BuilderItemId,
                 fetch: impl Fn(&mut BuilderModuleTree) -> &mut BuilderVisibility,
             ) {
                 let vis = fetch(tree);
@@ -308,7 +240,7 @@ impl BuilderModuleTree {
                 };
 
                 let Ok(target) = ModuleTreeVisibilityCx(tree).resolve_visibility_target(
-                    BuilderModuleId::ROOT,
+                    BuilderItemId::ROOT,
                     within,
                     &path,
                 ) else {
@@ -319,57 +251,58 @@ impl BuilderModuleTree {
                 *fetch(tree) = BuilderVisibility::PubInResolved(target);
             }
 
-            for use_idx in 0..self.modules[module_id].direct_uses.len() {
-                resolve_visibility(&mut self, module_id, |tree| {
-                    &mut tree.modules[module_id].direct_uses[use_idx].visibility
+            for use_idx in 0..self.items[item_id].direct_uses.len() {
+                resolve_visibility(&mut self, item_id, |tree| {
+                    &mut tree.items[item_id].direct_uses[use_idx].visibility
                 });
             }
 
-            for use_idx in 0..self.modules[module_id].glob_uses.len() {
-                resolve_visibility(&mut self, module_id, |tree| {
-                    &mut tree.modules[module_id].glob_uses[use_idx].visibility
+            for use_idx in 0..self.items[item_id].glob_uses.len() {
+                resolve_visibility(&mut self, item_id, |tree| {
+                    &mut tree.items[item_id].glob_uses[use_idx].visibility
                 });
             }
         }
 
-        // Resolve each module's use paths.
-        for module_id in self.modules.indices() {
-            for use_idx in 0..self.modules[module_id].direct_uses.len() {
-                _ = ModuleTreeSolverCx(&mut self).resolve_path(
-                    module_id,
-                    |tree| &mut tree.0.modules[module_id].direct_uses[use_idx].target,
-                    MustBeModule::No,
+        // Resolve each item's use paths.
+        for item_id in self.items.indices() {
+            for use_idx in 0..self.items[item_id].direct_uses.len() {
+                _ = ModuleTreeSolverCx(&mut self).stash_path(
+                    item_id,
+                    |tree| &mut tree.0.items[item_id].direct_uses[use_idx].target,
+                    None,
                 );
             }
 
-            for use_idx in 0..self.modules[module_id].glob_uses.len() {
-                _ = ModuleTreeSolverCx(&mut self).resolve_path(
-                    module_id,
-                    |tree| &mut tree.0.modules[module_id].glob_uses[use_idx].target,
-                    MustBeModule::Yes,
+            for use_idx in 0..self.items[item_id].glob_uses.len() {
+                _ = ModuleTreeSolverCx(&mut self).stash_path(
+                    item_id,
+                    |tree| &mut tree.0.items[item_id].glob_uses[use_idx].target,
+                    Some(ItemCategoryUse::GlobUseTarget),
                 );
             }
         }
 
-        // Link up the frozen module.
-        let out_items = self
-            .items
-            .iter()
-            .map(|item| {
-                Obj::new(
-                    Item {
-                        krate,
-                        parent: out_modules[item.parent],
-                        name: item.name,
-                        path: item.public_path.unwrap(),
-                        kind: LateInit::uninit(),
-                    },
-                    s,
-                )
-            })
-            .collect::<IndexVec<BuilderItemId, _>>();
+        // Create a graph of frozen items.
+        let mut out_items = IndexVec::new();
 
-        for (idx, in_module) in self.modules.iter().enumerate() {
+        for item in &self.items {
+            out_items.push(Obj::new(
+                Item {
+                    krate,
+                    direct_parent: item.direct_parent.map(|idx| out_items[idx]),
+                    category: item.category,
+                    name: item.name,
+                    path: item.public_path.unwrap(),
+                    direct_uses: LateInit::uninit(),
+                    glob_uses: LateInit::uninit(),
+                    kind: LateInit::uninit(),
+                },
+                s,
+            ));
+        }
+
+        for (idx, in_module) in self.items.iter().enumerate() {
             let direct_uses = in_module
                 .direct_uses
                 .iter()
@@ -380,17 +313,14 @@ impl BuilderModuleTree {
                             visibility: match item.visibility {
                                 BuilderVisibility::Pub => Visibility::Pub,
                                 BuilderVisibility::PubInResolved(module) => {
-                                    Visibility::PubIn(out_modules[module])
+                                    Visibility::PubIn(out_items[module])
                                 }
                                 BuilderVisibility::PubInUnresolved(_) => unreachable!(),
                             },
                             target: match item.target {
                                 CachedPath::Ignore => return None,
                                 CachedPath::Unresolved(_) => unreachable!(),
-                                CachedPath::Resolved(target) => match target {
-                                    AnyDef::Item(item) => AnyDef::Item(out_items[item]),
-                                    AnyDef::Module(module) => AnyDef::Module(out_modules[module]),
-                                },
+                                CachedPath::Resolved(target) => out_items[target],
                             },
                             is_direct_child: item.is_direct_child,
                         },
@@ -406,52 +336,50 @@ impl BuilderModuleTree {
                         span: item.span,
                         visibility: match item.visibility {
                             BuilderVisibility::Pub => Visibility::Pub,
-                            BuilderVisibility::PubInResolved(module) => {
-                                Visibility::PubIn(out_modules[module])
+                            BuilderVisibility::PubInResolved(target) => {
+                                Visibility::PubIn(out_items[target])
                             }
                             BuilderVisibility::PubInUnresolved(_) => unreachable!(),
                         },
                         target: match item.target {
                             CachedPath::Ignore => return None,
                             CachedPath::Unresolved(_) => unreachable!(),
-                            CachedPath::Resolved(target) => match target {
-                                AnyDef::Module(module) => out_modules[module],
-                                AnyDef::Item(_) => unreachable!(),
-                            },
+                            CachedPath::Resolved(target) => out_items[target],
                         },
                     })
                 })
                 .collect();
 
-            LateInit::init(&out_modules[idx].r(s).direct_uses, direct_uses);
-            LateInit::init(&out_modules[idx].r(s).glob_uses, glob_uses);
+            LateInit::init(&out_items[idx].r(s).direct_uses, direct_uses);
+            LateInit::init(&out_items[idx].r(s).glob_uses, glob_uses);
         }
 
-        LateInit::init(&krate.r(s).root, out_modules[BuilderModuleId::ROOT]);
+        LateInit::init(&krate.r(s).root, out_items[BuilderItemId::ROOT]);
 
-        (out_modules, out_items)
+        out_items
     }
 
-    fn path(&self, prefix: Symbol, target: BuilderAnyDef) -> impl 'static + Copy + fmt::Display {
-        ModulePathFmt {
+    fn path(&self, prefix: Symbol, target: BuilderItemId) -> ItemPathFmt {
+        ItemPathFmt {
             prefix,
-            main_part: match target {
-                AnyDef::Module(module) => self.modules[module].public_path.unwrap(),
-                AnyDef::Item(item) => self.items[item].public_path.unwrap(),
-            },
+            main_part: self.items[target].public_path.unwrap(),
         }
     }
 }
 
 impl ParentResolver for BuilderModuleTree {
-    type Module = BuilderModuleId;
+    type Item = BuilderItemId;
 
-    fn direct_parent(&self, def: Self::Module) -> ParentKind<Self::Module> {
-        self.modules[def].parent
+    fn categorize(&self, def: Self::Item) -> ItemCategory {
+        self.items[def].category
+    }
+
+    fn direct_parent(&self, def: Self::Item) -> ParentRef<Self::Item> {
+        self.items[def].direct_parent
     }
 }
 
-fn convert_visibility(self_mod: BuilderModuleId, ast: AstVisibility) -> BuilderVisibility {
+fn convert_visibility(self_mod: BuilderItemId, ast: AstVisibility) -> BuilderVisibility {
     match ast.kind {
         AstVisibilityKind::Implicit | AstVisibilityKind::Priv => {
             BuilderVisibility::PubInResolved(self_mod)
@@ -465,46 +393,48 @@ fn convert_visibility(self_mod: BuilderModuleId, ast: AstVisibility) -> BuilderV
 struct ModuleTreeVisibilityCx<'a>(&'a BuilderModuleTree);
 
 impl ParentResolver for ModuleTreeVisibilityCx<'_> {
-    type Module = BuilderModuleId;
+    type Item = BuilderItemId;
 
-    fn direct_parent(&self, def: Self::Module) -> ParentKind<Self::Module> {
-        self.0.modules[def].parent
+    fn categorize(&self, def: Self::Item) -> ItemCategory {
+        self.0.items[def].category
+    }
+
+    fn direct_parent(&self, def: Self::Item) -> ParentRef<Self::Item> {
+        self.0.items[def].direct_parent
     }
 }
 
 impl VisibilityResolver for ModuleTreeVisibilityCx<'_> {}
 
-impl ModuleResolver for ModuleTreeVisibilityCx<'_> {
-    type Item = BuilderItemId;
-
-    fn path(&self, def: BuilderAnyDef) -> impl 'static + Copy + fmt::Display {
+impl PathResolver for ModuleTreeVisibilityCx<'_> {
+    fn path(&self, def: Self::Item) -> ItemPathFmt {
         self.0.path(symbol!("crate"), def)
     }
 
-    fn global_use_count(&mut self, _curr: Self::Module) -> u32 {
+    fn global_use_count(&mut self, _curr: Self::Item) -> u32 {
         0
     }
 
-    fn global_use_span(&mut self, _curr: Self::Module, _use_idx: u32) -> Span {
+    fn global_use_span(&mut self, _curr: Self::Item, _use_idx: u32) -> Span {
         unreachable!()
     }
 
     fn global_use_target(
         &mut self,
-        _vis_ctxt: Self::Module,
-        _curr: Self::Module,
+        _vis_ctxt: Self::Item,
+        _curr: Self::Item,
         _use_idx: u32,
-    ) -> Result<Self::Module, StepLookupError> {
+    ) -> Result<Self::Item, StepLookupError> {
         unreachable!()
     }
 
     fn lookup_direct(
         &mut self,
-        _vis_ctxt: Self::Module,
-        curr: Self::Module,
+        _vis_ctxt: Self::Item,
+        curr: Self::Item,
         name: Symbol,
-    ) -> Result<AnyDef<Self::Module, Self::Item>, StepLookupError> {
-        match self.0.modules[curr].direct_uses[&name].target {
+    ) -> Result<Self::Item, StepLookupError> {
+        match self.0.items[curr].direct_uses[&name].target {
             CachedPath::Resolved(target) => Ok(target),
             _ => Err(StepLookupError::NotFound),
         }
@@ -514,35 +444,37 @@ impl ModuleResolver for ModuleTreeVisibilityCx<'_> {
 struct ModuleTreeSolverCx<'a>(&'a mut BuilderModuleTree);
 
 impl ParentResolver for ModuleTreeSolverCx<'_> {
-    type Module = BuilderModuleId;
+    type Item = BuilderItemId;
 
-    fn direct_parent(&self, def: Self::Module) -> ParentKind<Self::Module> {
-        self.0.modules[def].parent
+    fn categorize(&self, def: Self::Item) -> ItemCategory {
+        self.0.items[def].category
+    }
+
+    fn direct_parent(&self, def: Self::Item) -> ParentRef<Self::Item> {
+        self.0.items[def].direct_parent
     }
 }
 
-impl ModuleResolver for ModuleTreeSolverCx<'_> {
-    type Item = BuilderItemId;
-
-    fn path(&self, def: AnyDef<Self::Module, Self::Item>) -> impl 'static + Copy + fmt::Display {
+impl PathResolver for ModuleTreeSolverCx<'_> {
+    fn path(&self, def: Self::Item) -> ItemPathFmt {
         self.0.path(symbol!("crate"), def)
     }
 
-    fn global_use_count(&mut self, curr: Self::Module) -> u32 {
-        self.0.modules[curr].glob_uses.len() as u32
+    fn global_use_count(&mut self, curr: Self::Item) -> u32 {
+        self.0.items[curr].glob_uses.len() as u32
     }
 
-    fn global_use_span(&mut self, curr: Self::Module, use_idx: u32) -> Span {
-        self.0.modules[curr].glob_uses[use_idx as usize].span
+    fn global_use_span(&mut self, curr: Self::Item, use_idx: u32) -> Span {
+        self.0.items[curr].glob_uses[use_idx as usize].span
     }
 
     fn global_use_target(
         &mut self,
-        vis_ctxt: Self::Module,
-        curr: Self::Module,
+        vis_ctxt: Self::Item,
+        curr: Self::Item,
         use_idx: u32,
-    ) -> Result<Self::Module, StepLookupError> {
-        let glob = &self.0.modules[curr].glob_uses[use_idx as usize];
+    ) -> Result<Self::Item, StepLookupError> {
+        let glob = &self.0.items[curr].glob_uses[use_idx as usize];
 
         match glob.visibility {
             BuilderVisibility::Pub => {
@@ -556,16 +488,12 @@ impl ModuleResolver for ModuleTreeSolverCx<'_> {
             BuilderVisibility::PubInUnresolved(_) => unreachable!(),
         }
 
-        let Some(target) = self.resolve_path(
+        let Some(target) = self.stash_path(
             curr,
-            |tree| &mut tree.0.modules[curr].glob_uses[use_idx as usize].target,
-            MustBeModule::Yes,
+            |tree| &mut tree.0.items[curr].glob_uses[use_idx as usize].target,
+            Some(ItemCategoryUse::GlobUseTarget),
         ) else {
             return Err(StepLookupError::NotFound);
-        };
-
-        let AnyDef::Module(target) = target else {
-            unreachable!();
         };
 
         Ok(target)
@@ -573,15 +501,15 @@ impl ModuleResolver for ModuleTreeSolverCx<'_> {
 
     fn lookup_direct(
         &mut self,
-        vis_ctxt: Self::Module,
-        curr: Self::Module,
+        vis_ctxt: Self::Item,
+        curr: Self::Item,
         name: Symbol,
-    ) -> Result<AnyDef<Self::Module, Self::Item>, StepLookupError> {
-        let Some(target_idx) = self.0.modules[curr].direct_uses.get_index_of(&name) else {
+    ) -> Result<Self::Item, StepLookupError> {
+        let Some(target_idx) = self.0.items[curr].direct_uses.get_index_of(&name) else {
             return Err(StepLookupError::NotFound);
         };
 
-        let target = &self.0.modules[curr].direct_uses[target_idx];
+        let target = &self.0.items[curr].direct_uses[target_idx];
 
         match target.visibility {
             BuilderVisibility::Pub => {
@@ -595,10 +523,10 @@ impl ModuleResolver for ModuleTreeSolverCx<'_> {
             BuilderVisibility::PubInUnresolved(_) => unreachable!(),
         }
 
-        let target = self.resolve_path(
+        let target = self.stash_path(
             curr,
-            |tree| &mut tree.0.modules[curr].direct_uses[target_idx].target,
-            MustBeModule::No,
+            |tree| &mut tree.0.items[curr].direct_uses[target_idx].target,
+            None,
         );
 
         match target {
@@ -609,12 +537,12 @@ impl ModuleResolver for ModuleTreeSolverCx<'_> {
 }
 
 impl ModuleTreeSolverCx<'_> {
-    fn resolve_path(
+    fn stash_path(
         &mut self,
-        path_owner: BuilderModuleId,
+        path_owner: BuilderItemId,
         fetch: impl Fn(&mut Self) -> &mut CachedPath,
-        must_be_module: MustBeModule,
-    ) -> Option<BuilderAnyDef> {
+        for_use: Option<ItemCategoryUse>,
+    ) -> Option<BuilderItemId> {
         let path = fetch(self);
 
         match path {
@@ -629,22 +557,11 @@ impl ModuleTreeSolverCx<'_> {
             unreachable!()
         };
 
-        let Ok(target) = self.resolve_simple_path(BuilderModuleId::ROOT, path_owner, &path) else {
+        let Ok(target) = self.resolve_path_for_use(BuilderItemId::ROOT, path_owner, &path, for_use)
+        else {
             // (leave the path as `Ignore`)
             return None;
         };
-
-        match (must_be_module, &target) {
-            (MustBeModule::Yes, AnyDef::Item(_)) => {
-                Diag::span_err(path.span, "path must resolve to a module");
-
-                // (leave the path as `Ignore`)
-                return None;
-            }
-            (MustBeModule::Yes, AnyDef::Module(_)) | (MustBeModule::No, _) => {
-                // (fallthrough)
-            }
-        }
 
         *fetch(self) = CachedPath::Resolved(target);
 

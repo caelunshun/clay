@@ -183,7 +183,7 @@ impl fmt::Debug for TraitSpec {
         let s = &Session::fetch();
 
         f.debug_struct("TraitSpec")
-            .field("def", &self.def.r(s).item.r(s).name.text)
+            .field("def", &self.def.r(s).item.r(s).name.unwrap().text)
             .field("params", &self.params)
             .finish()
     }
@@ -200,7 +200,7 @@ impl fmt::Debug for TraitInstance {
         let s = &Session::fetch();
 
         f.debug_struct("TraitInstance")
-            .field("def", &self.def.r(s).item.r(s).name.text)
+            .field("def", &self.def.r(s).item.r(s).name.unwrap().text)
             .field("params", &self.params)
             .finish()
     }

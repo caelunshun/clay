@@ -5,7 +5,7 @@ use crate::{
     },
     parse::token::Ident,
     semantic::{
-        lower::modules::{AnyDef, ParentKind},
+        lower::modules::{ItemCategory, ParentRef},
         syntax::{AdtDef, FnItem, ImplDef, TraitDef},
     },
     utils::hash::FxIndexMap,
@@ -15,51 +15,45 @@ use crate::{
 pub struct Crate {
     pub name: Symbol,
     pub is_local: bool,
-    pub root: LateInit<Obj<Module>>,
+    pub root: LateInit<Obj<Item>>,
     pub items: LateInit<Vec<Obj<Item>>>,
 }
 
 #[derive(Debug, Clone)]
-pub struct Module {
+pub struct Item {
     pub krate: Obj<Crate>,
-    pub parent: ParentKind<Obj<Module>>,
+    pub direct_parent: ParentRef<Obj<Item>>,
+    pub category: ItemCategory,
     pub name: Option<Ident>,
     pub path: Symbol,
     pub direct_uses: LateInit<FxIndexMap<Symbol, DirectUse>>,
     pub glob_uses: LateInit<Vec<GlobUse>>,
+    pub kind: LateInit<ItemKind>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Visibility {
     Pub,
-    PubIn(Obj<Module>),
+    PubIn(Obj<Item>),
 }
 
 #[derive(Debug, Clone)]
 pub struct GlobUse {
     pub span: Span,
     pub visibility: Visibility,
-    pub target: Obj<Module>,
+    pub target: Obj<Item>,
 }
 
 #[derive(Debug, Clone)]
 pub struct DirectUse {
     pub visibility: Visibility,
-    pub target: AnyDef<Obj<Module>, Obj<Item>>,
+    pub target: Obj<Item>,
     pub is_direct_child: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct Item {
-    pub krate: Obj<Crate>,
-    pub parent: Obj<Module>,
-    pub name: Ident,
-    pub path: Symbol,
-    pub kind: LateInit<ItemKind>,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum ItemKind {
+    Module(Obj<Module>),
     Adt(Obj<AdtDef>),
     Trait(Obj<TraitDef>),
     Impl(Obj<ImplDef>),
@@ -94,4 +88,9 @@ impl ItemKind {
             _ => None,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct Module {
+    pub item: Obj<Item>,
 }

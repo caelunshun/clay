@@ -44,6 +44,9 @@ impl SignatureWfVisitor<'_> {
 
         for &item in &**items {
             match *item.r(s).kind {
+                ItemKind::Module(_) => {
+                    // (intentionally empty)
+                }
                 ItemKind::Adt(def) => {
                     self.visit_adt(def)?;
                 }
@@ -152,7 +155,8 @@ impl SignatureWfVisitor<'_> {
             ])),
         );
 
-        let new_self_ty = SpannedTy::new_saturated(new_self_ty, def.r(s).item.r(s).name.span, tcx);
+        let new_self_ty =
+            SpannedTy::new_saturated(new_self_ty, def.r(s).item.r(s).name.unwrap().span, tcx);
 
         let old_self_ty = self.self_ty.replace(new_self_ty);
         {

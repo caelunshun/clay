@@ -156,7 +156,7 @@ impl<'tcx> InferCx<'tcx> {
     }
 
     pub fn coherence(&self) -> &'tcx CoherenceMap {
-        &self.coherence
+        self.coherence
     }
 
     pub fn mode(&self) -> InferCxMode {

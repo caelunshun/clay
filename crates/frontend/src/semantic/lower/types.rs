@@ -183,8 +183,9 @@ impl IntraItemLowerCtxt<'_> {
 
         let def = self
             .resolve_simple_path(&ast.path)?
-            .as_item()
-            .and_then(|v| v.r(s).kind.as_trait())
+            .r(s)
+            .kind
+            .as_trait()
             .ok_or_else(|| Diag::span_err(ast.path.span, "expected a trait").emit())?;
 
         let mut params = Vec::new();
@@ -320,8 +321,9 @@ impl IntraItemLowerCtxt<'_> {
 
         let def = self
             .resolve_simple_path(path)?
-            .as_item()
-            .and_then(|v| v.r(s).kind.as_trait())
+            .r(s)
+            .kind
+            .as_trait()
             .ok_or_else(|| Diag::span_err(path.span, "expected a trait").emit())?;
 
         let mut params = Vec::new();
@@ -504,7 +506,7 @@ impl IntraItemLowerCtxt<'_> {
                     }
                 };
 
-                let Some(def) = def.as_item().and_then(|v| v.r(s).kind.as_adt()) else {
+                let Some(def) = def.r(s).kind.as_adt() else {
                     return SpannedTyView::Error(
                         Diag::span_err(path.span, "expected enum or struct").emit(),
                     )
