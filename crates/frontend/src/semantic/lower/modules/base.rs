@@ -84,15 +84,22 @@ impl ItemCategory {
             },
         }
     }
+
+    pub fn is_valid_for_super(self) -> bool {
+        match self {
+            ItemCategory::Module => true,
+            ItemCategory::Scope
+            | ItemCategory::Impl
+            | ItemCategory::Trait
+            | ItemCategory::Struct
+            | ItemCategory::Enum
+            | ItemCategory::EnumVariant
+            | ItemCategory::Func => false,
+        }
+    }
 }
 
 // === Resolver === //
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum ParentKind {
-    Real,
-    Scope,
-}
 
 #[derive(Debug, Copy, Clone)]
 pub enum ParentRef<T> {
@@ -101,13 +108,6 @@ pub enum ParentRef<T> {
 }
 
 impl<T> ParentRef<T> {
-    pub fn new(kind: ParentKind, parent: T) -> Self {
-        match kind {
-            ParentKind::Real => Self::Real(Some(parent)),
-            ParentKind::Scope => Self::Scoped(parent),
-        }
-    }
-
     pub fn as_option(self) -> Option<T> {
         match self {
             ParentRef::Real(v) => v,
@@ -136,6 +136,7 @@ pub enum StepLookupError {
 #[derive(Debug, Clone)]
 pub enum StepResolveError<T> {
     CannotSuperInRoot,
+    CannotSuperOnNonModule,
     DeniedVisibility,
     Ambiguous([(T, Span); 2]),
     NotFound,
@@ -152,6 +153,14 @@ impl<T: Handle> StepResolveError<T> {
             StepResolveError::CannotSuperInRoot => {
                 Diag::span_err(part.span(), "`super` cannot apply to crate root").emit()
             }
+            StepResolveError::CannotSuperOnNonModule => Diag::span_err(
+                part.span(),
+                format_args!(
+                    "`super` can only be applied to a module, not {}",
+                    resolver.categorize(curr).a_what()
+                ),
+            )
+            .emit(),
             StepResolveError::DeniedVisibility => {
                 Diag::span_err(part.span(), "item is not visible to the current module").emit()
             }
@@ -177,7 +186,7 @@ impl<T: Handle> StepResolveError<T> {
                 format_args!(
                     "`{}` not found in `{}`",
                     part.raw().text,
-                    resolver.path(resolver.scope_root(curr)),
+                    resolver.path(curr),
                 ),
             )
             .emit(),
@@ -391,6 +400,10 @@ where
             return Ok(local_crate_root);
         }
         AstPathPartKind::Keyword(_, AstPathPartKw::Super) => {
+            if !resolver.categorize(finger).is_valid_for_super() {
+                return Err(StepResolveError::CannotSuperOnNonModule);
+            }
+
             let Some(parent) = resolver.parent_module(finger) else {
                 return Err(StepResolveError::CannotSuperInRoot);
             };
@@ -446,7 +459,10 @@ where
 
                 let resolution = match resolution {
                     Ok(v) => v,
-                    Err(StepResolveError::CannotSuperInRoot) => {
+                    Err(
+                        StepResolveError::CannotSuperInRoot
+                        | StepResolveError::CannotSuperOnNonModule,
+                    ) => {
                         unreachable!()
                     }
                     Err(StepResolveError::Ambiguous(other_resolutions)) => {

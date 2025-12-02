@@ -10,8 +10,8 @@ use crate::{
     },
     semantic::{
         lower::modules::{
-            ItemCategory, ItemCategoryUse, ItemPathFmt, ParentKind, ParentRef, ParentResolver,
-            PathResolver, StepLookupError, VisibilityResolver,
+            ItemCategory, ItemCategoryUse, ItemPathFmt, ParentRef, ParentResolver, PathResolver,
+            StepLookupError, VisibilityResolver,
         },
         syntax::{Crate, DirectUse, GlobUse, Item, Visibility},
     },
@@ -116,13 +116,12 @@ impl BuilderModuleTree {
     pub fn push_named_item(
         &mut self,
         parent: BuilderItemId,
-        parent_kind: ParentKind,
         visibility: AstVisibility,
         category: ItemCategory,
         name: Ident,
     ) -> BuilderItemId {
         let child = self.items.push(BuilderItem {
-            direct_parent: ParentRef::new(parent_kind, parent),
+            direct_parent: ParentRef::Real(Some(parent)),
             category,
             name: Some(name),
             public_path: None,
@@ -146,12 +145,11 @@ impl BuilderModuleTree {
     pub fn push_unnamed_item(
         &mut self,
         parent: BuilderItemId,
-        parent_kind: ParentKind,
         category: ItemCategory,
         name: Option<Ident>,
     ) -> BuilderItemId {
         self.items.push(BuilderItem {
-            direct_parent: ParentRef::new(parent_kind, parent),
+            direct_parent: ParentRef::Real(Some(parent)),
             category,
             name,
             public_path: None,

@@ -10,6 +10,18 @@ note: name previously used here
 8 │     Foo { pub foo: (), foo: () },
   │     ^^^
 
+error: `does_not_exist` not found in `crate::What::Huh`
+   ┌─ crates/frontend/samples/test12.fir:25:16
+   │
+25 │ use What::Huh::does_not_exist;
+   │                ^^^^^^^^^^^^^^
+
+error: `super` can only be applied to a module, not an enum variant
+   ┌─ crates/frontend/samples/test12.fir:27:16
+   │
+27 │ use What::Huh::super as lolwut;
+   │                ^^^^^
+
 error: duplicate field name
   ┌─ crates/frontend/samples/test12.fir:4:5
   │
@@ -51,3 +63,15 @@ error: expected enum or struct
    │
 17 │     Kaz(Foo),
    │         ^^^
+
+error: `u32` not found in `crate`
+   ┌─ crates/frontend/samples/test12.fir:21:9
+   │
+21 │     Huh(u32),
+   │         ^^^
+
+error: `Huh` not found in `crate`
+   ┌─ crates/frontend/samples/test12.fir:22:11
+   │
+22 │     Quois(Huh),
+   │           ^^^
