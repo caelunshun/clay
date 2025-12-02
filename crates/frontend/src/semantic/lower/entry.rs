@@ -41,6 +41,8 @@ impl TyCtxt {
     pub fn lower_full_ast(&self, ast: &AstItemModuleContents) -> Obj<Crate> {
         let s = &self.session;
 
+        let _delay_and_sort_guard = s.diag.delay_and_sort(s.clone());
+
         // Build the module tree.
         let mut ctxt = UseLowerCtxt {
             tree: BuilderModuleTree::default(),

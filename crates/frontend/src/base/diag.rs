@@ -6,10 +6,10 @@ use crate::{
 };
 use derive_where::derive_where;
 use std::{
+    cell::{Cell, RefCell},
     fmt,
     marker::PhantomData,
-    ops,
-    sync::atomic::{AtomicBool, Ordering::*},
+    mem, ops,
 };
 
 // === Errors === //
@@ -50,10 +50,42 @@ impl EmissionGuarantee for ErrorGuaranteed {
 
 #[derive(Debug, Default)]
 pub struct DiagCtxt {
-    error_guaranteed: AtomicBool,
+    error_guaranteed: Cell<bool>,
+    delay_and_sort_accum: RefCell<Vec<SoftDiag>>,
+    delay_and_sort_guards: Cell<u32>,
 }
 
 impl DiagCtxt {
+    pub fn delay_and_sort(&self, s: Session) -> impl Sized {
+        self.delay_and_sort_guards.update(|v| v + 1);
+
+        scopeguard::guard((), move |()| {
+            let diag = &s.diag;
+            diag.delay_and_sort_guards.update(|v| v - 1);
+
+            if diag.delay_and_sort_guards.get() > 0 {
+                return;
+            }
+
+            let mut diags = mem::take(&mut *self.delay_and_sort_accum.borrow_mut());
+
+            diags.sort_by(|lhs, rhs| {
+                let lhs = lhs.me.spans.primary.first().map(|v| v.0.lo);
+                let rhs = rhs.me.spans.primary.first().map(|v| v.0.lo);
+
+                lhs.cmp(&rhs)
+            });
+
+            for diag in diags {
+                emit_pretty(
+                    &Session::fetch().source_map,
+                    &mut termcolor::StandardStream::stdout(termcolor::ColorChoice::Auto),
+                    &diag,
+                );
+            }
+        })
+    }
+
     #[track_caller]
     pub fn emit<E: EmissionGuarantee>(&self, mut diag: Diag<E>) -> E {
         if should_print_diagnostic_origins() {
@@ -63,21 +95,27 @@ impl DiagCtxt {
             ));
         }
 
-        if diag.is_fatal() {
-            self.error_guaranteed.store(true, Relaxed);
+        let is_fatal = diag.is_fatal();
+
+        if self.delay_and_sort_guards.get() == 0 {
+            emit_pretty(
+                &Session::fetch().source_map,
+                &mut termcolor::StandardStream::stdout(termcolor::ColorChoice::Auto),
+                diag.cast_ref(),
+            );
+        } else {
+            self.delay_and_sort_accum.borrow_mut().push(diag.cast());
         }
 
-        emit_pretty(
-            &Session::fetch().source_map,
-            &mut termcolor::StandardStream::stdout(termcolor::ColorChoice::Auto),
-            diag.cast_ref(),
-        );
+        if is_fatal {
+            self.error_guaranteed.set(true);
+        }
 
-        E::new_result(diag.is_fatal().then(ErrorGuaranteed::new_unchecked))
+        E::new_result(is_fatal.then(ErrorGuaranteed::new_unchecked))
     }
 
     pub fn had_error(&self) -> bool {
-        self.error_guaranteed.load(Relaxed)
+        self.error_guaranteed.get()
     }
 }
 
