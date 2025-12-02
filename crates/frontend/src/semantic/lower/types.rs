@@ -21,7 +21,7 @@ use crate::{
             SpannedTraitInstance, SpannedTraitInstanceView, SpannedTraitParam,
             SpannedTraitParamList, SpannedTraitParamView, SpannedTraitSpec, SpannedTraitSpecView,
             SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView,
-            SpannedTyView, TraitParam, TypeGeneric,
+            SpannedTyView, TraitDef, TraitParam, TypeGeneric,
         },
     },
     utils::hash::FxHashMap,
@@ -188,116 +188,9 @@ impl IntraItemLowerCtxt<'_> {
             .as_trait()
             .ok_or_else(|| Diag::span_err(ast.path.span, "expected a trait").emit())?;
 
-        let mut params = Vec::new();
-        let mut reader = ast.params.as_ref().map_or(&[][..], |v| &v.list).iter();
+        let params = self.lower_trait_spec_generics(def, ast.span, ast.params.as_ref())?;
 
-        // Lower positional arguments
-        if reader.len() < def.r(s).regular_generic_count as usize {
-            return Err(Diag::span_err(ast.span, "missing generic parameters").emit());
-        }
-
-        for (param, generic) in (&mut reader)
-            .zip(&def.r(s).generics.r(s).defs)
-            .take(def.r(s).regular_generic_count as usize)
-        {
-            match &param.kind {
-                AstGenericParamKind::PositionalTy(ty) => {
-                    if !matches!(generic, AnyGeneric::Ty(_)) {
-                        return Err(Diag::span_err(ty.span, "expected lifetime parameter").emit());
-                    }
-
-                    params.push(
-                        SpannedTraitParamView::Equals(
-                            SpannedTyOrReView::Ty(self.lower_ty(ty)).encode(ty.span, self.tcx),
-                        )
-                        .encode(param.span, self.tcx),
-                    );
-                }
-                AstGenericParamKind::PositionalRe(re) => {
-                    if !matches!(generic, AnyGeneric::Re(_)) {
-                        return Err(Diag::span_err(re.span, "expected type parameter").emit());
-                    }
-
-                    params.push(
-                        SpannedTraitParamView::Equals(
-                            SpannedTyOrReView::Re(self.lower_re(re)).encode(re.span, self.tcx),
-                        )
-                        .encode(re.span, self.tcx),
-                    );
-                }
-                AstGenericParamKind::InheritRe(..) => {
-                    Diag::span_err(param.span, "cannot name lifetime parameters").emit();
-                    continue;
-                }
-                AstGenericParamKind::TyEquals(..) | AstGenericParamKind::InheritTy(..) => {
-                    return Err(Diag::span_err(ast.span, "missing generic parameters").emit());
-                }
-            }
-        }
-
-        // Lower trait clauses
-        params.resize_with(def.r(s).generics.r(s).defs.len(), || {
-            SpannedTraitParam::new_unspanned(TraitParam::Unspecified(
-                self.tcx.intern_trait_clause_list(&[]),
-            ))
-        });
-
-        for param in &mut reader {
-            let name = match &param.kind {
-                AstGenericParamKind::TyEquals(name, _) => name,
-                AstGenericParamKind::InheritTy(name, _) => name,
-                AstGenericParamKind::PositionalTy(..) | AstGenericParamKind::PositionalRe(..) => {
-                    return Err(Diag::span_err(param.span, "too many generic parameters").emit());
-                }
-                AstGenericParamKind::InheritRe(..) => {
-                    Diag::span_err(param.span, "cannot name lifetime parameters").emit();
-                    continue;
-                }
-            };
-
-            let Some(generic) = def.r(s).associated_types.get(&name.text) else {
-                return Err(Diag::span_err(
-                    name.span,
-                    "trait does not have associated type with that name",
-                )
-                .emit());
-            };
-
-            let idx = generic.r(s).binder.unwrap().idx as usize;
-
-            match params[idx].value {
-                TraitParam::Unspecified(list) if list.r(s).is_empty() => {
-                    // (fallthrough)
-                }
-                _ => {
-                    return Err(Diag::span_err(
-                        param.span,
-                        "associated type mentioned more than once",
-                    )
-                    .emit());
-                }
-            }
-
-            params[idx] = match &param.kind {
-                AstGenericParamKind::TyEquals(_, ast) => SpannedTraitParamView::Equals(
-                    SpannedTyOrReView::Ty(self.lower_ty(ast)).encode(ast.span, self.tcx),
-                )
-                .encode(param.span, self.tcx),
-                AstGenericParamKind::InheritTy(_, ast) => {
-                    SpannedTraitParamView::Unspecified(self.lower_clauses(Some(ast)))
-                        .encode(param.span, self.tcx)
-                }
-                AstGenericParamKind::PositionalTy(..)
-                | AstGenericParamKind::PositionalRe(..)
-                | AstGenericParamKind::InheritRe(..) => unreachable!(),
-            };
-        }
-
-        Ok(SpannedTraitSpecView {
-            def,
-            params: SpannedTraitParamList::alloc_list(ast.span, &params, self.tcx),
-        }
-        .encode(ast.span, self.tcx))
+        Ok(SpannedTraitSpecView { def, params }.encode(ast.span, self.tcx))
     }
 
     pub fn lower_trait_instance(
@@ -307,6 +200,7 @@ impl IntraItemLowerCtxt<'_> {
     ) -> Result<SpannedTraitInstance, ErrorGuaranteed> {
         let s = &self.tcx.session;
 
+        // Validate path
         let AstTyKind::Name(path, generics) = &main_ty.kind else {
             return Err(Diag::span_err(main_ty.span, "expected a trait").emit());
         };
@@ -327,66 +221,19 @@ impl IntraItemLowerCtxt<'_> {
             .ok_or_else(|| Diag::span_err(path.span, "expected a trait").emit())?;
 
         let mut params = Vec::new();
-        let generics = generics.as_ref().map_or(&[][..], |v| &v.list);
 
-        // Ensure that no generics are associated types
-        for generic in generics {
-            match &generic.kind {
-                AstGenericParamKind::PositionalTy(..) | AstGenericParamKind::PositionalRe(..) => {
-                    // (no-op)
-                }
-                AstGenericParamKind::InheritRe(..) => {
-                    Diag::span_err(generic.span, "cannot name lifetime parameters").emit();
-                    continue;
-                }
-                AstGenericParamKind::TyEquals(..) | AstGenericParamKind::InheritTy(..) => {
-                    return Err(Diag::span_err(
-                        generic.span,
-                        "associated types must be specified in the `impl` block body",
-                    )
-                    .emit());
-                }
-            }
-        }
+        // Collect positional arguments
+        params.extend(
+            self.lower_positional_binder_generics(
+                def.r(s).generics,
+                Some(def.r(s).regular_generic_count),
+                main_ty.span,
+                generics.as_ref(),
+            )?
+            .iter(self.tcx),
+        );
 
-        // Lower positional arguments
-        if generics.len() < def.r(s).regular_generic_count as usize {
-            return Err(Diag::span_err(main_ty.span, "missing generic parameters").emit());
-        }
-
-        if generics.len() > def.r(s).regular_generic_count as usize {
-            return Err(Diag::span_err(
-                generics[def.r(s).regular_generic_count as usize].span,
-                "too many generic parameters",
-            )
-            .emit());
-        }
-
-        for (param, generic) in generics.iter().zip(&def.r(s).generics.r(s).defs) {
-            match &param.kind {
-                AstGenericParamKind::PositionalTy(ty) => {
-                    if !matches!(generic, AnyGeneric::Ty(_)) {
-                        return Err(Diag::span_err(ty.span, "expected lifetime parameter").emit());
-                    }
-
-                    params.push(SpannedTyOrReView::Ty(self.lower_ty(ty)).encode(ty.span, self.tcx));
-                }
-                AstGenericParamKind::PositionalRe(re) => {
-                    if !matches!(generic, AnyGeneric::Re(_)) {
-                        return Err(Diag::span_err(re.span, "expected type parameter").emit());
-                    }
-
-                    params.push(SpannedTyOrReView::Re(self.lower_re(re)).encode(re.span, self.tcx));
-                }
-                AstGenericParamKind::InheritRe(..)
-                | AstGenericParamKind::TyEquals(..)
-                | AstGenericParamKind::InheritTy(..) => {
-                    unreachable!()
-                }
-            }
-        }
-
-        // Lower associated types.
+        // Collect associated types
         let mut associated = FxHashMap::default();
 
         for member in &body.members {
@@ -497,8 +344,6 @@ impl IntraItemLowerCtxt<'_> {
                     return SpannedTyView::Universal(*generic).encode(ast.span, self.tcx);
                 }
 
-                let generics = generics.as_ref().map_or(&[][..], |v| v.list.as_slice());
-
                 let def = match self.resolve_simple_path(path) {
                     Ok(def) => def,
                     Err(err) => {
@@ -513,73 +358,20 @@ impl IntraItemLowerCtxt<'_> {
                     .encode(ast.span, self.tcx);
                 };
 
-                let mut had_error = None;
-
-                match generics.len().cmp(&def.r(s).generics.r(s).defs.len()) {
-                    Ordering::Equal => {
-                        // (fallthrough)
+                let params = match self.lower_positional_binder_generics(
+                    def.r(s).generics,
+                    None,
+                    ast.span,
+                    generics.as_ref(),
+                ) {
+                    Ok(v) => v,
+                    Err(err) => {
+                        return SpannedTyView::Error(err).encode(ast.span, self.tcx);
                     }
-                    Ordering::Less => {
-                        had_error =
-                            Some(Diag::span_err(ast.span, "missing generic parameters").emit());
-                    }
-                    Ordering::Greater => {
-                        had_error = Some(
-                            Diag::span_err(
-                                generics[def.r(s).generics.r(s).defs.len()].span,
-                                "too many generic parameters",
-                            )
-                            .emit(),
-                        );
-                    }
-                }
-
-                let mut params = Vec::new();
-
-                for (actual, expected) in generics.iter().zip(&def.r(s).generics.r(s).defs) {
-                    let actual_span = actual.span;
-
-                    let Some(actual) = actual.kind.as_positional() else {
-                        had_error = Some(
-                            Diag::span_err(actual.span, "expected a generic parameter").emit(),
-                        );
-
-                        continue;
-                    };
-
-                    match (actual, expected) {
-                        (AstGenericPositional::Ty(actual), AnyGeneric::Ty(_)) => {
-                            params.push(
-                                SpannedTyOrReView::Ty(self.lower_ty(actual))
-                                    .encode(actual_span, self.tcx),
-                            );
-                        }
-                        (AstGenericPositional::Re(actual), AnyGeneric::Re(_)) => {
-                            params.push(
-                                SpannedTyOrReView::Re(self.lower_re(actual))
-                                    .encode(actual_span, self.tcx),
-                            );
-                        }
-                        (_, AnyGeneric::Ty(_)) => {
-                            had_error = Some(Diag::span_err(actual_span, "expected a type").emit());
-                        }
-                        (_, AnyGeneric::Re(_)) => {
-                            had_error =
-                                Some(Diag::span_err(actual_span, "expected a lifetime").emit());
-                        }
-                    }
-                }
-
-                if let Some(err) = had_error {
-                    return SpannedTyView::Error(err).encode(ast.span, self.tcx);
-                }
+                };
 
                 SpannedTyView::Adt(
-                    SpannedAdtInstanceView {
-                        def,
-                        params: SpannedTyOrReList::alloc_list(ast.span, &params, self.tcx),
-                    }
-                    .encode(ast.span, self.tcx),
+                    SpannedAdtInstanceView { def, params }.encode(ast.span, self.tcx),
                 )
                 .encode(ast.span, self.tcx)
             }
@@ -609,5 +401,197 @@ impl IntraItemLowerCtxt<'_> {
             &ast.iter().map(|ast| self.lower_ty(ast)).collect::<Vec<_>>(),
             self.tcx,
         )
+    }
+
+    pub fn lower_trait_spec_generics(
+        &mut self,
+        def: Obj<TraitDef>,
+        segment_span: Span,
+        ast: Option<&AstGenericParamList>,
+    ) -> Result<SpannedTraitParamList, ErrorGuaranteed> {
+        let s = &self.tcx.session;
+
+        let mut reader = ast.as_ref().map_or(&[][..], |v| &v.list).iter();
+        let mut params = Vec::new();
+
+        // Lower positional arguments
+        if reader.len() < def.r(s).regular_generic_count as usize {
+            return Err(Diag::span_err(segment_span, "missing generic parameters").emit());
+        }
+
+        for (param, generic) in (&mut reader)
+            .zip(&def.r(s).generics.r(s).defs)
+            .take(def.r(s).regular_generic_count as usize)
+        {
+            match &param.kind {
+                AstGenericParamKind::PositionalTy(ty) => {
+                    if !matches!(generic, AnyGeneric::Ty(_)) {
+                        return Err(Diag::span_err(ty.span, "expected lifetime parameter").emit());
+                    }
+
+                    params.push(
+                        SpannedTraitParamView::Equals(
+                            SpannedTyOrReView::Ty(self.lower_ty(ty)).encode(ty.span, self.tcx),
+                        )
+                        .encode(param.span, self.tcx),
+                    );
+                }
+                AstGenericParamKind::PositionalRe(re) => {
+                    if !matches!(generic, AnyGeneric::Re(_)) {
+                        return Err(Diag::span_err(re.span, "expected type parameter").emit());
+                    }
+
+                    params.push(
+                        SpannedTraitParamView::Equals(
+                            SpannedTyOrReView::Re(self.lower_re(re)).encode(re.span, self.tcx),
+                        )
+                        .encode(re.span, self.tcx),
+                    );
+                }
+                AstGenericParamKind::InheritRe(..) => {
+                    Diag::span_err(param.span, "cannot name lifetime parameters").emit();
+                    continue;
+                }
+                AstGenericParamKind::TyEquals(..) | AstGenericParamKind::InheritTy(..) => {
+                    return Err(Diag::span_err(segment_span, "missing generic parameters").emit());
+                }
+            }
+        }
+
+        // Lower trait clauses
+        params.resize_with(def.r(s).generics.r(s).defs.len(), || {
+            SpannedTraitParam::new_unspanned(TraitParam::Unspecified(
+                self.tcx.intern_trait_clause_list(&[]),
+            ))
+        });
+
+        for param in &mut reader {
+            let name = match &param.kind {
+                AstGenericParamKind::TyEquals(name, _) => name,
+                AstGenericParamKind::InheritTy(name, _) => name,
+                AstGenericParamKind::PositionalTy(..) | AstGenericParamKind::PositionalRe(..) => {
+                    return Err(Diag::span_err(param.span, "too many generic parameters").emit());
+                }
+                AstGenericParamKind::InheritRe(..) => {
+                    Diag::span_err(param.span, "cannot name lifetime parameters").emit();
+                    continue;
+                }
+            };
+
+            let Some(generic) = def.r(s).associated_types.get(&name.text) else {
+                return Err(Diag::span_err(
+                    name.span,
+                    "trait does not have associated type with that name",
+                )
+                .emit());
+            };
+
+            let idx = generic.r(s).binder.unwrap().idx as usize;
+
+            match params[idx].value {
+                TraitParam::Unspecified(list) if list.r(s).is_empty() => {
+                    // (fallthrough)
+                }
+                _ => {
+                    return Err(Diag::span_err(
+                        param.span,
+                        "associated type mentioned more than once",
+                    )
+                    .emit());
+                }
+            }
+
+            params[idx] = match &param.kind {
+                AstGenericParamKind::TyEquals(_, ast) => SpannedTraitParamView::Equals(
+                    SpannedTyOrReView::Ty(self.lower_ty(ast)).encode(ast.span, self.tcx),
+                )
+                .encode(param.span, self.tcx),
+                AstGenericParamKind::InheritTy(_, ast) => {
+                    SpannedTraitParamView::Unspecified(self.lower_clauses(Some(ast)))
+                        .encode(param.span, self.tcx)
+                }
+                AstGenericParamKind::PositionalTy(..)
+                | AstGenericParamKind::PositionalRe(..)
+                | AstGenericParamKind::InheritRe(..) => unreachable!(),
+            };
+        }
+
+        Ok(SpannedTraitParamList::alloc_list(
+            segment_span,
+            &params,
+            self.tcx,
+        ))
+    }
+
+    pub fn lower_positional_binder_generics(
+        &mut self,
+        binder: Obj<GenericBinder>,
+        binder_len_override: Option<u32>,
+        segment_span: Span,
+        ast: Option<&AstGenericParamList>,
+    ) -> Result<SpannedTyOrReList, ErrorGuaranteed> {
+        let s = &self.tcx.session;
+
+        let binder_len = binder_len_override.map_or(binder.r(s).defs.len(), |v| v as usize);
+        let ast = ast.as_ref().map_or(&[][..], |v| v.list.as_slice());
+
+        let mut had_error = None;
+
+        match ast.len().cmp(&binder_len) {
+            Ordering::Equal => {
+                // (fallthrough)
+            }
+            Ordering::Less => {
+                had_error = Some(Diag::span_err(segment_span, "missing generic parameters").emit());
+            }
+            Ordering::Greater => {
+                had_error = Some(
+                    Diag::span_err(ast[binder_len].span, "too many generic parameters").emit(),
+                );
+            }
+        }
+
+        let mut params = Vec::new();
+
+        for (actual, expected) in ast.iter().zip(&binder.r(s).defs[..binder_len]) {
+            let actual_span = actual.span;
+
+            let Some(actual) = actual.kind.as_positional() else {
+                had_error = Some(
+                    Diag::span_err(actual.span, "expected a positional generic parameter").emit(),
+                );
+
+                continue;
+            };
+
+            match (actual, expected) {
+                (AstGenericPositional::Ty(actual), AnyGeneric::Ty(_)) => {
+                    params.push(
+                        SpannedTyOrReView::Ty(self.lower_ty(actual)).encode(actual_span, self.tcx),
+                    );
+                }
+                (AstGenericPositional::Re(actual), AnyGeneric::Re(_)) => {
+                    params.push(
+                        SpannedTyOrReView::Re(self.lower_re(actual)).encode(actual_span, self.tcx),
+                    );
+                }
+                (_, AnyGeneric::Ty(_)) => {
+                    had_error = Some(Diag::span_err(actual_span, "expected a type").emit());
+                }
+                (_, AnyGeneric::Re(_)) => {
+                    had_error = Some(Diag::span_err(actual_span, "expected a lifetime").emit());
+                }
+            }
+        }
+
+        if let Some(err) = had_error {
+            return Err(err);
+        }
+
+        Ok(SpannedTyOrReList::alloc_list(
+            segment_span,
+            &params,
+            self.tcx,
+        ))
     }
 }
