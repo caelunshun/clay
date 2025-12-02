@@ -1,3 +1,15 @@
+error: name `Foo` used more than once in enum
+   ┌─ crates/frontend/samples/test12.fir:10:5
+   │
+10 │     Foo((), pub (), ()),
+   │     ^^^
+
+note: name previously used here
+  ┌─ crates/frontend/samples/test12.fir:8:5
+  │
+8 │     Foo { pub foo: (), foo: () },
+  │     ^^^
+
 error: duplicate field name
   ┌─ crates/frontend/samples/test12.fir:4:5
   │
@@ -28,20 +40,14 @@ note: name first used here
 8 │     Foo { pub foo: (), foo: () },
   │               ^^^
 
-error: duplicate variant name
-   ┌─ crates/frontend/samples/test12.fir:10:5
-   │
-10 │     Foo((), pub (), ()),
-   │     ^^^^^^^^^^^^^^^^^^^
-
-note: name first used here
-  ┌─ crates/frontend/samples/test12.fir:8:5
-  │
-8 │     Foo { pub foo: (), foo: () },
-  │     ^^^
-
 error: enum fields are all implicitly public
    ┌─ crates/frontend/samples/test12.fir:10:13
    │
 10 │     Foo((), pub (), ()),
+   │             ^^^
+
+error: expected enum or struct
+   ┌─ crates/frontend/samples/test12.fir:17:9
    │
+17 │     Kaz(Foo),
+   │         ^^^

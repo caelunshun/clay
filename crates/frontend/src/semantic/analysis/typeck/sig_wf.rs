@@ -50,6 +50,9 @@ impl SignatureWfVisitor<'_> {
                 ItemKind::Adt(def) => {
                     self.visit_adt(def)?;
                 }
+                ItemKind::EnumVariant(_) => {
+                    // (already visited in ADT checks)
+                }
                 ItemKind::Trait(def) => {
                     self.visit_trait(def)?;
                 }

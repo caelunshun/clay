@@ -10,6 +10,9 @@ pub enum Woo {
     Foo((), pub (), ()),
 }
 
+pub use Woo::*;
+
 pub enum Waz<'a, T> {
     Foo(Whee<'a, (T, &'a ())>),
+    Kaz(Foo),
 }

@@ -23,16 +23,16 @@ use crate::{
         },
         syntax::{
             AdtDef, AdtEnumVariant, AdtKind, AdtKindEnum, AdtKindStruct, AdtStructField,
-            AdtStructFieldSyntax, AnyGeneric, Crate, Expr, FnDef, FnItem, FuncDefOwner,
-            GenericBinder, ImplDef, Item, ItemKind, Module, RegionGeneric, SpannedTy, TraitDef,
-            TypeGeneric, Visibility,
+            AdtStructFieldSyntax, AnyGeneric, Crate, EnumVariantItem, Expr, FnDef, FnItem,
+            FuncDefOwner, GenericBinder, ImplDef, Item, ItemKind, Module, RegionGeneric, SpannedTy,
+            TraitDef, TypeGeneric, Visibility,
         },
     },
     symbol,
     utils::hash::FxHashMap,
 };
 use hashbrown::hash_map;
-use index_vec::IndexVec;
+use index_vec::IndexSlice;
 use std::rc::Rc;
 
 // === Driver === //
@@ -44,7 +44,7 @@ impl TyCtxt {
         // Build the module tree.
         let mut ctxt = UseLowerCtxt {
             tree: BuilderModuleTree::default(),
-            item_asts: IndexVec::new(),
+            inter_tasks: Vec::new(),
         };
 
         ctxt.lower_initial_tree(BuilderItemId::ROOT, ast);
@@ -58,93 +58,49 @@ impl TyCtxt {
             },
             s,
         );
-        let items = ctxt.tree.freeze_and_check(krate, s);
-        let root = items[BuilderItemId::ROOT];
+        let index_to_item = ctxt.tree.freeze_and_check(krate, s);
+        let root = index_to_item[BuilderItemId::ROOT];
 
-        let UseLowerCtxt { tree: _, item_asts } = ctxt;
+        let UseLowerCtxt {
+            tree: _,
+            inter_tasks,
+        } = ctxt;
 
         // Lower inter-item properties.
-        let mut tasks = Vec::new();
+        let mut intra_tasks = Vec::new();
 
         InterItemLowerCtxt {
             tcx: self,
             root,
             target: root,
-            tasks: &mut tasks,
+            intra_tasks: &mut intra_tasks,
+            index_to_item: &index_to_item,
         }
         .lower_module(ast);
 
-        for (target, ast) in items.iter().skip(1).copied().zip(item_asts.iter().copied()) {
-            let mut ctxt = InterItemLowerCtxt {
+        for InterTask { item, mut handler } in inter_tasks {
+            handler(&mut InterItemLowerCtxt {
                 tcx: self,
                 root,
-                target,
-                tasks: &mut tasks,
-            };
-
-            match &ast {
-                AstItem::Mod(ast) => {
-                    ctxt.lower_module(ast.contents.as_ref().unwrap());
-                }
-                AstItem::Trait(ast) => {
-                    ctxt.lower_trait(ast);
-                }
-                AstItem::Impl(ast) => {
-                    ctxt.lower_impl(ast);
-                }
-                AstItem::Func(ast) => {
-                    ctxt.lower_fn_item(ast);
-                }
-                AstItem::Struct(ast) => {
-                    ctxt.lower_struct(ast);
-                }
-                AstItem::Enum(ast) => {
-                    ctxt.lower_enum(ast);
-                }
-                AstItem::Use(_) | AstItem::Error(_, _) => {
-                    unreachable!()
-                }
-            }
+                target: index_to_item[item],
+                intra_tasks: &mut intra_tasks,
+                index_to_item: &index_to_item,
+            });
         }
 
         // Lower intra-item properties.
-        for (scope, kind) in tasks {
-            let ctxt = IntraItemLowerCtxt {
+        for IntraTask { item, mut handler } in intra_tasks {
+            handler(IntraItemLowerCtxt {
                 tcx: self,
                 root,
-                target: scope,
+                target: item,
                 generic_ty_names: NameResolver::new(),
                 generic_re_names: NameResolver::new(),
                 block_label_names: NameResolver::new(),
-            };
-
-            match kind {
-                IntraLowerTask::Trait {
-                    item,
-                    inherits,
-                    generic_clause_lists,
-                } => {
-                    ctxt.lower_trait(item, inherits, generic_clause_lists);
-                }
-                IntraLowerTask::Impl { item, ast } => {
-                    ctxt.lower_impl(item, ast);
-                }
-                IntraLowerTask::Adt {
-                    item,
-                    generic_clause_lists,
-                    field_tys_to_extend,
-                } => {
-                    ctxt.lower_adt(item, generic_clause_lists, field_tys_to_extend);
-                }
-                IntraLowerTask::FnDef {
-                    item,
-                    ast,
-                    generic_clause_lists,
-                } => ctxt.lower_fn_def(item, ast, generic_clause_lists),
-            }
+            });
         }
 
-        LateInit::init(&krate.r(s).items, items.raw);
+        LateInit::init(&krate.r(s).items, index_to_item.raw);
 
         krate
     }
@@ -154,19 +110,37 @@ impl TyCtxt {
 
 pub struct UseLowerCtxt<'ast> {
     tree: BuilderModuleTree,
-    item_asts: IndexVec<BuilderItemId, &'ast AstItem>,
+    inter_tasks: Vec<InterTask<'ast>>,
+}
+
+struct InterTask<'ast> {
+    item: BuilderItemId,
+    handler: Box<dyn 'ast + FnMut(&mut InterItemLowerCtxt<'_, 'ast>)>,
 }
 
 impl<'ast> UseLowerCtxt<'ast> {
+    pub fn queue_task(
+        &mut self,
+        item: BuilderItemId,
+        task: impl 'ast + FnOnce(&mut InterItemLowerCtxt<'_, 'ast>),
+    ) {
+        let mut task = Some(task);
+
+        self.inter_tasks.push(InterTask {
+            item,
+            handler: Box::new(move |cx| task.take().unwrap()(cx)),
+        });
+    }
+
     pub fn lower_initial_tree(
         &mut self,
         parent_id: BuilderItemId,
         ast: &'ast AstItemModuleContents,
     ) {
-        for item_enum in &ast.items {
-            match item_enum {
+        for item in &ast.items {
+            match item {
                 AstItem::Mod(item) => {
-                    let item_mod_id = self.tree.push_named_item(
+                    let item_id = self.tree.push_named_item(
                         parent_id,
                         ParentKind::Real,
                         item.base.vis.clone(),
@@ -174,9 +148,11 @@ impl<'ast> UseLowerCtxt<'ast> {
                         item.name,
                     );
 
-                    self.item_asts.push(item_enum);
+                    self.queue_task(item_id, |cx| {
+                        cx.lower_module(item.contents.as_ref().unwrap())
+                    });
 
-                    self.lower_initial_tree(item_mod_id, item.contents.as_ref().unwrap());
+                    self.lower_initial_tree(item_id, item.contents.as_ref().unwrap());
                 }
                 AstItem::Use(item) => {
                     let mut prefix = Vec::new();
@@ -184,7 +160,7 @@ impl<'ast> UseLowerCtxt<'ast> {
                     self.lower_use(parent_id, &item.base.vis, &mut prefix, &item.path);
                 }
                 AstItem::Trait(item) => {
-                    self.tree.push_named_item(
+                    let item_id = self.tree.push_named_item(
                         parent_id,
                         ParentKind::Scope,
                         item.base.vis.clone(),
@@ -192,7 +168,9 @@ impl<'ast> UseLowerCtxt<'ast> {
                         item.name,
                     );
 
-                    self.item_asts.push(item_enum);
+                    self.queue_task(item_id, |cx| {
+                        cx.lower_trait(item);
+                    });
                 }
                 AstItem::Impl(item) => {
                     if !item.base.vis.kind.is_omitted() {
@@ -203,17 +181,19 @@ impl<'ast> UseLowerCtxt<'ast> {
                         .emit();
                     }
 
-                    self.tree.push_unnamed_item(
+                    let item_id = self.tree.push_unnamed_item(
                         parent_id,
                         ParentKind::Scope,
                         ItemCategory::Impl,
                         None,
                     );
 
-                    self.item_asts.push(item_enum);
+                    self.queue_task(item_id, |cx| {
+                        cx.lower_impl(item);
+                    });
                 }
                 AstItem::Func(item) => {
-                    self.tree.push_named_item(
+                    let item_id = self.tree.push_named_item(
                         parent_id,
                         ParentKind::Scope,
                         item.base.vis.clone(),
@@ -221,10 +201,12 @@ impl<'ast> UseLowerCtxt<'ast> {
                         item.def.name,
                     );
 
-                    self.item_asts.push(item_enum);
+                    self.queue_task(item_id, |cx| {
+                        cx.lower_fn_item(item);
+                    });
                 }
                 AstItem::Struct(item) => {
-                    self.tree.push_named_item(
+                    let item_id = self.tree.push_named_item(
                         parent_id,
                         ParentKind::Scope,
                         item.base.vis.clone(),
@@ -232,10 +214,12 @@ impl<'ast> UseLowerCtxt<'ast> {
                         item.name,
                     );
 
-                    self.item_asts.push(item_enum);
+                    self.queue_task(item_id, |cx| {
+                        cx.lower_struct(item);
+                    });
                 }
                 AstItem::Enum(item) => {
-                    let enum_id = self.tree.push_named_item(
+                    let item_id = self.tree.push_named_item(
                         parent_id,
                         ParentKind::Scope,
                         item.base.vis.clone(),
@@ -243,11 +227,13 @@ impl<'ast> UseLowerCtxt<'ast> {
                         item.name,
                     );
 
-                    self.item_asts.push(item_enum);
+                    self.queue_task(item_id, |cx| {
+                        cx.lower_enum(item);
+                    });
 
-                    for variant in &item.variants {
-                        self.tree.push_named_item(
-                            enum_id,
+                    for (idx, variant) in item.variants.iter().enumerate() {
+                        let variant_id = self.tree.push_named_item(
+                            item_id,
                             ParentKind::Scope,
                             AstVisibility {
                                 span: Span::DUMMY,
@@ -257,7 +243,9 @@ impl<'ast> UseLowerCtxt<'ast> {
                             variant.name,
                         );
 
-                        self.item_asts.push(item_enum);
+                        self.queue_task(variant_id, move |cx| {
+                            cx.lower_variant(cx.index_to_item[item_id], idx as u32);
+                        });
                     }
                 }
                 AstItem::Error(_, _) => {
@@ -359,12 +347,23 @@ pub struct InterItemLowerCtxt<'a, 'ast> {
     pub tcx: &'a TyCtxt,
     pub root: Obj<Item>,
     pub target: Obj<Item>,
-    pub tasks: &'a mut Vec<(Obj<Item>, IntraLowerTask<'ast>)>,
+    pub intra_tasks: &'a mut Vec<IntraTask<'ast>>,
+    pub index_to_item: &'a IndexSlice<BuilderItemId, [Obj<Item>]>,
+}
+
+struct IntraTask<'ast> {
+    item: Obj<Item>,
+    handler: Box<dyn 'ast + FnMut(IntraItemLowerCtxt<'_>)>,
 }
 
 impl<'ast> InterItemLowerCtxt<'_, 'ast> {
-    pub fn push_task(&mut self, kind: IntraLowerTask<'ast>) {
-        self.tasks.push((self.target, kind));
+    pub fn queue_task(&mut self, task: impl 'ast + FnOnce(IntraItemLowerCtxt<'_>)) {
+        let mut task = Some(task);
+
+        self.intra_tasks.push(IntraTask {
+            item: self.target,
+            handler: Box::new(move |cx| task.take().unwrap()(cx)),
+        });
     }
 
     pub fn resolve_visibility(&self, vis: &AstVisibility) -> Visibility {
@@ -453,10 +452,8 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
 
         LateInit::init(&self.target.r(s).kind, ItemKind::Trait(trait_target));
 
-        self.push_task(IntraLowerTask::Trait {
-            item: trait_target,
-            inherits: ast.inherits.as_ref(),
-            generic_clause_lists,
+        self.queue_task(move |cx| {
+            cx.lower_trait(trait_target, ast.inherits.as_ref(), generic_clause_lists);
         });
     }
 
@@ -488,10 +485,8 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
 
         LateInit::init(&self.target.r(s).kind, ItemKind::Adt(target_def));
 
-        self.push_task(IntraLowerTask::Adt {
-            item: target_def,
-            generic_clause_lists,
-            field_tys_to_extend,
+        self.queue_task(move |cx| {
+            cx.lower_adt(target_def, generic_clause_lists, field_tys_to_extend);
         });
     }
 
@@ -573,11 +568,25 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
 
         LateInit::init(&self.target.r(s).kind, ItemKind::Adt(target_def));
 
-        self.push_task(IntraLowerTask::Adt {
-            item: target_def,
-            generic_clause_lists,
-            field_tys_to_extend,
+        self.queue_task(move |cx| {
+            cx.lower_adt(target_def, generic_clause_lists, field_tys_to_extend);
         });
+    }
+
+    pub fn lower_variant(&mut self, owner: Obj<Item>, idx: u32) {
+        let s = &self.tcx.session;
+
+        LateInit::init(
+            &self.target.r(s).kind,
+            ItemKind::EnumVariant(Obj::new(
+                EnumVariantItem {
+                    item: self.target,
+                    owner,
+                    idx,
+                },
+                s,
+            )),
+        );
     }
 
     pub fn lower_struct_kind(
@@ -684,9 +693,10 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
     }
 
     pub fn lower_impl(&mut self, ast: &'ast AstItemImpl) {
-        self.push_task(IntraLowerTask::Impl {
-            item: self.target,
-            ast,
+        let target = self.target;
+
+        self.queue_task(move |cx| {
+            cx.lower_impl(target, ast);
         });
     }
 
@@ -732,10 +742,8 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
             s,
         );
 
-        self.push_task(IntraLowerTask::FnDef {
-            item: def,
-            ast,
-            generic_clause_lists,
+        self.queue_task(move |cx| {
+            cx.lower_fn_def(def, ast, generic_clause_lists);
         });
 
         def
@@ -751,28 +759,6 @@ pub struct IntraItemLowerCtxt<'tcx> {
     pub generic_ty_names: NameResolver<Obj<TypeGeneric>>,
     pub generic_re_names: NameResolver<Obj<RegionGeneric>>,
     pub block_label_names: NameResolver<(Span, Obj<Expr>)>,
-}
-
-pub enum IntraLowerTask<'ast> {
-    Trait {
-        item: Obj<TraitDef>,
-        inherits: Option<&'ast AstTraitClauseList>,
-        generic_clause_lists: Vec<Option<&'ast AstTraitClauseList>>,
-    },
-    Impl {
-        item: Obj<Item>,
-        ast: &'ast AstItemImpl,
-    },
-    Adt {
-        item: Obj<AdtDef>,
-        generic_clause_lists: Vec<Option<&'ast AstTraitClauseList>>,
-        field_tys_to_extend: Vec<(&'ast AstTy, Obj<LateInit<SpannedTy>>)>,
-    },
-    FnDef {
-        item: Obj<FnDef>,
-        ast: &'ast AstFnDef,
-        generic_clause_lists: Vec<Option<&'ast AstTraitClauseList>>,
-    },
 }
 
 impl IntraItemLowerCtxt<'_> {

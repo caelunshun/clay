@@ -55,6 +55,7 @@ pub struct DirectUse {
 pub enum ItemKind {
     Module(Obj<Module>),
     Adt(Obj<AdtDef>),
+    EnumVariant(Obj<EnumVariantItem>),
     Trait(Obj<TraitDef>),
     Impl(Obj<ImplDef>),
     Func(Obj<FnItem>),
@@ -64,6 +65,13 @@ impl ItemKind {
     pub fn as_adt(self) -> Option<Obj<AdtDef>> {
         match self {
             ItemKind::Adt(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn as_enum_variant(self) -> Option<Obj<EnumVariantItem>> {
+        match self {
+            ItemKind::EnumVariant(v) => Some(v),
             _ => None,
         }
     }
@@ -88,6 +96,13 @@ impl ItemKind {
             _ => None,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumVariantItem {
+    pub item: Obj<Item>,
+    pub owner: Obj<Item>,
+    pub idx: u32,
 }
 
 #[derive(Debug, Clone)]
