@@ -177,7 +177,7 @@ impl<T: Handle> StepResolveError<T> {
                 format_args!(
                     "`{}` not found in `{}`",
                     part.raw().text,
-                    resolver.path(curr),
+                    resolver.path(resolver.scope_root(curr)),
                 ),
             )
             .emit(),
@@ -241,6 +241,8 @@ pub trait ParentResolver {
     }
 
     fn is_descendant(&self, mut descendant: Self::Item, ancestor: Self::Item) -> bool {
+        descendant = self.scope_root(descendant);
+
         loop {
             if descendant == ancestor {
                 return true;
@@ -359,7 +361,7 @@ pub trait VisibilityResolver: PathResolver {
                 format_args!(
                     "`{}` is not an ancestor of the current module (`{}`)",
                     self.path(target),
-                    self.path(origin),
+                    self.path(self.scope_root(origin)),
                 ),
             )
             .emit());

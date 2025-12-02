@@ -235,7 +235,7 @@ impl<'ast> UseLowerCtxt<'ast> {
                     self.item_asts.push(item_enum);
                 }
                 AstItem::Enum(item) => {
-                    self.tree.push_named_item(
+                    let enum_id = self.tree.push_named_item(
                         parent_id,
                         ParentKind::Scope,
                         item.base.vis.clone(),
@@ -244,6 +244,21 @@ impl<'ast> UseLowerCtxt<'ast> {
                     );
 
                     self.item_asts.push(item_enum);
+
+                    for variant in &item.variants {
+                        self.tree.push_named_item(
+                            enum_id,
+                            ParentKind::Scope,
+                            AstVisibility {
+                                span: Span::DUMMY,
+                                kind: AstVisibilityKind::Pub,
+                            },
+                            ItemCategory::EnumVariant,
+                            variant.name,
+                        );
+
+                        self.item_asts.push(item_enum);
+                    }
                 }
                 AstItem::Error(_, _) => {
                     // (ignored)
@@ -497,19 +512,42 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
             .iter()
             .enumerate()
             .map(|(idx, variant)| {
-                match by_name.entry(variant.name.text) {
-                    hash_map::Entry::Occupied(entry) => {
-                        Diag::span_err(variant.span, "duplicate variant name")
-                            .child(LeafDiag::span_note(
-                                ast.variants[*entry.get() as usize].name.span,
-                                "name first used here",
-                            ))
-                            .emit();
-                    }
-                    hash_map::Entry::Vacant(entry) => {
-                        entry.insert(idx as u32);
-                    }
-                }
+                // Enums already have their variant names checked by the module resolution engine.
+                //
+                // Rust does this too:
+                //
+                // ```rust
+                // pub enum Whee {
+                //     Foo,
+                //     Foo,
+                // }
+                //
+                // pub struct Woo {
+                //     foo: (),
+                //     foo: (),
+                // }
+                // ```
+                //
+                // ```
+                // error[E0428]: the name `Foo` is defined multiple times
+                //  --> src/lib.rs:3:5
+                //   |
+                // 2 |     Foo,
+                //   |     --- previous definition of the type `Foo` here
+                // 3 |     Foo,
+                //   |     ^^^ `Foo` redefined here
+                //   |
+                //   = note: `Foo` must be defined only once in the type namespace of this enum
+                //
+                // error[E0124]: field `foo` is already declared
+                //  --> src/lib.rs:8:5
+                //   |
+                // 7 |     foo: (),
+                //   |     ------- `foo` first declared here
+                // 8 |     foo: (),
+                //   |     ^^^^^^^ field already declared
+                // ```
+                by_name.entry(variant.name.text).or_insert(idx as u32);
 
                 AdtEnumVariant {
                     idx: idx as u32,
