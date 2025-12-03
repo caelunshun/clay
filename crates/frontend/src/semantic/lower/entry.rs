@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        Diag, ErrorGuaranteed, LeafDiag,
+        Diag, LeafDiag,
         analysis::NameResolver,
         arena::{LateInit, Obj},
         syntax::{HasSpan as _, Span},
@@ -18,14 +18,14 @@ use crate::{
     semantic::{
         analysis::TyCtxt,
         lower::modules::{
-            BuilderItemId, BuilderModuleTree, FrozenModuleResolver, FrozenVisibilityResolver,
-            ItemCategory, PathResolver, VisibilityResolver,
+            BuilderItemId, BuilderModuleTree, FrozenVisibilityResolver, ItemCategory,
+            VisibilityResolver,
         },
         syntax::{
             AdtDef, AdtEnumVariant, AdtKind, AdtKindEnum, AdtKindStruct, AdtStructField,
             AdtStructFieldSyntax, AnyGeneric, Crate, EnumVariantItem, Expr, FnDef, FnItem,
-            FuncDefOwner, GenericBinder, ImplDef, Item, ItemKind, Module, RegionGeneric, SpannedTy,
-            TraitDef, TypeGeneric, Visibility,
+            FuncDefOwner, FuncLocal, GenericBinder, ImplDef, Item, ItemKind, Module, RegionGeneric,
+            SpannedTy, TraitDef, TypeGeneric, Visibility,
         },
     },
     symbol,
@@ -112,6 +112,7 @@ impl TyCtxt {
                 generic_ty_names: NameResolver::new(),
                 generic_re_names: NameResolver::new(),
                 block_label_names: NameResolver::new(),
+                func_local_names: NameResolver::new(),
             });
         }
 
@@ -770,13 +771,10 @@ pub struct IntraItemLowerCtxt<'tcx> {
     pub generic_ty_names: NameResolver<Obj<TypeGeneric>>,
     pub generic_re_names: NameResolver<Obj<RegionGeneric>>,
     pub block_label_names: NameResolver<(Span, Obj<Expr>)>,
+    pub func_local_names: NameResolver<Obj<FuncLocal>>,
 }
 
 impl IntraItemLowerCtxt<'_> {
-    pub fn resolve_bare_path(&self, path: &AstBarePath) -> Result<Obj<Item>, ErrorGuaranteed> {
-        FrozenModuleResolver(&self.tcx.session).resolve_bare_path(self.root, self.scope, path)
-    }
-
     pub fn lookup_label(&mut self, label: Option<Lifetime>) -> Option<Obj<Expr>> {
         let label = label?;
         let resolved = self.block_label_names.lookup(label.name).map(|v| v.1);
@@ -792,10 +790,12 @@ impl IntraItemLowerCtxt<'_> {
         self.generic_ty_names.push_rib();
         self.generic_re_names.push_rib();
         self.block_label_names.push_rib();
+        self.func_local_names.push_rib();
         let ret = f(self);
         self.generic_ty_names.pop_rib();
         self.generic_re_names.pop_rib();
         self.block_label_names.pop_rib();
+        self.func_local_names.pop_rib();
 
         ret
     }

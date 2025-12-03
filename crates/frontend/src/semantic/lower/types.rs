@@ -7,21 +7,24 @@ use crate::{
     },
     parse::{
         ast::{
-            AstGenericDef, AstGenericParamKind, AstGenericParamList, AstGenericPositional,
-            AstImplLikeBody, AstImplLikeMemberKind, AstNamedSpec, AstTraitClause,
-            AstTraitClauseList, AstTy, AstTyKind, AstTyOrRe,
+            AstBarePath, AstGenericDef, AstGenericParam, AstGenericParamKind, AstGenericParamList,
+            AstGenericPositional, AstImplLikeBody, AstImplLikeMemberKind, AstNamedSpec,
+            AstTraitClause, AstTraitClauseList, AstTy, AstTyKind, AstTyOrRe,
         },
         token::Lifetime,
     },
     semantic::{
-        lower::entry::{InterItemLowerCtxt, IntraItemLowerCtxt},
+        lower::{
+            entry::{InterItemLowerCtxt, IntraItemLowerCtxt},
+            modules::{FrozenModuleResolver, ParentResolver, PathResolver as _},
+        },
         syntax::{
-            AnyGeneric, GenericBinder, Re, RegionGeneric, SpannedAdtInstanceView, SpannedRe,
-            SpannedTraitClause, SpannedTraitClauseList, SpannedTraitClauseView,
-            SpannedTraitInstance, SpannedTraitInstanceView, SpannedTraitParam,
-            SpannedTraitParamList, SpannedTraitParamView, SpannedTraitSpec, SpannedTraitSpecView,
-            SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView,
-            SpannedTyView, TraitDef, TraitParam, TypeGeneric,
+            AdtDef, AnyGeneric, GenericBinder, Item, ItemKind, Re, RegionGeneric,
+            SpannedAdtInstanceView, SpannedRe, SpannedTraitClause, SpannedTraitClauseList,
+            SpannedTraitClauseView, SpannedTraitInstance, SpannedTraitInstanceView,
+            SpannedTraitParam, SpannedTraitParamList, SpannedTraitParamView, SpannedTraitSpec,
+            SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReList,
+            SpannedTyOrReView, SpannedTyView, TraitDef, TraitParam, TypeGeneric,
         },
     },
     utils::hash::FxHashMap,
@@ -79,7 +82,75 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum TyPathResolution {
+    Generic(Obj<TypeGeneric>),
+    Adt(Obj<AdtDef>),
+    Trait(Obj<TraitDef>),
+    Other(Obj<Item>),
+}
+
 impl IntraItemLowerCtxt<'_> {
+    pub fn resolve_ty_item_path(
+        &self,
+        path: &AstBarePath,
+    ) -> Result<TyPathResolution, ErrorGuaranteed> {
+        let s = &self.tcx.session;
+        let mut resolver = FrozenModuleResolver(s);
+
+        if let Some(first) = path.parts.first()
+            && let Some(first) = first.ident()
+            && let Some(generic) = self.generic_ty_names.lookup(first.text)
+        {
+            if let Some(subsequent) = path.parts.get(1) {
+                Diag::span_err(
+                    subsequent.span(),
+                    "generic types cannot be accessed like modules",
+                )
+                .emit();
+            }
+
+            return Ok(TyPathResolution::Generic(*generic));
+        }
+
+        let target = resolver.resolve_bare_path(self.root, self.scope, path)?;
+
+        match *target.r(s).kind {
+            ItemKind::Adt(def) => Ok(TyPathResolution::Adt(def)),
+            ItemKind::Trait(def) => Ok(TyPathResolution::Trait(def)),
+            _ => Ok(TyPathResolution::Other(target)),
+        }
+    }
+
+    pub fn resolve_ty_item_path_as_trait(
+        &self,
+        path: &AstBarePath,
+    ) -> Result<Obj<TraitDef>, ErrorGuaranteed> {
+        let s = &self.tcx.session;
+        let resolver = FrozenModuleResolver(s);
+
+        let offending_item = match self.resolve_ty_item_path(path)? {
+            TyPathResolution::Trait(def) => return Ok(def),
+            TyPathResolution::Generic(_) => {
+                return Err(
+                    Diag::span_err(path.span, "expected type, found generic parameter").emit(),
+                );
+            }
+            TyPathResolution::Adt(def) => def.r(s).item,
+            TyPathResolution::Other(item) => item,
+        };
+
+        Err(Diag::span_err(
+            path.span,
+            format_args!(
+                "expected trait, found {} `{}`",
+                resolver.categorize(offending_item).bare_what(),
+                resolver.path(offending_item),
+            ),
+        )
+        .emit())
+    }
+
     pub fn define_generics_in_binder(&mut self, binder: Obj<GenericBinder>) {
         let s = &self.tcx.session;
 
@@ -171,23 +242,7 @@ impl IntraItemLowerCtxt<'_> {
         &mut self,
         ast: &AstNamedSpec,
     ) -> Result<SpannedTraitSpec, ErrorGuaranteed> {
-        let s = &self.tcx.session;
-
-        if let Some(path) = ast.path.as_ident()
-            && self.generic_ty_names.lookup(path.text).is_some()
-        {
-            return Err(
-                Diag::span_err(path.span, "expected a trait but got a generic type").emit(),
-            );
-        }
-
-        let def = self
-            .resolve_bare_path(&ast.path)?
-            .r(s)
-            .kind
-            .as_trait()
-            .ok_or_else(|| Diag::span_err(ast.path.span, "expected a trait").emit())?;
-
+        let def = self.resolve_ty_item_path_as_trait(&ast.path)?;
         let params = self.lower_trait_spec_generics(def, ast.span, ast.params.as_ref())?;
 
         Ok(SpannedTraitSpecView { def, params }.encode(ast.span, self.tcx))
@@ -202,23 +257,10 @@ impl IntraItemLowerCtxt<'_> {
 
         // Validate path
         let AstTyKind::Name(path, generics) = &main_ty.kind else {
-            return Err(Diag::span_err(main_ty.span, "expected a trait").emit());
+            return Err(Diag::span_err(main_ty.span, "expected a trait, found a type").emit());
         };
 
-        if let Some(path) = path.as_ident()
-            && self.generic_ty_names.lookup(path.text).is_some()
-        {
-            return Err(
-                Diag::span_err(path.span, "expected a trait but got a generic type").emit(),
-            );
-        }
-
-        let def = self
-            .resolve_bare_path(path)?
-            .r(s)
-            .kind
-            .as_trait()
-            .ok_or_else(|| Diag::span_err(path.span, "expected a trait").emit())?;
+        let def = self.resolve_ty_item_path_as_trait(path)?;
 
         let mut params = Vec::new();
 
@@ -228,7 +270,7 @@ impl IntraItemLowerCtxt<'_> {
                 def.r(s).generics,
                 Some(def.r(s).regular_generic_count),
                 main_ty.span,
-                generics.as_ref(),
+                generics.as_ref().map_or(&[][..], |v| &v.list),
             )
             .iter(self.tcx),
         );
@@ -324,45 +366,54 @@ impl IntraItemLowerCtxt<'_> {
         match &ast.kind {
             AstTyKind::This => SpannedTyView::This.encode(ast.span, self.tcx),
             AstTyKind::Name(path, generics) => {
-                if let Some(name) = path.parts[0].ident()
-                    && let Some(generic) = self.generic_ty_names.lookup(name.text)
-                {
-                    if let Some(subsequent) = path.parts.get(1) {
-                        Diag::span_err(
-                            subsequent.span(),
-                            "generic types cannot be accessed like modules",
-                        )
-                        .emit();
-                    } else if let Some(generics) = generics {
-                        Diag::span_err(
-                            generics.span,
-                            "generic types cannot be instantiated with further generic parameters",
-                        )
-                        .emit();
+                let resolver = FrozenModuleResolver(s);
+
+                let def = match self.resolve_ty_item_path(path) {
+                    Ok(TyPathResolution::Adt(def)) => def,
+                    Ok(TyPathResolution::Generic(def)) => {
+                        return SpannedTyView::Universal(def).encode(ast.span, self.tcx);
                     }
-
-                    return SpannedTyView::Universal(*generic).encode(ast.span, self.tcx);
-                }
-
-                let def = match self.resolve_bare_path(path) {
-                    Ok(def) => def,
+                    Ok(TyPathResolution::Trait(def)) => {
+                        return SpannedTyView::Error(
+                            Diag::span_err(
+                                ast.span,
+                                format_args!(
+                                    "expected a struct or enum, found trait `{}`",
+                                    resolver.path(def.r(s).item),
+                                ),
+                            )
+                            .child(LeafDiag::new(
+                                Level::Help,
+                                "consider prefixing the trait with `dyn`",
+                            ))
+                            .emit(),
+                        )
+                        .encode(ast.span, self.tcx);
+                    }
+                    Ok(TyPathResolution::Other(def)) => {
+                        return SpannedTyView::Error(
+                            Diag::span_err(
+                                ast.span,
+                                format_args!(
+                                    "expected a struct or enum, found {} `{}`",
+                                    resolver.categorize(def).bare_what(),
+                                    resolver.path(def),
+                                ),
+                            )
+                            .emit(),
+                        )
+                        .encode(ast.span, self.tcx);
+                    }
                     Err(err) => {
                         return SpannedTyView::Error(err).encode(ast.span, self.tcx);
                     }
-                };
-
-                let Some(def) = def.r(s).kind.as_adt() else {
-                    return SpannedTyView::Error(
-                        Diag::span_err(path.span, "expected enum or struct").emit(),
-                    )
-                    .encode(ast.span, self.tcx);
                 };
 
                 let params = self.lower_positional_binder_generics(
                     def.r(s).generics,
                     None,
                     ast.span,
-                    generics.as_ref(),
+                    generics.as_ref().map_or(&[][..], |v| &v.list),
                 );
 
                 SpannedTyView::Adt(
@@ -382,6 +433,7 @@ impl IntraItemLowerCtxt<'_> {
             AstTyKind::Trait(spec) => {
                 SpannedTyView::Trait(self.lower_clauses(Some(spec))).encode(ast.span, self.tcx)
             }
+            AstTyKind::Paren(ast) => self.lower_ty(ast),
             AstTyKind::Tuple(items) => {
                 SpannedTyView::Tuple(self.lower_tys(items)).encode(ast.span, self.tcx)
             }
@@ -523,18 +575,17 @@ impl IntraItemLowerCtxt<'_> {
         binder: Obj<GenericBinder>,
         binder_len_override: Option<u32>,
         segment_span: Span,
-        ast: Option<&AstGenericParamList>,
+        ast_params: &[AstGenericParam],
     ) -> SpannedTyOrReList {
         let s = &self.tcx.session;
 
         let binder_len = binder_len_override.map_or(binder.r(s).defs.len(), |v| v as usize);
-        let ast = ast.as_ref().map_or(&[][..], |v| v.list.as_slice());
 
         let mut errored_out_missing = None;
 
         let params = binder.r(s).defs[..binder_len]
             .iter()
-            .zip(ast.iter().map(Some).chain(iter::repeat(None)))
+            .zip(ast_params.iter().map(Some).chain(iter::repeat(None)))
             .map(|(expected, actual)| {
                 let actual_span = actual.map_or(segment_span, |v| v.span);
 
@@ -548,7 +599,7 @@ impl IntraItemLowerCtxt<'_> {
                                         "expected {} generic parameter{} but got {}",
                                         binder_len,
                                         if binder_len == 1 { "" } else { "s" },
-                                        ast.len()
+                                        ast_params.len()
                                     ),
                                 ))
                                 .emit()
@@ -598,15 +649,15 @@ impl IntraItemLowerCtxt<'_> {
             })
             .collect::<Vec<_>>();
 
-        if ast.len() > binder_len {
-            Diag::span_err(ast[binder_len].span, "too many generic parameters")
+        if ast_params.len() > binder_len {
+            Diag::span_err(ast_params[binder_len].span, "too many generic parameters")
                 .child(LeafDiag::new(
                     Level::Note,
                     format_args!(
                         "expected {} generic parameter{} but got {}",
                         binder_len,
                         if binder_len == 1 { "" } else { "s" },
-                        ast.len()
+                        ast_params.len()
                     ),
                 ))
                 .emit();

@@ -4,7 +4,7 @@ use crate::{
         syntax::{HasSpan, Span},
     },
     parse::{
-        ast::{AstOptMutability, AstBarePath},
+        ast::{AstBarePath, AstOptMutability},
         token::{Ident, Lifetime},
     },
 };
@@ -129,6 +129,7 @@ pub enum AstTyKind {
     Name(AstBarePath, Option<AstGenericParamList>),
     Reference(Option<Lifetime>, AstOptMutability, Box<AstTy>),
     Trait(AstTraitClauseList),
+    Paren(Box<AstTy>),
     Tuple(Vec<AstTy>),
     Infer,
     Error(ErrorGuaranteed),

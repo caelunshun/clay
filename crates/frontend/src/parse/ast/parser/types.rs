@@ -206,7 +206,7 @@ pub fn parse_ty_pratt_seed(p: P) -> AstTy {
         let parts = parse_comma_group(&mut p.enter(&group), parse_ty);
 
         match parts.into_singleton() {
-            Ok(singleton) => return singleton,
+            Ok(singleton) => return build_ty(AstTyKind::Paren(Box::new(singleton)), p),
             Err(parts) => return build_ty(AstTyKind::Tuple(parts), p),
         }
     }
