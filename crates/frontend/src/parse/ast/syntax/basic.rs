@@ -2,7 +2,7 @@ use crate::{
     base::syntax::{HasSpan, Span},
     kw,
     parse::{
-        ast::{AstGenericParamList, AstNamedSpec, AstTy},
+        ast::AstGenericParamList,
         token::{Ident, TokenStream},
     },
     semantic::syntax::Mutability,
@@ -29,12 +29,15 @@ pub struct AstBarePath {
 }
 
 impl AstBarePath {
-    pub fn as_ident(&self) -> Option<Ident> {
+    pub fn as_singleton(&self) -> Option<AstPathPart> {
         self.parts
             .first()
             .copied()
             .filter(|_| self.parts.len() == 1)
-            .and_then(|v| v.ident())
+    }
+
+    pub fn as_ident(&self) -> Option<Ident> {
+        self.as_singleton().and_then(|v| v.ident())
     }
 }
 
@@ -53,29 +56,15 @@ pub enum AstTreePathKind {
     Tree(Vec<AstTreePath>),
 }
 
-// Expr
+// Paramed
 #[derive(Debug, Clone)]
-pub struct AstQualifiedExprPath {
+pub struct AstParamedPath {
     pub span: Span,
-    pub qualification: Option<Box<AstQualification>>,
-    pub rest: AstExprPath,
+    pub segments: Rc<[AstParamedPathSegment]>,
 }
 
 #[derive(Debug, Clone)]
-pub struct AstQualification {
-    pub span: Span,
-    pub self_ty: AstTy,
-    pub as_trait: Option<AstNamedSpec>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AstExprPath {
-    pub span: Span,
-    pub segments: Rc<[AstExprPathSegment]>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AstExprPathSegment {
+pub struct AstParamedPathSegment {
     pub part: AstPathPart,
     pub args: Option<Box<AstGenericParamList>>,
 }

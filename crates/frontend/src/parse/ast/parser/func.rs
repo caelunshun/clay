@@ -7,11 +7,11 @@ use crate::{
     parse::{
         ast::{
             AstAssignOpKind, AstBinOpKind, AstBindingMode, AstBlock, AstBoolLit, AstExpr,
-            AstExprField, AstExprKind, AstFnArg, AstFnDef, AstGenericParam, AstGenericParamKind,
-            AstLit, AstMatchArm, AstOptMutability, AstPat, AstPatField, AstPatKind,
-            AstPatStructRest, AstRangeLimits, AstStmt, AstStmtKind, AstStmtLet, AstStructRest,
-            AstTy, AstTyKind, AstUnOpKind, PunctSeq,
-            basic::{parse_mutability, parse_qualified_expr_path},
+            AstExprField, AstExprKind, AstExprPath, AstExprPathKind, AstFnArg, AstFnDef,
+            AstGenericParam, AstGenericParamKind, AstLit, AstMatchArm, AstOptMutability, AstPat,
+            AstPatField, AstPatKind, AstPatStructRest, AstQualification, AstRangeLimits, AstStmt,
+            AstStmtKind, AstStmtLet, AstStructRest, AstTy, AstTyKind, AstUnOpKind, PunctSeq,
+            basic::{parse_mutability, parse_paramed_path, parse_paramed_path_no_guard},
             bp::expr_bp,
             entry::P,
             types::{parse_generic_param_list, parse_return_ty, parse_ty},
@@ -154,7 +154,7 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
     }
 
     // Parse an expression path.
-    if let Some(path) = parse_qualified_expr_path(p) {
+    if let Some(path) = parse_expr_path(p) {
         if flags.contains(AstExprFlags::ALLOW_STRUCT_CTOR)
             && let Some(group) = match_group(GroupDelimiter::Brace).expect(p)
         {
@@ -863,6 +863,80 @@ pub fn parse_expr_range_limits(p: P) -> Option<(Span, AstRangeLimits)> {
     None
 }
 
+pub fn parse_expr_path(p: P) -> Option<AstExprPath> {
+    let mut p = p.to_parse_guard(symbol!("path"));
+    let p = &mut p;
+
+    let start = p.next_span();
+
+    if let Some(self_kw) = match_kw(kw!("Self")).expect(p) {
+        let rest = if match_punct_seq(puncts!("::")).expect(p).is_some() {
+            match parse_paramed_path_no_guard(p) {
+                Some(path) => Some(path),
+                None => {
+                    return Some(AstExprPath {
+                        span: start.to(p.prev_span()),
+                        kind: AstExprPathKind::Error(p.stuck().error()),
+                    });
+                }
+            }
+        } else {
+            None
+        };
+
+        return Some(AstExprPath {
+            span: start.to(p.prev_span()),
+            kind: AstExprPathKind::SelfTy(self_kw.span, rest),
+        });
+    }
+
+    match parse_qualification(p) {
+        Some(qualification) => {
+            let Some(rest) = match_punct_seq(puncts!("::"))
+                .expect(p)
+                .and_then(|_| parse_paramed_path_no_guard(p))
+            else {
+                return Some(AstExprPath {
+                    span: start.to(p.prev_span()),
+                    kind: AstExprPathKind::Error(p.stuck().error()),
+                });
+            };
+
+            Some(AstExprPath {
+                span: start.to(p.prev_span()),
+                kind: AstExprPathKind::Qualified(Box::new(qualification), rest),
+            })
+        }
+        None => {
+            let rest = parse_paramed_path(p)?;
+
+            Some(AstExprPath {
+                span: start.to(p.prev_span()),
+                kind: AstExprPathKind::Bare(rest),
+            })
+        }
+    }
+}
+
+pub fn parse_qualification(p: P) -> Option<AstQualification> {
+    let start = p.next_span();
+
+    match_punct(punct!('<')).expect(p)?;
+
+    let self_ty = parse_ty(p);
+    let as_trait = match_kw(kw!("as")).expect(p).map(|_| parse_ty(p));
+
+    if match_punct(punct!('>')).expect(p).is_none() {
+        p.stuck().ignore_not_in_loop();
+    }
+
+    Some(AstQualification {
+        span: start.to(p.prev_span()),
+        self_ty,
+        as_trait,
+    })
+}
+
 // === Block === //
 
 fn parse_brace_block(p: P) -> Option<AstBlock> {
@@ -1072,7 +1146,7 @@ pub fn parse_pat_single_arm(p: P) -> AstPat {
     // Parse identifier variants
     let binding_mode = parse_binding_mode(p);
 
-    if let Some(path) = parse_qualified_expr_path(p) {
+    if let Some(path) = parse_expr_path(p) {
         let and_bind = match_punct(punct!('@'))
             .expect(p)
             .map(|_| Box::new(parse_pat_single_arm(p)));
@@ -1240,7 +1314,7 @@ pub fn parse_pat_lit_expr(p: P) -> Option<AstExpr> {
         return Some(lit);
     }
 
-    if let Some(path) = parse_qualified_expr_path(p) {
+    if let Some(path) = parse_expr_path(p) {
         return Some(AstExpr {
             span: path.span,
             kind: AstExprKind::Path(path),

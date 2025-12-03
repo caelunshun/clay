@@ -8,15 +8,100 @@ use crate::{
             AstBinOpKind, AstBlock, AstExpr, AstExprKind, AstPat, AstPatKind, AstStmt, AstStmtKind,
             AstStmtLet, AstUnOpKind,
         },
-        token::Lifetime,
+        token::{Ident, Lifetime},
     },
     semantic::{
         lower::entry::IntraItemLowerCtxt,
-        syntax::{Block, Expr, ExprKind, LetStmt, Pat, PatKind, Stmt},
+        syntax::{
+            AdtDef, Block, EnumVariantItem, Expr, ExprKind, FuncLocal, LetStmt, Pat, PatKind,
+            SpannedTraitInstance, SpannedTy, SpannedTyOrReList, Stmt,
+        },
     },
 };
 
+#[derive(Debug, Clone)]
+pub enum ExprPathResolution {
+    /// A reference to the `Self` type by itself.
+    ResolvedSelfTy,
+
+    /// A reference to some resolved ADT with some optional generic parameters.
+    ResolvedAdt(Obj<AdtDef>, Option<SpannedTyOrReList>),
+
+    /// A reference to some resolved enum variant with some optional generic parameters.
+    ResolvedEnumVariant(Obj<EnumVariantItem>, Option<SpannedTyOrReList>),
+
+    /// A reference to a type with some further qualifications for methods or constants that cannot
+    /// be solved at lowering time. Note that types without further qualifications will be treated
+    /// as `Resolved` or `ResolvedSelfTy` to maintain exactly one representation for such scenarios.
+    ///
+    /// For example...
+    ///
+    /// - `Self::new`:
+    ///     - `self_ty = This`
+    ///     - `as_trait = None`
+    ///     - `assoc_name = new`
+    ///     - `assoc_args = None`
+    /// - `Self::new::<u32>`:
+    ///     - `self_ty = This`
+    ///     - `as_trait = None`
+    ///     - `assoc_name = new`
+    ///     - `assoc_args = Some([u32])`
+    /// - `<()>::woo`:
+    ///     - `self_ty = ()`
+    ///     - `as_trait = None`
+    ///     - `assoc_name = woo`
+    ///     - `assoc_args = None`
+    /// - `T::new`:
+    ///     - `self_ty = Universal(T)`
+    ///     - `as_trait = None`
+    ///     - `assoc_name = new`
+    ///     - `assoc_args = None`
+    /// - `MyTrait::foo`:
+    ///     - `self_ty = ExplicitInfer`
+    ///     - `as_trait = Some(MyTrait<_>)`
+    ///     - `assoc_name = foo`
+    ///     - `assoc_args = None`
+    /// - `MyTrait::<u32>::foo`:
+    ///     - `self_ty = ExplicitInfer`
+    ///     - `as_trait = Some(MyTrait<u32>)`
+    ///     - `assoc_name = foo`
+    ///     - `assoc_args = None`
+    ///
+    TypeRelative {
+        self_ty: SpannedTy,
+        as_trait: Option<SpannedTraitInstance>,
+        assoc_name: Ident,
+        assoc_args: Option<SpannedTyOrReList>,
+    },
+
+    /// The regular `self` keyword, which refers to a local.
+    SelfLocal,
+
+    /// A reference to a local defined within the current function.
+    Local(Obj<FuncLocal>),
+}
+
 impl IntraItemLowerCtxt<'_> {
+    // pub fn resolve_expr_path(
+    //     &mut self,
+    //     path: &AstExprPath,
+    // ) -> Result<ExprPathResolution, ErrorGuaranteed> {
+    //     match &path.kind {
+    //         AstExprPathKind::Bare(ast_paramed_path) => todo!(),
+    //         AstExprPathKind::SelfTy(self_kw, None) => Ok(ExprPathResolution::ResolvedSelfTy),
+    //         AstExprPathKind::SelfTy(self_kw, Some(rest)) => Ok(ExprPathResolution::TypeRelative {
+    //             self_ty: SpannedTyView::This.encode(*self_kw, self.tcx),
+    //             as_trait: None,
+    //             assoc_name: (),
+    //             assoc_args: (),
+    //         }),
+    //         AstExprPathKind::Qualified(ast_qualification, ast_paramed_path) => {
+    //             todo!()
+    //         }
+    //         AstExprPathKind::Error(err) => Err(*err),
+    //     }
+    // }
+
     pub fn lower_block_with_label(
         &mut self,
         owner: Obj<Expr>,

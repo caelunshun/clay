@@ -3,11 +3,10 @@ use crate::{
     kw,
     parse::{
         ast::{
-            AstAttribute, AstBarePath, AstExprPath, AstExprPathSegment, AstOptMutability,
-            AstPathPart, AstQualification, AstQualifiedExprPath, AstTreePath, AstTreePathKind,
-            AstTy, AstTyKind, AstVisibility, AstVisibilityKind, Keyword,
+            AstAttribute, AstBarePath, AstOptMutability, AstParamedPath, AstParamedPathSegment,
+            AstPathPart, AstTreePath, AstTreePathKind, AstVisibility, AstVisibilityKind, Keyword,
             entry::P,
-            types::{parse_generic_param_list, parse_named_spec, parse_ty},
+            types::parse_generic_param_list,
             utils::{
                 match_eos, match_group, match_ident, match_kw, match_punct, match_punct_seq,
                 parse_delimited_until_terminator,
@@ -195,90 +194,14 @@ pub fn parse_tree_path(p: P) -> Option<AstTreePath> {
     })
 }
 
-pub fn parse_qualified_expr_path(p: P) -> Option<AstQualifiedExprPath> {
+pub fn parse_paramed_path(p: P) -> Option<AstParamedPath> {
     let mut p = p.to_parse_guard(symbol!("path"));
     let p = &mut p;
 
-    let start = p.next_span();
-
-    match parse_qualification(p) {
-        Some(qualification) => {
-            let rest = match_punct_seq(puncts!("::"))
-                .expect(p)
-                .and_then(|_| parse_expr_path_no_guard(p))
-                .unwrap_or_else(|| {
-                    p.stuck().ignore_not_in_loop();
-
-                    AstExprPath {
-                        span: qualification.span,
-                        segments: Rc::from_iter([]),
-                    }
-                });
-
-            Some(AstQualifiedExprPath {
-                span: start.to(p.prev_span()),
-                qualification: Some(Box::new(qualification)),
-                rest,
-            })
-        }
-        None => {
-            let rest = parse_expr_path(p)?;
-
-            Some(AstQualifiedExprPath {
-                span: start.to(p.prev_span()),
-                qualification: None,
-                rest,
-            })
-        }
-    }
+    parse_paramed_path_no_guard(p)
 }
 
-pub fn parse_qualification(p: P) -> Option<AstQualification> {
-    let start = p.next_span();
-
-    if let Some(kw) = match_kw(kw!("Self")).expect(p) {
-        return Some(AstQualification {
-            span: kw.span,
-            self_ty: AstTy {
-                span: kw.span,
-                kind: AstTyKind::This,
-            },
-            as_trait: None,
-        });
-    }
-
-    match_punct(punct!('<')).expect(p)?;
-
-    let self_ty = parse_ty(p);
-    let as_trait = match_kw(kw!("as")).expect(p).and_then(|_| {
-        let spec = parse_named_spec(p);
-
-        if spec.is_none() {
-            p.stuck().ignore_not_in_loop();
-        }
-
-        spec
-    });
-
-    if match_punct(punct!('>')).expect(p).is_none() {
-        p.stuck().ignore_not_in_loop();
-    }
-
-    Some(AstQualification {
-        span: start.to(p.prev_span()),
-        self_ty,
-        as_trait,
-    })
-}
-
-pub fn parse_expr_path(p: P) -> Option<AstExprPath> {
-    let mut p = p.to_parse_guard(symbol!("path"));
-    let p = &mut p;
-
-    parse_expr_path_no_guard(p)
-}
-
-pub fn parse_expr_path_no_guard(p: P) -> Option<AstExprPath> {
+pub fn parse_paramed_path_no_guard(p: P) -> Option<AstParamedPath> {
     let start = p.next_span();
 
     let mut parts = Vec::new();
@@ -293,14 +216,14 @@ pub fn parse_expr_path_no_guard(p: P) -> Option<AstExprPath> {
         };
 
         if match_punct_seq(puncts!("::")).expect(p).is_none() {
-            parts.push(AstExprPathSegment { part, args: None });
+            parts.push(AstParamedPathSegment { part, args: None });
             break;
         }
 
         let args = parse_generic_param_list(p).map(Box::new);
         let args_is_some = args.is_some();
 
-        parts.push(AstExprPathSegment { part, args });
+        parts.push(AstParamedPathSegment { part, args });
 
         if args_is_some && match_punct_seq(puncts!("::")).expect(p).is_none() {
             break;
@@ -311,7 +234,7 @@ pub fn parse_expr_path_no_guard(p: P) -> Option<AstExprPath> {
         return None;
     }
 
-    Some(AstExprPath {
+    Some(AstParamedPath {
         span: start.to(p.prev_span()),
         segments: Rc::from(parts),
     })

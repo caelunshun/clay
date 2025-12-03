@@ -4,10 +4,7 @@ use crate::{
         syntax::{HasSpan, Span},
     },
     parse::{
-        ast::{
-            AstGenericParamList, AstItem, AstOptMutability, AstQualifiedExprPath, AstReturnTy,
-            AstTy,
-        },
+        ast::{AstGenericParamList, AstItem, AstOptMutability, AstParamedPath, AstReturnTy, AstTy},
         token::{Ident, Lifetime, TokenCharLit, TokenNumLit, TokenStrLit},
     },
 };
@@ -109,12 +106,12 @@ pub enum AstExprKind {
     Index(Box<AstExpr>, Box<AstExpr>),
     Range(Option<Box<AstExpr>>, Option<Box<AstExpr>>, AstRangeLimits),
     Underscore,
-    Path(AstQualifiedExprPath),
+    Path(AstExprPath),
     AddrOf(AstOptMutability, Box<AstExpr>),
     Break(Option<Lifetime>, Option<Box<AstExpr>>),
     Continue(Option<Lifetime>),
     Return(Option<Box<AstExpr>>),
-    Struct(AstQualifiedExprPath, Vec<AstExprField>, AstStructRest),
+    Struct(AstExprPath, Vec<AstExprField>, AstStructRest),
     Error(ErrorGuaranteed),
 }
 
@@ -278,6 +275,34 @@ pub enum AstStructRest {
     None,
 }
 
+#[derive(Debug, Clone)]
+pub struct AstExprPath {
+    pub span: Span,
+    pub kind: AstExprPathKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum AstExprPathKind {
+    /// A bare path with some generic parameterizations.
+    Bare(AstParamedPath),
+
+    /// A path starting with `Self` with an optional rest.
+    SelfTy(Span, Option<AstParamedPath>),
+
+    /// A path starting with an explicit qualifier with an mandatory rest path.
+    Qualified(Box<AstQualification>, AstParamedPath),
+
+    /// An invalid path.
+    Error(ErrorGuaranteed),
+}
+
+#[derive(Debug, Clone)]
+pub struct AstQualification {
+    pub span: Span,
+    pub self_ty: AstTy,
+    pub as_trait: Option<AstTy>,
+}
+
 // === Patterns === //
 
 #[derive(Debug, Clone)]
@@ -291,11 +316,11 @@ pub enum AstPatKind {
     Wild,
     Path {
         binding_mode: AstBindingMode,
-        path: AstQualifiedExprPath,
+        path: AstExprPath,
         and_bind: Option<Box<AstPat>>,
     },
-    PathAndBrace(AstQualifiedExprPath, Vec<AstPatField>, AstPatStructRest),
-    PathAndParen(AstQualifiedExprPath, Vec<AstPat>),
+    PathAndBrace(AstExprPath, Vec<AstPatField>, AstPatStructRest),
+    PathAndParen(AstExprPath, Vec<AstPat>),
     Or(Vec<AstPat>),
     Tuple(Vec<AstPat>),
     Ref(AstOptMutability, Box<AstPat>),
