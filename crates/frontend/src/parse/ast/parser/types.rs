@@ -8,7 +8,7 @@ use crate::{
         ast::{
             AstGenericParam, AstGenericParamKind, AstGenericParamList, AstNamedSpec, AstReturnTy,
             AstTraitClause, AstTraitClauseList, AstTy, AstTyKind,
-            basic::{parse_mutability, parse_simple_path},
+            basic::{parse_bare_path, parse_mutability},
             bp::ty_bp,
             entry::P,
             utils::{
@@ -43,23 +43,29 @@ pub fn parse_trait_clause_list(p: P) -> AstTraitClauseList {
 }
 
 pub fn parse_trait_clause(p: P) -> Result<AstTraitClause, ErrorGuaranteed> {
-    let start = p.next_span();
-
     if let Some(lifetime) = match_lifetime().expect(p) {
         return Ok(AstTraitClause::Outlives(lifetime));
     }
 
-    if let Some(path) = parse_simple_path(p) {
-        let params = parse_generic_param_list(p);
-
-        return Ok(AstTraitClause::Trait(AstNamedSpec {
-            span: start.to(p.prev_span()),
-            path,
-            params,
-        }));
+    if let Some(spec) = parse_named_spec(p) {
+        return Ok(AstTraitClause::Trait(spec));
     }
 
     Err(p.stuck().error())
+}
+
+pub fn parse_named_spec(p: P) -> Option<AstNamedSpec> {
+    let start = p.next_span();
+
+    let path = parse_bare_path(p)?;
+
+    let params = parse_generic_param_list(p);
+
+    Some(AstNamedSpec {
+        span: start.to(p.prev_span()),
+        path,
+        params,
+    })
 }
 
 // === Generic Parameters === //
@@ -87,7 +93,7 @@ pub fn parse_generic_param_list(p: P) -> Option<AstGenericParamList> {
 pub fn parse_generic_param(p: P) -> AstGenericParam {
     let start = p.next_span();
 
-    if let Some(path) = parse_simple_path(p) {
+    if let Some(path) = parse_bare_path(p) {
         if let Some(part) = path.as_ident() {
             if match_punct(punct!(':')).expect(p).is_some() {
                 let clauses = parse_trait_clause_list(p);
@@ -174,7 +180,7 @@ pub fn parse_ty_pratt_seed(p: P) -> AstTy {
     }
 
     // Parse path
-    if let Some(path) = parse_simple_path(p) {
+    if let Some(path) = parse_bare_path(p) {
         return build_ty(AstTyKind::Name(path, parse_generic_param_list(p)), p);
     }
 

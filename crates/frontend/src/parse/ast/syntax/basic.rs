@@ -2,7 +2,7 @@ use crate::{
     base::syntax::{HasSpan, Span},
     kw,
     parse::{
-        ast::{AstGenericParamList, AstTy},
+        ast::{AstGenericParamList, AstNamedSpec, AstTy},
         token::{Ident, TokenStream},
     },
     semantic::syntax::Mutability,
@@ -15,19 +15,20 @@ use std::rc::Rc;
 pub struct AstAttribute {
     pub span: Span,
     pub is_inner: bool,
-    pub path: AstSimplePath,
+    pub path: AstBarePath,
     pub args: TokenStream,
 }
 
 // === Paths === //
 
+// Bare
 #[derive(Debug, Clone)]
-pub struct AstSimplePath {
+pub struct AstBarePath {
     pub span: Span,
     pub parts: Rc<[AstPathPart]>,
 }
 
-impl AstSimplePath {
+impl AstBarePath {
     pub fn as_ident(&self) -> Option<Ident> {
         self.parts
             .first()
@@ -37,18 +38,34 @@ impl AstSimplePath {
     }
 }
 
+// Tree
 #[derive(Debug, Clone)]
-pub struct AstUsePath {
+pub struct AstTreePath {
     pub span: Span,
     pub base: Rc<[AstPathPart]>,
-    pub kind: AstUsePathKind,
+    pub kind: AstTreePathKind,
 }
 
 #[derive(Debug, Clone)]
-pub enum AstUsePathKind {
+pub enum AstTreePathKind {
     Direct(Option<Ident>),
     Wild(Span),
-    Tree(Vec<AstUsePath>),
+    Tree(Vec<AstTreePath>),
+}
+
+// Expr
+#[derive(Debug, Clone)]
+pub struct AstQualifiedExprPath {
+    pub span: Span,
+    pub qualification: Option<Box<AstQualification>>,
+    pub rest: AstExprPath,
+}
+
+#[derive(Debug, Clone)]
+pub struct AstQualification {
+    pub span: Span,
+    pub self_ty: AstTy,
+    pub as_trait: Option<AstNamedSpec>,
 }
 
 #[derive(Debug, Clone)]
@@ -63,13 +80,7 @@ pub struct AstExprPathSegment {
     pub args: Option<Box<AstGenericParamList>>,
 }
 
-#[derive(Debug, Clone)]
-pub struct AstExprQualification {
-    pub span: Span,
-    pub src_ty: AstTy,
-    pub as_trait: Option<AstTy>,
-}
-
+// Part
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct AstPathPart {
     raw: Ident,
@@ -217,7 +228,7 @@ pub enum AstVisibilityKind {
     Implicit,
     Priv,
     Pub,
-    PubIn(AstSimplePath),
+    PubIn(AstBarePath),
 }
 
 impl AstVisibilityKind {

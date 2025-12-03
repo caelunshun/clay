@@ -5,7 +5,7 @@ use crate::{
         syntax::{Span, Symbol},
     },
     parse::{
-        ast::{AstSimplePath, AstVisibility, AstVisibilityKind},
+        ast::{AstBarePath, AstVisibility, AstVisibilityKind},
         token::Ident,
     },
     semantic::{
@@ -61,7 +61,7 @@ struct BuilderDirectUse {
 
 enum CachedPath {
     Ignore,
-    Unresolved(AstSimplePath),
+    Unresolved(AstBarePath),
     Resolved(BuilderItemId),
 }
 
@@ -69,7 +69,7 @@ enum CachedPath {
 enum BuilderVisibility {
     Pub,
     PubInResolved(BuilderItemId),
-    PubInUnresolved(AstSimplePath),
+    PubInUnresolved(AstBarePath),
 }
 
 impl Default for BuilderModuleTree {
@@ -162,7 +162,7 @@ impl BuilderModuleTree {
         &mut self,
         parent: BuilderItemId,
         visibility: AstVisibility,
-        path: AstSimplePath,
+        path: AstBarePath,
     ) {
         self.items[parent].glob_uses.push(BuilderGlobUse {
             span: path.span,
@@ -176,7 +176,7 @@ impl BuilderModuleTree {
         parent: BuilderItemId,
         visibility: AstVisibility,
         name: Ident,
-        path: AstSimplePath,
+        path: AstBarePath,
     ) {
         self.push_direct_use(
             parent,
@@ -555,7 +555,8 @@ impl ModuleTreeSolverCx<'_> {
             unreachable!()
         };
 
-        let Ok(target) = self.resolve_path_for_use(BuilderItemId::ROOT, path_owner, &path, for_use)
+        let Ok(target) =
+            self.resolve_bare_path_for_use(BuilderItemId::ROOT, path_owner, &path, for_use)
         else {
             // (leave the path as `Ignore`)
             return None;

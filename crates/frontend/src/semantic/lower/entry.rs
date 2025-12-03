@@ -7,10 +7,10 @@ use crate::{
     },
     parse::{
         ast::{
-            AstFnDef, AstGenericDef, AstImplLikeMemberKind, AstItem, AstItemEnum, AstItemFn,
-            AstItemImpl, AstItemModuleContents, AstItemStruct, AstItemTrait, AstPathPart,
-            AstPathPartKind, AstPathPartKw, AstReturnTy, AstSimplePath, AstStructKind,
-            AstTraitClauseList, AstTy, AstUsePath, AstUsePathKind, AstVisibility,
+            AstBarePath, AstFnDef, AstGenericDef, AstImplLikeMemberKind, AstItem, AstItemEnum,
+            AstItemFn, AstItemImpl, AstItemModuleContents, AstItemStruct, AstItemTrait,
+            AstPathPart, AstPathPartKind, AstPathPartKw, AstReturnTy, AstStructKind,
+            AstTraitClauseList, AstTreePath, AstTreePathKind, AstTy, AstVisibility,
             AstVisibilityKind,
         },
         token::{Ident, Lifetime},
@@ -269,13 +269,13 @@ impl<'ast> UseLowerCtxt<'ast> {
         mod_id: BuilderItemId,
         visibility: &AstVisibility,
         prefix: &mut Vec<AstPathPart>,
-        ast: &AstUsePath,
+        ast: &AstTreePath,
     ) {
         let old_len = prefix.len();
         prefix.extend_from_slice(&ast.base);
 
         match &ast.kind {
-            AstUsePathKind::Direct(rename) => 'direct: {
+            AstTreePathKind::Direct(rename) => 'direct: {
                 let name = rename
                     .map(AstPathPart::new_ident)
                     .unwrap_or(prefix.last().copied().unwrap());
@@ -323,23 +323,23 @@ impl<'ast> UseLowerCtxt<'ast> {
                     mod_id,
                     visibility.clone(),
                     name,
-                    AstSimplePath {
+                    AstBarePath {
                         span: ast.span,
                         parts: Rc::from(prefix.as_slice()),
                     },
                 );
             }
-            AstUsePathKind::Wild(span) => {
+            AstTreePathKind::Wild(span) => {
                 self.tree.push_glob_use(
                     mod_id,
                     visibility.clone(),
-                    AstSimplePath {
+                    AstBarePath {
                         span: *span,
                         parts: Rc::from(prefix.as_slice()),
                     },
                 );
             }
-            AstUsePathKind::Tree(children) => {
+            AstTreePathKind::Tree(children) => {
                 for child in children.iter() {
                     self.lower_use(mod_id, visibility, prefix, child);
                 }
@@ -773,8 +773,8 @@ pub struct IntraItemLowerCtxt<'tcx> {
 }
 
 impl IntraItemLowerCtxt<'_> {
-    pub fn resolve_simple_path(&self, path: &AstSimplePath) -> Result<Obj<Item>, ErrorGuaranteed> {
-        FrozenModuleResolver(&self.tcx.session).resolve_path(self.root, self.scope, path)
+    pub fn resolve_bare_path(&self, path: &AstBarePath) -> Result<Obj<Item>, ErrorGuaranteed> {
+        FrozenModuleResolver(&self.tcx.session).resolve_bare_path(self.root, self.scope, path)
     }
 
     pub fn lookup_label(&mut self, label: Option<Lifetime>) -> Option<Obj<Expr>> {

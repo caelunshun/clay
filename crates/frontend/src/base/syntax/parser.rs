@@ -1,6 +1,7 @@
 use super::{HasSpan, Span, Symbol};
 use crate::{
     base::{Diag, ErrorGuaranteed, HardDiag, LeafDiag},
+    flags::should_print_parse_expect_success,
     utils::{
         hash::{FxHashSet, FxIndexMap},
         lang::{FormatFn, ListFormatter, OR_LIST_GLUE, format_list_into},
@@ -9,6 +10,7 @@ use crate::{
 use std::{
     fmt::Debug,
     ops::{Deref, DerefMut},
+    panic::Location,
 };
 
 // === Parser Core === //
@@ -66,6 +68,7 @@ impl<I: CursorIter> Parser<I> {
     }
 
     #[must_use]
+    #[track_caller]
     pub fn expect_covert_hinted<R>(
         &mut self,
         visible: bool,
@@ -75,6 +78,8 @@ impl<I: CursorIter> Parser<I> {
     where
         R: LookaheadResult + DefaultReject,
     {
+        let read_span = self.next_span();
+
         if self.needs_recovery {
             return R::default_reject();
         }
@@ -83,6 +88,10 @@ impl<I: CursorIter> Parser<I> {
         let res = self.cursor.lookahead(|c| f(c, &mut hinter));
 
         if res.is_ok() {
+            if should_print_parse_expect_success() {
+                eprintln!("Found {what} at {read_span} ({})", Location::caller());
+            }
+
             self.moved_forwards();
         } else if visible {
             self.expected.push(Expectation {
@@ -98,6 +107,7 @@ impl<I: CursorIter> Parser<I> {
     }
 
     #[must_use]
+    #[track_caller]
     pub fn expect_covert<R>(
         &mut self,
         visible: bool,
@@ -111,6 +121,7 @@ impl<I: CursorIter> Parser<I> {
     }
 
     #[must_use]
+    #[track_caller]
     pub fn expect_hinted<R>(
         &mut self,
         what: Symbol,
@@ -123,6 +134,7 @@ impl<I: CursorIter> Parser<I> {
     }
 
     #[must_use]
+    #[track_caller]
     pub fn expect<R>(&mut self, what: Symbol, f: impl FnOnce(&mut Cursor<I>) -> R) -> R
     where
         R: LookaheadResult + DefaultReject,
@@ -180,6 +192,7 @@ impl<I: CursorIter> Parser<I> {
         });
     }
 
+    #[track_caller]
     pub fn expect_or_hint<R>(
         &mut self,
         is_expected: bool,
@@ -198,6 +211,7 @@ impl<I: CursorIter> Parser<I> {
         }
     }
 
+    #[track_caller]
     pub fn maybe_expect<R>(
         &mut self,
         is_expected: bool,
@@ -509,6 +523,7 @@ pub trait Matcher<I: CursorIter> {
         self.consume(c).is_ok()
     }
 
+    #[track_caller]
     fn expect(&self, p: &mut Parser<I>) -> Self::Output
     where
         Self::Output: DefaultReject,
@@ -516,6 +531,7 @@ pub trait Matcher<I: CursorIter> {
         p.expect_hinted(self.expectation(), self.matcher())
     }
 
+    #[track_caller]
     fn expect_to_parse(&self, p: &mut Parser<I>, to_parse: Symbol) -> Self::Output
     where
         Self::Output: DefaultReject,
@@ -524,6 +540,7 @@ pub trait Matcher<I: CursorIter> {
         self.expect(&mut p)
     }
 
+    #[track_caller]
     fn expect_covert(&self, visible: bool, p: &mut Parser<I>) -> Self::Output
     where
         Self::Output: DefaultReject,
@@ -539,6 +556,7 @@ pub trait Matcher<I: CursorIter> {
         p.hint_if_passes(self.matcher(), gen_diag);
     }
 
+    #[track_caller]
     fn expect_or_hint(
         &mut self,
         p: &mut Parser<I>,
@@ -551,6 +569,7 @@ pub trait Matcher<I: CursorIter> {
         p.expect_or_hint(is_expected, self.expectation(), self.matcher(), gen_diag)
     }
 
+    #[track_caller]
     fn maybe_expect(&mut self, p: &mut Parser<I>, is_expected: bool) -> Self::Output
     where
         Self::Output: DefaultReject,

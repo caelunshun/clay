@@ -3,7 +3,7 @@ use crate::{
         Diag, ErrorGuaranteed, LeafDiag, Session,
         syntax::{HasSpan as _, Span, Symbol},
     },
-    parse::ast::{AstPathPart, AstPathPartKind, AstPathPartKw, AstSimplePath},
+    parse::ast::{AstBarePath, AstPathPart, AstPathPartKind, AstPathPartKw},
     symbol,
     utils::{hash::FxHashSet, mem::Handle},
 };
@@ -304,11 +304,11 @@ pub trait PathResolver: ParentResolver {
         )
     }
 
-    fn resolve_path(
+    fn resolve_bare_path(
         &mut self,
         local_crate_root: Self::Item,
         origin: Self::Item,
-        path: &AstSimplePath,
+        path: &AstBarePath,
     ) -> Result<Self::Item, ErrorGuaranteed> {
         let mut finger = origin;
 
@@ -322,14 +322,14 @@ pub trait PathResolver: ParentResolver {
         Ok(finger)
     }
 
-    fn resolve_path_for_use(
+    fn resolve_bare_path_for_use(
         &mut self,
         local_crate_root: Self::Item,
         origin: Self::Item,
-        path: &AstSimplePath,
+        path: &AstBarePath,
         for_use: Option<ItemCategoryUse>,
     ) -> Result<Self::Item, ErrorGuaranteed> {
-        let target = self.resolve_path(local_crate_root, origin, path)?;
+        let target = self.resolve_bare_path(local_crate_root, origin, path)?;
         let category = self.categorize(target);
 
         if let Some(for_use) = for_use
@@ -355,9 +355,9 @@ pub trait VisibilityResolver: PathResolver {
         &mut self,
         local_crate_root: Self::Item,
         origin: Self::Item,
-        path: &AstSimplePath,
+        path: &AstBarePath,
     ) -> Result<Self::Item, ErrorGuaranteed> {
-        let target = self.resolve_path_for_use(
+        let target = self.resolve_bare_path_for_use(
             local_crate_root,
             origin,
             path,

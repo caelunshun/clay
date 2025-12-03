@@ -11,7 +11,7 @@ use crate::{
             AstLit, AstMatchArm, AstOptMutability, AstPat, AstPatField, AstPatKind,
             AstPatStructRest, AstRangeLimits, AstStmt, AstStmtKind, AstStmtLet, AstStructRest,
             AstTy, AstTyKind, AstUnOpKind, PunctSeq,
-            basic::{parse_expr_path, parse_mutability},
+            basic::{parse_mutability, parse_qualified_expr_path},
             bp::expr_bp,
             entry::P,
             types::{parse_generic_param_list, parse_return_ty, parse_ty},
@@ -154,7 +154,7 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
     }
 
     // Parse an expression path.
-    if let Some(path) = parse_expr_path(p) {
+    if let Some(path) = parse_qualified_expr_path(p) {
         if flags.contains(AstExprFlags::ALLOW_STRUCT_CTOR)
             && let Some(group) = match_group(GroupDelimiter::Brace).expect(p)
         {
@@ -1072,7 +1072,7 @@ pub fn parse_pat_single_arm(p: P) -> AstPat {
     // Parse identifier variants
     let binding_mode = parse_binding_mode(p);
 
-    if let Some(path) = parse_expr_path(p) {
+    if let Some(path) = parse_qualified_expr_path(p) {
         let and_bind = match_punct(punct!('@'))
             .expect(p)
             .map(|_| Box::new(parse_pat_single_arm(p)));
@@ -1240,7 +1240,7 @@ pub fn parse_pat_lit_expr(p: P) -> Option<AstExpr> {
         return Some(lit);
     }
 
-    if let Some(path) = parse_expr_path(p) {
+    if let Some(path) = parse_qualified_expr_path(p) {
         return Some(AstExpr {
             span: path.span,
             kind: AstExprKind::Path(path),

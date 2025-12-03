@@ -4,7 +4,7 @@ use crate::{
         syntax::{HasSpan, Span},
     },
     parse::{
-        ast::{AstOptMutability, AstSimplePath},
+        ast::{AstOptMutability, AstBarePath},
         token::{Ident, Lifetime},
     },
 };
@@ -14,7 +14,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct AstNamedSpec {
     pub span: Span,
-    pub path: AstSimplePath,
+    pub path: AstBarePath,
     pub params: Option<AstGenericParamList>,
 }
 
@@ -126,7 +126,7 @@ pub struct AstTy {
 #[derive(Debug, Clone)]
 pub enum AstTyKind {
     This,
-    Name(AstSimplePath, Option<AstGenericParamList>),
+    Name(AstBarePath, Option<AstGenericParamList>),
     Reference(Option<Lifetime>, AstOptMutability, Box<AstTy>),
     Trait(AstTraitClauseList),
     Tuple(Vec<AstTy>),

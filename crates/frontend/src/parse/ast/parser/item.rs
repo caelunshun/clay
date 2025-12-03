@@ -3,11 +3,11 @@ use crate::{
     kw,
     parse::{
         ast::{
-            AstAttribute, AstEnumVariant, AstItemFn, AstImplLikeBody, AstImplLikeMember,
-            AstImplLikeMemberKind, AstItem, AstItemBase, AstItemEnum, AstItemImpl, AstItemModule,
-            AstItemModuleContents, AstItemStruct, AstItemTrait, AstItemUse, AstStructAnonField,
-            AstStructKind, AstStructNamedField, AstTraitClauseList,
-            basic::{parse_attributes, parse_use_path, parse_visibility},
+            AstAttribute, AstEnumVariant, AstImplLikeBody, AstImplLikeMember,
+            AstImplLikeMemberKind, AstItem, AstItemBase, AstItemEnum, AstItemFn, AstItemImpl,
+            AstItemModule, AstItemModuleContents, AstItemStruct, AstItemTrait, AstItemUse,
+            AstStructAnonField, AstStructKind, AstStructNamedField, AstTraitClauseList,
+            basic::{parse_attributes, parse_tree_path, parse_visibility},
             entry::P,
             func::parse_func,
             types::{parse_generic_param_list, parse_trait_clause_list, parse_ty},
@@ -154,7 +154,7 @@ fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
     }
 
     if match_kw(kw!("use")).expect(p).is_some() {
-        let Some(path) = parse_use_path(p) else {
+        let Some(path) = parse_tree_path(p) else {
             return Some(AstItem::Error(make_base(p), p.stuck().error()));
         };
 

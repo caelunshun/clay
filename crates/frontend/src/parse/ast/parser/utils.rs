@@ -91,11 +91,11 @@ pub fn match_punct_seq(punct: PunctSeq) -> impl TokenMatcher<Output = Option<Spa
     token_matcher(punct.expectation_name(), move |c, _| {
         let start = c.next_span();
 
-        if punct
-            .seq()
-            .iter()
-            .all(|&v| match_punct(v).consume(c).is_some())
-        {
+        if punct.seq().iter().enumerate().all(|(idx, &v)| {
+            match_punct(v)
+                .consume(c)
+                .is_some_and(|p| idx == 0 || p.glued)
+        }) {
             Some(start.to(c.prev_span()))
         } else {
             None

@@ -182,7 +182,7 @@ impl IntraItemLowerCtxt<'_> {
         }
 
         let def = self
-            .resolve_simple_path(&ast.path)?
+            .resolve_bare_path(&ast.path)?
             .r(s)
             .kind
             .as_trait()
@@ -214,7 +214,7 @@ impl IntraItemLowerCtxt<'_> {
         }
 
         let def = self
-            .resolve_simple_path(path)?
+            .resolve_bare_path(path)?
             .r(s)
             .kind
             .as_trait()
@@ -344,7 +344,7 @@ impl IntraItemLowerCtxt<'_> {
                     return SpannedTyView::Universal(*generic).encode(ast.span, self.tcx);
                 }
 
-                let def = match self.resolve_simple_path(path) {
+                let def = match self.resolve_bare_path(path) {
                     Ok(def) => def,
                     Err(err) => {
                         return SpannedTyView::Error(err).encode(ast.span, self.tcx);

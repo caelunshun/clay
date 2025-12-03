@@ -3,10 +3,11 @@ use crate::{
     kw,
     parse::{
         ast::{
-            AstAttribute, AstExprPath, AstExprPathSegment, AstOptMutability, AstPathPart,
-            AstSimplePath, AstUsePath, AstUsePathKind, AstVisibility, AstVisibilityKind, Keyword,
+            AstAttribute, AstBarePath, AstExprPath, AstExprPathSegment, AstOptMutability,
+            AstPathPart, AstQualification, AstQualifiedExprPath, AstTreePath, AstTreePathKind,
+            AstTy, AstTyKind, AstVisibility, AstVisibilityKind, Keyword,
             entry::P,
-            types::parse_generic_param_list,
+            types::{parse_generic_param_list, parse_named_spec, parse_ty},
             utils::{
                 match_eos, match_group, match_ident, match_kw, match_punct, match_punct_seq,
                 parse_delimited_until_terminator,
@@ -45,7 +46,7 @@ pub fn parse_attribute(p: P) -> Option<AstAttribute> {
 
     let mut p2 = p.enter(&bracket);
 
-    let Some(path) = parse_simple_path(&mut p2) else {
+    let Some(path) = parse_bare_path(&mut p2) else {
         p2.stuck().ignore_not_in_loop();
         return None;
     };
@@ -68,7 +69,7 @@ pub fn parse_attribute(p: P) -> Option<AstAttribute> {
     })
 }
 
-pub fn parse_simple_path(p: P) -> Option<AstSimplePath> {
+pub fn parse_bare_path(p: P) -> Option<AstBarePath> {
     let start = p.next_span();
 
     let mut p = p.to_parse_guard(symbol!("path"));
@@ -96,7 +97,7 @@ pub fn parse_simple_path(p: P) -> Option<AstSimplePath> {
         return None;
     }
 
-    Some(AstSimplePath {
+    Some(AstBarePath {
         span: start.to(p.prev_span()),
         parts: Rc::from(parts),
     })
@@ -119,7 +120,7 @@ pub fn parse_path_part(p: P) -> Option<AstPathPart> {
     None
 }
 
-pub fn parse_use_path(p: P) -> Option<AstUsePath> {
+pub fn parse_tree_path(p: P) -> Option<AstTreePath> {
     let start = p.next_span();
 
     let mut p = p.to_parse_guard(symbol!("path"));
@@ -142,10 +143,10 @@ pub fn parse_use_path(p: P) -> Option<AstUsePath> {
     if (parts.is_empty() || had_trailing_turbo)
         && let Some(punct) = match_punct(punct!('*')).expect(p)
     {
-        return Some(AstUsePath {
+        return Some(AstTreePath {
             span: start.to(p.prev_span()),
             base: Rc::from(parts),
-            kind: AstUsePathKind::Wild(punct.span),
+            kind: AstTreePathKind::Wild(punct.span),
         });
     }
 
@@ -154,10 +155,10 @@ pub fn parse_use_path(p: P) -> Option<AstUsePath> {
             .expect(p)
             .and_then(|_| match_ident().expect(p));
 
-        return Some(AstUsePath {
+        return Some(AstTreePath {
             span: start.to(p.prev_span()),
             base: Rc::from(parts),
-            kind: AstUsePathKind::Direct(rename),
+            kind: AstTreePathKind::Direct(rename),
         });
     }
 
@@ -169,15 +170,15 @@ pub fn parse_use_path(p: P) -> Option<AstUsePath> {
         let children = parse_delimited_until_terminator(
             &mut p2,
             &mut (),
-            |p, ()| parse_use_path(p),
+            |p, ()| parse_tree_path(p),
             |p, ()| match_punct(punct!(',')).expect(p).is_some(),
             |p, ()| match_eos(p),
         );
 
-        return Some(AstUsePath {
+        return Some(AstTreePath {
             span: start.to(p.prev_span()),
             base: Rc::from(parts),
-            kind: AstUsePathKind::Tree(children.elems.into_iter().flatten().collect()),
+            kind: AstTreePathKind::Tree(children.elems.into_iter().flatten().collect()),
         });
     }
 
@@ -187,18 +188,98 @@ pub fn parse_use_path(p: P) -> Option<AstUsePath> {
 
     p.stuck().ignore_not_in_loop();
 
-    Some(AstUsePath {
+    Some(AstTreePath {
         span: start.to(p.prev_span()),
         base: Rc::from(parts),
-        kind: AstUsePathKind::Direct(None),
+        kind: AstTreePathKind::Direct(None),
+    })
+}
+
+pub fn parse_qualified_expr_path(p: P) -> Option<AstQualifiedExprPath> {
+    let mut p = p.to_parse_guard(symbol!("path"));
+    let p = &mut p;
+
+    let start = p.next_span();
+
+    match parse_qualification(p) {
+        Some(qualification) => {
+            let rest = match_punct_seq(puncts!("::"))
+                .expect(p)
+                .and_then(|_| parse_expr_path_no_guard(p))
+                .unwrap_or_else(|| {
+                    p.stuck().ignore_not_in_loop();
+
+                    AstExprPath {
+                        span: qualification.span,
+                        segments: Rc::from_iter([]),
+                    }
+                });
+
+            Some(AstQualifiedExprPath {
+                span: start.to(p.prev_span()),
+                qualification: Some(Box::new(qualification)),
+                rest,
+            })
+        }
+        None => {
+            let rest = parse_expr_path(p)?;
+
+            Some(AstQualifiedExprPath {
+                span: start.to(p.prev_span()),
+                qualification: None,
+                rest,
+            })
+        }
+    }
+}
+
+pub fn parse_qualification(p: P) -> Option<AstQualification> {
+    let start = p.next_span();
+
+    if let Some(kw) = match_kw(kw!("Self")).expect(p) {
+        return Some(AstQualification {
+            span: kw.span,
+            self_ty: AstTy {
+                span: kw.span,
+                kind: AstTyKind::This,
+            },
+            as_trait: None,
+        });
+    }
+
+    match_punct(punct!('<')).expect(p)?;
+
+    let self_ty = parse_ty(p);
+    let as_trait = match_kw(kw!("as")).expect(p).and_then(|_| {
+        let spec = parse_named_spec(p);
+
+        if spec.is_none() {
+            p.stuck().ignore_not_in_loop();
+        }
+
+        spec
+    });
+
+    if match_punct(punct!('>')).expect(p).is_none() {
+        p.stuck().ignore_not_in_loop();
+    }
+
+    Some(AstQualification {
+        span: start.to(p.prev_span()),
+        self_ty,
+        as_trait,
     })
 }
 
 pub fn parse_expr_path(p: P) -> Option<AstExprPath> {
-    let start = p.next_span();
-
     let mut p = p.to_parse_guard(symbol!("path"));
     let p = &mut p;
+
+    parse_expr_path_no_guard(p)
+}
+
+pub fn parse_expr_path_no_guard(p: P) -> Option<AstExprPath> {
+    let start = p.next_span();
 
     let mut parts = Vec::new();
 
@@ -308,7 +389,7 @@ pub fn parse_visibility_in_path(p: P) -> Option<AstVisibility> {
 
     let mut p_inner = p.enter(path_cursor.iter);
 
-    let Some(path) = parse_simple_path(&mut p_inner) else {
+    let Some(path) = parse_bare_path(&mut p_inner) else {
         p_inner.stuck().ignore_not_in_loop();
 
         return Some(AstVisibility {
@@ -348,7 +429,7 @@ pub fn parse_visibility_shortcut(p: P, name: Symbol, kw: Keyword) -> Option<AstV
 
     Some(AstVisibility {
         span: start.to(p.prev_span()),
-        kind: AstVisibilityKind::PubIn(AstSimplePath {
+        kind: AstVisibilityKind::PubIn(AstBarePath {
             span: ident.span,
             parts: Rc::from_iter([AstPathPart::wrap_raw(ident)]),
         }),

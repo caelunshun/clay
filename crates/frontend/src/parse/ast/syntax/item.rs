@@ -2,7 +2,7 @@ use crate::{
     base::{ErrorGuaranteed, syntax::Span},
     parse::{
         ast::{
-            AstAttribute, AstFnDef, AstGenericParamList, AstTraitClauseList, AstTy, AstUsePath,
+            AstAttribute, AstFnDef, AstGenericParamList, AstTraitClauseList, AstTreePath, AstTy,
             AstVisibility,
         },
         token::Ident,
@@ -61,7 +61,7 @@ pub struct AstItemModuleContents {
 #[derive(Debug, Clone)]
 pub struct AstItemUse {
     pub base: AstItemBase,
-    pub path: AstUsePath,
+    pub path: AstTreePath,
 }
 
 #[derive(Debug, Clone)]
