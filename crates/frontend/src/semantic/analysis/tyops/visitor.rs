@@ -235,7 +235,7 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
 
     fn walk_re(&mut self, re: SpannedRe) -> ControlFlow<Self::Break> {
         match re.value {
-            Re::Gc | Re::ExplicitInfer | Re::Erased => {
+            Re::Gc | Re::ExplicitInfer | Re::Erased | Re::Error(_) => {
                 // (dead end)
             }
             Re::InferVar(var) => {
@@ -565,7 +565,7 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
 
     fn super_re(&mut self, re: Re) -> Result<Re, Self::Error> {
         match re {
-            Re::Gc | Re::ExplicitInfer | Re::Erased => Ok(re),
+            Re::Gc | Re::ExplicitInfer | Re::Erased | Re::Error(_) => Ok(re),
             Re::InferVar(var) => self.try_fold_re_infer_use(var),
             Re::Universal(generic) => self.try_fold_re_generic_use(generic),
         }

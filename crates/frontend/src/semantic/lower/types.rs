@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        Diag, ErrorGuaranteed, LeafDiag,
+        Diag, ErrorGuaranteed, LeafDiag, Level,
         analysis::SpannedViewEncode,
         arena::{LateInit, Obj},
         syntax::{HasSpan as _, Span},
@@ -27,7 +27,7 @@ use crate::{
     utils::hash::FxHashMap,
 };
 use hashbrown::hash_map;
-use std::cmp::Ordering;
+use std::iter;
 
 impl<'ast> InterItemLowerCtxt<'_, 'ast> {
     pub fn lower_generic_defs(
@@ -229,7 +229,7 @@ impl IntraItemLowerCtxt<'_> {
                 Some(def.r(s).regular_generic_count),
                 main_ty.span,
                 generics.as_ref(),
-            )?
+            )
             .iter(self.tcx),
         );
 
@@ -358,17 +358,12 @@ impl IntraItemLowerCtxt<'_> {
                     .encode(ast.span, self.tcx);
                 };
 
-                let params = match self.lower_positional_binder_generics(
+                let params = self.lower_positional_binder_generics(
                     def.r(s).generics,
                     None,
                     ast.span,
                     generics.as_ref(),
-                ) {
-                    Ok(v) => v,
-                    Err(err) => {
-                        return SpannedTyView::Error(err).encode(ast.span, self.tcx);
-                    }
-                };
+                );
 
                 SpannedTyView::Adt(
                     SpannedAdtInstanceView { def, params }.encode(ast.span, self.tcx),
@@ -529,69 +524,94 @@ impl IntraItemLowerCtxt<'_> {
         binder_len_override: Option<u32>,
         segment_span: Span,
         ast: Option<&AstGenericParamList>,
-    ) -> Result<SpannedTyOrReList, ErrorGuaranteed> {
+    ) -> SpannedTyOrReList {
         let s = &self.tcx.session;
 
         let binder_len = binder_len_override.map_or(binder.r(s).defs.len(), |v| v as usize);
         let ast = ast.as_ref().map_or(&[][..], |v| v.list.as_slice());
 
-        let mut had_error = None;
+        let mut errored_out_missing = None;
 
-        match ast.len().cmp(&binder_len) {
-            Ordering::Equal => {
-                // (fallthrough)
-            }
-            Ordering::Less => {
-                had_error = Some(Diag::span_err(segment_span, "missing generic parameters").emit());
-            }
-            Ordering::Greater => {
-                had_error = Some(
-                    Diag::span_err(ast[binder_len].span, "too many generic parameters").emit(),
-                );
-            }
+        let params = binder.r(s).defs[..binder_len]
+            .iter()
+            .zip(ast.iter().map(Some).chain(iter::repeat(None)))
+            .map(|(expected, actual)| {
+                let actual_span = actual.map_or(segment_span, |v| v.span);
+
+                let para_or_err = 'para_or_err: {
+                    let Some(actual) = actual else {
+                        break 'para_or_err Err(*errored_out_missing.get_or_insert_with(|| {
+                            Diag::span_err(segment_span, "missing generic parameters")
+                                .child(LeafDiag::new(
+                                    Level::Note,
+                                    format_args!(
+                                        "expected {} generic parameter{} but got {}",
+                                        binder_len,
+                                        if binder_len == 1 { "" } else { "s" },
+                                        ast.len()
+                                    ),
+                                ))
+                                .emit()
+                        }));
+                    };
+
+                    let Some(actual) = actual.kind.as_positional() else {
+                        break 'para_or_err Err(Diag::span_err(
+                            actual.span,
+                            "expected a positional generic parameter",
+                        )
+                        .emit());
+                    };
+
+                    match (actual, expected) {
+                        (AstGenericPositional::Ty(actual), AnyGeneric::Ty(_)) => {
+                            Ok(SpannedTyOrReView::Ty(self.lower_ty(actual))
+                                .encode(actual_span, self.tcx))
+                        }
+                        (AstGenericPositional::Re(actual), AnyGeneric::Re(_)) => {
+                            Ok(SpannedTyOrReView::Re(self.lower_re(actual))
+                                .encode(actual_span, self.tcx))
+                        }
+                        (_, AnyGeneric::Ty(_)) => Err(Diag::span_err(
+                            actual_span,
+                            "expected a type but got a lifetime",
+                        )
+                        .emit()),
+                        (_, AnyGeneric::Re(_)) => Err(Diag::span_err(
+                            actual_span,
+                            "expected a lifetime but got a type",
+                        )
+                        .emit()),
+                    }
+                };
+
+                para_or_err.unwrap_or_else(|err| match expected {
+                    AnyGeneric::Re(_) => {
+                        SpannedTyOrReView::Re(Re::Error(err).encode(actual_span, self.tcx))
+                            .encode(actual_span, self.tcx)
+                    }
+                    AnyGeneric::Ty(_) => SpannedTyOrReView::Ty(
+                        SpannedTyView::Error(err).encode(actual_span, self.tcx),
+                    )
+                    .encode(actual_span, self.tcx),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        if ast.len() > binder_len {
+            Diag::span_err(ast[binder_len].span, "too many generic parameters")
+                .child(LeafDiag::new(
+                    Level::Note,
+                    format_args!(
+                        "expected {} generic parameter{} but got {}",
+                        binder_len,
+                        if binder_len == 1 { "" } else { "s" },
+                        ast.len()
+                    ),
+                ))
+                .emit();
         }
 
-        let mut params = Vec::new();
-
-        for (actual, expected) in ast.iter().zip(&binder.r(s).defs[..binder_len]) {
-            let actual_span = actual.span;
-
-            let Some(actual) = actual.kind.as_positional() else {
-                had_error = Some(
-                    Diag::span_err(actual.span, "expected a positional generic parameter").emit(),
-                );
-
-                continue;
-            };
-
-            match (actual, expected) {
-                (AstGenericPositional::Ty(actual), AnyGeneric::Ty(_)) => {
-                    params.push(
-                        SpannedTyOrReView::Ty(self.lower_ty(actual)).encode(actual_span, self.tcx),
-                    );
-                }
-                (AstGenericPositional::Re(actual), AnyGeneric::Re(_)) => {
-                    params.push(
-                        SpannedTyOrReView::Re(self.lower_re(actual)).encode(actual_span, self.tcx),
-                    );
-                }
-                (_, AnyGeneric::Ty(_)) => {
-                    had_error = Some(Diag::span_err(actual_span, "expected a type").emit());
-                }
-                (_, AnyGeneric::Re(_)) => {
-                    had_error = Some(Diag::span_err(actual_span, "expected a lifetime").emit());
-                }
-            }
-        }
-
-        if let Some(err) = had_error {
-            return Err(err);
-        }
-
-        Ok(SpannedTyOrReList::alloc_list(
-            segment_span,
-            &params,
-            self.tcx,
-        ))
+        SpannedTyOrReList::alloc_list(segment_span, &params, self.tcx)
     }
 }

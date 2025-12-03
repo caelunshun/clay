@@ -367,6 +367,8 @@ pub enum Re {
 
     /// The lifetime used when we don't want to worry about lifetimes.
     Erased,
+
+    Error(ErrorGuaranteed),
 }
 
 pub type Ty = Intern<TyKind>;

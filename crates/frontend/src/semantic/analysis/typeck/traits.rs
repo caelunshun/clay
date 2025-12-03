@@ -253,7 +253,7 @@ impl TyCtxt {
                 match param {
                     TyOrRe::Re(param) => {
                         match param {
-                            Re::Gc => {
+                            Re::Gc | Re::Error(_) => {
                                 // (nothing mentioned)
                             }
                             Re::Universal(param) => {

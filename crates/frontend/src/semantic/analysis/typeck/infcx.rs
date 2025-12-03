@@ -815,16 +815,16 @@ impl ReInferTracker {
         var
     }
 
-    fn region_to_idx(&mut self, re: Re, tcx: &TyCtxt) -> AnyReIndex {
+    fn region_to_idx(&mut self, re: Re, tcx: &TyCtxt) -> Option<AnyReIndex> {
         let s = &tcx.session;
 
         match re {
-            Re::Gc => AnyReIndex::GC,
+            Re::Gc => Some(AnyReIndex::GC),
             Re::Universal(generic) => {
                 let new_universal_idx = self.tracked_universals.len();
 
                 match self.tracked_universals.entry(generic) {
-                    indexmap::map::Entry::Occupied(entry) => entry.get().index,
+                    indexmap::map::Entry::Occupied(entry) => Some(entry.get().index),
                     indexmap::map::Entry::Vacant(entry) => {
                         let index = self.tracked_any.push(TrackedAny {
                             kind: TrackedAnyKind::Universal(new_universal_idx as u32),
@@ -850,18 +850,21 @@ impl ReInferTracker {
                                 unreachable!()
                             };
 
-                            let rhs = self.region_to_idx(outlives.value, tcx);
+                            let Some(rhs) = self.region_to_idx(outlives.value, tcx) else {
+                                continue;
+                            };
 
                             let mut errors = Vec::new();
                             self.relate_inner(index, rhs, Some(&mut errors));
                         }
 
-                        index
+                        Some(index)
                     }
                 }
             }
-            Re::InferVar(idx) => AnyReIndex::from_raw(idx.0),
+            Re::InferVar(idx) => Some(AnyReIndex::from_raw(idx.0)),
             Re::ExplicitInfer | Re::Erased => unreachable!(),
+            Re::Error(_) => None,
         }
     }
 
@@ -876,8 +879,10 @@ impl ReInferTracker {
             return;
         }
 
-        let lhs = self.region_to_idx(lhs, tcx);
-        let rhs = self.region_to_idx(rhs, tcx);
+        let (Some(lhs), Some(rhs)) = (self.region_to_idx(lhs, tcx), self.region_to_idx(rhs, tcx))
+        else {
+            return;
+        };
 
         self.relate_inner(lhs, rhs, Some(offenses));
     }
