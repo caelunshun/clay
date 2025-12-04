@@ -11,7 +11,7 @@ use crate::{
         token::Lifetime,
     },
     semantic::{
-        lower::entry::IntraItemLowerCtxt,
+        lower::{entry::IntraItemLowerCtxt, func::path::ExprPathResolution},
         syntax::{Block, Expr, ExprKind, LetStmt, Pat, PatKind, Stmt},
     },
 };
@@ -204,10 +204,41 @@ impl IntraItemLowerCtxt<'_> {
                 .emit(),
             ),
             AstExprKind::Path(path) => match self.resolve_expr_path(path) {
-                Ok(_) => {
-                    // TODO
+                // TODO
+                Ok(ExprPathResolution::ResolvedSelfTy) => {
                     ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
                 }
+                Ok(ExprPathResolution::ResolvedAdt(obj, spanned)) => {
+                    ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
+                }
+                Ok(ExprPathResolution::ResolvedEnumVariant(obj, spanned)) => {
+                    ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
+                }
+                Ok(ExprPathResolution::ResolvedFn(obj, spanned)) => {
+                    ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
+                }
+                Ok(ExprPathResolution::TypeRelative {
+                    self_ty,
+                    as_trait,
+                    assoc,
+                }) => ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked()),
+                Ok(ExprPathResolution::SelfLocal) => {
+                    ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
+                }
+                Ok(ExprPathResolution::Local(obj)) => {
+                    ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
+                }
+                Ok(
+                    def @ (ExprPathResolution::ResolvedModule(_)
+                    | ExprPathResolution::ResolvedGeneric(_)
+                    | ExprPathResolution::ResolvedTrait(_, _)),
+                ) => ExprKind::Error(
+                    Diag::span_err(
+                        path.span,
+                        format_args!("expected value, got {}", def.bare_what(s)),
+                    )
+                    .emit(),
+                ),
                 Err(err) => ExprKind::Error(err),
             },
             AstExprKind::AddrOf(muta, expr) => {

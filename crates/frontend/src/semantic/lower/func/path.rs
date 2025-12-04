@@ -184,28 +184,18 @@ impl IntraItemLowerCtxt<'_> {
         let s = &self.tcx.session;
 
         // See whether we can resolve this as a `self` or as a function local.
-        if let Some(first) = &path.segments.first()
+        let local_like = if let [first] = &path.segments[..]
             && let Some(ident) = first.part.ident()
-            && let Some(local) = self.func_local_names.lookup(ident.text)
+            && first.args.is_none()
         {
-            if let Some(args) = &first.args {
-                Diag::span_err(
-                    args.span,
-                    format_args!("type arguments are not allowed on local `{}`", ident.text),
-                )
-                .emit();
+            if let Some(local) = self.func_local_names.lookup(ident.text) {
+                return Ok(ExprPathResolution::Local(*local));
             }
 
-            if let Some(subsequent) = &path.segments.get(1) {
-                Diag::span_err(
-                    subsequent.part.span(),
-                    "local variables cannot be accessed like modules",
-                )
-                .emit();
-            }
-
-            return Ok(ExprPathResolution::Local(*local));
-        }
+            Some(ident)
+        } else {
+            None
+        };
 
         if let [first] = &path.segments[..]
             && first.part.keyword() == Some(AstPathPartKw::Self_)
@@ -255,6 +245,17 @@ impl IntraItemLowerCtxt<'_> {
         while let Some(segment) = segments.next() {
             match resolver.resolve_step(self.root, self.scope, finger, segment.part) {
                 Ok(target) => finger = target,
+                Err(err @ StepResolveError::NotFound) => {
+                    if let Some(local_like) = local_like {
+                        return Err(Diag::span_err(
+                            path.span,
+                            format_args!("`{}` not found in scope", local_like.text),
+                        )
+                        .emit());
+                    } else {
+                        return Err(err.emit(&resolver, finger, segment.part));
+                    }
+                }
                 Err(err) => {
                     return Err(err.emit(&resolver, finger, segment.part));
                 }
