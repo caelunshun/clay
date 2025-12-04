@@ -2,7 +2,7 @@ use crate::{
     base::syntax::{HasSpan, Span},
     kw,
     parse::{
-        ast::AstGenericParamList,
+        ast::{AstGenericParamList, Keyword},
         token::{Ident, TokenStream},
     },
     semantic::syntax::Mutability,
@@ -150,6 +150,16 @@ pub enum AstPathPartKw {
     Crate,
     Super,
     Self_,
+}
+
+impl AstPathPartKw {
+    pub fn kw(self) -> Keyword {
+        match self {
+            AstPathPartKw::Crate => kw!("crate"),
+            AstPathPartKw::Super => kw!("super"),
+            AstPathPartKw::Self_ => kw!("self"),
+        }
+    }
 }
 
 // === Mutability === //

@@ -1,14 +1,14 @@
 use crate::{
     base::{
-        Diag, ErrorGuaranteed, LeafDiag,
+        Diag, ErrorGuaranteed, LeafDiag, Session,
         analysis::SpannedViewEncode as _,
         arena::Obj,
         syntax::{HasSpan as _, Span},
     },
     parse::{
         ast::{
-            AstExprPath, AstExprPathKind, AstParamedPath, AstParamedPathSegment, AstPathPartKw,
-            AstTyKind,
+            AstExprPath, AstExprPathKind, AstParamedPath, AstParamedPathSegment, AstPathPartKind,
+            AstPathPartKw, AstTyKind,
         },
         token::Ident,
     },
@@ -18,17 +18,20 @@ use crate::{
             modules::{FrozenModuleResolver, ParentResolver, PathResolver, StepResolveError},
         },
         syntax::{
-            AdtDef, EnumVariantItem, FnItem, FuncLocal, ItemKind, SpannedAdtInstanceView,
+            AdtDef, EnumVariantItem, FnItem, FuncLocal, Item, ItemKind, SpannedAdtInstanceView,
             SpannedTraitInstance, SpannedTraitInstanceView, SpannedTy, SpannedTyOrReList,
-            SpannedTyView, TraitDef,
+            SpannedTyView, TraitDef, TypeGeneric,
         },
     },
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum ExprPathResolution {
     /// A reference to the `Self` type by itself.
     ResolvedSelfTy,
+
+    /// A reference to a module or perhaps a scope.
+    ResolvedModule(Obj<Item>),
 
     /// A reference to some resolved ADT with some optional generic parameters.
     ResolvedAdt(Obj<AdtDef>, SpannedTyOrReList),
@@ -38,6 +41,12 @@ pub enum ExprPathResolution {
 
     /// A reference to a function item with some optional generic parameters.
     ResolvedFn(Obj<FnItem>, SpannedTyOrReList),
+
+    /// A reference to a trait.
+    ResolvedTrait(Obj<TraitDef>, SpannedTyOrReList),
+
+    /// A reference to a generic type.
+    ResolvedGeneric(Obj<TypeGeneric>),
 
     /// A reference to a type with some further qualifications for methods or constants that cannot
     /// be solved at lowering time. Note that types without further qualifications will be treated
@@ -89,6 +98,35 @@ pub enum ExprPathResolution {
     Local(Obj<FuncLocal>),
 }
 
+impl ExprPathResolution {
+    pub fn bare_what(self, s: &Session) -> String {
+        fn bare_what_item(item: Obj<Item>, s: &Session) -> String {
+            let resolver = FrozenModuleResolver(s);
+
+            format!(
+                "{} `{}`",
+                resolver.categorize(item).bare_what(),
+                resolver.path(item)
+            )
+        }
+
+        match self {
+            ExprPathResolution::ResolvedSelfTy => "`Self`".to_string(),
+            ExprPathResolution::ResolvedModule(def) => bare_what_item(def, s),
+            ExprPathResolution::ResolvedAdt(def, _) => bare_what_item(def.r(s).item, s),
+            ExprPathResolution::ResolvedEnumVariant(def, _) => bare_what_item(def.r(s).item, s),
+            ExprPathResolution::ResolvedFn(def, _) => bare_what_item(def.r(s).item, s),
+            ExprPathResolution::ResolvedTrait(def, _) => bare_what_item(def.r(s).item, s),
+            ExprPathResolution::ResolvedGeneric(def) => {
+                format!("generic type `{}`", def.r(s).ident.text)
+            }
+            ExprPathResolution::TypeRelative { .. } => "constant or method".to_string(),
+            ExprPathResolution::SelfLocal => "`self`".to_string(),
+            ExprPathResolution::Local(def) => format!("local variable `{}`", def.r(s).name.text),
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub struct TypeRelativeAssoc {
     pub name: Ident,
@@ -107,7 +145,8 @@ impl IntraItemLowerCtxt<'_> {
                 self_ty: SpannedTyView::This.encode(*self_kw, self.tcx),
                 as_trait: None,
                 assoc: self
-                    .lower_rest_as_type_relative_assoc(self_kw.shrink_to_hi(), &rest.segments)?,
+                    .lower_rest_as_type_relative_assoc(&rest.segments)?
+                    .unwrap(),
             }),
             AstExprPathKind::Qualified(qual, rest) => Ok(ExprPathResolution::TypeRelative {
                 self_ty: self.lower_ty(&qual.self_ty),
@@ -131,7 +170,8 @@ impl IntraItemLowerCtxt<'_> {
                     Some(SpannedTraitInstanceView { def, params }.encode(for_trait.span, self.tcx))
                 }),
                 assoc: self
-                    .lower_rest_as_type_relative_assoc(qual.span.shrink_to_hi(), &rest.segments)?,
+                    .lower_rest_as_type_relative_assoc(&rest.segments)?
+                    .unwrap(),
             }),
             AstExprPathKind::Error(err) => Err(*err),
         }
@@ -151,7 +191,7 @@ impl IntraItemLowerCtxt<'_> {
             if let Some(args) = &first.args {
                 Diag::span_err(
                     args.span,
-                    "local variables cannot be instantiated with generic parameters",
+                    format_args!("type arguments are not allowed on local `{}`", ident.text),
                 )
                 .emit();
             }
@@ -171,14 +211,40 @@ impl IntraItemLowerCtxt<'_> {
             && first.part.keyword() == Some(AstPathPartKw::Self_)
         {
             if let Some(args) = &first.args {
+                Diag::span_err(args.span, "type arguments are not allowed on `self`").emit();
+            }
+
+            return Ok(ExprPathResolution::SelfLocal);
+        }
+
+        // See whether we're referring to a generic type.
+        if let Some((first, subsequent)) = path.segments.split_first()
+            && let Some(ident) = first.part.ident()
+            && let Some(&generic) = self.generic_ty_names.lookup(ident.text)
+        {
+            if let Some(args) = &first.args {
                 Diag::span_err(
                     args.span,
-                    "`self` cannot be instantiated with generic parameters",
+                    format_args!(
+                        "type arguments are not allowed on generic type `{}`",
+                        ident.text,
+                    ),
                 )
                 .emit();
             }
 
-            return Ok(ExprPathResolution::SelfLocal);
+            return match self.lower_rest_as_type_relative_assoc(subsequent) {
+                Ok(Some(assoc)) => {
+                    let self_ty = SpannedTyView::Universal(generic).encode(ident.span, self.tcx);
+
+                    Ok(ExprPathResolution::TypeRelative {
+                        self_ty,
+                        as_trait: None,
+                        assoc,
+                    })
+                }
+                _ => Ok(ExprPathResolution::ResolvedGeneric(generic)),
+            };
         }
 
         // Otherwise, let's resolve a path.
@@ -240,15 +306,7 @@ impl IntraItemLowerCtxt<'_> {
             }
         }
 
-        Err(Diag::span_err(
-            path.span,
-            format_args!(
-                "path expressions cannot refer to {} `{}`",
-                resolver.categorize(finger).bare_what(),
-                resolver.path(finger),
-            ),
-        )
-        .emit())
+        Ok(ExprPathResolution::ResolvedModule(finger))
     }
 
     pub fn resolve_bare_expr_path_from_adt(
@@ -273,7 +331,13 @@ impl IntraItemLowerCtxt<'_> {
             match resolver.resolve_step(self.root, self.scope, adt.r(s).item, first_additional.part)
             {
                 Ok(variant) => {
-                    let variant = variant.r(s).kind.as_enum_variant().unwrap();
+                    let variant = variant
+                        .r(s)
+                        .kind
+                        .as_enum_variant()
+                        // Unwrap OK: enums can only contain variants and we pre-validated the path
+                        // to avoid path escapes.
+                        .unwrap();
 
                     Ok(self.resolve_bare_expr_path_from_enum_variant(
                         variant,
@@ -298,8 +362,10 @@ impl IntraItemLowerCtxt<'_> {
                     )
                     .encode(adt_segment.part.span(), self.tcx);
 
-                    let assoc =
-                        self.lower_rest_as_type_relative_assoc(Span::DUMMY, additional_segments)?;
+                    let assoc = self
+                        .lower_rest_as_type_relative_assoc(additional_segments)?
+                        // Unwrap OK: `additional_segments` is non-empty.
+                        .unwrap();
 
                     Ok(ExprPathResolution::TypeRelative {
                         self_ty,
@@ -376,16 +442,17 @@ impl IntraItemLowerCtxt<'_> {
         def_segment: &AstParamedPathSegment,
         segments: &[AstParamedPathSegment],
     ) -> Result<ExprPathResolution, ErrorGuaranteed> {
-        let self_ty = SpannedTyView::ExplicitInfer.encode(def_segment.part.span(), self.tcx);
-
         let as_trait_generics = self.lower_generics_of_trait_instance_in_fn_body(
             def,
             def_segment.part.span(),
             def_segment.args.as_deref(),
         );
 
-        let assoc = self
-            .lower_rest_as_type_relative_assoc(def_segment.part.span().shrink_to_hi(), segments)?;
+        let Ok(Some(assoc)) = self.lower_rest_as_type_relative_assoc(segments) else {
+            return Ok(ExprPathResolution::ResolvedTrait(def, as_trait_generics));
+        };
+
+        let self_ty = SpannedTyView::ExplicitInfer.encode(def_segment.part.span(), self.tcx);
 
         Ok(ExprPathResolution::TypeRelative {
             self_ty,
@@ -440,16 +507,11 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn lower_rest_as_type_relative_assoc(
         &mut self,
-        missing_segment_span: Span,
         rest: &[AstParamedPathSegment],
-    ) -> Result<TypeRelativeAssoc, ErrorGuaranteed> {
+    ) -> Result<Option<TypeRelativeAssoc>, ErrorGuaranteed> {
         let segment = match rest {
             [] => {
-                return Err(Diag::span_err(
-                    missing_segment_span,
-                    "expected method or constant name",
-                )
-                .emit());
+                return Ok(None);
             }
             [segment] => segment,
             [segment, extra_segment, ..] => {
@@ -463,20 +525,23 @@ impl IntraItemLowerCtxt<'_> {
             }
         };
 
-        let name = match segment.part.ident() {
-            Some(name) => name,
-            None => {
+        let name = match segment.part.kind() {
+            AstPathPartKind::Keyword(span, kw) => {
                 return Err(Diag::span_err(
-                    segment.part.span(),
-                    "expected method or constant name",
+                    span,
+                    format_args!(
+                        "`{}` can only be applied to a module, not a type",
+                        kw.kw().str()
+                    ),
                 )
                 .emit());
             }
+            AstPathPartKind::Regular(name) => name,
         };
 
-        Ok(TypeRelativeAssoc {
+        Ok(Some(TypeRelativeAssoc {
             name,
             args: self.lower_type_relative_generics(segment.args.as_deref()),
-        })
+        }))
     }
 }

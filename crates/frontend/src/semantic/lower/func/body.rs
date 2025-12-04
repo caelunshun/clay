@@ -204,7 +204,10 @@ impl IntraItemLowerCtxt<'_> {
                 .emit(),
             ),
             AstExprKind::Path(path) => match self.resolve_expr_path(path) {
-                Ok(_) => todo!(),
+                Ok(_) => {
+                    // TODO
+                    ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
+                }
                 Err(err) => ExprKind::Error(err),
             },
             AstExprKind::AddrOf(muta, expr) => {

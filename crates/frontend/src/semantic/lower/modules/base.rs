@@ -85,11 +85,10 @@ impl ItemCategory {
         }
     }
 
-    pub fn is_valid_for_super(self) -> bool {
+    pub fn is_valid_for_special(self) -> bool {
         match self {
-            ItemCategory::Module => true,
-            ItemCategory::Scope
-            | ItemCategory::Impl
+            ItemCategory::Module | ItemCategory::Scope => true,
+            ItemCategory::Impl
             | ItemCategory::Trait
             | ItemCategory::Struct
             | ItemCategory::Enum
@@ -136,7 +135,7 @@ pub enum StepLookupError {
 #[derive(Debug, Clone)]
 pub enum StepResolveError<T> {
     CannotSuperInRoot,
-    CannotSuperOnNonModule,
+    CannotKeywordOnNonModule(AstPathPartKw),
     DeniedVisibility,
     Ambiguous([(T, Span); 2]),
     NotFound,
@@ -153,10 +152,11 @@ impl<T: Handle> StepResolveError<T> {
             StepResolveError::CannotSuperInRoot => {
                 Diag::span_err(part.span(), "`super` cannot apply to crate root").emit()
             }
-            StepResolveError::CannotSuperOnNonModule => Diag::span_err(
+            StepResolveError::CannotKeywordOnNonModule(kw) => Diag::span_err(
                 part.span(),
                 format_args!(
-                    "`super` can only be applied to a module, not {}",
+                    "`{}` can only be applied to a module, not {}",
+                    kw.kw().str(),
                     resolver.categorize(curr).a_what()
                 ),
             )
@@ -393,22 +393,26 @@ where
 {
     // Handle special path parts.
     let part = match part.kind() {
-        AstPathPartKind::Keyword(_, AstPathPartKw::Self_) => {
-            return Ok(resolver.scope_root(finger));
-        }
-        AstPathPartKind::Keyword(_, AstPathPartKw::Crate) => {
-            return Ok(local_crate_root);
-        }
-        AstPathPartKind::Keyword(_, AstPathPartKw::Super) => {
-            if !resolver.categorize(finger).is_valid_for_super() {
-                return Err(StepResolveError::CannotSuperOnNonModule);
+        AstPathPartKind::Keyword(_, kw) => {
+            if !resolver.categorize(finger).is_valid_for_special() {
+                return Err(StepResolveError::CannotKeywordOnNonModule(kw));
             }
 
-            let Some(parent) = resolver.parent_module(finger) else {
-                return Err(StepResolveError::CannotSuperInRoot);
-            };
+            match kw {
+                AstPathPartKw::Self_ => {
+                    return Ok(resolver.scope_root(finger));
+                }
+                AstPathPartKw::Crate => {
+                    return Ok(local_crate_root);
+                }
+                AstPathPartKw::Super => {
+                    let Some(parent) = resolver.parent_module(finger) else {
+                        return Err(StepResolveError::CannotSuperInRoot);
+                    };
 
-            return Ok(parent);
+                    return Ok(parent);
+                }
+            }
         }
         AstPathPartKind::Regular(ident) => ident,
     };
@@ -461,7 +465,7 @@ where
                     Ok(v) => v,
                     Err(
                         StepResolveError::CannotSuperInRoot
-                        | StepResolveError::CannotSuperOnNonModule,
+                        | StepResolveError::CannotKeywordOnNonModule(_),
                     ) => {
                         unreachable!()
                     }
