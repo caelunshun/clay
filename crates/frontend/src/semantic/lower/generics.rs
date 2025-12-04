@@ -18,7 +18,7 @@ use crate::{
             modules::{FrozenModuleResolver, ParentResolver as _, PathResolver as _},
         },
         syntax::{
-            AdtDef, AnyGeneric, GenericBinder, Re, RegionGeneric, SpannedTraitClauseList,
+            AnyGeneric, GenericBinder, Item, Re, RegionGeneric, SpannedTraitClauseList,
             SpannedTraitInstance, SpannedTraitInstanceView, SpannedTraitParam,
             SpannedTraitParamView, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView,
             SpannedTyView, TraitDef, TypeGeneric,
@@ -158,9 +158,10 @@ impl IntraItemLowerCtxt<'_> {
         })
     }
 
-    pub fn lower_generics_of_adt(
+    pub fn lower_generics_of_entirely_positional(
         &mut self,
-        def: Obj<AdtDef>,
+        owner: Obj<Item>,
+        binder: Obj<GenericBinder>,
         segment_span: Span,
         generics: &[AstGenericParam],
     ) -> SpannedTyOrReList {
@@ -168,12 +169,8 @@ impl IntraItemLowerCtxt<'_> {
 
         let (positional, associated) = self.lower_generic_params_syntactic(generics);
 
-        let params = self.normalize_positional_generic_arity(
-            def.r(s).generics,
-            None,
-            segment_span,
-            &positional,
-        );
+        let params =
+            self.normalize_positional_generic_arity(binder, None, segment_span, &positional);
 
         if let Some(associated) = associated.first() {
             let resolver = FrozenModuleResolver(s);
@@ -182,8 +179,8 @@ impl IntraItemLowerCtxt<'_> {
                 associated.span,
                 format_args!(
                     "{} `{}` does not have any associated type constraints",
-                    resolver.categorize(def.r(s).item).bare_what(),
-                    resolver.path(def.r(s).item),
+                    resolver.categorize(owner).bare_what(),
+                    resolver.path(owner),
                 ),
             )
             .emit();
@@ -192,7 +189,7 @@ impl IntraItemLowerCtxt<'_> {
         params
     }
 
-    pub fn lower_generics_of_trait_instance(
+    pub fn lower_generics_of_trait_instance_in_fn_body(
         &mut self,
         def: Obj<TraitDef>,
         segment_span: Span,

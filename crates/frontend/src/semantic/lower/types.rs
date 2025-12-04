@@ -134,8 +134,9 @@ impl IntraItemLowerCtxt<'_> {
 
                 match self.resolve_ty_item_path(path) {
                     Ok(TyPathResolution::Adt(def)) => {
-                        let params = self.lower_generics_of_adt(
-                            def,
+                        let params = self.lower_generics_of_entirely_positional(
+                            def.r(s).item,
+                            def.r(s).generics,
                             ast.span,
                             generics.as_ref().map_or(&[][..], |v| &v.list),
                         );
