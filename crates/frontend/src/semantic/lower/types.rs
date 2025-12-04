@@ -132,75 +132,51 @@ impl IntraItemLowerCtxt<'_> {
             AstTyKind::Name(path, generics) => {
                 let resolver = FrozenModuleResolver(s);
 
-                let def = match self.resolve_ty_item_path(path) {
-                    Ok(TyPathResolution::Adt(def)) => def,
+                match self.resolve_ty_item_path(path) {
+                    Ok(TyPathResolution::Adt(def)) => {
+                        let params = self.lower_generics_of_adt(
+                            def,
+                            ast.span,
+                            generics.as_ref().map_or(&[][..], |v| &v.list),
+                        );
+
+                        SpannedTyView::Adt(
+                            SpannedAdtInstanceView { def, params }.encode(ast.span, self.tcx),
+                        )
+                        .encode(ast.span, self.tcx)
+                    }
                     Ok(TyPathResolution::Generic(def)) => {
-                        return SpannedTyView::Universal(def).encode(ast.span, self.tcx);
+                        SpannedTyView::Universal(def).encode(ast.span, self.tcx)
                     }
-                    Ok(TyPathResolution::Trait(def)) => {
-                        return SpannedTyView::Error(
-                            Diag::span_err(
-                                ast.span,
-                                format_args!(
-                                    "expected a struct or enum, found trait `{}`",
-                                    resolver.path(def.r(s).item),
-                                ),
-                            )
-                            .child(LeafDiag::new(
-                                Level::Help,
-                                "consider prefixing the trait with `dyn`",
-                            ))
-                            .emit(),
+                    Ok(TyPathResolution::Trait(def)) => SpannedTyView::Error(
+                        Diag::span_err(
+                            ast.span,
+                            format_args!(
+                                "expected a struct or enum, found trait `{}`",
+                                resolver.path(def.r(s).item),
+                            ),
                         )
-                        .encode(ast.span, self.tcx);
-                    }
-                    Ok(TyPathResolution::Other(def)) => {
-                        return SpannedTyView::Error(
-                            Diag::span_err(
-                                ast.span,
-                                format_args!(
-                                    "expected a struct or enum, found {} `{}`",
-                                    resolver.categorize(def).bare_what(),
-                                    resolver.path(def),
-                                ),
-                            )
-                            .emit(),
-                        )
-                        .encode(ast.span, self.tcx);
-                    }
-                    Err(err) => {
-                        return SpannedTyView::Error(err).encode(ast.span, self.tcx);
-                    }
-                };
-
-                let (positional, associated) = self
-                    .lower_generic_params_syntactic(generics.as_ref().map_or(&[][..], |v| &v.list));
-
-                if let Some(associated) = associated.first() {
-                    let resolver = FrozenModuleResolver(s);
-
-                    Diag::span_err(
-                        associated.span,
-                        format_args!(
-                            "{} `{}` does not support associated type constraints",
-                            resolver.categorize(def.r(s).item).bare_what(),
-                            resolver.path(def.r(s).item),
-                        ),
+                        .child(LeafDiag::new(
+                            Level::Help,
+                            "consider prefixing the trait with `dyn`",
+                        ))
+                        .emit(),
                     )
-                    .emit();
+                    .encode(ast.span, self.tcx),
+                    Ok(TyPathResolution::Other(def)) => SpannedTyView::Error(
+                        Diag::span_err(
+                            ast.span,
+                            format_args!(
+                                "expected a struct or enum, found {} `{}`",
+                                resolver.categorize(def).bare_what(),
+                                resolver.path(def),
+                            ),
+                        )
+                        .emit(),
+                    )
+                    .encode(ast.span, self.tcx),
+                    Err(err) => SpannedTyView::Error(err).encode(ast.span, self.tcx),
                 }
-
-                let params = self.normalize_positional_generic_arity(
-                    def.r(s).generics,
-                    None,
-                    ast.span,
-                    &positional,
-                );
-
-                SpannedTyView::Adt(
-                    SpannedAdtInstanceView { def, params }.encode(ast.span, self.tcx),
-                )
-                .encode(ast.span, self.tcx)
             }
             AstTyKind::Reference(lifetime, muta, pointee) => SpannedTyView::Reference(
                 match lifetime {

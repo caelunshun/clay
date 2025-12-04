@@ -881,7 +881,8 @@ impl IntraItemLowerCtxt<'_> {
         match (&ast.first_ty, &ast.second_ty) {
             (for_trait, Some(for_ty)) => {
                 let for_ty = self.lower_ty(for_ty);
-                let Ok(for_trait) = self.lower_impl_for_trait_spec(for_trait, &ast.body) else {
+                let Ok(for_trait) = self.lower_trait_instance_of_impl_block(for_trait, &ast.body)
+                else {
                     // TODO: don't early return
                     return;
                 };

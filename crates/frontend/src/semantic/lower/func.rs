@@ -32,10 +32,10 @@ pub enum ExprPathResolution {
     ResolvedSelfTy,
 
     /// A reference to some resolved ADT with some optional generic parameters.
-    ResolvedAdt(Obj<AdtDef>, Option<SpannedTyOrReList>),
+    ResolvedAdt(Obj<AdtDef>, SpannedTyOrReList),
 
     /// A reference to some resolved enum variant with some optional generic parameters.
-    ResolvedEnumVariant(Obj<EnumVariantItem>, Option<SpannedTyOrReList>),
+    ResolvedEnumVariant(Obj<EnumVariantItem>, SpannedTyOrReList),
 
     /// A reference to a type with some further qualifications for methods or constants that cannot
     /// be solved at lowering time. Note that types without further qualifications will be treated
@@ -98,212 +98,215 @@ impl IntraItemLowerCtxt<'_> {
         &mut self,
         path: &AstExprPath,
     ) -> Result<ExprPathResolution, ErrorGuaranteed> {
-        // let s = &self.tcx.session;
-        //
-        // fn lower_rest_as_assoc(
-        //     path: &AstParamedPath,
-        // ) -> Result<TypeRelativeAssoc, ErrorGuaranteed> {
-        //     todo!()
-        // }
-        //
-        // match &path.kind {
-        //     AstExprPathKind::Bare(path) => {
-        //         // See whether we can resolve this as a `self` or as a function local.
-        //         if let Some(first) = &path.segments.first()
-        //             && let Some(ident) = first.part.ident()
-        //             && let Some(local) = self.func_local_names.lookup(ident.text)
-        //         {
-        //             if let Some(args) = &first.args {
-        //                 Diag::span_err(
-        //                     args.span,
-        //                     "local variables cannot be instantiated with generic parameters",
-        //                 )
-        //                 .emit();
-        //             }
-        //
-        //             if let Some(subsequent) = &path.segments.get(1) {
-        //                 Diag::span_err(
-        //                     subsequent.part.span(),
-        //                     "local variables cannot be accessed like modules",
-        //                 )
-        //                 .emit();
-        //             }
-        //
-        //             return Ok(ExprPathResolution::Local(*local));
-        //         }
-        //
-        //         if let [first] = &path.segments[..]
-        //             && first.part.keyword() == Some(AstPathPartKw::Self_)
-        //         {
-        //             if let Some(args) = &first.args {
-        //                 Diag::span_err(
-        //                     args.span,
-        //                     "`self` cannot be instantiated with generic parameters",
-        //                 )
-        //                 .emit();
-        //             }
-        //
-        //             return Ok(ExprPathResolution::SelfLocal);
-        //         }
-        //
-        //         // Otherwise, let's resolve a path, keeping generic segments in mind!
-        //         let mut finger = self.scope;
-        //         let mut resolver = FrozenModuleResolver(s);
-        //         let mut segments = path.segments.iter();
-        //
-        //         fn resolve_enum_variant(
-        //             this: &mut IntraItemLowerCtxt<'_>,
-        //             variant: Obj<EnumVariantItem>,
-        //             first_generics: Option<SpannedTyOrReList>,
-        //             segment: &AstParamedPathSegment,
-        //             segments: &mut slice::Iter<'_, AstParamedPathSegment>,
-        //         ) -> ExprPathResolution {
-        //             let s = &this.tcx.session;
-        //             let resolver = FrozenModuleResolver(s);
-        //
-        //             if let Some(further) = segments.next() {
-        //                 StepResolveError::NotFound.emit(&resolver, variant.r(s).item, further.part);
-        //             }
-        //
-        //             let adt = variant.r(s).owner.r(s).kind.as_adt().unwrap();
-        //
-        //             let second_generics = segment.args.as_ref().map(|args| {
-        //                 this.normalize_positional_generic_arity(
-        //                     adt.r(s).generics,
-        //                     None,
-        //                     args.span,
-        //                     &args.list,
-        //                 )
-        //             });
-        //
-        //             if let (Some(first_generics), Some(second_generics)) =
-        //                 (first_generics, second_generics)
-        //             {
-        //                 Diag::span_err(
-        //                     second_generics.own_span().unwrap_or(Span::DUMMY),
-        //                     "generic parameters for `enum` specified more than once",
-        //                 )
-        //                 .child(LeafDiag::span_note(
-        //                     first_generics.own_span().unwrap_or(Span::DUMMY),
-        //                     "generics first specified here",
-        //                 ))
-        //                 .emit();
-        //             }
-        //
-        //             ExprPathResolution::ResolvedEnumVariant(
-        //                 variant,
-        //                 first_generics.or(second_generics),
-        //             )
-        //         }
-        //
-        //         while let Some(segment) = segments.next() {
-        //             match resolver.resolve_step(self.root, self.scope, finger, segment.part) {
-        //                 Ok(target) => finger = target,
-        //                 Err(err) => {
-        //                     return Err(err.emit(&resolver, finger, segment.part));
-        //                 }
-        //             }
-        //
-        //             match *finger.r(s).kind {
-        //                 ItemKind::Module(_) | ItemKind::Impl(_) => {
-        //                     // (fallthrough)
-        //                 }
-        //                 ItemKind::EnumVariant(variant) => {
-        //                     return Ok(resolve_enum_variant(
-        //                         self,
-        //                         variant,
-        //                         None,
-        //                         segment,
-        //                         &mut segments,
-        //                     ));
-        //                 }
-        //                 ItemKind::Adt(adt) => {
-        //                     let first_generics = segment.args.as_ref().map(|args| {
-        //                         self.normalize_positional_generic_arity(
-        //                             adt.r(s).generics,
-        //                             None,
-        //                             args.span,
-        //                             &args.list,
-        //                         )
-        //                     });
-        //
-        //                     if let Some(segment) = segments.next() {
-        //                         match resolver.resolve_step(
-        //                             self.root,
-        //                             self.scope,
-        //                             finger,
-        //                             segment.part,
-        //                         ) {
-        //                             Ok(variant) => {
-        //                                 let variant = variant.r(s).kind.as_enum_variant().unwrap();
-        //
-        //                                 return Ok(resolve_enum_variant(
-        //                                     self,
-        //                                     variant,
-        //                                     first_generics,
-        //                                     segment,
-        //                                     &mut segments,
-        //                                 ));
-        //                             }
-        //                             Err(StepResolveError::NotFound) => {
-        //                                 todo!()
-        //                             }
-        //                             Err(err) => {
-        //                                 return Err(err.emit(&resolver, finger, segment.part));
-        //                             }
-        //                         }
-        //                     } else {
-        //                         return Ok(ExprPathResolution::ResolvedAdt(adt, first_generics));
-        //                     }
-        //                 }
-        //                 ItemKind::Trait(def) => {
-        //                     todo!()
-        //                 }
-        //                 ItemKind::Func(def) => {
-        //                     todo!()
-        //                 }
-        //             }
-        //
-        //             if let Some(args) = &segment.args {
-        //                 Diag::span_err(
-        //                     args.span,
-        //                     format_args!(
-        //                         "{} at `{}` does not accept generic parameters",
-        //                         resolver.categorize(finger).a_what(),
-        //                         resolver.path(finger),
-        //                     ),
-        //                 )
-        //                 .emit();
-        //
-        //                 // (fallthrough)
-        //             }
-        //         }
-        //
-        //         Err(Diag::span_err(
-        //             path.span,
-        //             format_args!(
-        //                 "path expressions cannot refer to {} `{}`",
-        //                 resolver.categorize(finger).bare_what(),
-        //                 resolver.path(finger),
-        //             ),
-        //         )
-        //         .emit())
-        //     }
-        //     AstExprPathKind::SelfTy(_self_kw, None) => Ok(ExprPathResolution::ResolvedSelfTy),
-        //     AstExprPathKind::SelfTy(self_kw, Some(rest)) => Ok(ExprPathResolution::TypeRelative {
-        //         self_ty: SpannedTyView::This.encode(*self_kw, self.tcx),
-        //         as_trait: None,
-        //         assoc: lower_rest_as_assoc(rest)?,
-        //     }),
-        //     AstExprPathKind::Qualified(qual, rest) => Ok(ExprPathResolution::TypeRelative {
-        //         self_ty: self.lower_ty(&qual.self_ty),
-        //         as_trait: qual.as_trait.as_ref().map(|as_trait| todo!()),
-        //         assoc: lower_rest_as_assoc(rest)?,
-        //     }),
-        //     AstExprPathKind::Error(err) => Err(*err),
-        // }
+        let s = &self.tcx.session;
 
-        todo!();
+        fn lower_rest_as_assoc(
+            path: &AstParamedPath,
+        ) -> Result<TypeRelativeAssoc, ErrorGuaranteed> {
+            todo!()
+        }
+
+        match &path.kind {
+            AstExprPathKind::Bare(path) => {
+                // See whether we can resolve this as a `self` or as a function local.
+                if let Some(first) = &path.segments.first()
+                    && let Some(ident) = first.part.ident()
+                    && let Some(local) = self.func_local_names.lookup(ident.text)
+                {
+                    if let Some(args) = &first.args {
+                        Diag::span_err(
+                            args.span,
+                            "local variables cannot be instantiated with generic parameters",
+                        )
+                        .emit();
+                    }
+
+                    if let Some(subsequent) = &path.segments.get(1) {
+                        Diag::span_err(
+                            subsequent.part.span(),
+                            "local variables cannot be accessed like modules",
+                        )
+                        .emit();
+                    }
+
+                    return Ok(ExprPathResolution::Local(*local));
+                }
+
+                if let [first] = &path.segments[..]
+                    && first.part.keyword() == Some(AstPathPartKw::Self_)
+                {
+                    if let Some(args) = &first.args {
+                        Diag::span_err(
+                            args.span,
+                            "`self` cannot be instantiated with generic parameters",
+                        )
+                        .emit();
+                    }
+
+                    return Ok(ExprPathResolution::SelfLocal);
+                }
+
+                // Otherwise, let's resolve a path, keeping generic segments in mind!
+                let mut finger = self.scope;
+                let mut resolver = FrozenModuleResolver(s);
+                let mut segments = path.segments.iter();
+
+                fn resolve_enum_variant(
+                    this: &mut IntraItemLowerCtxt<'_>,
+                    variant: Obj<EnumVariantItem>,
+                    first_generics: Option<SpannedTyOrReList>,
+                    segment: &AstParamedPathSegment,
+                    segments: &mut slice::Iter<'_, AstParamedPathSegment>,
+                ) -> ExprPathResolution {
+                    let s = &this.tcx.session;
+                    let resolver = FrozenModuleResolver(s);
+
+                    if let Some(further) = segments.next() {
+                        StepResolveError::NotFound.emit(&resolver, variant.r(s).item, further.part);
+                    }
+
+                    let adt = variant.r(s).owner.r(s).kind.as_adt().unwrap();
+
+                    let second_generics = segment
+                        .args
+                        .as_ref()
+                        .map(|args| this.lower_generics_of_adt(adt, args.span, &args.list));
+
+                    if let (Some(first_generics), Some(second_generics)) =
+                        (first_generics, second_generics)
+                    {
+                        Diag::span_err(
+                            second_generics.own_span().unwrap_or(Span::DUMMY),
+                            "generic parameters for `enum` specified more than once",
+                        )
+                        .child(LeafDiag::span_note(
+                            first_generics.own_span().unwrap_or(Span::DUMMY),
+                            "generics first specified here",
+                        ))
+                        .emit();
+                    }
+
+                    let generics = first_generics.or(second_generics).unwrap_or_else(|| {
+                        this.synthesize_inferred_generics_for_elision(
+                            adt.r(s).generics,
+                            None,
+                            segment.part.span(),
+                        )
+                    });
+
+                    ExprPathResolution::ResolvedEnumVariant(variant, generics)
+                }
+
+                while let Some(segment) = segments.next() {
+                    match resolver.resolve_step(self.root, self.scope, finger, segment.part) {
+                        Ok(target) => finger = target,
+                        Err(err) => {
+                            return Err(err.emit(&resolver, finger, segment.part));
+                        }
+                    }
+
+                    match *finger.r(s).kind {
+                        ItemKind::Module(_) | ItemKind::Impl(_) => {
+                            // (fallthrough)
+                        }
+                        ItemKind::EnumVariant(variant) => {
+                            return Ok(resolve_enum_variant(
+                                self,
+                                variant,
+                                None,
+                                segment,
+                                &mut segments,
+                            ));
+                        }
+                        ItemKind::Adt(adt) => {
+                            let first_generics = segment
+                                .args
+                                .as_ref()
+                                .map(|args| self.lower_generics_of_adt(adt, args.span, &args.list));
+
+                            if let Some(segment) = segments.next() {
+                                match resolver.resolve_step(
+                                    self.root,
+                                    self.scope,
+                                    finger,
+                                    segment.part,
+                                ) {
+                                    Ok(variant) => {
+                                        let variant = variant.r(s).kind.as_enum_variant().unwrap();
+
+                                        return Ok(resolve_enum_variant(
+                                            self,
+                                            variant,
+                                            first_generics,
+                                            segment,
+                                            &mut segments,
+                                        ));
+                                    }
+                                    Err(StepResolveError::NotFound) => {
+                                        todo!()
+                                    }
+                                    Err(err) => {
+                                        return Err(err.emit(&resolver, finger, segment.part));
+                                    }
+                                }
+                            } else {
+                                let generics = first_generics.unwrap_or_else(|| {
+                                    self.synthesize_inferred_generics_for_elision(
+                                        adt.r(s).generics,
+                                        None,
+                                        segment.part.span(),
+                                    )
+                                });
+
+                                return Ok(ExprPathResolution::ResolvedAdt(adt, generics));
+                            }
+                        }
+                        ItemKind::Trait(def) => {
+                            todo!()
+                        }
+                        ItemKind::Func(def) => {
+                            todo!()
+                        }
+                    }
+
+                    if let Some(args) = &segment.args {
+                        Diag::span_err(
+                            args.span,
+                            format_args!(
+                                "{} at `{}` does not accept generic parameters",
+                                resolver.categorize(finger).a_what(),
+                                resolver.path(finger),
+                            ),
+                        )
+                        .emit();
+
+                        // (fallthrough)
+                    }
+                }
+
+                Err(Diag::span_err(
+                    path.span,
+                    format_args!(
+                        "path expressions cannot refer to {} `{}`",
+                        resolver.categorize(finger).bare_what(),
+                        resolver.path(finger),
+                    ),
+                )
+                .emit())
+            }
+            AstExprPathKind::SelfTy(_self_kw, None) => Ok(ExprPathResolution::ResolvedSelfTy),
+            AstExprPathKind::SelfTy(self_kw, Some(rest)) => Ok(ExprPathResolution::TypeRelative {
+                self_ty: SpannedTyView::This.encode(*self_kw, self.tcx),
+                as_trait: None,
+                assoc: lower_rest_as_assoc(rest)?,
+            }),
+            AstExprPathKind::Qualified(qual, rest) => Ok(ExprPathResolution::TypeRelative {
+                self_ty: self.lower_ty(&qual.self_ty),
+                as_trait: qual.as_trait.as_ref().map(|as_trait| todo!()),
+                assoc: lower_rest_as_assoc(rest)?,
+            }),
+            AstExprPathKind::Error(err) => Err(*err),
+        }
     }
 
     pub fn lower_block_with_label(

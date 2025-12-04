@@ -18,7 +18,7 @@ use crate::{
             modules::{FrozenModuleResolver, ParentResolver as _, PathResolver as _},
         },
         syntax::{
-            AnyGeneric, GenericBinder, Re, RegionGeneric, SpannedTraitClauseList,
+            AdtDef, AnyGeneric, GenericBinder, Re, RegionGeneric, SpannedTraitClauseList,
             SpannedTraitInstance, SpannedTraitInstanceView, SpannedTraitParam,
             SpannedTraitParamView, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView,
             SpannedTyView, TraitDef, TypeGeneric,
@@ -136,7 +136,166 @@ impl IntraItemLowerCtxt<'_> {
     }
 }
 
-// === Generic parameter lowering === //
+// === Complete generic lowering routines === //
+
+impl IntraItemLowerCtxt<'_> {
+    pub fn lower_generics_of_adt(
+        &mut self,
+        def: Obj<AdtDef>,
+        segment_span: Span,
+        generics: &[AstGenericParam],
+    ) -> SpannedTyOrReList {
+        let s = &self.tcx.session;
+
+        let (positional, associated) = self.lower_generic_params_syntactic(generics);
+
+        let params = self.normalize_positional_generic_arity(
+            def.r(s).generics,
+            None,
+            segment_span,
+            &positional,
+        );
+
+        if let Some(associated) = associated.first() {
+            let resolver = FrozenModuleResolver(s);
+
+            Diag::span_err(
+                associated.span,
+                format_args!(
+                    "{} `{}` does not have any associated type constraints",
+                    resolver.categorize(def.r(s).item).bare_what(),
+                    resolver.path(def.r(s).item),
+                ),
+            )
+            .emit();
+        }
+
+        params
+    }
+
+    pub fn lower_trait_instance_of_impl_block(
+        &mut self,
+        for_trait: &AstTy,
+        body: &AstImplLikeBody,
+    ) -> Result<SpannedTraitInstance, ErrorGuaranteed> {
+        let s = &self.tcx.session;
+
+        // Lower target item.
+        let AstTyKind::Name(for_trait_path, for_trait_generics) = &for_trait.kind else {
+            return Err(Diag::span_err(for_trait.span, "expected a trait, found a type").emit());
+        };
+
+        let def = self.resolve_ty_item_path_as_trait(for_trait_path)?;
+
+        // Lower positional parameters.
+        let (positional, associated) = self.lower_generic_params_syntactic(
+            for_trait_generics.as_ref().map_or(&[][..], |v| &v.list),
+        );
+
+        let params = self.normalize_positional_generic_arity(
+            def.r(s).generics,
+            Some(def.r(s).regular_generic_count),
+            for_trait.span,
+            &positional,
+        );
+
+        if let Some(first) = associated.first() {
+            Diag::span_err(
+                first.span,
+                "associated types must be specified in the `impl` block body",
+            )
+            .emit();
+        }
+
+        // Lower trait members
+        let mut params = params
+            .iter(self.tcx)
+            .map(Some)
+            .chain(iter::repeat(None))
+            .take(def.r(s).generics.r(s).defs.len())
+            .collect::<Vec<_>>();
+
+        for member in &body.members {
+            match &member.kind {
+                AstImplLikeMemberKind::TypeEquals(name, exact_ty) => {
+                    let Some(generic) = def.r(s).associated_types.get(&name.text) else {
+                        Diag::span_err(name.span, "no such associated type parameter").emit();
+                        continue;
+                    };
+
+                    let exact_ty = self.lower_ty(exact_ty);
+
+                    let param = &mut params[generic.r(s).binder.unwrap().idx as usize];
+
+                    if let Some(old_param) = param {
+                        Diag::span_err(name.span, "associated type specified more than once")
+                            .child(LeafDiag::span_note(
+                                old_param.own_span().unwrap_or(Span::DUMMY),
+                                "type first specified here",
+                            ))
+                            .emit();
+                    } else {
+                        *param = Some(
+                            SpannedTyOrReView::Ty(exact_ty)
+                                .encode(exact_ty.own_span().unwrap_or(Span::DUMMY), self.tcx),
+                        );
+                    }
+                }
+                AstImplLikeMemberKind::TypeInherits(..)
+                | AstImplLikeMemberKind::Func(..)
+                | AstImplLikeMemberKind::Error(_) => {
+                    // (ignored)
+                }
+            }
+        }
+
+        // Ensure that all parameters are present.
+        let missing_mentions = params
+            .iter()
+            .zip(&def.r(s).generics.r(s).defs)
+            .filter_map(|(supplied, expected)| {
+                if supplied.is_some() {
+                    return None;
+                }
+
+                Some(expected.as_ty().unwrap().r(s).ident.text)
+            })
+            .collect::<Vec<_>>();
+
+        let missing_mentions = (!missing_mentions.is_empty()).then(|| {
+            Diag::span_err(
+                for_trait.span,
+                format_args!(
+                    "missing associated types {}",
+                    format_list(
+                        missing_mentions.iter().map(|v| format!("`{v}`")),
+                        AND_LIST_GLUE
+                    )
+                ),
+            )
+            .emit()
+        });
+
+        let params = params
+            .iter()
+            .map(|param| {
+                param.unwrap_or_else(|| {
+                    SpannedTyOrReView::Ty(
+                        SpannedTyView::Error(missing_mentions.unwrap())
+                            .encode(for_trait.span, self.tcx),
+                    )
+                    .encode(for_trait.span, self.tcx)
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let params = SpannedTyOrReList::alloc_list(for_trait.span, &params, self.tcx);
+
+        Ok(SpannedTraitInstanceView { def, params }.encode(for_trait.span, self.tcx))
+    }
+}
+
+// === Generic parameter lowering helpers === //
 
 #[derive(Debug, Copy, Clone)]
 pub struct LoweredAssocConstraint {
@@ -406,130 +565,5 @@ impl IntraItemLowerCtxt<'_> {
 
             params[idx] = associated.param;
         }
-    }
-}
-
-// === Impl Lowering === //
-
-impl IntraItemLowerCtxt<'_> {
-    pub fn lower_impl_for_trait_spec(
-        &mut self,
-        for_trait: &AstTy,
-        body: &AstImplLikeBody,
-    ) -> Result<SpannedTraitInstance, ErrorGuaranteed> {
-        let s = &self.tcx.session;
-
-        // Lower target item.
-        let AstTyKind::Name(for_trait_path, for_trait_generics) = &for_trait.kind else {
-            return Err(Diag::span_err(for_trait.span, "expected a trait, found a type").emit());
-        };
-
-        let def = self.resolve_ty_item_path_as_trait(for_trait_path)?;
-
-        // Lower positional parameters.
-        let (positional, associated) = self.lower_generic_params_syntactic(
-            for_trait_generics.as_ref().map_or(&[][..], |v| &v.list),
-        );
-
-        let params = self.normalize_positional_generic_arity(
-            def.r(s).generics,
-            Some(def.r(s).regular_generic_count),
-            for_trait.span,
-            &positional,
-        );
-
-        if let Some(first) = associated.first() {
-            Diag::span_err(
-                first.span,
-                "associated types must be specified in the `impl` block body",
-            )
-            .emit();
-        }
-
-        // Lower trait members
-        let mut params = params
-            .iter(self.tcx)
-            .map(Some)
-            .chain(iter::repeat(None))
-            .take(def.r(s).generics.r(s).defs.len())
-            .collect::<Vec<_>>();
-
-        for member in &body.members {
-            match &member.kind {
-                AstImplLikeMemberKind::TypeEquals(name, exact_ty) => {
-                    let Some(generic) = def.r(s).associated_types.get(&name.text) else {
-                        Diag::span_err(name.span, "no such associated type parameter").emit();
-                        continue;
-                    };
-
-                    let exact_ty = self.lower_ty(exact_ty);
-
-                    let param = &mut params[generic.r(s).binder.unwrap().idx as usize];
-
-                    if let Some(old_param) = param {
-                        Diag::span_err(name.span, "associated type specified more than once")
-                            .child(LeafDiag::span_note(
-                                old_param.own_span().unwrap_or(Span::DUMMY),
-                                "type first specified here",
-                            ))
-                            .emit();
-                    } else {
-                        *param = Some(
-                            SpannedTyOrReView::Ty(exact_ty)
-                                .encode(exact_ty.own_span().unwrap_or(Span::DUMMY), self.tcx),
-                        );
-                    }
-                }
-                AstImplLikeMemberKind::TypeInherits(..)
-                | AstImplLikeMemberKind::Func(..)
-                | AstImplLikeMemberKind::Error(_) => {
-                    // (ignored)
-                }
-            }
-        }
-
-        // Ensure that all parameters are present.
-        let missing_mentions = params
-            .iter()
-            .zip(&def.r(s).generics.r(s).defs)
-            .filter_map(|(supplied, expected)| {
-                if supplied.is_some() {
-                    return None;
-                }
-
-                Some(expected.as_ty().unwrap().r(s).ident.text)
-            })
-            .collect::<Vec<_>>();
-
-        let missing_mentions = (!missing_mentions.is_empty()).then(|| {
-            Diag::span_err(
-                for_trait.span,
-                format_args!(
-                    "missing associated types {}",
-                    format_list(
-                        missing_mentions.iter().map(|v| format!("`{v}`")),
-                        AND_LIST_GLUE
-                    )
-                ),
-            )
-            .emit()
-        });
-
-        let params = params
-            .iter()
-            .map(|param| {
-                param.unwrap_or_else(|| {
-                    SpannedTyOrReView::Ty(
-                        SpannedTyView::Error(missing_mentions.unwrap())
-                            .encode(for_trait.span, self.tcx),
-                    )
-                    .encode(for_trait.span, self.tcx)
-                })
-            })
-            .collect::<Vec<_>>();
-
-        let params = SpannedTyOrReList::alloc_list(for_trait.span, &params, self.tcx);
-
-        Ok(SpannedTraitInstanceView { def, params }.encode(for_trait.span, self.tcx))
     }
 }
