@@ -59,7 +59,7 @@ impl DiagCtxt {
     pub fn delay_and_sort(&self, s: Session) -> impl Sized {
         self.delay_and_sort_guards.update(|v| v + 1);
 
-        scopeguard::guard((), move |()| {
+        scopeguard::guard_on_success((), move |()| {
             let diag = &s.diag;
             diag.delay_and_sort_guards.update(|v| v - 1);
 
