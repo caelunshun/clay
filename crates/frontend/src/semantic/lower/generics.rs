@@ -452,7 +452,7 @@ impl IntraItemLowerCtxt<'_> {
         binder: Obj<GenericBinder>,
         binder_len_override: Option<u32>,
         segment_span: Span,
-        params: &[SpannedTyOrRe],
+        orig_params: &[SpannedTyOrRe],
     ) -> SpannedTyOrReList {
         let s = &self.tcx.session;
 
@@ -460,9 +460,9 @@ impl IntraItemLowerCtxt<'_> {
 
         let mut errored_out_missing = None;
 
-        let params = binder.r(s).defs[..binder_len]
+        let resolved_params = binder.r(s).defs[..binder_len]
             .iter()
-            .zip(params.iter().map(Some).chain(iter::repeat(None)))
+            .zip(orig_params.iter().map(Some).chain(iter::repeat(None)))
             .map(|(expected, actual)| {
                 let actual_span =
                     actual.map_or(segment_span, |v| v.own_span().unwrap_or(segment_span));
@@ -477,7 +477,7 @@ impl IntraItemLowerCtxt<'_> {
                                         "expected {} generic parameter{} but got {}",
                                         binder_len,
                                         if binder_len == 1 { "" } else { "s" },
-                                        params.len(),
+                                        orig_params.len(),
                                     ),
                                 ))
                                 .emit()
@@ -513,9 +513,9 @@ impl IntraItemLowerCtxt<'_> {
             })
             .collect::<Vec<_>>();
 
-        if params.len() > binder_len {
+        if orig_params.len() > binder_len {
             Diag::span_err(
-                params[binder_len].own_span().unwrap_or(Span::DUMMY),
+                orig_params[binder_len].own_span().unwrap_or(Span::DUMMY),
                 "too many generic parameters",
             )
             .child(LeafDiag::new(
@@ -524,13 +524,13 @@ impl IntraItemLowerCtxt<'_> {
                     "expected {} generic parameter{} but got {}",
                     binder_len,
                     if binder_len == 1 { "" } else { "s" },
-                    params.len(),
+                    orig_params.len(),
                 ),
             ))
             .emit();
         }
 
-        SpannedTyOrReList::alloc_list(segment_span, &params, self.tcx)
+        SpannedTyOrReList::alloc_list(segment_span, &resolved_params, self.tcx)
     }
 
     pub fn synthesize_inferred_generics_for_elision(
