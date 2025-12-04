@@ -28,6 +28,22 @@ pub enum AdtKind {
     Struct(Obj<AdtKindStruct>),
 }
 
+impl AdtKind {
+    pub fn as_enum(self) -> Option<Obj<AdtKindEnum>> {
+        match self {
+            AdtKind::Enum(def) => Some(def),
+            AdtKind::Struct(_) => None,
+        }
+    }
+
+    pub fn as_struct(self) -> Option<Obj<AdtKindStruct>> {
+        match self {
+            AdtKind::Struct(def) => Some(def),
+            AdtKind::Enum(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AdtKindEnum {
     pub variants: Vec<AdtEnumVariant>,

@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        Diag,
+        Diag, ErrorGuaranteed, HardDiag, LeafDiag, Level,
         arena::{LateInit, Obj},
     },
     parse::{
@@ -12,7 +12,9 @@ use crate::{
     },
     semantic::{
         lower::{entry::IntraItemLowerCtxt, func::path::ExprPathResolution},
-        syntax::{Block, Expr, ExprKind, LetStmt, Pat, PatKind, Stmt},
+        syntax::{
+            AdtKind, AdtStructFieldSyntax, Block, Expr, ExprKind, LetStmt, Pat, PatKind, Stmt,
+        },
     },
 };
 
@@ -203,44 +205,97 @@ impl IntraItemLowerCtxt<'_> {
                 )
                 .emit(),
             ),
-            AstExprKind::Path(path) => match self.resolve_expr_path(path) {
-                // TODO
-                Ok(ExprPathResolution::ResolvedSelfTy) => {
-                    ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
-                }
-                Ok(ExprPathResolution::ResolvedAdt(obj, spanned)) => {
-                    ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
-                }
-                Ok(ExprPathResolution::ResolvedEnumVariant(obj, spanned)) => {
-                    ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
-                }
-                Ok(ExprPathResolution::ResolvedFn(obj, spanned)) => {
-                    ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
-                }
-                Ok(ExprPathResolution::TypeRelative {
-                    self_ty,
-                    as_trait,
-                    assoc,
-                }) => ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked()),
-                Ok(ExprPathResolution::SelfLocal) => {
-                    ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
-                }
-                Ok(ExprPathResolution::Local(obj)) => {
-                    ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
-                }
-                Ok(
-                    def @ (ExprPathResolution::ResolvedModule(_)
-                    | ExprPathResolution::ResolvedGeneric(_)
-                    | ExprPathResolution::ResolvedTrait(_, _)),
-                ) => ExprKind::Error(
+            AstExprKind::Path(path) => 'path: {
+                let res = match self.resolve_expr_path(path) {
+                    Ok(v) => v,
+                    Err(err) => {
+                        break 'path ExprKind::Error(err);
+                    }
+                };
+
+                let unexpected_value = || -> HardDiag {
                     Diag::span_err(
                         path.span,
-                        format_args!("expected value, got {}", def.bare_what(s)),
+                        format_args!("expected value, got {}", res.bare_what(s)),
                     )
-                    .emit(),
-                ),
-                Err(err) => ExprKind::Error(err),
-            },
+                };
+
+                let validate_syntax =
+                    |syntax: &AdtStructFieldSyntax, whats: &str| -> Option<ErrorGuaranteed> {
+                        match syntax {
+                            AdtStructFieldSyntax::Unit => None,
+                            AdtStructFieldSyntax::Tuple => None,
+                            AdtStructFieldSyntax::Named(_) => Some(
+                                Diag::span_err(
+                                    path.span,
+                                    format_args!("expected value, got {}", res.bare_what(s)),
+                                )
+                                .child(LeafDiag::new(
+                                    Level::Note,
+                                    format_args!(
+                                        "only unit and tuple {whats} can be turned into functions"
+                                    ),
+                                ))
+                                .emit(),
+                            ),
+                        }
+                    };
+
+                match res {
+                    ExprPathResolution::ResolvedSelfTy => {
+                        // TODO
+                        ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
+                    }
+                    ExprPathResolution::ResolvedAdt(def, args) => match def.r(s).kind {
+                        AdtKind::Enum(_) => ExprKind::Error(unexpected_value().emit()),
+                        AdtKind::Struct(def) => {
+                            if let Some(err) = validate_syntax(&def.r(s).syntax, "`struct`s") {
+                                break 'path ExprKind::Error(err);
+                            }
+
+                            // TODO
+                            ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
+                        }
+                    },
+                    ExprPathResolution::ResolvedEnumVariant(def, args) => {
+                        let descriptor = def.r(s).descriptor(s);
+
+                        if let Some(err) =
+                            validate_syntax(&descriptor.kind.r(s).syntax, "`enum` variants")
+                        {
+                            break 'path ExprKind::Error(err);
+                        }
+
+                        // TODO
+                        ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
+                    }
+                    ExprPathResolution::ResolvedFn(obj, spanned) => {
+                        // TODO
+                        ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
+                    }
+                    ExprPathResolution::TypeRelative {
+                        self_ty,
+                        as_trait,
+                        assoc,
+                    } => {
+                        // TODO
+                        ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
+                    }
+                    ExprPathResolution::SelfLocal => {
+                        // TODO
+                        ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
+                    }
+                    ExprPathResolution::Local(obj) => {
+                        // TODO
+                        ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
+                    }
+                    ExprPathResolution::ResolvedModule(_)
+                    | ExprPathResolution::ResolvedGeneric(_)
+                    | ExprPathResolution::ResolvedTrait(_, _) => {
+                        ExprKind::Error(unexpected_value().emit())
+                    }
+                }
+            }
             AstExprKind::AddrOf(muta, expr) => {
                 ExprKind::AddrOf(muta.as_muta(), self.lower_expr(expr))
             }

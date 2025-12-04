@@ -1,13 +1,19 @@
 fn main() {
-    whee::<i32>();
-
-    Woo::<Foo = (), u32>::new::<(), Maz = ()>()
+    Meow;
+    Whee::Foo;
+    Whee::Bar;
+    Whee::Baz;
+    Foo;
+    Bar;
+    Baz;
 }
 
-struct i32 {}
+pub struct Meow {}
 
-pub struct Woo<'a> {}
+pub enum Whee {
+    Foo,
+    Bar {},
+    Baz(),
+}
 
-mod u32 {}
-
-pub fn whee() {}
+use Whee::*;

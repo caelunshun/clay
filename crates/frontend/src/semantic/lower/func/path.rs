@@ -403,7 +403,7 @@ impl IntraItemLowerCtxt<'_> {
             StepResolveError::NotFound.emit(&resolver, variant.r(s).item, further.part);
         }
 
-        let adt = variant.r(s).owner.r(s).kind.as_adt().unwrap();
+        let adt = variant.r(s).owner_adt(s);
 
         let second_generics = variant_segment.args.as_ref().map(|args| {
             self.lower_generics_of_entirely_positional(

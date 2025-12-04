@@ -1,12 +1,13 @@
 use crate::{
     base::{
+        Session,
         arena::{LateInit, Obj},
         syntax::{Span, Symbol},
     },
     parse::token::Ident,
     semantic::{
         lower::modules::{ItemCategory, ParentRef},
-        syntax::{AdtDef, FnItem, ImplDef, TraitDef},
+        syntax::{AdtDef, AdtEnumVariant, AdtKindEnum, FnItem, ImplDef, TraitDef},
     },
     utils::hash::FxIndexMap,
 };
@@ -103,6 +104,20 @@ pub struct EnumVariantItem {
     pub item: Obj<Item>,
     pub owner: Obj<Item>,
     pub idx: u32,
+}
+
+impl EnumVariantItem {
+    pub fn owner_adt(&self, s: &Session) -> Obj<AdtDef> {
+        self.owner.r(s).kind.as_adt().unwrap()
+    }
+
+    pub fn owner_adt_enum(&self, s: &Session) -> Obj<AdtKindEnum> {
+        self.owner_adt(s).r(s).kind.as_enum().unwrap()
+    }
+
+    pub fn descriptor<'s>(&self, s: &'s Session) -> &'s AdtEnumVariant {
+        &self.owner_adt_enum(s).r(s).variants[self.idx as usize]
+    }
 }
 
 #[derive(Debug, Clone)]
