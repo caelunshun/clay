@@ -1,5 +1,7 @@
 fn main() {
-    Woo::new
+    Woo::<Foo = (), u32>::new::<(), Maz = ()>()
 }
 
-pub struct Woo {}
+pub struct Woo<'a> {}
+
+mod u32 {}

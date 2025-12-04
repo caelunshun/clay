@@ -139,6 +139,25 @@ impl IntraItemLowerCtxt<'_> {
 // === Complete generic lowering routines === //
 
 impl IntraItemLowerCtxt<'_> {
+    pub fn lower_type_relative_generics(
+        &mut self,
+        args: Option<&AstGenericParamList>,
+    ) -> Option<SpannedTyOrReList> {
+        args.as_ref().map(|args| {
+            let (positional, associated) = self.lower_generic_params_syntactic(&args.list);
+
+            if let Some(associated) = associated.first() {
+                Diag::span_err(
+                    associated.span,
+                    "method or constant does not have associated type constraints",
+                )
+                .emit();
+            }
+
+            SpannedTyOrReList::alloc_list(args.span, &positional, self.tcx)
+        })
+    }
+
     pub fn lower_generics_of_adt(
         &mut self,
         def: Obj<AdtDef>,
@@ -171,6 +190,42 @@ impl IntraItemLowerCtxt<'_> {
         }
 
         params
+    }
+
+    pub fn lower_generics_of_trait_instance(
+        &mut self,
+        def: Obj<TraitDef>,
+        segment_span: Span,
+        generics: Option<&AstGenericParamList>,
+    ) -> SpannedTyOrReList {
+        let s = &self.tcx.session;
+
+        let Some(generics) = generics else {
+            return self.construct_trait_instance_from_positionals(
+                def,
+                self.synthesize_inferred_generics_for_elision(
+                    def.r(s).generics,
+                    None,
+                    segment_span,
+                ),
+                segment_span,
+            );
+        };
+
+        let (positional, associated) = self.lower_generic_params_syntactic(&generics.list);
+
+        let params = self.normalize_positional_generic_arity(
+            def.r(s).generics,
+            None,
+            segment_span,
+            &positional,
+        );
+
+        if let Some(associated) = associated.first() {
+            Diag::span_err(associated.span, "associated types cannot be specified here").emit();
+        }
+
+        self.construct_trait_instance_from_positionals(def, params, segment_span)
     }
 
     pub fn lower_trait_instance_of_impl_block(
@@ -534,6 +589,32 @@ impl IntraItemLowerCtxt<'_> {
             ))
             .take(def.r(s).generics.r(s).defs.len())
             .collect::<Vec<_>>()
+    }
+
+    pub fn construct_trait_instance_from_positionals(
+        &mut self,
+        def: Obj<TraitDef>,
+        params: SpannedTyOrReList,
+        outer_span: Span,
+    ) -> SpannedTyOrReList {
+        let s = &self.tcx.session;
+
+        debug_assert_eq!(def.r(s).regular_generic_count as usize, params.len(s));
+
+        let elaborated_params = params
+            .iter(self.tcx)
+            .chain(iter::repeat(
+                SpannedTyOrReView::Ty(SpannedTyView::ExplicitInfer.encode(outer_span, self.tcx))
+                    .encode(outer_span, self.tcx),
+            ))
+            .take(def.r(s).generics.r(s).defs.len())
+            .collect::<Vec<_>>();
+
+        SpannedTyOrReList::alloc_list(
+            params.own_span().unwrap_or(Span::DUMMY),
+            &elaborated_params,
+            self.tcx,
+        )
     }
 
     pub fn lower_associated_type_generic_params(
