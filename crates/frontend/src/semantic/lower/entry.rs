@@ -880,11 +880,11 @@ impl IntraItemLowerCtxt<'_> {
         // Lower source trait
         match (&ast.first_ty, &ast.second_ty) {
             (for_trait, Some(for_ty)) => {
-                let Ok(for_trait) = self.lower_trait_instance(for_trait, &ast.body) else {
+                let for_ty = self.lower_ty(for_ty);
+                let Ok(for_trait) = self.lower_impl_for_trait_spec(for_trait, &ast.body) else {
+                    // TODO: don't early return
                     return;
                 };
-
-                let for_ty = self.lower_ty(for_ty);
 
                 let item_spec = Obj::new(
                     ImplDef {
@@ -904,9 +904,6 @@ impl IntraItemLowerCtxt<'_> {
                 todo!()
             }
         }
-
-        // Lower methods
-        // TODO
     }
 
     pub fn lower_adt(

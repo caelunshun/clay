@@ -2,85 +2,31 @@ use crate::{
     base::{
         Diag, ErrorGuaranteed, LeafDiag, Level,
         analysis::SpannedViewEncode,
-        arena::{LateInit, Obj},
+        arena::Obj,
         syntax::{HasSpan as _, Span},
     },
     parse::{
         ast::{
-            AstBarePath, AstGenericDef, AstGenericParam, AstGenericParamKind, AstGenericParamList,
-            AstGenericPositional, AstImplLikeBody, AstImplLikeMemberKind, AstNamedSpec,
-            AstTraitClause, AstTraitClauseList, AstTy, AstTyKind, AstTyOrRe,
+            AstBarePath, AstNamedSpec, AstTraitClause, AstTraitClauseList, AstTy, AstTyKind,
+            AstTyOrRe,
         },
         token::Lifetime,
     },
     semantic::{
         lower::{
-            entry::{InterItemLowerCtxt, IntraItemLowerCtxt},
+            entry::IntraItemLowerCtxt,
             modules::{FrozenModuleResolver, ParentResolver, PathResolver as _},
         },
         syntax::{
-            AdtDef, AnyGeneric, GenericBinder, Item, ItemKind, Re, RegionGeneric,
-            SpannedAdtInstanceView, SpannedRe, SpannedTraitClause, SpannedTraitClauseList,
-            SpannedTraitClauseView, SpannedTraitInstance, SpannedTraitInstanceView,
-            SpannedTraitParam, SpannedTraitParamList, SpannedTraitParamView, SpannedTraitSpec,
-            SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReList,
-            SpannedTyOrReView, SpannedTyView, TraitDef, TraitParam, TypeGeneric,
+            AdtDef, Item, ItemKind, Re, SpannedAdtInstanceView, SpannedRe, SpannedTraitClause,
+            SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParamList,
+            SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe,
+            SpannedTyOrReView, SpannedTyView, TraitDef, TypeGeneric,
         },
     },
-    utils::hash::FxHashMap,
 };
-use hashbrown::hash_map;
-use std::iter;
 
-impl<'ast> InterItemLowerCtxt<'_, 'ast> {
-    pub fn lower_generic_defs(
-        &mut self,
-        binder: &mut GenericBinder,
-        ast: &'ast AstGenericParamList,
-        generic_clause_lists: &mut Vec<Option<&'ast AstTraitClauseList>>,
-    ) {
-        let s = &self.tcx.session;
-
-        for def in &ast.list {
-            let Some(def_kind) = def.kind.as_generic_def() else {
-                Diag::span_err(def.span, "expected generic parameter definition").emit();
-                continue;
-            };
-
-            match def_kind {
-                AstGenericDef::Re(lifetime, clauses) => {
-                    binder.defs.push(AnyGeneric::Re(Obj::new(
-                        RegionGeneric {
-                            span: def.span,
-                            lifetime,
-                            binder: LateInit::uninit(),
-                            clauses: LateInit::uninit(),
-                            is_synthetic: false,
-                        },
-                        s,
-                    )));
-
-                    generic_clause_lists.push(clauses);
-                }
-                AstGenericDef::Ty(ident, clauses) => {
-                    binder.defs.push(AnyGeneric::Ty(Obj::new(
-                        TypeGeneric {
-                            span: def.span,
-                            ident,
-                            binder: LateInit::uninit(),
-                            user_clauses: LateInit::uninit(),
-                            elaborated_clauses: LateInit::uninit(),
-                            is_synthetic: false,
-                        },
-                        s,
-                    )));
-
-                    generic_clause_lists.push(clauses);
-                }
-            }
-        }
-    }
-}
+// === Name Resolution === //
 
 #[derive(Debug, Copy, Clone)]
 pub enum TyPathResolution {
@@ -150,193 +96,11 @@ impl IntraItemLowerCtxt<'_> {
         )
         .emit())
     }
+}
 
-    pub fn define_generics_in_binder(&mut self, binder: Obj<GenericBinder>) {
-        let s = &self.tcx.session;
+// === Type Lowering === //
 
-        for generic in &binder.r(s).defs {
-            match generic {
-                AnyGeneric::Re(generic) => {
-                    self.generic_re_names
-                        .define(generic.r(s).lifetime.name, *generic, |other| {
-                            Diag::span_err(generic.r(s).span, "generic name used more than once")
-                                .child(LeafDiag::span_note(
-                                    other.r(s).span,
-                                    "name previously used here",
-                                ))
-                                .emit()
-                        });
-                }
-                AnyGeneric::Ty(generic) => {
-                    self.generic_ty_names
-                        .define(generic.r(s).ident.text, *generic, |other| {
-                            Diag::span_err(generic.r(s).span, "generic name used more than once")
-                                .child(LeafDiag::span_note(
-                                    other.r(s).span,
-                                    "name previously used here",
-                                ))
-                                .emit()
-                        });
-                }
-            }
-        }
-    }
-
-    pub fn lower_generic_def_clauses(
-        &mut self,
-        generics: Obj<GenericBinder>,
-        clause_lists: &[Option<&AstTraitClauseList>],
-    ) {
-        let s = &self.tcx.session;
-
-        for (&generic, &clause_list) in generics.r(s).defs.iter().zip(clause_lists) {
-            match generic {
-                AnyGeneric::Re(generic) => {
-                    LateInit::init(&generic.r(s).clauses, self.lower_clauses(clause_list));
-                }
-                AnyGeneric::Ty(generic) => {
-                    LateInit::init(&generic.r(s).user_clauses, self.lower_clauses(clause_list));
-                }
-            }
-        }
-    }
-
-    pub fn lower_clauses(&mut self, ast: Option<&AstTraitClauseList>) -> SpannedTraitClauseList {
-        let Some(ast) = ast else {
-            return SpannedTraitClauseList::new_unspanned(self.tcx.intern_trait_clause_list(&[]));
-        };
-
-        let mut clauses = Vec::new();
-
-        for ast in &ast.clauses {
-            let Ok(ast) = ast else {
-                continue;
-            };
-
-            let Ok(clause) = self.lower_clause(ast) else {
-                continue;
-            };
-
-            clauses.push(clause);
-        }
-
-        SpannedTraitClauseList::alloc_list(ast.span, &clauses, self.tcx)
-    }
-
-    pub fn lower_clause(
-        &mut self,
-        ast: &AstTraitClause,
-    ) -> Result<SpannedTraitClause, ErrorGuaranteed> {
-        match ast {
-            AstTraitClause::Outlives(lt) => {
-                Ok(SpannedTraitClauseView::Outlives(self.lower_re(lt)).encode(lt.span, self.tcx))
-            }
-            AstTraitClause::Trait(spec) => {
-                Ok(SpannedTraitClauseView::Trait(self.lower_trait_spec(spec)?)
-                    .encode(spec.span, self.tcx))
-            }
-        }
-    }
-
-    pub fn lower_trait_spec(
-        &mut self,
-        ast: &AstNamedSpec,
-    ) -> Result<SpannedTraitSpec, ErrorGuaranteed> {
-        let def = self.resolve_ty_item_path_as_trait(&ast.path)?;
-        let params = self.lower_trait_spec_generics(def, ast.span, ast.params.as_ref())?;
-
-        Ok(SpannedTraitSpecView { def, params }.encode(ast.span, self.tcx))
-    }
-
-    pub fn lower_trait_instance(
-        &mut self,
-        main_ty: &AstTy,
-        body: &AstImplLikeBody,
-    ) -> Result<SpannedTraitInstance, ErrorGuaranteed> {
-        let s = &self.tcx.session;
-
-        // Validate path
-        let AstTyKind::Name(path, generics) = &main_ty.kind else {
-            return Err(Diag::span_err(main_ty.span, "expected a trait, found a type").emit());
-        };
-
-        let def = self.resolve_ty_item_path_as_trait(path)?;
-
-        let mut params = Vec::new();
-
-        // Collect positional arguments
-        params.extend(
-            self.lower_positional_binder_generics(
-                def.r(s).generics,
-                Some(def.r(s).regular_generic_count),
-                main_ty.span,
-                generics.as_ref().map_or(&[][..], |v| &v.list),
-            )
-            .iter(self.tcx),
-        );
-
-        // Collect associated types
-        let mut associated = FxHashMap::default();
-
-        for member in &body.members {
-            match &member.kind {
-                AstImplLikeMemberKind::TypeEquals(name, ty_val) => {
-                    let Some(generic) = def.r(s).associated_types.get(&name.text) else {
-                        Diag::span_err(name.span, "no such associated type parameter").emit();
-                        continue;
-                    };
-
-                    let ty_val = self.lower_ty(ty_val);
-
-                    match associated.entry(generic) {
-                        hash_map::Entry::Vacant(entry) => {
-                            entry.insert((name.span, ty_val));
-                        }
-                        hash_map::Entry::Occupied(entry) => {
-                            Diag::span_err(name.span, "associated type specified more than once")
-                                .child(LeafDiag::span_note(
-                                    entry.get().0,
-                                    "type first specified here",
-                                ))
-                                .emit();
-
-                            continue;
-                        }
-                    }
-                }
-                AstImplLikeMemberKind::TypeInherits(..) => {
-                    Diag::span_err(member.span, "associated type in `impl` without body").emit();
-                }
-                AstImplLikeMemberKind::Func(..) => {
-                    todo!();
-                }
-                AstImplLikeMemberKind::Error(_) => {
-                    // (ignored)
-                }
-            }
-        }
-
-        for generic in &def.r(s).generics.r(s).defs[(def.r(s).regular_generic_count as usize)..] {
-            let generic = generic.unwrap_ty();
-
-            let Some((_, assoc)) = associated.get(&generic) else {
-                return Err(Diag::span_err(
-                    path.span,
-                    format_args!("missing associated type `{}`", generic.r(s).ident.text),
-                )
-                .emit());
-            };
-
-            params.push(SpannedTyOrReView::Ty(*assoc).encode(generic.r(s).span, self.tcx));
-        }
-
-        Ok(SpannedTraitInstanceView {
-            def,
-            params: SpannedTyOrReList::alloc_list(main_ty.span, &params, self.tcx),
-        }
-        .encode(main_ty.span, self.tcx))
-    }
-
+impl IntraItemLowerCtxt<'_> {
     pub fn lower_ty_or_re(&mut self, ast: &AstTyOrRe) -> SpannedTyOrRe {
         match ast {
             AstTyOrRe::Re(ast) => {
@@ -409,11 +173,28 @@ impl IntraItemLowerCtxt<'_> {
                     }
                 };
 
-                let params = self.lower_positional_binder_generics(
+                let (positional, associated) = self
+                    .lower_generic_params_syntactic(generics.as_ref().map_or(&[][..], |v| &v.list));
+
+                if let Some(associated) = associated.first() {
+                    let resolver = FrozenModuleResolver(s);
+
+                    Diag::span_err(
+                        associated.span,
+                        format_args!(
+                            "{} `{}` does not support associated type constraints",
+                            resolver.categorize(def.r(s).item).bare_what(),
+                            resolver.path(def.r(s).item),
+                        ),
+                    )
+                    .emit();
+                }
+
+                let params = self.normalize_positional_generic_arity(
                     def.r(s).generics,
                     None,
                     ast.span,
-                    generics.as_ref().map_or(&[][..], |v| &v.list),
+                    &positional,
                 );
 
                 SpannedTyView::Adt(
@@ -449,220 +230,73 @@ impl IntraItemLowerCtxt<'_> {
             self.tcx,
         )
     }
+}
 
-    pub fn lower_trait_spec_generics(
-        &mut self,
-        def: Obj<TraitDef>,
-        segment_span: Span,
-        ast: Option<&AstGenericParamList>,
-    ) -> Result<SpannedTraitParamList, ErrorGuaranteed> {
-        let s = &self.tcx.session;
+// === Trait Clause Lowering === //
 
-        let mut reader = ast.as_ref().map_or(&[][..], |v| &v.list).iter();
-        let mut params = Vec::new();
+impl IntraItemLowerCtxt<'_> {
+    pub fn lower_clauses(&mut self, ast: Option<&AstTraitClauseList>) -> SpannedTraitClauseList {
+        let Some(ast) = ast else {
+            return SpannedTraitClauseList::new_unspanned(self.tcx.intern_trait_clause_list(&[]));
+        };
 
-        // Lower positional arguments
-        if reader.len() < def.r(s).regular_generic_count as usize {
-            return Err(Diag::span_err(segment_span, "missing generic parameters").emit());
-        }
+        let mut clauses = Vec::new();
 
-        for (param, generic) in (&mut reader)
-            .zip(&def.r(s).generics.r(s).defs)
-            .take(def.r(s).regular_generic_count as usize)
-        {
-            match &param.kind {
-                AstGenericParamKind::PositionalTy(ty) => {
-                    if !matches!(generic, AnyGeneric::Ty(_)) {
-                        return Err(Diag::span_err(ty.span, "expected lifetime parameter").emit());
-                    }
-
-                    params.push(
-                        SpannedTraitParamView::Equals(
-                            SpannedTyOrReView::Ty(self.lower_ty(ty)).encode(ty.span, self.tcx),
-                        )
-                        .encode(param.span, self.tcx),
-                    );
-                }
-                AstGenericParamKind::PositionalRe(re) => {
-                    if !matches!(generic, AnyGeneric::Re(_)) {
-                        return Err(Diag::span_err(re.span, "expected type parameter").emit());
-                    }
-
-                    params.push(
-                        SpannedTraitParamView::Equals(
-                            SpannedTyOrReView::Re(self.lower_re(re)).encode(re.span, self.tcx),
-                        )
-                        .encode(re.span, self.tcx),
-                    );
-                }
-                AstGenericParamKind::InheritRe(..) => {
-                    Diag::span_err(param.span, "cannot name lifetime parameters").emit();
-                    continue;
-                }
-                AstGenericParamKind::TyEquals(..) | AstGenericParamKind::InheritTy(..) => {
-                    return Err(Diag::span_err(segment_span, "missing generic parameters").emit());
-                }
-            }
-        }
-
-        // Lower trait clauses
-        params.resize_with(def.r(s).generics.r(s).defs.len(), || {
-            SpannedTraitParam::new_unspanned(TraitParam::Unspecified(
-                self.tcx.intern_trait_clause_list(&[]),
-            ))
-        });
-
-        for param in &mut reader {
-            let name = match &param.kind {
-                AstGenericParamKind::TyEquals(name, _) => name,
-                AstGenericParamKind::InheritTy(name, _) => name,
-                AstGenericParamKind::PositionalTy(..) | AstGenericParamKind::PositionalRe(..) => {
-                    return Err(Diag::span_err(param.span, "too many generic parameters").emit());
-                }
-                AstGenericParamKind::InheritRe(..) => {
-                    Diag::span_err(param.span, "cannot name lifetime parameters").emit();
-                    continue;
-                }
+        for ast in &ast.clauses {
+            let Ok(ast) = ast else {
+                continue;
             };
 
-            let Some(generic) = def.r(s).associated_types.get(&name.text) else {
-                return Err(Diag::span_err(
-                    name.span,
-                    "trait does not have associated type with that name",
-                )
-                .emit());
+            let Ok(clause) = self.lower_clause(ast) else {
+                continue;
             };
 
-            let idx = generic.r(s).binder.unwrap().idx as usize;
-
-            match params[idx].value {
-                TraitParam::Unspecified(list) if list.r(s).is_empty() => {
-                    // (fallthrough)
-                }
-                _ => {
-                    return Err(Diag::span_err(
-                        param.span,
-                        "associated type mentioned more than once",
-                    )
-                    .emit());
-                }
-            }
-
-            params[idx] = match &param.kind {
-                AstGenericParamKind::TyEquals(_, ast) => SpannedTraitParamView::Equals(
-                    SpannedTyOrReView::Ty(self.lower_ty(ast)).encode(ast.span, self.tcx),
-                )
-                .encode(param.span, self.tcx),
-                AstGenericParamKind::InheritTy(_, ast) => {
-                    SpannedTraitParamView::Unspecified(self.lower_clauses(Some(ast)))
-                        .encode(param.span, self.tcx)
-                }
-                AstGenericParamKind::PositionalTy(..)
-                | AstGenericParamKind::PositionalRe(..)
-                | AstGenericParamKind::InheritRe(..) => unreachable!(),
-            };
+            clauses.push(clause);
         }
 
-        Ok(SpannedTraitParamList::alloc_list(
-            segment_span,
-            &params,
-            self.tcx,
-        ))
+        SpannedTraitClauseList::alloc_list(ast.span, &clauses, self.tcx)
     }
 
-    pub fn lower_positional_binder_generics(
+    pub fn lower_clause(
         &mut self,
-        binder: Obj<GenericBinder>,
-        binder_len_override: Option<u32>,
-        segment_span: Span,
-        ast_params: &[AstGenericParam],
-    ) -> SpannedTyOrReList {
+        ast: &AstTraitClause,
+    ) -> Result<SpannedTraitClause, ErrorGuaranteed> {
+        match ast {
+            AstTraitClause::Outlives(lt) => {
+                Ok(SpannedTraitClauseView::Outlives(self.lower_re(lt)).encode(lt.span, self.tcx))
+            }
+            AstTraitClause::Trait(spec) => {
+                Ok(SpannedTraitClauseView::Trait(self.lower_trait_spec(spec)?)
+                    .encode(spec.span, self.tcx))
+            }
+        }
+    }
+
+    pub fn lower_trait_spec(
+        &mut self,
+        ast: &AstNamedSpec,
+    ) -> Result<SpannedTraitSpec, ErrorGuaranteed> {
         let s = &self.tcx.session;
 
-        let binder_len = binder_len_override.map_or(binder.r(s).defs.len(), |v| v as usize);
+        // Figure out which trait we're talking about.
+        let def = self.resolve_ty_item_path_as_trait(&ast.path)?;
 
-        let mut errored_out_missing = None;
+        // Lower generic parameters.
+        let (positional, associated) =
+            self.lower_generic_params_syntactic(ast.params.as_ref().map_or(&[][..], |v| &v.list));
 
-        let params = binder.r(s).defs[..binder_len]
-            .iter()
-            .zip(ast_params.iter().map(Some).chain(iter::repeat(None)))
-            .map(|(expected, actual)| {
-                let actual_span = actual.map_or(segment_span, |v| v.span);
+        let params = self.normalize_positional_generic_arity(
+            def.r(s).generics,
+            Some(def.r(s).regular_generic_count),
+            ast.span,
+            &positional,
+        );
+        let mut params = self.construct_trait_spec_from_positionals(def, params, ast.span);
 
-                let para_or_err = 'para_or_err: {
-                    let Some(actual) = actual else {
-                        break 'para_or_err Err(*errored_out_missing.get_or_insert_with(|| {
-                            Diag::span_err(segment_span, "missing generic parameters")
-                                .child(LeafDiag::new(
-                                    Level::Note,
-                                    format_args!(
-                                        "expected {} generic parameter{} but got {}",
-                                        binder_len,
-                                        if binder_len == 1 { "" } else { "s" },
-                                        ast_params.len()
-                                    ),
-                                ))
-                                .emit()
-                        }));
-                    };
+        self.lower_associated_type_generic_params(def, &mut params, &associated);
 
-                    let Some(actual) = actual.kind.as_positional() else {
-                        break 'para_or_err Err(Diag::span_err(
-                            actual.span,
-                            "expected a positional generic parameter",
-                        )
-                        .emit());
-                    };
+        let params = SpannedTraitParamList::alloc_list(ast.span, &params, self.tcx);
 
-                    match (actual, expected) {
-                        (AstGenericPositional::Ty(actual), AnyGeneric::Ty(_)) => {
-                            Ok(SpannedTyOrReView::Ty(self.lower_ty(actual))
-                                .encode(actual_span, self.tcx))
-                        }
-                        (AstGenericPositional::Re(actual), AnyGeneric::Re(_)) => {
-                            Ok(SpannedTyOrReView::Re(self.lower_re(actual))
-                                .encode(actual_span, self.tcx))
-                        }
-                        (_, AnyGeneric::Ty(_)) => Err(Diag::span_err(
-                            actual_span,
-                            "expected a type but got a lifetime",
-                        )
-                        .emit()),
-                        (_, AnyGeneric::Re(_)) => Err(Diag::span_err(
-                            actual_span,
-                            "expected a lifetime but got a type",
-                        )
-                        .emit()),
-                    }
-                };
-
-                para_or_err.unwrap_or_else(|err| match expected {
-                    AnyGeneric::Re(_) => {
-                        SpannedTyOrReView::Re(Re::Error(err).encode(actual_span, self.tcx))
-                            .encode(actual_span, self.tcx)
-                    }
-                    AnyGeneric::Ty(_) => SpannedTyOrReView::Ty(
-                        SpannedTyView::Error(err).encode(actual_span, self.tcx),
-                    )
-                    .encode(actual_span, self.tcx),
-                })
-            })
-            .collect::<Vec<_>>();
-
-        if ast_params.len() > binder_len {
-            Diag::span_err(ast_params[binder_len].span, "too many generic parameters")
-                .child(LeafDiag::new(
-                    Level::Note,
-                    format_args!(
-                        "expected {} generic parameter{} but got {}",
-                        binder_len,
-                        if binder_len == 1 { "" } else { "s" },
-                        ast_params.len()
-                    ),
-                ))
-                .emit();
-        }
-
-        SpannedTyOrReList::alloc_list(segment_span, &params, self.tcx)
+        Ok(SpannedTraitSpecView { def, params }.encode(ast.span, self.tcx))
     }
 }
