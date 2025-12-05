@@ -3,8 +3,7 @@ use crate::{
     semantic::{
         analysis::{InferCx, TyCtxt},
         syntax::{
-            Block, Expr, ExprKind, FuncLocal, SimpleTyKind, SpannedTy, SpannedTyList,
-            SpannedTyView, TyKind,
+            Block, Expr, ExprKind, FuncLocal, SpannedTy, SpannedTyList, SpannedTyView, TyKind,
         },
     },
     utils::hash::FxHashMap,
@@ -65,7 +64,7 @@ impl<'tcx> FnCtxt<'tcx> {
                 SpannedTyView::Tuple(SpannedTyList::alloc_list(expr.r(s).span, &elems, tcx))
                     .encode(expr.r(s).span, tcx)
             }
-            ExprKind::Binary(ast_bin_op_kind, lhs, rhs) => todo!(),
+            ExprKind::Binary(op, op_span, lhs, rhs) => todo!(),
             ExprKind::Unary(ast_un_op_kind, obj) => todo!(),
             ExprKind::Literal(ast_lit) => todo!(),
             ExprKind::StructCtorLit(obj, spanned) => todo!(),
@@ -82,32 +81,8 @@ impl<'tcx> FnCtxt<'tcx> {
                 cond,
                 truthy,
                 falsy,
-            } => {
-                self.check_exprs_with_equate(
-                    [*cond],
-                    Some(SpannedTy::new_unspanned(
-                        tcx.intern_ty(TyKind::Simple(SimpleTyKind::Bool)),
-                    )),
-                );
-
-                if let Some(falsy) = falsy {
-                    self.check_exprs_with_equate([*truthy, *falsy], None)
-                } else {
-                    self.check_expr(*truthy)
-                }
-            }
-            ExprKind::While(cond, block) => {
-                self.check_exprs_with_equate(
-                    [*cond],
-                    Some(SpannedTy::new_unspanned(
-                        tcx.intern_ty(TyKind::Simple(SimpleTyKind::Bool)),
-                    )),
-                );
-
-                self.check_block(*block);
-
-                SpannedTy::new_unspanned(tcx.intern_ty(TyKind::Tuple(tcx.intern_ty_list(&[]))))
-            }
+            } => todo!(),
+            ExprKind::While(cond, block) => todo!(),
             ExprKind::ForLoop { pat, iter, body } => todo!(),
             ExprKind::Match(scrutinee, arms) => todo!(),
             ExprKind::Loop(block) => todo!(),

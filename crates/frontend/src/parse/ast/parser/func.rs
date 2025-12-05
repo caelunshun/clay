@@ -714,9 +714,10 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
         for (punct_seq, op_bp, kind) in PUNCT_SEQ_INFIX_COMPUTE_OPS {
             if let Some(span) = match_punct_seq(punct_seq).maybe_expect(p, op_bp.left >= min_bp) {
                 lhs = AstExpr {
-                    span,
+                    span: lhs.span.to(p.prev_span()),
                     kind: AstExprKind::Binary(
                         kind,
+                        span,
                         Box::new(lhs),
                         Box::new(parse_expr_pratt_or_error(p, flags, op_bp.right)),
                     ),
@@ -817,6 +818,7 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
                     span: op_punct.span,
                     kind: AstExprKind::Binary(
                         kind,
+                        op_punct.span,
                         Box::new(lhs),
                         Box::new(parse_expr_pratt_or_error(p, flags, op_bp.right)),
                     ),

@@ -75,7 +75,7 @@ pub enum AstExprKind {
     },
     Paren(Box<AstExpr>),
     Tuple(Vec<AstExpr>),
-    Binary(AstBinOpKind, Box<AstExpr>, Box<AstExpr>),
+    Binary(AstBinOpKind, Span, Box<AstExpr>, Box<AstExpr>),
     Unary(AstUnOpKind, Box<AstExpr>),
     Lit(AstLit),
     Cast(Box<AstExpr>, Box<AstTy>),

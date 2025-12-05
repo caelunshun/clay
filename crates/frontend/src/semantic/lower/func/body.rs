@@ -2,6 +2,7 @@ use crate::{
     base::{
         Diag, ErrorGuaranteed, HardDiag, LeafDiag, Level,
         arena::{LateInit, Obj},
+        syntax::Span,
     },
     parse::{
         ast::{
@@ -13,13 +14,17 @@ use crate::{
     semantic::{
         lower::{entry::IntraItemLowerCtxt, func::path::ExprPathResolution},
         syntax::{
-            AdtKind, AdtStructFieldSyntax, Block, Expr, ExprKind, LetStmt, MatchArm, Pat, PatKind,
-            SpannedTyOrReList, Stmt,
+            AdtKind, AdtStructFieldSyntax, Block, Expr, ExprKind, LetChain, LetChainPart,
+            LetChainPartKind, LetStmt, MatchArm, Pat, PatKind, SpannedTyOrReList, Stmt,
         },
     },
 };
 
-// === Body lowering === //
+#[derive(Debug, Copy, Clone)]
+pub enum LetChainDenyReason {
+    NowhereNear,
+    BrokenOut(AstBinOpKind, Span),
+}
 
 impl IntraItemLowerCtxt<'_> {
     pub fn lower_block_with_label(
@@ -90,16 +95,22 @@ impl IntraItemLowerCtxt<'_> {
                 ascription,
                 init,
                 else_clause,
-            }) => Some(Stmt::Let(Obj::new(
-                LetStmt {
-                    span: stmt.span,
-                    pat: self.lower_pat(pat),
-                    ascription: self.lower_opt_ty(ascription.as_deref()),
-                    init: self.lower_opt_expr(init.as_deref()),
-                    else_clause: self.lower_opt_block(else_clause.as_deref()),
-                },
-                s,
-            ))),
+            }) => {
+                let init = self.lower_opt_expr(init.as_deref());
+                let else_clause = self.lower_opt_block(else_clause.as_deref());
+                let pat = self.lower_pat(pat);
+
+                Some(Stmt::Let(Obj::new(
+                    LetStmt {
+                        span: stmt.span,
+                        pat,
+                        ascription: self.lower_opt_ty(ascription.as_deref()),
+                        init,
+                        else_clause,
+                    },
+                    s,
+                )))
+            }
             AstStmtKind::Item(..) => {
                 // (already lowered elsewhere)
                 None
@@ -118,6 +129,14 @@ impl IntraItemLowerCtxt<'_> {
     }
 
     pub fn lower_expr(&mut self, ast: &AstExpr) -> Obj<Expr> {
+        self.lower_expr_with_deny_cause(ast, LetChainDenyReason::NowhereNear)
+    }
+
+    pub fn lower_expr_with_deny_cause(
+        &mut self,
+        ast: &AstExpr,
+        let_deny_cause: LetChainDenyReason,
+    ) -> Obj<Expr> {
         let s = &self.tcx.session;
 
         let expr = Obj::new(
@@ -137,42 +156,66 @@ impl IntraItemLowerCtxt<'_> {
                 return self.lower_expr(expr);
             }
             AstExprKind::Tuple(exprs) => ExprKind::Tuple(self.lower_exprs(exprs)),
-            AstExprKind::Binary(op, lhs, rhs) => {
-                ExprKind::Binary(*op, self.lower_expr(lhs), self.lower_expr(rhs))
+            AstExprKind::Binary(op, op_span, lhs, rhs) => {
+                let let_deny_cause = if *op == AstBinOpKind::And {
+                    let_deny_cause
+                } else {
+                    LetChainDenyReason::BrokenOut(*op, *op_span)
+                };
+
+                ExprKind::Binary(
+                    *op,
+                    *op_span,
+                    self.lower_expr_with_deny_cause(lhs, let_deny_cause),
+                    self.lower_expr_with_deny_cause(rhs, let_deny_cause),
+                )
             }
             AstExprKind::Unary(op, expr) => ExprKind::Unary(*op, self.lower_expr(expr)),
             AstExprKind::Lit(lit) => ExprKind::Literal(*lit),
             AstExprKind::Cast(expr, as_ty) => {
                 ExprKind::Cast(self.lower_expr(expr), self.lower_ty(as_ty))
             }
-            AstExprKind::Let(..) => {
-                unreachable!()
-            }
+            AstExprKind::Let(..) => match let_deny_cause {
+                LetChainDenyReason::NowhereNear => ExprKind::Error(
+                    Diag::span_err(
+                        ast.span,
+                        "`let` only allowed in statements or if-`let` chains",
+                    )
+                    .emit(),
+                ),
+                LetChainDenyReason::BrokenOut(op, span) => ExprKind::Error(
+                    // TODO: improve `op` formatting
+                    Diag::span_err(span, format_args!("{op:?} not allowed in if-`let` chain"))
+                        .emit(),
+                ),
+            },
             AstExprKind::If {
                 cond,
                 truthy,
                 falsy,
-            } => ExprKind::If {
-                // TODO: Handle `let` bindings
-                cond: self.lower_expr(cond),
-                truthy: self.lower_block_as_expr(truthy),
-                falsy: self.lower_opt_expr(falsy.as_deref()),
-            },
-            AstExprKind::While { cond, block, label } => ExprKind::While(
-                // TODO: Handle `let` bindings
-                self.lower_expr(cond),
-                self.lower_block_with_label(expr, *label, block),
-            ),
+            } => self.scoped(|this| ExprKind::If {
+                cond: this.lower_let_chain(cond),
+                truthy: this.lower_block_as_expr(truthy),
+                falsy: this.lower_opt_expr(falsy.as_deref()),
+            }),
+            AstExprKind::While { cond, block, label } => self.scoped(|this| {
+                ExprKind::While(
+                    this.lower_let_chain(cond),
+                    this.lower_block_with_label(expr, *label, block),
+                )
+            }),
             AstExprKind::ForLoop {
                 pat,
                 iter,
                 body,
                 label,
-            } => ExprKind::ForLoop {
-                pat: self.lower_pat(pat),
-                iter: self.lower_expr(iter),
-                body: self.lower_block_with_label(expr, *label, body),
-            },
+            } => {
+                let iter = self.lower_expr(iter);
+                let pat = self.lower_pat(pat);
+                let body = self.lower_block_with_label(expr, *label, body);
+
+                ExprKind::ForLoop { pat, iter, body }
+            }
             AstExprKind::Loop(block, label) => {
                 ExprKind::Loop(self.lower_block_with_label(expr, *label, block))
             }
@@ -334,14 +377,65 @@ impl IntraItemLowerCtxt<'_> {
         expr
     }
 
+    pub fn lower_let_chain(&mut self, expr: &AstExpr) -> Obj<LetChain> {
+        let s = &self.tcx.session;
+
+        let mut fold_iter = expr;
+        let mut prev_and_span = None;
+
+        let mut parts = Vec::new();
+
+        loop {
+            if let AstExprKind::Binary(AstBinOpKind::And, op_span, lhs, rhs) = &fold_iter.kind {
+                parts.push(self.lower_let_chain_part(prev_and_span.replace(*op_span), lhs));
+                fold_iter = rhs;
+            } else {
+                parts.push(self.lower_let_chain_part(prev_and_span, fold_iter));
+                break;
+            }
+        }
+
+        Obj::new(
+            LetChain {
+                span: expr.span,
+                parts: Obj::new_slice(&parts, s),
+            },
+            s,
+        )
+    }
+
+    pub fn lower_let_chain_part(
+        &mut self,
+        prev_and_span: Option<Span>,
+        expr: &AstExpr,
+    ) -> Obj<LetChainPart> {
+        let s = &self.tcx.session;
+
+        let kind = match &expr.kind {
+            AstExprKind::Let(pat, scrutinee, _eq_span) => {
+                let scrutinee = self.lower_expr(scrutinee);
+                let pat = self.lower_pat(pat);
+
+                LetChainPartKind::Let(pat, scrutinee)
+            }
+            _ => LetChainPartKind::Expr(self.lower_expr(expr)),
+        };
+
+        Obj::new(
+            LetChainPart {
+                span: expr.span,
+                prev_and_span,
+                kind,
+            },
+            s,
+        )
+    }
+
     pub fn lower_match_arm(&mut self, arm: &AstMatchArm) -> Obj<MatchArm> {
         self.scoped(|this| {
             let s = &this.tcx.session;
             let pat = this.lower_pat(&arm.pat);
-
-            // TODO: Handle `let` bindings
-            let guard = arm.guard.as_ref().map(|guard| this.lower_expr(guard));
-
+            let guard = arm.guard.as_ref().map(|guard| this.lower_let_chain(guard));
             let body = this.lower_expr(&arm.body);
 
             Obj::new(
@@ -381,24 +475,23 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::Lit(_) => PatKind::Lit(self.lower_expr(expr)),
             AstExprKind::Underscore => PatKind::Hole,
 
-            AstExprKind::Binary(AstBinOpKind::BitOr, lhs, rhs) => {
+            AstExprKind::Binary(AstBinOpKind::BitOr, _op_span, lhs, rhs) => {
                 let mut accum = Vec::new();
+                let mut fold_iter = rhs;
 
-                fn fold_or_pat(
-                    ctxt: &mut IntraItemLowerCtxt<'_>,
-                    accum: &mut Vec<Obj<Pat>>,
-                    expr: &AstExpr,
-                ) {
-                    if let AstExprKind::Binary(AstBinOpKind::BitOr, lhs, rhs) = &expr.kind {
-                        fold_or_pat(ctxt, accum, lhs);
-                        fold_or_pat(ctxt, accum, rhs);
+                accum.push(self.lower_lvalue_as_pat(lhs));
+
+                loop {
+                    if let AstExprKind::Binary(AstBinOpKind::BitOr, _op_span, lhs, rhs) =
+                        &fold_iter.kind
+                    {
+                        accum.push(self.lower_lvalue_as_pat(lhs));
+                        fold_iter = rhs;
                     } else {
-                        accum.push(ctxt.lower_lvalue_as_pat(expr));
+                        accum.push(self.lower_lvalue_as_pat(fold_iter));
+                        break;
                     }
                 }
-
-                fold_or_pat(self, &mut accum, lhs);
-                fold_or_pat(self, &mut accum, rhs);
 
                 PatKind::Or(Obj::new_slice(&accum, s))
             }
