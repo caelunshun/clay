@@ -68,13 +68,15 @@ impl<'tcx> FnCtxt<'tcx> {
             ExprKind::Binary(ast_bin_op_kind, lhs, rhs) => todo!(),
             ExprKind::Unary(ast_un_op_kind, obj) => todo!(),
             ExprKind::Literal(ast_lit) => todo!(),
+            ExprKind::StructCtorLit(obj, spanned) => todo!(),
+            ExprKind::EnumCtorLit(obj, spanned) => todo!(),
             ExprKind::FuncLit(obj, spanned) => todo!(),
-            ExprKind::TraitMethodLit {
-                method,
-                trait_params,
-                method_params,
+            ExprKind::TypeRelative {
+                self_ty,
+                as_trait,
+                assoc_name,
+                assoc_args,
             } => todo!(),
-            ExprKind::TypeMethodLit { ty, name, params } => todo!(),
             ExprKind::Cast(obj, spanned) => todo!(),
             ExprKind::If {
                 cond,
@@ -114,6 +116,7 @@ impl<'tcx> FnCtxt<'tcx> {
             ExprKind::Field(obj, ident) => todo!(),
             ExprKind::Index(obj, obj1) => todo!(),
             ExprKind::Range(obj, obj1, ast_range_limits) => todo!(),
+            ExprKind::SelfLocal => todo!(),
             ExprKind::Local(local) => self.local_types[local],
             ExprKind::AddrOf(mutability, pointee) => {
                 SpannedTy::new_unspanned(tcx.intern_ty(TyKind::Reference(

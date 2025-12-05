@@ -11,7 +11,10 @@ use crate::{
         token::Lifetime,
     },
     semantic::{
-        lower::{entry::IntraItemLowerCtxt, func::path::ExprPathResolution},
+        lower::{
+            entry::IntraItemLowerCtxt,
+            func::path::{ExprPathResolution, ExprPathResult},
+        },
         syntax::{
             AdtKind, AdtStructFieldSyntax, Block, Expr, ExprKind, LetStmt, Pat, PatKind, Stmt,
         },
@@ -92,7 +95,7 @@ impl IntraItemLowerCtxt<'_> {
             }) => Some(Stmt::Let(Obj::new(
                 LetStmt {
                     span: stmt.span,
-                    pat: self.lower_pat(pat, PatLoweringMode::Defining),
+                    pat: self.lower_pat(pat),
                     ascription: self.lower_opt_ty(ascription.as_deref()),
                     init: self.lower_opt_expr(init.as_deref()),
                     else_clause: self.lower_opt_block(else_clause.as_deref()),
@@ -166,7 +169,7 @@ impl IntraItemLowerCtxt<'_> {
                 body,
                 label,
             } => ExprKind::ForLoop {
-                pat: self.lower_pat(pat, PatLoweringMode::Defining),
+                pat: self.lower_pat(pat),
                 iter: self.lower_expr(iter),
                 body: self.lower_block_with_label(expr, *label, body),
             },
@@ -206,7 +209,7 @@ impl IntraItemLowerCtxt<'_> {
                 .emit(),
             ),
             AstExprKind::Path(path) => 'path: {
-                let res = match self.resolve_expr_path(path) {
+                let res = match self.resolve_expr_path(path).fail_on_unbound_local() {
                     Ok(v) => v,
                     Err(err) => {
                         break 'path ExprKind::Error(err);
@@ -253,8 +256,7 @@ impl IntraItemLowerCtxt<'_> {
                                 break 'path ExprKind::Error(err);
                             }
 
-                            // TODO
-                            ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
+                            ExprKind::StructCtorLit(def, args)
                         }
                     },
                     ExprPathResolution::ResolvedEnumVariant(def, args) => {
@@ -266,29 +268,25 @@ impl IntraItemLowerCtxt<'_> {
                             break 'path ExprKind::Error(err);
                         }
 
-                        // TODO
-                        ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
+                        ExprKind::EnumCtorLit(def, args)
                     }
-                    ExprPathResolution::ResolvedFn(obj, spanned) => {
-                        // TODO
-                        ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
-                    }
+                    ExprPathResolution::ResolvedFn(def, args) => ExprKind::FuncLit(def, args),
                     ExprPathResolution::TypeRelative {
                         self_ty,
                         as_trait,
                         assoc,
-                    } => {
-                        // TODO
-                        ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
-                    }
+                    } => ExprKind::TypeRelative {
+                        self_ty,
+                        as_trait,
+                        assoc_name: assoc.name,
+                        assoc_args: assoc.args,
+                    },
                     ExprPathResolution::SelfLocal => {
-                        // TODO
-                        ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
+                        // TODO: Validate against signature
+
+                        ExprKind::SelfLocal
                     }
-                    ExprPathResolution::Local(obj) => {
-                        // TODO
-                        ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
-                    }
+                    ExprPathResolution::Local(local) => ExprKind::Local(local),
                     ExprPathResolution::ResolvedModule(_)
                     | ExprPathResolution::ResolvedGeneric(_)
                     | ExprPathResolution::ResolvedTrait(_, _) => {
@@ -316,13 +314,13 @@ impl IntraItemLowerCtxt<'_> {
         expr
     }
 
-    pub fn lower_pat_list(&mut self, asts: &[AstPat], mode: PatLoweringMode) -> Obj<[Obj<Pat>]> {
+    pub fn lower_pat_list(&mut self, asts: &[AstPat]) -> Obj<[Obj<Pat>]> {
         let s = &self.tcx.session;
 
-        Obj::new_iter(asts.iter().map(|ast| self.lower_pat(ast, mode)), s)
+        Obj::new_iter(asts.iter().map(|ast| self.lower_pat(ast)), s)
     }
 
-    pub fn lower_pat(&mut self, ast: &AstPat, mode: PatLoweringMode) -> Obj<Pat> {
+    pub fn lower_pat(&mut self, ast: &AstPat) -> Obj<Pat> {
         let s = &self.tcx.session;
 
         let kind = match &ast.kind {
@@ -331,10 +329,22 @@ impl IntraItemLowerCtxt<'_> {
                 binding_mode,
                 path,
                 and_bind,
-            } => todo!(),
+            } => {
+                let res = self.resolve_expr_path(path);
+
+                match res {
+                    ExprPathResult::Resolved(expr_path_resolution) => todo!(),
+                    ExprPathResult::UnboundLocal(ident) => {
+                        todo!()
+                    }
+                    ExprPathResult::Fail(error_guaranteed) => {
+                        todo!()
+                    }
+                }
+            }
             AstPatKind::PathAndBrace(ast_expr_path, ast_pat_fields, ast_pat_struct_rest) => todo!(),
             AstPatKind::PathAndParen(ast_expr_path, ast_pats) => todo!(),
-            AstPatKind::Or(pats) => PatKind::Or(self.lower_pat_list(pats, mode)),
+            AstPatKind::Or(pats) => PatKind::Or(self.lower_pat_list(pats)),
             AstPatKind::Tuple(pats) => todo!(),
             AstPatKind::Ref(ast_opt_mutability, ast_pat) => todo!(),
             AstPatKind::Slice(ast_pats) => todo!(),
@@ -460,10 +470,4 @@ impl IntraItemLowerCtxt<'_> {
             s,
         )
     }
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum PatLoweringMode {
-    Defining,
-    Destructuring,
 }

@@ -9,8 +9,8 @@ use crate::{
         token::Ident,
     },
     semantic::syntax::{
-        AdtDef, GenericBinder, ImplDef, Item, Mutability, SpannedTraitParamList, SpannedTy,
-        SpannedTyOrRe, TraitMethod,
+        AdtDef, AdtKindStruct, EnumVariantItem, GenericBinder, ImplDef, Item, Mutability,
+        SpannedTraitInstance, SpannedTy, SpannedTyOrRe, SpannedTyOrReList,
     },
 };
 
@@ -134,16 +134,14 @@ pub enum ExprKind {
     Binary(AstBinOpKind, Obj<Expr>, Obj<Expr>),
     Unary(AstUnOpKind, Obj<Expr>),
     Literal(AstLit),
-    FuncLit(Obj<FnDef>, SpannedTyOrRe),
-    TraitMethodLit {
-        method: Obj<TraitMethod>,
-        trait_params: Option<SpannedTraitParamList>,
-        method_params: SpannedTyOrRe,
-    },
-    TypeMethodLit {
-        ty: SpannedTy,
-        name: Ident,
-        params: SpannedTyOrRe,
+    StructCtorLit(Obj<AdtKindStruct>, SpannedTyOrReList),
+    EnumCtorLit(Obj<EnumVariantItem>, SpannedTyOrReList),
+    FuncLit(Obj<FnItem>, SpannedTyOrReList),
+    TypeRelative {
+        self_ty: SpannedTy,
+        as_trait: Option<SpannedTraitInstance>,
+        assoc_name: Ident,
+        assoc_args: Option<SpannedTyOrReList>,
     },
     Cast(Obj<Expr>, SpannedTy),
     If {
@@ -165,6 +163,7 @@ pub enum ExprKind {
     Field(Obj<Expr>, Ident),
     Index(Obj<Expr>, Obj<Expr>),
     Range(Option<Obj<Expr>>, Option<Obj<Expr>>, AstRangeLimits),
+    SelfLocal,
     Local(Obj<FuncLocal>),
     AddrOf(Mutability, Obj<Expr>),
     Break {

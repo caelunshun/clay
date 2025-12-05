@@ -26,6 +26,27 @@ use crate::{
 };
 
 #[derive(Debug, Copy, Clone)]
+pub enum ExprPathResult {
+    Resolved(ExprPathResolution),
+    UnboundLocal(Ident),
+    Fail(ErrorGuaranteed),
+}
+
+impl ExprPathResult {
+    pub fn fail_on_unbound_local(self) -> Result<ExprPathResolution, ErrorGuaranteed> {
+        match self {
+            ExprPathResult::Resolved(res) => Ok(res),
+            ExprPathResult::UnboundLocal(ident) => Err(Diag::span_err(
+                ident.span,
+                format_args!("`{}` not found in scope", ident.text),
+            )
+            .emit()),
+            ExprPathResult::Fail(err) => Err(err),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
 pub enum ExprPathResolution {
     /// A reference to the `Self` type by itself.
     ResolvedSelfTy,
@@ -134,23 +155,28 @@ pub struct TypeRelativeAssoc {
 }
 
 impl IntraItemLowerCtxt<'_> {
-    pub fn resolve_expr_path(
-        &mut self,
-        path: &AstExprPath,
-    ) -> Result<ExprPathResolution, ErrorGuaranteed> {
+    pub fn resolve_expr_path(&mut self, path: &AstExprPath) -> ExprPathResult {
         match &path.kind {
             AstExprPathKind::Bare(path) => self.resolve_bare_expr_path(path),
-            AstExprPathKind::SelfTy(_self_kw, None) => Ok(ExprPathResolution::ResolvedSelfTy),
-            AstExprPathKind::SelfTy(self_kw, Some(rest)) => Ok(ExprPathResolution::TypeRelative {
-                self_ty: SpannedTyView::This.encode(*self_kw, self.tcx),
-                as_trait: None,
-                assoc: self
-                    .lower_rest_as_type_relative_assoc(&rest.segments)?
-                    .unwrap(),
-            }),
-            AstExprPathKind::Qualified(qual, rest) => Ok(ExprPathResolution::TypeRelative {
-                self_ty: self.lower_ty(&qual.self_ty),
-                as_trait: qual.as_trait.as_ref().and_then(|for_trait| {
+            AstExprPathKind::SelfTy(_self_kw, None) => {
+                ExprPathResult::Resolved(ExprPathResolution::ResolvedSelfTy)
+            }
+            AstExprPathKind::SelfTy(self_kw, Some(rest)) => {
+                let assoc = match self.lower_rest_as_type_relative_assoc(&rest.segments) {
+                    Ok(v) => v.unwrap(),
+                    Err(err) => return ExprPathResult::Fail(err),
+                };
+
+                ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
+                    self_ty: SpannedTyView::This.encode(*self_kw, self.tcx),
+                    as_trait: None,
+                    assoc,
+                })
+            }
+            AstExprPathKind::Qualified(qual, rest) => {
+                let self_ty = self.lower_ty(&qual.self_ty);
+
+                let as_trait = qual.as_trait.as_ref().and_then(|for_trait| {
                     let AstTyKind::Name(path, params) = &for_trait.kind else {
                         Diag::span_err(for_trait.span, "expected a trait, found a type").emit();
 
@@ -168,28 +194,33 @@ impl IntraItemLowerCtxt<'_> {
                     );
 
                     Some(SpannedTraitInstanceView { def, params }.encode(for_trait.span, self.tcx))
-                }),
-                assoc: self
-                    .lower_rest_as_type_relative_assoc(&rest.segments)?
-                    .unwrap(),
-            }),
-            AstExprPathKind::Error(err) => Err(*err),
+                });
+
+                let assoc = match self.lower_rest_as_type_relative_assoc(&rest.segments) {
+                    Ok(v) => v.unwrap(),
+                    Err(err) => return ExprPathResult::Fail(err),
+                };
+
+                ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
+                    self_ty,
+                    as_trait,
+                    assoc,
+                })
+            }
+            AstExprPathKind::Error(err) => ExprPathResult::Fail(*err),
         }
     }
 
-    pub fn resolve_bare_expr_path(
-        &mut self,
-        path: &AstParamedPath,
-    ) -> Result<ExprPathResolution, ErrorGuaranteed> {
+    pub fn resolve_bare_expr_path(&mut self, path: &AstParamedPath) -> ExprPathResult {
         let s = &self.tcx.session;
 
         // See whether we can resolve this as a `self` or as a function local.
-        let local_like = if let [first] = &path.segments[..]
-            && let Some(ident) = first.part.ident()
-            && first.args.is_none()
+        let local_like = if let [single_segment] = &path.segments[..]
+            && let Some(ident) = single_segment.part.ident()
+            && single_segment.args.is_none()
         {
             if let Some(local) = self.func_local_names.lookup(ident.text) {
-                return Ok(ExprPathResolution::Local(*local));
+                return ExprPathResult::Resolved(ExprPathResolution::Local(*local));
             }
 
             Some(ident)
@@ -197,14 +228,14 @@ impl IntraItemLowerCtxt<'_> {
             None
         };
 
-        if let [first] = &path.segments[..]
-            && first.part.keyword() == Some(AstPathPartKw::Self_)
+        if let [single_segment] = &path.segments[..]
+            && single_segment.part.keyword() == Some(AstPathPartKw::Self_)
         {
-            if let Some(args) = &first.args {
+            if let Some(args) = &single_segment.args {
                 Diag::span_err(args.span, "type arguments are not allowed on `self`").emit();
             }
 
-            return Ok(ExprPathResolution::SelfLocal);
+            return ExprPathResult::Resolved(ExprPathResolution::SelfLocal);
         }
 
         // See whether we're referring to a generic type.
@@ -227,13 +258,16 @@ impl IntraItemLowerCtxt<'_> {
                 Ok(Some(assoc)) => {
                     let self_ty = SpannedTyView::Universal(generic).encode(ident.span, self.tcx);
 
-                    Ok(ExprPathResolution::TypeRelative {
+                    ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
                         self_ty,
                         as_trait: None,
                         assoc,
                     })
                 }
-                _ => Ok(ExprPathResolution::ResolvedGeneric(generic)),
+                // Errors should fallback to a bare resolved generic.
+                Ok(None) | Err(_) => {
+                    ExprPathResult::Resolved(ExprPathResolution::ResolvedGeneric(generic))
+                }
             };
         }
 
@@ -247,17 +281,13 @@ impl IntraItemLowerCtxt<'_> {
                 Ok(target) => finger = target,
                 Err(err @ StepResolveError::NotFound) => {
                     if let Some(local_like) = local_like {
-                        return Err(Diag::span_err(
-                            path.span,
-                            format_args!("`{}` not found in scope", local_like.text),
-                        )
-                        .emit());
+                        return ExprPathResult::UnboundLocal(local_like);
                     } else {
-                        return Err(err.emit(&resolver, finger, segment.part));
+                        return ExprPathResult::Fail(err.emit(&resolver, finger, segment.part));
                     }
                 }
                 Err(err) => {
-                    return Err(err.emit(&resolver, finger, segment.part));
+                    return ExprPathResult::Fail(err.emit(&resolver, finger, segment.part));
                 }
             }
 
@@ -266,12 +296,14 @@ impl IntraItemLowerCtxt<'_> {
                     // (fallthrough)
                 }
                 ItemKind::EnumVariant(variant) => {
-                    return Ok(self.resolve_bare_expr_path_from_enum_variant(
-                        variant,
-                        None,
-                        segment,
-                        segments.as_slice(),
-                    ));
+                    return ExprPathResult::Resolved(
+                        self.resolve_bare_expr_path_from_enum_variant(
+                            variant,
+                            None,
+                            segment,
+                            segments.as_slice(),
+                        ),
+                    );
                 }
                 ItemKind::Adt(adt) => {
                     return self.resolve_bare_expr_path_from_adt(adt, segment, segments.as_slice());
@@ -307,7 +339,7 @@ impl IntraItemLowerCtxt<'_> {
             }
         }
 
-        Ok(ExprPathResolution::ResolvedModule(finger))
+        ExprPathResult::Resolved(ExprPathResolution::ResolvedModule(finger))
     }
 
     pub fn resolve_bare_expr_path_from_adt(
@@ -315,7 +347,7 @@ impl IntraItemLowerCtxt<'_> {
         adt: Obj<AdtDef>,
         adt_segment: &AstParamedPathSegment,
         additional_segments: &[AstParamedPathSegment],
-    ) -> Result<ExprPathResolution, ErrorGuaranteed> {
+    ) -> ExprPathResult {
         let s = &self.tcx.session;
         let mut resolver = FrozenModuleResolver(s);
 
@@ -340,7 +372,7 @@ impl IntraItemLowerCtxt<'_> {
                         // to avoid path escapes.
                         .unwrap();
 
-                    Ok(self.resolve_bare_expr_path_from_enum_variant(
+                    ExprPathResult::Resolved(self.resolve_bare_expr_path_from_enum_variant(
                         variant,
                         first_generics,
                         first_additional,
@@ -363,18 +395,21 @@ impl IntraItemLowerCtxt<'_> {
                     )
                     .encode(adt_segment.part.span(), self.tcx);
 
-                    let assoc = self
-                        .lower_rest_as_type_relative_assoc(additional_segments)?
+                    let assoc = match self.lower_rest_as_type_relative_assoc(additional_segments) {
                         // Unwrap OK: `additional_segments` is non-empty.
-                        .unwrap();
+                        Ok(v) => v.unwrap(),
+                        Err(err) => return ExprPathResult::Fail(err),
+                    };
 
-                    Ok(ExprPathResolution::TypeRelative {
+                    ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
                         self_ty,
                         as_trait: None,
                         assoc,
                     })
                 }
-                Err(err) => Err(err.emit(&resolver, adt.r(s).item, first_additional.part)),
+                Err(err) => {
+                    ExprPathResult::Fail(err.emit(&resolver, adt.r(s).item, first_additional.part))
+                }
             }
         } else {
             let generics = first_generics.unwrap_or_else(|| {
@@ -385,7 +420,7 @@ impl IntraItemLowerCtxt<'_> {
                 )
             });
 
-            Ok(ExprPathResolution::ResolvedAdt(adt, generics))
+            ExprPathResult::Resolved(ExprPathResolution::ResolvedAdt(adt, generics))
         }
     }
 
@@ -442,7 +477,7 @@ impl IntraItemLowerCtxt<'_> {
         def: Obj<TraitDef>,
         def_segment: &AstParamedPathSegment,
         segments: &[AstParamedPathSegment],
-    ) -> Result<ExprPathResolution, ErrorGuaranteed> {
+    ) -> ExprPathResult {
         let as_trait_generics = self.lower_generics_of_trait_instance_in_fn_body(
             def,
             def_segment.part.span(),
@@ -450,12 +485,15 @@ impl IntraItemLowerCtxt<'_> {
         );
 
         let Ok(Some(assoc)) = self.lower_rest_as_type_relative_assoc(segments) else {
-            return Ok(ExprPathResolution::ResolvedTrait(def, as_trait_generics));
+            return ExprPathResult::Resolved(ExprPathResolution::ResolvedTrait(
+                def,
+                as_trait_generics,
+            ));
         };
 
         let self_ty = SpannedTyView::ExplicitInfer.encode(def_segment.part.span(), self.tcx);
 
-        Ok(ExprPathResolution::TypeRelative {
+        ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
             self_ty,
             as_trait: Some(
                 SpannedTraitInstanceView {
@@ -473,7 +511,7 @@ impl IntraItemLowerCtxt<'_> {
         def: Obj<FnItem>,
         def_segment: &AstParamedPathSegment,
         segments: &[AstParamedPathSegment],
-    ) -> Result<ExprPathResolution, ErrorGuaranteed> {
+    ) -> ExprPathResult {
         let s = &self.tcx.session;
 
         if let Some(extra_segment) = segments.first() {
@@ -503,7 +541,7 @@ impl IntraItemLowerCtxt<'_> {
                 )
             });
 
-        Ok(ExprPathResolution::ResolvedFn(def, generics))
+        ExprPathResult::Resolved(ExprPathResolution::ResolvedFn(def, generics))
     }
 
     pub fn lower_rest_as_type_relative_assoc(
