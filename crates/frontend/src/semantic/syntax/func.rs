@@ -156,11 +156,18 @@ pub enum ExprKind {
         body: Obj<Block>,
     },
     Loop(Obj<Block>),
+    Match(Obj<Expr>, Obj<[Obj<MatchArm>]>),
     // TODO
     Block(Obj<Block>),
     Assign(Obj<Pat>, Obj<Expr>),
     AssignOp(AstAssignOpKind, Obj<Pat>, Obj<Expr>),
     Field(Obj<Expr>, Ident),
+    GenericMethodCall {
+        target: Obj<Expr>,
+        method: Ident,
+        generics: SpannedTyOrReList,
+        args: Obj<[Obj<Expr>]>,
+    },
     Index(Obj<Expr>, Obj<Expr>),
     Range(Option<Obj<Expr>>, Option<Obj<Expr>>, AstRangeLimits),
     SelfLocal,
@@ -176,4 +183,12 @@ pub enum ExprKind {
     Return(Option<Obj<Expr>>),
     Struct(Obj<AdtDef>), // TODO
     Error(ErrorGuaranteed),
+}
+
+#[derive(Debug, Clone)]
+pub struct MatchArm {
+    pub span: Span,
+    pub pat: Obj<Pat>,
+    pub guard: Option<Obj<Expr>>,
+    pub body: Obj<Expr>,
 }

@@ -675,7 +675,7 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
 
                 lhs = AstExpr {
                     span: dot.span.to(name.span),
-                    kind: AstExprKind::GenericMethod {
+                    kind: AstExprKind::GenericMethodCall {
                         target: Box::new(lhs),
                         method: name,
                         generics: Box::new(generics),
@@ -1094,9 +1094,9 @@ pub fn parse_pat_single_arm(p: P) -> AstPat {
         kind,
     };
 
-    // Parse wildcards
+    // Parse holes
     if match_kw(kw!("_")).expect(p).is_some() {
-        return build_pat(AstPatKind::Wild, p);
+        return build_pat(AstPatKind::Hole, p);
     }
 
     // Parse rest

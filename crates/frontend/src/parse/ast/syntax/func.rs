@@ -67,7 +67,7 @@ pub struct AstExpr {
 pub enum AstExprKind {
     Array(Vec<AstExpr>),
     Call(Box<AstExpr>, Vec<AstExpr>),
-    GenericMethod {
+    GenericMethodCall {
         target: Box<AstExpr>,
         method: Ident,
         generics: Box<AstGenericParamList>,
@@ -130,7 +130,7 @@ impl AstExprKind {
             | AstExprKind::Assign(..)
             | AstExprKind::AssignOp(..)
             | AstExprKind::Field(..)
-            | AstExprKind::GenericMethod { .. }
+            | AstExprKind::GenericMethodCall { .. }
             | AstExprKind::Index(..)
             | AstExprKind::Range(..)
             | AstExprKind::Underscore
@@ -313,7 +313,7 @@ pub struct AstPat {
 
 #[derive(Debug, Clone)]
 pub enum AstPatKind {
-    Wild,
+    Hole,
     Path {
         binding_mode: AstBindingMode,
         path: AstExprPath,

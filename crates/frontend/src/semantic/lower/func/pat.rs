@@ -245,7 +245,7 @@ impl IntraItemLowerCtxt<'_> {
         let s = &self.tcx.session;
 
         let kind = match &ast.kind {
-            AstPatKind::Wild => PatKind::Hole,
+            AstPatKind::Hole => PatKind::Hole,
             AstPatKind::Path {
                 binding_mode,
                 path,

@@ -5,15 +5,16 @@ use crate::{
     },
     parse::{
         ast::{
-            AstBinOpKind, AstBlock, AstExpr, AstExprKind, AstStmt, AstStmtKind, AstStmtLet,
-            AstUnOpKind,
+            AstBinOpKind, AstBlock, AstExpr, AstExprKind, AstMatchArm, AstStmt, AstStmtKind,
+            AstStmtLet, AstUnOpKind,
         },
         token::Lifetime,
     },
     semantic::{
         lower::{entry::IntraItemLowerCtxt, func::path::ExprPathResolution},
         syntax::{
-            AdtKind, AdtStructFieldSyntax, Block, Expr, ExprKind, LetStmt, Pat, PatKind, Stmt,
+            AdtKind, AdtStructFieldSyntax, Block, Expr, ExprKind, LetStmt, MatchArm, Pat, PatKind,
+            SpannedTyOrReList, Stmt,
         },
     },
 };
@@ -152,11 +153,13 @@ impl IntraItemLowerCtxt<'_> {
                 truthy,
                 falsy,
             } => ExprKind::If {
+                // TODO: Handle `let` bindings
                 cond: self.lower_expr(cond),
                 truthy: self.lower_block_as_expr(truthy),
                 falsy: self.lower_opt_expr(falsy.as_deref()),
             },
             AstExprKind::While { cond, block, label } => ExprKind::While(
+                // TODO: Handle `let` bindings
                 self.lower_expr(cond),
                 self.lower_block_with_label(expr, *label, block),
             ),
@@ -173,7 +176,10 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::Loop(block, label) => {
                 ExprKind::Loop(self.lower_block_with_label(expr, *label, block))
             }
-            AstExprKind::Match(ast_expr, ast_match_arms) => todo!(),
+            AstExprKind::Match(scrutinee, arms) => ExprKind::Match(
+                self.lower_expr(scrutinee),
+                Obj::new_iter(arms.iter().map(|arm| self.lower_match_arm(arm)), s),
+            ),
             AstExprKind::Block(block, label) => {
                 ExprKind::Block(self.lower_block_with_label(expr, *label, block))
             }
@@ -184,12 +190,29 @@ impl IntraItemLowerCtxt<'_> {
                 ExprKind::AssignOp(*op, self.lower_lvalue_as_pat(lhs), self.lower_expr(rhs))
             }
             AstExprKind::Field(expr, name) => ExprKind::Field(self.lower_expr(expr), *name),
-            AstExprKind::GenericMethod {
+            AstExprKind::GenericMethodCall {
                 target,
                 method,
                 generics,
                 args,
-            } => todo!(),
+            } => {
+                let (positional, associated) = self.lower_generic_params_syntactic(&generics.list);
+
+                if let Some(associated) = associated.first() {
+                    Diag::span_err(
+                        associated.span,
+                        "method does not have associated type constraints",
+                    )
+                    .emit();
+                }
+
+                ExprKind::GenericMethodCall {
+                    target: self.lower_expr(target),
+                    method: *method,
+                    generics: SpannedTyOrReList::alloc_list(generics.span, &positional, self.tcx),
+                    args: self.lower_exprs(args),
+                }
+            }
             AstExprKind::Index(expr, index) => {
                 ExprKind::Index(self.lower_expr(expr), self.lower_expr(index))
             }
@@ -311,6 +334,28 @@ impl IntraItemLowerCtxt<'_> {
         expr
     }
 
+    pub fn lower_match_arm(&mut self, arm: &AstMatchArm) -> Obj<MatchArm> {
+        self.scoped(|this| {
+            let s = &this.tcx.session;
+            let pat = this.lower_pat(&arm.pat);
+
+            // TODO: Handle `let` bindings
+            let guard = arm.guard.as_ref().map(|guard| this.lower_expr(guard));
+
+            let body = this.lower_expr(&arm.body);
+
+            Obj::new(
+                MatchArm {
+                    span: arm.span,
+                    pat,
+                    guard,
+                    body,
+                },
+                s,
+            )
+        })
+    }
+
     pub fn lower_lvalue_list_as_pat<'a>(
         &mut self,
         exprs: impl IntoIterator<Item = &'a AstExpr, IntoIter: ExactSizeIterator>,
@@ -358,11 +403,7 @@ impl IntraItemLowerCtxt<'_> {
                 PatKind::Or(Obj::new_slice(&accum, s))
             }
 
-            AstExprKind::Struct(..)
-            | AstExprKind::AddrOf(..)
-            | AstExprKind::Range(..)
-            | AstExprKind::Unary(AstUnOpKind::Neg, ..)
-            | AstExprKind::Call(..) => todo!(),
+            AstExprKind::Struct(..) | AstExprKind::AddrOf(..) | AstExprKind::Call(..) => todo!(),
 
             AstExprKind::Block(..)
             | AstExprKind::Field(..)
@@ -381,11 +422,12 @@ impl IntraItemLowerCtxt<'_> {
             | AstExprKind::Match(..)
             | AstExprKind::Assign(..)
             | AstExprKind::AssignOp(..)
-            | AstExprKind::GenericMethod { .. }
+            | AstExprKind::GenericMethodCall { .. }
             | AstExprKind::Break(..)
             | AstExprKind::Continue(..)
             | AstExprKind::Return(..)
             | AstExprKind::Unary(AstUnOpKind::Not, ..)
+            | AstExprKind::Unary(AstUnOpKind::Neg, ..)
             | AstExprKind::Binary(AstBinOpKind::Add, ..)
             | AstExprKind::Binary(AstBinOpKind::Sub, ..)
             | AstExprKind::Binary(AstBinOpKind::Mul, ..)
@@ -402,7 +444,8 @@ impl IntraItemLowerCtxt<'_> {
             | AstExprKind::Binary(AstBinOpKind::Le, ..)
             | AstExprKind::Binary(AstBinOpKind::Ne, ..)
             | AstExprKind::Binary(AstBinOpKind::Ge, ..)
-            | AstExprKind::Binary(AstBinOpKind::Gt, ..) => PatKind::Error(
+            | AstExprKind::Binary(AstBinOpKind::Gt, ..)
+            | AstExprKind::Range(..) => PatKind::Error(
                 Diag::span_err(expr.span, "invalid left-hand side of assignment").emit(),
             ),
 

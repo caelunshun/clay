@@ -109,11 +109,18 @@ impl<'tcx> FnCtxt<'tcx> {
                 SpannedTy::new_unspanned(tcx.intern_ty(TyKind::Tuple(tcx.intern_ty_list(&[]))))
             }
             ExprKind::ForLoop { pat, iter, body } => todo!(),
+            ExprKind::Match(scrutinee, arms) => todo!(),
             ExprKind::Loop(block) => todo!(),
             ExprKind::Block(block) => self.check_block(*block),
             ExprKind::Assign(lhs, rhs) => todo!(),
             ExprKind::AssignOp(op, lhs, rhs) => todo!(),
             ExprKind::Field(obj, ident) => todo!(),
+            ExprKind::GenericMethodCall {
+                target,
+                method,
+                generics,
+                args,
+            } => todo!(),
             ExprKind::Index(obj, obj1) => todo!(),
             ExprKind::Range(obj, obj1, ast_range_limits) => todo!(),
             ExprKind::SelfLocal => todo!(),
