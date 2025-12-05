@@ -5,16 +5,13 @@ use crate::{
     },
     parse::{
         ast::{
-            AstBinOpKind, AstBlock, AstExpr, AstExprKind, AstPat, AstPatKind, AstStmt, AstStmtKind,
-            AstStmtLet, AstUnOpKind,
+            AstBinOpKind, AstBlock, AstExpr, AstExprKind, AstStmt, AstStmtKind, AstStmtLet,
+            AstUnOpKind,
         },
         token::Lifetime,
     },
     semantic::{
-        lower::{
-            entry::IntraItemLowerCtxt,
-            func::path::{ExprPathResolution, ExprPathResult},
-        },
+        lower::{entry::IntraItemLowerCtxt, func::path::ExprPathResolution},
         syntax::{
             AdtKind, AdtStructFieldSyntax, Block, Expr, ExprKind, LetStmt, Pat, PatKind, Stmt,
         },
@@ -314,56 +311,6 @@ impl IntraItemLowerCtxt<'_> {
         expr
     }
 
-    pub fn lower_pat_list(&mut self, asts: &[AstPat]) -> Obj<[Obj<Pat>]> {
-        let s = &self.tcx.session;
-
-        Obj::new_iter(asts.iter().map(|ast| self.lower_pat(ast)), s)
-    }
-
-    pub fn lower_pat(&mut self, ast: &AstPat) -> Obj<Pat> {
-        let s = &self.tcx.session;
-
-        let kind = match &ast.kind {
-            AstPatKind::Wild => PatKind::Hole,
-            AstPatKind::Path {
-                binding_mode,
-                path,
-                and_bind,
-            } => {
-                let res = self.resolve_expr_path(path);
-
-                match res {
-                    ExprPathResult::Resolved(expr_path_resolution) => todo!(),
-                    ExprPathResult::UnboundLocal(ident) => {
-                        todo!()
-                    }
-                    ExprPathResult::Fail(error_guaranteed) => {
-                        todo!()
-                    }
-                }
-            }
-            AstPatKind::PathAndBrace(ast_expr_path, ast_pat_fields, ast_pat_struct_rest) => todo!(),
-            AstPatKind::PathAndParen(ast_expr_path, ast_pats) => todo!(),
-            AstPatKind::Or(pats) => PatKind::Or(self.lower_pat_list(pats)),
-            AstPatKind::Tuple(pats) => todo!(),
-            AstPatKind::Ref(ast_opt_mutability, ast_pat) => todo!(),
-            AstPatKind::Slice(ast_pats) => todo!(),
-            AstPatKind::Rest => todo!(),
-            AstPatKind::Paren(ast_pat) => todo!(),
-            AstPatKind::Range(ast_expr, ast_expr1, ast_range_limits) => todo!(),
-            AstPatKind::Lit(ast_expr) => todo!(),
-            AstPatKind::Error(err) => PatKind::Error(*err),
-        };
-
-        Obj::new(
-            Pat {
-                span: ast.span,
-                kind,
-            },
-            s,
-        )
-    }
-
     pub fn lower_lvalue_list_as_pat<'a>(
         &mut self,
         exprs: impl IntoIterator<Item = &'a AstExpr, IntoIter: ExactSizeIterator>,
@@ -384,9 +331,9 @@ impl IntraItemLowerCtxt<'_> {
                 return self.lower_lvalue_as_pat(expr);
             }
 
-            AstExprKind::Array(elems) => PatKind::Array(self.lower_lvalue_list_as_pat(elems)),
+            AstExprKind::Array(elems) => PatKind::Slice(self.lower_lvalue_list_as_pat(elems)),
             AstExprKind::Tuple(elems) => PatKind::Tuple(self.lower_lvalue_list_as_pat(elems)),
-            AstExprKind::Lit(lit) => PatKind::Lit(*lit),
+            AstExprKind::Lit(_) => PatKind::Lit(self.lower_expr(expr)),
             AstExprKind::Underscore => PatKind::Hole,
 
             AstExprKind::Binary(AstBinOpKind::BitOr, lhs, rhs) => {

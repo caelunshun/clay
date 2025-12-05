@@ -20,11 +20,11 @@ use std::{
 
 pub struct GpArena {
     generation: NonZeroU64,
-    inner: RefCell<GpArenaInner>,
+    bump: bumpalo::Bump,
+    drop_queue: RefCell<GpArenaDropQueue>,
 }
 
-struct GpArenaInner {
-    bump: bumpalo::Bump,
+struct GpArenaDropQueue {
     singles: Vec<NonNull<dyn Any>>,
     lists: Vec<GpList>,
 }
@@ -48,8 +48,8 @@ impl Default for GpArena {
 
         Self {
             generation: NonZeroU64::new(ID_GEN.fetch_add(1, Relaxed)).unwrap(),
-            inner: RefCell::new(GpArenaInner {
-                bump: Bump::new(),
+            bump: Bump::new(),
+            drop_queue: RefCell::new(GpArenaDropQueue {
                 singles: Vec::new(),
                 lists: Vec::new(),
             }),
@@ -59,7 +59,7 @@ impl Default for GpArena {
 
 impl Drop for GpArena {
     fn drop(&mut self) {
-        let inner = self.inner.get_mut();
+        let inner = self.drop_queue.get_mut();
 
         for &single in &inner.singles {
             unsafe { single.drop_in_place() };
@@ -109,13 +109,13 @@ impl<T: 'static> Obj<T> {
     where
         T: Sized,
     {
-        let mut inner = s.gp_arena.inner.borrow_mut();
+        let this = &s.gp_arena;
+        let ptr = NonNull::from(this.bump.alloc(value));
 
-        let ptr = NonNull::from(inner.bump.alloc(value));
-        inner.singles.push(ptr);
+        this.drop_queue.borrow_mut().singles.push(ptr);
 
         Self {
-            generation: s.gp_arena.generation,
+            generation: this.generation,
             ptr,
         }
     }
@@ -126,10 +126,10 @@ impl<T: 'static> Obj<[T]> {
     where
         T: Clone,
     {
-        let mut inner = s.gp_arena.inner.borrow_mut();
+        let this = &s.gp_arena;
+        let ptr = NonNull::from(this.bump.alloc_slice_clone(value));
 
-        let ptr = NonNull::from(inner.bump.alloc_slice_clone(value));
-        inner.lists.push(GpList {
+        this.drop_queue.borrow_mut().lists.push(GpList {
             base: ptr.cast(),
             len: ptr.len(),
             drop: |ptr, len| unsafe {
@@ -138,7 +138,7 @@ impl<T: 'static> Obj<[T]> {
         });
 
         Self {
-            generation: s.gp_arena.generation,
+            generation: this.generation,
             ptr,
         }
     }
@@ -147,10 +147,11 @@ impl<T: 'static> Obj<[T]> {
         value: impl IntoIterator<Item = T, IntoIter: ExactSizeIterator>,
         s: &Session,
     ) -> Self {
-        let mut inner = s.gp_arena.inner.borrow_mut();
+        let this = &s.gp_arena;
 
-        let ptr = NonNull::from(inner.bump.alloc_slice_fill_iter(value));
-        inner.lists.push(GpList {
+        let ptr = NonNull::from(this.bump.alloc_slice_fill_iter(value));
+
+        this.drop_queue.borrow_mut().lists.push(GpList {
             base: ptr.cast(),
             len: ptr.len(),
             drop: |ptr, len| unsafe {
@@ -159,7 +160,7 @@ impl<T: 'static> Obj<[T]> {
         });
 
         Self {
-            generation: s.gp_arena.generation,
+            generation: this.generation,
             ptr,
         }
     }

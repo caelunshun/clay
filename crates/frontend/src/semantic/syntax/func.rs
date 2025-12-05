@@ -73,13 +73,13 @@ pub enum PatKind {
     NewName(Obj<FuncLocal>),
 
     /// Match an array or slice of patterns.
-    Array(Obj<[Obj<Pat>]>),
+    Slice(Obj<[Obj<Pat>]>),
 
     /// Match a tuple of patterns.
     Tuple(Obj<[Obj<Pat>]>),
 
     /// Match a literal.
-    Lit(AstLit),
+    Lit(Obj<Expr>),
 
     /// Match a variety of options.
     Or(Obj<[Obj<Pat>]>),

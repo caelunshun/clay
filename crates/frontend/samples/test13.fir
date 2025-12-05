@@ -1,19 +1,3 @@
 fn main() {
-    Meow;
-    Whee::Foo;
-    Whee::Bar;
-    Whee::Baz;
-    Foo;
-    Bar;
-    Baz;
+    let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
 }
-
-pub struct Meow {}
-
-pub enum Whee {
-    Foo,
-    Bar {},
-    Baz(),
-}
-
-use Whee::*;

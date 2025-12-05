@@ -8,6 +8,7 @@ use crate::{
     semantic::syntax::{
         FnDef, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy, Visibility,
     },
+    symbol,
     utils::hash::FxHashMap,
 };
 use derive_where::derive_where;
@@ -548,4 +549,13 @@ impl RelationMode {
 pub enum Mutability {
     Mut,
     Not,
+}
+
+impl Mutability {
+    pub fn adverb(self) -> Symbol {
+        match self {
+            Mutability::Mut => symbol!("mutably"),
+            Mutability::Not => symbol!("immutably"),
+        }
+    }
 }

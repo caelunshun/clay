@@ -141,7 +141,9 @@ impl ExprPathResolution {
             ExprPathResolution::ResolvedGeneric(def) => {
                 format!("generic type `{}`", def.r(s).ident.text)
             }
-            ExprPathResolution::TypeRelative { .. } => "constant or method".to_string(),
+            ExprPathResolution::TypeRelative { .. } => {
+                "fully-qualified constant or method".to_string()
+            }
             ExprPathResolution::SelfLocal => "`self`".to_string(),
             ExprPathResolution::Local(def) => format!("local variable `{}`", def.r(s).name.text),
         }
