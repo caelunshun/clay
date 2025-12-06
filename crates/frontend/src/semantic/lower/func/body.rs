@@ -2,32 +2,24 @@ use crate::{
     base::{
         Diag, ErrorGuaranteed, HardDiag, LeafDiag, Level,
         arena::{LateInit, Obj},
-        syntax::Span,
     },
     parse::{
         ast::{
-            AstBinOpKind, AstBlock, AstExpr, AstExprKind, AstMatchArm, AstStmt, AstStmtKind,
-            AstStmtLet, AstUnOpKind,
+            AstBinOpKind, AstBinOpSpanned, AstBlock, AstExpr, AstExprKind, AstMatchArm, AstStmt,
+            AstStmtKind, AstStmtLet, AstUnOpKind,
         },
         token::Lifetime,
     },
     semantic::{
-        lower::{
-            entry::IntraItemLowerCtxt, func::path::ExprPathResolution,
-            utils::fold_right_associative_ast_bin_ops,
-        },
+        lower::{entry::IntraItemLowerCtxt, func::path::ExprPathResolution},
         syntax::{
-            AdtKind, AdtStructFieldSyntax, Block, Expr, ExprKind, LetChain, LetChainPart,
-            LetChainPartKind, LetStmt, MatchArm, Pat, PatKind, SpannedTyOrReList, Stmt,
+            AdtKind, AdtStructFieldSyntax, Block, Expr, ExprKind, LetStmt, MatchArm, Pat, PatKind,
+            SpannedTyOrReList, Stmt,
         },
     },
 };
 
-#[derive(Debug, Copy, Clone)]
-pub enum LetChainDenyReason {
-    NowhereNear,
-    BrokenOut(AstBinOpKind, Span),
-}
+// === Body lowering === //
 
 impl IntraItemLowerCtxt<'_> {
     pub fn lower_block_with_label(
@@ -132,14 +124,6 @@ impl IntraItemLowerCtxt<'_> {
     }
 
     pub fn lower_expr(&mut self, ast: &AstExpr) -> Obj<Expr> {
-        self.lower_expr_with_deny_cause(ast, LetChainDenyReason::NowhereNear)
-    }
-
-    pub fn lower_expr_with_deny_cause(
-        &mut self,
-        ast: &AstExpr,
-        let_deny_cause: LetChainDenyReason,
-    ) -> Obj<Expr> {
         let s = &self.tcx.session;
 
         let expr = Obj::new(
@@ -159,39 +143,21 @@ impl IntraItemLowerCtxt<'_> {
                 return self.lower_expr(expr);
             }
             AstExprKind::Tuple(exprs) => ExprKind::Tuple(self.lower_exprs(exprs)),
-            AstExprKind::Binary(op, op_span, lhs, rhs) => {
-                let let_deny_cause = if *op == AstBinOpKind::And {
-                    let_deny_cause
-                } else {
-                    LetChainDenyReason::BrokenOut(*op, *op_span)
-                };
-
-                ExprKind::Binary(
-                    *op,
-                    *op_span,
-                    self.lower_expr_with_deny_cause(lhs, let_deny_cause),
-                    self.lower_expr_with_deny_cause(rhs, let_deny_cause),
-                )
+            AstExprKind::Binary(op, lhs, rhs) => {
+                ExprKind::Binary(*op, self.lower_expr(lhs), self.lower_expr(rhs))
             }
             AstExprKind::Unary(op, expr) => ExprKind::Unary(*op, self.lower_expr(expr)),
             AstExprKind::Lit(lit) => ExprKind::Literal(*lit),
             AstExprKind::Cast(expr, as_ty) => {
                 ExprKind::Cast(self.lower_expr(expr), self.lower_ty(as_ty))
             }
-            AstExprKind::Let(..) => match let_deny_cause {
-                LetChainDenyReason::NowhereNear => ExprKind::Error(
-                    Diag::span_err(
-                        ast.span,
-                        "`let` only allowed in statements or if-`let` chains",
-                    )
-                    .emit(),
-                ),
-                LetChainDenyReason::BrokenOut(op, span) => ExprKind::Error(
-                    // TODO: improve `op` formatting
-                    Diag::span_err(span, format_args!("{op:?} not allowed in if-`let` chain"))
-                        .emit(),
-                ),
-            },
+            AstExprKind::Let(..) => ExprKind::Error(
+                Diag::span_err(
+                    ast.span,
+                    "`let` only allowed in statements or if-`let` chains",
+                )
+                .emit(),
+            ),
             AstExprKind::If {
                 cond,
                 truthy,
@@ -380,50 +346,86 @@ impl IntraItemLowerCtxt<'_> {
         expr
     }
 
-    pub fn lower_let_chain(&mut self, expr: &AstExpr) -> Obj<LetChain> {
+    pub fn lower_let_chain(&mut self, expr: &AstExpr) -> Obj<Expr> {
         let s = &self.tcx.session;
 
-        let parts = Obj::new_iter(
-            fold_right_associative_ast_bin_ops(expr, AstBinOpKind::And)
-                .into_iter()
-                .map(|(op_span, part)| self.lower_let_chain_part(op_span, part)),
-            s,
-        );
+        #[derive(Debug, Copy, Clone)]
+        enum BrokenOutViolation {
+            NotYetReported(AstBinOpSpanned),
+            AlreadyReported(ErrorGuaranteed),
+        }
 
-        Obj::new(
-            LetChain {
-                span: expr.span,
-                parts,
-            },
-            s,
-        )
-    }
+        let mut broken_out_violation = None;
 
-    pub fn lower_let_chain_part(
-        &mut self,
-        prev_and_span: Option<Span>,
-        expr: &AstExpr,
-    ) -> Obj<LetChainPart> {
-        let s = &self.tcx.session;
+        let parts = self
+            .flatten_right_associative_bin_op_chain(expr, |_| true)
+            .into_iter()
+            .map(|(prev_op, expr)| {
+                if let Some(prev_op) = prev_op
+                    && prev_op.kind != AstBinOpKind::And
+                {
+                    broken_out_violation = Some(BrokenOutViolation::NotYetReported(prev_op));
+                }
 
-        let kind = match &expr.kind {
-            AstExprKind::Let(pat, scrutinee, _eq_span) => {
-                let scrutinee = self.lower_expr(scrutinee);
-                let pat = self.lower_pat(pat);
+                let expr = if let Some(broken_out_violation) = &mut broken_out_violation {
+                    match &expr.kind {
+                        AstExprKind::Let(_pat, _scrutinee, _eq_span) => {
+                            let err = match *broken_out_violation {
+                                BrokenOutViolation::NotYetReported(culprit_op) => Diag::span_err(
+                                    culprit_op.span,
+                                    format_args!(
+                                        "{} not allowed in if-`let` chain",
+                                        culprit_op.kind.punct().expectation_name(),
+                                    ),
+                                )
+                                .secondary(
+                                    expr.span,
+                                    format_args!(
+                                        "`let` expression used here after the {}",
+                                        culprit_op.kind.punct().expectation_name(),
+                                    ),
+                                )
+                                .emit(),
 
-                LetChainPartKind::Let(pat, scrutinee)
-            }
-            _ => LetChainPartKind::Expr(self.lower_expr(expr)),
-        };
+                                // Leech off the previous error.
+                                BrokenOutViolation::AlreadyReported(err) => err,
+                            };
 
-        Obj::new(
-            LetChainPart {
-                span: expr.span,
-                prev_and_span,
-                kind,
-            },
-            s,
-        )
+                            *broken_out_violation = BrokenOutViolation::AlreadyReported(err);
+
+                            Obj::new(
+                                Expr {
+                                    span: expr.span,
+                                    kind: LateInit::new(ExprKind::Error(err)),
+                                },
+                                s,
+                            )
+                        }
+                        _ => self.lower_expr(expr),
+                    }
+                } else {
+                    match &expr.kind {
+                        AstExprKind::Let(pat, scrutinee, _eq_span) => {
+                            let scrutinee = self.lower_expr(scrutinee);
+                            let pat = self.lower_pat(pat);
+
+                            Obj::new(
+                                Expr {
+                                    span: expr.span,
+                                    kind: LateInit::new(ExprKind::Let(pat, scrutinee)),
+                                },
+                                s,
+                            )
+                        }
+                        _ => self.lower_expr(expr),
+                    }
+                };
+
+                (prev_op, expr)
+            })
+            .collect::<Vec<_>>();
+
+        self.recombine_right_associative_bin_op_chain(parts)
     }
 
     pub fn lower_match_arm(&mut self, arm: &AstMatchArm) -> Obj<MatchArm> {
@@ -470,14 +472,19 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::Lit(_) => PatKind::Lit(self.lower_expr(expr)),
             AstExprKind::Underscore => PatKind::Hole,
 
-            AstExprKind::Binary(AstBinOpKind::BitOr, _op_span, _lhs, _rhs) => {
-                PatKind::Or(Obj::new_iter(
-                    fold_right_associative_ast_bin_ops(expr, AstBinOpKind::BitOr)
-                        .into_iter()
-                        .map(|(_span, pat)| self.lower_lvalue_as_pat(pat)),
-                    s,
-                ))
-            }
+            AstExprKind::Binary(
+                AstBinOpSpanned {
+                    span: _,
+                    kind: AstBinOpKind::BitOr,
+                },
+                _lhs,
+                _rhs,
+            ) => PatKind::Or(Obj::new_iter(
+                self.flatten_right_associative_bin_op_chain(expr, |op| op == AstBinOpKind::BitOr)
+                    .into_iter()
+                    .map(|(_span, pat)| self.lower_lvalue_as_pat(pat)),
+                s,
+            )),
 
             AstExprKind::Struct(..) | AstExprKind::AddrOf(..) | AstExprKind::Call(..) => todo!(),
 
@@ -504,23 +511,30 @@ impl IntraItemLowerCtxt<'_> {
             | AstExprKind::Return(..)
             | AstExprKind::Unary(AstUnOpKind::Not, ..)
             | AstExprKind::Unary(AstUnOpKind::Neg, ..)
-            | AstExprKind::Binary(AstBinOpKind::Add, ..)
-            | AstExprKind::Binary(AstBinOpKind::Sub, ..)
-            | AstExprKind::Binary(AstBinOpKind::Mul, ..)
-            | AstExprKind::Binary(AstBinOpKind::Div, ..)
-            | AstExprKind::Binary(AstBinOpKind::Rem, ..)
-            | AstExprKind::Binary(AstBinOpKind::And, ..)
-            | AstExprKind::Binary(AstBinOpKind::Or, ..)
-            | AstExprKind::Binary(AstBinOpKind::BitXor, ..)
-            | AstExprKind::Binary(AstBinOpKind::BitAnd, ..)
-            | AstExprKind::Binary(AstBinOpKind::Shl, ..)
-            | AstExprKind::Binary(AstBinOpKind::Shr, ..)
-            | AstExprKind::Binary(AstBinOpKind::Eq, ..)
-            | AstExprKind::Binary(AstBinOpKind::Lt, ..)
-            | AstExprKind::Binary(AstBinOpKind::Le, ..)
-            | AstExprKind::Binary(AstBinOpKind::Ne, ..)
-            | AstExprKind::Binary(AstBinOpKind::Ge, ..)
-            | AstExprKind::Binary(AstBinOpKind::Gt, ..)
+            | AstExprKind::Binary(
+                AstBinOpSpanned {
+                    kind:
+                        AstBinOpKind::Add
+                        | AstBinOpKind::Sub
+                        | AstBinOpKind::Mul
+                        | AstBinOpKind::Div
+                        | AstBinOpKind::Rem
+                        | AstBinOpKind::And
+                        | AstBinOpKind::Or
+                        | AstBinOpKind::BitXor
+                        | AstBinOpKind::BitAnd
+                        | AstBinOpKind::Shl
+                        | AstBinOpKind::Shr
+                        | AstBinOpKind::Eq
+                        | AstBinOpKind::Lt
+                        | AstBinOpKind::Le
+                        | AstBinOpKind::Ne
+                        | AstBinOpKind::Ge
+                        | AstBinOpKind::Gt,
+                    ..
+                },
+                ..,
+            )
             | AstExprKind::Range(..) => PatKind::Error(
                 Diag::span_err(expr.span, "invalid left-hand side of assignment").emit(),
             ),
@@ -535,5 +549,57 @@ impl IntraItemLowerCtxt<'_> {
             },
             s,
         )
+    }
+}
+
+// === Utils === //
+
+impl IntraItemLowerCtxt<'_> {
+    pub fn flatten_right_associative_bin_op_chain<'ast>(
+        &mut self,
+        expr: &'ast AstExpr,
+        mut filter_op: impl FnMut(AstBinOpKind) -> bool,
+    ) -> Vec<(Option<AstBinOpSpanned>, &'ast AstExpr)> {
+        let mut accum = Vec::new();
+        let mut finger = expr;
+
+        loop {
+            if let AstExprKind::Binary(op, lhs, rhs) = &finger.kind
+                && filter_op(op.kind)
+            {
+                accum.push((Some(*op), &**rhs));
+                finger = lhs;
+            } else {
+                accum.push((None, finger));
+                break;
+            }
+        }
+
+        accum.reverse();
+
+        accum
+    }
+
+    pub fn recombine_right_associative_bin_op_chain(
+        &mut self,
+        parts: impl IntoIterator<Item = (Option<AstBinOpSpanned>, Obj<Expr>)>,
+    ) -> Obj<Expr> {
+        let s = &self.tcx.session;
+
+        let mut parts = parts.into_iter();
+        let (outer_op, mut outer) = parts.next().unwrap();
+        debug_assert!(outer_op.is_none());
+
+        for (op, part) in parts {
+            outer = Obj::new(
+                Expr {
+                    span: outer.r(s).span,
+                    kind: LateInit::new(ExprKind::Binary(op.unwrap(), outer, part)),
+                },
+                s,
+            );
+        }
+
+        outer
     }
 }

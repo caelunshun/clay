@@ -5,7 +5,7 @@ use crate::{
         syntax::Span,
     },
     parse::{
-        ast::{AstAssignOpKind, AstBinOpKind, AstLit, AstRangeLimits, AstUnOpKind},
+        ast::{AstAssignOpKind, AstBinOpSpanned, AstLit, AstRangeLimits, AstUnOpKind},
         token::Ident,
     },
     semantic::syntax::{
@@ -131,7 +131,7 @@ pub enum ExprKind {
         args: Obj<[Obj<Expr>]>,
     },
     Tuple(Obj<[Obj<Expr>]>),
-    Binary(AstBinOpKind, Span, Obj<Expr>, Obj<Expr>),
+    Binary(AstBinOpSpanned, Obj<Expr>, Obj<Expr>),
     Unary(AstUnOpKind, Obj<Expr>),
     Literal(AstLit),
     StructCtorLit(Obj<AdtKindStruct>, SpannedTyOrReList),
@@ -145,11 +145,12 @@ pub enum ExprKind {
     },
     Cast(Obj<Expr>, SpannedTy),
     If {
-        cond: Obj<LetChain>,
+        cond: Obj<Expr>,
         truthy: Obj<Expr>,
         falsy: Option<Obj<Expr>>,
     },
-    While(Obj<LetChain>, Obj<Block>),
+    While(Obj<Expr>, Obj<Block>),
+    Let(Obj<Pat>, Obj<Expr>),
     ForLoop {
         pat: Obj<Pat>,
         iter: Obj<Expr>,
@@ -185,28 +186,9 @@ pub enum ExprKind {
 }
 
 #[derive(Debug, Clone)]
-pub struct LetChain {
-    pub span: Span,
-    pub parts: Obj<[Obj<LetChainPart>]>,
-}
-
-#[derive(Debug, Clone)]
-pub struct LetChainPart {
-    pub span: Span,
-    pub prev_and_span: Option<Span>,
-    pub kind: LetChainPartKind,
-}
-
-#[derive(Debug, Clone)]
-pub enum LetChainPartKind {
-    Let(Obj<Pat>, Obj<Expr>),
-    Expr(Obj<Expr>),
-}
-
-#[derive(Debug, Clone)]
 pub struct MatchArm {
     pub span: Span,
     pub pat: Obj<Pat>,
-    pub guard: Option<Obj<LetChain>>,
+    pub guard: Option<Obj<Expr>>,
     pub body: Obj<Expr>,
 }

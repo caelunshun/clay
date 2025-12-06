@@ -115,7 +115,7 @@ pub use kw;
 
 macro_rules! define_punct_seqs {
     ($($name:ident = $($text:literal)*),* $(,)?) => {
-        #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+        #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
         pub enum PunctSeq {
             $($name,)*
         }
@@ -205,3 +205,32 @@ macro_rules! puncts {
 }
 
 pub use puncts;
+
+// === AnyPunct === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum AnyPunct {
+    Single(Punct),
+    Seq(PunctSeq),
+}
+
+impl AnyPunct {
+    pub fn expectation_name(self) -> Symbol {
+        match self {
+            AnyPunct::Single(v) => v.expectation_name(),
+            AnyPunct::Seq(v) => v.expectation_name(),
+        }
+    }
+}
+
+impl From<Punct> for AnyPunct {
+    fn from(value: Punct) -> Self {
+        Self::Single(value)
+    }
+}
+
+impl From<PunctSeq> for AnyPunct {
+    fn from(value: PunctSeq) -> Self {
+        Self::Seq(value)
+    }
+}

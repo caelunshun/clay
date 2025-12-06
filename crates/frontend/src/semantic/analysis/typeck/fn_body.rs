@@ -64,7 +64,8 @@ impl<'tcx> FnCtxt<'tcx> {
                 SpannedTyView::Tuple(SpannedTyList::alloc_list(expr.r(s).span, &elems, tcx))
                     .encode(expr.r(s).span, tcx)
             }
-            ExprKind::Binary(op, op_span, lhs, rhs) => todo!(),
+            ExprKind::Let(pat, scrutinee) => todo!(),
+            ExprKind::Binary(op, lhs, rhs) => todo!(),
             ExprKind::Unary(ast_un_op_kind, obj) => todo!(),
             ExprKind::Literal(ast_lit) => todo!(),
             ExprKind::StructCtorLit(obj, spanned) => todo!(),

@@ -5,7 +5,7 @@ use crate::{
     },
     parse::{
         ast::{
-            Keyword, PunctSeq,
+            AnyPunct, Keyword, PunctSeq,
             entry::{C, P},
         },
         token::{
@@ -57,6 +57,13 @@ pub fn match_eos(p: P) -> bool {
     let closing_name = p.cursor_unsafe().iter.group().delimiter.closing_name();
 
     p.expect(closing_name, |v| v.eat().is_none())
+}
+
+pub fn match_punct_any(punct: AnyPunct) -> impl TokenMatcher<Output = Option<Span>> {
+    token_matcher(punct.expectation_name(), move |c, _| match punct {
+        AnyPunct::Single(punct) => match_punct(punct).consume(c).map(|v| v.span),
+        AnyPunct::Seq(punct) => match_punct_seq(punct).consume(c),
+    })
 }
 
 pub fn match_punct(punct: Punct) -> impl TokenMatcher<Output = Option<TokenPunct>> {

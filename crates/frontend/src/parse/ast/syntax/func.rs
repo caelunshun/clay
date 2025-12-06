@@ -4,9 +4,13 @@ use crate::{
         syntax::{HasSpan, Span},
     },
     parse::{
-        ast::{AstGenericParamList, AstItem, AstOptMutability, AstParamedPath, AstReturnTy, AstTy},
+        ast::{
+            AnyPunct, AstGenericParamList, AstItem, AstOptMutability, AstParamedPath, AstReturnTy,
+            AstTy,
+        },
         token::{Ident, Lifetime, TokenCharLit, TokenNumLit, TokenStrLit},
     },
+    punct, puncts,
 };
 
 // === Functions === //
@@ -75,7 +79,7 @@ pub enum AstExprKind {
     },
     Paren(Box<AstExpr>),
     Tuple(Vec<AstExpr>),
-    Binary(AstBinOpKind, Span, Box<AstExpr>, Box<AstExpr>),
+    Binary(AstBinOpSpanned, Box<AstExpr>, Box<AstExpr>),
     Unary(AstUnOpKind, Box<AstExpr>),
     Lit(AstLit),
     Cast(Box<AstExpr>, Box<AstTy>),
@@ -177,6 +181,12 @@ pub struct AstBoolLit {
     pub value: bool,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct AstBinOpSpanned {
+    pub span: Span,
+    pub kind: AstBinOpKind,
+}
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum AstBinOpKind {
     /// The `+` operator (addition)
@@ -217,6 +227,31 @@ pub enum AstBinOpKind {
     Gt,
 }
 
+impl AstBinOpKind {
+    pub fn punct(self) -> AnyPunct {
+        match self {
+            AstBinOpKind::Add => punct!('+').into(),
+            AstBinOpKind::Sub => punct!('-').into(),
+            AstBinOpKind::Mul => punct!('*').into(),
+            AstBinOpKind::Div => punct!('/').into(),
+            AstBinOpKind::Rem => punct!('%').into(),
+            AstBinOpKind::And => puncts!("&&").into(),
+            AstBinOpKind::Or => puncts!("||").into(),
+            AstBinOpKind::BitXor => punct!('^').into(),
+            AstBinOpKind::BitAnd => punct!('&').into(),
+            AstBinOpKind::BitOr => punct!('|').into(),
+            AstBinOpKind::Shl => puncts!("<<").into(),
+            AstBinOpKind::Shr => puncts!(">>").into(),
+            AstBinOpKind::Eq => puncts!("==").into(),
+            AstBinOpKind::Lt => punct!('<').into(),
+            AstBinOpKind::Le => puncts!("<=").into(),
+            AstBinOpKind::Ne => puncts!("!=").into(),
+            AstBinOpKind::Ge => punct!('>').into(),
+            AstBinOpKind::Gt => puncts!(">=").into(),
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum AstAssignOpKind {
     /// The `+=` operator (addition)
@@ -239,6 +274,23 @@ pub enum AstAssignOpKind {
     Shl,
     /// The `>>=` operator (shift right)
     Shr,
+}
+
+impl AstAssignOpKind {
+    pub fn punct(self) -> AnyPunct {
+        match self {
+            AstAssignOpKind::Add => puncts!("+=").into(),
+            AstAssignOpKind::Sub => puncts!("-=").into(),
+            AstAssignOpKind::Mul => puncts!("*=").into(),
+            AstAssignOpKind::Div => puncts!("/=").into(),
+            AstAssignOpKind::Rem => puncts!("%=").into(),
+            AstAssignOpKind::BitXor => puncts!("^=").into(),
+            AstAssignOpKind::BitAnd => puncts!("&=").into(),
+            AstAssignOpKind::BitOr => puncts!("|=").into(),
+            AstAssignOpKind::Shl => puncts!("<<=").into(),
+            AstAssignOpKind::Shr => puncts!(">>=").into(),
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
