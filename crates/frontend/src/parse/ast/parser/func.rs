@@ -99,10 +99,9 @@ bitflags! {
     pub struct AstExprFlags: u32 {
         const ALLOW_BLOCK = 1 << 0;
         const ALLOW_STRUCT_CTOR = 1 << 1;
-        const ALLOW_LET_EXPR = 1 << 2;
 
         const IN_SCRUTINEE = 0;
-        const IN_COND = Self::ALLOW_LET_EXPR.bits();
+        const IN_COND = 0;
         const ALLOW_REGULAR = Self::ALLOW_BLOCK.bits() | Self::ALLOW_STRUCT_CTOR.bits();
     }
 }
@@ -271,14 +270,15 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
     }
 
     // Match `let` expressions in `if` conditions.
-    if flags.contains(AstExprFlags::ALLOW_LET_EXPR) && match_kw(kw!("let")).expect(p).is_some() {
+    if match_kw(kw!("let")).expect(p).is_some() {
         let pat = parse_pat(p);
 
         let Some(eq) = match_punct(punct!('=')).expect(p) else {
             return Some(build_expr(AstExprKind::Error(p.stuck().error()), p));
         };
 
-        let Some(rhs) = parse_expr(p, AstExprFlags::IN_SCRUTINEE) else {
+        let Some(rhs) = parse_expr_pratt(p, AstExprFlags::IN_SCRUTINEE, expr_bp::PRE_LET.right)
+        else {
             return Some(build_expr(AstExprKind::Error(p.stuck().error()), p));
         };
 
@@ -312,7 +312,6 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
     }
 
     // Match prefix range expressions
-
     if let Some((span, range)) = parse_expr_range_limits(p) {
         let rhs = parse_expr_pratt(p, flags, expr_bp::PRE_RANGE.right);
 

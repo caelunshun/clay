@@ -18,6 +18,9 @@ pub mod expr_bp {
     // `break exp;`
     pub const PRE_BREAK: PrefixBp = PrefixBp::new(1);
 
+    // `let pat = expr`
+    pub const PRE_LET: PrefixBp = PrefixBp::new(8);
+
     // `exp + exp`
     pub const INFIX_ADD: InfixBp = InfixBp::new_left(2);
 

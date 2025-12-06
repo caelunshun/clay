@@ -12,7 +12,7 @@ pub struct NameResolver<T> {
     stack: Vec<Op<T>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 struct DefinedName<T> {
     depth: u32,
     value: T,
@@ -24,7 +24,7 @@ enum Op<T> {
     Rib,
 }
 
-impl<T> NameResolver<T> {
+impl<T: Copy> NameResolver<T> {
     pub fn new() -> Self {
         Self::default()
     }
@@ -33,8 +33,22 @@ impl<T> NameResolver<T> {
         &mut self,
         sym: Symbol,
         value: T,
-        on_shadow: impl FnOnce(&T) -> ErrorGuaranteed,
+        on_shadow: impl FnOnce(T) -> ErrorGuaranteed,
     ) -> Option<ErrorGuaranteed> {
+        if let Some(replaced) = self.define_inner(sym, value)
+            && replaced.depth == self.depth
+        {
+            return Some(on_shadow(replaced.value));
+        }
+
+        None
+    }
+
+    pub fn define_force_shadow(&mut self, sym: Symbol, value: T) {
+        self.define_inner(sym, value);
+    }
+
+    fn define_inner(&mut self, sym: Symbol, value: T) -> Option<DefinedName<T>> {
         let replaced = self.map.insert(
             sym,
             DefinedName {
@@ -43,14 +57,9 @@ impl<T> NameResolver<T> {
             },
         );
 
-        let res = replaced
-            .as_ref()
-            .filter(|v| v.depth == self.depth)
-            .map(|v| on_shadow(&v.value));
-
         self.stack.push(Op::Set(sym, replaced));
 
-        res
+        replaced
     }
 
     pub fn lookup(&self, sym: Symbol) -> Option<&T> {

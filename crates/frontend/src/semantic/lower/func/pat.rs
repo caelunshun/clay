@@ -268,7 +268,11 @@ impl IntraItemLowerCtxt<'_> {
                             };
 
                             match locals.resolve(name, binding_mode.local_muta.as_muta(), s) {
-                                Ok(local) => PatKind::NewName(local),
+                                Ok(local) => {
+                                    self.func_local_names.define_force_shadow(name.text, local);
+
+                                    PatKind::NewName(local)
+                                }
                                 Err(err) => PatKind::Error(err),
                             }
                         }
@@ -287,7 +291,11 @@ impl IntraItemLowerCtxt<'_> {
                     },
                     ExprPathResult::UnboundLocal(name) => {
                         match locals.resolve(name, binding_mode.local_muta.as_muta(), s) {
-                            Ok(local) => PatKind::NewName(local),
+                            Ok(local) => {
+                                self.func_local_names.define_force_shadow(name.text, local);
+
+                                PatKind::NewName(local)
+                            }
                             Err(err) => PatKind::Error(err),
                         }
                     }

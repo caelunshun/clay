@@ -12,7 +12,10 @@ use crate::{
         token::Lifetime,
     },
     semantic::{
-        lower::{entry::IntraItemLowerCtxt, func::path::ExprPathResolution},
+        lower::{
+            entry::IntraItemLowerCtxt, func::path::ExprPathResolution,
+            utils::fold_right_associative_ast_bin_ops,
+        },
         syntax::{
             AdtKind, AdtStructFieldSyntax, Block, Expr, ExprKind, LetChain, LetChainPart,
             LetChainPartKind, LetStmt, MatchArm, Pat, PatKind, SpannedTyOrReList, Stmt,
@@ -380,25 +383,17 @@ impl IntraItemLowerCtxt<'_> {
     pub fn lower_let_chain(&mut self, expr: &AstExpr) -> Obj<LetChain> {
         let s = &self.tcx.session;
 
-        let mut fold_iter = expr;
-        let mut prev_and_span = None;
-
-        let mut parts = Vec::new();
-
-        loop {
-            if let AstExprKind::Binary(AstBinOpKind::And, op_span, lhs, rhs) = &fold_iter.kind {
-                parts.push(self.lower_let_chain_part(prev_and_span.replace(*op_span), lhs));
-                fold_iter = rhs;
-            } else {
-                parts.push(self.lower_let_chain_part(prev_and_span, fold_iter));
-                break;
-            }
-        }
+        let parts = Obj::new_iter(
+            fold_right_associative_ast_bin_ops(expr, AstBinOpKind::And)
+                .into_iter()
+                .map(|(op_span, part)| self.lower_let_chain_part(op_span, part)),
+            s,
+        );
 
         Obj::new(
             LetChain {
                 span: expr.span,
-                parts: Obj::new_slice(&parts, s),
+                parts,
             },
             s,
         )
@@ -475,25 +470,13 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::Lit(_) => PatKind::Lit(self.lower_expr(expr)),
             AstExprKind::Underscore => PatKind::Hole,
 
-            AstExprKind::Binary(AstBinOpKind::BitOr, _op_span, lhs, rhs) => {
-                let mut accum = Vec::new();
-                let mut fold_iter = rhs;
-
-                accum.push(self.lower_lvalue_as_pat(lhs));
-
-                loop {
-                    if let AstExprKind::Binary(AstBinOpKind::BitOr, _op_span, lhs, rhs) =
-                        &fold_iter.kind
-                    {
-                        accum.push(self.lower_lvalue_as_pat(lhs));
-                        fold_iter = rhs;
-                    } else {
-                        accum.push(self.lower_lvalue_as_pat(fold_iter));
-                        break;
-                    }
-                }
-
-                PatKind::Or(Obj::new_slice(&accum, s))
+            AstExprKind::Binary(AstBinOpKind::BitOr, _op_span, _lhs, _rhs) => {
+                PatKind::Or(Obj::new_iter(
+                    fold_right_associative_ast_bin_ops(expr, AstBinOpKind::BitOr)
+                        .into_iter()
+                        .map(|(_span, pat)| self.lower_lvalue_as_pat(pat)),
+                    s,
+                ))
             }
 
             AstExprKind::Struct(..) | AstExprKind::AddrOf(..) | AstExprKind::Call(..) => todo!(),
