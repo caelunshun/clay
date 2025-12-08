@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        Diag, ErrorGuaranteed, HardDiag, LeafDiag, Level,
+        Diag, ErrorGuaranteed, LeafDiag, Level,
         arena::{LateInit, Obj},
     },
     parse::{
@@ -11,9 +11,12 @@ use crate::{
         token::Lifetime,
     },
     semantic::{
-        lower::{entry::IntraItemLowerCtxt, func::path::ExprPathResolution},
+        lower::{
+            entry::IntraItemLowerCtxt,
+            func::path::{PathResolvedFnLit, PathResolvedLocal, PathResolvedValue},
+        },
         syntax::{
-            AdtCtorSyntax, AdtKind, Block, Expr, ExprKind, LetStmt, MatchArm, Pat, PatKind,
+            AdtCtorSyntax, Block, Expr, ExprKind, LetStmt, MatchArm, Pat, PatKind,
             SpannedTyOrReList, Stmt,
         },
     },
@@ -248,84 +251,53 @@ impl IntraItemLowerCtxt<'_> {
                     }
                 };
 
-                let unexpected_value = || -> HardDiag {
-                    Diag::span_err(
-                        path.span,
-                        format_args!("expected value, got {}", res.bare_what(s)),
-                    )
+                let Some(res_val) = res.as_value(s) else {
+                    break 'path ExprKind::Error(
+                        Diag::span_err(
+                            path.span,
+                            format_args!("expected value, got {}", res.bare_what(s)),
+                        )
+                        .emit(),
+                    );
                 };
 
-                let validate_syntax =
-                    |syntax: &AdtCtorSyntax, whats: &str| -> Option<ErrorGuaranteed> {
-                        match syntax {
-                            AdtCtorSyntax::Unit => None,
-                            AdtCtorSyntax::Tuple => None,
-                            AdtCtorSyntax::Named(_) => Some(
-                                Diag::span_err(
-                                    path.span,
-                                    format_args!("expected value, got {}", res.bare_what(s)),
-                                )
-                                .child(LeafDiag::new(
-                                    Level::Note,
-                                    format_args!(
-                                        "only unit and tuple {whats} can be turned into functions"
-                                    ),
-                                ))
-                                .emit(),
-                            ),
-                        }
-                    };
-
-                match res {
-                    ExprPathResolution::ResolvedSelfTy => {
-                        // TODO
-                        ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
-                    }
-                    ExprPathResolution::ResolvedAdt(def, args) => match *def.r(s).kind {
-                        AdtKind::Struct(def) => {
-                            if let Some(err) =
-                                validate_syntax(&def.r(s).ctor.r(s).syntax, "`struct`s")
-                            {
-                                break 'path ExprKind::Error(err);
-                            }
-
-                            ExprKind::StructCtorLit(def, args)
-                        }
-                        AdtKind::Enum(_) => ExprKind::Error(unexpected_value().emit()),
+                match res_val {
+                    PathResolvedValue::Local(local) => match local {
+                        PathResolvedLocal::LowerSelf => ExprKind::LocalSelf,
+                        PathResolvedLocal::Local(def) => ExprKind::Local(def),
                     },
-                    ExprPathResolution::ResolvedEnumVariant(def, args) => {
-                        let variant = def.r(s).adt_variant(s);
-
-                        if let Some(err) =
-                            validate_syntax(&variant.r(s).ctor.r(s).syntax, "`enum` variants")
-                        {
-                            break 'path ExprKind::Error(err);
-                        }
-
-                        ExprKind::EnumCtorLit(def, args)
-                    }
-                    ExprPathResolution::ResolvedFn(def, args) => ExprKind::FuncLit(def, args),
-                    ExprPathResolution::TypeRelative {
-                        self_ty,
-                        as_trait,
-                        assoc,
-                    } => ExprKind::TypeRelative {
-                        self_ty,
-                        as_trait,
-                        assoc_name: assoc.name,
-                        assoc_args: assoc.args,
+                    PathResolvedValue::FnLit(fn_lit) => match fn_lit {
+                        PathResolvedFnLit::Item(def, params) => ExprKind::FnItemLit(def, params),
+                        PathResolvedFnLit::TypeRelative {
+                            self_ty,
+                            as_trait,
+                            assoc,
+                        } => ExprKind::TypeRelative {
+                            self_ty,
+                            as_trait,
+                            assoc_name: assoc.name,
+                            assoc_args: assoc.args,
+                        },
                     },
-                    ExprPathResolution::SelfLocal => {
-                        // TODO: Validate against signature
-
-                        ExprKind::SelfLocal
-                    }
-                    ExprPathResolution::Local(local) => ExprKind::Local(local),
-                    ExprPathResolution::ResolvedModule(_)
-                    | ExprPathResolution::ResolvedGeneric(_)
-                    | ExprPathResolution::ResolvedTrait(_, _) => {
-                        ExprKind::Error(unexpected_value().emit())
-                    }
+                    PathResolvedValue::AdtCtor(ctor) => match ctor.def.r(s).syntax {
+                        AdtCtorSyntax::Unit | AdtCtorSyntax::Tuple => {
+                            ExprKind::TupleOrUnitCtor(ctor)
+                        }
+                        AdtCtorSyntax::Named(_) => ExprKind::Error(
+                            Diag::span_err(
+                                path.span,
+                                format_args!("expected value, got {}", res.bare_what(s)),
+                            )
+                            .child(LeafDiag::new(
+                                Level::Note,
+                                format_args!(
+                                    "only unit and tuple {} can be turned into functions",
+                                    ctor.def.r(s).owner.bare_whats()
+                                ),
+                            ))
+                            .emit(),
+                        ),
+                    },
                 }
             }
             AstExprKind::AddrOf(muta, expr) => {

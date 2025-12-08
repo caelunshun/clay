@@ -6,7 +6,8 @@ use crate::{
     },
     parse::token::{Ident, Lifetime},
     semantic::syntax::{
-        FnDef, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy, Visibility,
+        FnDef, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy, SpannedTyOrReList,
+        Visibility,
     },
     symbol,
     utils::hash::FxHashMap,
@@ -48,7 +49,7 @@ impl AdtKind {
 #[derive(Debug, Clone)]
 pub struct AdtKindStruct {
     pub adt: Obj<AdtItem>,
-    pub ctor: LateInit<Obj<AdtCtorDef>>,
+    pub ctor: LateInit<Obj<AdtCtor>>,
 }
 
 #[derive(Debug, Clone)]
@@ -64,7 +65,7 @@ pub struct AdtEnumVariant {
     pub span: Span,
     pub idx: u32,
     pub ident: Ident,
-    pub ctor: LateInit<Obj<AdtCtorDef>>,
+    pub ctor: LateInit<Obj<AdtCtor>>,
 }
 
 // === Adt Constructor === //
@@ -75,11 +76,26 @@ pub enum AdtCtorOwner {
     EnumVariant(Obj<AdtEnumVariant>),
 }
 
+impl AdtCtorOwner {
+    pub fn bare_whats(self) -> Symbol {
+        match self {
+            AdtCtorOwner::Struct(..) => symbol!("`struct`s"),
+            AdtCtorOwner::EnumVariant(..) => symbol!("`enum` variants"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
-pub struct AdtCtorDef {
+pub struct AdtCtor {
     pub owner: AdtCtorOwner,
     pub syntax: AdtCtorSyntax,
     pub fields: Vec<AdtCtorField>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct AdtCtorInstance {
+    pub def: Obj<AdtCtor>,
+    pub params: SpannedTyOrReList,
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +103,23 @@ pub enum AdtCtorSyntax {
     Unit,
     Tuple,
     Named(FxHashMap<Symbol, u32>),
+}
+
+impl AdtCtorSyntax {
+    #[must_use]
+    pub fn is_unit(&self) -> bool {
+        matches!(self, AdtCtorSyntax::Unit)
+    }
+
+    #[must_use]
+    pub fn is_tuple(&self) -> bool {
+        matches!(self, AdtCtorSyntax::Tuple)
+    }
+
+    #[must_use]
+    pub fn is_named(&self) -> bool {
+        matches!(self, AdtCtorSyntax::Named(..))
+    }
 }
 
 #[derive(Debug, Clone)]

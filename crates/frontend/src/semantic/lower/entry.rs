@@ -22,9 +22,9 @@ use crate::{
             VisibilityResolver,
         },
         syntax::{
-            AdtCtorDef, AdtCtorField, AdtCtorOwner, AdtCtorSyntax, AdtEnumVariant, AdtItem,
+            AdtCtor, AdtCtorField, AdtCtorOwner, AdtCtorSyntax, AdtEnumVariant, AdtItem,
             AdtKind, AdtKindEnum, AdtKindStruct, AnyGeneric, Crate, EnumVariantItem, Expr, FnDef,
-            FnItem, FuncDefOwner, FuncLocal, GenericBinder, ImplItem, Item, ItemKind, ModuleItem,
+            FuncItem, FuncDefOwner, FuncLocal, GenericBinder, ImplItem, Item, ItemKind, ModuleItem,
             RegionGeneric, SpannedTy, TraitItem, TypeGeneric, Visibility,
         },
     },
@@ -644,7 +644,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         ast: &'ast AstStructKind,
         field_tys_to_extend: &mut Vec<(&'ast AstTy, Obj<LateInit<SpannedTy>>)>,
         allow_visibilities: bool,
-    ) -> Obj<AdtCtorDef> {
+    ) -> Obj<AdtCtor> {
         let s = &self.tcx.session;
 
         let resolve_vis = move |this: &mut Self, vis: &AstVisibility| -> Visibility {
@@ -661,7 +661,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
 
         match ast {
             AstStructKind::Unit => Obj::new(
-                AdtCtorDef {
+                AdtCtor {
                     owner,
                     syntax: AdtCtorSyntax::Unit,
                     fields: Vec::new(),
@@ -682,7 +682,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                     .collect::<Vec<_>>();
 
                 let kind = Obj::new(
-                    AdtCtorDef {
+                    AdtCtor {
                         owner,
                         syntax: AdtCtorSyntax::Tuple,
                         fields,
@@ -728,7 +728,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                     .collect::<Vec<_>>();
 
                 let kind = Obj::new(
-                    AdtCtorDef {
+                    AdtCtor {
                         owner,
                         syntax: AdtCtorSyntax::Named(by_name),
                         fields,
@@ -757,7 +757,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let s = &self.tcx.session;
 
         let target_def = Obj::new(
-            FnItem {
+            FuncItem {
                 item: self.target,
                 def: LateInit::uninit(),
             },

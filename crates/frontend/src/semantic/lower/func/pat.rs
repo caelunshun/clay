@@ -11,7 +11,7 @@ use crate::{
     semantic::{
         lower::{
             entry::IntraItemLowerCtxt,
-            func::path::{ExprPathResolution, ExprPathResult},
+            func::path::{ExprPathIdentOrResolution, PathResolvedPattern},
         },
         syntax::{FuncLocal, Mutability, Pat, PatKind},
     },
@@ -250,46 +250,13 @@ impl IntraItemLowerCtxt<'_> {
                 binding_mode,
                 path,
                 and_bind,
-            } => {
+            } => 'path: {
+                // TODO: Lower the remainder
+
                 let res = self.resolve_expr_path(path);
 
-                // TODO: lower the rest of the pattern
-
-                match res {
-                    ExprPathResult::Resolved(res) => match res {
-                        ExprPathResolution::ResolvedSelfTy => todo!(),
-                        ExprPathResolution::ResolvedAdt(obj, spanned) => todo!(),
-                        ExprPathResolution::ResolvedEnumVariant(obj, spanned) => todo!(),
-                        ExprPathResolution::Local(def) => {
-                            let name = Ident {
-                                span: path.span,
-                                text: def.r(s).name.text,
-                                raw: false,
-                            };
-
-                            match locals.resolve(name, binding_mode.local_muta.as_muta(), s) {
-                                Ok(local) => {
-                                    self.func_local_names.define_force_shadow(name.text, local);
-
-                                    PatKind::NewName(local)
-                                }
-                                Err(err) => PatKind::Error(err),
-                            }
-                        }
-                        ExprPathResolution::SelfLocal
-                        | ExprPathResolution::ResolvedModule(_)
-                        | ExprPathResolution::TypeRelative { .. }
-                        | ExprPathResolution::ResolvedFn(..)
-                        | ExprPathResolution::ResolvedTrait(..)
-                        | ExprPathResolution::ResolvedGeneric(..) => PatKind::Error(
-                            Diag::span_err(
-                                path.span,
-                                format_args!("expected pattern, got {}", res.bare_what(s)),
-                            )
-                            .emit(),
-                        ),
-                    },
-                    ExprPathResult::UnboundLocal(name) => {
+                match res.as_ident_or_res(path, s) {
+                    Ok(ExprPathIdentOrResolution::Ident(name)) => {
                         match locals.resolve(name, binding_mode.local_muta.as_muta(), s) {
                             Ok(local) => {
                                 self.func_local_names.define_force_shadow(name.text, local);
@@ -299,7 +266,22 @@ impl IntraItemLowerCtxt<'_> {
                             Err(err) => PatKind::Error(err),
                         }
                     }
-                    ExprPathResult::Fail(err) => PatKind::Error(err),
+                    Ok(ExprPathIdentOrResolution::Resolution(res)) => {
+                        let Some(kind) = res.as_pat(s) else {
+                            break 'path PatKind::Error(
+                                Diag::span_err(
+                                    path.span,
+                                    format_args!("expected pattern, got {}", res.bare_what(s)),
+                                )
+                                .emit(),
+                            );
+                        };
+
+                        match kind {
+                            PathResolvedPattern::UnitCtor(ctor) => PatKind::AdtUnit(ctor),
+                        }
+                    }
+                    Err(err) => PatKind::Error(err),
                 }
             }
             AstPatKind::PathAndBrace(ast_expr_path, ast_pat_fields, ast_pat_struct_rest) => todo!(),

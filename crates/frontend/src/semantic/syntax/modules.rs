@@ -7,7 +7,7 @@ use crate::{
     parse::token::Ident,
     semantic::{
         lower::modules::{ItemCategory, ParentRef},
-        syntax::{AdtEnumVariant, AdtItem, AdtKindEnum, FnItem, ImplItem, TraitItem},
+        syntax::{AdtEnumVariant, AdtItem, AdtKindEnum, FuncItem, ImplItem, TraitItem},
     },
     utils::hash::FxIndexMap,
 };
@@ -59,7 +59,7 @@ pub enum ItemKind {
     EnumVariant(Obj<EnumVariantItem>),
     Trait(Obj<TraitItem>),
     Impl(Obj<ImplItem>),
-    Func(Obj<FnItem>),
+    Func(Obj<FuncItem>),
 }
 
 impl ItemKind {
@@ -91,7 +91,7 @@ impl ItemKind {
         }
     }
 
-    pub fn as_func(self) -> Option<Obj<FnItem>> {
+    pub fn as_func(self) -> Option<Obj<FuncItem>> {
         match self {
             ItemKind::Func(v) => Some(v),
             _ => None,

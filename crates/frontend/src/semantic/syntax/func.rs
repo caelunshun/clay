@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        ErrorGuaranteed, Session,
+        ErrorGuaranteed,
         arena::{LateInit, Obj},
         syntax::Span,
     },
@@ -9,15 +9,15 @@ use crate::{
         token::Ident,
     },
     semantic::syntax::{
-        AdtCtorSyntax, AdtItem, AdtKindStruct, EnumVariantItem, GenericBinder, ImplItem, Item,
-        Mutability, SpannedTraitInstance, SpannedTy, SpannedTyOrRe, SpannedTyOrReList,
+        AdtCtorInstance, AdtItem, GenericBinder, ImplItem, Item, Mutability, SpannedTraitInstance,
+        SpannedTy, SpannedTyOrRe, SpannedTyOrReList,
     },
 };
 
 // === FuncItem === //
 
 #[derive(Debug, Clone)]
-pub struct FnItem {
+pub struct FuncItem {
     pub item: Obj<Item>,
     pub def: LateInit<Obj<FnDef>>,
 }
@@ -36,7 +36,7 @@ pub struct FnDef {
 
 #[derive(Debug, Copy, Clone)]
 pub enum FuncDefOwner {
-    Func(Obj<FnItem>),
+    Func(Obj<FuncItem>),
     Method(Obj<ImplItem>, u32),
 }
 
@@ -83,6 +83,9 @@ pub enum PatKind {
 
     /// Match a variety of options.
     Or(Obj<[Obj<Pat>]>),
+
+    /// Match a unit unit struct or enum variant.
+    AdtUnit(AdtCtorInstance),
 
     /// Bind to a target place expression. Only available in destructuring patterns.
     PlaceExpr(Obj<Expr>),
@@ -134,9 +137,8 @@ pub enum ExprKind {
     Binary(AstBinOpSpanned, Obj<Expr>, Obj<Expr>),
     Unary(AstUnOpKind, Obj<Expr>),
     Literal(AstLit),
-    StructCtorLit(Obj<AdtKindStruct>, SpannedTyOrReList),
-    EnumCtorLit(Obj<EnumVariantItem>, SpannedTyOrReList),
-    FuncLit(Obj<FnItem>, SpannedTyOrReList),
+    TupleOrUnitCtor(AdtCtorInstance),
+    FnItemLit(Obj<FuncItem>, SpannedTyOrReList),
     TypeRelative {
         self_ty: SpannedTy,
         as_trait: Option<SpannedTraitInstance>,
@@ -170,7 +172,7 @@ pub enum ExprKind {
     },
     Index(Obj<Expr>, Obj<Expr>),
     Range(Option<Obj<Expr>>, Option<Obj<Expr>>, AstRangeLimits),
-    SelfLocal,
+    LocalSelf,
     Local(Obj<FuncLocal>),
     AddrOf(Mutability, Obj<Expr>),
     Break {
@@ -191,23 +193,4 @@ pub struct MatchArm {
     pub pat: Obj<Pat>,
     pub guard: Option<Obj<Expr>>,
     pub body: Obj<Expr>,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum AdtCtorKind {
-    Enum(Obj<EnumVariantItem>, SpannedTyOrRe),
-    Struct(Obj<AdtKindStruct>, SpannedTyOrRe),
-}
-
-impl AdtCtorKind {
-    pub fn syntax(self, s: &Session) -> AdtCtorSyntax {
-        match self {
-            AdtCtorKind::Enum(adt, _) => {
-                todo!()
-            }
-            AdtCtorKind::Struct(adt, _) => {
-                todo!()
-            }
-        }
-    }
 }

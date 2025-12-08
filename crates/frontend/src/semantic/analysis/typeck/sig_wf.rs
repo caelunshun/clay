@@ -12,7 +12,7 @@ use crate::{
             TyVisitorUnspanned, TyVisitorWalk,
         },
         syntax::{
-            AdtItem, AnyGeneric, Crate, FnItem, ImplItem, ItemKind, Re, RegionGeneric,
+            AdtItem, AnyGeneric, Crate, FuncItem, ImplItem, ItemKind, Re, RegionGeneric,
             SpannedAdtInstance, SpannedTraitClauseList, SpannedTraitInstance,
             SpannedTraitParamView, SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList,
             SpannedTyOrReView, TraitClause, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
@@ -255,7 +255,7 @@ impl SignatureWfVisitor<'_> {
         ControlFlow::Continue(())
     }
 
-    pub fn visit_fn_item(&mut self, def: Obj<FnItem>) -> ControlFlow<Infallible> {
+    pub fn visit_fn_item(&mut self, def: Obj<FuncItem>) -> ControlFlow<Infallible> {
         // TODO
 
         ControlFlow::Continue(())
