@@ -13,7 +13,7 @@ use crate::{
     semantic::{
         lower::{entry::IntraItemLowerCtxt, func::path::ExprPathResolution},
         syntax::{
-            AdtKind, AdtStructFieldSyntax, Block, Expr, ExprKind, LetStmt, MatchArm, Pat, PatKind,
+            AdtCtorSyntax, AdtKind, Block, Expr, ExprKind, LetStmt, MatchArm, Pat, PatKind,
             SpannedTyOrReList, Stmt,
         },
     },
@@ -256,11 +256,11 @@ impl IntraItemLowerCtxt<'_> {
                 };
 
                 let validate_syntax =
-                    |syntax: &AdtStructFieldSyntax, whats: &str| -> Option<ErrorGuaranteed> {
+                    |syntax: &AdtCtorSyntax, whats: &str| -> Option<ErrorGuaranteed> {
                         match syntax {
-                            AdtStructFieldSyntax::Unit => None,
-                            AdtStructFieldSyntax::Tuple => None,
-                            AdtStructFieldSyntax::Named(_) => Some(
+                            AdtCtorSyntax::Unit => None,
+                            AdtCtorSyntax::Tuple => None,
+                            AdtCtorSyntax::Named(_) => Some(
                                 Diag::span_err(
                                     path.span,
                                     format_args!("expected value, got {}", res.bare_what(s)),
@@ -281,21 +281,23 @@ impl IntraItemLowerCtxt<'_> {
                         // TODO
                         ExprKind::Error(crate::base::ErrorGuaranteed::new_unchecked())
                     }
-                    ExprPathResolution::ResolvedAdt(def, args) => match def.r(s).kind {
-                        AdtKind::Enum(_) => ExprKind::Error(unexpected_value().emit()),
+                    ExprPathResolution::ResolvedAdt(def, args) => match *def.r(s).kind {
                         AdtKind::Struct(def) => {
-                            if let Some(err) = validate_syntax(&def.r(s).syntax, "`struct`s") {
+                            if let Some(err) =
+                                validate_syntax(&def.r(s).ctor.r(s).syntax, "`struct`s")
+                            {
                                 break 'path ExprKind::Error(err);
                             }
 
                             ExprKind::StructCtorLit(def, args)
                         }
+                        AdtKind::Enum(_) => ExprKind::Error(unexpected_value().emit()),
                     },
                     ExprPathResolution::ResolvedEnumVariant(def, args) => {
-                        let descriptor = def.r(s).descriptor(s);
+                        let variant = def.r(s).adt_variant(s);
 
                         if let Some(err) =
-                            validate_syntax(&descriptor.kind.r(s).syntax, "`enum` variants")
+                            validate_syntax(&variant.r(s).ctor.r(s).syntax, "`enum` variants")
                         {
                             break 'path ExprKind::Error(err);
                         }

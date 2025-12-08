@@ -10,7 +10,7 @@ use crate::{
             UnboundVarHandlingMode,
         },
         syntax::{
-            AnyGeneric, Crate, FnDef, GenericBinder, GenericSolveStep, ImplDef,
+            AnyGeneric, Crate, FnDef, GenericBinder, GenericSolveStep, ImplItem,
             ListOfTraitClauseList, Re, RelationMode, SolidTyShape, SolidTyShapeKind, SpannedRe,
             SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParamView,
             SpannedTraitSpec, SpannedTy, SpannedTyOrReView, SpannedTyView, TraitClause, TraitParam,
@@ -61,14 +61,14 @@ pub struct TyAndTraitRelateError {
 
 #[derive(Debug, Clone)]
 pub struct TyAndImplResolution {
-    pub impl_def: Obj<ImplDef>,
+    pub impl_def: Obj<ImplItem>,
     pub impl_generics: TyOrReList,
 }
 
 #[derive(Debug, Clone)]
 pub struct TyAndImplRelateError {
     pub lhs: SpannedTy,
-    pub rhs: Obj<ImplDef>,
+    pub rhs: Obj<ImplItem>,
     pub bad_target: Option<Box<TyAndTyRelateError>>,
     pub bad_trait_args: Vec<(u32, TyAndTraitArgRelateError)>,
     pub bad_trait_clauses: Vec<TyAndImplGenericClauseError>,
@@ -106,7 +106,7 @@ pub struct RelateClauseAndTraitError;
 // === Order Solving === //
 
 impl TyCtxt {
-    pub fn determine_impl_generic_solve_order(&self, def: Obj<ImplDef>) {
+    pub fn determine_impl_generic_solve_order(&self, def: Obj<ImplItem>) {
         let s = &self.session;
 
         define_index_type! {
@@ -326,7 +326,7 @@ pub struct CoherenceMap {
 
 #[derive(Debug, Copy, Clone)]
 enum CoherenceMapEntry {
-    TraitImpl(Obj<ImplDef>),
+    TraitImpl(Obj<ImplItem>),
     InherentMethod(Obj<FnDef>),
 }
 
@@ -385,7 +385,7 @@ struct ImplFreshInfer {
 }
 
 impl<'tcx> InferCx<'tcx> {
-    fn instantiate_fresh_impl_vars(&mut self, candidate: Obj<ImplDef>) -> ImplFreshInfer {
+    fn instantiate_fresh_impl_vars(&mut self, candidate: Obj<ImplItem>) -> ImplFreshInfer {
         let tcx = self.tcx();
         let s = self.session();
 
@@ -596,7 +596,7 @@ impl<'tcx> InferCx<'tcx> {
         &'a self,
         lhs: Ty,
         rhs: TraitSpec,
-    ) -> impl Iterator<Item = Obj<ImplDef>> + 'tcx {
+    ) -> impl Iterator<Item = Obj<ImplItem>> + 'tcx {
         let tcx = self.tcx();
         let s = self.session();
 
@@ -633,7 +633,7 @@ impl<'tcx> InferCx<'tcx> {
     fn relate_ty_and_impl_no_fork(
         &mut self,
         lhs: SpannedTy,
-        rhs: Obj<ImplDef>,
+        rhs: Obj<ImplItem>,
         spec: SpannedTraitSpec,
     ) -> Result<TyAndImplResolution, Box<TyAndImplRelateError>> {
         let s = self.session();

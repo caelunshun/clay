@@ -6,7 +6,7 @@ use crate::{
     semantic::{
         analysis::TyCtxt,
         syntax::{
-            AdtInstance, SolidTyShape, SolidTyShapeKind, TraitDef, Ty, TyKind, TyOrRe, TyShape,
+            AdtInstance, SolidTyShape, SolidTyShapeKind, TraitItem, Ty, TyKind, TyOrRe, TyShape,
         },
     },
     utils::{
@@ -21,7 +21,7 @@ use std::slice;
 // === Erasure === //
 
 impl TyCtxt {
-    pub fn shape_of_trait_def(&self, def: Obj<TraitDef>, args: &[TyOrRe], target: Ty) -> TyShape {
+    pub fn shape_of_trait_def(&self, def: Obj<TraitItem>, args: &[TyOrRe], target: Ty) -> TyShape {
         let s = &self.session;
 
         debug_assert_eq!(args.len(), def.r(s).regular_generic_count as usize);

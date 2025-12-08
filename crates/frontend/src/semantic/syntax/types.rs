@@ -14,19 +14,19 @@ use crate::{
 use derive_where::derive_where;
 use std::fmt;
 
-// === AdtDef === //
+// === Adt Items === //
 
 #[derive(Debug, Clone)]
-pub struct AdtDef {
+pub struct AdtItem {
     pub item: Obj<Item>,
     pub generics: Obj<GenericBinder>,
-    pub kind: AdtKind,
+    pub kind: LateInit<AdtKind>,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum AdtKind {
-    Enum(Obj<AdtKindEnum>),
     Struct(Obj<AdtKindStruct>),
+    Enum(Obj<AdtKindEnum>),
 }
 
 impl AdtKind {
@@ -46,34 +46,51 @@ impl AdtKind {
 }
 
 #[derive(Debug, Clone)]
+pub struct AdtKindStruct {
+    pub adt: Obj<AdtItem>,
+    pub ctor: LateInit<Obj<AdtCtorDef>>,
+}
+
+#[derive(Debug, Clone)]
 pub struct AdtKindEnum {
-    pub variants: Vec<AdtEnumVariant>,
-    pub by_name: FxHashMap<Symbol, u32>,
+    pub adt: Obj<AdtItem>,
+    pub variants: LateInit<Vec<Obj<AdtEnumVariant>>>,
+    pub by_name: LateInit<FxHashMap<Symbol, u32>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct AdtEnumVariant {
-    pub idx: u32,
+    pub owner: Obj<AdtKindEnum>,
     pub span: Span,
+    pub idx: u32,
     pub ident: Ident,
-    pub kind: Obj<AdtKindStruct>,
+    pub ctor: LateInit<Obj<AdtCtorDef>>,
+}
+
+// === Adt Constructor === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum AdtCtorOwner {
+    Struct(Obj<AdtKindStruct>),
+    EnumVariant(Obj<AdtEnumVariant>),
 }
 
 #[derive(Debug, Clone)]
-pub struct AdtKindStruct {
-    pub syntax: AdtStructFieldSyntax,
-    pub fields: Vec<AdtStructField>,
+pub struct AdtCtorDef {
+    pub owner: AdtCtorOwner,
+    pub syntax: AdtCtorSyntax,
+    pub fields: Vec<AdtCtorField>,
 }
 
 #[derive(Debug, Clone)]
-pub enum AdtStructFieldSyntax {
+pub enum AdtCtorSyntax {
     Unit,
     Tuple,
     Named(FxHashMap<Symbol, u32>),
 }
 
 #[derive(Debug, Clone)]
-pub struct AdtStructField {
+pub struct AdtCtorField {
     pub span: Span,
     pub idx: u32,
     pub vis: Visibility,
@@ -83,14 +100,14 @@ pub struct AdtStructField {
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct AdtInstance {
-    pub def: Obj<AdtDef>,
+    pub def: Obj<AdtItem>,
     pub params: TyOrReList,
 }
 
 // === Traits === //
 
 #[derive(Debug, Clone)]
-pub struct TraitDef {
+pub struct TraitItem {
     /// The item defining this trait.
     pub item: Obj<Item>,
 
@@ -113,7 +130,7 @@ pub struct TraitDef {
 
 #[derive(Debug, Clone)]
 pub struct TraitMethod {
-    pub owner: Obj<TraitDef>,
+    pub owner: Obj<TraitItem>,
     pub func: Obj<FnDef>,
 }
 
@@ -140,7 +157,7 @@ pub enum TraitParam {
 // === Impls === //
 
 #[derive(Debug, Clone)]
-pub struct ImplDef {
+pub struct ImplItem {
     pub item: Obj<Item>,
     pub generics: Obj<GenericBinder>,
     pub trait_: Option<SpannedTraitInstance>,
@@ -191,7 +208,7 @@ pub struct GenericSolveStep {
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct TraitSpec {
-    pub def: Obj<TraitDef>,
+    pub def: Obj<TraitItem>,
     pub params: TraitParamList,
 }
 
@@ -208,7 +225,7 @@ impl fmt::Debug for TraitSpec {
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct TraitInstance {
-    pub def: Obj<TraitDef>,
+    pub def: Obj<TraitItem>,
     pub params: TyOrReList,
 }
 
@@ -485,7 +502,7 @@ pub enum SolidTyShapeKind {
     /// - The remaining `trait_def.regular_generic_count` child types (minus the number of region
     ///   generics) represent the trait arguments.
     ///
-    TraitImpl(Obj<TraitDef>),
+    TraitImpl(Obj<TraitItem>),
 
     /// A top-level coherence type indicating the implementation of a specific method in an inherent
     /// `impl` block. This type has exactly one child type indicating the implementation target.
@@ -493,7 +510,7 @@ pub enum SolidTyShapeKind {
 
     Simple(SimpleTyKind),
     Re(Mutability),
-    Adt(Obj<AdtDef>),
+    Adt(Obj<AdtItem>),
     Trait,
     Tuple(u32),
     FnDef,

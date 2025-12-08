@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        ErrorGuaranteed,
+        ErrorGuaranteed, Session,
         arena::{LateInit, Obj},
         syntax::Span,
     },
@@ -9,8 +9,8 @@ use crate::{
         token::Ident,
     },
     semantic::syntax::{
-        AdtDef, AdtKindStruct, EnumVariantItem, GenericBinder, ImplDef, Item, Mutability,
-        SpannedTraitInstance, SpannedTy, SpannedTyOrRe, SpannedTyOrReList,
+        AdtCtorSyntax, AdtItem, AdtKindStruct, EnumVariantItem, GenericBinder, ImplItem, Item,
+        Mutability, SpannedTraitInstance, SpannedTy, SpannedTyOrRe, SpannedTyOrReList,
     },
 };
 
@@ -37,7 +37,7 @@ pub struct FnDef {
 #[derive(Debug, Copy, Clone)]
 pub enum FuncDefOwner {
     Func(Obj<FnItem>),
-    Method(Obj<ImplDef>, u32),
+    Method(Obj<ImplItem>, u32),
 }
 
 #[derive(Debug, Clone)]
@@ -181,7 +181,7 @@ pub enum ExprKind {
         label: Option<Obj<Expr>>,
     },
     Return(Option<Obj<Expr>>),
-    Struct(Obj<AdtDef>), // TODO
+    Struct(Obj<AdtItem>), // TODO
     Error(ErrorGuaranteed),
 }
 
@@ -191,4 +191,23 @@ pub struct MatchArm {
     pub pat: Obj<Pat>,
     pub guard: Option<Obj<Expr>>,
     pub body: Obj<Expr>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum AdtCtorKind {
+    Enum(Obj<EnumVariantItem>, SpannedTyOrRe),
+    Struct(Obj<AdtKindStruct>, SpannedTyOrRe),
+}
+
+impl AdtCtorKind {
+    pub fn syntax(self, s: &Session) -> AdtCtorSyntax {
+        match self {
+            AdtCtorKind::Enum(adt, _) => {
+                todo!()
+            }
+            AdtCtorKind::Struct(adt, _) => {
+                todo!()
+            }
+        }
+    }
 }

@@ -18,9 +18,9 @@ use crate::{
             modules::{FrozenModuleResolver, ParentResolver, PathResolver, StepResolveError},
         },
         syntax::{
-            AdtDef, EnumVariantItem, FnItem, FuncLocal, Item, ItemKind, SpannedAdtInstanceView,
+            AdtItem, EnumVariantItem, FnItem, FuncLocal, Item, ItemKind, SpannedAdtInstanceView,
             SpannedTraitInstance, SpannedTraitInstanceView, SpannedTy, SpannedTyOrReList,
-            SpannedTyView, TraitDef, TypeGeneric,
+            SpannedTyView, TraitItem, TypeGeneric,
         },
     },
 };
@@ -55,7 +55,7 @@ pub enum ExprPathResolution {
     ResolvedModule(Obj<Item>),
 
     /// A reference to some resolved ADT with some optional generic parameters.
-    ResolvedAdt(Obj<AdtDef>, SpannedTyOrReList),
+    ResolvedAdt(Obj<AdtItem>, SpannedTyOrReList),
 
     /// A reference to some resolved enum variant with some optional generic parameters.
     ResolvedEnumVariant(Obj<EnumVariantItem>, SpannedTyOrReList),
@@ -64,7 +64,7 @@ pub enum ExprPathResolution {
     ResolvedFn(Obj<FnItem>, SpannedTyOrReList),
 
     /// A reference to a trait.
-    ResolvedTrait(Obj<TraitDef>, SpannedTyOrReList),
+    ResolvedTrait(Obj<TraitItem>, SpannedTyOrReList),
 
     /// A reference to a generic type.
     ResolvedGeneric(Obj<TypeGeneric>),
@@ -346,7 +346,7 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn resolve_bare_expr_path_from_adt(
         &mut self,
-        adt: Obj<AdtDef>,
+        adt: Obj<AdtItem>,
         adt_segment: &AstParamedPathSegment,
         additional_segments: &[AstParamedPathSegment],
     ) -> ExprPathResult {
@@ -440,7 +440,7 @@ impl IntraItemLowerCtxt<'_> {
             StepResolveError::NotFound.emit(&resolver, variant.r(s).item, further.part);
         }
 
-        let adt = variant.r(s).owner_adt(s);
+        let adt = variant.r(s).adt(s);
 
         let second_generics = variant_segment.args.as_ref().map(|args| {
             self.lower_generics_of_entirely_positional(
@@ -476,7 +476,7 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn resolve_bare_expr_path_from_trait(
         &mut self,
-        def: Obj<TraitDef>,
+        def: Obj<TraitItem>,
         def_segment: &AstParamedPathSegment,
         segments: &[AstParamedPathSegment],
     ) -> ExprPathResult {

@@ -21,7 +21,7 @@ use crate::{
             AnyGeneric, GenericBinder, Item, Re, RegionGeneric, SpannedTraitClauseList,
             SpannedTraitInstance, SpannedTraitInstanceView, SpannedTraitParam,
             SpannedTraitParamView, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView,
-            SpannedTyView, TraitDef, TypeGeneric,
+            SpannedTyView, TraitItem, TypeGeneric,
         },
     },
     utils::{
@@ -191,7 +191,7 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn lower_generics_of_trait_instance_in_fn_body(
         &mut self,
-        def: Obj<TraitDef>,
+        def: Obj<TraitItem>,
         segment_span: Span,
         generics: Option<&AstGenericParamList>,
     ) -> SpannedTyOrReList {
@@ -562,7 +562,7 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn construct_trait_spec_from_positionals(
         &mut self,
-        def: Obj<TraitDef>,
+        def: Obj<TraitItem>,
         params: SpannedTyOrReList,
         outer_span: Span,
     ) -> Vec<SpannedTraitParam> {
@@ -590,7 +590,7 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn construct_trait_instance_from_positionals(
         &mut self,
-        def: Obj<TraitDef>,
+        def: Obj<TraitItem>,
         params: SpannedTyOrReList,
         outer_span: Span,
     ) -> SpannedTyOrReList {
@@ -616,7 +616,7 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn lower_associated_type_generic_params(
         &mut self,
-        def: Obj<TraitDef>,
+        def: Obj<TraitItem>,
         params: &mut [SpannedTraitParam],
         associated: &[LoweredAssocConstraint],
     ) {

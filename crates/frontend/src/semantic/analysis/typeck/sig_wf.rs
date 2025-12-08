@@ -12,10 +12,10 @@ use crate::{
             TyVisitorUnspanned, TyVisitorWalk,
         },
         syntax::{
-            AdtDef, AnyGeneric, Crate, FnItem, ImplDef, ItemKind, Re, RegionGeneric,
+            AdtItem, AnyGeneric, Crate, FnItem, ImplItem, ItemKind, Re, RegionGeneric,
             SpannedAdtInstance, SpannedTraitClauseList, SpannedTraitInstance,
             SpannedTraitParamView, SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList,
-            SpannedTyOrReView, TraitClause, TraitDef, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            SpannedTyOrReView, TraitClause, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
             TypeGeneric,
         },
     },
@@ -68,13 +68,13 @@ impl SignatureWfVisitor<'_> {
         ControlFlow::Continue(())
     }
 
-    pub fn visit_adt(&mut self, def: Obj<AdtDef>) -> ControlFlow<Infallible> {
+    pub fn visit_adt(&mut self, def: Obj<AdtItem>) -> ControlFlow<Infallible> {
         // TODO
 
         ControlFlow::Continue(())
     }
 
-    pub fn visit_trait(&mut self, def: Obj<TraitDef>) -> ControlFlow<Infallible> {
+    pub fn visit_trait(&mut self, def: Obj<TraitItem>) -> ControlFlow<Infallible> {
         let tcx = self.tcx();
         let s = self.session();
 
@@ -163,7 +163,7 @@ impl SignatureWfVisitor<'_> {
 
         let old_self_ty = self.self_ty.replace(new_self_ty);
         {
-            let TraitDef {
+            let TraitItem {
                 item: _,
                 generics: _, // (visited using `new_self_ty_params`)
                 inherits,
@@ -208,13 +208,13 @@ impl SignatureWfVisitor<'_> {
         ControlFlow::Continue(())
     }
 
-    pub fn visit_impl(&mut self, item: Obj<ImplDef>) -> ControlFlow<Infallible> {
+    pub fn visit_impl(&mut self, item: Obj<ImplItem>) -> ControlFlow<Infallible> {
         let s = self.session();
         let tcx = self.tcx();
 
         let old_self_ty = self.self_ty.replace(item.r(s).target);
         {
-            let ImplDef {
+            let ImplItem {
                 item: _,
                 generics,
                 trait_,
@@ -317,7 +317,7 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
 }
 
 impl SignatureWfVisitor<'_> {
-    fn check_trait_helper(&mut self, def: Obj<TraitDef>, params: SpannedTyOrReList) {
+    fn check_trait_helper(&mut self, def: Obj<TraitItem>, params: SpannedTyOrReList) {
         let tcx = self.tcx();
         let s = self.session();
 

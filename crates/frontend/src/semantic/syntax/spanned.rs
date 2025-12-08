@@ -8,8 +8,8 @@ use crate::{
     semantic::{
         analysis::TyCtxt,
         syntax::{
-            AdtDef, AdtInstance, FnDef, InferTyVar, Mutability, Re, SimpleTyKind, TraitClause,
-            TraitClauseList, TraitDef, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty,
+            AdtInstance, AdtItem, FnDef, InferTyVar, Mutability, Re, SimpleTyKind, TraitClause,
+            TraitClauseList, TraitInstance, TraitItem, TraitParam, TraitParamList, TraitSpec, Ty,
             TyKind, TyList, TyOrRe, TyOrReList, TypeGeneric,
         },
     },
@@ -274,7 +274,7 @@ pub type SpannedAdtInstance = Spanned<AdtInstance>;
 
 #[derive(Debug, Copy, Clone)]
 pub struct SpannedAdtInstanceView {
-    pub def: Obj<AdtDef>,
+    pub def: Obj<AdtItem>,
     pub params: SpannedTyOrReList,
 }
 
@@ -309,7 +309,7 @@ pub type SpannedTraitSpec = Spanned<TraitSpec>;
 
 #[derive(Debug, Copy, Clone)]
 pub struct SpannedTraitSpecView {
-    pub def: Obj<TraitDef>,
+    pub def: Obj<TraitItem>,
     pub params: SpannedTraitParamList,
 }
 
@@ -344,7 +344,7 @@ pub type SpannedTraitInstance = Spanned<TraitInstance>;
 
 #[derive(Debug, Copy, Clone)]
 pub struct SpannedTraitInstanceView {
-    pub def: Obj<TraitDef>,
+    pub def: Obj<TraitItem>,
     pub params: SpannedTyOrReList,
 }
 

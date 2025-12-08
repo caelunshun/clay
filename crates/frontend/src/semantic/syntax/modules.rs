@@ -7,7 +7,7 @@ use crate::{
     parse::token::Ident,
     semantic::{
         lower::modules::{ItemCategory, ParentRef},
-        syntax::{AdtDef, AdtEnumVariant, AdtKindEnum, FnItem, ImplDef, TraitDef},
+        syntax::{AdtEnumVariant, AdtItem, AdtKindEnum, FnItem, ImplItem, TraitItem},
     },
     utils::hash::FxIndexMap,
 };
@@ -54,16 +54,16 @@ pub struct DirectUse {
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum ItemKind {
-    Module(Obj<Module>),
-    Adt(Obj<AdtDef>),
+    Module(Obj<ModuleItem>),
+    Adt(Obj<AdtItem>),
     EnumVariant(Obj<EnumVariantItem>),
-    Trait(Obj<TraitDef>),
-    Impl(Obj<ImplDef>),
+    Trait(Obj<TraitItem>),
+    Impl(Obj<ImplItem>),
     Func(Obj<FnItem>),
 }
 
 impl ItemKind {
-    pub fn as_adt(self) -> Option<Obj<AdtDef>> {
+    pub fn as_adt(self) -> Option<Obj<AdtItem>> {
         match self {
             ItemKind::Adt(v) => Some(v),
             _ => None,
@@ -77,14 +77,14 @@ impl ItemKind {
         }
     }
 
-    pub fn as_trait(self) -> Option<Obj<TraitDef>> {
+    pub fn as_trait(self) -> Option<Obj<TraitItem>> {
         match self {
             ItemKind::Trait(v) => Some(v),
             _ => None,
         }
     }
 
-    pub fn as_impl(self) -> Option<Obj<ImplDef>> {
+    pub fn as_impl(self) -> Option<Obj<ImplItem>> {
         match self {
             ItemKind::Impl(v) => Some(v),
             _ => None,
@@ -107,20 +107,20 @@ pub struct EnumVariantItem {
 }
 
 impl EnumVariantItem {
-    pub fn owner_adt(&self, s: &Session) -> Obj<AdtDef> {
+    pub fn adt(&self, s: &Session) -> Obj<AdtItem> {
         self.owner.r(s).kind.as_adt().unwrap()
     }
 
-    pub fn owner_adt_enum(&self, s: &Session) -> Obj<AdtKindEnum> {
-        self.owner_adt(s).r(s).kind.as_enum().unwrap()
+    pub fn adt_as_enum(&self, s: &Session) -> Obj<AdtKindEnum> {
+        self.adt(s).r(s).kind.as_enum().unwrap()
     }
 
-    pub fn descriptor<'s>(&self, s: &'s Session) -> &'s AdtEnumVariant {
-        &self.owner_adt_enum(s).r(s).variants[self.idx as usize]
+    pub fn adt_variant(&self, s: &Session) -> Obj<AdtEnumVariant> {
+        self.adt_as_enum(s).r(s).variants[self.idx as usize]
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Module {
+pub struct ModuleItem {
     pub item: Obj<Item>,
 }

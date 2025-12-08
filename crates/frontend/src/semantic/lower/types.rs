@@ -18,10 +18,10 @@ use crate::{
             modules::{FrozenModuleResolver, ParentResolver, PathResolver as _},
         },
         syntax::{
-            AdtDef, Item, ItemKind, Re, SpannedAdtInstanceView, SpannedRe, SpannedTraitClause,
+            AdtItem, Item, ItemKind, Re, SpannedAdtInstanceView, SpannedRe, SpannedTraitClause,
             SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParamList,
             SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe,
-            SpannedTyOrReView, SpannedTyView, TraitDef, TypeGeneric,
+            SpannedTyOrReView, SpannedTyView, TraitItem, TypeGeneric,
         },
     },
 };
@@ -31,8 +31,8 @@ use crate::{
 #[derive(Debug, Copy, Clone)]
 pub enum TyPathResolution {
     Generic(Obj<TypeGeneric>),
-    Adt(Obj<AdtDef>),
-    Trait(Obj<TraitDef>),
+    Adt(Obj<AdtItem>),
+    Trait(Obj<TraitItem>),
     Other(Obj<Item>),
 }
 
@@ -71,7 +71,7 @@ impl IntraItemLowerCtxt<'_> {
     pub fn resolve_ty_item_path_as_trait(
         &self,
         path: &AstBarePath,
-    ) -> Result<Obj<TraitDef>, ErrorGuaranteed> {
+    ) -> Result<Obj<TraitItem>, ErrorGuaranteed> {
         let s = &self.tcx.session;
         let resolver = FrozenModuleResolver(s);
 

@@ -22,10 +22,10 @@ use crate::{
             VisibilityResolver,
         },
         syntax::{
-            AdtDef, AdtEnumVariant, AdtKind, AdtKindEnum, AdtKindStruct, AdtStructField,
-            AdtStructFieldSyntax, AnyGeneric, Crate, EnumVariantItem, Expr, FnDef, FnItem,
-            FuncDefOwner, FuncLocal, GenericBinder, ImplDef, Item, ItemKind, Module, RegionGeneric,
-            SpannedTy, TraitDef, TypeGeneric, Visibility,
+            AdtCtorDef, AdtCtorField, AdtCtorOwner, AdtCtorSyntax, AdtEnumVariant, AdtItem,
+            AdtKind, AdtKindEnum, AdtKindStruct, AnyGeneric, Crate, EnumVariantItem, Expr, FnDef,
+            FnItem, FuncDefOwner, FuncLocal, GenericBinder, ImplItem, Item, ItemKind, ModuleItem,
+            RegionGeneric, SpannedTy, TraitItem, TypeGeneric, Visibility,
         },
     },
     symbol,
@@ -399,7 +399,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
 
         LateInit::init(
             &self.target.r(s).kind,
-            ItemKind::Module(Obj::new(Module { item: self.target }, s)),
+            ItemKind::Module(Obj::new(ModuleItem { item: self.target }, s)),
         );
     }
 
@@ -450,7 +450,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         }
 
         let trait_target = Obj::new(
-            TraitDef {
+            TraitItem {
                 item: self.target,
                 generics: self.tcx.seal_generic_binder(binder),
                 inherits: LateInit::uninit(),
@@ -479,25 +479,38 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
             self.lower_generic_defs(&mut generics, ast, &mut generic_clause_lists);
         }
 
-        let kind = self.lower_struct_kind(
+        let target_adt = Obj::new(
+            AdtItem {
+                item: self.target,
+                generics: self.tcx.seal_generic_binder(generics),
+                kind: LateInit::uninit(),
+            },
+            s,
+        );
+
+        LateInit::init(&self.target.r(s).kind, ItemKind::Adt(target_adt));
+
+        let target_struct = Obj::new(
+            AdtKindStruct {
+                adt: target_adt,
+                ctor: LateInit::uninit(),
+            },
+            s,
+        );
+
+        LateInit::init(&target_adt.r(s).kind, AdtKind::Struct(target_struct));
+
+        let ctor = self.lower_struct_ctor(
+            AdtCtorOwner::Struct(target_struct),
             &ast.kind,
             &mut field_tys_to_extend,
             /* allow_visibilities */ true,
         );
 
-        let target_def = Obj::new(
-            AdtDef {
-                item: self.target,
-                generics: self.tcx.seal_generic_binder(generics),
-                kind: AdtKind::Struct(kind),
-            },
-            s,
-        );
-
-        LateInit::init(&self.target.r(s).kind, ItemKind::Adt(target_def));
+        LateInit::init(&target_struct.r(s).ctor, ctor);
 
         self.queue_task(move |cx| {
-            cx.lower_adt(target_def, generic_clause_lists, field_tys_to_extend);
+            cx.lower_adt(target_adt, generic_clause_lists, field_tys_to_extend);
         });
     }
 
@@ -512,12 +525,34 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
             self.lower_generic_defs(&mut generics, ast, &mut generic_clause_lists);
         }
 
+        let target_adt = Obj::new(
+            AdtItem {
+                item: self.target,
+                generics: self.tcx.seal_generic_binder(generics),
+                kind: LateInit::uninit(),
+            },
+            s,
+        );
+
+        LateInit::init(&self.target.r(s).kind, ItemKind::Adt(target_adt));
+
+        let target_enum = Obj::new(
+            AdtKindEnum {
+                adt: target_adt,
+                variants: LateInit::uninit(),
+                by_name: LateInit::uninit(),
+            },
+            s,
+        );
+
+        LateInit::init(&target_adt.r(s).kind, AdtKind::Enum(target_enum));
+
         let mut by_name = FxHashMap::default();
         let variants = ast
             .variants
             .iter()
             .enumerate()
-            .map(|(idx, variant)| {
+            .map(|(idx, variant_ast)| {
                 // Enums already have their variant names checked by the module resolution engine.
                 //
                 // Rust does this too:
@@ -553,34 +588,37 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                 // 8 |     foo: (),
                 //   |     ^^^^^^^ field already declared
                 // ```
-                by_name.entry(variant.name.text).or_insert(idx as u32);
+                by_name.entry(variant_ast.name.text).or_insert(idx as u32);
 
-                AdtEnumVariant {
-                    idx: idx as u32,
-                    span: variant.span,
-                    ident: variant.name,
-                    kind: self.lower_struct_kind(
-                        &variant.kind,
-                        &mut field_tys_to_extend,
-                        /* allow_visibilities */ false,
-                    ),
-                }
+                let variant = Obj::new(
+                    AdtEnumVariant {
+                        owner: target_enum,
+                        idx: idx as u32,
+                        span: variant_ast.span,
+                        ident: variant_ast.name,
+                        ctor: LateInit::uninit(),
+                    },
+                    s,
+                );
+
+                let ctor = self.lower_struct_ctor(
+                    AdtCtorOwner::EnumVariant(variant),
+                    &variant_ast.kind,
+                    &mut field_tys_to_extend,
+                    false,
+                );
+
+                LateInit::init(&variant.r(s).ctor, ctor);
+
+                variant
             })
             .collect::<Vec<_>>();
 
-        let target_def = Obj::new(
-            AdtDef {
-                item: self.target,
-                generics: self.tcx.seal_generic_binder(generics),
-                kind: AdtKind::Enum(Obj::new(AdtKindEnum { variants, by_name }, s)),
-            },
-            s,
-        );
-
-        LateInit::init(&self.target.r(s).kind, ItemKind::Adt(target_def));
+        LateInit::init(&target_enum.r(s).variants, variants);
+        LateInit::init(&target_enum.r(s).by_name, by_name);
 
         self.queue_task(move |cx| {
-            cx.lower_adt(target_def, generic_clause_lists, field_tys_to_extend);
+            cx.lower_adt(target_adt, generic_clause_lists, field_tys_to_extend);
         });
     }
 
@@ -600,12 +638,13 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         );
     }
 
-    pub fn lower_struct_kind(
+    pub fn lower_struct_ctor(
         &mut self,
+        owner: AdtCtorOwner,
         ast: &'ast AstStructKind,
         field_tys_to_extend: &mut Vec<(&'ast AstTy, Obj<LateInit<SpannedTy>>)>,
         allow_visibilities: bool,
-    ) -> Obj<AdtKindStruct> {
+    ) -> Obj<AdtCtorDef> {
         let s = &self.tcx.session;
 
         let resolve_vis = move |this: &mut Self, vis: &AstVisibility| -> Visibility {
@@ -622,8 +661,9 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
 
         match ast {
             AstStructKind::Unit => Obj::new(
-                AdtKindStruct {
-                    syntax: AdtStructFieldSyntax::Unit,
+                AdtCtorDef {
+                    owner,
+                    syntax: AdtCtorSyntax::Unit,
                     fields: Vec::new(),
                 },
                 s,
@@ -632,7 +672,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                 let fields = ast
                     .iter()
                     .enumerate()
-                    .map(|(idx, field)| AdtStructField {
+                    .map(|(idx, field)| AdtCtorField {
                         span: field.span,
                         idx: idx as u32,
                         vis: resolve_vis(self, &field.vis),
@@ -642,8 +682,9 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                     .collect::<Vec<_>>();
 
                 let kind = Obj::new(
-                    AdtKindStruct {
-                        syntax: AdtStructFieldSyntax::Tuple,
+                    AdtCtorDef {
+                        owner,
+                        syntax: AdtCtorSyntax::Tuple,
                         fields,
                     },
                     s,
@@ -676,7 +717,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                             }
                         }
 
-                        AdtStructField {
+                        AdtCtorField {
                             span: field.span,
                             idx: idx as u32,
                             vis: resolve_vis(self, &field.vis),
@@ -687,8 +728,9 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                     .collect::<Vec<_>>();
 
                 let kind = Obj::new(
-                    AdtKindStruct {
-                        syntax: AdtStructFieldSyntax::Named(by_name),
+                    AdtCtorDef {
+                        owner,
+                        syntax: AdtCtorSyntax::Named(by_name),
                         fields,
                     },
                     s,
@@ -802,7 +844,7 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn lower_trait(
         mut self,
-        item: Obj<TraitDef>,
+        item: Obj<TraitItem>,
         inherits: Option<&AstTraitClauseList>,
         generic_clause_lists: Vec<Option<&AstTraitClauseList>>,
     ) {
@@ -888,7 +930,7 @@ impl IntraItemLowerCtxt<'_> {
                 };
 
                 let item_spec = Obj::new(
-                    ImplDef {
+                    ImplItem {
                         item,
                         generics: binder,
                         trait_: Some(for_trait),
@@ -909,7 +951,7 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn lower_adt(
         mut self,
-        item: Obj<AdtDef>,
+        item: Obj<AdtItem>,
         generic_clause_lists: Vec<Option<&AstTraitClauseList>>,
         field_tys_to_extend: Vec<(&AstTy, Obj<LateInit<SpannedTy>>)>,
     ) {
