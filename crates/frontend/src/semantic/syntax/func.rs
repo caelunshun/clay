@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        ErrorGuaranteed,
+        ErrorGuaranteed, Session,
         arena::{LateInit, Obj},
         syntax::Span,
     },
@@ -70,13 +70,13 @@ pub enum PatKind {
     Rest,
 
     /// Define a new local. Only available in defining patterns.
-    NewName(Obj<FuncLocal>),
+    NewName(Obj<FuncLocal>, Option<Obj<Pat>>),
 
     /// Match an array or slice of patterns.
-    Slice(Obj<[Obj<Pat>]>),
+    Slice(PatListFrontAndTail),
 
     /// Match a tuple of patterns.
-    Tuple(Obj<[Obj<Pat>]>),
+    Tuple(PatListFrontAndTail),
 
     /// Match a literal.
     Lit(Obj<Expr>),
@@ -84,14 +84,42 @@ pub enum PatKind {
     /// Match a variety of options.
     Or(Obj<[Obj<Pat>]>),
 
-    /// Match a unit unit struct or enum variant.
+    /// Match the dereference of something.
+    Ref(Mutability, Obj<Pat>),
+
+    /// Match a unit struct or enum variant.
     AdtUnit(AdtCtorInstance),
+
+    /// Match a tuple struct or enum variant.
+    AdtTuple(AdtCtorInstance, PatListFrontAndTail),
 
     /// Bind to a target place expression. Only available in destructuring patterns.
     PlaceExpr(Obj<Expr>),
 
     /// Failed to lower the pattern.
     Error(ErrorGuaranteed),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct PatListFrontAndTail {
+    pub front: Obj<[Obj<Pat>]>,
+    pub tail: Option<Obj<[Obj<Pat>]>>,
+}
+
+impl PatListFrontAndTail {
+    pub fn len(self, s: &Session) -> PatListFrontAndTailLen {
+        if let Some(tail) = self.tail {
+            PatListFrontAndTailLen::AtLeast(self.front.r(s).len() as u32 + tail.r(s).len() as u32)
+        } else {
+            PatListFrontAndTailLen::Exactly(self.front.r(s).len() as u32)
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum PatListFrontAndTailLen {
+    Exactly(u32),
+    AtLeast(u32),
 }
 
 // === Block === //

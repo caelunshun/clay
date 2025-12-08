@@ -5,19 +5,22 @@ use crate::{
     },
     parse::{
         ast::{
-            AstBinOpKind, AstBinOpSpanned, AstBlock, AstExpr, AstExprKind, AstMatchArm, AstStmt,
-            AstStmtKind, AstStmtLet, AstUnOpKind,
+            AstBinOpKind, AstBinOpSpanned, AstBlock, AstExpr, AstExprKind, AstMatchArm,
+            AstRangeLimits, AstStmt, AstStmtKind, AstStmtLet, AstUnOpKind,
         },
         token::Lifetime,
     },
     semantic::{
         lower::{
             entry::IntraItemLowerCtxt,
-            func::path::{PathResolvedFnLit, PathResolvedLocal, PathResolvedValue},
+            func::{
+                pat::PatOrRest,
+                path::{PathResolvedFnLit, PathResolvedLocal, PathResolvedValue},
+            },
         },
         syntax::{
             AdtCtorSyntax, Block, Expr, ExprKind, LetStmt, MatchArm, Pat, PatKind,
-            SpannedTyOrReList, Stmt,
+            PatListFrontAndTail, SpannedTyOrReList, Stmt,
         },
     },
 };
@@ -199,10 +202,10 @@ impl IntraItemLowerCtxt<'_> {
                 ExprKind::Block(self.lower_block_with_label(expr, *label, block))
             }
             AstExprKind::Assign(lhs, rhs) => {
-                ExprKind::Assign(self.lower_lvalue_as_pat(lhs), self.lower_expr(rhs))
+                ExprKind::Assign(self.lower_lvalue(lhs), self.lower_expr(rhs))
             }
             AstExprKind::AssignOp(op, lhs, rhs) => {
-                ExprKind::AssignOp(*op, self.lower_lvalue_as_pat(lhs), self.lower_expr(rhs))
+                ExprKind::AssignOp(*op, self.lower_lvalue(lhs), self.lower_expr(rhs))
             }
             AstExprKind::Field(expr, name) => ExprKind::Field(self.lower_expr(expr), *name),
             AstExprKind::GenericMethodCall {
@@ -421,28 +424,20 @@ impl IntraItemLowerCtxt<'_> {
         })
     }
 
-    pub fn lower_lvalue_list_as_pat<'a>(
-        &mut self,
-        exprs: impl IntoIterator<Item = &'a AstExpr, IntoIter: ExactSizeIterator>,
-    ) -> Obj<[Obj<Pat>]> {
-        let s = &self.tcx.session;
-
-        Obj::new_iter(
-            exprs.into_iter().map(|expr| self.lower_lvalue_as_pat(expr)),
-            s,
-        )
-    }
-
-    pub fn lower_lvalue_as_pat(&mut self, expr: &AstExpr) -> Obj<Pat> {
+    pub fn lower_lvalue(&mut self, expr: &AstExpr) -> Obj<Pat> {
         let s = &self.tcx.session;
 
         let kind = match &expr.kind {
             AstExprKind::Paren(expr) => {
-                return self.lower_lvalue_as_pat(expr);
+                return self.lower_lvalue(expr);
             }
 
-            AstExprKind::Array(elems) => PatKind::Slice(self.lower_lvalue_list_as_pat(elems)),
-            AstExprKind::Tuple(elems) => PatKind::Tuple(self.lower_lvalue_list_as_pat(elems)),
+            AstExprKind::Array(elems) => {
+                PatKind::Slice(self.lower_lvalue_list_front_and_tail(elems))
+            }
+            AstExprKind::Tuple(elems) => {
+                PatKind::Tuple(self.lower_lvalue_list_front_and_tail(elems))
+            }
             AstExprKind::Lit(_) => PatKind::Lit(self.lower_expr(expr)),
             AstExprKind::Underscore => PatKind::Hole,
 
@@ -456,7 +451,7 @@ impl IntraItemLowerCtxt<'_> {
             ) => PatKind::Or(Obj::new_iter(
                 self.flatten_right_associative_bin_op_chain(expr, |op| op == AstBinOpKind::BitOr)
                     .into_iter()
-                    .map(|(_span, pat)| self.lower_lvalue_as_pat(pat)),
+                    .map(|(_span, pat)| self.lower_lvalue(pat)),
                 s,
             )),
 
@@ -523,6 +518,25 @@ impl IntraItemLowerCtxt<'_> {
             },
             s,
         )
+    }
+
+    pub fn lower_lvalue_list<'a>(
+        &mut self,
+        exprs: impl IntoIterator<Item = &'a AstExpr, IntoIter: ExactSizeIterator>,
+    ) -> Obj<[Obj<Pat>]> {
+        let s = &self.tcx.session;
+
+        Obj::new_iter(exprs.into_iter().map(|expr| self.lower_lvalue(expr)), s)
+    }
+
+    pub fn lower_lvalue_list_front_and_tail<'a>(
+        &mut self,
+        exprs: impl IntoIterator<Item = &'a AstExpr>,
+    ) -> PatListFrontAndTail {
+        self.lower_pat_list_front_and_tail_generic(exprs, |this, expr| match expr.kind {
+            AstExprKind::Range(None, None, AstRangeLimits::HalfOpen) => PatOrRest::Rest(expr.span),
+            _ => PatOrRest::Pat(this.lower_lvalue(expr)),
+        })
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        Diag, ErrorGuaranteed, LeafDiag, Session,
+        Diag, ErrorGuaranteed, LeafDiag, Level, Session,
         arena::Obj,
         syntax::{Span, Symbol},
     },
@@ -13,7 +13,9 @@ use crate::{
             entry::IntraItemLowerCtxt,
             func::path::{ExprPathIdentOrResolution, PathResolvedPattern},
         },
-        syntax::{FuncLocal, Mutability, Pat, PatKind},
+        syntax::{
+            FuncLocal, Mutability, Pat, PatKind, PatListFrontAndTail, PatListFrontAndTailLen,
+        },
     },
     utils::hash::FxHashMap,
 };
@@ -251,8 +253,6 @@ impl IntraItemLowerCtxt<'_> {
                 path,
                 and_bind,
             } => 'path: {
-                // TODO: Lower the remainder
-
                 let res = self.resolve_expr_path(path);
 
                 match res.as_ident_or_res(path, s) {
@@ -261,7 +261,12 @@ impl IntraItemLowerCtxt<'_> {
                             Ok(local) => {
                                 self.func_local_names.define_force_shadow(name.text, local);
 
-                                PatKind::NewName(local)
+                                PatKind::NewName(
+                                    local,
+                                    and_bind
+                                        .as_ref()
+                                        .map(|ast| self.lower_pat_inner(ast, locals)),
+                                )
                             }
                             Err(err) => PatKind::Error(err),
                         }
@@ -277,6 +282,11 @@ impl IntraItemLowerCtxt<'_> {
                             );
                         };
 
+                        if let Some(and_bind) = and_bind {
+                            Diag::span_err(and_bind.span, "`@` only allowed after identifier")
+                                .emit();
+                        }
+
                         match kind {
                             PathResolvedPattern::UnitCtor(ctor) => PatKind::AdtUnit(ctor),
                         }
@@ -285,7 +295,53 @@ impl IntraItemLowerCtxt<'_> {
                 }
             }
             AstPatKind::PathAndBrace(ast_expr_path, ast_pat_fields, ast_pat_struct_rest) => todo!(),
-            AstPatKind::PathAndParen(ast_expr_path, ast_pats) => todo!(),
+            AstPatKind::PathAndParen(path, children) => 'pat: {
+                let res = match self.resolve_expr_path(path).fail_on_unbound_local() {
+                    Ok(v) => v,
+                    Err(err) => break 'pat PatKind::Error(err),
+                };
+
+                let Some(ctor) = res.as_adt_ctor(s).filter(|v| v.def.r(s).syntax.is_tuple()) else {
+                    break 'pat PatKind::Error(
+                        Diag::span_err(
+                            path.span,
+                            format_args!(
+                                "expected tuple struct or enum variant, got {}",
+                                res.bare_what(s)
+                            ),
+                        )
+                        .emit(),
+                    );
+                };
+
+                let children = self.lower_pat_list_front_and_tail(children, locals);
+                let expected_len = ctor.def.r(s).fields.len() as u32;
+
+                let arity_offense = match children.len(s) {
+                    PatListFrontAndTailLen::Exactly(v) if v != expected_len => Some((v, "", "")),
+                    PatListFrontAndTailLen::AtLeast(v) if v > expected_len => {
+                        Some((v, " at least", "only "))
+                    }
+                    _ => None,
+                };
+
+                if let Some((child_count, at_least, only)) = arity_offense {
+                    break 'pat PatKind::Error(
+                            Diag::span_err(
+                                path.span,
+                                format_args!(
+                                    "this pattern has{at_least} {child_count} field{}, but the corresponding tuple {} {only}has {}",
+                                    if child_count == 1 { "" } else {"s"},
+                                    res.bare_what(s),
+                                    expected_len,
+                                ),
+                            )
+                            .emit(),
+                        );
+                }
+
+                PatKind::AdtTuple(ctor, children)
+            }
             AstPatKind::Or(pats) => {
                 match locals.fork(|locals| {
                     let mut forks = Vec::new();
@@ -302,11 +358,24 @@ impl IntraItemLowerCtxt<'_> {
                     Err(err) => PatKind::Error(err),
                 }
             }
-            AstPatKind::Tuple(pats) => PatKind::Tuple(self.lower_pat_list_inner(pats, locals)),
+            AstPatKind::Tuple(pats) => {
+                PatKind::Tuple(self.lower_pat_list_front_and_tail(pats, locals))
+            }
             AstPatKind::Paren(pat) => return self.lower_pat(pat),
-            AstPatKind::Ref(ast_opt_mutability, ast_pat) => todo!(),
-            AstPatKind::Slice(pats) => PatKind::Slice(self.lower_pat_list_inner(pats, locals)),
-            AstPatKind::Rest => todo!(),
+            AstPatKind::Ref(muta, inner) => {
+                PatKind::Ref(muta.as_muta(), self.lower_pat_inner(inner, locals))
+            }
+            AstPatKind::Slice(pats) => {
+                PatKind::Slice(self.lower_pat_list_front_and_tail(pats, locals))
+            }
+            AstPatKind::Rest => PatKind::Error(
+                Diag::span_err(ast.span, "`..` patterns are not allowed here")
+                    .child(LeafDiag::new(
+                        Level::Note,
+                        "only allowed in tuple, tuple struct, and slice patterns",
+                    ))
+                    .emit(),
+            ),
             AstPatKind::Range(low, high, limits) => todo!(),
             AstPatKind::Lit(expr) => PatKind::Lit(self.lower_expr(expr)),
             AstPatKind::Error(err) => PatKind::Error(*err),
@@ -330,4 +399,61 @@ impl IntraItemLowerCtxt<'_> {
 
         Obj::new_iter(asts.iter().map(|ast| self.lower_pat_inner(ast, locals)), s)
     }
+
+    pub fn lower_pat_list_front_and_tail_generic<T>(
+        &mut self,
+        list: impl IntoIterator<Item = T>,
+        mut lower: impl FnMut(&mut Self, T) -> PatOrRest,
+    ) -> PatListFrontAndTail {
+        let s = &self.tcx.session;
+
+        let mut found_rest = None;
+
+        let mut front = Vec::new();
+        let mut tail = Vec::new();
+
+        for item in list {
+            match lower(self, item) {
+                PatOrRest::Pat(pat) => {
+                    if found_rest.is_some() {
+                        tail.push(pat);
+                    } else {
+                        front.push(pat);
+                    }
+                }
+                PatOrRest::Rest(new_span) => {
+                    if let Some(prev_span) = found_rest {
+                        Diag::anon_err("`..` can only be used once per tuple pattern")
+                            .primary(new_span, "can only be used once per tuple pattern")
+                            .secondary(prev_span, "previously used here")
+                            .emit();
+                    } else {
+                        found_rest = Some(new_span);
+                    }
+                }
+            }
+        }
+
+        PatListFrontAndTail {
+            front: Obj::new_slice(&front, s),
+            tail: found_rest.map(|_| Obj::new_slice(&tail, s)),
+        }
+    }
+
+    pub fn lower_pat_list_front_and_tail(
+        &mut self,
+        asts: &[AstPat],
+        locals: &mut PatLocalBranchResolver,
+    ) -> PatListFrontAndTail {
+        self.lower_pat_list_front_and_tail_generic(asts, |this, ast| match &ast.kind {
+            AstPatKind::Rest => PatOrRest::Rest(ast.span),
+            _ => PatOrRest::Pat(this.lower_pat_inner(ast, locals)),
+        })
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum PatOrRest {
+    Pat(Obj<Pat>),
+    Rest(Span),
 }
