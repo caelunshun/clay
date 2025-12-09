@@ -22,9 +22,9 @@ use crate::{
             VisibilityResolver,
         },
         syntax::{
-            AdtCtor, AdtCtorField, AdtCtorOwner, AdtCtorSyntax, AdtEnumVariant, AdtItem,
-            AdtKind, AdtKindEnum, AdtKindStruct, AnyGeneric, Crate, EnumVariantItem, Expr, FnDef,
-            FuncItem, FuncDefOwner, FuncLocal, GenericBinder, ImplItem, Item, ItemKind, ModuleItem,
+            AdtCtor, AdtCtorField, AdtCtorOwner, AdtCtorSyntax, AdtEnumVariant, AdtItem, AdtKind,
+            AdtKindEnum, AdtKindStruct, AnyGeneric, Crate, EnumVariantItem, Expr, FnDef, FuncArg,
+            FuncDefOwner, FuncItem, FuncLocal, GenericBinder, ImplItem, Item, ItemKind, ModuleItem,
             RegionGeneric, SpannedTy, TraitItem, TypeGeneric, Visibility,
         },
     },
@@ -976,7 +976,17 @@ impl IntraItemLowerCtxt<'_> {
         self.define_generics_in_binder(item.r(s).generics);
         self.lower_generic_def_clauses(item.r(s).generics, &generic_clause_lists);
 
-        // TODO: Lower signature
+        LateInit::init(
+            &item.r(s).args,
+            Obj::new_iter(
+                ast.args.iter().map(|arg| FuncArg {
+                    span: arg.span,
+                    pat: self.lower_pat(&arg.pat),
+                    ty: self.lower_ty(&arg.ty),
+                }),
+                s,
+            ),
+        );
 
         LateInit::init(
             &item.r(s).ret_ty,

@@ -1,46 +1,16 @@
-pub enum Whee<T> {
-    Foo(T, (T, T)),
-    Bar,
-    Baz {},
-    Maz { foo: u32, bar: i32 },
+pub struct u32;
+
+pub enum Demo {
+    Foo(u32),
+    Bar(u32),
 }
 
-pub struct Woo<'a, T> {
-    pub foo: &'a T,
-    bar: (),
-}
+pub use Demo::*;
 
-pub struct Waz(pub u32, pub (), pub(crate) ());
+fn main(v: u32) {
+    let Foo(a) | Bar(a) = 1;
 
-pub struct Faz;
+    let mut foo = 0;
 
-pub fn fizz_buzz(limit: Option<u32>) {
-    let mut sb = String::new();
-
-    let range = match limit {
-        v @ Some(..) if let Some(v) = v => (0..v).as::<dyn Iterator<Item = u32>>,
-        None => (0..).as::<dyn Iterator<Item = u32>>,
-    };
-
-    for i in range {
-        let mut special = false;
-
-        if i % 3 == 0 {
-            sb.push_str("fizz");
-            special |= true;
-        }
-
-        if i % 5 == 0 {
-            sb.push_str("buzz");
-            special |= true;
-        }
-
-        if !special {
-            sb.push_fmt(format_args("{}", [i]));
-        }
-
-        sb.push_char('\n');
-        print(&sb);
-        sb.clear();
-    }
+    foo = "meow";
 }

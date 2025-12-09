@@ -221,6 +221,8 @@ impl PatLocalForkResolver<'_> {
                     entry.into_mut().tmp_bound_in_curr_fork = true;
                 }
             }
+
+            self.locals.get_mut(&mention).unwrap().currently_bound_at = None;
         }
 
         // Write down errors for locals not bound in the current fork.
