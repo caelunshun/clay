@@ -15,7 +15,7 @@ use crate::{
     semantic::{
         lower::{
             entry::IntraItemLowerCtxt,
-            modules::{FrozenModuleResolver, ParentResolver, PathResolver, StepResolveError},
+            modules::{FrozenModuleResolver, PathResolver, StepResolveError},
         },
         syntax::{
             AdtCtorInstance, AdtItem, AdtKind, EnumVariantItem, FuncItem, FuncLocal, Item,
@@ -151,23 +151,15 @@ impl ExprPathResult {
 
 impl ExprPathResolution {
     pub fn bare_what(self, s: &Session) -> String {
-        fn bare_what_item(item: Obj<Item>, s: &Session) -> String {
-            let resolver = FrozenModuleResolver(s);
-
-            format!(
-                "{} `{}`",
-                resolver.categorize(item).bare_what(),
-                resolver.path(item)
-            )
-        }
-
         match self {
             ExprPathResolution::ResolvedSelfTy => "`Self`".to_string(),
-            ExprPathResolution::ResolvedModule(def) => bare_what_item(def, s),
-            ExprPathResolution::ResolvedAdt(def, _) => bare_what_item(def.r(s).item, s),
-            ExprPathResolution::ResolvedEnumVariant(def, _) => bare_what_item(def.r(s).item, s),
-            ExprPathResolution::ResolvedFn(def, _) => bare_what_item(def.r(s).item, s),
-            ExprPathResolution::ResolvedTrait(def, _) => bare_what_item(def.r(s).item, s),
+            ExprPathResolution::ResolvedModule(def) => def.r(s).bare_category_path(s),
+            ExprPathResolution::ResolvedAdt(def, _) => def.r(s).item.r(s).bare_category_path(s),
+            ExprPathResolution::ResolvedEnumVariant(def, _) => {
+                def.r(s).item.r(s).bare_category_path(s)
+            }
+            ExprPathResolution::ResolvedFn(def, _) => def.r(s).item.r(s).bare_category_path(s),
+            ExprPathResolution::ResolvedTrait(def, _) => def.r(s).item.r(s).bare_category_path(s),
             ExprPathResolution::ResolvedGeneric(def) => {
                 format!("generic type `{}`", def.r(s).ident.text)
             }
@@ -460,9 +452,8 @@ impl IntraItemLowerCtxt<'_> {
                 Diag::span_err(
                     args.span,
                     format_args!(
-                        "{} at `{}` does not accept generic parameters",
-                        resolver.categorize(finger).a_what(),
-                        resolver.path(finger),
+                        "{} does not accept generic parameters",
+                        finger.r(s).bare_category_path(s),
                     ),
                 )
                 .emit();

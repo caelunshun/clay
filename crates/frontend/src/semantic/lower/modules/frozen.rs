@@ -11,21 +11,7 @@ use crate::{
         },
         syntax::{Item, Visibility},
     },
-    symbol,
 };
-
-// === Common === //
-
-fn def_display_path(def: Obj<Item>, s: &Session) -> ItemPathFmt {
-    ItemPathFmt {
-        prefix: if def.r(s).krate.r(s).is_local {
-            symbol!("crate")
-        } else {
-            def.r(s).krate.r(s).name
-        },
-        main_part: def.r(s).path,
-    }
-}
 
 // === Visibility Resolver === //
 
@@ -48,7 +34,9 @@ impl ParentResolver for FrozenVisibilityResolver<'_> {
 
 impl PathResolver for FrozenVisibilityResolver<'_> {
     fn path(&self, def: Self::Item) -> ItemPathFmt {
-        def_display_path(def, self.0)
+        let s = self.0;
+
+        def.r(s).display_path(s)
     }
 
     fn global_use_count(&mut self, _curr: Self::Item) -> u32 {
@@ -100,7 +88,8 @@ impl ParentResolver for FrozenModuleResolver<'_> {
 
 impl PathResolver for FrozenModuleResolver<'_> {
     fn path(&self, def: Self::Item) -> ItemPathFmt {
-        def_display_path(def, self.0)
+        let s = self.0;
+        def.r(s).display_path(s)
     }
 
     fn global_use_count(&mut self, curr: Self::Item) -> u32 {

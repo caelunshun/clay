@@ -77,6 +77,22 @@ pub enum AdtCtorOwner {
 }
 
 impl AdtCtorOwner {
+    pub fn bare_identified_what(self, s: &Session) -> String {
+        match self {
+            AdtCtorOwner::Struct(struct_) => {
+                format!(
+                    "struct `{}`",
+                    struct_.r(s).adt.r(s).item.r(s).display_path(s),
+                )
+            }
+            AdtCtorOwner::EnumVariant(variant) => format!(
+                "enum variant `{}::{}`",
+                variant.r(s).owner.r(s).adt.r(s).item.r(s).display_path(s),
+                variant.r(s).ident.text,
+            ),
+        }
+    }
+
     pub fn bare_whats(self) -> Symbol {
         match self {
             AdtCtorOwner::Struct(..) => symbol!("`struct`s"),
@@ -119,6 +135,13 @@ impl AdtCtorSyntax {
     #[must_use]
     pub fn is_named(&self) -> bool {
         matches!(self, AdtCtorSyntax::Named(..))
+    }
+
+    pub fn unwrap_names(&self) -> &FxHashMap<Symbol, u32> {
+        match self {
+            AdtCtorSyntax::Named(v) => v,
+            _ => unreachable!(),
+        }
     }
 }
 

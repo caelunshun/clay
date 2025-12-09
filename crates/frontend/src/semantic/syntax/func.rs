@@ -93,11 +93,20 @@ pub enum PatKind {
     /// Match a tuple struct or enum variant.
     AdtTuple(AdtCtorInstance, PatListFrontAndTail),
 
+    /// Match a named struct or enum variant.
+    AdtNamed(AdtCtorInstance, Obj<[PatNamedField]>),
+
     /// Bind to a target place expression. Only available in destructuring patterns.
     PlaceExpr(Obj<Expr>),
 
     /// Failed to lower the pattern.
     Error(ErrorGuaranteed),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct PatNamedField {
+    pub idx: u32,
+    pub pat: Obj<Pat>,
 }
 
 #[derive(Debug, Copy, Clone)]

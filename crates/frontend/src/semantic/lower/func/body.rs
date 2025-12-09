@@ -2,13 +2,14 @@ use crate::{
     base::{
         Diag, ErrorGuaranteed, LeafDiag, Level,
         arena::{LateInit, Obj},
+        syntax::Span,
     },
     parse::{
         ast::{
             AstBinOpKind, AstBinOpSpanned, AstBlock, AstExpr, AstExprKind, AstMatchArm,
             AstRangeLimits, AstStmt, AstStmtKind, AstStmtLet, AstUnOpKind,
         },
-        token::Lifetime,
+        token::{Ident, Lifetime},
     },
     semantic::{
         lower::{
@@ -19,11 +20,16 @@ use crate::{
             },
         },
         syntax::{
-            AdtCtorSyntax, Block, Expr, ExprKind, LetStmt, MatchArm, Pat, PatKind,
+            AdtCtor, AdtCtorSyntax, Block, Expr, ExprKind, LetStmt, MatchArm, Pat, PatKind,
             PatListFrontAndTail, SpannedTyOrReList, Stmt,
         },
     },
+    utils::{
+        hash::FxHashMap,
+        lang::{AND_LIST_GLUE, format_list},
+    },
 };
+use hashbrown::hash_map;
 
 // === Body lowering === //
 
@@ -454,8 +460,11 @@ impl IntraItemLowerCtxt<'_> {
                     .map(|(_span, pat)| self.lower_lvalue(pat)),
                 s,
             )),
+            AstExprKind::AddrOf(muta, pointee) => {
+                PatKind::Ref(muta.as_muta(), self.lower_lvalue(pointee))
+            }
 
-            AstExprKind::Struct(..) | AstExprKind::AddrOf(..) | AstExprKind::Call(..) => todo!(),
+            AstExprKind::Struct(..) | AstExprKind::Call(..) => todo!(),
 
             AstExprKind::Block(..)
             | AstExprKind::Field(..)
@@ -589,5 +598,81 @@ impl IntraItemLowerCtxt<'_> {
         }
 
         outer
+    }
+
+    pub fn match_up_ctor_members<T>(
+        &self,
+        ctor: Obj<AdtCtor>,
+        fields: Vec<(Ident, T)>,
+        deny_missing: Option<Span>,
+    ) -> Vec<(u32, T)> {
+        let s = &self.tcx.session;
+        let name_map = ctor.r(s).syntax.unwrap_names();
+
+        let mut mentions = FxHashMap::default();
+        let mut accum = Vec::new();
+
+        for (name, value) in fields {
+            let Some(&resolved_idx) = name_map.get(&name.text) else {
+                Diag::span_err(
+                    name.span,
+                    format_args!(
+                        "{} does not have field `{}`",
+                        ctor.r(s).owner.bare_identified_what(s),
+                        name.text
+                    ),
+                )
+                .emit();
+
+                continue;
+            };
+
+            match mentions.entry(resolved_idx) {
+                hash_map::Entry::Vacant(entry) => {
+                    entry.insert(name.span);
+                }
+                hash_map::Entry::Occupied(entry) => {
+                    Diag::anon_err(format_args!("field `{}` used more than once", name.text))
+                        .primary(name.span, "used here again")
+                        .secondary(*entry.get(), "first used here")
+                        .emit();
+
+                    continue;
+                }
+            }
+
+            accum.push((resolved_idx, value));
+        }
+
+        if let Some(deny_missing) = deny_missing
+            && ctor.r(s).fields.len() != accum.len()
+        {
+            let mut missing_field_list = Vec::new();
+
+            for (idx, field_info) in ctor.r(s).fields.iter().enumerate() {
+                if mentions.contains_key(&(idx as u32)) {
+                    continue;
+                }
+
+                missing_field_list.push(field_info.ident.unwrap().text);
+            }
+
+            Diag::span_err(
+                deny_missing,
+                format_args!(
+                    "{} is missing field{}: {}",
+                    ctor.r(s).owner.bare_identified_what(s),
+                    if missing_field_list.len() == 1 {
+                        ""
+                    } else {
+                        "s"
+                    },
+                    format_list(missing_field_list, AND_LIST_GLUE),
+                ),
+            )
+            .emit();
+        }
+
+        accum
     }
 }

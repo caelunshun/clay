@@ -13,10 +13,7 @@ use crate::{
         token::Ident,
     },
     semantic::{
-        lower::{
-            entry::{InterItemLowerCtxt, IntraItemLowerCtxt},
-            modules::{FrozenModuleResolver, ParentResolver as _, PathResolver as _},
-        },
+        lower::entry::{InterItemLowerCtxt, IntraItemLowerCtxt},
         syntax::{
             AnyGeneric, GenericBinder, Item, Re, RegionGeneric, SpannedTraitClauseList,
             SpannedTraitInstance, SpannedTraitInstanceView, SpannedTraitParam,
@@ -173,14 +170,11 @@ impl IntraItemLowerCtxt<'_> {
             self.normalize_positional_generic_arity(binder, None, segment_span, &positional);
 
         if let Some(associated) = associated.first() {
-            let resolver = FrozenModuleResolver(s);
-
             Diag::span_err(
                 associated.span,
                 format_args!(
-                    "{} `{}` does not have any associated type constraints",
-                    resolver.categorize(owner).bare_what(),
-                    resolver.path(owner),
+                    "{} does not have any associated type constraints",
+                    owner.r(s).bare_category_path(s),
                 ),
             )
             .emit();
@@ -621,16 +615,14 @@ impl IntraItemLowerCtxt<'_> {
         associated: &[LoweredAssocConstraint],
     ) {
         let s = &self.tcx.session;
-        let resolver = FrozenModuleResolver(s);
 
         for associated in associated {
             let Some(generic) = def.r(s).associated_types.get(&associated.name.text) else {
                 Diag::span_err(
                     associated.name.span,
                     format_args!(
-                        "{} `{}` does not have associated type `{}`",
-                        resolver.categorize(def.r(s).item).bare_what(),
-                        resolver.path(def.r(s).item),
+                        "{} does not have associated type `{}`",
+                        def.r(s).item.r(s).bare_category_path(s),
                         associated.name.text,
                     ),
                 )

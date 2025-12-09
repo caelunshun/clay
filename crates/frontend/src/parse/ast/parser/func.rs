@@ -9,8 +9,9 @@ use crate::{
             AstAssignOpKind, AstBinOpKind, AstBinOpSpanned, AstBindingMode, AstBlock, AstBoolLit,
             AstExpr, AstExprField, AstExprKind, AstExprPath, AstExprPathKind, AstFnArg, AstFnDef,
             AstGenericParam, AstGenericParamKind, AstLit, AstMatchArm, AstOptMutability, AstPat,
-            AstPatField, AstPatKind, AstPatStructRest, AstQualification, AstRangeLimits, AstStmt,
-            AstStmtKind, AstStmtLet, AstStructRest, AstTy, AstTyKind, AstUnOpKind,
+            AstPatField, AstPatFieldKind, AstPatKind, AstPatStructRest, AstQualification,
+            AstRangeLimits, AstStmt, AstStmtKind, AstStmtLet, AstStructRest, AstTy, AstTyKind,
+            AstUnOpKind,
             basic::{parse_mutability, parse_paramed_path, parse_paramed_path_no_guard},
             bp::expr_bp,
             entry::P,
@@ -1150,7 +1151,9 @@ pub fn parse_pat_single_arm(p: P) -> AstPat {
                 let mut fields = Vec::new();
 
                 loop {
-                    let start = p.next_span();
+                    let start = p2.next_span();
+
+                    let muta = parse_mutability(p2);
 
                     let Some(name) = match_ident().expect(p2) else {
                         break;
@@ -1158,23 +1161,28 @@ pub fn parse_pat_single_arm(p: P) -> AstPat {
 
                     if match_punct(punct!(',')).expect(p2).is_some() {
                         fields.push(AstPatField {
-                            span: start.to(p.prev_span()),
+                            span: start.to(p2.prev_span()),
                             name,
-                            pat: None,
+                            kind: AstPatFieldKind::Bare(muta),
                         });
                         continue;
                     }
 
-                    if match_punct(punct!(':')).expect(p2).is_none() {
+                    if muta.was_explicit() || match_punct(punct!(':')).expect(p2).is_none() {
+                        fields.push(AstPatField {
+                            span: start.to(p2.prev_span()),
+                            name,
+                            kind: AstPatFieldKind::Bare(muta),
+                        });
                         break;
                     }
 
                     let expr = parse_pat(p2);
 
                     fields.push(AstPatField {
-                        span: start.to(p.prev_span()),
+                        span: start.to(p2.prev_span()),
                         name,
-                        pat: Some(Box::new(expr)),
+                        kind: AstPatFieldKind::WithPat(Box::new(expr)),
                     });
 
                     if match_punct(punct!(',')).expect(p2).is_none() {

@@ -6,9 +6,10 @@ use crate::{
     },
     parse::token::Ident,
     semantic::{
-        lower::modules::{ItemCategory, ParentRef},
+        lower::modules::{ItemCategory, ItemPathFmt, ParentRef},
         syntax::{AdtEnumVariant, AdtItem, AdtKindEnum, FuncItem, ImplItem, TraitItem},
     },
+    symbol,
     utils::hash::FxIndexMap,
 };
 
@@ -30,6 +31,23 @@ pub struct Item {
     pub direct_uses: LateInit<FxIndexMap<Symbol, DirectUse>>,
     pub glob_uses: LateInit<Vec<GlobUse>>,
     pub kind: LateInit<ItemKind>,
+}
+
+impl Item {
+    pub fn display_path(&self, s: &Session) -> ItemPathFmt {
+        ItemPathFmt {
+            prefix: if self.krate.r(s).is_local {
+                symbol!("crate")
+            } else {
+                self.krate.r(s).name
+            },
+            main_part: self.path,
+        }
+    }
+
+    pub fn bare_category_path(&self, s: &Session) -> String {
+        format!("{} `{}`", self.category.bare_what(), self.display_path(s))
+    }
 }
 
 #[derive(Debug, Clone)]

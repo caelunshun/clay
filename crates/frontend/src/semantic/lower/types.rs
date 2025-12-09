@@ -15,7 +15,7 @@ use crate::{
     semantic::{
         lower::{
             entry::IntraItemLowerCtxt,
-            modules::{FrozenModuleResolver, ParentResolver, PathResolver as _},
+            modules::{FrozenModuleResolver, PathResolver as _},
         },
         syntax::{
             AdtItem, Item, ItemKind, Re, SpannedAdtInstanceView, SpannedRe, SpannedTraitClause,
@@ -73,7 +73,6 @@ impl IntraItemLowerCtxt<'_> {
         path: &AstBarePath,
     ) -> Result<Obj<TraitItem>, ErrorGuaranteed> {
         let s = &self.tcx.session;
-        let resolver = FrozenModuleResolver(s);
 
         let offending_item = match self.resolve_ty_item_path(path)? {
             TyPathResolution::Trait(def) => return Ok(def),
@@ -89,9 +88,8 @@ impl IntraItemLowerCtxt<'_> {
         Err(Diag::span_err(
             path.span,
             format_args!(
-                "expected trait, found {} `{}`",
-                resolver.categorize(offending_item).bare_what(),
-                resolver.path(offending_item),
+                "expected trait, found {}",
+                offending_item.r(s).bare_category_path(s),
             ),
         )
         .emit())
@@ -168,9 +166,8 @@ impl IntraItemLowerCtxt<'_> {
                         Diag::span_err(
                             ast.span,
                             format_args!(
-                                "expected a struct or enum, found {} `{}`",
-                                resolver.categorize(def).bare_what(),
-                                resolver.path(def),
+                                "expected a struct or enum, found {}",
+                                def.r(s).bare_category_path(s),
                             ),
                         )
                         .emit(),

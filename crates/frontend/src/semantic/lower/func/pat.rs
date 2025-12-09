@@ -5,7 +5,7 @@ use crate::{
         syntax::{Span, Symbol},
     },
     parse::{
-        ast::{AstPat, AstPatKind},
+        ast::{AstPat, AstPatFieldKind, AstPatKind, AstPatStructRest},
         token::Ident,
     },
     semantic::{
@@ -15,6 +15,7 @@ use crate::{
         },
         syntax::{
             FuncLocal, Mutability, Pat, PatKind, PatListFrontAndTail, PatListFrontAndTailLen,
+            PatNamedField,
         },
     },
     utils::hash::FxHashMap,
@@ -294,7 +295,65 @@ impl IntraItemLowerCtxt<'_> {
                     Err(err) => PatKind::Error(err),
                 }
             }
-            AstPatKind::PathAndBrace(ast_expr_path, ast_pat_fields, ast_pat_struct_rest) => todo!(),
+            AstPatKind::PathAndBrace(path, fields, rest) => 'path: {
+                let res = match self.resolve_expr_path(path).fail_on_unbound_local() {
+                    Ok(v) => v,
+                    Err(err) => break 'path PatKind::Error(err),
+                };
+
+                let Some(ctor) = res.as_adt_ctor(s).filter(|v| v.def.r(s).syntax.is_named()) else {
+                    break 'path PatKind::Error(
+                        Diag::span_err(
+                            path.span,
+                            format_args!(
+                                "expected named struct or enum variant, got {}",
+                                res.bare_what(s)
+                            ),
+                        )
+                        .emit(),
+                    );
+                };
+
+                let fields = fields
+                    .iter()
+                    .map(|field| match &field.kind {
+                        AstPatFieldKind::WithPat(pat) => {
+                            (field.name, self.lower_pat_inner(pat, locals))
+                        }
+                        AstPatFieldKind::Bare(muta) => {
+                            let kind = match locals.resolve(field.name, muta.as_muta(), s) {
+                                Ok(name) => PatKind::NewName(name, None),
+                                Err(err) => PatKind::Error(err),
+                            };
+
+                            (
+                                field.name,
+                                Obj::new(
+                                    Pat {
+                                        span: field.name.span,
+                                        kind,
+                                    },
+                                    s,
+                                ),
+                            )
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                let deny_missing = match rest {
+                    AstPatStructRest::Rest(_span) => None,
+                    AstPatStructRest::None => Some(path.span),
+                };
+
+                let fields = Obj::new_iter(
+                    self.match_up_ctor_members(ctor.def, fields, deny_missing)
+                        .into_iter()
+                        .map(|(idx, pat)| PatNamedField { idx, pat }),
+                    s,
+                );
+
+                PatKind::AdtNamed(ctor, fields)
+            }
             AstPatKind::PathAndParen(path, children) => 'pat: {
                 let res = match self.resolve_expr_path(path).fail_on_unbound_local() {
                     Ok(v) => v,
@@ -327,17 +386,18 @@ impl IntraItemLowerCtxt<'_> {
 
                 if let Some((child_count, at_least, only)) = arity_offense {
                     break 'pat PatKind::Error(
-                            Diag::span_err(
-                                path.span,
-                                format_args!(
-                                    "this pattern has{at_least} {child_count} field{}, but the corresponding tuple {} {only}has {}",
-                                    if child_count == 1 { "" } else {"s"},
-                                    res.bare_what(s),
-                                    expected_len,
-                                ),
-                            )
-                            .emit(),
-                        );
+                        Diag::span_err(
+                            path.span,
+                            format_args!(
+                                "this pattern has{at_least} {child_count} field{}, but the \
+                                 corresponding tuple {} {only}has {}",
+                                if child_count == 1 { "" } else { "s" },
+                                res.bare_what(s),
+                                expected_len,
+                            ),
+                        )
+                        .emit(),
+                    );
                 }
 
                 PatKind::AdtTuple(ctor, children)

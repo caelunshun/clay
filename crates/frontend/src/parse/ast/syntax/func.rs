@@ -410,7 +410,13 @@ impl HasSpan for AstBindingMode {
 pub struct AstPatField {
     pub span: Span,
     pub name: Ident,
-    pub pat: Option<Box<AstPat>>,
+    pub kind: AstPatFieldKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum AstPatFieldKind {
+    Bare(AstOptMutability),
+    WithPat(Box<AstPat>),
 }
 
 #[derive(Debug, Copy, Clone)]
