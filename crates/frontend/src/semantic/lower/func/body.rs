@@ -7,7 +7,8 @@ use crate::{
     parse::{
         ast::{
             AstBinOpKind, AstBinOpSpanned, AstBlock, AstExpr, AstExprKind, AstMatchArm,
-            AstRangeExpr, AstRangeLimits, AstStmt, AstStmtKind, AstStmtLet, AstUnOpKind,
+            AstRangeExpr, AstRangeLimits, AstStmt, AstStmtKind, AstStmtLet, AstStructRest,
+            AstUnOpKind,
         },
         token::{Ident, Lifetime},
     },
@@ -21,7 +22,7 @@ use crate::{
         },
         syntax::{
             AdtCtor, AdtCtorSyntax, Block, Expr, ExprKind, LetStmt, MatchArm, Pat, PatKind,
-            PatListFrontAndTail, RangeExpr, SpannedTyOrReList, Stmt,
+            PatListFrontAndTail, RangeExpr, SpannedTyOrReList, Stmt, StructExpr, StructNamedField,
         },
     },
     utils::{
@@ -316,7 +317,82 @@ impl IntraItemLowerCtxt<'_> {
                 label: self.lookup_label(*label),
             },
             AstExprKind::Return(expr) => ExprKind::Return(self.lower_opt_expr(expr.as_deref())),
-            AstExprKind::Struct(ast_expr_path, ast_expr_fields, ast_struct_rest) => todo!(),
+            AstExprKind::Struct(path, fields, rest) => 'path: {
+                let res = match self.resolve_expr_path(path).fail_on_unbound_local() {
+                    Ok(v) => v,
+                    Err(err) => break 'path ExprKind::Error(err),
+                };
+
+                let Some(ctor) = res.as_adt_ctor(s).filter(|v| v.def.r(s).syntax.is_named()) else {
+                    break 'path ExprKind::Error(
+                        Diag::span_err(
+                            path.span,
+                            format_args!(
+                                "expected named struct or enum variant, got {}",
+                                res.bare_what(s)
+                            ),
+                        )
+                        .emit(),
+                    );
+                };
+
+                let fields = fields
+                    .iter()
+                    .map(|field| {
+                        let initializer = match &field.expr {
+                            Some(expr) => self.lower_expr(expr),
+                            None => {
+                                let kind = if let Some(def) =
+                                    self.func_local_names.lookup(field.name.text)
+                                {
+                                    ExprKind::Local(*def)
+                                } else {
+                                    ExprKind::Error(
+                                        Diag::span_err(
+                                            field.name.span,
+                                            format_args!(
+                                                "`{}` not found in scope",
+                                                field.name.text
+                                            ),
+                                        )
+                                        .emit(),
+                                    )
+                                };
+
+                                Obj::new(
+                                    Expr {
+                                        span: field.name.span,
+                                        kind: LateInit::new(kind),
+                                    },
+                                    s,
+                                )
+                            }
+                        };
+
+                        (field.name, initializer)
+                    })
+                    .collect::<Vec<_>>();
+
+                let (deny_missing, rest) = match rest {
+                    AstStructRest::Base(expr) => (None, Some(self.lower_expr(expr))),
+                    AstStructRest::Rest(span) => {
+                        Diag::span_err(span.shrink_to_hi(), "base expression required after `..`")
+                            .emit();
+
+                        (None, None)
+                    }
+                    AstStructRest::None => (Some(path.span), None),
+                };
+
+                let fields = Obj::new_iter(
+                    self.match_up_ctor_members(ctor.def, fields, deny_missing)
+                        .into_iter()
+                        .map(|(idx, init)| StructNamedField { idx, init }),
+                    s,
+                );
+
+                ExprKind::Struct(StructExpr { ctor, fields, rest })
+            }
             AstExprKind::Error(err) => ExprKind::Error(*err),
         };
 

@@ -9,7 +9,7 @@ use crate::{
         token::Ident,
     },
     semantic::syntax::{
-        AdtCtorInstance, AdtItem, GenericBinder, ImplItem, Item, Mutability, SpannedTraitInstance,
+        AdtCtorInstance, GenericBinder, ImplItem, Item, Mutability, SpannedTraitInstance,
         SpannedTy, SpannedTyOrRe, SpannedTyOrReList,
     },
 };
@@ -223,7 +223,7 @@ pub enum ExprKind {
         label: Option<Obj<Expr>>,
     },
     Return(Option<Obj<Expr>>),
-    Struct(Obj<AdtItem>), // TODO
+    Struct(StructExpr),
     Error(ErrorGuaranteed),
 }
 
@@ -232,6 +232,19 @@ pub struct RangeExpr {
     pub low: Option<Obj<Expr>>,
     pub high: Option<Obj<Expr>>,
     pub limits: AstRangeLimits,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct StructExpr {
+    pub ctor: AdtCtorInstance,
+    pub fields: Obj<[StructNamedField]>,
+    pub rest: Option<Obj<Expr>>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct StructNamedField {
+    pub idx: u32,
+    pub init: Obj<Expr>,
 }
 
 #[derive(Debug, Clone)]
