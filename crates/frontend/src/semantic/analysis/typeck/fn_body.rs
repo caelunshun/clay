@@ -97,7 +97,7 @@ impl<'tcx> FnCtxt<'tcx> {
                 args,
             } => todo!(),
             ExprKind::Index(obj, obj1) => todo!(),
-            ExprKind::Range(obj, obj1, ast_range_limits) => todo!(),
+            ExprKind::Range(range) => todo!(),
             ExprKind::LocalSelf => todo!(),
             ExprKind::Local(local) => self.local_types[local],
             ExprKind::AddrOf(mutability, pointee) => {

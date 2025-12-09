@@ -436,7 +436,7 @@ impl IntraItemLowerCtxt<'_> {
                     ))
                     .emit(),
             ),
-            AstPatKind::Range(low, high, limits) => todo!(),
+            AstPatKind::Range(inner) => PatKind::Range(self.lower_range_expr(ast.span, inner)),
             AstPatKind::Lit(expr) => PatKind::Lit(self.lower_expr(expr)),
             AstPatKind::Error(err) => PatKind::Error(*err),
         };
@@ -448,16 +448,6 @@ impl IntraItemLowerCtxt<'_> {
             },
             s,
         )
-    }
-
-    fn lower_pat_list_inner(
-        &mut self,
-        asts: &[AstPat],
-        locals: &mut PatLocalBranchResolver,
-    ) -> Obj<[Obj<Pat>]> {
-        let s = &self.tcx.session;
-
-        Obj::new_iter(asts.iter().map(|ast| self.lower_pat_inner(ast, locals)), s)
     }
 
     pub fn lower_pat_list_front_and_tail_generic<T>(

@@ -99,6 +99,9 @@ pub enum PatKind {
     /// Bind to a target place expression. Only available in destructuring patterns.
     PlaceExpr(Obj<Expr>),
 
+    /// Matches a range of scalar values.
+    Range(RangeExpr),
+
     /// Failed to lower the pattern.
     Error(ErrorGuaranteed),
 }
@@ -208,7 +211,7 @@ pub enum ExprKind {
         args: Obj<[Obj<Expr>]>,
     },
     Index(Obj<Expr>, Obj<Expr>),
-    Range(Option<Obj<Expr>>, Option<Obj<Expr>>, AstRangeLimits),
+    Range(RangeExpr),
     LocalSelf,
     Local(Obj<FuncLocal>),
     AddrOf(Mutability, Obj<Expr>),
@@ -222,6 +225,13 @@ pub enum ExprKind {
     Return(Option<Obj<Expr>>),
     Struct(Obj<AdtItem>), // TODO
     Error(ErrorGuaranteed),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct RangeExpr {
+    pub low: Option<Obj<Expr>>,
+    pub high: Option<Obj<Expr>>,
+    pub limits: AstRangeLimits,
 }
 
 #[derive(Debug, Clone)]

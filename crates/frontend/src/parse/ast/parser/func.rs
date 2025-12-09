@@ -9,7 +9,7 @@ use crate::{
             AstAssignOpKind, AstBinOpKind, AstBinOpSpanned, AstBindingMode, AstBlock, AstBoolLit,
             AstExpr, AstExprField, AstExprKind, AstExprPath, AstExprPathKind, AstFnArg, AstFnDef,
             AstGenericParam, AstGenericParamKind, AstLit, AstMatchArm, AstOptMutability, AstPat,
-            AstPatField, AstPatFieldKind, AstPatKind, AstPatStructRest, AstQualification,
+            AstPatField, AstPatFieldKind, AstPatKind, AstPatStructRest, AstQualification, AstRangeExpr,
             AstRangeLimits, AstStmt, AstStmtKind, AstStmtLet, AstStructRest, AstTy, AstTyKind,
             AstUnOpKind,
             basic::{parse_mutability, parse_paramed_path, parse_paramed_path_no_guard},
@@ -314,12 +314,16 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
     }
 
     // Match prefix range expressions
-    if let Some((span, range)) = parse_expr_range_limits(p) {
+    if let Some((span, limits)) = parse_expr_range_limits(p) {
         let rhs = parse_expr_pratt(p, flags, expr_bp::PRE_RANGE.right);
 
         return Some(AstExpr {
             span,
-            kind: AstExprKind::Range(None, rhs.map(Box::new), range),
+            kind: AstExprKind::Range(AstRangeExpr {
+                low: None,
+                high: rhs.map(Box::new),
+                limits,
+            }),
         });
     }
 
@@ -566,13 +570,17 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
     'chaining: loop {
         // Match infix range expressions
         if expr_bp::INFIX_RANGE.left >= min_bp
-            && let Some((span, range)) = parse_expr_range_limits(p)
+            && let Some((span, limits)) = parse_expr_range_limits(p)
         {
             let rhs = parse_expr_pratt(p, flags, expr_bp::INFIX_RANGE.right);
 
             lhs = AstExpr {
                 span,
-                kind: AstExprKind::Range(Some(Box::new(lhs)), rhs.map(Box::new), range),
+                kind: AstExprKind::Range(AstRangeExpr {
+                    low: Some(Box::new(lhs)),
+                    high: rhs.map(Box::new),
+                    limits,
+                }),
             };
 
             continue 'chaining;
@@ -1095,13 +1103,13 @@ pub fn parse_pat_single_arm(p: P) -> AstPat {
 
     // Parse literal variants
     if let Some(lit) = parse_expr_literal_as_expr(p) {
-        if let Some((_sp, range)) = parse_expr_range_limits(p) {
+        if let Some((_sp, limits)) = parse_expr_range_limits(p) {
             return build_pat(
-                AstPatKind::Range(
-                    Some(Box::new(lit)),
-                    parse_pat_lit_expr(p).map(Box::new),
-                    range,
-                ),
+                AstPatKind::Range(AstRangeExpr {
+                    low: Some(Box::new(lit)),
+                    high: parse_pat_lit_expr(p).map(Box::new),
+                    limits,
+                }),
                 p,
             );
         }
@@ -1203,16 +1211,16 @@ pub fn parse_pat_single_arm(p: P) -> AstPat {
             }
 
             // Parse range pattern
-            if let Some((_sp, range)) = parse_expr_range_limits(p) {
+            if let Some((_sp, limits)) = parse_expr_range_limits(p) {
                 return build_pat(
-                    AstPatKind::Range(
-                        Some(Box::new(AstExpr {
+                    AstPatKind::Range(AstRangeExpr {
+                        low: Some(Box::new(AstExpr {
                             span: path.span,
                             kind: AstExprKind::Path(path),
                         })),
-                        parse_pat_lit_expr(p).map(Box::new),
-                        range,
-                    ),
+                        high: parse_pat_lit_expr(p).map(Box::new),
+                        limits,
+                    }),
                     p,
                 );
             }

@@ -108,7 +108,7 @@ pub enum AstExprKind {
     AssignOp(AstAssignOpKind, Box<AstExpr>, Box<AstExpr>),
     Field(Box<AstExpr>, Ident),
     Index(Box<AstExpr>, Box<AstExpr>),
-    Range(Option<Box<AstExpr>>, Option<Box<AstExpr>>, AstRangeLimits),
+    Range(AstRangeExpr),
     Underscore,
     Path(AstExprPath),
     AddrOf(AstOptMutability, Box<AstExpr>),
@@ -303,6 +303,13 @@ pub enum AstUnOpKind {
     Neg,
 }
 
+#[derive(Debug, Clone)]
+pub struct AstRangeExpr {
+    pub low: Option<Box<AstExpr>>,
+    pub high: Option<Box<AstExpr>>,
+    pub limits: AstRangeLimits,
+}
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum AstRangeLimits {
     /// Inclusive at the beginning, exclusive at the end.
@@ -379,7 +386,7 @@ pub enum AstPatKind {
     Slice(Vec<AstPat>),
     Rest,
     Paren(Box<AstPat>),
-    Range(Option<Box<AstExpr>>, Option<Box<AstExpr>>, AstRangeLimits),
+    Range(AstRangeExpr),
     Lit(Box<AstExpr>),
     Error(ErrorGuaranteed),
 }

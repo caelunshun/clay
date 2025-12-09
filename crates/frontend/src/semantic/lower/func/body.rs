@@ -7,7 +7,7 @@ use crate::{
     parse::{
         ast::{
             AstBinOpKind, AstBinOpSpanned, AstBlock, AstExpr, AstExprKind, AstMatchArm,
-            AstRangeLimits, AstStmt, AstStmtKind, AstStmtLet, AstUnOpKind,
+            AstRangeExpr, AstRangeLimits, AstStmt, AstStmtKind, AstStmtLet, AstUnOpKind,
         },
         token::{Ident, Lifetime},
     },
@@ -21,7 +21,7 @@ use crate::{
         },
         syntax::{
             AdtCtor, AdtCtorSyntax, Block, Expr, ExprKind, LetStmt, MatchArm, Pat, PatKind,
-            PatListFrontAndTail, SpannedTyOrReList, Stmt,
+            PatListFrontAndTail, RangeExpr, SpannedTyOrReList, Stmt,
         },
     },
     utils::{
@@ -240,11 +240,7 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::Index(expr, index) => {
                 ExprKind::Index(self.lower_expr(expr), self.lower_expr(index))
             }
-            AstExprKind::Range(lower, upper, limits) => ExprKind::Range(
-                self.lower_opt_expr(lower.as_deref()),
-                self.lower_opt_expr(upper.as_deref()),
-                *limits,
-            ),
+            AstExprKind::Range(inner) => ExprKind::Range(self.lower_range_expr(ast.span, inner)),
             AstExprKind::Underscore => ExprKind::Error(
                 Diag::span_err(
                     ast.span,
@@ -327,6 +323,21 @@ impl IntraItemLowerCtxt<'_> {
         LateInit::init(&expr.r(s).kind, kind);
 
         expr
+    }
+
+    pub fn lower_range_expr(&mut self, span: Span, ast: &AstRangeExpr) -> RangeExpr {
+        let mut limits = ast.limits;
+
+        if ast.low.is_none() && ast.high.is_none() && ast.limits == AstRangeLimits::Closed {
+            Diag::span_err(span, "inclusive range with no end").emit();
+            limits = AstRangeLimits::HalfOpen;
+        }
+
+        RangeExpr {
+            low: self.lower_opt_expr(ast.low.as_deref()),
+            high: self.lower_opt_expr(ast.high.as_deref()),
+            limits,
+        }
     }
 
     pub fn lower_let_chain(&mut self, expr: &AstExpr) -> Obj<Expr> {
@@ -543,7 +554,11 @@ impl IntraItemLowerCtxt<'_> {
         exprs: impl IntoIterator<Item = &'a AstExpr>,
     ) -> PatListFrontAndTail {
         self.lower_pat_list_front_and_tail_generic(exprs, |this, expr| match expr.kind {
-            AstExprKind::Range(None, None, AstRangeLimits::HalfOpen) => PatOrRest::Rest(expr.span),
+            AstExprKind::Range(AstRangeExpr {
+                low: None,
+                high: None,
+                limits: AstRangeLimits::HalfOpen,
+            }) => PatOrRest::Rest(expr.span),
             _ => PatOrRest::Pat(this.lower_lvalue(expr)),
         })
     }

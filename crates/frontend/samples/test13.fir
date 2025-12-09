@@ -12,8 +12,4 @@ fn main() {
     {
         bar.maz();
     }
-
-    let Meow { mut a, b } = ();
 }
-
-pub struct Meow { a: () }
