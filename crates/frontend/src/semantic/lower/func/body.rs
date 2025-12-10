@@ -31,6 +31,7 @@ use crate::{
     },
 };
 use hashbrown::hash_map;
+use std::fmt;
 
 // === Body lowering === //
 
@@ -526,10 +527,10 @@ impl IntraItemLowerCtxt<'_> {
             }
 
             AstExprKind::Array(elems) => {
-                PatKind::Slice(self.lower_lvalue_list_front_and_tail(elems))
+                PatKind::Slice(self.lower_lvalue_list_front_and_tail("slice", elems))
             }
             AstExprKind::Tuple(elems) => {
-                PatKind::Tuple(self.lower_lvalue_list_front_and_tail(elems))
+                PatKind::Tuple(self.lower_lvalue_list_front_and_tail("tuple", elems))
             }
             AstExprKind::Lit(_) => PatKind::Lit(self.lower_expr(expr)),
             AstExprKind::Underscore => PatKind::Hole,
@@ -627,9 +628,10 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn lower_lvalue_list_front_and_tail<'a>(
         &mut self,
+        kind_name: impl fmt::Display,
         exprs: impl IntoIterator<Item = &'a AstExpr>,
     ) -> PatListFrontAndTail {
-        self.lower_pat_list_front_and_tail_generic(exprs, |this, expr| match expr.kind {
+        self.lower_pat_list_front_and_tail_generic(kind_name, exprs, |this, expr| match expr.kind {
             AstExprKind::Range(AstRangeExpr {
                 low: None,
                 high: None,

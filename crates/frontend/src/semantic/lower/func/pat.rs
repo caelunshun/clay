@@ -20,7 +20,7 @@ use crate::{
     },
     utils::hash::FxHashMap,
 };
-use std::mem;
+use std::{fmt, mem};
 
 // === Fork Resolution === //
 
@@ -375,7 +375,7 @@ impl IntraItemLowerCtxt<'_> {
                     );
                 };
 
-                let children = self.lower_pat_list_front_and_tail(children, locals);
+                let children = self.lower_pat_list_front_and_tail("tuple", children, locals);
                 let expected_len = ctor.def.r(s).fields.len() as u32;
 
                 let arity_offense = match children.len(s) {
@@ -421,14 +421,14 @@ impl IntraItemLowerCtxt<'_> {
                 }
             }
             AstPatKind::Tuple(pats) => {
-                PatKind::Tuple(self.lower_pat_list_front_and_tail(pats, locals))
+                PatKind::Tuple(self.lower_pat_list_front_and_tail("tuple", pats, locals))
             }
             AstPatKind::Paren(pat) => return self.lower_pat(pat),
             AstPatKind::Ref(muta, inner) => {
                 PatKind::Ref(muta.as_muta(), self.lower_pat_inner(inner, locals))
             }
             AstPatKind::Slice(pats) => {
-                PatKind::Slice(self.lower_pat_list_front_and_tail(pats, locals))
+                PatKind::Slice(self.lower_pat_list_front_and_tail("slice", pats, locals))
             }
             AstPatKind::Rest => PatKind::Error(
                 Diag::span_err(ast.span, "`..` patterns are not allowed here")
@@ -454,6 +454,7 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn lower_pat_list_front_and_tail_generic<T>(
         &mut self,
+        kind_name: impl fmt::Display,
         list: impl IntoIterator<Item = T>,
         mut lower: impl FnMut(&mut Self, T) -> PatOrRest,
     ) -> PatListFrontAndTail {
@@ -475,10 +476,15 @@ impl IntraItemLowerCtxt<'_> {
                 }
                 PatOrRest::Rest(new_span) => {
                     if let Some(prev_span) = found_rest {
-                        Diag::anon_err("`..` can only be used once per tuple pattern")
-                            .primary(new_span, "can only be used once per tuple pattern")
-                            .secondary(prev_span, "previously used here")
-                            .emit();
+                        Diag::anon_err(format_args!(
+                            "`..` can only be used once per {kind_name} pattern"
+                        ))
+                        .primary(
+                            new_span,
+                            format_args!("can only be used once per {kind_name} pattern"),
+                        )
+                        .secondary(prev_span, "previously used here")
+                        .emit();
                     } else {
                         found_rest = Some(new_span);
                     }
@@ -494,10 +500,11 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn lower_pat_list_front_and_tail(
         &mut self,
+        kind_name: impl fmt::Display,
         asts: &[AstPat],
         locals: &mut PatLocalBranchResolver,
     ) -> PatListFrontAndTail {
-        self.lower_pat_list_front_and_tail_generic(asts, |this, ast| match &ast.kind {
+        self.lower_pat_list_front_and_tail_generic(kind_name, asts, |this, ast| match &ast.kind {
             AstPatKind::Rest => PatOrRest::Rest(ast.span),
             _ => PatOrRest::Pat(this.lower_pat_inner(ast, locals)),
         })
