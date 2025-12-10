@@ -6,12 +6,8 @@ pub enum Demo {
     Baz {},
 }
 
-pub use Demo::*;
-
 fn main(v: u32) {
-    let Foo((-1, a)) | Bar(a) = 1;
-
-    [v, .., v, .., v] = [1, 2, 3];
+    let Demo::Foo((-1, a)) | Demo::Bar(a) = 1;
 
     let mut foo = 0;
 
@@ -19,8 +15,9 @@ fn main(v: u32) {
 
     match foo {
         -0 => 1,
-        -1..-1 => {},
-        'a'..='z' => {},
+        -1..-1 => {}
+        'a'..='Z' => {},
+        -1 => {}
         "meow" => {},
     }
 }

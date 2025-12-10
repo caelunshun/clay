@@ -154,6 +154,10 @@ impl AstExprKind {
             | AstExprKind::Error(..) => false,
         }
     }
+
+    pub fn can_omit_comma_in_arm(&self) -> bool {
+        matches!(self, AstExprKind::Block(_, _))
+    }
 }
 
 #[derive(Debug, Copy, Clone)]

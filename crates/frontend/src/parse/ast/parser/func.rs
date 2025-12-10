@@ -259,11 +259,22 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
             return Some(build_expr(AstExprKind::Error(p.stuck().error()), p));
         };
 
+        struct ArmParseCx {
+            can_omit_comma: bool,
+        }
+
         let arms = parse_delimited_until_terminator(
             &mut p.enter(&braced),
-            &mut (),
-            |p, _| parse_match_arm(p),
-            |p, _| match_punct(punct!(',')).expect(p).is_some(),
+            &mut ArmParseCx {
+                can_omit_comma: false,
+            },
+            |p, cx| {
+                let arm = parse_match_arm(p);
+                cx.can_omit_comma = arm.body.kind.can_omit_comma_in_arm();
+
+                arm
+            },
+            |p, cx| match_punct(punct!(',')).expect(p).is_some() || cx.can_omit_comma,
             |p, _| match_eos(p),
         )
         .elems;
