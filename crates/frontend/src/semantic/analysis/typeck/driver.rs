@@ -24,14 +24,14 @@ use crate::{
 use std::{convert::Infallible, ops::ControlFlow};
 
 #[derive(Debug, Clone)]
-pub struct SignatureWfVisitor<'tcx> {
+pub struct CrateTypeckVisitor<'tcx> {
     pub tcx: &'tcx TyCtxt,
     pub coherence: &'tcx CoherenceMap,
     pub self_ty: Option<SpannedTy>,
     pub clause_applies_to: Option<Ty>,
 }
 
-impl SignatureWfVisitor<'_> {
+impl CrateTypeckVisitor<'_> {
     pub fn visit_crate(&mut self, krate: Obj<Crate>) -> ControlFlow<Infallible> {
         let s = self.session();
 
@@ -80,12 +80,11 @@ impl SignatureWfVisitor<'_> {
 
         // Construct `Self` type.
         let new_self_ty_generic = Obj::new(
-            // TODO: better names
             TypeGeneric {
                 span: Span::DUMMY,
                 ident: Ident {
                     span: Span::DUMMY,
-                    text: symbol!("SelfHelper"),
+                    text: symbol!("Self"),
                     raw: false,
                 },
                 binder: LateInit::new(None),
@@ -262,7 +261,7 @@ impl SignatureWfVisitor<'_> {
     }
 }
 
-impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
+impl<'tcx> TyVisitor<'tcx> for CrateTypeckVisitor<'tcx> {
     type Break = Infallible;
 
     fn tcx(&self) -> &'tcx TyCtxt {
@@ -316,7 +315,7 @@ impl<'tcx> TyVisitor<'tcx> for SignatureWfVisitor<'tcx> {
     }
 }
 
-impl SignatureWfVisitor<'_> {
+impl CrateTypeckVisitor<'_> {
     fn check_trait_helper(&mut self, def: Obj<TraitItem>, params: SpannedTyOrReList) {
         let tcx = self.tcx();
         let s = self.session();

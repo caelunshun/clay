@@ -5,7 +5,7 @@ use crate::{
         arena::{HasInterner, HasListInterner, Interner, ListInterner, Obj},
     },
     semantic::{
-        analysis::{BinderSubstitution, CoherenceMap, SignatureWfVisitor},
+        analysis::{BinderSubstitution, CoherenceMap, CrateTypeckVisitor},
         syntax::{
             Crate, ListOfTraitClauseList, TraitClause, TraitClauseList, TraitParam, TraitParamList,
             Ty, TyKind, TyList, TyOrRe, TyOrReList, TyShape,
@@ -108,7 +108,7 @@ impl TyCtxt {
             self.determine_impl_generic_solve_order(def);
         }
 
-        _ = SignatureWfVisitor {
+        _ = CrateTypeckVisitor {
             tcx: self,
             self_ty: None,
             clause_applies_to: None,

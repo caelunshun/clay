@@ -30,7 +30,7 @@ pub struct FnDef {
     pub generics: Obj<GenericBinder>,
     pub self_param: LateInit<Option<SpannedTy>>,
     pub args: LateInit<Obj<[FuncArg]>>,
-    pub ret_ty: LateInit<Option<SpannedTy>>,
+    pub ret_ty: LateInit<SpannedTy>,
     pub body: LateInit<Option<Obj<Block>>>,
 }
 

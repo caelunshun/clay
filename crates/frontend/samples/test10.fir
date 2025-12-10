@@ -1,4 +1,16 @@
-pub struct u32;
+mod meow {
+    pub struct u32 {
+        _private: (),
+    }
+
+    pub struct i32(pub u32, ());
+
+    fn yay() {
+        i32((), ());
+    }
+}
+
+use meow::*;
 
 pub enum Demo {
     Foo(u32),
@@ -12,6 +24,10 @@ fn main(v: u32) {
     let mut foo = 0;
 
     foo = "meow";
+
+    u32 { _private: () };
+
+    i32((), ());
 
     match foo {
         -0 => 1,

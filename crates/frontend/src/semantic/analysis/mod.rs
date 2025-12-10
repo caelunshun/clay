@@ -1,3 +1,6 @@
+mod infcx;
+pub use infcx::*;
+
 mod tcx;
 pub use tcx::*;
 

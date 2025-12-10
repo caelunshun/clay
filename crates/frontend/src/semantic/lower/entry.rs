@@ -25,7 +25,7 @@ use crate::{
             AdtCtor, AdtCtorField, AdtCtorOwner, AdtCtorSyntax, AdtEnumVariant, AdtItem, AdtKind,
             AdtKindEnum, AdtKindStruct, AnyGeneric, Crate, EnumVariantItem, Expr, FnDef, FuncArg,
             FuncDefOwner, FuncItem, FuncLocal, GenericBinder, ImplItem, Item, ItemKind, ModuleItem,
-            RegionGeneric, SpannedTy, TraitItem, TypeGeneric, Visibility,
+            RegionGeneric, SpannedTy, TraitItem, TyKind, TypeGeneric, Visibility,
         },
     },
     symbol,
@@ -991,8 +991,11 @@ impl IntraItemLowerCtxt<'_> {
         LateInit::init(
             &item.r(s).ret_ty,
             match &ast.ret_ty {
-                AstReturnTy::Omitted => None,
-                AstReturnTy::Present(ty) => Some(self.lower_ty(ty)),
+                AstReturnTy::Omitted => SpannedTy::new_unspanned(
+                    self.tcx
+                        .intern_ty(TyKind::Tuple(self.tcx.intern_ty_list(&[]))),
+                ),
+                AstReturnTy::Present(ty) => self.lower_ty(ty),
             },
         );
 
