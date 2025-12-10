@@ -9,9 +9,9 @@ use crate::{
             AstAssignOpKind, AstBinOpKind, AstBinOpSpanned, AstBindingMode, AstBlock, AstBoolLit,
             AstExpr, AstExprField, AstExprKind, AstExprPath, AstExprPathKind, AstFnArg, AstFnDef,
             AstGenericParam, AstGenericParamKind, AstLit, AstMatchArm, AstOptMutability, AstPat,
-            AstPatField, AstPatFieldKind, AstPatKind, AstPatStructRest, AstQualification, AstRangeExpr,
-            AstRangeLimits, AstStmt, AstStmtKind, AstStmtLet, AstStructRest, AstTy, AstTyKind,
-            AstUnOpKind,
+            AstPatField, AstPatFieldKind, AstPatKind, AstPatStructRest, AstQualification,
+            AstRangeExpr, AstRangeLimits, AstStmt, AstStmtKind, AstStmtLet, AstStructRest, AstTy,
+            AstTyKind, AstUnOpKind,
             basic::{parse_mutability, parse_paramed_path, parse_paramed_path_no_guard},
             bp::expr_bp,
             entry::P,
@@ -489,6 +489,26 @@ pub fn parse_expr_literal_as_expr(p: P) -> Option<AstExpr> {
         span: lit.span(),
         kind: AstExprKind::Lit(lit),
     })
+}
+
+pub fn parse_expr_literal_as_expr_with_negate(p: P) -> Option<AstExpr> {
+    let start = p.next_span();
+
+    if match_punct(punct!('-')).expect(p).is_some() {
+        let Some(lit) = parse_expr_literal_as_expr(p) else {
+            return Some(AstExpr {
+                span: start.to(p.prev_span()),
+                kind: AstExprKind::Error(p.stuck().error()),
+            });
+        };
+
+        return Some(AstExpr {
+            span: start.to(p.prev_span()),
+            kind: AstExprKind::Unary(AstUnOpKind::Not, Box::new(lit)),
+        });
+    }
+
+    parse_expr_literal_as_expr(p)
 }
 
 pub fn parse_expr_literal(p: P) -> Option<AstLit> {
@@ -1102,7 +1122,7 @@ pub fn parse_pat_single_arm(p: P) -> AstPat {
     }
 
     // Parse literal variants
-    if let Some(lit) = parse_expr_literal_as_expr(p) {
+    if let Some(lit) = parse_expr_literal_as_expr_with_negate(p) {
         if let Some((_sp, limits)) = parse_expr_range_limits(p) {
             return build_pat(
                 AstPatKind::Range(AstRangeExpr {
@@ -1291,7 +1311,7 @@ pub fn parse_binding_mode(p: P) -> AstBindingMode {
 }
 
 pub fn parse_pat_lit_expr(p: P) -> Option<AstExpr> {
-    if let Some(lit) = parse_expr_literal_as_expr(p) {
+    if let Some(lit) = parse_expr_literal_as_expr_with_negate(p) {
         return Some(lit);
     }
 
