@@ -12,10 +12,10 @@ use crate::{
             TyVisitorUnspanned, TyVisitorWalk,
         },
         syntax::{
-            AdtItem, AnyGeneric, Crate, FuncItem, ImplItem, ItemKind, Re, RegionGeneric,
-            SpannedAdtInstance, SpannedTraitClauseList, SpannedTraitInstance,
+            AdtCtor, AdtInstance, AdtItem, AdtKind, AnyGeneric, Crate, FuncItem, GenericBinder,
+            ImplItem, ItemKind, SpannedAdtInstance, SpannedTraitClauseList, SpannedTraitInstance,
             SpannedTraitParamView, SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList,
-            SpannedTyOrReView, TraitClause, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            SpannedTyOrReView, TraitClause, TraitInstance, TraitItem, Ty, TyKind, TyOrRe,
             TypeGeneric,
         },
     },
@@ -68,17 +68,12 @@ impl CrateTypeckVisitor<'_> {
         ControlFlow::Continue(())
     }
 
-    pub fn visit_adt(&mut self, def: Obj<AdtItem>) -> ControlFlow<Infallible> {
-        // TODO
-
-        ControlFlow::Continue(())
-    }
-
     pub fn visit_trait(&mut self, def: Obj<TraitItem>) -> ControlFlow<Infallible> {
         let tcx = self.tcx();
         let s = self.session();
 
-        // Construct `Self` type.
+        // Construct a `Self` type universally quantifying all possible target types on which this
+        // trait could be implemented.
         let new_self_ty_generic = Obj::new(
             TypeGeneric {
                 span: Span::DUMMY,
@@ -103,63 +98,31 @@ impl CrateTypeckVisitor<'_> {
             substitution: None,
         };
 
-        let new_self_ty_params = def
-            .r(s)
-            .generics
-            .r(s)
-            .defs
-            .iter()
-            .map(|&def| match def {
-                AnyGeneric::Re(generic) => {
-                    let generic = Obj::new(
-                        RegionGeneric {
-                            span: generic.r(s).span,
-                            lifetime: generic.r(s).lifetime,
-                            binder: LateInit::new(None),
-                            clauses: LateInit::new(
-                                new_self_ty_subst.fold_spanned_clause_list(*generic.r(s).clauses),
-                            ),
-                            is_synthetic: true,
-                        },
-                        s,
-                    );
+        // Our trait has a set of input generic parameters which could refer to `Self`. Redefine
+        // universals for each parameter which properly refer to the `Self` we constructed above.
+        let new_self_arg_binder = tcx
+            .substitute_generic_binder_clauses(def.r(s).generics, |clauses| {
+                new_self_ty_subst.fold_spanned_clause_list(clauses)
+            });
 
-                    TraitParam::Equals(TyOrRe::Re(Re::Universal(generic)))
-                }
-                AnyGeneric::Ty(generic) => {
-                    let generic = Obj::new(
-                        TypeGeneric {
-                            span: generic.r(s).span,
-                            ident: generic.r(s).ident,
-                            binder: LateInit::new(None),
-                            user_clauses: LateInit::new(
-                                new_self_ty_subst
-                                    .fold_spanned_clause_list(*generic.r(s).user_clauses),
-                            ),
-                            elaborated_clauses: LateInit::uninit(),
-                            is_synthetic: true,
-                        },
-                        s,
-                    );
-
-                    TraitParam::Equals(TyOrRe::Ty(tcx.intern_ty(TyKind::Universal(generic))))
-                }
-            })
-            .collect::<Vec<_>>();
+        let new_self_arg_spec = tcx.convert_trait_instance_to_spec(TraitInstance {
+            def,
+            params: tcx
+                .convert_generic_binder_into_instance_args(Span::DUMMY, new_self_arg_binder)
+                .value,
+        });
 
         LateInit::init(
             &new_self_ty_generic.r(s).user_clauses,
-            SpannedTraitClauseList::new_unspanned(tcx.intern_trait_clause_list(&[
-                TraitClause::Trait(TraitSpec {
-                    def,
-                    params: tcx.intern_trait_param_list(&new_self_ty_params),
-                }),
-            ])),
+            SpannedTraitClauseList::new_unspanned(
+                tcx.intern_trait_clause_list(&[TraitClause::Trait(new_self_arg_spec)]),
+            ),
         );
 
         let new_self_ty =
             SpannedTy::new_saturated(new_self_ty, def.r(s).item.r(s).name.unwrap().span, tcx);
 
+        // Now, we can validate our trait body.
         let old_self_ty = self.self_ty.replace(new_self_ty);
         {
             let TraitItem {
@@ -171,36 +134,19 @@ impl CrateTypeckVisitor<'_> {
                 methods,
             } = def.r(s);
 
+            // First, let's ensure that the inherited trait list is well-formed.
             let old_clause_applies_to = self.clause_applies_to.replace(new_self_ty.value);
             self.visit_spanned_clause_list(**inherits)?;
             self.clause_applies_to = old_clause_applies_to;
 
-            for &param in &new_self_ty_params {
-                let TraitParam::Equals(param) = param else {
-                    unreachable!()
-                };
+            // Now, let's ensure that each generic parameter's clauses are well-formed.
+            self.visit_generic_binder(new_self_arg_binder)?;
 
-                match param {
-                    TyOrRe::Re(param) => {
-                        let Re::Universal(generic) = param else {
-                            unreachable!()
-                        };
-
-                        self.visit_spanned_clause_list(*generic.r(s).clauses)?;
-                    }
-                    TyOrRe::Ty(param) => {
-                        let TyKind::Universal(generic) = *param.r(s) else {
-                            unreachable!()
-                        };
-
-                        let old_clause_applies_to = self.clause_applies_to.replace(param);
-                        self.visit_spanned_clause_list(*generic.r(s).user_clauses)?;
-                        self.clause_applies_to = old_clause_applies_to;
-                    }
-                }
-            }
-
-            // TODO: Visit methods
+            // Finally, let's check method signatures and, if a default one is provided, bodies.
+            // TODO
+            // for method in methods.iter() {
+            //     self.visit_fn_def(method.r(s).func)?;
+            // }
         }
         self.self_ty = old_self_ty;
 
@@ -209,8 +155,9 @@ impl CrateTypeckVisitor<'_> {
 
     pub fn visit_impl(&mut self, item: Obj<ImplItem>) -> ControlFlow<Infallible> {
         let s = self.session();
-        let tcx = self.tcx();
 
+        // `Self` lexically refers to the target type quantified by some lexical set of universal
+        // generic parameters.
         let old_self_ty = self.self_ty.replace(item.r(s).target);
         {
             let ImplItem {
@@ -222,40 +169,121 @@ impl CrateTypeckVisitor<'_> {
                 generic_solve_order: _,
             } = item.r(s);
 
+            // Let's ensure that the target trait instance is well formed.
             if let Some(trait_) = *trait_ {
                 let old_clause_applies_to = self.clause_applies_to.replace(item.r(s).target.value);
                 self.visit_spanned_trait_instance(trait_)?;
                 self.clause_applies_to = old_clause_applies_to;
             }
 
+            // Let's also ensure that our target type is well-formed.
             self.visit_spanned_ty(*target)?;
 
-            for &generic in &generics.r(s).defs {
-                match generic {
-                    AnyGeneric::Re(generic) => {
-                        self.visit_spanned_clause_list(*generic.r(s).clauses)?;
-                    }
-                    AnyGeneric::Ty(generic) => {
-                        let old_clause_applies_to = self
-                            .clause_applies_to
-                            .replace(tcx.intern_ty(TyKind::Universal(generic)));
+            // Let's ensure that `impl` generics all have well-formed clauses.
+            self.visit_generic_binder(*generics)?;
 
-                        self.visit_spanned_clause_list(*generic.r(s).user_clauses)?;
-
-                        self.clause_applies_to = old_clause_applies_to;
-                    }
-                }
-            }
-
-            // TODO: Visit methods
+            // Finally, let's check method signatures and bodies.
+            // TODO
+            // for method in methods.iter() {
+            //     self.visit_fn_def(*method)?;
+            // }
         }
         self.self_ty = old_self_ty;
 
         ControlFlow::Continue(())
     }
 
+    pub fn visit_adt(&mut self, def: Obj<AdtItem>) -> ControlFlow<Infallible> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        // `Self` refers to the current ADT constructed with its own generic types. Our original
+        // generics may have mentioned `Self` by type so we need to construct a new set of generics
+        // which are fully explicit.
+        let new_binder = self
+            .tcx
+            .clone_generic_binder_without_clauses(def.r(s).generics);
+
+        let new_self_ty = tcx.intern_ty(TyKind::Adt(AdtInstance {
+            def,
+            params: tcx
+                .convert_generic_binder_into_instance_args(Span::DUMMY, new_binder)
+                .value,
+        }));
+
+        let mut new_self_ty_subst = SubstitutionFolder {
+            tcx,
+            self_ty: new_self_ty,
+            substitution: None,
+        };
+
+        tcx.init_generic_binder_clauses_of_duplicate(def.r(s).generics, new_binder, |clauses| {
+            new_self_ty_subst.fold_spanned_clause_list(clauses)
+        });
+
+        let new_self_ty =
+            SpannedTy::new_saturated(new_self_ty, def.r(s).item.r(s).name.unwrap().span, tcx);
+
+        // Now, WF-check the definition.
+        let old_self_ty = self.self_ty.replace(new_self_ty);
+        {
+            match *def.r(s).kind {
+                AdtKind::Struct(kind) => {
+                    self.visit_adt_ctor(*kind.r(s).ctor)?;
+                }
+                AdtKind::Enum(kind) => {
+                    for variant in kind.r(s).variants.iter() {
+                        self.visit_adt_ctor(*variant.r(s).ctor)?;
+                    }
+                }
+            }
+        }
+        self.self_ty = old_self_ty;
+
+        ControlFlow::Continue(())
+    }
+
+    pub fn visit_adt_ctor(&mut self, ctor: Obj<AdtCtor>) -> ControlFlow<Infallible> {
+        let s = self.session();
+
+        for field in ctor.r(s).fields.iter() {
+            self.visit_spanned_ty(*field.ty)?;
+        }
+
+        ControlFlow::Continue(())
+    }
+
     pub fn visit_fn_item(&mut self, def: Obj<FuncItem>) -> ControlFlow<Infallible> {
-        // TODO
+        let s = self.session();
+
+        self.visit_fn_def(*def.r(s).def)?;
+
+        ControlFlow::Continue(())
+    }
+
+    pub fn visit_generic_binder(
+        &mut self,
+        generics: Obj<GenericBinder>,
+    ) -> ControlFlow<Infallible> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        for &generic in &generics.r(s).defs {
+            match generic {
+                AnyGeneric::Re(generic) => {
+                    self.visit_spanned_clause_list(*generic.r(s).clauses)?;
+                }
+                AnyGeneric::Ty(generic) => {
+                    let old_clause_applies_to = self
+                        .clause_applies_to
+                        .replace(tcx.intern_ty(TyKind::Universal(generic)));
+
+                    self.visit_spanned_clause_list(*generic.r(s).user_clauses)?;
+
+                    self.clause_applies_to = old_clause_applies_to;
+                }
+            }
+        }
 
         ControlFlow::Continue(())
     }
@@ -309,7 +337,12 @@ impl<'tcx> TyVisitor<'tcx> for CrateTypeckVisitor<'tcx> {
         &mut self,
         instance: SpannedAdtInstance,
     ) -> ControlFlow<Self::Break> {
+        let s = self.session();
+        let tcx = self.tcx();
+
         // TODO
+
+        self.walk_adt_instance(instance)?;
 
         ControlFlow::Continue(())
     }

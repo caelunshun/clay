@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        analysis::Spanned,
+        analysis::{Spanned, SpannedViewEncode},
         arena::{LateInit, Obj},
         syntax::Span,
     },
@@ -9,8 +9,10 @@ use crate::{
         analysis::{TyCtxt, TyVisitor, TyVisitorUnspanned, TyVisitorWalk},
         syntax::{
             AnyGeneric, GenericBinder, PosInBinder, Re, RegionGeneric, SpannedRe,
-            SpannedTraitClauseList, SpannedTy, TraitClause, TraitParam, TraitSpec, TyKind, TyOrRe,
-            TypeGeneric,
+            SpannedTraitClauseList, SpannedTraitInstance, SpannedTraitParamList,
+            SpannedTraitParamView, SpannedTraitSpec, SpannedTraitSpecView, SpannedTy,
+            SpannedTyOrReList, SpannedTyOrReView, SpannedTyView, TraitClause, TraitInstance,
+            TraitParam, TraitSpec, TyKind, TyOrRe, TypeGeneric,
         },
     },
     symbol,
@@ -38,6 +40,139 @@ impl TyCtxt {
         }
 
         binder
+    }
+
+    pub fn clone_generic_binder_without_clauses(
+        &self,
+        orig_binder: Obj<GenericBinder>,
+    ) -> Obj<GenericBinder> {
+        let s = &self.session;
+
+        let new_binder_defs = orig_binder
+            .r(s)
+            .defs
+            .iter()
+            .map(|&def| match def {
+                AnyGeneric::Re(generic) => AnyGeneric::Re(Obj::new(
+                    RegionGeneric {
+                        span: generic.r(s).span,
+                        lifetime: generic.r(s).lifetime,
+                        binder: LateInit::uninit(),
+                        clauses: LateInit::uninit(),
+                        is_synthetic: true,
+                    },
+                    s,
+                )),
+                AnyGeneric::Ty(generic) => AnyGeneric::Ty(Obj::new(
+                    TypeGeneric {
+                        span: generic.r(s).span,
+                        ident: generic.r(s).ident,
+                        binder: LateInit::uninit(),
+                        user_clauses: LateInit::uninit(),
+                        elaborated_clauses: LateInit::uninit(),
+                        is_synthetic: true,
+                    },
+                    s,
+                )),
+            })
+            .collect::<Vec<_>>();
+
+        self.seal_generic_binder(GenericBinder {
+            defs: new_binder_defs,
+        })
+    }
+
+    pub fn init_generic_binder_clauses_of_duplicate(
+        &self,
+        orig_binder: Obj<GenericBinder>,
+        new_binder: Obj<GenericBinder>,
+        mut subst: impl FnMut(SpannedTraitClauseList) -> SpannedTraitClauseList,
+    ) -> Obj<GenericBinder> {
+        let s = &self.session;
+
+        for (new_generic, old_generic) in new_binder.r(s).defs.iter().zip(&orig_binder.r(s).defs) {
+            match (new_generic, old_generic) {
+                (AnyGeneric::Re(new_generic), AnyGeneric::Re(old_generic)) => {
+                    LateInit::init(&new_generic.r(s).clauses, subst(*old_generic.r(s).clauses));
+                }
+                (AnyGeneric::Ty(new_generic), AnyGeneric::Ty(old_generic)) => {
+                    LateInit::init(
+                        &new_generic.r(s).user_clauses,
+                        subst(*old_generic.r(s).user_clauses),
+                    );
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        new_binder
+    }
+
+    pub fn substitute_generic_binder_clauses(
+        &self,
+        orig_binder: Obj<GenericBinder>,
+        subst: impl FnMut(SpannedTraitClauseList) -> SpannedTraitClauseList,
+    ) -> Obj<GenericBinder> {
+        let new_binder = self.clone_generic_binder_without_clauses(orig_binder);
+        self.init_generic_binder_clauses_of_duplicate(orig_binder, new_binder, subst);
+
+        new_binder
+    }
+
+    pub fn convert_generic_binder_into_instance_args(
+        &self,
+        span: Span,
+        binder: Obj<GenericBinder>,
+    ) -> SpannedTyOrReList {
+        let s = &self.session;
+
+        SpannedTyOrReList::alloc_list(
+            span,
+            &binder
+                .r(s)
+                .defs
+                .iter()
+                .map(|generic| match generic {
+                    AnyGeneric::Re(generic) => SpannedTyOrReView::Re(
+                        Re::Universal(*generic).encode(generic.r(s).span, self),
+                    )
+                    .encode(generic.r(s).span, self),
+                    AnyGeneric::Ty(generic) => SpannedTyOrReView::Ty(
+                        SpannedTyView::Universal(*generic).encode(generic.r(s).span, self),
+                    )
+                    .encode(generic.r(s).span, self),
+                })
+                .collect::<Vec<_>>(),
+            self,
+        )
+    }
+
+    pub fn convert_spanned_trait_instance_to_spec(
+        &self,
+        instance: SpannedTraitInstance,
+    ) -> SpannedTraitSpec {
+        SpannedTraitSpecView {
+            def: instance.view(self).def,
+            params: SpannedTraitParamList::alloc_list(
+                instance.view(self).params.own_span().unwrap_or(Span::DUMMY),
+                &instance
+                    .view(self)
+                    .params
+                    .iter(self)
+                    .map(|arg| {
+                        SpannedTraitParamView::Equals(arg)
+                            .encode(arg.own_span().unwrap_or(Span::DUMMY), self)
+                    })
+                    .collect::<Vec<_>>(),
+                self,
+            ),
+        }
+        .encode(instance.own_span().unwrap_or(Span::DUMMY), self)
+    }
+
+    pub fn convert_trait_instance_to_spec(&self, instance: TraitInstance) -> TraitSpec {
+        self.convert_spanned_trait_instance_to_spec(Spanned::new_unspanned(instance))
+            .value
     }
 
     pub fn mentioned_generics<B>(

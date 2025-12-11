@@ -1,13 +1,23 @@
 use crate::{
     base::{Session, analysis::SpannedViewEncode, arena::Obj},
     semantic::{
-        analysis::{InferCx, TyCtxt},
+        analysis::{CrateTypeckVisitor, InferCx, TyCtxt},
         syntax::{
-            Block, Expr, ExprKind, FuncLocal, SpannedTy, SpannedTyList, SpannedTyView, TyKind,
+            Block, Expr, ExprKind, FnDef, FuncLocal, SpannedTy, SpannedTyList, SpannedTyView,
+            TyKind,
         },
     },
     utils::hash::FxHashMap,
 };
+use std::{convert::Infallible, ops::ControlFlow};
+
+impl CrateTypeckVisitor<'_> {
+    pub fn visit_fn_def(&mut self, def: Obj<FnDef>) -> ControlFlow<Infallible> {
+        // TODO: Check signature
+
+        ControlFlow::Continue(())
+    }
+}
 
 pub struct FnCtxt<'tcx> {
     icx: InferCx<'tcx>,
