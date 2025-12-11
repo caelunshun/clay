@@ -1,7 +1,7 @@
 use crate::{
     base::{Session, analysis::SpannedViewEncode, arena::Obj},
     semantic::{
-        analysis::{CrateTypeckVisitor, InferCx, TyCtxt},
+        analysis::{CrateTypeckVisitor, InferCx, TyCtxt, TyVisitor},
         syntax::{
             Block, Expr, ExprKind, FnDef, FuncLocal, SpannedTy, SpannedTyList, SpannedTyView,
             TyKind,
@@ -13,7 +13,25 @@ use std::{convert::Infallible, ops::ControlFlow};
 
 impl CrateTypeckVisitor<'_> {
     pub fn visit_fn_def(&mut self, def: Obj<FnDef>) -> ControlFlow<Infallible> {
-        // TODO: Check signature
+        let s = self.session();
+        let tcx = self.tcx();
+
+        // WF-check the signature.
+        self.visit_generic_binder(def.r(s).generics)?;
+
+        // TODO
+        // if let Some(self_param) = *def.r(s).self_param {
+        //     self.visit_spanned_ty(self_param)?;
+        // }
+
+        for arg in def.r(s).args.r(s) {
+            self.visit_spanned_ty(arg.ty)?;
+        }
+
+        self.visit_spanned_ty(*def.r(s).ret_ty)?;
+
+        // Check the body
+        // TODO
 
         ControlFlow::Continue(())
     }

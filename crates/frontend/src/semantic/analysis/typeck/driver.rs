@@ -15,8 +15,8 @@ use crate::{
             AdtCtor, AdtInstance, AdtItem, AdtKind, AnyGeneric, Crate, FuncItem, GenericBinder,
             ImplItem, ItemKind, SpannedAdtInstance, SpannedTraitClauseList, SpannedTraitInstance,
             SpannedTraitParamView, SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList,
-            SpannedTyOrReView, TraitClause, TraitInstance, TraitItem, Ty, TyKind, TyOrRe,
-            TypeGeneric,
+            SpannedTyOrReView, SpannedTyView, TraitClause, TraitInstance, TraitItem, Ty, TyKind,
+            TyOrRe, TypeGeneric,
         },
     },
     symbol,
@@ -296,6 +296,30 @@ impl<'tcx> TyVisitor<'tcx> for CrateTypeckVisitor<'tcx> {
         self.tcx
     }
 
+    fn visit_spanned_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
+        match ty.view(self.tcx()) {
+            SpannedTyView::Trait(_) => {
+                let old_clause_applies_to = self.clause_applies_to.replace(ty.value);
+                self.walk_ty(ty)?;
+                self.clause_applies_to = old_clause_applies_to;
+            }
+            SpannedTyView::This
+            | SpannedTyView::Simple(..)
+            | SpannedTyView::Reference(..)
+            | SpannedTyView::Adt(..)
+            | SpannedTyView::Tuple(..)
+            | SpannedTyView::FnDef(..)
+            | SpannedTyView::ExplicitInfer
+            | SpannedTyView::Universal(..)
+            | SpannedTyView::InferVar(..)
+            | SpannedTyView::Error(..) => {
+                self.walk_ty(ty)?;
+            }
+        }
+
+        ControlFlow::Continue(())
+    }
+
     fn visit_spanned_trait_spec(&mut self, spec: SpannedTraitSpec) -> ControlFlow<Self::Break> {
         let tcx = self.tcx();
 
@@ -356,7 +380,9 @@ impl CrateTypeckVisitor<'_> {
         // Replace `Self` for the bound `self_ty` in the input `params`.
         let mut input_subst = SubstitutionFolder {
             tcx,
-            self_ty: self.self_ty.unwrap().value,
+            self_ty: self
+                .self_ty
+                .map_or(tcx.intern_ty(TyKind::This), |v| v.value),
             substitution: None,
         };
 
