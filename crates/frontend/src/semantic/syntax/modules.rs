@@ -6,7 +6,9 @@ use crate::{
     },
     parse::token::Ident,
     semantic::{
-        lower::modules::{ItemCategory, ItemPathFmt, ParentRef},
+        lower::modules::{
+            FrozenModuleResolver, ItemCategory, ItemPathFmt, ParentRef, ParentResolver as _,
+        },
         syntax::{AdtEnumVariant, AdtItem, AdtKindEnum, FuncItem, ImplItem, TraitItem},
     },
     symbol,
@@ -50,10 +52,19 @@ impl Item {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum Visibility {
     Pub,
     PubIn(Obj<Item>),
+}
+
+impl Visibility {
+    pub fn is_visible_to(self, vis_ctxt: Obj<Item>, s: &Session) -> bool {
+        match self {
+            Visibility::Pub => true,
+            Visibility::PubIn(vis_in) => FrozenModuleResolver(s).is_descendant(vis_ctxt, vis_in),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -287,7 +287,39 @@ impl IntraItemLowerCtxt<'_> {
                         },
                     },
                     PathResolvedValue::AdtCtor(ctor) => match ctor.def.r(s).syntax {
-                        AdtCtorSyntax::Unit | AdtCtorSyntax::Tuple => {
+                        AdtCtorSyntax::Unit => ExprKind::TupleOrUnitCtor(ctor),
+                        AdtCtorSyntax::Tuple => {
+                            let offending_fields = ctor
+                                .def
+                                .r(s)
+                                .fields
+                                .iter()
+                                .filter(|field| !field.vis.is_visible_to(self.scope, s))
+                                .collect::<Vec<_>>();
+
+                            if !offending_fields.is_empty() {
+                                Diag::span_err(
+                                    path.span,
+                                    format_args!(
+                                        "tuple constructor for {} is not visible to {} because \
+                                         field{} {} {} inaccessible",
+                                        ctor.def.r(s).owner.bare_identified_what(s),
+                                        self.scope.r(s).bare_category_path(s),
+                                        if offending_fields.len() == 1 { "" } else { "s" },
+                                        format_list(
+                                            offending_fields.iter().map(|v| format!("`{}`", v.idx)),
+                                            AND_LIST_GLUE,
+                                        ),
+                                        if offending_fields.len() == 1 {
+                                            "is"
+                                        } else {
+                                            "are"
+                                        },
+                                    ),
+                                )
+                                .emit();
+                            }
+
                             ExprKind::TupleOrUnitCtor(ctor)
                         }
                         AdtCtorSyntax::Named(_) => ExprKind::Error(
@@ -719,6 +751,21 @@ impl IntraItemLowerCtxt<'_> {
 
                 continue;
             };
+
+            if !ctor.r(s).fields[resolved_idx as usize]
+                .vis
+                .is_visible_to(self.scope, s)
+            {
+                Diag::span_err(
+                    name.span,
+                    format_args!(
+                        "field `{}` is not visible to {}",
+                        name.text,
+                        self.scope.r(s).bare_category_path(s)
+                    ),
+                )
+                .emit();
+            }
 
             match mentions.entry(resolved_idx) {
                 hash_map::Entry::Vacant(entry) => {

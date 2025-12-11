@@ -400,6 +400,31 @@ impl IntraItemLowerCtxt<'_> {
                         )
                         .emit(),
                     );
+                } else {
+                    let front_fields = children.front.r(s).iter().zip(&ctor.def.r(s).fields);
+
+                    let back_fields = children
+                        .tail
+                        .iter()
+                        .flat_map(|v| v.r(s).iter())
+                        .zip(ctor.def.r(s).fields.iter().rev());
+
+                    for (pat, field) in front_fields.chain(back_fields) {
+                        if field.vis.is_visible_to(self.scope, s) {
+                            continue;
+                        }
+
+                        Diag::span_err(
+                            pat.r(s).span,
+                            format_args!(
+                                "field `{}` of {} is not visible to {}",
+                                field.idx,
+                                ctor.def.r(s).owner.bare_identified_what(s),
+                                self.scope.r(s).bare_category_path(s),
+                            ),
+                        )
+                        .emit();
+                    }
                 }
 
                 PatKind::AdtTuple(ctor, children)

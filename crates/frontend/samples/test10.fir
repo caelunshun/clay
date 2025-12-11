@@ -3,7 +3,11 @@ mod meow {
         _private: (),
     }
 
-    pub struct i32(pub u32, ());
+    pub struct i32(pub u32, (), ());
+
+    pub enum Whee {
+        Foo(i32),
+    }
 
     fn yay() {
         i32((), ());
@@ -36,6 +40,10 @@ fn main(v: dyn Meow<()>) {
         -1..-1 => {}
         'a'..='Z' => {},
         -1 => {}
+        u32 { _private } => (),
+        i32((), ..) => {}
+        i32((), (), ..) => {}
+        i32((), .., ()) => {}
         "meow" => {},
     }
 }

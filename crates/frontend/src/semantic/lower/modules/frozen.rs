@@ -9,7 +9,7 @@ use crate::{
             ItemCategory, ItemPathFmt, ParentRef, ParentResolver, PathResolver, StepLookupError,
             VisibilityResolver,
         },
-        syntax::{Item, Visibility},
+        syntax::Item,
     },
 };
 
@@ -108,15 +108,8 @@ impl PathResolver for FrozenModuleResolver<'_> {
     ) -> Result<Self::Item, StepLookupError> {
         let glob_use = &curr.r(self.0).glob_uses[use_idx as usize];
 
-        match glob_use.visibility {
-            Visibility::Pub => {
-                // (fallthrough)
-            }
-            Visibility::PubIn(vis) => {
-                if !self.is_descendant(vis_ctxt, vis) {
-                    return Err(StepLookupError::NotVisible);
-                }
-            }
+        if !glob_use.visibility.is_visible_to(vis_ctxt, self.0) {
+            return Err(StepLookupError::NotVisible);
         }
 
         Ok(glob_use.target)
@@ -132,15 +125,8 @@ impl PathResolver for FrozenModuleResolver<'_> {
             return Err(StepLookupError::NotFound);
         };
 
-        match direct_use.visibility {
-            Visibility::Pub => {
-                // (fallthrough)
-            }
-            Visibility::PubIn(vis) => {
-                if !self.is_descendant(vis_ctxt, vis) {
-                    return Err(StepLookupError::NotVisible);
-                }
-            }
+        if !direct_use.visibility.is_visible_to(vis_ctxt, self.0) {
+            return Err(StepLookupError::NotVisible);
         }
 
         Ok(direct_use.target)
