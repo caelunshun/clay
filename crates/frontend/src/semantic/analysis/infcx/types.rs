@@ -7,8 +7,7 @@ use crate::{
         },
         syntax::{
             InferReVar, InferTyVar, Mutability, Re, ReVariance, RegionGeneric, RelationMode,
-            SpannedRe, SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParam,
-            SpannedTraitParamView, SpannedTy, SpannedTyOrReView, SpannedTyView, Ty, TyKind,
+            SpannedTy, SpannedTyView, TraitClause, TraitClauseList, TraitParam, Ty, TyKind, TyOrRe,
         },
     },
     utils::hash::{FxHashSet, FxIndexMap},
@@ -23,24 +22,24 @@ use std::{convert::Infallible, ops::ControlFlow};
 
 #[derive(Debug, Clone)]
 pub struct TyAndTyRelateError {
-    pub origin_lhs: SpannedTy,
-    pub origin_rhs: SpannedTy,
+    pub origin_lhs: Ty,
+    pub origin_rhs: Ty,
     pub culprits: Vec<TyAndTyRelateCulprit>,
 }
 
 #[derive(Debug, Clone)]
 pub enum TyAndTyRelateCulprit {
-    Types(SpannedTy, SpannedTy),
+    Types(Ty, Ty),
     Regions(Box<ReAndReRelateError>),
-    ClauseLists(SpannedTraitClauseList, SpannedTraitClauseList),
-    Params(SpannedTraitParam, SpannedTraitParam),
+    ClauseLists(TraitClauseList, TraitClauseList),
+    Params(TraitParam, TraitParam),
     RecursiveType(InferTyOccursError),
 }
 
 #[derive(Debug, Clone)]
 pub struct ReAndReRelateError {
-    pub lhs: SpannedRe,
-    pub rhs: SpannedRe,
+    pub lhs: Re,
+    pub rhs: Re,
     pub offenses: Vec<ReAndReRelateOffense>,
 }
 
@@ -52,8 +51,8 @@ pub struct ReAndReRelateOffense {
 
 #[derive(Debug, Clone)]
 pub struct TyAndReRelateError {
-    pub lhs: SpannedTy,
-    pub rhs: SpannedRe,
+    pub lhs: Ty,
+    pub rhs: Re,
     pub culprits: Vec<Box<ReAndReRelateError>>,
 }
 
@@ -171,13 +170,13 @@ impl<'tcx> InferCx<'tcx> {
         self.tcx().intern_ty(TyKind::InferVar(self.types.fresh()))
     }
 
-    pub fn peel_ty_var(&self, ty: SpannedTy) -> SpannedTy {
-        let tcx = self.tcx();
+    pub fn peel_ty_var(&self, ty: Ty) -> Ty {
+        let s = self.session();
 
-        match ty.view(tcx) {
-            SpannedTyView::InferVar(var) => {
+        match *ty.r(s) {
+            TyKind::InferVar(var) => {
                 if let Ok(var) = self.types.lookup(var) {
-                    SpannedTy::new_maybe_saturated(var, ty.own_span(), tcx)
+                    var
                 } else {
                     ty
                 }
@@ -196,15 +195,13 @@ impl<'tcx> InferCx<'tcx> {
 
     pub fn relate_re_and_re(
         &mut self,
-        lhs: SpannedRe,
-        rhs: SpannedRe,
+        lhs: Re,
+        rhs: Re,
         mode: RelationMode,
     ) -> Result<(), Box<ReAndReRelateError>> {
         let Some(regions) = &mut self.regions else {
             return Ok(());
         };
-
-        let tcx = self.tcx;
 
         let tmp1;
         let tmp2;
@@ -227,17 +224,17 @@ impl<'tcx> InferCx<'tcx> {
         let mut fork = regions.clone();
 
         for &(lhs, rhs) in equivalences {
-            if lhs.value == rhs.value {
+            if lhs == rhs {
                 continue;
             }
 
-            match (lhs.view(tcx), rhs.view(tcx)) {
+            match (lhs, rhs) {
                 (Re::Erased, _)
                 | (_, Re::Erased)
                 | (Re::ExplicitInfer, _)
                 | (_, Re::ExplicitInfer) => unreachable!(),
                 _ => {
-                    fork.relate(lhs.value, rhs.value, self.tcx, &mut offenses);
+                    fork.relate(lhs, rhs, self.tcx, &mut offenses);
                 }
             }
         }
@@ -256,8 +253,8 @@ impl<'tcx> InferCx<'tcx> {
     /// `&'0 u32` and `&'1 u32` will result in the region relation `'0: '1`.
     pub fn relate_ty_and_ty(
         &mut self,
-        lhs: SpannedTy,
-        rhs: SpannedTy,
+        lhs: Ty,
+        rhs: Ty,
         mode: RelationMode,
     ) -> Result<(), Box<TyAndTyRelateError>> {
         let mut fork = self.clone();
@@ -280,29 +277,28 @@ impl<'tcx> InferCx<'tcx> {
 
     fn relate_ty_and_ty_inner(
         &mut self,
-        lhs: SpannedTy,
-        rhs: SpannedTy,
+        lhs: Ty,
+        rhs: Ty,
         culprits: &mut Vec<TyAndTyRelateCulprit>,
         mode: RelationMode,
     ) {
-        let tcx = self.tcx();
         let s = self.session();
 
-        if lhs.value == rhs.value {
+        if lhs == rhs {
             // The types are compatible!
             return;
         }
 
-        match (lhs.view(tcx), rhs.view(tcx)) {
-            (SpannedTyView::This, _)
-            | (_, SpannedTyView::This)
-            | (SpannedTyView::ExplicitInfer, _)
-            | (_, SpannedTyView::ExplicitInfer) => {
+        match (*lhs.r(s), *rhs.r(s)) {
+            (TyKind::This, _)
+            | (_, TyKind::This)
+            | (TyKind::ExplicitInfer, _)
+            | (_, TyKind::ExplicitInfer) => {
                 unreachable!()
             }
             (
-                SpannedTyView::Reference(lhs_re, lhs_muta, lhs_pointee),
-                SpannedTyView::Reference(rhs_re, rhs_muta, rhs_pointee),
+                TyKind::Reference(lhs_re, lhs_muta, lhs_pointee),
+                TyKind::Reference(rhs_re, rhs_muta, rhs_pointee),
             ) if lhs_muta == rhs_muta => {
                 if let Err(err) = self.relate_re_and_re(lhs_re, rhs_re, mode) {
                     culprits.push(TyAndTyRelateCulprit::Regions(err));
@@ -320,20 +316,15 @@ impl<'tcx> InferCx<'tcx> {
                     mode.with_variance(variance),
                 );
             }
-            (SpannedTyView::Adt(lhs), SpannedTyView::Adt(rhs))
-                if lhs.value.def == rhs.value.def =>
-            {
-                let lhs = lhs.view(tcx);
-                let rhs = rhs.view(tcx);
-
-                for (lhs, rhs) in lhs.params.iter(tcx).zip(rhs.params.iter(tcx)) {
-                    match (lhs.view(tcx), rhs.view(tcx)) {
-                        (SpannedTyOrReView::Re(lhs), SpannedTyOrReView::Re(rhs)) => {
+            (TyKind::Adt(lhs), TyKind::Adt(rhs)) if lhs.def == rhs.def => {
+                for (&lhs, &rhs) in lhs.params.r(s).iter().zip(rhs.params.r(s)) {
+                    match (lhs, rhs) {
+                        (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
                             if let Err(err) = self.relate_re_and_re(lhs, rhs, mode) {
                                 culprits.push(TyAndTyRelateCulprit::Regions(err));
                             }
                         }
-                        (SpannedTyOrReView::Ty(lhs), SpannedTyOrReView::Ty(rhs)) => {
+                        (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
                             // TODO: variance
                             self.relate_ty_and_ty_inner(lhs, rhs, culprits, mode);
                         }
@@ -341,23 +332,18 @@ impl<'tcx> InferCx<'tcx> {
                     }
                 }
             }
-            (SpannedTyView::Trait(lhs), SpannedTyView::Trait(rhs)) => {
+            (TyKind::Trait(lhs), TyKind::Trait(rhs)) => {
                 self.relate_dyn_trait_clauses_inner(lhs, rhs, culprits, mode);
             }
-            (SpannedTyView::Tuple(lhs), SpannedTyView::Tuple(rhs)) if lhs.len(s) == rhs.len(s) => {
-                for (lhs, rhs) in lhs.iter(tcx).zip(rhs.iter(tcx)) {
+            (TyKind::Tuple(lhs), TyKind::Tuple(rhs)) if lhs.r(s).len() == rhs.r(s).len() => {
+                for (&lhs, &rhs) in lhs.r(s).iter().zip(rhs.r(s)) {
                     self.relate_ty_and_ty_inner(lhs, rhs, culprits, mode);
                 }
             }
-            (SpannedTyView::InferVar(lhs_var), SpannedTyView::InferVar(rhs_var)) => {
+            (TyKind::InferVar(lhs_var), TyKind::InferVar(rhs_var)) => {
                 match (self.types.lookup(lhs_var), self.types.lookup(rhs_var)) {
                     (Ok(lhs_ty), Ok(rhs_ty)) => {
-                        self.relate_ty_and_ty_inner(
-                            SpannedTy::new_maybe_saturated(lhs_ty, lhs.own_span(), tcx),
-                            SpannedTy::new_maybe_saturated(rhs_ty, rhs.own_span(), tcx),
-                            culprits,
-                            mode,
-                        );
+                        self.relate_ty_and_ty_inner(lhs_ty, rhs_ty, culprits, mode);
                     }
                     (Ok(lhs_ty), Err(rhs_root)) => {
                         if let Err(err) = self.relate_var_and_ty(rhs_root, lhs_ty) {
@@ -376,27 +362,17 @@ impl<'tcx> InferCx<'tcx> {
                     }
                 }
             }
-            (SpannedTyView::InferVar(lhs_var), _) => {
+            (TyKind::InferVar(lhs_var), _) => {
                 if let Ok(known_lhs) = self.types.lookup(lhs_var) {
-                    self.relate_ty_and_ty_inner(
-                        SpannedTy::new_maybe_saturated(known_lhs, lhs.own_span(), tcx),
-                        rhs,
-                        culprits,
-                        mode,
-                    );
-                } else if let Err(err) = self.relate_var_and_ty(lhs_var, rhs.value) {
+                    self.relate_ty_and_ty_inner(known_lhs, rhs, culprits, mode);
+                } else if let Err(err) = self.relate_var_and_ty(lhs_var, rhs) {
                     culprits.push(TyAndTyRelateCulprit::RecursiveType(err));
                 }
             }
-            (_, SpannedTyView::InferVar(rhs_var)) => {
+            (_, TyKind::InferVar(rhs_var)) => {
                 if let Ok(known_rhs) = self.types.lookup(rhs_var) {
-                    self.relate_ty_and_ty_inner(
-                        lhs,
-                        SpannedTy::new_maybe_saturated(known_rhs, rhs.own_span(), tcx),
-                        culprits,
-                        mode,
-                    );
-                } else if let Err(err) = self.relate_var_and_ty(rhs_var, lhs.value) {
+                    self.relate_ty_and_ty_inner(lhs, known_rhs, culprits, mode);
+                } else if let Err(err) = self.relate_var_and_ty(rhs_var, lhs) {
                     culprits.push(TyAndTyRelateCulprit::RecursiveType(err));
                 }
             }
@@ -474,22 +450,21 @@ impl<'tcx> InferCx<'tcx> {
 
     fn relate_dyn_trait_clauses_inner(
         &mut self,
-        lhs: SpannedTraitClauseList,
-        rhs: SpannedTraitClauseList,
+        lhs: TraitClauseList,
+        rhs: TraitClauseList,
         culprits: &mut Vec<TyAndTyRelateCulprit>,
         mode: RelationMode,
     ) {
         let s = self.session();
-        let tcx = self.tcx();
 
-        if lhs.len(s) != rhs.len(s) {
+        if lhs.r(s).len() != rhs.r(s).len() {
             culprits.push(TyAndTyRelateCulprit::ClauseLists(lhs, rhs));
             return;
         }
 
-        for (lhs_clause, rhs_clause) in lhs.iter(tcx).zip(rhs.iter(tcx)) {
-            match (lhs_clause.view(tcx), rhs_clause.view(tcx)) {
-                (SpannedTraitClauseView::Outlives(lhs), SpannedTraitClauseView::Outlives(rhs)) => {
+        for (&lhs_clause, &rhs_clause) in lhs.r(s).iter().zip(rhs.r(s)) {
+            match (lhs_clause, rhs_clause) {
+                (TraitClause::Outlives(lhs), TraitClause::Outlives(rhs)) => {
                     // Technically, `MyTrait + 'a + 'b: 'c` could imply either `'a: 'c` or
                     // `'b: 'c`, meaning that relating both would be unnecessary but this
                     // logic will produce constraints for both. This isn't a problem because
@@ -499,41 +474,30 @@ impl<'tcx> InferCx<'tcx> {
                         culprits.push(TyAndTyRelateCulprit::Regions(err));
                     }
                 }
-                (SpannedTraitClauseView::Trait(lhs), SpannedTraitClauseView::Trait(rhs))
-                    if lhs.value.def == rhs.value.def =>
-                {
-                    for (lhs, rhs) in lhs
-                        .view(tcx)
-                        .params
-                        .iter(tcx)
-                        .zip(rhs.view(tcx).params.iter(tcx))
-                    {
-                        match (lhs.view(tcx), rhs.view(tcx)) {
-                            (
-                                SpannedTraitParamView::Equals(lhs),
-                                SpannedTraitParamView::Equals(rhs),
-                            ) => match (lhs.view(tcx), rhs.view(tcx)) {
-                                (SpannedTyOrReView::Re(lhs), SpannedTyOrReView::Re(rhs)) => {
-                                    if let Err(err) =
-                                        self.relate_re_and_re(lhs, rhs, RelationMode::Equate)
-                                    {
-                                        culprits.push(TyAndTyRelateCulprit::Regions(err));
+                (TraitClause::Trait(lhs), TraitClause::Trait(rhs)) if lhs.def == rhs.def => {
+                    for (&lhs, &rhs) in lhs.params.r(s).iter().zip(rhs.params.r(s)) {
+                        match (lhs, rhs) {
+                            (TraitParam::Equals(lhs), TraitParam::Equals(rhs)) => {
+                                match (lhs, rhs) {
+                                    (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
+                                        if let Err(err) =
+                                            self.relate_re_and_re(lhs, rhs, RelationMode::Equate)
+                                        {
+                                            culprits.push(TyAndTyRelateCulprit::Regions(err));
+                                        }
                                     }
+                                    (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
+                                        self.relate_ty_and_ty_inner(
+                                            lhs,
+                                            rhs,
+                                            culprits,
+                                            RelationMode::Equate,
+                                        );
+                                    }
+                                    _ => unreachable!(),
                                 }
-                                (SpannedTyOrReView::Ty(lhs), SpannedTyOrReView::Ty(rhs)) => {
-                                    self.relate_ty_and_ty_inner(
-                                        lhs,
-                                        rhs,
-                                        culprits,
-                                        RelationMode::Equate,
-                                    );
-                                }
-                                _ => unreachable!(),
-                            },
-                            (
-                                SpannedTraitParamView::Unspecified(lhs),
-                                SpannedTraitParamView::Unspecified(rhs),
-                            ) => {
+                            }
+                            (TraitParam::Unspecified(lhs), TraitParam::Unspecified(rhs)) => {
                                 self.relate_dyn_trait_clauses_inner(
                                     lhs,
                                     rhs,
@@ -555,11 +519,7 @@ impl<'tcx> InferCx<'tcx> {
         }
     }
 
-    pub fn relate_ty_and_re(
-        &mut self,
-        lhs: SpannedTy,
-        rhs: SpannedRe,
-    ) -> Result<(), Box<TyAndReRelateError>> {
+    pub fn relate_ty_and_re(&mut self, lhs: Ty, rhs: Re) -> Result<(), Box<TyAndReRelateError>> {
         let mut fork = self.clone();
         let mut culprits = Vec::new();
 
@@ -575,45 +535,45 @@ impl<'tcx> InferCx<'tcx> {
     #[expect(clippy::vec_box)]
     fn relate_ty_and_re_inner(
         &mut self,
-        lhs: SpannedTy,
-        rhs: SpannedRe,
+        lhs: Ty,
+        rhs: Re,
         culprits: &mut Vec<Box<ReAndReRelateError>>,
     ) {
-        let tcx = self.tcx();
+        let s = self.session();
 
-        match lhs.view(tcx) {
-            SpannedTyView::This | SpannedTyView::ExplicitInfer => unreachable!(),
-            SpannedTyView::FnDef(_) | SpannedTyView::Simple(_) | SpannedTyView::Error(_) => {
+        match *lhs.r(s) {
+            TyKind::This | TyKind::ExplicitInfer => unreachable!(),
+            TyKind::FnDef(_) | TyKind::Simple(_) | TyKind::Error(_) => {
                 // (trivial)
             }
-            SpannedTyView::Reference(lhs, _muta, _pointee) => {
+            TyKind::Reference(lhs, _muta, _pointee) => {
                 // No need to relate the pointee since WF checks already ensure that it outlives
                 // `lhs`.
                 if let Err(err) = self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs) {
                     culprits.push(err);
                 }
             }
-            SpannedTyView::Adt(lhs) => {
+            TyKind::Adt(lhs) => {
                 // ADTs are bounded by which regions they mention.
-                for lhs in lhs.view(tcx).params.iter(tcx) {
-                    match lhs.view(tcx) {
-                        SpannedTyOrReView::Re(lhs) => {
+                for &lhs in lhs.params.r(s) {
+                    match lhs {
+                        TyOrRe::Re(lhs) => {
                             if let Err(err) =
                                 self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs)
                             {
                                 culprits.push(err);
                             }
                         }
-                        SpannedTyOrReView::Ty(lhs) => {
+                        TyOrRe::Ty(lhs) => {
                             self.relate_ty_and_re_inner(lhs, rhs, culprits);
                         }
                     }
                 }
             }
-            SpannedTyView::Trait(lhs) => {
-                for lhs in lhs.iter(tcx) {
-                    match lhs.view(tcx) {
-                        SpannedTraitClauseView::Outlives(lhs) => {
+            TyKind::Trait(lhs) => {
+                for &lhs in lhs.r(s) {
+                    match lhs {
+                        TraitClause::Outlives(lhs) => {
                             // There is guaranteed to be exactly one outlives constraint for a trait
                             // object so relating these constraints is sufficient to ensure that the
                             // object outlives the `rhs`.
@@ -623,25 +583,21 @@ impl<'tcx> InferCx<'tcx> {
                                 culprits.push(err);
                             }
                         }
-                        SpannedTraitClauseView::Trait(_) => {
+                        TraitClause::Trait(_) => {
                             // (if the outlives constraint says the trait is okay, it's okay)
                         }
                     }
                 }
             }
-            SpannedTyView::Tuple(lhs) => {
-                for lhs in lhs.iter(tcx) {
+            TyKind::Tuple(lhs) => {
+                for &lhs in lhs.r(s) {
                     self.relate_ty_and_re_inner(lhs, rhs, culprits);
                 }
             }
-            SpannedTyView::Universal(_) => todo!(),
-            SpannedTyView::InferVar(inf_lhs) => {
+            TyKind::Universal(_) => todo!(),
+            TyKind::InferVar(inf_lhs) => {
                 if let Ok(inf_lhs) = self.types.lookup(inf_lhs) {
-                    self.relate_ty_and_re_inner(
-                        SpannedTy::new_maybe_saturated(inf_lhs, lhs.own_span(), tcx),
-                        rhs,
-                        culprits,
-                    );
+                    self.relate_ty_and_re_inner(inf_lhs, rhs, culprits);
                 } else {
                     // Defer the check.
                     todo!();
@@ -845,12 +801,11 @@ impl ReInferTracker {
                         // user. That way, the only errors that can be produced originate from
                         // discovering new constraints beyond that.
                         for outlives in generic.r(s).clauses.iter(tcx) {
-                            let SpannedTraitClauseView::Outlives(outlives) = outlives.view(tcx)
-                            else {
+                            let TraitClause::Outlives(outlives) = outlives.value else {
                                 unreachable!()
                             };
 
-                            let Some(rhs) = self.region_to_idx(outlives.value, tcx) else {
+                            let Some(rhs) = self.region_to_idx(outlives, tcx) else {
                                 continue;
                             };
 

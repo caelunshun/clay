@@ -33,6 +33,8 @@ fn main(v: dyn Meow<()>) {
 
     u32 { _private: () };
 
+    <i32>::Foo;
+
     i32((), ());
 
     match foo {

@@ -27,7 +27,7 @@ use std::{convert::Infallible, ops::ControlFlow};
 pub struct CrateTypeckVisitor<'tcx> {
     pub tcx: &'tcx TyCtxt,
     pub coherence: &'tcx CoherenceMap,
-    pub self_ty: Option<SpannedTy>,
+    pub self_ty: Option<Ty>,
     pub clause_applies_to: Option<Ty>,
 }
 
@@ -107,9 +107,7 @@ impl CrateTypeckVisitor<'_> {
 
         let new_self_arg_spec = tcx.convert_trait_instance_to_spec(TraitInstance {
             def,
-            params: tcx
-                .convert_generic_binder_into_instance_args(Span::DUMMY, new_self_arg_binder)
-                .value,
+            params: tcx.convert_generic_binder_into_instance_args(new_self_arg_binder),
         });
 
         LateInit::init(
@@ -118,9 +116,6 @@ impl CrateTypeckVisitor<'_> {
                 tcx.intern_trait_clause_list(&[TraitClause::Trait(new_self_arg_spec)]),
             ),
         );
-
-        let new_self_ty =
-            SpannedTy::new_saturated(new_self_ty, def.r(s).item.r(s).name.unwrap().span, tcx);
 
         // Now, we can validate our trait body.
         let old_self_ty = self.self_ty.replace(new_self_ty);
@@ -135,7 +130,7 @@ impl CrateTypeckVisitor<'_> {
             } = def.r(s);
 
             // First, let's ensure that the inherited trait list is well-formed.
-            let old_clause_applies_to = self.clause_applies_to.replace(new_self_ty.value);
+            let old_clause_applies_to = self.clause_applies_to.replace(new_self_ty);
             self.visit_spanned_clause_list(**inherits)?;
             self.clause_applies_to = old_clause_applies_to;
 
@@ -158,7 +153,7 @@ impl CrateTypeckVisitor<'_> {
 
         // `Self` lexically refers to the target type quantified by some lexical set of universal
         // generic parameters.
-        let old_self_ty = self.self_ty.replace(item.r(s).target);
+        let old_self_ty = self.self_ty.replace(item.r(s).target.value);
         {
             let ImplItem {
                 item: _,
@@ -206,9 +201,7 @@ impl CrateTypeckVisitor<'_> {
 
         let new_self_ty = tcx.intern_ty(TyKind::Adt(AdtInstance {
             def,
-            params: tcx
-                .convert_generic_binder_into_instance_args(Span::DUMMY, new_binder)
-                .value,
+            params: tcx.convert_generic_binder_into_instance_args(new_binder),
         }));
 
         let mut new_self_ty_subst = SubstitutionFolder {
@@ -220,9 +213,6 @@ impl CrateTypeckVisitor<'_> {
         tcx.init_generic_binder_clauses_of_duplicate(def.r(s).generics, new_binder, |clauses| {
             new_self_ty_subst.fold_spanned_clause_list(clauses)
         });
-
-        let new_self_ty =
-            SpannedTy::new_saturated(new_self_ty, def.r(s).item.r(s).name.unwrap().span, tcx);
 
         // Now, WF-check the definition.
         let old_self_ty = self.self_ty.replace(new_self_ty);
@@ -380,9 +370,7 @@ impl CrateTypeckVisitor<'_> {
         // Replace `Self` for the bound `self_ty` in the input `params`.
         let mut input_subst = SubstitutionFolder {
             tcx,
-            self_ty: self
-                .self_ty
-                .map_or(tcx.intern_ty(TyKind::This), |v| v.value),
+            self_ty: self.self_ty.unwrap_or(tcx.intern_ty(TyKind::This)),
             substitution: None,
         };
 
@@ -420,7 +408,7 @@ impl CrateTypeckVisitor<'_> {
                         trait_subst.fold_spanned_clause_list(*requirements.r(s).clauses);
 
                     if let Err(err) = InferCx::new(tcx, self.coherence, InferCxMode::RegionAware)
-                        .relate_re_and_clause(actual, requirements)
+                        .relate_re_and_clause(actual.value, requirements.value)
                     {
                         Diag::span_err(
                             actual.own_span().unwrap(),
@@ -443,7 +431,7 @@ impl CrateTypeckVisitor<'_> {
                     }
 
                     if let Err(err) = InferCx::new(tcx, self.coherence, InferCxMode::RegionAware)
-                        .relate_ty_and_clause(actual, requirements)
+                        .relate_ty_and_clause(actual.value, requirements.value)
                     {
                         Diag::span_err(
                             actual.own_span().unwrap(),

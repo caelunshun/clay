@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        analysis::{Spanned, SpannedViewEncode},
+        analysis::Spanned,
         arena::{LateInit, Obj},
         syntax::Span,
     },
@@ -9,10 +9,8 @@ use crate::{
         analysis::{TyCtxt, TyVisitor, TyVisitorUnspanned, TyVisitorWalk},
         syntax::{
             AnyGeneric, GenericBinder, PosInBinder, Re, RegionGeneric, SpannedRe,
-            SpannedTraitClauseList, SpannedTraitInstance, SpannedTraitParamList,
-            SpannedTraitParamView, SpannedTraitSpec, SpannedTraitSpecView, SpannedTy,
-            SpannedTyOrReList, SpannedTyOrReView, SpannedTyView, TraitClause, TraitInstance,
-            TraitParam, TraitSpec, TyKind, TyOrRe, TypeGeneric,
+            SpannedTraitClauseList, SpannedTy, TraitClause, TraitClauseList, TraitInstance,
+            TraitParam, TraitSpec, TyKind, TyOrRe, TyOrReList, TypeGeneric,
         },
     },
     symbol,
@@ -121,58 +119,37 @@ impl TyCtxt {
 
     pub fn convert_generic_binder_into_instance_args(
         &self,
-        span: Span,
         binder: Obj<GenericBinder>,
-    ) -> SpannedTyOrReList {
+    ) -> TyOrReList {
         let s = &self.session;
 
-        SpannedTyOrReList::alloc_list(
-            span,
+        self.intern_ty_or_re_list(
             &binder
                 .r(s)
                 .defs
                 .iter()
                 .map(|generic| match generic {
-                    AnyGeneric::Re(generic) => SpannedTyOrReView::Re(
-                        Re::Universal(*generic).encode(generic.r(s).span, self),
-                    )
-                    .encode(generic.r(s).span, self),
-                    AnyGeneric::Ty(generic) => SpannedTyOrReView::Ty(
-                        SpannedTyView::Universal(*generic).encode(generic.r(s).span, self),
-                    )
-                    .encode(generic.r(s).span, self),
+                    AnyGeneric::Re(generic) => TyOrRe::Re(Re::Universal(*generic)),
+                    AnyGeneric::Ty(generic) => {
+                        TyOrRe::Ty(self.intern_ty(TyKind::Universal(*generic)))
+                    }
                 })
                 .collect::<Vec<_>>(),
-            self,
         )
     }
 
-    pub fn convert_spanned_trait_instance_to_spec(
-        &self,
-        instance: SpannedTraitInstance,
-    ) -> SpannedTraitSpec {
-        SpannedTraitSpecView {
-            def: instance.view(self).def,
-            params: SpannedTraitParamList::alloc_list(
-                instance.view(self).params.own_span().unwrap_or(Span::DUMMY),
+    pub fn convert_trait_instance_to_spec(&self, instance: TraitInstance) -> TraitSpec {
+        TraitSpec {
+            def: instance.def,
+            params: self.intern_trait_param_list(
                 &instance
-                    .view(self)
                     .params
-                    .iter(self)
-                    .map(|arg| {
-                        SpannedTraitParamView::Equals(arg)
-                            .encode(arg.own_span().unwrap_or(Span::DUMMY), self)
-                    })
+                    .r(&self.session)
+                    .iter()
+                    .map(|&arg| TraitParam::Equals(arg))
                     .collect::<Vec<_>>(),
-                self,
             ),
         }
-        .encode(instance.own_span().unwrap_or(Span::DUMMY), self)
-    }
-
-    pub fn convert_trait_instance_to_spec(&self, instance: TraitInstance) -> TraitSpec {
-        self.convert_spanned_trait_instance_to_spec(Spanned::new_unspanned(instance))
-            .value
     }
 
     pub fn mentioned_generics<B>(
@@ -192,7 +169,7 @@ impl TyCtxt {
         &self,
         generic: Obj<TypeGeneric>,
         mut binder: Option<&mut GenericBinder>,
-    ) -> SpannedTraitClauseList {
+    ) -> TraitClauseList {
         let s = &self.session;
 
         let generic = generic.r(s);
@@ -257,9 +234,6 @@ impl TyCtxt {
             .collect::<Vec<_>>();
 
         let clauses = self.intern_trait_clause_list(&clauses);
-
-        // TODO: Inherit spans
-        let clauses = Spanned::new_unspanned(clauses);
 
         LateInit::init(&generic.elaborated_clauses, clauses);
 

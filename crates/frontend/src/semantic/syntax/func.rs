@@ -66,9 +66,6 @@ pub enum PatKind {
     /// Ignore the destructure target.
     Hole,
 
-    /// Ignore the remainder of a structure.
-    Rest,
-
     /// Define a new local. Only available in defining patterns.
     NewName(Obj<FuncLocal>, Option<Obj<Pat>>),
 

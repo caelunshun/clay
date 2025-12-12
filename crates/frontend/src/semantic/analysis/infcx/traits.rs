@@ -11,10 +11,8 @@ use crate::{
         },
         syntax::{
             AnyGeneric, Crate, FnDef, GenericBinder, GenericSolveStep, ImplItem,
-            ListOfTraitClauseList, Re, RelationMode, SolidTyShape, SolidTyShapeKind, SpannedRe,
-            SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParamView,
-            SpannedTraitSpec, SpannedTy, SpannedTyOrReView, SpannedTyView, TraitClause, TraitParam,
-            TraitSpec, Ty, TyKind, TyOrRe, TyOrReList, TyShape,
+            ListOfTraitClauseList, Re, RelationMode, SolidTyShape, SolidTyShapeKind, TraitClause,
+            TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReList, TyShape,
         },
     },
 };
@@ -24,8 +22,8 @@ use index_vec::{IndexVec, define_index_type};
 
 #[derive(Debug, Clone)]
 pub struct TyAndClauseRelateError {
-    pub lhs: SpannedTy,
-    pub rhs: SpannedTraitClauseList,
+    pub lhs: Ty,
+    pub rhs: TraitClauseList,
     pub errors: Vec<(u32, TyAndSingleClauseRelateError)>,
     pub had_ambiguity: bool,
 }
@@ -38,8 +36,8 @@ pub enum TyAndSingleClauseRelateError {
 
 #[derive(Debug, Clone)]
 pub struct ReAndClauseRelateError {
-    pub lhs: SpannedRe,
-    pub rhs: SpannedTraitClauseList,
+    pub lhs: Re,
+    pub rhs: TraitClauseList,
     pub errors: Vec<(u32, ReAndReRelateError)>,
 }
 
@@ -52,8 +50,8 @@ pub enum TyAndTraitRelateResolution {
 
 #[derive(Debug, Clone)]
 pub struct TyAndTraitRelateError {
-    pub lhs: SpannedTy,
-    pub rhs: SpannedTraitSpec,
+    pub lhs: Ty,
+    pub rhs: TraitSpec,
     pub resolutions: Vec<TyAndImplResolution>,
     pub rejections: Vec<Box<TyAndImplRelateError>>,
     pub had_ambiguity: bool,
@@ -67,7 +65,7 @@ pub struct TyAndImplResolution {
 
 #[derive(Debug, Clone)]
 pub struct TyAndImplRelateError {
-    pub lhs: SpannedTy,
+    pub lhs: Ty,
     pub rhs: Obj<ImplItem>,
     pub bad_target: Option<Box<TyAndTyRelateError>>,
     pub bad_trait_args: Vec<(u32, TyAndTraitArgRelateError)>,
@@ -441,10 +439,10 @@ impl<'tcx> InferCx<'tcx> {
 
     pub fn relate_ty_and_clause(
         &mut self,
-        lhs: SpannedTy,
-        rhs: SpannedTraitClauseList,
+        lhs: Ty,
+        rhs: TraitClauseList,
     ) -> Result<(), Box<TyAndClauseRelateError>> {
-        let tcx = self.tcx();
+        let s = self.session();
 
         let mut fork = self.clone();
 
@@ -455,16 +453,16 @@ impl<'tcx> InferCx<'tcx> {
             had_ambiguity: false,
         };
 
-        for (idx, clause) in rhs.iter(tcx).enumerate() {
-            match clause.view(tcx) {
-                SpannedTraitClauseView::Outlives(rhs) => {
+        for (idx, &clause) in rhs.r(s).iter().enumerate() {
+            match clause {
+                TraitClause::Outlives(rhs) => {
                     if let Err(err) = fork.relate_ty_and_re(lhs, rhs) {
                         error
                             .errors
                             .push((idx as u32, TyAndSingleClauseRelateError::Outlives(err)));
                     }
                 }
-                SpannedTraitClauseView::Trait(rhs) => {
+                TraitClause::Trait(rhs) => {
                     if let Err(err) = fork.relate_ty_and_trait(lhs, rhs) {
                         error.had_ambiguity |= err.had_ambiguity;
                         error
@@ -486,22 +484,22 @@ impl<'tcx> InferCx<'tcx> {
 
     pub fn relate_re_and_clause(
         &mut self,
-        lhs: SpannedRe,
-        rhs: SpannedTraitClauseList,
+        lhs: Re,
+        rhs: TraitClauseList,
     ) -> Result<(), Box<ReAndClauseRelateError>> {
-        let tcx = self.tcx();
+        let s = self.session();
 
         let mut errors = Vec::new();
         let mut fork = self.clone();
 
-        for clause in rhs.iter(tcx) {
-            match clause.view(tcx) {
-                SpannedTraitClauseView::Outlives(rhs) => {
+        for &clause in rhs.r(s) {
+            match clause {
+                TraitClause::Outlives(rhs) => {
                     if let Err(err) = fork.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs) {
                         errors.push(err);
                     }
                 }
-                SpannedTraitClauseView::Trait(_) => {
+                TraitClause::Trait(_) => {
                     unreachable!()
                 }
             }
@@ -522,22 +520,21 @@ impl<'tcx> InferCx<'tcx> {
 
     pub fn relate_ty_and_trait(
         &mut self,
-        lhs: SpannedTy,
-        rhs: SpannedTraitSpec,
+        lhs: Ty,
+        rhs: TraitSpec,
     ) -> Result<TyAndTraitRelateResolution, Box<TyAndTraitRelateError>> {
         let tcx = self.tcx();
         let s = self.session();
 
         // See whether the type itself can provide the implementation.
-        match self.peel_ty_var(lhs).view(tcx) {
-            SpannedTyView::Trait(clauses) => {
+        match *self.peel_ty_var(lhs).r(s) {
+            TyKind::Trait(clauses) => {
                 todo!()
             }
-            SpannedTyView::Universal(generic) => {
-                match self.relate_clause_and_trait(
-                    tcx.elaborate_generic_clauses(generic, None),
-                    rhs.value,
-                ) {
+            TyKind::Universal(generic) => {
+                match self
+                    .relate_clause_and_trait(tcx.elaborate_generic_clauses(generic, None), rhs)
+                {
                     Ok(()) => {
                         return Ok(TyAndTraitRelateResolution::Inherent);
                     }
@@ -562,7 +559,7 @@ impl<'tcx> InferCx<'tcx> {
 
         let mut accepted_fork = None;
 
-        for candidate in self.gather_impl_candidates(lhs.value, rhs.value) {
+        for candidate in self.gather_impl_candidates(lhs, rhs) {
             let mut fork = self.clone();
 
             match fork.relate_ty_and_impl_no_fork(lhs, candidate, rhs) {
@@ -632,9 +629,9 @@ impl<'tcx> InferCx<'tcx> {
 
     fn relate_ty_and_impl_no_fork(
         &mut self,
-        lhs: SpannedTy,
+        lhs: Ty,
         rhs: Obj<ImplItem>,
-        spec: SpannedTraitSpec,
+        spec: TraitSpec,
     ) -> Result<TyAndImplResolution, Box<TyAndImplRelateError>> {
         let s = self.session();
         let tcx = self.tcx();
@@ -653,60 +650,44 @@ impl<'tcx> InferCx<'tcx> {
         let rhs_fresh = self.instantiate_fresh_impl_vars(rhs);
 
         // See whether our target type can even match this `impl` block.
-        if let Err(err) = self.relate_ty_and_ty(
-            lhs,
-            // We don't really care about the spans of types outside our main body so this is
-            // okay for diagnostics.
-            SpannedTy::new_unspanned(rhs_fresh.target),
-            RelationMode::Equate,
-        ) {
+        if let Err(err) = self.relate_ty_and_ty(lhs, rhs_fresh.target, RelationMode::Equate) {
             error.bad_target = Some(err);
         }
 
         // See whether our specific target trait clauses can be covered by the inferred
         // generics. We only check the regular generics at this stage since associated types are
         // defined entirely from our solved regular generics.
-        for (idx, (&instance, required_param)) in rhs_fresh
+        for (idx, (&instance, &required_param)) in rhs_fresh
             .trait_
             .r(s)
             .iter()
-            .zip(spec.view(tcx).params.iter(tcx))
-            .take(spec.value.def.r(s).regular_generic_count as usize)
+            .zip(spec.params.r(s))
+            .take(spec.def.r(s).regular_generic_count as usize)
             .enumerate()
         {
-            match required_param.view(tcx) {
-                SpannedTraitParamView::Equals(required) => {
-                    match (instance, required.view(tcx)) {
-                        (TyOrRe::Re(instance), SpannedTyOrReView::Re(required)) => {
-                            if let Err(err) = self.relate_re_and_re(
-                                // We don't really care about the spans of types outside our main body
-                                // so this is okay for diagnostics.
-                                SpannedRe::new_unspanned(instance),
-                                required,
-                                RelationMode::Equate,
-                            ) {
-                                error
-                                    .bad_trait_args
-                                    .push((idx as u32, TyAndTraitArgRelateError::Re(err)));
-                            }
+            match required_param {
+                TraitParam::Equals(required) => match (instance, required) {
+                    (TyOrRe::Re(instance), TyOrRe::Re(required)) => {
+                        if let Err(err) =
+                            self.relate_re_and_re(instance, required, RelationMode::Equate)
+                        {
+                            error
+                                .bad_trait_args
+                                .push((idx as u32, TyAndTraitArgRelateError::Re(err)));
                         }
-                        (TyOrRe::Ty(instance), SpannedTyOrReView::Ty(required)) => {
-                            if let Err(err) = self.relate_ty_and_ty(
-                                // We don't really care about the spans of types outside our main body
-                                // so this is okay for diagnostics.
-                                SpannedTy::new_unspanned(instance),
-                                required,
-                                RelationMode::Equate,
-                            ) {
-                                error
-                                    .bad_trait_args
-                                    .push((idx as u32, TyAndTraitArgRelateError::Ty(err)));
-                            }
-                        }
-                        _ => unreachable!(),
                     }
-                }
-                SpannedTraitParamView::Unspecified(_) => {
+                    (TyOrRe::Ty(instance), TyOrRe::Ty(required)) => {
+                        if let Err(err) =
+                            self.relate_ty_and_ty(instance, required, RelationMode::Equate)
+                        {
+                            error
+                                .bad_trait_args
+                                .push((idx as u32, TyAndTraitArgRelateError::Ty(err)));
+                        }
+                    }
+                    _ => unreachable!(),
+                },
+                TraitParam::Unspecified(_) => {
                     unreachable!()
                 }
             }
@@ -730,13 +711,7 @@ impl<'tcx> InferCx<'tcx> {
 
                 match var {
                     TyOrRe::Re(re) => {
-                        if let Err(err) = self.relate_re_and_clause(
-                            // We don't really care about the spans of types outside our main body
-                            // so this is okay for diagnostics.
-                            SpannedRe::new_unspanned(re),
-                            // Same here.
-                            SpannedTraitClauseList::new_unspanned(clause),
-                        ) {
+                        if let Err(err) = self.relate_re_and_clause(re, clause) {
                             error.bad_trait_clauses.push(TyAndImplGenericClauseError {
                                 step: infer_step,
                                 error: TyAndImplGenericClauseErrorKind::Re(err),
@@ -744,13 +719,7 @@ impl<'tcx> InferCx<'tcx> {
                         }
                     }
                     TyOrRe::Ty(ty) => {
-                        if let Err(err) = self.relate_ty_and_clause(
-                            // We don't really care about the spans of types outside our main body
-                            // so this is okay for diagnostics.
-                            SpannedTy::new_unspanned(ty),
-                            // Same here.
-                            SpannedTraitClauseList::new_unspanned(clause),
-                        ) {
+                        if let Err(err) = self.relate_ty_and_clause(ty, clause) {
                             error.had_ambiguity |= err.had_ambiguity;
                             error.bad_trait_clauses.push(TyAndImplGenericClauseError {
                                 step: infer_step,
@@ -762,38 +731,34 @@ impl<'tcx> InferCx<'tcx> {
             }
 
             // See whether the user-supplied associated type constraints match what we inferred.
-            for (idx, (&instance_ty, required_param)) in rhs_fresh
+            for (idx, (&instance_ty, &required_param)) in rhs_fresh
                 .trait_
                 .r(s)
                 .iter()
-                .zip(spec.view(tcx).params.iter(tcx))
+                .zip(spec.params.r(s))
                 .enumerate()
-                .skip(spec.value.def.r(s).regular_generic_count as usize)
+                .skip(spec.def.r(s).regular_generic_count as usize)
             {
                 // Associated types are never regions.
                 let instance_ty = instance_ty.unwrap_ty();
 
-                match required_param.view(tcx) {
-                    SpannedTraitParamView::Equals(required_ty) => {
-                        let SpannedTyOrReView::Ty(required_ty) = required_ty.view(tcx) else {
+                match required_param {
+                    TraitParam::Equals(required_ty) => {
+                        let TyOrRe::Ty(required_ty) = required_ty else {
                             unreachable!()
                         };
 
-                        if let Err(err) = self.relate_ty_and_ty(
-                            SpannedTy::new_unspanned(instance_ty),
-                            required_ty,
-                            RelationMode::Equate,
-                        ) {
+                        if let Err(err) =
+                            self.relate_ty_and_ty(instance_ty, required_ty, RelationMode::Equate)
+                        {
                             error
                                 .bad_trait_assoc_types
                                 .push((idx as u32, TyAndImplAssocRelateError::TyAndTy(err)));
                         }
                     }
-                    SpannedTraitParamView::Unspecified(additional_clauses) => {
-                        if let Err(err) = self.relate_ty_and_clause(
-                            SpannedTy::new_unspanned(instance_ty),
-                            additional_clauses,
-                        ) {
+                    TraitParam::Unspecified(additional_clauses) => {
+                        if let Err(err) = self.relate_ty_and_clause(instance_ty, additional_clauses)
+                        {
                             error.had_ambiguity |= err.had_ambiguity;
                             error
                                 .bad_trait_assoc_types
@@ -822,64 +787,54 @@ impl<'tcx> InferCx<'tcx> {
 
     fn relate_clause_and_trait(
         &mut self,
-        lhs_elaborated: SpannedTraitClauseList,
+        lhs_elaborated: TraitClauseList,
         rhs: TraitSpec,
     ) -> Result<(), RelateClauseAndTraitError> {
         let s = self.session();
-        let tcx = self.tcx();
 
         // Find the clause that could prove our trait.
-        let lhs = lhs_elaborated.iter(tcx).find(|clause| match clause.value {
-            TraitClause::Outlives(_) => false,
-            TraitClause::Trait(lhs) => lhs.def == rhs.def,
-        });
+        let lhs = lhs_elaborated
+            .r(s)
+            .iter()
+            .copied()
+            .find(|&clause| match clause {
+                TraitClause::Outlives(_) => false,
+                TraitClause::Trait(lhs) => lhs.def == rhs.def,
+            });
 
         let Some(lhs) = lhs else {
             return Err(RelateClauseAndTraitError {});
         };
 
-        let SpannedTraitClauseView::Trait(lhs) = lhs.view(tcx) else {
+        let TraitClause::Trait(lhs) = lhs else {
             unreachable!()
         };
 
         let mut fork = self.clone();
 
-        for (lhs_param, &rhs_param) in lhs.view(tcx).params.iter(tcx).zip(rhs.params.r(s)) {
-            let SpannedTraitParamView::Equals(lhs) = lhs_param.view(tcx) else {
+        for (&lhs_param, &rhs_param) in lhs.params.r(s).iter().zip(rhs.params.r(s)) {
+            let TraitParam::Equals(lhs) = lhs_param else {
                 unreachable!();
             };
 
             match rhs_param {
-                TraitParam::Equals(rhs) => match (lhs.view(tcx), rhs) {
-                    (SpannedTyOrReView::Re(lhs), TyOrRe::Re(rhs)) => {
-                        if let Err(_err) = fork.relate_re_and_re(
-                            lhs,
-                            SpannedRe::new_unspanned(rhs),
-                            RelationMode::Equate,
-                        ) {
+                TraitParam::Equals(rhs) => match (lhs, rhs) {
+                    (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
+                        if let Err(_err) = fork.relate_re_and_re(lhs, rhs, RelationMode::Equate) {
                             return Err(RelateClauseAndTraitError);
                         }
                     }
-                    (SpannedTyOrReView::Ty(lhs), TyOrRe::Ty(rhs)) => {
-                        if let Err(_err) = fork.relate_ty_and_ty(
-                            lhs,
-                            SpannedTy::new_unspanned(rhs),
-                            RelationMode::Equate,
-                        ) {
+                    (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
+                        if let Err(_err) = fork.relate_ty_and_ty(lhs, rhs, RelationMode::Equate) {
                             return Err(RelateClauseAndTraitError);
                         }
                     }
                     _ => unreachable!(),
                 },
                 TraitParam::Unspecified(rhs_clauses) => {
-                    let SpannedTyOrReView::Ty(lhs) = lhs.view(tcx) else {
-                        unreachable!()
-                    };
+                    let TyOrRe::Ty(lhs) = lhs else { unreachable!() };
 
-                    if let Err(_err) = fork.relate_ty_and_clause(
-                        lhs,
-                        SpannedTraitClauseList::new_unspanned(rhs_clauses),
-                    ) {
+                    if let Err(_err) = fork.relate_ty_and_clause(lhs, rhs_clauses) {
                         return Err(RelateClauseAndTraitError);
                     }
                 }

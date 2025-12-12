@@ -394,7 +394,7 @@ pub struct TypeGeneric {
     /// The first element of the `elaborated_clauses` will always be an outlives constraint and
     /// there will always be exactly one such clause.
     #[derive_where(skip)]
-    pub elaborated_clauses: LateInit<SpannedTraitClauseList>,
+    pub elaborated_clauses: LateInit<TraitClauseList>,
 
     /// Whether this generic was implicitly created rather than defined explicitly by the user.
     pub is_synthetic: bool,
