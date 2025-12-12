@@ -1,20 +1,18 @@
 use crate::{
-    base::{Session, analysis::SpannedViewEncode, arena::Obj},
+    base::{Session, arena::Obj},
     semantic::{
-        analysis::{CrateTypeckVisitor, InferCx, TyCtxt, TyVisitor},
+        analysis::{CrateTypeckVisitor, TyCtxt, TyVisitor},
         syntax::{
-            Block, Expr, ExprKind, FnDef, FuncLocal, SpannedTy, SpannedTyList, SpannedTyView,
-            TyKind,
+            Block, Divergence, Expr, ExprKind, FnDef, FuncLocal, GenericBinder, Pat, Re,
+            SpannedTyOrReList, Ty, TyAndDivergence, TyKind,
         },
     },
-    utils::hash::FxHashMap,
 };
 use std::{convert::Infallible, ops::ControlFlow};
 
 impl CrateTypeckVisitor<'_> {
     pub fn visit_fn_def(&mut self, def: Obj<FnDef>) -> ControlFlow<Infallible> {
         let s = self.session();
-        let tcx = self.tcx();
 
         // WF-check the signature.
         self.visit_generic_binder(def.r(s).generics)?;
@@ -37,42 +35,63 @@ impl CrateTypeckVisitor<'_> {
     }
 }
 
-pub struct FnCtxt<'tcx> {
-    icx: InferCx<'tcx>,
-    local_types: FxHashMap<Obj<FuncLocal>, SpannedTy>,
-    pre_coerce_expr_types: FxHashMap<Obj<Expr>, SpannedTy>,
-}
+// === Body Walking === //
 
-impl<'tcx> FnCtxt<'tcx> {
-    pub fn session(&self) -> &'tcx Session {
-        self.icx.session()
+pub trait TyCheckPhase<'tcx> {
+    // === Context === //
+
+    fn tcx(&self) -> &'tcx TyCtxt;
+
+    fn session(&self) -> &'tcx Session {
+        &self.tcx().session
     }
 
-    pub fn tcx(&self) -> &'tcx TyCtxt {
-        self.icx.tcx()
-    }
+    // === Inference === //
 
-    fn check_block(&mut self, block: Obj<Block>) -> SpannedTy {
-        let s = self.icx.session();
+    /// Obtains a fresh region for inference.
+    fn fresh_re(&mut self) -> Re;
 
-        todo!()
-    }
+    /// Normalizes inference variables to their known types.
+    fn reveal_ty(&mut self, ty: Ty) -> Ty;
 
-    fn check_exprs_with_equate(
+    /// Obtains a local's type inference variable.
+    fn local_ty(&mut self, local: Obj<FuncLocal>) -> Ty;
+
+    /// Type-checks a collection of expressions, ensuring they all have the same type and that they
+    /// can be coerced to meet a given demand. Returns the type of the expression after coercion.
+    fn check_expr(
         &mut self,
-        expr: impl IntoIterator<Item = Obj<Expr>>,
-        demand: Option<SpannedTy>,
-    ) -> SpannedTy {
-        todo!()
+        exprs: impl IntoIterator<Item = Obj<Expr>>,
+        demand: Option<Ty>,
+    ) -> TyAndDivergence;
+
+    /// Type-checks a block and ensures it can be coerced into the demand type. Returns the type of
+    /// the block after the coercion.
+    fn check_block(&mut self, block: Obj<Block>, demand: Option<Ty>) -> TyAndDivergence;
+
+    /// Check that a type is well-formed as soon as possible.
+    fn queue_wf(&mut self, ty: Ty);
+
+    /// Check that a generic parameter list is well-formed as soon as possible.
+    fn queue_wf_binder(&mut self, args: SpannedTyOrReList, binder: Obj<GenericBinder>);
+
+    // === Visitation === //
+
+    /// Walks a block, making demands of other blocks and expressions.
+    fn visit_block(&mut self, block: Obj<Block>) -> TyAndDivergence {
+        todo!();
     }
 
-    fn check_expr(&mut self, expr: Obj<Expr>) -> SpannedTy {
+    /// Walks an expression, making demands of other blocks and expressions.
+    fn visit_expr(&mut self, expr: Obj<Expr>) -> TyAndDivergence {
         let s = self.session();
         let tcx = self.tcx();
 
-        let pre_coerce_expr_ty = match &*expr.r(s).kind {
+        let mut divergence = Divergence::MayDiverge;
+
+        let ty = match &*expr.r(s).kind {
             ExprKind::Array(elems) => {
-                let elem_ty = self.check_exprs_with_equate(elems.r(s).iter().copied(), None);
+                let elem_ty = self.check_expr(elems.r(s).iter().copied(), None);
 
                 todo!();
             }
@@ -82,16 +101,15 @@ impl<'tcx> FnCtxt<'tcx> {
                 generics,
                 args,
             } => todo!(),
-            ExprKind::Tuple(elems) => {
-                let elems = elems
-                    .r(s)
-                    .iter()
-                    .map(|elem| self.check_expr(*elem))
-                    .collect::<Vec<_>>();
-
-                SpannedTyView::Tuple(SpannedTyList::alloc_list(expr.r(s).span, &elems, tcx))
-                    .encode(expr.r(s).span, tcx)
-            }
+            ExprKind::Tuple(elems) => tcx.intern_ty(TyKind::Tuple(
+                tcx.intern_ty_list(
+                    &elems
+                        .r(s)
+                        .iter()
+                        .map(|elem| divergence.and_do(self.check_expr([*elem], None)))
+                        .collect::<Vec<_>>(),
+                ),
+            )),
             ExprKind::Let(pat, scrutinee) => todo!(),
             ExprKind::Binary(op, lhs, rhs) => todo!(),
             ExprKind::Unary(ast_un_op_kind, obj) => todo!(),
@@ -114,7 +132,7 @@ impl<'tcx> FnCtxt<'tcx> {
             ExprKind::ForLoop { pat, iter, body } => todo!(),
             ExprKind::Match(scrutinee, arms) => todo!(),
             ExprKind::Loop(block) => todo!(),
-            ExprKind::Block(block) => self.check_block(*block),
+            ExprKind::Block(block) => divergence.and_do(self.check_block(*block, None)),
             ExprKind::Assign(lhs, rhs) => todo!(),
             ExprKind::AssignOp(op, lhs, rhs) => todo!(),
             ExprKind::Field(obj, ident) => todo!(),
@@ -127,27 +145,23 @@ impl<'tcx> FnCtxt<'tcx> {
             ExprKind::Index(obj, obj1) => todo!(),
             ExprKind::Range(range) => todo!(),
             ExprKind::LocalSelf => todo!(),
-            ExprKind::Local(local) => self.local_types[local],
-            ExprKind::AddrOf(mutability, pointee) => {
-                SpannedTy::new_unspanned(tcx.intern_ty(TyKind::Reference(
-                    self.icx.fresh_re(),
-                    *mutability,
-                    self.check_expr(*pointee).value,
-                )))
-            }
+            ExprKind::Local(local) => self.local_ty(*local),
+            ExprKind::AddrOf(mutability, pointee) => tcx.intern_ty(TyKind::Reference(
+                self.fresh_re(),
+                *mutability,
+                divergence.and_do(self.check_expr([*pointee], None)),
+            )),
             ExprKind::Break { label, expr } => todo!(),
             ExprKind::Continue { label } => todo!(),
             ExprKind::Return(obj) => todo!(),
             ExprKind::Struct(obj) => todo!(),
-            ExprKind::Error(error_guaranteed) => todo!(),
+            ExprKind::Error(err) => tcx.intern_ty(TyKind::Error(*err)),
         };
 
-        debug_assert!(
-            self.pre_coerce_expr_types
-                .insert(expr, pre_coerce_expr_ty)
-                .is_none()
-        );
+        TyAndDivergence { ty, divergence }
+    }
 
-        pre_coerce_expr_ty
+    fn demanded_pat_ty(&mut self, pat: Obj<Pat>) -> Ty {
+        todo!()
     }
 }

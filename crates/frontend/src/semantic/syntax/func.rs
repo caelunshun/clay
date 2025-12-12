@@ -10,9 +10,10 @@ use crate::{
     },
     semantic::syntax::{
         AdtCtorInstance, GenericBinder, ImplItem, Item, Mutability, SpannedTraitInstance,
-        SpannedTy, SpannedTyOrRe, SpannedTyOrReList,
+        SpannedTy, SpannedTyOrRe, SpannedTyOrReList, Ty,
     },
 };
+use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 
 // === FuncItem === //
 
@@ -250,4 +251,65 @@ pub struct MatchArm {
     pub pat: Obj<Pat>,
     pub guard: Option<Obj<Expr>>,
     pub body: Obj<Expr>,
+}
+
+// === Divergence === //
+
+#[derive(Debug, Copy, Clone)]
+pub struct TyAndDivergence {
+    pub ty: Ty,
+    pub divergence: Divergence,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum Divergence {
+    MustDiverge,
+    MayDiverge,
+}
+
+impl Divergence {
+    pub fn and_do(&mut self, other: TyAndDivergence) -> Ty {
+        *self &= other.divergence;
+        other.ty
+    }
+}
+
+impl BitOr for Divergence {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Divergence::MustDiverge, Divergence::MustDiverge) => Divergence::MustDiverge,
+            _ => Divergence::MayDiverge,
+        }
+    }
+}
+
+impl BitOrAssign for Divergence {
+    fn bitor_assign(&mut self, rhs: Self) {
+        *self = *self | rhs;
+    }
+}
+
+impl BitAnd for Divergence {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Divergence::MayDiverge, Divergence::MayDiverge) => Divergence::MayDiverge,
+            _ => Divergence::MustDiverge,
+        }
+    }
+}
+
+impl BitAndAssign for Divergence {
+    fn bitand_assign(&mut self, rhs: Self) {
+        *self = *self & rhs;
+    }
+}
+
+impl Divergence {
+    pub fn must_diverge(self) -> bool {
+        matches!(self, Self::MustDiverge)
+    }
 }
