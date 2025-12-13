@@ -16,7 +16,7 @@ use bit_set::BitSet;
 use disjoint::DisjointSetVec;
 use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
-use std::{convert::Infallible, ops::ControlFlow};
+use std::{convert::Infallible, mem, ops::ControlFlow};
 
 // === Errors === //
 
@@ -346,33 +346,33 @@ impl<'tcx> InferCx<'tcx> {
                         self.relate_ty_and_ty_inner(lhs_ty, rhs_ty, culprits, mode);
                     }
                     (Ok(lhs_ty), Err(rhs_root)) => {
-                        if let Err(err) = self.relate_var_and_ty(rhs_root, lhs_ty) {
+                        if let Err(err) = self.relate_var_and_non_var_ty(rhs_root, lhs_ty) {
                             culprits.push(TyAndTyRelateCulprit::RecursiveType(err));
                         }
                     }
                     (Err(lhs_root), Ok(rhs_ty)) => {
-                        if let Err(err) = self.relate_var_and_ty(lhs_root, rhs_ty) {
+                        if let Err(err) = self.relate_var_and_non_var_ty(lhs_root, rhs_ty) {
                             culprits.push(TyAndTyRelateCulprit::RecursiveType(err));
                         }
                     }
                     (Err(_), Err(_)) => {
                         // Cannot fail occurs check because neither type structurally includes the
                         // other.
-                        self.types.union_unrelated(lhs_var, rhs_var);
+                        self.types.union_unrelated_floating(lhs_var, rhs_var);
                     }
                 }
             }
             (TyKind::InferVar(lhs_var), _) => {
                 if let Ok(known_lhs) = self.types.lookup(lhs_var) {
                     self.relate_ty_and_ty_inner(known_lhs, rhs, culprits, mode);
-                } else if let Err(err) = self.relate_var_and_ty(lhs_var, rhs) {
+                } else if let Err(err) = self.relate_var_and_non_var_ty(lhs_var, rhs) {
                     culprits.push(TyAndTyRelateCulprit::RecursiveType(err));
                 }
             }
             (_, TyKind::InferVar(rhs_var)) => {
                 if let Ok(known_rhs) = self.types.lookup(rhs_var) {
                     self.relate_ty_and_ty_inner(lhs, known_rhs, culprits, mode);
-                } else if let Err(err) = self.relate_var_and_ty(rhs_var, lhs) {
+                } else if let Err(err) = self.relate_var_and_non_var_ty(rhs_var, lhs) {
                     culprits.push(TyAndTyRelateCulprit::RecursiveType(err));
                 }
             }
@@ -389,7 +389,7 @@ impl<'tcx> InferCx<'tcx> {
         }
     }
 
-    pub fn relate_var_and_ty(
+    pub fn relate_var_and_non_var_ty(
         &mut self,
         lhs_var_root: InferTyVar,
         rhs_ty: Ty,
@@ -443,7 +443,7 @@ impl<'tcx> InferCx<'tcx> {
             });
         }
 
-        self.types.assign(lhs_var_root, rhs_ty);
+        self.types.assign_floating_to_non_var(lhs_var_root, rhs_ty);
 
         Ok(())
     }
@@ -609,44 +609,130 @@ impl<'tcx> InferCx<'tcx> {
     pub fn wf_ty(&mut self, ty: SpannedTy) {
         todo!()
     }
+
+    pub fn observe_ty_var(&mut self, var: InferTyVar) {
+        self.types.observe(var);
+    }
+
+    pub fn ty_var_reveal_order(&self) -> &[InferTyVar] {
+        self.types.observed_reveal_order()
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TyVarObserver {
+    next_idx: usize,
+}
+
+impl TyVarObserver {
+    pub fn next(&mut self, icx: &mut InferCx<'_>) -> Option<InferTyVar> {
+        let next = icx.ty_var_reveal_order().get(self.next_idx).copied()?;
+        self.next_idx += 1;
+        Some(next)
+    }
 }
 
 // === TyInferTracker === //
 
 #[derive(Debug, Clone, Default)]
 pub struct TyInferTracker {
-    disjoint: DisjointSetVec<Option<Ty>>,
+    disjoint: DisjointSetVec<DisjointTyInferNode>,
+    observed_reveal_order: Vec<InferTyVar>,
+}
+
+#[derive(Debug, Clone)]
+struct DisjointTyInferNode {
+    root: Option<DisjointTyInferRoot>,
+    is_observed: bool,
+}
+
+#[derive(Debug, Clone)]
+enum DisjointTyInferRoot {
+    KnownRoot(Ty),
+    InferRoot(Vec<InferTyVar>),
 }
 
 impl TyInferTracker {
     pub fn fresh(&mut self) -> InferTyVar {
         let var = InferTyVar(self.disjoint.len() as u32);
-        self.disjoint.push(None);
+        self.disjoint.push(DisjointTyInferNode {
+            root: Some(DisjointTyInferRoot::InferRoot(Vec::new())),
+            is_observed: false,
+        });
         var
+    }
+
+    pub fn observe(&mut self, var: InferTyVar) {
+        if mem::replace(&mut self.disjoint[var.0 as usize].is_observed, true) {
+            return;
+        }
+
+        let root_var = self.disjoint.root_of(var.0 as usize);
+
+        match self.disjoint[root_var].root.as_mut().unwrap() {
+            DisjointTyInferRoot::KnownRoot(_) => {
+                self.observed_reveal_order.push(var);
+            }
+            DisjointTyInferRoot::InferRoot(observed) => {
+                observed.push(var);
+            }
+        }
+    }
+
+    pub fn observed_reveal_order(&self) -> &[InferTyVar] {
+        &self.observed_reveal_order
     }
 
     pub fn lookup(&self, var: InferTyVar) -> Result<Ty, InferTyVar> {
         let root_var = self.disjoint.root_of(var.0 as usize);
 
-        self.disjoint[root_var].ok_or(InferTyVar(root_var as u32))
+        match self.disjoint[root_var].root.as_ref().unwrap() {
+            &DisjointTyInferRoot::KnownRoot(ty) => Ok(ty),
+            DisjointTyInferRoot::InferRoot(_) => Err(InferTyVar(root_var as u32)),
+        }
     }
 
-    pub fn assign(&mut self, var: InferTyVar, ty: Ty) {
+    pub fn assign_floating_to_non_var(&mut self, var: InferTyVar, ty: Ty) {
         let root_idx = self.disjoint.root_of(var.0 as usize);
-        let root = &mut self.disjoint[root_idx];
+        let root = self.disjoint[root_idx].root.as_mut().unwrap();
 
-        debug_assert!(root.is_none());
+        let DisjointTyInferRoot::InferRoot(observed) = root else {
+            unreachable!();
+        };
 
-        *root = Some(ty);
+        self.observed_reveal_order.extend_from_slice(observed);
+        *root = DisjointTyInferRoot::KnownRoot(ty);
     }
 
-    pub fn union_unrelated(&mut self, lhs: InferTyVar, rhs: InferTyVar) {
-        let lhs_ty = self.lookup(lhs).ok();
-        let rhs_ty = self.lookup(rhs).ok();
+    pub fn union_unrelated_floating(&mut self, lhs: InferTyVar, rhs: InferTyVar) {
+        let lhs_root = self.disjoint.root_of(lhs.0 as usize);
+        let rhs_root = self.disjoint.root_of(rhs.0 as usize);
 
-        debug_assert!(lhs_ty.is_none() && rhs_ty.is_none());
+        if lhs_root == rhs_root {
+            return;
+        }
+
+        let lhs_root = self.disjoint[lhs_root].root.take().unwrap();
+        let rhs_root = self.disjoint[rhs_root].root.take().unwrap();
+
+        let (
+            DisjointTyInferRoot::InferRoot(mut lhs_observed),
+            DisjointTyInferRoot::InferRoot(mut rhs_observed),
+        ) = (lhs_root, rhs_root)
+        else {
+            unreachable!()
+        };
 
         self.disjoint.join(lhs.0 as usize, rhs.0 as usize);
+
+        let new_root = self.disjoint.root_of(lhs.0 as usize);
+        let new_root = &mut self.disjoint[new_root].root;
+
+        debug_assert!(new_root.is_none());
+
+        lhs_observed.append(&mut rhs_observed);
+
+        *new_root = Some(DisjointTyInferRoot::InferRoot(lhs_observed));
     }
 }
 
