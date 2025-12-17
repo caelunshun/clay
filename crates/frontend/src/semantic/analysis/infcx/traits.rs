@@ -1,22 +1,26 @@
 use crate::{
     base::{
-        Diag,
+        Diag, HardDiag, Session,
         arena::{HasListInterner, LateInit, Obj},
+        syntax::Span,
     },
     semantic::{
         analysis::{
-            BinderSubstitution, InfTySubstitutor, InferCx, ReAndReRelateError, SubstitutionFolder,
-            TyAndReRelateError, TyAndTyRelateError, TyCtxt, TyFolderInfallible as _, TyShapeMap,
-            UnboundVarHandlingMode,
+            BinderSubstitution, FloatingInferVar, InfTySubstitutor, InferCx, InferCxMode,
+            ObservedTyVar, ReAndReRelateError, SubstitutionFolder, TyAndTyRelateError, TyCtxt,
+            TyFolderInfallible as _, TyShapeMap, UnboundVarHandlingMode,
         },
         syntax::{
-            AnyGeneric, Crate, FnDef, GenericBinder, GenericSolveStep, ImplItem,
-            ListOfTraitClauseList, Re, RelationMode, SolidTyShape, SolidTyShapeKind, TraitClause,
-            TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReList, TyShape,
+            AnyGeneric, Crate, FnDef, GenericBinder, GenericSolveStep, ImplItem, InferTyVar,
+            ListOfTraitClauseList, Re, RelationMode, SolidTyShape, SolidTyShapeKind, SpannedTy,
+            TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReList,
+            TyShape,
         },
     },
+    utils::hash::{FxHashMap, FxHashSet},
 };
 use index_vec::{IndexVec, define_index_type};
+use std::collections::VecDeque;
 
 // === Errors === //
 
@@ -96,6 +100,13 @@ pub enum TyAndImplGenericClauseErrorKind {
 pub enum TyAndImplAssocRelateError {
     TyAndTy(Box<TyAndTyRelateError>),
     TyAndClause(Box<TyAndClauseRelateError>),
+}
+
+#[derive(Debug, Clone)]
+pub struct TyAndReRelateError {
+    pub lhs: Ty,
+    pub rhs: Re,
+    pub culprits: Vec<Box<ReAndReRelateError>>,
 }
 
 #[derive(Debug, Clone)]
@@ -372,7 +383,350 @@ impl CoherenceMap {
     }
 }
 
-// === Inference Context === //
+// === ObligationCx Core === //
+
+/// A type inference context for solving type obligations of the form...
+///
+/// - `Region: Region`
+/// - `Type = Type`
+/// - `Type: Clauses`
+/// - `Clauses entail Clauses`
+/// - `is-well-formed Type`
+///
+/// This context is built on top of an [`InferCx`].
+///
+/// ## Multi-pass Checking
+///
+/// This context has two modes: region unaware and region aware.
+///
+/// - The region unaware mode just solves for type equalities, making it ideal for a first pass of
+///   type-checker where one just wants to solve for type inference variables. This process is
+///   allowed to fail.
+///
+/// - The region aware mode can take the solved inference types and, after replacing all the erased
+///   regions within those solved inference types with fresh region inference variables, it can run
+///   a second pass of type-checking to ensure that region inference is correct.
+///
+/// If all the types checked with a region aware check were obtained by a prior region unaware
+/// type-check, the inference methods will never return type errors—only region errors.
+///
+/// This two-pass design is necessary because we want each inferred expression type to have its own
+/// set of fresh region inference variables. If we instead tried to do type solving in a single
+/// pass, we'd either have to...
+///
+/// a) Wait until a source expression's type is fully solved so that we can replace all its regions
+///    with fresh region variables, which could prevent us from properly inferring certain patterns.
+///
+/// b) Equate source expression types without instantiating fresh new inference variable for each of
+///    them, preventing us from handling region-based sub-typing. This is what using a region-aware
+///    mode for the first inference pass would accomplish.
+///
+/// Note that, if there are no type inference variables involved in your seed queries (e.g. when
+/// WF-checking traits), you can immediately skip to region aware checking.
+///
+/// ## Well-formedness checks
+///
+/// There are two types of well-formedness requirements a type may have...
+///
+/// - A type WF requirement where a generic parameter must implement a trait (e.g. if `Foo<T>` has a
+///   clause stipulating that `T: MyTrait`)
+///
+/// - A region WF constraint where a lifetime must outlive another lifetime (e.g. `&'a T` would
+///   imply that `T: 'a`).
+///
+/// Relational methods never check type WF requirements or push region WF constraints by
+/// themselves but will never crash if these WF requirements aren't met. You can "bolt on" these WF
+/// requirements at the end of a region-aware inference session by calling `wf_ty` on all the types
+/// the programmer has created. This has to be done at the end of an inference session since
+/// inferred types must all be solved by this point.
+pub struct ObligationCx<'tcx> {
+    icx: InferCx<'tcx>,
+    coherence: &'tcx CoherenceMap,
+
+    /// The obligation we're currently in the process of invoking.
+    current_obligation: Option<ObligationIdx>,
+
+    /// All obligations ever registered with us.
+    all_obligations: IndexVec<ObligationIdx, Obligation>,
+
+    /// Every single obligation we've ever tried to prove. We only ever have to prove a given
+    /// obligation and, if an obligation depends on itself, it is safe to assume it holds
+    /// coinductively while proving itself.
+    all_obligation_kinds: FxHashSet<ObligationKind>,
+
+    /// The queue obligations to invoke. These are invoked in FIFO order to ensure that we properly
+    /// explore all branches of the proof tree simultaneously.
+    run_queue: VecDeque<ObligationIdx>,
+
+    /// A map from inference variables to obligations they block from re-running.
+    blocker_vars: FxHashMap<ObservedTyVar, Vec<ObligationIdx>>,
+
+    /// The number of observed inference variables we have processed from `icx`'s
+    /// `observed_reveal_order` list.
+    blocker_var_read_len: usize,
+
+    /// The maximum depth we're willing to expand for obligations
+    max_obligation_depth: u32,
+}
+
+define_index_type! {
+    pub struct ObligationIdx = u32;
+}
+
+// TODO: if multiple obligations try to spawn this obligation, what depth should it have? Should we
+//  take the longest obligation chain?
+struct Obligation {
+    /// The obligation responsible for spawning this new obligation.
+    parent: Option<ObligationIdx>,
+
+    /// The number of parent obligations leading to the creation of this obligation.
+    depth: u32,
+
+    /// The reason for which this obligation was spawned.
+    reason: ObligationReason,
+
+    /// The kind of obligation we're trying to prove.
+    kind: ObligationKind,
+
+    /// The number of inference variables we need to solve before we can rerun this obligation.
+    blockers: u32,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum ObligationKind {
+    TyAndTrait(Ty, TraitSpec),
+    TyAndRe(Ty, Re),
+}
+
+impl ObligationKind {
+    // TODO
+    pub fn proves_what(self, s: &Session) -> String {
+        _ = s;
+        format!("{self:?}")
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum ObligationReason {
+    FunctionBody(Span),
+}
+
+#[derive(Debug, Clone)]
+pub enum ObligationResult {
+    Success,
+    Failure(HardDiag),
+    NotReady(Vec<InferTyVar>),
+}
+
+// Constructor and getters
+impl<'tcx> ObligationCx<'tcx> {
+    pub fn new(
+        tcx: &'tcx TyCtxt,
+        coherence: &'tcx CoherenceMap,
+        mode: InferCxMode,
+        max_obligation_depth: u32,
+    ) -> Self {
+        Self {
+            icx: InferCx::new(tcx, mode),
+            coherence,
+            current_obligation: None,
+            all_obligations: IndexVec::new(),
+            all_obligation_kinds: FxHashSet::default(),
+            run_queue: VecDeque::new(),
+            blocker_vars: FxHashMap::default(),
+            blocker_var_read_len: 0,
+            max_obligation_depth,
+        }
+    }
+
+    pub fn tcx(&self) -> &'tcx TyCtxt {
+        self.icx.tcx()
+    }
+
+    pub fn session(&self) -> &'tcx Session {
+        self.icx.session()
+    }
+
+    pub fn coherence(&self) -> &'tcx CoherenceMap {
+        self.coherence
+    }
+
+    pub fn icx(&self) -> &InferCx<'tcx> {
+        &self.icx
+    }
+
+    pub fn icx_mut(&mut self) -> &mut InferCx<'tcx> {
+        &mut self.icx
+    }
+}
+
+// Forwards
+impl<'tcx> ObligationCx<'tcx> {
+    pub fn mode(&self) -> InferCxMode {
+        self.icx.mode()
+    }
+
+    pub fn fresh_ty_var(&mut self) -> InferTyVar {
+        self.icx.fresh_ty_var()
+    }
+
+    pub fn fresh_ty(&mut self) -> Ty {
+        self.icx.fresh_ty()
+    }
+
+    pub fn lookup_ty_var(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {
+        self.icx.lookup_ty_var(var)
+    }
+
+    pub fn peel_ty_var(&self, ty: Ty) -> Ty {
+        self.icx.peel_ty_var(ty)
+    }
+
+    pub fn fresh_re(&mut self) -> Re {
+        self.icx.fresh_re()
+    }
+
+    pub fn relate_re_and_re(
+        &mut self,
+        lhs: Re,
+        rhs: Re,
+        mode: RelationMode,
+    ) -> Result<(), Box<ReAndReRelateError>> {
+        self.icx.relate_re_and_re(lhs, rhs, mode)
+    }
+
+    pub fn relate_ty_and_ty(
+        &mut self,
+        lhs: Ty,
+        rhs: Ty,
+        mode: RelationMode,
+    ) -> Result<(), Box<TyAndTyRelateError>> {
+        self.icx.relate_ty_and_ty(lhs, rhs, mode)
+    }
+}
+
+// Core operations
+impl<'tcx> ObligationCx<'tcx> {
+    pub fn push_obligation(&mut self, reason: ObligationReason, kind: ObligationKind) {
+        if self.all_obligation_kinds.insert(kind) {
+            return;
+        }
+
+        let depth = self
+            .current_obligation
+            .map_or(0, |v| self.all_obligations[v].depth + 1);
+
+        let obligation = self.all_obligations.push(Obligation {
+            parent: self.current_obligation,
+            depth,
+            reason,
+            kind,
+            blockers: 0,
+        });
+
+        self.run_queue.push_back(obligation);
+    }
+
+    pub fn process_obligations(&mut self) {
+        let s = self.session();
+
+        debug_assert!(
+            self.current_obligation.is_none(),
+            "cannot reentrantly call `process_obligations`"
+        );
+
+        while let Some(front_idx) = self.run_queue.pop_front() {
+            let Obligation {
+                depth,
+                kind,
+                blockers,
+                ..
+            } = self.all_obligations[front_idx];
+
+            debug_assert_eq!(blockers, 0);
+
+            // See whether we've discovered the values for new inference variables.
+            for &idx in &self.icx.observed_reveal_order()[self.blocker_var_read_len..] {
+                let Some(blocked) = self.blocker_vars.remove(&idx) else {
+                    continue;
+                };
+
+                for blocked_idx in blocked {
+                    let blocked = &mut self.all_obligations[blocked_idx];
+
+                    blocked.blockers -= 1;
+
+                    if blocked.blockers == 0 {
+                        self.run_queue.push_back(blocked_idx);
+                    }
+                }
+            }
+
+            self.blocker_var_read_len = self.icx.observed_reveal_order().len();
+
+            // Run the obligation.
+            let old_icx = self.icx.clone();
+
+            let result = 'res: {
+                if depth >= self.max_obligation_depth {
+                    break 'res ObligationResult::Failure(Diag::anon_err(format_args!(
+                        "overflowed requirements while trying to prove {}",
+                        kind.proves_what(s),
+                    )));
+                }
+
+                self.current_obligation = Some(front_idx);
+
+                let mut this = scopeguard::guard(&mut *self, |this| {
+                    this.current_obligation = None;
+                });
+
+                this.run_obligation_now(kind)
+            };
+
+            // Process its result.
+            match result {
+                ObligationResult::Success => {
+                    // (we're good)
+                }
+                ObligationResult::Failure(diag) => {
+                    self.icx = old_icx;
+
+                    // TODO: Include the reason stack.
+                    diag.emit();
+                }
+                ObligationResult::NotReady(vars) => {
+                    self.icx = old_icx;
+
+                    let mut blocker_count = 0;
+
+                    for var in vars {
+                        if self.icx.lookup_ty_var(var).is_ok() {
+                            continue;
+                        }
+
+                        let var = self.icx.observe_ty_var(var);
+
+                        self.blocker_vars.entry(var).or_default().push(front_idx);
+                        blocker_count += 1;
+                    }
+
+                    if blocker_count == 0 {
+                        self.run_queue.push_back(front_idx);
+                    } else {
+                        self.all_obligations[front_idx].blockers = blocker_count;
+                    }
+                }
+            }
+        }
+    }
+
+    fn run_obligation_now(&mut self, kind: ObligationKind) -> ObligationResult {
+        todo!()
+    }
+}
+
+// === ObligationCx Operations === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 struct ImplFreshInfer {
@@ -382,7 +736,7 @@ struct ImplFreshInfer {
     impl_generic_clauses: ListOfTraitClauseList,
 }
 
-impl<'tcx> InferCx<'tcx> {
+impl<'tcx> ObligationCx<'tcx> {
     fn instantiate_fresh_impl_vars(&mut self, candidate: Obj<ImplItem>) -> ImplFreshInfer {
         let tcx = self.tcx();
         let s = self.session();
@@ -844,5 +1198,96 @@ impl<'tcx> InferCx<'tcx> {
         *self = fork;
 
         Ok(())
+    }
+
+    pub fn relate_ty_and_re(&mut self, lhs: Ty, rhs: Re) -> Result<(), Box<TyAndReRelateError>> {
+        let mut fork = self.clone();
+        let mut culprits = Vec::new();
+
+        fork.relate_ty_and_re_inner(lhs, rhs, &mut culprits);
+
+        if !culprits.is_empty() {
+            return Err(Box::new(TyAndReRelateError { lhs, rhs, culprits }));
+        }
+
+        Ok(())
+    }
+
+    #[expect(clippy::vec_box)]
+    fn relate_ty_and_re_inner(
+        &mut self,
+        lhs: Ty,
+        rhs: Re,
+        culprits: &mut Vec<Box<ReAndReRelateError>>,
+    ) {
+        let s = self.session();
+
+        match *lhs.r(s) {
+            TyKind::This | TyKind::ExplicitInfer => unreachable!(),
+            TyKind::FnDef(_) | TyKind::Simple(_) | TyKind::Error(_) => {
+                // (trivial)
+            }
+            TyKind::Reference(lhs, _muta, _pointee) => {
+                // No need to relate the pointee since WF checks already ensure that it outlives
+                // `lhs`.
+                if let Err(err) = self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs) {
+                    culprits.push(err);
+                }
+            }
+            TyKind::Adt(lhs) => {
+                // ADTs are bounded by which regions they mention.
+                for &lhs in lhs.params.r(s) {
+                    match lhs {
+                        TyOrRe::Re(lhs) => {
+                            if let Err(err) =
+                                self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs)
+                            {
+                                culprits.push(err);
+                            }
+                        }
+                        TyOrRe::Ty(lhs) => {
+                            self.relate_ty_and_re_inner(lhs, rhs, culprits);
+                        }
+                    }
+                }
+            }
+            TyKind::Trait(lhs) => {
+                for &lhs in lhs.r(s) {
+                    match lhs {
+                        TraitClause::Outlives(lhs) => {
+                            // There is guaranteed to be exactly one outlives constraint for a trait
+                            // object so relating these constraints is sufficient to ensure that the
+                            // object outlives the `rhs`.
+                            if let Err(err) =
+                                self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs)
+                            {
+                                culprits.push(err);
+                            }
+                        }
+                        TraitClause::Trait(_) => {
+                            // (if the outlives constraint says the trait is okay, it's okay)
+                        }
+                    }
+                }
+            }
+            TyKind::Tuple(lhs) => {
+                for &lhs in lhs.r(s) {
+                    self.relate_ty_and_re_inner(lhs, rhs, culprits);
+                }
+            }
+            TyKind::Universal(_) => todo!(),
+            TyKind::InferVar(inf_lhs) => {
+                if let Ok(inf_lhs) = self.lookup_ty_var(inf_lhs) {
+                    self.relate_ty_and_re_inner(inf_lhs, rhs, culprits);
+                } else {
+                    // Defer the check.
+                    todo!();
+                }
+            }
+        }
+    }
+
+    pub fn wf_ty(&mut self, ty: SpannedTy) {
+        todo!()
     }
 }

@@ -2,8 +2,7 @@ use crate::{
     base::{ErrorGuaranteed, Session, arena::Obj},
     semantic::{
         analysis::{
-            CoherenceMap, TyCtxt, TyFolder, TyFolderInfallible, TyVisitor, TyVisitorUnspanned,
-            TyVisitorWalk,
+            TyCtxt, TyFolder, TyFolderInfallible, TyVisitor, TyVisitorUnspanned, TyVisitorWalk,
         },
         syntax::{
             InferReVar, InferTyVar, Mutability, Re, ReVariance, RegionGeneric, RelationMode,
@@ -16,7 +15,7 @@ use bit_set::BitSet;
 use disjoint::DisjointSetVec;
 use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
-use std::{convert::Infallible, mem, ops::ControlFlow};
+use std::{convert::Infallible, ops::ControlFlow};
 
 // === Errors === //
 
@@ -37,6 +36,12 @@ pub enum TyAndTyRelateCulprit {
 }
 
 #[derive(Debug, Clone)]
+pub struct InferTyOccursError {
+    pub var: InferTyVar,
+    pub occurs_in: Ty,
+}
+
+#[derive(Debug, Clone)]
 pub struct ReAndReRelateError {
     pub lhs: Re,
     pub rhs: Re,
@@ -49,19 +54,6 @@ pub struct ReAndReRelateOffense {
     pub forced_to_outlive: Re,
 }
 
-#[derive(Debug, Clone)]
-pub struct TyAndReRelateError {
-    pub lhs: Ty,
-    pub rhs: Re,
-    pub culprits: Vec<Box<ReAndReRelateError>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct InferTyOccursError {
-    pub var: InferTyVar,
-    pub occurs_in: Ty,
-}
-
 // === InferCx === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -70,74 +62,36 @@ pub enum InferCxMode {
     RegionAware,
 }
 
-/// A type inference context for solving type equations of the form...
+/// A type inference context for solving type obligations of the form...
 ///
 /// - `Region: Region`
 /// - `Type = Type`
-/// - `Type: Clauses`
 ///
-/// Using the above equations, it can also solve equations of the form...
-///
-/// - `Clauses entail Clauses`
-/// - `is-well-formed Type`
-///
-/// ## Multi-pass Checking
-///
-/// This context has two modes: region unaware and region aware.
-///
-/// - The region unaware mode just solves for type equalities, making it ideal for a first pass of
-///   type-checker where one just wants to solve for type inference variables. This process is
-///   allowed to fail.
-///
-/// - The region aware mode can take the solved inference types and, after replacing all the erased
-///   regions within those solved inference types with fresh region inference variables, it can run
-///   a second pass of type-checking to ensure that region inference is correct.
-///
-/// If all the types checked with a region aware check were obtained by a prior region unaware
-/// type-check, the inference methods will never return type errors—only region errors.
-///
-/// This two-pass design is necessary because we want each inferred expression type to have its own
-/// set of fresh region inference variables. If we instead tried to do type solving in a single
-/// pass, we'd either have to...
-///
-/// a) Wait until a source expression's type is fully solved so that we can replace all its regions
-///    with fresh region variables, which could prevent us from properly inferring certain patterns.
-///
-/// b) Equate source expression types without instantiating fresh new inference variable for each of
-///    them, preventing us from handling region-based sub-typing. This is what using a region-aware
-///    mode for the first inference pass would accomplish.
-///
-/// Note that, if there are no type inference variables involved in your seed queries (e.g. when
-/// WF-checking traits), you can immediately skip to region aware checking.
-///
-/// ## Well-formedness checks
-///
-/// There are two types of well-formedness requirements a type may have...
-///
-/// - A type WF requirement where a generic parameter must implement a trait (e.g. if `Foo<T>` has a
-///   clause stipulating that `T: MyTrait`)
-///
-/// - A region WF constraint where a lifetime must outlive another lifetime (e.g. `&'a T` would
-///   imply that `T: 'a`).
-///
-/// Relational methods never check type WF requirements or push region WF constraints by
-/// themselves but will never crash if these WF requirements aren't met. You can "bolt on" these WF
-/// requirements at the end of a region-aware inference session by calling `wf_ty` on all the types
-/// the programmer has created. This has to be done at the end of an inference session since
-/// inferred types must all be solved by this point.
+/// No operations performed by this context depend on the order in which prior operations have been
+/// performed and, as such, all operations can be performed and checked for correctness immediately.
+/// This property is not true for more complex `Ty: Clause` and `Ty: 're` obligations. To perform
+/// those obligations, you'll need an [`ObligationCx`](super::ObligationCx).
 #[derive(Debug, Clone)]
 pub struct InferCx<'tcx> {
     tcx: &'tcx TyCtxt,
-    coherence: &'tcx CoherenceMap,
     types: TyInferTracker,
     regions: Option<ReInferTracker>,
 }
 
+define_index_type! {
+    pub struct ObservedTyVar = u32;
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct FloatingInferVar<'a> {
+    pub root: InferTyVar,
+    pub observed_equivalent: &'a [ObservedTyVar],
+}
+
 impl<'tcx> InferCx<'tcx> {
-    pub fn new(tcx: &'tcx TyCtxt, coherence: &'tcx CoherenceMap, mode: InferCxMode) -> Self {
+    pub fn new(tcx: &'tcx TyCtxt, mode: InferCxMode) -> Self {
         Self {
             tcx,
-            coherence,
             types: TyInferTracker::default(),
             regions: match mode {
                 InferCxMode::RegionBlind => None,
@@ -154,10 +108,6 @@ impl<'tcx> InferCx<'tcx> {
         &self.tcx.session
     }
 
-    pub fn coherence(&self) -> &'tcx CoherenceMap {
-        self.coherence
-    }
-
     pub fn mode(&self) -> InferCxMode {
         if self.regions.is_some() {
             InferCxMode::RegionAware
@@ -166,8 +116,24 @@ impl<'tcx> InferCx<'tcx> {
         }
     }
 
+    pub fn fresh_ty_var(&mut self) -> InferTyVar {
+        self.types.fresh()
+    }
+
     pub fn fresh_ty(&mut self) -> Ty {
-        self.tcx().intern_ty(TyKind::InferVar(self.types.fresh()))
+        self.tcx().intern_ty(TyKind::InferVar(self.fresh_ty_var()))
+    }
+
+    pub fn observe_ty_var(&mut self, var: InferTyVar) -> ObservedTyVar {
+        self.types.observe(var)
+    }
+
+    pub fn observed_reveal_order(&self) -> &[ObservedTyVar] {
+        self.types.observed_reveal_order()
+    }
+
+    pub fn lookup_ty_var(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {
+        self.types.lookup(var)
     }
 
     pub fn peel_ty_var(&self, ty: Ty) -> Ty {
@@ -345,13 +311,15 @@ impl<'tcx> InferCx<'tcx> {
                     (Ok(lhs_ty), Ok(rhs_ty)) => {
                         self.relate_ty_and_ty_inner(lhs_ty, rhs_ty, culprits, mode);
                     }
-                    (Ok(lhs_ty), Err(rhs_root)) => {
-                        if let Err(err) = self.relate_var_and_non_var_ty(rhs_root, lhs_ty) {
+                    (Ok(lhs_ty), Err(rhs_floating)) => {
+                        if let Err(err) = self.relate_var_and_non_var_ty(rhs_floating.root, lhs_ty)
+                        {
                             culprits.push(TyAndTyRelateCulprit::RecursiveType(err));
                         }
                     }
-                    (Err(lhs_root), Ok(rhs_ty)) => {
-                        if let Err(err) = self.relate_var_and_non_var_ty(lhs_root, rhs_ty) {
+                    (Err(lhs_floating), Ok(rhs_ty)) => {
+                        if let Err(err) = self.relate_var_and_non_var_ty(lhs_floating.root, rhs_ty)
+                        {
                             culprits.push(TyAndTyRelateCulprit::RecursiveType(err));
                         }
                     }
@@ -389,12 +357,15 @@ impl<'tcx> InferCx<'tcx> {
         }
     }
 
-    pub fn relate_var_and_non_var_ty(
+    fn relate_var_and_non_var_ty(
         &mut self,
         lhs_var_root: InferTyVar,
         rhs_ty: Ty,
     ) -> Result<(), InferTyOccursError> {
-        debug_assert!(self.types.lookup(lhs_var_root) == Err(lhs_var_root));
+        debug_assert_eq!(
+            self.types.lookup(lhs_var_root).map_err(|v| v.root),
+            Err(lhs_var_root),
+        );
 
         struct OccursVisitor<'a, 'tcx> {
             icx: &'a InferCx<'tcx>,
@@ -412,8 +383,8 @@ impl<'tcx> InferCx<'tcx> {
                 if let SpannedTyView::InferVar(var) = ty.view(self.tcx()) {
                     match self.icx.types.lookup(var) {
                         Ok(resolved) => self.visit_ty(resolved),
-                        Err(other_root) => {
-                            if self.reject == other_root {
+                        Err(other_floating) => {
+                            if self.reject == other_floating.root {
                                 ControlFlow::Break(())
                             } else {
                                 ControlFlow::Continue(())
@@ -518,222 +489,6 @@ impl<'tcx> InferCx<'tcx> {
             }
         }
     }
-
-    pub fn relate_ty_and_re(&mut self, lhs: Ty, rhs: Re) -> Result<(), Box<TyAndReRelateError>> {
-        let mut fork = self.clone();
-        let mut culprits = Vec::new();
-
-        fork.relate_ty_and_re_inner(lhs, rhs, &mut culprits);
-
-        if !culprits.is_empty() {
-            return Err(Box::new(TyAndReRelateError { lhs, rhs, culprits }));
-        }
-
-        Ok(())
-    }
-
-    #[expect(clippy::vec_box)]
-    fn relate_ty_and_re_inner(
-        &mut self,
-        lhs: Ty,
-        rhs: Re,
-        culprits: &mut Vec<Box<ReAndReRelateError>>,
-    ) {
-        let s = self.session();
-
-        match *lhs.r(s) {
-            TyKind::This | TyKind::ExplicitInfer => unreachable!(),
-            TyKind::FnDef(_) | TyKind::Simple(_) | TyKind::Error(_) => {
-                // (trivial)
-            }
-            TyKind::Reference(lhs, _muta, _pointee) => {
-                // No need to relate the pointee since WF checks already ensure that it outlives
-                // `lhs`.
-                if let Err(err) = self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs) {
-                    culprits.push(err);
-                }
-            }
-            TyKind::Adt(lhs) => {
-                // ADTs are bounded by which regions they mention.
-                for &lhs in lhs.params.r(s) {
-                    match lhs {
-                        TyOrRe::Re(lhs) => {
-                            if let Err(err) =
-                                self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs)
-                            {
-                                culprits.push(err);
-                            }
-                        }
-                        TyOrRe::Ty(lhs) => {
-                            self.relate_ty_and_re_inner(lhs, rhs, culprits);
-                        }
-                    }
-                }
-            }
-            TyKind::Trait(lhs) => {
-                for &lhs in lhs.r(s) {
-                    match lhs {
-                        TraitClause::Outlives(lhs) => {
-                            // There is guaranteed to be exactly one outlives constraint for a trait
-                            // object so relating these constraints is sufficient to ensure that the
-                            // object outlives the `rhs`.
-                            if let Err(err) =
-                                self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs)
-                            {
-                                culprits.push(err);
-                            }
-                        }
-                        TraitClause::Trait(_) => {
-                            // (if the outlives constraint says the trait is okay, it's okay)
-                        }
-                    }
-                }
-            }
-            TyKind::Tuple(lhs) => {
-                for &lhs in lhs.r(s) {
-                    self.relate_ty_and_re_inner(lhs, rhs, culprits);
-                }
-            }
-            TyKind::Universal(_) => todo!(),
-            TyKind::InferVar(inf_lhs) => {
-                if let Ok(inf_lhs) = self.types.lookup(inf_lhs) {
-                    self.relate_ty_and_re_inner(inf_lhs, rhs, culprits);
-                } else {
-                    // Defer the check.
-                    todo!();
-                }
-            }
-        }
-    }
-
-    pub fn wf_ty(&mut self, ty: SpannedTy) {
-        todo!()
-    }
-
-    pub fn observe_ty_var(&mut self, var: InferTyVar) {
-        self.types.observe(var);
-    }
-
-    pub fn ty_var_reveal_order(&self) -> &[InferTyVar] {
-        self.types.observed_reveal_order()
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct TyVarObserver {
-    next_idx: usize,
-}
-
-impl TyVarObserver {
-    pub fn next(&mut self, icx: &mut InferCx<'_>) -> Option<InferTyVar> {
-        let next = icx.ty_var_reveal_order().get(self.next_idx).copied()?;
-        self.next_idx += 1;
-        Some(next)
-    }
-}
-
-// === TyInferTracker === //
-
-#[derive(Debug, Clone, Default)]
-pub struct TyInferTracker {
-    disjoint: DisjointSetVec<DisjointTyInferNode>,
-    observed_reveal_order: Vec<InferTyVar>,
-}
-
-#[derive(Debug, Clone)]
-struct DisjointTyInferNode {
-    root: Option<DisjointTyInferRoot>,
-    is_observed: bool,
-}
-
-#[derive(Debug, Clone)]
-enum DisjointTyInferRoot {
-    KnownRoot(Ty),
-    InferRoot(Vec<InferTyVar>),
-}
-
-impl TyInferTracker {
-    pub fn fresh(&mut self) -> InferTyVar {
-        let var = InferTyVar(self.disjoint.len() as u32);
-        self.disjoint.push(DisjointTyInferNode {
-            root: Some(DisjointTyInferRoot::InferRoot(Vec::new())),
-            is_observed: false,
-        });
-        var
-    }
-
-    pub fn observe(&mut self, var: InferTyVar) {
-        if mem::replace(&mut self.disjoint[var.0 as usize].is_observed, true) {
-            return;
-        }
-
-        let root_var = self.disjoint.root_of(var.0 as usize);
-
-        match self.disjoint[root_var].root.as_mut().unwrap() {
-            DisjointTyInferRoot::KnownRoot(_) => {
-                self.observed_reveal_order.push(var);
-            }
-            DisjointTyInferRoot::InferRoot(observed) => {
-                observed.push(var);
-            }
-        }
-    }
-
-    pub fn observed_reveal_order(&self) -> &[InferTyVar] {
-        &self.observed_reveal_order
-    }
-
-    pub fn lookup(&self, var: InferTyVar) -> Result<Ty, InferTyVar> {
-        let root_var = self.disjoint.root_of(var.0 as usize);
-
-        match self.disjoint[root_var].root.as_ref().unwrap() {
-            &DisjointTyInferRoot::KnownRoot(ty) => Ok(ty),
-            DisjointTyInferRoot::InferRoot(_) => Err(InferTyVar(root_var as u32)),
-        }
-    }
-
-    pub fn assign_floating_to_non_var(&mut self, var: InferTyVar, ty: Ty) {
-        let root_idx = self.disjoint.root_of(var.0 as usize);
-        let root = self.disjoint[root_idx].root.as_mut().unwrap();
-
-        let DisjointTyInferRoot::InferRoot(observed) = root else {
-            unreachable!();
-        };
-
-        self.observed_reveal_order.extend_from_slice(observed);
-        *root = DisjointTyInferRoot::KnownRoot(ty);
-    }
-
-    pub fn union_unrelated_floating(&mut self, lhs: InferTyVar, rhs: InferTyVar) {
-        let lhs_root = self.disjoint.root_of(lhs.0 as usize);
-        let rhs_root = self.disjoint.root_of(rhs.0 as usize);
-
-        if lhs_root == rhs_root {
-            return;
-        }
-
-        let lhs_root = self.disjoint[lhs_root].root.take().unwrap();
-        let rhs_root = self.disjoint[rhs_root].root.take().unwrap();
-
-        let (
-            DisjointTyInferRoot::InferRoot(mut lhs_observed),
-            DisjointTyInferRoot::InferRoot(mut rhs_observed),
-        ) = (lhs_root, rhs_root)
-        else {
-            unreachable!()
-        };
-
-        self.disjoint.join(lhs.0 as usize, rhs.0 as usize);
-
-        let new_root = self.disjoint.root_of(lhs.0 as usize);
-        let new_root = &mut self.disjoint[new_root].root;
-
-        debug_assert!(new_root.is_none());
-
-        lhs_observed.append(&mut rhs_observed);
-
-        *new_root = Some(DisjointTyInferRoot::InferRoot(lhs_observed));
-    }
 }
 
 // === InfTySubstitutor === //
@@ -773,10 +528,10 @@ impl<'tcx> TyFolder<'tcx> for InfTySubstitutor<'_, 'tcx> {
     fn try_fold_ty_infer_use(&mut self, var: InferTyVar) -> Result<Ty, Self::Error> {
         match self.infer_types.lookup(var) {
             Ok(v) => self.try_fold_ty(v),
-            Err(normalized) => Ok(match self.mode {
+            Err(floating) => Ok(match self.mode {
                 UnboundVarHandlingMode::Error(error) => self.tcx().intern_ty(TyKind::Error(error)),
                 UnboundVarHandlingMode::NormalizeToRoot => {
-                    self.tcx().intern_ty(TyKind::InferVar(normalized))
+                    self.tcx().intern_ty(TyKind::InferVar(floating.root))
                 }
                 UnboundVarHandlingMode::EraseToExplicitInfer => {
                     self.tcx().intern_ty(TyKind::ExplicitInfer)
@@ -789,10 +544,135 @@ impl<'tcx> TyFolder<'tcx> for InfTySubstitutor<'_, 'tcx> {
     }
 }
 
+// === TyInferTracker === //
+
+#[derive(Debug, Clone)]
+struct TyInferTracker {
+    disjoint: DisjointSetVec<DisjointTyInferNode>,
+    observed_reveal_order: Vec<ObservedTyVar>,
+    next_observe_idx: ObservedTyVar,
+}
+
+#[derive(Debug, Clone)]
+struct DisjointTyInferNode {
+    root: Option<DisjointTyInferRoot>,
+    observed_idx: Option<ObservedTyVar>,
+}
+
+#[derive(Debug, Clone)]
+enum DisjointTyInferRoot {
+    Known(Ty),
+    Floating(Vec<ObservedTyVar>),
+}
+
+impl Default for TyInferTracker {
+    fn default() -> Self {
+        Self {
+            disjoint: DisjointSetVec::new(),
+            observed_reveal_order: Vec::new(),
+            next_observe_idx: ObservedTyVar::from_usize(0),
+        }
+    }
+}
+
+impl TyInferTracker {
+    fn fresh(&mut self) -> InferTyVar {
+        let var = InferTyVar(self.disjoint.len() as u32);
+        self.disjoint.push(DisjointTyInferNode {
+            root: Some(DisjointTyInferRoot::Floating(Vec::new())),
+            observed_idx: None,
+        });
+        var
+    }
+
+    fn observe(&mut self, var: InferTyVar) -> ObservedTyVar {
+        let observed_idx = &mut self.disjoint[var.0 as usize].observed_idx;
+
+        if let Some(observed_idx) = *observed_idx {
+            return observed_idx;
+        }
+
+        let observed_idx = *observed_idx.insert(self.next_observe_idx);
+        self.next_observe_idx += 1;
+
+        let root_var = self.disjoint.root_of(var.0 as usize);
+
+        match self.disjoint[root_var].root.as_mut().unwrap() {
+            DisjointTyInferRoot::Known(_) => {
+                self.observed_reveal_order.push(observed_idx);
+            }
+            DisjointTyInferRoot::Floating(observed) => {
+                observed.push(observed_idx);
+            }
+        }
+
+        observed_idx
+    }
+
+    fn observed_reveal_order(&self) -> &[ObservedTyVar] {
+        &self.observed_reveal_order
+    }
+
+    fn lookup(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {
+        let root_var = self.disjoint.root_of(var.0 as usize);
+
+        match self.disjoint[root_var].root.as_ref().unwrap() {
+            &DisjointTyInferRoot::Known(ty) => Ok(ty),
+            DisjointTyInferRoot::Floating(observed_equivalent) => Err(FloatingInferVar {
+                root: InferTyVar(root_var as u32),
+                observed_equivalent,
+            }),
+        }
+    }
+
+    fn assign_floating_to_non_var(&mut self, var: InferTyVar, ty: Ty) {
+        let root_idx = self.disjoint.root_of(var.0 as usize);
+        let root = self.disjoint[root_idx].root.as_mut().unwrap();
+
+        let DisjointTyInferRoot::Floating(observed) = root else {
+            unreachable!();
+        };
+
+        self.observed_reveal_order.extend_from_slice(observed);
+        *root = DisjointTyInferRoot::Known(ty);
+    }
+
+    fn union_unrelated_floating(&mut self, lhs: InferTyVar, rhs: InferTyVar) {
+        let lhs_root = self.disjoint.root_of(lhs.0 as usize);
+        let rhs_root = self.disjoint.root_of(rhs.0 as usize);
+
+        if lhs_root == rhs_root {
+            return;
+        }
+
+        let lhs_root = self.disjoint[lhs_root].root.take().unwrap();
+        let rhs_root = self.disjoint[rhs_root].root.take().unwrap();
+
+        let (
+            DisjointTyInferRoot::Floating(mut lhs_observed),
+            DisjointTyInferRoot::Floating(mut rhs_observed),
+        ) = (lhs_root, rhs_root)
+        else {
+            unreachable!()
+        };
+
+        self.disjoint.join(lhs.0 as usize, rhs.0 as usize);
+
+        let new_root = self.disjoint.root_of(lhs.0 as usize);
+        let new_root = &mut self.disjoint[new_root].root;
+
+        debug_assert!(new_root.is_none());
+
+        lhs_observed.append(&mut rhs_observed);
+
+        *new_root = Some(DisjointTyInferRoot::Floating(lhs_observed));
+    }
+}
+
 // === ReInferTracker === //
 
 #[derive(Debug, Clone)]
-pub struct ReInferTracker {
+struct ReInferTracker {
     /// The set of universal regions we're tracking.
     tracked_universals: FxIndexMap<Obj<RegionGeneric>, TrackedUniversal>,
 
@@ -846,7 +726,7 @@ impl Default for ReInferTracker {
 }
 
 impl ReInferTracker {
-    pub fn fresh(&mut self) -> InferReVar {
+    fn fresh(&mut self) -> InferReVar {
         let var = InferReVar(self.tracked_any.next_idx().raw());
 
         self.tracked_any.push(TrackedAny {
@@ -909,13 +789,7 @@ impl ReInferTracker {
         }
     }
 
-    pub fn relate(
-        &mut self,
-        lhs: Re,
-        rhs: Re,
-        tcx: &TyCtxt,
-        offenses: &mut Vec<ReAndReRelateOffense>,
-    ) {
+    fn relate(&mut self, lhs: Re, rhs: Re, tcx: &TyCtxt, offenses: &mut Vec<ReAndReRelateOffense>) {
         if lhs == rhs {
             return;
         }
