@@ -485,10 +485,43 @@ where
                 let dst = Compound::Byte(self.backend.int_trunc(src, IntBitness::B8));
                 self.current_vals[unary.dst] = Some(dst);
             }
-            mir::InstrData::BoolAnd(binary) => todo!(),
-            mir::InstrData::BoolOr(binary) => todo!(),
-            mir::InstrData::BoolXor(binary) => todo!(),
-            mir::InstrData::BoolNot(unary) => todo!(),
+            mir::InstrData::BoolAnd(binary) => {
+                let Compound::Bool(src1) = self.get_val(binary.src1) else {
+                    panic!("not a bool")
+                };
+                let Compound::Bool(src2) = self.get_val(binary.src2) else {
+                    panic!("not a bool")
+                };
+                let dst = Compound::Bool(self.backend.int_and(src1, src2));
+                self.current_vals[binary.dst] = Some(dst);
+            }
+            mir::InstrData::BoolOr(binary) => {
+                let Compound::Bool(src1) = self.get_val(binary.src1) else {
+                    panic!("not a bool")
+                };
+                let Compound::Bool(src2) = self.get_val(binary.src2) else {
+                    panic!("not a bool")
+                };
+                let dst = Compound::Bool(self.backend.int_or(src1, src2));
+                self.current_vals[binary.dst] = Some(dst);
+            }
+            mir::InstrData::BoolXor(binary) => {
+                let Compound::Bool(src1) = self.get_val(binary.src1) else {
+                    panic!("not a bool")
+                };
+                let Compound::Bool(src2) = self.get_val(binary.src2) else {
+                    panic!("not a bool")
+                };
+                let dst = Compound::Bool(self.backend.int_xor(src1, src2));
+                self.current_vals[binary.dst] = Some(dst);
+            }
+            mir::InstrData::BoolNot(unary) => {
+                let Compound::Bool(src) = self.get_val(unary.src) else {
+                    panic!("not a bool")
+                };
+                let dst = Compound::Bool(self.backend.int_not(src));
+                self.current_vals[unary.dst] = Some(dst);
+            }
             mir::InstrData::InitStruct(init_struct) => todo!(),
             mir::InstrData::GetField(get_field) => todo!(),
             mir::InstrData::SetField(set_field) => todo!(),
