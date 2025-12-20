@@ -216,7 +216,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 self.verify_type_data_matches(ins.src_index, &[TypeKind::Prim(PrimType::Int)])?;
                 self.verify_type_equals(ins.dst_val, element_type)?;
             }
-            InstrData::BufregGetMRef(ins) => {
+            InstrData::BufrefGetMRef(ins) => {
                 let element_type = self.expect_bufref(ins.src_bufref)?;
                 self.verify_type_data_matches(ins.src_index, &[TypeKind::Prim(PrimType::Int)])?;
                 self.verify_type_data_matches(ins.dst_ref, &[TypeKind::MRef(element_type)])?;

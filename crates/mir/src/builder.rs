@@ -492,7 +492,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
     }
 
     pub fn bufref_get_mref(mut self, dst: ValId, src_list: ValId, src_index: ValId) {
-        self.instr(InstrData::BufregGetMRef(instr::BufrefGetMRef {
+        self.instr(InstrData::BufrefGetMRef(instr::BufrefGetMRef {
             dst_ref: dst,
             src_bufref: src_list,
             src_index,

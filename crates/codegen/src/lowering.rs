@@ -566,7 +566,7 @@ where
                 self.current_vals[set_field.dst_struct] =
                     Some(Compound::Struct { fields: new_fields });
             }
-            mir::InstrData::Alloc(alloc) => todo!(),
+            mir::InstrData::Alloc(alloc) => {}
             mir::InstrData::Load(load) => todo!(),
             mir::InstrData::Store(store) => todo!(),
             mir::InstrData::MakeFieldMRef(make_field_mref) => todo!(),
@@ -576,7 +576,7 @@ where
             mir::InstrData::BufrefTrunc(bufref_trunc) => todo!(),
             mir::InstrData::BufrefLen(bufref_len) => todo!(),
             mir::InstrData::BufrefGet(bufref_get) => todo!(),
-            mir::InstrData::BufregGetMRef(bufref_get_mref) => todo!(),
+            mir::InstrData::BufrefGetMRef(bufref_get_mref) => todo!(),
         }
     }
 

@@ -534,7 +534,7 @@ impl<'db> Formatter<'db> {
                 self.val_name(ins.dst_val),
                 list([self.val_name(ins.src_bufref), self.val_name(ins.src_index)]),
             ]),
-            InstrData::BufregGetMRef(ins) => list([
+            InstrData::BufrefGetMRef(ins) => list([
                 symbol("bufref.get_mref"),
                 self.val_name(ins.dst_ref),
                 list([self.val_name(ins.src_bufref), self.val_name(ins.src_index)]),

@@ -55,7 +55,7 @@ pub enum InstrData<'db> {
     BufrefTrunc(BufrefTrunc),
     BufrefLen(BufrefLen),
     BufrefGet(BufrefGet),
-    BufregGetMRef(BufrefGetMRef),
+    BufrefGetMRef(BufrefGetMRef),
 }
 
 impl InstrData<'_> {
@@ -182,7 +182,7 @@ impl InstrData<'_> {
                 ins.src_bufref = map(ins.src_bufref);
                 ins.src_index = map(ins.src_index);
             }
-            InstrData::BufregGetMRef(ins) => {
+            InstrData::BufrefGetMRef(ins) => {
                 ins.src_bufref = map(ins.src_bufref);
                 ins.src_index = map(ins.src_index);
             }
@@ -268,7 +268,7 @@ impl InstrData<'_> {
             InstrData::BufrefGet(ins) => {
                 ins.dst_val = map(ins.dst_val);
             }
-            InstrData::BufregGetMRef(ins) => {
+            InstrData::BufrefGetMRef(ins) => {
                 ins.dst_ref = map(ins.dst_ref);
             }
         }
