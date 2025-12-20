@@ -14,7 +14,7 @@ use crate::{
     strand::{self, CallStackEntry, GBasicBlockId, Strand},
 };
 use bumpalo::Bump;
-use cranelift_entity::SecondaryMap;
+use cranelift_entity::{EntityRef, SecondaryMap};
 use fir_core::{HashMap, HashSet};
 use mir::{FuncData, TypeArgs};
 use salsa::Database;
@@ -551,8 +551,21 @@ where
                 );
                 self.current_vals[init_struct.dst] = Some(Compound::Struct { fields });
             }
-            mir::InstrData::GetField(get_field) => todo!(),
-            mir::InstrData::SetField(set_field) => todo!(),
+            mir::InstrData::GetField(get_field) => {
+                let Compound::Struct { fields } = self.get_val(get_field.src_struct) else {
+                    panic!("not a struct")
+                };
+                self.current_vals[get_field.dst] = Some(fields[get_field.field.index()])
+            }
+            mir::InstrData::SetField(set_field) => {
+                let Compound::Struct { fields } = self.get_val(set_field.src_struct) else {
+                    panic!("not a struct")
+                };
+                let new_fields = self.bump.alloc_slice_copy(fields);
+                new_fields[set_field.field.index()] = self.get_val(set_field.src_field_val);
+                self.current_vals[set_field.dst_struct] =
+                    Some(Compound::Struct { fields: new_fields });
+            }
             mir::InstrData::Alloc(alloc) => todo!(),
             mir::InstrData::Load(load) => todo!(),
             mir::InstrData::Store(store) => todo!(),
