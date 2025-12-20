@@ -540,7 +540,17 @@ where
                 let dst = Compound::Bool(self.backend.int_not(src));
                 self.current_vals[unary.dst] = Some(dst);
             }
-            mir::InstrData::InitStruct(init_struct) => todo!(),
+            mir::InstrData::InitStruct(init_struct) => {
+                let fields = self.bump.alloc_slice_fill_iter(
+                    init_struct
+                        .fields
+                        .as_slice(&self.current_func.val_lists)
+                        .iter()
+                        .copied()
+                        .map(|val| self.get_val(val)),
+                );
+                self.current_vals[init_struct.dst] = Some(Compound::Struct { fields });
+            }
             mir::InstrData::GetField(get_field) => todo!(),
             mir::InstrData::SetField(set_field) => todo!(),
             mir::InstrData::Alloc(alloc) => todo!(),
