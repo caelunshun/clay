@@ -415,7 +415,16 @@ where
                 let dst = Compound::Int(self.backend.int_sdiv(lhs, rhs));
                 self.current_vals[binary.dst] = Some(dst);
             }
-            mir::InstrData::IntCmp(cmp) => {}
+            mir::InstrData::IntCmp(cmp) => {
+                let Compound::Int(lhs) = self.get_val(cmp.src1) else {
+                    panic!("not an int")
+                };
+                let Compound::Int(rhs) = self.get_val(cmp.src2) else {
+                    panic!("not an int")
+                };
+                let dst = Compound::Bool(self.backend.int_scmp(lhs, rhs, cmp.mode));
+                self.current_vals[cmp.dst] = Some(dst);
+            }
             mir::InstrData::RealAdd(binary) => {
                 let Compound::Real(lhs) = self.get_val(binary.src1) else {
                     panic!("not a real")
@@ -456,7 +465,16 @@ where
                 let dst = Compound::Real(self.backend.float_div(lhs, rhs));
                 self.current_vals[binary.dst] = Some(dst);
             }
-            mir::InstrData::RealCmp(cmp) => todo!(),
+            mir::InstrData::RealCmp(cmp) => {
+                let Compound::Real(lhs) = self.get_val(cmp.src1) else {
+                    panic!("not a real")
+                };
+                let Compound::Real(rhs) = self.get_val(cmp.src2) else {
+                    panic!("not a real")
+                };
+                let dst = Compound::Bool(self.backend.float_cmp(lhs, rhs, cmp.mode));
+                self.current_vals[cmp.dst] = Some(dst);
+            }
             mir::InstrData::RealToInt(unary) => {
                 let Compound::Real(src) = self.get_val(unary.src) else {
                     panic!("not a real")
