@@ -5,7 +5,9 @@ use crate::{
         self, BasicBlockId, CodeBuilder, CodegenBackend, FloatBitness, IntBitness, Signature, ValTy,
     },
     compiled_strand::{CompiledStrand, Symbol},
+    intrinsic::IntrinsicCall,
     isa::Isa,
+    layout::layout_of,
     lowering::{
         compound_val::{Compound, scalarize_type, scalarize_types},
         context::LoweringCx,
@@ -566,7 +568,26 @@ where
                 self.current_vals[set_field.dst_struct] =
                     Some(Compound::Struct { fields: new_fields });
             }
-            mir::InstrData::Alloc(alloc) => {}
+            mir::InstrData::Alloc(alloc) => {
+                let typ = self.current_func.vals[alloc.src].typ;
+                let layout = layout_of(self.db, self.mir_cx, typ, self.current_type_args.clone());
+
+                let size = self
+                    .backend
+                    .int_const(layout.size().try_into().unwrap(), IntBitness::B64);
+                let align = self
+                    .backend
+                    .int_const(layout.align().try_into().unwrap(), IntBitness::B64);
+                let ptr = self
+                    .backend
+                    .call_intrinsic(IntrinsicCall::GcAlloc, &[size, align])[0];
+                // Initially allocated pointer has a tag of 0, so we don't have to
+                // decode it.
+                self.current_vals[alloc.dst_ref] = Some(Compound::MRef {
+                    tagged: ptr,
+                    untagged: ptr,
+                });
+            }
             mir::InstrData::Load(load) => todo!(),
             mir::InstrData::Store(store) => todo!(),
             mir::InstrData::MakeFieldMRef(make_field_mref) => todo!(),

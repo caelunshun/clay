@@ -1,5 +1,6 @@
 use crate::{
     compiled_strand::{CompiledStrand, Symbol},
+    intrinsic::IntrinsicCall,
     isa::Isa,
 };
 use bumpalo::Bump;
@@ -181,6 +182,10 @@ where
     /// Call a function whose address will be provided by the given
     /// relocation symbol.
     fn call(&mut self, symbol: Symbol, sig: Signature, args: &[ValId]) -> &'bump [ValId];
+
+    fn call_intrinsic(&mut self, intrinsic: IntrinsicCall, args: &[ValId]) -> &'bump [ValId] {
+        self.call(Symbol::Intrinsic(intrinsic), intrinsic.signature(), args)
+    }
 
     /// Tail call. This is a block terminator.
     fn tailcall(&mut self, symbol: Symbol, sig: Signature, args: &[ValId]);
