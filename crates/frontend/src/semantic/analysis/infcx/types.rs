@@ -1,5 +1,5 @@
 use crate::{
-    base::{ErrorGuaranteed, Session, arena::Obj},
+    base::{ErrorGuaranteed, HardDiag, Session, arena::Obj},
     semantic::{
         analysis::{
             TyCtxt, TyFolder, TyFolderInfallible, TyVisitor, TyVisitorUnspanned, TyVisitorWalk,
@@ -15,7 +15,7 @@ use bit_set::BitSet;
 use disjoint::DisjointSetVec;
 use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
-use std::{convert::Infallible, ops::ControlFlow};
+use std::{cell::RefCell, convert::Infallible, ops::ControlFlow, rc::Rc};
 
 // === Errors === //
 
@@ -24,6 +24,16 @@ pub struct TyAndTyRelateError {
     pub origin_lhs: Ty,
     pub origin_rhs: Ty,
     pub culprits: Vec<TyAndTyRelateCulprit>,
+}
+
+impl TyAndTyRelateError {
+    // TODO
+    pub fn to_diag(self) -> HardDiag {
+        HardDiag::anon_err(format_args!(
+            "could not unify {:?} and {:?}",
+            self.origin_lhs, self.origin_rhs,
+        ))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +62,15 @@ pub struct ReAndReRelateError {
 pub struct ReAndReRelateOffense {
     pub universal: Obj<RegionGeneric>,
     pub forced_to_outlive: Re,
+}
+
+impl ReAndReRelateError {
+    pub fn to_diag(self) -> HardDiag {
+        HardDiag::anon_err(format_args!(
+            "could not unify {:?} and {:?}",
+            self.lhs, self.rhs,
+        ))
+    }
 }
 
 // === InferCx === //
@@ -114,6 +133,18 @@ impl<'tcx> InferCx<'tcx> {
         } else {
             InferCxMode::RegionBlind
         }
+    }
+
+    pub fn start_tracing(&mut self) {
+        self.types.start_tracing();
+    }
+
+    pub fn finish_tracing(&mut self) -> FxHashSet<InferTyVar> {
+        self.types.finish_tracing()
+    }
+
+    pub fn mention_var_for_tracing(&self, var: InferTyVar) {
+        self.types.mention_var_for_tracing(var);
     }
 
     pub fn fresh_ty_var(&mut self) -> InferTyVar {
@@ -551,6 +582,7 @@ struct TyInferTracker {
     disjoint: DisjointSetVec<DisjointTyInferNode>,
     observed_reveal_order: Vec<ObservedTyVar>,
     next_observe_idx: ObservedTyVar,
+    tracing_state: Option<Rc<TyInferTracingState>>,
 }
 
 #[derive(Debug, Clone)]
@@ -565,17 +597,53 @@ enum DisjointTyInferRoot {
     Floating(Vec<ObservedTyVar>),
 }
 
+#[derive(Debug)]
+struct TyInferTracingState {
+    set: RefCell<FxHashSet<InferTyVar>>,
+    var_count: InferTyVar,
+}
+
 impl Default for TyInferTracker {
     fn default() -> Self {
         Self {
             disjoint: DisjointSetVec::new(),
             observed_reveal_order: Vec::new(),
             next_observe_idx: ObservedTyVar::from_usize(0),
+            tracing_state: None,
         }
     }
 }
 
 impl TyInferTracker {
+    fn start_tracing(&mut self) {
+        debug_assert!(self.tracing_state.is_none());
+
+        self.tracing_state = Some(Rc::new(TyInferTracingState {
+            set: RefCell::default(),
+            var_count: InferTyVar(self.disjoint.len() as u32),
+        }))
+    }
+
+    fn finish_tracing(&mut self) -> FxHashSet<InferTyVar> {
+        let set = self.tracing_state.take().expect("not tracing");
+        let set = Rc::into_inner(set)
+            .expect("derived inference contexts remain using the same tracing state");
+
+        set.set.into_inner()
+    }
+
+    fn mention_var_for_tracing(&self, var: InferTyVar) {
+        let Some(state) = &self.tracing_state else {
+            return;
+        };
+
+        if var.0 >= state.var_count.0 {
+            return;
+        }
+
+        state.set.borrow_mut().insert(var);
+    }
+
     fn fresh(&mut self) -> InferTyVar {
         let var = InferTyVar(self.disjoint.len() as u32);
         self.disjoint.push(DisjointTyInferNode {
@@ -618,10 +686,14 @@ impl TyInferTracker {
 
         match self.disjoint[root_var].root.as_ref().unwrap() {
             &DisjointTyInferRoot::Known(ty) => Ok(ty),
-            DisjointTyInferRoot::Floating(observed_equivalent) => Err(FloatingInferVar {
-                root: InferTyVar(root_var as u32),
-                observed_equivalent,
-            }),
+            DisjointTyInferRoot::Floating(observed_equivalent) => {
+                self.mention_var_for_tracing(var);
+
+                Err(FloatingInferVar {
+                    root: InferTyVar(root_var as u32),
+                    observed_equivalent,
+                })
+            }
         }
     }
 

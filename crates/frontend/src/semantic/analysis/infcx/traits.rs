@@ -25,92 +25,10 @@ use std::collections::VecDeque;
 // === Errors === //
 
 #[derive(Debug, Clone)]
-pub struct TyAndClauseRelateError {
-    pub lhs: Ty,
-    pub rhs: TraitClauseList,
-    pub errors: Vec<(u32, TyAndSingleClauseRelateError)>,
-    pub had_ambiguity: bool,
-}
-
-#[derive(Debug, Clone)]
-pub enum TyAndSingleClauseRelateError {
-    TyAndTrait(Box<TyAndTraitRelateError>),
-    Outlives(Box<TyAndReRelateError>),
-}
-
-#[derive(Debug, Clone)]
-pub struct ReAndClauseRelateError {
-    pub lhs: Re,
-    pub rhs: TraitClauseList,
-    pub errors: Vec<(u32, ReAndReRelateError)>,
-}
-
-#[derive(Debug, Clone)]
-#[must_use]
-pub enum TyAndTraitRelateResolution {
-    Impl(TyAndImplResolution),
-    Inherent,
-}
-
-#[derive(Debug, Clone)]
-pub struct TyAndTraitRelateError {
-    pub lhs: Ty,
-    pub rhs: TraitSpec,
-    pub resolutions: Vec<TyAndImplResolution>,
-    pub rejections: Vec<Box<TyAndImplRelateError>>,
-    pub had_ambiguity: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct TyAndImplResolution {
-    pub impl_def: Obj<ImplItem>,
-    pub impl_generics: TyOrReList,
-}
-
-#[derive(Debug, Clone)]
-pub struct TyAndImplRelateError {
-    pub lhs: Ty,
-    pub rhs: Obj<ImplItem>,
-    pub bad_target: Option<Box<TyAndTyRelateError>>,
-    pub bad_trait_args: Vec<(u32, TyAndTraitArgRelateError)>,
-    pub bad_trait_clauses: Vec<TyAndImplGenericClauseError>,
-    pub bad_trait_assoc_types: Vec<(u32, TyAndImplAssocRelateError)>,
-    pub had_ambiguity: bool,
-}
-
-#[derive(Debug, Clone)]
-pub enum TyAndTraitArgRelateError {
-    Ty(Box<TyAndTyRelateError>),
-    Re(Box<ReAndReRelateError>),
-}
-
-#[derive(Debug, Clone)]
-pub struct TyAndImplGenericClauseError {
-    pub step: GenericSolveStep,
-    pub error: TyAndImplGenericClauseErrorKind,
-}
-
-#[derive(Debug, Clone)]
-pub enum TyAndImplGenericClauseErrorKind {
-    Ty(Box<TyAndClauseRelateError>),
-    Re(Box<ReAndClauseRelateError>),
-}
-
-#[derive(Debug, Clone)]
-pub enum TyAndImplAssocRelateError {
-    TyAndTy(Box<TyAndTyRelateError>),
-    TyAndClause(Box<TyAndClauseRelateError>),
-}
-
-#[derive(Debug, Clone)]
-pub struct TyAndReRelateError {
-    pub lhs: Ty,
-    pub rhs: Re,
-    pub culprits: Vec<Box<ReAndReRelateError>>,
-}
-
-#[derive(Debug, Clone)]
 pub struct RelateClauseAndTraitError;
+
+#[derive(Debug, Clone)]
+pub struct SelectTraitError;
 
 // === Order Solving === //
 
@@ -395,6 +313,14 @@ impl CoherenceMap {
 ///
 /// This context is built on top of an [`InferCx`].
 ///
+/// ## Obligation Solving
+///
+/// An obligation is something that must unconditionally hold in order for a program to compile.
+/// This means that, unlike `InferCx` relations, obligations cannot be tried for success. In return
+/// for this strict structure, obligations are automatically scheduled out of order to ensure that
+/// all inference variables are solved in the correct order. Additionally, obligations can be solved
+/// co-inductively—that is, an obligation can assume itself to be true while proving itself.
+///
 /// ## Multi-pass Checking
 ///
 /// This context has two modes: region unaware and region aware.
@@ -458,12 +384,12 @@ pub struct ObligationCx<'tcx> {
     /// explore all branches of the proof tree simultaneously.
     run_queue: VecDeque<ObligationIdx>,
 
-    /// A map from inference variables to obligations they block from re-running.
-    blocker_vars: FxHashMap<ObservedTyVar, Vec<ObligationIdx>>,
+    /// A map from inference variables to obligations they could re-run upon being inferred.
+    var_wake_ups: FxHashMap<ObservedTyVar, Vec<ObligationIdx>>,
 
     /// The number of observed inference variables we have processed from `icx`'s
     /// `observed_reveal_order` list.
-    blocker_var_read_len: usize,
+    rerun_var_read_len: usize,
 
     /// The maximum depth we're willing to expand for obligations
     max_obligation_depth: u32,
@@ -473,8 +399,6 @@ define_index_type! {
     pub struct ObligationIdx = u32;
 }
 
-// TODO: if multiple obligations try to spawn this obligation, what depth should it have? Should we
-//  take the longest obligation chain?
 struct Obligation {
     /// The obligation responsible for spawning this new obligation.
     parent: Option<ObligationIdx>,
@@ -488,8 +412,9 @@ struct Obligation {
     /// The kind of obligation we're trying to prove.
     kind: ObligationKind,
 
-    /// The number of inference variables we need to solve before we can rerun this obligation.
-    blockers: u32,
+    /// The set of variables whose inference could cause us to rerun. Cleared once the obligation is
+    /// enqueued to re-run and re-populated if, after the re-run, the obligation is still ambiguous.
+    can_wake_by: FxHashSet<ObservedTyVar>,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -509,13 +434,24 @@ impl ObligationKind {
 #[derive(Debug, Copy, Clone)]
 pub enum ObligationReason {
     FunctionBody(Span),
+    Structural,
 }
 
 #[derive(Debug, Clone)]
 pub enum ObligationResult {
+    /// The obligation was successfully satisfied.
     Success,
+
+    /// The obligation is guaranteed to fail.
     Failure(HardDiag),
-    NotReady(Vec<InferTyVar>),
+
+    /// The obligation has failed because of an ambiguity. This could either be caused by a missing
+    /// inference variable or, if no inference variables were looked up or unified in the solving of
+    /// this obligation, a genuine ambiguity.
+    ///
+    /// If this result is returned, the obligation will be enqueued to run again once one or more of
+    /// the inference variables the obligation depended upon during execution have been solved.
+    Ambiguous(HardDiag),
 }
 
 // Constructor and getters
@@ -533,8 +469,8 @@ impl<'tcx> ObligationCx<'tcx> {
             all_obligations: IndexVec::new(),
             all_obligation_kinds: FxHashSet::default(),
             run_queue: VecDeque::new(),
-            blocker_vars: FxHashMap::default(),
-            blocker_var_read_len: 0,
+            var_wake_ups: FxHashMap::default(),
+            rerun_var_read_len: 0,
             max_obligation_depth,
         }
     }
@@ -592,7 +528,9 @@ impl<'tcx> ObligationCx<'tcx> {
         rhs: Re,
         mode: RelationMode,
     ) -> Result<(), Box<ReAndReRelateError>> {
-        self.icx.relate_re_and_re(lhs, rhs, mode)
+        let res = self.icx.relate_re_and_re(lhs, rhs, mode);
+        self.process_obligations();
+        res
     }
 
     pub fn relate_ty_and_ty(
@@ -601,7 +539,9 @@ impl<'tcx> ObligationCx<'tcx> {
         rhs: Ty,
         mode: RelationMode,
     ) -> Result<(), Box<TyAndTyRelateError>> {
-        self.icx.relate_ty_and_ty(lhs, rhs, mode)
+        let res = self.icx.relate_ty_and_ty(lhs, rhs, mode);
+        self.process_obligations();
+        res
     }
 }
 
@@ -621,48 +561,41 @@ impl<'tcx> ObligationCx<'tcx> {
             depth,
             reason,
             kind,
-            blockers: 0,
+            can_wake_by: FxHashSet::default(),
         });
 
         self.run_queue.push_back(obligation);
+        self.process_obligations();
     }
 
     pub fn process_obligations(&mut self) {
+        if self.current_obligation.is_some() {
+            return;
+        }
+
+        self.process_obligations_inner(/* error_on_ambiguity*/ false);
+    }
+
+    pub fn force_obligations_to_finish(&mut self) {
+        self.process_obligations_inner(/* error_on_ambiguity*/ true);
+    }
+
+    fn process_obligations_inner(&mut self, error_on_ambiguity: bool) {
         let s = self.session();
 
-        debug_assert!(
-            self.current_obligation.is_none(),
-            "cannot reentrantly call `process_obligations`"
-        );
+        debug_assert!(self.current_obligation.is_none());
+
+        self.discover_obligations_reruns();
 
         while let Some(front_idx) = self.run_queue.pop_front() {
             let Obligation {
                 depth,
                 kind,
-                blockers,
+                ref can_wake_by,
                 ..
             } = self.all_obligations[front_idx];
 
-            debug_assert_eq!(blockers, 0);
-
-            // See whether we've discovered the values for new inference variables.
-            for &idx in &self.icx.observed_reveal_order()[self.blocker_var_read_len..] {
-                let Some(blocked) = self.blocker_vars.remove(&idx) else {
-                    continue;
-                };
-
-                for blocked_idx in blocked {
-                    let blocked = &mut self.all_obligations[blocked_idx];
-
-                    blocked.blockers -= 1;
-
-                    if blocked.blockers == 0 {
-                        self.run_queue.push_back(blocked_idx);
-                    }
-                }
-            }
-
-            self.blocker_var_read_len = self.icx.observed_reveal_order().len();
+            debug_assert!(can_wake_by.is_empty());
 
             // Run the obligation.
             let old_icx = self.icx.clone();
@@ -681,52 +614,84 @@ impl<'tcx> ObligationCx<'tcx> {
                     this.current_obligation = None;
                 });
 
+                this.icx.start_tracing();
                 this.run_obligation_now(kind)
             };
 
+            let involved_vars = self.icx.finish_tracing();
+
             // Process its result.
-            match result {
-                ObligationResult::Success => {
-                    // (we're good)
-                }
+            let diag = match result {
+                ObligationResult::Success => None,
                 ObligationResult::Failure(diag) => {
                     self.icx = old_icx;
-
-                    // TODO: Include the reason stack.
-                    diag.emit();
+                    Some(diag)
                 }
-                ObligationResult::NotReady(vars) => {
+                ObligationResult::Ambiguous(diag) => {
                     self.icx = old_icx;
 
-                    let mut blocker_count = 0;
+                    let front = &mut self.all_obligations[front_idx];
 
-                    for var in vars {
-                        if self.icx.lookup_ty_var(var).is_ok() {
-                            continue;
+                    if !error_on_ambiguity {
+                        for var in involved_vars {
+                            if self.icx.lookup_ty_var(var).is_ok() {
+                                continue;
+                            }
+
+                            let var = self.icx.observe_ty_var(var);
+
+                            if !front.can_wake_by.insert(var) {
+                                continue;
+                            }
+
+                            self.var_wake_ups.entry(var).or_default().push(front_idx);
                         }
-
-                        let var = self.icx.observe_ty_var(var);
-
-                        self.blocker_vars.entry(var).or_default().push(front_idx);
-                        blocker_count += 1;
                     }
 
-                    if blocker_count == 0 {
-                        self.run_queue.push_back(front_idx);
-                    } else {
-                        self.all_obligations[front_idx].blockers = blocker_count;
-                    }
+                    front.can_wake_by.is_empty().then_some(diag)
                 }
+            };
+
+            if let Some(diag) = diag {
+                // TODO: Push reason stack
+                diag.emit();
             }
+
+            self.discover_obligations_reruns();
         }
     }
 
+    fn discover_obligations_reruns(&mut self) {
+        for &var in &self.icx.observed_reveal_order()[self.rerun_var_read_len..] {
+            let Some(awoken) = self.var_wake_ups.remove(&var) else {
+                continue;
+            };
+
+            for awoken_idx in awoken {
+                let awoken = &mut self.all_obligations[awoken_idx];
+
+                if !awoken.can_wake_by.contains(&var) {
+                    continue;
+                }
+
+                awoken.can_wake_by.clear();
+
+                self.run_queue.push_back(awoken_idx);
+            }
+        }
+
+        self.rerun_var_read_len = self.icx.observed_reveal_order().len();
+    }
+
     fn run_obligation_now(&mut self, kind: ObligationKind) -> ObligationResult {
-        todo!()
+        match kind {
+            ObligationKind::TyAndTrait(lhs, rhs) => self.run_relate_ty_and_trait(lhs, rhs),
+            ObligationKind::TyAndRe(lhs, rhs) => self.run_relate_ty_and_re(lhs, rhs),
+        }
     }
 }
 
-// === ObligationCx Operations === //
+// === Ty & Clause Relations === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 struct ImplFreshInfer {
@@ -737,9 +702,140 @@ struct ImplFreshInfer {
 }
 
 impl<'tcx> ObligationCx<'tcx> {
-    fn instantiate_fresh_impl_vars(&mut self, candidate: Obj<ImplItem>) -> ImplFreshInfer {
+    pub fn relate_ty_and_clause(
+        &mut self,
+        reason: ObligationReason,
+        lhs: Ty,
+        rhs: TraitClauseList,
+    ) {
+        let s = self.session();
+
+        for &clause in rhs.r(s) {
+            match clause {
+                TraitClause::Outlives(rhs) => {
+                    self.relate_ty_and_re(reason, lhs, rhs);
+                }
+                TraitClause::Trait(rhs) => {
+                    self.relate_ty_and_trait(reason, lhs, rhs);
+                }
+            }
+        }
+    }
+
+    pub fn relate_re_and_clause(&mut self, lhs: Re, rhs: TraitClauseList) {
+        let s = self.session();
+
+        for &clause in rhs.r(s) {
+            match clause {
+                TraitClause::Outlives(rhs) => {
+                    self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs);
+                }
+                TraitClause::Trait(_) => {
+                    unreachable!()
+                }
+            }
+        }
+    }
+
+    pub fn relate_ty_and_trait(&mut self, reason: ObligationReason, lhs: Ty, rhs: TraitSpec) {
+        self.push_obligation(reason, ObligationKind::TyAndTrait(lhs, rhs));
+    }
+
+    fn run_relate_ty_and_trait(&mut self, lhs: Ty, rhs: TraitSpec) -> ObligationResult {
         let tcx = self.tcx();
         let s = self.session();
+
+        // See whether the type itself can provide the implementation.
+        match *self.peel_ty_var(lhs).r(s) {
+            TyKind::Trait(clauses) => {
+                todo!()
+            }
+            TyKind::Universal(generic) => {
+                match Self::relate_clause_and_trait(
+                    &mut self.icx,
+                    tcx.elaborate_generic_clauses(generic, None),
+                    rhs,
+                ) {
+                    Ok(()) => {
+                        return ObligationResult::Success;
+                    }
+                    Err(RelateClauseAndTraitError) => {
+                        // (fallthrough)
+                    }
+                }
+            }
+            TyKind::InferVar(_) => {
+                // We can't yet rule out the possibility that this obligation is inherently
+                // fulfilled.
+                return ObligationResult::Ambiguous(HardDiag::anon_err("type annotation required"));
+            }
+            TyKind::Error(..) => {
+                // Error types can do anything.
+                return ObligationResult::Success;
+            }
+            TyKind::This | TyKind::ExplicitInfer => unreachable!(),
+            TyKind::Simple(..)
+            | TyKind::Reference(..)
+            | TyKind::Adt(..)
+            | TyKind::Tuple(..)
+            | TyKind::FnDef(..) => {
+                // (the `impl` must come externally, fallthrough)
+            }
+        }
+
+        // Select an unambiguous satisfying `impl`.
+        // TODO
+
+        // Register that `impl`'s obligations.
+        // TODO
+
+        todo!()
+    }
+
+    fn gather_impl_candidates<'a>(
+        &'a self,
+        lhs: Ty,
+        rhs: TraitSpec,
+    ) -> impl Iterator<Item = Obj<ImplItem>> + 'tcx {
+        let tcx = self.tcx();
+        let s = self.session();
+
+        self.coherence()
+            .by_shape
+            .lookup(
+                tcx.shape_of_trait_def(
+                    rhs.def,
+                    &rhs.params.r(s)[..rhs.def.r(s).regular_generic_count as usize]
+                        .iter()
+                        .map(|&v| match v {
+                            TraitParam::Equals(v) => InfTySubstitutor::new(
+                                self.icx(),
+                                UnboundVarHandlingMode::EraseToExplicitInfer,
+                            )
+                            .fold_ty_or_re(v),
+                            TraitParam::Unspecified(_) => unreachable!(),
+                        })
+                        .collect::<Vec<_>>(),
+                    InfTySubstitutor::new(self.icx(), UnboundVarHandlingMode::EraseToExplicitInfer)
+                        .fold_ty(lhs),
+                ),
+                s,
+            )
+            .map(|v| {
+                let CoherenceMapEntry::TraitImpl(v) = *v else {
+                    unreachable!()
+                };
+
+                v
+            })
+    }
+
+    fn instantiate_fresh_impl_vars(
+        icx: &mut InferCx<'tcx>,
+        candidate: Obj<ImplItem>,
+    ) -> ImplFreshInfer {
+        let tcx = icx.tcx();
+        let s = icx.session();
 
         // Define fresh variables describing the substitutions to be made.
         let binder = candidate.r(s).generics;
@@ -748,8 +844,8 @@ impl<'tcx> ObligationCx<'tcx> {
             .defs
             .iter()
             .map(|generic| match generic {
-                AnyGeneric::Re(_) => TyOrRe::Re(self.fresh_re()),
-                AnyGeneric::Ty(_) => TyOrRe::Ty(self.fresh_ty()),
+                AnyGeneric::Re(_) => TyOrRe::Re(icx.fresh_re()),
+                AnyGeneric::Ty(_) => TyOrRe::Ty(icx.fresh_ty()),
             })
             .collect::<Vec<_>>();
 
@@ -791,252 +887,51 @@ impl<'tcx> ObligationCx<'tcx> {
         }
     }
 
-    pub fn relate_ty_and_clause(
-        &mut self,
-        lhs: Ty,
-        rhs: TraitClauseList,
-    ) -> Result<(), Box<TyAndClauseRelateError>> {
-        let s = self.session();
-
-        let mut fork = self.clone();
-
-        let mut error = TyAndClauseRelateError {
-            lhs,
-            rhs,
-            errors: Vec::new(),
-            had_ambiguity: false,
-        };
-
-        for (idx, &clause) in rhs.r(s).iter().enumerate() {
-            match clause {
-                TraitClause::Outlives(rhs) => {
-                    if let Err(err) = fork.relate_ty_and_re(lhs, rhs) {
-                        error
-                            .errors
-                            .push((idx as u32, TyAndSingleClauseRelateError::Outlives(err)));
-                    }
-                }
-                TraitClause::Trait(rhs) => {
-                    if let Err(err) = fork.relate_ty_and_trait(lhs, rhs) {
-                        error.had_ambiguity |= err.had_ambiguity;
-                        error
-                            .errors
-                            .push((idx as u32, TyAndSingleClauseRelateError::TyAndTrait(err)));
-                    }
-                }
-            }
-        }
-
-        if error.had_ambiguity || !error.errors.is_empty() {
-            return Err(Box::new(error));
-        }
-
-        *self = fork;
-
-        Ok(())
-    }
-
-    pub fn relate_re_and_clause(
-        &mut self,
-        lhs: Re,
-        rhs: TraitClauseList,
-    ) -> Result<(), Box<ReAndClauseRelateError>> {
-        let s = self.session();
-
-        let mut errors = Vec::new();
-        let mut fork = self.clone();
-
-        for &clause in rhs.r(s) {
-            match clause {
-                TraitClause::Outlives(rhs) => {
-                    if let Err(err) = fork.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs) {
-                        errors.push(err);
-                    }
-                }
-                TraitClause::Trait(_) => {
-                    unreachable!()
-                }
-            }
-        }
-
-        if !errors.is_empty() {
-            return Err(Box::new(ReAndClauseRelateError {
-                lhs,
-                rhs,
-                errors: Vec::new(),
-            }));
-        }
-
-        *self = fork;
-
-        Ok(())
-    }
-
-    pub fn relate_ty_and_trait(
-        &mut self,
-        lhs: Ty,
-        rhs: TraitSpec,
-    ) -> Result<TyAndTraitRelateResolution, Box<TyAndTraitRelateError>> {
-        let tcx = self.tcx();
-        let s = self.session();
-
-        // See whether the type itself can provide the implementation.
-        match *self.peel_ty_var(lhs).r(s) {
-            TyKind::Trait(clauses) => {
-                todo!()
-            }
-            TyKind::Universal(generic) => {
-                match self
-                    .relate_clause_and_trait(tcx.elaborate_generic_clauses(generic, None), rhs)
-                {
-                    Ok(()) => {
-                        return Ok(TyAndTraitRelateResolution::Inherent);
-                    }
-                    Err(RelateClauseAndTraitError) => {
-                        // (fallthrough)
-                    }
-                }
-            }
-            _ => {
-                // (no other types can inherently fulfill a trait requirement without an `impl`)
-            }
-        }
-
-        // Otherwise, attempt to provide the implementation through an implementation block.
-        let mut error = TyAndTraitRelateError {
-            lhs,
-            rhs,
-            resolutions: Vec::new(),
-            rejections: Vec::new(),
-            had_ambiguity: false,
-        };
-
-        let mut accepted_fork = None;
-
-        for candidate in self.gather_impl_candidates(lhs, rhs) {
-            let mut fork = self.clone();
-
-            match fork.relate_ty_and_impl_no_fork(lhs, candidate, rhs) {
-                Ok(resolution) => {
-                    error.resolutions.push(resolution);
-                    accepted_fork = Some(fork);
-                }
-                Err(rejection) => {
-                    error.had_ambiguity |= rejection.had_ambiguity;
-                    error.rejections.push(rejection);
-                }
-            }
-        }
-
-        if error.resolutions.len() > 1 {
-            error.had_ambiguity = true;
-        }
-
-        if error.had_ambiguity || error.resolutions.is_empty() {
-            return Err(Box::new(error));
-        }
-
-        *self = accepted_fork.unwrap();
-
-        Ok(TyAndTraitRelateResolution::Impl(
-            error.resolutions.into_iter().next().unwrap(),
-        ))
-    }
-
-    pub fn gather_impl_candidates<'a>(
-        &'a self,
-        lhs: Ty,
-        rhs: TraitSpec,
-    ) -> impl Iterator<Item = Obj<ImplItem>> + 'tcx {
-        let tcx = self.tcx();
-        let s = self.session();
-
-        self.coherence()
-            .by_shape
-            .lookup(
-                tcx.shape_of_trait_def(
-                    rhs.def,
-                    &rhs.params.r(s)[..rhs.def.r(s).regular_generic_count as usize]
-                        .iter()
-                        .map(|&v| match v {
-                            TraitParam::Equals(v) => InfTySubstitutor::new(
-                                self,
-                                UnboundVarHandlingMode::EraseToExplicitInfer,
-                            )
-                            .fold_ty_or_re(v),
-                            TraitParam::Unspecified(_) => unreachable!(),
-                        })
-                        .collect::<Vec<_>>(),
-                    InfTySubstitutor::new(self, UnboundVarHandlingMode::EraseToExplicitInfer)
-                        .fold_ty(lhs),
-                ),
-                s,
-            )
-            .map(|v| {
-                let CoherenceMapEntry::TraitImpl(v) = *v else {
-                    unreachable!()
-                };
-
-                v
-            })
-    }
-
-    fn relate_ty_and_impl_no_fork(
-        &mut self,
+    fn try_select_impl_no_fork(
+        icx: &mut InferCx<'tcx>,
         lhs: Ty,
         rhs: Obj<ImplItem>,
         spec: TraitSpec,
-    ) -> Result<TyAndImplResolution, Box<TyAndImplRelateError>> {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        let mut error = TyAndImplRelateError {
-            lhs,
-            rhs,
-            bad_target: None,
-            bad_trait_args: Vec::new(),
-            bad_trait_clauses: Vec::new(),
-            bad_trait_assoc_types: Vec::new(),
-            had_ambiguity: false,
-        };
+    ) -> Result<ImplFreshInfer, SelectTraitError> {
+        let s = icx.session();
 
         // Replace universal qualifications in `impl` with inference variables
-        let rhs_fresh = self.instantiate_fresh_impl_vars(rhs);
+        let rhs_fresh = Self::instantiate_fresh_impl_vars(icx, rhs);
 
-        // See whether our target type can even match this `impl` block.
-        if let Err(err) = self.relate_ty_and_ty(lhs, rhs_fresh.target, RelationMode::Equate) {
-            error.bad_target = Some(err);
+        // Does the `lhs` type match the `rhs`'s target type?
+        if icx
+            .relate_ty_and_ty(lhs, rhs_fresh.target, RelationMode::Equate)
+            .is_err()
+        {
+            return Err(SelectTraitError);
         }
 
         // See whether our specific target trait clauses can be covered by the inferred
         // generics. We only check the regular generics at this stage since associated types are
         // defined entirely from our solved regular generics.
-        for (idx, (&instance, &required_param)) in rhs_fresh
+        for (&instance, &required_param) in rhs_fresh
             .trait_
             .r(s)
             .iter()
             .zip(spec.params.r(s))
             .take(spec.def.r(s).regular_generic_count as usize)
-            .enumerate()
         {
             match required_param {
                 TraitParam::Equals(required) => match (instance, required) {
                     (TyOrRe::Re(instance), TyOrRe::Re(required)) => {
-                        if let Err(err) =
-                            self.relate_re_and_re(instance, required, RelationMode::Equate)
+                        if icx
+                            .relate_re_and_re(instance, required, RelationMode::Equate)
+                            .is_err()
                         {
-                            error
-                                .bad_trait_args
-                                .push((idx as u32, TyAndTraitArgRelateError::Re(err)));
+                            return Err(SelectTraitError);
                         }
                     }
                     (TyOrRe::Ty(instance), TyOrRe::Ty(required)) => {
-                        if let Err(err) =
-                            self.relate_ty_and_ty(instance, required, RelationMode::Equate)
+                        if icx
+                            .relate_ty_and_ty(instance, required, RelationMode::Equate)
+                            .is_err()
                         {
-                            error
-                                .bad_trait_args
-                                .push((idx as u32, TyAndTraitArgRelateError::Ty(err)));
+                            return Err(SelectTraitError);
                         }
                     }
                     _ => unreachable!(),
@@ -1047,104 +942,15 @@ impl<'tcx> ObligationCx<'tcx> {
             }
         }
 
-        // Skip nested trait checks if we failed to match the target since...
-        //
-        // a) it causes unnecessary ambiguities
-        // b) it can cause trait-check overflows which could otherwise be avoided
-        // c) it's not even needed for diagnostics
-        //
-        if error.bad_target.is_none() && error.bad_trait_args.is_empty() {
-            // See whether the inferences we made for all our variables are valid.
-            // See `ImplDef::generic_solve_order` on why the specific solving order is important.
-            for &infer_step in rhs.r(s).generic_solve_order.iter() {
-                let var = rhs_fresh.impl_generics.r(s)[infer_step.generic_idx as usize];
-                let clause = rhs_fresh.impl_generic_clauses.r(s)[infer_step.generic_idx as usize]
-                    .r(s)[infer_step.clause_idx as usize];
-
-                let clause = tcx.intern_trait_clause_list(&[clause]);
-
-                match var {
-                    TyOrRe::Re(re) => {
-                        if let Err(err) = self.relate_re_and_clause(re, clause) {
-                            error.bad_trait_clauses.push(TyAndImplGenericClauseError {
-                                step: infer_step,
-                                error: TyAndImplGenericClauseErrorKind::Re(err),
-                            });
-                        }
-                    }
-                    TyOrRe::Ty(ty) => {
-                        if let Err(err) = self.relate_ty_and_clause(ty, clause) {
-                            error.had_ambiguity |= err.had_ambiguity;
-                            error.bad_trait_clauses.push(TyAndImplGenericClauseError {
-                                step: infer_step,
-                                error: TyAndImplGenericClauseErrorKind::Ty(err),
-                            });
-                        }
-                    }
-                }
-            }
-
-            // See whether the user-supplied associated type constraints match what we inferred.
-            for (idx, (&instance_ty, &required_param)) in rhs_fresh
-                .trait_
-                .r(s)
-                .iter()
-                .zip(spec.params.r(s))
-                .enumerate()
-                .skip(spec.def.r(s).regular_generic_count as usize)
-            {
-                // Associated types are never regions.
-                let instance_ty = instance_ty.unwrap_ty();
-
-                match required_param {
-                    TraitParam::Equals(required_ty) => {
-                        let TyOrRe::Ty(required_ty) = required_ty else {
-                            unreachable!()
-                        };
-
-                        if let Err(err) =
-                            self.relate_ty_and_ty(instance_ty, required_ty, RelationMode::Equate)
-                        {
-                            error
-                                .bad_trait_assoc_types
-                                .push((idx as u32, TyAndImplAssocRelateError::TyAndTy(err)));
-                        }
-                    }
-                    TraitParam::Unspecified(additional_clauses) => {
-                        if let Err(err) = self.relate_ty_and_clause(instance_ty, additional_clauses)
-                        {
-                            error.had_ambiguity |= err.had_ambiguity;
-                            error
-                                .bad_trait_assoc_types
-                                .push((idx as u32, TyAndImplAssocRelateError::TyAndClause(err)));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Do some error checking.
-        if error.had_ambiguity
-            || error.bad_target.is_some()
-            || !error.bad_trait_args.is_empty()
-            || !error.bad_trait_clauses.is_empty()
-            || !error.bad_trait_assoc_types.is_empty()
-        {
-            return Err(Box::new(error));
-        }
-
-        Ok(TyAndImplResolution {
-            impl_def: rhs,
-            impl_generics: rhs_fresh.impl_generics,
-        })
+        Ok(rhs_fresh)
     }
 
     fn relate_clause_and_trait(
-        &mut self,
+        icx: &mut InferCx<'tcx>,
         lhs_elaborated: TraitClauseList,
         rhs: TraitSpec,
     ) -> Result<(), RelateClauseAndTraitError> {
-        let s = self.session();
+        let s = icx.session();
 
         // Find the clause that could prove our trait.
         let lhs = lhs_elaborated
@@ -1157,14 +963,14 @@ impl<'tcx> ObligationCx<'tcx> {
             });
 
         let Some(lhs) = lhs else {
-            return Err(RelateClauseAndTraitError {});
+            return Err(RelateClauseAndTraitError);
         };
 
         let TraitClause::Trait(lhs) = lhs else {
             unreachable!()
         };
 
-        let mut fork = self.clone();
+        let mut fork = icx.clone();
 
         for (&lhs_param, &rhs_param) in lhs.params.r(s).iter().zip(rhs.params.r(s)) {
             let TraitParam::Equals(lhs) = lhs_param else {
@@ -1188,38 +994,27 @@ impl<'tcx> ObligationCx<'tcx> {
                 TraitParam::Unspecified(rhs_clauses) => {
                     let TyOrRe::Ty(lhs) = lhs else { unreachable!() };
 
-                    if let Err(_err) = fork.relate_ty_and_clause(lhs, rhs_clauses) {
+                    if let Err(_err) = Self::relate_ty_and_clause(&mut fork, lhs, rhs_clauses) {
                         return Err(RelateClauseAndTraitError);
                     }
                 }
             }
         }
 
-        *self = fork;
+        *icx = fork;
 
         Ok(())
     }
+}
 
-    pub fn relate_ty_and_re(&mut self, lhs: Ty, rhs: Re) -> Result<(), Box<TyAndReRelateError>> {
-        let mut fork = self.clone();
-        let mut culprits = Vec::new();
+// === Ty & Re Relations === //
 
-        fork.relate_ty_and_re_inner(lhs, rhs, &mut culprits);
-
-        if !culprits.is_empty() {
-            return Err(Box::new(TyAndReRelateError { lhs, rhs, culprits }));
-        }
-
-        Ok(())
+impl<'tcx> ObligationCx<'tcx> {
+    pub fn relate_ty_and_re(&mut self, reason: ObligationReason, lhs: Ty, rhs: Re) {
+        self.push_obligation(reason, ObligationKind::TyAndRe(lhs, rhs));
     }
 
-    #[expect(clippy::vec_box)]
-    fn relate_ty_and_re_inner(
-        &mut self,
-        lhs: Ty,
-        rhs: Re,
-        culprits: &mut Vec<Box<ReAndReRelateError>>,
-    ) {
+    fn run_relate_ty_and_re(&mut self, lhs: Ty, rhs: Re) -> ObligationResult {
         let s = self.session();
 
         match *lhs.r(s) {
@@ -1231,7 +1026,7 @@ impl<'tcx> ObligationCx<'tcx> {
                 // No need to relate the pointee since WF checks already ensure that it outlives
                 // `lhs`.
                 if let Err(err) = self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs) {
-                    culprits.push(err);
+                    return ObligationResult::Failure(err.to_diag());
                 }
             }
             TyKind::Adt(lhs) => {
@@ -1242,11 +1037,11 @@ impl<'tcx> ObligationCx<'tcx> {
                             if let Err(err) =
                                 self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs)
                             {
-                                culprits.push(err);
+                                return ObligationResult::Failure(err.to_diag());
                             }
                         }
                         TyOrRe::Ty(lhs) => {
-                            self.relate_ty_and_re_inner(lhs, rhs, culprits);
+                            self.relate_ty_and_re(ObligationReason::Structural, lhs, rhs);
                         }
                     }
                 }
@@ -1261,7 +1056,7 @@ impl<'tcx> ObligationCx<'tcx> {
                             if let Err(err) =
                                 self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs)
                             {
-                                culprits.push(err);
+                                return ObligationResult::Failure(err.to_diag());
                             }
                         }
                         TraitClause::Trait(_) => {
@@ -1272,21 +1067,28 @@ impl<'tcx> ObligationCx<'tcx> {
             }
             TyKind::Tuple(lhs) => {
                 for &lhs in lhs.r(s) {
-                    self.relate_ty_and_re_inner(lhs, rhs, culprits);
+                    self.relate_ty_and_re(ObligationReason::Structural, lhs, rhs);
                 }
             }
             TyKind::Universal(_) => todo!(),
             TyKind::InferVar(inf_lhs) => {
                 if let Ok(inf_lhs) = self.lookup_ty_var(inf_lhs) {
-                    self.relate_ty_and_re_inner(inf_lhs, rhs, culprits);
+                    self.relate_ty_and_re(ObligationReason::Structural, inf_lhs, rhs);
                 } else {
-                    // Defer the check.
-                    todo!();
+                    return ObligationResult::Ambiguous(HardDiag::anon_err(
+                        "type annotation required",
+                    ));
                 }
             }
         }
-    }
 
+        ObligationResult::Success
+    }
+}
+
+// === WF Relations === //
+
+impl<'tcx> ObligationCx<'tcx> {
     pub fn wf_ty(&mut self, ty: SpannedTy) {
         todo!()
     }
