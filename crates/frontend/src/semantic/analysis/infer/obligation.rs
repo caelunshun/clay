@@ -6,8 +6,15 @@ use crate::{
     },
     utils::hash::{FxHashMap, FxHashSet},
 };
+use derive_where::derive_where;
 use index_vec::{IndexVec, define_index_type};
-use std::{collections::VecDeque, fmt, mem, rc::Rc};
+use polonius_the_crab::{polonius, polonius_return};
+use std::{
+    cell::{Ref, RefCell},
+    collections::VecDeque,
+    fmt, mem,
+    rc::Rc,
+};
 
 // === Definitions === //
 
@@ -98,7 +105,7 @@ pub enum ObligationResult {
 #[derive(Clone)]
 pub struct ObligationCx<'tcx> {
     ucx: UnifyCx<'tcx>,
-    root: Rc<ObligationCxRoot>,
+    root: StealableRc<ObligationCxRoot>,
     local_obligation_queue: Rc<Vec<QueuedObligation>>,
 }
 
@@ -108,6 +115,7 @@ struct QueuedObligation {
     reason: ObligationReason,
 }
 
+#[derive(Default)]
 struct ObligationCxRoot {
     /// The obligation we're currently in the process of executing.
     current_obligation: Option<ObligationIdx>,
@@ -164,14 +172,7 @@ impl<'tcx> ObligationCx<'tcx> {
     pub fn new(tcx: &'tcx TyCtxt, mode: UnifyCxMode) -> Self {
         Self {
             ucx: UnifyCx::new(tcx, mode),
-            root: Rc::new(ObligationCxRoot {
-                current_obligation: None,
-                all_obligations: IndexVec::new(),
-                all_obligation_kinds: FxHashSet::default(),
-                run_queue: VecDeque::new(),
-                var_wake_ups: FxHashMap::default(),
-                rerun_var_read_len: 0,
-            }),
+            root: StealableRc::default(),
             local_obligation_queue: Rc::new(Vec::new()),
         }
     }
@@ -193,7 +194,7 @@ impl<'tcx> ObligationCx<'tcx> {
     }
 
     pub fn push_obligation_no_poll(&mut self, reason: ObligationReason, kind: ObligationKind) {
-        if self.root.current_obligation.is_none() {
+        if self.root.get_ref().current_obligation.is_none() {
             self.push_obligation_no_poll_immediately(None, reason, kind);
         } else {
             Rc::make_mut(&mut self.local_obligation_queue).push(QueuedObligation { kind, reason });
@@ -206,11 +207,9 @@ impl<'tcx> ObligationCx<'tcx> {
         reason: ObligationReason,
         kind: ObligationKind,
     ) {
-        let root = Rc::get_mut(&mut self.root).expect(
-            "`ObligationCx` cannot be forked and pushed to while no obligation is being resolved",
-        );
+        let root = self.root.get_unique();
 
-        if root.all_obligation_kinds.insert(kind) {
+        if !root.all_obligation_kinds.insert(kind) {
             return;
         }
 
@@ -234,13 +233,12 @@ impl<'tcx> ObligationCx<'tcx> {
 
     #[must_use]
     pub fn is_running_obligation(&self) -> bool {
-        self.root.current_obligation.is_some()
+        self.root.get_ref().current_obligation.is_some()
     }
 
     #[must_use]
     pub fn start_running_obligation(&mut self) -> Option<ObligationKind> {
-        let root = Rc::get_mut(&mut self.root)
-            .expect("`ObligationCx` cannot be forked while attempting to start a new obligation");
+        let root = self.root.get_unique();
 
         debug_assert!(root.current_obligation.is_none());
 
@@ -275,8 +273,7 @@ impl<'tcx> ObligationCx<'tcx> {
     }
 
     pub fn finish_running_obligation(&mut self, result: ObligationResult) -> ShouldApplyFork {
-        let root = Rc::get_mut(&mut self.root)
-            .expect("`ObligationCx` cannot be forked while attempting to finish an old obligation");
+        let root = self.root.get_unique();
 
         let curr_idx = root
             .current_obligation
@@ -348,5 +345,46 @@ impl<T> ConfirmationResult<T> {
             }
             ConfirmationResult::Error(diag) => ObligationResult::Failure(diag),
         }
+    }
+}
+
+// === Helpers === //
+
+#[derive_where(Clone)]
+struct StealableRc<T>(Rc<RefCell<Option<T>>>);
+
+impl<T: Default> Default for StealableRc<T> {
+    fn default() -> Self {
+        Self::new(T::default())
+    }
+}
+
+impl<T> StealableRc<T> {
+    fn new(value: T) -> Self {
+        Self(Rc::new(RefCell::new(Some(value))))
+    }
+
+    pub fn get_ref(&self) -> Ref<'_, T> {
+        Ref::map(self.0.borrow(), |v| v.as_ref().expect("already stolen"))
+    }
+
+    pub fn get_unique(&mut self) -> &mut T {
+        let mut this = &mut *self;
+
+        polonius!(|this| -> &'polonius mut T {
+            if let Some(unique) = Rc::get_mut(&mut this.0) {
+                polonius_return!(unique.get_mut().as_mut().expect("already stolen"));
+            }
+        });
+
+        let stolen = this.0.borrow_mut().take().expect("already stolen");
+
+        this.0 = Rc::new(RefCell::new(Some(stolen)));
+
+        Rc::get_mut(&mut this.0)
+            .unwrap()
+            .get_mut()
+            .as_mut()
+            .unwrap()
     }
 }
