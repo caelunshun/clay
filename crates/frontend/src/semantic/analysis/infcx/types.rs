@@ -89,7 +89,7 @@ pub enum InferCxMode {
 /// No operations performed by this context depend on the order in which prior operations have been
 /// performed and, as such, all operations can be performed and checked for correctness immediately.
 /// This property is not true for more complex `Ty: Clause` and `Ty: 're` obligations. To perform
-/// those obligations, you'll need an [`ObligationCx`](super::ObligationCx).
+/// those obligations, you'll need an [`TraitCx`](super::TraitCx).
 #[derive(Debug, Clone)]
 pub struct InferCx<'tcx> {
     tcx: &'tcx TyCtxt,
