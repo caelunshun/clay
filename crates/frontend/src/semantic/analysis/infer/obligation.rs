@@ -4,17 +4,13 @@ use crate::{
         analysis::{ObservedTyVar, TyCtxt, UnifyCx, UnifyCxMode},
         syntax::{Re, TraitSpec, Ty},
     },
-    utils::hash::{FxHashMap, FxHashSet},
+    utils::{
+        hash::{FxHashMap, FxHashSet},
+        lang::StealRc,
+    },
 };
-use derive_where::derive_where;
 use index_vec::{IndexVec, define_index_type};
-use polonius_the_crab::{polonius, polonius_return};
-use std::{
-    cell::{Ref, RefCell},
-    collections::VecDeque,
-    fmt, mem,
-    rc::Rc,
-};
+use std::{collections::VecDeque, fmt, mem, rc::Rc};
 
 // === Definitions === //
 
@@ -52,6 +48,7 @@ impl ObligationKind {
 pub enum ObligationReason {
     FunctionBody(Span),
     WfForTraitParam(Span),
+    ImplConstraint,
     Structural,
 }
 
@@ -105,7 +102,7 @@ pub enum ObligationResult {
 #[derive(Clone)]
 pub struct ObligationCx<'tcx> {
     ucx: UnifyCx<'tcx>,
-    root: StealableRc<ObligationCxRoot>,
+    root: StealRc<ObligationCxRoot>,
     local_obligation_queue: Rc<Vec<QueuedObligation>>,
 }
 
@@ -172,7 +169,7 @@ impl<'tcx> ObligationCx<'tcx> {
     pub fn new(tcx: &'tcx TyCtxt, mode: UnifyCxMode) -> Self {
         Self {
             ucx: UnifyCx::new(tcx, mode),
-            root: StealableRc::default(),
+            root: StealRc::default(),
             local_obligation_queue: Rc::new(Vec::new()),
         }
     }
@@ -194,7 +191,7 @@ impl<'tcx> ObligationCx<'tcx> {
     }
 
     pub fn push_obligation_no_poll(&mut self, reason: ObligationReason, kind: ObligationKind) {
-        if self.root.get_ref().current_obligation.is_none() {
+        if self.root.get().current_obligation.is_none() {
             self.push_obligation_no_poll_immediately(None, reason, kind);
         } else {
             Rc::make_mut(&mut self.local_obligation_queue).push(QueuedObligation { kind, reason });
@@ -207,7 +204,7 @@ impl<'tcx> ObligationCx<'tcx> {
         reason: ObligationReason,
         kind: ObligationKind,
     ) {
-        let root = self.root.get_unique();
+        let root = self.root.unique();
 
         if !root.all_obligation_kinds.insert(kind) {
             return;
@@ -218,6 +215,7 @@ impl<'tcx> ObligationCx<'tcx> {
         if depth > MAX_OBLIGATION_DEPTH {
             // TODO: Improve diagnostic
             Diag::anon_err("maximum obligation depth reached").emit();
+            return;
         }
 
         let obligation = root.all_obligations.push(ObligationState {
@@ -233,12 +231,12 @@ impl<'tcx> ObligationCx<'tcx> {
 
     #[must_use]
     pub fn is_running_obligation(&self) -> bool {
-        self.root.get_ref().current_obligation.is_some()
+        self.root.get().current_obligation.is_some()
     }
 
     #[must_use]
     pub fn start_running_obligation(&mut self) -> Option<ObligationKind> {
-        let root = self.root.get_unique();
+        let root = self.root.unique();
 
         debug_assert!(root.current_obligation.is_none());
 
@@ -273,12 +271,14 @@ impl<'tcx> ObligationCx<'tcx> {
     }
 
     pub fn finish_running_obligation(&mut self, result: ObligationResult) -> ShouldApplyFork {
-        let root = self.root.get_unique();
+        let root = self.root.unique();
 
         let curr_idx = root
             .current_obligation
             .take()
             .expect("not currently running an obligation");
+
+        let traced_vars = self.ucx.finish_tracing();
 
         match result {
             ObligationResult::Success => {
@@ -301,7 +301,7 @@ impl<'tcx> ObligationCx<'tcx> {
             ObligationResult::NotReady => {
                 let curr = &mut root.all_obligations[curr_idx];
 
-                for var in self.ucx.finish_tracing() {
+                for var in traced_vars {
                     if self.ucx.lookup_ty_var(var).is_ok() {
                         continue;
                     }
@@ -345,46 +345,5 @@ impl<T> ConfirmationResult<T> {
             }
             ConfirmationResult::Error(diag) => ObligationResult::Failure(diag),
         }
-    }
-}
-
-// === Helpers === //
-
-#[derive_where(Clone)]
-struct StealableRc<T>(Rc<RefCell<Option<T>>>);
-
-impl<T: Default> Default for StealableRc<T> {
-    fn default() -> Self {
-        Self::new(T::default())
-    }
-}
-
-impl<T> StealableRc<T> {
-    fn new(value: T) -> Self {
-        Self(Rc::new(RefCell::new(Some(value))))
-    }
-
-    pub fn get_ref(&self) -> Ref<'_, T> {
-        Ref::map(self.0.borrow(), |v| v.as_ref().expect("already stolen"))
-    }
-
-    pub fn get_unique(&mut self) -> &mut T {
-        let mut this = &mut *self;
-
-        polonius!(|this| -> &'polonius mut T {
-            if let Some(unique) = Rc::get_mut(&mut this.0) {
-                polonius_return!(unique.get_mut().as_mut().expect("already stolen"));
-            }
-        });
-
-        let stolen = this.0.borrow_mut().take().expect("already stolen");
-
-        this.0 = Rc::new(RefCell::new(Some(stolen)));
-
-        Rc::get_mut(&mut this.0)
-            .unwrap()
-            .get_mut()
-            .as_mut()
-            .unwrap()
     }
 }

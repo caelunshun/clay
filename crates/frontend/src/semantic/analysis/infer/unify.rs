@@ -9,13 +9,16 @@ use crate::{
             SpannedTy, SpannedTyView, TraitClause, TraitClauseList, TraitParam, Ty, TyKind, TyOrRe,
         },
     },
-    utils::hash::{FxHashSet, FxIndexMap},
+    utils::{
+        hash::{FxHashSet, FxIndexMap},
+        lang::StealRc,
+    },
 };
 use bit_set::BitSet;
 use disjoint::DisjointSetVec;
 use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
-use std::{cell::RefCell, convert::Infallible, ops::ControlFlow, rc::Rc};
+use std::{cell::RefCell, convert::Infallible, ops::ControlFlow};
 
 // === Errors === //
 
@@ -628,7 +631,7 @@ struct TyInferTracker {
     disjoint: DisjointSetVec<DisjointTyInferNode>,
     observed_reveal_order: Vec<ObservedTyVar>,
     next_observe_idx: ObservedTyVar,
-    tracing_state: Option<Rc<TyInferTracingState>>,
+    tracing_state: Option<StealRc<TyInferTracingState>>,
 }
 
 #[derive(Debug, Clone)]
@@ -664,22 +667,19 @@ impl TyInferTracker {
     fn start_tracing(&mut self) {
         debug_assert!(self.tracing_state.is_none());
 
-        self.tracing_state = Some(Rc::new(TyInferTracingState {
+        self.tracing_state = Some(StealRc::new(TyInferTracingState {
             set: RefCell::default(),
             var_count: InferTyVar(self.disjoint.len() as u32),
         }))
     }
 
     fn finish_tracing(&mut self) -> FxHashSet<InferTyVar> {
-        let set = self.tracing_state.take().expect("not tracing");
-        let set = Rc::into_inner(set)
-            .expect("derived inference contexts remain using the same tracing state");
-
-        set.set.into_inner()
+        let state = self.tracing_state.take().expect("not tracing").steal();
+        RefCell::into_inner(state.set)
     }
 
     fn mention_var_for_tracing(&self, var: InferTyVar) {
-        let Some(state) = &self.tracing_state else {
+        let Some(state) = &self.tracing_state.as_ref().and_then(|v| v.try_get()) else {
             return;
         };
 

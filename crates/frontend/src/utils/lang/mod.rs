@@ -15,3 +15,6 @@ pub use match_pair::*;
 
 mod stack_ops;
 pub use stack_ops::*;
+
+mod steal_rc;
+pub use steal_rc::*;

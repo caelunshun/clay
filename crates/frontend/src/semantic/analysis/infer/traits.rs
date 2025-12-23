@@ -671,6 +671,7 @@ impl<'tcx> TraitCx<'tcx> {
         rhs: Obj<ImplItem>,
         spec: TraitSpec,
     ) -> SelectionResult<Self> {
+        let tcx = self.tcx();
         let s = self.session();
 
         // Replace universal qualifications in `impl` with inference variables
@@ -719,7 +720,57 @@ impl<'tcx> TraitCx<'tcx> {
         }
 
         // Obtain all required sub-obligations from generic parameters on the `impl`.
-        // TODO
+        for &infer_step in rhs.r(s).generic_solve_order.iter() {
+            let var = rhs_fresh.impl_generics.r(s)[infer_step.generic_idx as usize];
+            let clause = rhs_fresh.impl_generic_clauses.r(s)[infer_step.generic_idx as usize].r(s)
+                [infer_step.clause_idx as usize];
+
+            let clause = tcx.intern_trait_clause_list(&[clause]);
+
+            match var {
+                TyOrRe::Re(re) => {
+                    if let Err(err) = self.relate_re_and_clause(re, clause) {
+                        return Ok(ConfirmationResult::Error(err.to_diag()));
+                    }
+                }
+                TyOrRe::Ty(ty) => {
+                    self.relate_ty_and_clause(ObligationReason::ImplConstraint, ty, clause);
+                }
+            }
+        }
+
+        // See whether the user-supplied associated type constraints match what we inferred.
+        for (&instance_ty, &required_param) in rhs_fresh
+            .trait_
+            .r(s)
+            .iter()
+            .zip(spec.params.r(s))
+            .skip(spec.def.r(s).regular_generic_count as usize)
+        {
+            // Associated types are never regions.
+            let instance_ty = instance_ty.unwrap_ty();
+
+            match required_param {
+                TraitParam::Equals(required_ty) => {
+                    let TyOrRe::Ty(required_ty) = required_ty else {
+                        unreachable!()
+                    };
+
+                    if let Err(err) =
+                        self.relate_ty_and_ty(instance_ty, required_ty, RelationMode::Equate)
+                    {
+                        return Ok(ConfirmationResult::Error(err.to_diag()));
+                    }
+                }
+                TraitParam::Unspecified(additional_clauses) => {
+                    self.relate_ty_and_clause(
+                        ObligationReason::Structural,
+                        instance_ty,
+                        additional_clauses,
+                    );
+                }
+            }
+        }
 
         Ok(ConfirmationResult::Success(self))
     }
