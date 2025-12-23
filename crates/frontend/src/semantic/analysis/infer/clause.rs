@@ -6,9 +6,8 @@ use crate::{
     semantic::{
         analysis::{
             BinderSubstitution, ConfirmationResult, FloatingInferVar, InferTySubstitutor,
-            ObligationCx, ObligationKind, ObligationReason, ObligationResult,
-            ReAndClauseUnifyError, ReAndReUnifyError, SelectionRejected, SelectionResult,
-            SubstitutionFolder, TyAndTyUnifyError, TyCtxt, TyFolderInfallible as _, TyShapeMap,
+            ObligationCx, ObligationKind, ObligationReason, ObligationResult, SelectionRejected,
+            SelectionResult, SubstitutionFolder, TyCtxt, TyFolderInfallible as _, TyShapeMap,
             UnboundVarHandlingMode, UnifyCx, UnifyCxMode,
         },
         syntax::{
@@ -392,6 +391,18 @@ impl<'tcx> ClauseCx<'tcx> {
             |this| &mut this.ocx,
             |this| this.clone(),
             |fork, kind| match kind {
+                ObligationKind::ReAndRe(lhs, rhs, mode) => {
+                    match fork.ucx_mut().unify_re_and_re(lhs, rhs, mode) {
+                        Ok(()) => ObligationResult::Success,
+                        Err(err) => ObligationResult::Failure(err.to_diag()),
+                    }
+                }
+                ObligationKind::TyAndTy(lhs, rhs, mode) => {
+                    match fork.ucx_mut().unify_ty_and_ty(lhs, rhs, mode) {
+                        Ok(()) => ObligationResult::Success,
+                        Err(err) => ObligationResult::Failure(err.to_diag()),
+                    }
+                }
                 ObligationKind::TyAndTrait(lhs, rhs) => fork.run_oblige_ty_and_trait(lhs, rhs),
                 ObligationKind::TyAndRe(lhs, rhs) => fork.run_oblige_ty_and_re(lhs, rhs),
                 ObligationKind::TyWf(ty) => fork.run_oblige_ty_wf(ty),
@@ -426,36 +437,44 @@ impl<'tcx> ClauseCx<'tcx> {
         self.ucx_mut().fresh_re()
     }
 
-    pub fn unify_re_and_re(
+    pub fn oblige_re_and_re(
         &mut self,
+        reason: ObligationReason,
         lhs: Re,
         rhs: Re,
         mode: RelationMode,
-    ) -> Result<(), Box<ReAndReUnifyError>> {
-        let res = self.ucx_mut().unify_re_and_re(lhs, rhs, mode);
-        self.process_obligations();
-        res
+    ) {
+        self.push_obligation(reason, ObligationKind::ReAndRe(lhs, rhs, mode));
     }
 
-    pub fn unify_re_and_clause(
+    pub fn oblige_ty_and_ty(
         &mut self,
-        lhs: Re,
-        rhs: TraitClauseList,
-    ) -> Result<(), ReAndClauseUnifyError> {
-        let res = self.ucx_mut().unify_re_and_clause(lhs, rhs);
-        self.process_obligations();
-        res
-    }
-
-    pub fn unify_ty_and_ty(
-        &mut self,
+        reason: ObligationReason,
         lhs: Ty,
         rhs: Ty,
         mode: RelationMode,
-    ) -> Result<(), Box<TyAndTyUnifyError>> {
-        let res = self.ucx_mut().unify_ty_and_ty(lhs, rhs, mode);
-        self.process_obligations();
-        res
+    ) {
+        self.push_obligation(reason, ObligationKind::TyAndTy(lhs, rhs, mode));
+    }
+
+    pub fn oblige_re_and_clause(
+        &mut self,
+        reason: ObligationReason,
+        lhs: Re,
+        rhs: TraitClauseList,
+    ) {
+        let s = self.session();
+
+        for &clause in rhs.r(s) {
+            match clause {
+                TraitClause::Outlives(rhs) => {
+                    self.oblige_re_and_re(reason, lhs, rhs, RelationMode::LhsOntoRhs)
+                }
+                TraitClause::Trait(_) => {
+                    unreachable!()
+                }
+            }
+        }
     }
 }
 
@@ -588,12 +607,11 @@ impl<'tcx> ClauseCx<'tcx> {
             unreachable!()
         };
 
-        for (&lhs_param, &rhs_param) in lhs
-            .params
-            .r(s)
-            .iter()
-            .zip(rhs.params.r(s))
-            .take(rhs.def.r(s).regular_generic_count as usize)
+        // See whether we can select an inherent `impl`.
+        let mut param_iter = lhs.params.r(s).iter().zip(rhs.params.r(s));
+
+        for (&lhs_param, &rhs_param) in
+            (&mut param_iter).take(rhs.def.r(s).regular_generic_count as usize)
         {
             let TraitParam::Equals(lhs) = lhs_param else {
                 unreachable!();
@@ -602,12 +620,19 @@ impl<'tcx> ClauseCx<'tcx> {
             match rhs_param {
                 TraitParam::Equals(rhs) => match (lhs, rhs) {
                     (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                        if let Err(_err) = self.unify_re_and_re(lhs, rhs, RelationMode::Equate) {
-                            return Err(SelectionRejected);
-                        }
+                        // This can be an obligation because selection shouldn't depend on regions.
+                        self.oblige_re_and_re(
+                            ObligationReason::Structural,
+                            lhs,
+                            rhs,
+                            RelationMode::Equate,
+                        );
                     }
                     (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
-                        if let Err(_err) = self.unify_ty_and_ty(lhs, rhs, RelationMode::Equate) {
+                        if let Err(_err) =
+                            self.ucx_mut()
+                                .unify_ty_and_ty(lhs, rhs, RelationMode::Equate)
+                        {
                             return Err(SelectionRejected);
                         }
                     }
@@ -619,7 +644,42 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         }
 
-        // TODO: Obligations
+        // If we can, push its obligations.
+        for (&lhs_param, &rhs_param) in param_iter {
+            let TraitParam::Equals(lhs) = lhs_param else {
+                unreachable!();
+            };
+
+            match rhs_param {
+                TraitParam::Equals(rhs) => match (lhs, rhs) {
+                    (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
+                        self.oblige_re_and_re(
+                            ObligationReason::Structural,
+                            lhs,
+                            rhs,
+                            RelationMode::Equate,
+                        );
+                    }
+                    (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
+                        self.oblige_ty_and_ty(
+                            ObligationReason::Structural,
+                            lhs,
+                            rhs,
+                            RelationMode::Equate,
+                        );
+                    }
+                    _ => unreachable!(),
+                },
+                TraitParam::Unspecified(rhs) => match lhs {
+                    TyOrRe::Re(lhs) => {
+                        self.oblige_re_and_clause(ObligationReason::Structural, lhs, rhs);
+                    }
+                    TyOrRe::Ty(lhs) => {
+                        self.oblige_ty_and_clause(ObligationReason::Structural, lhs, rhs);
+                    }
+                },
+            }
+        }
 
         Ok(ConfirmationResult::Success(self))
     }
@@ -679,6 +739,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // Does the `lhs` type match the `rhs`'s target type?
         if self
+            .ucx_mut()
             .unify_ty_and_ty(lhs, rhs_fresh.target, RelationMode::Equate)
             .is_err()
         {
@@ -697,6 +758,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 TraitParam::Equals(required) => match (instance, required) {
                     (TyOrRe::Re(instance), TyOrRe::Re(required)) => {
                         if self
+                            .ucx_mut()
                             .unify_re_and_re(instance, required, RelationMode::Equate)
                             .is_err()
                         {
@@ -705,6 +767,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     }
                     (TyOrRe::Ty(instance), TyOrRe::Ty(required)) => {
                         if self
+                            .ucx_mut()
                             .unify_ty_and_ty(instance, required, RelationMode::Equate)
                             .is_err()
                         {
@@ -729,9 +792,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
             match var {
                 TyOrRe::Re(re) => {
-                    if let Err(err) = self.unify_re_and_clause(re, clause) {
-                        return Ok(ConfirmationResult::Error(err.to_diag()));
-                    }
+                    self.oblige_re_and_clause(ObligationReason::Structural, re, clause);
                 }
                 TyOrRe::Ty(ty) => {
                     self.oblige_ty_and_clause(ObligationReason::ImplConstraint, ty, clause);
@@ -756,11 +817,12 @@ impl<'tcx> ClauseCx<'tcx> {
                         unreachable!()
                     };
 
-                    if let Err(err) =
-                        self.unify_ty_and_ty(instance_ty, required_ty, RelationMode::Equate)
-                    {
-                        return Ok(ConfirmationResult::Error(err.to_diag()));
-                    }
+                    self.oblige_ty_and_ty(
+                        ObligationReason::Structural,
+                        instance_ty,
+                        required_ty,
+                        RelationMode::Equate,
+                    );
                 }
                 TraitParam::Unspecified(additional_clauses) => {
                     self.oblige_ty_and_clause(
@@ -848,7 +910,10 @@ impl<'tcx> ClauseCx<'tcx> {
             TyKind::Reference(lhs, _muta, _pointee) => {
                 // No need to unify the pointee since WF checks already ensure that it outlives
                 // `lhs`.
-                if let Err(err) = self.unify_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs) {
+                if let Err(err) = self
+                    .ucx_mut()
+                    .unify_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs)
+                {
                     return ObligationResult::Failure(err.to_diag());
                 }
             }
@@ -858,7 +923,8 @@ impl<'tcx> ClauseCx<'tcx> {
                     match lhs {
                         TyOrRe::Re(lhs) => {
                             if let Err(err) =
-                                self.unify_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs)
+                                self.ucx_mut()
+                                    .unify_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs)
                             {
                                 return ObligationResult::Failure(err.to_diag());
                             }
@@ -877,7 +943,8 @@ impl<'tcx> ClauseCx<'tcx> {
                             // object so relating these constraints is sufficient to ensure that the
                             // object outlives the `rhs`.
                             if let Err(err) =
-                                self.unify_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs)
+                                self.ucx_mut()
+                                    .unify_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs)
                             {
                                 return ObligationResult::Failure(err.to_diag());
                             }

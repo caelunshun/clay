@@ -65,22 +65,7 @@ pub struct ReAndReUnifyOffense {
 }
 
 impl ReAndReUnifyError {
-    pub fn to_diag(self) -> HardDiag {
-        HardDiag::anon_err(format_args!(
-            "could not unify {:?} and {:?}",
-            self.lhs, self.rhs,
-        ))
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ReAndClauseUnifyError {
-    pub lhs: Re,
-    pub rhs: TraitClauseList,
-    pub offenses: Vec<ReAndReUnifyOffense>,
-}
-
-impl ReAndClauseUnifyError {
+    // TODO
     pub fn to_diag(self) -> HardDiag {
         HardDiag::anon_err(format_args!(
             "could not unify {:?} and {:?}",
@@ -262,35 +247,6 @@ impl<'tcx> UnifyCx<'tcx> {
         Ok(())
     }
 
-    pub fn unify_re_and_clause(
-        &mut self,
-        lhs: Re,
-        rhs: TraitClauseList,
-    ) -> Result<(), ReAndClauseUnifyError> {
-        let s = self.session();
-
-        let mut offenses = Vec::new();
-
-        for &clause in rhs.r(s) {
-            match clause {
-                TraitClause::Outlives(rhs) => {
-                    if let Err(err) = self.unify_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs) {
-                        offenses.extend_from_slice(&err.offenses);
-                    }
-                }
-                TraitClause::Trait(_) => {
-                    unreachable!()
-                }
-            }
-        }
-
-        if !offenses.is_empty() {
-            return Err(ReAndClauseUnifyError { lhs, rhs, offenses });
-        }
-
-        Ok(())
-    }
-
     /// Unifies two types such that they match. The `mode` specifies how the regions inside the
     /// types should be unified. For example, if it is `RelationMode::LhsOntoRhs`, relating
     /// `&'0 u32` and `&'1 u32` will result in the region relation `'0: '1`.
@@ -405,20 +361,26 @@ impl<'tcx> UnifyCx<'tcx> {
                     }
                 }
             }
-            (TyKind::InferVar(lhs_var), _) => {
-                if let Ok(known_lhs) = self.types.lookup(lhs_var) {
+            (TyKind::InferVar(lhs_var), _) => match self.types.lookup(lhs_var) {
+                Ok(known_lhs) => {
                     self.unify_ty_and_ty_inner(known_lhs, rhs, culprits, mode);
-                } else if let Err(err) = self.unify_var_and_non_var_ty(lhs_var, rhs) {
-                    culprits.push(TyAndTyUnifyCulprit::RecursiveType(err));
                 }
-            }
-            (_, TyKind::InferVar(rhs_var)) => {
-                if let Ok(known_rhs) = self.types.lookup(rhs_var) {
+                Err(lhs_var) => {
+                    if let Err(err) = self.unify_var_and_non_var_ty(lhs_var.root, rhs) {
+                        culprits.push(TyAndTyUnifyCulprit::RecursiveType(err));
+                    }
+                }
+            },
+            (_, TyKind::InferVar(rhs_var)) => match self.types.lookup(rhs_var) {
+                Ok(known_rhs) => {
                     self.unify_ty_and_ty_inner(lhs, known_rhs, culprits, mode);
-                } else if let Err(err) = self.unify_var_and_non_var_ty(rhs_var, lhs) {
-                    culprits.push(TyAndTyUnifyCulprit::RecursiveType(err));
                 }
-            }
+                Err(rhs_var) => {
+                    if let Err(err) = self.unify_var_and_non_var_ty(rhs_var.root, lhs) {
+                        culprits.push(TyAndTyUnifyCulprit::RecursiveType(err));
+                    }
+                }
+            },
             // Omissions okay because of intern equality fast-path:
             //
             // - `(Simple, Simple)`

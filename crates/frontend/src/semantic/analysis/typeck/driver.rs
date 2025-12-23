@@ -406,17 +406,12 @@ impl CrateTypeckVisitor<'_> {
                     let requirements =
                         trait_subst.fold_spanned_clause_list(*requirements.r(s).clauses);
 
-                    if let Err(err) = ClauseCx::new(tcx, self.coherence, UnifyCxMode::RegionAware)
-                        .unify_re_and_clause(actual.value, requirements.value)
-                    {
-                        err.to_diag().primary(actual.own_span().unwrap(), "").emit();
-                    }
-
-                    if let Err(err) = ClauseCx::new(tcx, self.coherence, UnifyCxMode::RegionAware)
-                        .unify_re_and_clause(actual.value, requirements.value)
-                    {
-                        err.to_diag().primary(actual.own_span().unwrap(), "").emit();
-                    }
+                    ClauseCx::new(tcx, self.coherence, UnifyCxMode::RegionAware)
+                        .oblige_re_and_clause(
+                            ObligationReason::WfForTraitParam(actual.own_span().unwrap()),
+                            actual.value,
+                            requirements.value,
+                        );
                 }
                 (SpannedTyOrReView::Ty(actual), AnyGeneric::Ty(requirements)) => {
                     let requirements =

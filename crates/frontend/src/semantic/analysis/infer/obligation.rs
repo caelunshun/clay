@@ -2,7 +2,7 @@ use crate::{
     base::{Diag, ErrorGuaranteed, HardDiag, Session, syntax::Span},
     semantic::{
         analysis::{ObservedTyVar, TyCtxt, UnifyCx, UnifyCxMode},
-        syntax::{Re, TraitSpec, Ty},
+        syntax::{Re, RelationMode, TraitSpec, Ty},
     },
     utils::hash::{FxHashMap, FxHashSet},
 };
@@ -15,6 +15,11 @@ pub const MAX_OBLIGATION_DEPTH: u32 = 256;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum ObligationKind {
+    // Simple obligations, just here to standardize diagnostics.
+    ReAndRe(Re, Re, RelationMode),
+    TyAndTy(Ty, Ty, RelationMode),
+
+    // Complex obligations, make full use of the `ObligationCx`.
     TyAndTrait(Ty, TraitSpec),
     TyAndRe(Ty, Re),
     TyWf(Ty),
