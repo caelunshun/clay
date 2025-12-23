@@ -388,22 +388,15 @@ impl<'tcx> TraitCx<'tcx> {
     }
 
     fn process_obligations(&mut self) {
-        if self.ocx.is_running_obligation() {
-            return;
-        }
-
-        while let Some(kind) = self.ocx.start_running_obligation() {
-            let mut fork = self.clone();
-
-            let res = match kind {
+        ObligationCx::poll_obligations(
+            self,
+            |this| &mut this.ocx,
+            |this| this.clone(),
+            |fork, kind| match kind {
                 ObligationKind::TyAndTrait(lhs, rhs) => fork.run_relate_ty_and_trait(lhs, rhs),
                 ObligationKind::TyAndRe(lhs, rhs) => fork.run_relate_ty_and_re(lhs, rhs),
-            };
-
-            if fork.ocx.finish_running_obligation(res).should_apply() {
-                *self = fork;
-            }
-        }
+            },
+        );
     }
 }
 

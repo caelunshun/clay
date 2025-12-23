@@ -4,10 +4,7 @@ use crate::{
         analysis::{ObservedTyVar, TyCtxt, UnifyCx, UnifyCxMode},
         syntax::{Re, TraitSpec, Ty},
     },
-    utils::{
-        hash::{FxHashMap, FxHashSet},
-        lang::StealRc,
-    },
+    utils::hash::{FxHashMap, FxHashSet},
 };
 use index_vec::{IndexVec, define_index_type};
 use std::{collections::VecDeque, fmt, mem, rc::Rc};
@@ -15,20 +12,6 @@ use std::{collections::VecDeque, fmt, mem, rc::Rc};
 // === Definitions === //
 
 pub const MAX_OBLIGATION_DEPTH: u32 = 256;
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-#[must_use]
-pub enum ShouldApplyFork {
-    Yes,
-    No,
-}
-
-impl ShouldApplyFork {
-    #[must_use]
-    pub fn should_apply(self) -> bool {
-        matches!(self, Self::Yes)
-    }
-}
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum ObligationKind {
@@ -80,29 +63,17 @@ pub enum ObligationResult {
 /// co-inductively—that is, an obligation can assume itself to be true while proving itself.
 ///
 /// To push an obligation to an `ObligationCx`, you simply have to call [`push_obligation_no_poll`].
-/// You can then poll these obligations for progress by following the following steps:
-///
-/// - Ensure that obligations are not being polled reentrantly using [`is_running_obligation`]. If
-///   they are, early return and let the root-most call to your obligation polling function handle
-///   them.
-/// - While runnable obligations are still being returned by [`start_running_obligation`]...
-///   - Fork the `ObligationCx` (and any other relevant contextual state) by `Clone`'ing it.
-///   - Process the returned [`ObligationKind`] to obtain an [`ObligationResult`].
-///   - Pass the result back to the `ObligationCx` using [`finish_running_obligation`].
-///   - Use the returned [`ShouldApplyFork`] result to determine whether to apply the forked
-///     state to `self` before solving another obligation.
+/// You can then poll these obligations for progress using [`poll_obligations`].
 ///
 /// This context can be forked while processing an obligation but, for efficiency purposes, does not
 /// allow forking while not processing obligations.
 ///
 /// [`push_obligation_no_poll`]: ObligationCx::push_obligation_no_poll
-/// [`is_running_obligation`]: ObligationCx::is_running_obligation
-/// [`start_running_obligation`]: ObligationCx::start_running_obligation
-/// [`finish_running_obligation`]: ObligationCx::finish_running_obligation
+/// [`poll_obligations`]: ObligationCx::poll_obligations
 #[derive(Clone)]
 pub struct ObligationCx<'tcx> {
     ucx: UnifyCx<'tcx>,
-    root: StealRc<ObligationCxRoot>,
+    root: Rc<ObligationCxRoot>,
     local_obligation_queue: Rc<Vec<QueuedObligation>>,
 }
 
@@ -169,7 +140,7 @@ impl<'tcx> ObligationCx<'tcx> {
     pub fn new(tcx: &'tcx TyCtxt, mode: UnifyCxMode) -> Self {
         Self {
             ucx: UnifyCx::new(tcx, mode),
-            root: StealRc::default(),
+            root: Rc::default(),
             local_obligation_queue: Rc::new(Vec::new()),
         }
     }
@@ -191,21 +162,22 @@ impl<'tcx> ObligationCx<'tcx> {
     }
 
     pub fn push_obligation_no_poll(&mut self, reason: ObligationReason, kind: ObligationKind) {
-        if self.root.get().current_obligation.is_none() {
-            self.push_obligation_no_poll_immediately(None, reason, kind);
+        if self.root.current_obligation.is_none() {
+            let root = Rc::get_mut(&mut self.root)
+                .expect("`ObligationCx` cannot be forked while pushing root-level obligations");
+
+            Self::push_obligation_no_poll_immediately(root, None, reason, kind);
         } else {
             Rc::make_mut(&mut self.local_obligation_queue).push(QueuedObligation { kind, reason });
         }
     }
 
     fn push_obligation_no_poll_immediately(
-        &mut self,
+        root: &mut ObligationCxRoot,
         parent: Option<ObligationIdx>,
         reason: ObligationReason,
         kind: ObligationKind,
     ) {
-        let root = self.root.unique();
-
         if !root.all_obligation_kinds.insert(kind) {
             return;
         }
@@ -229,93 +201,131 @@ impl<'tcx> ObligationCx<'tcx> {
         root.run_queue.push_back(obligation);
     }
 
-    #[must_use]
-    pub fn is_running_obligation(&self) -> bool {
-        self.root.get().current_obligation.is_some()
-    }
-
-    #[must_use]
-    pub fn start_running_obligation(&mut self) -> Option<ObligationKind> {
-        let root = self.root.unique();
-
-        debug_assert!(root.current_obligation.is_none());
-
-        // See whether any new obligations can be added to the queue yet.
-        for &var in &self.ucx.observed_reveal_order()[root.rerun_var_read_len..] {
-            let Some(awoken) = root.var_wake_ups.remove(&var) else {
-                continue;
-            };
-
-            for awoken_idx in awoken {
-                let awoken = &mut root.all_obligations[awoken_idx];
-
-                if !awoken.can_wake_by.contains(&var) {
-                    continue;
-                }
-
-                awoken.can_wake_by.clear();
-
-                root.run_queue.push_back(awoken_idx);
-            }
+    pub fn poll_obligations<T>(
+        target: &mut T,
+        getter: impl Fn(&mut T) -> &mut Self,
+        forker: impl Fn(&T) -> T,
+        mut run: impl FnMut(&mut T, ObligationKind) -> ObligationResult,
+    ) {
+        if getter(target).root.current_obligation.is_some() {
+            return;
         }
 
-        root.rerun_var_read_len = self.ucx.observed_reveal_order().len();
+        loop {
+            let this = getter(target);
 
-        // Start running the next obligation.
-        let curr = root.run_queue.pop_front()?;
-        root.current_obligation = Some(curr);
+            let root = Rc::get_mut(&mut this.root)
+                .expect("`ObligationCx` cannot be forked while polling obligations");
 
-        self.ucx.start_tracing();
+            debug_assert!(root.current_obligation.is_none());
 
-        Some(root.all_obligations[curr].kind)
-    }
+            // See whether any new obligations can be added to the queue yet.
+            for &var in &this.ucx.observed_reveal_order()[root.rerun_var_read_len..] {
+                let Some(awoken) = root.var_wake_ups.remove(&var) else {
+                    continue;
+                };
 
-    pub fn finish_running_obligation(&mut self, result: ObligationResult) -> ShouldApplyFork {
-        let root = self.root.unique();
+                for awoken_idx in awoken {
+                    let awoken = &mut root.all_obligations[awoken_idx];
 
-        let curr_idx = root
-            .current_obligation
-            .take()
-            .expect("not currently running an obligation");
+                    if !awoken.can_wake_by.contains(&var) {
+                        continue;
+                    }
 
-        let traced_vars = self.ucx.finish_tracing();
+                    awoken.can_wake_by.clear();
 
-        match result {
-            ObligationResult::Success => {
-                for obligation in mem::take(Rc::make_mut(&mut self.local_obligation_queue)) {
-                    self.push_obligation_no_poll_immediately(
-                        Some(curr_idx),
-                        obligation.reason,
-                        obligation.kind,
+                    root.run_queue.push_back(awoken_idx);
+                }
+            }
+
+            root.rerun_var_read_len = this.ucx.observed_reveal_order().len();
+
+            // Mark the next obligation as active.
+            let Some(curr_idx) = root.run_queue.pop_front() else {
+                break;
+            };
+
+            root.current_obligation = Some(curr_idx);
+
+            let kind = root.all_obligations[curr_idx].kind;
+
+            // The `root` is set up so exclusive access to it is no longer needed; fork the
+            // `target`.
+            let mut fork = forker(target);
+
+            // We must trace on the `fork` since stopping the tracing process requires exactly one
+            // `UnifyCx` to remain.
+            getter(&mut fork).ucx.start_tracing();
+
+            // Process the obligation.
+            let res = run(&mut fork, kind);
+
+            // Interpret the result.
+            let traced_vars = getter(&mut fork).ucx.finish_tracing();
+
+            match res {
+                ObligationResult::Success => {
+                    // Merge the `fork` and the `target` before obtaining the root.
+                    *target = fork;
+
+                    // Push enqueued obligations.
+                    let this = getter(target);
+                    let root = Rc::get_mut(&mut this.root).expect(
+                        "All other `ObligationCx` forks must be dropped after obligation returns",
                     );
-                }
 
-                ShouldApplyFork::Yes
-            }
-            ObligationResult::Failure(diag) => {
-                // TODO: Improve diagnostic
-                diag.emit();
+                    root.current_obligation = None;
 
-                ShouldApplyFork::No
-            }
-            ObligationResult::NotReady => {
-                let curr = &mut root.all_obligations[curr_idx];
-
-                for var in traced_vars {
-                    if self.ucx.lookup_ty_var(var).is_ok() {
-                        continue;
+                    for obligation in mem::take(Rc::make_mut(&mut this.local_obligation_queue)) {
+                        Self::push_obligation_no_poll_immediately(
+                            root,
+                            Some(curr_idx),
+                            obligation.reason,
+                            obligation.kind,
+                        );
                     }
-
-                    let var = self.ucx.observe_ty_var(var);
-
-                    if !curr.can_wake_by.insert(var) {
-                        continue;
-                    }
-
-                    root.var_wake_ups.entry(var).or_default().push(curr_idx);
                 }
+                ObligationResult::Failure(diag) => {
+                    // Drop the fork to regain access to the `root`.
+                    drop(fork);
+                    let this = getter(target);
+                    let root = Rc::get_mut(&mut this.root).expect(
+                        "All other `ObligationCx` forks must be dropped after obligation returns",
+                    );
 
-                ShouldApplyFork::No
+                    // Print diagnostic.
+                    root.current_obligation = None;
+
+                    // TODO: Improve diagnostic
+                    diag.emit();
+                }
+                ObligationResult::NotReady => {
+                    // Drop the fork to regain access to the `root`.
+                    drop(fork);
+                    let this = getter(target);
+                    let root = Rc::get_mut(&mut this.root).expect(
+                        "All other `ObligationCx` forks must be dropped after obligation returns",
+                    );
+
+                    // Register wake-ups.
+                    root.current_obligation = None;
+
+                    let curr = &mut root.all_obligations[curr_idx];
+
+                    for var in traced_vars {
+                        if this.ucx.lookup_ty_var(var).is_ok() {
+                            continue;
+                        }
+
+                        let var = this.ucx.observe_ty_var(var);
+
+                        if !curr.can_wake_by.insert(var) {
+                            continue;
+                        }
+
+                        root.var_wake_ups.entry(var).or_default().push(curr_idx);
+                    }
+                }
             }
         }
     }
