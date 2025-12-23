@@ -1,7 +1,7 @@
 use crate::{
     base::{HardDiag, Session, syntax::Span},
     semantic::{
-        analysis::{InferCx, InferCxMode, ObservedTyVar, TyCtxt},
+        analysis::{ObservedTyVar, TyCtxt, UnifyCx, UnifyCxMode},
         syntax::{Re, TraitSpec, Ty},
     },
     utils::hash::{FxHashMap, FxHashSet},
@@ -64,9 +64,37 @@ pub enum ObligationResult {
 
 // === ObligationCx === //
 
+/// A [`UnifyCx`] extended with the ability to solve obligations out-of-order.
+///
+/// An obligation is something that must unconditionally hold in order for a program to compile.
+/// This means that, unlike `UnifyCx` relations, obligations cannot be tried for success. In return
+/// for this strict structure, obligations are automatically scheduled out of order to ensure that
+/// all inference variables are solved in the correct order. Additionally, obligations can be solved
+/// co-inductively—that is, an obligation can assume itself to be true while proving itself.
+///
+/// To push an obligation to an `ObligationCx`, you simply have to call [`push_obligation`]. You can
+/// then poll these obligations for progress by following the following steps:
+///
+/// - Ensure that obligations are not being polled reentrantly using [`is_running_obligation`]. If
+///   they are, early return and let the root-most call to your obligation polling function handle
+///   them.
+/// - While runnable obligations are still being returned by [`start_running_obligation`]...
+///   - Fork the `ObligationCx` (and any other relevant contextual state) by `Clone`'ing it.
+///   - Process the returned [`ObligationKind`] to obtain an [`ObligationResult`].
+///   - Pass the result back to the `ObligationCx` using [`finish_running_obligation`].
+///   - Use the returned [`ShouldApplyFork`] result to determine whether to apply the forked
+///     state to `self` before solving another obligation.
+///
+/// This context can be forked while processing an obligation but, for efficiency purposes, does not
+/// allow forking while not processing obligations.
+///
+/// [`push_obligation`]: ObligationCx::push_obligation
+/// [`is_running_obligation`]: ObligationCx::is_running_obligation
+/// [`start_running_obligation`]: ObligationCx::start_running_obligation
+/// [`finish_running_obligation`]: ObligationCx::finish_running_obligation
 #[derive(Clone)]
 pub struct ObligationCx<'tcx> {
-    icx: InferCx<'tcx>,
+    ucx: UnifyCx<'tcx>,
     root: Rc<ObligationCxRoot>,
     local_obligation_queue: Rc<Vec<QueuedObligation>>,
 }
@@ -96,7 +124,7 @@ struct ObligationCxRoot {
     /// A map from inference variables to obligations they could re-run upon being inferred.
     var_wake_ups: FxHashMap<ObservedTyVar, Vec<ObligationIdx>>,
 
-    /// The number of observed inference variables we have processed from `icx`'s
+    /// The number of observed inference variables we have processed from `ucx`'s
     /// `observed_reveal_order` list.
     rerun_var_read_len: usize,
 
@@ -133,9 +161,9 @@ impl<'tcx> fmt::Debug for ObligationCx<'tcx> {
 }
 
 impl<'tcx> ObligationCx<'tcx> {
-    pub fn new(tcx: &'tcx TyCtxt, mode: InferCxMode, max_obligation_depth: u32) -> Self {
+    pub fn new(tcx: &'tcx TyCtxt, mode: UnifyCxMode, max_obligation_depth: u32) -> Self {
         Self {
-            icx: InferCx::new(tcx, mode),
+            ucx: UnifyCx::new(tcx, mode),
             root: Rc::new(ObligationCxRoot {
                 current_obligation: None,
                 all_obligations: IndexVec::new(),
@@ -150,19 +178,19 @@ impl<'tcx> ObligationCx<'tcx> {
     }
 
     pub fn tcx(&self) -> &'tcx TyCtxt {
-        self.icx.tcx()
+        self.ucx.tcx()
     }
 
     pub fn session(&self) -> &'tcx Session {
-        self.icx.session()
+        self.ucx.session()
     }
 
-    pub fn icx(&self) -> &InferCx<'tcx> {
-        &self.icx
+    pub fn ucx(&self) -> &UnifyCx<'tcx> {
+        &self.ucx
     }
 
-    pub fn icx_mut(&mut self) -> &mut InferCx<'tcx> {
-        &mut self.icx
+    pub fn ucx_mut(&mut self) -> &mut UnifyCx<'tcx> {
+        &mut self.ucx
     }
 
     pub fn push_obligation(&mut self, reason: ObligationReason, kind: ObligationKind) {
@@ -213,7 +241,7 @@ impl<'tcx> ObligationCx<'tcx> {
         debug_assert!(root.current_obligation.is_none());
 
         // See whether any new obligations can be added to the queue yet.
-        for &var in &self.icx.observed_reveal_order()[root.rerun_var_read_len..] {
+        for &var in &self.ucx.observed_reveal_order()[root.rerun_var_read_len..] {
             let Some(awoken) = root.var_wake_ups.remove(&var) else {
                 continue;
             };
@@ -231,13 +259,13 @@ impl<'tcx> ObligationCx<'tcx> {
             }
         }
 
-        root.rerun_var_read_len = self.icx.observed_reveal_order().len();
+        root.rerun_var_read_len = self.ucx.observed_reveal_order().len();
 
         // Start running the next obligation.
         let curr = root.run_queue.pop_front()?;
         root.current_obligation = Some(curr);
 
-        self.icx.start_tracing();
+        self.ucx.start_tracing();
 
         Some(root.all_obligations[curr].kind)
     }
@@ -272,12 +300,12 @@ impl<'tcx> ObligationCx<'tcx> {
             ObligationResult::NotReady => {
                 let curr = &mut root.all_obligations[curr_idx];
 
-                for var in self.icx.finish_tracing() {
-                    if self.icx.lookup_ty_var(var).is_ok() {
+                for var in self.ucx.finish_tracing() {
+                    if self.ucx.lookup_ty_var(var).is_ok() {
                         continue;
                     }
 
-                    let var = self.icx.observe_ty_var(var);
+                    let var = self.ucx.observe_ty_var(var);
 
                     if !curr.can_wake_by.insert(var) {
                         continue;
@@ -294,22 +322,26 @@ impl<'tcx> ObligationCx<'tcx> {
 
 // === Selection Helpers === //
 
-pub type SelectionResult = Result<ConfirmationResult, SelectionRejected>;
+pub type SelectionResult<T> = Result<ConfirmationResult<T>, SelectionRejected>;
 
 #[derive(Debug, Clone)]
 pub struct SelectionRejected;
 
 #[derive(Debug, Clone)]
 #[must_use]
-pub enum ConfirmationResult {
-    Success,
+pub enum ConfirmationResult<T> {
+    Success(T),
     Error(HardDiag),
 }
 
-impl ConfirmationResult {
-    pub fn into_obligation_res(self) -> ObligationResult {
+impl<T> ConfirmationResult<T> {
+    pub fn into_obligation_res(self, apply_target: &mut T) -> ObligationResult {
         match self {
-            ConfirmationResult::Success => ObligationResult::Success,
+            ConfirmationResult::Success(fork) => {
+                *apply_target = fork;
+
+                ObligationResult::Success
+            }
             ConfirmationResult::Error(diag) => ObligationResult::Failure(diag),
         }
     }

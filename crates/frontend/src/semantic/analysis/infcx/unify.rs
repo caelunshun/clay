@@ -73,10 +73,10 @@ impl ReAndReRelateError {
     }
 }
 
-// === InferCx === //
+// === UnifyCx === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum InferCxMode {
+pub enum UnifyCxMode {
     RegionBlind,
     RegionAware,
 }
@@ -89,9 +89,10 @@ pub enum InferCxMode {
 /// No operations performed by this context depend on the order in which prior operations have been
 /// performed and, as such, all operations can be performed and checked for correctness immediately.
 /// This property is not true for more complex `Ty: Clause` and `Ty: 're` obligations. To perform
-/// those obligations, you'll need an [`TraitCx`](super::TraitCx).
+/// those obligations, you'll need an [`TraitCx`](super::TraitCx), which uses the deferred-solving
+/// functionality of a [`ObligationCx`](super::ObligationCx) internally to solve these obligations.
 #[derive(Debug, Clone)]
-pub struct InferCx<'tcx> {
+pub struct UnifyCx<'tcx> {
     tcx: &'tcx TyCtxt,
     types: TyInferTracker,
     regions: Option<ReInferTracker>,
@@ -107,14 +108,14 @@ pub struct FloatingInferVar<'a> {
     pub observed_equivalent: &'a [ObservedTyVar],
 }
 
-impl<'tcx> InferCx<'tcx> {
-    pub fn new(tcx: &'tcx TyCtxt, mode: InferCxMode) -> Self {
+impl<'tcx> UnifyCx<'tcx> {
+    pub fn new(tcx: &'tcx TyCtxt, mode: UnifyCxMode) -> Self {
         Self {
             tcx,
             types: TyInferTracker::default(),
             regions: match mode {
-                InferCxMode::RegionBlind => None,
-                InferCxMode::RegionAware => Some(ReInferTracker::default()),
+                UnifyCxMode::RegionBlind => None,
+                UnifyCxMode::RegionAware => Some(ReInferTracker::default()),
             },
         }
     }
@@ -127,11 +128,11 @@ impl<'tcx> InferCx<'tcx> {
         &self.tcx.session
     }
 
-    pub fn mode(&self) -> InferCxMode {
+    pub fn mode(&self) -> UnifyCxMode {
         if self.regions.is_some() {
-            InferCxMode::RegionAware
+            UnifyCxMode::RegionAware
         } else {
-            InferCxMode::RegionBlind
+            UnifyCxMode::RegionBlind
         }
     }
 
@@ -399,7 +400,7 @@ impl<'tcx> InferCx<'tcx> {
         );
 
         struct OccursVisitor<'a, 'tcx> {
-            icx: &'a InferCx<'tcx>,
+            ucx: &'a UnifyCx<'tcx>,
             reject: InferTyVar,
         }
 
@@ -407,12 +408,12 @@ impl<'tcx> InferCx<'tcx> {
             type Break = ();
 
             fn tcx(&self) -> &'tcx TyCtxt {
-                self.icx.tcx()
+                self.ucx.tcx()
             }
 
             fn visit_spanned_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
                 if let SpannedTyView::InferVar(var) = ty.view(self.tcx()) {
-                    match self.icx.types.lookup(var) {
+                    match self.ucx.types.lookup(var) {
                         Ok(resolved) => self.visit_ty(resolved),
                         Err(other_floating) => {
                             if self.reject == other_floating.root {
@@ -429,7 +430,7 @@ impl<'tcx> InferCx<'tcx> {
         }
 
         let does_occur = OccursVisitor {
-            icx: self,
+            ucx: self,
             reject: lhs_var_root,
         }
         .visit_ty(rhs_ty)
@@ -540,10 +541,10 @@ pub enum UnboundVarHandlingMode {
 }
 
 impl<'a, 'tcx> InfTySubstitutor<'a, 'tcx> {
-    pub fn new(icx: &'a InferCx<'tcx>, mode: UnboundVarHandlingMode) -> Self {
+    pub fn new(ucx: &'a UnifyCx<'tcx>, mode: UnboundVarHandlingMode) -> Self {
         Self {
-            infer_types: &icx.types,
-            tcx: icx.tcx,
+            infer_types: &ucx.types,
+            tcx: ucx.tcx,
             mode,
         }
     }

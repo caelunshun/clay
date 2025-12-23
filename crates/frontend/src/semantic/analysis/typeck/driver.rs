@@ -7,9 +7,9 @@ use crate::{
     parse::token::Ident,
     semantic::{
         analysis::{
-            BinderSubstitution, CoherenceMap, ExplicitInferVisitor, InferCx, InferCxMode,
-            SubstitutionFolder, TyCtxt, TyFolderInfalliblePreservesSpans as _, TyVisitor,
-            TyVisitorUnspanned, TyVisitorWalk,
+            BinderSubstitution, CoherenceMap, ExplicitInferVisitor, SubstitutionFolder, TyCtxt,
+            TyFolderInfalliblePreservesSpans as _, TyVisitor, TyVisitorUnspanned, TyVisitorWalk,
+            UnifyCx, UnifyCxMode,
         },
         syntax::{
             AdtCtor, AdtInstance, AdtItem, AdtKind, AnyGeneric, Crate, FuncItem, GenericBinder,
@@ -407,7 +407,7 @@ impl CrateTypeckVisitor<'_> {
                     let requirements =
                         trait_subst.fold_spanned_clause_list(*requirements.r(s).clauses);
 
-                    if let Err(err) = InferCx::new(tcx, self.coherence, InferCxMode::RegionAware)
+                    if let Err(err) = UnifyCx::new(tcx, self.coherence, UnifyCxMode::RegionAware)
                         .relate_re_and_clause(actual.value, requirements.value)
                     {
                         Diag::span_err(
@@ -430,7 +430,7 @@ impl CrateTypeckVisitor<'_> {
                         continue;
                     }
 
-                    if let Err(err) = InferCx::new(tcx, self.coherence, InferCxMode::RegionAware)
+                    if let Err(err) = UnifyCx::new(tcx, self.coherence, UnifyCxMode::RegionAware)
                         .relate_ty_and_clause(actual.value, requirements.value)
                     {
                         Diag::span_err(

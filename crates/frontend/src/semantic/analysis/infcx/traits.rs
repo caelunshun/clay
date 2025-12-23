@@ -5,11 +5,10 @@ use crate::{
     },
     semantic::{
         analysis::{
-            BinderSubstitution, ConfirmationResult, FloatingInferVar, InfTySubstitutor, InferCx,
-            InferCxMode, ObligationCx, ObligationKind, ObligationReason, ObligationResult,
-            ReAndReRelateError, SelectionRejected, SelectionResult, SubstitutionFolder,
-            TyAndTyRelateError, TyCtxt, TyFolderInfallible as _, TyShapeMap,
-            UnboundVarHandlingMode,
+            BinderSubstitution, ConfirmationResult, FloatingInferVar, InfTySubstitutor,
+            ObligationCx, ObligationKind, ObligationReason, ObligationResult, ReAndReRelateError,
+            SelectionRejected, SelectionResult, SubstitutionFolder, TyAndTyRelateError, TyCtxt,
+            TyFolderInfallible as _, TyShapeMap, UnboundVarHandlingMode, UnifyCx, UnifyCxMode,
         },
         syntax::{
             AnyGeneric, Crate, FnDef, GenericBinder, GenericSolveStep, ImplItem, InferTyVar,
@@ -302,17 +301,9 @@ impl TyCtxt {
 /// - `Clauses entail Clauses`
 /// - `is-well-formed Type`
 ///
-/// This context is built on top of an [`InferCx`].
+/// This context is built on top of an [`ObligationCx`].
 ///
-/// ## Obligation Solving
-///
-/// An obligation is something that must unconditionally hold in order for a program to compile.
-/// This means that, unlike `InferCx` relations, obligations cannot be tried for success. In return
-/// for this strict structure, obligations are automatically scheduled out of order to ensure that
-/// all inference variables are solved in the correct order. Additionally, obligations can be solved
-/// co-inductively—that is, an obligation can assume itself to be true while proving itself.
-///
-/// ## Multi-pass Checking
+/// ## Multi-Pass Checking
 ///
 /// This context has two modes: region unaware and region aware.
 ///
@@ -366,7 +357,7 @@ impl<'tcx> TraitCx<'tcx> {
     pub fn new(
         tcx: &'tcx TyCtxt,
         coherence: &'tcx CoherenceMap,
-        mode: InferCxMode,
+        mode: UnifyCxMode,
         max_obligation_depth: u32,
     ) -> Self {
         Self {
@@ -387,12 +378,12 @@ impl<'tcx> TraitCx<'tcx> {
         self.coherence
     }
 
-    pub fn icx(&self) -> &InferCx<'tcx> {
-        self.ocx.icx()
+    pub fn ucx(&self) -> &UnifyCx<'tcx> {
+        self.ocx.ucx()
     }
 
-    pub fn icx_mut(&mut self) -> &mut InferCx<'tcx> {
-        self.ocx.icx_mut()
+    pub fn ucx_mut(&mut self) -> &mut UnifyCx<'tcx> {
+        self.ocx.ucx_mut()
     }
 
     fn process_obligations(&mut self) {
@@ -404,10 +395,8 @@ impl<'tcx> TraitCx<'tcx> {
             let mut fork = self.clone();
 
             let res = match kind {
-                ObligationKind::TyAndTrait(lhs, rhs) => {
-                    fork.run_relate_ty_and_trait_no_fork(lhs, rhs)
-                }
-                ObligationKind::TyAndRe(lhs, rhs) => todo!(),
+                ObligationKind::TyAndTrait(lhs, rhs) => fork.run_relate_ty_and_trait(lhs, rhs),
+                ObligationKind::TyAndRe(lhs, rhs) => fork.run_relate_ty_and_re(lhs, rhs),
             };
 
             if fork.ocx.finish_running_obligation(res).should_apply() {
@@ -419,28 +408,28 @@ impl<'tcx> TraitCx<'tcx> {
 
 // Forwards
 impl<'tcx> TraitCx<'tcx> {
-    pub fn mode(&self) -> InferCxMode {
-        self.icx().mode()
+    pub fn mode(&self) -> UnifyCxMode {
+        self.ucx().mode()
     }
 
     pub fn fresh_ty_var(&mut self) -> InferTyVar {
-        self.icx_mut().fresh_ty_var()
+        self.ucx_mut().fresh_ty_var()
     }
 
     pub fn fresh_ty(&mut self) -> Ty {
-        self.icx_mut().fresh_ty()
+        self.ucx_mut().fresh_ty()
     }
 
     pub fn lookup_ty_var(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {
-        self.icx().lookup_ty_var(var)
+        self.ucx().lookup_ty_var(var)
     }
 
     pub fn peel_ty_var(&self, ty: Ty) -> Ty {
-        self.icx().peel_ty_var(ty)
+        self.ucx().peel_ty_var(ty)
     }
 
     pub fn fresh_re(&mut self) -> Re {
-        self.icx_mut().fresh_re()
+        self.ucx_mut().fresh_re()
     }
 
     pub fn relate_re_and_re(
@@ -449,7 +438,7 @@ impl<'tcx> TraitCx<'tcx> {
         rhs: Re,
         mode: RelationMode,
     ) -> Result<(), Box<ReAndReRelateError>> {
-        let res = self.icx_mut().relate_re_and_re(lhs, rhs, mode);
+        let res = self.ucx_mut().relate_re_and_re(lhs, rhs, mode);
         self.process_obligations();
         res
     }
@@ -460,7 +449,7 @@ impl<'tcx> TraitCx<'tcx> {
         rhs: Ty,
         mode: RelationMode,
     ) -> Result<(), Box<TyAndTyRelateError>> {
-        let res = self.icx_mut().relate_ty_and_ty(lhs, rhs, mode);
+        let res = self.ucx_mut().relate_ty_and_ty(lhs, rhs, mode);
         self.process_obligations();
         res
     }
@@ -517,7 +506,7 @@ impl<'tcx> TraitCx<'tcx> {
             .push_obligation(reason, ObligationKind::TyAndTrait(lhs, rhs));
     }
 
-    fn run_relate_ty_and_trait_no_fork(&mut self, lhs: Ty, rhs: TraitSpec) -> ObligationResult {
+    fn run_relate_ty_and_trait(&mut self, lhs: Ty, rhs: TraitSpec) -> ObligationResult {
         let tcx = self.tcx();
         let s = self.session();
 
@@ -527,9 +516,13 @@ impl<'tcx> TraitCx<'tcx> {
                 todo!()
             }
             TyKind::Universal(generic) => {
-                match self.select_clause_for_spec(tcx.elaborate_generic_clauses(generic, None), rhs)
+                match self
+                    .clone()
+                    .try_select_inherent_impl(tcx.elaborate_generic_clauses(generic, None), rhs)
                 {
-                    Ok(res) => return res.into_obligation_res(),
+                    Ok(res) => {
+                        return res.into_obligation_res(self);
+                    }
                     Err(SelectionRejected) => {
                         // (fallthrough)
                     }
@@ -554,20 +547,35 @@ impl<'tcx> TraitCx<'tcx> {
             }
         }
 
-        // Select an unambiguous satisfying `impl`.
-        // TODO
+        // Otherwise, scan for a suitable `impl`.
+        let mut prev_confirmation = None;
 
-        // Register that `impl`'s obligations.
-        // TODO
+        for candidate in self.gather_impl_candidates(lhs, rhs) {
+            let Ok(confirmation) = self.clone().try_select_block_impl(lhs, candidate, rhs) else {
+                continue;
+            };
 
-        todo!()
+            if prev_confirmation.is_some() {
+                return ObligationResult::NotReady;
+            }
+
+            prev_confirmation = Some(confirmation)
+        }
+
+        let Some(confirmation) = prev_confirmation else {
+            return ObligationResult::Failure(Diag::anon_err(format_args!(
+                "failed to prove {lhs:?} implements {rhs:?}"
+            )));
+        };
+
+        confirmation.into_obligation_res(self)
     }
 
-    fn select_clause_for_spec(
-        &mut self,
+    fn try_select_inherent_impl(
+        mut self,
         lhs_elaborated: TraitClauseList,
         rhs: TraitSpec,
-    ) -> SelectionResult {
+    ) -> SelectionResult<Self> {
         let s = self.session();
 
         // Find the clause that could prove our trait.
@@ -621,19 +629,18 @@ impl<'tcx> TraitCx<'tcx> {
 
         // TODO: Obligations
 
-        Ok(ConfirmationResult::Success)
+        Ok(ConfirmationResult::Success(self))
     }
 
-    fn gather_impl_candidates<'a>(
-        icx: &'a InferCx<'tcx>,
-        coherence: &'a CoherenceMap,
+    fn gather_impl_candidates(
+        &self,
         lhs: Ty,
         rhs: TraitSpec,
-    ) -> impl Iterator<Item = Obj<ImplItem>> + 'a {
-        let tcx = icx.tcx();
-        let s = icx.session();
+    ) -> impl Iterator<Item = Obj<ImplItem>> + 'tcx {
+        let tcx = self.tcx();
+        let s = self.session();
 
-        coherence
+        self.coherence
             .by_shape
             .lookup(
                 tcx.shape_of_trait_def(
@@ -642,14 +649,14 @@ impl<'tcx> TraitCx<'tcx> {
                         .iter()
                         .map(|&v| match v {
                             TraitParam::Equals(v) => InfTySubstitutor::new(
-                                icx,
+                                self.ucx(),
                                 UnboundVarHandlingMode::EraseToExplicitInfer,
                             )
                             .fold_ty_or_re(v),
                             TraitParam::Unspecified(_) => unreachable!(),
                         })
                         .collect::<Vec<_>>(),
-                    InfTySubstitutor::new(icx, UnboundVarHandlingMode::EraseToExplicitInfer)
+                    InfTySubstitutor::new(self.ucx(), UnboundVarHandlingMode::EraseToExplicitInfer)
                         .fold_ty(lhs),
                 ),
                 s,
@@ -663,7 +670,12 @@ impl<'tcx> TraitCx<'tcx> {
             })
     }
 
-    fn select_impl(&mut self, lhs: Ty, rhs: Obj<ImplItem>, spec: TraitSpec) -> SelectionResult {
+    fn try_select_block_impl(
+        mut self,
+        lhs: Ty,
+        rhs: Obj<ImplItem>,
+        spec: TraitSpec,
+    ) -> SelectionResult<Self> {
         let s = self.session();
 
         // Replace universal qualifications in `impl` with inference variables
@@ -714,7 +726,7 @@ impl<'tcx> TraitCx<'tcx> {
         // Obtain all required sub-obligations from generic parameters on the `impl`.
         // TODO
 
-        Ok(ConfirmationResult::Success)
+        Ok(ConfirmationResult::Success(self))
     }
 
     fn instantiate_fresh_impl_vars(&mut self, candidate: Obj<ImplItem>) -> ImplFreshInfer {
