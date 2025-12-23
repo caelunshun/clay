@@ -1,0 +1,5 @@
+error: maximum obligation depth reached
+   ┌─ crates/frontend/samples/test2.fir:14:16
+   │
+14 │     type Bar = B;
+   │                ^

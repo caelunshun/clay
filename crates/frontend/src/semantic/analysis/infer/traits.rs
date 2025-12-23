@@ -5,7 +5,7 @@ use crate::{
     },
     semantic::{
         analysis::{
-            BinderSubstitution, ConfirmationResult, FloatingInferVar, InfTySubstitutor,
+            BinderSubstitution, ConfirmationResult, FloatingInferVar, InferTySubstitutor,
             ObligationCx, ObligationKind, ObligationReason, ObligationResult,
             ReAndClauseRelateError, ReAndReRelateError, SelectionRejected, SelectionResult,
             SubstitutionFolder, TyAndTyRelateError, TyCtxt, TyFolderInfallible as _, TyShapeMap,
@@ -552,7 +552,11 @@ impl<'tcx> TraitCx<'tcx> {
 
         let Some(confirmation) = prev_confirmation else {
             return ObligationResult::Failure(Diag::anon_err(format_args!(
-                "failed to prove {lhs:?} implements {rhs:?}"
+                "failed to prove {:?} implements {:?}",
+                InferTySubstitutor::new(self.ucx(), UnboundVarHandlingMode::NormalizeToRoot)
+                    .fold_ty(lhs),
+                InferTySubstitutor::new(self.ucx(), UnboundVarHandlingMode::NormalizeToRoot)
+                    .fold_trait_spec(rhs),
             )));
         };
 
@@ -636,7 +640,7 @@ impl<'tcx> TraitCx<'tcx> {
                     &rhs.params.r(s)[..rhs.def.r(s).regular_generic_count as usize]
                         .iter()
                         .map(|&v| match v {
-                            TraitParam::Equals(v) => InfTySubstitutor::new(
+                            TraitParam::Equals(v) => InferTySubstitutor::new(
                                 self.ucx(),
                                 UnboundVarHandlingMode::EraseToExplicitInfer,
                             )
@@ -644,8 +648,11 @@ impl<'tcx> TraitCx<'tcx> {
                             TraitParam::Unspecified(_) => unreachable!(),
                         })
                         .collect::<Vec<_>>(),
-                    InfTySubstitutor::new(self.ucx(), UnboundVarHandlingMode::EraseToExplicitInfer)
-                        .fold_ty(lhs),
+                    InferTySubstitutor::new(
+                        self.ucx(),
+                        UnboundVarHandlingMode::EraseToExplicitInfer,
+                    )
+                    .fold_ty(lhs),
                 ),
                 s,
             )

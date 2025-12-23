@@ -1,4 +1,4 @@
-error: malformed parameter for trait parameter
+error: failed to prove 0x133812f00: Universal(0x133812f48: TypeGeneric { ident: Ident { span: crates/frontend/samples/test3.fir:27:43-44, text: "V"#25, raw: false }, user_clauses: 0x13380ff18: [], is_synthetic: false, .. }) implements TraitSpec { def: "Generic"#19, params: 0x133811a58: [Equals(Ty(0x133811af8: InferVar(InferTyVar(5))))] }
    ┌─ crates/frontend/samples/test3.fir:28:16
    │
 28 │     type Woo = ((D, D), V, T);

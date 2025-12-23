@@ -1,5 +1,5 @@
 use crate::{
-    base::{Diag, HardDiag, Session, syntax::Span},
+    base::{Diag, ErrorGuaranteed, HardDiag, Session, syntax::Span},
     semantic::{
         analysis::{ObservedTyVar, TyCtxt, UnifyCx, UnifyCxMode},
         syntax::{Re, TraitSpec, Ty},
@@ -33,6 +33,17 @@ pub enum ObligationReason {
     WfForTraitParam(Span),
     ImplConstraint,
     Structural,
+}
+
+impl ObligationReason {
+    pub fn span(self) -> Option<Span> {
+        match self {
+            ObligationReason::FunctionBody(span) | ObligationReason::WfForTraitParam(span) => {
+                Some(span)
+            }
+            ObligationReason::ImplConstraint | ObligationReason::Structural => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -166,13 +177,13 @@ impl<'tcx> ObligationCx<'tcx> {
             let root = Rc::get_mut(&mut self.root)
                 .expect("`ObligationCx` cannot be forked while pushing root-level obligations");
 
-            Self::push_obligation_no_poll_immediately(root, None, reason, kind);
+            Self::push_obligation_no_poll_inner(root, None, reason, kind);
         } else {
             Rc::make_mut(&mut self.local_obligation_queue).push(QueuedObligation { kind, reason });
         }
     }
 
-    fn push_obligation_no_poll_immediately(
+    fn push_obligation_no_poll_inner(
         root: &mut ObligationCxRoot,
         parent: Option<ObligationIdx>,
         reason: ObligationReason,
@@ -184,12 +195,6 @@ impl<'tcx> ObligationCx<'tcx> {
 
         let depth = parent.map_or(0, |v| root.all_obligations[v].depth + 1);
 
-        if depth > MAX_OBLIGATION_DEPTH {
-            // TODO: Improve diagnostic
-            Diag::anon_err("maximum obligation depth reached").emit();
-            return;
-        }
-
         let obligation = root.all_obligations.push(ObligationState {
             parent,
             depth,
@@ -198,7 +203,43 @@ impl<'tcx> ObligationCx<'tcx> {
             can_wake_by: FxHashSet::default(),
         });
 
+        if depth > MAX_OBLIGATION_DEPTH {
+            Self::emit_diag_with_context_inner(
+                root,
+                obligation,
+                Diag::anon_err("maximum obligation depth reached"),
+            );
+
+            return;
+        }
+
         root.run_queue.push_back(obligation);
+    }
+
+    fn emit_diag_with_context_inner(
+        root: &ObligationCxRoot,
+        culprit_idx: ObligationIdx,
+        mut diag: HardDiag,
+    ) -> ErrorGuaranteed {
+        let all_obligations = &root.all_obligations;
+
+        // Determine the root obligation.
+        let mut root_idx = culprit_idx;
+
+        loop {
+            let Some(parent) = all_obligations[root_idx].parent else {
+                break;
+            };
+
+            root_idx = parent;
+        }
+
+        // Attach a primary span.
+        diag.push_primary(all_obligations[root_idx].reason.span().unwrap(), "");
+
+        // TODO: Print out full causality chain
+
+        diag.emit()
     }
 
     pub fn poll_obligations<T>(
@@ -265,19 +306,18 @@ impl<'tcx> ObligationCx<'tcx> {
 
             match res {
                 ObligationResult::Success => {
-                    // Merge the `fork` and the `target` before obtaining the root.
+                    // Merge the `fork` and the `target` and obtain the root.
                     *target = fork;
-
-                    // Push enqueued obligations.
                     let this = getter(target);
                     let root = Rc::get_mut(&mut this.root).expect(
                         "All other `ObligationCx` forks must be dropped after obligation returns",
                     );
 
+                    // Push enqueued obligations.
                     root.current_obligation = None;
 
                     for obligation in mem::take(Rc::make_mut(&mut this.local_obligation_queue)) {
-                        Self::push_obligation_no_poll_immediately(
+                        Self::push_obligation_no_poll_inner(
                             root,
                             Some(curr_idx),
                             obligation.reason,
@@ -295,9 +335,7 @@ impl<'tcx> ObligationCx<'tcx> {
 
                     // Print diagnostic.
                     root.current_obligation = None;
-
-                    // TODO: Improve diagnostic
-                    diag.emit();
+                    Self::emit_diag_with_context_inner(root, curr_idx, diag);
                 }
                 ObligationResult::NotReady => {
                     // Drop the fork to regain access to the `root`.

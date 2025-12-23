@@ -482,7 +482,7 @@ impl<'tcx> UnifyCx<'tcx> {
         .is_break();
 
         if does_occur {
-            let occurs_in = InfTySubstitutor::new(self, UnboundVarHandlingMode::NormalizeToRoot)
+            let occurs_in = InferTySubstitutor::new(self, UnboundVarHandlingMode::NormalizeToRoot)
                 .fold_ty(rhs_ty);
 
             return Err(InferTyOccursError {
@@ -571,7 +571,7 @@ impl<'tcx> UnifyCx<'tcx> {
 // === InfTySubstitutor === //
 
 #[derive(Debug, Copy, Clone)]
-pub struct InfTySubstitutor<'a, 'tcx> {
+pub struct InferTySubstitutor<'a, 'tcx> {
     infer_types: &'a TyInferTracker,
     tcx: &'tcx TyCtxt,
     mode: UnboundVarHandlingMode,
@@ -585,7 +585,7 @@ pub enum UnboundVarHandlingMode {
     Panic,
 }
 
-impl<'a, 'tcx> InfTySubstitutor<'a, 'tcx> {
+impl<'a, 'tcx> InferTySubstitutor<'a, 'tcx> {
     pub fn new(ucx: &'a UnifyCx<'tcx>, mode: UnboundVarHandlingMode) -> Self {
         Self {
             infer_types: &ucx.types,
@@ -595,7 +595,7 @@ impl<'a, 'tcx> InfTySubstitutor<'a, 'tcx> {
     }
 }
 
-impl<'tcx> TyFolder<'tcx> for InfTySubstitutor<'_, 'tcx> {
+impl<'tcx> TyFolder<'tcx> for InferTySubstitutor<'_, 'tcx> {
     type Error = Infallible;
 
     fn tcx(&self) -> &'tcx TyCtxt {

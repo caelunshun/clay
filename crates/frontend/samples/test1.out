@@ -1,22 +1,22 @@
-error: malformed parameter for trait parameter
+error: failed to prove 0x14e812f30: Tuple(0x14e812f60: [0x14e810408: Tuple(0x14e810438: [0x14e810938: Tuple(0x14e810968: [])])]) implements TraitSpec { def: "Generic"#18, params: 0x14e812148: [Equals(Ty(0x14e810408: Tuple(0x14e810438: [0x14e810938: Tuple(0x14e810968: [])])))] }
    ┌─ crates/frontend/samples/test1.fir:23:28
    │
 23 │ impl<T: Associated<T: Demo<((), (((),),), ((),))>>> Dummy for T {}
    │                            ^^^^^^^^^^^^^^^^^^^^^
 
-error: malformed parameter for trait parameter
+error: failed to prove 0x14e812f30: Tuple(0x14e812f60: [0x14e810408: Tuple(0x14e810438: [0x14e810938: Tuple(0x14e810968: [])])]) implements TraitSpec { def: "Generic"#18, params: 0x14e812148: [Equals(Ty(0x14e810408: Tuple(0x14e810438: [0x14e810938: Tuple(0x14e810968: [])])))] }
    ┌─ crates/frontend/samples/test1.fir:25:11
    │
 25 │ impl Demo<((), (((),),), ((),))> for () {}
    │           ^^^^^^^^^^^^^^^^^^^^^
 
-error: malformed parameter for trait parameter
+error: failed to prove 0x14e812f30: Tuple(0x14e812f60: [0x14e810408: Tuple(0x14e810438: [0x14e810938: Tuple(0x14e810968: [])])]) implements TraitSpec { def: "Generic"#18, params: 0x14e812148: [Equals(Ty(0x14e810408: Tuple(0x14e810438: [0x14e810938: Tuple(0x14e810968: [])])))] }
    ┌─ crates/frontend/samples/test1.fir:28:24
    │
 28 │     type IHahThe: Demo<((), (((),),), ((),))>;
    │                        ^^^^^^^^^^^^^^^^^^^^^
 
-error: malformed parameter for trait parameter
+error: failed to prove 0x14e812f30: Tuple(0x14e812f60: [0x14e810408: Tuple(0x14e810438: [0x14e810938: Tuple(0x14e810968: [])])]) implements TraitSpec { def: "Generic"#18, params: 0x14e812148: [Equals(Ty(0x14e810408: Tuple(0x14e810438: [0x14e810938: Tuple(0x14e810968: [])])))] }
    ┌─ crates/frontend/samples/test1.fir:36:16
    │
 36 │     type Woo = ((), (((),),), ((),));
