@@ -20,13 +20,13 @@ use std::{cell::RefCell, convert::Infallible, ops::ControlFlow, rc::Rc};
 // === Errors === //
 
 #[derive(Debug, Clone)]
-pub struct TyAndTyRelateError {
+pub struct TyAndTyUnifyError {
     pub origin_lhs: Ty,
     pub origin_rhs: Ty,
-    pub culprits: Vec<TyAndTyRelateCulprit>,
+    pub culprits: Vec<TyAndTyUnifyCulprit>,
 }
 
-impl TyAndTyRelateError {
+impl TyAndTyUnifyError {
     // TODO
     pub fn to_diag(self) -> HardDiag {
         HardDiag::anon_err(format_args!(
@@ -37,9 +37,9 @@ impl TyAndTyRelateError {
 }
 
 #[derive(Debug, Clone)]
-pub enum TyAndTyRelateCulprit {
+pub enum TyAndTyUnifyCulprit {
     Types(Ty, Ty),
-    Regions(Box<ReAndReRelateError>),
+    Regions(Box<ReAndReUnifyError>),
     ClauseLists(TraitClauseList, TraitClauseList),
     Params(TraitParam, TraitParam),
     RecursiveType(InferTyOccursError),
@@ -52,19 +52,19 @@ pub struct InferTyOccursError {
 }
 
 #[derive(Debug, Clone)]
-pub struct ReAndReRelateError {
+pub struct ReAndReUnifyError {
     pub lhs: Re,
     pub rhs: Re,
-    pub offenses: Vec<ReAndReRelateOffense>,
+    pub offenses: Vec<ReAndReUnifyOffense>,
 }
 
 #[derive(Debug, Clone)]
-pub struct ReAndReRelateOffense {
+pub struct ReAndReUnifyOffense {
     pub universal: Obj<RegionGeneric>,
     pub forced_to_outlive: Re,
 }
 
-impl ReAndReRelateError {
+impl ReAndReUnifyError {
     pub fn to_diag(self) -> HardDiag {
         HardDiag::anon_err(format_args!(
             "could not unify {:?} and {:?}",
@@ -74,13 +74,13 @@ impl ReAndReRelateError {
 }
 
 #[derive(Debug, Clone)]
-pub struct ReAndClauseRelateError {
+pub struct ReAndClauseUnifyError {
     pub lhs: Re,
     pub rhs: TraitClauseList,
-    pub offenses: Vec<ReAndReRelateOffense>,
+    pub offenses: Vec<ReAndReUnifyOffense>,
 }
 
-impl ReAndClauseRelateError {
+impl ReAndClauseUnifyError {
     pub fn to_diag(self) -> HardDiag {
         HardDiag::anon_err(format_args!(
             "could not unify {:?} and {:?}",
@@ -105,7 +105,7 @@ pub enum UnifyCxMode {
 /// No operations performed by this context depend on the order in which prior operations have been
 /// performed and, as such, all operations can be performed and checked for correctness immediately.
 /// This property is not true for more complex `Ty: Clause` and `Ty: 're` obligations. To perform
-/// those obligations, you'll need an [`TraitCx`](super::TraitCx), which uses the deferred-solving
+/// those obligations, you'll need an [`ClauseCx`](super::ClauseCx), which uses the deferred-solving
 /// functionality of a [`ObligationCx`](super::ObligationCx) internally to solve these obligations.
 #[derive(Debug, Clone)]
 pub struct UnifyCx<'tcx> {
@@ -207,12 +207,12 @@ impl<'tcx> UnifyCx<'tcx> {
         }
     }
 
-    pub fn relate_re_and_re(
+    pub fn unify_re_and_re(
         &mut self,
         lhs: Re,
         rhs: Re,
         mode: RelationMode,
-    ) -> Result<(), Box<ReAndReRelateError>> {
+    ) -> Result<(), Box<ReAndReUnifyError>> {
         let Some(regions) = &mut self.regions else {
             return Ok(());
         };
@@ -248,13 +248,13 @@ impl<'tcx> UnifyCx<'tcx> {
                 | (Re::ExplicitInfer, _)
                 | (_, Re::ExplicitInfer) => unreachable!(),
                 _ => {
-                    fork.relate(lhs, rhs, self.tcx, &mut offenses);
+                    fork.unify(lhs, rhs, self.tcx, &mut offenses);
                 }
             }
         }
 
         if !offenses.is_empty() {
-            return Err(Box::new(ReAndReRelateError { lhs, rhs, offenses }));
+            return Err(Box::new(ReAndReUnifyError { lhs, rhs, offenses }));
         }
 
         *regions = fork;
@@ -262,11 +262,11 @@ impl<'tcx> UnifyCx<'tcx> {
         Ok(())
     }
 
-    pub fn relate_re_and_clause(
+    pub fn unify_re_and_clause(
         &mut self,
         lhs: Re,
         rhs: TraitClauseList,
-    ) -> Result<(), ReAndClauseRelateError> {
+    ) -> Result<(), ReAndClauseUnifyError> {
         let s = self.session();
 
         let mut offenses = Vec::new();
@@ -274,7 +274,7 @@ impl<'tcx> UnifyCx<'tcx> {
         for &clause in rhs.r(s) {
             match clause {
                 TraitClause::Outlives(rhs) => {
-                    if let Err(err) = self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs) {
+                    if let Err(err) = self.unify_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs) {
                         offenses.extend_from_slice(&err.offenses);
                     }
                 }
@@ -285,28 +285,28 @@ impl<'tcx> UnifyCx<'tcx> {
         }
 
         if !offenses.is_empty() {
-            return Err(ReAndClauseRelateError { lhs, rhs, offenses });
+            return Err(ReAndClauseUnifyError { lhs, rhs, offenses });
         }
 
         Ok(())
     }
 
-    /// Relates two types such that they match. The `mode` specifies how the regions inside the
-    /// types should be related. For example, if it is `RelationMode::LhsOntoRhs`, relating
+    /// Unifies two types such that they match. The `mode` specifies how the regions inside the
+    /// types should be unified. For example, if it is `RelationMode::LhsOntoRhs`, relating
     /// `&'0 u32` and `&'1 u32` will result in the region relation `'0: '1`.
-    pub fn relate_ty_and_ty(
+    pub fn unify_ty_and_ty(
         &mut self,
         lhs: Ty,
         rhs: Ty,
         mode: RelationMode,
-    ) -> Result<(), Box<TyAndTyRelateError>> {
+    ) -> Result<(), Box<TyAndTyUnifyError>> {
         let mut fork = self.clone();
         let mut culprits = Vec::new();
 
-        fork.relate_ty_and_ty_inner(lhs, rhs, &mut culprits, mode);
+        fork.unify_ty_and_ty_inner(lhs, rhs, &mut culprits, mode);
 
         if !culprits.is_empty() {
-            return Err(Box::new(TyAndTyRelateError {
+            return Err(Box::new(TyAndTyUnifyError {
                 origin_lhs: lhs,
                 origin_rhs: rhs,
                 culprits,
@@ -318,11 +318,11 @@ impl<'tcx> UnifyCx<'tcx> {
         Ok(())
     }
 
-    fn relate_ty_and_ty_inner(
+    fn unify_ty_and_ty_inner(
         &mut self,
         lhs: Ty,
         rhs: Ty,
-        culprits: &mut Vec<TyAndTyRelateCulprit>,
+        culprits: &mut Vec<TyAndTyUnifyCulprit>,
         mode: RelationMode,
     ) {
         let s = self.session();
@@ -343,8 +343,8 @@ impl<'tcx> UnifyCx<'tcx> {
                 TyKind::Reference(lhs_re, lhs_muta, lhs_pointee),
                 TyKind::Reference(rhs_re, rhs_muta, rhs_pointee),
             ) if lhs_muta == rhs_muta => {
-                if let Err(err) = self.relate_re_and_re(lhs_re, rhs_re, mode) {
-                    culprits.push(TyAndTyRelateCulprit::Regions(err));
+                if let Err(err) = self.unify_re_and_re(lhs_re, rhs_re, mode) {
+                    culprits.push(TyAndTyUnifyCulprit::Regions(err));
                 }
 
                 let variance = match lhs_muta {
@@ -352,7 +352,7 @@ impl<'tcx> UnifyCx<'tcx> {
                     Mutability::Not => ReVariance::Covariant,
                 };
 
-                self.relate_ty_and_ty_inner(
+                self.unify_ty_and_ty_inner(
                     lhs_pointee,
                     rhs_pointee,
                     culprits,
@@ -363,41 +363,39 @@ impl<'tcx> UnifyCx<'tcx> {
                 for (&lhs, &rhs) in lhs.params.r(s).iter().zip(rhs.params.r(s)) {
                     match (lhs, rhs) {
                         (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                            if let Err(err) = self.relate_re_and_re(lhs, rhs, mode) {
-                                culprits.push(TyAndTyRelateCulprit::Regions(err));
+                            if let Err(err) = self.unify_re_and_re(lhs, rhs, mode) {
+                                culprits.push(TyAndTyUnifyCulprit::Regions(err));
                             }
                         }
                         (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
                             // TODO: variance
-                            self.relate_ty_and_ty_inner(lhs, rhs, culprits, mode);
+                            self.unify_ty_and_ty_inner(lhs, rhs, culprits, mode);
                         }
                         _ => unreachable!(),
                     }
                 }
             }
             (TyKind::Trait(lhs), TyKind::Trait(rhs)) => {
-                self.relate_dyn_trait_clauses_inner(lhs, rhs, culprits, mode);
+                self.unify_dyn_trait_clauses_inner(lhs, rhs, culprits, mode);
             }
             (TyKind::Tuple(lhs), TyKind::Tuple(rhs)) if lhs.r(s).len() == rhs.r(s).len() => {
                 for (&lhs, &rhs) in lhs.r(s).iter().zip(rhs.r(s)) {
-                    self.relate_ty_and_ty_inner(lhs, rhs, culprits, mode);
+                    self.unify_ty_and_ty_inner(lhs, rhs, culprits, mode);
                 }
             }
             (TyKind::InferVar(lhs_var), TyKind::InferVar(rhs_var)) => {
                 match (self.types.lookup(lhs_var), self.types.lookup(rhs_var)) {
                     (Ok(lhs_ty), Ok(rhs_ty)) => {
-                        self.relate_ty_and_ty_inner(lhs_ty, rhs_ty, culprits, mode);
+                        self.unify_ty_and_ty_inner(lhs_ty, rhs_ty, culprits, mode);
                     }
                     (Ok(lhs_ty), Err(rhs_floating)) => {
-                        if let Err(err) = self.relate_var_and_non_var_ty(rhs_floating.root, lhs_ty)
-                        {
-                            culprits.push(TyAndTyRelateCulprit::RecursiveType(err));
+                        if let Err(err) = self.unify_var_and_non_var_ty(rhs_floating.root, lhs_ty) {
+                            culprits.push(TyAndTyUnifyCulprit::RecursiveType(err));
                         }
                     }
                     (Err(lhs_floating), Ok(rhs_ty)) => {
-                        if let Err(err) = self.relate_var_and_non_var_ty(lhs_floating.root, rhs_ty)
-                        {
-                            culprits.push(TyAndTyRelateCulprit::RecursiveType(err));
+                        if let Err(err) = self.unify_var_and_non_var_ty(lhs_floating.root, rhs_ty) {
+                            culprits.push(TyAndTyUnifyCulprit::RecursiveType(err));
                         }
                     }
                     (Err(_), Err(_)) => {
@@ -409,16 +407,16 @@ impl<'tcx> UnifyCx<'tcx> {
             }
             (TyKind::InferVar(lhs_var), _) => {
                 if let Ok(known_lhs) = self.types.lookup(lhs_var) {
-                    self.relate_ty_and_ty_inner(known_lhs, rhs, culprits, mode);
-                } else if let Err(err) = self.relate_var_and_non_var_ty(lhs_var, rhs) {
-                    culprits.push(TyAndTyRelateCulprit::RecursiveType(err));
+                    self.unify_ty_and_ty_inner(known_lhs, rhs, culprits, mode);
+                } else if let Err(err) = self.unify_var_and_non_var_ty(lhs_var, rhs) {
+                    culprits.push(TyAndTyUnifyCulprit::RecursiveType(err));
                 }
             }
             (_, TyKind::InferVar(rhs_var)) => {
                 if let Ok(known_rhs) = self.types.lookup(rhs_var) {
-                    self.relate_ty_and_ty_inner(lhs, known_rhs, culprits, mode);
-                } else if let Err(err) = self.relate_var_and_non_var_ty(rhs_var, lhs) {
-                    culprits.push(TyAndTyRelateCulprit::RecursiveType(err));
+                    self.unify_ty_and_ty_inner(lhs, known_rhs, culprits, mode);
+                } else if let Err(err) = self.unify_var_and_non_var_ty(rhs_var, lhs) {
+                    culprits.push(TyAndTyUnifyCulprit::RecursiveType(err));
                 }
             }
             // Omissions okay because of intern equality fast-path:
@@ -429,12 +427,12 @@ impl<'tcx> UnifyCx<'tcx> {
             //
             // TODO: Check exhaustiveness automatically.
             _ => {
-                culprits.push(TyAndTyRelateCulprit::Types(lhs, rhs));
+                culprits.push(TyAndTyUnifyCulprit::Types(lhs, rhs));
             }
         }
     }
 
-    fn relate_var_and_non_var_ty(
+    fn unify_var_and_non_var_ty(
         &mut self,
         lhs_var_root: InferTyVar,
         rhs_ty: Ty,
@@ -496,17 +494,17 @@ impl<'tcx> UnifyCx<'tcx> {
         Ok(())
     }
 
-    fn relate_dyn_trait_clauses_inner(
+    fn unify_dyn_trait_clauses_inner(
         &mut self,
         lhs: TraitClauseList,
         rhs: TraitClauseList,
-        culprits: &mut Vec<TyAndTyRelateCulprit>,
+        culprits: &mut Vec<TyAndTyUnifyCulprit>,
         mode: RelationMode,
     ) {
         let s = self.session();
 
         if lhs.r(s).len() != rhs.r(s).len() {
-            culprits.push(TyAndTyRelateCulprit::ClauseLists(lhs, rhs));
+            culprits.push(TyAndTyUnifyCulprit::ClauseLists(lhs, rhs));
             return;
         }
 
@@ -518,8 +516,8 @@ impl<'tcx> UnifyCx<'tcx> {
                     // logic will produce constraints for both. This isn't a problem because
                     // we only ever lower trait objects with *exactly one* outlives
                     // constraint.
-                    if let Err(err) = self.relate_re_and_re(lhs, rhs, mode) {
-                        culprits.push(TyAndTyRelateCulprit::Regions(err));
+                    if let Err(err) = self.unify_re_and_re(lhs, rhs, mode) {
+                        culprits.push(TyAndTyUnifyCulprit::Regions(err));
                     }
                 }
                 (TraitClause::Trait(lhs), TraitClause::Trait(rhs)) if lhs.def == rhs.def => {
@@ -529,13 +527,13 @@ impl<'tcx> UnifyCx<'tcx> {
                                 match (lhs, rhs) {
                                     (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
                                         if let Err(err) =
-                                            self.relate_re_and_re(lhs, rhs, RelationMode::Equate)
+                                            self.unify_re_and_re(lhs, rhs, RelationMode::Equate)
                                         {
-                                            culprits.push(TyAndTyRelateCulprit::Regions(err));
+                                            culprits.push(TyAndTyUnifyCulprit::Regions(err));
                                         }
                                     }
                                     (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
-                                        self.relate_ty_and_ty_inner(
+                                        self.unify_ty_and_ty_inner(
                                             lhs,
                                             rhs,
                                             culprits,
@@ -546,7 +544,7 @@ impl<'tcx> UnifyCx<'tcx> {
                                 }
                             }
                             (TraitParam::Unspecified(lhs), TraitParam::Unspecified(rhs)) => {
-                                self.relate_dyn_trait_clauses_inner(
+                                self.unify_dyn_trait_clauses_inner(
                                     lhs,
                                     rhs,
                                     culprits,
@@ -554,13 +552,13 @@ impl<'tcx> UnifyCx<'tcx> {
                                 );
                             }
                             _ => {
-                                culprits.push(TyAndTyRelateCulprit::Params(lhs, rhs));
+                                culprits.push(TyAndTyUnifyCulprit::Params(lhs, rhs));
                             }
                         }
                     }
                 }
                 _ => {
-                    culprits.push(TyAndTyRelateCulprit::ClauseLists(lhs, rhs));
+                    culprits.push(TyAndTyUnifyCulprit::ClauseLists(lhs, rhs));
                     return;
                 }
             }
@@ -798,8 +796,8 @@ struct ReInferTracker {
     /// region, or a tracked universal region) to the actual region being represented.
     tracked_any: IndexVec<AnyReIndex, TrackedAny>,
 
-    /// The set of all related pairs to avoid duplicates.
-    related_pairs: FxHashSet<(AnyReIndex, AnyReIndex)>,
+    /// The set of all unified pairs to avoid duplicates.
+    unified_pairs: FxHashSet<(AnyReIndex, AnyReIndex)>,
 }
 
 define_index_type! {
@@ -838,7 +836,7 @@ impl Default for ReInferTracker {
                 kind: TrackedAnyKind::Gc,
                 outlived_by: SmallVec::new(),
             }]),
-            related_pairs: FxHashSet::default(),
+            unified_pairs: FxHashSet::default(),
         }
     }
 }
@@ -894,7 +892,7 @@ impl ReInferTracker {
                             };
 
                             let mut errors = Vec::new();
-                            self.relate_inner(index, rhs, Some(&mut errors));
+                            self.unify_inner(index, rhs, Some(&mut errors));
                         }
 
                         Some(index)
@@ -907,7 +905,7 @@ impl ReInferTracker {
         }
     }
 
-    fn relate(&mut self, lhs: Re, rhs: Re, tcx: &TyCtxt, offenses: &mut Vec<ReAndReRelateOffense>) {
+    fn unify(&mut self, lhs: Re, rhs: Re, tcx: &TyCtxt, offenses: &mut Vec<ReAndReUnifyOffense>) {
         if lhs == rhs {
             return;
         }
@@ -917,17 +915,17 @@ impl ReInferTracker {
             return;
         };
 
-        self.relate_inner(lhs, rhs, Some(offenses));
+        self.unify_inner(lhs, rhs, Some(offenses));
     }
 
-    fn relate_inner(
+    fn unify_inner(
         &mut self,
         lhs: AnyReIndex,
         rhs: AnyReIndex,
-        mut offenses: Option<&mut Vec<ReAndReRelateOffense>>,
+        mut offenses: Option<&mut Vec<ReAndReUnifyOffense>>,
     ) {
         // Ensure that we don't perform a relation more than once.
-        if !self.related_pairs.insert((lhs, rhs)) {
+        if !self.unified_pairs.insert((lhs, rhs)) {
             return;
         }
 
@@ -970,7 +968,7 @@ impl ReInferTracker {
                 if let Some(offenses) = &mut offenses
                     && let Some(offending_re) = offending_re
                 {
-                    offenses.push(ReAndReRelateOffense {
+                    offenses.push(ReAndReUnifyOffense {
                         universal: generic,
                         forced_to_outlive: offending_re,
                     });

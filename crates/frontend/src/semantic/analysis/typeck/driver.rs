@@ -6,8 +6,8 @@ use crate::{
     parse::token::Ident,
     semantic::{
         analysis::{
-            BinderSubstitution, CoherenceMap, ExplicitInferVisitor, ObligationReason,
-            SubstitutionFolder, TraitCx, TyCtxt, TyFolderInfalliblePreservesSpans as _, TyVisitor,
+            BinderSubstitution, ClauseCx, CoherenceMap, ExplicitInferVisitor, ObligationReason,
+            SubstitutionFolder, TyCtxt, TyFolderInfalliblePreservesSpans as _, TyVisitor,
             TyVisitorUnspanned, TyVisitorWalk, UnifyCxMode,
         },
         syntax::{
@@ -160,7 +160,7 @@ impl CrateTypeckVisitor<'_> {
                 trait_,
                 target,
                 methods,
-                generic_solve_order: _,
+                optimal_solve_order: _,
             } = item.r(s);
 
             // Let's ensure that the target trait instance is well formed.
@@ -406,14 +406,14 @@ impl CrateTypeckVisitor<'_> {
                     let requirements =
                         trait_subst.fold_spanned_clause_list(*requirements.r(s).clauses);
 
-                    if let Err(err) = TraitCx::new(tcx, self.coherence, UnifyCxMode::RegionAware)
-                        .relate_re_and_clause(actual.value, requirements.value)
+                    if let Err(err) = ClauseCx::new(tcx, self.coherence, UnifyCxMode::RegionAware)
+                        .unify_re_and_clause(actual.value, requirements.value)
                     {
                         err.to_diag().primary(actual.own_span().unwrap(), "").emit();
                     }
 
-                    if let Err(err) = TraitCx::new(tcx, self.coherence, UnifyCxMode::RegionAware)
-                        .relate_re_and_clause(actual.value, requirements.value)
+                    if let Err(err) = ClauseCx::new(tcx, self.coherence, UnifyCxMode::RegionAware)
+                        .unify_re_and_clause(actual.value, requirements.value)
                     {
                         err.to_diag().primary(actual.own_span().unwrap(), "").emit();
                     }
@@ -429,8 +429,8 @@ impl CrateTypeckVisitor<'_> {
                         continue;
                     }
 
-                    TraitCx::new(tcx, self.coherence, UnifyCxMode::RegionAware)
-                        .relate_ty_and_clause(
+                    ClauseCx::new(tcx, self.coherence, UnifyCxMode::RegionAware)
+                        .oblige_ty_and_clause(
                             ObligationReason::WfForTraitParam(actual.own_span().unwrap()),
                             actual.value,
                             requirements.value,

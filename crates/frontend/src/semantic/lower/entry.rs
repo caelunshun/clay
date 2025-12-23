@@ -936,7 +936,7 @@ impl IntraItemLowerCtxt<'_> {
                         trait_: Some(for_trait),
                         target: for_ty,
                         methods: LateInit::uninit(),
-                        generic_solve_order: LateInit::uninit(),
+                        optimal_solve_order: LateInit::uninit(),
                     },
                     s,
                 );

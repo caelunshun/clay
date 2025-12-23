@@ -17,6 +17,7 @@ pub const MAX_OBLIGATION_DEPTH: u32 = 256;
 pub enum ObligationKind {
     TyAndTrait(Ty, TraitSpec),
     TyAndRe(Ty, Re),
+    TyWf(Ty),
 }
 
 impl ObligationKind {

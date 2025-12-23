@@ -219,41 +219,7 @@ pub struct ImplItem {
     pub trait_: Option<SpannedTraitInstance>,
     pub target: SpannedTy,
     pub methods: LateInit<Vec<Obj<FnDef>>>,
-
-    // We can't simply solve for stuff like `u32: Id<{T}>` where `{T}` is still unknown because
-    // these impls could conflict...
-    //
-    // ```rust
-    // pub trait Id<T> {}
-    //
-    // impl<T> Id<T> for T {}
-    //
-    // impl Id<i32> for u32 {}
-    // ```
-    //
-    // Is `T` a `u32` or an `i32`? The other direction of `{T}: Id<i32>` is also problematic for the
-    // same exact reason.
-    //
-    // To avoid potential combinatorial explosion from having to try out each candidate to figure
-    // out which leads to a valid solution, we'll establish the following rule: if a trait
-    // resolution is ever ambiguous, the entire resolution fails, regardless of whether backtrack
-    // could reveal a solution.
-    //
-    // This gives as another useful rule: non-top-level trait solving should only ever be invoked if
-    // the entire type is known.
-    //
-    // This gives us a solving algorithm:
-    //
-    // - Start by equating candidate type to `impl` target type.
-    // - Repeatedly do constraint checking on the constraints whose clause parameter types and
-    //   source types contain no remaining free inference variables.
-    //
-    // We can make this solving algorithm always work by ensuring that such a solving order exists
-    // ahead of time as part of our well-formedness checks on `impl`s. I think this WF check is
-    // equivalent to Rust's whole generic covered in `impl` rule.
-    //
-    // Anyways, this field encodes the solving order we found as part of our WF checks.
-    pub generic_solve_order: LateInit<Vec<GenericSolveStep>>,
+    pub optimal_solve_order: LateInit<Vec<GenericSolveStep>>,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
