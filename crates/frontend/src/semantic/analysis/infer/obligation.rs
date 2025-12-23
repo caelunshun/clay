@@ -1,5 +1,5 @@
 use crate::{
-    base::{HardDiag, Session, syntax::Span},
+    base::{Diag, HardDiag, Session, syntax::Span},
     semantic::{
         analysis::{ObservedTyVar, TyCtxt, UnifyCx, UnifyCxMode},
         syntax::{Re, TraitSpec, Ty},
@@ -10,6 +10,8 @@ use index_vec::{IndexVec, define_index_type};
 use std::{collections::VecDeque, fmt, mem, rc::Rc};
 
 // === Definitions === //
+
+pub const MAX_OBLIGATION_DEPTH: u32 = 256;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 #[must_use]
@@ -42,6 +44,7 @@ impl ObligationKind {
 #[derive(Debug, Copy, Clone)]
 pub enum ObligationReason {
     FunctionBody(Span),
+    WfForTraitParam(Span),
     Structural,
 }
 
@@ -72,8 +75,8 @@ pub enum ObligationResult {
 /// all inference variables are solved in the correct order. Additionally, obligations can be solved
 /// co-inductively—that is, an obligation can assume itself to be true while proving itself.
 ///
-/// To push an obligation to an `ObligationCx`, you simply have to call [`push_obligation`]. You can
-/// then poll these obligations for progress by following the following steps:
+/// To push an obligation to an `ObligationCx`, you simply have to call [`push_obligation_no_poll`].
+/// You can then poll these obligations for progress by following the following steps:
 ///
 /// - Ensure that obligations are not being polled reentrantly using [`is_running_obligation`]. If
 ///   they are, early return and let the root-most call to your obligation polling function handle
@@ -88,7 +91,7 @@ pub enum ObligationResult {
 /// This context can be forked while processing an obligation but, for efficiency purposes, does not
 /// allow forking while not processing obligations.
 ///
-/// [`push_obligation`]: ObligationCx::push_obligation
+/// [`push_obligation_no_poll`]: ObligationCx::push_obligation_no_poll
 /// [`is_running_obligation`]: ObligationCx::is_running_obligation
 /// [`start_running_obligation`]: ObligationCx::start_running_obligation
 /// [`finish_running_obligation`]: ObligationCx::finish_running_obligation
@@ -127,9 +130,6 @@ struct ObligationCxRoot {
     /// The number of observed inference variables we have processed from `ucx`'s
     /// `observed_reveal_order` list.
     rerun_var_read_len: usize,
-
-    /// The maximum depth we're willing to expand for obligations
-    max_obligation_depth: u32,
 }
 
 define_index_type! {
@@ -161,7 +161,7 @@ impl<'tcx> fmt::Debug for ObligationCx<'tcx> {
 }
 
 impl<'tcx> ObligationCx<'tcx> {
-    pub fn new(tcx: &'tcx TyCtxt, mode: UnifyCxMode, max_obligation_depth: u32) -> Self {
+    pub fn new(tcx: &'tcx TyCtxt, mode: UnifyCxMode) -> Self {
         Self {
             ucx: UnifyCx::new(tcx, mode),
             root: Rc::new(ObligationCxRoot {
@@ -171,7 +171,6 @@ impl<'tcx> ObligationCx<'tcx> {
                 run_queue: VecDeque::new(),
                 var_wake_ups: FxHashMap::default(),
                 rerun_var_read_len: 0,
-                max_obligation_depth,
             }),
             local_obligation_queue: Rc::new(Vec::new()),
         }
@@ -193,15 +192,15 @@ impl<'tcx> ObligationCx<'tcx> {
         &mut self.ucx
     }
 
-    pub fn push_obligation(&mut self, reason: ObligationReason, kind: ObligationKind) {
+    pub fn push_obligation_no_poll(&mut self, reason: ObligationReason, kind: ObligationKind) {
         if self.root.current_obligation.is_none() {
-            self.push_obligation_immediately(None, reason, kind);
+            self.push_obligation_no_poll_immediately(None, reason, kind);
         } else {
             Rc::make_mut(&mut self.local_obligation_queue).push(QueuedObligation { kind, reason });
         }
     }
 
-    fn push_obligation_immediately(
+    fn push_obligation_no_poll_immediately(
         &mut self,
         parent: Option<ObligationIdx>,
         reason: ObligationReason,
@@ -216,6 +215,11 @@ impl<'tcx> ObligationCx<'tcx> {
         }
 
         let depth = parent.map_or(0, |v| root.all_obligations[v].depth + 1);
+
+        if depth > MAX_OBLIGATION_DEPTH {
+            // TODO: Improve diagnostic
+            Diag::anon_err("maximum obligation depth reached").emit();
+        }
 
         let obligation = root.all_obligations.push(ObligationState {
             parent,
@@ -282,7 +286,7 @@ impl<'tcx> ObligationCx<'tcx> {
         match result {
             ObligationResult::Success => {
                 for obligation in mem::take(Rc::make_mut(&mut self.local_obligation_queue)) {
-                    self.push_obligation_immediately(
+                    self.push_obligation_no_poll_immediately(
                         Some(curr_idx),
                         obligation.reason,
                         obligation.kind,
@@ -292,7 +296,7 @@ impl<'tcx> ObligationCx<'tcx> {
                 ShouldApplyFork::Yes
             }
             ObligationResult::Failure(diag) => {
-                // TODO: Diagnostic
+                // TODO: Improve diagnostic
                 diag.emit();
 
                 ShouldApplyFork::No

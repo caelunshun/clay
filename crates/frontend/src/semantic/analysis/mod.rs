@@ -1,5 +1,5 @@
-mod infcx;
-pub use infcx::*;
+mod infer;
+pub use infer::*;
 
 mod tcx;
 pub use tcx::*;

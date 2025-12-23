@@ -1,15 +1,14 @@
 use crate::{
     base::{
-        Diag,
         arena::{LateInit, Obj},
         syntax::Span,
     },
     parse::token::Ident,
     semantic::{
         analysis::{
-            BinderSubstitution, CoherenceMap, ExplicitInferVisitor, SubstitutionFolder, TyCtxt,
-            TyFolderInfalliblePreservesSpans as _, TyVisitor, TyVisitorUnspanned, TyVisitorWalk,
-            UnifyCx, UnifyCxMode,
+            BinderSubstitution, CoherenceMap, ExplicitInferVisitor, ObligationReason,
+            SubstitutionFolder, TraitCx, TyCtxt, TyFolderInfalliblePreservesSpans as _, TyVisitor,
+            TyVisitorUnspanned, TyVisitorWalk, UnifyCxMode,
         },
         syntax::{
             AdtCtor, AdtInstance, AdtItem, AdtKind, AnyGeneric, Crate, FuncItem, GenericBinder,
@@ -407,16 +406,16 @@ impl CrateTypeckVisitor<'_> {
                     let requirements =
                         trait_subst.fold_spanned_clause_list(*requirements.r(s).clauses);
 
-                    if let Err(err) = UnifyCx::new(tcx, self.coherence, UnifyCxMode::RegionAware)
+                    if let Err(err) = TraitCx::new(tcx, self.coherence, UnifyCxMode::RegionAware)
                         .relate_re_and_clause(actual.value, requirements.value)
                     {
-                        Diag::span_err(
-                            actual.own_span().unwrap(),
-                            "malformed parameter for trait parameter",
-                        )
-                        .emit();
+                        err.to_diag().primary(actual.own_span().unwrap(), "").emit();
+                    }
 
-                        // dbg!(err);
+                    if let Err(err) = TraitCx::new(tcx, self.coherence, UnifyCxMode::RegionAware)
+                        .relate_re_and_clause(actual.value, requirements.value)
+                    {
+                        err.to_diag().primary(actual.own_span().unwrap(), "").emit();
                     }
                 }
                 (SpannedTyOrReView::Ty(actual), AnyGeneric::Ty(requirements)) => {
@@ -430,17 +429,12 @@ impl CrateTypeckVisitor<'_> {
                         continue;
                     }
 
-                    if let Err(err) = UnifyCx::new(tcx, self.coherence, UnifyCxMode::RegionAware)
-                        .relate_ty_and_clause(actual.value, requirements.value)
-                    {
-                        Diag::span_err(
-                            actual.own_span().unwrap(),
-                            "malformed parameter for trait parameter",
-                        )
-                        .emit();
-
-                        // dbg!(err);
-                    }
+                    TraitCx::new(tcx, self.coherence, UnifyCxMode::RegionAware)
+                        .relate_ty_and_clause(
+                            ObligationReason::WfForTraitParam(actual.own_span().unwrap()),
+                            actual.value,
+                            requirements.value,
+                        );
                 }
                 _ => unreachable!(),
             }

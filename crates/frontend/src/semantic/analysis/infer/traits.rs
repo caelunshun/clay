@@ -6,9 +6,10 @@ use crate::{
     semantic::{
         analysis::{
             BinderSubstitution, ConfirmationResult, FloatingInferVar, InfTySubstitutor,
-            ObligationCx, ObligationKind, ObligationReason, ObligationResult, ReAndReRelateError,
-            SelectionRejected, SelectionResult, SubstitutionFolder, TyAndTyRelateError, TyCtxt,
-            TyFolderInfallible as _, TyShapeMap, UnboundVarHandlingMode, UnifyCx, UnifyCxMode,
+            ObligationCx, ObligationKind, ObligationReason, ObligationResult,
+            ReAndClauseRelateError, ReAndReRelateError, SelectionRejected, SelectionResult,
+            SubstitutionFolder, TyAndTyRelateError, TyCtxt, TyFolderInfallible as _, TyShapeMap,
+            UnboundVarHandlingMode, UnifyCx, UnifyCxMode,
         },
         syntax::{
             AnyGeneric, Crate, FnDef, GenericBinder, GenericSolveStep, ImplItem, InferTyVar,
@@ -354,14 +355,9 @@ pub struct TraitCx<'tcx> {
 }
 
 impl<'tcx> TraitCx<'tcx> {
-    pub fn new(
-        tcx: &'tcx TyCtxt,
-        coherence: &'tcx CoherenceMap,
-        mode: UnifyCxMode,
-        max_obligation_depth: u32,
-    ) -> Self {
+    pub fn new(tcx: &'tcx TyCtxt, coherence: &'tcx CoherenceMap, mode: UnifyCxMode) -> Self {
         Self {
-            ocx: ObligationCx::new(tcx, mode, max_obligation_depth),
+            ocx: ObligationCx::new(tcx, mode),
             coherence,
         }
     }
@@ -384,6 +380,11 @@ impl<'tcx> TraitCx<'tcx> {
 
     pub fn ucx_mut(&mut self) -> &mut UnifyCx<'tcx> {
         self.ocx.ucx_mut()
+    }
+
+    fn push_obligation(&mut self, reason: ObligationReason, kind: ObligationKind) {
+        self.ocx.push_obligation_no_poll(reason, kind);
+        self.process_obligations();
     }
 
     fn process_obligations(&mut self) {
@@ -443,6 +444,16 @@ impl<'tcx> TraitCx<'tcx> {
         res
     }
 
+    pub fn relate_re_and_clause(
+        &mut self,
+        lhs: Re,
+        rhs: TraitClauseList,
+    ) -> Result<(), ReAndClauseRelateError> {
+        let res = self.ucx_mut().relate_re_and_clause(lhs, rhs);
+        self.process_obligations();
+        res
+    }
+
     pub fn relate_ty_and_ty(
         &mut self,
         lhs: Ty,
@@ -486,24 +497,8 @@ impl<'tcx> TraitCx<'tcx> {
         }
     }
 
-    pub fn relate_re_and_clause(&mut self, lhs: Re, rhs: TraitClauseList) {
-        let s = self.session();
-
-        for &clause in rhs.r(s) {
-            match clause {
-                TraitClause::Outlives(rhs) => {
-                    self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs);
-                }
-                TraitClause::Trait(_) => {
-                    unreachable!()
-                }
-            }
-        }
-    }
-
     pub fn relate_ty_and_trait(&mut self, reason: ObligationReason, lhs: Ty, rhs: TraitSpec) {
-        self.ocx
-            .push_obligation(reason, ObligationKind::TyAndTrait(lhs, rhs));
+        self.push_obligation(reason, ObligationKind::TyAndTrait(lhs, rhs));
     }
 
     fn run_relate_ty_and_trait(&mut self, lhs: Ty, rhs: TraitSpec) -> ObligationResult {
@@ -788,8 +783,7 @@ impl<'tcx> TraitCx<'tcx> {
 
 impl<'tcx> TraitCx<'tcx> {
     pub fn relate_ty_and_re(&mut self, reason: ObligationReason, lhs: Ty, rhs: Re) {
-        self.ocx
-            .push_obligation(reason, ObligationKind::TyAndRe(lhs, rhs));
+        self.push_obligation(reason, ObligationKind::TyAndRe(lhs, rhs));
     }
 
     fn run_relate_ty_and_re(&mut self, lhs: Ty, rhs: Re) -> ObligationResult {

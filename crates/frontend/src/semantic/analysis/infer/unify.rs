@@ -73,6 +73,22 @@ impl ReAndReRelateError {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ReAndClauseRelateError {
+    pub lhs: Re,
+    pub rhs: TraitClauseList,
+    pub offenses: Vec<ReAndReRelateOffense>,
+}
+
+impl ReAndClauseRelateError {
+    pub fn to_diag(self) -> HardDiag {
+        HardDiag::anon_err(format_args!(
+            "could not unify {:?} and {:?}",
+            self.lhs, self.rhs,
+        ))
+    }
+}
+
 // === UnifyCx === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -242,6 +258,35 @@ impl<'tcx> UnifyCx<'tcx> {
         }
 
         *regions = fork;
+
+        Ok(())
+    }
+
+    pub fn relate_re_and_clause(
+        &mut self,
+        lhs: Re,
+        rhs: TraitClauseList,
+    ) -> Result<(), ReAndClauseRelateError> {
+        let s = self.session();
+
+        let mut offenses = Vec::new();
+
+        for &clause in rhs.r(s) {
+            match clause {
+                TraitClause::Outlives(rhs) => {
+                    if let Err(err) = self.relate_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs) {
+                        offenses.extend_from_slice(&err.offenses);
+                    }
+                }
+                TraitClause::Trait(_) => {
+                    unreachable!()
+                }
+            }
+        }
+
+        if !offenses.is_empty() {
+            return Err(ReAndClauseRelateError { lhs, rhs, offenses });
+        }
 
         Ok(())
     }
