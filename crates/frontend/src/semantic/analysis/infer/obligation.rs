@@ -13,7 +13,7 @@ use std::{collections::VecDeque, fmt, mem, rc::Rc};
 
 pub const MAX_OBLIGATION_DEPTH: u32 = 256;
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum ObligationKind {
     // Simple obligations, just here to standardize diagnostics.
     ReAndRe(Re, Re, RelationMode),
@@ -31,6 +31,21 @@ impl ObligationKind {
         _ = s;
         format!("{self:?}")
     }
+
+    pub fn as_coinductive(self) -> Option<CoinductiveObligationKey> {
+        match self {
+            ObligationKind::TyWf(ty) => Some(CoinductiveObligationKey::TyWf(ty)),
+            ObligationKind::ReAndRe(_, _, _)
+            | ObligationKind::TyAndTy(_, _, _)
+            | ObligationKind::TyAndTrait(_, _)
+            | ObligationKind::TyAndRe(_, _) => None,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum CoinductiveObligationKey {
+    TyWf(Ty),
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -108,10 +123,9 @@ struct ObligationCxRoot {
     /// All obligations ever registered with us.
     all_obligations: IndexVec<ObligationIdx, ObligationState>,
 
-    /// Every single obligation we've ever tried to prove. We only ever have to prove a given
-    /// obligation and, if an obligation depends on itself, it is safe to assume it holds
-    /// coinductively while proving itself.
-    all_obligation_kinds: FxHashSet<ObligationKind>,
+    /// Every single coinductive obligation we've ever tried to prove. Used to break proof cycles if
+    /// coinduction on a given obligation is permissible.
+    coinductive_obligations: FxHashSet<CoinductiveObligationKey>,
 
     /// The queue obligations to invoke. These are invoked in FIFO order to ensure that we properly
     /// explore all branches of the proof tree simultaneously.
@@ -195,7 +209,9 @@ impl<'tcx> ObligationCx<'tcx> {
         reason: ObligationReason,
         kind: ObligationKind,
     ) {
-        if !root.all_obligation_kinds.insert(kind) {
+        if let Some(key) = kind.as_coinductive()
+            && !root.coinductive_obligations.insert(key)
+        {
             return;
         }
 

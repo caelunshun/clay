@@ -7,8 +7,8 @@ use crate::{
         analysis::{
             BinderSubstitution, ConfirmationResult, FloatingInferVar, InferTySubstitutor,
             ObligationCx, ObligationKind, ObligationReason, ObligationResult, SelectionRejected,
-            SelectionResult, SubstitutionFolder, TyCtxt, TyFolderInfallible as _, TyShapeMap,
-            UnboundVarHandlingMode, UnifyCx, UnifyCxMode,
+            SelectionResult, SubstitutionFolder, TyCtxt, TyFolder, TyFolderInfallible as _,
+            TyFolderSuper, TyShapeMap, UnboundVarHandlingMode, UnifyCx, UnifyCxMode,
         },
         syntax::{
             AnyGeneric, Crate, FnDef, GenericBinder, GenericSolveStep, ImplItem, InferTyVar,
@@ -18,6 +18,7 @@ use crate::{
     },
 };
 use index_vec::{IndexVec, define_index_type};
+use std::convert::Infallible;
 
 // === CoherenceMap === //
 
@@ -413,6 +414,10 @@ impl<'tcx> ClauseCx<'tcx> {
 
 // Forwards
 impl<'tcx> ClauseCx<'tcx> {
+    pub fn instantiator(&mut self, self_ty: Ty) -> ClauseTyInstantiator<'_, 'tcx> {
+        ClauseTyInstantiator { ccx: self, self_ty }
+    }
+
     pub fn mode(&self) -> UnifyCxMode {
         self.ucx().mode()
     }
@@ -983,5 +988,56 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn run_oblige_ty_wf(&mut self, ty: Ty) -> ObligationResult {
         todo!()
+    }
+}
+
+// === Type Instantiation === //
+
+/// A type folder which instantiates a user-written type to be compatible with a [`ClauseCx`].
+///
+/// It...
+///
+/// - Replaces `Self` types.
+/// - Instantiates `ExplicitInfer` types.
+///
+/// Once a user's type is instantiated, it can be safely used inside a `ClauseCx`. All types
+/// used internally by a `ClauseCx` are naturally normalized.
+pub struct ClauseTyInstantiator<'a, 'tcx> {
+    pub ccx: &'a mut ClauseCx<'tcx>,
+    pub self_ty: Ty,
+}
+
+impl<'tcx> TyFolder<'tcx> for ClauseTyInstantiator<'_, 'tcx> {
+    type Error = Infallible;
+
+    fn tcx(&self) -> &'tcx TyCtxt {
+        self.ccx.tcx()
+    }
+
+    fn try_fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let ty = match *ty.r(s) {
+            TyKind::This => self.self_ty,
+            TyKind::ExplicitInfer => self.ccx.fresh_ty(),
+            TyKind::InferVar(var) => match self.ccx.lookup_ty_var(var) {
+                Ok(ty) => self.fold_ty(ty),
+                Err(root) => tcx.intern_ty(TyKind::InferVar(root.root)),
+            },
+            TyKind::Simple(_)
+            | TyKind::Error(_)
+            | TyKind::FnDef(_)
+            | TyKind::Universal(_)
+            | TyKind::Reference(_, _, _)
+            | TyKind::Adt(_)
+            | TyKind::Trait(_)
+            | TyKind::Tuple(_) => {
+                let Ok(v) = self.super_ty(ty);
+                v
+            }
+        };
+
+        Ok(ty)
     }
 }
