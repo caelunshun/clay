@@ -110,8 +110,6 @@ impl TyCtxt {
 
         _ = CrateTypeckVisitor {
             tcx: self,
-            self_ty: None,
-            clause_applies_to: None,
             coherence: &coherence,
         }
         .visit_crate(krate);

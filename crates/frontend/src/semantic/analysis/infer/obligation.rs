@@ -31,27 +31,13 @@ impl ObligationKind {
         _ = s;
         format!("{self:?}")
     }
-
-    pub fn as_coinductive(self) -> Option<CoinductiveObligationKey> {
-        match self {
-            ObligationKind::TyWf(ty) => Some(CoinductiveObligationKey::TyWf(ty)),
-            ObligationKind::ReAndRe(_, _, _)
-            | ObligationKind::TyAndTy(_, _, _)
-            | ObligationKind::TyAndTrait(_, _)
-            | ObligationKind::TyAndRe(_, _) => None,
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum CoinductiveObligationKey {
-    TyWf(Ty),
 }
 
 #[derive(Debug, Copy, Clone)]
 pub enum ObligationReason {
     FunctionBody(Span),
     WfForTraitParam(Span),
+    WfForReference(Span),
     ImplConstraint,
     Structural,
 }
@@ -59,9 +45,9 @@ pub enum ObligationReason {
 impl ObligationReason {
     pub fn span(self) -> Option<Span> {
         match self {
-            ObligationReason::FunctionBody(span) | ObligationReason::WfForTraitParam(span) => {
-                Some(span)
-            }
+            ObligationReason::FunctionBody(span)
+            | ObligationReason::WfForTraitParam(span)
+            | ObligationReason::WfForReference(span) => Some(span),
             ObligationReason::ImplConstraint | ObligationReason::Structural => None,
         }
     }
@@ -122,10 +108,6 @@ struct ObligationCxRoot {
 
     /// All obligations ever registered with us.
     all_obligations: IndexVec<ObligationIdx, ObligationState>,
-
-    /// Every single coinductive obligation we've ever tried to prove. Used to break proof cycles if
-    /// coinduction on a given obligation is permissible.
-    coinductive_obligations: FxHashSet<CoinductiveObligationKey>,
 
     /// The queue obligations to invoke. These are invoked in FIFO order to ensure that we properly
     /// explore all branches of the proof tree simultaneously.
@@ -209,12 +191,6 @@ impl<'tcx> ObligationCx<'tcx> {
         reason: ObligationReason,
         kind: ObligationKind,
     ) {
-        if let Some(key) = kind.as_coinductive()
-            && !root.coinductive_obligations.insert(key)
-        {
-            return;
-        }
-
         let depth = parent.map_or(0, |v| root.all_obligations[v].depth + 1);
 
         let obligation = root.all_obligations.push(ObligationState {

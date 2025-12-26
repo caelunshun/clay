@@ -2,23 +2,29 @@ use crate::{
     base::{
         Diag, Session,
         arena::{HasListInterner, LateInit, Obj},
+        syntax::Span,
     },
     semantic::{
         analysis::{
-            BinderSubstitution, ConfirmationResult, FloatingInferVar, InferTySubstitutor,
-            ObligationCx, ObligationKind, ObligationReason, ObligationResult, SelectionRejected,
-            SelectionResult, SubstitutionFolder, TyCtxt, TyFolder, TyFolderInfallible as _,
-            TyFolderSuper, TyShapeMap, UnboundVarHandlingMode, UnifyCx, UnifyCxMode,
+            BinderSubstitution, ConfirmationResult, ExplicitInferVisitor, FloatingInferVar,
+            InferTySubstitutor, ObligationCx, ObligationKind, ObligationReason, ObligationResult,
+            SelectionRejected, SelectionResult, SubstitutionFolder, TyCtxt, TyFolder,
+            TyFolderInfallible as _, TyFolderInfalliblePreservesSpans as _, TyFolderPreservesSpans,
+            TyFolderSuper, TyShapeMap, TyVisitor, TyVisitorUnspanned, TyVisitorWalk,
+            UnboundVarHandlingMode, UnifyCx, UnifyCxMode,
         },
         syntax::{
             AnyGeneric, Crate, FnDef, GenericBinder, GenericSolveStep, ImplItem, InferTyVar,
-            ListOfTraitClauseList, Re, RelationMode, SolidTyShape, SolidTyShapeKind, TraitClause,
-            TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReList, TyShape,
+            ListOfTraitClauseList, Re, RelationMode, SolidTyShape, SolidTyShapeKind,
+            SpannedAdtInstance, SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec,
+            SpannedTy, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView, SpannedTyView,
+            TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReList,
+            TyShape,
         },
     },
 };
 use index_vec::{IndexVec, define_index_type};
-use std::convert::Infallible;
+use std::{convert::Infallible, ops::ControlFlow};
 
 // === CoherenceMap === //
 
@@ -982,12 +988,186 @@ impl<'tcx> ClauseCx<'tcx> {
 // === WF Relations === //
 
 impl<'tcx> ClauseCx<'tcx> {
+    pub fn wf_visitor(&mut self) -> ClauseTyWfVisitor<'_, 'tcx> {
+        ClauseTyWfVisitor {
+            ccx: self,
+            clause_applies_to: None,
+        }
+    }
+
     pub fn oblige_ty_wf(&mut self, reason: ObligationReason, ty: Ty) {
         self.push_obligation(reason, ObligationKind::TyWf(ty));
     }
 
     pub fn run_oblige_ty_wf(&mut self, ty: Ty) -> ObligationResult {
-        todo!()
+        // TODO: Wait for inference resolution and perform coinductivity checks to break WF cycles
+
+        ControlFlow::Continue(()) = self.wf_visitor().visit_ty(ty);
+
+        ObligationResult::Success
+    }
+}
+
+pub struct ClauseTyWfVisitor<'a, 'tcx> {
+    pub ccx: &'a mut ClauseCx<'tcx>,
+    pub clause_applies_to: Option<Ty>,
+}
+
+impl ClauseTyWfVisitor<'_, '_> {
+    pub fn with_clause_applies_to(mut self, ty: Ty) -> Self {
+        self.clause_applies_to = Some(ty);
+        self
+    }
+}
+
+impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
+    type Break = Infallible;
+
+    fn tcx(&self) -> &'tcx TyCtxt {
+        self.ccx.tcx()
+    }
+
+    fn visit_spanned_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
+        match ty.view(self.tcx()) {
+            SpannedTyView::Trait(_) => {
+                let old_clause_applies_to = self.clause_applies_to.replace(ty.value);
+                self.walk_ty(ty)?;
+                self.clause_applies_to = old_clause_applies_to;
+            }
+            SpannedTyView::Reference(re, _muta, pointee) => {
+                self.ccx.oblige_ty_and_re(
+                    ObligationReason::WfForReference(ty.own_span().unwrap_or(Span::DUMMY)),
+                    pointee.value,
+                    re.value,
+                );
+
+                self.walk_ty(ty)?;
+            }
+            SpannedTyView::This
+            | SpannedTyView::Simple(..)
+            | SpannedTyView::Adt(..)
+            | SpannedTyView::Tuple(..)
+            | SpannedTyView::FnDef(..)
+            | SpannedTyView::ExplicitInfer
+            | SpannedTyView::Universal(..)
+            | SpannedTyView::InferVar(..)
+            | SpannedTyView::Error(..) => {
+                self.walk_ty(ty)?;
+            }
+        }
+
+        ControlFlow::Continue(())
+    }
+
+    fn visit_spanned_trait_spec(&mut self, spec: SpannedTraitSpec) -> ControlFlow<Self::Break> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let params = spec
+            .view(tcx)
+            .params
+            .iter(tcx)
+            .map(|param| match param.view(tcx) {
+                SpannedTraitParamView::Equals(v) => v,
+                SpannedTraitParamView::Unspecified(_) => {
+                    SpannedTyOrRe::new_unspanned(TyOrRe::Ty(tcx.intern_ty(TyKind::ExplicitInfer)))
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let params =
+            SpannedTyOrReList::alloc_list(spec.own_span().unwrap_or(Span::DUMMY), &params, tcx);
+
+        self.check_generics(spec.value.def.r(s).generics, params);
+
+        self.walk_trait_spec(spec)?;
+
+        ControlFlow::Continue(())
+    }
+
+    fn visit_spanned_trait_instance(
+        &mut self,
+        instance: SpannedTraitInstance,
+    ) -> ControlFlow<Self::Break> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        self.check_generics(instance.value.def.r(s).generics, instance.view(tcx).params);
+        self.walk_trait_instance(instance)?;
+
+        ControlFlow::Continue(())
+    }
+
+    fn visit_spanned_adt_instance(
+        &mut self,
+        instance: SpannedAdtInstance,
+    ) -> ControlFlow<Self::Break> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        // Check generics
+        let old_clause_applies_to = self
+            .clause_applies_to
+            .replace(tcx.intern_ty(TyKind::Adt(instance.value)));
+
+        self.check_generics(instance.value.def.r(s).generics, instance.view(tcx).params);
+
+        self.clause_applies_to = old_clause_applies_to;
+
+        // Ensure parameter types are also well-formed.
+        self.walk_adt_instance(instance)?;
+
+        ControlFlow::Continue(())
+    }
+}
+
+impl ClauseTyWfVisitor<'_, '_> {
+    fn check_generics(&mut self, binder: Obj<GenericBinder>, params: SpannedTyOrReList) {
+        let tcx = self.tcx();
+        let s = self.session();
+
+        // Create a folder to replace generics in the trait with the user's supplied generics.
+        let mut trait_subst = SubstitutionFolder {
+            tcx,
+            self_ty: self.clause_applies_to.unwrap(),
+            substitution: Some(BinderSubstitution {
+                binder,
+                substs: params.value,
+            }),
+        };
+
+        for (actual, requirements) in params.iter(tcx).zip(&binder.r(s).defs) {
+            match (actual.view(tcx), requirements) {
+                (SpannedTyOrReView::Re(actual), AnyGeneric::Re(requirements)) => {
+                    let requirements =
+                        trait_subst.fold_spanned_clause_list(*requirements.r(s).clauses);
+
+                    self.ccx.oblige_re_and_clause(
+                        ObligationReason::WfForTraitParam(actual.own_span().unwrap()),
+                        actual.value,
+                        requirements.value,
+                    );
+                }
+                (SpannedTyOrReView::Ty(actual), AnyGeneric::Ty(requirements)) => {
+                    let requirements =
+                        trait_subst.fold_spanned_clause_list(*requirements.r(s).user_clauses);
+
+                    if ExplicitInferVisitor(tcx)
+                        .visit_clause_list(requirements.value)
+                        .is_break()
+                    {
+                        continue;
+                    }
+
+                    self.ccx.oblige_ty_and_clause(
+                        ObligationReason::WfForTraitParam(actual.own_span().unwrap()),
+                        actual.value,
+                        requirements.value,
+                    );
+                }
+                _ => unreachable!(),
+            }
+        }
     }
 }
 
@@ -1007,6 +1187,8 @@ pub struct ClauseTyInstantiator<'a, 'tcx> {
     pub self_ty: Ty,
 }
 
+impl<'tcx> TyFolderPreservesSpans<'tcx> for ClauseTyInstantiator<'_, 'tcx> {}
+
 impl<'tcx> TyFolder<'tcx> for ClauseTyInstantiator<'_, 'tcx> {
     type Error = Infallible;
 
@@ -1016,15 +1198,10 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyInstantiator<'_, 'tcx> {
 
     fn try_fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
         let s = self.session();
-        let tcx = self.tcx();
 
         let ty = match *ty.r(s) {
             TyKind::This => self.self_ty,
             TyKind::ExplicitInfer => self.ccx.fresh_ty(),
-            TyKind::InferVar(var) => match self.ccx.lookup_ty_var(var) {
-                Ok(ty) => self.fold_ty(ty),
-                Err(root) => tcx.intern_ty(TyKind::InferVar(root.root)),
-            },
             TyKind::Simple(_)
             | TyKind::Error(_)
             | TyKind::FnDef(_)
@@ -1032,7 +1209,8 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyInstantiator<'_, 'tcx> {
             | TyKind::Reference(_, _, _)
             | TyKind::Adt(_)
             | TyKind::Trait(_)
-            | TyKind::Tuple(_) => {
+            | TyKind::Tuple(_)
+            | TyKind::InferVar(_) => {
                 let Ok(v) = self.super_ty(ty);
                 v
             }
