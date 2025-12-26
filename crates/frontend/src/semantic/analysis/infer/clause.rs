@@ -350,8 +350,7 @@ impl TyCtxt {
 /// Relational methods never check type WF requirements or push region WF constraints by
 /// themselves but will never crash if these WF requirements aren't met. You can "bolt on" these WF
 /// requirements at the end of a region-aware inference session by calling `wf_ty` on all the types
-/// the programmer has created. This has to be done at the end of an inference session since
-/// inferred types must all be solved by this point.
+/// the programmer has created.
 #[derive(Clone)]
 pub struct ClauseCx<'tcx> {
     ocx: ObligationCx<'tcx>,
@@ -550,16 +549,16 @@ impl<'tcx> ClauseCx<'tcx> {
                 // fulfilled.
                 return ObligationResult::NotReady;
             }
-            TyKind::Error(..) => {
+            TyKind::Error(_) => {
                 // Error types can do anything.
                 return ObligationResult::Success;
             }
             TyKind::This | TyKind::ExplicitInfer => unreachable!(),
-            TyKind::Simple(..)
-            | TyKind::Reference(..)
-            | TyKind::Adt(..)
-            | TyKind::Tuple(..)
-            | TyKind::FnDef(..) => {
+            TyKind::Simple(_)
+            | TyKind::Reference(_, _, _)
+            | TyKind::Adt(_)
+            | TyKind::Tuple(_)
+            | TyKind::FnDef(_, _) => {
                 // (the `impl` must come externally, fallthrough)
             }
         }
@@ -914,7 +913,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
         match *lhs.r(s) {
             TyKind::This | TyKind::ExplicitInfer => unreachable!(),
-            TyKind::FnDef(_) | TyKind::Simple(_) | TyKind::Error(_) => {
+            TyKind::FnDef(_, _) | TyKind::Simple(_) | TyKind::Error(_) => {
                 // (trivial)
             }
             TyKind::Reference(lhs, _muta, _pointee) => {
@@ -1035,22 +1034,24 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             }
             SpannedTyView::Reference(re, _muta, pointee) => {
                 self.ccx.oblige_ty_and_re(
-                    ObligationReason::WfForReference(ty.own_span()),
+                    ObligationReason::WfForReference(pointee.own_span()),
                     pointee.value,
                     re.value,
                 );
 
                 self.walk_ty(ty)?;
             }
+            SpannedTyView::FnDef(..) => {
+                todo!()
+            }
             SpannedTyView::This
-            | SpannedTyView::Simple(..)
-            | SpannedTyView::Adt(..)
-            | SpannedTyView::Tuple(..)
-            | SpannedTyView::FnDef(..)
+            | SpannedTyView::Simple(_)
+            | SpannedTyView::Adt(_)
+            | SpannedTyView::Tuple(_)
             | SpannedTyView::ExplicitInfer
-            | SpannedTyView::Universal(..)
-            | SpannedTyView::InferVar(..)
-            | SpannedTyView::Error(..) => {
+            | SpannedTyView::Universal(_)
+            | SpannedTyView::InferVar(_)
+            | SpannedTyView::Error(_) => {
                 self.walk_ty(ty)?;
             }
         }
@@ -1201,7 +1202,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyInstantiator<'_, 'tcx> {
             TyKind::ExplicitInfer => self.ccx.fresh_ty(),
             TyKind::Simple(_)
             | TyKind::Error(_)
-            | TyKind::FnDef(_)
+            | TyKind::FnDef(_, _)
             | TyKind::Universal(_)
             | TyKind::Reference(_, _, _)
             | TyKind::Adt(_)

@@ -79,7 +79,7 @@ impl TyCtxt {
                         .collect::<Vec<_>>(),
                 ),
             }),
-            TyKind::FnDef(obj) => todo!(),
+            TyKind::FnDef(obj, generics) => todo!(),
         }
     }
 }

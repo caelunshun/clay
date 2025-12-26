@@ -70,7 +70,7 @@ pub enum SpannedTyView {
     Adt(SpannedAdtInstance),
     Trait(SpannedTraitClauseList),
     Tuple(SpannedTyList),
-    FnDef(Obj<FnDef>),
+    FnDef(Obj<FnDef>, Option<SpannedTyOrReList>),
     ExplicitInfer,
     Universal(Obj<TypeGeneric>),
     InferVar(InferTyVar),
@@ -102,7 +102,10 @@ impl SpannedViewDecode<TyCtxt> for Ty {
             TyKind::Tuple(tys) => {
                 SpannedTyView::Tuple(Spanned::new_raw(tys, span_info.unwrap(tcx)))
             }
-            TyKind::FnDef(def) => SpannedTyView::FnDef(def),
+            TyKind::FnDef(def, generics) => SpannedTyView::FnDef(
+                def,
+                generics.map(|generics| Spanned::new_raw(generics, span_info.unwrap(tcx))),
+            ),
             TyKind::ExplicitInfer => SpannedTyView::ExplicitInfer,
             TyKind::Universal(generic) => SpannedTyView::Universal(generic),
             TyKind::InferVar(infer_ty_var) => SpannedTyView::InferVar(infer_ty_var),
@@ -140,8 +143,12 @@ impl SpannedViewEncode<TyCtxt> for SpannedTyView {
                 tcx.intern_ty(TyKind::Tuple(tys.value)),
                 tys.span_info.wrap(own_span, tcx),
             ),
-            SpannedTyView::FnDef(def) => Spanned::new_raw(
-                tcx.intern_ty(TyKind::FnDef(def)),
+            SpannedTyView::FnDef(def, Some(generics)) => Spanned::new_raw(
+                tcx.intern_ty(TyKind::FnDef(def, Some(generics.value))),
+                SpannedInfo::new_list(own_span, &[generics.span_info], tcx),
+            ),
+            SpannedTyView::FnDef(def, None) => Spanned::new_raw(
+                tcx.intern_ty(TyKind::FnDef(def, None)),
                 SpannedInfo::new_terminal(own_span, tcx),
             ),
             SpannedTyView::ExplicitInfer => Spanned::new_raw(

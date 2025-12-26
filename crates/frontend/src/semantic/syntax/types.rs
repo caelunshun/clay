@@ -451,7 +451,7 @@ pub enum TyKind {
     Tuple(TyList),
 
     /// A statically-known function type. This can be coerced into a functional interface.
-    FnDef(Obj<FnDef>),
+    FnDef(Obj<FnDef>, Option<TyOrReList>),
 
     /// A user's explicit request to infer a type (i.e. `_`)
     ExplicitInfer,

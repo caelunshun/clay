@@ -316,6 +316,8 @@ impl<'tcx> UnifyCx<'tcx> {
                 );
             }
             (TyKind::Adt(lhs), TyKind::Adt(rhs)) if lhs.def == rhs.def => {
+                // TODO: variance
+
                 for (&lhs, &rhs) in lhs.params.r(s).iter().zip(rhs.params.r(s)) {
                     match (lhs, rhs) {
                         (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
@@ -324,7 +326,6 @@ impl<'tcx> UnifyCx<'tcx> {
                             }
                         }
                         (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
-                            // TODO: variance
                             self.unify_ty_and_ty_inner(lhs, rhs, culprits, mode);
                         }
                         _ => unreachable!(),
@@ -333,6 +334,58 @@ impl<'tcx> UnifyCx<'tcx> {
             }
             (TyKind::Trait(lhs), TyKind::Trait(rhs)) => {
                 self.unify_dyn_trait_clauses_inner(lhs, rhs, culprits, mode);
+            }
+            (TyKind::FnDef(lhs, Some(lhs_generics)), TyKind::FnDef(rhs, Some(rhs_generics)))
+                if lhs == rhs =>
+            {
+                for (&lhs, &rhs) in lhs_generics.r(s).iter().zip(rhs_generics.r(s)) {
+                    // In `rustc`, these types always seem to be invariant...
+                    //
+                    // ```rust
+                    // fn meow<'a, 'b>() {
+                    //     let a = &mut foo::<'a>;
+                    //     let b = &mut bar::<'b>;
+                    //
+                    //     eq(a, b);
+                    // }
+                    //
+                    // fn eq<T>(a: &mut T, b: &mut T) {}
+                    //
+                    // fn foo<'a>() -> &'a mut u32 {}
+                    //
+                    // fn bar<'a>() -> &'a mut u32 {}
+                    // ```
+                    //
+                    // ```
+                    // error[E0308]: mismatched types
+                    //  --> src/lib.rs:5:11
+                    //   |
+                    // 5 |     eq(a, b);
+                    //   |     --    ^ expected `&mut fn() -> &mut u32 {foo::<'_>}`, found `&mut fn() -> &mut u32 {bar::<'_>}`
+                    //   |     |
+                    //   |     arguments to this function are incorrect
+                    //   |
+                    //   = note: expected mutable reference `&mut fn() -> &'a mut _ {foo::<'a>}`
+                    //              found mutable reference `&mut fn() -> &'b mut _ {bar::<'b>}`
+                    // note: function defined here
+                    // ```
+                    let mode = RelationMode::Equate;
+
+                    match (lhs, rhs) {
+                        (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
+                            if let Err(err) = self.unify_re_and_re(lhs, rhs, mode) {
+                                culprits.push(TyAndTyUnifyCulprit::Regions(err));
+                            }
+                        }
+                        (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
+                            self.unify_ty_and_ty_inner(lhs, rhs, culprits, mode);
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+            }
+            (TyKind::FnDef(lhs, None), TyKind::FnDef(rhs, None)) if lhs == rhs => {
+                // (accepted)
             }
             (TyKind::Tuple(lhs), TyKind::Tuple(rhs)) if lhs.r(s).len() == rhs.r(s).len() => {
                 for (&lhs, &rhs) in lhs.r(s).iter().zip(rhs.r(s)) {
@@ -384,7 +437,6 @@ impl<'tcx> UnifyCx<'tcx> {
             // Omissions okay because of intern equality fast-path:
             //
             // - `(Simple, Simple)`
-            // - `(FnDef, FnDef)`
             // - `(Universal, Universal)`
             //
             // TODO: Check exhaustiveness automatically.

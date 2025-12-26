@@ -251,10 +251,10 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
 
     fn walk_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
         match ty.view(self.tcx()) {
-            SpannedTyView::Simple(..)
-            | SpannedTyView::FnDef(..)
+            SpannedTyView::Simple(_)
             | SpannedTyView::ExplicitInfer
-            | SpannedTyView::Error(..) => {
+            | SpannedTyView::FnDef(_, None)
+            | SpannedTyView::Error(_) => {
                 // (dead end)
             }
             SpannedTyView::This => {
@@ -266,6 +266,9 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
             SpannedTyView::Reference(re, _muta, pointee) => {
                 self.visit_spanned_re(re)?;
                 self.visit_spanned_ty(pointee)?;
+            }
+            SpannedTyView::FnDef(_def, Some(generics)) => {
+                self.visit_spanned_ty_or_re_list(generics)?;
             }
             SpannedTyView::Adt(instance) => {
                 self.visit_spanned_adt_instance(instance)?;
@@ -575,9 +578,7 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
         let tcx = self.tcx();
 
         match *ty.r(&tcx.session) {
-            TyKind::Simple(..) | TyKind::FnDef(..) | TyKind::ExplicitInfer | TyKind::Error(..) => {
-                Ok(ty)
-            }
+            TyKind::Simple(_) | TyKind::ExplicitInfer | TyKind::Error(_) => Ok(ty),
             TyKind::InferVar(var) => self.try_fold_ty_infer_use(var),
             TyKind::This => self.try_fold_self_ty_use(),
             TyKind::Reference(re, muta, pointee) => Ok(tcx.intern_ty(TyKind::Reference(
@@ -588,6 +589,10 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
             TyKind::Adt(instance) => {
                 Ok(tcx.intern_ty(TyKind::Adt(self.try_fold_adt_instance(instance)?)))
             }
+            TyKind::FnDef(def, Some(args)) => {
+                Ok(tcx.intern_ty(TyKind::FnDef(def, Some(self.try_fold_ty_or_re_list(args)?))))
+            }
+            TyKind::FnDef(def, None) => Ok(tcx.intern_ty(TyKind::FnDef(def, None))),
             TyKind::Trait(clause_list) => {
                 Ok(tcx.intern_ty(TyKind::Trait(self.try_fold_clause_list(clause_list)?)))
             }

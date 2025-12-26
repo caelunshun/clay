@@ -82,7 +82,7 @@ impl<'tcx> FuncCx<'tcx> {
                 let callee = divergence.and_do(self.check_expr([callee], None));
 
                 match *self.ccx.peel_ty_var(callee).r(s) {
-                    TyKind::FnDef(obj) => todo!(),
+                    TyKind::FnDef(obj, generics) => todo!(),
                     TyKind::Trait(intern) => todo!(),
                     TyKind::Error(err) => {
                         // Propagate error.
