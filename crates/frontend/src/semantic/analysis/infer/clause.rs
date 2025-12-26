@@ -2,7 +2,6 @@ use crate::{
     base::{
         Diag, Session,
         arena::{HasListInterner, LateInit, Obj},
-        syntax::Span,
     },
     semantic::{
         analysis::{
@@ -1036,7 +1035,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             }
             SpannedTyView::Reference(re, _muta, pointee) => {
                 self.ccx.oblige_ty_and_re(
-                    ObligationReason::WfForReference(ty.own_span().unwrap_or(Span::DUMMY)),
+                    ObligationReason::WfForReference(ty.own_span()),
                     pointee.value,
                     re.value,
                 );
@@ -1075,8 +1074,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             })
             .collect::<Vec<_>>();
 
-        let params =
-            SpannedTyOrReList::alloc_list(spec.own_span().unwrap_or(Span::DUMMY), &params, tcx);
+        let params = SpannedTyOrReList::alloc_list(spec.own_span(), &params, tcx);
 
         self.check_generics(spec.value.def.r(s).generics, params);
 
@@ -1143,7 +1141,10 @@ impl ClauseTyWfVisitor<'_, '_> {
                         trait_subst.fold_spanned_clause_list(*requirements.r(s).clauses);
 
                     self.ccx.oblige_re_and_clause(
-                        ObligationReason::WfForTraitParam(actual.own_span().unwrap()),
+                        ObligationReason::WfForTraitParam {
+                            use_site: actual.own_span(),
+                            obligation_site: requirements.own_span(),
+                        },
                         actual.value,
                         requirements.value,
                     );
@@ -1160,7 +1161,10 @@ impl ClauseTyWfVisitor<'_, '_> {
                     }
 
                     self.ccx.oblige_ty_and_clause(
-                        ObligationReason::WfForTraitParam(actual.own_span().unwrap()),
+                        ObligationReason::WfForTraitParam {
+                            use_site: actual.own_span(),
+                            obligation_site: requirements.own_span(),
+                        },
                         actual.value,
                         requirements.value,
                     );

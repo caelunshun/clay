@@ -278,6 +278,10 @@ impl Span {
         self.lo.usize()..self.hi.usize()
     }
 
+    pub fn not_dummy(self) -> Option<Span> {
+        (!self.is_dummy()).then_some(self)
+    }
+
     pub fn is_dummy(self) -> bool {
         self == Self::DUMMY
     }

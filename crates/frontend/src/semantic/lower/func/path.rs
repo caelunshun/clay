@@ -1,9 +1,7 @@
 use crate::{
     base::{
-        Diag, ErrorGuaranteed, LeafDiag, Session,
-        analysis::SpannedViewEncode as _,
-        arena::Obj,
-        syntax::{HasSpan as _, Span},
+        Diag, ErrorGuaranteed, LeafDiag, Session, analysis::SpannedViewEncode as _, arena::Obj,
+        syntax::HasSpan as _,
     },
     parse::{
         ast::{
@@ -574,11 +572,11 @@ impl IntraItemLowerCtxt<'_> {
 
         if let (Some(first_generics), Some(second_generics)) = (first_generics, second_generics) {
             Diag::span_err(
-                second_generics.own_span().unwrap_or(Span::DUMMY),
+                second_generics.own_span(),
                 "generic parameters for `enum` specified more than once",
             )
             .child(LeafDiag::span_note(
-                first_generics.own_span().unwrap_or(Span::DUMMY),
+                first_generics.own_span(),
                 "generics first specified here",
             ))
             .emit();

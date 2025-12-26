@@ -239,10 +239,10 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
                 // (dead end)
             }
             Re::InferVar(var) => {
-                self.visit_spanned_re_infer_use(re.own_span(), var)?;
+                self.visit_spanned_re_infer_use(re.own_span_if_specified(), var)?;
             }
             Re::Universal(generic) => {
-                self.visit_spanned_re_generic_use(re.own_span(), generic)?;
+                self.visit_spanned_re_generic_use(re.own_span_if_specified(), generic)?;
             }
         }
 
@@ -258,10 +258,10 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
                 // (dead end)
             }
             SpannedTyView::This => {
-                self.visit_spanned_self_ty_use(ty.own_span())?;
+                self.visit_spanned_self_ty_use(ty.own_span_if_specified())?;
             }
             SpannedTyView::InferVar(var) => {
-                self.visit_spanned_ty_infer_use(ty.own_span(), var)?;
+                self.visit_spanned_ty_infer_use(ty.own_span_if_specified(), var)?;
             }
             SpannedTyView::Reference(re, _muta, pointee) => {
                 self.visit_spanned_re(re)?;
@@ -277,7 +277,7 @@ pub trait TyVisitorWalk<'tcx>: TyVisitor<'tcx> {
                 self.visit_spanned_ty_list(tys)?;
             }
             SpannedTyView::Universal(generic) => {
-                self.visit_spanned_ty_generic_use(ty.own_span(), generic)?;
+                self.visit_spanned_ty_generic_use(ty.own_span_if_specified(), generic)?;
             }
         }
 

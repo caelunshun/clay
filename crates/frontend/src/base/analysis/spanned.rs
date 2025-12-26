@@ -51,8 +51,12 @@ impl<T> Spanned<T> {
         }
     }
 
-    pub fn own_span(&self) -> Option<Span> {
+    pub fn own_span_if_specified(&self) -> Option<Span> {
         self.span_info.own_span()
+    }
+
+    pub fn own_span(&self) -> Span {
+        self.own_span_if_specified().unwrap_or(Span::DUMMY)
     }
 
     pub fn new_view<C>(

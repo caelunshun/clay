@@ -276,14 +276,13 @@ impl IntraItemLowerCtxt<'_> {
                     if let Some(old_param) = param {
                         Diag::span_err(name.span, "associated type specified more than once")
                             .child(LeafDiag::span_note(
-                                old_param.own_span().unwrap_or(Span::DUMMY),
+                                old_param.own_span(),
                                 "type first specified here",
                             ))
                             .emit();
                     } else {
                         *param = Some(
-                            SpannedTyOrReView::Ty(exact_ty)
-                                .encode(exact_ty.own_span().unwrap_or(Span::DUMMY), self.tcx),
+                            SpannedTyOrReView::Ty(exact_ty).encode(exact_ty.own_span(), self.tcx),
                         );
                     }
                 }
@@ -458,8 +457,9 @@ impl IntraItemLowerCtxt<'_> {
             .iter()
             .zip(orig_params.iter().map(Some).chain(iter::repeat(None)))
             .map(|(expected, actual)| {
-                let actual_span =
-                    actual.map_or(segment_span, |v| v.own_span().unwrap_or(segment_span));
+                let actual_span = actual.map_or(segment_span, |v| {
+                    v.own_span().not_dummy().unwrap_or(segment_span)
+                });
 
                 let para_or_err = 'para_or_err: {
                     let Some(&actual) = actual else {
@@ -509,7 +509,7 @@ impl IntraItemLowerCtxt<'_> {
 
         if orig_params.len() > binder_len {
             Diag::span_err(
-                orig_params[binder_len].own_span().unwrap_or(Span::DUMMY),
+                orig_params[binder_len].own_span(),
                 "too many generic parameters",
             )
             .child(LeafDiag::new(
@@ -567,8 +567,7 @@ impl IntraItemLowerCtxt<'_> {
         params
             .iter(self.tcx)
             .map(|ty_or_re| {
-                SpannedTraitParamView::Equals(ty_or_re)
-                    .encode(ty_or_re.own_span().unwrap_or(Span::DUMMY), self.tcx)
+                SpannedTraitParamView::Equals(ty_or_re).encode(ty_or_re.own_span(), self.tcx)
             })
             .chain(iter::repeat(
                 SpannedTraitParamView::Unspecified(SpannedTraitClauseList::alloc_list(
@@ -601,11 +600,7 @@ impl IntraItemLowerCtxt<'_> {
             .take(def.r(s).generics.r(s).defs.len())
             .collect::<Vec<_>>();
 
-        SpannedTyOrReList::alloc_list(
-            params.own_span().unwrap_or(Span::DUMMY),
-            &elaborated_params,
-            self.tcx,
-        )
+        SpannedTyOrReList::alloc_list(params.own_span(), &elaborated_params, self.tcx)
     }
 
     pub fn lower_associated_type_generic_params(

@@ -36,7 +36,10 @@ impl ObligationKind {
 #[derive(Debug, Copy, Clone)]
 pub enum ObligationReason {
     FunctionBody(Span),
-    WfForTraitParam(Span),
+    WfForTraitParam {
+        use_site: Span,
+        obligation_site: Span,
+    },
     WfForReference(Span),
     ImplConstraint,
     Structural,
@@ -45,9 +48,13 @@ pub enum ObligationReason {
 impl ObligationReason {
     pub fn span(self) -> Option<Span> {
         match self {
-            ObligationReason::FunctionBody(span)
-            | ObligationReason::WfForTraitParam(span)
-            | ObligationReason::WfForReference(span) => Some(span),
+            ObligationReason::FunctionBody(span) | ObligationReason::WfForReference(span) => {
+                Some(span)
+            }
+            ObligationReason::WfForTraitParam {
+                use_site,
+                obligation_site,
+            } => Some(use_site.not_dummy().unwrap_or(obligation_site)),
             ObligationReason::ImplConstraint | ObligationReason::Structural => None,
         }
     }
