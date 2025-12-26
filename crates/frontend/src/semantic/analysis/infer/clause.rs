@@ -5,12 +5,12 @@ use crate::{
     },
     semantic::{
         analysis::{
-            BinderSubstitution, ConfirmationResult, ExplicitInferVisitor, FloatingInferVar,
-            InferTySubstitutor, ObligationCx, ObligationKind, ObligationReason, ObligationResult,
-            SelectionRejected, SelectionResult, SubstitutionFolder, TyCtxt, TyFolder,
-            TyFolderInfallible as _, TyFolderInfalliblePreservesSpans as _, TyFolderPreservesSpans,
-            TyFolderSuper, TyShapeMap, TyVisitor, TyVisitorUnspanned, TyVisitorWalk,
-            UnboundVarHandlingMode, UnifyCx, UnifyCxMode,
+            BinderSubstitution, ConfirmationResult, FloatingInferVar, InferTySubstitutor,
+            ObligationCx, ObligationKind, ObligationReason, ObligationResult, SelectionRejected,
+            SelectionResult, SubstitutionFolder, TyCtxt, TyFolder, TyFolderInfallible as _,
+            TyFolderInfalliblePreservesSpans as _, TyFolderPreservesSpans, TyFolderSuper,
+            TyShapeMap, TyVisitor, TyVisitorUnspanned, TyVisitorWalk, UnboundVarHandlingMode,
+            UnifyCx, UnifyCxMode,
         },
         syntax::{
             AnyGeneric, Crate, FnDef, GenericBinder, GenericSolveStep, ImplItem, InferTyVar,
@@ -1152,13 +1152,6 @@ impl ClauseTyWfVisitor<'_, '_> {
                 (SpannedTyOrReView::Ty(actual), AnyGeneric::Ty(requirements)) => {
                     let requirements =
                         trait_subst.fold_spanned_clause_list(*requirements.r(s).user_clauses);
-
-                    if ExplicitInferVisitor(tcx)
-                        .visit_clause_list(requirements.value)
-                        .is_break()
-                    {
-                        continue;
-                    }
 
                     self.ccx.oblige_ty_and_clause(
                         ObligationReason::WfForTraitParam {
