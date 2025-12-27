@@ -137,6 +137,10 @@ impl<'tcx> UnifyCx<'tcx> {
         }
     }
 
+    pub fn substitutor(&self, mode: UnboundVarHandlingMode) -> InferTySubstitutor<'_, 'tcx> {
+        InferTySubstitutor { ucx: self, mode }
+    }
+
     pub fn start_tracing(&mut self) {
         self.types.start_tracing();
     }
@@ -494,7 +498,8 @@ impl<'tcx> UnifyCx<'tcx> {
         .is_break();
 
         if does_occur {
-            let occurs_in = InferTySubstitutor::new(self, UnboundVarHandlingMode::NormalizeToRoot)
+            let occurs_in = self
+                .substitutor(UnboundVarHandlingMode::NormalizeToRoot)
                 .fold_ty(rhs_ty);
 
             return Err(InferTyOccursError {
@@ -584,9 +589,8 @@ impl<'tcx> UnifyCx<'tcx> {
 
 #[derive(Debug, Copy, Clone)]
 pub struct InferTySubstitutor<'a, 'tcx> {
-    infer_types: &'a TyInferTracker,
-    tcx: &'tcx TyCtxt,
-    mode: UnboundVarHandlingMode,
+    pub ucx: &'a UnifyCx<'tcx>,
+    pub mode: UnboundVarHandlingMode,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -597,25 +601,15 @@ pub enum UnboundVarHandlingMode {
     Panic,
 }
 
-impl<'a, 'tcx> InferTySubstitutor<'a, 'tcx> {
-    pub fn new(ucx: &'a UnifyCx<'tcx>, mode: UnboundVarHandlingMode) -> Self {
-        Self {
-            infer_types: &ucx.types,
-            tcx: ucx.tcx,
-            mode,
-        }
-    }
-}
-
 impl<'tcx> TyFolder<'tcx> for InferTySubstitutor<'_, 'tcx> {
     type Error = Infallible;
 
     fn tcx(&self) -> &'tcx TyCtxt {
-        self.tcx
+        self.ucx.tcx()
     }
 
     fn try_fold_ty_infer_use(&mut self, var: InferTyVar) -> Result<Ty, Self::Error> {
-        match self.infer_types.lookup(var) {
+        match self.ucx.lookup_ty_var(var) {
             Ok(v) => self.try_fold_ty(v),
             Err(floating) => Ok(match self.mode {
                 UnboundVarHandlingMode::Error(error) => self.tcx().intern_ty(TyKind::Error(error)),

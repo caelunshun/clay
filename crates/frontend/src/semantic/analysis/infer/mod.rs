@@ -1,3 +1,6 @@
+mod coherence;
+pub use coherence::*;
+
 mod clause;
 pub use clause::*;
 

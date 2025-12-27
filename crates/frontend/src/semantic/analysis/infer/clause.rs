@@ -1,300 +1,24 @@
 use crate::{
-    base::{
-        Diag, Session,
-        arena::{HasListInterner, LateInit, Obj},
-    },
+    base::{Diag, Session, arena::Obj},
     semantic::{
         analysis::{
-            BinderSubstitution, ConfirmationResult, FloatingInferVar, InferTySubstitutor,
-            ObligationCx, ObligationKind, ObligationReason, ObligationResult, SelectionRejected,
-            SelectionResult, SubstitutionFolder, TyCtxt, TyFolder, TyFolderInfallible as _,
+            BinderSubstitution, CoherenceMap, ConfirmationResult, FloatingInferVar, ObligationCx,
+            ObligationKind, ObligationReason, ObligationResult, SelectionRejected, SelectionResult,
+            SubstitutionFolder, TyCtxt, TyFolder, TyFolderInfallible as _,
             TyFolderInfalliblePreservesSpans as _, TyFolderPreservesSpans, TyFolderSuper,
-            TyShapeMap, TyVisitor, TyVisitorUnspanned, TyVisitorWalk, UnboundVarHandlingMode,
-            UnifyCx, UnifyCxMode,
+            TyVisitor, TyVisitorUnspanned, TyVisitorWalk, UnboundVarHandlingMode, UnifyCx,
+            UnifyCxMode,
         },
         syntax::{
-            AnyGeneric, Crate, FnDef, GenericBinder, GenericSolveStep, ImplItem, InferTyVar,
-            ListOfTraitClauseList, Re, RelationMode, SolidTyShape, SolidTyShapeKind,
-            SpannedAdtInstance, SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec,
-            SpannedTy, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView, SpannedTyView,
-            TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReList,
-            TyShape,
+            AnyGeneric, GenericBinder, ImplItem, InferTyVar, ListOfTraitClauseList, Re,
+            RelationMode, SpannedAdtInstance, SpannedTraitInstance, SpannedTraitParamView,
+            SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView,
+            SpannedTyView, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            TyOrReList,
         },
     },
 };
-use index_vec::{IndexVec, define_index_type};
 use std::{convert::Infallible, ops::ControlFlow};
-
-// === CoherenceMap === //
-
-#[derive(Debug, Default)]
-pub struct CoherenceMap {
-    by_shape: TyShapeMap<CoherenceMapEntry>,
-}
-
-#[derive(Debug, Copy, Clone)]
-enum CoherenceMapEntry {
-    TraitImpl(Obj<ImplItem>),
-    InherentMethod(Obj<FnDef>),
-}
-
-impl CoherenceMap {
-    pub fn populate(&mut self, tcx: &TyCtxt, krate: Obj<Crate>) {
-        let s = &tcx.session;
-
-        // Extend map with all `impl`s.
-        for &item in &**krate.r(s).items {
-            let Some(item) = item.r(s).kind.as_impl() else {
-                continue;
-            };
-
-            match item.r(s).trait_ {
-                Some(trait_) => {
-                    let arg_count = trait_.value.def.r(s).regular_generic_count as usize;
-                    self.by_shape.insert(
-                        tcx.shape_of_trait_def(
-                            trait_.value.def,
-                            &trait_.value.params.r(s)[..arg_count],
-                            item.r(s).target.value,
-                        ),
-                        CoherenceMapEntry::TraitImpl(item),
-                        s,
-                    );
-                }
-                None => {
-                    for &method in &**item.r(s).methods {
-                        self.by_shape.insert(
-                            TyShape::Solid(SolidTyShape {
-                                kind: SolidTyShapeKind::InherentMethodImpl(method.r(s).name.text),
-                                children: tcx
-                                    .intern(&[tcx.erase_ty_to_shape(item.r(s).target.value)]),
-                            }),
-                            CoherenceMapEntry::InherentMethod(method),
-                            s,
-                        );
-                    }
-                }
-            }
-        }
-
-        // Perform coherence checks
-        // TODO
-    }
-}
-
-// === Order Solving === //
-
-impl TyCtxt {
-    pub fn determine_impl_generic_solve_order(&self, def: Obj<ImplItem>) {
-        let s = &self.session;
-
-        define_index_type! {
-            struct GenericIdx = u32;
-        }
-
-        define_index_type! {
-            struct ClauseIndex = u32;
-        }
-
-        struct GenericState {
-            covered: bool,
-            deps: Vec<ClauseIndex>,
-        }
-
-        struct ClauseState {
-            blockers: u32,
-            step_idx: GenericSolveStep,
-            spec: TraitSpec,
-        }
-
-        let generic_defs = &def.r(s).generics.r(s).defs;
-
-        // Populate clauses
-        let mut generic_states = generic_defs
-            .iter()
-            .map(|_| GenericState {
-                covered: false,
-                deps: Vec::new(),
-            })
-            .collect::<IndexVec<GenericIdx, _>>();
-
-        let mut clause_states = IndexVec::<ClauseIndex, ClauseState>::new();
-
-        for (step_generic_idx, main_generic_def) in generic_defs.iter().enumerate() {
-            for (step_clause_idx, clause_def) in
-                main_generic_def.clauses(s).value.r(s).iter().enumerate()
-            {
-                let TraitClause::Trait(spec) = *clause_def else {
-                    continue;
-                };
-
-                let clause_state_idx = clause_states.next_idx();
-                let mut blockers = 1;
-
-                generic_states[step_generic_idx].deps.push(clause_state_idx);
-
-                for &param in &spec.params.r(s)[..spec.def.r(s).regular_generic_count as usize] {
-                    let TraitParam::Equals(ty) = param else {
-                        unreachable!()
-                    };
-
-                    cbit::cbit!(for generic in self.mentioned_generics(ty) {
-                        debug_assert_eq!(generic.binder(s).unwrap().def, def.r(s).generics);
-
-                        generic_states[generic.binder(s).unwrap().idx as usize]
-                            .deps
-                            .push(clause_state_idx);
-
-                        blockers += 1;
-                    });
-                }
-
-                clause_states.push(ClauseState {
-                    step_idx: GenericSolveStep {
-                        generic_idx: step_generic_idx as u32,
-                        clause_idx: step_clause_idx as u32,
-                    },
-                    blockers,
-                    spec,
-                });
-            }
-        }
-
-        // Iteratively mark covered generics.
-        let mut solve_queue = Vec::new();
-        let mut solve_order = Vec::new();
-
-        fn cover_idx(
-            solve_queue: &mut Vec<TraitSpec>,
-            solve_order: &mut Vec<GenericSolveStep>,
-            generic_states: &mut IndexVec<GenericIdx, GenericState>,
-            clause_states: &mut IndexVec<ClauseIndex, ClauseState>,
-            idx: GenericIdx,
-        ) {
-            let generic = &mut generic_states[idx];
-
-            if generic.covered {
-                return;
-            }
-
-            generic.covered = true;
-
-            for &dep in &generic.deps {
-                let clause = &mut clause_states[dep];
-                clause.blockers -= 1;
-
-                if clause.blockers > 0 {
-                    continue;
-                }
-
-                solve_queue.push(clause.spec);
-                solve_order.push(clause.step_idx);
-            }
-        }
-
-        fn cover_ty(
-            tcx: &TyCtxt,
-            solve_queue: &mut Vec<TraitSpec>,
-            solve_order: &mut Vec<GenericSolveStep>,
-            generic_states: &mut IndexVec<GenericIdx, GenericState>,
-            clause_states: &mut IndexVec<ClauseIndex, ClauseState>,
-            binder: Obj<GenericBinder>,
-            ty: Ty,
-        ) {
-            let s = &tcx.session;
-
-            cbit::cbit!(for generic in tcx.mentioned_generics(TyOrRe::Ty(ty)) {
-                debug_assert_eq!(generic.binder(s).unwrap().def, binder);
-
-                cover_idx(
-                    solve_queue,
-                    solve_order,
-                    generic_states,
-                    clause_states,
-                    GenericIdx::from_raw(generic.binder(s).unwrap().idx),
-                );
-            });
-        }
-
-        // Cover generics appearing in the target type and trait.
-        cover_ty(
-            self,
-            &mut solve_queue,
-            &mut solve_order,
-            &mut generic_states,
-            &mut clause_states,
-            def.r(s).generics,
-            def.r(s).target.value,
-        );
-
-        if let Some(trait_) = def.r(s).trait_ {
-            for &param in trait_.value.params.r(s) {
-                match param {
-                    TyOrRe::Re(param) => {
-                        match param {
-                            Re::Gc | Re::Error(_) => {
-                                // (nothing mentioned)
-                            }
-                            Re::Universal(param) => {
-                                cover_idx(
-                                    &mut solve_queue,
-                                    &mut solve_order,
-                                    &mut generic_states,
-                                    &mut clause_states,
-                                    GenericIdx::from_raw(param.r(s).binder.unwrap().idx),
-                                );
-                            }
-                            Re::InferVar(_) | Re::ExplicitInfer | Re::Erased => unreachable!(),
-                        }
-                    }
-                    TyOrRe::Ty(param) => {
-                        cover_ty(
-                            self,
-                            &mut solve_queue,
-                            &mut solve_order,
-                            &mut generic_states,
-                            &mut clause_states,
-                            def.r(s).generics,
-                            param,
-                        );
-                    }
-                }
-            }
-        }
-
-        // Recursively uncover more generics.
-        while let Some(clause) = solve_queue.pop() {
-            for param in &clause.params.r(s)[(clause.def.r(s).regular_generic_count as usize)..] {
-                match param {
-                    TraitParam::Equals(eq) => {
-                        // We can use this to reveal more equalities!
-                        cover_ty(
-                            self,
-                            &mut solve_queue,
-                            &mut solve_order,
-                            &mut generic_states,
-                            &mut clause_states,
-                            def.r(s).generics,
-                            eq.unwrap_ty(),
-                        );
-                    }
-                    TraitParam::Unspecified(_) => {
-                        // (does not contribute to solve order)
-                    }
-                }
-            }
-        }
-
-        // Ensure that all generics are covered.
-        for (state, def) in generic_states.iter().zip(generic_defs) {
-            if !state.covered {
-                Diag::span_err(def.span(s), "generic parameter not covered by `impl`").emit();
-            }
-        }
-
-        LateInit::init(&def.r(s).optimal_solve_order, solve_order);
-    }
-}
 
 // === ClauseCx Core === //
 
@@ -566,7 +290,17 @@ impl<'tcx> ClauseCx<'tcx> {
         // Otherwise, scan for a suitable `impl`.
         let mut prev_confirmation = None;
 
-        for candidate in self.gather_impl_candidates(lhs, rhs) {
+        let candidates = self.coherence.gather_impl_candidates(
+            tcx,
+            self.ucx()
+                .substitutor(UnboundVarHandlingMode::EraseToExplicitInfer)
+                .fold_ty(lhs),
+            self.ucx()
+                .substitutor(UnboundVarHandlingMode::EraseToExplicitInfer)
+                .fold_trait_spec(rhs),
+        );
+
+        for candidate in candidates {
             let Ok(confirmation) = self.clone().try_select_block_impl(lhs, candidate, rhs) else {
                 continue;
             };
@@ -581,9 +315,11 @@ impl<'tcx> ClauseCx<'tcx> {
         let Some(confirmation) = prev_confirmation else {
             return ObligationResult::Failure(Diag::anon_err(format_args!(
                 "failed to prove {:?} implements {:?}",
-                InferTySubstitutor::new(self.ucx(), UnboundVarHandlingMode::NormalizeToRoot)
+                self.ucx()
+                    .substitutor(UnboundVarHandlingMode::NormalizeToRoot)
                     .fold_ty(lhs),
-                InferTySubstitutor::new(self.ucx(), UnboundVarHandlingMode::NormalizeToRoot)
+                self.ucx()
+                    .substitutor(UnboundVarHandlingMode::NormalizeToRoot)
                     .fold_trait_spec(rhs),
             )));
         };
@@ -691,47 +427,6 @@ impl<'tcx> ClauseCx<'tcx> {
         }
 
         Ok(ConfirmationResult::Success(self))
-    }
-
-    fn gather_impl_candidates(
-        &self,
-        lhs: Ty,
-        rhs: TraitSpec,
-    ) -> impl Iterator<Item = Obj<ImplItem>> + 'tcx {
-        let tcx = self.tcx();
-        let s = self.session();
-
-        self.coherence
-            .by_shape
-            .lookup(
-                tcx.shape_of_trait_def(
-                    rhs.def,
-                    &rhs.params.r(s)[..rhs.def.r(s).regular_generic_count as usize]
-                        .iter()
-                        .map(|&v| match v {
-                            TraitParam::Equals(v) => InferTySubstitutor::new(
-                                self.ucx(),
-                                UnboundVarHandlingMode::EraseToExplicitInfer,
-                            )
-                            .fold_ty_or_re(v),
-                            TraitParam::Unspecified(_) => unreachable!(),
-                        })
-                        .collect::<Vec<_>>(),
-                    InferTySubstitutor::new(
-                        self.ucx(),
-                        UnboundVarHandlingMode::EraseToExplicitInfer,
-                    )
-                    .fold_ty(lhs),
-                ),
-                s,
-            )
-            .map(|v| {
-                let CoherenceMapEntry::TraitImpl(v) = *v else {
-                    unreachable!()
-                };
-
-                v
-            })
     }
 
     fn try_select_block_impl(
@@ -1070,7 +765,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             .map(|param| match param.view(tcx) {
                 SpannedTraitParamView::Equals(v) => v,
                 SpannedTraitParamView::Unspecified(_) => {
-                    SpannedTyOrRe::new_unspanned(TyOrRe::Ty(tcx.intern_ty(TyKind::ExplicitInfer)))
+                    SpannedTyOrRe::new_unspanned(TyOrRe::Ty(self.ccx.fresh_ty()))
                 }
             })
             .collect::<Vec<_>>();
