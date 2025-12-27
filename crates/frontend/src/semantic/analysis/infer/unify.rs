@@ -1,9 +1,7 @@
 use crate::{
     base::{ErrorGuaranteed, HardDiag, Session, arena::Obj},
     semantic::{
-        analysis::{
-            TyCtxt, TyFolder, TyFolderInfallible, TyVisitor, TyVisitorUnspanned, TyVisitorWalk,
-        },
+        analysis::{TyCtxt, TyFolder, TyFolderInfallible, TyVisitor, TyVisitorExt},
         syntax::{
             InferReVar, InferTyVar, Mutability, Re, ReVariance, RegionGeneric, RelationMode,
             SpannedTy, SpannedTyView, TraitClause, TraitClauseList, TraitParam, Ty, TyKind, TyOrRe,
@@ -472,10 +470,10 @@ impl<'tcx> UnifyCx<'tcx> {
                 self.ucx.tcx()
             }
 
-            fn visit_spanned_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
+            fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
                 if let SpannedTyView::InferVar(var) = ty.view(self.tcx()) {
                     match self.ucx.types.lookup(var) {
-                        Ok(resolved) => self.visit_ty(resolved),
+                        Ok(resolved) => self.visit_fallible(resolved),
                         Err(other_floating) => {
                             if self.reject == other_floating.root {
                                 ControlFlow::Break(())
@@ -485,7 +483,7 @@ impl<'tcx> UnifyCx<'tcx> {
                         }
                     }
                 } else {
-                    self.walk_ty(ty)
+                    self.walk_spanned_fallible(ty)
                 }
             }
         }
@@ -494,7 +492,7 @@ impl<'tcx> UnifyCx<'tcx> {
             ucx: self,
             reject: lhs_var_root,
         }
-        .visit_ty(rhs_ty)
+        .visit_fallible(rhs_ty)
         .is_break();
 
         if does_occur {

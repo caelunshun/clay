@@ -6,8 +6,7 @@ use crate::{
             ObligationKind, ObligationReason, ObligationResult, SelectionRejected, SelectionResult,
             SubstitutionFolder, TyCtxt, TyFolder, TyFolderInfallible as _,
             TyFolderInfalliblePreservesSpans as _, TyFolderPreservesSpans, TyFolderSuper,
-            TyVisitor, TyVisitorUnspanned, TyVisitorWalk, UnboundVarHandlingMode, UnifyCx,
-            UnifyCxMode,
+            TyVisitor, TyVisitorInfallibleExt, UnboundVarHandlingMode, UnifyCx, UnifyCxMode,
         },
         syntax::{
             AnyGeneric, GenericBinder, ImplItem, InferTyVar, ListOfTraitClauseList, Re,
@@ -694,8 +693,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn run_oblige_ty_wf(&mut self, ty: Ty) -> ObligationResult {
         // TODO: Wait for inference resolution and perform coinductivity checks to break WF cycles
-
-        ControlFlow::Continue(()) = self.wf_visitor().visit_ty(ty);
+        self.wf_visitor().visit(ty);
 
         ObligationResult::Success
     }
@@ -720,11 +718,11 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         self.ccx.tcx()
     }
 
-    fn visit_spanned_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
+    fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
         match ty.view(self.tcx()) {
             SpannedTyView::Trait(_) => {
                 let old_clause_applies_to = self.clause_applies_to.replace(ty.value);
-                self.walk_ty(ty)?;
+                self.walk_spanned(ty);
                 self.clause_applies_to = old_clause_applies_to;
             }
             SpannedTyView::Reference(re, _muta, pointee) => {
@@ -734,7 +732,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
                     re.value,
                 );
 
-                self.walk_ty(ty)?;
+                self.walk_spanned(ty);
             }
             SpannedTyView::FnDef(..) => {
                 todo!()
@@ -745,16 +743,17 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             | SpannedTyView::Tuple(_)
             | SpannedTyView::ExplicitInfer
             | SpannedTyView::Universal(_)
+            // FIXME: This shouldn't just be accepted. Defer these!!
             | SpannedTyView::InferVar(_)
             | SpannedTyView::Error(_) => {
-                self.walk_ty(ty)?;
+                self.walk_spanned(ty);
             }
         }
 
         ControlFlow::Continue(())
     }
 
-    fn visit_spanned_trait_spec(&mut self, spec: SpannedTraitSpec) -> ControlFlow<Self::Break> {
+    fn visit_trait_spec(&mut self, spec: SpannedTraitSpec) -> ControlFlow<Self::Break> {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -774,28 +773,22 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
 
         self.check_generics(spec.value.def.r(s).generics, params);
 
-        self.walk_trait_spec(spec)?;
+        self.walk_spanned(spec);
 
         ControlFlow::Continue(())
     }
 
-    fn visit_spanned_trait_instance(
-        &mut self,
-        instance: SpannedTraitInstance,
-    ) -> ControlFlow<Self::Break> {
+    fn visit_trait_instance(&mut self, instance: SpannedTraitInstance) -> ControlFlow<Self::Break> {
         let s = self.session();
         let tcx = self.tcx();
 
         self.check_generics(instance.value.def.r(s).generics, instance.view(tcx).params);
-        self.walk_trait_instance(instance)?;
+        self.walk_spanned(instance);
 
         ControlFlow::Continue(())
     }
 
-    fn visit_spanned_adt_instance(
-        &mut self,
-        instance: SpannedAdtInstance,
-    ) -> ControlFlow<Self::Break> {
+    fn visit_adt_instance(&mut self, instance: SpannedAdtInstance) -> ControlFlow<Self::Break> {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -809,7 +802,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         self.clause_applies_to = old_clause_applies_to;
 
         // Ensure parameter types are also well-formed.
-        self.walk_adt_instance(instance)?;
+        self.walk_spanned(instance);
 
         ControlFlow::Continue(())
     }

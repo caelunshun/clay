@@ -8,7 +8,7 @@ use crate::{
     semantic::{
         analysis::{
             ClauseCx, CoherenceMap, SubstitutionFolder, TyCtxt,
-            TyFolderInfalliblePreservesSpans as _, TyVisitor, UnifyCxMode,
+            TyFolderInfalliblePreservesSpans as _, TyVisitorInfallibleExt, UnifyCxMode,
         },
         syntax::{
             AdtCtor, AdtInstance, AdtItem, AdtKind, AnyGeneric, Crate, FuncItem, GenericBinder,
@@ -18,7 +18,6 @@ use crate::{
     },
     symbol,
 };
-use std::{convert::Infallible, ops::ControlFlow};
 
 #[derive(Debug, Clone)]
 pub struct CrateTypeckVisitor<'tcx> {
@@ -35,7 +34,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         &self.tcx.session
     }
 
-    pub fn visit_crate(&mut self, krate: Obj<Crate>) -> ControlFlow<Infallible> {
+    pub fn visit_crate(&mut self, krate: Obj<Crate>) {
         let s = self.session();
 
         let Crate {
@@ -51,27 +50,25 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
                     // (intentionally empty)
                 }
                 ItemKind::Adt(def) => {
-                    self.visit_adt(def)?;
+                    self.visit_adt(def);
                 }
                 ItemKind::EnumVariant(_) => {
                     // (already visited in ADT checks)
                 }
                 ItemKind::Trait(def) => {
-                    self.visit_trait(def)?;
+                    self.visit_trait(def);
                 }
                 ItemKind::Impl(def) => {
-                    self.visit_impl(def)?;
+                    self.visit_impl(def);
                 }
                 ItemKind::Func(def) => {
-                    self.visit_fn_item(def)?;
+                    self.visit_fn_item(def);
                 }
             }
         }
-
-        ControlFlow::Continue(())
     }
 
-    pub fn visit_trait(&mut self, def: Obj<TraitItem>) -> ControlFlow<Infallible> {
+    pub fn visit_trait(&mut self, def: Obj<TraitItem>) {
         let tcx = self.tcx();
         let s = self.session();
 
@@ -140,22 +137,20 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
             ccx.wf_visitor()
                 .with_clause_applies_to(new_self_ty)
-                .visit_spanned_clause_list(inherits)?;
+                .visit_spanned(inherits);
         }
 
         // Now, let's ensure that each generic parameter's clauses are well-formed.
-        self.visit_generic_binder(new_self_ty, new_self_arg_binder)?;
+        self.visit_generic_binder(new_self_ty, new_self_arg_binder);
 
         // Finally, let's check method signatures and, if a default one is provided, bodies.
         // TODO
         // for method in methods.iter() {
         //     self.visit_fn_def(method.r(s).func)?;
         // }
-
-        ControlFlow::Continue(())
     }
 
-    pub fn visit_impl(&mut self, item: Obj<ImplItem>) -> ControlFlow<Infallible> {
+    pub fn visit_impl(&mut self, item: Obj<ImplItem>) {
         let s = self.session();
 
         // `Self` lexically refers to the target type quantified by some lexical set of universal
@@ -181,7 +176,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
             ccx.wf_visitor()
                 .with_clause_applies_to(item.r(s).target.value)
-                .visit_spanned_trait_instance(trait_)?;
+                .visit_spanned(trait_);
         }
 
         // Let's also ensure that our target type is well-formed.
@@ -190,22 +185,20 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
             let target = ccx.instantiator(self_ty).fold_spanned_ty(*target);
 
-            ccx.wf_visitor().visit_spanned_ty(target)?;
+            ccx.wf_visitor().visit_spanned(target);
         }
 
         // Let's ensure that `impl` generics all have well-formed clauses.
-        self.visit_generic_binder(self_ty, *generics)?;
+        self.visit_generic_binder(self_ty, *generics);
 
         // Finally, let's check method signatures and bodies.
         // TODO
         // for method in methods.iter() {
         //     self.visit_fn_def(*method)?;
         // }
-
-        ControlFlow::Continue(())
     }
 
-    pub fn visit_adt(&mut self, def: Obj<AdtItem>) -> ControlFlow<Infallible> {
+    pub fn visit_adt(&mut self, def: Obj<AdtItem>) {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -234,19 +227,17 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         // Now, WF-check the definition.
         match *def.r(s).kind {
             AdtKind::Struct(kind) => {
-                self.visit_adt_ctor(new_self_ty, *kind.r(s).ctor)?;
+                self.visit_adt_ctor(new_self_ty, *kind.r(s).ctor);
             }
             AdtKind::Enum(kind) => {
                 for variant in kind.r(s).variants.iter() {
-                    self.visit_adt_ctor(new_self_ty, *variant.r(s).ctor)?;
+                    self.visit_adt_ctor(new_self_ty, *variant.r(s).ctor);
                 }
             }
         }
-
-        ControlFlow::Continue(())
     }
 
-    pub fn visit_adt_ctor(&mut self, self_ty: Ty, ctor: Obj<AdtCtor>) -> ControlFlow<Infallible> {
+    pub fn visit_adt_ctor(&mut self, self_ty: Ty, ctor: Obj<AdtCtor>) {
         let s = self.session();
 
         for field in ctor.r(s).fields.iter() {
@@ -254,25 +245,17 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
             let field_ty = ccx.instantiator(self_ty).fold_spanned_ty(*field.ty);
 
-            ccx.wf_visitor().visit_spanned_ty(field_ty)?;
+            ccx.wf_visitor().visit_spanned(field_ty);
         }
-
-        ControlFlow::Continue(())
     }
 
-    pub fn visit_fn_item(&mut self, def: Obj<FuncItem>) -> ControlFlow<Infallible> {
+    pub fn visit_fn_item(&mut self, def: Obj<FuncItem>) {
         let s = self.session();
 
-        self.visit_fn_def(*def.r(s).def)?;
-
-        ControlFlow::Continue(())
+        self.visit_fn_def(*def.r(s).def);
     }
 
-    pub fn visit_generic_binder(
-        &mut self,
-        self_ty: Ty,
-        generics: Obj<GenericBinder>,
-    ) -> ControlFlow<Infallible> {
+    pub fn visit_generic_binder(&mut self, self_ty: Ty, generics: Obj<GenericBinder>) {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -285,7 +268,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
                         .instantiator(self_ty)
                         .fold_spanned_clause_list(*generic.r(s).clauses);
 
-                    ccx.wf_visitor().visit_spanned_clause_list(clauses)?;
+                    ccx.wf_visitor().visit_spanned(clauses);
                 }
                 AnyGeneric::Ty(generic) => {
                     let mut ccx = ClauseCx::new(self.tcx, self.coherence, UnifyCxMode::RegionAware);
@@ -296,11 +279,9 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
                     ccx.wf_visitor()
                         .with_clause_applies_to(tcx.intern_ty(TyKind::Universal(generic)))
-                        .visit_spanned_clause_list(user_clauses)?;
+                        .visit_spanned(user_clauses);
                 }
             }
         }
-
-        ControlFlow::Continue(())
     }
 }

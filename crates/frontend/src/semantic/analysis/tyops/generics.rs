@@ -6,7 +6,7 @@ use crate::{
     },
     parse::token::Ident,
     semantic::{
-        analysis::{TyCtxt, TyVisitor, TyVisitorUnspanned},
+        analysis::{TyCtxt, TyVisitable, TyVisitor, TyVisitorExt},
         syntax::{
             AnyGeneric, GenericBinder, PosInBinder, Re, RegionGeneric, SpannedTraitClauseList,
             TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitSpec, TyKind, TyOrRe,
@@ -154,7 +154,7 @@ impl TyCtxt {
 
     pub fn mentioned_generics<B>(
         &self,
-        ty: TyOrRe,
+        ty: impl TyVisitable,
         f: impl FnMut(AnyGeneric) -> ControlFlow<B>,
     ) -> ControlFlow<B> {
         GenericMentionVisitor {
@@ -162,7 +162,7 @@ impl TyCtxt {
             tcx: self,
             f,
         }
-        .visit_ty_or_re(ty)
+        .visit_fallible(ty)
     }
 
     pub fn elaborate_generic_clauses(
@@ -271,7 +271,7 @@ where
         self.tcx
     }
 
-    fn visit_spanned_re_generic_use(
+    fn visit_re_generic_use(
         &mut self,
         _span: Option<Span>,
         generic: Obj<RegionGeneric>,
@@ -279,7 +279,7 @@ where
         (self.f)(AnyGeneric::Re(generic))
     }
 
-    fn visit_spanned_ty_generic_use(
+    fn visit_ty_generic_use(
         &mut self,
         _span: Option<Span>,
         generic: Obj<TypeGeneric>,
