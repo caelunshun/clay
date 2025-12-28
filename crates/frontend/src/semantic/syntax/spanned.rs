@@ -2,7 +2,7 @@ use crate::{
     base::{
         ErrorGuaranteed,
         analysis::{Spanned, SpannedInfo, SpannedViewDecode, SpannedViewEncode},
-        arena::Obj,
+        arena::{HasInterner, Obj},
         syntax::Span,
     },
     semantic::{
@@ -120,51 +120,51 @@ impl SpannedViewEncode<TyCtxt> for SpannedTyView {
     fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
         match self {
             SpannedTyView::This => Spanned::new_raw(
-                tcx.intern_ty(TyKind::This),
+                tcx.intern(TyKind::This),
                 SpannedInfo::new_terminal(own_span, tcx),
             ),
             SpannedTyView::Simple(kind) => Spanned::new_raw(
-                tcx.intern_ty(TyKind::Simple(kind)),
+                tcx.intern(TyKind::Simple(kind)),
                 SpannedInfo::new_terminal(own_span, tcx),
             ),
             SpannedTyView::Reference(re, muta, pointee) => Spanned::new_raw(
-                tcx.intern_ty(TyKind::Reference(re.value, muta, pointee.value)),
+                tcx.intern(TyKind::Reference(re.value, muta, pointee.value)),
                 SpannedInfo::new_list(own_span, &[re.span_info, pointee.span_info], tcx),
             ),
             SpannedTyView::Adt(adt) => Spanned::new_raw(
-                tcx.intern_ty(TyKind::Adt(adt.value)),
+                tcx.intern(TyKind::Adt(adt.value)),
                 adt.span_info.wrap(own_span, tcx),
             ),
             SpannedTyView::Trait(clauses) => Spanned::new_raw(
-                tcx.intern_ty(TyKind::Trait(clauses.value)),
+                tcx.intern(TyKind::Trait(clauses.value)),
                 clauses.span_info.wrap(own_span, tcx),
             ),
             SpannedTyView::Tuple(tys) => Spanned::new_raw(
-                tcx.intern_ty(TyKind::Tuple(tys.value)),
+                tcx.intern(TyKind::Tuple(tys.value)),
                 tys.span_info.wrap(own_span, tcx),
             ),
             SpannedTyView::FnDef(def, Some(generics)) => Spanned::new_raw(
-                tcx.intern_ty(TyKind::FnDef(def, Some(generics.value))),
+                tcx.intern(TyKind::FnDef(def, Some(generics.value))),
                 SpannedInfo::new_list(own_span, &[generics.span_info], tcx),
             ),
             SpannedTyView::FnDef(def, None) => Spanned::new_raw(
-                tcx.intern_ty(TyKind::FnDef(def, None)),
+                tcx.intern(TyKind::FnDef(def, None)),
                 SpannedInfo::new_terminal(own_span, tcx),
             ),
             SpannedTyView::ExplicitInfer => Spanned::new_raw(
-                tcx.intern_ty(TyKind::ExplicitInfer),
+                tcx.intern(TyKind::ExplicitInfer),
                 SpannedInfo::new_terminal(own_span, tcx),
             ),
             SpannedTyView::Universal(generic) => Spanned::new_raw(
-                tcx.intern_ty(TyKind::Universal(generic)),
+                tcx.intern(TyKind::Universal(generic)),
                 SpannedInfo::new_terminal(own_span, tcx),
             ),
             SpannedTyView::InferVar(infer_ty_var) => Spanned::new_raw(
-                tcx.intern_ty(TyKind::InferVar(infer_ty_var)),
+                tcx.intern(TyKind::InferVar(infer_ty_var)),
                 SpannedInfo::new_terminal(own_span, tcx),
             ),
             SpannedTyView::Error(error_guaranteed) => Spanned::new_raw(
-                tcx.intern_ty(TyKind::Error(error_guaranteed)),
+                tcx.intern(TyKind::Error(error_guaranteed)),
                 SpannedInfo::new_terminal(own_span, tcx),
             ),
         }

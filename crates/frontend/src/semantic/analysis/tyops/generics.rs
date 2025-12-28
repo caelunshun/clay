@@ -1,7 +1,7 @@
 use crate::{
     base::{
         analysis::Spanned,
-        arena::{LateInit, Obj},
+        arena::{HasInterner, HasListInterner, LateInit, Obj},
         syntax::Span,
     },
     parse::token::Ident,
@@ -123,16 +123,14 @@ impl TyCtxt {
     ) -> TyOrReList {
         let s = &self.session;
 
-        self.intern_ty_or_re_list(
+        self.intern_list(
             &binder
                 .r(s)
                 .defs
                 .iter()
                 .map(|generic| match generic {
                     AnyGeneric::Re(generic) => TyOrRe::Re(Re::Universal(*generic)),
-                    AnyGeneric::Ty(generic) => {
-                        TyOrRe::Ty(self.intern_ty(TyKind::Universal(*generic)))
-                    }
+                    AnyGeneric::Ty(generic) => TyOrRe::Ty(self.intern(TyKind::Universal(*generic))),
                 })
                 .collect::<Vec<_>>(),
         )
@@ -141,7 +139,7 @@ impl TyCtxt {
     pub fn convert_trait_instance_to_spec(&self, instance: TraitInstance) -> TraitSpec {
         TraitSpec {
             def: instance.def,
-            params: self.intern_trait_param_list(
+            params: self.intern_list(
                 &instance
                     .params
                     .r(&self.session)
@@ -219,21 +217,19 @@ impl TyCtxt {
                                 binder.defs.push(AnyGeneric::Ty(generic));
                             }
 
-                            TraitParam::Equals(TyOrRe::Ty(
-                                self.intern_ty(TyKind::Universal(generic)),
-                            ))
+                            TraitParam::Equals(TyOrRe::Ty(self.intern(TyKind::Universal(generic))))
                         })
                         .collect::<Vec<_>>();
 
                     TraitClause::Trait(TraitSpec {
                         def: spec.def,
-                        params: self.intern_trait_param_list(&params),
+                        params: self.intern_list(&params),
                     })
                 }
             })
             .collect::<Vec<_>>();
 
-        let clauses = self.intern_trait_clause_list(&clauses);
+        let clauses = self.intern_list(&clauses);
 
         LateInit::init(&generic.elaborated_clauses, clauses);
 

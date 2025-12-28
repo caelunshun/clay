@@ -1,5 +1,8 @@
 use crate::{
-    base::{Session, arena::Obj},
+    base::{
+        Session,
+        arena::{HasInterner, Obj},
+    },
     semantic::{
         analysis::{ClauseCx, CrateTypeckVisitor, TyCtxt},
         syntax::{
@@ -16,7 +19,7 @@ impl CrateTypeckVisitor<'_> {
 
         // Obtain the self type.
         let self_ty = match def.r(s).owner {
-            FuncDefOwner::Func(_) => tcx.intern_ty(TyKind::This),
+            FuncDefOwner::Func(_) => tcx.intern(TyKind::This),
             FuncDefOwner::Method(_, _) => todo!(),
         };
 

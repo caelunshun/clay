@@ -2,7 +2,7 @@ use crate::{
     base::{
         Diag, ErrorGuaranteed, LeafDiag, Level,
         analysis::SpannedViewEncode,
-        arena::Obj,
+        arena::{HasListInterner, Obj},
         syntax::{HasSpan as _, Span},
     },
     parse::{
@@ -211,7 +211,7 @@ impl IntraItemLowerCtxt<'_> {
 impl IntraItemLowerCtxt<'_> {
     pub fn lower_clauses(&mut self, ast: Option<&AstTraitClauseList>) -> SpannedTraitClauseList {
         let Some(ast) = ast else {
-            return SpannedTraitClauseList::new_unspanned(self.tcx.intern_trait_clause_list(&[]));
+            return SpannedTraitClauseList::new_unspanned(self.tcx.intern_list(&[]));
         };
 
         let mut clauses = Vec::new();

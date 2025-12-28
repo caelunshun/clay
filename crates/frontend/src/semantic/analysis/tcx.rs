@@ -1,15 +1,12 @@
 use crate::{
     base::{
         HasSession, Session,
-        analysis::{Memo, SpannedInfo},
+        analysis::SpannedInfo,
         arena::{HasInterner, HasListInterner, Interner, ListInterner, Obj},
     },
     semantic::{
-        analysis::{BinderSubstitution, CoherenceMap, CrateTypeckVisitor},
-        syntax::{
-            Crate, ListOfTraitClauseList, TraitClause, TraitClauseList, TraitParam, TraitParamList,
-            Ty, TyKind, TyList, TyOrRe, TyOrReList, TyShape,
-        },
+        analysis::{CoherenceMap, CrateTypeckVisitor},
+        syntax::{Crate, TraitClause, TraitClauseList, TraitParam, Ty, TyKind, TyOrRe, TyShape},
     },
 };
 use std::{ops::Deref, rc::Rc};
@@ -23,7 +20,6 @@ pub struct TyCtxt {
 pub struct TyCtxtInner {
     pub session: Session,
     pub interners: Interners,
-    pub queries: Queries,
 }
 
 #[derive(Debug, Default)]
@@ -36,11 +32,6 @@ pub struct Interners {
     pub list_of_trait_clause_list: ListInterner<TraitClauseList>,
     pub spanned_info_list: ListInterner<SpannedInfo>,
     pub coherence_ty_list: ListInterner<TyShape>,
-}
-
-#[derive(Debug, Default)]
-pub struct Queries {
-    pub substitute_ty: Memo<(Ty, Ty, Option<BinderSubstitution>), Ty>,
 }
 
 impl Deref for TyCtxt {
@@ -57,40 +48,8 @@ impl TyCtxt {
             inner: Rc::new(TyCtxtInner {
                 session,
                 interners: Interners::default(),
-                queries: Queries::default(),
             }),
         }
-    }
-
-    pub fn intern_ty(&self, ty: TyKind) -> Ty {
-        self.interners.ty.intern(ty, &self.session)
-    }
-
-    pub fn intern_ty_list(&self, ty: &[Ty]) -> TyList {
-        self.interners.ty_list.intern(ty, &self.session)
-    }
-
-    pub fn intern_ty_or_re_list(&self, elems: &[TyOrRe]) -> TyOrReList {
-        self.interners.ty_or_re_list.intern(elems, &self.session)
-    }
-
-    pub fn intern_trait_param_list(&self, elems: &[TraitParam]) -> TraitParamList {
-        self.interners.trait_param_list.intern(elems, &self.session)
-    }
-
-    pub fn intern_trait_clause_list(&self, elems: &[TraitClause]) -> TraitClauseList {
-        self.interners
-            .trait_clause_list
-            .intern(elems, &self.session)
-    }
-
-    pub fn intern_list_of_trait_clause_list(
-        &self,
-        elems: &[TraitClauseList],
-    ) -> ListOfTraitClauseList {
-        self.interners
-            .list_of_trait_clause_list
-            .intern(elems, &self.session)
     }
 
     pub fn check_crate(&self, krate: Obj<Crate>) {

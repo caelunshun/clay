@@ -257,11 +257,11 @@ where
 pub trait HasListInterner<T: 'static + hash::Hash + Eq + Clone>: HasSession {
     fn interner(&self) -> &ListInterner<T>;
 
-    fn intern(&self, values: &[T]) -> Intern<[T]>
+    fn intern_list(&self, values: &[T]) -> Intern<[T]>
     where
         T: Clone,
     {
-        self.interner().intern(values, self.session())
+        self.interner().intern_list(values, self.session())
     }
 }
 
@@ -281,7 +281,7 @@ impl<T> ListInterner<T>
 where
     T: 'static + hash::Hash + Eq,
 {
-    pub fn intern(&self, values: &[T], s: &Session) -> Intern<[T]>
+    pub fn intern_list(&self, values: &[T], s: &Session) -> Intern<[T]>
     where
         T: Clone,
     {

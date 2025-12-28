@@ -2,7 +2,7 @@ use crate::{
     base::{
         Diag, LeafDiag,
         analysis::NameResolver,
-        arena::{LateInit, Obj},
+        arena::{HasInterner, HasListInterner, LateInit, Obj},
         syntax::{HasSpan as _, Span},
     },
     parse::{
@@ -992,8 +992,7 @@ impl IntraItemLowerCtxt<'_> {
             &item.r(s).ret_ty,
             match &ast.ret_ty {
                 AstReturnTy::Omitted => SpannedTy::new_unspanned(
-                    self.tcx
-                        .intern_ty(TyKind::Tuple(self.tcx.intern_ty_list(&[]))),
+                    self.tcx.intern(TyKind::Tuple(self.tcx.intern_list(&[]))),
                 ),
                 AstReturnTy::Present(ty) => self.lower_ty(ty),
             },

@@ -1,5 +1,8 @@
 use crate::{
-    base::{ErrorGuaranteed, HardDiag, Session, arena::Obj},
+    base::{
+        ErrorGuaranteed, HardDiag, Session,
+        arena::{HasInterner, Obj},
+    },
     semantic::{
         analysis::{TyCtxt, TyFolder, TyFolderInfallible, TyVisitor, TyVisitorExt},
         syntax::{
@@ -156,7 +159,7 @@ impl<'tcx> UnifyCx<'tcx> {
     }
 
     pub fn fresh_ty(&mut self) -> Ty {
-        self.tcx().intern_ty(TyKind::InferVar(self.fresh_ty_var()))
+        self.tcx().intern(TyKind::InferVar(self.fresh_ty_var()))
     }
 
     pub fn observe_ty_var(&mut self, var: InferTyVar) -> ObservedTyVar {
@@ -610,12 +613,12 @@ impl<'tcx> TyFolder<'tcx> for InferTySubstitutor<'_, 'tcx> {
         match self.ucx.lookup_ty_var(var) {
             Ok(v) => self.try_fold_ty(v),
             Err(floating) => Ok(match self.mode {
-                UnboundVarHandlingMode::Error(error) => self.tcx().intern_ty(TyKind::Error(error)),
+                UnboundVarHandlingMode::Error(error) => self.tcx().intern(TyKind::Error(error)),
                 UnboundVarHandlingMode::NormalizeToRoot => {
-                    self.tcx().intern_ty(TyKind::InferVar(floating.root))
+                    self.tcx().intern(TyKind::InferVar(floating.root))
                 }
                 UnboundVarHandlingMode::EraseToExplicitInfer => {
-                    self.tcx().intern_ty(TyKind::ExplicitInfer)
+                    self.tcx().intern(TyKind::ExplicitInfer)
                 }
                 UnboundVarHandlingMode::Panic => {
                     unreachable!("unexpected ambiguous inference variable")

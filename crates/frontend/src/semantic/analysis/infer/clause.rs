@@ -1,5 +1,8 @@
 use crate::{
-    base::{Diag, Session, arena::Obj},
+    base::{
+        Diag, Session,
+        arena::{HasInterner, HasListInterner, Obj},
+    },
     semantic::{
         analysis::{
             BinderSubstitution, CoherenceMap, ConfirmationResult, FloatingInferVar, ObligationCx,
@@ -491,7 +494,7 @@ impl<'tcx> ClauseCx<'tcx> {
             let clause = rhs_fresh.impl_generic_clauses.r(s)[infer_step.generic_idx as usize].r(s)
                 [infer_step.clause_idx as usize];
 
-            let clause = tcx.intern_trait_clause_list(&[clause]);
+            let clause = tcx.intern_list(&[clause]);
 
             match var {
                 TyOrRe::Re(re) => {
@@ -556,14 +559,14 @@ impl<'tcx> ClauseCx<'tcx> {
             })
             .collect::<Vec<_>>();
 
-        let impl_generics = tcx.intern_ty_or_re_list(&impl_generics);
+        let impl_generics = tcx.intern_list(&impl_generics);
         let substs = BinderSubstitution {
             binder,
             substs: impl_generics,
         };
 
         // Substitute the target type
-        let target = SubstitutionFolder::new(tcx, tcx.intern_ty(TyKind::This), Some(substs))
+        let target = SubstitutionFolder::new(tcx, tcx.intern(TyKind::This), Some(substs))
             .fold_ty(candidate.r(s).target.value);
 
         // Substitute inference clauses
@@ -581,7 +584,7 @@ impl<'tcx> ClauseCx<'tcx> {
             })
             .collect::<Vec<_>>();
 
-        let impl_generic_clauses = tcx.intern_list_of_trait_clause_list(&inf_var_clauses);
+        let impl_generic_clauses = tcx.intern_list(&inf_var_clauses);
 
         let trait_ = SubstitutionFolder::new(tcx, target, Some(substs))
             .fold_ty_or_re_list(candidate.r(s).trait_.unwrap().value.params);
@@ -795,7 +798,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         // Check generics
         let old_clause_applies_to = self
             .clause_applies_to
-            .replace(tcx.intern_ty(TyKind::Adt(instance.value)));
+            .replace(tcx.intern(TyKind::Adt(instance.value)));
 
         self.check_generics(instance.value.def.r(s).generics, instance.view(tcx).params);
 

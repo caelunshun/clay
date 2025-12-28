@@ -1,7 +1,7 @@
 use crate::{
     base::{
         Session,
-        arena::{LateInit, Obj},
+        arena::{HasInterner, HasListInterner, LateInit, Obj},
         syntax::Span,
     },
     parse::token::Ident,
@@ -90,7 +90,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
             s,
         );
 
-        let new_self_ty = tcx.intern_ty(TyKind::Universal(new_self_ty_generic));
+        let new_self_ty = tcx.intern(TyKind::Universal(new_self_ty_generic));
 
         let mut new_self_ty_subst = SubstitutionFolder {
             tcx,
@@ -113,7 +113,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         LateInit::init(
             &new_self_ty_generic.r(s).user_clauses,
             SpannedTraitClauseList::new_unspanned(
-                tcx.intern_trait_clause_list(&[TraitClause::Trait(new_self_arg_spec)]),
+                tcx.intern_list(&[TraitClause::Trait(new_self_arg_spec)]),
             ),
         );
 
@@ -209,7 +209,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
             .tcx
             .clone_generic_binder_without_clauses(def.r(s).generics);
 
-        let new_self_ty = tcx.intern_ty(TyKind::Adt(AdtInstance {
+        let new_self_ty = tcx.intern(TyKind::Adt(AdtInstance {
             def,
             params: tcx.convert_generic_binder_into_instance_args(new_binder),
         }));
@@ -278,7 +278,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
                         .fold_spanned_clause_list(*generic.r(s).user_clauses);
 
                     ccx.wf_visitor()
-                        .with_clause_applies_to(tcx.intern_ty(TyKind::Universal(generic)))
+                        .with_clause_applies_to(tcx.intern(TyKind::Universal(generic)))
                         .visit_spanned(user_clauses);
                 }
             }

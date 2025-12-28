@@ -1,5 +1,5 @@
 use crate::{
-    base::arena::Obj,
+    base::arena::{HasInterner, Obj},
     semantic::{
         analysis::{TyCtxt, TyFolder, TyFolderPreservesSpans, TyFolderSuper as _},
         syntax::{GenericBinder, Re, RegionGeneric, Ty, TyKind, TyOrReList, TypeGeneric},
@@ -40,15 +40,7 @@ impl<'tcx> TyFolder<'tcx> for SubstitutionFolder<'tcx> {
     }
 
     fn try_fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
-        let mapped = self
-            .tcx
-            .queries
-            .substitute_ty
-            .compute_infallible((ty, self.self_ty, self.substitution), |_| {
-                self.super_ty(ty).unwrap()
-            });
-
-        Ok(mapped)
+        self.super_ty(ty)
     }
 
     fn try_fold_ty_generic_use(&mut self, generic: Obj<TypeGeneric>) -> Result<Ty, Self::Error> {
@@ -62,7 +54,7 @@ impl<'tcx> TyFolder<'tcx> for SubstitutionFolder<'tcx> {
         {
             Ok(substitution.substs.r(s)[pos_in_binder.idx as usize].unwrap_ty())
         } else {
-            Ok(self.tcx.intern_ty(TyKind::Universal(generic)))
+            Ok(self.tcx.intern(TyKind::Universal(generic)))
         }
     }
 

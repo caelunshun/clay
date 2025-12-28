@@ -28,7 +28,7 @@ impl TyCtxt {
 
         TyShape::Solid(SolidTyShape {
             kind: SolidTyShapeKind::TraitImpl(def),
-            children: self.intern(
+            children: self.intern_list(
                 &([self.erase_ty_to_shape(target)]
                     .into_iter()
                     .chain(
@@ -51,15 +51,15 @@ impl TyCtxt {
             TyKind::Universal(_) | TyKind::ExplicitInfer | TyKind::Error(_) => TyShape::Hole,
             TyKind::Simple(kind) => TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Simple(kind),
-                children: self.intern(&[]),
+                children: self.intern_list(&[]),
             }),
             TyKind::Reference(_re, mutability, pointee) => TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Re(mutability),
-                children: self.intern(&[self.erase_ty_to_shape(pointee)]),
+                children: self.intern_list(&[self.erase_ty_to_shape(pointee)]),
             }),
             TyKind::Adt(AdtInstance { def, params }) => TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Adt(def),
-                children: self.intern(
+                children: self.intern_list(
                     &params
                         .r(s)
                         .iter()
@@ -71,7 +71,7 @@ impl TyCtxt {
             TyKind::Trait(intern) => todo!(),
             TyKind::Tuple(children) => TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Tuple(children.r(s).len() as u32),
-                children: self.intern(
+                children: self.intern_list(
                     &children
                         .r(s)
                         .iter()
@@ -255,11 +255,11 @@ mod tests {
         map.insert(
             TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Tuple(2),
-                children: tcx.intern(&[
+                children: tcx.intern_list(&[
                     TyShape::Hole,
                     TyShape::Solid(SolidTyShape {
                         kind: SolidTyShapeKind::Simple(SimpleTyKind::Bool),
-                        children: tcx.intern(&[]),
+                        children: tcx.intern_list(&[]),
                     }),
                 ]),
             }),
@@ -269,10 +269,10 @@ mod tests {
         map.insert(
             TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Tuple(2),
-                children: tcx.intern(&[
+                children: tcx.intern_list(&[
                     TyShape::Solid(SolidTyShape {
                         kind: SolidTyShapeKind::Simple(SimpleTyKind::Str),
-                        children: tcx.intern(&[]),
+                        children: tcx.intern_list(&[]),
                     }),
                     TyShape::Hole,
                 ]),
@@ -285,7 +285,7 @@ mod tests {
             map.lookup(
                 TyShape::Solid(SolidTyShape {
                     kind: SolidTyShapeKind::Tuple(2),
-                    children: tcx.intern(&[TyShape::Hole, TyShape::Hole]),
+                    children: tcx.intern_list(&[TyShape::Hole, TyShape::Hole]),
                 }),
                 &tcx.session,
             )
@@ -298,11 +298,11 @@ mod tests {
             map.lookup(
                 TyShape::Solid(SolidTyShape {
                     kind: SolidTyShapeKind::Tuple(2),
-                    children: tcx.intern(&[
+                    children: tcx.intern_list(&[
                         TyShape::Hole,
                         TyShape::Solid(SolidTyShape {
                             kind: SolidTyShapeKind::Simple(SimpleTyKind::Bool),
-                            children: tcx.intern(&[])
+                            children: tcx.intern_list(&[])
                         })
                     ]),
                 }),
@@ -317,11 +317,11 @@ mod tests {
             map.lookup(
                 TyShape::Solid(SolidTyShape {
                     kind: SolidTyShapeKind::Tuple(2),
-                    children: tcx.intern(&[
+                    children: tcx.intern_list(&[
                         TyShape::Hole,
                         TyShape::Solid(SolidTyShape {
                             kind: SolidTyShapeKind::Simple(SimpleTyKind::Str),
-                            children: tcx.intern(&[])
+                            children: tcx.intern_list(&[])
                         })
                     ]),
                 }),

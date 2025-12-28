@@ -1,5 +1,10 @@
 use crate::{
-    base::{Session, analysis::Spanned, arena::Obj, syntax::Span},
+    base::{
+        Session,
+        analysis::Spanned,
+        arena::{HasInterner, HasListInterner, Obj},
+        syntax::Span,
+    },
     semantic::{
         analysis::TyCtxt,
         syntax::{
@@ -584,7 +589,7 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
             out.push(self.try_fold_clause(ty)?);
         }
 
-        Ok(self.tcx().intern_trait_clause_list(&out))
+        Ok(self.tcx().intern_list(&out))
     }
 
     fn super_clause(&mut self, clause: TraitClause) -> Result<TraitClause, Self::Error> {
@@ -602,7 +607,7 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
             out.push(self.try_fold_param(ty)?);
         }
 
-        Ok(self.tcx().intern_trait_param_list(&out))
+        Ok(self.tcx().intern_list(&out))
     }
 
     fn super_param(&mut self, param: TraitParam) -> Result<TraitParam, Self::Error> {
@@ -659,7 +664,7 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
             out.push(self.try_fold_ty_or_re(ty)?);
         }
 
-        Ok(self.tcx().intern_ty_or_re_list(&out))
+        Ok(self.tcx().intern_list(&out))
     }
 
     fn super_ty_list(&mut self, list: TyList) -> Result<TyList, Self::Error> {
@@ -670,7 +675,7 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
             out.push(self.try_fold_ty(ty)?);
         }
 
-        Ok(self.tcx().intern_ty_list(&out))
+        Ok(self.tcx().intern_list(&out))
     }
 
     fn super_re(&mut self, re: Re) -> Result<Re, Self::Error> {
@@ -688,28 +693,28 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
             TyKind::Simple(_) | TyKind::ExplicitInfer | TyKind::Error(_) => Ok(ty),
             TyKind::InferVar(var) => self.try_fold_ty_infer_use(var),
             TyKind::This => self.try_fold_self_ty_use(),
-            TyKind::Reference(re, muta, pointee) => Ok(tcx.intern_ty(TyKind::Reference(
+            TyKind::Reference(re, muta, pointee) => Ok(tcx.intern(TyKind::Reference(
                 self.try_fold_re(re)?,
                 muta,
                 self.try_fold_ty(pointee)?,
             ))),
             TyKind::Adt(instance) => {
-                Ok(tcx.intern_ty(TyKind::Adt(self.try_fold_adt_instance(instance)?)))
+                Ok(tcx.intern(TyKind::Adt(self.try_fold_adt_instance(instance)?)))
             }
             TyKind::FnDef(def, Some(args)) => {
-                Ok(tcx.intern_ty(TyKind::FnDef(def, Some(self.try_fold_ty_or_re_list(args)?))))
+                Ok(tcx.intern(TyKind::FnDef(def, Some(self.try_fold_ty_or_re_list(args)?))))
             }
-            TyKind::FnDef(def, None) => Ok(tcx.intern_ty(TyKind::FnDef(def, None))),
+            TyKind::FnDef(def, None) => Ok(tcx.intern(TyKind::FnDef(def, None))),
             TyKind::Trait(clause_list) => {
-                Ok(tcx.intern_ty(TyKind::Trait(self.try_fold_clause_list(clause_list)?)))
+                Ok(tcx.intern(TyKind::Trait(self.try_fold_clause_list(clause_list)?)))
             }
-            TyKind::Tuple(tys) => Ok(tcx.intern_ty(TyKind::Tuple(self.try_fold_ty_list(tys)?))),
+            TyKind::Tuple(tys) => Ok(tcx.intern(TyKind::Tuple(self.try_fold_ty_list(tys)?))),
             TyKind::Universal(generic) => self.try_fold_ty_generic_use(generic),
         }
     }
 
     fn super_self_ty_use(&mut self) -> Result<Ty, Self::Error> {
-        Ok(self.tcx().intern_ty(TyKind::This))
+        Ok(self.tcx().intern(TyKind::This))
     }
 
     fn super_re_infer_use(&mut self, var: InferReVar) -> Result<Re, Self::Error> {
@@ -717,7 +722,7 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
     }
 
     fn super_ty_infer_use(&mut self, var: InferTyVar) -> Result<Ty, Self::Error> {
-        Ok(self.tcx().intern_ty(TyKind::InferVar(var)))
+        Ok(self.tcx().intern(TyKind::InferVar(var)))
     }
 
     fn super_re_generic_use(&mut self, generic: Obj<RegionGeneric>) -> Result<Re, Self::Error> {
@@ -725,7 +730,7 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
     }
 
     fn super_ty_generic_use(&mut self, generic: Obj<TypeGeneric>) -> Result<Ty, Self::Error> {
-        Ok(self.tcx().intern_ty(TyKind::Universal(generic)))
+        Ok(self.tcx().intern(TyKind::Universal(generic)))
     }
 }
 

@@ -55,7 +55,7 @@ impl CoherenceMap {
                             TyShape::Solid(SolidTyShape {
                                 kind: SolidTyShapeKind::InherentMethodImpl(method.r(s).name.text),
                                 children: tcx
-                                    .intern(&[tcx.erase_ty_to_shape(item.r(s).target.value)]),
+                                    .intern_list(&[tcx.erase_ty_to_shape(item.r(s).target.value)]),
                             }),
                             CoherenceMapEntry::InherentMethod(method),
                             s,

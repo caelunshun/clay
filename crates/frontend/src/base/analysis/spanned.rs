@@ -35,7 +35,7 @@ impl<T> Spanned<T> {
     pub fn new_saturated(value: T, span: Span, cx: &impl HasListInterner<SpannedInfo>) -> Self {
         Self {
             value,
-            span_info: SpannedInfo::Tracked(span, cx.intern(&[])),
+            span_info: SpannedInfo::Tracked(span, cx.intern_list(&[])),
         }
     }
 
@@ -84,8 +84,8 @@ impl<T: Clone> Spanned<Intern<[T]>> {
     where
         T: 'static + hash::Hash + Eq,
     {
-        let span_info = cx.intern(&elems.iter().map(|v| v.span_info).collect::<Vec<_>>());
-        let value = cx.intern(&elems.iter().map(|v| v.value.clone()).collect::<Vec<_>>());
+        let span_info = cx.intern_list(&elems.iter().map(|v| v.span_info).collect::<Vec<_>>());
+        let value = cx.intern_list(&elems.iter().map(|v| v.value.clone()).collect::<Vec<_>>());
 
         Self {
             value,
@@ -129,7 +129,7 @@ impl SpannedInfo {
         children: &[SpannedInfo],
         cx: &impl HasListInterner<SpannedInfo>,
     ) -> Self {
-        Self::Tracked(own_span, cx.intern(children))
+        Self::Tracked(own_span, cx.intern_list(children))
     }
 
     pub fn new_terminal(own_span: Span, cx: &impl HasListInterner<SpannedInfo>) -> Self {
@@ -153,7 +153,7 @@ impl SpannedInfo {
                 let child_spans = child_spans.r(cx.session());
 
                 if child_spans.is_empty() {
-                    [SpannedInfo::Tracked(own_span, cx.intern(&[])); N]
+                    [SpannedInfo::Tracked(own_span, cx.intern_list(&[])); N]
                 } else {
                     array::from_fn(|i| child_spans[i])
                 }
@@ -168,7 +168,7 @@ impl SpannedInfo {
                 let child_spans = child_spans.r(cx.session());
 
                 if child_spans.is_empty() {
-                    SpannedInfo::Tracked(own_span, cx.intern(&[]))
+                    SpannedInfo::Tracked(own_span, cx.intern_list(&[]))
                 } else {
                     child_spans[n]
                 }
@@ -188,7 +188,7 @@ impl SpannedInfo {
 
                 if child_spans.is_empty() {
                     IterEither::Left(iter::repeat_n(
-                        SpannedInfo::Tracked(own_span, cx.intern(&[])),
+                        SpannedInfo::Tracked(own_span, cx.intern_list(&[])),
                         len,
                     ))
                 } else {
