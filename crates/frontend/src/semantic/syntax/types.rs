@@ -13,6 +13,7 @@ use crate::{
     utils::hash::FxHashMap,
 };
 use derive_where::derive_where;
+use index_vec::define_index_type;
 use std::fmt;
 
 // === Adt Items === //
@@ -277,7 +278,7 @@ pub enum AnyGeneric {
 }
 
 impl AnyGeneric {
-    pub fn binder(self, s: &Session) -> Option<PosInBinder> {
+    pub fn binder(self, s: &Session) -> PosInBinder {
         match self {
             AnyGeneric::Re(re) => *re.r(s).binder,
             AnyGeneric::Ty(ty) => *ty.r(s).binder,
@@ -287,7 +288,7 @@ impl AnyGeneric {
     pub fn clauses(self, s: &Session) -> SpannedTraitClauseList {
         match self {
             AnyGeneric::Re(re) => *re.r(s).clauses,
-            AnyGeneric::Ty(ty) => *ty.r(s).user_clauses,
+            AnyGeneric::Ty(ty) => *ty.r(s).clauses,
         }
     }
 
@@ -326,15 +327,10 @@ impl AnyGeneric {
 pub struct RegionGeneric {
     #[derive_where(skip)]
     pub span: Span,
-
     pub lifetime: Lifetime,
-
     #[derive_where(skip)]
-    pub binder: LateInit<Option<PosInBinder>>,
-
+    pub binder: LateInit<PosInBinder>,
     pub clauses: LateInit<SpannedTraitClauseList>,
-
-    pub is_synthetic: bool,
 }
 
 #[derive_where(Debug)]
@@ -342,28 +338,10 @@ pub struct RegionGeneric {
 pub struct TypeGeneric {
     #[derive_where(skip)]
     pub span: Span,
-
     pub ident: Ident,
-
     #[derive_where(skip)]
-    pub binder: LateInit<Option<PosInBinder>>,
-
-    /// The user-specified clauses on a generic type.
-    pub user_clauses: LateInit<SpannedTraitClauseList>,
-
-    /// All knowable facts about which traits the generic parameter implements.
-    ///
-    /// Unlike `user_clauses`, `elaborated_clauses` ensures that all generic parameters
-    /// supplied to each trait clause will be of the form [`TraitParam::Equals`] and that all
-    /// implicit bounds (including super-trait bounds) will be written out.
-    ///
-    /// The first element of the `elaborated_clauses` will always be an outlives constraint and
-    /// there will always be exactly one such clause.
-    #[derive_where(skip)]
-    pub elaborated_clauses: LateInit<TraitClauseList>,
-
-    /// Whether this generic was implicitly created rather than defined explicitly by the user.
-    pub is_synthetic: bool,
+    pub binder: LateInit<PosInBinder>,
+    pub clauses: LateInit<SpannedTraitClauseList>,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -412,14 +390,23 @@ pub enum Re {
     /// lives for the entire duration of the program.
     Gc,
 
+    /// An explicit request to infer the lifetime.
+    ///
+    /// Used in user annotations and instantiated into an `InferVar` region during `ClauseCx`
+    /// import.
+    SigExplicitInfer,
+
     /// Refers to a generic lifetime parameter.
-    Universal(Obj<RegionGeneric>),
+    ///
+    /// Used in user annotations and instantiated into either a `UniversalVar` or an `InferVar`
+    /// region during `ClauseCx` import.
+    SigUniversal(Obj<RegionGeneric>),
 
     /// An internal lifetime parameter within the body.
     InferVar(InferReVar),
 
-    /// An explicit request to infer the lifetime.
-    ExplicitInfer,
+    /// An instantiated generic lifetime parameter.
+    UniversalVar(UniversalReVar),
 
     /// The lifetime used when we don't want to worry about lifetimes.
     Erased,
@@ -432,8 +419,23 @@ pub type TyList = Intern<[Ty]>;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TyKind {
-    /// The `Self`-type. This is expected to be substituted away before most analyses.
-    This,
+    /// The `Self`-type.
+    ///
+    /// Used in user annotations and instantiated into the actual `Self` type during `ClauseCx`
+    /// import.
+    SigThis,
+
+    /// A user's explicit request to infer a type (i.e. `_`).
+    ///
+    /// Used in user annotations and instantiated into an `InferVar` region during `ClauseCx`
+    /// import.
+    SigExplicitInfer,
+
+    /// The universal type quantification produced by a generic parameter.
+    ///
+    /// Used in user annotations and instantiated into either a `UniversalVar` or an `InferVar` type
+    /// during `ClauseCx` import.
+    SigUniversal(Obj<TypeGeneric>),
 
     /// A simple primitive non-composite type living for `'gc`.
     Simple(SimpleTyKind),
@@ -453,15 +455,11 @@ pub enum TyKind {
     /// A statically-known function type. This can be coerced into a functional interface.
     FnDef(Obj<FnDef>, Option<TyOrReList>),
 
-    /// A user's explicit request to infer a type (i.e. `_`)
-    ExplicitInfer,
-
-    /// The universal type quantification produced by a generic parameter.
-    Universal(Obj<TypeGeneric>),
-
-    /// An inference variable used in trait solving. The second parameter is used in diagnostics to
-    /// indicate the generic that led to the generation of this variable.
+    /// An inference variable.
     InferVar(InferTyVar),
+
+    /// An universal type variable.
+    UniversalVar(UniversalTyVar),
 
     Error(ErrorGuaranteed),
 }
@@ -471,6 +469,14 @@ pub struct InferReVar(pub u32);
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct InferTyVar(pub u32);
+
+define_index_type! {
+    pub struct UniversalTyVar = u32;
+}
+
+define_index_type! {
+    pub struct UniversalReVar = u32;
+}
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum SimpleTyKind {

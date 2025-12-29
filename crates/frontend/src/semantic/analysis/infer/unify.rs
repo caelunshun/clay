@@ -1,16 +1,14 @@
 use crate::{
-    base::{
-        ErrorGuaranteed, HardDiag, Session,
-        arena::{HasInterner, Obj},
-    },
+    base::{ErrorGuaranteed, HardDiag, Session, arena::HasInterner},
     semantic::{
         analysis::{TyCtxt, TyFolder, TyFolderInfallible, TyVisitor, TyVisitorExt},
         syntax::{
-            InferReVar, InferTyVar, Mutability, Re, ReVariance, RegionGeneric, RelationMode,
-            SpannedTy, SpannedTyView, TraitClause, TraitClauseList, TraitParam, Ty, TyKind, TyOrRe,
+            InferReVar, InferTyVar, Mutability, Re, ReVariance, RelationMode, SpannedTy,
+            SpannedTyView, TraitClause, TraitClauseList, TraitParam, Ty, TyKind, TyOrRe,
+            UniversalReVar,
         },
     },
-    utils::hash::{FxHashSet, FxIndexMap},
+    utils::hash::FxHashSet,
 };
 use bit_set::BitSet;
 use disjoint::DisjointSetVec;
@@ -61,7 +59,7 @@ pub struct ReAndReUnifyError {
 
 #[derive(Debug, Clone)]
 pub struct ReAndReUnifyOffense {
-    pub universal: Obj<RegionGeneric>,
+    pub universal: UniversalReVar,
     pub forced_to_outlive: Re,
 }
 
@@ -101,13 +99,13 @@ pub struct UnifyCx<'tcx> {
 }
 
 define_index_type! {
-    pub struct ObservedTyVar = u32;
+    pub struct ObservedTyInferVar = u32;
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct FloatingInferVar<'a> {
     pub root: InferTyVar,
-    pub observed_equivalent: &'a [ObservedTyVar],
+    pub observed_equivalent: &'a [ObservedTyInferVar],
 }
 
 impl<'tcx> UnifyCx<'tcx> {
@@ -154,27 +152,28 @@ impl<'tcx> UnifyCx<'tcx> {
         self.types.mention_var_for_tracing(var);
     }
 
-    pub fn fresh_ty_var(&mut self) -> InferTyVar {
+    pub fn fresh_ty_infer_var(&mut self) -> InferTyVar {
         self.types.fresh()
     }
 
-    pub fn fresh_ty(&mut self) -> Ty {
-        self.tcx().intern(TyKind::InferVar(self.fresh_ty_var()))
+    pub fn fresh_ty_infer(&mut self) -> Ty {
+        self.tcx()
+            .intern(TyKind::InferVar(self.fresh_ty_infer_var()))
     }
 
-    pub fn observe_ty_var(&mut self, var: InferTyVar) -> ObservedTyVar {
+    pub fn observe_ty_infer_var(&mut self, var: InferTyVar) -> ObservedTyInferVar {
         self.types.observe(var)
     }
 
-    pub fn observed_reveal_order(&self) -> &[ObservedTyVar] {
+    pub fn observed_infer_reveal_order(&self) -> &[ObservedTyInferVar] {
         self.types.observed_reveal_order()
     }
 
-    pub fn lookup_ty_var(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {
+    pub fn lookup_ty_infer_var(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {
         self.types.lookup(var)
     }
 
-    pub fn peel_ty_var(&self, ty: Ty) -> Ty {
+    pub fn peel_ty_infer_var(&self, ty: Ty) -> Ty {
         let s = self.session();
 
         match *ty.r(s) {
@@ -189,9 +188,31 @@ impl<'tcx> UnifyCx<'tcx> {
         }
     }
 
-    pub fn fresh_re(&mut self) -> Re {
+    pub fn fresh_re_universal(&mut self) -> Re {
         if let Some(regions) = &mut self.regions {
-            Re::InferVar(regions.fresh())
+            Re::UniversalVar(regions.fresh_universal())
+        } else {
+            Re::Erased
+        }
+    }
+
+    pub fn permit_re_universal_outlives(&mut self, lhs: Re, rhs: Re) {
+        let Some(regions) = &mut self.regions else {
+            debug_assert!(matches!(lhs, Re::Erased));
+            debug_assert!(matches!(rhs, Re::Erased));
+
+            return;
+        };
+
+        debug_assert!(matches!(lhs, Re::UniversalVar(_)));
+        debug_assert!(matches!(rhs, Re::UniversalVar(_)));
+
+        regions.unify(lhs, rhs, None);
+    }
+
+    pub fn fresh_re_infer(&mut self) -> Re {
+        if let Some(regions) = &mut self.regions {
+            Re::InferVar(regions.fresh_infer())
         } else {
             Re::Erased
         }
@@ -204,6 +225,9 @@ impl<'tcx> UnifyCx<'tcx> {
         mode: RelationMode,
     ) -> Result<(), Box<ReAndReUnifyError>> {
         let Some(regions) = &mut self.regions else {
+            debug_assert!(matches!(lhs, Re::Erased));
+            debug_assert!(matches!(rhs, Re::Erased));
+
             return Ok(());
         };
 
@@ -235,10 +259,10 @@ impl<'tcx> UnifyCx<'tcx> {
             match (lhs, rhs) {
                 (Re::Erased, _)
                 | (_, Re::Erased)
-                | (Re::ExplicitInfer, _)
-                | (_, Re::ExplicitInfer) => unreachable!(),
+                | (Re::SigExplicitInfer, _)
+                | (_, Re::SigExplicitInfer) => unreachable!(),
                 _ => {
-                    fork.unify(lhs, rhs, self.tcx, &mut offenses);
+                    fork.unify(lhs, rhs, Some(&mut offenses));
                 }
             }
         }
@@ -294,10 +318,12 @@ impl<'tcx> UnifyCx<'tcx> {
         }
 
         match (*lhs.r(s), *rhs.r(s)) {
-            (TyKind::This, _)
-            | (_, TyKind::This)
-            | (TyKind::ExplicitInfer, _)
-            | (_, TyKind::ExplicitInfer) => {
+            (TyKind::SigThis, _)
+            | (_, TyKind::SigThis)
+            | (TyKind::SigExplicitInfer, _)
+            | (_, TyKind::SigExplicitInfer)
+            | (TyKind::SigUniversal(_), _)
+            | (_, TyKind::SigUniversal(_)) => {
                 unreachable!()
             }
             (
@@ -442,7 +468,7 @@ impl<'tcx> UnifyCx<'tcx> {
             // Omissions okay because of intern equality fast-path:
             //
             // - `(Simple, Simple)`
-            // - `(Universal, Universal)`
+            // - `(UniversalVar, UniversalVar)`
             //
             // TODO: Check exhaustiveness automatically.
             _ => {
@@ -609,8 +635,8 @@ impl<'tcx> TyFolder<'tcx> for InferTySubstitutor<'_, 'tcx> {
         self.ucx.tcx()
     }
 
-    fn try_fold_ty_infer_use(&mut self, var: InferTyVar) -> Result<Ty, Self::Error> {
-        match self.ucx.lookup_ty_var(var) {
+    fn try_fold_ty_infer_var_use(&mut self, var: InferTyVar) -> Result<Ty, Self::Error> {
+        match self.ucx.lookup_ty_infer_var(var) {
             Ok(v) => self.try_fold_ty(v),
             Err(floating) => Ok(match self.mode {
                 UnboundVarHandlingMode::Error(error) => self.tcx().intern(TyKind::Error(error)),
@@ -618,7 +644,7 @@ impl<'tcx> TyFolder<'tcx> for InferTySubstitutor<'_, 'tcx> {
                     self.tcx().intern(TyKind::InferVar(floating.root))
                 }
                 UnboundVarHandlingMode::EraseToExplicitInfer => {
-                    self.tcx().intern(TyKind::ExplicitInfer)
+                    self.tcx().intern(TyKind::SigExplicitInfer)
                 }
                 UnboundVarHandlingMode::Panic => {
                     unreachable!("unexpected ambiguous inference variable")
@@ -633,21 +659,21 @@ impl<'tcx> TyFolder<'tcx> for InferTySubstitutor<'_, 'tcx> {
 #[derive(Debug, Clone)]
 struct TyInferTracker {
     disjoint: DisjointSetVec<DisjointTyInferNode>,
-    observed_reveal_order: Vec<ObservedTyVar>,
-    next_observe_idx: ObservedTyVar,
+    observed_reveal_order: Vec<ObservedTyInferVar>,
+    next_observe_idx: ObservedTyInferVar,
     tracing_state: Option<Rc<TyInferTracingState>>,
 }
 
 #[derive(Debug, Clone)]
 struct DisjointTyInferNode {
     root: Option<DisjointTyInferRoot>,
-    observed_idx: Option<ObservedTyVar>,
+    observed_idx: Option<ObservedTyInferVar>,
 }
 
 #[derive(Debug, Clone)]
 enum DisjointTyInferRoot {
     Known(Ty),
-    Floating(Vec<ObservedTyVar>),
+    Floating(Vec<ObservedTyInferVar>),
 }
 
 #[derive(Debug)]
@@ -661,7 +687,7 @@ impl Default for TyInferTracker {
         Self {
             disjoint: DisjointSetVec::new(),
             observed_reveal_order: Vec::new(),
-            next_observe_idx: ObservedTyVar::from_usize(0),
+            next_observe_idx: ObservedTyInferVar::from_usize(0),
             tracing_state: None,
         }
     }
@@ -706,7 +732,7 @@ impl TyInferTracker {
         var
     }
 
-    fn observe(&mut self, var: InferTyVar) -> ObservedTyVar {
+    fn observe(&mut self, var: InferTyVar) -> ObservedTyInferVar {
         let observed_idx = &mut self.disjoint[var.0 as usize].observed_idx;
 
         if let Some(observed_idx) = *observed_idx {
@@ -730,7 +756,7 @@ impl TyInferTracker {
         observed_idx
     }
 
-    fn observed_reveal_order(&self) -> &[ObservedTyVar] {
+    fn observed_reveal_order(&self) -> &[ObservedTyInferVar] {
         &self.observed_reveal_order
     }
 
@@ -799,7 +825,7 @@ impl TyInferTracker {
 #[derive(Debug, Clone)]
 struct ReInferTracker {
     /// The set of universal regions we're tracking.
-    tracked_universals: FxIndexMap<Obj<RegionGeneric>, TrackedUniversal>,
+    tracked_universals: IndexVec<UniversalReVar, TrackedUniversal>,
 
     /// A map from `ReInferIndex` (which represents either the `'gc` region, a tracked inference
     /// region, or a tracked universal region) to the actual region being represented.
@@ -819,7 +845,6 @@ impl AnyReIndex {
 
 #[derive(Debug, Clone)]
 struct TrackedUniversal {
-    generic: Obj<RegionGeneric>,
     index: AnyReIndex,
     outlives: BitSet,
 }
@@ -834,13 +859,13 @@ struct TrackedAny {
 enum TrackedAnyKind {
     Gc,
     Inference,
-    Universal(u32),
+    Universal(UniversalReVar),
 }
 
 impl Default for ReInferTracker {
     fn default() -> Self {
         Self {
-            tracked_universals: FxIndexMap::default(),
+            tracked_universals: IndexVec::default(),
             tracked_any: IndexVec::from_iter([TrackedAny {
                 kind: TrackedAnyKind::Gc,
                 outlived_by: SmallVec::new(),
@@ -851,7 +876,7 @@ impl Default for ReInferTracker {
 }
 
 impl ReInferTracker {
-    fn fresh(&mut self) -> InferReVar {
+    fn fresh_infer(&mut self) -> InferReVar {
         let var = InferReVar(self.tracked_any.next_idx().raw());
 
         self.tracked_any.push(TrackedAny {
@@ -862,77 +887,38 @@ impl ReInferTracker {
         var
     }
 
-    fn region_to_idx(&mut self, re: Re, tcx: &TyCtxt) -> Option<AnyReIndex> {
-        let s = &tcx.session;
+    fn fresh_universal(&mut self) -> UniversalReVar {
+        let index = self.tracked_any.push(TrackedAny {
+            kind: TrackedAnyKind::Universal(self.tracked_universals.next_idx()),
+            outlived_by: SmallVec::new(),
+        });
 
+        let mut outlives = BitSet::new();
+        outlives.insert(index.index());
+
+        self.tracked_universals
+            .push(TrackedUniversal { index, outlives })
+    }
+
+    fn region_to_idx(&mut self, re: Re) -> Option<AnyReIndex> {
         match re {
             Re::Gc => Some(AnyReIndex::GC),
-            Re::Universal(generic) => {
-                let new_universal_idx = self.tracked_universals.len();
-
-                match self.tracked_universals.entry(generic) {
-                    indexmap::map::Entry::Occupied(entry) => Some(entry.get().index),
-                    indexmap::map::Entry::Vacant(entry) => {
-                        let index = self.tracked_any.push(TrackedAny {
-                            kind: TrackedAnyKind::Universal(new_universal_idx as u32),
-                            outlived_by: SmallVec::new(),
-                        });
-
-                        entry.insert(TrackedUniversal {
-                            generic,
-                            index,
-                            outlives: {
-                                let mut outlives = BitSet::new();
-                                outlives.insert(index.index());
-                                outlives
-                            },
-                        });
-
-                        // Introduce universal outlives without reporting their relations to the
-                        // user. That way, the only errors that can be produced originate from
-                        // discovering new constraints beyond that.
-                        for outlives in generic.r(s).clauses.iter(tcx) {
-                            let TraitClause::Outlives(outlives) = outlives.value else {
-                                unreachable!()
-                            };
-
-                            let Some(rhs) = self.region_to_idx(outlives, tcx) else {
-                                continue;
-                            };
-
-                            let mut errors = Vec::new();
-                            self.unify_inner(index, rhs, Some(&mut errors));
-                        }
-
-                        Some(index)
-                    }
-                }
-            }
+            Re::UniversalVar(universal) => Some(self.tracked_universals[universal].index),
             Re::InferVar(idx) => Some(AnyReIndex::from_raw(idx.0)),
-            Re::ExplicitInfer | Re::Erased => unreachable!(),
+            Re::SigExplicitInfer | Re::SigUniversal(_) | Re::Erased => unreachable!(),
             Re::Error(_) => None,
         }
     }
 
-    fn unify(&mut self, lhs: Re, rhs: Re, tcx: &TyCtxt, offenses: &mut Vec<ReAndReUnifyOffense>) {
+    fn unify(&mut self, lhs: Re, rhs: Re, mut offenses: Option<&mut Vec<ReAndReUnifyOffense>>) {
         if lhs == rhs {
             return;
         }
 
-        let (Some(lhs), Some(rhs)) = (self.region_to_idx(lhs, tcx), self.region_to_idx(rhs, tcx))
-        else {
+        let (Some(lhs), Some(rhs)) = (self.region_to_idx(lhs), self.region_to_idx(rhs)) else {
             return;
         };
 
-        self.unify_inner(lhs, rhs, Some(offenses));
-    }
-
-    fn unify_inner(
-        &mut self,
-        lhs: AnyReIndex,
-        rhs: AnyReIndex,
-        mut offenses: Option<&mut Vec<ReAndReUnifyOffense>>,
-    ) {
         // Ensure that we don't perform a relation more than once.
         if !self.unified_pairs.insert((lhs, rhs)) {
             return;
@@ -942,49 +928,45 @@ impl ReInferTracker {
         self.tracked_any[rhs].outlived_by.push(lhs);
 
         // For every universal region, update the outlives graph.
-        for universal_idx in 0..self.tracked_universals.len() {
-            if !self.tracked_universals[universal_idx]
+        for universal in self.tracked_universals.indices() {
+            if !self.tracked_universals[universal]
                 .outlives
                 .contains(rhs.index())
             {
                 continue;
             }
 
-            if self.tracked_universals[universal_idx]
+            if self.tracked_universals[universal]
                 .outlives
                 .contains(lhs.index())
             {
                 continue;
             }
 
-            let generic = self.tracked_universals[universal_idx].generic;
-
             let mut dfs_stack = vec![lhs];
 
             while let Some(top) = dfs_stack.pop() {
-                self.tracked_universals[universal_idx]
+                self.tracked_universals[universal]
                     .outlives
                     .insert(top.index());
 
                 let offending_re = match self.tracked_any[top].kind {
                     TrackedAnyKind::Gc => Some(Re::Gc),
                     TrackedAnyKind::Inference => None,
-                    TrackedAnyKind::Universal(idx) => {
-                        Some(Re::Universal(self.tracked_universals[idx as usize].generic))
-                    }
+                    TrackedAnyKind::Universal(var) => Some(Re::UniversalVar(var)),
                 };
 
                 if let Some(offenses) = &mut offenses
                     && let Some(offending_re) = offending_re
                 {
                     offenses.push(ReAndReUnifyOffense {
-                        universal: generic,
+                        universal,
                         forced_to_outlive: offending_re,
                     });
                 }
 
                 for &outlived_by in &self.tracked_any[top].outlived_by {
-                    if self.tracked_universals[universal_idx]
+                    if self.tracked_universals[universal]
                         .outlives
                         .contains(outlived_by.index())
                     {

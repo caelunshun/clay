@@ -112,7 +112,7 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn lower_re(&mut self, ast: &Lifetime) -> SpannedRe {
         if let Some(generic) = self.generic_re_names.lookup(ast.name) {
-            return Re::Universal(*generic).encode(ast.span, self.tcx);
+            return Re::SigUniversal(*generic).encode(ast.span, self.tcx);
         }
 
         todo!()
@@ -126,7 +126,7 @@ impl IntraItemLowerCtxt<'_> {
         let s = &self.tcx.session;
 
         match &ast.kind {
-            AstTyKind::This => SpannedTyView::This.encode(ast.span, self.tcx),
+            AstTyKind::This => SpannedTyView::SigThis.encode(ast.span, self.tcx),
             AstTyKind::Name(path, generics) => {
                 let resolver = FrozenModuleResolver(s);
 
@@ -145,7 +145,7 @@ impl IntraItemLowerCtxt<'_> {
                         .encode(ast.span, self.tcx)
                     }
                     Ok(TyPathResolution::Generic(def)) => {
-                        SpannedTyView::Universal(def).encode(ast.span, self.tcx)
+                        SpannedTyView::SigUniversal(def).encode(ast.span, self.tcx)
                     }
                     Ok(TyPathResolution::Trait(def)) => SpannedTyView::Error(
                         Diag::span_err(
@@ -179,7 +179,7 @@ impl IntraItemLowerCtxt<'_> {
             AstTyKind::Reference(lifetime, muta, pointee) => SpannedTyView::Reference(
                 match lifetime {
                     Some(ast) => self.lower_re(ast),
-                    None => Re::ExplicitInfer.encode(ast.span.shrink_to_lo(), self.tcx),
+                    None => Re::SigExplicitInfer.encode(ast.span.shrink_to_lo(), self.tcx),
                 },
                 muta.as_muta(),
                 self.lower_ty(pointee),
@@ -192,7 +192,7 @@ impl IntraItemLowerCtxt<'_> {
             AstTyKind::Tuple(items) => {
                 SpannedTyView::Tuple(self.lower_tys(items)).encode(ast.span, self.tcx)
             }
-            AstTyKind::Infer => SpannedTyView::ExplicitInfer.encode(ast.span, self.tcx),
+            AstTyKind::Infer => SpannedTyView::SigExplicitInfer.encode(ast.span, self.tcx),
             AstTyKind::Error(error) => SpannedTyView::Error(*error).encode(ast.span, self.tcx),
         }
     }

@@ -1,19 +1,15 @@
 use crate::{
     base::{
-        analysis::Spanned,
         arena::{HasInterner, HasListInterner, LateInit, Obj},
         syntax::Span,
     },
-    parse::token::Ident,
     semantic::{
         analysis::{TyCtxt, TyVisitable, TyVisitor, TyVisitorExt},
         syntax::{
             AnyGeneric, GenericBinder, PosInBinder, Re, RegionGeneric, SpannedTraitClauseList,
-            TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitSpec, TyKind, TyOrRe,
-            TyOrReList, TypeGeneric,
+            TraitInstance, TraitParam, TraitSpec, TyKind, TyOrRe, TyOrReList, TypeGeneric,
         },
     },
-    symbol,
 };
 use derive_where::derive_where;
 use std::{marker::PhantomData, ops::ControlFlow};
@@ -30,10 +26,10 @@ impl TyCtxt {
                     AnyGeneric::Re(generic) => &generic.r(s).binder,
                     AnyGeneric::Ty(generic) => &generic.r(s).binder,
                 },
-                Some(PosInBinder {
+                PosInBinder {
                     def: binder,
                     idx: i as u32,
-                }),
+                },
             );
         }
 
@@ -57,7 +53,6 @@ impl TyCtxt {
                         lifetime: generic.r(s).lifetime,
                         binder: LateInit::uninit(),
                         clauses: LateInit::uninit(),
-                        is_synthetic: true,
                     },
                     s,
                 )),
@@ -66,9 +61,7 @@ impl TyCtxt {
                         span: generic.r(s).span,
                         ident: generic.r(s).ident,
                         binder: LateInit::uninit(),
-                        user_clauses: LateInit::uninit(),
-                        elaborated_clauses: LateInit::uninit(),
-                        is_synthetic: true,
+                        clauses: LateInit::uninit(),
                     },
                     s,
                 )),
@@ -94,10 +87,7 @@ impl TyCtxt {
                     LateInit::init(&new_generic.r(s).clauses, subst(*old_generic.r(s).clauses));
                 }
                 (AnyGeneric::Ty(new_generic), AnyGeneric::Ty(old_generic)) => {
-                    LateInit::init(
-                        &new_generic.r(s).user_clauses,
-                        subst(*old_generic.r(s).user_clauses),
-                    );
+                    LateInit::init(&new_generic.r(s).clauses, subst(*old_generic.r(s).clauses));
                 }
                 _ => unreachable!(),
             }
@@ -129,8 +119,10 @@ impl TyCtxt {
                 .defs
                 .iter()
                 .map(|generic| match generic {
-                    AnyGeneric::Re(generic) => TyOrRe::Re(Re::Universal(*generic)),
-                    AnyGeneric::Ty(generic) => TyOrRe::Ty(self.intern(TyKind::Universal(*generic))),
+                    AnyGeneric::Re(generic) => TyOrRe::Re(Re::SigUniversal(*generic)),
+                    AnyGeneric::Ty(generic) => {
+                        TyOrRe::Ty(self.intern(TyKind::SigUniversal(*generic)))
+                    }
                 })
                 .collect::<Vec<_>>(),
         )
@@ -150,101 +142,28 @@ impl TyCtxt {
         }
     }
 
-    pub fn mentioned_generics<B>(
+    pub fn mentioned_sig_generics<B>(
         &self,
         ty: impl TyVisitable,
         f: impl FnMut(AnyGeneric) -> ControlFlow<B>,
     ) -> ControlFlow<B> {
-        GenericMentionVisitor {
+        SigGenericMentionVisitor {
             _ty: PhantomData,
             tcx: self,
             f,
         }
         .visit_fallible(ty)
     }
-
-    pub fn elaborate_generic_clauses(
-        &self,
-        generic: Obj<TypeGeneric>,
-        mut binder: Option<&mut GenericBinder>,
-    ) -> TraitClauseList {
-        let s = &self.session;
-
-        let generic = generic.r(s);
-
-        if let Some(v) = LateInit::get(&generic.elaborated_clauses) {
-            return *v;
-        }
-
-        let clauses = generic
-            .user_clauses
-            .value
-            .r(s)
-            .iter()
-            .map(|clause| match *clause {
-                TraitClause::Outlives(re) => TraitClause::Outlives(re),
-                TraitClause::Trait(spec) => {
-                    let params = spec
-                        .params
-                        .r(s)
-                        .iter()
-                        .zip(&spec.def.r(s).generics.r(s).defs)
-                        .map(|(&param, def)| {
-                            let clauses = match param {
-                                TraitParam::Equals(_) => return param,
-                                // TODO: Actually elaborate :)
-                                TraitParam::Unspecified(clauses) => clauses,
-                            };
-
-                            // TODO: Better debug names.
-                            let generic = Obj::new(
-                                TypeGeneric {
-                                    span: Span::DUMMY,
-                                    ident: Ident {
-                                        span: Span::DUMMY,
-                                        text: symbol!("?"),
-                                        raw: false,
-                                    },
-                                    binder: LateInit::uninit(),
-                                    user_clauses: LateInit::new(Spanned::new_unspanned(clauses)),
-                                    elaborated_clauses: LateInit::uninit(),
-                                    is_synthetic: true,
-                                },
-                                s,
-                            );
-
-                            if let Some(binder) = &mut binder {
-                                binder.defs.push(AnyGeneric::Ty(generic));
-                            }
-
-                            TraitParam::Equals(TyOrRe::Ty(self.intern(TyKind::Universal(generic))))
-                        })
-                        .collect::<Vec<_>>();
-
-                    TraitClause::Trait(TraitSpec {
-                        def: spec.def,
-                        params: self.intern_list(&params),
-                    })
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let clauses = self.intern_list(&clauses);
-
-        LateInit::init(&generic.elaborated_clauses, clauses);
-
-        clauses
-    }
 }
 
 #[derive_where(Copy, Clone; F)]
-pub struct GenericMentionVisitor<'tcx, F, B> {
+pub struct SigGenericMentionVisitor<'tcx, F, B> {
     _ty: PhantomData<fn() -> B>,
     tcx: &'tcx TyCtxt,
     f: F,
 }
 
-impl<'tcx, F, B> GenericMentionVisitor<'tcx, F, B>
+impl<'tcx, F, B> SigGenericMentionVisitor<'tcx, F, B>
 where
     F: FnMut(AnyGeneric) -> ControlFlow<B>,
 {
@@ -257,7 +176,7 @@ where
     }
 }
 
-impl<'tcx, F, B> TyVisitor<'tcx> for GenericMentionVisitor<'tcx, F, B>
+impl<'tcx, F, B> TyVisitor<'tcx> for SigGenericMentionVisitor<'tcx, F, B>
 where
     F: FnMut(AnyGeneric) -> ControlFlow<B>,
 {
@@ -267,7 +186,7 @@ where
         self.tcx
     }
 
-    fn visit_re_generic_use(
+    fn visit_re_sig_universal_use(
         &mut self,
         _span: Option<Span>,
         generic: Obj<RegionGeneric>,
@@ -275,7 +194,7 @@ where
         (self.f)(AnyGeneric::Re(generic))
     }
 
-    fn visit_ty_generic_use(
+    fn visit_ty_sig_universal_use(
         &mut self,
         _span: Option<Span>,
         generic: Obj<TypeGeneric>,

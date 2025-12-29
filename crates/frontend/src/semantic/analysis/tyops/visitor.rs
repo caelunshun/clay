@@ -15,7 +15,7 @@ use crate::{
             SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReList,
             SpannedTyOrReView, SpannedTyView, TraitClause, TraitClauseList, TraitInstance,
             TraitParam, TraitParamList, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReList,
-            TypeGeneric,
+            TypeGeneric, UniversalReVar, UniversalTyVar,
         },
     },
 };
@@ -99,13 +99,13 @@ pub trait TyVisitor<'tcx> {
 
     // === Terminators === //
 
-    fn visit_self_ty_use(&mut self, span: Option<Span>) -> ControlFlow<Self::Break> {
+    fn visit_sig_self_ty_use(&mut self, span: Option<Span>) -> ControlFlow<Self::Break> {
         _ = span;
 
         ControlFlow::Continue(())
     }
 
-    fn visit_re_infer_use(
+    fn visit_re_infer_var_use(
         &mut self,
         span: Option<Span>,
         var: InferReVar,
@@ -115,7 +115,17 @@ pub trait TyVisitor<'tcx> {
         ControlFlow::Continue(())
     }
 
-    fn visit_ty_infer_use(
+    fn visit_re_universal_var_use(
+        &mut self,
+        span: Option<Span>,
+        var: UniversalReVar,
+    ) -> ControlFlow<Self::Break> {
+        _ = (span, var);
+
+        ControlFlow::Continue(())
+    }
+
+    fn visit_ty_infer_var_use(
         &mut self,
         span: Option<Span>,
         var: InferTyVar,
@@ -125,7 +135,17 @@ pub trait TyVisitor<'tcx> {
         ControlFlow::Continue(())
     }
 
-    fn visit_re_generic_use(
+    fn visit_ty_universal_var_use(
+        &mut self,
+        span: Option<Span>,
+        var: UniversalTyVar,
+    ) -> ControlFlow<Self::Break> {
+        _ = (span, var);
+
+        ControlFlow::Continue(())
+    }
+
+    fn visit_re_sig_universal_use(
         &mut self,
         span: Option<Span>,
         generic: Obj<RegionGeneric>,
@@ -135,7 +155,7 @@ pub trait TyVisitor<'tcx> {
         ControlFlow::Continue(())
     }
 
-    fn visit_ty_generic_use(
+    fn visit_ty_sig_universal_use(
         &mut self,
         span: Option<Span>,
         generic: Obj<TypeGeneric>,
@@ -415,14 +435,17 @@ impl TyVisitable for Re {
         V: ?Sized + TyVisitor<'tcx>,
     {
         match me.value {
-            Re::Gc | Re::ExplicitInfer | Re::Erased | Re::Error(_) => {
+            Re::Gc | Re::SigExplicitInfer | Re::Erased | Re::Error(_) => {
                 // (dead end)
             }
-            Re::InferVar(var) => {
-                visitor.visit_re_infer_use(me.own_span_if_specified(), var)?;
+            Re::SigUniversal(generic) => {
+                visitor.visit_re_sig_universal_use(me.own_span_if_specified(), generic)?;
             }
-            Re::Universal(generic) => {
-                visitor.visit_re_generic_use(me.own_span_if_specified(), generic)?;
+            Re::InferVar(var) => {
+                visitor.visit_re_infer_var_use(me.own_span_if_specified(), var)?;
+            }
+            Re::UniversalVar(var) => {
+                visitor.visit_re_universal_var_use(me.own_span_if_specified(), var)?;
             }
         }
 
@@ -444,16 +467,22 @@ impl TyVisitable for Ty {
     {
         match me.view(visitor.tcx()) {
             SpannedTyView::Simple(_)
-            | SpannedTyView::ExplicitInfer
+            | SpannedTyView::SigExplicitInfer
             | SpannedTyView::FnDef(_, None)
             | SpannedTyView::Error(_) => {
                 // (dead end)
             }
-            SpannedTyView::This => {
-                visitor.visit_self_ty_use(me.own_span_if_specified())?;
+            SpannedTyView::SigThis => {
+                visitor.visit_sig_self_ty_use(me.own_span_if_specified())?;
+            }
+            SpannedTyView::SigUniversal(generic) => {
+                visitor.visit_ty_sig_universal_use(me.own_span_if_specified(), generic)?;
             }
             SpannedTyView::InferVar(var) => {
-                visitor.visit_ty_infer_use(me.own_span_if_specified(), var)?;
+                visitor.visit_ty_infer_var_use(me.own_span_if_specified(), var)?;
+            }
+            SpannedTyView::UniversalVar(var) => {
+                visitor.visit_ty_universal_var_use(me.own_span_if_specified(), var)?;
             }
             SpannedTyView::Reference(re, _muta, pointee) => {
                 visitor.visit_spanned_fallible(re)?;
@@ -470,9 +499,6 @@ impl TyVisitable for Ty {
             }
             SpannedTyView::Tuple(tys) => {
                 visitor.visit_spanned_fallible(tys)?;
-            }
-            SpannedTyView::Universal(generic) => {
-                visitor.visit_ty_generic_use(me.own_span_if_specified(), generic)?;
             }
         }
 
@@ -554,24 +580,38 @@ pub trait TyFolder<'tcx> {
         self.super_ty(ty)
     }
 
-    fn try_fold_self_ty_use(&mut self) -> Result<Ty, Self::Error> {
-        self.super_self_ty_use()
+    fn try_fold_sig_self_ty_use(&mut self) -> Result<Ty, Self::Error> {
+        self.super_sig_self_ty_use()
     }
 
-    fn try_fold_re_infer_use(&mut self, var: InferReVar) -> Result<Re, Self::Error> {
-        self.super_re_infer_use(var)
+    fn try_fold_re_infer_var_use(&mut self, var: InferReVar) -> Result<Re, Self::Error> {
+        self.super_re_infer_var_use(var)
     }
 
-    fn try_fold_ty_infer_use(&mut self, var: InferTyVar) -> Result<Ty, Self::Error> {
-        self.super_ty_infer_use(var)
+    fn try_fold_re_universal_var_use(&mut self, var: UniversalReVar) -> Result<Re, Self::Error> {
+        self.super_re_universal_var_use(var)
     }
 
-    fn try_fold_re_generic_use(&mut self, generic: Obj<RegionGeneric>) -> Result<Re, Self::Error> {
-        self.super_re_generic_use(generic)
+    fn try_fold_ty_infer_var_use(&mut self, var: InferTyVar) -> Result<Ty, Self::Error> {
+        self.super_ty_infer_var_use(var)
     }
 
-    fn try_fold_ty_generic_use(&mut self, generic: Obj<TypeGeneric>) -> Result<Ty, Self::Error> {
-        self.super_ty_generic_use(generic)
+    fn try_fold_ty_universal_var_use(&mut self, var: UniversalTyVar) -> Result<Ty, Self::Error> {
+        self.super_ty_universal_var_use(var)
+    }
+
+    fn try_fold_re_sig_universal_use(
+        &mut self,
+        generic: Obj<RegionGeneric>,
+    ) -> Result<Re, Self::Error> {
+        self.super_re_sig_universal_use(generic)
+    }
+
+    fn try_fold_ty_sig_universal_use(
+        &mut self,
+        generic: Obj<TypeGeneric>,
+    ) -> Result<Ty, Self::Error> {
+        self.super_ty_sig_universal_use(generic)
     }
 }
 
@@ -680,9 +720,10 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
 
     fn super_re(&mut self, re: Re) -> Result<Re, Self::Error> {
         match re {
-            Re::Gc | Re::ExplicitInfer | Re::Erased | Re::Error(_) => Ok(re),
-            Re::InferVar(var) => self.try_fold_re_infer_use(var),
-            Re::Universal(generic) => self.try_fold_re_generic_use(generic),
+            Re::Gc | Re::SigExplicitInfer | Re::Erased | Re::Error(_) => Ok(re),
+            Re::InferVar(var) => self.try_fold_re_infer_var_use(var),
+            Re::UniversalVar(var) => self.try_fold_re_universal_var_use(var),
+            Re::SigUniversal(generic) => self.try_fold_re_sig_universal_use(generic),
         }
     }
 
@@ -690,9 +731,10 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
         let tcx = self.tcx();
 
         match *ty.r(&tcx.session) {
-            TyKind::Simple(_) | TyKind::ExplicitInfer | TyKind::Error(_) => Ok(ty),
-            TyKind::InferVar(var) => self.try_fold_ty_infer_use(var),
-            TyKind::This => self.try_fold_self_ty_use(),
+            TyKind::Simple(_) | TyKind::SigExplicitInfer | TyKind::Error(_) => Ok(ty),
+            TyKind::InferVar(var) => self.try_fold_ty_infer_var_use(var),
+            TyKind::UniversalVar(var) => self.try_fold_ty_universal_var_use(var),
+            TyKind::SigThis => self.try_fold_sig_self_ty_use(),
             TyKind::Reference(re, muta, pointee) => Ok(tcx.intern(TyKind::Reference(
                 self.try_fold_re(re)?,
                 muta,
@@ -709,28 +751,39 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
                 Ok(tcx.intern(TyKind::Trait(self.try_fold_clause_list(clause_list)?)))
             }
             TyKind::Tuple(tys) => Ok(tcx.intern(TyKind::Tuple(self.try_fold_ty_list(tys)?))),
-            TyKind::Universal(generic) => self.try_fold_ty_generic_use(generic),
+            TyKind::SigUniversal(generic) => self.try_fold_ty_sig_universal_use(generic),
         }
     }
 
-    fn super_self_ty_use(&mut self) -> Result<Ty, Self::Error> {
-        Ok(self.tcx().intern(TyKind::This))
+    fn super_sig_self_ty_use(&mut self) -> Result<Ty, Self::Error> {
+        Ok(self.tcx().intern(TyKind::SigThis))
     }
 
-    fn super_re_infer_use(&mut self, var: InferReVar) -> Result<Re, Self::Error> {
+    fn super_re_infer_var_use(&mut self, var: InferReVar) -> Result<Re, Self::Error> {
         Ok(Re::InferVar(var))
     }
 
-    fn super_ty_infer_use(&mut self, var: InferTyVar) -> Result<Ty, Self::Error> {
+    fn super_re_universal_var_use(&mut self, var: UniversalReVar) -> Result<Re, Self::Error> {
+        Ok(Re::UniversalVar(var))
+    }
+
+    fn super_ty_infer_var_use(&mut self, var: InferTyVar) -> Result<Ty, Self::Error> {
         Ok(self.tcx().intern(TyKind::InferVar(var)))
     }
 
-    fn super_re_generic_use(&mut self, generic: Obj<RegionGeneric>) -> Result<Re, Self::Error> {
-        Ok(Re::Universal(generic))
+    fn super_ty_universal_var_use(&mut self, var: UniversalTyVar) -> Result<Ty, Self::Error> {
+        Ok(self.tcx().intern(TyKind::UniversalVar(var)))
     }
 
-    fn super_ty_generic_use(&mut self, generic: Obj<TypeGeneric>) -> Result<Ty, Self::Error> {
-        Ok(self.tcx().intern(TyKind::Universal(generic)))
+    fn super_re_sig_universal_use(
+        &mut self,
+        generic: Obj<RegionGeneric>,
+    ) -> Result<Re, Self::Error> {
+        Ok(Re::SigUniversal(generic))
+    }
+
+    fn super_ty_sig_universal_use(&mut self, generic: Obj<TypeGeneric>) -> Result<Ty, Self::Error> {
+        Ok(self.tcx().intern(TyKind::SigUniversal(generic)))
     }
 }
 
@@ -802,27 +855,27 @@ pub trait TyFolderInfallible<'tcx>: TyFolder<'tcx, Error = Infallible> {
     }
 
     fn fold_self_ty_use(&mut self) -> Ty {
-        let Ok(v) = self.try_fold_self_ty_use();
+        let Ok(v) = self.try_fold_sig_self_ty_use();
         v
     }
 
     fn fold_re_infer_use(&mut self, var: InferReVar) -> Re {
-        let Ok(v) = self.try_fold_re_infer_use(var);
+        let Ok(v) = self.try_fold_re_infer_var_use(var);
         v
     }
 
     fn fold_ty_infer_use(&mut self, var: InferTyVar) -> Ty {
-        let Ok(v) = self.try_fold_ty_infer_use(var);
+        let Ok(v) = self.try_fold_ty_infer_var_use(var);
         v
     }
 
     fn fold_re_generic_use(&mut self, generic: Obj<RegionGeneric>) -> Re {
-        let Ok(v) = self.try_fold_re_generic_use(generic);
+        let Ok(v) = self.try_fold_re_sig_universal_use(generic);
         v
     }
 
     fn fold_ty_generic_use(&mut self, generic: Obj<TypeGeneric>) -> Ty {
-        let Ok(v) = self.try_fold_ty_generic_use(generic);
+        let Ok(v) = self.try_fold_ty_sig_universal_use(generic);
         v
     }
 }

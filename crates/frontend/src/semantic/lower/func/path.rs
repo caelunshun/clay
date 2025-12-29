@@ -290,7 +290,7 @@ impl IntraItemLowerCtxt<'_> {
                 };
 
                 ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
-                    self_ty: SpannedTyView::This.encode(*self_kw, self.tcx),
+                    self_ty: SpannedTyView::SigThis.encode(*self_kw, self.tcx),
                     as_trait: None,
                     assoc,
                 })
@@ -378,7 +378,7 @@ impl IntraItemLowerCtxt<'_> {
 
             return match self.lower_rest_as_type_relative_assoc(subsequent) {
                 Ok(Some(assoc)) => {
-                    let self_ty = SpannedTyView::Universal(generic).encode(ident.span, self.tcx);
+                    let self_ty = SpannedTyView::SigUniversal(generic).encode(ident.span, self.tcx);
 
                     ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
                         self_ty,
@@ -612,7 +612,7 @@ impl IntraItemLowerCtxt<'_> {
             ));
         };
 
-        let self_ty = SpannedTyView::ExplicitInfer.encode(def_segment.part.span(), self.tcx);
+        let self_ty = SpannedTyView::SigExplicitInfer.encode(def_segment.part.span(), self.tcx);
 
         ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
             self_ty,

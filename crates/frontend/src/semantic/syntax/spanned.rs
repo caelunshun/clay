@@ -10,7 +10,7 @@ use crate::{
         syntax::{
             AdtInstance, AdtItem, FnDef, InferTyVar, Mutability, Re, SimpleTyKind, TraitClause,
             TraitClauseList, TraitInstance, TraitItem, TraitParam, TraitParamList, TraitSpec, Ty,
-            TyKind, TyList, TyOrRe, TyOrReList, TypeGeneric,
+            TyKind, TyList, TyOrRe, TyOrReList, TypeGeneric, UniversalTyVar,
         },
     },
 };
@@ -64,16 +64,17 @@ pub type SpannedTy = Spanned<Ty>;
 
 #[derive(Debug, Copy, Clone)]
 pub enum SpannedTyView {
-    This,
+    SigThis,
+    SigExplicitInfer,
+    SigUniversal(Obj<TypeGeneric>),
     Simple(SimpleTyKind),
     Reference(SpannedRe, Mutability, SpannedTy),
     Adt(SpannedAdtInstance),
     Trait(SpannedTraitClauseList),
     Tuple(SpannedTyList),
     FnDef(Obj<FnDef>, Option<SpannedTyOrReList>),
-    ExplicitInfer,
-    Universal(Obj<TypeGeneric>),
     InferVar(InferTyVar),
+    UniversalVar(UniversalTyVar),
     Error(ErrorGuaranteed),
 }
 
@@ -84,7 +85,9 @@ impl SpannedViewDecode<TyCtxt> for Ty {
         let s = &tcx.session;
 
         match *value.r(s) {
-            TyKind::This => SpannedTyView::This,
+            TyKind::SigThis => SpannedTyView::SigThis,
+            TyKind::SigExplicitInfer => SpannedTyView::SigExplicitInfer,
+            TyKind::SigUniversal(generic) => SpannedTyView::SigUniversal(generic),
             TyKind::Simple(kind) => SpannedTyView::Simple(kind),
             TyKind::Reference(re, muta, pointee) => {
                 let [re_span, pointee_span] = span_info.child_spans(tcx);
@@ -106,9 +109,8 @@ impl SpannedViewDecode<TyCtxt> for Ty {
                 def,
                 generics.map(|generics| Spanned::new_raw(generics, span_info.unwrap(tcx))),
             ),
-            TyKind::ExplicitInfer => SpannedTyView::ExplicitInfer,
-            TyKind::Universal(generic) => SpannedTyView::Universal(generic),
-            TyKind::InferVar(infer_ty_var) => SpannedTyView::InferVar(infer_ty_var),
+            TyKind::InferVar(var) => SpannedTyView::InferVar(var),
+            TyKind::UniversalVar(var) => SpannedTyView::UniversalVar(var),
             TyKind::Error(error) => SpannedTyView::Error(error),
         }
     }
@@ -119,8 +121,16 @@ impl SpannedViewEncode<TyCtxt> for SpannedTyView {
 
     fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
         match self {
-            SpannedTyView::This => Spanned::new_raw(
-                tcx.intern(TyKind::This),
+            SpannedTyView::SigThis => Spanned::new_raw(
+                tcx.intern(TyKind::SigThis),
+                SpannedInfo::new_terminal(own_span, tcx),
+            ),
+            SpannedTyView::SigExplicitInfer => Spanned::new_raw(
+                tcx.intern(TyKind::SigExplicitInfer),
+                SpannedInfo::new_terminal(own_span, tcx),
+            ),
+            SpannedTyView::SigUniversal(generic) => Spanned::new_raw(
+                tcx.intern(TyKind::SigUniversal(generic)),
                 SpannedInfo::new_terminal(own_span, tcx),
             ),
             SpannedTyView::Simple(kind) => Spanned::new_raw(
@@ -151,16 +161,12 @@ impl SpannedViewEncode<TyCtxt> for SpannedTyView {
                 tcx.intern(TyKind::FnDef(def, None)),
                 SpannedInfo::new_terminal(own_span, tcx),
             ),
-            SpannedTyView::ExplicitInfer => Spanned::new_raw(
-                tcx.intern(TyKind::ExplicitInfer),
+            SpannedTyView::InferVar(var) => Spanned::new_raw(
+                tcx.intern(TyKind::InferVar(var)),
                 SpannedInfo::new_terminal(own_span, tcx),
             ),
-            SpannedTyView::Universal(generic) => Spanned::new_raw(
-                tcx.intern(TyKind::Universal(generic)),
-                SpannedInfo::new_terminal(own_span, tcx),
-            ),
-            SpannedTyView::InferVar(infer_ty_var) => Spanned::new_raw(
-                tcx.intern(TyKind::InferVar(infer_ty_var)),
+            SpannedTyView::UniversalVar(var) => Spanned::new_raw(
+                tcx.intern(TyKind::UniversalVar(var)),
                 SpannedInfo::new_terminal(own_span, tcx),
             ),
             SpannedTyView::Error(error_guaranteed) => Spanned::new_raw(

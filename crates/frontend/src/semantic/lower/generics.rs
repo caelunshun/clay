@@ -54,7 +54,6 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                             lifetime,
                             binder: LateInit::uninit(),
                             clauses: LateInit::uninit(),
-                            is_synthetic: false,
                         },
                         s,
                     )));
@@ -67,9 +66,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                             span: def.span,
                             ident,
                             binder: LateInit::uninit(),
-                            user_clauses: LateInit::uninit(),
-                            elaborated_clauses: LateInit::uninit(),
-                            is_synthetic: false,
+                            clauses: LateInit::uninit(),
                         },
                         s,
                     )));
@@ -126,7 +123,7 @@ impl IntraItemLowerCtxt<'_> {
                     LateInit::init(&generic.r(s).clauses, self.lower_clauses(clause_list));
                 }
                 AnyGeneric::Ty(generic) => {
-                    LateInit::init(&generic.r(s).user_clauses, self.lower_clauses(clause_list));
+                    LateInit::init(&generic.r(s).clauses, self.lower_clauses(clause_list));
                 }
             }
         }
@@ -271,7 +268,7 @@ impl IntraItemLowerCtxt<'_> {
 
                     let exact_ty = self.lower_ty(exact_ty);
 
-                    let param = &mut params[generic.r(s).binder.unwrap().idx as usize];
+                    let param = &mut params[generic.r(s).binder.idx as usize];
 
                     if let Some(old_param) = param {
                         Diag::span_err(name.span, "associated type specified more than once")
@@ -541,11 +538,11 @@ impl IntraItemLowerCtxt<'_> {
             .iter()
             .map(|expected| match expected {
                 AnyGeneric::Re(_) => {
-                    SpannedTyOrReView::Re(Re::ExplicitInfer.encode(segment_span, self.tcx))
+                    SpannedTyOrReView::Re(Re::SigExplicitInfer.encode(segment_span, self.tcx))
                         .encode(segment_span, self.tcx)
                 }
                 AnyGeneric::Ty(_) => SpannedTyOrReView::Ty(
-                    SpannedTyView::ExplicitInfer.encode(segment_span, self.tcx),
+                    SpannedTyView::SigExplicitInfer.encode(segment_span, self.tcx),
                 )
                 .encode(segment_span, self.tcx),
             })
@@ -594,7 +591,7 @@ impl IntraItemLowerCtxt<'_> {
         let elaborated_params = params
             .iter(self.tcx)
             .chain(iter::repeat(
-                SpannedTyOrReView::Ty(SpannedTyView::ExplicitInfer.encode(outer_span, self.tcx))
+                SpannedTyOrReView::Ty(SpannedTyView::SigExplicitInfer.encode(outer_span, self.tcx))
                     .encode(outer_span, self.tcx),
             ))
             .take(def.r(s).generics.r(s).defs.len())
@@ -626,7 +623,7 @@ impl IntraItemLowerCtxt<'_> {
                 continue;
             };
 
-            let idx = generic.r(s).binder.unwrap().idx as usize;
+            let idx = generic.r(s).binder.idx as usize;
 
             params[idx] = associated.param;
         }

@@ -425,9 +425,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                             span: member.span,
                             ident: *name,
                             binder: LateInit::uninit(),
-                            user_clauses: LateInit::uninit(),
-                            elaborated_clauses: LateInit::uninit(),
-                            is_synthetic: false,
+                            clauses: LateInit::uninit(),
                         },
                         s,
                     );
@@ -878,7 +876,6 @@ impl IntraItemLowerCtxt<'_> {
                                 lifetime,
                                 binder: LateInit::uninit(),
                                 clauses: LateInit::uninit(),
-                                is_synthetic: false,
                             },
                             s,
                         )));
@@ -891,9 +888,7 @@ impl IntraItemLowerCtxt<'_> {
                                 span: def.span,
                                 ident,
                                 binder: LateInit::uninit(),
-                                user_clauses: LateInit::uninit(),
-                                elaborated_clauses: LateInit::uninit(),
-                                is_synthetic: false,
+                                clauses: LateInit::uninit(),
                             },
                             s,
                         )));
@@ -914,7 +909,7 @@ impl IntraItemLowerCtxt<'_> {
                     LateInit::init(&generic.r(s).clauses, self.lower_clauses(clause_list));
                 }
                 AnyGeneric::Ty(generic) => {
-                    LateInit::init(&generic.r(s).user_clauses, self.lower_clauses(clause_list));
+                    LateInit::init(&generic.r(s).clauses, self.lower_clauses(clause_list));
                 }
             }
         }

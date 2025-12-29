@@ -45,10 +45,10 @@ impl TyCtxt {
         let s = &self.session;
 
         match *ty.r(s) {
-            TyKind::This | TyKind::InferVar(_) => {
+            TyKind::SigThis | TyKind::SigUniversal(_) | TyKind::SigExplicitInfer => {
                 unreachable!("unexpected {ty:?}");
             }
-            TyKind::Universal(_) | TyKind::ExplicitInfer | TyKind::Error(_) => TyShape::Hole,
+            TyKind::InferVar(_) | TyKind::UniversalVar(_) | TyKind::Error(_) => TyShape::Hole,
             TyKind::Simple(kind) => TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Simple(kind),
                 children: self.intern_list(&[]),

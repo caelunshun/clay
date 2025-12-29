@@ -5,11 +5,10 @@ use crate::{
     },
     semantic::{
         analysis::{
-            BinderSubstitution, CoherenceMap, ConfirmationResult, FloatingInferVar, ObligationCx,
-            ObligationKind, ObligationReason, ObligationResult, SelectionRejected, SelectionResult,
-            SubstitutionFolder, TyCtxt, TyFolder, TyFolderInfallible as _,
-            TyFolderInfalliblePreservesSpans as _, TyFolderPreservesSpans, TyFolderSuper,
-            TyVisitor, TyVisitorInfallibleExt, UnboundVarHandlingMode, UnifyCx, UnifyCxMode,
+            CoherenceMap, ConfirmationResult, FloatingInferVar, ObligationCx, ObligationKind,
+            ObligationReason, ObligationResult, SelectionRejected, SelectionResult, TyCtxt,
+            TyFolderInfallible as _, TyFolderInfalliblePreservesSpans as _, TyVisitor,
+            TyVisitorInfallibleExt, UnboundVarHandlingMode, UnifyCx, UnifyCxMode,
         },
         syntax::{
             AnyGeneric, GenericBinder, ImplItem, InferTyVar, ListOfTraitClauseList, Re,
@@ -77,6 +76,8 @@ use std::{convert::Infallible, ops::ControlFlow};
 /// themselves but will never crash if these WF requirements aren't met. You can "bolt on" these WF
 /// requirements at the end of a region-aware inference session by calling `wf_ty` on all the types
 /// the programmer has created.
+///
+/// TODO: Update this!
 #[derive(Clone)]
 pub struct ClauseCx<'tcx> {
     ocx: ObligationCx<'tcx>,
@@ -144,32 +145,28 @@ impl<'tcx> ClauseCx<'tcx> {
 
 // Forwards
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn instantiator(&mut self, self_ty: Ty) -> ClauseTyInstantiator<'_, 'tcx> {
-        ClauseTyInstantiator { ccx: self, self_ty }
-    }
-
     pub fn mode(&self) -> UnifyCxMode {
         self.ucx().mode()
     }
 
-    pub fn fresh_ty_var(&mut self) -> InferTyVar {
-        self.ucx_mut().fresh_ty_var()
+    pub fn fresh_ty_infer_var(&mut self) -> InferTyVar {
+        self.ucx_mut().fresh_ty_infer_var()
     }
 
-    pub fn fresh_ty(&mut self) -> Ty {
-        self.ucx_mut().fresh_ty()
+    pub fn fresh_ty_infer(&mut self) -> Ty {
+        self.ucx_mut().fresh_ty_infer()
     }
 
-    pub fn lookup_ty_var(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {
-        self.ucx().lookup_ty_var(var)
+    pub fn lookup_ty_infer_var(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {
+        self.ucx().lookup_ty_infer_var(var)
     }
 
-    pub fn peel_ty_var(&self, ty: Ty) -> Ty {
-        self.ucx().peel_ty_var(ty)
+    pub fn peel_ty_infer_var(&self, ty: Ty) -> Ty {
+        self.ucx().peel_ty_infer_var(ty)
     }
 
-    pub fn fresh_re(&mut self) -> Re {
-        self.ucx_mut().fresh_re()
+    pub fn fresh_re_infer(&mut self) -> Re {
+        self.ucx_mut().fresh_re_infer()
     }
 
     pub fn oblige_re_and_re(
@@ -253,14 +250,14 @@ impl<'tcx> ClauseCx<'tcx> {
         let s = self.session();
 
         // See whether the type itself can provide the implementation.
-        match *self.peel_ty_var(lhs).r(s) {
+        match *self.peel_ty_infer_var(lhs).r(s) {
             TyKind::Trait(clauses) => {
                 todo!()
             }
-            TyKind::Universal(generic) => {
+            TyKind::UniversalVar(universal) => {
                 match self
                     .clone()
-                    .try_select_inherent_impl(tcx.elaborate_generic_clauses(generic, None), rhs)
+                    .try_select_inherent_impl(tcx.elaborate_generic_clauses(universal, None), rhs)
                 {
                     Ok(res) => {
                         return res.into_obligation_res(self);
@@ -279,7 +276,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 // Error types can do anything.
                 return ObligationResult::Success;
             }
-            TyKind::This | TyKind::ExplicitInfer => unreachable!(),
+            TyKind::SigThis | TyKind::SigExplicitInfer | TyKind::SigUniversal(_) => unreachable!(),
             TyKind::Simple(_)
             | TyKind::Reference(_, _, _)
             | TyKind::Adt(_)
@@ -554,8 +551,8 @@ impl<'tcx> ClauseCx<'tcx> {
             .defs
             .iter()
             .map(|generic| match generic {
-                AnyGeneric::Re(_) => TyOrRe::Re(self.fresh_re()),
-                AnyGeneric::Ty(_) => TyOrRe::Ty(self.fresh_ty()),
+                AnyGeneric::Re(_) => TyOrRe::Re(self.fresh_re_infer()),
+                AnyGeneric::Ty(_) => TyOrRe::Ty(self.fresh_ty_infer()),
             })
             .collect::<Vec<_>>();
 
@@ -566,7 +563,7 @@ impl<'tcx> ClauseCx<'tcx> {
         };
 
         // Substitute the target type
-        let target = SubstitutionFolder::new(tcx, tcx.intern(TyKind::This), Some(substs))
+        let target = SubstitutionFolder::new(tcx, tcx.intern(TyKind::SigThis), Some(substs))
             .fold_ty(candidate.r(s).target.value);
 
         // Substitute inference clauses
@@ -577,7 +574,7 @@ impl<'tcx> ClauseCx<'tcx> {
             .map(|generic| {
                 let clauses = match generic {
                     AnyGeneric::Re(generic) => generic.r(s).clauses.value,
-                    AnyGeneric::Ty(generic) => generic.r(s).user_clauses.value,
+                    AnyGeneric::Ty(generic) => generic.r(s).clauses.value,
                 };
 
                 SubstitutionFolder::new(tcx, target, Some(substs)).fold_clause_list(clauses)
@@ -609,7 +606,7 @@ impl<'tcx> ClauseCx<'tcx> {
         let s = self.session();
 
         match *lhs.r(s) {
-            TyKind::This | TyKind::ExplicitInfer => unreachable!(),
+            TyKind::SigThis | TyKind::SigExplicitInfer | TyKind::SigUniversal(_) => unreachable!(),
             TyKind::FnDef(_, _) | TyKind::Simple(_) | TyKind::Error(_) => {
                 // (trivial)
             }
@@ -666,9 +663,9 @@ impl<'tcx> ClauseCx<'tcx> {
                     self.oblige_ty_and_re(ObligationReason::Structural, lhs, rhs);
                 }
             }
-            TyKind::Universal(_) => todo!(),
+            TyKind::UniversalVar(_) => todo!(),
             TyKind::InferVar(inf_lhs) => {
-                if let Ok(inf_lhs) = self.lookup_ty_var(inf_lhs) {
+                if let Ok(inf_lhs) = self.lookup_ty_infer_var(inf_lhs) {
                     self.oblige_ty_and_re(ObligationReason::Structural, inf_lhs, rhs);
                 } else {
                     return ObligationResult::NotReady;
@@ -740,12 +737,12 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             SpannedTyView::FnDef(..) => {
                 todo!()
             }
-            SpannedTyView::This
+            SpannedTyView::SigThis
             | SpannedTyView::Simple(_)
             | SpannedTyView::Adt(_)
             | SpannedTyView::Tuple(_)
-            | SpannedTyView::ExplicitInfer
-            | SpannedTyView::Universal(_)
+            | SpannedTyView::SigExplicitInfer
+            | SpannedTyView::SigUniversal(_)
             // FIXME: This shouldn't just be accepted. Defer these!!
             | SpannedTyView::InferVar(_)
             | SpannedTyView::Error(_) => {
@@ -767,7 +764,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             .map(|param| match param.view(tcx) {
                 SpannedTraitParamView::Equals(v) => v,
                 SpannedTraitParamView::Unspecified(_) => {
-                    SpannedTyOrRe::new_unspanned(TyOrRe::Ty(self.ccx.fresh_ty()))
+                    SpannedTyOrRe::new_unspanned(TyOrRe::Ty(self.ccx.fresh_ty_infer()))
                 }
             })
             .collect::<Vec<_>>();
@@ -843,7 +840,7 @@ impl ClauseTyWfVisitor<'_, '_> {
                 }
                 (SpannedTyOrReView::Ty(actual), AnyGeneric::Ty(requirements)) => {
                     let requirements =
-                        trait_subst.fold_spanned_clause_list(*requirements.r(s).user_clauses);
+                        trait_subst.fold_spanned_clause_list(*requirements.r(s).clauses);
 
                     self.ccx.oblige_ty_and_clause(
                         ObligationReason::WfForTraitParam {
@@ -857,54 +854,5 @@ impl ClauseTyWfVisitor<'_, '_> {
                 _ => unreachable!(),
             }
         }
-    }
-}
-
-// === Type Instantiation === //
-
-/// A type folder which instantiates a user-written type to be compatible with a [`ClauseCx`].
-///
-/// It...
-///
-/// - Replaces `Self` types.
-/// - Instantiates `ExplicitInfer` types.
-///
-/// Once a user's type is instantiated, it can be safely used inside a `ClauseCx`. All types
-/// used internally by a `ClauseCx` are naturally normalized.
-pub struct ClauseTyInstantiator<'a, 'tcx> {
-    pub ccx: &'a mut ClauseCx<'tcx>,
-    pub self_ty: Ty,
-}
-
-impl<'tcx> TyFolderPreservesSpans<'tcx> for ClauseTyInstantiator<'_, 'tcx> {}
-
-impl<'tcx> TyFolder<'tcx> for ClauseTyInstantiator<'_, 'tcx> {
-    type Error = Infallible;
-
-    fn tcx(&self) -> &'tcx TyCtxt {
-        self.ccx.tcx()
-    }
-
-    fn try_fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
-        let s = self.session();
-
-        let ty = match *ty.r(s) {
-            TyKind::This => self.self_ty,
-            TyKind::ExplicitInfer => self.ccx.fresh_ty(),
-            TyKind::Simple(_)
-            | TyKind::Error(_)
-            | TyKind::FnDef(_, _)
-            | TyKind::Universal(_)
-            | TyKind::Reference(_, _, _)
-            | TyKind::Adt(_)
-            | TyKind::Trait(_)
-            | TyKind::Tuple(_)
-            | TyKind::InferVar(_) => {
-                let Ok(v) = self.super_ty(ty);
-                v
-            }
-        };
-
-        Ok(ty)
     }
 }

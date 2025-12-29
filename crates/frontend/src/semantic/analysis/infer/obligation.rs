@@ -1,7 +1,7 @@
 use crate::{
     base::{Diag, ErrorGuaranteed, HardDiag, Session, syntax::Span},
     semantic::{
-        analysis::{ObservedTyVar, TyCtxt, UnifyCx, UnifyCxMode},
+        analysis::{ObservedTyInferVar, TyCtxt, UnifyCx, UnifyCxMode},
         syntax::{Re, RelationMode, TraitSpec, Ty},
     },
     utils::hash::{FxHashMap, FxHashSet},
@@ -121,7 +121,7 @@ struct ObligationCxRoot {
     run_queue: VecDeque<ObligationIdx>,
 
     /// A map from inference variables to obligations they could re-run upon being inferred.
-    var_wake_ups: FxHashMap<ObservedTyVar, Vec<ObligationIdx>>,
+    var_wake_ups: FxHashMap<ObservedTyInferVar, Vec<ObligationIdx>>,
 
     /// The number of observed inference variables we have processed from `ucx`'s
     /// `observed_reveal_order` list.
@@ -147,7 +147,7 @@ struct ObligationState {
 
     /// The set of variables whose inference could cause us to rerun. Cleared once the obligation is
     /// enqueued to re-run and re-populated if, after the re-run, the obligation is still ambiguous.
-    can_wake_by: FxHashSet<ObservedTyVar>,
+    can_wake_by: FxHashSet<ObservedTyInferVar>,
 }
 
 impl<'tcx> fmt::Debug for ObligationCx<'tcx> {
@@ -266,7 +266,7 @@ impl<'tcx> ObligationCx<'tcx> {
             debug_assert!(root.current_obligation.is_none());
 
             // See whether any new obligations can be added to the queue yet.
-            for &var in &this.ucx.observed_reveal_order()[root.rerun_var_read_len..] {
+            for &var in &this.ucx.observed_infer_reveal_order()[root.rerun_var_read_len..] {
                 let Some(awoken) = root.var_wake_ups.remove(&var) else {
                     continue;
                 };
@@ -284,7 +284,7 @@ impl<'tcx> ObligationCx<'tcx> {
                 }
             }
 
-            root.rerun_var_read_len = this.ucx.observed_reveal_order().len();
+            root.rerun_var_read_len = this.ucx.observed_infer_reveal_order().len();
 
             // Mark the next obligation as active.
             let Some(curr_idx) = root.run_queue.pop_front() else {
@@ -356,11 +356,11 @@ impl<'tcx> ObligationCx<'tcx> {
                     let curr = &mut root.all_obligations[curr_idx];
 
                     for var in traced_vars {
-                        if this.ucx.lookup_ty_var(var).is_ok() {
+                        if this.ucx.lookup_ty_infer_var(var).is_ok() {
                             continue;
                         }
 
-                        let var = this.ucx.observe_ty_var(var);
+                        let var = this.ucx.observe_ty_infer_var(var);
 
                         if !curr.can_wake_by.insert(var) {
                             continue;

@@ -83,14 +83,12 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
                     raw: false,
                 },
                 binder: LateInit::new(None),
-                user_clauses: LateInit::uninit(),
-                elaborated_clauses: LateInit::uninit(),
-                is_synthetic: true,
+                clauses: LateInit::uninit(),
             },
             s,
         );
 
-        let new_self_ty = tcx.intern(TyKind::Universal(new_self_ty_generic));
+        let new_self_ty = tcx.intern(TyKind::SigUniversal(new_self_ty_generic));
 
         let mut new_self_ty_subst = SubstitutionFolder {
             tcx,
@@ -111,7 +109,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         });
 
         LateInit::init(
-            &new_self_ty_generic.r(s).user_clauses,
+            &new_self_ty_generic.r(s).clauses,
             SpannedTraitClauseList::new_unspanned(
                 tcx.intern_list(&[TraitClause::Trait(new_self_arg_spec)]),
             ),
@@ -275,10 +273,10 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
                     let user_clauses = ccx
                         .instantiator(self_ty)
-                        .fold_spanned_clause_list(*generic.r(s).user_clauses);
+                        .fold_spanned_clause_list(*generic.r(s).clauses);
 
                     ccx.wf_visitor()
-                        .with_clause_applies_to(tcx.intern(TyKind::Universal(generic)))
+                        .with_clause_applies_to(tcx.intern(TyKind::SigUniversal(generic)))
                         .visit_spanned(user_clauses);
                 }
             }

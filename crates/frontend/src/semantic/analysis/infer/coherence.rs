@@ -158,10 +158,10 @@ impl TyCtxt {
                         unreachable!()
                     };
 
-                    cbit::cbit!(for generic in self.mentioned_generics(ty) {
-                        debug_assert_eq!(generic.binder(s).unwrap().def, def.r(s).generics);
+                    cbit::cbit!(for generic in self.mentioned_sig_generics(ty) {
+                        debug_assert_eq!(generic.binder(s).def, def.r(s).generics);
 
-                        generic_states[generic.binder(s).unwrap().idx as usize]
+                        generic_states[generic.binder(s).idx as usize]
                             .deps
                             .push(clause_state_idx);
 
@@ -223,15 +223,15 @@ impl TyCtxt {
         ) {
             let s = &tcx.session;
 
-            cbit::cbit!(for generic in tcx.mentioned_generics(TyOrRe::Ty(ty)) {
-                debug_assert_eq!(generic.binder(s).unwrap().def, binder);
+            cbit::cbit!(for generic in tcx.mentioned_sig_generics(TyOrRe::Ty(ty)) {
+                debug_assert_eq!(generic.binder(s).def, binder);
 
                 cover_idx(
                     solve_queue,
                     solve_order,
                     generic_states,
                     clause_states,
-                    GenericIdx::from_raw(generic.binder(s).unwrap().idx),
+                    GenericIdx::from_raw(generic.binder(s).idx),
                 );
             });
         }
@@ -255,16 +255,19 @@ impl TyCtxt {
                             Re::Gc | Re::Error(_) => {
                                 // (nothing mentioned)
                             }
-                            Re::Universal(param) => {
+                            Re::SigUniversal(param) => {
                                 cover_idx(
                                     &mut solve_queue,
                                     &mut solve_order,
                                     &mut generic_states,
                                     &mut clause_states,
-                                    GenericIdx::from_raw(param.r(s).binder.unwrap().idx),
+                                    GenericIdx::from_raw(param.r(s).binder.idx),
                                 );
                             }
-                            Re::InferVar(_) | Re::ExplicitInfer | Re::Erased => unreachable!(),
+                            Re::InferVar(_)
+                            | Re::UniversalVar(_)
+                            | Re::SigExplicitInfer
+                            | Re::Erased => unreachable!(),
                         }
                     }
                     TyOrRe::Ty(param) => {
