@@ -64,7 +64,7 @@ impl TyCtxt {
                 continue;
             };
 
-            self.determine_impl_generic_solve_order(def);
+            self.check_impl_generic_covering(def);
         }
 
         _ = CrateTypeckVisitor {

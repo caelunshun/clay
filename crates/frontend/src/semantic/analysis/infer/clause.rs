@@ -7,18 +7,20 @@ use crate::{
         analysis::{
             CoherenceMap, ConfirmationResult, FloatingInferVar, ObligationCx, ObligationKind,
             ObligationReason, ObligationResult, SelectionRejected, SelectionResult, TyCtxt,
-            TyFolderInfallible as _, TyFolderInfalliblePreservesSpans as _, TyVisitor,
-            TyVisitorInfallibleExt, UnboundVarHandlingMode, UnifyCx, UnifyCxMode,
+            TyFolder, TyFolderInfallible as _, TyFolderInfalliblePreservesSpans as _,
+            TyFolderSuper, TyVisitor, TyVisitorInfallibleExt, UnboundVarHandlingMode, UnifyCx,
+            UnifyCxMode,
         },
         syntax::{
-            AnyGeneric, GenericBinder, ImplItem, InferTyVar, ListOfTraitClauseList, Re,
-            RelationMode, SpannedAdtInstance, SpannedTraitInstance, SpannedTraitParamView,
-            SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView,
-            SpannedTyView, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
-            TyOrReList,
+            AnyGeneric, GenericBinder, GenericSubst, ImplItem, InferTyVar, Re, RelationMode,
+            SpannedAdtInstance, SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec,
+            SpannedTy, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView, SpannedTyView,
+            TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };
+use index_vec::IndexVec;
 use std::{convert::Infallible, ops::ControlFlow};
 
 // === ClauseCx Core === //
@@ -82,6 +84,14 @@ use std::{convert::Infallible, ops::ControlFlow};
 pub struct ClauseCx<'tcx> {
     ocx: ObligationCx<'tcx>,
     coherence: &'tcx CoherenceMap,
+    universal_vars: IndexVec<UniversalTyVar, UniversalTyVarDescriptor>,
+}
+
+#[derive(Clone)]
+struct UniversalTyVarDescriptor {
+    src_info: UniversalTyVarSourceInfo,
+    regular_clauses: Option<TraitClauseList>,
+    elaborated_clauses: Option<TraitClauseList>,
 }
 
 impl<'tcx> ClauseCx<'tcx> {
@@ -89,6 +99,7 @@ impl<'tcx> ClauseCx<'tcx> {
         Self {
             ocx: ObligationCx::new(tcx, mode),
             coherence,
+            universal_vars: IndexVec::new(),
         }
     }
 
@@ -143,7 +154,7 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 }
 
-// Forwards
+// Basic operations
 impl<'tcx> ClauseCx<'tcx> {
     pub fn mode(&self) -> UnifyCxMode {
         self.ucx().mode()
@@ -167,6 +178,48 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn fresh_re_infer(&mut self) -> Re {
         self.ucx_mut().fresh_re_infer()
+    }
+
+    pub fn fresh_re_universal(&mut self, src_info: UniversalReVarSourceInfo) -> Re {
+        self.ucx_mut().fresh_re_universal(src_info)
+    }
+
+    pub fn lookup_universal_re_src_info(
+        &mut self,
+        var: UniversalReVar,
+    ) -> UniversalReVarSourceInfo {
+        self.ucx_mut().lookup_universal_re_src_info(var)
+    }
+
+    pub fn permit_re_universal_outlives(&mut self, lhs: Re, rhs: Re) {
+        self.ucx_mut().permit_re_universal_outlives(lhs, rhs);
+    }
+
+    pub fn fresh_ty_universal_var(&mut self, src_info: UniversalTyVarSourceInfo) -> UniversalTyVar {
+        self.universal_vars.push(UniversalTyVarDescriptor {
+            src_info,
+            regular_clauses: None,
+            elaborated_clauses: None,
+        })
+    }
+
+    pub fn fresh_ty_universal(&mut self, src_info: UniversalTyVarSourceInfo) -> Ty {
+        self.tcx()
+            .intern(TyKind::UniversalVar(self.fresh_ty_universal_var(src_info)))
+    }
+
+    pub fn init_ty_universal_clauses(&mut self, var: UniversalTyVar, clauses: TraitClauseList) {
+        let descriptor = &mut self.universal_vars[var];
+
+        assert!(descriptor.regular_clauses.is_none());
+        descriptor.regular_clauses = Some(clauses);
+    }
+
+    pub fn lookup_universal_ty_src_info(
+        &mut self,
+        var: UniversalTyVar,
+    ) -> UniversalTyVarSourceInfo {
+        self.universal_vars[var].src_info
     }
 
     pub fn oblige_re_and_re(
@@ -210,18 +263,238 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 }
 
-// === Ty & Clause Relations === //
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-struct ImplFreshInfer {
-    target: Ty,
-    trait_: TyOrReList,
-    impl_generics: TyOrReList,
-    impl_generic_clauses: ListOfTraitClauseList,
-}
+// === Importing === //
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn oblige_ty_and_clause(
+    pub fn importer<'a>(
+        &'a mut self,
+        self_ty: Ty,
+        sig_universal_substs: &'a [GenericSubst],
+    ) -> ClauseCxImporter<'a, 'tcx> {
+        ClauseCxImporter {
+            ccx: self,
+            self_ty,
+            sig_universal_substs,
+        }
+    }
+
+    pub fn import_binder_list_as_universal(
+        &mut self,
+        self_ty: Ty,
+        binders: &[Obj<GenericBinder>],
+    ) -> Vec<GenericSubst> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        // Produce a substitution for each binder.
+        let substs = binders
+            .iter()
+            .map(|&binder| {
+                let substs = binder
+                    .r(s)
+                    .defs
+                    .iter()
+                    .map(|&generic| match generic {
+                        AnyGeneric::Re(generic) => TyOrRe::Re(
+                            self.fresh_re_universal(UniversalReVarSourceInfo::Root(generic)),
+                        ),
+                        AnyGeneric::Ty(generic) => TyOrRe::Ty(
+                            self.fresh_ty_universal(UniversalTyVarSourceInfo::Root(generic)),
+                        ),
+                    })
+                    .collect::<Vec<_>>();
+
+                let substs = tcx.intern_list(&substs);
+
+                GenericSubst { binder, substs }
+            })
+            .collect::<Vec<_>>();
+
+        // Instantiate each generic's clauses and register their obligations.
+        for &subst in &substs {
+            for (&generic, &subst) in subst.binder.r(s).defs.iter().zip(subst.substs.r(s)) {
+                match (generic, subst) {
+                    (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
+                        for &clause in generic.r(s).clauses.value.r(s) {
+                            let clause = self.importer(self_ty, &substs).fold_clause(clause);
+
+                            let TraitClause::Outlives(allowed_to_outlive) = clause else {
+                                unreachable!()
+                            };
+
+                            self.permit_re_universal_outlives(target, allowed_to_outlive);
+                        }
+                    }
+                    (AnyGeneric::Ty(generic), TyOrRe::Ty(target)) => {
+                        let TyKind::UniversalVar(target) = *target.r(s) else {
+                            unreachable!()
+                        };
+
+                        let clauses = self
+                            .importer(self_ty, &substs)
+                            .fold_clause_list(generic.r(s).clauses.value);
+
+                        self.wf_visitor().visit(clauses);
+                        self.init_ty_universal_clauses(target, clauses);
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+
+        substs
+    }
+
+    pub fn import_binder_list_as_infer(
+        &mut self,
+        self_ty: Ty,
+        binders: &[Obj<GenericBinder>],
+    ) -> Vec<GenericSubst> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        // Produce a substitution for each binder.
+        let substs = binders
+            .iter()
+            .map(|&binder| {
+                let substs = binder
+                    .r(s)
+                    .defs
+                    .iter()
+                    .map(|&generic| match generic {
+                        AnyGeneric::Re(_) => TyOrRe::Re(self.fresh_re_infer()),
+                        AnyGeneric::Ty(_) => TyOrRe::Ty(self.fresh_ty_infer()),
+                    })
+                    .collect::<Vec<_>>();
+
+                let substs = tcx.intern_list(&substs);
+
+                GenericSubst { binder, substs }
+            })
+            .collect::<Vec<_>>();
+
+        // Register clause obligations.
+        for &subst in &substs {
+            for (&generic, &subst) in subst.binder.r(s).defs.iter().zip(subst.substs.r(s)) {
+                match (generic, subst) {
+                    (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
+                        for &clause in generic.r(s).clauses.value.r(s) {
+                            let clause = self.importer(self_ty, &substs).fold_clause(clause);
+
+                            let TraitClause::Outlives(must_outlive) = clause else {
+                                unreachable!()
+                            };
+
+                            self.oblige_re_and_re(
+                                ObligationReason::ImplConstraint,
+                                target,
+                                must_outlive,
+                                RelationMode::LhsOntoRhs,
+                            );
+                        }
+                    }
+                    (AnyGeneric::Ty(generic), TyOrRe::Ty(target)) => {
+                        let clauses = self
+                            .importer(self_ty, &substs)
+                            .fold_clause_list(generic.r(s).clauses.value);
+
+                        self.wf_visitor().visit(clauses);
+
+                        self.oblige_ty_and_clauses(
+                            ObligationReason::ImplConstraint,
+                            target,
+                            clauses,
+                        );
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+
+        substs
+    }
+}
+
+pub struct ClauseCxImporter<'a, 'tcx> {
+    pub ccx: &'a mut ClauseCx<'tcx>,
+    pub self_ty: Ty,
+    pub sig_universal_substs: &'a [GenericSubst],
+}
+
+impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
+    type Error = Infallible;
+
+    fn tcx(&self) -> &'tcx TyCtxt {
+        self.ccx.tcx()
+    }
+
+    fn try_fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
+        let s = self.session();
+
+        Ok(match *ty.r(s) {
+            TyKind::SigThis => self.self_ty,
+            TyKind::SigExplicitInfer => self.ccx.fresh_ty_infer(),
+            TyKind::SigUniversal(generic) => self
+                .sig_universal_substs
+                .iter()
+                .find(|v| v.binder == generic.r(s).binder.def)
+                .expect("no substitutions provided for signature universal")
+                .substs
+                .r(s)[generic.r(s).binder.idx as usize]
+                .unwrap_ty(),
+
+            TyKind::Simple(_)
+            | TyKind::Reference(_, _, _)
+            | TyKind::Adt(_)
+            | TyKind::Trait(_)
+            | TyKind::Tuple(_)
+            | TyKind::FnDef(_, _)
+            | TyKind::InferVar(_)
+            | TyKind::UniversalVar(_)
+            | TyKind::Error(_) => return self.super_ty(ty),
+        })
+    }
+
+    fn try_fold_re(&mut self, re: Re) -> Result<Re, Self::Error> {
+        let s = self.session();
+
+        Ok(match re {
+            Re::SigExplicitInfer => self.ccx.fresh_re_infer(),
+            Re::SigUniversal(generic) => self
+                .sig_universal_substs
+                .iter()
+                .find(|v| v.binder == generic.r(s).binder.def)
+                .expect("no substitutions provided for signature universal")
+                .substs
+                .r(s)[generic.r(s).binder.idx as usize]
+                .unwrap_re(),
+            Re::Gc | Re::InferVar(_) | Re::UniversalVar(_) | Re::Erased | Re::Error(_) => {
+                return self.super_re(re);
+            }
+        })
+    }
+}
+
+// === Elaboration === //
+
+impl<'tcx> ClauseCx<'tcx> {
+    pub fn regular_ty_universal_clauses(&self, var: UniversalTyVar) -> TraitClauseList {
+        self.universal_vars[var].regular_clauses.unwrap()
+    }
+
+    pub fn elaborate_ty_universal_clauses(&mut self, var: UniversalTyVar) -> TraitClauseList {
+        if let Some(elaborated) = self.universal_vars[var].elaborated_clauses {
+            return elaborated;
+        }
+
+        todo!()
+    }
+}
+
+// === Ty & Clause Relations === //
+
+impl<'tcx> ClauseCx<'tcx> {
+    pub fn oblige_ty_and_clauses(
         &mut self,
         reason: ObligationReason,
         lhs: Ty,
@@ -257,7 +530,7 @@ impl<'tcx> ClauseCx<'tcx> {
             TyKind::UniversalVar(universal) => {
                 match self
                     .clone()
-                    .try_select_inherent_impl(tcx.elaborate_generic_clauses(universal, None), rhs)
+                    .try_select_inherent_impl(self.elaborate_ty_universal_clauses(universal), rhs)
                 {
                     Ok(res) => {
                         return res.into_obligation_res(self);
@@ -419,7 +692,7 @@ impl<'tcx> ClauseCx<'tcx> {
                         self.oblige_re_and_clause(ObligationReason::Structural, lhs, rhs);
                     }
                     TyOrRe::Ty(lhs) => {
-                        self.oblige_ty_and_clause(ObligationReason::Structural, lhs, rhs);
+                        self.oblige_ty_and_clauses(ObligationReason::Structural, lhs, rhs);
                     }
                 },
             }
@@ -498,7 +771,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     self.oblige_re_and_clause(ObligationReason::Structural, re, clause);
                 }
                 TyOrRe::Ty(ty) => {
-                    self.oblige_ty_and_clause(ObligationReason::ImplConstraint, ty, clause);
+                    self.oblige_ty_and_clauses(ObligationReason::ImplConstraint, ty, clause);
                 }
             }
         }
@@ -528,7 +801,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     );
                 }
                 TraitParam::Unspecified(additional_clauses) => {
-                    self.oblige_ty_and_clause(
+                    self.oblige_ty_and_clauses(
                         ObligationReason::Structural,
                         instance_ty,
                         additional_clauses,
@@ -538,60 +811,6 @@ impl<'tcx> ClauseCx<'tcx> {
         }
 
         Ok(ConfirmationResult::Success(self))
-    }
-
-    fn instantiate_fresh_impl_vars(&mut self, candidate: Obj<ImplItem>) -> ImplFreshInfer {
-        let tcx = self.tcx();
-        let s = self.session();
-
-        // Define fresh variables describing the substitutions to be made.
-        let binder = candidate.r(s).generics;
-        let impl_generics = binder
-            .r(s)
-            .defs
-            .iter()
-            .map(|generic| match generic {
-                AnyGeneric::Re(_) => TyOrRe::Re(self.fresh_re_infer()),
-                AnyGeneric::Ty(_) => TyOrRe::Ty(self.fresh_ty_infer()),
-            })
-            .collect::<Vec<_>>();
-
-        let impl_generics = tcx.intern_list(&impl_generics);
-        let substs = BinderSubstitution {
-            binder,
-            substs: impl_generics,
-        };
-
-        // Substitute the target type
-        let target = SubstitutionFolder::new(tcx, tcx.intern(TyKind::SigThis), Some(substs))
-            .fold_ty(candidate.r(s).target.value);
-
-        // Substitute inference clauses
-        let inf_var_clauses = binder
-            .r(s)
-            .defs
-            .iter()
-            .map(|generic| {
-                let clauses = match generic {
-                    AnyGeneric::Re(generic) => generic.r(s).clauses.value,
-                    AnyGeneric::Ty(generic) => generic.r(s).clauses.value,
-                };
-
-                SubstitutionFolder::new(tcx, target, Some(substs)).fold_clause_list(clauses)
-            })
-            .collect::<Vec<_>>();
-
-        let impl_generic_clauses = tcx.intern_list(&inf_var_clauses);
-
-        let trait_ = SubstitutionFolder::new(tcx, target, Some(substs))
-            .fold_ty_or_re_list(candidate.r(s).trait_.unwrap().value.params);
-
-        ImplFreshInfer {
-            target,
-            trait_,
-            impl_generics,
-            impl_generic_clauses,
-        }
     }
 }
 
@@ -809,7 +1028,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
 }
 
 impl ClauseTyWfVisitor<'_, '_> {
-    fn check_generics(&mut self, binder: Obj<GenericBinder>, params: SpannedTyOrReList) {
+    fn check_generics(&mut self, binder: Obj<SigUniversalBinder>, params: SpannedTyOrReList) {
         let tcx = self.tcx();
         let s = self.session();
 
@@ -825,7 +1044,7 @@ impl ClauseTyWfVisitor<'_, '_> {
 
         for (actual, requirements) in params.iter(tcx).zip(&binder.r(s).defs) {
             match (actual.view(tcx), requirements) {
-                (SpannedTyOrReView::Re(actual), AnyGeneric::Re(requirements)) => {
+                (SpannedTyOrReView::Re(actual), AnySigUniversal::Re(requirements)) => {
                     let requirements =
                         trait_subst.fold_spanned_clause_list(*requirements.r(s).clauses);
 
@@ -838,11 +1057,11 @@ impl ClauseTyWfVisitor<'_, '_> {
                         requirements.value,
                     );
                 }
-                (SpannedTyOrReView::Ty(actual), AnyGeneric::Ty(requirements)) => {
+                (SpannedTyOrReView::Ty(actual), AnySigUniversal::Ty(requirements)) => {
                     let requirements =
                         trait_subst.fold_spanned_clause_list(*requirements.r(s).clauses);
 
-                    self.ccx.oblige_ty_and_clause(
+                    self.ccx.oblige_ty_and_clauses(
                         ObligationReason::WfForTraitParam {
                             use_site: actual.own_span(),
                             obligation_site: requirements.own_span(),

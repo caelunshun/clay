@@ -1,13 +1,13 @@
 use crate::{
     base::{
         Diag,
-        arena::{HasListInterner, LateInit, Obj},
+        arena::{HasListInterner, Obj},
     },
     semantic::{
         analysis::{TyCtxt, TyShapeMap},
         syntax::{
-            Crate, FnDef, GenericBinder, GenericSolveStep, ImplItem, Re, SolidTyShape,
-            SolidTyShapeKind, TraitClause, TraitParam, TraitSpec, Ty, TyOrRe, TyShape,
+            Crate, FnDef, GenericBinder, ImplItem, Re, SolidTyShape, SolidTyShapeKind, TraitClause,
+            TraitParam, TraitSpec, Ty, TyOrRe, TyShape,
         },
     },
 };
@@ -102,10 +102,10 @@ impl CoherenceMap {
     }
 }
 
-// === Order Solving === //
+// === Impl Generic Covering === //
 
 impl TyCtxt {
-    pub fn determine_impl_generic_solve_order(&self, def: Obj<ImplItem>) {
+    pub fn check_impl_generic_covering(&self, def: Obj<ImplItem>) {
         let s = &self.session;
 
         define_index_type! {
@@ -125,6 +125,12 @@ impl TyCtxt {
             blockers: u32,
             step_idx: GenericSolveStep,
             spec: TraitSpec,
+        }
+
+        #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+        struct GenericSolveStep {
+            pub generic_idx: u32,
+            pub clause_idx: u32,
         }
 
         let generic_defs = &def.r(s).generics.r(s).defs;
@@ -314,7 +320,5 @@ impl TyCtxt {
                 Diag::span_err(def.span(s), "generic parameter not covered by `impl`").emit();
             }
         }
-
-        LateInit::init(&def.r(s).optimal_solve_order, solve_order);
     }
 }

@@ -220,13 +220,6 @@ pub struct ImplItem {
     pub trait_: Option<SpannedTraitInstance>,
     pub target: SpannedTy,
     pub methods: LateInit<Vec<Obj<FnDef>>>,
-    pub optimal_solve_order: LateInit<Vec<GenericSolveStep>>,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct GenericSolveStep {
-    pub generic_idx: u32,
-    pub clause_idx: u32,
 }
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
@@ -348,6 +341,12 @@ pub struct TypeGeneric {
 pub struct PosInBinder {
     pub def: Obj<GenericBinder>,
     pub idx: u32,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct GenericSubst {
+    pub binder: Obj<GenericBinder>,
+    pub substs: TyOrReList,
 }
 
 // === Type === //
@@ -476,6 +475,17 @@ define_index_type! {
 
 define_index_type! {
     pub struct UniversalReVar = u32;
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum UniversalReVarSourceInfo {
+    Root(Obj<RegionGeneric>),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum UniversalTyVarSourceInfo {
+    Root(Obj<TypeGeneric>),
+    Projection(UniversalTyVar, TraitInstance, Symbol),
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

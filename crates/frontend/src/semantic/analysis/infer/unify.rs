@@ -5,7 +5,7 @@ use crate::{
         syntax::{
             InferReVar, InferTyVar, Mutability, Re, ReVariance, RelationMode, SpannedTy,
             SpannedTyView, TraitClause, TraitClauseList, TraitParam, Ty, TyKind, TyOrRe,
-            UniversalReVar,
+            UniversalReVar, UniversalReVarSourceInfo,
         },
     },
     utils::hash::FxHashSet,
@@ -188,12 +188,19 @@ impl<'tcx> UnifyCx<'tcx> {
         }
     }
 
-    pub fn fresh_re_universal(&mut self) -> Re {
+    pub fn fresh_re_universal(&mut self, src_info: UniversalReVarSourceInfo) -> Re {
         if let Some(regions) = &mut self.regions {
-            Re::UniversalVar(regions.fresh_universal())
+            Re::UniversalVar(regions.fresh_universal(src_info))
         } else {
             Re::Erased
         }
+    }
+
+    pub fn lookup_universal_re_src_info(&self, var: UniversalReVar) -> UniversalReVarSourceInfo {
+        self.regions
+            .as_ref()
+            .expect("cannot `lookup_universal_re_src_info` in a region-blind context")
+            .lookup_universal_src_info(var)
     }
 
     pub fn permit_re_universal_outlives(&mut self, lhs: Re, rhs: Re) {
@@ -824,8 +831,8 @@ impl TyInferTracker {
 
 #[derive(Debug, Clone)]
 struct ReInferTracker {
-    /// The set of universal regions we're tracking.
-    tracked_universals: IndexVec<UniversalReVar, TrackedUniversal>,
+    /// The set of universal region variables we're tracking.
+    universals: IndexVec<UniversalReVar, TrackedUniversal>,
 
     /// A map from `ReInferIndex` (which represents either the `'gc` region, a tracked inference
     /// region, or a tracked universal region) to the actual region being represented.
@@ -847,6 +854,7 @@ impl AnyReIndex {
 struct TrackedUniversal {
     index: AnyReIndex,
     outlives: BitSet,
+    src_info: UniversalReVarSourceInfo,
 }
 
 #[derive(Debug, Clone)]
@@ -865,7 +873,7 @@ enum TrackedAnyKind {
 impl Default for ReInferTracker {
     fn default() -> Self {
         Self {
-            tracked_universals: IndexVec::default(),
+            universals: IndexVec::default(),
             tracked_any: IndexVec::from_iter([TrackedAny {
                 kind: TrackedAnyKind::Gc,
                 outlived_by: SmallVec::new(),
@@ -887,23 +895,30 @@ impl ReInferTracker {
         var
     }
 
-    fn fresh_universal(&mut self) -> UniversalReVar {
+    fn fresh_universal(&mut self, src_info: UniversalReVarSourceInfo) -> UniversalReVar {
         let index = self.tracked_any.push(TrackedAny {
-            kind: TrackedAnyKind::Universal(self.tracked_universals.next_idx()),
+            kind: TrackedAnyKind::Universal(self.universals.next_idx()),
             outlived_by: SmallVec::new(),
         });
 
         let mut outlives = BitSet::new();
         outlives.insert(index.index());
 
-        self.tracked_universals
-            .push(TrackedUniversal { index, outlives })
+        self.universals.push(TrackedUniversal {
+            index,
+            outlives,
+            src_info,
+        })
+    }
+
+    fn lookup_universal_src_info(&self, var: UniversalReVar) -> UniversalReVarSourceInfo {
+        self.universals[var].src_info
     }
 
     fn region_to_idx(&mut self, re: Re) -> Option<AnyReIndex> {
         match re {
             Re::Gc => Some(AnyReIndex::GC),
-            Re::UniversalVar(universal) => Some(self.tracked_universals[universal].index),
+            Re::UniversalVar(universal) => Some(self.universals[universal].index),
             Re::InferVar(idx) => Some(AnyReIndex::from_raw(idx.0)),
             Re::SigExplicitInfer | Re::SigUniversal(_) | Re::Erased => unreachable!(),
             Re::Error(_) => None,
@@ -928,27 +943,19 @@ impl ReInferTracker {
         self.tracked_any[rhs].outlived_by.push(lhs);
 
         // For every universal region, update the outlives graph.
-        for universal in self.tracked_universals.indices() {
-            if !self.tracked_universals[universal]
-                .outlives
-                .contains(rhs.index())
-            {
+        for universal in self.universals.indices() {
+            if !self.universals[universal].outlives.contains(rhs.index()) {
                 continue;
             }
 
-            if self.tracked_universals[universal]
-                .outlives
-                .contains(lhs.index())
-            {
+            if self.universals[universal].outlives.contains(lhs.index()) {
                 continue;
             }
 
             let mut dfs_stack = vec![lhs];
 
             while let Some(top) = dfs_stack.pop() {
-                self.tracked_universals[universal]
-                    .outlives
-                    .insert(top.index());
+                self.universals[universal].outlives.insert(top.index());
 
                 let offending_re = match self.tracked_any[top].kind {
                     TrackedAnyKind::Gc => Some(Re::Gc),
@@ -966,7 +973,7 @@ impl ReInferTracker {
                 }
 
                 for &outlived_by in &self.tracked_any[top].outlived_by {
-                    if self.tracked_universals[universal]
+                    if self.universals[universal]
                         .outlives
                         .contains(outlived_by.index())
                     {

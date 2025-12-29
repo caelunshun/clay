@@ -7,8 +7,8 @@ use crate::{
     parse::token::Ident,
     semantic::{
         analysis::{
-            ClauseCx, CoherenceMap, SubstitutionFolder, TyCtxt,
-            TyFolderInfalliblePreservesSpans as _, TyVisitorInfallibleExt, UnifyCxMode,
+            ClauseCx, CoherenceMap, TyCtxt, TyFolderInfalliblePreservesSpans as _,
+            TyVisitorInfallibleExt, UnifyCxMode,
         },
         syntax::{
             AdtCtor, AdtInstance, AdtItem, AdtKind, AnyGeneric, Crate, FuncItem, GenericBinder,
