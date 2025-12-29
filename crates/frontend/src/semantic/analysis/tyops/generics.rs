@@ -1,14 +1,11 @@
 use crate::{
     base::{
-        arena::{HasInterner, HasListInterner, LateInit, Obj},
+        arena::{LateInit, Obj},
         syntax::Span,
     },
     semantic::{
         analysis::{TyCtxt, TyVisitable, TyVisitor, TyVisitorExt},
-        syntax::{
-            AnyGeneric, GenericBinder, PosInBinder, Re, RegionGeneric, TraitInstance, TraitParam,
-            TraitSpec, TyKind, TyOrRe, TyOrReList, TypeGeneric,
-        },
+        syntax::{AnyGeneric, GenericBinder, PosInBinder, RegionGeneric, TypeGeneric},
     },
 };
 use derive_where::derive_where;
@@ -34,41 +31,6 @@ impl TyCtxt {
         }
 
         binder
-    }
-
-    pub fn convert_generic_binder_into_instance_args(
-        &self,
-        binder: Obj<GenericBinder>,
-    ) -> TyOrReList {
-        let s = &self.session;
-
-        self.intern_list(
-            &binder
-                .r(s)
-                .defs
-                .iter()
-                .map(|generic| match generic {
-                    AnyGeneric::Re(generic) => TyOrRe::Re(Re::SigUniversal(*generic)),
-                    AnyGeneric::Ty(generic) => {
-                        TyOrRe::Ty(self.intern(TyKind::SigUniversal(*generic)))
-                    }
-                })
-                .collect::<Vec<_>>(),
-        )
-    }
-
-    pub fn convert_trait_instance_to_spec(&self, instance: TraitInstance) -> TraitSpec {
-        TraitSpec {
-            def: instance.def,
-            params: self.intern_list(
-                &instance
-                    .params
-                    .r(&self.session)
-                    .iter()
-                    .map(|&arg| TraitParam::Equals(arg))
-                    .collect::<Vec<_>>(),
-            ),
-        }
     }
 
     pub fn mentioned_sig_generics<B>(

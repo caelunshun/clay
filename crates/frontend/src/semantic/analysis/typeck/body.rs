@@ -19,7 +19,7 @@ impl CrateTypeckVisitor<'_> {
         };
 
         // WF-check the signature.
-        self.visit_generic_binder(self_ty, def.r(s).generics);
+        self.visit_simple_generic_binder(self_ty, def.r(s).generics);
 
         // TODO
         // if let Some(self_param) = *def.r(s).self_param {

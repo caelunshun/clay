@@ -2,21 +2,22 @@ use crate::{
     base::{
         Diag, Session,
         arena::{HasInterner, HasListInterner, Obj},
+        syntax::Span,
     },
     semantic::{
         analysis::{
             CoherenceMap, ConfirmationResult, FloatingInferVar, ObligationCx, ObligationKind,
             ObligationReason, ObligationResult, SelectionRejected, SelectionResult, TyCtxt,
             TyFolder, TyFolderInfallible as _, TyFolderInfalliblePreservesSpans as _,
-            TyFolderSuper, TyVisitor, TyVisitorInfallibleExt, UnboundVarHandlingMode, UnifyCx,
-            UnifyCxMode,
+            TyFolderPreservesSpans, TyFolderSuper, TyVisitor, TyVisitorInfallibleExt,
+            UnboundVarHandlingMode, UnifyCx, UnifyCxMode,
         },
         syntax::{
             AnyGeneric, GenericBinder, GenericSubst, ImplItem, InferTyVar, Re, RelationMode,
             SpannedAdtInstance, SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec,
-            SpannedTy, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView, SpannedTyView,
-            TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
-            UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
+            SpannedTy, SpannedTyOrRe, SpannedTyOrReList, SpannedTyView, TraitClause,
+            TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, UniversalReVar,
+            UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -269,12 +270,12 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn importer<'a>(
         &'a mut self,
         self_ty: Ty,
-        sig_universal_substs: &'a [GenericSubst],
+        sig_generic_substs: &'a [GenericSubst],
     ) -> ClauseCxImporter<'a, 'tcx> {
         ClauseCxImporter {
             ccx: self,
             self_ty,
-            sig_universal_substs,
+            sig_generic_substs,
         }
     }
 
@@ -334,7 +335,6 @@ impl<'tcx> ClauseCx<'tcx> {
                             .importer(self_ty, &substs)
                             .fold_clause_list(generic.r(s).clauses.value);
 
-                        self.wf_visitor().visit(clauses);
                         self.init_ty_universal_clauses(target, clauses);
                     }
                     _ => unreachable!(),
@@ -374,19 +374,50 @@ impl<'tcx> ClauseCx<'tcx> {
             .collect::<Vec<_>>();
 
         // Register clause obligations.
-        for &subst in &substs {
-            for (&generic, &subst) in subst.binder.r(s).defs.iter().zip(subst.substs.r(s)) {
+        self.oblige_binder_substs_meet_clauses(
+            self_ty,
+            &substs,
+            |_this, _subst_idx, _param_idx, clause| ObligationReason::GenericRequirements {
+                clause,
+            },
+        );
+
+        substs
+    }
+
+    pub fn oblige_binder_substs_meet_clauses(
+        &mut self,
+        self_ty: Ty,
+        substs: &[GenericSubst],
+        mut reason_gen: impl FnMut(&mut Self, usize, usize, Span) -> ObligationReason,
+    ) {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        // Register clause obligations.
+        for (subst_idx, &subst) in substs.iter().enumerate() {
+            for (param_idx, (&generic, &subst)) in subst
+                .binder
+                .r(s)
+                .defs
+                .iter()
+                .zip(subst.substs.r(s))
+                .enumerate()
+            {
                 match (generic, subst) {
                     (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
-                        for &clause in generic.r(s).clauses.value.r(s) {
-                            let clause = self.importer(self_ty, &substs).fold_clause(clause);
+                        for clause in generic.r(s).clauses.iter(tcx) {
+                            let clause_span = clause.own_span();
+                            let clause = self.importer(self_ty, &substs).fold_clause(clause.value);
 
                             let TraitClause::Outlives(must_outlive) = clause else {
                                 unreachable!()
                             };
 
+                            let reason = reason_gen(self, subst_idx, param_idx, clause_span);
+
                             self.oblige_re_and_re(
-                                ObligationReason::ImplConstraint,
+                                reason,
                                 target,
                                 must_outlive,
                                 RelationMode::LhsOntoRhs,
@@ -396,30 +427,35 @@ impl<'tcx> ClauseCx<'tcx> {
                     (AnyGeneric::Ty(generic), TyOrRe::Ty(target)) => {
                         let clauses = self
                             .importer(self_ty, &substs)
-                            .fold_clause_list(generic.r(s).clauses.value);
+                            .fold_spanned_clause_list(*generic.r(s).clauses);
 
-                        self.wf_visitor().visit(clauses);
+                        for clause in clauses.iter(tcx) {
+                            let reason = reason_gen(self, subst_idx, param_idx, clause.own_span());
 
-                        self.oblige_ty_and_clauses(
-                            ObligationReason::ImplConstraint,
-                            target,
-                            clauses,
-                        );
+                            match clause.value {
+                                TraitClause::Outlives(rhs) => {
+                                    self.oblige_ty_and_re(reason, target, rhs);
+                                }
+                                TraitClause::Trait(rhs) => {
+                                    self.oblige_ty_and_trait(reason, target, rhs);
+                                }
+                            }
+                        }
                     }
                     _ => unreachable!(),
                 }
             }
         }
-
-        substs
     }
 }
 
 pub struct ClauseCxImporter<'a, 'tcx> {
     pub ccx: &'a mut ClauseCx<'tcx>,
     pub self_ty: Ty,
-    pub sig_universal_substs: &'a [GenericSubst],
+    pub sig_generic_substs: &'a [GenericSubst],
 }
+
+impl<'tcx> TyFolderPreservesSpans<'tcx> for ClauseCxImporter<'_, 'tcx> {}
 
 impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
     type Error = Infallible;
@@ -435,10 +471,10 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
             TyKind::SigThis => self.self_ty,
             TyKind::SigExplicitInfer => self.ccx.fresh_ty_infer(),
             TyKind::SigUniversal(generic) => self
-                .sig_universal_substs
+                .sig_generic_substs
                 .iter()
                 .find(|v| v.binder == generic.r(s).binder.def)
-                .expect("no substitutions provided for signature universal")
+                .expect("no substitutions provided for signature generic")
                 .substs
                 .r(s)[generic.r(s).binder.idx as usize]
                 .unwrap_ty(),
@@ -461,10 +497,10 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
         Ok(match re {
             Re::SigExplicitInfer => self.ccx.fresh_re_infer(),
             Re::SigUniversal(generic) => self
-                .sig_universal_substs
+                .sig_generic_substs
                 .iter()
                 .find(|v| v.binder == generic.r(s).binder.def)
-                .expect("no substitutions provided for signature universal")
+                .expect("no substitutions provided for signature generic")
                 .substs
                 .r(s)[generic.r(s).binder.idx as usize]
                 .unwrap_re(),
@@ -707,24 +743,37 @@ impl<'tcx> ClauseCx<'tcx> {
         rhs: Obj<ImplItem>,
         spec: TraitSpec,
     ) -> SelectionResult<Self> {
-        let tcx = self.tcx();
         let s = self.session();
 
-        // Replace universal qualifications in `impl` with inference variables
-        let rhs_fresh = self.instantiate_fresh_impl_vars(rhs);
+        // Obtain inference variables for all generics in the `impl` and tentatively create
+        // obligations for them.
+        let trait_substs = self.import_binder_list_as_infer(lhs, &[rhs.r(s).generics]);
+
+        // Import the target type and trait. WF obligations are not needed on these types because
+        // the `impl` itself has been WF-checked for all types compatible with the generic
+        // parameters.
+        let target_ty = self
+            .importer(lhs, &trait_substs)
+            .fold_ty(rhs.r(s).target.value);
+
+        let target_trait = self
+            .importer(lhs, &trait_substs)
+            .fold_trait_instance(rhs.r(s).trait_.unwrap().value);
 
         // Does the `lhs` type match the `rhs`'s target type?
         if self
             .ucx_mut()
-            .unify_ty_and_ty(lhs, rhs_fresh.target, RelationMode::Equate)
+            .unify_ty_and_ty(lhs, target_ty, RelationMode::Equate)
             .is_err()
         {
             return Err(SelectionRejected);
         }
 
         // See whether our RHS trait's generic parameters can be satisfied by this `impl`.
-        for (&instance, &required_param) in rhs_fresh
-            .trait_
+        debug_assert_eq!(target_trait.def, spec.def);
+
+        for (&instance, &required_param) in target_trait
+            .params
             .r(s)
             .iter()
             .zip(spec.params.r(s))
@@ -758,27 +807,9 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         }
 
-        // Obtain all required sub-obligations from generic parameters on the `impl`.
-        for &infer_step in rhs.r(s).optimal_solve_order.iter() {
-            let var = rhs_fresh.impl_generics.r(s)[infer_step.generic_idx as usize];
-            let clause = rhs_fresh.impl_generic_clauses.r(s)[infer_step.generic_idx as usize].r(s)
-                [infer_step.clause_idx as usize];
-
-            let clause = tcx.intern_list(&[clause]);
-
-            match var {
-                TyOrRe::Re(re) => {
-                    self.oblige_re_and_clause(ObligationReason::Structural, re, clause);
-                }
-                TyOrRe::Ty(ty) => {
-                    self.oblige_ty_and_clauses(ObligationReason::ImplConstraint, ty, clause);
-                }
-            }
-        }
-
-        // See whether the user-supplied associated type constraints match what we inferred.
-        for (&instance_ty, &required_param) in rhs_fresh
-            .trait_
+        // Register obligations for associated types.
+        for (&instance_ty, &required_param) in target_trait
+            .params
             .r(s)
             .iter()
             .zip(spec.params.r(s))
@@ -911,7 +942,13 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     pub fn run_oblige_ty_wf(&mut self, ty: Ty) -> ObligationResult {
-        // TODO: Wait for inference resolution and perform coinductivity checks to break WF cycles
+        if matches!(
+            self.peel_ty_infer_var(ty).r(self.session()),
+            TyKind::InferVar(_)
+        ) {
+            return ObligationResult::NotReady;
+        }
+
         self.wf_visitor().visit(ty);
 
         ObligationResult::Success
@@ -945,28 +982,28 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
                 self.clause_applies_to = old_clause_applies_to;
             }
             SpannedTyView::Reference(re, _muta, pointee) => {
-                self.ccx.oblige_ty_and_re(
-                    ObligationReason::WfForReference(pointee.own_span()),
-                    pointee.value,
-                    re.value,
-                );
+                self.ccx
+                    .oblige_ty_and_re(ObligationReason::Structural, pointee.value, re.value);
 
                 self.walk_spanned(ty);
             }
             SpannedTyView::FnDef(..) => {
                 todo!()
             }
-            SpannedTyView::SigThis
-            | SpannedTyView::Simple(_)
+            SpannedTyView::Simple(_)
             | SpannedTyView::Adt(_)
             | SpannedTyView::Tuple(_)
-            | SpannedTyView::SigExplicitInfer
-            | SpannedTyView::SigUniversal(_)
-            // FIXME: This shouldn't just be accepted. Defer these!!
-            | SpannedTyView::InferVar(_)
+            | SpannedTyView::UniversalVar(_)
             | SpannedTyView::Error(_) => {
                 self.walk_spanned(ty);
             }
+            SpannedTyView::InferVar(_) => {
+                self.ccx
+                    .oblige_ty_wf(ObligationReason::WfDeferred(ty.own_span()), ty.value);
+            }
+            SpannedTyView::SigThis
+            | SpannedTyView::SigExplicitInfer
+            | SpannedTyView::SigUniversal(_) => unreachable!(),
         }
 
         ControlFlow::Continue(())
@@ -1028,50 +1065,19 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
 }
 
 impl ClauseTyWfVisitor<'_, '_> {
-    fn check_generics(&mut self, binder: Obj<SigUniversalBinder>, params: SpannedTyOrReList) {
+    fn check_generics(&mut self, binder: Obj<GenericBinder>, params: SpannedTyOrReList) {
         let tcx = self.tcx();
-        let s = self.session();
 
-        // Create a folder to replace generics in the trait with the user's supplied generics.
-        let mut trait_subst = SubstitutionFolder {
-            tcx,
-            self_ty: self.clause_applies_to.unwrap(),
-            substitution: Some(BinderSubstitution {
+        self.ccx.oblige_binder_substs_meet_clauses(
+            self.clause_applies_to.unwrap(),
+            &[GenericSubst {
                 binder,
                 substs: params.value,
-            }),
-        };
-
-        for (actual, requirements) in params.iter(tcx).zip(&binder.r(s).defs) {
-            match (actual.view(tcx), requirements) {
-                (SpannedTyOrReView::Re(actual), AnySigUniversal::Re(requirements)) => {
-                    let requirements =
-                        trait_subst.fold_spanned_clause_list(*requirements.r(s).clauses);
-
-                    self.ccx.oblige_re_and_clause(
-                        ObligationReason::WfForTraitParam {
-                            use_site: actual.own_span(),
-                            obligation_site: requirements.own_span(),
-                        },
-                        actual.value,
-                        requirements.value,
-                    );
-                }
-                (SpannedTyOrReView::Ty(actual), AnySigUniversal::Ty(requirements)) => {
-                    let requirements =
-                        trait_subst.fold_spanned_clause_list(*requirements.r(s).clauses);
-
-                    self.ccx.oblige_ty_and_clauses(
-                        ObligationReason::WfForTraitParam {
-                            use_site: actual.own_span(),
-                            obligation_site: requirements.own_span(),
-                        },
-                        actual.value,
-                        requirements.value,
-                    );
-                }
-                _ => unreachable!(),
-            }
-        }
+            }],
+            |_, _subst_idx, param_idx, clause_span| ObligationReason::WfForGenericParam {
+                use_span: params.nth(param_idx, tcx).own_span(),
+                clause_span,
+            },
+        );
     }
 }

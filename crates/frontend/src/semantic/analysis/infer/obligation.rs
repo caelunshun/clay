@@ -35,27 +35,47 @@ impl ObligationKind {
 
 #[derive(Debug, Copy, Clone)]
 pub enum ObligationReason {
-    FunctionBody(Span),
-    WfForTraitParam {
-        use_site: Span,
-        obligation_site: Span,
+    /// This obligation is required to type-check the function body.
+    FunctionBody {
+        at: Span,
     },
-    WfForReference(Span),
-    ImplConstraint,
+
+    /// This obligation is required to satisfy the requirements of a generic parameter for
+    /// well-formedness.
+    WfForGenericParam {
+        use_span: Span,
+        clause_span: Span,
+    },
+
+    /// This obligation is required to satisfy the well-formedness requirements of a reference.
+    WfForReference {
+        pointee: Span,
+    },
+
+    // TODO: This is temporary. WF shouldn't have a stack.
+    WfDeferred(Span),
+
+    /// This obligation is required by a generic parameter's clause list.
+    GenericRequirements {
+        clause: Span,
+    },
+
+    /// This obligation follows implicitly from its parent.
     Structural,
 }
 
 impl ObligationReason {
     pub fn span(self) -> Option<Span> {
         match self {
-            ObligationReason::FunctionBody(span) | ObligationReason::WfForReference(span) => {
-                Some(span)
-            }
-            ObligationReason::WfForTraitParam {
-                use_site,
-                obligation_site,
-            } => Some(use_site.not_dummy().unwrap_or(obligation_site)),
-            ObligationReason::ImplConstraint | ObligationReason::Structural => None,
+            ObligationReason::FunctionBody { at: span }
+            | ObligationReason::WfForReference { pointee: span }
+            | ObligationReason::GenericRequirements { clause: span }
+            | ObligationReason::WfDeferred(span) => Some(span),
+            ObligationReason::WfForGenericParam {
+                use_span,
+                clause_span,
+            } => Some(use_span.not_dummy().unwrap_or(clause_span)),
+            ObligationReason::Structural => None,
         }
     }
 }

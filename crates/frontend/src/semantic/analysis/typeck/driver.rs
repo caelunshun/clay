@@ -12,8 +12,8 @@ use crate::{
         },
         syntax::{
             AdtCtor, AdtInstance, AdtItem, AdtKind, AnyGeneric, Crate, FuncItem, GenericBinder,
-            ImplItem, ItemKind, SpannedTraitClauseList, TraitClause, TraitInstance, TraitItem, Ty,
-            TyKind, TypeGeneric,
+            GenericSubst, ImplItem, ItemKind, SpannedTraitClauseList, TraitClause, TraitInstance,
+            TraitItem, Ty, TyKind, TypeGeneric,
         },
     },
     symbol,
@@ -139,7 +139,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         }
 
         // Now, let's ensure that each generic parameter's clauses are well-formed.
-        self.visit_generic_binder(new_self_ty, new_self_arg_binder);
+        self.visit_simple_generic_binder(new_self_ty, new_self_arg_binder);
 
         // Finally, let's check method signatures and, if a default one is provided, bodies.
         // TODO
@@ -159,7 +159,6 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
             trait_,
             target,
             methods,
-            optimal_solve_order: _,
         } = item.r(s);
 
         let self_ty = item.r(s).target.value;
@@ -187,7 +186,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         }
 
         // Let's ensure that `impl` generics all have well-formed clauses.
-        self.visit_generic_binder(self_ty, *generics);
+        self.visit_simple_generic_binder(self_ty, *generics);
 
         // Finally, let's check method signatures and bodies.
         // TODO
@@ -203,6 +202,9 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         // `Self` refers to the current ADT constructed with its own generic types. Our original
         // generics may have mentioned `Self` by type so we need to construct a new set of generics
         // which are fully explicit.
+        let mut ccx = ClauseCx::new(tcx, self.coherence, UnifyCxMode::RegionAware);
+
+        let sig_generic_substs = ccx.import_binder_list_as_universal(self_ty, binders);
         let new_binder = self
             .tcx
             .clone_generic_binder_without_clauses(def.r(s).generics);
@@ -225,23 +227,34 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         // Now, WF-check the definition.
         match *def.r(s).kind {
             AdtKind::Struct(kind) => {
-                self.visit_adt_ctor(new_self_ty, *kind.r(s).ctor);
+                self.visit_adt_ctor(&mut ccx, new_self_ty, &sig_generic_substs, *kind.r(s).ctor);
             }
             AdtKind::Enum(kind) => {
                 for variant in kind.r(s).variants.iter() {
-                    self.visit_adt_ctor(new_self_ty, *variant.r(s).ctor);
+                    self.visit_adt_ctor(
+                        &mut ccx,
+                        new_self_ty,
+                        &sig_generic_substs,
+                        *variant.r(s).ctor,
+                    );
                 }
             }
         }
     }
 
-    pub fn visit_adt_ctor(&mut self, self_ty: Ty, ctor: Obj<AdtCtor>) {
+    fn visit_adt_ctor(
+        &mut self,
+        ccx: &mut ClauseCx,
+        self_ty: Ty,
+        sig_generic_substs: &[GenericSubst],
+        ctor: Obj<AdtCtor>,
+    ) {
         let s = self.session();
 
         for field in ctor.r(s).fields.iter() {
-            let mut ccx = ClauseCx::new(self.tcx(), self.coherence, UnifyCxMode::RegionAware);
-
-            let field_ty = ccx.instantiator(self_ty).fold_spanned_ty(*field.ty);
+            let field_ty = ccx
+                .importer(self_ty, sig_generic_substs)
+                .fold_spanned_ty(*field.ty);
 
             ccx.wf_visitor().visit_spanned(field_ty);
         }
@@ -253,33 +266,25 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         self.visit_fn_def(*def.r(s).def);
     }
 
-    pub fn visit_generic_binder(&mut self, self_ty: Ty, generics: Obj<GenericBinder>) {
+    pub fn visit_simple_generic_binder(&mut self, self_ty: Ty, generics: Obj<GenericBinder>) {
         let s = self.session();
         let tcx = self.tcx();
 
+        let mut ccx = ClauseCx::new(tcx, self.coherence, UnifyCxMode::RegionAware);
+
+        let sig_generic_substs = ccx.import_binder_list_as_universal(self_ty, &[generics]);
+
         for &generic in &generics.r(s).defs {
-            match generic {
-                AnyGeneric::Re(generic) => {
-                    let mut ccx = ClauseCx::new(self.tcx, self.coherence, UnifyCxMode::RegionAware);
+            let clauses = match generic {
+                AnyGeneric::Re(generic) => *generic.r(s).clauses,
+                AnyGeneric::Ty(generic) => *generic.r(s).clauses,
+            };
 
-                    let clauses = ccx
-                        .instantiator(self_ty)
-                        .fold_spanned_clause_list(*generic.r(s).clauses);
+            let clauses = ccx
+                .importer(self_ty, &sig_generic_substs)
+                .fold_spanned_clause_list(clauses);
 
-                    ccx.wf_visitor().visit_spanned(clauses);
-                }
-                AnyGeneric::Ty(generic) => {
-                    let mut ccx = ClauseCx::new(self.tcx, self.coherence, UnifyCxMode::RegionAware);
-
-                    let user_clauses = ccx
-                        .instantiator(self_ty)
-                        .fold_spanned_clause_list(*generic.r(s).clauses);
-
-                    ccx.wf_visitor()
-                        .with_clause_applies_to(tcx.intern(TyKind::SigUniversal(generic)))
-                        .visit_spanned(user_clauses);
-                }
-            }
+            ccx.wf_visitor().visit_spanned(clauses);
         }
     }
 }
