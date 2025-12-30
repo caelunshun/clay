@@ -389,11 +389,11 @@ pub enum Re {
     /// lives for the entire duration of the program.
     Gc,
 
-    /// An explicit request to infer the lifetime.
+    /// An uninstantiated request to infer the lifetime (e.g. `'_`).
     ///
     /// Used in user annotations and instantiated into an `InferVar` region during `ClauseCx`
     /// import.
-    SigExplicitInfer,
+    SigInfer,
 
     /// Refers to a generic lifetime parameter.
     ///
@@ -424,11 +424,11 @@ pub enum TyKind {
     /// import.
     SigThis,
 
-    /// A user's explicit request to infer a type (i.e. `_`).
+    /// An uninstantiated request to infer a type (e.g. `_`).
     ///
     /// Used in user annotations and instantiated into an `InferVar` region during `ClauseCx`
     /// import.
-    SigExplicitInfer,
+    SigInfer,
 
     /// The universal type quantification produced by a generic parameter.
     ///

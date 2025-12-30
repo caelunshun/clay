@@ -50,7 +50,7 @@ impl TyCtxt {
             }
             TyKind::InferVar(_)
             | TyKind::UniversalVar(_)
-            | TyKind::SigExplicitInfer
+            | TyKind::SigInfer
             | TyKind::SigGeneric(_)
             | TyKind::Error(_) => TyShape::Hole,
             TyKind::Simple(kind) => TyShape::Solid(SolidTyShape {

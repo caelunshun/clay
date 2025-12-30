@@ -628,7 +628,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
 
         Ok(match *ty.r(s) {
             TyKind::SigThis => self.env.self_ty,
-            TyKind::SigExplicitInfer => self.ccx.fresh_ty_infer(),
+            TyKind::SigInfer => self.ccx.fresh_ty_infer(),
             TyKind::SigGeneric(generic) => self
                 .env
                 .sig_generic_substs
@@ -655,7 +655,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
         let s = self.session();
 
         Ok(match re {
-            Re::SigExplicitInfer => self.ccx.fresh_re_infer(),
+            Re::SigInfer => self.ccx.fresh_re_infer(),
             Re::SigGeneric(generic) => self
                 .env
                 .sig_generic_substs
@@ -810,7 +810,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 // Error types can do anything.
                 return ObligationResult::Success;
             }
-            TyKind::SigThis | TyKind::SigExplicitInfer | TyKind::SigGeneric(_) => unreachable!(),
+            TyKind::SigThis | TyKind::SigInfer | TyKind::SigGeneric(_) => unreachable!(),
             TyKind::Simple(_)
             | TyKind::Reference(_, _, _)
             | TyKind::Adt(_)
@@ -826,10 +826,10 @@ impl<'tcx> ClauseCx<'tcx> {
         let candidates = self.coherence.gather_impl_candidates(
             tcx,
             self.ucx()
-                .substitutor(UnboundVarHandlingMode::EraseToExplicitInfer)
+                .substitutor(UnboundVarHandlingMode::EraseToSigInfer)
                 .fold_ty(lhs),
             self.ucx()
-                .substitutor(UnboundVarHandlingMode::EraseToExplicitInfer)
+                .substitutor(UnboundVarHandlingMode::EraseToSigInfer)
                 .fold_trait_spec(rhs),
         );
 
@@ -1082,7 +1082,7 @@ impl<'tcx> ClauseCx<'tcx> {
         let s = self.session();
 
         match *lhs.r(s) {
-            TyKind::SigThis | TyKind::SigExplicitInfer | TyKind::SigGeneric(_) => unreachable!(),
+            TyKind::SigThis | TyKind::SigInfer | TyKind::SigGeneric(_) => unreachable!(),
             TyKind::FnDef(_, _) | TyKind::Simple(_) | TyKind::Error(_) => {
                 // (trivial)
             }
@@ -1236,9 +1236,9 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
                 self.ccx
                     .oblige_ty_wf(ObligationReason::WfDeferred(ty.own_span()), ty.value);
             }
-            SpannedTyView::SigThis
-            | SpannedTyView::SigExplicitInfer
-            | SpannedTyView::SigGeneric(_) => unreachable!(),
+            SpannedTyView::SigThis | SpannedTyView::SigInfer | SpannedTyView::SigGeneric(_) => {
+                unreachable!()
+            }
         }
 
         ControlFlow::Continue(())

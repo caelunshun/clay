@@ -435,7 +435,7 @@ impl TyVisitable for Re {
         V: ?Sized + TyVisitor<'tcx>,
     {
         match me.value {
-            Re::Gc | Re::SigExplicitInfer | Re::Erased | Re::Error(_) => {
+            Re::Gc | Re::SigInfer | Re::Erased | Re::Error(_) => {
                 // (dead end)
             }
             Re::SigGeneric(generic) => {
@@ -467,7 +467,7 @@ impl TyVisitable for Ty {
     {
         match me.view(visitor.tcx()) {
             SpannedTyView::Simple(_)
-            | SpannedTyView::SigExplicitInfer
+            | SpannedTyView::SigInfer
             | SpannedTyView::FnDef(_, None)
             | SpannedTyView::Error(_) => {
                 // (dead end)
@@ -720,7 +720,7 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
 
     fn super_re(&mut self, re: Re) -> Result<Re, Self::Error> {
         match re {
-            Re::Gc | Re::SigExplicitInfer | Re::Erased | Re::Error(_) => Ok(re),
+            Re::Gc | Re::SigInfer | Re::Erased | Re::Error(_) => Ok(re),
             Re::InferVar(var) => self.try_fold_re_infer_var_use(var),
             Re::UniversalVar(var) => self.try_fold_re_universal_var_use(var),
             Re::SigGeneric(generic) => self.try_fold_re_sig_generic_use(generic),
@@ -731,7 +731,7 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
         let tcx = self.tcx();
 
         match *ty.r(&tcx.session) {
-            TyKind::Simple(_) | TyKind::SigExplicitInfer | TyKind::Error(_) => Ok(ty),
+            TyKind::Simple(_) | TyKind::SigInfer | TyKind::Error(_) => Ok(ty),
             TyKind::InferVar(var) => self.try_fold_ty_infer_var_use(var),
             TyKind::UniversalVar(var) => self.try_fold_ty_universal_var_use(var),
             TyKind::SigThis => self.try_fold_sig_self_ty_use(),

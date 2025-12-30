@@ -538,11 +538,11 @@ impl IntraItemLowerCtxt<'_> {
             .iter()
             .map(|expected| match expected {
                 AnyGeneric::Re(_) => {
-                    SpannedTyOrReView::Re(Re::SigExplicitInfer.encode(segment_span, self.tcx))
+                    SpannedTyOrReView::Re(Re::SigInfer.encode(segment_span, self.tcx))
                         .encode(segment_span, self.tcx)
                 }
                 AnyGeneric::Ty(_) => SpannedTyOrReView::Ty(
-                    SpannedTyView::SigExplicitInfer.encode(segment_span, self.tcx),
+                    SpannedTyView::SigInfer.encode(segment_span, self.tcx),
                 )
                 .encode(segment_span, self.tcx),
             })
@@ -591,7 +591,7 @@ impl IntraItemLowerCtxt<'_> {
         let elaborated_params = params
             .iter(self.tcx)
             .chain(iter::repeat(
-                SpannedTyOrReView::Ty(SpannedTyView::SigExplicitInfer.encode(outer_span, self.tcx))
+                SpannedTyOrReView::Ty(SpannedTyView::SigInfer.encode(outer_span, self.tcx))
                     .encode(outer_span, self.tcx),
             ))
             .take(def.r(s).generics.r(s).defs.len())

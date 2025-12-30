@@ -82,12 +82,12 @@ pub enum ExprPathResolution {
     ///     - `assoc_name = new`
     ///     - `assoc_args = None`
     /// - `MyTrait::foo`:
-    ///     - `self_ty = ExplicitInfer`
+    ///     - `self_ty = SigInfer`
     ///     - `as_trait = Some(MyTrait<_>)`
     ///     - `assoc_name = foo`
     ///     - `assoc_args = None`
     /// - `MyTrait::<u32>::foo`:
-    ///     - `self_ty = ExplicitInfer`
+    ///     - `self_ty = SigInfer`
     ///     - `as_trait = Some(MyTrait<u32>)`
     ///     - `assoc_name = foo`
     ///     - `assoc_args = None`
@@ -612,7 +612,7 @@ impl IntraItemLowerCtxt<'_> {
             ));
         };
 
-        let self_ty = SpannedTyView::SigExplicitInfer.encode(def_segment.part.span(), self.tcx);
+        let self_ty = SpannedTyView::SigInfer.encode(def_segment.part.span(), self.tcx);
 
         ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
             self_ty,

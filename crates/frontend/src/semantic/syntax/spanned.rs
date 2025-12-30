@@ -65,7 +65,7 @@ pub type SpannedTy = Spanned<Ty>;
 #[derive(Debug, Copy, Clone)]
 pub enum SpannedTyView {
     SigThis,
-    SigExplicitInfer,
+    SigInfer,
     SigGeneric(Obj<TypeGeneric>),
     Simple(SimpleTyKind),
     Reference(SpannedRe, Mutability, SpannedTy),
@@ -86,7 +86,7 @@ impl SpannedViewDecode<TyCtxt> for Ty {
 
         match *value.r(s) {
             TyKind::SigThis => SpannedTyView::SigThis,
-            TyKind::SigExplicitInfer => SpannedTyView::SigExplicitInfer,
+            TyKind::SigInfer => SpannedTyView::SigInfer,
             TyKind::SigGeneric(generic) => SpannedTyView::SigGeneric(generic),
             TyKind::Simple(kind) => SpannedTyView::Simple(kind),
             TyKind::Reference(re, muta, pointee) => {
@@ -125,8 +125,8 @@ impl SpannedViewEncode<TyCtxt> for SpannedTyView {
                 tcx.intern(TyKind::SigThis),
                 SpannedInfo::new_terminal(own_span, tcx),
             ),
-            SpannedTyView::SigExplicitInfer => Spanned::new_raw(
-                tcx.intern(TyKind::SigExplicitInfer),
+            SpannedTyView::SigInfer => Spanned::new_raw(
+                tcx.intern(TyKind::SigInfer),
                 SpannedInfo::new_terminal(own_span, tcx),
             ),
             SpannedTyView::SigGeneric(generic) => Spanned::new_raw(

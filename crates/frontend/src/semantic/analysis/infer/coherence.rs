@@ -270,10 +270,9 @@ impl TyCtxt {
                                     GenericIdx::from_raw(param.r(s).binder.idx),
                                 );
                             }
-                            Re::InferVar(_)
-                            | Re::UniversalVar(_)
-                            | Re::SigExplicitInfer
-                            | Re::Erased => unreachable!(),
+                            Re::InferVar(_) | Re::UniversalVar(_) | Re::SigInfer | Re::Erased => {
+                                unreachable!()
+                            }
                         }
                     }
                     TyOrRe::Ty(param) => {

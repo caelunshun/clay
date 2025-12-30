@@ -179,7 +179,7 @@ impl IntraItemLowerCtxt<'_> {
             AstTyKind::Reference(lifetime, muta, pointee) => SpannedTyView::Reference(
                 match lifetime {
                     Some(ast) => self.lower_re(ast),
-                    None => Re::SigExplicitInfer.encode(ast.span.shrink_to_lo(), self.tcx),
+                    None => Re::SigInfer.encode(ast.span.shrink_to_lo(), self.tcx),
                 },
                 muta.as_muta(),
                 self.lower_ty(pointee),
@@ -192,7 +192,7 @@ impl IntraItemLowerCtxt<'_> {
             AstTyKind::Tuple(items) => {
                 SpannedTyView::Tuple(self.lower_tys(items)).encode(ast.span, self.tcx)
             }
-            AstTyKind::Infer => SpannedTyView::SigExplicitInfer.encode(ast.span, self.tcx),
+            AstTyKind::Infer => SpannedTyView::SigInfer.encode(ast.span, self.tcx),
             AstTyKind::Error(error) => SpannedTyView::Error(*error).encode(ast.span, self.tcx),
         }
     }

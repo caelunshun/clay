@@ -264,10 +264,9 @@ impl<'tcx> UnifyCx<'tcx> {
             }
 
             match (lhs, rhs) {
-                (Re::Erased, _)
-                | (_, Re::Erased)
-                | (Re::SigExplicitInfer, _)
-                | (_, Re::SigExplicitInfer) => unreachable!(),
+                (Re::Erased, _) | (_, Re::Erased) | (Re::SigInfer, _) | (_, Re::SigInfer) => {
+                    unreachable!()
+                }
                 _ => {
                     fork.unify(lhs, rhs, Some(&mut offenses));
                 }
@@ -327,8 +326,8 @@ impl<'tcx> UnifyCx<'tcx> {
         match (*lhs.r(s), *rhs.r(s)) {
             (TyKind::SigThis, _)
             | (_, TyKind::SigThis)
-            | (TyKind::SigExplicitInfer, _)
-            | (_, TyKind::SigExplicitInfer)
+            | (TyKind::SigInfer, _)
+            | (_, TyKind::SigInfer)
             | (TyKind::SigGeneric(_), _)
             | (_, TyKind::SigGeneric(_)) => {
                 unreachable!()
@@ -631,7 +630,7 @@ pub struct InferTySubstitutor<'a, 'tcx> {
 pub enum UnboundVarHandlingMode {
     Error(ErrorGuaranteed),
     NormalizeToRoot,
-    EraseToExplicitInfer,
+    EraseToSigInfer,
     Panic,
 }
 
@@ -650,9 +649,7 @@ impl<'tcx> TyFolder<'tcx> for InferTySubstitutor<'_, 'tcx> {
                 UnboundVarHandlingMode::NormalizeToRoot => {
                     self.tcx().intern(TyKind::InferVar(floating.root))
                 }
-                UnboundVarHandlingMode::EraseToExplicitInfer => {
-                    self.tcx().intern(TyKind::SigExplicitInfer)
-                }
+                UnboundVarHandlingMode::EraseToSigInfer => self.tcx().intern(TyKind::SigInfer),
                 UnboundVarHandlingMode::Panic => {
                     unreachable!("unexpected ambiguous inference variable")
                 }
@@ -920,7 +917,7 @@ impl ReInferTracker {
             Re::Gc => Some(AnyReIndex::GC),
             Re::UniversalVar(universal) => Some(self.universals[universal].index),
             Re::InferVar(idx) => Some(AnyReIndex::from_raw(idx.0)),
-            Re::SigExplicitInfer | Re::SigGeneric(_) | Re::Erased => unreachable!(),
+            Re::SigInfer | Re::SigGeneric(_) | Re::Erased => unreachable!(),
             Re::Error(_) => None,
         }
     }
