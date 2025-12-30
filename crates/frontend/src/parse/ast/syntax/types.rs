@@ -131,6 +131,7 @@ pub enum AstTyKind {
     Trait(AstTraitClauseList),
     Paren(Box<AstTy>),
     Tuple(Vec<AstTy>),
+    Project(Box<AstTy>, Box<AstNamedSpec>, Ident),
     Infer,
     Error(ErrorGuaranteed),
 }

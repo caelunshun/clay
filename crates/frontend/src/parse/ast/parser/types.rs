@@ -12,7 +12,7 @@ use crate::{
             bp::ty_bp,
             entry::P,
             utils::{
-                match_group, match_kw, match_lifetime, match_punct, match_punct_seq,
+                match_group, match_ident, match_kw, match_lifetime, match_punct, match_punct_seq,
                 parse_comma_group, parse_delimited_until_terminator,
             },
         },
@@ -214,6 +214,36 @@ pub fn parse_ty_pratt_seed(p: P) -> AstTy {
     // Parse infer
     if match_kw(kw!("_")).expect(p).is_some() {
         return build_ty(AstTyKind::Infer, p);
+    }
+
+    // Parse projection
+    if match_punct(punct!('<')).expect(p).is_some() {
+        let target = parse_ty(p);
+
+        if match_kw(kw!("as")).expect(p).is_none() {
+            return build_ty(AstTyKind::Error(p.stuck().error()), p);
+        }
+
+        let Some(spec) = parse_named_spec(p) else {
+            return build_ty(AstTyKind::Error(p.stuck().error()), p);
+        };
+
+        if match_punct(punct!('>')).expect(p).is_none() {
+            return build_ty(AstTyKind::Error(p.stuck().error()), p);
+        }
+
+        if match_punct_seq(puncts!("::")).expect(p).is_none() {
+            return build_ty(AstTyKind::Error(p.stuck().error()), p);
+        }
+
+        let Some(assoc) = match_ident().expect(p) else {
+            return build_ty(AstTyKind::Error(p.stuck().error()), p);
+        };
+
+        return build_ty(
+            AstTyKind::Project(Box::new(target), Box::new(spec), assoc),
+            p,
+        );
     }
 
     build_ty(AstTyKind::Error(p.stuck().error()), p)

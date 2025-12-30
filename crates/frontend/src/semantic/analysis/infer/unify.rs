@@ -329,7 +329,9 @@ impl<'tcx> UnifyCx<'tcx> {
             | (TyKind::SigInfer, _)
             | (_, TyKind::SigInfer)
             | (TyKind::SigGeneric(_), _)
-            | (_, TyKind::SigGeneric(_)) => {
+            | (_, TyKind::SigGeneric(_))
+            | (TyKind::SigProject(_), _)
+            | (_, TyKind::SigProject(_)) => {
                 unreachable!()
             }
             (

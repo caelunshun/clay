@@ -444,6 +444,13 @@ pub enum TyKind {
     /// during `ClauseCx` import.
     SigGeneric(Obj<TypeGeneric>),
 
+    /// An uninstantiated type projection, which fetches an associated type from a `trait` impl for
+    /// the given type.
+    ///
+    /// Used in user annotations and instantiated into an `InferVar` which is used in a trait
+    /// obligation to constrain the inference variable to its target associated type.
+    SigProject(TyProjection),
+
     /// A simple primitive non-composite type living for `'gc`.
     Simple(SimpleTyKind),
 
@@ -469,6 +476,13 @@ pub enum TyKind {
     UniversalVar(UniversalTyVar),
 
     Error(ErrorGuaranteed),
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct TyProjection {
+    pub target: Ty,
+    pub spec: TraitSpec,
+    pub assoc: u32,
 }
 
 define_index_type! {

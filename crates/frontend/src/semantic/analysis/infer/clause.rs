@@ -17,7 +17,7 @@ use crate::{
             InferTyVar, Re, RelationMode, SpannedAdtInstance, SpannedTraitInstance,
             SpannedTraitParamView, SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList,
             SpannedTyView, TraitClause, TraitClauseList, TraitItem, TraitParam, TraitSpec, Ty,
-            TyKind, TyOrRe, UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar,
+            TyKind, TyOrRe, TyProjection, UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar,
             UniversalTyVarSourceInfo,
         },
     },
@@ -625,6 +625,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
 
     fn try_fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
         let s = self.session();
+        let tcx = self.tcx();
 
         Ok(match *ty.r(s) {
             TyKind::SigThis => self.env.self_ty,
@@ -638,6 +639,35 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
                 .substs
                 .r(s)[generic.r(s).binder.idx as usize]
                 .unwrap_ty(),
+            TyKind::SigProject(projection) => {
+                let TyProjection {
+                    target,
+                    spec,
+                    assoc,
+                } = self.fold_ty_projection(projection);
+
+                let assoc_infer_ty = self.ccx.fresh_ty_infer();
+                let spec = {
+                    let mut args = spec.params.r(s).to_vec();
+                    args[assoc as usize] = TraitParam::Equals(TyOrRe::Ty(assoc_infer_ty));
+
+                    TraitSpec {
+                        def: spec.def,
+                        params: tcx.intern_list(&args),
+                    }
+                };
+
+                // TODO: How do we get a span here?
+                self.ccx
+                    .wf_visitor()
+                    .with_clause_applies_to(target)
+                    .visit(spec);
+
+                self.ccx
+                    .oblige_ty_and_trait(ObligationReason::Structural, target, spec);
+
+                assoc_infer_ty
+            }
 
             TyKind::Simple(_)
             | TyKind::Reference(_, _, _)
@@ -810,7 +840,9 @@ impl<'tcx> ClauseCx<'tcx> {
                 // Error types can do anything.
                 return ObligationResult::Success;
             }
-            TyKind::SigThis | TyKind::SigInfer | TyKind::SigGeneric(_) => unreachable!(),
+            TyKind::SigThis | TyKind::SigInfer | TyKind::SigGeneric(_) | TyKind::SigProject(_) => {
+                unreachable!()
+            }
             TyKind::Simple(_)
             | TyKind::Reference(_, _, _)
             | TyKind::Adt(_)
@@ -1082,7 +1114,9 @@ impl<'tcx> ClauseCx<'tcx> {
         let s = self.session();
 
         match *lhs.r(s) {
-            TyKind::SigThis | TyKind::SigInfer | TyKind::SigGeneric(_) => unreachable!(),
+            TyKind::SigThis | TyKind::SigInfer | TyKind::SigGeneric(_) | TyKind::SigProject(_) => {
+                unreachable!()
+            }
             TyKind::FnDef(_, _) | TyKind::Simple(_) | TyKind::Error(_) => {
                 // (trivial)
             }
@@ -1236,7 +1270,10 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
                 self.ccx
                     .oblige_ty_wf(ObligationReason::WfDeferred(ty.own_span()), ty.value);
             }
-            SpannedTyView::SigThis | SpannedTyView::SigInfer | SpannedTyView::SigGeneric(_) => {
+            SpannedTyView::SigThis
+            | SpannedTyView::SigInfer
+            | SpannedTyView::SigGeneric(_)
+            | SpannedTyView::SigProject(_) => {
                 unreachable!()
             }
         }

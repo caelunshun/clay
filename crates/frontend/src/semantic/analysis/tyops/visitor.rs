@@ -13,9 +13,10 @@ use crate::{
             SpannedTraitClauseView, SpannedTraitInstance, SpannedTraitInstanceView,
             SpannedTraitParam, SpannedTraitParamList, SpannedTraitParamView, SpannedTraitSpec,
             SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReList,
-            SpannedTyOrReView, SpannedTyView, TraitClause, TraitClauseList, TraitInstance,
-            TraitParam, TraitParamList, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReList,
-            TypeGeneric, UniversalReVar, UniversalTyVar,
+            SpannedTyOrReView, SpannedTyProjection, SpannedTyProjectionView, SpannedTyView,
+            TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty,
+            TyKind, TyList, TyOrRe, TyOrReList, TyProjection, TypeGeneric, UniversalReVar,
+            UniversalTyVar,
         },
     },
 };
@@ -95,6 +96,10 @@ pub trait TyVisitor<'tcx> {
 
     fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
         self.walk_spanned_fallible(ty)
+    }
+
+    fn visit_ty_projection(&mut self, projection: SpannedTyProjection) -> ControlFlow<Self::Break> {
+        self.walk_spanned_fallible(projection)
     }
 
     // === Terminators === //
@@ -478,6 +483,9 @@ impl TyVisitable for Ty {
             SpannedTyView::SigGeneric(generic) => {
                 visitor.visit_ty_sig_generic_use(me.own_span_if_specified(), generic)?;
             }
+            SpannedTyView::SigProject(project) => {
+                visitor.visit_spanned_fallible(project)?;
+            }
             SpannedTyView::InferVar(var) => {
                 visitor.visit_ty_infer_var_use(me.own_span_if_specified(), var)?;
             }
@@ -501,6 +509,32 @@ impl TyVisitable for Ty {
                 visitor.visit_spanned_fallible(tys)?;
             }
         }
+
+        ControlFlow::Continue(())
+    }
+}
+
+impl TyVisitable for TyProjection {
+    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + TyVisitor<'tcx>,
+    {
+        visitor.visit_ty_projection(me)
+    }
+
+    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + TyVisitor<'tcx>,
+    {
+        let SpannedTyProjectionView {
+            target,
+            spec,
+            assoc_span: _,
+            assoc: _,
+        } = me.view(visitor.tcx());
+
+        visitor.visit_spanned_fallible(target)?;
+        visitor.visit_spanned_fallible(spec)?;
 
         ControlFlow::Continue(())
     }
@@ -578,6 +612,13 @@ pub trait TyFolder<'tcx> {
 
     fn try_fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
         self.super_ty(ty)
+    }
+
+    fn try_fold_ty_projection(
+        &mut self,
+        projection: TyProjection,
+    ) -> Result<TyProjection, Self::Error> {
+        self.super_ty_projection(projection)
     }
 
     fn try_fold_sig_self_ty_use(&mut self) -> Result<Ty, Self::Error> {
@@ -732,9 +773,13 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
 
         match *ty.r(&tcx.session) {
             TyKind::Simple(_) | TyKind::SigInfer | TyKind::Error(_) => Ok(ty),
+            TyKind::SigThis => self.try_fold_sig_self_ty_use(),
+            TyKind::SigGeneric(generic) => self.try_fold_ty_sig_generic_use(generic),
+            TyKind::SigProject(projection) => {
+                Ok(tcx.intern(TyKind::SigProject(self.try_fold_ty_projection(projection)?)))
+            }
             TyKind::InferVar(var) => self.try_fold_ty_infer_var_use(var),
             TyKind::UniversalVar(var) => self.try_fold_ty_universal_var_use(var),
-            TyKind::SigThis => self.try_fold_sig_self_ty_use(),
             TyKind::Reference(re, muta, pointee) => Ok(tcx.intern(TyKind::Reference(
                 self.try_fold_re(re)?,
                 muta,
@@ -751,8 +796,18 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
                 Ok(tcx.intern(TyKind::Trait(self.try_fold_clause_list(clause_list)?)))
             }
             TyKind::Tuple(tys) => Ok(tcx.intern(TyKind::Tuple(self.try_fold_ty_list(tys)?))),
-            TyKind::SigGeneric(generic) => self.try_fold_ty_sig_generic_use(generic),
         }
+    }
+
+    fn super_ty_projection(
+        &mut self,
+        projection: TyProjection,
+    ) -> Result<TyProjection, Self::Error> {
+        Ok(TyProjection {
+            target: self.try_fold_ty(projection.target)?,
+            spec: self.try_fold_trait_spec(projection.spec)?,
+            assoc: projection.assoc,
+        })
     }
 
     fn super_sig_self_ty_use(&mut self) -> Result<Ty, Self::Error> {
@@ -848,6 +903,11 @@ pub trait TyFolderInfallible<'tcx>: TyFolder<'tcx, Error = Infallible> {
 
     fn fold_ty(&mut self, ty: Ty) -> Ty {
         let Ok(v) = self.try_fold_ty(ty);
+        v
+    }
+
+    fn fold_ty_projection(&mut self, projection: TyProjection) -> TyProjection {
+        let Ok(v) = self.try_fold_ty_projection(projection);
         v
     }
 
@@ -973,6 +1033,14 @@ pub trait TyFolderPreservesSpans<'tcx>: TyFolder<'tcx> {
         self.try_fold_ty(ty.value)
             .map(|value| Spanned::new_raw(value, ty.span_info))
     }
+
+    fn try_fold_spanned_ty_projection(
+        &mut self,
+        projection: SpannedTyProjection,
+    ) -> Result<SpannedTyProjection, Self::Error> {
+        self.try_fold_ty_projection(projection.value)
+            .map(|value| Spanned::new_raw(value, projection.span_info))
+    }
 }
 
 pub trait TyFolderInfalliblePreservesSpans<'tcx>:
@@ -1045,6 +1113,14 @@ pub trait TyFolderInfalliblePreservesSpans<'tcx>:
 
     fn fold_spanned_ty(&mut self, ty: SpannedTy) -> SpannedTy {
         let Ok(v) = self.try_fold_spanned_ty(ty);
+        v
+    }
+
+    fn fold_spanned_ty_projection(
+        &mut self,
+        projection: SpannedTyProjection,
+    ) -> SpannedTyProjection {
+        let Ok(v) = self.try_fold_spanned_ty_projection(projection);
         v
     }
 }

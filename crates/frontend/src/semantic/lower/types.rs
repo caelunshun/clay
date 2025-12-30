@@ -21,7 +21,7 @@ use crate::{
             AdtItem, Item, ItemKind, Re, SpannedAdtInstanceView, SpannedRe, SpannedTraitClause,
             SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParamList,
             SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe,
-            SpannedTyOrReView, SpannedTyView, TraitItem, TypeGeneric,
+            SpannedTyOrReView, SpannedTyProjectionView, SpannedTyView, TraitItem, TypeGeneric,
         },
     },
 };
@@ -191,6 +191,32 @@ impl IntraItemLowerCtxt<'_> {
             AstTyKind::Paren(ast) => self.lower_ty(ast),
             AstTyKind::Tuple(items) => {
                 SpannedTyView::Tuple(self.lower_tys(items)).encode(ast.span, self.tcx)
+            }
+            AstTyKind::Project(target, spec, assoc) => {
+                let target = self.lower_ty(target);
+                let spec = match self.lower_trait_spec(spec) {
+                    Ok(spec) => spec,
+                    Err(error) => return SpannedTyView::Error(error).encode(ast.span, self.tcx),
+                };
+
+                let Some(assoc_generic) = spec.value.def.r(s).associated_types.get(&assoc.text)
+                else {
+                    return SpannedTyView::Error(
+                        Diag::span_err(assoc.span, "no such associated type").emit(),
+                    )
+                    .encode(ast.span, self.tcx);
+                };
+
+                SpannedTyView::SigProject(
+                    SpannedTyProjectionView {
+                        target,
+                        spec,
+                        assoc_span: Some(assoc.span),
+                        assoc: assoc_generic.r(s).binder.idx,
+                    }
+                    .encode(ast.span, self.tcx),
+                )
+                .encode(ast.span, self.tcx)
             }
             AstTyKind::Infer => SpannedTyView::SigInfer.encode(ast.span, self.tcx),
             AstTyKind::Error(error) => SpannedTyView::Error(*error).encode(ast.span, self.tcx),

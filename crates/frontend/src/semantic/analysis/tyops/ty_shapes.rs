@@ -52,6 +52,7 @@ impl TyCtxt {
             | TyKind::UniversalVar(_)
             | TyKind::SigInfer
             | TyKind::SigGeneric(_)
+            | TyKind::SigProject(_)
             | TyKind::Error(_) => TyShape::Hole,
             TyKind::Simple(kind) => TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Simple(kind),

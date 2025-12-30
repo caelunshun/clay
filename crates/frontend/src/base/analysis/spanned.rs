@@ -136,6 +136,16 @@ impl SpannedInfo {
         Self::new_list(own_span, &[], cx)
     }
 
+    pub fn new_maybe_terminal(
+        own_span: Option<Span>,
+        cx: &impl HasListInterner<SpannedInfo>,
+    ) -> Self {
+        match own_span {
+            Some(own_span) => Self::new_terminal(own_span, cx),
+            None => Self::Untracked,
+        }
+    }
+
     pub fn own_span(self) -> Option<Span> {
         match self {
             SpannedInfo::Untracked => None,
