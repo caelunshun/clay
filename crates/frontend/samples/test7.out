@@ -1,5 +1,17 @@
-error: failed to prove 0x12800f6d0: Tuple(0x12800f700: [0x12800f7c8: Universal(0x12800f7f8: TypeGeneric { ident: Ident { span: <dummy>, text: "Self"#25, raw: false }, user_clauses: 0x128014598: [Trait(TraitSpec { def: "Foo"#22, params: 0x12800f620: [Equals(Ty(0x12800f658: Universal(0x12800f728: TypeGeneric { ident: Ident { span: crates/frontend/samples/test7.fir:47:14-17, text: "Bar"#24, raw: false }, user_clauses: 0x12800f688: [Trait(TraitSpec { def: "Foo"#22, params: 0x12800f6b0: [Equals(Ty(0x12800f6d0))] })], is_synthetic: true, .. })))] })], is_synthetic: true, .. })]) implements TraitSpec { def: "Foo"#22, params: 0x128014520: [Equals(Ty(0x128014540: Tuple(0x128014570: [0x12800f658: Universal(0x12800f728: TypeGeneric { ident: Ident { span: crates/frontend/samples/test7.fir:47:14-17, text: "Bar"#24, raw: false }, user_clauses: 0x12800f688: [Trait(TraitSpec { def: "Foo"#22, params: 0x12800f6b0: [Equals(Ty(0x12800f6d0: Tuple(0x12800f700: [0x12800f7c8: Universal(0x12800f7f8: TypeGeneric { ident: Ident { span: <dummy>, text: "Self"#25, raw: false }, user_clauses: 0x128014598: [Trait(TraitSpec { def: "Foo"#22, params: 0x12800f620: [Equals(Ty(0x12800f658))] })], is_synthetic: true, .. })])))] })], is_synthetic: true, .. })])))] }
-   ┌─ crates/frontend/samples/test7.fir:47:29
+error: failed to prove 0x12b80dec8: UniversalVar(1) implements TraitSpec { def: "Meow"#18, params: 0x12b80e7a8: [] }
+   ┌─ crates/frontend/samples/test7.fir:23:32
    │
-47 │         type Bar: Foo<Bar = (Self,)>;
-   │                             ^^^^^^^
+23 │     type Bar: NeedsMeowGeneric<Foo>;
+   │                                ^^^
+
+error: failed to prove 0x12b80def8: UniversalVar(0) implements TraitSpec { def: "Meow"#18, params: 0x12b80e7a8: [] }
+   ┌─ crates/frontend/samples/test7.fir:27:45
+   │
+27 │ pub struct Demo4<Foo, Bar: NeedsMeowGeneric<Foo>>(Foo, Bar);
+   │                                             ^^^
+
+error: failed to prove 0x12b80e0a8: Tuple(0x12b80e0d8: []) implements TraitSpec { def: "Meow"#18, params: 0x12b80e7a8: [] }
+   ┌─ crates/frontend/samples/test7.fir:32:14
+   │
+32 │     type T = ();
+   │

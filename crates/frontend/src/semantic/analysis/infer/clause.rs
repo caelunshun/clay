@@ -389,13 +389,7 @@ impl<'tcx> ClauseCx<'tcx> {
         let substs = self.create_blank_infer_vars_from_binder_list(binders);
 
         // Register clause obligations.
-        self.oblige_binder_substs_meet_clauses(
-            self_ty,
-            &substs,
-            |_this, _subst_idx, _param_idx, clause| ObligationReason::GenericRequirements {
-                clause,
-            },
-        );
+        self.oblige_imported_infer_binder_meets_clauses(self_ty, &substs);
 
         substs
     }
@@ -432,65 +426,75 @@ impl<'tcx> ClauseCx<'tcx> {
         GenericSubst { binder, substs }
     }
 
-    pub fn oblige_binder_substs_meet_clauses(
+    pub fn oblige_imported_infer_binder_meets_clauses(
         &mut self,
         self_ty: Ty,
         substs: &[GenericSubst],
-        mut reason_gen: impl FnMut(&mut Self, usize, usize, Span) -> ObligationReason,
+    ) {
+        let s = self.session();
+
+        for &subst in substs {
+            self.oblige_wf_binder_args(
+                &subst.binder.r(s).defs,
+                subst.substs.r(s),
+                self_ty,
+                substs,
+                |_this, _idx, clause| ObligationReason::GenericRequirements { clause },
+            )
+        }
+    }
+
+    pub fn oblige_wf_binder_args(
+        &mut self,
+        defs: &[AnyGeneric],
+        args: &[TyOrRe],
+        self_ty: Ty,
+        substs: &[GenericSubst],
+        mut gen_reason: impl FnMut(&mut Self, usize, Span) -> ObligationReason,
     ) {
         let s = self.session();
         let tcx = self.tcx();
 
-        // Register clause obligations.
-        for (subst_idx, &subst) in substs.iter().enumerate() {
-            for (param_idx, (&generic, &subst)) in subst
-                .binder
-                .r(s)
-                .defs
-                .iter()
-                .zip(subst.substs.r(s))
-                .enumerate()
-            {
-                match (generic, subst) {
-                    (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
-                        for clause in generic.r(s).clauses.iter(tcx) {
-                            let clause_span = clause.own_span();
-                            let clause = self.importer(self_ty, substs).fold_clause(clause.value);
+        for (i, (&generic, &subst)) in defs.iter().zip(args).enumerate() {
+            match (generic, subst) {
+                (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
+                    for clause in generic.r(s).clauses.iter(tcx) {
+                        let clause_span = clause.own_span();
+                        let clause = self.importer(self_ty, substs).fold_clause(clause.value);
 
-                            let TraitClause::Outlives(must_outlive) = clause else {
-                                unreachable!()
-                            };
+                        let TraitClause::Outlives(must_outlive) = clause else {
+                            unreachable!()
+                        };
 
-                            let reason = reason_gen(self, subst_idx, param_idx, clause_span);
+                        let reason = gen_reason(self, i, clause_span);
 
-                            self.oblige_re_and_re(
-                                reason,
-                                target,
-                                must_outlive,
-                                RelationMode::LhsOntoRhs,
-                            );
-                        }
+                        self.oblige_re_and_re(
+                            reason,
+                            target,
+                            must_outlive,
+                            RelationMode::LhsOntoRhs,
+                        );
                     }
-                    (AnyGeneric::Ty(generic), TyOrRe::Ty(target)) => {
-                        let clauses = self
-                            .importer(self_ty, substs)
-                            .fold_spanned_clause_list(*generic.r(s).clauses);
+                }
+                (AnyGeneric::Ty(generic), TyOrRe::Ty(target)) => {
+                    let clauses = self
+                        .importer(self_ty, substs)
+                        .fold_spanned_clause_list(*generic.r(s).clauses);
 
-                        for clause in clauses.iter(tcx) {
-                            let reason = reason_gen(self, subst_idx, param_idx, clause.own_span());
+                    for clause in clauses.iter(tcx) {
+                        let reason = gen_reason(self, i, clause.own_span());
 
-                            match clause.value {
-                                TraitClause::Outlives(rhs) => {
-                                    self.oblige_ty_and_re(reason, target, rhs);
-                                }
-                                TraitClause::Trait(rhs) => {
-                                    self.oblige_ty_and_trait(reason, target, rhs);
-                                }
+                        match clause.value {
+                            TraitClause::Outlives(rhs) => {
+                                self.oblige_ty_and_re(reason, target, rhs);
+                            }
+                            TraitClause::Trait(rhs) => {
+                                self.oblige_ty_and_trait(reason, target, rhs);
                             }
                         }
                     }
-                    _ => unreachable!(),
                 }
+                _ => unreachable!(),
             }
         }
     }
@@ -1216,7 +1220,15 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
 
         let params = SpannedTyOrReList::alloc_list(spec.own_span(), &params, tcx);
 
-        self.check_generics(spec.value.def.r(s).generics, params);
+        // Just like in `rustc`, we never produce obligations on the associated types since, if an
+        // `impl` is found, we just rely on the fact that `impl` WF checks already validated the
+        // type for its clauses and ensure that our `impl` matches what the trait spec said it would
+        // contain.
+        self.check_generics(
+            spec.value.def.r(s).generics,
+            params,
+            Some(spec.value.def.r(s).regular_generic_count),
+        );
 
         self.walk_spanned(spec);
 
@@ -1227,7 +1239,11 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         let s = self.session();
         let tcx = self.tcx();
 
-        self.check_generics(instance.value.def.r(s).generics, instance.view(tcx).params);
+        self.check_generics(
+            instance.value.def.r(s).generics,
+            instance.view(tcx).params,
+            None,
+        );
         self.walk_spanned(instance);
 
         ControlFlow::Continue(())
@@ -1242,7 +1258,11 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             .clause_applies_to
             .replace(tcx.intern(TyKind::Adt(instance.value)));
 
-        self.check_generics(instance.value.def.r(s).generics, instance.view(tcx).params);
+        self.check_generics(
+            instance.value.def.r(s).generics,
+            instance.view(tcx).params,
+            None,
+        );
 
         self.clause_applies_to = old_clause_applies_to;
 
@@ -1254,17 +1274,37 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
 }
 
 impl ClauseTyWfVisitor<'_, '_> {
-    fn check_generics(&mut self, binder: Obj<GenericBinder>, params: SpannedTyOrReList) {
+    fn check_generics(
+        &mut self,
+        binder: Obj<GenericBinder>,
+        all_params: SpannedTyOrReList,
+        validate_count: Option<u32>,
+    ) {
+        let s = self.session();
         let tcx = self.tcx();
 
-        self.ccx.oblige_binder_substs_meet_clauses(
+        let defs = &binder.r(s).defs[..];
+        let defs = match validate_count {
+            Some(limit) => &defs[..limit as usize],
+            None => defs,
+        };
+
+        let validated_params = all_params.value.r(s);
+        let validated_params = match validate_count {
+            Some(limit) => &validated_params[..limit as usize],
+            None => validated_params,
+        };
+
+        self.ccx.oblige_wf_binder_args(
+            defs,
+            validated_params,
             self.clause_applies_to.unwrap(),
             &[GenericSubst {
                 binder,
-                substs: params.value,
+                substs: all_params.value,
             }],
-            |_, _subst_idx, param_idx, clause_span| ObligationReason::WfForGenericParam {
-                use_span: params.nth(param_idx, tcx).own_span(),
+            |_, param_idx, clause_span| ObligationReason::WfForGenericParam {
+                use_span: all_params.nth(param_idx, tcx).own_span(),
                 clause_span,
             },
         );
