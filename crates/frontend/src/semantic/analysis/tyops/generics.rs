@@ -77,7 +77,7 @@ where
         self.tcx
     }
 
-    fn visit_re_sig_universal_use(
+    fn visit_re_sig_generic_use(
         &mut self,
         _span: Option<Span>,
         generic: Obj<RegionGeneric>,
@@ -85,7 +85,7 @@ where
         (self.f)(AnyGeneric::Re(generic))
     }
 
-    fn visit_ty_sig_universal_use(
+    fn visit_ty_sig_generic_use(
         &mut self,
         _span: Option<Span>,
         generic: Obj<TypeGeneric>,

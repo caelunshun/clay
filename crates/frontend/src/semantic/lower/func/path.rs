@@ -378,7 +378,7 @@ impl IntraItemLowerCtxt<'_> {
 
             return match self.lower_rest_as_type_relative_assoc(subsequent) {
                 Ok(Some(assoc)) => {
-                    let self_ty = SpannedTyView::SigUniversal(generic).encode(ident.span, self.tcx);
+                    let self_ty = SpannedTyView::SigGeneric(generic).encode(ident.span, self.tcx);
 
                     ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
                         self_ty,

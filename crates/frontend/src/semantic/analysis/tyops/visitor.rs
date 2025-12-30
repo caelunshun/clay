@@ -145,7 +145,7 @@ pub trait TyVisitor<'tcx> {
         ControlFlow::Continue(())
     }
 
-    fn visit_re_sig_universal_use(
+    fn visit_re_sig_generic_use(
         &mut self,
         span: Option<Span>,
         generic: Obj<RegionGeneric>,
@@ -155,7 +155,7 @@ pub trait TyVisitor<'tcx> {
         ControlFlow::Continue(())
     }
 
-    fn visit_ty_sig_universal_use(
+    fn visit_ty_sig_generic_use(
         &mut self,
         span: Option<Span>,
         generic: Obj<TypeGeneric>,
@@ -438,8 +438,8 @@ impl TyVisitable for Re {
             Re::Gc | Re::SigExplicitInfer | Re::Erased | Re::Error(_) => {
                 // (dead end)
             }
-            Re::SigUniversal(generic) => {
-                visitor.visit_re_sig_universal_use(me.own_span_if_specified(), generic)?;
+            Re::SigGeneric(generic) => {
+                visitor.visit_re_sig_generic_use(me.own_span_if_specified(), generic)?;
             }
             Re::InferVar(var) => {
                 visitor.visit_re_infer_var_use(me.own_span_if_specified(), var)?;
@@ -475,8 +475,8 @@ impl TyVisitable for Ty {
             SpannedTyView::SigThis => {
                 visitor.visit_sig_self_ty_use(me.own_span_if_specified())?;
             }
-            SpannedTyView::SigUniversal(generic) => {
-                visitor.visit_ty_sig_universal_use(me.own_span_if_specified(), generic)?;
+            SpannedTyView::SigGeneric(generic) => {
+                visitor.visit_ty_sig_generic_use(me.own_span_if_specified(), generic)?;
             }
             SpannedTyView::InferVar(var) => {
                 visitor.visit_ty_infer_var_use(me.own_span_if_specified(), var)?;
@@ -600,18 +600,18 @@ pub trait TyFolder<'tcx> {
         self.super_ty_universal_var_use(var)
     }
 
-    fn try_fold_re_sig_universal_use(
+    fn try_fold_re_sig_generic_use(
         &mut self,
         generic: Obj<RegionGeneric>,
     ) -> Result<Re, Self::Error> {
-        self.super_re_sig_universal_use(generic)
+        self.super_re_sig_generic_use(generic)
     }
 
-    fn try_fold_ty_sig_universal_use(
+    fn try_fold_ty_sig_generic_use(
         &mut self,
         generic: Obj<TypeGeneric>,
     ) -> Result<Ty, Self::Error> {
-        self.super_ty_sig_universal_use(generic)
+        self.super_ty_sig_generic_use(generic)
     }
 }
 
@@ -723,7 +723,7 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
             Re::Gc | Re::SigExplicitInfer | Re::Erased | Re::Error(_) => Ok(re),
             Re::InferVar(var) => self.try_fold_re_infer_var_use(var),
             Re::UniversalVar(var) => self.try_fold_re_universal_var_use(var),
-            Re::SigUniversal(generic) => self.try_fold_re_sig_universal_use(generic),
+            Re::SigGeneric(generic) => self.try_fold_re_sig_generic_use(generic),
         }
     }
 
@@ -751,7 +751,7 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
                 Ok(tcx.intern(TyKind::Trait(self.try_fold_clause_list(clause_list)?)))
             }
             TyKind::Tuple(tys) => Ok(tcx.intern(TyKind::Tuple(self.try_fold_ty_list(tys)?))),
-            TyKind::SigUniversal(generic) => self.try_fold_ty_sig_universal_use(generic),
+            TyKind::SigGeneric(generic) => self.try_fold_ty_sig_generic_use(generic),
         }
     }
 
@@ -775,15 +775,12 @@ pub trait TyFolderSuper<'tcx>: TyFolder<'tcx> {
         Ok(self.tcx().intern(TyKind::UniversalVar(var)))
     }
 
-    fn super_re_sig_universal_use(
-        &mut self,
-        generic: Obj<RegionGeneric>,
-    ) -> Result<Re, Self::Error> {
-        Ok(Re::SigUniversal(generic))
+    fn super_re_sig_generic_use(&mut self, generic: Obj<RegionGeneric>) -> Result<Re, Self::Error> {
+        Ok(Re::SigGeneric(generic))
     }
 
-    fn super_ty_sig_universal_use(&mut self, generic: Obj<TypeGeneric>) -> Result<Ty, Self::Error> {
-        Ok(self.tcx().intern(TyKind::SigUniversal(generic)))
+    fn super_ty_sig_generic_use(&mut self, generic: Obj<TypeGeneric>) -> Result<Ty, Self::Error> {
+        Ok(self.tcx().intern(TyKind::SigGeneric(generic)))
     }
 }
 
@@ -870,12 +867,12 @@ pub trait TyFolderInfallible<'tcx>: TyFolder<'tcx, Error = Infallible> {
     }
 
     fn fold_re_generic_use(&mut self, generic: Obj<RegionGeneric>) -> Re {
-        let Ok(v) = self.try_fold_re_sig_universal_use(generic);
+        let Ok(v) = self.try_fold_re_sig_generic_use(generic);
         v
     }
 
     fn fold_ty_generic_use(&mut self, generic: Obj<TypeGeneric>) -> Ty {
-        let Ok(v) = self.try_fold_ty_sig_universal_use(generic);
+        let Ok(v) = self.try_fold_ty_sig_generic_use(generic);
         v
     }
 }

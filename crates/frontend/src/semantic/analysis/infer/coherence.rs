@@ -261,7 +261,7 @@ impl TyCtxt {
                             Re::Gc | Re::Error(_) => {
                                 // (nothing mentioned)
                             }
-                            Re::SigUniversal(param) => {
+                            Re::SigGeneric(param) => {
                                 cover_idx(
                                     &mut solve_queue,
                                     &mut solve_order,

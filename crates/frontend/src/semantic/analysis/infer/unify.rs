@@ -329,8 +329,8 @@ impl<'tcx> UnifyCx<'tcx> {
             | (_, TyKind::SigThis)
             | (TyKind::SigExplicitInfer, _)
             | (_, TyKind::SigExplicitInfer)
-            | (TyKind::SigUniversal(_), _)
-            | (_, TyKind::SigUniversal(_)) => {
+            | (TyKind::SigGeneric(_), _)
+            | (_, TyKind::SigGeneric(_)) => {
                 unreachable!()
             }
             (
@@ -920,7 +920,7 @@ impl ReInferTracker {
             Re::Gc => Some(AnyReIndex::GC),
             Re::UniversalVar(universal) => Some(self.universals[universal].index),
             Re::InferVar(idx) => Some(AnyReIndex::from_raw(idx.0)),
-            Re::SigExplicitInfer | Re::SigUniversal(_) | Re::Erased => unreachable!(),
+            Re::SigExplicitInfer | Re::SigGeneric(_) | Re::Erased => unreachable!(),
             Re::Error(_) => None,
         }
     }

@@ -112,7 +112,7 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn lower_re(&mut self, ast: &Lifetime) -> SpannedRe {
         if let Some(generic) = self.generic_re_names.lookup(ast.name) {
-            return Re::SigUniversal(*generic).encode(ast.span, self.tcx);
+            return Re::SigGeneric(*generic).encode(ast.span, self.tcx);
         }
 
         todo!()
@@ -145,7 +145,7 @@ impl IntraItemLowerCtxt<'_> {
                         .encode(ast.span, self.tcx)
                     }
                     Ok(TyPathResolution::Generic(def)) => {
-                        SpannedTyView::SigUniversal(def).encode(ast.span, self.tcx)
+                        SpannedTyView::SigGeneric(def).encode(ast.span, self.tcx)
                     }
                     Ok(TyPathResolution::Trait(def)) => SpannedTyView::Error(
                         Diag::span_err(

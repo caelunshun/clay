@@ -399,7 +399,7 @@ pub enum Re {
     ///
     /// Used in user annotations and instantiated into either a `UniversalVar` or an `InferVar`
     /// region during `ClauseCx` import.
-    SigUniversal(Obj<RegionGeneric>),
+    SigGeneric(Obj<RegionGeneric>),
 
     /// An internal lifetime parameter within the body.
     InferVar(InferReVar),
@@ -434,7 +434,7 @@ pub enum TyKind {
     ///
     /// Used in user annotations and instantiated into either a `UniversalVar` or an `InferVar` type
     /// during `ClauseCx` import.
-    SigUniversal(Obj<TypeGeneric>),
+    SigGeneric(Obj<TypeGeneric>),
 
     /// A simple primitive non-composite type living for `'gc`.
     Simple(SimpleTyKind),
