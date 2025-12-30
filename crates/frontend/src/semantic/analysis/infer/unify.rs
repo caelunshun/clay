@@ -703,7 +703,7 @@ impl TyInferTracker {
 
         self.tracing_state = Some(Rc::new(TyInferTracingState {
             set: RefCell::default(),
-            var_count: InferTyVar(self.disjoint.len() as u32),
+            var_count: InferTyVar::from_usize(self.disjoint.len()),
         }))
     }
 
@@ -720,7 +720,7 @@ impl TyInferTracker {
             return;
         };
 
-        if var.0 >= state.var_count.0 {
+        if var >= state.var_count {
             return;
         }
 
@@ -728,7 +728,7 @@ impl TyInferTracker {
     }
 
     fn fresh(&mut self) -> InferTyVar {
-        let var = InferTyVar(self.disjoint.len() as u32);
+        let var = InferTyVar::from_usize(self.disjoint.len());
         self.disjoint.push(DisjointTyInferNode {
             root: Some(DisjointTyInferRoot::Floating(Vec::new())),
             observed_idx: None,
@@ -737,7 +737,7 @@ impl TyInferTracker {
     }
 
     fn observe(&mut self, var: InferTyVar) -> ObservedTyInferVar {
-        let observed_idx = &mut self.disjoint[var.0 as usize].observed_idx;
+        let observed_idx = &mut self.disjoint[var.index()].observed_idx;
 
         if let Some(observed_idx) = *observed_idx {
             return observed_idx;
@@ -746,7 +746,7 @@ impl TyInferTracker {
         let observed_idx = *observed_idx.insert(self.next_observe_idx);
         self.next_observe_idx += 1;
 
-        let root_var = self.disjoint.root_of(var.0 as usize);
+        let root_var = self.disjoint.root_of(var.index());
 
         match self.disjoint[root_var].root.as_mut().unwrap() {
             DisjointTyInferRoot::Known(_) => {
@@ -765,7 +765,7 @@ impl TyInferTracker {
     }
 
     fn lookup(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {
-        let root_var = self.disjoint.root_of(var.0 as usize);
+        let root_var = self.disjoint.root_of(var.index());
 
         match self.disjoint[root_var].root.as_ref().unwrap() {
             &DisjointTyInferRoot::Known(ty) => Ok(ty),
@@ -773,7 +773,7 @@ impl TyInferTracker {
                 self.mention_var_for_tracing(var);
 
                 Err(FloatingInferVar {
-                    root: InferTyVar(root_var as u32),
+                    root: InferTyVar::from_usize(root_var),
                     observed_equivalent,
                 })
             }
@@ -781,7 +781,7 @@ impl TyInferTracker {
     }
 
     fn assign_floating_to_non_var(&mut self, var: InferTyVar, ty: Ty) {
-        let root_idx = self.disjoint.root_of(var.0 as usize);
+        let root_idx = self.disjoint.root_of(var.index());
         let root = self.disjoint[root_idx].root.as_mut().unwrap();
 
         let DisjointTyInferRoot::Floating(observed) = root else {
@@ -793,8 +793,8 @@ impl TyInferTracker {
     }
 
     fn union_unrelated_floating(&mut self, lhs: InferTyVar, rhs: InferTyVar) {
-        let lhs_root = self.disjoint.root_of(lhs.0 as usize);
-        let rhs_root = self.disjoint.root_of(rhs.0 as usize);
+        let lhs_root = self.disjoint.root_of(lhs.index());
+        let rhs_root = self.disjoint.root_of(rhs.index());
 
         if lhs_root == rhs_root {
             return;
@@ -811,9 +811,9 @@ impl TyInferTracker {
             unreachable!()
         };
 
-        self.disjoint.join(lhs.0 as usize, rhs.0 as usize);
+        self.disjoint.join(lhs.index(), rhs.index());
 
-        let new_root = self.disjoint.root_of(lhs.0 as usize);
+        let new_root = self.disjoint.root_of(lhs.index());
         let new_root = &mut self.disjoint[new_root].root;
 
         debug_assert!(new_root.is_none());
@@ -882,7 +882,7 @@ impl Default for ReInferTracker {
 
 impl ReInferTracker {
     fn fresh_infer(&mut self) -> InferReVar {
-        let var = InferReVar(self.tracked_any.next_idx().raw());
+        let var = InferReVar::from_raw(self.tracked_any.next_idx().raw());
 
         self.tracked_any.push(TrackedAny {
             kind: TrackedAnyKind::Inference,
@@ -916,7 +916,7 @@ impl ReInferTracker {
         match re {
             Re::Gc => Some(AnyReIndex::GC),
             Re::UniversalVar(universal) => Some(self.universals[universal].index),
-            Re::InferVar(idx) => Some(AnyReIndex::from_raw(idx.0)),
+            Re::InferVar(idx) => Some(AnyReIndex::from_raw(idx.raw())),
             Re::SigInfer | Re::SigGeneric(_) | Re::Erased => unreachable!(),
             Re::Error(_) => None,
         }

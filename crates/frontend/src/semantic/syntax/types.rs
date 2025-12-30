@@ -13,7 +13,7 @@ use crate::{
     utils::hash::FxHashMap,
 };
 use derive_where::derive_where;
-use index_vec::define_index_type;
+use index_vec::{IndexVec, define_index_type};
 use std::fmt;
 
 // === Adt Items === //
@@ -56,15 +56,19 @@ pub struct AdtKindStruct {
 #[derive(Debug, Clone)]
 pub struct AdtKindEnum {
     pub adt: Obj<AdtItem>,
-    pub variants: LateInit<Vec<Obj<AdtEnumVariant>>>,
-    pub by_name: LateInit<FxHashMap<Symbol, u32>>,
+    pub variants: LateInit<IndexVec<AdtEnumVariantIdx, Obj<AdtEnumVariant>>>,
+    pub by_name: LateInit<FxHashMap<Symbol, AdtEnumVariantIdx>>,
+}
+
+define_index_type! {
+    pub struct AdtEnumVariantIdx = u32;
 }
 
 #[derive(Debug, Clone)]
 pub struct AdtEnumVariant {
     pub owner: Obj<AdtKindEnum>,
     pub span: Span,
-    pub idx: u32,
+    pub idx: AdtEnumVariantIdx,
     pub ident: Ident,
     pub ctor: LateInit<Obj<AdtCtor>>,
 }
@@ -102,11 +106,15 @@ impl AdtCtorOwner {
     }
 }
 
+define_index_type! {
+    pub struct AdtCtorFieldIdx = u32;
+}
+
 #[derive(Debug, Clone)]
 pub struct AdtCtor {
     pub owner: AdtCtorOwner,
     pub syntax: AdtCtorSyntax,
-    pub fields: Vec<AdtCtorField>,
+    pub fields: IndexVec<AdtCtorFieldIdx, AdtCtorField>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -119,7 +127,7 @@ pub struct AdtCtorInstance {
 pub enum AdtCtorSyntax {
     Unit,
     Tuple,
-    Named(FxHashMap<Symbol, u32>),
+    Named(FxHashMap<Symbol, AdtCtorFieldIdx>),
 }
 
 impl AdtCtorSyntax {
@@ -138,7 +146,7 @@ impl AdtCtorSyntax {
         matches!(self, AdtCtorSyntax::Named(..))
     }
 
-    pub fn unwrap_names(&self) -> &FxHashMap<Symbol, u32> {
+    pub fn unwrap_names(&self) -> &FxHashMap<Symbol, AdtCtorFieldIdx> {
         match self {
             AdtCtorSyntax::Named(v) => v,
             _ => unreachable!(),
@@ -149,7 +157,7 @@ impl AdtCtorSyntax {
 #[derive(Debug, Clone)]
 pub struct AdtCtorField {
     pub span: Span,
-    pub idx: u32,
+    pub idx: AdtCtorFieldIdx,
     pub vis: Visibility,
     pub ident: Option<Ident>,
     pub ty: LateInit<SpannedTy>,
@@ -463,11 +471,13 @@ pub enum TyKind {
     Error(ErrorGuaranteed),
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct InferReVar(pub u32);
+define_index_type! {
+    pub struct InferReVar = u32;
+}
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct InferTyVar(pub u32);
+define_index_type! {
+    pub struct InferTyVar = u32;
+}
 
 define_index_type! {
     pub struct UniversalTyVar = u32;

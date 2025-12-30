@@ -418,7 +418,7 @@ impl IntraItemLowerCtxt<'_> {
                             pat.r(s).span,
                             format_args!(
                                 "field `{}` of {} is not visible to {}",
-                                field.idx,
+                                field.idx.raw(),
                                 ctor.def.r(s).owner.bare_identified_what(s),
                                 self.scope.r(s).bare_category_path(s),
                             ),

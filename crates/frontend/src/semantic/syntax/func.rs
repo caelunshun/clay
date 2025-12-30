@@ -9,8 +9,8 @@ use crate::{
         token::Ident,
     },
     semantic::syntax::{
-        AdtCtorInstance, GenericBinder, ImplItem, Item, Mutability, SpannedTraitInstance,
-        SpannedTy, SpannedTyOrRe, SpannedTyOrReList, Ty,
+        AdtCtorFieldIdx, AdtCtorInstance, GenericBinder, ImplItem, Item, Mutability,
+        SpannedTraitInstance, SpannedTy, SpannedTyOrRe, SpannedTyOrReList, Ty,
     },
 };
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
@@ -106,7 +106,7 @@ pub enum PatKind {
 
 #[derive(Debug, Copy, Clone)]
 pub struct PatNamedField {
-    pub idx: u32,
+    pub idx: AdtCtorFieldIdx,
     pub pat: Obj<Pat>,
 }
 
@@ -241,7 +241,7 @@ pub struct StructExpr {
 
 #[derive(Debug, Copy, Clone)]
 pub struct StructNamedField {
-    pub idx: u32,
+    pub idx: AdtCtorFieldIdx,
     pub init: Obj<Expr>,
 }
 

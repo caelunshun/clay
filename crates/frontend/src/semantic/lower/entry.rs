@@ -3,7 +3,7 @@ use crate::{
         Diag, LeafDiag,
         analysis::NameResolver,
         arena::{HasInterner, HasListInterner, LateInit, Obj},
-        syntax::{HasSpan as _, Span},
+        syntax::{HasSpan as _, Span, Symbol},
     },
     parse::{
         ast::{
@@ -22,17 +22,18 @@ use crate::{
             VisibilityResolver,
         },
         syntax::{
-            AdtCtor, AdtCtorField, AdtCtorOwner, AdtCtorSyntax, AdtEnumVariant, AdtItem, AdtKind,
-            AdtKindEnum, AdtKindStruct, AnyGeneric, Crate, EnumVariantItem, Expr, FnDef, FuncArg,
-            FuncDefOwner, FuncItem, FuncLocal, GenericBinder, ImplItem, Item, ItemKind, ModuleItem,
-            RegionGeneric, SpannedTy, TraitItem, TyKind, TypeGeneric, Visibility,
+            AdtCtor, AdtCtorField, AdtCtorFieldIdx, AdtCtorOwner, AdtCtorSyntax, AdtEnumVariant,
+            AdtEnumVariantIdx, AdtItem, AdtKind, AdtKindEnum, AdtKindStruct, AnyGeneric, Crate,
+            EnumVariantItem, Expr, FnDef, FuncArg, FuncDefOwner, FuncItem, FuncLocal,
+            GenericBinder, ImplItem, Item, ItemKind, ModuleItem, RegionGeneric, SpannedTy,
+            TraitItem, TyKind, TypeGeneric, Visibility,
         },
     },
     symbol,
     utils::hash::FxHashMap,
 };
 use hashbrown::hash_map;
-use index_vec::IndexSlice;
+use index_vec::{IndexSlice, IndexVec};
 use std::rc::Rc;
 
 // === Driver === //
@@ -551,6 +552,8 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
             .iter()
             .enumerate()
             .map(|(idx, variant_ast)| {
+                let idx = AdtEnumVariantIdx::from_usize(idx);
+
                 // Enums already have their variant names checked by the module resolution engine.
                 //
                 // Rust does this too:
@@ -586,12 +589,12 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                 // 8 |     foo: (),
                 //   |     ^^^^^^^ field already declared
                 // ```
-                by_name.entry(variant_ast.name.text).or_insert(idx as u32);
+                by_name.entry(variant_ast.name.text).or_insert(idx);
 
                 let variant = Obj::new(
                     AdtEnumVariant {
                         owner: target_enum,
-                        idx: idx as u32,
+                        idx,
                         span: variant_ast.span,
                         ident: variant_ast.name,
                         ctor: LateInit::uninit(),
@@ -610,7 +613,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
 
                 variant
             })
-            .collect::<Vec<_>>();
+            .collect::<IndexVec<_, _>>();
 
         LateInit::init(&target_enum.r(s).variants, variants);
         LateInit::init(&target_enum.r(s).by_name, by_name);
@@ -662,7 +665,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                 AdtCtor {
                     owner,
                     syntax: AdtCtorSyntax::Unit,
-                    fields: Vec::new(),
+                    fields: IndexVec::new(),
                 },
                 s,
             ),
@@ -672,12 +675,12 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                     .enumerate()
                     .map(|(idx, field)| AdtCtorField {
                         span: field.span,
-                        idx: idx as u32,
+                        idx: AdtCtorFieldIdx::from_usize(idx),
                         vis: resolve_vis(self, &field.vis),
                         ident: None,
                         ty: LateInit::uninit(),
                     })
-                    .collect::<Vec<_>>();
+                    .collect::<IndexVec<_, _>>();
 
                 let kind = Obj::new(
                     AdtCtor {
@@ -695,35 +698,37 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                 kind
             }
             AstStructKind::Struct(ast) => {
-                let mut by_name = FxHashMap::default();
+                let mut by_name = FxHashMap::<Symbol, AdtCtorFieldIdx>::default();
 
                 let fields = ast
                     .iter()
                     .enumerate()
                     .map(|(idx, field)| {
+                        let idx = AdtCtorFieldIdx::from_usize(idx);
+
                         match by_name.entry(field.name.text) {
                             hash_map::Entry::Occupied(entry) => {
                                 Diag::span_err(field.span, "duplicate field name")
                                     .child(LeafDiag::span_note(
-                                        ast[*entry.get() as usize].name.span,
+                                        ast[entry.get().index()].name.span,
                                         "name first used here",
                                     ))
                                     .emit();
                             }
                             hash_map::Entry::Vacant(entry) => {
-                                entry.insert(idx as u32);
+                                entry.insert(idx);
                             }
                         }
 
                         AdtCtorField {
                             span: field.span,
-                            idx: idx as u32,
+                            idx,
                             vis: resolve_vis(self, &field.vis),
                             ident: Some(field.name),
                             ty: LateInit::uninit(),
                         }
                     })
-                    .collect::<Vec<_>>();
+                    .collect::<IndexVec<_, _>>();
 
                 let kind = Obj::new(
                     AdtCtor {

@@ -21,8 +21,9 @@ use crate::{
             },
         },
         syntax::{
-            AdtCtor, AdtCtorSyntax, Block, Expr, ExprKind, LetStmt, MatchArm, Pat, PatKind,
-            PatListFrontAndTail, RangeExpr, SpannedTyOrReList, Stmt, StructExpr, StructNamedField,
+            AdtCtor, AdtCtorFieldIdx, AdtCtorSyntax, Block, Expr, ExprKind, LetStmt, MatchArm, Pat,
+            PatKind, PatListFrontAndTail, RangeExpr, SpannedTyOrReList, Stmt, StructExpr,
+            StructNamedField,
         },
     },
     utils::{
@@ -307,7 +308,9 @@ impl IntraItemLowerCtxt<'_> {
                                         self.scope.r(s).bare_category_path(s),
                                         if offending_fields.len() == 1 { "" } else { "s" },
                                         format_list(
-                                            offending_fields.iter().map(|v| format!("`{}`", v.idx)),
+                                            offending_fields
+                                                .iter()
+                                                .map(|v| format!("`{}`", v.idx.raw())),
                                             AND_LIST_GLUE,
                                         ),
                                         if offending_fields.len() == 1 {
@@ -730,7 +733,7 @@ impl IntraItemLowerCtxt<'_> {
         ctor: Obj<AdtCtor>,
         fields: Vec<(Ident, T)>,
         deny_missing: Option<Span>,
-    ) -> Vec<(u32, T)> {
+    ) -> Vec<(AdtCtorFieldIdx, T)> {
         let s = &self.tcx.session;
         let name_map = ctor.r(s).syntax.unwrap_names();
 
@@ -752,7 +755,7 @@ impl IntraItemLowerCtxt<'_> {
                 continue;
             };
 
-            if !ctor.r(s).fields[resolved_idx as usize]
+            if !ctor.r(s).fields[resolved_idx]
                 .vis
                 .is_visible_to(self.scope, s)
             {
@@ -789,8 +792,8 @@ impl IntraItemLowerCtxt<'_> {
         {
             let mut missing_field_list = Vec::new();
 
-            for (idx, field_info) in ctor.r(s).fields.iter().enumerate() {
-                if mentions.contains_key(&(idx as u32)) {
+            for (idx, field_info) in ctor.r(s).fields.iter_enumerated() {
+                if mentions.contains_key(&idx) {
                     continue;
                 }
 
