@@ -1,0 +1,5 @@
+error: could not unify UniversalVar(3) and UniversalVar(2)
+  ┌─ crates/frontend/samples/test14.fir:1:48
+  │
+1 │ struct Meow1<'a, 'b, 'c, T: 'a + 'b>(Thump<'c, T>);
+  │                                                ^

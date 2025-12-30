@@ -93,7 +93,13 @@ pub struct ClauseCx<'tcx> {
 struct UniversalTyVarDescriptor {
     src_info: UniversalTyVarSourceInfo,
     direct_clauses: Option<TraitClauseList>,
-    elaborated_clauses: Option<TraitClauseList>,
+    elaboration: Option<UniversalElaboration>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct UniversalElaboration {
+    pub clauses: TraitClauseList,
+    pub lub_re: Re,
 }
 
 impl<'tcx> ClauseCx<'tcx> {
@@ -201,7 +207,7 @@ impl<'tcx> ClauseCx<'tcx> {
         self.universal_vars.push(UniversalTyVarDescriptor {
             src_info,
             direct_clauses: None,
-            elaborated_clauses: None,
+            elaboration: None,
         })
     }
 
@@ -673,29 +679,36 @@ impl<'tcx> ClauseCx<'tcx> {
         self.universal_vars[var].direct_clauses.unwrap()
     }
 
-    pub fn elaborate_ty_universal_clauses(&mut self, var: UniversalTyVar) -> TraitClauseList {
+    pub fn elaborate_ty_universal_clauses(&mut self, var: UniversalTyVar) -> UniversalElaboration {
         // See whether this universal variable has been elaborated yet.
-        if let Some(elaborated) = self.universal_vars[var].elaborated_clauses {
+        if let Some(elaborated) = self.universal_vars[var].elaboration {
             return elaborated;
         }
 
         // If not, accumulate a collection of clauses.
         let mut elaborated = Vec::new();
 
+        let lub_re = self.fresh_re_universal(UniversalReVarSourceInfo::ElaboratedLub);
+
         self.elaborate_clause_and_implied(
             var,
+            lub_re,
             &mut elaborated,
             self.direct_ty_universal_clauses(var),
         );
 
-        let elaborated = self.tcx().intern_list(&elaborated);
-        self.universal_vars[var].elaborated_clauses = Some(elaborated);
+        let elaborated = UniversalElaboration {
+            clauses: self.tcx().intern_list(&elaborated),
+            lub_re,
+        };
+        self.universal_vars[var].elaboration = Some(elaborated);
         elaborated
     }
 
     fn elaborate_clause_and_implied(
         &mut self,
         root: UniversalTyVar,
+        lub_re: Re,
         accum: &mut Vec<TraitClause>,
         target: TraitClauseList,
     ) {
@@ -704,6 +717,7 @@ impl<'tcx> ClauseCx<'tcx> {
         for &target in target.r(s) {
             match target {
                 TraitClause::Outlives(re) => {
+                    self.permit_re_universal_outlives(lub_re, re);
                     accum.push(TraitClause::Outlives(re));
                 }
                 TraitClause::Trait(spec) => {
@@ -848,13 +862,14 @@ impl<'tcx> ClauseCx<'tcx> {
 
     fn try_select_inherent_impl(
         mut self,
-        lhs_elaborated: TraitClauseList,
+        lhs: UniversalElaboration,
         rhs: TraitSpec,
     ) -> SelectionResult<Self> {
         let s = self.session();
 
         // Find the clause that could prove our trait.
-        let lhs = lhs_elaborated
+        let lhs = lhs
+            .clauses
             .r(s)
             .iter()
             .copied()
@@ -1124,7 +1139,16 @@ impl<'tcx> ClauseCx<'tcx> {
                     self.oblige_ty_and_re(ObligationReason::Structural, lhs, rhs);
                 }
             }
-            TyKind::UniversalVar(_) => todo!(),
+            TyKind::UniversalVar(var) => {
+                let lub_re = self.elaborate_ty_universal_clauses(var).lub_re;
+
+                self.oblige_re_and_re(
+                    ObligationReason::Structural,
+                    lub_re,
+                    rhs,
+                    RelationMode::LhsOntoRhs,
+                );
+            }
             TyKind::InferVar(inf_lhs) => {
                 if let Ok(inf_lhs) = self.lookup_ty_infer_var(inf_lhs) {
                     self.oblige_ty_and_re(ObligationReason::Structural, inf_lhs, rhs);

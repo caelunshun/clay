@@ -480,6 +480,7 @@ define_index_type! {
 #[derive(Debug, Copy, Clone)]
 pub enum UniversalReVarSourceInfo {
     Root(Obj<RegionGeneric>),
+    ElaboratedLub,
 }
 
 #[derive(Debug, Copy, Clone)]
