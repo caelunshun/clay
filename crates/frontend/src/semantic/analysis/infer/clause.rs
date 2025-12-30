@@ -1211,10 +1211,9 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     pub fn run_oblige_ty_wf(&mut self, ty: Ty) -> ObligationResult {
-        if matches!(
-            self.peel_ty_infer_var(ty).r(self.session()),
-            TyKind::InferVar(_)
-        ) {
+        let ty = self.peel_ty_infer_var(ty);
+
+        if matches!(ty.r(self.session()), TyKind::InferVar(_)) {
             return ObligationResult::NotReady;
         }
 

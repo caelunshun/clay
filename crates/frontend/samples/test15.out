@@ -1,0 +1,5 @@
+error: failed to prove 0x14d00d210: Tuple(0x14d00d258: [0x14d00bf68: Tuple(0x14d00bfb0: [])]) implements TraitSpec { def: "Meow"#18, params: 0x14d00ce58: [] }
+   ┌─ crates/frontend/samples/test15.fir:11:50
+   │
+11 │ pub struct Miau2<T: Assoc<Holder = ((),)>>(Thump<<T as Assoc>::Holder>);
+   │                                                  ^^^^^^^^^^^^^^^^^^^^
