@@ -7,7 +7,7 @@ use crate::{
     utils::hash::{FxHashMap, FxHashSet},
 };
 use index_vec::{IndexVec, define_index_type};
-use std::{collections::VecDeque, fmt, mem, rc::Rc};
+use std::{cell::Cell, collections::VecDeque, fmt, mem, rc::Rc};
 
 // === Definitions === //
 
@@ -124,12 +124,15 @@ pub struct ObligationCx<'tcx> {
 
 #[derive(Clone)]
 struct QueuedObligation {
+    parent: Option<ObligationIdx>,
     kind: ObligationKind,
     reason: ObligationReason,
 }
 
 #[derive(Default)]
 struct ObligationCxRoot {
+    eval_suppressed: Cell<bool>,
+
     /// The obligation we're currently in the process of executing.
     current_obligation: Option<ObligationIdx>,
 
@@ -201,44 +204,12 @@ impl<'tcx> ObligationCx<'tcx> {
         &mut self.ucx
     }
 
-    pub fn push_obligation_no_poll(&mut self, reason: ObligationReason, kind: ObligationKind) {
-        if self.root.current_obligation.is_none() {
-            let root = Rc::get_mut(&mut self.root)
-                .expect("`ObligationCx` cannot be forked while pushing root-level obligations");
-
-            Self::push_obligation_no_poll_inner(root, None, reason, kind);
-        } else {
-            Rc::make_mut(&mut self.local_obligation_queue).push(QueuedObligation { kind, reason });
-        }
-    }
-
-    fn push_obligation_no_poll_inner(
-        root: &mut ObligationCxRoot,
-        parent: Option<ObligationIdx>,
-        reason: ObligationReason,
-        kind: ObligationKind,
-    ) {
-        let depth = parent.map_or(0, |v| root.all_obligations[v].depth + 1);
-
-        let obligation = root.all_obligations.push(ObligationState {
-            parent,
-            depth,
-            reason,
+    pub fn push_obligation(&mut self, reason: ObligationReason, kind: ObligationKind) {
+        Rc::make_mut(&mut self.local_obligation_queue).push(QueuedObligation {
+            parent: self.root.current_obligation,
             kind,
-            can_wake_by: FxHashSet::default(),
+            reason,
         });
-
-        if depth > MAX_OBLIGATION_DEPTH {
-            Self::emit_diag_with_context_inner(
-                root,
-                obligation,
-                Diag::anon_err("maximum obligation depth reached"),
-            );
-
-            return;
-        }
-
-        root.run_queue.push_back(obligation);
     }
 
     fn emit_diag_with_context_inner(
@@ -260,11 +231,25 @@ impl<'tcx> ObligationCx<'tcx> {
         }
 
         // Attach a primary span.
-        diag.push_primary(all_obligations[root_idx].reason.span().unwrap(), "");
+        diag.push_primary(
+            all_obligations[root_idx]
+                .reason
+                .span()
+                .unwrap_or(Span::DUMMY),
+            "",
+        );
 
         // TODO: Print out full causality chain
 
         diag.emit()
+    }
+
+    pub fn obligation_eval_suppressed(&self) -> bool {
+        self.root.eval_suppressed.get()
+    }
+
+    pub fn set_obligation_eval_suppressed(&mut self, is_suppressed: bool) {
+        self.root.eval_suppressed.set(is_suppressed);
     }
 
     pub fn poll_obligations<T>(
@@ -273,7 +258,9 @@ impl<'tcx> ObligationCx<'tcx> {
         forker: impl Fn(&T) -> T,
         mut run: impl FnMut(&mut T, ObligationKind) -> ObligationResult,
     ) {
-        if getter(target).root.current_obligation.is_some() {
+        let this = getter(target);
+
+        if this.root.current_obligation.is_some() || this.root.eval_suppressed.get() {
             return;
         }
 
@@ -284,6 +271,37 @@ impl<'tcx> ObligationCx<'tcx> {
                 .expect("`ObligationCx` cannot be forked while polling obligations");
 
             debug_assert!(root.current_obligation.is_none());
+
+            // Import queued obligations.
+            for obligation in mem::take(Rc::make_mut(&mut this.local_obligation_queue)) {
+                let QueuedObligation {
+                    parent,
+                    kind,
+                    reason,
+                } = obligation;
+
+                let depth = parent.map_or(0, |v| root.all_obligations[v].depth + 1);
+
+                let obligation = root.all_obligations.push(ObligationState {
+                    parent,
+                    depth,
+                    reason,
+                    kind,
+                    can_wake_by: FxHashSet::default(),
+                });
+
+                if depth > MAX_OBLIGATION_DEPTH {
+                    Self::emit_diag_with_context_inner(
+                        root,
+                        obligation,
+                        Diag::anon_err("maximum obligation depth reached"),
+                    );
+
+                    return;
+                }
+
+                root.run_queue.push_back(obligation);
+            }
 
             // See whether any new obligations can be added to the queue yet.
             for &var in &this.ucx.observed_infer_reveal_order()[root.rerun_var_read_len..] {
@@ -338,17 +356,8 @@ impl<'tcx> ObligationCx<'tcx> {
                         "All other `ObligationCx` forks must be dropped after obligation returns",
                     );
 
-                    // Push enqueued obligations.
+                    // Stop the obligation.
                     root.current_obligation = None;
-
-                    for obligation in mem::take(Rc::make_mut(&mut this.local_obligation_queue)) {
-                        Self::push_obligation_no_poll_inner(
-                            root,
-                            Some(curr_idx),
-                            obligation.reason,
-                            obligation.kind,
-                        );
-                    }
                 }
                 ObligationResult::Failure(diag) => {
                     // Drop the fork to regain access to the `root`.

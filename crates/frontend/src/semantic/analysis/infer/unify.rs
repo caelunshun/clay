@@ -378,36 +378,7 @@ impl<'tcx> UnifyCx<'tcx> {
                 if lhs == rhs =>
             {
                 for (&lhs, &rhs) in lhs_generics.r(s).iter().zip(rhs_generics.r(s)) {
-                    // In `rustc`, these types always seem to be invariant...
-                    //
-                    // ```rust
-                    // fn meow<'a, 'b>() {
-                    //     let a = &mut foo::<'a>;
-                    //     let b = &mut bar::<'b>;
-                    //
-                    //     eq(a, b);
-                    // }
-                    //
-                    // fn eq<T>(a: &mut T, b: &mut T) {}
-                    //
-                    // fn foo<'a>() -> &'a mut u32 {}
-                    //
-                    // fn bar<'a>() -> &'a mut u32 {}
-                    // ```
-                    //
-                    // ```
-                    // error[E0308]: mismatched types
-                    //  --> src/lib.rs:5:11
-                    //   |
-                    // 5 |     eq(a, b);
-                    //   |     --    ^ expected `&mut fn() -> &mut u32 {foo::<'_>}`, found `&mut fn() -> &mut u32 {bar::<'_>}`
-                    //   |     |
-                    //   |     arguments to this function are incorrect
-                    //   |
-                    //   = note: expected mutable reference `&mut fn() -> &'a mut _ {foo::<'a>}`
-                    //              found mutable reference `&mut fn() -> &'b mut _ {bar::<'b>}`
-                    // note: function defined here
-                    // ```
+                    // TODO: The variance rules for these are a bit more complicated.
                     let mode = RelationMode::Equate;
 
                     match (lhs, rhs) {

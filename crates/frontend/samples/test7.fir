@@ -16,11 +16,11 @@ pub trait Demo1 {
 // This is accepted.
 pub struct Demo2<Foo, Bar: NeedsMeowAssoc<T = Foo>>(Foo, Bar);
 
-pub trait Demo3 {
+pub trait Demo3<T: Meow> {
     type Foo;
 
     // This is rejected.
-    type Bar: NeedsMeowGeneric<Foo>;
+    type Bar: NeedsMeowGeneric<<Self as Demo3<T>>::Foo>;
 }
 
 // This is rejected.
