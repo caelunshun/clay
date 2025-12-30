@@ -117,8 +117,6 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Let's ensure that the target trait instance is well formed.
         if let Some(trait_) = *trait_ {
-            let mut ccx = ClauseCx::new(self.tcx(), self.coherence, UnifyCxMode::RegionAware);
-
             let trait_ = ccx
                 .importer(env.self_ty, &env.sig_generic_substs)
                 .fold_spanned_trait_instance(trait_);
@@ -139,6 +137,9 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Let's ensure that `impl` generics all have well-formed clauses.
         self.visit_generic_binder(&mut ccx, env.self_ty, &env.sig_generic_substs, *generics);
+
+        // Let's ensure that the type implements its super-traits as well.
+        // TODO
 
         // Finally, let's check method signatures and bodies.
         // TODO
@@ -218,10 +219,12 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
             };
 
             let clauses = ccx
-                .importer(self_ty, &sig_generic_substs)
+                .importer(self_ty, sig_generic_substs)
                 .fold_spanned_clause_list(clauses);
 
-            ccx.wf_visitor().visit_spanned(clauses);
+            ccx.wf_visitor()
+                .with_clause_applies_to(self_ty)
+                .visit_spanned(clauses);
         }
     }
 }

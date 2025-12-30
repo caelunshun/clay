@@ -67,7 +67,7 @@ impl TyCtxt {
             self.check_impl_generic_covering(def);
         }
 
-        _ = CrateTypeckVisitor {
+        CrateTypeckVisitor {
             tcx: self,
             coherence: &coherence,
         }

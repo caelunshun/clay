@@ -486,7 +486,7 @@ pub enum UniversalReVarSourceInfo {
 pub enum UniversalTyVarSourceInfo {
     TraitSelf,
     Root(Obj<TypeGeneric>),
-    Projection(UniversalTyVar, TraitInstance, Symbol),
+    Projection(UniversalTyVar, TraitSpec, u32),
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

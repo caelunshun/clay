@@ -92,7 +92,7 @@ pub struct ClauseCx<'tcx> {
 #[derive(Clone)]
 struct UniversalTyVarDescriptor {
     src_info: UniversalTyVarSourceInfo,
-    regular_clauses: Option<TraitClauseList>,
+    direct_clauses: Option<TraitClauseList>,
     elaborated_clauses: Option<TraitClauseList>,
 }
 
@@ -200,7 +200,7 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn fresh_ty_universal_var(&mut self, src_info: UniversalTyVarSourceInfo) -> UniversalTyVar {
         self.universal_vars.push(UniversalTyVarDescriptor {
             src_info,
-            regular_clauses: None,
+            direct_clauses: None,
             elaborated_clauses: None,
         })
     }
@@ -210,11 +210,15 @@ impl<'tcx> ClauseCx<'tcx> {
             .intern(TyKind::UniversalVar(self.fresh_ty_universal_var(src_info)))
     }
 
-    pub fn init_ty_universal_clauses(&mut self, var: UniversalTyVar, clauses: TraitClauseList) {
+    pub fn init_ty_universal_var_direct_clauses(
+        &mut self,
+        var: UniversalTyVar,
+        clauses: TraitClauseList,
+    ) {
         let descriptor = &mut self.universal_vars[var];
 
-        assert!(descriptor.regular_clauses.is_none());
-        descriptor.regular_clauses = Some(clauses);
+        assert!(descriptor.direct_clauses.is_none());
+        descriptor.direct_clauses = Some(clauses);
     }
 
     pub fn lookup_universal_ty_src_info(
@@ -347,7 +351,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
                         for &clause in generic.r(s).clauses.value.r(s) {
                             let clause = self
-                                .importer(self_ty, &sig_generic_substs)
+                                .importer(self_ty, sig_generic_substs)
                                 .fold_clause(clause);
 
                             let TraitClause::Outlives(allowed_to_outlive) = clause else {
@@ -363,10 +367,10 @@ impl<'tcx> ClauseCx<'tcx> {
                         };
 
                         let clauses = self
-                            .importer(self_ty, &sig_generic_substs)
+                            .importer(self_ty, sig_generic_substs)
                             .fold_clause_list(generic.r(s).clauses.value);
 
-                        self.init_ty_universal_clauses(target, clauses);
+                        self.init_ty_universal_var_direct_clauses(target, clauses);
                     }
                     _ => unreachable!(),
                 }
@@ -451,7 +455,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
                         for clause in generic.r(s).clauses.iter(tcx) {
                             let clause_span = clause.own_span();
-                            let clause = self.importer(self_ty, &substs).fold_clause(clause.value);
+                            let clause = self.importer(self_ty, substs).fold_clause(clause.value);
 
                             let TraitClause::Outlives(must_outlive) = clause else {
                                 unreachable!()
@@ -469,7 +473,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     }
                     (AnyGeneric::Ty(generic), TyOrRe::Ty(target)) => {
                         let clauses = self
-                            .importer(self_ty, &substs)
+                            .importer(self_ty, substs)
                             .fold_spanned_clause_list(*generic.r(s).clauses);
 
                         for clause in clauses.iter(tcx) {
@@ -508,7 +512,7 @@ impl<'tcx> ClauseCx<'tcx> {
         let generic_params = sig_generic_substs[0].substs;
 
         // Make `Self` implement the trait with these synthesized parameters.
-        self.init_ty_universal_clauses(
+        self.init_ty_universal_var_direct_clauses(
             self_var,
             tcx.intern_list(&[TraitClause::Trait(TraitSpec {
                 def,
@@ -643,16 +647,72 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
 // === Elaboration === //
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn regular_ty_universal_clauses(&self, var: UniversalTyVar) -> TraitClauseList {
-        self.universal_vars[var].regular_clauses.unwrap()
+    pub fn direct_ty_universal_clauses(&self, var: UniversalTyVar) -> TraitClauseList {
+        self.universal_vars[var].direct_clauses.unwrap()
     }
 
     pub fn elaborate_ty_universal_clauses(&mut self, var: UniversalTyVar) -> TraitClauseList {
+        // See whether this universal variable has been elaborated yet.
         if let Some(elaborated) = self.universal_vars[var].elaborated_clauses {
             return elaborated;
         }
 
-        todo!()
+        // If not, accumulate a collection of clauses.
+        let mut elaborated = Vec::new();
+
+        self.elaborate_clause_and_implied(
+            var,
+            &mut elaborated,
+            self.direct_ty_universal_clauses(var),
+        );
+
+        let elaborated = self.tcx().intern_list(&elaborated);
+        self.universal_vars[var].elaborated_clauses = Some(elaborated);
+        elaborated
+    }
+
+    fn elaborate_clause_and_implied(
+        &mut self,
+        root: UniversalTyVar,
+        accum: &mut Vec<TraitClause>,
+        target: TraitClauseList,
+    ) {
+        let s = self.session();
+
+        for &target in target.r(s) {
+            match target {
+                TraitClause::Outlives(re) => {
+                    accum.push(TraitClause::Outlives(re));
+                }
+                TraitClause::Trait(spec) => {
+                    // // Elaborate with filled in parameters.
+                    // let new_params = spec
+                    //     .params
+                    //     .r(s)
+                    //     .iter()
+                    //     .zip(&spec.def.r(s).generics.r(s).defs)
+                    //     .enumerate()
+                    //     .map(|(idx, (param, base))| match *param {
+                    //         TraitParam::Equals(ty) => TraitParam::Equals(ty),
+                    //         TraitParam::Unspecified(extra_clauses) => {
+                    //             let universal = self.fresh_ty_universal_var(
+                    //                 UniversalTyVarSourceInfo::Projection(root, spec, idx as u32),
+                    //             );
+                    //             let base = *base.as_ty().unwrap().r(s).clauses;
+                    //
+                    //             self.importer(self_ty, sig_generic_substs);
+                    //
+                    //             todo!()
+                    //         }
+                    //     });
+                    //
+                    // // Elaborate super-traits.
+                    // // TODO
+
+                    accum.push(TraitClause::Trait(spec));
+                }
+            }
+        }
     }
 }
 
