@@ -2,12 +2,12 @@ use crate::{
     base::{Session, arena::Obj},
     semantic::{
         analysis::{
-            ClauseCx, CoherenceMap, TyCtxt, TyFolderInfalliblePreservesSpans as _,
-            TyVisitorInfallibleExt, UnifyCxMode,
+            ClauseCx, ClauseImportEnvRef, CoherenceMap, TyCtxt,
+            TyFolderInfalliblePreservesSpans as _, TyVisitorInfallibleExt, UnifyCxMode,
         },
         syntax::{
-            AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FuncItem, GenericBinder, GenericSubst,
-            ImplItem, ItemKind, TraitItem, Ty,
+            AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FuncItem, GenericBinder, ImplItem,
+            ItemKind, TraitItem,
         },
     },
 };
@@ -81,7 +81,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         // First, let's ensure that the inherited trait list is well-formed.
         {
             let inherits = ccx
-                .importer(env.self_ty, &env.sig_generic_substs)
+                .importer(env.as_ref())
                 .fold_spanned_clause_list(**inherits);
 
             ccx.wf_visitor()
@@ -90,7 +90,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         }
 
         // Now, let's ensure that each generic parameter's clauses are well-formed.
-        self.visit_generic_binder(&mut ccx, env.self_ty, &env.sig_generic_substs, *generics);
+        self.visit_generic_binder(&mut ccx, env.as_ref(), *generics);
 
         // Finally, let's check method signatures and, if a default one is provided, bodies.
         // TODO
@@ -119,7 +119,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         // regular generic parameters *and* associated types.
         if let Some(trait_) = *trait_ {
             let trait_ = ccx
-                .importer(env.self_ty, &env.sig_generic_substs)
+                .importer(env.as_ref())
                 .fold_spanned_trait_instance(trait_);
 
             ccx.wf_visitor()
@@ -129,15 +129,13 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Let's also ensure that our target type is well-formed.
         {
-            let target = ccx
-                .importer(env.self_ty, &env.sig_generic_substs)
-                .fold_spanned_ty(*target);
+            let target = ccx.importer(env.as_ref()).fold_spanned_ty(*target);
 
             ccx.wf_visitor().visit_spanned(target);
         }
 
         // Let's ensure that `impl` generics all have well-formed clauses.
-        self.visit_generic_binder(&mut ccx, env.self_ty, &env.sig_generic_substs, *generics);
+        self.visit_generic_binder(&mut ccx, env.as_ref(), *generics);
 
         // Let's ensure that the type implements its super-traits as well.
         // TODO
@@ -158,31 +156,16 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         let env = ccx.import_adt_def_env(def);
 
         // First, let's ensure that each generic parameter's clauses are well-formed.
-        self.visit_generic_binder(
-            &mut ccx,
-            env.self_ty,
-            &env.sig_generic_substs,
-            def.r(s).generics,
-        );
+        self.visit_generic_binder(&mut ccx, env.as_ref(), def.r(s).generics);
 
         // Now, WF-check the definition.
         match *def.r(s).kind {
             AdtKind::Struct(kind) => {
-                self.visit_adt_ctor(
-                    &mut ccx,
-                    env.self_ty,
-                    &env.sig_generic_substs,
-                    *kind.r(s).ctor,
-                );
+                self.visit_adt_ctor(&mut ccx, env.as_ref(), *kind.r(s).ctor);
             }
             AdtKind::Enum(kind) => {
                 for variant in kind.r(s).variants.iter() {
-                    self.visit_adt_ctor(
-                        &mut ccx,
-                        env.self_ty,
-                        &env.sig_generic_substs,
-                        *variant.r(s).ctor,
-                    );
+                    self.visit_adt_ctor(&mut ccx, env.as_ref(), *variant.r(s).ctor);
                 }
             }
         }
@@ -191,16 +174,13 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
     fn visit_adt_ctor(
         &mut self,
         ccx: &mut ClauseCx,
-        self_ty: Ty,
-        sig_generic_substs: &[GenericSubst],
+        env: ClauseImportEnvRef<'_>,
         ctor: Obj<AdtCtor>,
     ) {
         let s = self.session();
 
         for field in ctor.r(s).fields.iter() {
-            let field_ty = ccx
-                .importer(self_ty, sig_generic_substs)
-                .fold_spanned_ty(*field.ty);
+            let field_ty = ccx.importer(env).fold_spanned_ty(*field.ty);
 
             ccx.wf_visitor().visit_spanned(field_ty);
         }
@@ -215,8 +195,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
     pub fn visit_generic_binder(
         &mut self,
         ccx: &mut ClauseCx,
-        self_ty: Ty,
-        sig_generic_substs: &[GenericSubst],
+        env: ClauseImportEnvRef<'_>,
         generics: Obj<GenericBinder>,
     ) {
         let s = self.session();
@@ -227,12 +206,10 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
                 AnyGeneric::Ty(generic) => *generic.r(s).clauses,
             };
 
-            let clauses = ccx
-                .importer(self_ty, sig_generic_substs)
-                .fold_spanned_clause_list(clauses);
+            let clauses = ccx.importer(env).fold_spanned_clause_list(clauses);
 
             ccx.wf_visitor()
-                .with_clause_applies_to(self_ty)
+                .with_clause_applies_to(env.self_ty)
                 .visit_spanned(clauses);
         }
     }

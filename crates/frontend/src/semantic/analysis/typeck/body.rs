@@ -19,12 +19,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         let env = self.setup_env_for_fn_def(def, &mut ccx);
 
         // WF-check the signature.
-        self.visit_generic_binder(
-            &mut ccx,
-            env.self_ty,
-            &env.sig_generic_substs,
-            def.r(s).generics,
-        );
+        self.visit_generic_binder(&mut ccx, env.as_ref(), def.r(s).generics);
 
         // TODO
         // if let Some(self_param) = *def.r(s).self_param {
@@ -32,16 +27,12 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         // }
 
         for arg in def.r(s).args.r(s) {
-            let arg = ccx
-                .importer(env.self_ty, &env.sig_generic_substs)
-                .fold_spanned_ty(arg.ty);
+            let arg = ccx.importer(env.as_ref()).fold_spanned_ty(arg.ty);
 
             ccx.wf_visitor().visit_spanned(arg);
         }
 
-        let ret_ty = ccx
-            .importer(env.self_ty, &env.sig_generic_substs)
-            .fold_spanned_ty(*def.r(s).ret_ty);
+        let ret_ty = ccx.importer(env.as_ref()).fold_spanned_ty(*def.r(s).ret_ty);
 
         ccx.wf_visitor().visit_spanned(ret_ty);
 
