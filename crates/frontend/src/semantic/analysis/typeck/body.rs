@@ -2,7 +2,7 @@ use crate::{
     base::arena::{HasInterner, Obj},
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnv, CrateTypeckVisitor, TyFolderInfalliblePreservesSpans,
+            ClauseCx, ClauseImportEnv, CrateTypeckVisitor, TyFolderInfallibleExt,
             TyVisitorInfallibleExt, UnifyCxMode,
         },
         syntax::{FnDef, FuncDefOwner, TyKind},
@@ -27,12 +27,12 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         // }
 
         for arg in def.r(s).args.r(s) {
-            let arg = ccx.importer(env.as_ref()).fold_spanned_ty(arg.ty);
+            let arg = ccx.importer(env.as_ref()).fold_preserved(arg.ty);
 
             ccx.wf_visitor().visit_spanned(arg);
         }
 
-        let ret_ty = ccx.importer(env.as_ref()).fold_spanned_ty(*def.r(s).ret_ty);
+        let ret_ty = ccx.importer(env.as_ref()).fold_preserved(*def.r(s).ret_ty);
 
         ccx.wf_visitor().visit_spanned(ret_ty);
 

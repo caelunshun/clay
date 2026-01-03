@@ -8,9 +8,11 @@ use crate::{
     semantic::{
         analysis::TyCtxt,
         syntax::{
-            AdtInstance, AdtItem, FnDef, InferTyVar, Mutability, Re, SimpleTyKind, TraitClause,
-            TraitClauseList, TraitInstance, TraitItem, TraitParam, TraitParamList, TraitSpec, Ty,
-            TyKind, TyList, TyOrRe, TyOrReList, TyProjection, TypeGeneric, UniversalTyVar,
+            AdtInstance, AdtItem, FnDef, GenericBinder, HrtbBinder, HrtbBinderKind, HrtbDebruijn,
+            HrtbDebruijnDef, HrtbDebruijnDefList, InferTyVar, Mutability, Re, SimpleTyKind,
+            TraitClause, TraitClauseList, TraitInstance, TraitItem, TraitParam, TraitParamList,
+            TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList, TyProjection,
+            TypeGeneric, UniversalTyVar,
         },
     },
 };
@@ -74,6 +76,7 @@ pub enum SpannedTyView {
     Trait(SpannedTraitClauseList),
     Tuple(SpannedTyList),
     FnDef(Obj<FnDef>, Option<SpannedTyOrReList>),
+    HrtbVar(HrtbDebruijn),
     InferVar(InferTyVar),
     UniversalVar(UniversalTyVar),
     Error(ErrorGuaranteed),
@@ -113,6 +116,7 @@ impl SpannedViewDecode<TyCtxt> for Ty {
                 def,
                 generics.map(|generics| Spanned::new_raw(generics, span_info.unwrap(tcx))),
             ),
+            TyKind::HrtbVar(var) => SpannedTyView::HrtbVar(var),
             TyKind::InferVar(var) => SpannedTyView::InferVar(var),
             TyKind::UniversalVar(var) => SpannedTyView::UniversalVar(var),
             TyKind::Error(error) => SpannedTyView::Error(error),
@@ -169,6 +173,10 @@ impl SpannedViewEncode<TyCtxt> for SpannedTyView {
                 tcx.intern(TyKind::FnDef(def, None)),
                 SpannedInfo::new_terminal(own_span, tcx),
             ),
+            SpannedTyView::HrtbVar(var) => Spanned::new_raw(
+                tcx.intern(TyKind::HrtbVar(var)),
+                SpannedInfo::new_terminal(own_span, tcx),
+            ),
             SpannedTyView::InferVar(var) => Spanned::new_raw(
                 tcx.intern(TyKind::InferVar(var)),
                 SpannedInfo::new_terminal(own_span, tcx),
@@ -212,7 +220,7 @@ pub type SpannedTraitClause = Spanned<TraitClause>;
 #[derive(Debug, Copy, Clone)]
 pub enum SpannedTraitClauseView {
     Outlives(SpannedRe),
-    Trait(SpannedTraitSpec),
+    Trait(SpannedHrtbBinder<TraitSpec>),
 }
 
 impl SpannedViewDecode<TyCtxt> for TraitClause {
@@ -440,6 +448,119 @@ impl SpannedViewEncode<TyCtxt> for SpannedTyProjectionView {
                 ],
                 tcx,
             ),
+        )
+    }
+}
+
+// === HrtbBinder === //
+
+pub type SpannedHrtbBinder<T> = Spanned<HrtbBinder<T>>;
+
+#[derive(Debug, Copy, Clone)]
+pub struct SpannedHrtbBinderView<T> {
+    pub kind: SpannedHrtbBinderKind,
+    pub inner: Spanned<T>,
+}
+
+impl<T: Copy> SpannedViewDecode<TyCtxt> for HrtbBinder<T> {
+    type View = SpannedHrtbBinderView<T>;
+
+    fn decode(value: &Self, span_info: SpannedInfo, tcx: &TyCtxt) -> Self::View {
+        let [kind_span, inner_span] = span_info.child_spans(tcx);
+
+        SpannedHrtbBinderView {
+            kind: Spanned::new_raw(value.kind, kind_span),
+            inner: Spanned::new_raw(value.inner, inner_span),
+        }
+    }
+}
+
+impl<T: Copy> SpannedViewEncode<TyCtxt> for SpannedHrtbBinderView<T> {
+    type Unspanned = HrtbBinder<T>;
+
+    fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
+        Spanned::new_raw(
+            HrtbBinder {
+                kind: self.kind.value,
+                inner: self.inner.value,
+            },
+            SpannedInfo::new_list(own_span, &[self.kind.span_info, self.inner.span_info], tcx),
+        )
+    }
+}
+
+// === HrtbBinderKind === //
+
+pub type SpannedHrtbBinderKind = Spanned<HrtbBinderKind>;
+
+#[derive(Debug, Copy, Clone)]
+pub enum SpannedHrtbBinderKindView {
+    Signature(Obj<GenericBinder>),
+    Imported(SpannedHrtbDebruijnDefList),
+}
+
+impl SpannedViewDecode<TyCtxt> for HrtbBinderKind {
+    type View = SpannedHrtbBinderKindView;
+
+    fn decode(value: &Self, span_info: SpannedInfo, tcx: &TyCtxt) -> Self::View {
+        match *value {
+            HrtbBinderKind::Signature(def) => SpannedHrtbBinderKindView::Signature(def),
+            HrtbBinderKind::Imported(list) => {
+                SpannedHrtbBinderKindView::Imported(Spanned::new_raw(list, span_info.unwrap(tcx)))
+            }
+        }
+    }
+}
+
+impl SpannedViewEncode<TyCtxt> for SpannedHrtbBinderKindView {
+    type Unspanned = HrtbBinderKind;
+
+    fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
+        match self {
+            SpannedHrtbBinderKindView::Signature(def) => Spanned::new_raw(
+                HrtbBinderKind::Signature(def),
+                SpannedInfo::new_terminal(own_span, tcx),
+            ),
+            SpannedHrtbBinderKindView::Imported(list) => Spanned::new_raw(
+                HrtbBinderKind::Imported(list.value),
+                list.span_info.wrap(own_span, tcx),
+            ),
+        }
+    }
+}
+
+// === HrtbDebruijnDef === //
+
+pub type SpannedHrtbDebruijnDefList = Spanned<HrtbDebruijnDefList>;
+pub type SpannedHrtbDebruijnDef = Spanned<HrtbDebruijnDef>;
+
+#[derive(Debug, Copy, Clone)]
+pub struct SpannedHrtbDebruijnDefView {
+    pub kind: TyOrReKind,
+    pub clauses: SpannedTraitClauseList,
+}
+
+impl SpannedViewDecode<TyCtxt> for HrtbDebruijnDef {
+    type View = SpannedHrtbDebruijnDefView;
+
+    fn decode(value: &Self, span_info: SpannedInfo, tcx: &TyCtxt) -> Self::View {
+        SpannedHrtbDebruijnDefView {
+            kind: value.kind,
+            clauses: Spanned::new_raw(value.clauses, span_info.unwrap(tcx)),
+        }
+    }
+}
+
+impl SpannedViewEncode<TyCtxt> for SpannedHrtbDebruijnDefView {
+    type Unspanned = HrtbDebruijnDef;
+
+    fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
+        Spanned::new_raw(
+            HrtbDebruijnDef {
+                kind: self.kind,
+                clauses: self.clauses.value,
+            },
+            self.clauses.span_info.wrap(own_span, tcx),
         )
     }
 }

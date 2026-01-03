@@ -1,6 +1,7 @@
 use crate::{
     base::{
         Diag, Session,
+        analysis::Spanned,
         arena::{HasInterner, HasListInterner, Obj},
         syntax::Span,
     },
@@ -8,19 +9,20 @@ use crate::{
         analysis::{
             CoherenceMap, ConfirmationResult, FloatingInferVar, ObligationCx, ObligationKind,
             ObligationReason, ObligationResult, SelectionRejected, SelectionResult, TyCtxt,
-            TyFolder, TyFolderInfallible as _, TyFolderInfalliblePreservesSpans as _,
-            TyFolderPreservesSpans, TyFolderSuper, TyVisitor, TyVisitorInfallibleExt,
-            UnboundVarHandlingMode, UnifyCx, UnifyCxMode,
+            TyFoldable, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyFolderPreservesSpans,
+            TyVisitor, TyVisitorInfallibleExt, UnboundVarHandlingMode, UnifyCx, UnifyCxMode,
         },
         syntax::{
-            AdtInstance, AdtItem, AnyGeneric, FnDef, GenericBinder, GenericSubst, ImplItem,
-            InferTyVar, Re, RelationMode, SpannedAdtInstance, SpannedTraitInstance,
-            SpannedTraitParamView, SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList,
+            AdtInstance, AdtItem, AnyGeneric, FnDef, GenericBinder, GenericSubst, HrtbBinder,
+            HrtbBinderKind, ImplItem, InferTyVar, Re, RelationMode, SpannedAdtInstance,
+            SpannedHrtbBinder, SpannedRe, SpannedTraitInstance, SpannedTraitParamView,
+            SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList, SpannedTyProjectionView,
             SpannedTyView, TraitClause, TraitClauseList, TraitItem, TraitParam, TraitSpec, Ty,
-            TyKind, TyOrRe, TyProjection, UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar,
+            TyKind, TyOrRe, TyOrReList, UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar,
             UniversalTyVarSourceInfo,
         },
     },
+    utils::hash::FxHashMap,
 };
 use index_vec::IndexVec;
 use std::{convert::Infallible, ops::ControlFlow};
@@ -32,8 +34,9 @@ use std::{convert::Infallible, ops::ControlFlow};
 /// - `Region: Region`
 /// - `Type = Type`
 /// - `Type: Clauses`
-/// - `Clauses entail Clauses`
-/// - `is-well-formed Type`
+/// - `well-formed Type`
+///
+/// Obligations are enqueued out of order and the context solves them as inference variables arrive.
 ///
 /// This context is built on top of an [`ObligationCx`].
 ///
@@ -65,23 +68,6 @@ use std::{convert::Infallible, ops::ControlFlow};
 ///
 /// Note that, if there are no type inference variables involved in your seed queries (e.g. when
 /// WF-checking traits), you can immediately skip to region aware checking.
-///
-/// ## Well-formedness checks
-///
-/// There are two types of well-formedness requirements a type may have...
-///
-/// - A type WF requirement where a generic parameter must implement a trait (e.g. if `Foo<T>` has a
-///   clause stipulating that `T: MyTrait`)
-///
-/// - A region WF constraint where a lifetime must outlive another lifetime (e.g. `&'a T` would
-///   imply that `T: 'a`).
-///
-/// Relational methods never check type WF requirements or push region WF constraints by
-/// themselves but will never crash if these WF requirements aren't met. You can "bolt on" these WF
-/// requirements at the end of a region-aware inference session by calling `wf_ty` on all the types
-/// the programmer has created.
-///
-/// TODO: Update this!
 #[derive(Clone)]
 pub struct ClauseCx<'tcx> {
     ocx: ObligationCx<'tcx>,
@@ -327,7 +313,11 @@ impl<'a> ClauseImportEnvRef<'a> {
 
 impl<'tcx> ClauseCx<'tcx> {
     pub fn importer<'a>(&'a mut self, env: ClauseImportEnvRef<'a>) -> ClauseCxImporter<'a, 'tcx> {
-        ClauseCxImporter { ccx: self, env }
+        ClauseCxImporter {
+            ccx: self,
+            env,
+            hrtb_binder_substs: FxHashMap::default(),
+        }
     }
 
     // === Universal === //
@@ -393,7 +383,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 match (generic, subst) {
                     (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
                         for &clause in generic.r(s).clauses.value.r(s) {
-                            let clause = self.importer(env).fold_clause(clause);
+                            let clause = self.importer(env).fold(clause);
 
                             let TraitClause::Outlives(allowed_to_outlive) = clause else {
                                 unreachable!()
@@ -407,9 +397,7 @@ impl<'tcx> ClauseCx<'tcx> {
                             unreachable!()
                         };
 
-                        let clauses = self
-                            .importer(env)
-                            .fold_clause_list(generic.r(s).clauses.value);
+                        let clauses = self.importer(env).fold(generic.r(s).clauses.value);
 
                         self.init_ty_universal_var_direct_clauses(target, clauses);
                     }
@@ -498,7 +486,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
                     for clause in generic.r(s).clauses.iter(tcx) {
                         let clause_span = clause.own_span();
-                        let clause = self.importer(env).fold_clause(clause.value);
+                        let clause = self.importer(env).fold(clause.value);
 
                         let TraitClause::Outlives(must_outlive) = clause else {
                             unreachable!()
@@ -515,9 +503,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     }
                 }
                 (AnyGeneric::Ty(generic), TyOrRe::Ty(target)) => {
-                    let clauses = self
-                        .importer(env)
-                        .fold_spanned_clause_list(*generic.r(s).clauses);
+                    let clauses = self.importer(env).fold_preserved(*generic.r(s).clauses);
 
                     for clause in clauses.iter(tcx) {
                         let reason = gen_reason(self, i, clause.own_span());
@@ -557,15 +543,18 @@ impl<'tcx> ClauseCx<'tcx> {
             // Make `Self` implement the trait with these synthesized parameters.
             this.init_ty_universal_var_direct_clauses(
                 self_var,
-                tcx.intern_list(&[TraitClause::Trait(TraitSpec {
-                    def,
-                    params: tcx.intern_list(
-                        &generic_params
-                            .r(s)
-                            .iter()
-                            .map(|&arg| TraitParam::Equals(arg))
-                            .collect::<Vec<_>>(),
-                    ),
+                tcx.intern_list(&[TraitClause::Trait(HrtbBinder {
+                    kind: HrtbBinderKind::Imported(tcx.intern_list(&[])),
+                    inner: TraitSpec {
+                        def,
+                        params: tcx.intern_list(
+                            &generic_params
+                                .r(s)
+                                .iter()
+                                .map(|&arg| TraitParam::Equals(arg))
+                                .collect::<Vec<_>>(),
+                        ),
+                    },
                 })]),
             );
 
@@ -613,7 +602,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     tcx.intern(TyKind::SigThis),
                     &sig_generic_substs,
                 ))
-                .fold_ty(def.r(s).target.value);
+                .fold(def.r(s).target.value);
 
             // Initialize the clauses.
             this.init_universal_var_clauses_from_binder(ClauseImportEnvRef::new(
@@ -631,8 +620,9 @@ impl<'tcx> ClauseCx<'tcx> {
 }
 
 pub struct ClauseCxImporter<'a, 'tcx> {
-    pub ccx: &'a mut ClauseCx<'tcx>,
-    pub env: ClauseImportEnvRef<'a>,
+    ccx: &'a mut ClauseCx<'tcx>,
+    env: ClauseImportEnvRef<'a>,
+    hrtb_binder_substs: FxHashMap<Obj<GenericBinder>, TyOrReList>,
 }
 
 impl<'tcx> TyFolderPreservesSpans<'tcx> for ClauseCxImporter<'_, 'tcx> {}
@@ -644,14 +634,22 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
         self.ccx.tcx()
     }
 
-    fn try_fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
+    fn fold_hrtb_binder<T: Copy + TyFoldable>(
+        &mut self,
+        binder: SpannedHrtbBinder<T>,
+    ) -> Result<HrtbBinder<T>, Self::Error> {
+        todo!()
+    }
+
+    fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
         let s = self.session();
         let tcx = self.tcx();
 
-        Ok(match *ty.r(s) {
-            TyKind::SigThis => self.env.self_ty,
-            TyKind::SigInfer => self.ccx.fresh_ty_infer(),
-            TyKind::SigGeneric(generic) => self
+        Ok(match ty.view(tcx) {
+            SpannedTyView::SigThis => self.env.self_ty,
+            SpannedTyView::SigInfer => self.ccx.fresh_ty_infer(),
+            // TODO: import HRTBs
+            SpannedTyView::SigGeneric(generic) => self
                 .env
                 .sig_generic_substs
                 .iter()
@@ -660,53 +658,62 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
                 .substs
                 .r(s)[generic.r(s).binder.idx as usize]
                 .unwrap_ty(),
-            TyKind::SigProject(projection) => {
-                let TyProjection {
+            SpannedTyView::SigProject(projection) => {
+                let SpannedTyProjectionView {
                     target,
                     spec,
+                    assoc_span,
                     assoc,
-                } = self.fold_ty_projection(projection);
+                } = self.fold_preserved(projection).view(tcx);
 
                 let assoc_infer_ty = self.ccx.fresh_ty_infer();
                 let spec = {
-                    let mut args = spec.params.r(s).to_vec();
+                    let mut args = spec.value.params.r(s).to_vec();
                     args[assoc as usize] = TraitParam::Equals(TyOrRe::Ty(assoc_infer_ty));
 
                     TraitSpec {
-                        def: spec.def,
+                        def: spec.value.def,
                         params: tcx.intern_list(&args),
                     }
                 };
 
-                // TODO: How do we get a span here?
                 self.ccx
                     .wf_visitor()
-                    .with_clause_applies_to(target)
-                    .visit(spec);
+                    .with_clause_applies_to(target.value)
+                    .visit_spanned(Spanned::new_maybe_saturated(spec, assoc_span, tcx));
 
-                self.ccx
-                    .oblige_ty_and_trait(ObligationReason::Structural, target, spec);
+                self.ccx.oblige_ty_and_trait_instantiated(
+                    ObligationReason::Structural,
+                    target.value,
+                    spec,
+                );
 
                 assoc_infer_ty
             }
 
-            TyKind::Simple(_)
-            | TyKind::Reference(_, _, _)
-            | TyKind::Adt(_)
-            | TyKind::Trait(_)
-            | TyKind::Tuple(_)
-            | TyKind::FnDef(_, _)
-            | TyKind::InferVar(_)
-            | TyKind::UniversalVar(_)
-            | TyKind::Error(_) => return self.super_ty(ty),
+            SpannedTyView::Simple(_)
+            | SpannedTyView::Reference(_, _, _)
+            | SpannedTyView::Adt(_)
+            | SpannedTyView::Trait(_)
+            | SpannedTyView::Tuple(_)
+            | SpannedTyView::FnDef(_, _)
+            | SpannedTyView::Error(_) => return self.super_spanned_fallible(ty),
+
+            // These should not appear in an unimported type.
+            SpannedTyView::HrtbVar(_)
+            | SpannedTyView::InferVar(_)
+            | SpannedTyView::UniversalVar(_) => {
+                unreachable!()
+            }
         })
     }
 
-    fn try_fold_re(&mut self, re: Re) -> Result<Re, Self::Error> {
+    fn fold_re(&mut self, re: SpannedRe) -> Result<Re, Self::Error> {
         let s = self.session();
 
-        Ok(match re {
+        Ok(match re.value {
             Re::SigInfer => self.ccx.fresh_re_infer(),
+            // TODO: import HRTBs
             Re::SigGeneric(generic) => self
                 .env
                 .sig_generic_substs
@@ -716,9 +723,11 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
                 .substs
                 .r(s)[generic.r(s).binder.idx as usize]
                 .unwrap_re(),
-            Re::Gc | Re::InferVar(_) | Re::UniversalVar(_) | Re::Erased | Re::Error(_) => {
-                return self.super_re(re);
+            Re::Gc | Re::Error(_) => {
+                return self.super_spanned_fallible(re);
             }
+            // These should not appear in an imported type.
+            Re::HrtbVar(_) | Re::InferVar(_) | Re::UniversalVar(_) | Re::Erased => unreachable!(),
         })
     }
 }
@@ -826,7 +835,22 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    pub fn oblige_ty_and_trait(&mut self, reason: ObligationReason, lhs: Ty, rhs: TraitSpec) {
+    pub fn oblige_ty_and_trait(
+        &mut self,
+        reason: ObligationReason,
+        lhs: Ty,
+        rhs: HrtbBinder<TraitSpec>,
+    ) {
+        let rhs = self.instantiate_hrtb_universal(rhs);
+        self.oblige_ty_and_trait_instantiated(reason, lhs, rhs)
+    }
+
+    pub fn oblige_ty_and_trait_instantiated(
+        &mut self,
+        reason: ObligationReason,
+        lhs: Ty,
+        rhs: TraitSpec,
+    ) {
         self.push_obligation(reason, ObligationKind::TyAndTrait(lhs, rhs));
     }
 
@@ -861,7 +885,12 @@ impl<'tcx> ClauseCx<'tcx> {
                 // Error types can do anything.
                 return ObligationResult::Success;
             }
-            TyKind::SigThis | TyKind::SigInfer | TyKind::SigGeneric(_) | TyKind::SigProject(_) => {
+            TyKind::SigThis
+            | TyKind::SigInfer
+            | TyKind::SigGeneric(_)
+            | TyKind::SigProject(_)
+            // LHS HRTBs should have been instantiated right before the obligation.
+            | TyKind::HrtbVar(_) => {
                 unreachable!()
             }
             TyKind::Simple(_)
@@ -880,10 +909,10 @@ impl<'tcx> ClauseCx<'tcx> {
             tcx,
             self.ucx()
                 .substitutor(UnboundVarHandlingMode::EraseToSigInfer)
-                .fold_ty(lhs),
+                .fold(lhs),
             self.ucx()
                 .substitutor(UnboundVarHandlingMode::EraseToSigInfer)
-                .fold_trait_spec(rhs),
+                .fold(rhs),
         );
 
         for candidate in candidates {
@@ -903,10 +932,10 @@ impl<'tcx> ClauseCx<'tcx> {
                 "failed to prove {:?} implements {:?}",
                 self.ucx()
                     .substitutor(UnboundVarHandlingMode::NormalizeToRoot)
-                    .fold_ty(lhs),
+                    .fold(lhs),
                 self.ucx()
                     .substitutor(UnboundVarHandlingMode::NormalizeToRoot)
-                    .fold_trait_spec(rhs),
+                    .fold(rhs),
             )));
         };
 
@@ -928,7 +957,7 @@ impl<'tcx> ClauseCx<'tcx> {
             .copied()
             .find(|&clause| match clause {
                 TraitClause::Outlives(_) => false,
-                TraitClause::Trait(lhs) => lhs.def == rhs.def,
+                TraitClause::Trait(lhs) => lhs.inner.def == rhs.def,
             });
 
         let Some(lhs) = lhs else {
@@ -938,6 +967,10 @@ impl<'tcx> ClauseCx<'tcx> {
         let TraitClause::Trait(lhs) = lhs else {
             unreachable!()
         };
+
+        // Instantiate the binder with inference variables so that we may select the correct
+        // implementation of it.
+        let lhs = self.instantiate_hrtb_infer(lhs);
 
         // See whether we can select an inherent `impl`.
         let mut param_iter = lhs.params.r(s).iter().zip(rhs.params.r(s));
@@ -1033,11 +1066,11 @@ impl<'tcx> ClauseCx<'tcx> {
         // parameters.
         let target_ty = self
             .importer(ClauseImportEnvRef::new(lhs, &trait_substs))
-            .fold_ty(rhs.r(s).target.value);
+            .fold_spanned(rhs.r(s).target);
 
         let target_trait = self
             .importer(ClauseImportEnvRef::new(lhs, &trait_substs))
-            .fold_trait_instance(rhs.r(s).trait_.unwrap().value);
+            .fold_spanned(rhs.r(s).trait_.unwrap());
 
         // Does the `lhs` type match the `rhs`'s target type?
         if self
@@ -1122,6 +1155,14 @@ impl<'tcx> ClauseCx<'tcx> {
 
         Ok(ConfirmationResult::Success(self))
     }
+
+    pub fn instantiate_hrtb_universal(&mut self, binder: HrtbBinder<TraitSpec>) -> TraitSpec {
+        todo!()
+    }
+
+    pub fn instantiate_hrtb_infer(&mut self, binder: HrtbBinder<TraitSpec>) -> TraitSpec {
+        todo!()
+    }
 }
 
 // === Ty & Re Relations === //
@@ -1135,7 +1176,11 @@ impl<'tcx> ClauseCx<'tcx> {
         let s = self.session();
 
         match *lhs.r(s) {
-            TyKind::SigThis | TyKind::SigInfer | TyKind::SigGeneric(_) | TyKind::SigProject(_) => {
+            TyKind::SigThis
+            | TyKind::SigInfer
+            | TyKind::SigGeneric(_)
+            | TyKind::SigProject(_)
+            | TyKind::HrtbVar(_) => {
                 unreachable!()
             }
             TyKind::FnDef(_, _) | TyKind::Simple(_) | TyKind::Error(_) => {
@@ -1283,6 +1328,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             | SpannedTyView::Adt(_)
             | SpannedTyView::Tuple(_)
             | SpannedTyView::UniversalVar(_)
+            | SpannedTyView::HrtbVar(_)
             | SpannedTyView::Error(_) => {
                 self.walk_spanned(ty);
             }

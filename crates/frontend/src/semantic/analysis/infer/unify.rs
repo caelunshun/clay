@@ -1,10 +1,10 @@
 use crate::{
     base::{ErrorGuaranteed, HardDiag, Session, arena::HasInterner},
     semantic::{
-        analysis::{TyCtxt, TyFolder, TyFolderInfallible, TyVisitor, TyVisitorExt},
+        analysis::{TyCtxt, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyVisitor, TyVisitorExt},
         syntax::{
-            InferReVar, InferTyVar, Mutability, Re, ReVariance, RelationMode, SpannedTy,
-            SpannedTyView, TraitClause, TraitClauseList, TraitParam, Ty, TyKind, TyOrRe,
+            HrtbBinderKind, InferReVar, InferTyVar, Mutability, Re, ReVariance, RelationMode,
+            SpannedTy, SpannedTyView, TraitClause, TraitClauseList, TraitParam, Ty, TyKind, TyOrRe,
             UniversalReVar, UniversalReVarSourceInfo,
         },
     },
@@ -448,6 +448,7 @@ impl<'tcx> UnifyCx<'tcx> {
             //
             // - `(Simple, Simple)`
             // - `(UniversalVar, UniversalVar)`
+            // - `(HrtbVar, HrtbVar)`
             //
             // TODO: Check exhaustiveness automatically.
             _ => {
@@ -506,7 +507,7 @@ impl<'tcx> UnifyCx<'tcx> {
         if does_occur {
             let occurs_in = self
                 .substitutor(UnboundVarHandlingMode::NormalizeToRoot)
-                .fold_ty(rhs_ty);
+                .fold(rhs_ty);
 
             return Err(InferTyOccursError {
                 var: lhs_var_root,
@@ -521,19 +522,19 @@ impl<'tcx> UnifyCx<'tcx> {
 
     fn unify_dyn_trait_clauses_inner(
         &mut self,
-        lhs: TraitClauseList,
-        rhs: TraitClauseList,
+        lhs_root: TraitClauseList,
+        rhs_root: TraitClauseList,
         culprits: &mut Vec<TyAndTyUnifyCulprit>,
         mode: RelationMode,
     ) {
         let s = self.session();
 
-        if lhs.r(s).len() != rhs.r(s).len() {
-            culprits.push(TyAndTyUnifyCulprit::ClauseLists(lhs, rhs));
+        if lhs_root.r(s).len() != rhs_root.r(s).len() {
+            culprits.push(TyAndTyUnifyCulprit::ClauseLists(lhs_root, rhs_root));
             return;
         }
 
-        for (&lhs_clause, &rhs_clause) in lhs.r(s).iter().zip(rhs.r(s)) {
+        for (&lhs_clause, &rhs_clause) in lhs_root.r(s).iter().zip(rhs_root.r(s)) {
             match (lhs_clause, rhs_clause) {
                 (TraitClause::Outlives(lhs), TraitClause::Outlives(rhs)) => {
                     // Technically, `MyTrait + 'a + 'b: 'c` could imply either `'a: 'c` or
@@ -545,8 +546,40 @@ impl<'tcx> UnifyCx<'tcx> {
                         culprits.push(TyAndTyUnifyCulprit::Regions(err));
                     }
                 }
-                (TraitClause::Trait(lhs), TraitClause::Trait(rhs)) if lhs.def == rhs.def => {
-                    for (&lhs, &rhs) in lhs.params.r(s).iter().zip(rhs.params.r(s)) {
+                (TraitClause::Trait(lhs), TraitClause::Trait(rhs))
+                    if lhs.inner.def == rhs.inner.def =>
+                {
+                    // Ensure that the binders are compatible.
+                    let (
+                        HrtbBinderKind::Imported(lhs_binder),
+                        HrtbBinderKind::Imported(rhs_binder),
+                    ) = (lhs.kind, rhs.kind)
+                    else {
+                        unreachable!()
+                    };
+
+                    if lhs_binder.r(s).len() != rhs_binder.r(s).len() {
+                        culprits.push(TyAndTyUnifyCulprit::ClauseLists(lhs_root, rhs_root));
+                        return;
+                    }
+
+                    for (&lhs, &rhs) in lhs_binder.r(s).iter().zip(rhs_binder.r(s)) {
+                        if lhs.kind != rhs.kind {
+                            culprits.push(TyAndTyUnifyCulprit::ClauseLists(lhs_root, rhs_root));
+                            return;
+                        }
+
+                        self.unify_dyn_trait_clauses_inner(
+                            lhs.clauses,
+                            rhs.clauses,
+                            culprits,
+                            RelationMode::Equate,
+                        );
+                    }
+
+                    // Ensure that the inner values are compatible. HRTBs are debruijn indexed so
+                    // this properly checks for alpha-equivalence w.r.t the binders.
+                    for (&lhs, &rhs) in lhs.inner.params.r(s).iter().zip(rhs.inner.params.r(s)) {
                         match (lhs, rhs) {
                             (TraitParam::Equals(lhs), TraitParam::Equals(rhs)) => {
                                 match (lhs, rhs) {
@@ -583,7 +616,7 @@ impl<'tcx> UnifyCx<'tcx> {
                     }
                 }
                 _ => {
-                    culprits.push(TyAndTyUnifyCulprit::ClauseLists(lhs, rhs));
+                    culprits.push(TyAndTyUnifyCulprit::ClauseLists(lhs_root, rhs_root));
                     return;
                 }
             }
@@ -614,9 +647,13 @@ impl<'tcx> TyFolder<'tcx> for InferTySubstitutor<'_, 'tcx> {
         self.ucx.tcx()
     }
 
-    fn try_fold_ty_infer_var_use(&mut self, var: InferTyVar) -> Result<Ty, Self::Error> {
+    fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
+        let TyKind::InferVar(var) = *ty.value.r(self.session()) else {
+            return self.super_spanned_fallible(ty);
+        };
+
         match self.ucx.lookup_ty_infer_var(var) {
-            Ok(v) => self.try_fold_ty(v),
+            Ok(v) => self.fold_fallible(v),
             Err(floating) => Ok(match self.mode {
                 UnboundVarHandlingMode::Error(error) => self.tcx().intern(TyKind::Error(error)),
                 UnboundVarHandlingMode::NormalizeToRoot => {
@@ -890,7 +927,7 @@ impl ReInferTracker {
             Re::Gc => Some(AnyReIndex::GC),
             Re::UniversalVar(universal) => Some(self.universals[universal].index),
             Re::InferVar(idx) => Some(AnyReIndex::from_raw(idx.raw())),
-            Re::SigInfer | Re::SigGeneric(_) | Re::Erased => unreachable!(),
+            Re::SigInfer | Re::SigGeneric(_) | Re::HrtbVar(_) | Re::Erased => unreachable!(),
             Re::Error(_) => None,
         }
     }

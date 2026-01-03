@@ -2,8 +2,8 @@ use crate::{
     base::{Session, arena::Obj},
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, CoherenceMap, TyCtxt,
-            TyFolderInfalliblePreservesSpans as _, TyVisitorInfallibleExt, UnifyCxMode,
+            ClauseCx, ClauseImportEnvRef, CoherenceMap, TyCtxt, TyFolderInfallibleExt,
+            TyVisitorInfallibleExt, UnifyCxMode,
         },
         syntax::{
             AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FuncItem, GenericBinder, ImplItem,
@@ -80,9 +80,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // First, let's ensure that the inherited trait list is well-formed.
         {
-            let inherits = ccx
-                .importer(env.as_ref())
-                .fold_spanned_clause_list(**inherits);
+            let inherits = ccx.importer(env.as_ref()).fold_preserved(**inherits);
 
             ccx.wf_visitor()
                 .with_clause_applies_to(env.self_ty)
@@ -118,9 +116,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         // Let's ensure that the target trait instance is well formed. This includes trait-checking
         // regular generic parameters *and* associated types.
         if let Some(trait_) = *trait_ {
-            let trait_ = ccx
-                .importer(env.as_ref())
-                .fold_spanned_trait_instance(trait_);
+            let trait_ = ccx.importer(env.as_ref()).fold_preserved(trait_);
 
             ccx.wf_visitor()
                 .with_clause_applies_to(env.self_ty)
@@ -129,7 +125,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Let's also ensure that our target type is well-formed.
         {
-            let target = ccx.importer(env.as_ref()).fold_spanned_ty(*target);
+            let target = ccx.importer(env.as_ref()).fold_preserved(*target);
 
             ccx.wf_visitor().visit_spanned(target);
         }
@@ -180,7 +176,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         let s = self.session();
 
         for field in ctor.r(s).fields.iter() {
-            let field_ty = ccx.importer(env).fold_spanned_ty(*field.ty);
+            let field_ty = ccx.importer(env).fold_preserved(*field.ty);
 
             ccx.wf_visitor().visit_spanned(field_ty);
         }
@@ -206,7 +202,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
                 AnyGeneric::Ty(generic) => *generic.r(s).clauses,
             };
 
-            let clauses = ccx.importer(env).fold_spanned_clause_list(clauses);
+            let clauses = ccx.importer(env).fold_preserved(clauses);
 
             ccx.wf_visitor()
                 .with_clause_applies_to(env.self_ty)

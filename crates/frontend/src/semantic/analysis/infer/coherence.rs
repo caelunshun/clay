@@ -6,8 +6,8 @@ use crate::{
     semantic::{
         analysis::{TyCtxt, TyShapeMap},
         syntax::{
-            Crate, FnDef, GenericBinder, ImplItem, Re, SolidTyShape, SolidTyShapeKind, TraitClause,
-            TraitParam, TraitSpec, Ty, TyOrRe, TyShape,
+            Crate, FnDef, GenericBinder, HrtbBinderKind, ImplItem, Re, SolidTyShape,
+            SolidTyShapeKind, TraitClause, TraitParam, TraitSpec, Ty, TyOrRe, TyShape,
         },
     },
 };
@@ -154,6 +154,17 @@ impl TyCtxt {
                     continue;
                 };
 
+                // Ignore clauses with bound values for the purposes of covering.
+                let HrtbBinderKind::Signature(binder) = spec.kind else {
+                    unreachable!()
+                };
+
+                if !binder.r(s).defs.is_empty() {
+                    continue;
+                }
+
+                let spec = spec.inner;
+
                 let clause_state_idx = clause_states.next_idx();
                 let mut blockers = 1;
 
@@ -270,7 +281,11 @@ impl TyCtxt {
                                     GenericIdx::from_raw(param.r(s).binder.idx),
                                 );
                             }
-                            Re::InferVar(_) | Re::UniversalVar(_) | Re::SigInfer | Re::Erased => {
+                            Re::HrtbVar(_)
+                            | Re::InferVar(_)
+                            | Re::UniversalVar(_)
+                            | Re::SigInfer
+                            | Re::Erased => {
                                 unreachable!()
                             }
                         }

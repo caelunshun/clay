@@ -208,7 +208,7 @@ pub type TraitClauseList = Intern<[TraitClause]>;
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TraitClause {
     Outlives(Re),
-    Trait(TraitSpec),
+    Trait(HrtbBinder<TraitSpec>),
 }
 
 pub type TraitParamList = Intern<[TraitParam]>;
@@ -279,17 +279,10 @@ pub enum AnyGeneric {
 }
 
 impl AnyGeneric {
-    pub fn binder(self, s: &Session) -> PosInBinder {
+    pub fn kind(self) -> TyOrReKind {
         match self {
-            AnyGeneric::Re(re) => *re.r(s).binder,
-            AnyGeneric::Ty(ty) => *ty.r(s).binder,
-        }
-    }
-
-    pub fn clauses(self, s: &Session) -> SpannedTraitClauseList {
-        match self {
-            AnyGeneric::Re(re) => *re.r(s).clauses,
-            AnyGeneric::Ty(ty) => *ty.r(s).clauses,
+            AnyGeneric::Re(_) => TyOrReKind::Re,
+            AnyGeneric::Ty(_) => TyOrReKind::Ty,
         }
     }
 
@@ -313,6 +306,20 @@ impl AnyGeneric {
 
     pub fn unwrap_ty(self) -> Obj<TypeGeneric> {
         self.as_ty().unwrap()
+    }
+
+    pub fn binder(self, s: &Session) -> PosInBinder {
+        match self {
+            AnyGeneric::Re(re) => *re.r(s).binder,
+            AnyGeneric::Ty(ty) => *ty.r(s).binder,
+        }
+    }
+
+    pub fn clauses(self, s: &Session) -> SpannedTraitClauseList {
+        match self {
+            AnyGeneric::Re(re) => *re.r(s).clauses,
+            AnyGeneric::Ty(ty) => *ty.r(s).clauses,
+        }
     }
 
     pub fn span(self, s: &Session) -> Span {
@@ -362,12 +369,25 @@ pub struct GenericSubst {
 pub type TyOrReList = Intern<[TyOrRe]>;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum TyOrReKind {
+    Re,
+    Ty,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TyOrRe {
     Re(Re),
     Ty(Ty),
 }
 
 impl TyOrRe {
+    pub fn kind(self) -> TyOrReKind {
+        match self {
+            TyOrRe::Re(_) => TyOrReKind::Re,
+            TyOrRe::Ty(_) => TyOrReKind::Ty,
+        }
+    }
+
     pub fn as_re(self) -> Option<Re> {
         match self {
             TyOrRe::Re(v) => Some(v),
@@ -403,11 +423,21 @@ pub enum Re {
     /// import.
     SigInfer,
 
-    /// Refers to a generic lifetime parameter.
+    /// An uninstantiated generic lifetime parameter.
     ///
-    /// Used in user annotations and instantiated into either a `UniversalVar` or an `InferVar`
-    /// region during `ClauseCx` import.
+    /// Used in user annotations and instantiated into either a `UniversalVar`, an `InferVar`, or if
+    /// bound within an HRTB binder, a `HrtbVar` during `ClauseCx` import.
     SigGeneric(Obj<RegionGeneric>),
+
+    /// An instantiated generic region variable within an HRTB binder (e.g. the `'a` in the type
+    /// `Foo<'a>` in the clause `for<'a> Foo<'a>`).
+    ///
+    /// This is first instantiated from a `SigGeneric within an HRTB binder. Similar to a
+    /// `SigGeneric`, it is later instantiated into a `UniversalVar` or an `InferVar` during trait
+    /// obligation checking depending on how the HRTB is being used.
+    ///
+    /// These are indexed using debruijn indices.
+    HrtbVar(HrtbDebruijn),
 
     /// An internal lifetime parameter within the body.
     InferVar(InferReVar),
@@ -434,14 +464,14 @@ pub enum TyKind {
 
     /// An uninstantiated request to infer a type (e.g. `_`).
     ///
-    /// Used in user annotations and instantiated into an `InferVar` region during `ClauseCx`
+    /// Used in user annotations and instantiated into an `InferVar` type during `ClauseCx`
     /// import.
     SigInfer,
 
-    /// The universal type quantification produced by a generic parameter.
+    /// An uninstantiated generic type parameter.
     ///
-    /// Used in user annotations and instantiated into either a `UniversalVar` or an `InferVar` type
-    /// during `ClauseCx` import.
+    /// Used in user annotations and instantiated into either a `UniversalVar`, an `InferVar`, or if
+    /// bound within an HRTB binder, a `HrtbVar` during `ClauseCx` import.
     SigGeneric(Obj<TypeGeneric>),
 
     /// An uninstantiated type projection, which fetches an associated type from a `trait` impl for
@@ -468,6 +498,16 @@ pub enum TyKind {
 
     /// A statically-known function type. This can be coerced into a functional interface.
     FnDef(Obj<FnDef>, Option<TyOrReList>),
+
+    /// An instantiated generic region variable within an HRTB binder (e.g. the `T` in the type
+    /// `Foo<T>` in the clause `for<T> Foo<T>`).
+    ///
+    /// This is first instantiated from a `SigGeneric within an HRTB binder. Similar to a
+    /// `SigGeneric`, it is later instantiated into a `UniversalVar` or an `InferVar` during trait
+    /// obligation checking depending on how the HRTB is being used.
+    ///
+    /// These are indexed using debruijn indices.
+    HrtbVar(HrtbDebruijn),
 
     /// An inference variable.
     InferVar(InferTyVar),
@@ -579,6 +619,31 @@ pub enum SolidTyShapeKind {
     Tuple(u32),
     FnDef,
 }
+
+// === Binders === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct HrtbBinder<T> {
+    pub kind: HrtbBinderKind,
+    pub inner: T,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum HrtbBinderKind {
+    Signature(Obj<GenericBinder>),
+    Imported(HrtbDebruijnDefList),
+}
+
+pub type HrtbDebruijnDefList = Intern<[HrtbDebruijnDef]>;
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct HrtbDebruijnDef {
+    pub kind: TyOrReKind,
+    pub clauses: TraitClauseList,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct HrtbDebruijn(pub u32);
 
 // === Misc Enums === //
 

@@ -45,15 +45,16 @@ impl TyCtxt {
         let s = &self.session;
 
         match *ty.r(s) {
-            TyKind::SigThis => {
-                unreachable!("unexpected {ty:?}");
-            }
-            TyKind::InferVar(_)
+            // It's always safe to be conservative with these types.
+            TyKind::SigThis
+            | TyKind::HrtbVar(_)
+            | TyKind::InferVar(_)
             | TyKind::UniversalVar(_)
             | TyKind::SigInfer
             | TyKind::SigGeneric(_)
             | TyKind::SigProject(_)
             | TyKind::Error(_) => TyShape::Hole,
+
             TyKind::Simple(kind) => TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Simple(kind),
                 children: self.intern_list(&[]),

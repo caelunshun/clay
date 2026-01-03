@@ -6,7 +6,10 @@ use crate::{
     },
     semantic::{
         analysis::{CoherenceMap, CrateTypeckVisitor},
-        syntax::{Crate, TraitClause, TraitClauseList, TraitParam, Ty, TyKind, TyOrRe, TyShape},
+        syntax::{
+            Crate, HrtbDebruijnDef, TraitClause, TraitClauseList, TraitParam, Ty, TyKind, TyOrRe,
+            TyShape,
+        },
     },
 };
 use std::{ops::Deref, rc::Rc};
@@ -32,6 +35,7 @@ pub struct Interners {
     pub list_of_trait_clause_list: ListInterner<TraitClauseList>,
     pub spanned_info_list: ListInterner<SpannedInfo>,
     pub coherence_ty_list: ListInterner<TyShape>,
+    pub hrtb_debruijn_list: ListInterner<HrtbDebruijnDef>,
 }
 
 impl Deref for TyCtxt {
@@ -126,5 +130,11 @@ impl HasListInterner<SpannedInfo> for TyCtxt {
 impl HasListInterner<TyShape> for TyCtxt {
     fn interner(&self) -> &ListInterner<TyShape> {
         &self.interners.coherence_ty_list
+    }
+}
+
+impl HasListInterner<HrtbDebruijnDef> for TyCtxt {
+    fn interner(&self) -> &ListInterner<HrtbDebruijnDef> {
+        &self.interners.hrtb_debruijn_list
     }
 }
