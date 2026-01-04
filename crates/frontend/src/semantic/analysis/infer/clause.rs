@@ -252,7 +252,7 @@ impl<'tcx> ClauseCx<'tcx> {
         self.push_obligation(reason, ObligationKind::TyAndTy(lhs, rhs, mode));
     }
 
-    pub fn oblige_re_and_clause(
+    pub fn oblige_re_and_clauses(
         &mut self,
         reason: ObligationReason,
         lhs: Re,
@@ -1099,7 +1099,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 },
                 TraitParam::Unspecified(rhs) => match lhs {
                     TyOrRe::Re(lhs) => {
-                        self.oblige_re_and_clause(ObligationReason::Structural, lhs, rhs);
+                        self.oblige_re_and_clauses(ObligationReason::Structural, lhs, rhs);
                     }
                     TyOrRe::Ty(lhs) => {
                         self.oblige_ty_and_clauses(ObligationReason::Structural, lhs, rhs);
@@ -1284,17 +1284,50 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     pub fn instantiate_hrtb_infer(&mut self, binder: HrtbBinder<TraitSpec>) -> TraitSpec {
+        let tcx = self.tcx();
         let s = self.session();
 
         let HrtbBinderKind::Imported(defs) = binder.kind else {
             unreachable!();
         };
 
+        // Fast path :)
         if defs.r(s).is_empty() {
             return binder.inner;
         }
 
-        todo!()
+        self.suppress_obligation_eval(|this| {
+            // Make up new inference variables for our binder.
+            let vars = defs
+                .r(s)
+                .iter()
+                .map(|def| match def.kind {
+                    TyOrReKind::Re => TyOrRe::Re(this.fresh_re_infer()),
+                    TyOrReKind::Ty => TyOrRe::Ty(this.fresh_ty_infer()),
+                })
+                .collect::<Vec<_>>();
+
+            let vars = tcx.intern_list(&vars);
+
+            // Constrain the new inference variables with their obligations.
+            for (&def, &var) in defs.r(s).iter().zip(vars.r(s)) {
+                match var {
+                    TyOrRe::Re(var) => {
+                        let clauses = HrtbSubstitutionFolder::new(this, vars, s).fold(def.clauses);
+
+                        this.oblige_re_and_clauses(ObligationReason::Structural, var, clauses);
+                    }
+                    TyOrRe::Ty(var) => {
+                        let clauses = HrtbSubstitutionFolder::new(this, vars, s).fold(def.clauses);
+
+                        this.oblige_ty_and_clauses(ObligationReason::Structural, var, clauses);
+                    }
+                }
+            }
+
+            // Fold the inner type
+            HrtbSubstitutionFolder::new(this, vars, s).fold(binder.inner)
+        })
     }
 }
 

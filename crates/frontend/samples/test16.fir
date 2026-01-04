@@ -14,3 +14,6 @@ struct Test1<'b>(Foo<LivesForAll<'b>>);
 struct Test2<'b>(Foo<LivesForSome1<'b>>);
 struct Test3<'b>(Foo<LivesForSome2<'b>>);
 struct Test4(Foo<LivesForSome2<'gc>>);
+struct Test5<'a, T: Meow<'a>>(Foo<T>);
+struct Test6<T: for<'h> Meow<'h>>(Foo<T>);
+struct Test7<'i, T: for<'h: 'i> Meow<'h>>(Foo<T>);
