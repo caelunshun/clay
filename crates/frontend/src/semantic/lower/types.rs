@@ -18,11 +18,11 @@ use crate::{
             modules::{FrozenModuleResolver, PathResolver as _},
         },
         syntax::{
-            AdtItem, GenericBinder, Item, ItemKind, Re, SpannedAdtInstanceView,
-            SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedRe, SpannedTraitClause,
-            SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParamList,
-            SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe,
-            SpannedTyOrReView, SpannedTyProjectionView, SpannedTyView, TraitItem, TypeGeneric,
+            AdtItem, Item, ItemKind, Re, SpannedAdtInstanceView, SpannedHrtbBinderKindView,
+            SpannedHrtbBinderView, SpannedRe, SpannedTraitClause, SpannedTraitClauseList,
+            SpannedTraitClauseView, SpannedTraitParamList, SpannedTraitSpec, SpannedTraitSpecView,
+            SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReView, SpannedTyProjectionView,
+            SpannedTyView, TraitItem, TypeGeneric,
         },
     },
 };
@@ -269,19 +269,26 @@ impl IntraItemLowerCtxt<'_> {
             AstTraitClause::Outlives(lt) => {
                 Ok(SpannedTraitClauseView::Outlives(self.lower_re(lt)).encode(lt.span, self.tcx))
             }
-            AstTraitClause::Trait(spec) => Ok(SpannedTraitClauseView::Trait(
-                SpannedHrtbBinderView {
-                    // TODO: Lower HRTBs in spec.
-                    kind: SpannedHrtbBinderKindView::Signature(Obj::new(
-                        GenericBinder { defs: Vec::new() },
-                        s,
-                    ))
+            AstTraitClause::Trait(spec) => {
+                let binder =
+                    self.lower_complete_param_list(spec.binder.as_ref().map(|v| &v.params));
+
+                let binder_span = spec.binder.as_ref().map_or(spec.span, |v| v.span);
+
+                let inner = self.scoped(|this| {
+                    this.define_generics_in_binder(binder);
+                    this.lower_trait_spec(&spec.spec)
+                })?;
+
+                Ok(SpannedTraitClauseView::Trait(
+                    SpannedHrtbBinderView {
+                        kind: SpannedHrtbBinderKindView::Signature(binder).encode(binder_span, tcx),
+                        inner,
+                    }
                     .encode(spec.span, tcx),
-                    inner: self.lower_trait_spec(spec)?,
-                }
-                .encode(spec.span, tcx),
-            )
-            .encode(spec.span, self.tcx)),
+                )
+                .encode(spec.span, self.tcx))
+            }
         }
     }
 

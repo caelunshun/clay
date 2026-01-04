@@ -655,7 +655,7 @@ impl<'tcx> ClauseCxImporter<'_, 'tcx> {
             };
         }
 
-        panic!("no substitutions provided for signature generic");
+        panic!("no substitutions provided for signature generic {generic:?}");
     }
 }
 
@@ -682,8 +682,19 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
         let binder_count = binder.r(s).defs.len();
 
         // Fold the inner value with a new generic binder available as an HRTB binder.
-        self.hrtb_top.move_inwards_by(binder_count);
+        let new_range = self.hrtb_top.move_inwards_by(binder_count);
+        let old_range = self.hrtb_binder_ranges.insert(binder, new_range);
+
         let inner = self.fold_spanned(inner);
+
+        match old_range {
+            Some(old_range) => {
+                *self.hrtb_binder_ranges.get_mut(&binder).unwrap() = old_range;
+            }
+            None => {
+                self.hrtb_binder_ranges.remove(&binder);
+            }
+        }
 
         // Create the imported definitions.
         let defs = binder

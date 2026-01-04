@@ -6,8 +6,8 @@ use crate::{
     kw,
     parse::{
         ast::{
-            AstGenericParam, AstGenericParamKind, AstGenericParamList, AstNamedSpec, AstReturnTy,
-            AstTraitClause, AstTraitClauseList, AstTy, AstTyKind,
+            AstGenericParam, AstGenericParamKind, AstGenericParamList, AstHrtbBinder, AstNamedSpec,
+            AstReturnTy, AstTraitClause, AstTraitClauseList, AstTraitImplClause, AstTy, AstTyKind,
             basic::{parse_bare_path, parse_mutability},
             bp::ty_bp,
             entry::P,
@@ -47,8 +47,15 @@ pub fn parse_trait_clause(p: P) -> Result<AstTraitClause, ErrorGuaranteed> {
         return Ok(AstTraitClause::Outlives(lifetime));
     }
 
+    let start = p.next_span();
+    let binder = parse_hrtb_binder(p);
+
     if let Some(spec) = parse_named_spec(p) {
-        return Ok(AstTraitClause::Trait(spec));
+        return Ok(AstTraitClause::Trait(AstTraitImplClause {
+            span: start.to(p.prev_span()),
+            binder,
+            spec,
+        }));
     }
 
     Err(p.stuck().error())
@@ -64,6 +71,24 @@ pub fn parse_named_spec(p: P) -> Option<AstNamedSpec> {
     Some(AstNamedSpec {
         span: start.to(p.prev_span()),
         path,
+        params,
+    })
+}
+
+pub fn parse_hrtb_binder(p: P) -> Option<AstHrtbBinder> {
+    let start = p.next_span();
+
+    if match_kw(kw!("for")).expect(p).is_none() {
+        return None;
+    }
+
+    let Some(params) = parse_generic_param_list(p) else {
+        p.stuck().ignore_not_in_loop();
+        return None;
+    };
+
+    Some(AstHrtbBinder {
+        span: start.to(p.prev_span()),
         params,
     })
 }

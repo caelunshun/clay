@@ -11,6 +11,7 @@ use crate::{
 
 // === Clauses === //
 
+/// A path with some generic parameters (e.g. `MyStruct<'a, B, C>`, `MyTrait<'a, B, C = D, E: F>`).
 #[derive(Debug, Clone)]
 pub struct AstNamedSpec {
     pub span: Span,
@@ -18,16 +19,33 @@ pub struct AstNamedSpec {
     pub params: Option<AstGenericParamList>,
 }
 
+/// A list of trait clauses (e.g. `'a + MyImplClause + for<'b> MyOtherClause<'b>`).
 #[derive(Debug, Clone)]
 pub struct AstTraitClauseList {
     pub span: Span,
     pub clauses: Vec<Result<AstTraitClause, ErrorGuaranteed>>,
 }
 
+/// A singular trait clause (e.g. `'a`, `MyImplClause`, `for<'b> MyOtherClause<'b>`).
 #[derive(Debug, Clone)]
 pub enum AstTraitClause {
     Outlives(Lifetime),
-    Trait(AstNamedSpec),
+    Trait(AstTraitImplClause),
+}
+
+/// A trait clause with an optional HRTB binder.
+#[derive(Debug, Clone)]
+pub struct AstTraitImplClause {
+    pub span: Span,
+    pub binder: Option<AstHrtbBinder>,
+    pub spec: AstNamedSpec,
+}
+
+/// An HRTB binder (e.g. `for<'a, 'b: 'a, T: Spec>`).
+#[derive(Debug, Clone)]
+pub struct AstHrtbBinder {
+    pub span: Span,
+    pub params: AstGenericParamList,
 }
 
 #[derive(Debug, Clone)]

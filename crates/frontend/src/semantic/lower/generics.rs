@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        Diag, ErrorGuaranteed, LeafDiag, Level,
+        Diag, ErrorGuaranteed, LeafDiag, Level, Session,
         analysis::SpannedViewEncode as _,
         arena::{LateInit, Obj},
         syntax::{Span, Symbol},
@@ -31,6 +31,49 @@ use std::iter;
 
 // === Generic definition lowering === //
 
+fn lower_generic_defs<'ast>(
+    binder: &mut GenericBinder,
+    ast: &'ast AstGenericParamList,
+    generic_clause_lists: &mut Vec<Option<&'ast AstTraitClauseList>>,
+    s: &Session,
+) {
+    for def in &ast.list {
+        let Some(def_kind) = def.kind.as_generic_def() else {
+            Diag::span_err(def.span, "expected generic parameter definition").emit();
+            continue;
+        };
+
+        match def_kind {
+            AstGenericDef::Re(lifetime, clauses) => {
+                binder.defs.push(AnyGeneric::Re(Obj::new(
+                    RegionGeneric {
+                        span: def.span,
+                        lifetime,
+                        binder: LateInit::uninit(),
+                        clauses: LateInit::uninit(),
+                    },
+                    s,
+                )));
+
+                generic_clause_lists.push(clauses);
+            }
+            AstGenericDef::Ty(ident, clauses) => {
+                binder.defs.push(AnyGeneric::Ty(Obj::new(
+                    TypeGeneric {
+                        span: def.span,
+                        ident,
+                        binder: LateInit::uninit(),
+                        clauses: LateInit::uninit(),
+                    },
+                    s,
+                )));
+
+                generic_clause_lists.push(clauses);
+            }
+        }
+    }
+}
+
 impl<'ast> InterItemLowerCtxt<'_, 'ast> {
     pub fn lower_generic_defs(
         &mut self,
@@ -38,47 +81,37 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         ast: &'ast AstGenericParamList,
         generic_clause_lists: &mut Vec<Option<&'ast AstTraitClauseList>>,
     ) {
-        let s = &self.tcx.session;
-
-        for def in &ast.list {
-            let Some(def_kind) = def.kind.as_generic_def() else {
-                Diag::span_err(def.span, "expected generic parameter definition").emit();
-                continue;
-            };
-
-            match def_kind {
-                AstGenericDef::Re(lifetime, clauses) => {
-                    binder.defs.push(AnyGeneric::Re(Obj::new(
-                        RegionGeneric {
-                            span: def.span,
-                            lifetime,
-                            binder: LateInit::uninit(),
-                            clauses: LateInit::uninit(),
-                        },
-                        s,
-                    )));
-
-                    generic_clause_lists.push(clauses);
-                }
-                AstGenericDef::Ty(ident, clauses) => {
-                    binder.defs.push(AnyGeneric::Ty(Obj::new(
-                        TypeGeneric {
-                            span: def.span,
-                            ident,
-                            binder: LateInit::uninit(),
-                            clauses: LateInit::uninit(),
-                        },
-                        s,
-                    )));
-
-                    generic_clause_lists.push(clauses);
-                }
-            }
-        }
+        lower_generic_defs(binder, ast, generic_clause_lists, &self.tcx.session);
     }
 }
 
 impl IntraItemLowerCtxt<'_> {
+    pub fn lower_complete_param_list(
+        &mut self,
+        ast: Option<&AstGenericParamList>,
+    ) -> Obj<GenericBinder> {
+        let mut binder = GenericBinder::default();
+        let mut generic_clause_lists = Vec::new();
+
+        if let Some(ast) = ast {
+            lower_generic_defs(
+                &mut binder,
+                ast,
+                &mut generic_clause_lists,
+                &self.tcx.session,
+            );
+        }
+
+        let binder = self.tcx.seal_generic_binder(binder);
+
+        self.scoped(|this| {
+            this.define_generics_in_binder(binder);
+            this.lower_generic_def_clauses(binder, &generic_clause_lists);
+        });
+
+        binder
+    }
+
     pub fn define_generics_in_binder(&mut self, binder: Obj<GenericBinder>) {
         let s = &self.tcx.session;
 
@@ -541,10 +574,10 @@ impl IntraItemLowerCtxt<'_> {
                     SpannedTyOrReView::Re(Re::SigInfer.encode(segment_span, self.tcx))
                         .encode(segment_span, self.tcx)
                 }
-                AnyGeneric::Ty(_) => SpannedTyOrReView::Ty(
-                    SpannedTyView::SigInfer.encode(segment_span, self.tcx),
-                )
-                .encode(segment_span, self.tcx),
+                AnyGeneric::Ty(_) => {
+                    SpannedTyOrReView::Ty(SpannedTyView::SigInfer.encode(segment_span, self.tcx))
+                        .encode(segment_span, self.tcx)
+                }
             })
             .collect::<Vec<_>>();
 
