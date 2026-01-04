@@ -10,7 +10,8 @@ use crate::{
             CoherenceMap, ConfirmationResult, FloatingInferVar, ObligationCx, ObligationKind,
             ObligationReason, ObligationResult, SelectionRejected, SelectionResult, TyCtxt,
             TyFoldable, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyFolderPreservesSpans,
-            TyVisitor, TyVisitorInfallibleExt, UnboundVarHandlingMode, UnifyCx, UnifyCxMode,
+            TyVisitable, TyVisitor, TyVisitorInfallibleExt, UnboundVarHandlingMode, UnifyCx,
+            UnifyCxMode,
         },
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, GenericBinder, GenericSubst, HrtbBinder,
@@ -682,22 +683,13 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
 
         let binder_count = binder.r(s).defs.len();
 
-        // Fold the inner value with a new generic binder available as an HRTB binder.
+        // Bring the binder into scope.
         let new_range = self.hrtb_top.move_inwards_by(binder_count);
         let old_range = self.hrtb_binder_ranges.insert(binder, new_range);
 
+        // Fold the inner value and definitions list with a new generic binder available as an HRTB
+        // binder.
         let inner = self.fold_spanned(inner);
-
-        match old_range {
-            Some(old_range) => {
-                *self.hrtb_binder_ranges.get_mut(&binder).unwrap() = old_range;
-            }
-            None => {
-                self.hrtb_binder_ranges.remove(&binder);
-            }
-        }
-
-        // Create the imported definitions.
         let defs = binder
             .r(s)
             .defs
@@ -713,6 +705,15 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
         // Update the `binder_count` only after we've imported the `defs` since the definition
         // indexing scheme is relative to `binder.inner` to allow mutual recursion among generic
         // definitions.
+        match old_range {
+            Some(old_range) => {
+                *self.hrtb_binder_ranges.get_mut(&binder).unwrap() = old_range;
+            }
+            None => {
+                self.hrtb_binder_ranges.remove(&binder);
+            }
+        }
+
         self.hrtb_top.move_outwards_by(binder_count);
 
         Ok(HrtbBinder {
@@ -1549,6 +1550,16 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
 
     fn tcx(&self) -> &'tcx TyCtxt {
         self.ccx.tcx()
+    }
+
+    fn visit_hrtb_binder<T: Copy + TyVisitable>(
+        &mut self,
+        _binder: SpannedHrtbBinder<T>,
+    ) -> ControlFlow<Self::Break> {
+        // We can ignore the stuff inside the binder because, if it's not well-formed, no `impl` of
+        // it could exist.
+
+        ControlFlow::Continue(())
     }
 
     fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {

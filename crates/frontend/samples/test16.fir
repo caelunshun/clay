@@ -17,3 +17,12 @@ struct Test4(Foo<LivesForSome2<'gc>>);
 struct Test5<'a, T: Meow<'a>>(Foo<T>);
 struct Test6<T: for<'h> Meow<'h>>(Foo<T>);
 struct Test7<'i, T: for<'h: 'i> Meow<'h>>(Foo<T>);
+
+trait Fn<I, O> {}
+struct Test8<T: for<'a, V> Fn<&'a V, &'a V>>;
+struct Test9<T: for<'a, V: 'a> Fn<&'a V, &'a V>>;
+struct Test10(Test8<MyFunc>, Test9<MyFunc>);
+
+struct MyFunc;
+
+impl<'a, V: 'a, W> Fn<&'a V, W> for MyFunc {}
