@@ -1,0 +1,11 @@
+error: could not unify regions InferVar(3) and InferVar(4) since [ReAndReUnifyOffense { universal: 0, forced_to_outlive: UniversalVar(1) }]
+   ┌─ crates/frontend/samples/test16.fir:14:22
+   │
+14 │ struct Test2<'b>(Foo<LivesForSome1<'b>>);
+   │                      ^^^^^^^^^^^^^^^^^
+
+error: could not unify regions InferVar(4) and InferVar(3) since [ReAndReUnifyOffense { universal: 1, forced_to_outlive: UniversalVar(0) }]
+   ┌─ crates/frontend/samples/test16.fir:15:22
+   │
+15 │ struct Test3<'b>(Foo<LivesForSome2<'b>>);
+   │                      ^^^^^^^^^^^^^^^^^

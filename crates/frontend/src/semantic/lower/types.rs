@@ -118,7 +118,7 @@ impl IntraItemLowerCtxt<'_> {
         }
 
         // TODO: Use actual keyword lifetimes
-        if ast.name == symbol!("static") {
+        if ast.name == symbol!("gc") {
             return Re::Gc.encode(ast.span, self.tcx);
         }
 

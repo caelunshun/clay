@@ -29,7 +29,7 @@ impl TyAndTyUnifyError {
     // TODO
     pub fn to_diag(self) -> HardDiag {
         HardDiag::anon_err(format_args!(
-            "could not unify {:?} and {:?}",
+            "could not unify types {:?} and {:?}",
             self.origin_lhs, self.origin_rhs,
         ))
     }
@@ -67,8 +67,8 @@ impl ReAndReUnifyError {
     // TODO
     pub fn to_diag(self) -> HardDiag {
         HardDiag::anon_err(format_args!(
-            "could not unify {:?} and {:?}",
-            self.lhs, self.rhs,
+            "could not unify regions {:?} and {:?} since {:?}",
+            self.lhs, self.rhs, self.offenses,
         ))
     }
 }
@@ -210,9 +210,6 @@ impl<'tcx> UnifyCx<'tcx> {
 
             return;
         };
-
-        debug_assert!(matches!(lhs, Re::UniversalVar(_)));
-        debug_assert!(matches!(rhs, Re::UniversalVar(_)));
 
         regions.unify(lhs, rhs, None);
     }
@@ -911,11 +908,14 @@ impl ReInferTracker {
         let mut outlives = BitSet::new();
         outlives.insert(index.index());
 
-        self.universals.push(TrackedUniversal {
+        let idx = self.universals.push(TrackedUniversal {
             index,
             outlives,
             src_info,
-        })
+        });
+
+        self.unify(Re::Gc, Re::UniversalVar(idx), None);
+        idx
     }
 
     fn lookup_universal_src_info(&self, var: UniversalReVar) -> UniversalReVarSourceInfo {
