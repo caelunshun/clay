@@ -546,11 +546,13 @@ define_index_type! {
 pub enum UniversalReVarSourceInfo {
     Root(Obj<RegionGeneric>),
     ElaboratedLub,
+    HrtbVar,
 }
 
 #[derive(Debug, Copy, Clone)]
 pub enum UniversalTyVarSourceInfo {
     TraitSelf,
+    HrtbVar,
     Root(Obj<TypeGeneric>),
     Projection(UniversalTyVar, TraitSpec, u32),
 }

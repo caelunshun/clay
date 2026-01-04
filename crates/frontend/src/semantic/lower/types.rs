@@ -25,6 +25,7 @@ use crate::{
             SpannedTyView, TraitItem, TypeGeneric,
         },
     },
+    symbol,
 };
 
 // === Name Resolution === //
@@ -114,6 +115,11 @@ impl IntraItemLowerCtxt<'_> {
     pub fn lower_re(&mut self, ast: &Lifetime) -> SpannedRe {
         if let Some(generic) = self.generic_re_names.lookup(ast.name) {
             return Re::SigGeneric(*generic).encode(ast.span, self.tcx);
+        }
+
+        // TODO: Use actual keyword lifetimes
+        if ast.name == symbol!("static") {
+            return Re::Gc.encode(ast.span, self.tcx);
         }
 
         todo!()
