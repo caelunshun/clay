@@ -18,7 +18,8 @@ use crate::{
             modules::{FrozenModuleResolver, PathResolver as _},
         },
         syntax::{
-            AdtItem, Item, ItemKind, Re, SpannedAdtInstanceView, SpannedRe, SpannedTraitClause,
+            AdtItem, GenericBinder, Item, ItemKind, Re, SpannedAdtInstanceView,
+            SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedRe, SpannedTraitClause,
             SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParamList,
             SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe,
             SpannedTyOrReView, SpannedTyProjectionView, SpannedTyView, TraitItem, TypeGeneric,
@@ -261,14 +262,26 @@ impl IntraItemLowerCtxt<'_> {
         &mut self,
         ast: &AstTraitClause,
     ) -> Result<SpannedTraitClause, ErrorGuaranteed> {
+        let tcx = self.tcx;
+        let s = &self.tcx.session;
+
         match ast {
             AstTraitClause::Outlives(lt) => {
                 Ok(SpannedTraitClauseView::Outlives(self.lower_re(lt)).encode(lt.span, self.tcx))
             }
-            AstTraitClause::Trait(spec) => {
-                Ok(SpannedTraitClauseView::Trait(self.lower_trait_spec(spec)?)
-                    .encode(spec.span, self.tcx))
-            }
+            AstTraitClause::Trait(spec) => Ok(SpannedTraitClauseView::Trait(
+                SpannedHrtbBinderView {
+                    // TODO: Lower HRTBs in spec.
+                    kind: SpannedHrtbBinderKindView::Signature(Obj::new(
+                        GenericBinder { defs: Vec::new() },
+                        s,
+                    ))
+                    .encode(spec.span, tcx),
+                    inner: self.lower_trait_spec(spec)?,
+                }
+                .encode(spec.span, tcx),
+            )
+            .encode(spec.span, self.tcx)),
         }
     }
 

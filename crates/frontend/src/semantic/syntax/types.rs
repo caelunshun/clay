@@ -1,6 +1,7 @@
 use crate::{
     base::{
         ErrorGuaranteed, Session,
+        analysis::DebruijnRelative,
         arena::{Intern, LateInit, Obj},
         syntax::{Span, Symbol},
     },
@@ -643,7 +644,7 @@ pub struct HrtbDebruijnDef {
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct HrtbDebruijn(pub u32);
+pub struct HrtbDebruijn(pub DebruijnRelative);
 
 // === Misc Enums === //
 

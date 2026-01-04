@@ -1,7 +1,7 @@
 use crate::{
     base::{
         Diag, Session,
-        analysis::Spanned,
+        analysis::{DebruijnAbsoluteRange, DebruijnTop, Spanned},
         arena::{HasInterner, HasListInterner, Obj},
         syntax::Span,
     },
@@ -14,12 +14,12 @@ use crate::{
         },
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, GenericBinder, GenericSubst, HrtbBinder,
-            HrtbBinderKind, ImplItem, InferTyVar, Re, RelationMode, SpannedAdtInstance,
-            SpannedHrtbBinder, SpannedRe, SpannedTraitInstance, SpannedTraitParamView,
-            SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList, SpannedTyProjectionView,
-            SpannedTyView, TraitClause, TraitClauseList, TraitItem, TraitParam, TraitSpec, Ty,
-            TyKind, TyOrRe, TyOrReList, UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar,
-            UniversalTyVarSourceInfo,
+            HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef, ImplItem, InferTyVar, Re, RelationMode,
+            SpannedAdtInstance, SpannedHrtbBinder, SpannedHrtbBinderView, SpannedRe,
+            SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec, SpannedTy,
+            SpannedTyOrRe, SpannedTyOrReList, SpannedTyProjectionView, SpannedTyView, TraitClause,
+            TraitClauseList, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReKind,
+            UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
@@ -316,7 +316,8 @@ impl<'tcx> ClauseCx<'tcx> {
         ClauseCxImporter {
             ccx: self,
             env,
-            hrtb_binder_substs: FxHashMap::default(),
+            hrtb_top: DebruijnTop::default(),
+            hrtb_binder_ranges: FxHashMap::default(),
         }
     }
 
@@ -622,10 +623,41 @@ impl<'tcx> ClauseCx<'tcx> {
 pub struct ClauseCxImporter<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
     env: ClauseImportEnvRef<'a>,
-    hrtb_binder_substs: FxHashMap<Obj<GenericBinder>, TyOrReList>,
+    hrtb_top: DebruijnTop,
+    hrtb_binder_ranges: FxHashMap<Obj<GenericBinder>, DebruijnAbsoluteRange>,
 }
 
 impl<'tcx> TyFolderPreservesSpans<'tcx> for ClauseCxImporter<'_, 'tcx> {}
+
+impl<'tcx> ClauseCxImporter<'_, 'tcx> {
+    fn lookup_generic(&self, generic: AnyGeneric) -> TyOrRe {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let kind = generic.kind();
+        let pos = generic.binder(s);
+
+        if let Some(binder) = self
+            .env
+            .sig_generic_substs
+            .iter()
+            .find(|v| v.binder == pos.def)
+        {
+            return binder.substs.r(s)[pos.idx as usize];
+        }
+
+        if let Some(range) = self.hrtb_binder_ranges.get(&pos.def) {
+            let var = HrtbDebruijn(self.hrtb_top.make_relative(range.at(pos.idx as usize)));
+
+            return match kind {
+                TyOrReKind::Re => TyOrRe::Re(Re::HrtbVar(var)),
+                TyOrReKind::Ty => TyOrRe::Ty(tcx.intern(TyKind::HrtbVar(var))),
+            };
+        }
+
+        panic!("no substitutions provided for signature generic");
+    }
+}
 
 impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
     type Error = Infallible;
@@ -638,7 +670,43 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
         &mut self,
         binder: SpannedHrtbBinder<T>,
     ) -> Result<HrtbBinder<T>, Self::Error> {
-        todo!()
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let SpannedHrtbBinderView { kind, inner } = binder.view(tcx);
+
+        let HrtbBinderKind::Signature(binder) = kind.value else {
+            unreachable!()
+        };
+
+        let binder_count = binder.r(s).defs.len();
+
+        // Fold the inner value with a new generic binder available as an HRTB binder.
+        self.hrtb_top.move_inwards_by(binder_count);
+        let inner = self.fold_spanned(inner);
+
+        // Create the imported definitions.
+        let defs = binder
+            .r(s)
+            .defs
+            .iter()
+            .map(|def| HrtbDebruijnDef {
+                kind: def.kind(),
+                clauses: self.fold_spanned(def.clauses(s)),
+            })
+            .collect::<Vec<_>>();
+
+        let defs = tcx.intern_list(&defs);
+
+        // Update the `binder_count` only after we've imported the `defs` since the definition
+        // indexing scheme is relative to `binder.inner` to allow mutual recursion among generic
+        // definitions.
+        self.hrtb_top.move_outwards_by(binder_count);
+
+        Ok(HrtbBinder {
+            kind: HrtbBinderKind::Imported(defs),
+            inner,
+        })
     }
 
     fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
@@ -648,16 +716,9 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
         Ok(match ty.view(tcx) {
             SpannedTyView::SigThis => self.env.self_ty,
             SpannedTyView::SigInfer => self.ccx.fresh_ty_infer(),
-            // TODO: import HRTBs
-            SpannedTyView::SigGeneric(generic) => self
-                .env
-                .sig_generic_substs
-                .iter()
-                .find(|v| v.binder == generic.r(s).binder.def)
-                .expect("no substitutions provided for signature generic")
-                .substs
-                .r(s)[generic.r(s).binder.idx as usize]
-                .unwrap_ty(),
+            SpannedTyView::SigGeneric(generic) => {
+                self.lookup_generic(AnyGeneric::Ty(generic)).unwrap_ty()
+            }
             SpannedTyView::SigProject(projection) => {
                 let SpannedTyProjectionView {
                     target,
@@ -709,20 +770,9 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
     }
 
     fn fold_re(&mut self, re: SpannedRe) -> Result<Re, Self::Error> {
-        let s = self.session();
-
         Ok(match re.value {
             Re::SigInfer => self.ccx.fresh_re_infer(),
-            // TODO: import HRTBs
-            Re::SigGeneric(generic) => self
-                .env
-                .sig_generic_substs
-                .iter()
-                .find(|v| v.binder == generic.r(s).binder.def)
-                .expect("no substitutions provided for signature generic")
-                .substs
-                .r(s)[generic.r(s).binder.idx as usize]
-                .unwrap_re(),
+            Re::SigGeneric(generic) => self.lookup_generic(AnyGeneric::Re(generic)).unwrap_re(),
             Re::Gc | Re::Error(_) => {
                 return self.super_spanned_fallible(re);
             }
@@ -1157,10 +1207,30 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     pub fn instantiate_hrtb_universal(&mut self, binder: HrtbBinder<TraitSpec>) -> TraitSpec {
+        let s = self.session();
+
+        let HrtbBinderKind::Imported(defs) = binder.kind else {
+            unreachable!();
+        };
+
+        if defs.r(s).is_empty() {
+            return binder.inner;
+        }
+
         todo!()
     }
 
     pub fn instantiate_hrtb_infer(&mut self, binder: HrtbBinder<TraitSpec>) -> TraitSpec {
+        let s = self.session();
+
+        let HrtbBinderKind::Imported(defs) = binder.kind else {
+            unreachable!();
+        };
+
+        if defs.r(s).is_empty() {
+            return binder.inner;
+        }
+
         todo!()
     }
 }
