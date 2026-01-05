@@ -1,11 +1,10 @@
 use crate::{
-    base::{Session, analysis::Spanned, arena::Obj, syntax::Span},
+    base::{Session, analysis::Spanned},
     semantic::{
         analysis::TyCtxt,
         syntax::{
-            AdtInstance, HrtbBinder, HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef,
-            HrtbDebruijnDefList, InferReVar, InferTyVar, Re, RegionGeneric, SpannedAdtInstance,
-            SpannedAdtInstanceView, SpannedHrtbBinder, SpannedHrtbBinderKind,
+            AdtInstance, HrtbBinder, HrtbBinderKind, HrtbDebruijnDef, HrtbDebruijnDefList, Re,
+            SpannedAdtInstance, SpannedAdtInstanceView, SpannedHrtbBinder, SpannedHrtbBinderKind,
             SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedHrtbDebruijnDef,
             SpannedHrtbDebruijnDefList, SpannedHrtbDebruijnDefView, SpannedRe, SpannedTraitClause,
             SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitInstance,
@@ -14,7 +13,7 @@ use crate::{
             SpannedTyList, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView,
             SpannedTyProjection, SpannedTyProjectionView, SpannedTyView, TraitClause,
             TraitClauseList, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty, TyList,
-            TyOrRe, TyOrReList, TyProjection, TypeGeneric, UniversalReVar, UniversalTyVar,
+            TyOrRe, TyOrReList, TyProjection,
         },
     },
 };
@@ -124,94 +123,6 @@ pub trait TyVisitor<'tcx> {
         defs: SpannedHrtbDebruijnDef,
     ) -> ControlFlow<Self::Break> {
         self.walk_spanned_fallible(defs)
-    }
-
-    // === Terminators === //
-
-    fn visit_sig_self_ty_use(&mut self, span: Option<Span>) -> ControlFlow<Self::Break> {
-        _ = span;
-
-        ControlFlow::Continue(())
-    }
-
-    fn visit_re_hrtb_var_use(
-        &mut self,
-        span: Option<Span>,
-        var: HrtbDebruijn,
-    ) -> ControlFlow<Self::Break> {
-        _ = (span, var);
-
-        ControlFlow::Continue(())
-    }
-
-    fn visit_re_infer_var_use(
-        &mut self,
-        span: Option<Span>,
-        var: InferReVar,
-    ) -> ControlFlow<Self::Break> {
-        _ = (span, var);
-
-        ControlFlow::Continue(())
-    }
-
-    fn visit_re_universal_var_use(
-        &mut self,
-        span: Option<Span>,
-        var: UniversalReVar,
-    ) -> ControlFlow<Self::Break> {
-        _ = (span, var);
-
-        ControlFlow::Continue(())
-    }
-
-    fn visit_ty_hrtb_var_use(
-        &mut self,
-        span: Option<Span>,
-        var: HrtbDebruijn,
-    ) -> ControlFlow<Self::Break> {
-        _ = (span, var);
-
-        ControlFlow::Continue(())
-    }
-
-    fn visit_ty_infer_var_use(
-        &mut self,
-        span: Option<Span>,
-        var: InferTyVar,
-    ) -> ControlFlow<Self::Break> {
-        _ = (span, var);
-
-        ControlFlow::Continue(())
-    }
-
-    fn visit_ty_universal_var_use(
-        &mut self,
-        span: Option<Span>,
-        var: UniversalTyVar,
-    ) -> ControlFlow<Self::Break> {
-        _ = (span, var);
-
-        ControlFlow::Continue(())
-    }
-
-    fn visit_re_sig_generic_use(
-        &mut self,
-        span: Option<Span>,
-        generic: Obj<RegionGeneric>,
-    ) -> ControlFlow<Self::Break> {
-        _ = (span, generic);
-
-        ControlFlow::Continue(())
-    }
-
-    fn visit_ty_sig_generic_use(
-        &mut self,
-        span: Option<Span>,
-        generic: Obj<TypeGeneric>,
-    ) -> ControlFlow<Self::Break> {
-        _ = (span, generic);
-
-        ControlFlow::Continue(())
     }
 }
 
@@ -488,20 +399,16 @@ impl TyVisitable for Re {
         V: ?Sized + TyVisitor<'tcx>,
     {
         match me.value {
-            Re::Gc | Re::SigInfer | Re::Erased | Re::Error(_) => {
+            Re::Gc
+            | Re::SigInfer
+            | Re::Erased
+            | Re::Error(_)
+            | Re::SigGeneric(_)
+            | Re::HrtbVar(_)
+            | Re::InferVar(_)
+            | Re::UniversalVar(_) => {
+                _ = visitor;
                 // (dead end)
-            }
-            Re::SigGeneric(generic) => {
-                visitor.visit_re_sig_generic_use(me.own_span_if_specified(), generic)?;
-            }
-            Re::HrtbVar(var) => {
-                visitor.visit_re_hrtb_var_use(me.own_span_if_specified(), var)?;
-            }
-            Re::InferVar(var) => {
-                visitor.visit_re_infer_var_use(me.own_span_if_specified(), var)?;
-            }
-            Re::UniversalVar(var) => {
-                visitor.visit_re_universal_var_use(me.own_span_if_specified(), var)?;
             }
         }
 
@@ -525,26 +432,16 @@ impl TyVisitable for Ty {
             SpannedTyView::Simple(_)
             | SpannedTyView::SigInfer
             | SpannedTyView::FnDef(_, None)
-            | SpannedTyView::Error(_) => {
+            | SpannedTyView::Error(_)
+            | SpannedTyView::SigThis
+            | SpannedTyView::SigGeneric(_)
+            | SpannedTyView::HrtbVar(_)
+            | SpannedTyView::InferVar(_)
+            | SpannedTyView::UniversalVar(_) => {
                 // (dead end)
-            }
-            SpannedTyView::SigThis => {
-                visitor.visit_sig_self_ty_use(me.own_span_if_specified())?;
-            }
-            SpannedTyView::SigGeneric(generic) => {
-                visitor.visit_ty_sig_generic_use(me.own_span_if_specified(), generic)?;
             }
             SpannedTyView::SigProject(project) => {
                 visitor.visit_spanned_fallible(project)?;
-            }
-            SpannedTyView::HrtbVar(var) => {
-                visitor.visit_ty_hrtb_var_use(me.own_span_if_specified(), var)?;
-            }
-            SpannedTyView::InferVar(var) => {
-                visitor.visit_ty_infer_var_use(me.own_span_if_specified(), var)?;
-            }
-            SpannedTyView::UniversalVar(var) => {
-                visitor.visit_ty_universal_var_use(me.own_span_if_specified(), var)?;
             }
             SpannedTyView::Reference(re, _muta, pointee) => {
                 visitor.visit_spanned_fallible(re)?;

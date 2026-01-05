@@ -1,11 +1,8 @@
 use crate::{
-    base::{
-        arena::{LateInit, Obj},
-        syntax::Span,
-    },
+    base::arena::{LateInit, Obj},
     semantic::{
         analysis::{TyCtxt, TyVisitable, TyVisitor, TyVisitorExt},
-        syntax::{AnyGeneric, GenericBinder, PosInBinder, RegionGeneric, TypeGeneric},
+        syntax::{AnyGeneric, GenericBinder, PosInBinder, Re, SpannedRe, SpannedTy, TyKind},
     },
 };
 use derive_where::derive_where;
@@ -77,19 +74,52 @@ where
         self.tcx
     }
 
-    fn visit_re_sig_generic_use(
-        &mut self,
-        _span: Option<Span>,
-        generic: Obj<RegionGeneric>,
-    ) -> ControlFlow<Self::Break> {
-        (self.f)(AnyGeneric::Re(generic))
+    fn visit_re(&mut self, re: SpannedRe) -> ControlFlow<Self::Break> {
+        match re.value {
+            Re::SigGeneric(generic) => {
+                (self.f)(AnyGeneric::Re(generic))?;
+            }
+            Re::Gc
+            | Re::SigInfer
+            | Re::HrtbVar(_)
+            | Re::InferVar(_)
+            | Re::UniversalVar(_)
+            | Re::Erased
+            | Re::Error(_) => {
+                // (not a generic)
+            }
+        }
+
+        self.walk_spanned_fallible(re)?;
+
+        ControlFlow::Continue(())
     }
 
-    fn visit_ty_sig_generic_use(
-        &mut self,
-        _span: Option<Span>,
-        generic: Obj<TypeGeneric>,
-    ) -> ControlFlow<Self::Break> {
-        (self.f)(AnyGeneric::Ty(generic))
+    fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
+        match *ty.value.r(self.session()) {
+            TyKind::SigGeneric(generic) => {
+                (self.f)(AnyGeneric::Ty(generic))?;
+            }
+
+            TyKind::SigThis
+            | TyKind::SigInfer
+            | TyKind::SigProject(_)
+            | TyKind::Simple(_)
+            | TyKind::Reference(_, _, _)
+            | TyKind::Adt(_)
+            | TyKind::Trait(_)
+            | TyKind::Tuple(_)
+            | TyKind::FnDef(_, _)
+            | TyKind::HrtbVar(_)
+            | TyKind::InferVar(_)
+            | TyKind::UniversalVar(_)
+            | TyKind::Error(_) => {
+                // (not a generic)
+            }
+        }
+
+        self.walk_spanned_fallible(ty)?;
+
+        ControlFlow::Continue(())
     }
 }
