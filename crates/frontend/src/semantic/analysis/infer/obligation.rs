@@ -52,6 +52,11 @@ pub enum ObligationReason {
         pointee: Span,
     },
 
+    WfSuperTrait {
+        block: Span,
+        clause: Span,
+    },
+
     // TODO: This is temporary. WF shouldn't have a stack.
     WfDeferred(Span),
 
@@ -70,6 +75,10 @@ impl ObligationReason {
             ObligationReason::FunctionBody { at: span }
             | ObligationReason::WfForReference { pointee: span }
             | ObligationReason::GenericRequirements { clause: span }
+            | ObligationReason::WfSuperTrait {
+                block: _,
+                clause: span,
+            }
             | ObligationReason::WfDeferred(span) => Some(span),
             ObligationReason::WfForGenericParam {
                 use_span,

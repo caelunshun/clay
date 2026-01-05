@@ -2,12 +2,12 @@ use crate::{
     base::{Session, arena::Obj},
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, CoherenceMap, TyCtxt, TyFolderInfallibleExt,
-            TyVisitorInfallibleExt, UnifyCxMode,
+            ClauseCx, ClauseImportEnvRef, CoherenceMap, ObligationReason, TyCtxt,
+            TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCxMode,
         },
         syntax::{
-            AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FuncItem, GenericBinder, ImplItem,
-            ItemKind, TraitItem,
+            AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FuncItem, GenericBinder, GenericSubst,
+            ImplItem, ItemKind, TraitItem,
         },
     },
 };
@@ -121,6 +121,30 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
             ccx.wf_visitor()
                 .with_clause_applies_to(env.self_ty)
                 .visit_spanned(trait_);
+
+            // Let's ensure that the type implements its super-traits as well.
+            let trait_def = trait_.value.def;
+
+            for super_clause in trait_def.r(s).inherits.iter(tcx) {
+                let super_clause = ccx
+                    .importer(ClauseImportEnvRef::new(
+                        env.self_ty,
+                        &[GenericSubst {
+                            binder: trait_def.r(s).generics,
+                            substs: trait_.value.params,
+                        }],
+                    ))
+                    .fold_preserved(super_clause);
+
+                ccx.oblige_ty_and_clause(
+                    ObligationReason::WfSuperTrait {
+                        block: target.own_span(),
+                        clause: super_clause.own_span(),
+                    },
+                    env.self_ty,
+                    super_clause.value,
+                );
+            }
         }
 
         // Let's also ensure that our target type is well-formed.
@@ -132,9 +156,6 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Let's ensure that `impl` generics all have well-formed clauses.
         self.visit_generic_binder(&mut ccx, env.as_ref(), *generics);
-
-        // Let's ensure that the type implements its super-traits as well.
-        // TODO
 
         // Finally, let's check method signatures and bodies.
         // TODO

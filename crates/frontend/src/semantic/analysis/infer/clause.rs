@@ -887,13 +887,17 @@ impl<'tcx> ClauseCx<'tcx> {
         let s = self.session();
 
         for &clause in rhs.r(s) {
-            match clause {
-                TraitClause::Outlives(rhs) => {
-                    self.oblige_ty_and_re(reason, lhs, rhs);
-                }
-                TraitClause::Trait(rhs) => {
-                    self.oblige_ty_and_trait(reason, lhs, rhs);
-                }
+            self.oblige_ty_and_clause(reason, lhs, clause);
+        }
+    }
+
+    pub fn oblige_ty_and_clause(&mut self, reason: ObligationReason, lhs: Ty, rhs: TraitClause) {
+        match rhs {
+            TraitClause::Outlives(rhs) => {
+                self.oblige_ty_and_re(reason, lhs, rhs);
+            }
+            TraitClause::Trait(rhs) => {
+                self.oblige_ty_and_trait(reason, lhs, rhs);
             }
         }
     }
