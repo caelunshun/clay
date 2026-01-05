@@ -269,7 +269,6 @@ impl IntraItemLowerCtxt<'_> {
         ast: &AstTraitClause,
     ) -> Result<SpannedTraitClause, ErrorGuaranteed> {
         let tcx = self.tcx;
-        let s = &self.tcx.session;
 
         match ast {
             AstTraitClause::Outlives(lt) => {

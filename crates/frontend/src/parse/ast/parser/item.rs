@@ -267,7 +267,14 @@ pub fn parse_impl_ish_body(p: P) -> AstImplLikeBody {
             break;
         }
 
-        members.push(parse_impl_ish_member(p));
+        if let Some(member) = parse_impl_ish_member(p) {
+            members.push(member);
+            continue;
+        }
+
+        if p.stuck().should_break() {
+            break;
+        }
     }
 
     AstImplLikeBody {
@@ -276,15 +283,17 @@ pub fn parse_impl_ish_body(p: P) -> AstImplLikeBody {
     }
 }
 
-pub fn parse_impl_ish_member(p: P) -> AstImplLikeMember {
+pub fn parse_impl_ish_member(p: P) -> Option<AstImplLikeMember> {
     let start = p.next_span();
 
     let vis = parse_visibility(p);
 
-    let make_member = |kind: AstImplLikeMemberKind, p: P| AstImplLikeMember {
-        span: start.to(p.prev_span()),
-        vis,
-        kind,
+    let make_member = |kind: AstImplLikeMemberKind, p: P| {
+        Some(AstImplLikeMember {
+            span: start.to(p.prev_span()),
+            vis,
+            kind,
+        })
     };
 
     if match_kw(kw!("type")).expect(p).is_some() {
@@ -340,7 +349,7 @@ pub fn parse_impl_ish_member(p: P) -> AstImplLikeMember {
         }
     }
 
-    make_member(AstImplLikeMemberKind::Error(p.stuck().error()), p)
+    None
 }
 
 pub fn parse_struct_kind(p: P) -> AstStructKind {

@@ -78,9 +78,7 @@ pub fn parse_named_spec(p: P) -> Option<AstNamedSpec> {
 pub fn parse_hrtb_binder(p: P) -> Option<AstHrtbBinder> {
     let start = p.next_span();
 
-    if match_kw(kw!("for")).expect(p).is_none() {
-        return None;
-    }
+    match_kw(kw!("for")).expect(p)?;
 
     let Some(params) = parse_generic_param_list(p) else {
         p.stuck().ignore_not_in_loop();
