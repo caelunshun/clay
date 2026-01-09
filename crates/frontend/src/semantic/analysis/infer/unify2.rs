@@ -1,5 +1,5 @@
 use crate::{
-    base::ErrorGuaranteed,
+    base::{Diag, ErrorGuaranteed, syntax::Span},
     semantic::syntax::{InferReVar, Re, RelationDirection, UniversalReVar},
     utils::hash::FxHashSet,
 };
@@ -11,14 +11,26 @@ use std::ops::ControlFlow;
 
 #[derive(Debug, Clone)]
 pub struct ReUnifyTracker {
+    /// The next fresh inference variable to yield to the user.
     next_infer: InferReVar,
+
+    /// A map from universal variable to the set of regions it's explicitly permitted to outlive or
+    /// be outlived by.
     universals: IndexVec<UniversalReVar, ReUniversalState>,
+
+    /// The set of user-generated constraints between regions. May contain duplicate constraints and
+    /// redundant constraints like `'gc: 'other` or `'other: 'other`.
     constraints: Vec<ReConstraint>,
 }
 
 #[derive(Debug, Clone, Default)]
 struct ReUniversalState {
+    /// Regions for which `'self: 'other`. May contain duplicates and redundant constraints like
+    /// `'self: 'self`.
     allowed_outlive: Vec<InferRe>,
+
+    /// Regions for which `'other: 'self`. May contain duplicates and redundant constraints like
+    /// `'gc` and `'self`.
     allowed_outlived_by: Vec<InferRe>,
 }
 
@@ -79,6 +91,22 @@ impl ReUnifyTracker {
 
     pub fn verify(&self) {
         let permissions = ReElaboratedPermissions::compute(self);
+        let mut outlives = ReIncrementalOutlives::default();
+
+        for cst in &self.constraints {
+            outlives.add_constraint(cst.lhs, cst.rhs, |var, must_outlive| {
+                if permissions.can_outlive(var, must_outlive) {
+                    return Ok(());
+                }
+
+                // TODO: Format properly
+                Err(Diag::span_err(
+                    Span::DUMMY,
+                    format_args!("constraint {cst:?} requires {var:?} to outlive {must_outlive:?}"),
+                )
+                .emit())
+            })
+        }
 
         todo!()
     }
@@ -89,6 +117,14 @@ impl ReUnifyTracker {
 #[derive(Debug, Clone)]
 struct ReElaboratedPermissions {
     /// Universal variables for which `'lhs: 'rhs`.
+    ///
+    /// Some caveats:
+    ///
+    /// - May or may not contain relations connected implicitly by a `'gc` (e.g. `'lhs: 'gc`, which
+    ///   implies `'lhs: 'rhs` for all other `'rhs`).
+    ///
+    /// - May or may not contain redundant constraints like `'self: 'self`.
+    ///
     permitted_uni_outlives: FxHashSet<(UniversalReVar, UniversalReVar)>,
 
     /// Universal variables for which `'lhs: 'gc`.
@@ -178,16 +214,80 @@ impl ReElaboratedPermissions {
         }
     }
 
-    fn can_outlive(&self, lhs: InferRe, rhs: InferRe) -> bool {
-        match (lhs, rhs) {
-            (InferRe::Gc, _) => true,
-            (InferRe::Universal(lhs), InferRe::Gc) => self.permitted_gc_outlives.contains(&lhs),
-            (InferRe::Universal(lhs), InferRe::Universal(rhs)) => {
+    fn can_outlive(&self, lhs: UniversalReVar, rhs: InferRe) -> bool {
+        match rhs {
+            InferRe::Gc => self.permitted_gc_outlives.contains(&lhs),
+            InferRe::Universal(rhs) => {
                 lhs == rhs
                     || self.permitted_uni_outlives.contains(&(lhs, rhs))
                     || self.permitted_gc_outlives.contains(&lhs)
             }
-            (InferRe::Infer(_), _) | (_, InferRe::Infer(_)) => unreachable!(),
+            InferRe::Infer(_) => unreachable!(),
+        }
+    }
+}
+
+// === ReIncrementalOutlives === //
+
+#[derive(Debug, Clone, Default)]
+struct ReIncrementalOutlives {
+    direct_outlive_graph: DirectedInferReGraph,
+    transitive_universal_outlives: IndexVec<UniversalReVar, FxHashSet<InferRe>>,
+    dfs_queue: Vec<InferRe>,
+}
+
+impl ReIncrementalOutlives {
+    fn add_constraint(
+        &mut self,
+        lhs: InferRe,
+        rhs: InferRe,
+        mut check_outlive: impl FnMut(UniversalReVar, InferRe) -> Result<(), ErrorGuaranteed>,
+    ) {
+        self.direct_outlive_graph.add(lhs, rhs);
+
+        for (var, var_outlives) in self.transitive_universal_outlives.iter_mut_enumerated() {
+            if !var_outlives.contains(&rhs) {
+                continue;
+            }
+
+            if !var_outlives.insert(lhs) {
+                continue;
+            }
+
+            debug_assert!(self.dfs_queue.is_empty());
+
+            self.dfs_queue.push(lhs);
+
+            for stack_idx in 0.. {
+                let Some(&top) = self.dfs_queue.get(stack_idx) else {
+                    break;
+                };
+
+                match top {
+                    InferRe::Gc | InferRe::Universal(_) => {
+                        if check_outlive(var, top).is_err() {
+                            for marked in &self.dfs_queue {
+                                var_outlives.remove(marked);
+                            }
+
+                            break;
+                        }
+                    }
+                    InferRe::Infer(_) => {
+                        // (do not report)
+                    }
+                }
+
+                for &succ in self.direct_outlive_graph.successors(top) {
+                    if !var_outlives.insert(succ) {
+                        continue;
+                    }
+
+                    self.dfs_queue.push(succ);
+                }
+            }
+
+            self.dfs_queue.clear();
         }
     }
 }
@@ -202,7 +302,7 @@ enum InferRe {
 }
 
 impl InferRe {
-    pub fn from_re(re: Re) -> Result<InferRe, ErrorGuaranteed> {
+    fn from_re(re: Re) -> Result<InferRe, ErrorGuaranteed> {
         match re {
             Re::Gc => Ok(InferRe::Gc),
             Re::UniversalVar(var) => Ok(InferRe::Universal(var)),
@@ -212,7 +312,7 @@ impl InferRe {
         }
     }
 
-    pub fn to_re(self) -> Re {
+    fn to_re(self) -> Re {
         match self {
             InferRe::Gc => Re::Gc,
             InferRe::Universal(var) => Re::UniversalVar(var),
@@ -231,7 +331,7 @@ struct InferReMap<T> {
 }
 
 impl<T: Default> InferReMap<T> {
-    pub fn get(&self, re: InferRe) -> Option<&T> {
+    fn get(&self, re: InferRe) -> Option<&T> {
         match re {
             InferRe::Gc => Some(&self.gc_maps_to),
             InferRe::Universal(var) => self.universal_maps_to.get(var),
@@ -239,7 +339,7 @@ impl<T: Default> InferReMap<T> {
         }
     }
 
-    pub fn get_mut(&mut self, re: InferRe) -> &mut T {
+    fn get_mut(&mut self, re: InferRe) -> &mut T {
         fn get_entry<I: index_vec::Idx, T: Default>(target: &mut IndexVec<I, T>, idx: I) -> &mut T {
             let min_len = idx.index() + 1;
 
@@ -268,7 +368,7 @@ struct InferReGraph {
 }
 
 impl InferReGraph {
-    pub fn add(&mut self, lhs: InferRe, rhs: InferRe) {
+    fn add(&mut self, lhs: InferRe, rhs: InferRe) {
         if !self.entries.insert((lhs, rhs)) {
             return;
         }
@@ -277,11 +377,11 @@ impl InferReGraph {
         self.outlived_by.add(rhs, lhs);
     }
 
-    pub fn outlives(&self) -> &DirectedInferReGraph {
+    fn outlives(&self) -> &DirectedInferReGraph {
         &self.outlives
     }
 
-    pub fn outlived_by(&self) -> &DirectedInferReGraph {
+    fn outlived_by(&self) -> &DirectedInferReGraph {
         &self.outlived_by
     }
 }
@@ -290,11 +390,11 @@ impl InferReGraph {
 struct DirectedInferReGraph(InferReMap<SmallVec<[InferRe; 1]>>);
 
 impl DirectedInferReGraph {
-    pub fn add(&mut self, lhs: InferRe, rhs: InferRe) {
+    fn add(&mut self, lhs: InferRe, rhs: InferRe) {
         self.0.get_mut(lhs).push(rhs);
     }
 
-    pub fn successors(&self, re: InferRe) -> &[InferRe] {
+    fn successors(&self, re: InferRe) -> &[InferRe] {
         self.0.get(re).map_or(&[][..], |v| v.as_slice())
     }
 }
@@ -306,24 +406,24 @@ struct InferReDfs {
 }
 
 impl InferReDfs {
-    pub fn clear(&mut self) {
+    fn clear(&mut self) {
         self.visited.clear();
         self.stack.clear();
     }
 
-    pub fn visit(&mut self, re: InferRe) {
+    fn visit(&mut self, re: InferRe) {
         if self.visited.insert(re) {
             self.stack.push(re);
         }
     }
 
-    pub fn visit_slice(&mut self, re: &[InferRe]) {
+    fn visit_slice(&mut self, re: &[InferRe]) {
         for &re in re {
             self.visit(re);
         }
     }
 
-    pub fn flush<B>(
+    fn flush<B>(
         &mut self,
         mut f: impl FnMut((&mut Self, InferRe)) -> ControlFlow<B>,
     ) -> ControlFlow<B> {
