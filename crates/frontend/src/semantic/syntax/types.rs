@@ -15,6 +15,7 @@ use crate::{
 };
 use derive_where::derive_where;
 use index_vec::{IndexVec, define_index_type};
+use smallvec::{SmallVec, smallvec};
 use std::fmt;
 
 // === Adt Items === //
@@ -668,6 +669,29 @@ impl ReVariance {
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum RelationDirection {
+    LhsOntoRhs,
+    RhsOntoLhs,
+}
+
+impl RelationDirection {
+    #[must_use]
+    pub fn invert(self) -> RelationDirection {
+        match self {
+            RelationDirection::LhsOntoRhs => RelationDirection::RhsOntoLhs,
+            RelationDirection::RhsOntoLhs => RelationDirection::LhsOntoRhs,
+        }
+    }
+
+    pub fn adapt<T: Copy>(self, lhs: T, rhs: T) -> (T, T) {
+        match self {
+            RelationDirection::LhsOntoRhs => (lhs, rhs),
+            RelationDirection::RhsOntoLhs => (rhs, lhs),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum RelationMode {
     LhsOntoRhs,
     RhsOntoLhs,
@@ -690,6 +714,14 @@ impl RelationMode {
             RelationMode::LhsOntoRhs => RelationMode::RhsOntoLhs,
             RelationMode::RhsOntoLhs => RelationMode::LhsOntoRhs,
             RelationMode::Equate => RelationMode::Equate,
+        }
+    }
+
+    pub fn enumerate<T: Copy>(self, lhs: T, rhs: T) -> SmallVec<[(T, T); 2]> {
+        match self {
+            RelationMode::LhsOntoRhs => smallvec![(lhs, rhs)],
+            RelationMode::RhsOntoLhs => smallvec![(rhs, lhs)],
+            RelationMode::Equate => smallvec![(lhs, rhs), (rhs, lhs)],
         }
     }
 }
