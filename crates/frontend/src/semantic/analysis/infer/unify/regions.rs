@@ -1,6 +1,8 @@
 use crate::{
     base::{Diag, ErrorGuaranteed, syntax::Span},
-    semantic::syntax::{InferReVar, Re, RelationDirection, UniversalReVar},
+    semantic::syntax::{
+        InferReVar, Re, RelationDirection, UniversalReVar, UniversalReVarSourceInfo,
+    },
     utils::hash::FxHashSet,
 };
 use index_vec::IndexVec;
@@ -23,8 +25,10 @@ pub struct ReUnifyTracker {
     constraints: Vec<ReConstraint>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct ReUniversalState {
+    src_info: UniversalReVarSourceInfo,
+
     /// Regions for which `'self: 'other`. May contain duplicates and redundant constraints like
     /// `'self: 'self`.
     allowed_outlive: Vec<InferRe>,
@@ -52,8 +56,16 @@ impl Default for ReUnifyTracker {
 }
 
 impl ReUnifyTracker {
-    pub fn fresh_universal(&mut self) -> UniversalReVar {
-        self.universals.push(ReUniversalState::default())
+    pub fn fresh_universal(&mut self, src_info: UniversalReVarSourceInfo) -> UniversalReVar {
+        self.universals.push(ReUniversalState {
+            src_info,
+            allowed_outlive: Vec::new(),
+            allowed_outlived_by: Vec::new(),
+        })
+    }
+
+    pub fn lookup_universal_src_info(&self, var: UniversalReVar) -> UniversalReVarSourceInfo {
+        self.universals[var].src_info
     }
 
     pub fn fresh_infer(&mut self) -> InferReVar {
@@ -62,7 +74,7 @@ impl ReUnifyTracker {
         var
     }
 
-    pub fn relate(&mut self, lhs: Re, rhs: Re) {
+    pub fn constrain(&mut self, lhs: Re, rhs: Re) {
         let (Ok(lhs), Ok(rhs)) = (InferRe::from_re(lhs), InferRe::from_re(rhs)) else {
             return;
         };
@@ -107,8 +119,6 @@ impl ReUnifyTracker {
                 .emit())
             })
         }
-
-        todo!()
     }
 }
 

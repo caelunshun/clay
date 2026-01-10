@@ -1,20 +1,20 @@
 use crate::{
     base::{ErrorGuaranteed, HardDiag, Session, arena::HasInterner},
     semantic::{
-        analysis::{TyCtxt, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyVisitor, TyVisitorExt},
+        analysis::{
+            TyCtxt, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyVisitor, TyVisitorExt,
+            infer::unify::{regions::ReUnifyTracker, types::TyUnifyTracker},
+        },
         syntax::{
-            HrtbBinderKind, InferReVar, InferTyVar, Mutability, Re, ReVariance, RelationMode,
-            SpannedTy, SpannedTyView, TraitClause, TraitClauseList, TraitParam, Ty, TyKind, TyOrRe,
-            UniversalReVar, UniversalReVarSourceInfo,
+            HrtbBinderKind, InferTyVar, Mutability, Re, ReVariance, RelationDirection,
+            RelationMode, SpannedTy, SpannedTyView, TraitClause, TraitClauseList, TraitParam, Ty,
+            TyKind, TyOrRe, UniversalReVar, UniversalReVarSourceInfo,
         },
     },
     utils::hash::FxHashSet,
 };
-use bit_set::BitSet;
-use disjoint::DisjointSetVec;
-use index_vec::{IndexVec, define_index_type};
-use smallvec::SmallVec;
-use std::{cell::RefCell, convert::Infallible, ops::ControlFlow, rc::Rc};
+use index_vec::define_index_type;
+use std::{convert::Infallible, ops::ControlFlow};
 
 // === Errors === //
 
@@ -38,7 +38,6 @@ impl TyAndTyUnifyError {
 #[derive(Debug, Clone)]
 pub enum TyAndTyUnifyCulprit {
     Types(Ty, Ty),
-    Regions(Box<ReAndReUnifyError>),
     ClauseLists(TraitClauseList, TraitClauseList),
     Params(TraitParam, TraitParam),
     RecursiveType(InferTyOccursError),
@@ -48,29 +47,6 @@ pub enum TyAndTyUnifyCulprit {
 pub struct InferTyOccursError {
     pub var: InferTyVar,
     pub occurs_in: Ty,
-}
-
-#[derive(Debug, Clone)]
-pub struct ReAndReUnifyError {
-    pub lhs: Re,
-    pub rhs: Re,
-    pub offenses: Vec<ReAndReUnifyOffense>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ReAndReUnifyOffense {
-    pub universal: UniversalReVar,
-    pub forced_to_outlive: Re,
-}
-
-impl ReAndReUnifyError {
-    // TODO
-    pub fn to_diag(self) -> HardDiag {
-        HardDiag::anon_err(format_args!(
-            "could not unify regions {:?} and {:?} since {:?}",
-            self.lhs, self.rhs, self.offenses,
-        ))
-    }
 }
 
 // === UnifyCx === //
@@ -94,8 +70,8 @@ pub enum UnifyCxMode {
 #[derive(Debug, Clone)]
 pub struct UnifyCx<'tcx> {
     tcx: &'tcx TyCtxt,
-    types: TyInferTracker,
-    regions: Option<ReInferTracker>,
+    types: TyUnifyTracker,
+    regions: Option<ReUnifyTracker>,
 }
 
 define_index_type! {
@@ -112,10 +88,10 @@ impl<'tcx> UnifyCx<'tcx> {
     pub fn new(tcx: &'tcx TyCtxt, mode: UnifyCxMode) -> Self {
         Self {
             tcx,
-            types: TyInferTracker::default(),
+            types: TyUnifyTracker::default(),
             regions: match mode {
                 UnifyCxMode::RegionBlind => None,
-                UnifyCxMode::RegionAware => Some(ReInferTracker::default()),
+                UnifyCxMode::RegionAware => Some(ReUnifyTracker::default()),
             },
         }
     }
@@ -133,6 +109,12 @@ impl<'tcx> UnifyCx<'tcx> {
             UnifyCxMode::RegionAware
         } else {
             UnifyCxMode::RegionBlind
+        }
+    }
+
+    pub fn verify(&mut self) {
+        if let Some(re) = &mut self.regions {
+            re.verify();
         }
     }
 
@@ -203,15 +185,24 @@ impl<'tcx> UnifyCx<'tcx> {
             .lookup_universal_src_info(var)
     }
 
-    pub fn permit_re_universal_outlives(&mut self, lhs: Re, rhs: Re) {
+    pub fn permit_re_universal_outlives(
+        &mut self,
+        universal: Re,
+        other: Re,
+        dir: RelationDirection,
+    ) {
         let Some(regions) = &mut self.regions else {
-            debug_assert!(matches!(lhs, Re::Erased));
-            debug_assert!(matches!(rhs, Re::Erased));
+            debug_assert!(matches!(universal, Re::Erased));
+            debug_assert!(matches!(other, Re::Erased));
 
             return;
         };
 
-        regions.unify(lhs, rhs, None);
+        let Re::UniversalVar(universal) = universal else {
+            unreachable!()
+        };
+
+        regions.permit(universal, other, dir);
     }
 
     pub fn fresh_re_infer(&mut self) -> Re {
@@ -222,61 +213,17 @@ impl<'tcx> UnifyCx<'tcx> {
         }
     }
 
-    pub fn unify_re_and_re(
-        &mut self,
-        lhs: Re,
-        rhs: Re,
-        mode: RelationMode,
-    ) -> Result<(), Box<ReAndReUnifyError>> {
+    pub fn unify_re_and_re(&mut self, lhs: Re, rhs: Re, mode: RelationMode) {
         let Some(regions) = &mut self.regions else {
             debug_assert!(matches!(lhs, Re::Erased));
             debug_assert!(matches!(rhs, Re::Erased));
 
-            return Ok(());
+            return;
         };
 
-        let tmp1;
-        let tmp2;
-        let equivalences = match mode {
-            RelationMode::LhsOntoRhs => {
-                tmp1 = [(lhs, rhs)];
-                &tmp1[..]
-            }
-            RelationMode::RhsOntoLhs => {
-                tmp1 = [(rhs, lhs)];
-                &tmp1[..]
-            }
-            RelationMode::Equate => {
-                tmp2 = [(lhs, rhs), (rhs, lhs)];
-                &tmp2[..]
-            }
-        };
-
-        let mut offenses = Vec::new();
-        let mut fork = regions.clone();
-
-        for &(lhs, rhs) in equivalences {
-            if lhs == rhs {
-                continue;
-            }
-
-            match (lhs, rhs) {
-                (Re::Erased, _) | (_, Re::Erased) | (Re::SigInfer, _) | (_, Re::SigInfer) => {
-                    unreachable!()
-                }
-                _ => {
-                    fork.unify(lhs, rhs, Some(&mut offenses));
-                }
-            }
+        for (lhs, rhs) in mode.enumerate(lhs, rhs) {
+            regions.constrain(lhs, rhs);
         }
-
-        if !offenses.is_empty() {
-            return Err(Box::new(ReAndReUnifyError { lhs, rhs, offenses }));
-        }
-
-        *regions = fork;
-
-        Ok(())
     }
 
     /// Unifies two types such that they match. The `mode` specifies how the regions inside the
@@ -335,9 +282,7 @@ impl<'tcx> UnifyCx<'tcx> {
                 TyKind::Reference(lhs_re, lhs_muta, lhs_pointee),
                 TyKind::Reference(rhs_re, rhs_muta, rhs_pointee),
             ) if lhs_muta == rhs_muta => {
-                if let Err(err) = self.unify_re_and_re(lhs_re, rhs_re, mode) {
-                    culprits.push(TyAndTyUnifyCulprit::Regions(err));
-                }
+                self.unify_re_and_re(lhs_re, rhs_re, mode);
 
                 let variance = match lhs_muta {
                     Mutability::Mut => ReVariance::Invariant,
@@ -357,9 +302,7 @@ impl<'tcx> UnifyCx<'tcx> {
                 for (&lhs, &rhs) in lhs.params.r(s).iter().zip(rhs.params.r(s)) {
                     match (lhs, rhs) {
                         (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                            if let Err(err) = self.unify_re_and_re(lhs, rhs, mode) {
-                                culprits.push(TyAndTyUnifyCulprit::Regions(err));
-                            }
+                            self.unify_re_and_re(lhs, rhs, mode);
                         }
                         (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
                             self.unify_ty_and_ty_inner(lhs, rhs, culprits, mode);
@@ -380,9 +323,7 @@ impl<'tcx> UnifyCx<'tcx> {
 
                     match (lhs, rhs) {
                         (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                            if let Err(err) = self.unify_re_and_re(lhs, rhs, mode) {
-                                culprits.push(TyAndTyUnifyCulprit::Regions(err));
-                            }
+                            self.unify_re_and_re(lhs, rhs, mode);
                         }
                         (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
                             self.unify_ty_and_ty_inner(lhs, rhs, culprits, mode);
@@ -539,9 +480,7 @@ impl<'tcx> UnifyCx<'tcx> {
                     // logic will produce constraints for both. This isn't a problem because
                     // we only ever lower trait objects with *exactly one* outlives
                     // constraint.
-                    if let Err(err) = self.unify_re_and_re(lhs, rhs, mode) {
-                        culprits.push(TyAndTyUnifyCulprit::Regions(err));
-                    }
+                    self.unify_re_and_re(lhs, rhs, mode);
                 }
                 (TraitClause::Trait(lhs), TraitClause::Trait(rhs))
                     if lhs.inner.def == rhs.inner.def =>
@@ -581,11 +520,7 @@ impl<'tcx> UnifyCx<'tcx> {
                             (TraitParam::Equals(lhs), TraitParam::Equals(rhs)) => {
                                 match (lhs, rhs) {
                                     (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                                        if let Err(err) =
-                                            self.unify_re_and_re(lhs, rhs, RelationMode::Equate)
-                                        {
-                                            culprits.push(TyAndTyUnifyCulprit::Regions(err));
-                                        }
+                                        self.unify_re_and_re(lhs, rhs, RelationMode::Equate);
                                     }
                                     (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
                                         self.unify_ty_and_ty_inner(
@@ -661,335 +596,6 @@ impl<'tcx> TyFolder<'tcx> for InferTySubstitutor<'_, 'tcx> {
                     unreachable!("unexpected ambiguous inference variable")
                 }
             }),
-        }
-    }
-}
-
-// === TyInferTracker === //
-
-#[derive(Debug, Clone)]
-struct TyInferTracker {
-    disjoint: DisjointSetVec<DisjointTyInferNode>,
-    observed_reveal_order: Vec<ObservedTyInferVar>,
-    next_observe_idx: ObservedTyInferVar,
-    tracing_state: Option<Rc<TyInferTracingState>>,
-}
-
-#[derive(Debug, Clone)]
-struct DisjointTyInferNode {
-    root: Option<DisjointTyInferRoot>,
-    observed_idx: Option<ObservedTyInferVar>,
-}
-
-#[derive(Debug, Clone)]
-enum DisjointTyInferRoot {
-    Known(Ty),
-    Floating(Vec<ObservedTyInferVar>),
-}
-
-#[derive(Debug)]
-struct TyInferTracingState {
-    set: RefCell<FxHashSet<InferTyVar>>,
-    var_count: InferTyVar,
-}
-
-impl Default for TyInferTracker {
-    fn default() -> Self {
-        Self {
-            disjoint: DisjointSetVec::new(),
-            observed_reveal_order: Vec::new(),
-            next_observe_idx: ObservedTyInferVar::from_usize(0),
-            tracing_state: None,
-        }
-    }
-}
-
-impl TyInferTracker {
-    fn start_tracing(&mut self) {
-        debug_assert!(self.tracing_state.is_none());
-
-        self.tracing_state = Some(Rc::new(TyInferTracingState {
-            set: RefCell::default(),
-            var_count: InferTyVar::from_usize(self.disjoint.len()),
-        }))
-    }
-
-    fn finish_tracing(&mut self) -> FxHashSet<InferTyVar> {
-        let set = self.tracing_state.take().expect("not tracing");
-        let set = Rc::into_inner(set)
-            .expect("derived inference contexts remain using the same tracing state");
-
-        set.set.into_inner()
-    }
-
-    fn mention_var_for_tracing(&self, var: InferTyVar) {
-        let Some(state) = &self.tracing_state else {
-            return;
-        };
-
-        if var >= state.var_count {
-            return;
-        }
-
-        state.set.borrow_mut().insert(var);
-    }
-
-    fn fresh(&mut self) -> InferTyVar {
-        let var = InferTyVar::from_usize(self.disjoint.len());
-        self.disjoint.push(DisjointTyInferNode {
-            root: Some(DisjointTyInferRoot::Floating(Vec::new())),
-            observed_idx: None,
-        });
-        var
-    }
-
-    fn observe(&mut self, var: InferTyVar) -> ObservedTyInferVar {
-        let observed_idx = &mut self.disjoint[var.index()].observed_idx;
-
-        if let Some(observed_idx) = *observed_idx {
-            return observed_idx;
-        }
-
-        let observed_idx = *observed_idx.insert(self.next_observe_idx);
-        self.next_observe_idx += 1;
-
-        let root_var = self.disjoint.root_of(var.index());
-
-        match self.disjoint[root_var].root.as_mut().unwrap() {
-            DisjointTyInferRoot::Known(_) => {
-                self.observed_reveal_order.push(observed_idx);
-            }
-            DisjointTyInferRoot::Floating(observed) => {
-                observed.push(observed_idx);
-            }
-        }
-
-        observed_idx
-    }
-
-    fn observed_reveal_order(&self) -> &[ObservedTyInferVar] {
-        &self.observed_reveal_order
-    }
-
-    fn lookup(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {
-        let root_var = self.disjoint.root_of(var.index());
-
-        match self.disjoint[root_var].root.as_ref().unwrap() {
-            &DisjointTyInferRoot::Known(ty) => Ok(ty),
-            DisjointTyInferRoot::Floating(observed_equivalent) => {
-                self.mention_var_for_tracing(var);
-
-                Err(FloatingInferVar {
-                    root: InferTyVar::from_usize(root_var),
-                    observed_equivalent,
-                })
-            }
-        }
-    }
-
-    fn assign_floating_to_non_var(&mut self, var: InferTyVar, ty: Ty) {
-        let root_idx = self.disjoint.root_of(var.index());
-        let root = self.disjoint[root_idx].root.as_mut().unwrap();
-
-        let DisjointTyInferRoot::Floating(observed) = root else {
-            unreachable!();
-        };
-
-        self.observed_reveal_order.extend_from_slice(observed);
-        *root = DisjointTyInferRoot::Known(ty);
-    }
-
-    fn union_unrelated_floating(&mut self, lhs: InferTyVar, rhs: InferTyVar) {
-        let lhs_root = self.disjoint.root_of(lhs.index());
-        let rhs_root = self.disjoint.root_of(rhs.index());
-
-        if lhs_root == rhs_root {
-            return;
-        }
-
-        let lhs_root = self.disjoint[lhs_root].root.take().unwrap();
-        let rhs_root = self.disjoint[rhs_root].root.take().unwrap();
-
-        let (
-            DisjointTyInferRoot::Floating(mut lhs_observed),
-            DisjointTyInferRoot::Floating(mut rhs_observed),
-        ) = (lhs_root, rhs_root)
-        else {
-            unreachable!()
-        };
-
-        self.disjoint.join(lhs.index(), rhs.index());
-
-        let new_root = self.disjoint.root_of(lhs.index());
-        let new_root = &mut self.disjoint[new_root].root;
-
-        debug_assert!(new_root.is_none());
-
-        lhs_observed.append(&mut rhs_observed);
-
-        *new_root = Some(DisjointTyInferRoot::Floating(lhs_observed));
-    }
-}
-
-// === ReInferTracker === //
-
-#[derive(Debug, Clone)]
-struct ReInferTracker {
-    /// The set of universal region variables we're tracking.
-    universals: IndexVec<UniversalReVar, TrackedUniversal>,
-
-    /// A map from `ReInferIndex` (which represents either the `'gc` region, a tracked inference
-    /// region, or a tracked universal region) to the actual region being represented.
-    tracked_any: IndexVec<AnyReIndex, TrackedAny>,
-
-    /// The set of all unified pairs to avoid duplicates.
-    unified_pairs: FxHashSet<(AnyReIndex, AnyReIndex)>,
-}
-
-define_index_type! {
-    struct AnyReIndex = u32;
-}
-
-impl AnyReIndex {
-    const GC: Self = Self { _raw: 0 };
-}
-
-#[derive(Debug, Clone)]
-struct TrackedUniversal {
-    index: AnyReIndex,
-    outlives: BitSet,
-    src_info: UniversalReVarSourceInfo,
-}
-
-#[derive(Debug, Clone)]
-struct TrackedAny {
-    kind: TrackedAnyKind,
-    outlived_by: SmallVec<[AnyReIndex; 1]>,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-enum TrackedAnyKind {
-    Gc,
-    Inference,
-    Universal(UniversalReVar),
-}
-
-impl Default for ReInferTracker {
-    fn default() -> Self {
-        Self {
-            universals: IndexVec::default(),
-            tracked_any: IndexVec::from_iter([TrackedAny {
-                kind: TrackedAnyKind::Gc,
-                outlived_by: SmallVec::new(),
-            }]),
-            unified_pairs: FxHashSet::default(),
-        }
-    }
-}
-
-impl ReInferTracker {
-    fn fresh_infer(&mut self) -> InferReVar {
-        let var = InferReVar::from_raw(self.tracked_any.next_idx().raw());
-
-        self.tracked_any.push(TrackedAny {
-            kind: TrackedAnyKind::Inference,
-            outlived_by: SmallVec::new(),
-        });
-
-        var
-    }
-
-    fn fresh_universal(&mut self, src_info: UniversalReVarSourceInfo) -> UniversalReVar {
-        let index = self.tracked_any.push(TrackedAny {
-            kind: TrackedAnyKind::Universal(self.universals.next_idx()),
-            outlived_by: SmallVec::new(),
-        });
-
-        let mut outlives = BitSet::new();
-        outlives.insert(index.index());
-
-        let idx = self.universals.push(TrackedUniversal {
-            index,
-            outlives,
-            src_info,
-        });
-
-        self.unify(Re::Gc, Re::UniversalVar(idx), None);
-        idx
-    }
-
-    fn lookup_universal_src_info(&self, var: UniversalReVar) -> UniversalReVarSourceInfo {
-        self.universals[var].src_info
-    }
-
-    fn region_to_idx(&mut self, re: Re) -> Option<AnyReIndex> {
-        match re {
-            Re::Gc => Some(AnyReIndex::GC),
-            Re::UniversalVar(universal) => Some(self.universals[universal].index),
-            Re::InferVar(idx) => Some(AnyReIndex::from_raw(idx.raw())),
-            Re::SigInfer | Re::SigGeneric(_) | Re::HrtbVar(_) | Re::Erased => unreachable!(),
-            Re::Error(_) => None,
-        }
-    }
-
-    fn unify(&mut self, lhs: Re, rhs: Re, mut offenses: Option<&mut Vec<ReAndReUnifyOffense>>) {
-        if lhs == rhs {
-            return;
-        }
-
-        let (Some(lhs), Some(rhs)) = (self.region_to_idx(lhs), self.region_to_idx(rhs)) else {
-            return;
-        };
-
-        // Ensure that we don't perform a relation more than once.
-        if !self.unified_pairs.insert((lhs, rhs)) {
-            return;
-        }
-
-        // Record the outlives constraint.
-        self.tracked_any[rhs].outlived_by.push(lhs);
-
-        // For every universal region, update the outlives graph.
-        for universal in self.universals.indices() {
-            if !self.universals[universal].outlives.contains(rhs.index()) {
-                continue;
-            }
-
-            if self.universals[universal].outlives.contains(lhs.index()) {
-                continue;
-            }
-
-            let mut dfs_stack = vec![lhs];
-
-            while let Some(top) = dfs_stack.pop() {
-                self.universals[universal].outlives.insert(top.index());
-
-                let offending_re = match self.tracked_any[top].kind {
-                    TrackedAnyKind::Gc => Some(Re::Gc),
-                    TrackedAnyKind::Inference => None,
-                    TrackedAnyKind::Universal(var) => Some(Re::UniversalVar(var)),
-                };
-
-                if let Some(offenses) = &mut offenses
-                    && let Some(offending_re) = offending_re
-                {
-                    offenses.push(ReAndReUnifyOffense {
-                        universal,
-                        forced_to_outlive: offending_re,
-                    });
-                }
-
-                for &outlived_by in &self.tracked_any[top].outlived_by {
-                    if self.universals[universal]
-                        .outlives
-                        .contains(outlived_by.index())
-                    {
-                        continue;
-                    }
-
-                    dfs_stack.push(outlived_by);
-                }
-            }
         }
     }
 }

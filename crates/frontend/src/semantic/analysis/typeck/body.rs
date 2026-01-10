@@ -38,6 +38,8 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Check the body
         // TODO
+
+        ccx.verify();
     }
 
     fn setup_env_for_fn_def(

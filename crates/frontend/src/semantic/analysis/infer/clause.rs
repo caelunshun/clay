@@ -15,13 +15,13 @@ use crate::{
         },
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, GenericBinder, GenericSubst, HrtbBinder,
-            HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef, ImplItem, InferTyVar, Re, RelationMode,
-            SpannedAdtInstance, SpannedHrtbBinder, SpannedHrtbBinderView, SpannedRe,
-            SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec, SpannedTy,
-            SpannedTyOrRe, SpannedTyOrReList, SpannedTyProjectionView, SpannedTyView, TraitClause,
-            TraitClauseList, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReKind,
-            TyOrReList, UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar,
-            UniversalTyVarSourceInfo,
+            HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef, ImplItem, InferTyVar, Re,
+            RelationDirection, RelationMode, SpannedAdtInstance, SpannedHrtbBinder,
+            SpannedHrtbBinderView, SpannedRe, SpannedTraitInstance, SpannedTraitParamView,
+            SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList, SpannedTyProjectionView,
+            SpannedTyView, TraitClause, TraitClauseList, TraitItem, TraitParam, TraitSpec, Ty,
+            TyKind, TyOrRe, TyOrReKind, TyOrReList, UniversalReVar, UniversalReVarSourceInfo,
+            UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
@@ -131,10 +131,9 @@ impl<'tcx> ClauseCx<'tcx> {
             |this| this.clone(),
             |fork, kind| match kind {
                 ObligationKind::ReAndRe(lhs, rhs, mode) => {
-                    match fork.ucx_mut().unify_re_and_re(lhs, rhs, mode) {
-                        Ok(()) => ObligationResult::Success,
-                        Err(err) => ObligationResult::Failure(err.to_diag()),
-                    }
+                    fork.ucx_mut().unify_re_and_re(lhs, rhs, mode);
+
+                    ObligationResult::Success
                 }
                 ObligationKind::TyAndTy(lhs, rhs, mode) => {
                     match fork.ucx_mut().unify_ty_and_ty(lhs, rhs, mode) {
@@ -198,8 +197,14 @@ impl<'tcx> ClauseCx<'tcx> {
         self.ucx_mut().lookup_universal_re_src_info(var)
     }
 
-    pub fn permit_re_universal_outlives(&mut self, lhs: Re, rhs: Re) {
-        self.ucx_mut().permit_re_universal_outlives(lhs, rhs);
+    pub fn permit_re_universal_outlives(
+        &mut self,
+        universal: Re,
+        other: Re,
+        dir: RelationDirection,
+    ) {
+        self.ucx_mut()
+            .permit_re_universal_outlives(universal, other, dir);
     }
 
     pub fn fresh_ty_universal_var(&mut self, src_info: UniversalTyVarSourceInfo) -> UniversalTyVar {
@@ -271,6 +276,10 @@ impl<'tcx> ClauseCx<'tcx> {
                 }
             }
         }
+    }
+
+    pub fn verify(&mut self) {
+        self.ucx_mut().verify();
     }
 }
 
@@ -392,7 +401,11 @@ impl<'tcx> ClauseCx<'tcx> {
                                 unreachable!()
                             };
 
-                            self.permit_re_universal_outlives(target, allowed_to_outlive);
+                            self.permit_re_universal_outlives(
+                                target,
+                                allowed_to_outlive,
+                                RelationDirection::LhsOntoRhs,
+                            );
                         }
                     }
                     (AnyGeneric::Ty(generic), TyOrRe::Ty(target)) => {
@@ -840,7 +853,7 @@ impl<'tcx> ClauseCx<'tcx> {
         for &target in target.r(s) {
             match target {
                 TraitClause::Outlives(re) => {
-                    self.permit_re_universal_outlives(lub_re, re);
+                    self.permit_re_universal_outlives(lub_re, re, RelationDirection::LhsOntoRhs);
                     accum.push(TraitClause::Outlives(re));
                 }
                 TraitClause::Trait(spec) => {
@@ -1161,13 +1174,8 @@ impl<'tcx> ClauseCx<'tcx> {
             match required_param {
                 TraitParam::Equals(required) => match (instance, required) {
                     (TyOrRe::Re(instance), TyOrRe::Re(required)) => {
-                        if self
-                            .ucx_mut()
-                            .unify_re_and_re(instance, required, RelationMode::Equate)
-                            .is_err()
-                        {
-                            return Err(SelectionRejected);
-                        }
+                        self.ucx_mut()
+                            .unify_re_and_re(instance, required, RelationMode::Equate);
                     }
                     (TyOrRe::Ty(instance), TyOrRe::Ty(required)) => {
                         if self
@@ -1268,7 +1276,11 @@ impl<'tcx> ClauseCx<'tcx> {
                                 unreachable!();
                             };
 
-                            this.permit_re_universal_outlives(var, re);
+                            this.permit_re_universal_outlives(
+                                var,
+                                re,
+                                RelationDirection::LhsOntoRhs,
+                            );
                         }
                     }
                     TyOrRe::Ty(var) => {
@@ -1437,24 +1449,16 @@ impl<'tcx> ClauseCx<'tcx> {
             TyKind::Reference(lhs, _muta, _pointee) => {
                 // No need to unify the pointee since WF checks already ensure that it outlives
                 // `lhs`.
-                if let Err(err) = self
-                    .ucx_mut()
-                    .unify_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs)
-                {
-                    return ObligationResult::Failure(err.to_diag());
-                }
+                self.ucx_mut()
+                    .unify_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs);
             }
             TyKind::Adt(lhs) => {
                 // ADTs are bounded by which regions they mention.
                 for &lhs in lhs.params.r(s) {
                     match lhs {
                         TyOrRe::Re(lhs) => {
-                            if let Err(err) =
-                                self.ucx_mut()
-                                    .unify_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs)
-                            {
-                                return ObligationResult::Failure(err.to_diag());
-                            }
+                            self.ucx_mut()
+                                .unify_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs);
                         }
                         TyOrRe::Ty(lhs) => {
                             self.oblige_ty_and_re(ObligationReason::Structural, lhs, rhs);
@@ -1469,12 +1473,8 @@ impl<'tcx> ClauseCx<'tcx> {
                             // There is guaranteed to be exactly one outlives constraint for a trait
                             // object so relating these constraints is sufficient to ensure that the
                             // object outlives the `rhs`.
-                            if let Err(err) =
-                                self.ucx_mut()
-                                    .unify_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs)
-                            {
-                                return ObligationResult::Failure(err.to_diag());
-                            }
+                            self.ucx_mut()
+                                .unify_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs);
                         }
                         TraitClause::Trait(_) => {
                             // (if the outlives constraint says the trait is okay, it's okay)
