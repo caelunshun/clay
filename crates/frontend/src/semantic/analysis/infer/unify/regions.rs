@@ -102,8 +102,8 @@ impl ReUnifyTracker {
     }
 
     pub fn verify(&self) {
-        let permissions = ReElaboratedPermissions::compute(self);
-        let mut outlives = ReIncrementalOutlives::default();
+        let permissions = ReElaboratedPermissions::new(self);
+        let mut outlives = ReIncrementalOutlives::new(self);
 
         for cst in &self.constraints {
             outlives.add_constraint(cst.lhs, cst.rhs, |var, must_outlive| {
@@ -142,7 +142,7 @@ struct ReElaboratedPermissions {
 }
 
 impl ReElaboratedPermissions {
-    fn compute(tracker: &ReUnifyTracker) -> Self {
+    fn new(tracker: &ReUnifyTracker) -> Self {
         // Convert constraints and permissions into a graph.
         let mut graph = InferReGraph::default();
 
@@ -239,7 +239,7 @@ impl ReElaboratedPermissions {
 
 // === ReIncrementalOutlives === //
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct ReIncrementalOutlives {
     direct_outlive_graph: DirectedInferReGraph,
     transitive_universal_outlives: IndexVec<UniversalReVar, FxHashSet<InferRe>>,
@@ -247,16 +247,26 @@ struct ReIncrementalOutlives {
 }
 
 impl ReIncrementalOutlives {
+    fn new(tracker: &ReUnifyTracker) -> Self {
+        Self {
+            direct_outlive_graph: DirectedInferReGraph::default(),
+            transitive_universal_outlives: IndexVec::from_iter(
+                tracker.universals.iter().map(|_| FxHashSet::default()),
+            ),
+            dfs_queue: Vec::new(),
+        }
+    }
+
     fn add_constraint(
         &mut self,
         lhs: InferRe,
         rhs: InferRe,
         mut check_outlive: impl FnMut(UniversalReVar, InferRe) -> Result<(), ErrorGuaranteed>,
     ) {
-        self.direct_outlive_graph.add(lhs, rhs);
+        self.direct_outlive_graph.add(rhs, lhs);
 
         for (var, var_outlives) in self.transitive_universal_outlives.iter_mut_enumerated() {
-            if !var_outlives.contains(&rhs) {
+            if !(rhs == InferRe::Universal(var) || var_outlives.contains(&rhs)) {
                 continue;
             }
 
@@ -437,8 +447,6 @@ impl InferReDfs {
         &mut self,
         mut f: impl FnMut((&mut Self, InferRe)) -> ControlFlow<B>,
     ) -> ControlFlow<B> {
-        debug_assert!(self.stack.is_empty());
-
         while let Some(top) = self.stack.pop() {
             f((self, top))?;
         }

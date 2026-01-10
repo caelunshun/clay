@@ -36,7 +36,7 @@ mod part2 {
         // dependent generic parameters. Weird.
         type Meow: Spec<Foo = ()>;
 
-        // But this should be properly rejected.
+        // Rust actually accepts this so... yeah.
         type Thump: Spec<Foo = (), Bar = ()>;
     }
 }

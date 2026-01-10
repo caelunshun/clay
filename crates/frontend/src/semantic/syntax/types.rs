@@ -548,6 +548,7 @@ pub enum UniversalReVarSourceInfo {
     Root(Obj<RegionGeneric>),
     ElaboratedLub,
     HrtbVar,
+    TestPlaceholder,
 }
 
 #[derive(Debug, Copy, Clone)]

@@ -1,5 +1,0 @@
-error: failed to prove 0x15800ef28: Tuple(0x15800ef58: []) implements TraitSpec { def: "Generic"#21, params: 0x15801a7d0: [Equals(Ty(0x15800ef28: Tuple(0x15800ef58: [])))] }
-   ┌─ crates/frontend/samples/test9.fir:40:32
-   │
-40 │         type Thump: Spec<Foo = (), Bar = ()>;
-   │                                ^^

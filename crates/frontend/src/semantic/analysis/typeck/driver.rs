@@ -164,6 +164,8 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         // for method in methods.iter() {
         //     self.visit_fn_def(*method)?;
         // }
+
+        ccx.verify();
     }
 
     pub fn visit_adt(&mut self, def: Obj<AdtItem>) {

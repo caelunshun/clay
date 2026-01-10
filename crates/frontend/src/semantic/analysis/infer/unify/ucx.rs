@@ -114,7 +114,7 @@ impl<'tcx> UnifyCx<'tcx> {
 
     pub fn verify(&mut self) {
         if let Some(re) = &mut self.regions {
-            re.verify();
+            _ = re.verify();
         }
     }
 

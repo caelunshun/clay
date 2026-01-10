@@ -1558,10 +1558,18 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
 
     fn visit_hrtb_binder<T: Copy + TyVisitable>(
         &mut self,
-        _binder: SpannedHrtbBinder<T>,
+        binder: SpannedHrtbBinder<T>,
     ) -> ControlFlow<Self::Break> {
-        // We can ignore the stuff inside the binder because, if it's not well-formed, no `impl` of
-        // it could exist.
+        match binder.value.kind {
+            HrtbBinderKind::Signature(_) => {
+                // We can ignore the stuff inside the binder because, if it's not well-formed, no
+                // `impl` of it could exist.
+            }
+            HrtbBinderKind::Imported(_definitions) => {
+                // It's instantiated so we can verify both the binders and their inner type now.
+                self.walk_spanned(binder);
+            }
+        }
 
         ControlFlow::Continue(())
     }
