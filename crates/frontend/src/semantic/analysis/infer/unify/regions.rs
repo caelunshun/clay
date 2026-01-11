@@ -1,7 +1,8 @@
 use crate::{
     base::{Diag, ErrorGuaranteed, syntax::Span},
-    semantic::syntax::{
-        InferReVar, Re, RelationDirection, UniversalReVar, UniversalReVarSourceInfo,
+    semantic::{
+        analysis::CheckOrigin,
+        syntax::{InferReVar, Re, RelationDirection, UniversalReVar, UniversalReVarSourceInfo},
     },
     utils::hash::FxHashSet,
 };
@@ -38,11 +39,11 @@ struct ReUniversalState {
     allowed_outlived_by: Vec<InferRe>,
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 struct ReConstraint {
     lhs: InferRe,
     rhs: InferRe,
-    origin: (),
+    origin: CheckOrigin,
 }
 
 impl Default for ReUnifyTracker {
@@ -74,16 +75,12 @@ impl ReUnifyTracker {
         var
     }
 
-    pub fn constrain(&mut self, lhs: Re, rhs: Re) {
+    pub fn constrain(&mut self, origin: CheckOrigin, lhs: Re, rhs: Re) {
         let (Ok(lhs), Ok(rhs)) = (InferRe::from_re(lhs), InferRe::from_re(rhs)) else {
             return;
         };
 
-        self.constraints.push(ReConstraint {
-            lhs,
-            rhs,
-            origin: (),
-        });
+        self.constraints.push(ReConstraint { lhs, rhs, origin });
     }
 
     pub fn permit(&mut self, universal: UniversalReVar, other: Re, dir: RelationDirection) {

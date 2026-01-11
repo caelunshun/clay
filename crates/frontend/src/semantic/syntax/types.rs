@@ -643,6 +643,7 @@ pub type HrtbDebruijnDefList = Intern<[HrtbDebruijnDef]>;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct HrtbDebruijnDef {
+    pub spawned_from: Span,
     pub kind: TyOrReKind,
     pub clauses: TraitClauseList,
 }

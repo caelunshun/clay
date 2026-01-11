@@ -1,17 +1,17 @@
 use crate::{
     base::{
-        Diag, Session,
+        ErrorGuaranteed, Session,
         analysis::{DebruijnAbsoluteRange, DebruijnTop, Spanned},
         arena::{HasInterner, HasListInterner, Obj},
         syntax::Span,
     },
     semantic::{
         analysis::{
-            CoherenceMap, ConfirmationResult, FloatingInferVar, ObligationCx, ObligationKind,
-            ObligationReason, ObligationResult, SelectionRejected, SelectionResult, TyCtxt,
-            TyFoldable, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyFolderPreservesSpans,
-            TyVisitable, TyVisitor, TyVisitorInfallibleExt, UnboundVarHandlingMode, UnifyCx,
-            UnifyCxMode,
+            CheckOrigin, CheckOriginKind, CoherenceMap, ConfirmationResult, FloatingInferVar,
+            NoTraitImplError, ObligationCx, ObligationResult, RecursionLimitReached,
+            SelectionRejected, SelectionResult, TyCtxt, TyFoldable, TyFolder, TyFolderExt,
+            TyFolderInfallibleExt, TyFolderPreservesSpans, TyVisitable, TyVisitor,
+            TyVisitorInfallibleExt, UnboundVarHandlingMode, UnifyCx, UnifyCxMode,
         },
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, GenericBinder, GenericSubst, HrtbBinder,
@@ -28,6 +28,44 @@ use crate::{
 };
 use index_vec::IndexVec;
 use std::{convert::Infallible, ops::ControlFlow};
+
+// === Obligations === //
+
+const MAX_OBLIGATION_DEPTH: u32 = 256;
+
+#[derive(Debug, Clone)]
+enum ClauseObligation {
+    ReAndRe(CheckOrigin, Re, Re, RelationMode),
+    TyAndTy(CheckOrigin, Ty, Ty, RelationMode),
+    TyAndTrait(CheckOrigin, Ty, TraitSpec),
+    TyAndRe(CheckOrigin, Ty, Re),
+    InferTyWf(Span, InferTyVar),
+}
+
+impl ClauseObligation {
+    fn verify_depth(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
+        match self {
+            Self::ReAndRe(origin, ..)
+            | Self::TyAndTy(origin, ..)
+            | Self::TyAndTrait(origin, ..)
+            | Self::TyAndRe(origin, ..) => {
+                if origin.depth() > MAX_OBLIGATION_DEPTH {
+                    return Some(
+                        RecursionLimitReached {
+                            origin: origin.clone(),
+                        }
+                        .emit(ccx),
+                    );
+                }
+            }
+            Self::InferTyWf(..) => {
+                // (has no depth)
+            }
+        }
+
+        None
+    }
+}
 
 // === ClauseCx Core === //
 
@@ -72,7 +110,7 @@ use std::{convert::Infallible, ops::ControlFlow};
 /// WF-checking traits), you can immediately skip to region aware checking.
 #[derive(Clone)]
 pub struct ClauseCx<'tcx> {
-    ocx: ObligationCx<'tcx>,
+    ocx: ObligationCx<'tcx, ClauseObligation>,
     coherence: &'tcx CoherenceMap,
     universal_vars: IndexVec<UniversalTyVar, UniversalTyVarDescriptor>,
 }
@@ -119,8 +157,8 @@ impl<'tcx> ClauseCx<'tcx> {
         self.ocx.ucx_mut()
     }
 
-    fn push_obligation(&mut self, reason: ObligationReason, kind: ObligationKind) {
-        self.ocx.push_obligation(reason, kind);
+    fn push_obligation(&mut self, kind: ClauseObligation) {
+        self.ocx.push_obligation(kind);
         self.process_obligations();
     }
 
@@ -129,21 +167,30 @@ impl<'tcx> ClauseCx<'tcx> {
             self,
             |this| &mut this.ocx,
             |this| this.clone(),
-            |fork, kind| match kind {
-                ObligationKind::ReAndRe(lhs, rhs, mode) => {
-                    fork.ucx_mut().unify_re_and_re(lhs, rhs, mode);
+            |fork, kind| {
+                if let Some(err) = kind.verify_depth(fork) {
+                    return ObligationResult::Failure(err);
+                }
 
-                    ObligationResult::Success
-                }
-                ObligationKind::TyAndTy(lhs, rhs, mode) => {
-                    match fork.ucx_mut().unify_ty_and_ty(lhs, rhs, mode) {
-                        Ok(()) => ObligationResult::Success,
-                        Err(err) => ObligationResult::Failure(err.to_diag()),
+                match kind {
+                    ClauseObligation::ReAndRe(origin, lhs, rhs, mode) => {
+                        fork.ucx_mut().unify_re_and_re(&origin, lhs, rhs, mode);
+                        ObligationResult::Success
                     }
+                    ClauseObligation::TyAndTy(origin, lhs, rhs, mode) => {
+                        match fork.ucx_mut().unify_ty_and_ty(&origin, lhs, rhs, mode) {
+                            Ok(()) => ObligationResult::Success,
+                            Err(err) => ObligationResult::Failure(err.emit(fork)),
+                        }
+                    }
+                    ClauseObligation::TyAndTrait(origin, lhs, rhs) => {
+                        fork.run_oblige_ty_and_trait(&origin, lhs, rhs)
+                    }
+                    ClauseObligation::TyAndRe(origin, lhs, rhs) => {
+                        fork.run_oblige_ty_and_re(&origin, lhs, rhs)
+                    }
+                    ClauseObligation::InferTyWf(span, var) => fork.run_oblige_ty_wf(span, var),
                 }
-                ObligationKind::TyAndTrait(lhs, rhs) => fork.run_oblige_ty_and_trait(lhs, rhs),
-                ObligationKind::TyAndRe(lhs, rhs) => fork.run_oblige_ty_and_re(lhs, rhs),
-                ObligationKind::TyWf(ty) => fork.run_oblige_ty_wf(ty),
             },
         );
     }
@@ -238,38 +285,21 @@ impl<'tcx> ClauseCx<'tcx> {
         self.universal_vars[var].src_info
     }
 
-    pub fn oblige_re_and_re(
-        &mut self,
-        reason: ObligationReason,
-        lhs: Re,
-        rhs: Re,
-        mode: RelationMode,
-    ) {
-        self.push_obligation(reason, ObligationKind::ReAndRe(lhs, rhs, mode));
+    pub fn oblige_re_and_re(&mut self, origin: CheckOrigin, lhs: Re, rhs: Re, mode: RelationMode) {
+        self.push_obligation(ClauseObligation::ReAndRe(origin, lhs, rhs, mode));
     }
 
-    pub fn oblige_ty_and_ty(
-        &mut self,
-        reason: ObligationReason,
-        lhs: Ty,
-        rhs: Ty,
-        mode: RelationMode,
-    ) {
-        self.push_obligation(reason, ObligationKind::TyAndTy(lhs, rhs, mode));
+    pub fn oblige_ty_and_ty(&mut self, origin: CheckOrigin, lhs: Ty, rhs: Ty, mode: RelationMode) {
+        self.push_obligation(ClauseObligation::TyAndTy(origin, lhs, rhs, mode));
     }
 
-    pub fn oblige_re_and_clauses(
-        &mut self,
-        reason: ObligationReason,
-        lhs: Re,
-        rhs: TraitClauseList,
-    ) {
+    pub fn oblige_re_and_clauses(&mut self, origin: &CheckOrigin, lhs: Re, rhs: TraitClauseList) {
         let s = self.session();
 
         for &clause in rhs.r(s) {
             match clause {
                 TraitClause::Outlives(rhs) => {
-                    self.oblige_re_and_re(reason, lhs, rhs, RelationMode::LhsOntoRhs)
+                    self.oblige_re_and_re(origin.clone(), lhs, rhs, RelationMode::LhsOntoRhs)
                 }
                 TraitClause::Trait(_) => {
                     unreachable!()
@@ -427,6 +457,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn import_binder_list_as_infer(
         &mut self,
+        origin: &CheckOrigin,
         self_ty: Ty,
         binders: &[Obj<GenericBinder>],
     ) -> Vec<GenericSubst> {
@@ -434,10 +465,13 @@ impl<'tcx> ClauseCx<'tcx> {
         let substs = self.create_blank_infer_vars_from_binder_list(binders);
 
         // Register clause obligations.
-        self.oblige_imported_infer_binder_meets_clauses(ClauseImportEnvRef {
-            self_ty,
-            sig_generic_substs: &substs,
-        });
+        self.oblige_imported_infer_binder_meets_clauses(
+            origin,
+            ClauseImportEnvRef {
+                self_ty,
+                sig_generic_substs: &substs,
+            },
+        );
 
         substs
     }
@@ -474,7 +508,11 @@ impl<'tcx> ClauseCx<'tcx> {
         GenericSubst { binder, substs }
     }
 
-    pub fn oblige_imported_infer_binder_meets_clauses(&mut self, env: ClauseImportEnvRef<'_>) {
+    pub fn oblige_imported_infer_binder_meets_clauses(
+        &mut self,
+        origin: &CheckOrigin,
+        env: ClauseImportEnvRef<'_>,
+    ) {
         let s = self.session();
 
         for &subst in env.sig_generic_substs {
@@ -482,7 +520,12 @@ impl<'tcx> ClauseCx<'tcx> {
                 env,
                 &subst.binder.r(s).defs,
                 subst.substs.r(s),
-                |_this, _idx, clause| ObligationReason::GenericRequirements { clause },
+                |_this, _idx, clause| {
+                    CheckOrigin::new(
+                        Some(origin.clone()),
+                        CheckOriginKind::GenericRequirements { clause },
+                    )
+                },
             );
         }
     }
@@ -492,7 +535,7 @@ impl<'tcx> ClauseCx<'tcx> {
         env: ClauseImportEnvRef<'_>,
         defs: &[AnyGeneric],
         args: &[TyOrRe],
-        mut gen_reason: impl FnMut(&mut Self, usize, Span) -> ObligationReason,
+        mut gen_reason: impl FnMut(&mut Self, usize, Span) -> CheckOrigin,
     ) {
         let s = self.session();
         let tcx = self.tcx();
@@ -708,6 +751,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
             .defs
             .iter()
             .map(|def| HrtbDebruijnDef {
+                spawned_from: def.span(s),
                 kind: def.kind(),
                 clauses: self.fold_spanned(def.clauses(s)),
             })
@@ -770,7 +814,12 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
                     .visit_spanned(Spanned::new_maybe_saturated(spec, assoc_span, tcx));
 
                 self.ccx.oblige_ty_and_trait_instantiated(
-                    ObligationReason::Structural,
+                    CheckOrigin::new(
+                        None,
+                        CheckOriginKind::InstantiatedProjection {
+                            span: projection.own_span(),
+                        },
+                    ),
                     target.value,
                     spec,
                 );
@@ -891,50 +940,50 @@ impl<'tcx> ClauseCx<'tcx> {
 // === Ty & Clause Relations === //
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn oblige_ty_and_clauses(
-        &mut self,
-        reason: ObligationReason,
-        lhs: Ty,
-        rhs: TraitClauseList,
-    ) {
+    pub fn oblige_ty_and_clauses(&mut self, origin: &CheckOrigin, lhs: Ty, rhs: TraitClauseList) {
         let s = self.session();
 
         for &clause in rhs.r(s) {
-            self.oblige_ty_and_clause(reason, lhs, clause);
+            self.oblige_ty_and_clause(origin.clone(), lhs, clause);
         }
     }
 
-    pub fn oblige_ty_and_clause(&mut self, reason: ObligationReason, lhs: Ty, rhs: TraitClause) {
+    pub fn oblige_ty_and_clause(&mut self, origin: CheckOrigin, lhs: Ty, rhs: TraitClause) {
         match rhs {
             TraitClause::Outlives(rhs) => {
-                self.oblige_ty_and_re(reason, lhs, rhs);
+                self.oblige_ty_and_re(origin, lhs, rhs);
             }
             TraitClause::Trait(rhs) => {
-                self.oblige_ty_and_trait(reason, lhs, rhs);
+                self.oblige_ty_and_trait(origin, lhs, rhs);
             }
         }
     }
 
     pub fn oblige_ty_and_trait(
         &mut self,
-        reason: ObligationReason,
+        origin: CheckOrigin,
         lhs: Ty,
         rhs: HrtbBinder<TraitSpec>,
     ) {
         let rhs = self.instantiate_hrtb_universal(rhs);
-        self.oblige_ty_and_trait_instantiated(reason, lhs, rhs)
+        self.oblige_ty_and_trait_instantiated(origin, lhs, rhs)
     }
 
     pub fn oblige_ty_and_trait_instantiated(
         &mut self,
-        reason: ObligationReason,
+        origin: CheckOrigin,
         lhs: Ty,
         rhs: TraitSpec,
     ) {
-        self.push_obligation(reason, ObligationKind::TyAndTrait(lhs, rhs));
+        self.push_obligation(ClauseObligation::TyAndTrait(origin, lhs, rhs));
     }
 
-    fn run_oblige_ty_and_trait(&mut self, lhs: Ty, rhs: TraitSpec) -> ObligationResult {
+    fn run_oblige_ty_and_trait(
+        &mut self,
+        origin: &CheckOrigin,
+        lhs: Ty,
+        rhs: TraitSpec,
+    ) -> ObligationResult {
         let tcx = self.tcx();
         let s = self.session();
 
@@ -946,7 +995,7 @@ impl<'tcx> ClauseCx<'tcx> {
             TyKind::UniversalVar(universal) => {
                 match self
                     .clone()
-                    .try_select_inherent_impl(self.elaborate_ty_universal_clauses(universal), rhs)
+                    .try_select_inherent_impl(origin, self.elaborate_ty_universal_clauses(universal), rhs)
                 {
                     Ok(res) => {
                         return res.into_obligation_res(self);
@@ -996,7 +1045,10 @@ impl<'tcx> ClauseCx<'tcx> {
         );
 
         for candidate in candidates {
-            let Ok(confirmation) = self.clone().try_select_block_impl(lhs, candidate, rhs) else {
+            let Ok(confirmation) = self
+                .clone()
+                .try_select_block_impl(origin, lhs, candidate, rhs)
+            else {
                 continue;
             };
 
@@ -1008,15 +1060,14 @@ impl<'tcx> ClauseCx<'tcx> {
         }
 
         let Some(confirmation) = prev_confirmation else {
-            return ObligationResult::Failure(Diag::anon_err(format_args!(
-                "failed to prove {:?} implements {:?}",
-                self.ucx()
-                    .substitutor(UnboundVarHandlingMode::NormalizeToRoot)
-                    .fold(lhs),
-                self.ucx()
-                    .substitutor(UnboundVarHandlingMode::NormalizeToRoot)
-                    .fold(rhs),
-            )));
+            return ObligationResult::Failure(
+                NoTraitImplError {
+                    origin: origin.clone(),
+                    target: lhs,
+                    spec: rhs,
+                }
+                .emit(self),
+            );
         };
 
         confirmation.into_obligation_res(self)
@@ -1024,6 +1075,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     fn try_select_inherent_impl(
         mut self,
+        origin: &CheckOrigin,
         lhs: UniversalElaboration,
         rhs: TraitSpec,
     ) -> SelectionResult<Self> {
@@ -1050,7 +1102,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // Instantiate the binder with inference variables so that we may select the correct
         // implementation of it.
-        let lhs = self.instantiate_hrtb_infer(lhs);
+        let lhs = self.instantiate_hrtb_infer(origin, lhs);
 
         // See whether we can select an inherent `impl`.
         let mut param_iter = lhs.params.r(s).iter().zip(rhs.params.r(s));
@@ -1066,17 +1118,12 @@ impl<'tcx> ClauseCx<'tcx> {
                 TraitParam::Equals(rhs) => match (lhs, rhs) {
                     (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
                         // This can be an obligation because selection shouldn't depend on regions.
-                        self.oblige_re_and_re(
-                            ObligationReason::Structural,
-                            lhs,
-                            rhs,
-                            RelationMode::Equate,
-                        );
+                        self.oblige_re_and_re(origin.clone(), lhs, rhs, RelationMode::Equate);
                     }
                     (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
                         if let Err(_err) =
                             self.ucx_mut()
-                                .unify_ty_and_ty(lhs, rhs, RelationMode::Equate)
+                                .unify_ty_and_ty(origin, lhs, rhs, RelationMode::Equate)
                         {
                             return Err(SelectionRejected);
                         }
@@ -1098,29 +1145,19 @@ impl<'tcx> ClauseCx<'tcx> {
             match rhs_param {
                 TraitParam::Equals(rhs) => match (lhs, rhs) {
                     (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                        self.oblige_re_and_re(
-                            ObligationReason::Structural,
-                            lhs,
-                            rhs,
-                            RelationMode::Equate,
-                        );
+                        self.oblige_re_and_re(origin.clone(), lhs, rhs, RelationMode::Equate);
                     }
                     (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
-                        self.oblige_ty_and_ty(
-                            ObligationReason::Structural,
-                            lhs,
-                            rhs,
-                            RelationMode::Equate,
-                        );
+                        self.oblige_ty_and_ty(origin.clone(), lhs, rhs, RelationMode::Equate);
                     }
                     _ => unreachable!(),
                 },
                 TraitParam::Unspecified(rhs) => match lhs {
                     TyOrRe::Re(lhs) => {
-                        self.oblige_re_and_clauses(ObligationReason::Structural, lhs, rhs);
+                        self.oblige_re_and_clauses(origin, lhs, rhs);
                     }
                     TyOrRe::Ty(lhs) => {
-                        self.oblige_ty_and_clauses(ObligationReason::Structural, lhs, rhs);
+                        self.oblige_ty_and_clauses(origin, lhs, rhs);
                     }
                 },
             }
@@ -1131,6 +1168,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     fn try_select_block_impl(
         mut self,
+        origin: &CheckOrigin,
         lhs: Ty,
         rhs: Obj<ImplItem>,
         spec: TraitSpec,
@@ -1139,7 +1177,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // Obtain inference variables for all generics in the `impl` and tentatively create
         // obligations for them.
-        let trait_substs = self.import_binder_list_as_infer(lhs, &[rhs.r(s).generics]);
+        let trait_substs = self.import_binder_list_as_infer(origin, lhs, &[rhs.r(s).generics]);
 
         // Import the target type and trait. WF obligations are not needed on these types because
         // the `impl` itself has been WF-checked for all types compatible with the generic
@@ -1155,7 +1193,7 @@ impl<'tcx> ClauseCx<'tcx> {
         // Does the `lhs` type match the `rhs`'s target type?
         if self
             .ucx_mut()
-            .unify_ty_and_ty(lhs, target_ty, RelationMode::Equate)
+            .unify_ty_and_ty(origin, lhs, target_ty, RelationMode::Equate)
             .is_err()
         {
             return Err(SelectionRejected);
@@ -1174,13 +1212,17 @@ impl<'tcx> ClauseCx<'tcx> {
             match required_param {
                 TraitParam::Equals(required) => match (instance, required) {
                     (TyOrRe::Re(instance), TyOrRe::Re(required)) => {
-                        self.ucx_mut()
-                            .unify_re_and_re(instance, required, RelationMode::Equate);
+                        self.ucx_mut().unify_re_and_re(
+                            origin,
+                            instance,
+                            required,
+                            RelationMode::Equate,
+                        );
                     }
                     (TyOrRe::Ty(instance), TyOrRe::Ty(required)) => {
                         if self
                             .ucx_mut()
-                            .unify_ty_and_ty(instance, required, RelationMode::Equate)
+                            .unify_ty_and_ty(origin, instance, required, RelationMode::Equate)
                             .is_err()
                         {
                             return Err(SelectionRejected);
@@ -1212,18 +1254,14 @@ impl<'tcx> ClauseCx<'tcx> {
                     };
 
                     self.oblige_ty_and_ty(
-                        ObligationReason::Structural,
+                        origin.clone(),
                         instance_ty,
                         required_ty,
                         RelationMode::Equate,
                     );
                 }
                 TraitParam::Unspecified(additional_clauses) => {
-                    self.oblige_ty_and_clauses(
-                        ObligationReason::Structural,
-                        instance_ty,
-                        additional_clauses,
-                    );
+                    self.oblige_ty_and_clauses(origin, instance_ty, additional_clauses);
                 }
             }
         }
@@ -1300,7 +1338,11 @@ impl<'tcx> ClauseCx<'tcx> {
         })
     }
 
-    pub fn instantiate_hrtb_infer(&mut self, binder: HrtbBinder<TraitSpec>) -> TraitSpec {
+    pub fn instantiate_hrtb_infer(
+        &mut self,
+        origin: &CheckOrigin,
+        binder: HrtbBinder<TraitSpec>,
+    ) -> TraitSpec {
         let tcx = self.tcx();
         let s = self.session();
 
@@ -1332,12 +1374,24 @@ impl<'tcx> ClauseCx<'tcx> {
                     TyOrRe::Re(var) => {
                         let clauses = HrtbSubstitutionFolder::new(this, vars, s).fold(def.clauses);
 
-                        this.oblige_re_and_clauses(ObligationReason::Structural, var, clauses);
+                        this.oblige_re_and_clauses(
+                            &origin.clone().child(CheckOriginKind::HrtbSelection {
+                                def: def.spawned_from,
+                            }),
+                            var,
+                            clauses,
+                        );
                     }
                     TyOrRe::Ty(var) => {
                         let clauses = HrtbSubstitutionFolder::new(this, vars, s).fold(def.clauses);
 
-                        this.oblige_ty_and_clauses(ObligationReason::Structural, var, clauses);
+                        this.oblige_ty_and_clauses(
+                            &origin.clone().child(CheckOriginKind::HrtbSelection {
+                                def: def.spawned_from,
+                            }),
+                            var,
+                            clauses,
+                        );
                     }
                 }
             }
@@ -1428,11 +1482,11 @@ impl<'tcx> TyFolder<'tcx> for HrtbSubstitutionFolder<'_, 'tcx> {
 // === Ty & Re Relations === //
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn oblige_ty_and_re(&mut self, reason: ObligationReason, lhs: Ty, rhs: Re) {
-        self.push_obligation(reason, ObligationKind::TyAndRe(lhs, rhs));
+    pub fn oblige_ty_and_re(&mut self, origin: CheckOrigin, lhs: Ty, rhs: Re) {
+        self.push_obligation(ClauseObligation::TyAndRe(origin, lhs, rhs));
     }
 
-    fn run_oblige_ty_and_re(&mut self, lhs: Ty, rhs: Re) -> ObligationResult {
+    fn run_oblige_ty_and_re(&mut self, origin: &CheckOrigin, lhs: Ty, rhs: Re) -> ObligationResult {
         let s = self.session();
 
         match *lhs.r(s) {
@@ -1450,18 +1504,22 @@ impl<'tcx> ClauseCx<'tcx> {
                 // No need to unify the pointee since WF checks already ensure that it outlives
                 // `lhs`.
                 self.ucx_mut()
-                    .unify_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs);
+                    .unify_re_and_re(origin, lhs, rhs, RelationMode::LhsOntoRhs);
             }
             TyKind::Adt(lhs) => {
                 // ADTs are bounded by which regions they mention.
                 for &lhs in lhs.params.r(s) {
                     match lhs {
                         TyOrRe::Re(lhs) => {
-                            self.ucx_mut()
-                                .unify_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs);
+                            self.ucx_mut().unify_re_and_re(
+                                origin,
+                                lhs,
+                                rhs,
+                                RelationMode::LhsOntoRhs,
+                            );
                         }
                         TyOrRe::Ty(lhs) => {
-                            self.oblige_ty_and_re(ObligationReason::Structural, lhs, rhs);
+                            self.oblige_ty_and_re(origin.clone(), lhs, rhs);
                         }
                     }
                 }
@@ -1473,8 +1531,12 @@ impl<'tcx> ClauseCx<'tcx> {
                             // There is guaranteed to be exactly one outlives constraint for a trait
                             // object so relating these constraints is sufficient to ensure that the
                             // object outlives the `rhs`.
-                            self.ucx_mut()
-                                .unify_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs);
+                            self.ucx_mut().unify_re_and_re(
+                                origin,
+                                lhs,
+                                rhs,
+                                RelationMode::LhsOntoRhs,
+                            );
                         }
                         TraitClause::Trait(_) => {
                             // (if the outlives constraint says the trait is okay, it's okay)
@@ -1484,22 +1546,17 @@ impl<'tcx> ClauseCx<'tcx> {
             }
             TyKind::Tuple(lhs) => {
                 for &lhs in lhs.r(s) {
-                    self.oblige_ty_and_re(ObligationReason::Structural, lhs, rhs);
+                    self.oblige_ty_and_re(origin.clone(), lhs, rhs);
                 }
             }
             TyKind::UniversalVar(var) => {
                 let lub_re = self.elaborate_ty_universal_clauses(var).lub_re;
 
-                self.oblige_re_and_re(
-                    ObligationReason::Structural,
-                    lub_re,
-                    rhs,
-                    RelationMode::LhsOntoRhs,
-                );
+                self.oblige_re_and_re(origin.clone(), lub_re, rhs, RelationMode::LhsOntoRhs);
             }
             TyKind::InferVar(inf_lhs) => {
                 if let Ok(inf_lhs) = self.lookup_ty_infer_var(inf_lhs) {
-                    self.oblige_ty_and_re(ObligationReason::Structural, inf_lhs, rhs);
+                    self.oblige_ty_and_re(origin.clone(), inf_lhs, rhs);
                 } else {
                     return ObligationResult::NotReady;
                 }
@@ -1520,18 +1577,15 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    pub fn oblige_ty_wf(&mut self, reason: ObligationReason, ty: Ty) {
-        self.push_obligation(reason, ObligationKind::TyWf(ty));
-    }
+    pub fn run_oblige_ty_wf(&mut self, span: Span, var: InferTyVar) -> ObligationResult {
+        let tcx = self.tcx();
 
-    pub fn run_oblige_ty_wf(&mut self, ty: Ty) -> ObligationResult {
-        let ty = self.peel_ty_infer_var(ty);
-
-        if matches!(ty.r(self.session()), TyKind::InferVar(_)) {
+        let Ok(ty) = self.lookup_ty_infer_var(var) else {
             return ObligationResult::NotReady;
-        }
+        };
 
-        self.wf_visitor().visit(ty);
+        let ty = SpannedTy::new_saturated(ty, span, tcx);
+        self.wf_visitor().visit_spanned(ty);
 
         ObligationResult::Success
     }
@@ -1582,8 +1636,16 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
                 self.clause_applies_to = old_clause_applies_to;
             }
             SpannedTyView::Reference(re, _muta, pointee) => {
-                self.ccx
-                    .oblige_ty_and_re(ObligationReason::Structural, pointee.value, re.value);
+                self.ccx.oblige_ty_and_re(
+                    CheckOrigin::new(
+                        None,
+                        CheckOriginKind::WfForReference {
+                            pointee: pointee.own_span(),
+                        },
+                    ),
+                    pointee.value,
+                    re.value,
+                );
 
                 self.walk_spanned(ty);
             }
@@ -1598,9 +1660,9 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             | SpannedTyView::Error(_) => {
                 self.walk_spanned(ty);
             }
-            SpannedTyView::InferVar(_) => {
+            SpannedTyView::InferVar(var) => {
                 self.ccx
-                    .oblige_ty_wf(ObligationReason::WfDeferred(ty.own_span()), ty.value);
+                    .push_obligation(ClauseObligation::InferTyWf(ty.own_span(), var));
             }
             SpannedTyView::SigThis
             | SpannedTyView::SigInfer
@@ -1716,9 +1778,14 @@ impl ClauseTyWfVisitor<'_, '_> {
             ),
             defs,
             validated_params,
-            |_, param_idx, clause_span| ObligationReason::WfForGenericParam {
-                use_span: all_params.nth(param_idx, tcx).own_span(),
-                clause_span,
+            |_, param_idx, clause_span| {
+                CheckOrigin::new(
+                    None,
+                    CheckOriginKind::WfForGenericParam {
+                        use_span: all_params.nth(param_idx, tcx).own_span(),
+                        clause_span,
+                    },
+                )
             },
         );
     }

@@ -571,7 +571,11 @@ impl TyVisitable for HrtbDebruijnDef {
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        let SpannedHrtbDebruijnDefView { kind: _, clauses } = me.view(visitor.tcx());
+        let SpannedHrtbDebruijnDefView {
+            spawned_from: _,
+            kind: _,
+            clauses,
+        } = me.view(visitor.tcx());
 
         visitor.visit_spanned_fallible(clauses)?;
 

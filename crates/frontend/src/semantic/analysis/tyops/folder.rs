@@ -641,9 +641,14 @@ impl TyFoldable for HrtbDebruijnDef {
     where
         F: ?Sized + TyFolder<'tcx>,
     {
-        let SpannedHrtbDebruijnDefView { kind, clauses } = me.view(folder.tcx());
+        let SpannedHrtbDebruijnDefView {
+            spawned_from,
+            kind,
+            clauses,
+        } = me.view(folder.tcx());
 
         Ok(HrtbDebruijnDef {
+            spawned_from,
             kind,
             clauses: folder.fold_spanned_fallible(clauses)?,
         })

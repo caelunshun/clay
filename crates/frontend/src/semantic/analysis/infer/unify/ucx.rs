@@ -1,8 +1,9 @@
 use crate::{
-    base::{ErrorGuaranteed, HardDiag, Session, arena::HasInterner},
+    base::{ErrorGuaranteed, Session, arena::HasInterner},
     semantic::{
         analysis::{
-            TyCtxt, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyVisitor, TyVisitorExt,
+            CheckOrigin, InferTyOccursError, TyAndTyUnifyCulprit, TyAndTyUnifyError, TyCtxt,
+            TyFolder, TyFolderExt, TyFolderInfallibleExt, TyVisitor, TyVisitorExt,
             infer::unify::{regions::ReUnifyTracker, types::TyUnifyTracker},
         },
         syntax::{
@@ -15,39 +16,6 @@ use crate::{
 };
 use index_vec::define_index_type;
 use std::{convert::Infallible, ops::ControlFlow};
-
-// === Errors === //
-
-#[derive(Debug, Clone)]
-pub struct TyAndTyUnifyError {
-    pub origin_lhs: Ty,
-    pub origin_rhs: Ty,
-    pub culprits: Vec<TyAndTyUnifyCulprit>,
-}
-
-impl TyAndTyUnifyError {
-    // TODO
-    pub fn to_diag(self) -> HardDiag {
-        HardDiag::anon_err(format_args!(
-            "could not unify types {:?} and {:?}",
-            self.origin_lhs, self.origin_rhs,
-        ))
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum TyAndTyUnifyCulprit {
-    Types(Ty, Ty),
-    ClauseLists(TraitClauseList, TraitClauseList),
-    Params(TraitParam, TraitParam),
-    RecursiveType(InferTyOccursError),
-}
-
-#[derive(Debug, Clone)]
-pub struct InferTyOccursError {
-    pub var: InferTyVar,
-    pub occurs_in: Ty,
-}
 
 // === UnifyCx === //
 
@@ -213,7 +181,7 @@ impl<'tcx> UnifyCx<'tcx> {
         }
     }
 
-    pub fn unify_re_and_re(&mut self, lhs: Re, rhs: Re, mode: RelationMode) {
+    pub fn unify_re_and_re(&mut self, origin: &CheckOrigin, lhs: Re, rhs: Re, mode: RelationMode) {
         let Some(regions) = &mut self.regions else {
             debug_assert!(matches!(lhs, Re::Erased));
             debug_assert!(matches!(rhs, Re::Erased));
@@ -222,7 +190,7 @@ impl<'tcx> UnifyCx<'tcx> {
         };
 
         for (lhs, rhs) in mode.enumerate(lhs, rhs) {
-            regions.constrain(lhs, rhs);
+            regions.constrain(origin.clone(), lhs, rhs);
         }
     }
 
@@ -231,6 +199,7 @@ impl<'tcx> UnifyCx<'tcx> {
     /// `&'0 u32` and `&'1 u32` will result in the region relation `'0: '1`.
     pub fn unify_ty_and_ty(
         &mut self,
+        origin: &CheckOrigin,
         lhs: Ty,
         rhs: Ty,
         mode: RelationMode,
@@ -238,10 +207,11 @@ impl<'tcx> UnifyCx<'tcx> {
         let mut fork = self.clone();
         let mut culprits = Vec::new();
 
-        fork.unify_ty_and_ty_inner(lhs, rhs, &mut culprits, mode);
+        fork.unify_ty_and_ty_inner(origin, lhs, rhs, &mut culprits, mode);
 
         if !culprits.is_empty() {
             return Err(Box::new(TyAndTyUnifyError {
+                origin: origin.clone(),
                 origin_lhs: lhs,
                 origin_rhs: rhs,
                 culprits,
@@ -255,6 +225,7 @@ impl<'tcx> UnifyCx<'tcx> {
 
     fn unify_ty_and_ty_inner(
         &mut self,
+        origin: &CheckOrigin,
         lhs: Ty,
         rhs: Ty,
         culprits: &mut Vec<TyAndTyUnifyCulprit>,
@@ -282,7 +253,7 @@ impl<'tcx> UnifyCx<'tcx> {
                 TyKind::Reference(lhs_re, lhs_muta, lhs_pointee),
                 TyKind::Reference(rhs_re, rhs_muta, rhs_pointee),
             ) if lhs_muta == rhs_muta => {
-                self.unify_re_and_re(lhs_re, rhs_re, mode);
+                self.unify_re_and_re(origin, lhs_re, rhs_re, mode);
 
                 let variance = match lhs_muta {
                     Mutability::Mut => ReVariance::Invariant,
@@ -290,6 +261,7 @@ impl<'tcx> UnifyCx<'tcx> {
                 };
 
                 self.unify_ty_and_ty_inner(
+                    origin,
                     lhs_pointee,
                     rhs_pointee,
                     culprits,
@@ -302,17 +274,17 @@ impl<'tcx> UnifyCx<'tcx> {
                 for (&lhs, &rhs) in lhs.params.r(s).iter().zip(rhs.params.r(s)) {
                     match (lhs, rhs) {
                         (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                            self.unify_re_and_re(lhs, rhs, mode);
+                            self.unify_re_and_re(origin, lhs, rhs, mode);
                         }
                         (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
-                            self.unify_ty_and_ty_inner(lhs, rhs, culprits, mode);
+                            self.unify_ty_and_ty_inner(origin, lhs, rhs, culprits, mode);
                         }
                         _ => unreachable!(),
                     }
                 }
             }
             (TyKind::Trait(lhs), TyKind::Trait(rhs)) => {
-                self.unify_dyn_trait_clauses_inner(lhs, rhs, culprits, mode);
+                self.unify_dyn_trait_clauses_inner(origin, lhs, rhs, culprits, mode);
             }
             (TyKind::FnDef(lhs, Some(lhs_generics)), TyKind::FnDef(rhs, Some(rhs_generics)))
                 if lhs == rhs =>
@@ -323,10 +295,10 @@ impl<'tcx> UnifyCx<'tcx> {
 
                     match (lhs, rhs) {
                         (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                            self.unify_re_and_re(lhs, rhs, mode);
+                            self.unify_re_and_re(origin, lhs, rhs, mode);
                         }
                         (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
-                            self.unify_ty_and_ty_inner(lhs, rhs, culprits, mode);
+                            self.unify_ty_and_ty_inner(origin, lhs, rhs, culprits, mode);
                         }
                         _ => unreachable!(),
                     }
@@ -337,13 +309,13 @@ impl<'tcx> UnifyCx<'tcx> {
             }
             (TyKind::Tuple(lhs), TyKind::Tuple(rhs)) if lhs.r(s).len() == rhs.r(s).len() => {
                 for (&lhs, &rhs) in lhs.r(s).iter().zip(rhs.r(s)) {
-                    self.unify_ty_and_ty_inner(lhs, rhs, culprits, mode);
+                    self.unify_ty_and_ty_inner(origin, lhs, rhs, culprits, mode);
                 }
             }
             (TyKind::InferVar(lhs_var), TyKind::InferVar(rhs_var)) => {
                 match (self.types.lookup(lhs_var), self.types.lookup(rhs_var)) {
                     (Ok(lhs_ty), Ok(rhs_ty)) => {
-                        self.unify_ty_and_ty_inner(lhs_ty, rhs_ty, culprits, mode);
+                        self.unify_ty_and_ty_inner(origin, lhs_ty, rhs_ty, culprits, mode);
                     }
                     (Ok(lhs_ty), Err(rhs_floating)) => {
                         if let Err(err) = self.unify_var_and_non_var_ty(rhs_floating.root, lhs_ty) {
@@ -364,7 +336,7 @@ impl<'tcx> UnifyCx<'tcx> {
             }
             (TyKind::InferVar(lhs_var), _) => match self.types.lookup(lhs_var) {
                 Ok(known_lhs) => {
-                    self.unify_ty_and_ty_inner(known_lhs, rhs, culprits, mode);
+                    self.unify_ty_and_ty_inner(origin, known_lhs, rhs, culprits, mode);
                 }
                 Err(lhs_var) => {
                     if let Err(err) = self.unify_var_and_non_var_ty(lhs_var.root, rhs) {
@@ -374,7 +346,7 @@ impl<'tcx> UnifyCx<'tcx> {
             },
             (_, TyKind::InferVar(rhs_var)) => match self.types.lookup(rhs_var) {
                 Ok(known_rhs) => {
-                    self.unify_ty_and_ty_inner(lhs, known_rhs, culprits, mode);
+                    self.unify_ty_and_ty_inner(origin, lhs, known_rhs, culprits, mode);
                 }
                 Err(rhs_var) => {
                     if let Err(err) = self.unify_var_and_non_var_ty(rhs_var.root, lhs) {
@@ -460,6 +432,7 @@ impl<'tcx> UnifyCx<'tcx> {
 
     fn unify_dyn_trait_clauses_inner(
         &mut self,
+        origin: &CheckOrigin,
         lhs_root: TraitClauseList,
         rhs_root: TraitClauseList,
         culprits: &mut Vec<TyAndTyUnifyCulprit>,
@@ -480,7 +453,7 @@ impl<'tcx> UnifyCx<'tcx> {
                     // logic will produce constraints for both. This isn't a problem because
                     // we only ever lower trait objects with *exactly one* outlives
                     // constraint.
-                    self.unify_re_and_re(lhs, rhs, mode);
+                    self.unify_re_and_re(origin, lhs, rhs, mode);
                 }
                 (TraitClause::Trait(lhs), TraitClause::Trait(rhs))
                     if lhs.inner.def == rhs.inner.def =>
@@ -506,6 +479,7 @@ impl<'tcx> UnifyCx<'tcx> {
                         }
 
                         self.unify_dyn_trait_clauses_inner(
+                            origin,
                             lhs.clauses,
                             rhs.clauses,
                             culprits,
@@ -520,10 +494,16 @@ impl<'tcx> UnifyCx<'tcx> {
                             (TraitParam::Equals(lhs), TraitParam::Equals(rhs)) => {
                                 match (lhs, rhs) {
                                     (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                                        self.unify_re_and_re(lhs, rhs, RelationMode::Equate);
+                                        self.unify_re_and_re(
+                                            origin,
+                                            lhs,
+                                            rhs,
+                                            RelationMode::Equate,
+                                        );
                                     }
                                     (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
                                         self.unify_ty_and_ty_inner(
+                                            origin,
                                             lhs,
                                             rhs,
                                             culprits,
@@ -535,6 +515,7 @@ impl<'tcx> UnifyCx<'tcx> {
                             }
                             (TraitParam::Unspecified(lhs), TraitParam::Unspecified(rhs)) => {
                                 self.unify_dyn_trait_clauses_inner(
+                                    origin,
                                     lhs,
                                     rhs,
                                     culprits,

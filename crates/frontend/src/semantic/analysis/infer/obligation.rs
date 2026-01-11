@@ -1,93 +1,13 @@
 use crate::{
-    base::{Diag, ErrorGuaranteed, HardDiag, Session, syntax::Span},
-    semantic::{
-        analysis::{ObservedTyInferVar, TyCtxt, UnifyCx, UnifyCxMode},
-        syntax::{Re, RelationMode, TraitSpec, Ty},
-    },
+    base::{ErrorGuaranteed, Session},
+    semantic::analysis::{ObservedTyInferVar, TyCtxt, UnifyCx, UnifyCxMode},
     utils::hash::{FxHashMap, FxHashSet},
 };
+use derive_where::derive_where;
 use index_vec::{IndexVec, define_index_type};
 use std::{cell::Cell, collections::VecDeque, fmt, mem, rc::Rc};
 
 // === Definitions === //
-
-pub const MAX_OBLIGATION_DEPTH: u32 = 256;
-
-#[derive(Debug, Copy, Clone)]
-pub enum ObligationKind {
-    // Simple obligations, just here to standardize diagnostics.
-    ReAndRe(Re, Re, RelationMode),
-    TyAndTy(Ty, Ty, RelationMode),
-
-    // Complex obligations, make full use of the `ObligationCx`.
-    TyAndTrait(Ty, TraitSpec),
-    TyAndRe(Ty, Re),
-    TyWf(Ty),
-}
-
-impl ObligationKind {
-    // TODO
-    pub fn proves_what(self, s: &Session) -> String {
-        _ = s;
-        format!("{self:?}")
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum ObligationReason {
-    /// This obligation is required to type-check the function body.
-    FunctionBody {
-        at: Span,
-    },
-
-    /// This obligation is required to satisfy the requirements of a generic parameter for
-    /// well-formedness.
-    WfForGenericParam {
-        use_span: Span,
-        clause_span: Span,
-    },
-
-    /// This obligation is required to satisfy the well-formedness requirements of a reference.
-    WfForReference {
-        pointee: Span,
-    },
-
-    WfSuperTrait {
-        block: Span,
-        clause: Span,
-    },
-
-    // TODO: This is temporary. WF shouldn't have a stack.
-    WfDeferred(Span),
-
-    /// This obligation is required by a generic parameter's clause list.
-    GenericRequirements {
-        clause: Span,
-    },
-
-    /// This obligation follows implicitly from its parent.
-    Structural,
-}
-
-impl ObligationReason {
-    pub fn span(self) -> Option<Span> {
-        match self {
-            ObligationReason::FunctionBody { at: span }
-            | ObligationReason::WfForReference { pointee: span }
-            | ObligationReason::GenericRequirements { clause: span }
-            | ObligationReason::WfSuperTrait {
-                block: _,
-                clause: span,
-            }
-            | ObligationReason::WfDeferred(span) => Some(span),
-            ObligationReason::WfForGenericParam {
-                use_span,
-                clause_span,
-            } => Some(use_span.not_dummy().unwrap_or(clause_span)),
-            ObligationReason::Structural => None,
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub enum ObligationResult {
@@ -95,7 +15,7 @@ pub enum ObligationResult {
     Success,
 
     /// The obligation is guaranteed to fail.
-    Failure(HardDiag),
+    Failure(ErrorGuaranteed),
 
     /// The obligation failed because we're still waiting on one or more of the inference variables
     /// to be specified unambiguously or, in rare cases, because the program is ill-formed in some
@@ -125,28 +45,27 @@ pub enum ObligationResult {
 /// [`push_obligation_no_poll`]: ObligationCx::push_obligation_no_poll
 /// [`poll_obligations`]: ObligationCx::poll_obligations
 #[derive(Clone)]
-pub struct ObligationCx<'tcx> {
+pub struct ObligationCx<'tcx, K> {
     ucx: UnifyCx<'tcx>,
-    root: Rc<ObligationCxRoot>,
-    local_obligation_queue: Rc<Vec<QueuedObligation>>,
+    root: Rc<ObligationCxRoot<K>>,
+    local_obligation_queue: Rc<Vec<QueuedObligation<K>>>,
 }
 
 #[derive(Clone)]
-struct QueuedObligation {
+struct QueuedObligation<K> {
     parent: Option<ObligationIdx>,
-    kind: ObligationKind,
-    reason: ObligationReason,
+    kind: K,
 }
 
-#[derive(Default)]
-struct ObligationCxRoot {
+#[derive_where(Default)]
+struct ObligationCxRoot<K> {
     eval_suppressed: Cell<bool>,
 
     /// The obligation we're currently in the process of executing.
     current_obligation: Option<ObligationIdx>,
 
     /// All obligations ever registered with us.
-    all_obligations: IndexVec<ObligationIdx, ObligationState>,
+    all_obligations: IndexVec<ObligationIdx, ObligationState<K>>,
 
     /// The queue obligations to invoke. These are invoked in FIFO order to ensure that we properly
     /// explore all branches of the proof tree simultaneously.
@@ -164,31 +83,28 @@ define_index_type! {
     struct ObligationIdx = u32;
 }
 
-struct ObligationState {
+struct ObligationState<K> {
     /// The obligation responsible for spawning this new obligation.
     parent: Option<ObligationIdx>,
 
     /// The number of parent obligations leading to the creation of this obligation.
     depth: u32,
 
-    /// The reason for which this obligation was spawned.
-    reason: ObligationReason,
-
     /// The kind of obligation we're trying to prove.
-    kind: ObligationKind,
+    kind: K,
 
     /// The set of variables whose inference could cause us to rerun. Cleared once the obligation is
     /// enqueued to re-run and re-populated if, after the re-run, the obligation is still ambiguous.
     can_wake_by: FxHashSet<ObservedTyInferVar>,
 }
 
-impl<'tcx> fmt::Debug for ObligationCx<'tcx> {
+impl<'tcx, K> fmt::Debug for ObligationCx<'tcx, K> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ObligationCx").finish_non_exhaustive()
     }
 }
 
-impl<'tcx> ObligationCx<'tcx> {
+impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
     pub fn new(tcx: &'tcx TyCtxt, mode: UnifyCxMode) -> Self {
         Self {
             ucx: UnifyCx::new(tcx, mode),
@@ -213,44 +129,11 @@ impl<'tcx> ObligationCx<'tcx> {
         &mut self.ucx
     }
 
-    pub fn push_obligation(&mut self, reason: ObligationReason, kind: ObligationKind) {
+    pub fn push_obligation(&mut self, kind: K) {
         Rc::make_mut(&mut self.local_obligation_queue).push(QueuedObligation {
             parent: self.root.current_obligation,
             kind,
-            reason,
         });
-    }
-
-    fn emit_diag_with_context_inner(
-        root: &ObligationCxRoot,
-        culprit_idx: ObligationIdx,
-        mut diag: HardDiag,
-    ) -> ErrorGuaranteed {
-        let all_obligations = &root.all_obligations;
-
-        // Determine the root obligation.
-        let mut root_idx = culprit_idx;
-
-        loop {
-            let Some(parent) = all_obligations[root_idx].parent else {
-                break;
-            };
-
-            root_idx = parent;
-        }
-
-        // Attach a primary span.
-        diag.push_primary(
-            all_obligations[root_idx]
-                .reason
-                .span()
-                .unwrap_or(Span::DUMMY),
-            "",
-        );
-
-        // TODO: Print out full causality chain
-
-        diag.emit()
     }
 
     pub fn obligation_eval_suppressed(&self) -> bool {
@@ -265,7 +148,7 @@ impl<'tcx> ObligationCx<'tcx> {
         target: &mut T,
         getter: impl Fn(&mut T) -> &mut Self,
         forker: impl Fn(&T) -> T,
-        mut run: impl FnMut(&mut T, ObligationKind) -> ObligationResult,
+        mut run: impl FnMut(&mut T, K) -> ObligationResult,
     ) {
         let this = getter(target);
 
@@ -283,31 +166,16 @@ impl<'tcx> ObligationCx<'tcx> {
 
             // Import queued obligations.
             for obligation in mem::take(Rc::make_mut(&mut this.local_obligation_queue)) {
-                let QueuedObligation {
-                    parent,
-                    kind,
-                    reason,
-                } = obligation;
+                let QueuedObligation { parent, kind } = obligation;
 
                 let depth = parent.map_or(0, |v| root.all_obligations[v].depth + 1);
 
                 let obligation = root.all_obligations.push(ObligationState {
                     parent,
                     depth,
-                    reason,
                     kind,
                     can_wake_by: FxHashSet::default(),
                 });
-
-                if depth > MAX_OBLIGATION_DEPTH {
-                    Self::emit_diag_with_context_inner(
-                        root,
-                        obligation,
-                        Diag::anon_err("maximum obligation depth reached"),
-                    );
-
-                    return;
-                }
 
                 root.run_queue.push_back(obligation);
             }
@@ -340,7 +208,7 @@ impl<'tcx> ObligationCx<'tcx> {
 
             root.current_obligation = Some(curr_idx);
 
-            let kind = root.all_obligations[curr_idx].kind;
+            let kind = root.all_obligations[curr_idx].kind.clone();
 
             // The `root` is set up so exclusive access to it is no longer needed; fork the
             // `target`.
@@ -357,7 +225,7 @@ impl<'tcx> ObligationCx<'tcx> {
             let traced_vars = getter(&mut fork).ucx.finish_tracing();
 
             match res {
-                ObligationResult::Success => {
+                ObligationResult::Success | ObligationResult::Failure(_) => {
                     // Merge the `fork` and the `target` and obtain the root.
                     *target = fork;
                     let this = getter(target);
@@ -367,18 +235,6 @@ impl<'tcx> ObligationCx<'tcx> {
 
                     // Stop the obligation.
                     root.current_obligation = None;
-                }
-                ObligationResult::Failure(diag) => {
-                    // Drop the fork to regain access to the `root`.
-                    drop(fork);
-                    let this = getter(target);
-                    let root = Rc::get_mut(&mut this.root).expect(
-                        "All other `ObligationCx` forks must be dropped after obligation returns",
-                    );
-
-                    // Print diagnostic.
-                    root.current_obligation = None;
-                    Self::emit_diag_with_context_inner(root, curr_idx, diag);
                 }
                 ObligationResult::NotReady => {
                     // Drop the fork to regain access to the `root`.
@@ -419,11 +275,11 @@ pub type SelectionResult<T> = Result<ConfirmationResult<T>, SelectionRejected>;
 #[derive(Debug, Clone)]
 pub struct SelectionRejected;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 #[must_use]
 pub enum ConfirmationResult<T> {
     Success(T),
-    Error(HardDiag),
+    Error(ErrorGuaranteed),
 }
 
 impl<T> ConfirmationResult<T> {
@@ -434,7 +290,7 @@ impl<T> ConfirmationResult<T> {
 
                 ObligationResult::Success
             }
-            ConfirmationResult::Error(diag) => ObligationResult::Failure(diag),
+            ConfirmationResult::Error(err) => ObligationResult::Failure(err),
         }
     }
 }

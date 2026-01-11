@@ -536,6 +536,7 @@ pub type SpannedHrtbDebruijnDef = Spanned<HrtbDebruijnDef>;
 
 #[derive(Debug, Copy, Clone)]
 pub struct SpannedHrtbDebruijnDefView {
+    pub spawned_from: Span,
     pub kind: TyOrReKind,
     pub clauses: SpannedTraitClauseList,
 }
@@ -545,6 +546,7 @@ impl SpannedViewDecode<TyCtxt> for HrtbDebruijnDef {
 
     fn decode(value: &Self, span_info: SpannedInfo, tcx: &TyCtxt) -> Self::View {
         SpannedHrtbDebruijnDefView {
+            spawned_from: value.spawned_from,
             kind: value.kind,
             clauses: Spanned::new_raw(value.clauses, span_info.unwrap(tcx)),
         }
@@ -557,6 +559,7 @@ impl SpannedViewEncode<TyCtxt> for SpannedHrtbDebruijnDefView {
     fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
         Spanned::new_raw(
             HrtbDebruijnDef {
+                spawned_from: self.spawned_from,
                 kind: self.kind,
                 clauses: self.clauses.value,
             },

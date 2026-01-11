@@ -2,7 +2,7 @@ use crate::{
     base::{Session, arena::Obj},
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, CoherenceMap, ObligationReason, TyCtxt,
+            CheckOrigin, CheckOriginKind, ClauseCx, ClauseImportEnvRef, CoherenceMap, TyCtxt,
             TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCxMode,
         },
         syntax::{
@@ -139,10 +139,13 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
                     .fold_preserved(super_clause);
 
                 ccx.oblige_ty_and_clause(
-                    ObligationReason::WfSuperTrait {
-                        block: target.own_span(),
-                        clause: super_clause.own_span(),
-                    },
+                    CheckOrigin::new(
+                        None,
+                        CheckOriginKind::WfSuperTrait {
+                            block: target.own_span(),
+                            clause: super_clause.own_span(),
+                        },
+                    ),
                     env.self_ty,
                     super_clause.value,
                 );
