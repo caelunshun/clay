@@ -262,20 +262,20 @@ impl ReIncrementalOutlives {
         rhs: InferRe,
         mut check_outlive: impl FnMut(UniversalReVar, InferRe) -> Result<(), ErrorGuaranteed>,
     ) {
-        self.direct_outlive_graph.add(rhs, lhs);
+        self.direct_outlive_graph.add(lhs, rhs);
 
         for (var, var_outlives) in self.transitive_universal_outlives.iter_mut_enumerated() {
-            if !(rhs == InferRe::Universal(var) || var_outlives.contains(&rhs)) {
+            if !(lhs == InferRe::Universal(var) || var_outlives.contains(&lhs)) {
                 continue;
             }
 
-            if !var_outlives.insert(lhs) {
+            if !var_outlives.insert(rhs) {
                 continue;
             }
 
             debug_assert!(self.dfs_queue.is_empty());
 
-            self.dfs_queue.push(lhs);
+            self.dfs_queue.push(rhs);
 
             for stack_idx in 0.. {
                 let Some(&top) = self.dfs_queue.get(stack_idx) else {
