@@ -1,7 +1,7 @@
 use crate::{
-    base::{Diag, ErrorGuaranteed, syntax::Span},
+    base::ErrorGuaranteed,
     semantic::{
-        analysis::CheckOrigin,
+        analysis::{CheckOrigin, ClauseCx, ReAndReUnifyError},
         syntax::{InferReVar, Re, RelationDirection, UniversalReVar, UniversalReVarSourceInfo},
     },
     utils::hash::FxHashSet,
@@ -98,7 +98,7 @@ impl ReUnifyTracker {
         }
     }
 
-    pub fn verify(&self) {
+    pub fn verify(&self, ccx: &ClauseCx<'_>) {
         let permissions = ReElaboratedPermissions::new(self);
         let mut outlives = ReIncrementalOutlives::new(self);
 
@@ -108,12 +108,14 @@ impl ReUnifyTracker {
                     return Ok(());
                 }
 
-                // TODO: Format properly
-                Err(Diag::span_err(
-                    Span::DUMMY,
-                    format_args!("constraint {cst:?} requires {var:?} to outlive {must_outlive:?}"),
-                )
-                .emit())
+                Err(ReAndReUnifyError {
+                    origin: cst.origin.clone(),
+                    lhs: cst.lhs.to_re(),
+                    rhs: cst.rhs.to_re(),
+                    requires_var: var,
+                    to_outlive: must_outlive.to_re(),
+                }
+                .emit(ccx))
             })
         }
     }

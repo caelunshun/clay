@@ -2,8 +2,8 @@ use crate::{
     base::{ErrorGuaranteed, Session, arena::HasInterner},
     semantic::{
         analysis::{
-            CheckOrigin, InferTyOccursError, TyAndTyUnifyCulprit, TyAndTyUnifyError, TyCtxt,
-            TyFolder, TyFolderExt, TyFolderInfallibleExt, TyVisitor, TyVisitorExt,
+            CheckOrigin, ClauseCx, InferTyOccursError, TyAndTyUnifyCulprit, TyAndTyUnifyError,
+            TyCtxt, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyVisitor, TyVisitorExt,
             infer::unify::{regions::ReUnifyTracker, types::TyUnifyTracker},
         },
         syntax::{
@@ -80,9 +80,9 @@ impl<'tcx> UnifyCx<'tcx> {
         }
     }
 
-    pub fn verify(&mut self) {
-        if let Some(re) = &mut self.regions {
-            _ = re.verify();
+    pub fn verify(&self, ccx: &ClauseCx<'_>) {
+        if let Some(re) = &self.regions {
+            _ = re.verify(ccx);
         }
     }
 

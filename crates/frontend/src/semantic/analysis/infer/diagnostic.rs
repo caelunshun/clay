@@ -2,7 +2,7 @@ use crate::{
     base::{Diag, ErrorGuaranteed, syntax::Span},
     semantic::{
         analysis::ClauseCx,
-        syntax::{InferTyVar, TraitClauseList, TraitParam, TraitSpec, Ty},
+        syntax::{InferTyVar, Re, TraitClauseList, TraitParam, TraitSpec, Ty, UniversalReVar},
     },
 };
 use std::{fmt, iter, rc::Rc};
@@ -29,6 +29,22 @@ pub struct NoTraitImplError {
 }
 
 impl NoTraitImplError {
+    pub fn emit(&self, ccx: &ClauseCx<'_>) -> ErrorGuaranteed {
+        // TODO
+        Diag::anon_err(format!("{self:#?}")).emit()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ReAndReUnifyError {
+    pub origin: CheckOrigin,
+    pub lhs: Re,
+    pub rhs: Re,
+    pub requires_var: UniversalReVar,
+    pub to_outlive: Re,
+}
+
+impl ReAndReUnifyError {
     pub fn emit(&self, ccx: &ClauseCx<'_>) -> ErrorGuaranteed {
         // TODO
         Diag::anon_err(format!("{self:#?}")).emit()

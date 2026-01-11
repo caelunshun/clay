@@ -308,8 +308,8 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    pub fn verify(&mut self) {
-        self.ucx_mut().verify();
+    pub fn verify(&self) {
+        self.ucx().verify(self);
     }
 }
 
