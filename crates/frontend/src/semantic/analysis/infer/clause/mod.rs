@@ -1614,14 +1614,18 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         &mut self,
         binder: SpannedHrtbBinder<T>,
     ) -> ControlFlow<Self::Break> {
+        let s = self.session();
+
         match binder.value.kind {
             HrtbBinderKind::Signature(_) => {
-                // We can ignore the stuff inside the binder because, if it's not well-formed, no
-                // `impl` of it could exist.
+                unreachable!()
             }
-            HrtbBinderKind::Imported(_definitions) => {
-                // It's instantiated so we can verify both the binders and their inner type now.
-                self.walk_spanned(binder);
+            HrtbBinderKind::Imported(definitions) => {
+                // Ill-formed HRTB binders will be checked later once a user tries to instantiate
+                // them.
+                if definitions.r(s).is_empty() {
+                    self.walk_spanned(binder);
+                }
             }
         }
 
