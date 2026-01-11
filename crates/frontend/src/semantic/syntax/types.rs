@@ -678,6 +678,14 @@ pub enum RelationDirection {
 
 impl RelationDirection {
     #[must_use]
+    pub fn to_mode(self) -> RelationMode {
+        match self {
+            RelationDirection::LhsOntoRhs => RelationMode::LhsOntoRhs,
+            RelationDirection::RhsOntoLhs => RelationMode::RhsOntoLhs,
+        }
+    }
+
+    #[must_use]
     pub fn invert(self) -> RelationDirection {
         match self {
             RelationDirection::LhsOntoRhs => RelationDirection::RhsOntoLhs,

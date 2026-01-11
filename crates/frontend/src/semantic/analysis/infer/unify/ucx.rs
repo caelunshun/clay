@@ -33,8 +33,9 @@ pub enum UnifyCxMode {
 /// No operations performed by this context depend on the order in which prior operations have been
 /// performed and, as such, all operations can be performed and checked for correctness immediately.
 /// This property is not true for more complex `Ty: Clause` and `Ty: 're` obligations. To perform
-/// those obligations, you'll need an [`ClauseCx`](super::ClauseCx), which uses the deferred-solving
-/// functionality of a [`ObligationCx`](super::ObligationCx) internally to solve these obligations.
+/// those obligations, you'll need an [`ClauseCx`](super::super::ClauseCx), which uses the
+/// deferred-solving functionality of a [`ObligationCx`](super::super::ObligationCx) internally to
+/// solve these obligations.
 #[derive(Debug, Clone)]
 pub struct UnifyCx<'tcx> {
     tcx: &'tcx TyCtxt,
@@ -82,7 +83,7 @@ impl<'tcx> UnifyCx<'tcx> {
 
     pub fn verify(&self, ccx: &ClauseCx<'_>) {
         if let Some(re) = &self.regions {
-            _ = re.verify(ccx);
+            re.verify(ccx);
         }
     }
 

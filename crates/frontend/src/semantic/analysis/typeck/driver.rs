@@ -138,7 +138,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
                     ))
                     .fold_preserved(super_clause);
 
-                ccx.oblige_ty_and_clause(
+                ccx.oblige_ty_meets_clause(
                     CheckOrigin::new(
                         None,
                         CheckOriginKind::WfSuperTrait {
