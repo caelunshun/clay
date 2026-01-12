@@ -7,8 +7,8 @@ use crate::{
     },
     parse::{
         ast::{
-            AstBarePath, AstNamedSpec, AstTraitClause, AstTraitClauseList, AstTy, AstTyKind,
-            AstTyOrRe,
+            AstBarePath, AstNamedSpec, AstTraitClause, AstTraitClauseList, AstTraitOutlivesClause,
+            AstTy, AstTyKind, AstTyOrRe, OutlivesKind,
         },
         token::Lifetime,
     },
@@ -18,11 +18,11 @@ use crate::{
             modules::{FrozenModuleResolver, PathResolver as _},
         },
         syntax::{
-            AdtItem, Item, ItemKind, Re, SpannedAdtInstanceView, SpannedHrtbBinderKindView,
-            SpannedHrtbBinderView, SpannedRe, SpannedTraitClause, SpannedTraitClauseList,
-            SpannedTraitClauseView, SpannedTraitParamList, SpannedTraitSpec, SpannedTraitSpecView,
-            SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReView, SpannedTyProjectionView,
-            SpannedTyView, TraitItem, TypeGeneric,
+            AdtItem, Item, ItemKind, Re, RelationDirection, SpannedAdtInstanceView,
+            SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedRe, SpannedTraitClause,
+            SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParamList,
+            SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe,
+            SpannedTyOrReView, SpannedTyProjectionView, SpannedTyView, TraitItem, TypeGeneric,
         },
     },
     symbol,
@@ -271,8 +271,15 @@ impl IntraItemLowerCtxt<'_> {
         let tcx = self.tcx;
 
         match ast {
-            AstTraitClause::Outlives(lt) => {
-                Ok(SpannedTraitClauseView::Outlives(self.lower_re(lt)).encode(lt.span, self.tcx))
+            AstTraitClause::Outlives(AstTraitOutlivesClause { span, kind, other }) => {
+                Ok(SpannedTraitClauseView::Outlives(
+                    match kind {
+                        OutlivesKind::Shorter => RelationDirection::RhsOntoLhs,
+                        OutlivesKind::Longer => RelationDirection::LhsOntoRhs,
+                    },
+                    self.lower_ty_or_re(other),
+                )
+                .encode(*span, self.tcx))
             }
             AstTraitClause::Trait(spec) => {
                 let binder =

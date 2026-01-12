@@ -8,13 +8,17 @@ use std::{fmt, iter, slice};
 // === Keywords === //
 
 macro_rules! define_keywords {
-    ($( $name:ident = $text:literal ),* $(,)?) => {
+    ($(
+        struct $ty_name:ident {
+            $( $name:ident = $text:literal ),* $(,)?
+        }
+    )*) => {$(
         #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-        pub enum Keyword {
+        pub enum $ty_name {
             $($name,)*
         }
 
-        impl Keyword {
+        impl $ty_name {
             pub const fn new(v: &str) -> Self {
                 $(if const_str_eq(v, $text) {
                     return Self::$name;
@@ -54,7 +58,7 @@ macro_rules! define_keywords {
                 }
             }
         }
-    };
+    )*};
 }
 
 impl fmt::Debug for Keyword {
@@ -64,42 +68,49 @@ impl fmt::Debug for Keyword {
 }
 
 define_keywords! {
-    As = "as",
-    Break = "break",
-    Const = "const",
-    Continue = "continue",
-    Crate = "crate",
-    Dyn = "dyn",
-    Else = "else",
-    Enum = "enum",
-    False = "false",
-    Fn = "fn",
-    For = "for",
-    Hole = "_",
-    If = "if",
-    Impl = "impl",
-    In = "in",
-    Let = "let",
-    Loop = "loop",
-    Match = "match",
-    Mod = "mod",
-    Move = "move",
-    Mut = "mut",
-    Priv = "priv",
-    Pub = "pub",
-    Ref = "ref",
-    Return = "return",
-    SelfLower = "self",
-    SelfUpper = "Self",
-    Static = "static",
-    Struct = "struct",
-    Super = "super",
-    Trait = "trait",
-    True = "true",
-    Type = "type",
-    Union = "union",
-    Use = "use",
-    While = "while",
+    struct Keyword {
+        As = "as",
+        Break = "break",
+        Const = "const",
+        Continue = "continue",
+        Crate = "crate",
+        Dyn = "dyn",
+        Else = "else",
+        Enum = "enum",
+        False = "false",
+        Fn = "fn",
+        For = "for",
+        Hole = "_",
+        If = "if",
+        Impl = "impl",
+        In = "in",
+        Let = "let",
+        Loop = "loop",
+        Match = "match",
+        Mod = "mod",
+        Move = "move",
+        Mut = "mut",
+        Priv = "priv",
+        Pub = "pub",
+        Ref = "ref",
+        Return = "return",
+        SelfLower = "self",
+        SelfUpper = "Self",
+        Static = "static",
+        Struct = "struct",
+        Super = "super",
+        Trait = "trait",
+        True = "true",
+        Type = "type",
+        Union = "union",
+        Use = "use",
+        While = "while",
+    }
+
+    struct WeakKeyword {
+        Longer = "longer",
+        Shorter = "shorter",
+    }
 }
 
 #[macro_export]
@@ -110,6 +121,15 @@ macro_rules! kw {
 }
 
 pub use kw;
+
+#[macro_export]
+macro_rules! weak_kw {
+    ($kw:expr) => {
+        const { $crate::parse::ast::WeakKeyword::new($kw) }
+    };
+}
+
+pub use weak_kw;
 
 // === Punctuation sequences === //
 

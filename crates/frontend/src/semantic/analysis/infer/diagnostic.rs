@@ -137,6 +137,8 @@ pub enum CheckOriginKind {
     HrtbSelection {
         def: Span,
     },
+
+    NeverErrors,
 }
 
 impl CheckOrigin {

@@ -1,6 +1,6 @@
 mod demo1 {
     pub trait Demo<'c> {
-        type Foo: 'c;
+        type Foo: &longer 'c;
     }
 
     // Accepted
@@ -14,7 +14,7 @@ mod demo1 {
     }
 
     // Accepted
-    impl<'a, 'b: 'a> Demo<'a> for &'b () {
+    impl<'a, 'b: &longer 'a> Demo<'a> for &'b () {
         type Foo = &'b ();
     }
 
@@ -34,12 +34,12 @@ mod demo2 {
     }
 
     // Accepted
-    impl<'b: 'c, 'c: 'b> Woo for ((&'b (), &'c ()), ()) {
+    impl<'b: &longer 'c, 'c: &longer 'b> Woo for ((&'b (), &'c ()), ()) {
         type Huh = (&'b (), &'c ());
     }
 
     // Rejected
-    impl<'b: 'c, 'c> Woo for ((&'b (), &'c ()), ((),)) {
+    impl<'b: &longer 'c, 'c> Woo for ((&'b (), &'c ()), ((),)) {
         type Huh = (&'b (), &'c ());
     }
 

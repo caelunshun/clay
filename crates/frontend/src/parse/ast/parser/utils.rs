@@ -5,7 +5,7 @@ use crate::{
     },
     parse::{
         ast::{
-            AnyPunct, Keyword, PunctSeq,
+            AnyPunct, Keyword, PunctSeq, WeakKeyword,
             entry::{C, P},
         },
         token::{
@@ -21,6 +21,12 @@ pub fn match_any_ident(c: C) -> Option<Ident> {
 }
 
 pub fn match_kw(kw: Keyword) -> impl TokenMatcher<Output = Option<Ident>> {
+    token_matcher(kw.expectation_name(), move |c, _h| {
+        match_any_ident(c).filter(|v| !v.raw && v.text == kw.symbol())
+    })
+}
+
+pub fn match_weak_kw(kw: WeakKeyword) -> impl TokenMatcher<Output = Option<Ident>> {
     token_matcher(kw.expectation_name(), move |c, _h| {
         match_any_ident(c).filter(|v| !v.raw && v.text == kw.symbol())
     })

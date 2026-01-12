@@ -209,8 +209,8 @@ impl TyVisitable for TraitClause {
         V: ?Sized + TyVisitor<'tcx>,
     {
         match me.view(visitor.tcx()) {
-            SpannedTraitClauseView::Outlives(re) => {
-                visitor.visit_spanned_fallible(re)?;
+            SpannedTraitClauseView::Outlives(_dir, ty_or_re) => {
+                visitor.visit_spanned_fallible(ty_or_re)?;
             }
             SpannedTraitClauseView::Trait(spec) => {
                 visitor.visit_spanned_fallible(spec)?;

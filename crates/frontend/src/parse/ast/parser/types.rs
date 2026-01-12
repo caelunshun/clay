@@ -7,18 +7,19 @@ use crate::{
     parse::{
         ast::{
             AstGenericParam, AstGenericParamKind, AstGenericParamList, AstHrtbBinder, AstNamedSpec,
-            AstReturnTy, AstTraitClause, AstTraitClauseList, AstTraitImplClause, AstTy, AstTyKind,
+            AstReturnTy, AstTraitClause, AstTraitClauseList, AstTraitImplClause,
+            AstTraitOutlivesClause, AstTy, AstTyKind, AstTyOrRe, OutlivesKind,
             basic::{parse_bare_path, parse_mutability},
             bp::ty_bp,
             entry::P,
             utils::{
                 match_group, match_ident, match_kw, match_lifetime, match_punct, match_punct_seq,
-                parse_comma_group, parse_delimited_until_terminator,
+                match_weak_kw, parse_comma_group, parse_delimited_until_terminator,
             },
         },
         token::GroupDelimiter,
     },
-    punct, puncts, symbol,
+    punct, puncts, symbol, weak_kw,
 };
 
 // === Trait Clauses === //
@@ -43,8 +44,28 @@ pub fn parse_trait_clause_list(p: P) -> AstTraitClauseList {
 }
 
 pub fn parse_trait_clause(p: P) -> Result<AstTraitClause, ErrorGuaranteed> {
-    if let Some(lifetime) = match_lifetime().expect(p) {
-        return Ok(AstTraitClause::Outlives(lifetime));
+    let start = p.next_span();
+
+    if match_punct(punct!('&')).expect(p).is_some() {
+        let kind = 'kind: {
+            if match_weak_kw(weak_kw!("longer")).expect(p).is_some() {
+                break 'kind OutlivesKind::Longer;
+            }
+
+            if match_weak_kw(weak_kw!("shorter")).expect(p).is_some() {
+                break 'kind OutlivesKind::Shorter;
+            }
+
+            return Err(p.stuck().error());
+        };
+
+        let other = parse_ty_or_re(p);
+
+        return Ok(AstTraitClause::Outlives(AstTraitOutlivesClause {
+            span: start.to(p.prev_span()),
+            kind,
+            other,
+        }));
     }
 
     let start = p.next_span();
@@ -176,6 +197,14 @@ pub fn parse_generic_param(p: P) -> AstGenericParam {
 }
 
 // === Types === //
+
+pub fn parse_ty_or_re(p: P) -> AstTyOrRe {
+    if let Some(lt) = match_lifetime().expect(p) {
+        return AstTyOrRe::Re(lt);
+    }
+
+    AstTyOrRe::Ty(parse_ty(p))
+}
 
 pub fn parse_ty(p: P) -> AstTy {
     parse_ty_pratt(p, Bp::MIN)

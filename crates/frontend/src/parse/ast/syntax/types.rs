@@ -29,8 +29,21 @@ pub struct AstTraitClauseList {
 /// A singular trait clause (e.g. `'a`, `MyImplClause`, `for<'b> MyOtherClause<'b>`).
 #[derive(Debug, Clone)]
 pub enum AstTraitClause {
-    Outlives(Lifetime),
+    Outlives(AstTraitOutlivesClause),
     Trait(AstTraitImplClause),
+}
+
+#[derive(Debug, Clone)]
+pub struct AstTraitOutlivesClause {
+    pub span: Span,
+    pub kind: OutlivesKind,
+    pub other: AstTyOrRe,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum OutlivesKind {
+    Shorter,
+    Longer,
 }
 
 /// A trait clause with an optional HRTB binder.

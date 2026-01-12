@@ -296,8 +296,8 @@ impl TyFoldable for TraitClause {
         F: ?Sized + TyFolder<'tcx>,
     {
         Ok(match me.view(folder.tcx()) {
-            SpannedTraitClauseView::Outlives(re) => {
-                TraitClause::Outlives(folder.fold_spanned_fallible(re)?)
+            SpannedTraitClauseView::Outlives(dir, ty_or_re) => {
+                TraitClause::Outlives(dir, folder.fold_spanned_fallible(ty_or_re)?)
             }
             SpannedTraitClauseView::Trait(spec) => {
                 TraitClause::Trait(folder.fold_spanned_fallible(spec)?)

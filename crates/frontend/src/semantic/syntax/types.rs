@@ -209,7 +209,7 @@ pub type TraitClauseList = Intern<[TraitClause]>;
 /// A single trait clause (e.g. `'a` or `Trait<'re1, Ty1, Ty2, AssocA = Ty3, AssocC = Ty4>`).
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TraitClause {
-    Outlives(Re),
+    Outlives(RelationDirection, TyOrRe),
     Trait(HrtbBinder<TraitSpec>),
 }
 

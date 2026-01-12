@@ -246,14 +246,14 @@ impl<'tcx> ClauseCx<'tcx> {
         self.ucx_mut().lookup_universal_re_src_info(var)
     }
 
-    pub fn permit_re_universal_outlives(
+    pub fn permit_universe_re_outlives_re(
         &mut self,
         universal: Re,
         other: Re,
         dir: RelationDirection,
     ) {
         self.ucx_mut()
-            .permit_re_universal_outlives(universal, other, dir);
+            .permit_universe_re_outlives_re(universal, other, dir);
     }
 
     pub fn fresh_ty_universal_var(&mut self, src_info: UniversalTyVarSourceInfo) -> UniversalTyVar {
@@ -312,8 +312,8 @@ impl<'tcx> ClauseCx<'tcx> {
 
         for &clause in rhs.r(s) {
             match clause {
-                TraitClause::Outlives(rhs) => {
-                    self.oblige_re_outlives_re(origin.clone(), lhs, rhs, RelationMode::LhsOntoRhs)
+                TraitClause::Outlives(dir, rhs) => {
+                    self.oblige_general_outlives(origin.clone(), TyOrRe::Re(lhs), rhs, dir);
                 }
                 TraitClause::Trait(_) => {
                     unreachable!()
@@ -441,14 +441,16 @@ impl<'tcx> ClauseCx<'tcx> {
                         for &clause in generic.r(s).clauses.value.r(s) {
                             let clause = self.importer(env).fold(clause);
 
-                            let TraitClause::Outlives(allowed_to_outlive) = clause else {
+                            let TraitClause::Outlives(allowed_to_outlive_dir, allowed_to_outlive) =
+                                clause
+                            else {
                                 unreachable!()
                             };
 
-                            self.permit_re_universal_outlives(
+                            self.permit_universe_re_outlives_general(
                                 target,
                                 allowed_to_outlive,
-                                RelationDirection::LhsOntoRhs,
+                                allowed_to_outlive_dir,
                             );
                         }
                     }
@@ -561,17 +563,17 @@ impl<'tcx> ClauseCx<'tcx> {
                         let clause_span = clause.own_span();
                         let clause = self.importer(env).fold(clause.value);
 
-                        let TraitClause::Outlives(must_outlive) = clause else {
+                        let TraitClause::Outlives(must_outlive_dir, must_outlive) = clause else {
                             unreachable!()
                         };
 
                         let reason = gen_reason(self, i, clause_span);
 
-                        self.oblige_re_outlives_re(
+                        self.oblige_general_outlives(
                             reason,
-                            target,
+                            TyOrRe::Re(target),
                             must_outlive,
-                            RelationMode::LhsOntoRhs,
+                            must_outlive_dir,
                         );
                     }
                 }
@@ -582,12 +584,12 @@ impl<'tcx> ClauseCx<'tcx> {
                         let reason = gen_reason(self, i, clause.own_span());
 
                         match clause.value {
-                            TraitClause::Outlives(rhs) => {
-                                self.oblige_ty_outlives_re(
+                            TraitClause::Outlives(must_outlive_dir, must_outlive) => {
+                                self.oblige_general_outlives(
                                     reason,
-                                    target,
-                                    rhs,
-                                    RelationDirection::LhsOntoRhs,
+                                    TyOrRe::Ty(target),
+                                    must_outlive,
+                                    must_outlive_dir,
                                 );
                             }
                             TraitClause::Trait(rhs) => {
@@ -920,9 +922,9 @@ impl<'tcx> ClauseCx<'tcx> {
 
         for &target in target.r(s) {
             match target {
-                TraitClause::Outlives(re) => {
-                    self.permit_re_universal_outlives(lub_re, re, RelationDirection::LhsOntoRhs);
-                    accum.push(TraitClause::Outlives(re));
+                TraitClause::Outlives(outlive_dir, outlive) => {
+                    self.permit_universe_re_outlives_general(lub_re, outlive, outlive_dir);
+                    accum.push(TraitClause::Outlives(outlive_dir, outlive));
                 }
                 TraitClause::Trait(spec) => {
                     // // Elaborate with filled in parameters.
@@ -969,8 +971,8 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn oblige_ty_meets_clause(&mut self, origin: CheckOrigin, lhs: Ty, rhs: TraitClause) {
         match rhs {
-            TraitClause::Outlives(rhs) => {
-                self.oblige_ty_outlives_re(origin, lhs, rhs, RelationDirection::LhsOntoRhs);
+            TraitClause::Outlives(rhs_dir, rhs) => {
+                self.oblige_general_outlives(origin, TyOrRe::Ty(lhs), rhs, rhs_dir);
             }
             TraitClause::Trait(rhs) => {
                 self.oblige_ty_meets_trait(origin, lhs, rhs);
@@ -1107,7 +1109,7 @@ impl<'tcx> ClauseCx<'tcx> {
             .iter()
             .copied()
             .find(|&clause| match clause {
-                TraitClause::Outlives(_) => false,
+                TraitClause::Outlives(_, _) => false,
                 TraitClause::Trait(lhs) => lhs.inner.def == rhs.def,
             });
 
@@ -1329,14 +1331,16 @@ impl<'tcx> ClauseCx<'tcx> {
                         let clauses = HrtbSubstitutionFolder::new(this, vars, s).fold(def.clauses);
 
                         for clause in clauses.r(s) {
-                            let TraitClause::Outlives(re) = *clause else {
+                            let TraitClause::Outlives(permitted_outlive_dir, permitted_outlive) =
+                                *clause
+                            else {
                                 unreachable!();
                             };
 
-                            this.permit_re_universal_outlives(
+                            this.permit_universe_re_outlives_general(
                                 var,
-                                re,
-                                RelationDirection::LhsOntoRhs,
+                                permitted_outlive,
+                                permitted_outlive_dir,
                             );
                         }
                     }
@@ -1501,6 +1505,62 @@ impl<'tcx> TyFolder<'tcx> for HrtbSubstitutionFolder<'_, 'tcx> {
 // === Outlives Relations === //
 
 impl<'tcx> ClauseCx<'tcx> {
+    pub fn permit_universe_re_outlives_general(
+        &mut self,
+        universal: Re,
+        other: TyOrRe,
+        dir: RelationDirection,
+    ) {
+        match other {
+            TyOrRe::Re(other) => {
+                self.permit_universe_re_outlives_re(universal, other, dir);
+            }
+            TyOrRe::Ty(other) => {
+                self.permit_universe_re_outlives_ty(universal, other, dir);
+            }
+        }
+    }
+
+    pub fn permit_universe_re_outlives_ty(
+        &mut self,
+        universal: Re,
+        other: Ty,
+        dir: RelationDirection,
+    ) {
+        // Without loss of generality...
+        //
+        // If `dir == LhsOntoRhs`...
+        //
+        // ```
+        // universal: 'a
+        // 'a: other
+        // =>
+        // universal: other
+        // ```
+        //
+        // If `dir == RhsOntoLhs`...
+        //
+        // ```
+        // 'a: universal
+        // other: 'a
+        // =>
+        // other: universal
+        // ```
+
+        let joiner = self.fresh_re_infer();
+
+        // `'a: other` (inverse: `other: 'a`)
+        self.oblige_ty_outlives_re(
+            CheckOrigin::new(None, CheckOriginKind::NeverErrors),
+            other,
+            joiner,
+            dir.invert(),
+        );
+
+        // `universal: 'a` (inverse: `'a: universal`)
+        self.permit_universe_re_outlives_re(universal, joiner, dir);
+    }
+
     pub fn oblige_general_outlives(
         &mut self,
         origin: CheckOrigin,
@@ -1591,12 +1651,17 @@ impl<'tcx> ClauseCx<'tcx> {
             TyKind::Trait(lhs) => {
                 for &lhs in lhs.r(s) {
                     match lhs {
-                        TraitClause::Outlives(lhs) => {
+                        // TODO: Fix this!!
+                        TraitClause::Outlives(_lhs_dir, lhs) => {
                             // There is guaranteed to be exactly one outlives constraint for a trait
                             // object so relating these constraints is sufficient to ensure that the
                             // object outlives the `rhs`.
-                            self.ucx_mut()
-                                .unify_re_and_re(origin, lhs, rhs, dir.to_mode());
+                            self.ucx_mut().unify_re_and_re(
+                                origin,
+                                lhs.unwrap_re(),
+                                rhs,
+                                dir.to_mode(),
+                            );
                         }
                         TraitClause::Trait(_) => {
                             // (if the outlives constraint says the trait is okay, it's okay)

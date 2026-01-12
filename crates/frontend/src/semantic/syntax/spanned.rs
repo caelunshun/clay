@@ -9,10 +9,10 @@ use crate::{
         analysis::TyCtxt,
         syntax::{
             AdtInstance, AdtItem, FnDef, GenericBinder, HrtbBinder, HrtbBinderKind, HrtbDebruijn,
-            HrtbDebruijnDef, HrtbDebruijnDefList, InferTyVar, Mutability, Re, SimpleTyKind,
-            TraitClause, TraitClauseList, TraitInstance, TraitItem, TraitParam, TraitParamList,
-            TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList, TyProjection,
-            TypeGeneric, UniversalTyVar,
+            HrtbDebruijnDef, HrtbDebruijnDefList, InferTyVar, Mutability, Re, RelationDirection,
+            SimpleTyKind, TraitClause, TraitClauseList, TraitInstance, TraitItem, TraitParam,
+            TraitParamList, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList,
+            TyProjection, TypeGeneric, UniversalTyVar,
         },
     },
 };
@@ -219,7 +219,7 @@ pub type SpannedTraitClause = Spanned<TraitClause>;
 
 #[derive(Debug, Copy, Clone)]
 pub enum SpannedTraitClauseView {
-    Outlives(SpannedRe),
+    Outlives(RelationDirection, SpannedTyOrRe),
     Trait(SpannedHrtbBinder<TraitSpec>),
 }
 
@@ -228,8 +228,8 @@ impl SpannedViewDecode<TyCtxt> for TraitClause {
 
     fn decode(value: &Self, span_info: SpannedInfo, tcx: &TyCtxt) -> Self::View {
         match *value {
-            TraitClause::Outlives(re) => {
-                SpannedTraitClauseView::Outlives(Spanned::new_raw(re, span_info.unwrap(tcx)))
+            TraitClause::Outlives(dir, re) => {
+                SpannedTraitClauseView::Outlives(dir, Spanned::new_raw(re, span_info.unwrap(tcx)))
             }
             TraitClause::Trait(spec) => {
                 SpannedTraitClauseView::Trait(Spanned::new_raw(spec, span_info.unwrap(tcx)))
@@ -243,8 +243,8 @@ impl SpannedViewEncode<TyCtxt> for SpannedTraitClauseView {
 
     fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
         match self {
-            SpannedTraitClauseView::Outlives(re) => Spanned::new_raw(
-                TraitClause::Outlives(re.value),
+            SpannedTraitClauseView::Outlives(dir, re) => Spanned::new_raw(
+                TraitClause::Outlives(dir, re.value),
                 re.span_info.wrap(own_span, tcx),
             ),
             SpannedTraitClauseView::Trait(spec) => Spanned::new_raw(

@@ -154,7 +154,7 @@ impl<'tcx> UnifyCx<'tcx> {
             .lookup_universal_src_info(var)
     }
 
-    pub fn permit_re_universal_outlives(
+    pub fn permit_universe_re_outlives_re(
         &mut self,
         universal: Re,
         other: Re,
@@ -448,13 +448,18 @@ impl<'tcx> UnifyCx<'tcx> {
 
         for (&lhs_clause, &rhs_clause) in lhs_root.r(s).iter().zip(rhs_root.r(s)) {
             match (lhs_clause, rhs_clause) {
-                (TraitClause::Outlives(lhs), TraitClause::Outlives(rhs)) => {
-                    // Technically, `MyTrait + 'a + 'b: 'c` could imply either `'a: 'c` or
-                    // `'b: 'c`, meaning that relating both would be unnecessary but this
-                    // logic will produce constraints for both. This isn't a problem because
-                    // we only ever lower trait objects with *exactly one* outlives
-                    // constraint.
-                    self.unify_re_and_re(origin, lhs, rhs, mode);
+                (TraitClause::Outlives(lhs_dir, lhs), TraitClause::Outlives(rhs_dir, rhs))
+                    if lhs_dir == rhs_dir =>
+                {
+                    match (lhs, rhs) {
+                        (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
+                            self.unify_re_and_re(origin, lhs, rhs, mode);
+                        }
+                        (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
+                            self.unify_ty_and_ty_inner(origin, lhs, rhs, culprits, mode);
+                        }
+                        _ => unreachable!(),
+                    }
                 }
                 (TraitClause::Trait(lhs), TraitClause::Trait(rhs))
                     if lhs.inner.def == rhs.inner.def =>
