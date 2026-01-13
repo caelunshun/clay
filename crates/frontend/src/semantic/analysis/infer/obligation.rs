@@ -48,13 +48,7 @@ pub enum ObligationResult {
 pub struct ObligationCx<'tcx, K> {
     ucx: UnifyCx<'tcx>,
     root: Rc<ObligationCxRoot<K>>,
-    local_obligation_queue: Rc<Vec<QueuedObligation<K>>>,
-}
-
-#[derive(Clone)]
-struct QueuedObligation<K> {
-    parent: Option<ObligationIdx>,
-    kind: K,
+    local_obligation_queue: Rc<Vec<K>>,
 }
 
 #[derive_where(Default)]
@@ -84,12 +78,6 @@ define_index_type! {
 }
 
 struct ObligationState<K> {
-    /// The obligation responsible for spawning this new obligation.
-    parent: Option<ObligationIdx>,
-
-    /// The number of parent obligations leading to the creation of this obligation.
-    depth: u32,
-
     /// The kind of obligation we're trying to prove.
     kind: K,
 
@@ -130,10 +118,7 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
     }
 
     pub fn push_obligation(&mut self, kind: K) {
-        Rc::make_mut(&mut self.local_obligation_queue).push(QueuedObligation {
-            parent: self.root.current_obligation,
-            kind,
-        });
+        Rc::make_mut(&mut self.local_obligation_queue).push(kind);
     }
 
     pub fn obligation_eval_suppressed(&self) -> bool {
@@ -166,14 +151,8 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
 
             // Import queued obligations.
             for obligation in mem::take(Rc::make_mut(&mut this.local_obligation_queue)) {
-                let QueuedObligation { parent, kind } = obligation;
-
-                let depth = parent.map_or(0, |v| root.all_obligations[v].depth + 1);
-
                 let obligation = root.all_obligations.push(ObligationState {
-                    parent,
-                    depth,
-                    kind,
+                    kind: obligation,
                     can_wake_by: FxHashSet::default(),
                 });
 

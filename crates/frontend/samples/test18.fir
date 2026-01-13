@@ -20,7 +20,7 @@ impl<'a, T: &longer 'a> LendingOutput<'a> for LendingOutputSimpleMut<T> {
 pub struct Forever<T>(pub T);
 
 impl<T> Iterator for Forever<T> {
-    type Output: &shorter 'a;
+    type Output = LendingOutputSimpleMut<T>;
 
     fn next<'a: &shorter Self>(&'a mut self) -> <Self::Output as LendingOutput<'a>>::Output {
         &mut self.0
