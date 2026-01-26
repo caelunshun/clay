@@ -107,7 +107,7 @@ where
             | TyKind::Simple(_)
             | TyKind::Reference(_, _, _)
             | TyKind::Adt(_)
-            | TyKind::Trait(_)
+            | TyKind::Trait(_, _, _)
             | TyKind::Tuple(_)
             | TyKind::FnDef(_, _)
             | TyKind::HrtbVar(_)

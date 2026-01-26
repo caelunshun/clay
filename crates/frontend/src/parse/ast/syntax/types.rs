@@ -159,7 +159,7 @@ pub enum AstTyKind {
     This,
     Name(AstBarePath, Option<AstGenericParamList>),
     Reference(Option<Lifetime>, AstOptMutability, Box<AstTy>),
-    Trait(AstTraitClauseList),
+    Trait(Option<Lifetime>, AstOptMutability, AstTraitClauseList),
     Paren(Box<AstTy>),
     Tuple(Vec<AstTy>),
     Project(Box<AstTy>, Box<AstNamedSpec>, Ident),

@@ -74,7 +74,7 @@ impl TyCtxt {
                         .collect::<Vec<_>>(),
                 ),
             }),
-            TyKind::Trait(intern) => todo!(),
+            TyKind::Trait(_re, _muta, _intern) => todo!(),
             TyKind::Tuple(children) => TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Tuple(children.r(s).len() as u32),
                 children: self.intern_list(

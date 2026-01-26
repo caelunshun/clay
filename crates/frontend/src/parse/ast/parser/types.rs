@@ -236,17 +236,19 @@ pub fn parse_ty_pratt_seed(p: P) -> AstTy {
         return build_ty(AstTyKind::Name(path, parse_generic_param_list(p)), p);
     }
 
-    // Parse `dyn` trait
-    if match_kw(kw!("dyn")).expect(p).is_some() {
-        return build_ty(AstTyKind::Trait(parse_trait_clause_list(p)), p);
-    }
-
     // Parse reference
     if match_punct(punct!('&')).expect(p).is_some() {
+        let lt = match_lifetime().expect(p);
+        let muta = parse_mutability(p);
+
+        if match_kw(kw!("dyn")).expect(p).is_some() {
+            return build_ty(AstTyKind::Trait(lt, muta, parse_trait_clause_list(p)), p);
+        }
+
         return build_ty(
             AstTyKind::Reference(
-                match_lifetime().expect(p),
-                parse_mutability(p),
+                lt,
+                muta,
                 Box::new(parse_ty_pratt(p, ty_bp::PRE_TY_REF.right)),
             ),
             p,

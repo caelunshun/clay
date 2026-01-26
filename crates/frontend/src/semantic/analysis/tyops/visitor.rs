@@ -453,7 +453,8 @@ impl TyVisitable for Ty {
             SpannedTyView::Adt(instance) => {
                 visitor.visit_spanned_fallible(instance)?;
             }
-            SpannedTyView::Trait(clause_list) => {
+            SpannedTyView::Trait(re, _muta, clause_list) => {
+                visitor.visit_spanned_fallible(re)?;
                 visitor.visit_spanned_fallible(clause_list)?;
             }
             SpannedTyView::Tuple(tys) => {

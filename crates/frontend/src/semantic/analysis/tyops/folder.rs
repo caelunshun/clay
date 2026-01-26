@@ -532,9 +532,11 @@ impl TyFoldable for Ty {
                 TyKind::FnDef(def, Some(folder.fold_spanned_fallible(generics)?))
             }
             SpannedTyView::Adt(instance) => TyKind::Adt(folder.fold_spanned_fallible(instance)?),
-            SpannedTyView::Trait(clause_list) => {
-                TyKind::Trait(folder.fold_spanned_fallible(clause_list)?)
-            }
+            SpannedTyView::Trait(re, muta, clause_list) => TyKind::Trait(
+                folder.fold_spanned_fallible(re)?,
+                muta,
+                folder.fold_spanned_fallible(clause_list)?,
+            ),
             SpannedTyView::Tuple(tys) => TyKind::Tuple(folder.fold_spanned_fallible(tys)?),
         };
 

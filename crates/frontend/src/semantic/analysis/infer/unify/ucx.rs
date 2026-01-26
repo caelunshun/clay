@@ -284,8 +284,23 @@ impl<'tcx> UnifyCx<'tcx> {
                     }
                 }
             }
-            (TyKind::Trait(lhs), TyKind::Trait(rhs)) => {
-                self.unify_dyn_trait_clauses_inner(origin, lhs, rhs, culprits, mode);
+            (TyKind::Trait(lhs_re, lhs_muta, lhs), TyKind::Trait(rhs_re, rhs_muta, rhs))
+                if lhs_muta == rhs_muta =>
+            {
+                self.unify_re_and_re(origin, lhs_re, rhs_re, mode);
+
+                let variance = match lhs_muta {
+                    Mutability::Mut => ReVariance::Invariant,
+                    Mutability::Not => ReVariance::Covariant,
+                };
+
+                self.unify_dyn_trait_clauses_inner(
+                    origin,
+                    lhs,
+                    rhs,
+                    culprits,
+                    mode.with_variance(variance),
+                );
             }
             (TyKind::FnDef(lhs, Some(lhs_generics)), TyKind::FnDef(rhs, Some(rhs_generics)))
                 if lhs == rhs =>

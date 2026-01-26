@@ -73,7 +73,7 @@ pub enum SpannedTyView {
     Simple(SimpleTyKind),
     Reference(SpannedRe, Mutability, SpannedTy),
     Adt(SpannedAdtInstance),
-    Trait(SpannedTraitClauseList),
+    Trait(SpannedRe, Mutability, SpannedTraitClauseList),
     Tuple(SpannedTyList),
     FnDef(Obj<FnDef>, Option<SpannedTyOrReList>),
     HrtbVar(HrtbDebruijn),
@@ -106,8 +106,14 @@ impl SpannedViewDecode<TyCtxt> for Ty {
                 )
             }
             TyKind::Adt(adt) => SpannedTyView::Adt(Spanned::new_raw(adt, span_info.unwrap(tcx))),
-            TyKind::Trait(clauses) => {
-                SpannedTyView::Trait(Spanned::new_raw(clauses, span_info.unwrap(tcx)))
+            TyKind::Trait(re, muta, clauses) => {
+                let [re_span, clauses_span] = span_info.child_spans(tcx);
+
+                SpannedTyView::Trait(
+                    Spanned::new_raw(re, re_span),
+                    muta,
+                    Spanned::new_raw(clauses, clauses_span),
+                )
             }
             TyKind::Tuple(tys) => {
                 SpannedTyView::Tuple(Spanned::new_raw(tys, span_info.unwrap(tcx)))
@@ -157,9 +163,9 @@ impl SpannedViewEncode<TyCtxt> for SpannedTyView {
                 tcx.intern(TyKind::Adt(adt.value)),
                 adt.span_info.wrap(own_span, tcx),
             ),
-            SpannedTyView::Trait(clauses) => Spanned::new_raw(
-                tcx.intern(TyKind::Trait(clauses.value)),
-                clauses.span_info.wrap(own_span, tcx),
+            SpannedTyView::Trait(re, muta, clauses) => Spanned::new_raw(
+                tcx.intern(TyKind::Trait(re.value, muta, clauses.value)),
+                SpannedInfo::new_list(own_span, &[re.span_info, clauses.span_info], tcx),
             ),
             SpannedTyView::Tuple(tys) => Spanned::new_raw(
                 tcx.intern(TyKind::Tuple(tys.value)),

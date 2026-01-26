@@ -100,7 +100,7 @@ impl ReUnifyTracker {
 
     pub fn verify(&self, ccx: &ClauseCx<'_>) {
         let permissions = ReElaboratedPermissions::new(self);
-        let mut outlives = ReIncrementalOutlives::new(self);
+        let mut outlives = ReIncrementalConstraints::new(self);
 
         for cst in &self.constraints {
             outlives.add_constraint(cst.lhs, cst.rhs, |var, must_outlive| {
@@ -150,6 +150,16 @@ impl ReElaboratedPermissions {
         }
 
         for (var, state) in tracker.universals.iter_enumerated() {
+            // Permissions introduce edges on this graph to ensure that...
+            //
+            // ```
+            // permit 'a: 'b
+            // permit 'b: 'c
+            // ==>
+            // permit 'a: 'c
+            // ```
+            //
+            // ...works properly.
             for &outlives in &state.allowed_outlive {
                 graph.add(InferRe::Universal(var), outlives);
             }
@@ -236,16 +246,28 @@ impl ReElaboratedPermissions {
     }
 }
 
-// === ReIncrementalOutlives === //
+// === ReIncrementalConstraints === //
 
 #[derive(Debug, Clone)]
-struct ReIncrementalOutlives {
+struct ReIncrementalConstraints {
+    /// A graph from region to regions they are constrained to outlive. Does not include permissions
+    /// since the presence of a permission edge along a path implies that either...
+    ///
+    /// a) One universal is already allowed to outlive the permission edge universal, and is
+    ///    therefore allowed to outlive all universals the other universal is allowed to outlive.
+    /// b) One universal is not allowed to outlive the permission edge universal, in which case an
+    ///    error is already guaranteed.
+    ///
     direct_outlive_graph: DirectedInferReGraph,
+
+    /// The set of lifetimes each universal is constrained to outlive.
     transitive_universal_outlives: IndexVec<UniversalReVar, FxHashSet<InferRe>>,
+
+    /// A reusable queue for DFS'ing. Always empty in between invocations of `add_constraint`.
     dfs_queue: Vec<InferRe>,
 }
 
-impl ReIncrementalOutlives {
+impl ReIncrementalConstraints {
     fn new(tracker: &ReUnifyTracker) -> Self {
         Self {
             direct_outlive_graph: DirectedInferReGraph::default(),

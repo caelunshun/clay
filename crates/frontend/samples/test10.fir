@@ -24,7 +24,7 @@ pub enum Demo {
 
 pub trait Meow<T: Meow<T>> {}
 
-fn main(v: dyn Meow<()>) {
+fn main<'a>(v: &'a dyn Meow<()>) {
     let Demo::Foo((-1, a)) | Demo::Bar(a) = 1;
 
     let mut foo = 0;

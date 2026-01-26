@@ -192,9 +192,15 @@ impl IntraItemLowerCtxt<'_> {
                 self.lower_ty(pointee),
             )
             .encode(ast.span, self.tcx),
-            AstTyKind::Trait(spec) => {
-                SpannedTyView::Trait(self.lower_clauses(Some(spec))).encode(ast.span, self.tcx)
-            }
+            AstTyKind::Trait(lifetime, muta, spec) => SpannedTyView::Trait(
+                match lifetime {
+                    Some(ast) => self.lower_re(ast),
+                    None => Re::SigInfer.encode(ast.span.shrink_to_lo(), self.tcx),
+                },
+                muta.as_muta(),
+                self.lower_clauses(Some(spec)),
+            )
+            .encode(ast.span, self.tcx),
             AstTyKind::Paren(ast) => self.lower_ty(ast),
             AstTyKind::Tuple(items) => {
                 SpannedTyView::Tuple(self.lower_tys(items)).encode(ast.span, self.tcx)

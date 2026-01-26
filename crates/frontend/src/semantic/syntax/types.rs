@@ -492,8 +492,8 @@ pub enum TyKind {
     /// An instantiation of an ADT.
     Adt(AdtInstance),
 
-    /// A `dyn Trait` object.
-    Trait(TraitClauseList),
+    /// A `&'re dyn Trait` object.
+    Trait(Re, Mutability, TraitClauseList),
 
     /// A tuple.
     Tuple(TyList),

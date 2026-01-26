@@ -851,7 +851,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
             SpannedTyView::Simple(_)
             | SpannedTyView::Reference(_, _, _)
             | SpannedTyView::Adt(_)
-            | SpannedTyView::Trait(_)
+            | SpannedTyView::Trait(_, _, _)
             | SpannedTyView::Tuple(_)
             | SpannedTyView::FnDef(_, _)
             | SpannedTyView::Error(_) => return self.super_spanned_fallible(ty),
@@ -1010,7 +1010,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // See whether the type itself can provide the implementation.
         match *self.peel_ty_infer_var(lhs).r(s) {
-            TyKind::Trait(clauses) => {
+            TyKind::Trait(_re, _muta, clauses) => {
                 todo!()
             }
             TyKind::UniversalVar(universal) => {
@@ -1648,26 +1648,9 @@ impl<'tcx> ClauseCx<'tcx> {
                     }
                 }
             }
-            TyKind::Trait(lhs) => {
-                for &lhs in lhs.r(s) {
-                    match lhs {
-                        // TODO: Fix this!!
-                        TraitClause::Outlives(_lhs_dir, lhs) => {
-                            // There is guaranteed to be exactly one outlives constraint for a trait
-                            // object so relating these constraints is sufficient to ensure that the
-                            // object outlives the `rhs`.
-                            self.ucx_mut().unify_re_and_re(
-                                origin,
-                                lhs.unwrap_re(),
-                                rhs,
-                                dir.to_mode(),
-                            );
-                        }
-                        TraitClause::Trait(_) => {
-                            // (if the outlives constraint says the trait is okay, it's okay)
-                        }
-                    }
-                }
+            TyKind::Trait(lhs_re, _muta, _lhs_spec) => {
+                self.ucx_mut()
+                    .unify_re_and_re(origin, lhs_re, rhs, dir.to_mode());
             }
             TyKind::Tuple(lhs) => {
                 for &lhs in lhs.r(s) {
@@ -1759,7 +1742,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
 
     fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
         match ty.view(self.tcx()) {
-            SpannedTyView::Trait(_) => {
+            SpannedTyView::Trait(_, _, _) => {
                 let old_clause_applies_to = self.clause_applies_to.replace(ty.value);
                 self.walk_spanned(ty);
                 self.clause_applies_to = old_clause_applies_to;
