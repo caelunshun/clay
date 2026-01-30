@@ -1,13 +1,21 @@
 use crate::{
-    base::arena::{HasInterner, Obj},
+    base::{
+        Session,
+        arena::{HasInterner, Obj},
+        syntax::Span,
+    },
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnv, CrateTypeckVisitor, TyFolderInfallibleExt,
+            ClauseCx, ClauseImportEnv, CrateTypeckVisitor, TyCtxt, TyFolderInfallibleExt,
             TyVisitorInfallibleExt, UnifyCxMode,
         },
-        syntax::{FnDef, FuncDefOwner, TyKind},
+        syntax::{
+            Block, Divergence, Expr, ExprKind, FnDef, FuncDefOwner, FuncLocal, InferTyVar, Stmt,
+            Ty, TyAndDivergence, TyKind,
+        },
     },
 };
+use rustc_hash::FxHashMap;
 
 impl<'tcx> CrateTypeckVisitor<'tcx> {
     pub fn visit_fn_def(&mut self, def: Obj<FnDef>) {
@@ -37,7 +45,10 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         ccx.wf_visitor().visit_spanned(ret_ty);
 
         // Check the body
-        // TODO
+        if let Some(body) = *def.r(s).body {
+            let mut bcx = BodyChecker::new(&mut ccx);
+            bcx.check_block(body);
+        }
 
         ccx.verify();
     }
@@ -62,5 +73,139 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
             .extend_from_slice(&ccx.import_fn_item_env(env.self_ty, def));
 
         env
+    }
+}
+
+pub struct BodyChecker<'a, 'tcx> {
+    ccx: &'a mut ClauseCx<'tcx>,
+    local_types: FxHashMap<Obj<FuncLocal>, Ty>,
+    needs_infer: Vec<NeedsInfer>,
+}
+
+#[derive(Copy, Clone)]
+struct NeedsInfer {
+    span: Span,
+    var: InferTyVar,
+}
+
+impl<'a, 'tcx> BodyChecker<'a, 'tcx> {
+    pub fn new(ccx: &'a mut ClauseCx<'tcx>) -> Self {
+        Self {
+            ccx,
+            local_types: FxHashMap::default(),
+            needs_infer: Vec::new(),
+        }
+    }
+
+    pub fn tcx(&self) -> &'tcx TyCtxt {
+        self.ccx.tcx()
+    }
+
+    pub fn session(&self) -> &'tcx Session {
+        self.ccx.session()
+    }
+
+    pub fn type_of_local(&mut self, local: Obj<FuncLocal>) -> Ty {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        *self.local_types.entry(local).or_insert_with(|| {
+            let var = self.ccx.fresh_ty_infer_var();
+
+            self.needs_infer.push(NeedsInfer {
+                span: local.r(s).name.span,
+                var,
+            });
+
+            tcx.intern(TyKind::InferVar(var))
+        })
+    }
+
+    pub fn check_block(&mut self, block: Obj<Block>) -> TyAndDivergence {
+        let s = self.session();
+
+        let mut divergence = Divergence::MayDiverge;
+
+        for stmt in &block.r(s).stmts {
+            match stmt {
+                Stmt::Expr(expr) => {
+                    divergence.and_do(self.check_expr(*expr));
+                }
+                Stmt::Let(stmt) => {
+                    todo!()
+                }
+            }
+        }
+
+        todo!()
+    }
+
+    pub fn check_exprs_with_demand(
+        &mut self,
+        exprs: &[Obj<Expr>],
+        ty: Option<Ty>,
+    ) -> TyAndDivergence {
+        todo!()
+    }
+
+    pub fn check_expr(&mut self, expr: Obj<Expr>) -> TyAndDivergence {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let mut divergence = Divergence::MayDiverge;
+        let ty = match *expr.r(s).kind {
+            ExprKind::Array(obj) => todo!(),
+            ExprKind::Call(obj, obj1) => todo!(),
+            ExprKind::Method {
+                callee,
+                generics,
+                args,
+            } => todo!(),
+            ExprKind::Tuple(obj) => todo!(),
+            ExprKind::Binary(ast_bin_op_spanned, obj, obj1) => todo!(),
+            ExprKind::Unary(ast_un_op_kind, obj) => todo!(),
+            ExprKind::Literal(ast_lit) => todo!(),
+            ExprKind::TupleOrUnitCtor(adt_ctor_instance) => todo!(),
+            ExprKind::FnItemLit(obj, spanned) => todo!(),
+            ExprKind::TypeRelative {
+                self_ty,
+                as_trait,
+                assoc_name,
+                assoc_args,
+            } => todo!(),
+            ExprKind::Cast(obj, spanned) => todo!(),
+            ExprKind::If {
+                cond,
+                truthy,
+                falsy,
+            } => todo!(),
+            ExprKind::While(obj, obj1) => todo!(),
+            ExprKind::Let(obj, obj1) => todo!(),
+            ExprKind::ForLoop { pat, iter, body } => todo!(),
+            ExprKind::Loop(obj) => todo!(),
+            ExprKind::Match(obj, obj1) => todo!(),
+            ExprKind::Block(obj) => todo!(),
+            ExprKind::Assign(obj, obj1) => todo!(),
+            ExprKind::AssignOp(ast_assign_op_kind, obj, obj1) => todo!(),
+            ExprKind::Field(obj, ident) => todo!(),
+            ExprKind::GenericMethodCall {
+                target,
+                method,
+                generics,
+                args,
+            } => todo!(),
+            ExprKind::Index(obj, obj1) => todo!(),
+            ExprKind::Range(range_expr) => todo!(),
+            ExprKind::LocalSelf => todo!(),
+            ExprKind::Local(obj) => todo!(),
+            ExprKind::AddrOf(mutability, obj) => todo!(),
+            ExprKind::Break { label, expr } => todo!(),
+            ExprKind::Continue { label } => todo!(),
+            ExprKind::Return(obj) => todo!(),
+            ExprKind::Struct(struct_expr) => todo!(),
+            ExprKind::Error(err) => tcx.intern(TyKind::Error(err)),
+        };
+
+        TyAndDivergence { ty, divergence }
     }
 }

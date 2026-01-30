@@ -36,13 +36,13 @@ pub enum ObligationResult {
 /// all inference variables are solved in the correct order. Additionally, obligations can be solved
 /// co-inductively—that is, an obligation can assume itself to be true while proving itself.
 ///
-/// To push an obligation to an `ObligationCx`, you simply have to call [`push_obligation_no_poll`].
+/// To push an obligation to an `ObligationCx`, you simply have to call [`push_obligation`].
 /// You can then poll these obligations for progress using [`poll_obligations`].
 ///
 /// This context can be forked while processing an obligation but, for efficiency purposes, does not
 /// allow forking while not processing obligations.
 ///
-/// [`push_obligation_no_poll`]: ObligationCx::push_obligation_no_poll
+/// [`push_obligation`]: ObligationCx::push_obligation
 /// [`poll_obligations`]: ObligationCx::poll_obligations
 #[derive(Clone)]
 pub struct ObligationCx<'tcx, K> {

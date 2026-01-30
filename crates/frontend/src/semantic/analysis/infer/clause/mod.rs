@@ -37,7 +37,6 @@ const MAX_OBLIGATION_DEPTH: u32 = 256;
 enum ClauseObligation {
     TyUnifiesTy(CheckOrigin, Ty, Ty, RelationMode),
     TyMeetsTrait(CheckOrigin, Ty, TraitSpec),
-    ReOutlivesRe(CheckOrigin, Re, Re, RelationMode),
     TyOutlivesRe(CheckOrigin, Ty, Re, RelationDirection),
     InferTyWf(Span, InferTyVar),
 }
@@ -45,8 +44,7 @@ enum ClauseObligation {
 impl ClauseObligation {
     fn verify_depth(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
         match self {
-            Self::ReOutlivesRe(origin, ..)
-            | Self::TyUnifiesTy(origin, ..)
+            Self::TyUnifiesTy(origin, ..)
             | Self::TyMeetsTrait(origin, ..)
             | Self::TyOutlivesRe(origin, ..) => {
                 if origin.depth() > MAX_OBLIGATION_DEPTH {
@@ -173,10 +171,6 @@ impl<'tcx> ClauseCx<'tcx> {
                 }
 
                 match kind {
-                    ClauseObligation::ReOutlivesRe(origin, lhs, rhs, mode) => {
-                        fork.ucx_mut().unify_re_and_re(&origin, lhs, rhs, mode);
-                        ObligationResult::Success
-                    }
                     ClauseObligation::TyUnifiesTy(origin, lhs, rhs, mode) => {
                         match fork.ucx_mut().unify_ty_and_ty(&origin, lhs, rhs, mode) {
                             Ok(()) => ObligationResult::Success,
@@ -294,7 +288,7 @@ impl<'tcx> ClauseCx<'tcx> {
         rhs: Re,
         mode: RelationMode,
     ) {
-        self.push_obligation(ClauseObligation::ReOutlivesRe(origin, lhs, rhs, mode));
+        self.ucx_mut().unify_re_and_re(&origin, lhs, rhs, mode);
     }
 
     pub fn oblige_ty_unifies_ty(
