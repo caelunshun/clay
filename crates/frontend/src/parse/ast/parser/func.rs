@@ -342,13 +342,20 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
     for (punct, op_kind, bp) in [
         (punct!('-'), AstUnOpKind::Neg, expr_bp::PRE_NEG),
         (punct!('!'), AstUnOpKind::Not, expr_bp::PRE_NOT),
-        (punct!('&'), AstUnOpKind::Neg, expr_bp::PRE_REF),
+        (punct!('*'), AstUnOpKind::Deref, expr_bp::PRE_DEREF),
     ] {
         if match_punct(punct).expect(p).is_some() {
             let lhs = parse_expr_pratt_or_error(p, flags, bp.right);
 
             return Some(build_expr(AstExprKind::Unary(op_kind, Box::new(lhs)), p));
         }
+    }
+
+    if match_punct(punct!('&')).expect(p).is_some() {
+        let muta = parse_mutability(p);
+        let lhs = parse_expr_pratt_or_error(p, flags, expr_bp::PRE_REF.right);
+
+        return Some(build_expr(AstExprKind::AddrOf(muta, Box::new(lhs)), p));
     }
 
     None

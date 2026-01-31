@@ -12,8 +12,8 @@ use crate::{
             TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
         },
         syntax::{
-            Block, Divergence, Expr, ExprKind, FnDef, FuncLocal, InferTyVar, Pat, PatKind,
-            RelationMode, SimpleTyKind, SpannedFnInstanceView, SpannedTyView, Stmt, Ty,
+            Block, Divergence, Expr, ExprKind, FnDef, FuncLocal, InferTyVar, Pat, PatKind, Re,
+            RelationMode, SimpleTyKind, SpannedFnInstanceView, SpannedTyView, Stmt, StructExpr, Ty,
             TyAndDivergence, TyKind,
         },
     },
@@ -136,7 +136,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     self.check_expr(*expr).and_do(&mut divergence);
                 }
                 Stmt::Let(stmt) => {
-                    let pat_ty = self.type_of_pat(stmt.r(s).pat);
+                    let pat_ty = self.type_of_pat(stmt.r(s).pat, None);
 
                     if let Some(ascription) = stmt.r(s).ascription {
                         self.ccx_mut().oblige_ty_unifies_ty(
@@ -250,13 +250,28 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 self.check_exprs_equate([Some(truthy), falsy].into_iter().flatten())
                     .and_do(&mut divergence)
             }
-            ExprKind::While(obj, obj1) => todo!(),
-            ExprKind::Let(obj, obj1) => todo!(),
+            ExprKind::While(cond, block) => {
+                self.check_expr_demand(cond, tcx.intern(TyKind::Simple(SimpleTyKind::Bool)))
+                    .and_do(&mut divergence);
+
+                _ = self.check_block(block);
+
+                tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
+            }
+            ExprKind::Let(pat, expr) => {
+                let pat_ty = self.type_of_pat(pat, Some(&mut divergence));
+                self.check_expr_demand(expr, pat_ty).and_do(&mut divergence);
+
+                tcx.intern(TyKind::Simple(SimpleTyKind::Bool))
+            }
             ExprKind::ForLoop { pat, iter, body } => todo!(),
-            ExprKind::Loop(obj) => todo!(),
+            ExprKind::Loop(block) => todo!(),
             ExprKind::Match(obj, obj1) => todo!(),
             ExprKind::Block(block) => self.check_block(block).and_do(&mut divergence),
-            ExprKind::Assign(obj, obj1) => todo!(),
+            ExprKind::Assign(pat, expr) => {
+                let pat_ty = self.type_of_pat(pat, Some(&mut divergence));
+                self.check_expr_demand(expr, pat_ty).and_do(&mut divergence)
+            }
             ExprKind::AssignOp(ast_assign_op_kind, obj, obj1) => todo!(),
             ExprKind::Field(obj, ident) => todo!(),
             ExprKind::GenericMethodCall {
@@ -269,18 +284,21 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             ExprKind::Range(range_expr) => todo!(),
             ExprKind::LocalSelf => todo!(),
             ExprKind::Local(local) => self.type_of_local(local),
-            ExprKind::AddrOf(mutability, obj) => todo!(),
+            ExprKind::AddrOf(mutability, pointee) => {
+                let pointee = self.check_expr(pointee).and_do(&mut divergence);
+                tcx.intern(TyKind::Reference(Re::Erased, mutability, pointee))
+            }
             ExprKind::Break { label, expr } => todo!(),
             ExprKind::Continue { label } => todo!(),
             ExprKind::Return(obj) => todo!(),
-            ExprKind::Struct(expr) => todo!(),
+            ExprKind::Struct(StructExpr { ctor, fields, rest }) => todo!(),
             ExprKind::Error(err) => tcx.intern(TyKind::Error(err)),
         };
 
         TyAndDivergence::new(ty, divergence)
     }
 
-    pub fn type_of_pat(&mut self, pat: Obj<Pat>) -> Ty {
+    pub fn type_of_pat(&mut self, pat: Obj<Pat>, divergence: Option<&mut Divergence>) -> Ty {
         let s = self.session();
 
         match pat.r(s).kind {
@@ -289,7 +307,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let local_ty = self.type_of_local(local);
 
                 if let Some(bind_as) = bind_as {
-                    let bind_as_ty = self.type_of_pat(bind_as);
+                    let bind_as_ty = self.type_of_pat(bind_as, divergence);
 
                     self.ccx_mut().oblige_ty_unifies_ty(
                         CheckOrigin::root(CheckOriginKind::Pattern {
@@ -311,7 +329,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             PatKind::AdtUnit(adt_ctor_instance) => todo!(),
             PatKind::AdtTuple(adt_ctor_instance, pat_list_front_and_tail) => todo!(),
             PatKind::AdtNamed(adt_ctor_instance, obj) => todo!(),
-            PatKind::PlaceExpr(obj) => todo!(),
+            PatKind::PlaceExpr(expr) => self.check_expr(expr).and_do(divergence.unwrap()),
             PatKind::Range(range_expr) => todo!(),
             PatKind::Error(_) => self.ccx_mut().fresh_ty_infer(),
         }

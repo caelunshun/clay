@@ -1,15 +1,12 @@
-fn main() {
-    meow::<()>;
-
-    let foo = true;
-
-    if foo {
-        foo
-    } else {
-        ()
-    }
+pub enum Option<T> {
+    Some(T),
+    None,
 }
 
-trait Waow {}
+pub use Option::*;
 
-fn meow<T: Waow>() {}
+fn main() {
+    if let a = &2 {
+        a = &4;
+    }
+}

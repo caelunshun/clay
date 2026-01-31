@@ -12,6 +12,9 @@ pub mod expr_bp {
     // `&exp`
     pub const PRE_REF: PrefixBp = PrefixBp::new(9);
 
+    // `*exp`
+    pub const PRE_DEREF: PrefixBp = PrefixBp::new(9);
+
     // `return exp;`
     pub const PRE_RETURN: PrefixBp = PrefixBp::new(1);
 
