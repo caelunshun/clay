@@ -261,17 +261,21 @@ pub struct TyAndDivergence {
     pub divergence: Divergence,
 }
 
+impl TyAndDivergence {
+    pub const fn new(ty: Ty, divergence: Divergence) -> Self {
+        Self { ty, divergence }
+    }
+
+    pub fn and_do(self, divergence: &mut Divergence) -> Ty {
+        *divergence &= self.divergence;
+        self.ty
+    }
+}
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum Divergence {
     MustDiverge,
     MayDiverge,
-}
-
-impl Divergence {
-    pub fn and_do(&mut self, other: TyAndDivergence) -> Ty {
-        *self &= other.divergence;
-        other.ty
-    }
 }
 
 impl BitOr for Divergence {
