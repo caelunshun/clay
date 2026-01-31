@@ -499,7 +499,7 @@ pub enum TyKind {
     Tuple(TyList),
 
     /// A statically-known function type. This can be coerced into a functional interface.
-    FnDef(Obj<FnDef>, Option<TyOrReList>),
+    FnDef(FnInstance),
 
     /// An instantiated generic region variable within an HRTB binder (e.g. the `T` in the type
     /// `Foo<T>` in the clause `for<T> Foo<T>`).
@@ -518,6 +518,13 @@ pub enum TyKind {
     UniversalVar(UniversalTyVar),
 
     Error(ErrorGuaranteed),
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct FnInstance {
+    pub def: Obj<FnDef>,
+    pub impl_ty: Option<Ty>,
+    pub args: Option<TyOrReList>,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

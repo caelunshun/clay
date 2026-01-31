@@ -243,7 +243,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn oblige_wf_args_meet_binder(
         &mut self,
-        env: ClauseImportEnvRef<'_>,
+        def_env: ClauseImportEnvRef<'_>,
         defs: &[AnyGeneric],
         args: &[TyOrRe],
         mut gen_reason: impl FnMut(&mut Self, usize, Span) -> CheckOrigin,
@@ -256,7 +256,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
                     for clause in generic.r(s).clauses.iter(tcx) {
                         let clause_span = clause.own_span();
-                        let clause = self.importer(env).fold(clause.value);
+                        let clause = self.importer(def_env).fold(clause.value);
 
                         let TraitClause::Outlives(must_outlive_dir, must_outlive) = clause else {
                             unreachable!()
@@ -273,7 +273,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     }
                 }
                 (AnyGeneric::Ty(generic), TyOrRe::Ty(target)) => {
-                    let clauses = self.importer(env).fold_preserved(*generic.r(s).clauses);
+                    let clauses = self.importer(def_env).fold_preserved(*generic.r(s).clauses);
 
                     for clause in clauses.iter(tcx) {
                         let reason = gen_reason(self, i, clause.own_span());
@@ -563,7 +563,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
             | SpannedTyView::Adt(_)
             | SpannedTyView::Trait(_, _, _)
             | SpannedTyView::Tuple(_)
-            | SpannedTyView::FnDef(_, _)
+            | SpannedTyView::FnDef(_)
             | SpannedTyView::Error(_) => return self.super_spanned_fallible(ty),
 
             // These should not appear in an unimported type.

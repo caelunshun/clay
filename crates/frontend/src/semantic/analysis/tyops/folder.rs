@@ -7,8 +7,9 @@ use crate::{
     semantic::{
         analysis::TyCtxt,
         syntax::{
-            AdtInstance, HrtbBinder, HrtbBinderKind, HrtbDebruijnDef, HrtbDebruijnDefList, Re,
-            SpannedAdtInstance, SpannedAdtInstanceView, SpannedHrtbBinder, SpannedHrtbBinderKind,
+            AdtInstance, FnInstance, HrtbBinder, HrtbBinderKind, HrtbDebruijnDef,
+            HrtbDebruijnDefList, Re, SpannedAdtInstance, SpannedAdtInstanceView, SpannedFnInstance,
+            SpannedFnInstanceView, SpannedHrtbBinder, SpannedHrtbBinderKind,
             SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedHrtbDebruijnDef,
             SpannedHrtbDebruijnDefList, SpannedHrtbDebruijnDefView, SpannedRe, SpannedTraitClause,
             SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitInstance,
@@ -110,6 +111,10 @@ pub trait TyFolder<'tcx> {
         &mut self,
         instance: SpannedAdtInstance,
     ) -> Result<AdtInstance, Self::Error> {
+        self.super_spanned_fallible(instance)
+    }
+
+    fn fold_fn_instance(&mut self, instance: SpannedFnInstance) -> Result<FnInstance, Self::Error> {
         self.super_spanned_fallible(instance)
     }
 
@@ -410,6 +415,34 @@ impl TyFoldable for AdtInstance {
     }
 }
 
+impl TyFoldable for FnInstance {
+    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    where
+        F: ?Sized + TyFolder<'tcx>,
+    {
+        folder.fold_fn_instance(me)
+    }
+
+    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    where
+        F: ?Sized + TyFolder<'tcx>,
+    {
+        let SpannedFnInstanceView { def, impl_ty, args } = me.view(folder.tcx());
+
+        Ok(FnInstance {
+            def,
+            impl_ty: match impl_ty {
+                Some(v) => Some(folder.fold_spanned_fallible(v)?),
+                None => None,
+            },
+            args: match args {
+                Some(v) => Some(folder.fold_spanned_fallible(v)?),
+                None => None,
+            },
+        })
+    }
+}
+
 // === Types === //
 
 impl TyFoldable for TyOrRe {
@@ -510,7 +543,6 @@ impl TyFoldable for Ty {
         let kind = match me.view(tcx) {
             SpannedTyView::Simple(_)
             | SpannedTyView::SigInfer
-            | SpannedTyView::FnDef(_, None)
             | SpannedTyView::Error(_)
             | SpannedTyView::SigThis
             | SpannedTyView::SigGeneric(_)
@@ -528,9 +560,7 @@ impl TyFoldable for Ty {
                 muta,
                 folder.fold_spanned_fallible(pointee)?,
             ),
-            SpannedTyView::FnDef(def, Some(generics)) => {
-                TyKind::FnDef(def, Some(folder.fold_spanned_fallible(generics)?))
-            }
+            SpannedTyView::FnDef(def) => TyKind::FnDef(folder.fold_spanned_fallible(def)?),
             SpannedTyView::Adt(instance) => TyKind::Adt(folder.fold_spanned_fallible(instance)?),
             SpannedTyView::Trait(re, muta, clause_list) => TyKind::Trait(
                 folder.fold_spanned_fallible(re)?,

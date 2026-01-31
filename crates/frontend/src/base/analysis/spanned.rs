@@ -124,6 +124,10 @@ pub enum SpannedInfo {
 }
 
 impl SpannedInfo {
+    pub fn new_optional(info: Option<SpannedInfo>) -> Self {
+        info.unwrap_or(SpannedInfo::Untracked)
+    }
+
     pub fn new_list(
         own_span: Span,
         children: &[SpannedInfo],

@@ -1,6 +1,7 @@
 use crate::{
     base::{
         Session,
+        analysis::SpannedViewEncode,
         arena::{HasInterner, HasListInterner as _, Obj},
         syntax::Span,
     },
@@ -11,8 +12,8 @@ use crate::{
             TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
         },
         syntax::{
-            Block, Divergence, Expr, ExprKind, FnDef, FuncLocal, InferTyVar, SimpleTyKind, Stmt,
-            Ty, TyAndDivergence, TyKind,
+            Block, Divergence, Expr, ExprKind, FnDef, FuncLocal, InferTyVar, SimpleTyKind,
+            SpannedFnInstanceView, SpannedTyView, Stmt, Ty, TyAndDivergence, TyKind,
         },
     },
 };
@@ -185,11 +186,20 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             ExprKind::FnItemLit(def, args) => {
                 let env = self.import_env;
                 let args = self.ccx_mut().importer(env).fold_preserved(args);
-                self.ccx_mut().wf_visitor().visit_spanned(args);
 
-                // TODO: generic arg WF
+                let fn_ty = SpannedTyView::FnDef(
+                    SpannedFnInstanceView {
+                        def: *def.r(s).def,
+                        impl_ty: None,
+                        args: Some(args),
+                    }
+                    .encode(expr.r(s).span, tcx),
+                )
+                .encode(expr.r(s).span, tcx);
 
-                tcx.intern(TyKind::FnDef(*def.r(s).def, Some(args.value)))
+                self.ccx_mut().wf_visitor().visit_spanned(fn_ty);
+
+                fn_ty.value
             }
             ExprKind::TypeRelative {
                 self_ty,

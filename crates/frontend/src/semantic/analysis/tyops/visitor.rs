@@ -3,8 +3,9 @@ use crate::{
     semantic::{
         analysis::TyCtxt,
         syntax::{
-            AdtInstance, HrtbBinder, HrtbBinderKind, HrtbDebruijnDef, HrtbDebruijnDefList, Re,
-            SpannedAdtInstance, SpannedAdtInstanceView, SpannedHrtbBinder, SpannedHrtbBinderKind,
+            AdtInstance, FnInstance, HrtbBinder, HrtbBinderKind, HrtbDebruijnDef,
+            HrtbDebruijnDefList, Re, SpannedAdtInstance, SpannedAdtInstanceView, SpannedFnInstance,
+            SpannedFnInstanceView, SpannedHrtbBinder, SpannedHrtbBinderKind,
             SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedHrtbDebruijnDef,
             SpannedHrtbDebruijnDefList, SpannedHrtbDebruijnDefView, SpannedRe, SpannedTraitClause,
             SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitInstance,
@@ -69,6 +70,10 @@ pub trait TyVisitor<'tcx> {
     }
 
     fn visit_adt_instance(&mut self, instance: SpannedAdtInstance) -> ControlFlow<Self::Break> {
+        self.walk_spanned_fallible(instance)
+    }
+
+    fn visit_fn_instance(&mut self, instance: SpannedFnInstance) -> ControlFlow<Self::Break> {
         self.walk_spanned_fallible(instance)
     }
 
@@ -325,6 +330,36 @@ impl TyVisitable for AdtInstance {
     }
 }
 
+impl TyVisitable for FnInstance {
+    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + TyVisitor<'tcx>,
+    {
+        visitor.visit_fn_instance(me)
+    }
+
+    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + TyVisitor<'tcx>,
+    {
+        let SpannedFnInstanceView {
+            def: _,
+            impl_ty,
+            args,
+        } = me.view(visitor.tcx());
+
+        if let Some(impl_ty) = impl_ty {
+            visitor.visit_spanned_fallible(impl_ty)?;
+        }
+
+        if let Some(args) = args {
+            visitor.visit_spanned_fallible(args)?;
+        }
+
+        ControlFlow::Continue(())
+    }
+}
+
 // === Types === //
 
 impl TyVisitable for TyOrRe {
@@ -431,7 +466,6 @@ impl TyVisitable for Ty {
         match me.view(visitor.tcx()) {
             SpannedTyView::Simple(_)
             | SpannedTyView::SigInfer
-            | SpannedTyView::FnDef(_, None)
             | SpannedTyView::Error(_)
             | SpannedTyView::SigThis
             | SpannedTyView::SigGeneric(_)
@@ -447,8 +481,8 @@ impl TyVisitable for Ty {
                 visitor.visit_spanned_fallible(re)?;
                 visitor.visit_spanned_fallible(pointee)?;
             }
-            SpannedTyView::FnDef(_def, Some(generics)) => {
-                visitor.visit_spanned_fallible(generics)?;
+            SpannedTyView::FnDef(instance) => {
+                visitor.visit_spanned_fallible(instance)?;
             }
             SpannedTyView::Adt(instance) => {
                 visitor.visit_spanned_fallible(instance)?;

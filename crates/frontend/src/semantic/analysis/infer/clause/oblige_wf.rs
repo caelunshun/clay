@@ -12,10 +12,10 @@ use crate::{
             infer::clause::ClauseObligation,
         },
         syntax::{
-            FnDef, GenericBinder, GenericSubst, HrtbBinderKind, InferTyVar, RelationDirection,
-            SpannedAdtInstance, SpannedHrtbBinder, SpannedTraitInstance, SpannedTraitParamView,
-            SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList, SpannedTyView, Ty,
-            TyKind, TyOrRe,
+            FuncDefOwner, GenericBinder, GenericSubst, HrtbBinderKind, InferTyVar,
+            RelationDirection, SpannedAdtInstance, SpannedFnInstance, SpannedFnInstanceView,
+            SpannedHrtbBinder, SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec,
+            SpannedTy, SpannedTyOrRe, SpannedTyOrReList, SpannedTyView, Ty, TyKind, TyOrRe,
         },
     },
 };
@@ -107,11 +107,10 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
 
                 self.walk_spanned(ty);
             }
-            SpannedTyView::FnDef(..) => {
-                todo!()
-            }
+
             SpannedTyView::Simple(_)
             | SpannedTyView::Adt(_)
+            | SpannedTyView::FnDef(_)
             | SpannedTyView::Tuple(_)
             | SpannedTyView::UniversalVar(_)
             | SpannedTyView::HrtbVar(_)
@@ -158,6 +157,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         self.check_generics(
             self.clause_applies_to.unwrap(),
             spec.value.def.r(s).generics,
+            [],
             params,
             Some(spec.value.def.r(s).regular_generic_count),
         );
@@ -174,6 +174,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         self.check_generics(
             self.clause_applies_to.unwrap(),
             instance.value.def.r(s).generics,
+            [],
             instance.view(tcx).params,
             None,
         );
@@ -190,6 +191,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         self.check_generics(
             tcx.intern(TyKind::Adt(instance.value)),
             instance.value.def.r(s).generics,
+            [],
             instance.view(tcx).params,
             None,
         );
@@ -199,28 +201,64 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
 
         ControlFlow::Continue(())
     }
+
+    fn visit_fn_instance(&mut self, instance: SpannedFnInstance) -> ControlFlow<Self::Break> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let SpannedFnInstanceView { def, impl_ty, args } = instance.view(tcx);
+
+        // Validate the generic types against the function's binder(s).
+        match def.r(s).owner {
+            FuncDefOwner::Func(_) => {
+                assert!(impl_ty.is_none());
+
+                if let Some(args) = args {
+                    self.check_generics(
+                        tcx.intern(TyKind::SigThis),
+                        def.r(s).generics,
+                        [],
+                        args,
+                        None,
+                    );
+                }
+            }
+            FuncDefOwner::Method(impl_block, _idx) => {
+                let impl_ty = impl_ty.unwrap();
+
+                let impl_args = self.ccx.import_binder_list_as_infer(
+                    &CheckOrigin::root(CheckOriginKind::WfFnDef {
+                        fn_ty: instance.own_span(),
+                    }),
+                    impl_ty.value,
+                    &[impl_block.r(s).generics],
+                );
+
+                if let Some(args) = args {
+                    self.check_generics(
+                        tcx.intern(TyKind::SigThis),
+                        def.r(s).generics,
+                        impl_args,
+                        args,
+                        None,
+                    );
+                }
+            }
+        }
+
+        // Ensure parameter types are also well-formed.
+        self.walk_spanned(instance);
+
+        ControlFlow::Continue(())
+    }
 }
 
 impl ClauseTyWfVisitor<'_, '_> {
-    // pub fn visit_fn_instance(&mut self, def: Obj<FnDef>, args: SpannedTyOrReList) {
-    //     let s = self.session();
-    //     let tcx = self.tcx();
-    //
-    //     // Import `target`'s `Self` type.
-    //     let target_env = self.ccx.import_fn_def_env(def);
-    //     let target = ;
-    //
-    //     // Check generics
-    //     self.check_generics(target, def.r(s).generics, args, None);
-    //
-    //     // Ensure parameter types are also well-formed.
-    //     self.walk_spanned(args);
-    // }
-
-    pub fn check_generics(
+    fn check_generics(
         &mut self,
         clause_applies_to: Ty,
         binder: Obj<GenericBinder>,
+        extra_def_substs: impl IntoIterator<Item = GenericSubst>,
         all_params: SpannedTyOrReList,
         validate_count: Option<u32>,
     ) {
@@ -245,7 +283,10 @@ impl ClauseTyWfVisitor<'_, '_> {
                 &[GenericSubst {
                     binder,
                     substs: all_params.value,
-                }],
+                }]
+                .into_iter()
+                .chain(extra_def_substs)
+                .collect::<Vec<_>>(),
             ),
             defs,
             validated_params,

@@ -7,7 +7,7 @@ use crate::{
             infer::unify::{regions::ReUnifyTracker, types::TyUnifyTracker},
         },
         syntax::{
-            HrtbBinderKind, InferTyVar, Mutability, Re, ReVariance, RelationDirection,
+            FnInstance, HrtbBinderKind, InferTyVar, Mutability, Re, ReVariance, RelationDirection,
             RelationMode, SpannedTy, SpannedTyView, TraitClause, TraitClauseList, TraitParam, Ty,
             TyKind, TyOrRe, UniversalReVar, UniversalReVarSourceInfo,
         },
@@ -302,26 +302,53 @@ impl<'tcx> UnifyCx<'tcx> {
                     mode.with_variance(variance),
                 );
             }
-            (TyKind::FnDef(lhs, Some(lhs_generics)), TyKind::FnDef(rhs, Some(rhs_generics)))
-                if lhs == rhs =>
-            {
-                for (&lhs, &rhs) in lhs_generics.r(s).iter().zip(rhs_generics.r(s)) {
-                    // TODO: The variance rules for these are a bit more complicated.
-                    let mode = RelationMode::Equate;
+            (
+                TyKind::FnDef(FnInstance {
+                    def: lhs_def,
+                    impl_ty: lhs_impl_ty,
+                    args: lhs_args,
+                }),
+                TyKind::FnDef(FnInstance {
+                    def: rhs_def,
+                    impl_ty: rhs_impl_ty,
+                    args: rhs_args,
+                }),
+            ) if lhs_def == rhs_def => 'func: {
+                match (lhs_args, rhs_args) {
+                    (Some(lhs_generics), Some(rhs_generics)) => {
+                        for (&lhs, &rhs) in lhs_generics.r(s).iter().zip(rhs_generics.r(s)) {
+                            // TODO: The variance rules for these are a bit more complicated.
+                            let mode = RelationMode::Equate;
 
-                    match (lhs, rhs) {
-                        (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                            self.unify_re_and_re(origin, lhs, rhs, mode);
+                            match (lhs, rhs) {
+                                (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
+                                    self.unify_re_and_re(origin, lhs, rhs, mode);
+                                }
+                                (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
+                                    self.unify_ty_and_ty_inner(origin, lhs, rhs, culprits, mode);
+                                }
+                                _ => unreachable!(),
+                            }
                         }
-                        (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
-                            self.unify_ty_and_ty_inner(origin, lhs, rhs, culprits, mode);
-                        }
-                        _ => unreachable!(),
+                    }
+                    (None, None) => {
+                        // (trivially compatible)
+                    }
+                    _ => {
+                        culprits.push(TyAndTyUnifyCulprit::Types(lhs, rhs));
+                        break 'func;
                     }
                 }
-            }
-            (TyKind::FnDef(lhs, None), TyKind::FnDef(rhs, None)) if lhs == rhs => {
-                // (accepted)
+
+                match (lhs_impl_ty, rhs_impl_ty) {
+                    (Some(lhs), Some(rhs)) => {
+                        self.unify_ty_and_ty_inner(origin, lhs, rhs, culprits, mode);
+                    }
+                    (None, None) => {
+                        // (trivially compatible)
+                    }
+                    _ => unreachable!(),
+                }
             }
             (TyKind::Tuple(lhs), TyKind::Tuple(rhs)) if lhs.r(s).len() == rhs.r(s).len() => {
                 for (&lhs, &rhs) in lhs.r(s).iter().zip(rhs.r(s)) {

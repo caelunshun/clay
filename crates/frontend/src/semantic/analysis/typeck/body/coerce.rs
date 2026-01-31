@@ -195,7 +195,7 @@ impl CoercionPossibility {
             TyKind::Simple(_)
             | TyKind::Adt(_)
             | TyKind::Tuple(_)
-            | TyKind::FnDef(_, _)
+            | TyKind::FnDef(_)
             | TyKind::HrtbVar(_)
             | TyKind::InferVar(_)
             | TyKind::UniversalVar(_)

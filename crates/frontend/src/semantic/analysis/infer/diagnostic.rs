@@ -122,6 +122,10 @@ pub enum CheckOriginKind {
         clause: Span,
     },
 
+    WfFnDef {
+        fn_ty: Span,
+    },
+
     /// This obligation is required by a generic parameter's clause list.
     GenericRequirements {
         clause: Span,

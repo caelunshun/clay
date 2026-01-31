@@ -106,7 +106,7 @@ impl<'tcx> ClauseCx<'tcx> {
             | TyKind::Reference(_, _, _)
             | TyKind::Adt(_)
             | TyKind::Tuple(_)
-            | TyKind::FnDef(_, _) => {
+            | TyKind::FnDef(_) => {
                 // (the `impl` must come externally, fallthrough)
             }
         }

@@ -109,7 +109,7 @@ where
             | TyKind::Adt(_)
             | TyKind::Trait(_, _, _)
             | TyKind::Tuple(_)
-            | TyKind::FnDef(_, _)
+            | TyKind::FnDef(_)
             | TyKind::HrtbVar(_)
             | TyKind::InferVar(_)
             | TyKind::UniversalVar(_)

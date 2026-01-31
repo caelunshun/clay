@@ -5,7 +5,7 @@ use crate::semantic::{
         CheckOrigin, ClauseCx, ObligationNotReady, ObligationResult,
         infer::clause::ClauseObligation,
     },
-    syntax::{Re, RelationDirection, RelationMode, Ty, TyKind, TyOrRe},
+    syntax::{FnInstance, Re, RelationDirection, RelationMode, Ty, TyKind, TyOrRe},
 };
 
 impl<'tcx> ClauseCx<'tcx> {
@@ -126,7 +126,7 @@ impl<'tcx> ClauseCx<'tcx> {
             | TyKind::HrtbVar(_) => {
                 unreachable!()
             }
-            TyKind::FnDef(_, _) | TyKind::Simple(_) | TyKind::Error(_) => {
+            TyKind::Simple(_) | TyKind::Error(_) => {
                 // (trivial)
             }
             TyKind::Reference(lhs, _muta, _pointee) => {
@@ -143,6 +143,30 @@ impl<'tcx> ClauseCx<'tcx> {
                         }
                         TyOrRe::Ty(lhs) => {
                             self.oblige_ty_outlives_re(origin.clone(), lhs, rhs, dir);
+                        }
+                    }
+                }
+            }
+            TyKind::FnDef(FnInstance {
+                def: _,
+                impl_ty,
+                args,
+            }) => {
+                if let Some(impl_ty) = impl_ty {
+                    self.oblige_ty_outlives_re(origin.clone(), impl_ty, rhs, dir);
+                }
+
+                if let Some(args) = args {
+                    // Functions, like ADTs, are bounded by which regions they mention.
+                    for &lhs in args.r(s) {
+                        match lhs {
+                            TyOrRe::Re(lhs) => {
+                                self.ucx_mut()
+                                    .unify_re_and_re(origin, lhs, rhs, dir.to_mode());
+                            }
+                            TyOrRe::Ty(lhs) => {
+                                self.oblige_ty_outlives_re(origin.clone(), lhs, rhs, dir);
+                            }
                         }
                     }
                 }

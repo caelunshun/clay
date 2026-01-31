@@ -8,11 +8,11 @@ use crate::{
     semantic::{
         analysis::TyCtxt,
         syntax::{
-            AdtInstance, AdtItem, FnDef, GenericBinder, HrtbBinder, HrtbBinderKind, HrtbDebruijn,
-            HrtbDebruijnDef, HrtbDebruijnDefList, InferTyVar, Mutability, Re, RelationDirection,
-            SimpleTyKind, TraitClause, TraitClauseList, TraitInstance, TraitItem, TraitParam,
-            TraitParamList, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList,
-            TyProjection, TypeGeneric, UniversalTyVar,
+            AdtInstance, AdtItem, FnDef, FnInstance, GenericBinder, HrtbBinder, HrtbBinderKind,
+            HrtbDebruijn, HrtbDebruijnDef, HrtbDebruijnDefList, InferTyVar, Mutability, Re,
+            RelationDirection, SimpleTyKind, TraitClause, TraitClauseList, TraitInstance,
+            TraitItem, TraitParam, TraitParamList, TraitSpec, Ty, TyKind, TyList, TyOrRe,
+            TyOrReKind, TyOrReList, TyProjection, TypeGeneric, UniversalTyVar,
         },
     },
 };
@@ -75,7 +75,7 @@ pub enum SpannedTyView {
     Adt(SpannedAdtInstance),
     Trait(SpannedRe, Mutability, SpannedTraitClauseList),
     Tuple(SpannedTyList),
-    FnDef(Obj<FnDef>, Option<SpannedTyOrReList>),
+    FnDef(SpannedFnInstance),
     HrtbVar(HrtbDebruijn),
     InferVar(InferTyVar),
     UniversalVar(UniversalTyVar),
@@ -118,10 +118,9 @@ impl SpannedViewDecode<TyCtxt> for Ty {
             TyKind::Tuple(tys) => {
                 SpannedTyView::Tuple(Spanned::new_raw(tys, span_info.unwrap(tcx)))
             }
-            TyKind::FnDef(def, generics) => SpannedTyView::FnDef(
-                def,
-                generics.map(|generics| Spanned::new_raw(generics, span_info.unwrap(tcx))),
-            ),
+            TyKind::FnDef(instance) => {
+                SpannedTyView::FnDef(Spanned::new_raw(instance, span_info.unwrap(tcx)))
+            }
             TyKind::HrtbVar(var) => SpannedTyView::HrtbVar(var),
             TyKind::InferVar(var) => SpannedTyView::InferVar(var),
             TyKind::UniversalVar(var) => SpannedTyView::UniversalVar(var),
@@ -171,13 +170,9 @@ impl SpannedViewEncode<TyCtxt> for SpannedTyView {
                 tcx.intern(TyKind::Tuple(tys.value)),
                 tys.span_info.wrap(own_span, tcx),
             ),
-            SpannedTyView::FnDef(def, Some(generics)) => Spanned::new_raw(
-                tcx.intern(TyKind::FnDef(def, Some(generics.value))),
-                SpannedInfo::new_list(own_span, &[generics.span_info], tcx),
-            ),
-            SpannedTyView::FnDef(def, None) => Spanned::new_raw(
-                tcx.intern(TyKind::FnDef(def, None)),
-                SpannedInfo::new_terminal(own_span, tcx),
+            SpannedTyView::FnDef(instance) => Spanned::new_raw(
+                tcx.intern(TyKind::FnDef(instance.value)),
+                instance.span_info.wrap(own_span, tcx),
             ),
             SpannedTyView::HrtbVar(var) => Spanned::new_raw(
                 tcx.intern(TyKind::HrtbVar(var)),
@@ -404,6 +399,55 @@ impl SpannedViewEncode<TyCtxt> for SpannedTraitInstanceView {
                 params: self.params.value,
             },
             self.params.span_info.wrap(own_span, tcx),
+        )
+    }
+}
+
+// === FnInstance === //
+
+pub type SpannedFnInstance = Spanned<FnInstance>;
+
+#[derive(Debug, Copy, Clone)]
+pub struct SpannedFnInstanceView {
+    pub def: Obj<FnDef>,
+    pub impl_ty: Option<SpannedTy>,
+    pub args: Option<SpannedTyOrReList>,
+}
+
+impl SpannedViewDecode<TyCtxt> for FnInstance {
+    type View = SpannedFnInstanceView;
+
+    fn decode(value: &Self, span_info: SpannedInfo, tcx: &TyCtxt) -> Self::View {
+        let [impl_ty_span, args_span] = span_info.child_spans(tcx);
+
+        SpannedFnInstanceView {
+            def: value.def,
+            impl_ty: value
+                .impl_ty
+                .map(|impl_ty| Spanned::new_raw(impl_ty, impl_ty_span)),
+            args: value.args.map(|args| Spanned::new_raw(args, args_span)),
+        }
+    }
+}
+
+impl SpannedViewEncode<TyCtxt> for SpannedFnInstanceView {
+    type Unspanned = FnInstance;
+
+    fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
+        Spanned::new_raw(
+            FnInstance {
+                def: self.def,
+                impl_ty: self.impl_ty.map(|v| v.value),
+                args: self.args.map(|v| v.value),
+            },
+            SpannedInfo::new_list(
+                own_span,
+                &[
+                    SpannedInfo::new_optional(self.impl_ty.map(|v| v.span_info)),
+                    SpannedInfo::new_optional(self.args.map(|v| v.span_info)),
+                ],
+                tcx,
+            ),
         )
     }
 }
