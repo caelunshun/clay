@@ -189,12 +189,12 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn suppress_obligation_eval<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
         let was_suppressed = self.ocx.obligation_eval_suppressed();
         self.ocx.set_obligation_eval_suppressed(true);
-
-        let mut this = scopeguard::guard(self, |this| {
-            this.ocx.set_obligation_eval_suppressed(was_suppressed)
-        });
-
-        f(&mut this)
+        let res = f(self);
+        self.ocx.set_obligation_eval_suppressed(was_suppressed);
+        if !was_suppressed {
+            self.process_obligations();
+        }
+        res
     }
 
     pub fn try_fork<T, E>(&mut self, f: impl FnOnce(&mut Self) -> Result<T, E>) -> Result<T, E> {
@@ -209,6 +209,15 @@ impl<'tcx> ClauseCx<'tcx> {
 
             res
         })
+    }
+
+    pub fn fork_throwaway<T>(&self, f: impl FnOnce(&mut Self) -> T) -> T {
+        let was_suppressed = self.ocx.obligation_eval_suppressed();
+        self.ocx.set_obligation_eval_suppressed(true);
+        let res = f(&mut self.clone());
+        self.ocx.set_obligation_eval_suppressed(was_suppressed);
+        // N.B. there are no obligations to run here.
+        res
     }
 }
 

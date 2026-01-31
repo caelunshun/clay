@@ -138,7 +138,7 @@ pub enum CheckOriginKind {
         def: Span,
     },
 
-    NeverErrors,
+    NeverPrinted,
 }
 
 impl CheckOrigin {
@@ -150,6 +150,10 @@ impl CheckOrigin {
             depth,
             kind,
         }))
+    }
+
+    pub fn never_printed() -> Self {
+        Self::new(None, CheckOriginKind::NeverPrinted)
     }
 
     pub fn child(self, kind: CheckOriginKind) -> Self {

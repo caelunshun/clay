@@ -113,7 +113,7 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
         self.root.eval_suppressed.get()
     }
 
-    pub fn set_obligation_eval_suppressed(&mut self, is_suppressed: bool) {
+    pub fn set_obligation_eval_suppressed(&self, is_suppressed: bool) {
         self.root.eval_suppressed.set(is_suppressed);
     }
 

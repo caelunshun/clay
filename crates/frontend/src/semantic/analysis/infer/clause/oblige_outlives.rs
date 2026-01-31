@@ -2,7 +2,7 @@
 
 use crate::semantic::{
     analysis::{
-        CheckOrigin, CheckOriginKind, ClauseCx, ObligationNotReady, ObligationResult,
+        CheckOrigin, ClauseCx, ObligationNotReady, ObligationResult,
         infer::clause::ClauseObligation,
     },
     syntax::{Re, RelationDirection, RelationMode, Ty, TyKind, TyOrRe},
@@ -54,12 +54,7 @@ impl<'tcx> ClauseCx<'tcx> {
         let joiner = self.fresh_re_infer();
 
         // `'a: other` (inverse: `other: 'a`)
-        self.oblige_ty_outlives_re(
-            CheckOrigin::new(None, CheckOriginKind::NeverErrors),
-            other,
-            joiner,
-            dir.invert(),
-        );
+        self.oblige_ty_outlives_re(CheckOrigin::never_printed(), other, joiner, dir.invert());
 
         // `universal: 'a` (inverse: `'a: universal`)
         self.permit_universe_re_outlives_re(universal, joiner, dir);

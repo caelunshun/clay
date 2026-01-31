@@ -736,10 +736,10 @@ impl RelationMode {
     }
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Mutability {
-    Mut,
     Not,
+    Mut,
 }
 
 impl Mutability {

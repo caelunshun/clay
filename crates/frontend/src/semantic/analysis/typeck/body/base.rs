@@ -8,17 +8,17 @@ use crate::{
     semantic::{
         analysis::{
             ClauseCx, ClauseImportEnv, CrateTypeckVisitor, TyCtxt, TyFolderInfallibleExt,
-            TyVisitorInfallibleExt, UnifyCxMode,
+            TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
         },
         syntax::{
             Block, Divergence, Expr, ExprKind, FnDef, FuncDefOwner, FuncLocal, InferTyVar,
-            Mutability, Re, SimpleTyKind, Stmt, TraitClauseList, Ty, TyAndDivergence, TyKind,
+            SimpleTyKind, Stmt, Ty, TyAndDivergence, TyKind,
         },
     },
 };
 use rustc_hash::FxHashMap;
-use smallvec::{SmallVec, smallvec};
-use std::cmp::Ordering;
+
+// === Driver === //
 
 impl<'tcx> CrateTypeckVisitor<'tcx> {
     pub fn visit_fn_def(&mut self, def: Obj<FnDef>) {
@@ -49,7 +49,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Check the body
         if let Some(body) = *def.r(s).body {
-            let mut bcx = BodyChecker::new(&mut ccx);
+            let mut bcx = BodyCtxt::new(&mut ccx);
             bcx.check_block(body);
         }
 
@@ -79,7 +79,9 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
     }
 }
 
-pub struct BodyChecker<'a, 'tcx> {
+// === BodyCtxt === //
+
+pub struct BodyCtxt<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
     local_types: FxHashMap<Obj<FuncLocal>, Ty>,
     needs_infer: Vec<NeedsInfer>,
@@ -91,93 +93,7 @@ struct NeedsInfer {
     var: InferTyVar,
 }
 
-#[derive(Debug, Clone)]
-enum UnresolvedCoercionTarget {
-    Solid(Ty),
-    ThinReference(SmallVec<[Ty; 1]>),
-    WideReference(SmallVec<[Ty; 1]>),
-}
-
-impl UnresolvedCoercionTarget {
-    fn new(bcx: &BodyChecker<'_, '_>, ty: Ty) -> Self {
-        let s = bcx.session();
-
-        match ty.r(s) {
-            TyKind::SigThis | TyKind::SigInfer | TyKind::SigGeneric(_) | TyKind::SigProject(_) => {
-                unreachable!()
-            }
-
-            TyKind::Simple(_)
-            | TyKind::Adt(_)
-            | TyKind::Tuple(_)
-            | TyKind::FnDef(_, _)
-            | TyKind::HrtbVar(_)
-            | TyKind::InferVar(_)
-            | TyKind::UniversalVar(_)
-            | TyKind::Error(_) => Self::Solid(ty),
-
-            TyKind::Reference(_, _, _) => Self::ThinReference(smallvec![ty]),
-            TyKind::Trait(_, _, _) => Self::WideReference(smallvec![ty]),
-        }
-    }
-
-    fn level(&self) -> u8 {
-        match self {
-            UnresolvedCoercionTarget::Solid(_) => 0,
-            UnresolvedCoercionTarget::ThinReference(_) => 1,
-            UnresolvedCoercionTarget::WideReference(_) => 2,
-        }
-    }
-
-    fn merge(&mut self, other: UnresolvedCoercionTarget) {
-        match self.level().cmp(&other.level()) {
-            Ordering::Less => {
-                *self = other;
-            }
-            Ordering::Greater => {
-                // (keep the current target)
-            }
-            Ordering::Equal => match (self, other) {
-                (UnresolvedCoercionTarget::Solid(_lhs), UnresolvedCoercionTarget::Solid(_rhs)) => {
-                    // (prefer earlier solid choice)
-                }
-                (
-                    UnresolvedCoercionTarget::ThinReference(lhs),
-                    UnresolvedCoercionTarget::ThinReference(rhs),
-                ) => {
-                    lhs.extend(rhs);
-                }
-                (
-                    UnresolvedCoercionTarget::WideReference(lhs),
-                    UnresolvedCoercionTarget::WideReference(rhs),
-                ) => {
-                    lhs.extend(rhs);
-                }
-                _ => unreachable!(),
-            },
-        }
-    }
-
-    fn resolve(self, bcx: &BodyChecker<'_, '_>) -> ResolvedCoercionTarget {
-        match self {
-            UnresolvedCoercionTarget::Solid(ty) => ResolvedCoercionTarget::Solid(ty),
-            UnresolvedCoercionTarget::ThinReference(options) => {
-                todo!()
-            }
-            UnresolvedCoercionTarget::WideReference(options) => {
-                todo!()
-            }
-        }
-    }
-}
-
-enum ResolvedCoercionTarget {
-    Solid(Ty),
-    ThinReference(Re, Mutability, Ty),
-    WideReference(Re, Mutability, TraitClauseList),
-}
-
-impl<'a, 'tcx> BodyChecker<'a, 'tcx> {
+impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
     pub fn new(ccx: &'a mut ClauseCx<'tcx>) -> Self {
         Self {
             ccx,
@@ -192,6 +108,22 @@ impl<'a, 'tcx> BodyChecker<'a, 'tcx> {
 
     pub fn session(&self) -> &'tcx Session {
         self.ccx.session()
+    }
+
+    pub fn ccx(&self) -> &ClauseCx<'tcx> {
+        self.ccx
+    }
+
+    pub fn ccx_mut(&mut self) -> &mut ClauseCx<'tcx> {
+        self.ccx
+    }
+
+    pub fn ucx(&self) -> &UnifyCx<'tcx> {
+        self.ccx.ucx()
+    }
+
+    pub fn ucx_mut(&mut self) -> &mut UnifyCx<'tcx> {
+        self.ccx.ucx_mut()
     }
 
     pub fn type_of_local(&mut self, local: Obj<FuncLocal>) -> Ty {
@@ -226,70 +158,6 @@ impl<'a, 'tcx> BodyChecker<'a, 'tcx> {
             }
         }
 
-        todo!()
-    }
-
-    pub fn check_exprs_equate_with_demand(
-        &mut self,
-        exprs: &[Obj<Expr>],
-        demand: Option<Ty>,
-    ) -> TyAndDivergence {
-        let mut divergence = Divergence::MayDiverge;
-
-        // Compute GLB for coercion.
-        let (mut glb, exprs) = if let Some(demand) = demand {
-            (demand, exprs)
-        } else {
-            let (first, exprs) = exprs.split_first().unwrap();
-            (self.check_expr(*first).and_do(&mut divergence), exprs)
-        };
-
-        let exprs = exprs
-            .iter()
-            .map(|&expr| (expr, self.check_expr(expr).and_do(&mut divergence)))
-            .collect::<Vec<_>>();
-
-        for &(_expr, ty) in &exprs {
-            self.compute_coercion_glb(ty, &mut glb);
-        }
-
-        // Perform coercions.
-        for &(expr, ty) in &exprs {
-            todo!()
-        }
-
-        TyAndDivergence::new(glb, divergence)
-    }
-
-    fn compute_coercion_glb(&self, candidate_glb: Ty, current_glb: &mut Ty) {
-        let s = self.session();
-
-        match candidate_glb.r(s) {
-            TyKind::SigThis | TyKind::SigGeneric(_) | TyKind::SigProject(_) => unreachable!(),
-
-            TyKind::Simple(_)
-            | TyKind::Adt(_)
-            | TyKind::SigInfer
-            | TyKind::Tuple(_)
-            | TyKind::UniversalVar(_)
-            | TyKind::InferVar(_)
-            | TyKind::HrtbVar(_)
-            | TyKind::FnDef(_, _)
-            | TyKind::Error(_) => {
-                // Cannot be a coercion target.
-            }
-
-            TyKind::Reference(_candidate_re, candidate_muta, candiate_ty) => {
-                todo!()
-            }
-
-            TyKind::Trait(re, mutability, intern) => {
-                // TODO
-            }
-        }
-    }
-
-    fn coerce_expr(&mut self, expr: Obj<Expr>, target: Ty) {
         todo!()
     }
 
