@@ -1,14 +1,14 @@
 use crate::{
     base::{
         Session,
-        arena::{HasInterner, Obj},
+        arena::{HasInterner, HasListInterner as _, Obj},
         syntax::Span,
     },
     parse::ast::AstLit,
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnv, CrateTypeckVisitor, TyCtxt, TyFolderInfallibleExt,
-            TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
+            ClauseCx, ClauseImportEnv, ClauseImportEnvRef, CrateTypeckVisitor, TyCtxt,
+            TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
         },
         syntax::{
             Block, Divergence, Expr, ExprKind, FnDef, FuncDefOwner, FuncLocal, InferTyVar,
@@ -49,7 +49,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Check the body
         if let Some(body) = *def.r(s).body {
-            let mut bcx = BodyCtxt::new(&mut ccx);
+            let mut bcx = BodyCtxt::new(&mut ccx, env.as_ref());
             bcx.check_block(body);
         }
 
@@ -83,6 +83,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
 pub struct BodyCtxt<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
+    import_env: ClauseImportEnvRef<'a>,
     local_types: FxHashMap<Obj<FuncLocal>, Ty>,
     needs_infer: Vec<NeedsInfer>,
 }
@@ -94,9 +95,10 @@ struct NeedsInfer {
 }
 
 impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
-    pub fn new(ccx: &'a mut ClauseCx<'tcx>) -> Self {
+    pub fn new(ccx: &'a mut ClauseCx<'tcx>, import_env: ClauseImportEnvRef<'a>) -> Self {
         Self {
             ccx,
+            import_env,
             local_types: FxHashMap::default(),
             needs_infer: Vec::new(),
         }
@@ -144,6 +146,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
     pub fn check_block(&mut self, block: Obj<Block>) -> TyAndDivergence {
         let s = self.session();
+        let tcx = self.tcx();
 
         let mut divergence = Divergence::MayDiverge;
 
@@ -158,7 +161,13 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             }
         }
 
-        todo!()
+        let output = if let Some(last_expr) = block.r(s).last_expr {
+            self.check_expr(last_expr).and_do(&mut divergence)
+        } else {
+            tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
+        };
+
+        TyAndDivergence::new(output, divergence)
     }
 
     pub fn check_expr(&mut self, expr: Obj<Expr>) -> TyAndDivergence {
@@ -174,7 +183,15 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 generics,
                 args,
             } => todo!(),
-            ExprKind::Tuple(obj) => todo!(),
+            ExprKind::Tuple(children) => {
+                let children = children
+                    .r(s)
+                    .iter()
+                    .map(|&expr| self.check_expr(expr).and_do(&mut divergence))
+                    .collect::<Vec<_>>();
+
+                tcx.intern(TyKind::Tuple(tcx.intern_list(&children)))
+            }
             ExprKind::Binary(ast_bin_op_spanned, obj, obj1) => todo!(),
             ExprKind::Unary(ast_un_op_kind, obj) => todo!(),
             ExprKind::Literal(lit) => match lit {
@@ -194,7 +211,11 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 assoc_name,
                 assoc_args,
             } => todo!(),
-            ExprKind::Cast(obj, spanned) => todo!(),
+            ExprKind::Cast(expr, as_ty) => {
+                let env = self.import_env;
+                let as_ty = self.ccx_mut().importer(env).fold(as_ty.value);
+                self.check_expr_demand(expr, as_ty).and_do(&mut divergence)
+            }
             ExprKind::If {
                 cond,
                 truthy,
@@ -205,7 +226,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             ExprKind::ForLoop { pat, iter, body } => todo!(),
             ExprKind::Loop(obj) => todo!(),
             ExprKind::Match(obj, obj1) => todo!(),
-            ExprKind::Block(obj) => todo!(),
+            ExprKind::Block(block) => self.check_block(block).and_do(&mut divergence),
             ExprKind::Assign(obj, obj1) => todo!(),
             ExprKind::AssignOp(ast_assign_op_kind, obj, obj1) => todo!(),
             ExprKind::Field(obj, ident) => todo!(),

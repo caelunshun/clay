@@ -83,6 +83,7 @@ impl BodyCtxt<'_, '_> {
         TyAndDivergence::new(demand, divergence)
     }
 
+    // TODO: Save the coercions to a fact map
     fn apply_coercions(&mut self, exprs: &[(Obj<Expr>, Ty)], target: CoercionResolution) -> Ty {
         let s = self.session();
         let tcx = self.tcx();
