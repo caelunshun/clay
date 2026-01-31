@@ -5,7 +5,7 @@ use crate::{
             BodyCtxt, CheckOrigin, CheckOriginKind, ClauseCx, NoTraitImplError, ObligationNotReady,
         },
         syntax::{
-            Divergence, Expr, Mutability, RelationMode, TraitClauseList, TraitItem, TraitParam,
+            Divergence, Expr, Mutability, Re, RelationMode, TraitClauseList, TraitItem, TraitParam,
             TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
@@ -85,6 +85,7 @@ impl BodyCtxt<'_, '_> {
 
     fn apply_coercions(&mut self, exprs: &[(Obj<Expr>, Ty)], target: CoercionResolution) -> Ty {
         let s = self.session();
+        let tcx = self.tcx();
 
         match target {
             CoercionResolution::Solid(solid) => {
@@ -105,14 +106,68 @@ impl BodyCtxt<'_, '_> {
                 to_muta,
                 deref_steps,
             } => {
-                for &(expr, actual) in exprs {}
+                let unify_pointee = self.ccx_mut().fresh_ty_infer();
+                let mut deref_steps = deref_steps.iter();
 
-                todo!()
+                for &(expr, actual) in exprs {
+                    let mut output_pointee = actual;
+
+                    match CoercionPossibility::new(self, actual) {
+                        CoercionPossibility::Solid(_) | CoercionPossibility::WideReference(_) => {
+                            // (nothing to do)
+                        }
+                        CoercionPossibility::ThinReference(_) => {
+                            let deref_step_count = *deref_steps.next().unwrap();
+
+                            for _ in 0..deref_step_count {
+                                let next_output = self.ccx_mut().fresh_ty_infer();
+
+                                self.ccx_mut().oblige_ty_meets_trait_instantiated(
+                                    CheckOrigin::root(CheckOriginKind::Coercion {
+                                        expr_span: expr.r(s).span,
+                                    }),
+                                    output_pointee,
+                                    TraitSpec {
+                                        def: deref_lang_item(),
+                                        params: tcx.intern_list(&[TraitParam::Equals(TyOrRe::Ty(
+                                            next_output,
+                                        ))]),
+                                    },
+                                );
+
+                                output_pointee = next_output;
+                            }
+                        }
+                    }
+
+                    self.ccx_mut().oblige_ty_unifies_ty(
+                        CheckOrigin::root(CheckOriginKind::Coercion {
+                            expr_span: expr.r(s).span,
+                        }),
+                        output_pointee,
+                        unify_pointee,
+                        RelationMode::Equate,
+                    );
+                }
+
+                tcx.intern(TyKind::Reference(Re::Erased, to_muta, unify_pointee))
             }
             CoercionResolution::WideReference {
                 to_muta,
                 to_clauses,
-            } => todo!(),
+            } => {
+                for &(expr, actual) in exprs {
+                    self.ccx_mut().oblige_ty_meets_clauses(
+                        &CheckOrigin::root(CheckOriginKind::Coercion {
+                            expr_span: expr.r(s).span,
+                        }),
+                        actual,
+                        to_clauses,
+                    );
+                }
+
+                tcx.intern(TyKind::Trait(Re::Erased, to_muta, to_clauses))
+            }
         }
     }
 }
@@ -129,8 +184,9 @@ enum CoercionPossibility {
 impl CoercionPossibility {
     fn new(bcx: &BodyCtxt<'_, '_>, ty: Ty) -> Self {
         let s = bcx.session();
+        let ty = bcx.ccx().peel_ty_infer_var(ty);
 
-        match ty.r(s) {
+        match *ty.r(s) {
             TyKind::SigThis | TyKind::SigInfer | TyKind::SigGeneric(_) | TyKind::SigProject(_) => {
                 unreachable!()
             }
@@ -187,7 +243,7 @@ impl CoercionPossibility {
         match self {
             CoercionPossibility::Solid(ty) => CoercionResolution::Solid(ty),
             CoercionPossibility::ThinReference(refs) => {
-                let refs = refs.iter().map(|v| match *v.r(s) {
+                let refs = refs.iter().map(|&ty| match *ty.r(s) {
                     TyKind::Reference(_, muta, pointee) => (muta, pointee),
                     _ => unreachable!(),
                 });
@@ -295,15 +351,11 @@ fn compute_deref_chain_clobber_obligations(
     let mut accum = smallvec![curr];
     let tcx = ccx.tcx();
 
-    fn deref_lang_item() -> Obj<TraitItem> {
-        todo!()
-    }
-
     loop {
         let next_infer_var = ccx.fresh_ty_infer_var();
         let next_infer = tcx.intern(TyKind::InferVar(next_infer_var));
 
-        match ccx.try_oblige_ty_meets_trait(
+        match ccx.try_oblige_ty_meets_trait_instantiated(
             &CheckOrigin::never_printed(),
             curr,
             TraitSpec {
@@ -339,4 +391,8 @@ enum CoercionResolution {
         to_muta: Mutability,
         to_clauses: TraitClauseList,
     },
+}
+
+fn deref_lang_item() -> Obj<TraitItem> {
+    todo!()
 }

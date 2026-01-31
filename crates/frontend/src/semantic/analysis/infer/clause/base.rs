@@ -166,7 +166,7 @@ impl<'tcx> ClauseCx<'tcx> {
                         Ok(())
                     }
                     ClauseObligation::TyMeetsTrait(origin, lhs, rhs) => {
-                        match fork.try_oblige_ty_meets_trait(&origin, lhs, rhs) {
+                        match fork.try_oblige_ty_meets_trait_instantiated(&origin, lhs, rhs) {
                             Ok(Ok(())) => Ok(()),
                             Ok(Err(err)) => {
                                 err.emit(fork);

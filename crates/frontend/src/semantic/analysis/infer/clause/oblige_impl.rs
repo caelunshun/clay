@@ -57,7 +57,7 @@ impl<'tcx> ClauseCx<'tcx> {
         self.push_obligation(ClauseObligation::TyMeetsTrait(origin, lhs, rhs));
     }
 
-    pub fn try_oblige_ty_meets_trait(
+    pub fn try_oblige_ty_meets_trait_instantiated(
         &mut self,
         origin: &CheckOrigin,
         lhs: Ty,
