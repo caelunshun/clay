@@ -97,12 +97,9 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             }
             SpannedTyView::Reference(re, _muta, pointee) => {
                 self.ccx.oblige_ty_outlives_re(
-                    CheckOrigin::new(
-                        None,
-                        CheckOriginKind::WfForReference {
-                            pointee: pointee.own_span(),
-                        },
-                    ),
+                    CheckOrigin::root(CheckOriginKind::WfForReference {
+                        pointee: pointee.own_span(),
+                    }),
                     pointee.value,
                     re.value,
                     RelationDirection::LhsOntoRhs,
@@ -328,13 +325,10 @@ impl ClauseTyWfVisitor<'_, '_> {
             defs,
             validated_params,
             |_, param_idx, clause_span| {
-                CheckOrigin::new(
-                    None,
-                    CheckOriginKind::WfForGenericParam {
-                        use_span: all_params.nth(param_idx, tcx).own_span(),
-                        clause_span,
-                    },
-                )
+                CheckOrigin::root(CheckOriginKind::WfForGenericParam {
+                    use_span: all_params.nth(param_idx, tcx).own_span(),
+                    clause_span,
+                })
             },
         );
     }

@@ -101,9 +101,8 @@ struct CheckOriginInner {
 
 #[derive(Debug, Clone)]
 pub enum CheckOriginKind {
-    /// This obligation is required to type-check the function body.
-    FunctionBody {
-        at: Span,
+    Coercion {
+        expr_span: Span,
     },
 
     /// This obligation is required to satisfy the requirements of a generic parameter for
@@ -152,8 +151,12 @@ impl CheckOrigin {
         }))
     }
 
+    pub fn root(kind: CheckOriginKind) -> Self {
+        Self::new(None, kind)
+    }
+
     pub fn never_printed() -> Self {
-        Self::new(None, CheckOriginKind::NeverPrinted)
+        Self::root(CheckOriginKind::NeverPrinted)
     }
 
     pub fn child(self, kind: CheckOriginKind) -> Self {

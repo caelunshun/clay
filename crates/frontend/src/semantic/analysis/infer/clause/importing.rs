@@ -530,12 +530,9 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
                     .visit_spanned(Spanned::new_maybe_saturated(spec, assoc_span, tcx));
 
                 self.ccx.oblige_ty_meets_trait_instantiated(
-                    CheckOrigin::new(
-                        None,
-                        CheckOriginKind::InstantiatedProjection {
-                            span: projection.own_span(),
-                        },
-                    ),
+                    CheckOrigin::root(CheckOriginKind::InstantiatedProjection {
+                        span: projection.own_span(),
+                    }),
                     target.value,
                     spec,
                 );

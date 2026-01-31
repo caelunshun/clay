@@ -1,7 +1,9 @@
 use crate::{
     base::arena::{HasInterner, HasListInterner, Obj},
     semantic::{
-        analysis::{BodyCtxt, CheckOrigin, ClauseCx, NoTraitImplError, ObligationNotReady},
+        analysis::{
+            BodyCtxt, CheckOrigin, CheckOriginKind, ClauseCx, NoTraitImplError, ObligationNotReady,
+        },
         syntax::{
             Divergence, Expr, Mutability, RelationMode, TraitClauseList, TraitItem, TraitParam,
             TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
@@ -16,66 +18,214 @@ use std::cmp::Ordering;
 impl BodyCtxt<'_, '_> {
     pub fn check_exprs_equate_with_demand(
         &mut self,
-        exprs: &[Obj<Expr>],
+        exprs: impl IntoIterator<Item = Obj<Expr>>,
         demand: Option<Ty>,
+    ) -> TyAndDivergence {
+        if let Some(demand) = demand {
+            self.check_exprs_demand(exprs, demand)
+        } else {
+            self.check_exprs_equate(exprs)
+        }
+    }
+
+    pub fn check_exprs_equate(
+        &mut self,
+        exprs: impl IntoIterator<Item = Obj<Expr>>,
     ) -> TyAndDivergence {
         let mut divergence = Divergence::MayDiverge;
 
-        // Compute GLB for coercion.
-        let (mut glb, exprs) = if let Some(demand) = demand {
-            (demand, exprs)
-        } else {
-            let (first, exprs) = exprs.split_first().unwrap();
-            (self.check_expr(*first).and_do(&mut divergence), exprs)
-        };
-
         let exprs = exprs
-            .iter()
-            .map(|&expr| (expr, self.check_expr(expr).and_do(&mut divergence)))
+            .into_iter()
+            .map(|expr| {
+                let actual = self.check_expr(expr).and_do(&mut divergence);
+                (expr, actual)
+            })
             .collect::<Vec<_>>();
 
-        for &(_expr, ty) in &exprs {
-            self.compute_coercion_glb(ty, &mut glb);
+        // Compute GLB
+        let (&(_first_expr, first_actual), other) = exprs.split_first().unwrap();
+
+        let mut glb = CoercionPossibility::new(self, first_actual);
+
+        for &(_other_expr, other_actual) in other {
+            glb.merge(CoercionPossibility::new(self, other_actual));
         }
 
-        // Perform coercions.
-        for &(expr, ty) in &exprs {
-            todo!()
-        }
+        let glb = glb.resolve(self);
 
-        TyAndDivergence::new(glb, divergence)
+        // Apply coercion
+        let output = self.apply_coercions(&exprs, glb);
+
+        TyAndDivergence::new(output, divergence)
     }
 
-    fn compute_coercion_glb(&self, candidate_glb: Ty, current_glb: &mut Ty) {
+    pub fn check_exprs_demand(
+        &mut self,
+        exprs: impl IntoIterator<Item = Obj<Expr>>,
+        demand: Ty,
+    ) -> TyAndDivergence {
+        let mut divergence = Divergence::MayDiverge;
+
+        for expr in exprs {
+            self.check_expr_demand(expr, demand).and_do(&mut divergence);
+        }
+
+        TyAndDivergence::new(demand, divergence)
+    }
+
+    pub fn check_expr_demand(&mut self, expr: Obj<Expr>, demand: Ty) -> TyAndDivergence {
+        let mut divergence = Divergence::MayDiverge;
+
+        let actual = self.check_expr(expr).and_do(&mut divergence);
+        let target = CoercionPossibility::new(self, demand).resolve(self);
+        self.apply_coercions(&[(expr, actual)], target);
+
+        TyAndDivergence::new(demand, divergence)
+    }
+
+    fn apply_coercions(&mut self, exprs: &[(Obj<Expr>, Ty)], target: CoercionResolution) -> Ty {
         let s = self.session();
 
-        match candidate_glb.r(s) {
-            TyKind::SigThis | TyKind::SigGeneric(_) | TyKind::SigProject(_) => unreachable!(),
+        match target {
+            CoercionResolution::Solid(solid) => {
+                for &(expr, actual) in exprs {
+                    self.ccx_mut().oblige_ty_unifies_ty(
+                        CheckOrigin::root(CheckOriginKind::Coercion {
+                            expr_span: expr.r(s).span,
+                        }),
+                        actual,
+                        solid,
+                        RelationMode::Equate,
+                    );
+                }
+
+                solid
+            }
+            CoercionResolution::ThinReference {
+                to_muta,
+                deref_steps,
+            } => {
+                for &(expr, actual) in exprs {}
+
+                todo!()
+            }
+            CoercionResolution::WideReference {
+                to_muta,
+                to_clauses,
+            } => todo!(),
+        }
+    }
+}
+
+// === CoercionTarget === //
+
+#[derive(Debug, Clone)]
+enum CoercionPossibility {
+    Solid(Ty),
+    ThinReference(SmallVec<[Ty; 1]>),
+    WideReference(Ty),
+}
+
+impl CoercionPossibility {
+    fn new(bcx: &BodyCtxt<'_, '_>, ty: Ty) -> Self {
+        let s = bcx.session();
+
+        match ty.r(s) {
+            TyKind::SigThis | TyKind::SigInfer | TyKind::SigGeneric(_) | TyKind::SigProject(_) => {
+                unreachable!()
+            }
 
             TyKind::Simple(_)
             | TyKind::Adt(_)
-            | TyKind::SigInfer
             | TyKind::Tuple(_)
-            | TyKind::UniversalVar(_)
-            | TyKind::InferVar(_)
-            | TyKind::HrtbVar(_)
             | TyKind::FnDef(_, _)
-            | TyKind::Error(_) => {
-                // Cannot be a coercion target.
-            }
+            | TyKind::HrtbVar(_)
+            | TyKind::InferVar(_)
+            | TyKind::UniversalVar(_)
+            | TyKind::Error(_) => Self::Solid(ty),
 
-            TyKind::Reference(_candidate_re, candidate_muta, candiate_ty) => {
-                todo!()
-            }
-
-            TyKind::Trait(re, mutability, intern) => {
-                // TODO
-            }
+            TyKind::Reference(_, _, _) => Self::ThinReference(smallvec![ty]),
+            TyKind::Trait(_, _, _) => Self::WideReference(ty),
         }
     }
 
-    fn coerce_expr(&mut self, expr: Obj<Expr>, target: Ty) {
-        todo!()
+    fn level(&self) -> u8 {
+        match self {
+            CoercionPossibility::Solid(_) => 0,
+            CoercionPossibility::ThinReference(_) => 1,
+            CoercionPossibility::WideReference(_) => 2,
+        }
+    }
+
+    fn merge(&mut self, other: CoercionPossibility) {
+        match self.level().cmp(&other.level()) {
+            Ordering::Less => {
+                *self = other;
+            }
+            Ordering::Greater => {
+                // (keep the current target)
+            }
+            Ordering::Equal => match (self, other) {
+                (CoercionPossibility::Solid(_), CoercionPossibility::Solid(_))
+                | (CoercionPossibility::WideReference(_), CoercionPossibility::WideReference(_)) => {
+                    // (prefer earlier choice)
+                }
+                (
+                    CoercionPossibility::ThinReference(lhs),
+                    CoercionPossibility::ThinReference(rhs),
+                ) => {
+                    lhs.extend(rhs);
+                }
+                _ => unreachable!(),
+            },
+        }
+    }
+
+    fn resolve(self, bcx: &BodyCtxt<'_, '_>) -> CoercionResolution {
+        let s = bcx.session();
+
+        match self {
+            CoercionPossibility::Solid(ty) => CoercionResolution::Solid(ty),
+            CoercionPossibility::ThinReference(refs) => {
+                let refs = refs.iter().map(|v| match *v.r(s) {
+                    TyKind::Reference(_, muta, pointee) => (muta, pointee),
+                    _ => unreachable!(),
+                });
+
+                let to_muta = refs.clone().map(|v| v.0).min().unwrap();
+
+                let deref_steps = compute_deref_glb(
+                    bcx.ccx(),
+                    &refs
+                        .clone()
+                        .map(|(_muta, pointee)| pointee)
+                        .collect::<Vec<_>>(),
+                );
+
+                let deref_steps = if deref_steps.contains(&0) {
+                    deref_steps
+                } else {
+                    // Do not perform GLB coercion if the GLB target is not one of the existing
+                    // references to match `rustc`'s behavior.
+                    vec![0; refs.len()]
+                };
+
+                CoercionResolution::ThinReference {
+                    to_muta,
+                    deref_steps,
+                }
+            }
+            CoercionPossibility::WideReference(ty) => {
+                let TyKind::Trait(_, to_muta, to_clauses) = *ty.r(s) else {
+                    unreachable!()
+                };
+
+                CoercionResolution::WideReference {
+                    to_muta,
+                    to_clauses,
+                }
+            }
+        }
     }
 }
 
@@ -178,110 +328,8 @@ fn compute_deref_chain_clobber_obligations(
     accum
 }
 
-// === CoercionTarget === //
-
 #[derive(Debug, Clone)]
-enum CoercionChoice {
-    Solid(Ty),
-    ThinReference(SmallVec<[Ty; 1]>),
-    WideReference(SmallVec<[Ty; 1]>),
-}
-
-impl CoercionChoice {
-    fn new(bcx: &BodyCtxt<'_, '_>, ty: Ty) -> Self {
-        let s = bcx.session();
-
-        match ty.r(s) {
-            TyKind::SigThis | TyKind::SigInfer | TyKind::SigGeneric(_) | TyKind::SigProject(_) => {
-                unreachable!()
-            }
-
-            TyKind::Simple(_)
-            | TyKind::Adt(_)
-            | TyKind::Tuple(_)
-            | TyKind::FnDef(_, _)
-            | TyKind::HrtbVar(_)
-            | TyKind::InferVar(_)
-            | TyKind::UniversalVar(_)
-            | TyKind::Error(_) => Self::Solid(ty),
-
-            TyKind::Reference(_, _, _) => Self::ThinReference(smallvec![ty]),
-            TyKind::Trait(_, _, _) => Self::WideReference(smallvec![ty]),
-        }
-    }
-
-    fn level(&self) -> u8 {
-        match self {
-            CoercionChoice::Solid(_) => 0,
-            CoercionChoice::ThinReference(_) => 1,
-            CoercionChoice::WideReference(_) => 2,
-        }
-    }
-
-    fn merge(&mut self, other: CoercionChoice) {
-        match self.level().cmp(&other.level()) {
-            Ordering::Less => {
-                *self = other;
-            }
-            Ordering::Greater => {
-                // (keep the current target)
-            }
-            Ordering::Equal => match (self, other) {
-                (CoercionChoice::Solid(_lhs), CoercionChoice::Solid(_rhs)) => {
-                    // (prefer earlier solid choice)
-                }
-                (CoercionChoice::ThinReference(lhs), CoercionChoice::ThinReference(rhs)) => {
-                    lhs.extend(rhs);
-                }
-                (CoercionChoice::WideReference(lhs), CoercionChoice::WideReference(rhs)) => {
-                    lhs.extend(rhs);
-                }
-                _ => unreachable!(),
-            },
-        }
-    }
-
-    fn resolve(self, bcx: &BodyCtxt<'_, '_>) -> CoercionTarget {
-        let s = bcx.session();
-
-        match self {
-            CoercionChoice::Solid(ty) => CoercionTarget::Solid(ty),
-            CoercionChoice::ThinReference(refs) => {
-                let refs = refs.iter().map(|v| match *v.r(s) {
-                    TyKind::Reference(_, muta, pointee) => (muta, pointee),
-                    _ => unreachable!(),
-                });
-
-                let to_muta = refs.clone().map(|v| v.0).min().unwrap();
-
-                let deref_steps = compute_deref_glb(
-                    bcx.ccx(),
-                    &refs
-                        .clone()
-                        .map(|(_muta, pointee)| pointee)
-                        .collect::<Vec<_>>(),
-                );
-
-                CoercionTarget::ThinReference {
-                    to_muta,
-                    deref_steps,
-                }
-            }
-            CoercionChoice::WideReference(refs) => {
-                let refs = refs.iter().map(|v| match *v.r(s) {
-                    TyKind::Trait(_, muta, pointee) => (muta, pointee),
-                    _ => unreachable!(),
-                });
-
-                let to_muta = refs.clone().map(|v| v.0).min().unwrap();
-
-                todo!()
-            }
-        }
-    }
-}
-
-enum CoercionTarget {
+enum CoercionResolution {
     Solid(Ty),
     ThinReference {
         to_muta: Mutability,
