@@ -2,7 +2,8 @@
 
 use crate::semantic::{
     analysis::{
-        CheckOrigin, CheckOriginKind, ClauseCx, ObligationResult, infer::clause::ClauseObligation,
+        CheckOrigin, CheckOriginKind, ClauseCx, ObligationNotReady, ObligationResult,
+        infer::clause::ClauseObligation,
     },
     syntax::{Re, RelationDirection, RelationMode, Ty, TyKind, TyOrRe},
 };
@@ -113,7 +114,7 @@ impl<'tcx> ClauseCx<'tcx> {
         self.push_obligation(ClauseObligation::TyOutlivesRe(origin, lhs, rhs, dir));
     }
 
-    pub fn run_oblige_ty_outlives_re_or_clobber(
+    pub(super) fn run_oblige_ty_outlives_re(
         &mut self,
         origin: &CheckOrigin,
         lhs: Ty,
@@ -169,11 +170,11 @@ impl<'tcx> ClauseCx<'tcx> {
                 if let Ok(inf_lhs) = self.lookup_ty_infer_var(inf_lhs) {
                     self.oblige_ty_outlives_re(origin.clone(), inf_lhs, rhs, dir);
                 } else {
-                    return ObligationResult::NotReady;
+                    return Err(ObligationNotReady);
                 }
             }
         }
 
-        ObligationResult::Success
+        Ok(())
     }
 }

@@ -2,7 +2,7 @@ use crate::{
     base::{ErrorGuaranteed, Session, arena::HasInterner, syntax::Span},
     semantic::{
         analysis::{
-            CheckOrigin, CoherenceMap, FloatingInferVar, ObligationCx, ObligationResult,
+            CheckOrigin, CoherenceMap, FloatingInferVar, ObligationCx, ObligationNotReady,
             RecursionLimitReached, TyAndTyUnifyError, TyCtxt, UnifyCx, UnifyCxMode,
         },
         syntax::{
@@ -153,34 +153,39 @@ impl<'tcx> ClauseCx<'tcx> {
             |this| &mut this.ocx,
             |this| this.clone(),
             |fork, kind| {
-                if let Some(err) = kind.verify_depth(fork) {
-                    return ObligationResult::Failure(err);
+                if let Some(_err) = kind.verify_depth(fork) {
+                    return Ok(());
                 }
 
                 match kind {
                     ClauseObligation::TyUnifiesTy(origin, lhs, rhs, mode) => {
-                        match fork.ucx_mut().unify_ty_and_ty(&origin, lhs, rhs, mode) {
-                            Ok(()) => ObligationResult::Success,
-                            Err(err) => ObligationResult::Failure(err.emit(fork)),
+                        if let Err(err) = fork.ucx_mut().unify_ty_and_ty(&origin, lhs, rhs, mode) {
+                            err.emit(fork);
                         }
+
+                        Ok(())
                     }
                     ClauseObligation::TyMeetsTrait(origin, lhs, rhs) => {
-                        fork.run_oblige_ty_meets_trait_or_clobber(&origin, lhs, rhs)
+                        match fork.try_oblige_ty_meets_trait(&origin, lhs, rhs) {
+                            Ok(Ok(())) => Ok(()),
+                            Ok(Err(err)) => {
+                                err.emit(fork);
+                                Ok(())
+                            }
+                            Err(ObligationNotReady) => Err(ObligationNotReady),
+                        }
                     }
                     ClauseObligation::TyOutlivesRe(origin, lhs, rhs, dir) => {
-                        fork.run_oblige_ty_outlives_re_or_clobber(&origin, lhs, rhs, dir)
+                        fork.run_oblige_ty_outlives_re(&origin, lhs, rhs, dir)
                     }
                     ClauseObligation::InferTyWf(span, var) => {
-                        fork.run_oblige_infer_ty_wf_or_clobber(span, var)
+                        fork.run_oblige_infer_ty_wf(span, var)
                     }
                 }
             },
         );
     }
-}
 
-// Basic operations
-impl<'tcx> ClauseCx<'tcx> {
     pub fn suppress_obligation_eval<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
         let was_suppressed = self.ocx.obligation_eval_suppressed();
         self.ocx.set_obligation_eval_suppressed(true);
@@ -192,6 +197,23 @@ impl<'tcx> ClauseCx<'tcx> {
         f(&mut this)
     }
 
+    pub fn try_fork<T, E>(&mut self, f: impl FnOnce(&mut Self) -> Result<T, E>) -> Result<T, E> {
+        self.suppress_obligation_eval(|this| {
+            let mut fork = this.clone();
+
+            let res = f(&mut fork);
+
+            if res.is_ok() {
+                *this = fork;
+            }
+
+            res
+        })
+    }
+}
+
+// Basic operations
+impl<'tcx> ClauseCx<'tcx> {
     pub fn fresh_ty_infer_var(&mut self) -> InferTyVar {
         self.ucx_mut().fresh_ty_infer_var()
     }

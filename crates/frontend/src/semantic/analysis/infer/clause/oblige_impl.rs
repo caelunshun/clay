@@ -4,9 +4,9 @@ use crate::{
     base::arena::Obj,
     semantic::{
         analysis::{
-            CheckOrigin, ClauseCx, ClauseImportEnvRef, ConfirmationResult, NoTraitImplError,
-            ObligationResult, SelectionRejected, SelectionResult, TyFolderInfallibleExt,
-            UnboundVarHandlingMode, UniversalElaboration, infer::clause::ClauseObligation,
+            CheckOrigin, ClauseCx, ClauseImportEnvRef, NoTraitImplError, ObligationNotReady,
+            ObligationResult, TyFolderInfallibleExt, UnboundVarHandlingMode, UniversalElaboration,
+            infer::clause::ClauseObligation,
         },
         syntax::{
             HrtbBinder, ImplItem, RelationMode, TraitClause, TraitClauseList, TraitParam,
@@ -14,6 +14,9 @@ use crate::{
         },
     },
 };
+
+#[derive(Debug, Clone)]
+struct SelectionRejected;
 
 impl<'tcx> ClauseCx<'tcx> {
     pub fn oblige_ty_meets_clauses(&mut self, origin: &CheckOrigin, lhs: Ty, rhs: TraitClauseList) {
@@ -54,12 +57,12 @@ impl<'tcx> ClauseCx<'tcx> {
         self.push_obligation(ClauseObligation::TyMeetsTrait(origin, lhs, rhs));
     }
 
-    pub fn run_oblige_ty_meets_trait_or_clobber(
+    pub fn try_oblige_ty_meets_trait(
         &mut self,
         origin: &CheckOrigin,
         lhs: Ty,
         rhs: TraitSpec,
-    ) -> ObligationResult {
+    ) -> ObligationResult<Result<(), NoTraitImplError>> {
         let tcx = self.tcx();
         let s = self.session();
 
@@ -74,7 +77,8 @@ impl<'tcx> ClauseCx<'tcx> {
                     .try_select_inherent_impl(origin, self.elaborate_ty_universal_clauses(universal), rhs)
                 {
                     Ok(res) => {
-                        return res.into_obligation_res(self);
+                        *self = res;
+                        return Ok(Ok(()));
                     }
                     Err(SelectionRejected) => {
                         // (fallthrough)
@@ -84,11 +88,11 @@ impl<'tcx> ClauseCx<'tcx> {
             TyKind::InferVar(_) => {
                 // We can't yet rule out the possibility that this obligation is inherently
                 // fulfilled.
-                return ObligationResult::NotReady;
+                return Err(ObligationNotReady);
             }
             TyKind::Error(_) => {
                 // Error types can do anything.
-                return ObligationResult::Success;
+                return Ok(Ok(()));
             }
             TyKind::SigThis
             | TyKind::SigInfer
@@ -129,24 +133,23 @@ impl<'tcx> ClauseCx<'tcx> {
             };
 
             if prev_confirmation.is_some() {
-                return ObligationResult::NotReady;
+                return Err(ObligationNotReady);
             }
 
             prev_confirmation = Some(confirmation)
         }
 
         let Some(confirmation) = prev_confirmation else {
-            return ObligationResult::Failure(
-                NoTraitImplError {
-                    origin: origin.clone(),
-                    target: lhs,
-                    spec: rhs,
-                }
-                .emit(self),
-            );
+            return Ok(Err(NoTraitImplError {
+                origin: origin.clone(),
+                target: lhs,
+                spec: rhs,
+            }));
         };
 
-        confirmation.into_obligation_res(self)
+        *self = confirmation;
+
+        Ok(Ok(()))
     }
 
     fn try_select_inherent_impl(
@@ -154,7 +157,7 @@ impl<'tcx> ClauseCx<'tcx> {
         origin: &CheckOrigin,
         lhs: UniversalElaboration,
         rhs: TraitSpec,
-    ) -> SelectionResult<Self> {
+    ) -> Result<Self, SelectionRejected> {
         let s = self.session();
 
         // Find the clause that could prove our trait.
@@ -239,7 +242,7 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         }
 
-        Ok(ConfirmationResult::Success(self))
+        Ok(self)
     }
 
     fn try_select_block_impl(
@@ -248,7 +251,7 @@ impl<'tcx> ClauseCx<'tcx> {
         lhs: Ty,
         rhs: Obj<ImplItem>,
         spec: TraitSpec,
-    ) -> SelectionResult<Self> {
+    ) -> Result<Self, SelectionRejected> {
         let s = self.session();
 
         // Obtain inference variables for all generics in the `impl` and tentatively create
@@ -342,6 +345,6 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         }
 
-        Ok(ConfirmationResult::Success(self))
+        Ok(self)
     }
 }

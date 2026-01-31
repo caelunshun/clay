@@ -1,5 +1,5 @@
 use crate::{
-    base::{ErrorGuaranteed, Session},
+    base::Session,
     semantic::analysis::{ObservedTyInferVar, TyCtxt, UnifyCx, UnifyCxMode},
     utils::hash::{FxHashMap, FxHashSet},
 };
@@ -7,24 +7,12 @@ use derive_where::derive_where;
 use index_vec::{IndexVec, define_index_type};
 use std::{cell::Cell, collections::VecDeque, fmt, mem, rc::Rc};
 
-// === Definitions === //
+// === Results === //
+
+pub type ObligationResult<T = ()> = Result<T, ObligationNotReady>;
 
 #[derive(Debug, Clone)]
-pub enum ObligationResult {
-    /// The obligation was successfully satisfied.
-    Success,
-
-    /// The obligation is guaranteed to fail.
-    Failure(ErrorGuaranteed),
-
-    /// The obligation failed because we're still waiting on one or more of the inference variables
-    /// to be specified unambiguously or, in rare cases, because the program is ill-formed in some
-    /// other way which introduces an ambiguity (e.g. if trait coherence checks failed).
-    ///
-    /// If this variant is returned, the obligation will be queued to rerun once one or more
-    /// inference variables accessed during the execution of the obligation are revealed.
-    NotReady,
-}
+pub struct ObligationNotReady;
 
 // === ObligationCx === //
 
@@ -204,7 +192,7 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
             let traced_vars = getter(&mut fork).ucx.finish_tracing();
 
             match res {
-                ObligationResult::Success | ObligationResult::Failure(_) => {
+                Ok(()) => {
                     // Merge the `fork` and the `target` and obtain the root.
                     *target = fork;
                     let this = getter(target);
@@ -215,7 +203,7 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
                     // Stop the obligation.
                     root.current_obligation = None;
                 }
-                ObligationResult::NotReady => {
+                Err(ObligationNotReady) => {
                     // Drop the fork to regain access to the `root`.
                     drop(fork);
                     let this = getter(target);
@@ -243,33 +231,6 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
                     }
                 }
             }
-        }
-    }
-}
-
-// === Selection Helpers === //
-
-pub type SelectionResult<T> = Result<ConfirmationResult<T>, SelectionRejected>;
-
-#[derive(Debug, Clone)]
-pub struct SelectionRejected;
-
-#[derive(Clone)]
-#[must_use]
-pub enum ConfirmationResult<T> {
-    Success(T),
-    Error(ErrorGuaranteed),
-}
-
-impl<T> ConfirmationResult<T> {
-    pub fn into_obligation_res(self, apply_target: &mut T) -> ObligationResult {
-        match self {
-            ConfirmationResult::Success(fork) => {
-                *apply_target = fork;
-
-                ObligationResult::Success
-            }
-            ConfirmationResult::Error(err) => ObligationResult::Failure(err),
         }
     }
 }

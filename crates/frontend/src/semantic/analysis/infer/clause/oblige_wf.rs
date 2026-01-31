@@ -7,9 +7,9 @@ use crate::{
     },
     semantic::{
         analysis::{
-            CheckOrigin, CheckOriginKind, ClauseCx, ClauseImportEnvRef, ObligationResult, TyCtxt,
-            TyVisitable, TyVisitor, TyVisitorExt as _, TyVisitorInfallibleExt,
-            infer::clause::ClauseObligation,
+            CheckOrigin, CheckOriginKind, ClauseCx, ClauseImportEnvRef, ObligationNotReady,
+            ObligationResult, TyCtxt, TyVisitable, TyVisitor, TyVisitorExt as _,
+            TyVisitorInfallibleExt, infer::clause::ClauseObligation,
         },
         syntax::{
             GenericBinder, GenericSubst, HrtbBinderKind, InferTyVar, RelationDirection,
@@ -29,7 +29,7 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    pub fn run_oblige_infer_ty_wf_or_clobber(
+    pub(super) fn run_oblige_infer_ty_wf(
         &mut self,
         span: Span,
         var: InferTyVar,
@@ -37,13 +37,13 @@ impl<'tcx> ClauseCx<'tcx> {
         let tcx = self.tcx();
 
         let Ok(ty) = self.lookup_ty_infer_var(var) else {
-            return ObligationResult::NotReady;
+            return Err(ObligationNotReady);
         };
 
         let ty = SpannedTy::new_saturated(ty, span, tcx);
         self.wf_visitor().visit_spanned(ty);
 
-        ObligationResult::Success
+        Ok(())
     }
 }
 
