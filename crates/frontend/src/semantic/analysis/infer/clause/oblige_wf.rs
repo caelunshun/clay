@@ -8,11 +8,11 @@ use crate::{
     semantic::{
         analysis::{
             CheckOrigin, CheckOriginKind, ClauseCx, ClauseImportEnvRef, ObligationNotReady,
-            ObligationResult, TyCtxt, TyVisitable, TyVisitor, TyVisitorExt as _,
-            TyVisitorInfallibleExt, infer::clause::ClauseObligation,
+            ObligationResult, TyCtxt, TyVisitable, TyVisitor, TyVisitorInfallibleExt,
+            infer::clause::ClauseObligation,
         },
         syntax::{
-            GenericBinder, GenericSubst, HrtbBinderKind, InferTyVar, RelationDirection,
+            FnDef, GenericBinder, GenericSubst, HrtbBinderKind, InferTyVar, RelationDirection,
             SpannedAdtInstance, SpannedHrtbBinder, SpannedTraitInstance, SpannedTraitParamView,
             SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList, SpannedTyView, Ty,
             TyKind, TyOrRe,
@@ -156,6 +156,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         // type for its clauses and ensure that our `impl` matches what the trait spec said it would
         // contain.
         self.check_generics(
+            self.clause_applies_to.unwrap(),
             spec.value.def.r(s).generics,
             params,
             Some(spec.value.def.r(s).regular_generic_count),
@@ -171,6 +172,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         let tcx = self.tcx();
 
         self.check_generics(
+            self.clause_applies_to.unwrap(),
             instance.value.def.r(s).generics,
             instance.view(tcx).params,
             None,
@@ -185,116 +187,39 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         let tcx = self.tcx();
 
         // Check generics
-        let old_clause_applies_to = self
-            .clause_applies_to
-            .replace(tcx.intern(TyKind::Adt(instance.value)));
-
         self.check_generics(
+            tcx.intern(TyKind::Adt(instance.value)),
             instance.value.def.r(s).generics,
             instance.view(tcx).params,
             None,
         );
-
-        self.clause_applies_to = old_clause_applies_to;
 
         // Ensure parameter types are also well-formed.
         self.walk_spanned(instance);
 
         ControlFlow::Continue(())
     }
-
-    fn session(&self) -> &'tcx crate::base::Session {
-        &self.tcx().session
-    }
-
-    fn visit_clause_list(
-        &mut self,
-        clauses: crate::semantic::syntax::SpannedTraitClauseList,
-    ) -> std::ops::ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(clauses)
-    }
-
-    fn visit_clause(
-        &mut self,
-        clause: crate::semantic::syntax::SpannedTraitClause,
-    ) -> std::ops::ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(clause)
-    }
-
-    fn visit_param_list(
-        &mut self,
-        params: crate::semantic::syntax::SpannedTraitParamList,
-    ) -> std::ops::ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(params)
-    }
-
-    fn visit_param(
-        &mut self,
-        param: crate::semantic::syntax::SpannedTraitParam,
-    ) -> std::ops::ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(param)
-    }
-
-    fn visit_ty_or_re(
-        &mut self,
-        ty_or_re: crate::semantic::syntax::SpannedTyOrRe,
-    ) -> std::ops::ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(ty_or_re)
-    }
-
-    fn visit_ty_or_re_list(
-        &mut self,
-        list: crate::semantic::syntax::SpannedTyOrReList,
-    ) -> std::ops::ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(list)
-    }
-
-    fn visit_ty_list(
-        &mut self,
-        list: crate::semantic::syntax::SpannedTyList,
-    ) -> std::ops::ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(list)
-    }
-
-    fn visit_re(
-        &mut self,
-        re: crate::semantic::syntax::SpannedRe,
-    ) -> std::ops::ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(re)
-    }
-
-    fn visit_ty_projection(
-        &mut self,
-        projection: crate::semantic::syntax::SpannedTyProjection,
-    ) -> std::ops::ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(projection)
-    }
-
-    fn visit_hrtb_binder_kind(
-        &mut self,
-        kind: crate::semantic::syntax::SpannedHrtbBinderKind,
-    ) -> std::ops::ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(kind)
-    }
-
-    fn visit_hrtb_debruijn_def_list(
-        &mut self,
-        defs: crate::semantic::syntax::SpannedHrtbDebruijnDefList,
-    ) -> std::ops::ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(defs)
-    }
-
-    fn visit_hrtb_debruijn_def(
-        &mut self,
-        defs: crate::semantic::syntax::SpannedHrtbDebruijnDef,
-    ) -> std::ops::ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(defs)
-    }
 }
 
 impl ClauseTyWfVisitor<'_, '_> {
-    fn check_generics(
+    // pub fn visit_fn_instance(&mut self, def: Obj<FnDef>, args: SpannedTyOrReList) {
+    //     let s = self.session();
+    //     let tcx = self.tcx();
+    //
+    //     // Import `target`'s `Self` type.
+    //     let target_env = self.ccx.import_fn_def_env(def);
+    //     let target = ;
+    //
+    //     // Check generics
+    //     self.check_generics(target, def.r(s).generics, args, None);
+    //
+    //     // Ensure parameter types are also well-formed.
+    //     self.walk_spanned(args);
+    // }
+
+    pub fn check_generics(
         &mut self,
+        clause_applies_to: Ty,
         binder: Obj<GenericBinder>,
         all_params: SpannedTyOrReList,
         validate_count: Option<u32>,
@@ -316,7 +241,7 @@ impl ClauseTyWfVisitor<'_, '_> {
 
         self.ccx.oblige_wf_args_meet_binder(
             ClauseImportEnvRef::new(
-                self.clause_applies_to.unwrap(),
+                clause_applies_to,
                 &[GenericSubst {
                     binder,
                     substs: all_params.value,

@@ -7,12 +7,12 @@ use crate::{
     parse::ast::AstLit,
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnv, ClauseImportEnvRef, CrateTypeckVisitor, TyCtxt,
-            TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
+            ClauseCx, ClauseImportEnvRef, CrateTypeckVisitor, TyCtxt, TyFolderInfallibleExt,
+            TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
         },
         syntax::{
-            Block, Divergence, Expr, ExprKind, FnDef, FuncDefOwner, FuncLocal, InferTyVar,
-            SimpleTyKind, Stmt, Ty, TyAndDivergence, TyKind,
+            Block, Divergence, Expr, ExprKind, FnDef, FuncLocal, InferTyVar, SimpleTyKind, Stmt,
+            Ty, TyAndDivergence, TyKind,
         },
     },
 };
@@ -27,7 +27,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Setup a `ClauseCx` for signature validation.
         let mut ccx = ClauseCx::new(tcx, self.coherence, UnifyCxMode::RegionAware);
-        let env = self.setup_env_for_fn_def(def, &mut ccx);
+        let env = ccx.import_fn_def_env(def);
 
         // WF-check the signature.
         self.visit_generic_binder(&mut ccx, env.as_ref(), def.r(s).generics);
@@ -54,28 +54,6 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         }
 
         ccx.verify();
-    }
-
-    fn setup_env_for_fn_def(
-        &mut self,
-        def: Obj<FnDef>,
-        ccx: &mut ClauseCx<'tcx>,
-    ) -> ClauseImportEnv {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        let mut env = match def.r(s).owner {
-            FuncDefOwner::Func(_item) => ClauseImportEnv {
-                self_ty: tcx.intern(TyKind::SigThis),
-                sig_generic_substs: Vec::new(),
-            },
-            FuncDefOwner::Method(def, _idx) => ccx.import_impl_block_env(def),
-        };
-
-        env.sig_generic_substs
-            .extend_from_slice(&ccx.import_fn_item_env(env.self_ty, def));
-
-        env
     }
 }
 
@@ -204,7 +182,15 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 AstLit::Bool(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Bool)),
             },
             ExprKind::TupleOrUnitCtor(adt_ctor_instance) => todo!(),
-            ExprKind::FnItemLit(obj, spanned) => todo!(),
+            ExprKind::FnItemLit(def, args) => {
+                let env = self.import_env;
+                let args = self.ccx_mut().importer(env).fold_preserved(args);
+                self.ccx_mut().wf_visitor().visit_spanned(args);
+
+                // TODO: generic arg WF
+
+                tcx.intern(TyKind::FnDef(*def.r(s).def, Some(args.value)))
+            }
             ExprKind::TypeRelative {
                 self_ty,
                 as_trait,
@@ -213,14 +199,22 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             } => todo!(),
             ExprKind::Cast(expr, as_ty) => {
                 let env = self.import_env;
-                let as_ty = self.ccx_mut().importer(env).fold(as_ty.value);
-                self.check_expr_demand(expr, as_ty).and_do(&mut divergence)
+                let as_ty = self.ccx_mut().importer(env).fold_preserved(as_ty);
+                self.ccx_mut().wf_visitor().visit_spanned(as_ty);
+                self.check_expr_demand(expr, as_ty.value)
+                    .and_do(&mut divergence)
             }
             ExprKind::If {
                 cond,
                 truthy,
                 falsy,
-            } => todo!(),
+            } => {
+                self.check_expr_demand(cond, tcx.intern(TyKind::Simple(SimpleTyKind::Bool)))
+                    .and_do(&mut divergence);
+
+                self.check_exprs_equate([Some(truthy), falsy].into_iter().flatten())
+                    .and_do(&mut divergence)
+            }
             ExprKind::While(obj, obj1) => todo!(),
             ExprKind::Let(obj, obj1) => todo!(),
             ExprKind::ForLoop { pat, iter, body } => todo!(),

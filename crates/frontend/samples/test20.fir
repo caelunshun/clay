@@ -1,3 +1,13 @@
 fn main() {
-    (true,).as::<((),)>
+    meow::<()>;
+
+    if true {
+        true
+    } else {
+        ()
+    }
 }
+
+trait Waow {}
+
+fn meow<T: Waow>() {}
