@@ -256,6 +256,7 @@ pub struct MatchArm {
 // === Divergence === //
 
 #[derive(Debug, Copy, Clone)]
+#[must_use]
 pub struct TyAndDivergence {
     pub ty: Ty,
     pub divergence: Divergence,

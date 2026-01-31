@@ -1,8 +1,10 @@
 fn main() {
     meow::<()>;
 
-    if true {
-        true
+    let foo = true;
+
+    if foo {
+        foo
     } else {
         ()
     }

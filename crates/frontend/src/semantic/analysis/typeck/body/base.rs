@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        Session,
+        Diag, Session,
         analysis::SpannedViewEncode,
         arena::{HasInterner, HasListInterner as _, Obj},
         syntax::Span,
@@ -8,12 +8,13 @@ use crate::{
     parse::ast::AstLit,
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, CrateTypeckVisitor, TyCtxt, TyFolderInfallibleExt,
-            TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
+            CheckOrigin, CheckOriginKind, ClauseCx, ClauseImportEnvRef, CrateTypeckVisitor, TyCtxt,
+            TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
         },
         syntax::{
-            Block, Divergence, Expr, ExprKind, FnDef, FuncLocal, InferTyVar, SimpleTyKind,
-            SpannedFnInstanceView, SpannedTyView, Stmt, Ty, TyAndDivergence, TyKind,
+            Block, Divergence, Expr, ExprKind, FnDef, FuncLocal, InferTyVar, Pat, PatKind,
+            RelationMode, SimpleTyKind, SpannedFnInstanceView, SpannedTyView, Stmt, Ty,
+            TyAndDivergence, TyKind,
         },
     },
 };
@@ -51,7 +52,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         // Check the body
         if let Some(body) = *def.r(s).body {
             let mut bcx = BodyCtxt::new(&mut ccx, env.as_ref());
-            bcx.check_block(body);
+            _ = bcx.check_block(body);
         }
 
         ccx.verify();
@@ -135,7 +136,31 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     self.check_expr(*expr).and_do(&mut divergence);
                 }
                 Stmt::Let(stmt) => {
-                    todo!()
+                    let pat_ty = self.type_of_pat(stmt.r(s).pat);
+
+                    if let Some(ascription) = stmt.r(s).ascription {
+                        self.ccx_mut().oblige_ty_unifies_ty(
+                            CheckOrigin::root(CheckOriginKind::Pattern {
+                                pat_span: ascription.own_span(),
+                            }),
+                            pat_ty,
+                            ascription.value,
+                            RelationMode::Equate,
+                        );
+                    }
+
+                    if let Some(init) = stmt.r(s).init {
+                        self.check_expr_demand(init, pat_ty).and_do(&mut divergence);
+                    }
+
+                    if let Some(else_clause) = stmt.r(s).else_clause {
+                        let block = self.check_block(else_clause);
+
+                        if block.divergence != Divergence::MustDiverge {
+                            Diag::span_err(else_clause.r(s).span, "`else` block must diverge")
+                                .emit();
+                        }
+                    }
                 }
             }
         }
@@ -253,5 +278,42 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         };
 
         TyAndDivergence::new(ty, divergence)
+    }
+
+    pub fn type_of_pat(&mut self, pat: Obj<Pat>) -> Ty {
+        let s = self.session();
+
+        match pat.r(s).kind {
+            PatKind::Hole => self.ccx_mut().fresh_ty_infer(),
+            PatKind::NewName(local, bind_as) => {
+                let local_ty = self.type_of_local(local);
+
+                if let Some(bind_as) = bind_as {
+                    let bind_as_ty = self.type_of_pat(bind_as);
+
+                    self.ccx_mut().oblige_ty_unifies_ty(
+                        CheckOrigin::root(CheckOriginKind::Pattern {
+                            pat_span: pat.r(s).span,
+                        }),
+                        local_ty,
+                        bind_as_ty,
+                        RelationMode::Equate,
+                    );
+                }
+
+                local_ty
+            }
+            PatKind::Slice(pat_list_front_and_tail) => todo!(),
+            PatKind::Tuple(pat_list_front_and_tail) => todo!(),
+            PatKind::Lit(obj) => todo!(),
+            PatKind::Or(obj) => todo!(),
+            PatKind::Ref(mutability, obj) => todo!(),
+            PatKind::AdtUnit(adt_ctor_instance) => todo!(),
+            PatKind::AdtTuple(adt_ctor_instance, pat_list_front_and_tail) => todo!(),
+            PatKind::AdtNamed(adt_ctor_instance, obj) => todo!(),
+            PatKind::PlaceExpr(obj) => todo!(),
+            PatKind::Range(range_expr) => todo!(),
+            PatKind::Error(_) => self.ccx_mut().fresh_ty_infer(),
+        }
     }
 }
