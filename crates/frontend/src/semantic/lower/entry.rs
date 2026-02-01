@@ -407,8 +407,22 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
     pub fn lower_trait(&mut self, ast: &'ast AstItemTrait) {
         let s = &self.tcx.session;
 
-        let mut binder = GenericBinder::default();
+        let trait_target = Obj::new(
+            TraitItem {
+                item: self.target,
+                generics: LateInit::uninit(),
+                inherits: LateInit::uninit(),
+                regular_generic_count: LateInit::uninit(),
+                associated_types: LateInit::uninit(),
+                methods: LateInit::uninit(),
+            },
+            s,
+        );
 
+        LateInit::init(&self.target.r(s).kind, ItemKind::Trait(trait_target));
+
+        // Lower regular generics
+        let mut binder = GenericBinder::default();
         let mut generic_clause_lists = Vec::new();
 
         if let Some(generics) = &ast.generics {
@@ -416,7 +430,10 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         }
 
         let regular_generic_count = binder.defs.len() as u32;
+
+        // Lower members
         let mut associated_types = FxHashMap::default();
+        let mut methods = Vec::new();
 
         for member in &ast.body.members {
             match &member.kind {
@@ -439,8 +456,13 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                     Diag::span_err(member.span, "default associated types are not supported")
                         .emit();
                 }
-                AstImplLikeMemberKind::Func(..) => {
-                    todo!();
+                AstImplLikeMemberKind::Func(ast) => {
+                    let method = self.lower_fn_def(
+                        FuncDefOwner::TraitMethod(trait_target, methods.len() as u32),
+                        ast,
+                    );
+
+                    methods.push(method);
                 }
                 AstImplLikeMemberKind::Error(_) => {
                     // (ignored)
@@ -448,19 +470,19 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
             }
         }
 
-        let trait_target = Obj::new(
-            TraitItem {
-                item: self.target,
-                generics: self.tcx.seal_generic_binder(binder),
-                inherits: LateInit::uninit(),
-                regular_generic_count,
-                associated_types,
-                methods: LateInit::uninit(),
-            },
-            s,
+        LateInit::init(
+            &trait_target.r(s).generics,
+            self.tcx.seal_generic_binder(binder),
         );
 
-        LateInit::init(&self.target.r(s).kind, ItemKind::Trait(trait_target));
+        LateInit::init(
+            &trait_target.r(s).regular_generic_count,
+            regular_generic_count,
+        );
+
+        LateInit::init(&trait_target.r(s).associated_types, associated_types);
+
+        LateInit::init(&trait_target.r(s).methods, methods);
 
         self.queue_task(move |cx| {
             cx.lower_trait(trait_target, ast.inherits.as_ref(), generic_clause_lists);
@@ -853,8 +875,8 @@ impl IntraItemLowerCtxt<'_> {
     ) {
         let s = &self.tcx.session;
 
-        self.define_generics_in_binder(item.r(s).generics);
-        self.lower_generic_def_clauses(item.r(s).generics, &generic_clause_lists);
+        self.define_generics_in_binder(*item.r(s).generics);
+        self.lower_generic_def_clauses(*item.r(s).generics, &generic_clause_lists);
 
         LateInit::init(&item.r(s).inherits, self.lower_clauses(inherits));
     }

@@ -38,7 +38,7 @@ impl CoherenceMap {
 
             match item.r(s).trait_ {
                 Some(trait_) => {
-                    let arg_count = trait_.value.def.r(s).regular_generic_count as usize;
+                    let arg_count = *trait_.value.def.r(s).regular_generic_count as usize;
                     self.by_shape.insert(
                         tcx.shape_of_trait_def(
                             trait_.value.def,
@@ -81,7 +81,7 @@ impl CoherenceMap {
             .lookup(
                 tcx.shape_of_trait_def(
                     rhs.def,
-                    &rhs.params.r(s)[..rhs.def.r(s).regular_generic_count as usize]
+                    &rhs.params.r(s)[..*rhs.def.r(s).regular_generic_count as usize]
                         .iter()
                         .map(|&v| match v {
                             TraitParam::Equals(v) => v,
@@ -170,7 +170,7 @@ impl TyCtxt {
 
                 generic_states[step_generic_idx].deps.push(clause_state_idx);
 
-                for &param in &spec.params.r(s)[..spec.def.r(s).regular_generic_count as usize] {
+                for &param in &spec.params.r(s)[..*spec.def.r(s).regular_generic_count as usize] {
                     let TraitParam::Equals(ty) = param else {
                         unreachable!()
                     };
@@ -307,7 +307,7 @@ impl TyCtxt {
 
         // Recursively uncover more generics.
         while let Some(clause) = solve_queue.pop() {
-            for param in &clause.params.r(s)[(clause.def.r(s).regular_generic_count as usize)..] {
+            for param in &clause.params.r(s)[(*clause.def.r(s).regular_generic_count as usize)..] {
                 match param {
                     TraitParam::Equals(eq) => {
                         // We can use this to reveal more equalities!

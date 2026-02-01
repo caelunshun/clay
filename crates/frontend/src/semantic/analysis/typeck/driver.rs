@@ -88,7 +88,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         }
 
         // Now, let's ensure that each generic parameter's clauses are well-formed.
-        self.visit_generic_binder(&mut ccx, env.as_ref(), *generics);
+        self.visit_generic_binder(&mut ccx, env.as_ref(), **generics);
 
         // Finally, let's check method signatures and, if a default one is provided, bodies.
         // TODO
@@ -132,7 +132,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
                     .importer(ClauseImportEnvRef::new(
                         env.self_ty,
                         &[GenericSubst {
-                            binder: trait_def.r(s).generics,
+                            binder: *trait_def.r(s).generics,
                             substs: trait_.value.params,
                         }],
                     ))

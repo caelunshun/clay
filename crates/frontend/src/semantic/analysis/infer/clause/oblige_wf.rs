@@ -156,10 +156,10 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         // contain.
         self.check_generics(
             self.clause_applies_to.unwrap(),
-            spec.value.def.r(s).generics,
+            *spec.value.def.r(s).generics,
             [],
             params,
-            Some(spec.value.def.r(s).regular_generic_count),
+            Some(*spec.value.def.r(s).regular_generic_count),
         );
 
         self.walk_spanned(spec);
@@ -173,7 +173,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
 
         self.check_generics(
             self.clause_applies_to.unwrap(),
-            instance.value.def.r(s).generics,
+            *instance.value.def.r(s).generics,
             [],
             instance.view(tcx).params,
             None,
@@ -223,7 +223,28 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
                     );
                 }
             }
-            FuncDefOwner::Method(impl_block, _idx) => {
+            FuncDefOwner::TraitMethod(trait_item, _idx) => {
+                let impl_ty = impl_ty.unwrap();
+
+                let trait_args = self.ccx.import_binder_list_as_infer(
+                    &CheckOrigin::root(CheckOriginKind::WfFnDef {
+                        fn_ty: instance.own_span(),
+                    }),
+                    impl_ty.value,
+                    &[*trait_item.r(s).generics],
+                );
+
+                if let Some(args) = args {
+                    self.check_generics(
+                        tcx.intern(TyKind::SigThis),
+                        def.r(s).generics,
+                        trait_args,
+                        args,
+                        None,
+                    );
+                }
+            }
+            FuncDefOwner::ImplMethod(impl_block, _idx) => {
                 let impl_ty = impl_ty.unwrap();
 
                 let impl_args = self.ccx.import_binder_list_as_infer(

@@ -311,7 +311,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
             // Create universal variables for each parameter.
             let sig_generic_substs =
-                this.import_binder_list_as_universal(self_ty, &[def.r(s).generics]);
+                this.import_binder_list_as_universal(self_ty, &[*def.r(s).generics]);
 
             let generic_params = sig_generic_substs[0].substs;
 
@@ -402,7 +402,8 @@ impl<'tcx> ClauseCx<'tcx> {
                 self_ty: tcx.intern(TyKind::SigThis),
                 sig_generic_substs: Vec::new(),
             },
-            FuncDefOwner::Method(def, _idx) => self.import_impl_block_env(def),
+            FuncDefOwner::TraitMethod(def, _idx) => self.import_trait_def_env(def),
+            FuncDefOwner::ImplMethod(def, _idx) => self.import_impl_block_env(def),
         };
 
         env.sig_generic_substs

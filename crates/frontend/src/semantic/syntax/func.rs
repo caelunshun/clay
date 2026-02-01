@@ -10,7 +10,7 @@ use crate::{
     },
     semantic::syntax::{
         AdtCtorFieldIdx, AdtCtorInstance, GenericBinder, ImplItem, Item, Mutability,
-        SpannedTraitInstance, SpannedTy, SpannedTyOrRe, SpannedTyOrReList, Ty,
+        SpannedTraitInstance, SpannedTy, SpannedTyOrRe, SpannedTyOrReList, TraitItem, Ty,
     },
 };
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
@@ -38,7 +38,8 @@ pub struct FnDef {
 #[derive(Debug, Copy, Clone)]
 pub enum FuncDefOwner {
     Func(Obj<FuncItem>),
-    Method(Obj<ImplItem>, u32),
+    TraitMethod(Obj<TraitItem>, u32),
+    ImplMethod(Obj<ImplItem>, u32),
 }
 
 #[derive(Debug, Clone)]

@@ -225,7 +225,7 @@ impl IntraItemLowerCtxt<'_> {
             return self.construct_trait_instance_from_positionals(
                 def,
                 self.synthesize_inferred_generics_for_elision(
-                    def.r(s).generics,
+                    *def.r(s).generics,
                     None,
                     segment_span,
                 ),
@@ -236,7 +236,7 @@ impl IntraItemLowerCtxt<'_> {
         let (positional, associated) = self.lower_generic_params_syntactic(&generics.list);
 
         let params = self.normalize_positional_generic_arity(
-            def.r(s).generics,
+            *def.r(s).generics,
             None,
             segment_span,
             &positional,
@@ -269,8 +269,8 @@ impl IntraItemLowerCtxt<'_> {
         );
 
         let params = self.normalize_positional_generic_arity(
-            def.r(s).generics,
-            Some(def.r(s).regular_generic_count),
+            *def.r(s).generics,
+            Some(*def.r(s).regular_generic_count),
             for_trait.span,
             &positional,
         );
@@ -592,7 +592,7 @@ impl IntraItemLowerCtxt<'_> {
     ) -> Vec<SpannedTraitParam> {
         let s = &self.tcx.session;
 
-        debug_assert_eq!(def.r(s).regular_generic_count as usize, params.len(s));
+        debug_assert_eq!(*def.r(s).regular_generic_count as usize, params.len(s));
 
         params
             .iter(self.tcx)
@@ -619,7 +619,7 @@ impl IntraItemLowerCtxt<'_> {
     ) -> SpannedTyOrReList {
         let s = &self.tcx.session;
 
-        debug_assert_eq!(def.r(s).regular_generic_count as usize, params.len(s));
+        debug_assert_eq!(*def.r(s).regular_generic_count as usize, params.len(s));
 
         let elaborated_params = params
             .iter(self.tcx)

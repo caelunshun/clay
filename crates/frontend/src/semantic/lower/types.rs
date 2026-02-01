@@ -324,8 +324,8 @@ impl IntraItemLowerCtxt<'_> {
             self.lower_generic_params_syntactic(ast.params.as_ref().map_or(&[][..], |v| &v.list));
 
         let params = self.normalize_positional_generic_arity(
-            def.r(s).generics,
-            Some(def.r(s).regular_generic_count),
+            *def.r(s).generics,
+            Some(*def.r(s).regular_generic_count),
             ast.span,
             &positional,
         );

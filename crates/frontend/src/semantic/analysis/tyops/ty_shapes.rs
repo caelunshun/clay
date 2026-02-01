@@ -24,7 +24,7 @@ impl TyCtxt {
     pub fn shape_of_trait_def(&self, def: Obj<TraitItem>, args: &[TyOrRe], target: Ty) -> TyShape {
         let s = &self.session;
 
-        debug_assert_eq!(args.len(), def.r(s).regular_generic_count as usize);
+        debug_assert_eq!(args.len(), *def.r(s).regular_generic_count as usize);
 
         TyShape::Solid(SolidTyShape {
             kind: SolidTyShapeKind::TraitImpl(def),

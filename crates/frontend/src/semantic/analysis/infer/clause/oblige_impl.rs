@@ -187,7 +187,7 @@ impl<'tcx> ClauseCx<'tcx> {
         let mut param_iter = lhs.params.r(s).iter().zip(rhs.params.r(s));
 
         for (&lhs_param, &rhs_param) in
-            (&mut param_iter).take(rhs.def.r(s).regular_generic_count as usize)
+            (&mut param_iter).take(*rhs.def.r(s).regular_generic_count as usize)
         {
             let TraitParam::Equals(lhs) = lhs_param else {
                 unreachable!();
@@ -286,7 +286,7 @@ impl<'tcx> ClauseCx<'tcx> {
             .r(s)
             .iter()
             .zip(spec.params.r(s))
-            .take(spec.def.r(s).regular_generic_count as usize)
+            .take(*spec.def.r(s).regular_generic_count as usize)
         {
             match required_param {
                 TraitParam::Equals(required) => match (instance, required) {
@@ -321,7 +321,7 @@ impl<'tcx> ClauseCx<'tcx> {
             .r(s)
             .iter()
             .zip(spec.params.r(s))
-            .skip(spec.def.r(s).regular_generic_count as usize)
+            .skip(*spec.def.r(s).regular_generic_count as usize)
         {
             // Associated types are never regions.
             let instance_ty = instance_ty.unwrap_ty();

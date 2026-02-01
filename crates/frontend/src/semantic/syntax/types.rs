@@ -180,25 +180,19 @@ pub struct TraitItem {
 
     /// The set of parameter generics and associated types defined by this trait. This list starts
     /// with a `regular_generic_count` number of generic parameters followed by associated types.
-    pub generics: Obj<GenericBinder>,
+    pub generics: LateInit<Obj<GenericBinder>>,
 
     /// The set of traits inherited by the current trait.
     pub inherits: LateInit<SpannedTraitClauseList>,
 
     /// The number of generic parameters taken by this trait.
-    pub regular_generic_count: u32,
+    pub regular_generic_count: LateInit<u32>,
 
     /// Maps associated type names to their generic parameter as bound in `generics`.
-    pub associated_types: FxHashMap<Symbol, Obj<TypeGeneric>>,
+    pub associated_types: LateInit<FxHashMap<Symbol, Obj<TypeGeneric>>>,
 
     /// The set of methods defined by this trait.
-    pub methods: LateInit<Vec<Obj<TraitMethod>>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct TraitMethod {
-    pub owner: Obj<TraitItem>,
-    pub func: Obj<FnDef>,
+    pub methods: LateInit<Vec<Obj<FnDef>>>,
 }
 
 pub type ListOfTraitClauseList = Intern<[TraitClauseList]>;
