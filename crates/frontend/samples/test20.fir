@@ -40,6 +40,10 @@ impl<T> Iterator for Forever<T> {
     }
 }
 
+pub trait Demo {
+    fn demo();
+}
+
 fn main() {
-    Iterator::next;
+    Demo::demo;
 }

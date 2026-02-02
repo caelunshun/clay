@@ -1,10 +1,14 @@
 //! Logic to elaborate a trait clause list.
 
 use crate::{
-    base::arena::HasListInterner,
+    base::arena::{HasInterner, HasListInterner},
     semantic::{
-        analysis::{ClauseCx, UniversalElaboration},
-        syntax::{Re, TraitClause, TraitClauseList, UniversalReVarSourceInfo, UniversalTyVar},
+        analysis::{ClauseCx, ClauseImportEnvRef, TyFolderInfallibleExt, UniversalElaboration},
+        syntax::{
+            AnyGeneric, GenericSubst, HrtbBinder, Re, TraitClause, TraitClauseList, TraitParam,
+            TraitSpec, TyKind, TyOrRe, UniversalReVarSourceInfo, UniversalTyVar,
+            UniversalTyVarSourceInfo,
+        },
     },
 };
 
@@ -43,6 +47,7 @@ impl<'tcx> ClauseCx<'tcx> {
         target: TraitClauseList,
     ) {
         let s = self.session();
+        let tcx = self.tcx();
 
         for &target in target.r(s) {
             match target {
@@ -50,32 +55,82 @@ impl<'tcx> ClauseCx<'tcx> {
                     self.permit_universe_re_outlives_general(lub_re, outlive, outlive_dir);
                     accum.push(TraitClause::Outlives(outlive_dir, outlive));
                 }
-                TraitClause::Trait(spec) => {
-                    // // Elaborate with filled in parameters.
-                    // let new_params = spec
-                    //     .params
-                    //     .r(s)
-                    //     .iter()
-                    //     .zip(&spec.def.r(s).generics.r(s).defs)
-                    //     .enumerate()
-                    //     .map(|(idx, (param, base))| match *param {
-                    //         TraitParam::Equals(ty) => TraitParam::Equals(ty),
-                    //         TraitParam::Unspecified(extra_clauses) => {
-                    //             let universal = self.fresh_ty_universal_var(
-                    //                 UniversalTyVarSourceInfo::Projection(root, spec, idx as u32),
-                    //             );
-                    //             let base = *base.as_ty().unwrap().r(s).clauses;
-                    //
-                    //             self.importer(self_ty, sig_generic_substs);
-                    //
-                    //             todo!()
-                    //         }
-                    //     });
-                    //
-                    // // Elaborate super-traits.
-                    // // TODO
+                TraitClause::Trait(HrtbBinder { kind, inner: spec }) => {
+                    // Elaborate with filled in parameters.
+                    let new_params = spec
+                        .params
+                        .r(s)
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, param)| match *param {
+                            TraitParam::Equals(ty_or_re) => ty_or_re,
+                            TraitParam::Unspecified(_) => TyOrRe::Ty(self.fresh_ty_universal(
+                                UniversalTyVarSourceInfo::Projection(root, spec, idx as u32),
+                            )),
+                        })
+                        .collect::<Vec<_>>();
 
-                    accum.push(TraitClause::Trait(spec));
+                    let new_params = tcx.intern_list(&new_params);
+
+                    for ((new_param, base), spec_param) in new_params
+                        .r(s)
+                        .iter()
+                        .zip(&spec.def.r(s).generics.r(s).defs)
+                        .zip(spec.params.r(s).iter())
+                    {
+                        let TraitParam::Unspecified(explicit_clauses) = *spec_param else {
+                            continue;
+                        };
+
+                        let (TyOrRe::Ty(new_param), AnyGeneric::Ty(base)) = (new_param, base)
+                        else {
+                            unreachable!()
+                        };
+
+                        let TyKind::UniversalVar(new_param) = *new_param.r(s) else {
+                            unreachable!()
+                        };
+
+                        let implicit_clauses = self
+                            .importer(ClauseImportEnvRef {
+                                self_ty: tcx.intern(TyKind::UniversalVar(root)),
+                                sig_generic_substs: &[GenericSubst {
+                                    binder: *spec.def.r(s).generics,
+                                    substs: new_params,
+                                }],
+                            })
+                            .fold(base.r(s).clauses.value);
+
+                        let all_clauses = explicit_clauses
+                            .r(s)
+                            .iter()
+                            .chain(implicit_clauses.r(s))
+                            .copied()
+                            .collect::<Vec<_>>();
+
+                        let all_clauses = tcx.intern_list(&all_clauses);
+
+                        self.init_ty_universal_var_direct_clauses(new_param, all_clauses);
+                    }
+
+                    let new_params = new_params
+                        .r(s)
+                        .iter()
+                        .map(|&ty_or_re| TraitParam::Equals(ty_or_re))
+                        .collect::<Vec<_>>();
+
+                    let new_params = tcx.intern_list(&new_params);
+
+                    accum.push(TraitClause::Trait(HrtbBinder {
+                        kind,
+                        inner: TraitSpec {
+                            def: spec.def,
+                            params: new_params,
+                        },
+                    }));
+
+                    // Elaborate super-traits.
+                    // TODO
                 }
             }
         }

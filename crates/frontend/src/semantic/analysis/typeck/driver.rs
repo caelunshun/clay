@@ -91,10 +91,9 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         self.visit_generic_binder(&mut ccx, env.as_ref(), **generics);
 
         // Finally, let's check method signatures and, if a default one is provided, bodies.
-        // TODO
-        // for method in methods.iter() {
-        //     self.visit_fn_def(method.r(s).func)?;
-        // }
+        for &method in methods.iter() {
+            self.visit_fn_def(method);
+        }
 
         ccx.verify();
     }
