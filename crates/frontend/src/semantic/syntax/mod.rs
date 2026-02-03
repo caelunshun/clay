@@ -1,11 +1,14 @@
+mod attr;
+pub use self::attr::*;
+
 mod func;
-pub use func::*;
+pub use self::func::*;
 
 mod modules;
-pub use modules::*;
+pub use self::modules::*;
 
 mod spanned;
-pub use spanned::*;
+pub use self::spanned::*;
 
 mod types;
-pub use types::*;
+pub use self::types::*;

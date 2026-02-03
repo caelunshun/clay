@@ -1,3 +1,8 @@
+#[lang("deref_trait")]
+pub trait Deref {
+    type Target;
+}
+
 pub enum Option<T> {
     Some(T),
     None,

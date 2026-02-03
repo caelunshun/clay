@@ -9,7 +9,10 @@ use crate::{
         lower::modules::{
             FrozenModuleResolver, ItemCategory, ItemPathFmt, ParentRef, ParentResolver as _,
         },
-        syntax::{AdtEnumVariant, AdtItem, AdtKindEnum, FuncItem, ImplItem, TraitItem},
+        syntax::{
+            AdtEnumVariant, AdtItem, AdtKindEnum, Attribute, FuncItem, ImplItem, LangItems,
+            TraitItem,
+        },
     },
     symbol,
     utils::hash::FxIndexMap,
@@ -21,6 +24,7 @@ pub struct Crate {
     pub is_local: bool,
     pub root: LateInit<Obj<Item>>,
     pub items: LateInit<Vec<Obj<Item>>>,
+    pub lang_items: LangItems,
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +36,7 @@ pub struct Item {
     pub path: Symbol,
     pub direct_uses: LateInit<FxIndexMap<Symbol, DirectUse>>,
     pub glob_uses: LateInit<Vec<GlobUse>>,
+    pub attrs: LateInit<Vec<Obj<Attribute>>>,
     pub kind: LateInit<ItemKind>,
 }
 

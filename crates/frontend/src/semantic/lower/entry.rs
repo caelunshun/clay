@@ -7,9 +7,9 @@ use crate::{
     },
     parse::{
         ast::{
-            AstBarePath, AstFnDef, AstGenericDef, AstImplLikeMemberKind, AstItem, AstItemEnum,
-            AstItemFn, AstItemImpl, AstItemModuleContents, AstItemStruct, AstItemTrait,
-            AstPathPart, AstPathPartKind, AstPathPartKw, AstReturnTy, AstStructKind,
+            AstAttribute, AstBarePath, AstFnDef, AstGenericDef, AstImplLikeMemberKind, AstItem,
+            AstItemBase, AstItemEnum, AstItemFn, AstItemImpl, AstItemModuleContents, AstItemStruct,
+            AstItemTrait, AstPathPart, AstPathPartKind, AstPathPartKw, AstReturnTy, AstStructKind,
             AstTraitClauseList, AstTreePath, AstTreePathKind, AstTy, AstVisibility,
             AstVisibilityKind,
         },
@@ -25,8 +25,8 @@ use crate::{
             AdtCtor, AdtCtorField, AdtCtorFieldIdx, AdtCtorOwner, AdtCtorSyntax, AdtEnumVariant,
             AdtEnumVariantIdx, AdtItem, AdtKind, AdtKindEnum, AdtKindStruct, AnyGeneric, Crate,
             EnumVariantItem, Expr, FnDef, FuncArg, FuncDefOwner, FuncItem, FuncLocal,
-            GenericBinder, ImplItem, Item, ItemKind, ModuleItem, RegionGeneric, SpannedTy,
-            TraitItem, TyKind, TypeGeneric, Visibility,
+            GenericBinder, ImplItem, Item, ItemKind, LangItems, ModuleItem, RegionGeneric,
+            SpannedTy, TraitItem, TyKind, TypeGeneric, Visibility,
         },
     },
     symbol,
@@ -58,6 +58,7 @@ impl TyCtxt {
                 is_local: true,
                 root: LateInit::uninit(),
                 items: LateInit::uninit(),
+                lang_items: LangItems::default(),
             },
             s,
         );
@@ -80,7 +81,7 @@ impl TyCtxt {
             intra_tasks: &mut intra_tasks,
             index_to_item: &index_to_item,
         }
-        .lower_module(ast);
+        .lower_module(ast, None);
 
         for InterTask {
             target,
@@ -168,7 +169,10 @@ impl<'ast> UseLowerCtxt<'ast> {
                     );
 
                     self.queue_task(item_id, item_id, |cx| {
-                        cx.lower_module(item.contents.as_ref().unwrap())
+                        cx.lower_module(
+                            item.contents.as_ref().unwrap(),
+                            Some(&item.base.outer_attrs),
+                        )
                     });
 
                     self.lower_initial_tree(item_id, item.contents.as_ref().unwrap());
@@ -395,8 +399,27 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         }
     }
 
-    pub fn lower_module(&mut self, _ast: &'ast AstItemModuleContents) {
+    pub fn queue_lower_item_attributes(
+        &mut self,
+        attrs: impl 'ast + IntoIterator<Item = &'ast AstAttribute>,
+    ) {
+        let target = self.target;
+
+        self.queue_task(move |mut cx| cx.lower_item_attributes(target, attrs));
+    }
+
+    pub fn lower_module(
+        &mut self,
+        ast: &'ast AstItemModuleContents,
+        outer_attrs: Option<&'ast [AstAttribute]>,
+    ) {
         let s = &self.tcx.session;
+
+        self.queue_lower_item_attributes(
+            ast.inner_attrs
+                .iter()
+                .chain(outer_attrs.into_iter().flatten()),
+        );
 
         LateInit::init(
             &self.target.r(s).kind,
@@ -406,6 +429,8 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
 
     pub fn lower_trait(&mut self, ast: &'ast AstItemTrait) {
         let s = &self.tcx.session;
+
+        self.queue_lower_item_attributes(&ast.base.outer_attrs);
 
         let trait_target = Obj::new(
             TraitItem {
@@ -492,6 +517,8 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
     pub fn lower_struct(&mut self, ast: &'ast AstItemStruct) {
         let s = &self.tcx.session;
 
+        self.queue_lower_item_attributes(&ast.base.outer_attrs);
+
         let mut generics = GenericBinder::default();
         let mut generic_clause_lists = Vec::new();
         let mut field_tys_to_extend = Vec::new();
@@ -537,6 +564,8 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
 
     pub fn lower_enum(&mut self, ast: &'ast AstItemEnum) {
         let s = &self.tcx.session;
+
+        self.queue_lower_item_attributes(&ast.base.outer_attrs);
 
         let mut generics = GenericBinder::default();
         let mut generic_clause_lists = Vec::new();
@@ -773,13 +802,14 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
     pub fn lower_impl(&mut self, ast: &'ast AstItemImpl) {
         let target = self.target;
 
-        self.queue_task(move |cx| {
-            cx.lower_impl(target, ast);
-        });
+        self.queue_lower_item_attributes(&ast.base.outer_attrs);
+        self.queue_task(move |cx| cx.lower_impl(target, ast));
     }
 
     pub fn lower_fn_item(&mut self, ast: &'ast AstItemFn) {
         let s = &self.tcx.session;
+
+        self.queue_lower_item_attributes(&ast.base.outer_attrs);
 
         let target_def = Obj::new(
             FuncItem {

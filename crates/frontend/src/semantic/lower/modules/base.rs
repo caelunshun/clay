@@ -142,6 +142,15 @@ pub enum StepResolveError<T> {
 }
 
 impl<T: Handle> StepResolveError<T> {
+    #[must_use]
+    pub fn bind(self, curr: T, part: AstPathPart) -> PathResolveError<T> {
+        PathResolveError {
+            error: self,
+            curr,
+            part,
+        }
+    }
+
     pub fn emit(
         self,
         resolver: &(impl ?Sized + PathResolver<Item = T>),
@@ -191,6 +200,19 @@ impl<T: Handle> StepResolveError<T> {
             )
             .emit(),
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PathResolveError<T: Handle> {
+    pub error: StepResolveError<T>,
+    pub curr: T,
+    pub part: AstPathPart,
+}
+
+impl<T: Handle> PathResolveError<T> {
+    pub fn emit(self, resolver: &(impl ?Sized + PathResolver<Item = T>)) -> ErrorGuaranteed {
+        self.error.emit(resolver, self.curr, self.part)
     }
 }
 
@@ -304,22 +326,32 @@ pub trait PathResolver: ParentResolver {
         )
     }
 
+    fn try_resolve_bare_path(
+        &mut self,
+        local_crate_root: Self::Item,
+        origin: Self::Item,
+        path: &AstBarePath,
+    ) -> Result<Self::Item, PathResolveError<Self::Item>> {
+        let mut finger = origin;
+
+        for &part in path.parts.iter() {
+            match self.resolve_step(local_crate_root, origin, finger, part) {
+                Ok(next) => finger = next,
+                Err(err) => return Err(err.bind(finger, part)),
+            }
+        }
+
+        Ok(finger)
+    }
+
     fn resolve_bare_path(
         &mut self,
         local_crate_root: Self::Item,
         origin: Self::Item,
         path: &AstBarePath,
     ) -> Result<Self::Item, ErrorGuaranteed> {
-        let mut finger = origin;
-
-        for &part in path.parts.iter() {
-            match self.resolve_step(local_crate_root, origin, finger, part) {
-                Ok(next) => finger = next,
-                Err(err) => return Err(err.emit(self, finger, part)),
-            }
-        }
-
-        Ok(finger)
+        self.try_resolve_bare_path(local_crate_root, origin, path)
+            .map_err(|err| err.emit(self))
     }
 
     fn resolve_bare_path_for_use(

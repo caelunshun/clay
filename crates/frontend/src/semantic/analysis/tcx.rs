@@ -1,14 +1,14 @@
 use crate::{
     base::{
-        HasSession, Session,
+        Diag, HasSession, Session,
         analysis::SpannedInfo,
         arena::{HasInterner, HasListInterner, Interner, ListInterner, Obj},
     },
     semantic::{
         analysis::{CoherenceMap, CrateTypeckVisitor},
         syntax::{
-            Crate, HrtbDebruijnDef, TraitClause, TraitClauseList, TraitParam, Ty, TyKind, TyOrRe,
-            TyShape,
+            AttributeKind, Crate, EarlyAttrLang, HrtbDebruijnDef, LangItemDefineError, TraitClause,
+            TraitClauseList, TraitParam, Ty, TyKind, TyOrRe, TyShape,
         },
     },
 };
@@ -62,6 +62,26 @@ impl TyCtxt {
         let mut coherence = CoherenceMap::default();
 
         coherence.populate(self, krate);
+
+        for &def in &**krate.r(s).items {
+            for attr in &**def.r(s).attrs {
+                let AttributeKind::Lang(EarlyAttrLang { name }) = attr.r(s).kind else {
+                    continue;
+                };
+
+                match krate.r(s).lang_items.define(name, def) {
+                    Ok(_) => {
+                        // (fallthrough)
+                    }
+                    Err(LangItemDefineError::AlreadyDefined(_there)) => {
+                        Diag::span_err(attr.r(s).span, "duplicate language").emit();
+                    }
+                    Err(LangItemDefineError::NoSuchName) => {
+                        Diag::span_err(attr.r(s).span, "no such language item").emit();
+                    }
+                }
+            }
+        }
 
         for &def in &**krate.r(s).items {
             let Some(def) = def.r(s).kind.as_impl() else {

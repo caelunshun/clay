@@ -1,9 +1,9 @@
 use crate::{
-    base::syntax::{HasSpan, Span},
+    base::syntax::{HasSpan, Span, Symbol},
     kw,
     parse::{
         ast::{AstGenericParamList, Keyword},
-        token::{Ident, TokenStream},
+        token::{Ident, TokenGroup},
     },
     semantic::syntax::Mutability,
 };
@@ -16,7 +16,7 @@ pub struct AstAttribute {
     pub span: Span,
     pub is_inner: bool,
     pub path: AstBarePath,
-    pub args: TokenStream,
+    pub params: TokenGroup,
 }
 
 // === Paths === //
@@ -38,6 +38,10 @@ impl AstBarePath {
 
     pub fn as_ident(&self) -> Option<Ident> {
         self.as_singleton().and_then(|v| v.ident())
+    }
+
+    pub fn as_symbol(&self) -> Option<Symbol> {
+        self.as_ident().map(|v| v.text)
     }
 }
 

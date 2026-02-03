@@ -1,5 +1,5 @@
 use crate::{
-    base::syntax::{Matcher as _, Symbol},
+    base::syntax::{Matcher as _, Span, Symbol},
     kw,
     parse::{
         ast::{
@@ -12,7 +12,7 @@ use crate::{
                 parse_delimited_until_terminator,
             },
         },
-        token::{GroupDelimiter, TokenCursor},
+        token::{GroupDelimiter, TokenCursor, TokenGroup, TokenStream},
     },
     punct, puncts, symbol,
 };
@@ -44,27 +44,32 @@ pub fn parse_attribute(p: P) -> Option<AstAttribute> {
     };
 
     let mut p2 = p.enter(&bracket);
+    let p2 = &mut p2;
 
-    let Some(path) = parse_bare_path(&mut p2) else {
+    let Some(path) = parse_bare_path(p2) else {
         p2.stuck().ignore_not_in_loop();
         return None;
     };
 
-    let Some(paren) = match_group(GroupDelimiter::Paren).expect(&mut p2) else {
-        p2.stuck().ignore_not_in_loop();
-        return None;
-    };
+    let params = if let Some(parens) = match_group(GroupDelimiter::Paren).expect(p2) {
+        parens
+    } else {
+        if !match_eos(p2) {
+            p2.stuck().ignore_not_in_loop();
+        }
 
-    if !match_eos(&mut p2) {
-        p2.stuck().ignore_not_in_loop();
-        return None;
-    }
+        TokenGroup {
+            span: Span::DUMMY,
+            delimiter: GroupDelimiter::Paren,
+            tokens: TokenStream::new(),
+        }
+    };
 
     Some(AstAttribute {
         span: start.to(p.prev_span()),
         is_inner,
         path,
-        args: paren.tokens,
+        params,
     })
 }
 

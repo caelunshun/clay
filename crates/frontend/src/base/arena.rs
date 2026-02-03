@@ -374,6 +374,7 @@ impl<T> LateInit<T> {
 impl<T> Deref for LateInit<T> {
     type Target = T;
 
+    #[track_caller]
     fn deref(&self) -> &Self::Target {
         Self::get(self).expect("cell not initialized")
     }

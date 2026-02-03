@@ -35,6 +35,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
             is_local: _,
             root: _,
             items,
+            lang_items: _,
         } = krate.r(s);
 
         for &item in &**items {
