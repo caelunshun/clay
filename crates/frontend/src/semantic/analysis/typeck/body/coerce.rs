@@ -1,12 +1,15 @@
 use crate::{
-    base::arena::{HasInterner, HasListInterner, Obj},
+    base::{
+        Session,
+        arena::{HasInterner, HasListInterner, Obj},
+    },
     semantic::{
         analysis::{
             BodyCtxt, CheckOrigin, CheckOriginKind, ClauseCx, NoTraitImplError, ObligationNotReady,
         },
         syntax::{
-            Divergence, Expr, Mutability, Re, RelationMode, TraitClauseList, TraitItem, TraitParam,
-            TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            Crate, Divergence, Expr, Mutability, Re, RelationMode, TraitClauseList, TraitItem,
+            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -84,9 +87,11 @@ impl BodyCtxt<'_, '_> {
     }
 
     // TODO: Save the coercions to a fact map
+    // TODO: Check mutabilities
     fn apply_coercions(&mut self, exprs: &[(Obj<Expr>, Ty)], target: CoercionResolution) -> Ty {
         let s = self.session();
         let tcx = self.tcx();
+        let krate = self.krate();
 
         match target {
             CoercionResolution::Solid(solid) => {
@@ -129,7 +134,7 @@ impl BodyCtxt<'_, '_> {
                                     }),
                                     output_pointee,
                                     TraitSpec {
-                                        def: deref_lang_item(),
+                                        def: deref_lang_item(krate, s).unwrap(),
                                         params: tcx.intern_list(&[TraitParam::Equals(TyOrRe::Ty(
                                             next_output,
                                         ))]),
@@ -253,6 +258,7 @@ impl CoercionPossibility {
 
                 let deref_steps = compute_deref_glb(
                     bcx.ccx(),
+                    bcx.krate(),
                     &refs
                         .clone()
                         .map(|(_muta, pointee)| pointee)
@@ -288,14 +294,18 @@ impl CoercionPossibility {
 
 // === Deref Chains === //
 
-fn compute_deref_glb(ccx: &ClauseCx<'_>, pointees: &[Ty]) -> Vec<u32> {
-    ccx.fork_throwaway(|ccx| compute_deref_glb_clobber_obligations(ccx, pointees))
+fn compute_deref_glb(ccx: &ClauseCx<'_>, krate: Obj<Crate>, pointees: &[Ty]) -> Vec<u32> {
+    ccx.fork_throwaway(|ccx| compute_deref_glb_clobber_obligations(ccx, krate, pointees))
 }
 
-fn compute_deref_glb_clobber_obligations(ccx: &mut ClauseCx<'_>, pointees: &[Ty]) -> Vec<u32> {
+fn compute_deref_glb_clobber_obligations(
+    ccx: &mut ClauseCx<'_>,
+    krate: Obj<Crate>,
+    pointees: &[Ty],
+) -> Vec<u32> {
     let chains = pointees
         .iter()
-        .map(|&origin| compute_deref_chain_clobber_obligations(ccx, origin))
+        .map(|&origin| compute_deref_chain_clobber_obligations(ccx, krate, origin))
         .collect::<Vec<_>>();
 
     let mut chain_iters = chains.iter().map(|v| v.iter().rev()).collect::<Vec<_>>();
@@ -347,10 +357,13 @@ fn compute_deref_glb_clobber_obligations(ccx: &mut ClauseCx<'_>, pointees: &[Ty]
 
 fn compute_deref_chain_clobber_obligations(
     ccx: &mut ClauseCx<'_>,
+    krate: Obj<Crate>,
     mut curr: Ty,
 ) -> SmallVec<[Ty; 1]> {
-    let mut accum = smallvec![curr];
     let tcx = ccx.tcx();
+    let s = ccx.session();
+
+    let mut accum = smallvec![curr];
 
     loop {
         let next_infer_var = ccx.fresh_ty_infer_var();
@@ -360,7 +373,7 @@ fn compute_deref_chain_clobber_obligations(
             &CheckOrigin::never_printed(),
             curr,
             TraitSpec {
-                def: deref_lang_item(),
+                def: deref_lang_item(krate, s).unwrap(),
                 params: tcx.intern_list(&[TraitParam::Equals(TyOrRe::Ty(next_infer))]),
             },
         ) {
@@ -394,6 +407,10 @@ enum CoercionResolution {
     },
 }
 
-fn deref_lang_item() -> Obj<TraitItem> {
-    todo!()
+fn deref_lang_item(krate: Obj<Crate>, s: &Session) -> Option<Obj<TraitItem>> {
+    krate
+        .r(s)
+        .lang_items
+        .deref_trait()
+        .map(|v| v.r(s).kind.as_trait().unwrap())
 }

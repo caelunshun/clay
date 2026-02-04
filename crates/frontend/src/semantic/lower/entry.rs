@@ -8,7 +8,7 @@ use crate::{
     parse::{
         ast::{
             AstAttribute, AstBarePath, AstFnDef, AstGenericDef, AstImplLikeMemberKind, AstItem,
-            AstItemBase, AstItemEnum, AstItemFn, AstItemImpl, AstItemModuleContents, AstItemStruct,
+            AstItemEnum, AstItemFn, AstItemImpl, AstItemModuleContents, AstItemStruct,
             AstItemTrait, AstPathPart, AstPathPartKind, AstPathPartKw, AstReturnTy, AstStructKind,
             AstTraitClauseList, AstTreePath, AstTreePathKind, AstTy, AstVisibility,
             AstVisibilityKind,
@@ -677,6 +677,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
     pub fn lower_variant(&mut self, owner: Obj<Item>, idx: u32) {
         let s = &self.tcx.session;
 
+        LateInit::init(&self.target.r(s).attrs, Vec::new());
         LateInit::init(
             &self.target.r(s).kind,
             ItemKind::EnumVariant(Obj::new(

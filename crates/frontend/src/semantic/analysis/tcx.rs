@@ -94,8 +94,9 @@ impl TyCtxt {
         CrateTypeckVisitor {
             tcx: self,
             coherence: &coherence,
+            krate,
         }
-        .visit_crate(krate);
+        .visit_crate();
     }
 }
 

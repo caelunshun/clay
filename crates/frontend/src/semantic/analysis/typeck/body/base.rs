@@ -12,9 +12,9 @@ use crate::{
             TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
         },
         syntax::{
-            Block, Divergence, Expr, ExprKind, FnDef, FuncLocal, InferTyVar, Pat, PatKind, Re,
-            RelationMode, SimpleTyKind, SpannedFnInstanceView, SpannedTyView, Stmt, StructExpr, Ty,
-            TyAndDivergence, TyKind,
+            Block, Crate, Divergence, Expr, ExprKind, FnDef, FuncLocal, InferTyVar, Pat, PatKind,
+            Re, RelationMode, SimpleTyKind, SpannedFnInstanceView, SpannedTyView, Stmt, StructExpr,
+            Ty, TyAndDivergence, TyKind,
         },
     },
 };
@@ -51,7 +51,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Check the body
         if let Some(body) = *def.r(s).body {
-            let mut bcx = BodyCtxt::new(&mut ccx, env.as_ref());
+            let mut bcx = BodyCtxt::new(&mut ccx, self.krate, env.as_ref());
             _ = bcx.check_block(body);
         }
 
@@ -63,6 +63,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
 pub struct BodyCtxt<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
+    krate: Obj<Crate>,
     import_env: ClauseImportEnvRef<'a>,
     local_types: FxHashMap<Obj<FuncLocal>, Ty>,
     needs_infer: Vec<NeedsInfer>,
@@ -75,9 +76,14 @@ struct NeedsInfer {
 }
 
 impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
-    pub fn new(ccx: &'a mut ClauseCx<'tcx>, import_env: ClauseImportEnvRef<'a>) -> Self {
+    pub fn new(
+        ccx: &'a mut ClauseCx<'tcx>,
+        krate: Obj<Crate>,
+        import_env: ClauseImportEnvRef<'a>,
+    ) -> Self {
         Self {
             ccx,
+            krate,
             import_env,
             local_types: FxHashMap::default(),
             needs_infer: Vec::new(),
@@ -90,6 +96,10 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
     pub fn session(&self) -> &'tcx Session {
         self.ccx.session()
+    }
+
+    pub fn krate(&self) -> Obj<Crate> {
+        self.krate
     }
 
     pub fn ccx(&self) -> &ClauseCx<'tcx> {

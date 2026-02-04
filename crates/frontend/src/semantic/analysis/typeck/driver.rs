@@ -16,6 +16,7 @@ use crate::{
 pub struct CrateTypeckVisitor<'tcx> {
     pub tcx: &'tcx TyCtxt,
     pub coherence: &'tcx CoherenceMap,
+    pub krate: Obj<Crate>,
 }
 
 impl<'tcx> CrateTypeckVisitor<'tcx> {
@@ -27,7 +28,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         &self.tcx.session
     }
 
-    pub fn visit_crate(&mut self, krate: Obj<Crate>) {
+    pub fn visit_crate(&mut self) {
         let s = self.session();
 
         let Crate {
@@ -36,7 +37,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
             root: _,
             items,
             lang_items: _,
-        } = krate.r(s);
+        } = self.krate.r(s);
 
         for &item in &**items {
             match *item.r(s).kind {
