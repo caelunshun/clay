@@ -28,11 +28,11 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         let tcx = self.tcx();
 
         // Setup a `ClauseCx` for signature validation.
-        let mut ccx = ClauseCx::new(tcx, self.coherence, UnifyCxMode::RegionAware);
-        let env = ccx.import_fn_def_env(def);
+        let mut ccx_sig = ClauseCx::new(tcx, self.coherence, UnifyCxMode::RegionAware);
+        let env_sig = ccx_sig.import_fn_def_env(def);
 
         // WF-check the signature.
-        self.visit_generic_binder(&mut ccx, env.as_ref(), def.r(s).generics);
+        self.visit_generic_binder(&mut ccx_sig, env_sig.as_ref(), def.r(s).generics);
 
         // TODO
         // if let Some(self_param) = *def.r(s).self_param {
@@ -40,22 +40,27 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         // }
 
         for arg in def.r(s).args.r(s) {
-            let arg = ccx.importer(env.as_ref()).fold_preserved(arg.ty);
+            let arg = ccx_sig.importer(env_sig.as_ref()).fold_preserved(arg.ty);
 
-            ccx.wf_visitor().visit_spanned(arg);
+            ccx_sig.wf_visitor().visit_spanned(arg);
         }
 
-        let ret_ty = ccx.importer(env.as_ref()).fold_preserved(*def.r(s).ret_ty);
+        let ret_ty = ccx_sig
+            .importer(env_sig.as_ref())
+            .fold_preserved(*def.r(s).ret_ty);
 
-        ccx.wf_visitor().visit_spanned(ret_ty);
+        ccx_sig.wf_visitor().visit_spanned(ret_ty);
 
         // Check the body
         if let Some(body) = *def.r(s).body {
-            let mut bcx = BodyCtxt::new(&mut ccx, self.krate, env.as_ref());
+            let mut ccx_body = ClauseCx::new(tcx, self.coherence, UnifyCxMode::RegionBlind);
+            let env_body = ccx_body.import_fn_def_env(def);
+
+            let mut bcx = BodyCtxt::new(&mut ccx_body, self.krate, env_body.as_ref());
             _ = bcx.check_block(body);
         }
 
-        ccx.verify();
+        ccx_sig.verify();
     }
 }
 

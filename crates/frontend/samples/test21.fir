@@ -21,7 +21,7 @@ impl Deref for Bar {
 
 fn demo() {
     let a: Foo;
-    let b: Foo;
+    let b: Bar;
 
     let foo = if true {
         &a
