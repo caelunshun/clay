@@ -144,10 +144,9 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub(super) fn push_obligation(&mut self, kind: ClauseObligation) {
         self.ocx.push_obligation(kind);
-        self.process_obligations();
     }
 
-    fn process_obligations(&mut self) {
+    pub fn poll_obligations(&mut self) {
         ObligationCx::poll_obligations(
             self,
             |this| &mut this.ocx,
@@ -166,7 +165,7 @@ impl<'tcx> ClauseCx<'tcx> {
                         Ok(())
                     }
                     ClauseObligation::TyMeetsTrait(origin, lhs, rhs) => {
-                        match fork.try_oblige_ty_meets_trait_instantiated(&origin, lhs, rhs) {
+                        match fork.run_oblige_ty_meets_trait_instantiated(&origin, lhs, rhs) {
                             Ok(Ok(())) => Ok(()),
                             Ok(Err(err)) => {
                                 err.emit(fork);
@@ -184,40 +183,6 @@ impl<'tcx> ClauseCx<'tcx> {
                 }
             },
         );
-    }
-
-    pub fn suppress_obligation_eval<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
-        let was_suppressed = self.ocx.obligation_eval_suppressed();
-        self.ocx.set_obligation_eval_suppressed(true);
-        let res = f(self);
-        self.ocx.set_obligation_eval_suppressed(was_suppressed);
-        if !was_suppressed {
-            self.process_obligations();
-        }
-        res
-    }
-
-    pub fn try_fork<T, E>(&mut self, f: impl FnOnce(&mut Self) -> Result<T, E>) -> Result<T, E> {
-        self.suppress_obligation_eval(|this| {
-            let mut fork = this.clone();
-
-            let res = f(&mut fork);
-
-            if res.is_ok() {
-                *this = fork;
-            }
-
-            res
-        })
-    }
-
-    pub fn fork_throwaway<T>(&self, f: impl FnOnce(&mut Self) -> T) -> T {
-        let was_suppressed = self.ocx.obligation_eval_suppressed();
-        self.ocx.set_obligation_eval_suppressed(true);
-        let res = f(&mut self.clone());
-        self.ocx.set_obligation_eval_suppressed(was_suppressed);
-        // N.B. there are no obligations to run here.
-        res
     }
 }
 
@@ -344,7 +309,8 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    pub fn verify(&self) {
+    pub fn verify(&mut self) {
+        self.poll_obligations();
         self.ucx().verify(self);
     }
 }

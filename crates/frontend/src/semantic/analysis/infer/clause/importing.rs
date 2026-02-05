@@ -78,16 +78,14 @@ impl<'tcx> ClauseCx<'tcx> {
         self_ty: Ty,
         binders: &[Obj<GenericBinder>],
     ) -> Vec<GenericSubst> {
-        self.suppress_obligation_eval(|this| {
-            let substs = this.create_blank_universal_vars_from_binder_list(binders);
+        let substs = self.create_blank_universal_vars_from_binder_list(binders);
 
-            this.init_universal_var_clauses_from_binder(ClauseImportEnvRef {
-                self_ty,
-                sig_generic_substs: &substs,
-            });
+        self.init_universal_var_clauses_from_binder(ClauseImportEnvRef {
+            self_ty,
+            sig_generic_substs: &substs,
+        });
 
-            substs
-        })
+        substs
     }
 
     pub fn create_blank_universal_vars_from_binder_list(
@@ -301,92 +299,86 @@ impl<'tcx> ClauseCx<'tcx> {
     // === Specialized imports === //
 
     pub fn import_trait_def_env(&mut self, def: Obj<TraitItem>) -> ClauseImportEnv {
-        self.suppress_obligation_eval(|this| {
-            let s = this.session();
-            let tcx = this.tcx();
+        let s = self.session();
+        let tcx = self.tcx();
 
-            // Create a universal variable representing `Self`
-            let self_var = this.fresh_ty_universal_var(UniversalTyVarSourceInfo::TraitSelf);
-            let self_ty = tcx.intern(TyKind::UniversalVar(self_var));
+        // Create a universal variable representing `Self`
+        let self_var = self.fresh_ty_universal_var(UniversalTyVarSourceInfo::TraitSelf);
+        let self_ty = tcx.intern(TyKind::UniversalVar(self_var));
 
-            // Create universal variables for each parameter.
-            let sig_generic_substs =
-                this.import_binder_list_as_universal(self_ty, &[*def.r(s).generics]);
+        // Create universal variables for each parameter.
+        let sig_generic_substs =
+            self.import_binder_list_as_universal(self_ty, &[*def.r(s).generics]);
 
-            let generic_params = sig_generic_substs[0].substs;
+        let generic_params = sig_generic_substs[0].substs;
 
-            // Make `Self` implement the trait with these synthesized parameters.
-            this.init_ty_universal_var_direct_clauses(
-                self_var,
-                tcx.intern_list(&[TraitClause::Trait(HrtbBinder {
-                    kind: HrtbBinderKind::Imported(tcx.intern_list(&[])),
-                    inner: TraitSpec {
-                        def,
-                        params: tcx.intern_list(
-                            &generic_params
-                                .r(s)
-                                .iter()
-                                .map(|&arg| TraitParam::Equals(arg))
-                                .collect::<Vec<_>>(),
-                        ),
-                    },
-                })]),
-            );
+        // Make `Self` implement the trait with these synthesized parameters.
+        self.init_ty_universal_var_direct_clauses(
+            self_var,
+            tcx.intern_list(&[TraitClause::Trait(HrtbBinder {
+                kind: HrtbBinderKind::Imported(tcx.intern_list(&[])),
+                inner: TraitSpec {
+                    def,
+                    params: tcx.intern_list(
+                        &generic_params
+                            .r(s)
+                            .iter()
+                            .map(|&arg| TraitParam::Equals(arg))
+                            .collect::<Vec<_>>(),
+                    ),
+                },
+            })]),
+        );
 
-            ClauseImportEnv::new(self_ty, sig_generic_substs)
-        })
+        ClauseImportEnv::new(self_ty, sig_generic_substs)
     }
 
     pub fn import_adt_def_env(&mut self, def: Obj<AdtItem>) -> ClauseImportEnv {
-        self.suppress_obligation_eval(|this| {
-            let s = this.session();
-            let tcx = this.tcx();
+        let s = self.session();
+        let tcx = self.tcx();
 
-            // Create universal parameters.
-            let sig_generic_substs =
-                this.create_blank_universal_vars_from_binder_list(&[def.r(s).generics]);
+        // Create universal parameters.
+        let sig_generic_substs =
+            self.create_blank_universal_vars_from_binder_list(&[def.r(s).generics]);
 
-            // Create the `Self` type.
-            let self_ty = tcx.intern(TyKind::Adt(AdtInstance {
-                def,
-                params: sig_generic_substs[0].substs,
-            }));
+        // Create the `Self` type.
+        let self_ty = tcx.intern(TyKind::Adt(AdtInstance {
+            def,
+            params: sig_generic_substs[0].substs,
+        }));
 
-            // Initialize the clauses.
-            this.init_universal_var_clauses_from_binder(ClauseImportEnvRef {
-                self_ty,
-                sig_generic_substs: &sig_generic_substs,
-            });
+        // Initialize the clauses.
+        self.init_universal_var_clauses_from_binder(ClauseImportEnvRef {
+            self_ty,
+            sig_generic_substs: &sig_generic_substs,
+        });
 
-            ClauseImportEnv::new(self_ty, sig_generic_substs)
-        })
+        ClauseImportEnv::new(self_ty, sig_generic_substs)
     }
 
     pub fn import_impl_block_env(&mut self, def: Obj<ImplItem>) -> ClauseImportEnv {
-        self.suppress_obligation_eval(|this| {
-            let s = this.session();
-            let tcx = this.tcx();
+        let s = self.session();
+        let tcx = self.tcx();
 
-            // Create universal parameters.
-            let sig_generic_substs =
-                this.create_blank_universal_vars_from_binder_list(&[def.r(s).generics]);
+        // Create universal parameters.
+        let sig_generic_substs =
+            self.create_blank_universal_vars_from_binder_list(&[def.r(s).generics]);
 
-            // Create the `Self` type. This type cannot contain `Self` so we give a dummy self type.
-            let self_ty = this
-                .importer(ClauseImportEnvRef::new(
-                    tcx.intern(TyKind::SigThis),
-                    &sig_generic_substs,
-                ))
-                .fold(def.r(s).target.value);
-
-            // Initialize the clauses.
-            this.init_universal_var_clauses_from_binder(ClauseImportEnvRef::new(
-                self_ty,
+        // Create the `Self` type. This type cannot contain `Self` so we give a dummy self type.
+        let self_ty = self
+            .importer(ClauseImportEnvRef::new(
+                tcx.intern(TyKind::SigThis),
                 &sig_generic_substs,
-            ));
+            ))
+            .fold(def.r(s).target.value);
 
-            ClauseImportEnv::new(self_ty, sig_generic_substs)
-        })
+        // Initialize the clauses.
+        self.init_universal_var_clauses_from_binder(ClauseImportEnvRef::new(
+            self_ty,
+            &sig_generic_substs,
+        ));
+
+        ClauseImportEnv::new(self_ty, sig_generic_substs)
     }
 
     pub fn import_fn_item_generics(&mut self, self_ty: Ty, def: Obj<FnDef>) -> Vec<GenericSubst> {

@@ -30,58 +30,56 @@ impl<'tcx> ClauseCx<'tcx> {
             return binder.inner;
         }
 
-        self.suppress_obligation_eval(|this| {
-            // Make up new universal variables for our binder.
-            let vars = defs
-                .r(s)
-                .iter()
-                .map(|def| match def.kind {
-                    TyOrReKind::Re => {
-                        TyOrRe::Re(this.fresh_re_universal(UniversalReVarSourceInfo::HrtbVar))
-                    }
-                    TyOrReKind::Ty => {
-                        TyOrRe::Ty(this.fresh_ty_universal(UniversalTyVarSourceInfo::HrtbVar))
-                    }
-                })
-                .collect::<Vec<_>>();
+        // Make up new universal variables for our binder.
+        let vars = defs
+            .r(s)
+            .iter()
+            .map(|def| match def.kind {
+                TyOrReKind::Re => {
+                    TyOrRe::Re(self.fresh_re_universal(UniversalReVarSourceInfo::HrtbVar))
+                }
+                TyOrReKind::Ty => {
+                    TyOrRe::Ty(self.fresh_ty_universal(UniversalTyVarSourceInfo::HrtbVar))
+                }
+            })
+            .collect::<Vec<_>>();
 
-            let vars = tcx.intern_list(&vars);
+        let vars = tcx.intern_list(&vars);
 
-            // Initialize their clauses.
-            for (&def, &var) in defs.r(s).iter().zip(vars.r(s)) {
-                match var {
-                    TyOrRe::Re(var) => {
-                        let clauses = HrtbSubstitutionFolder::new(this, vars, s).fold(def.clauses);
+        // Initialize their clauses.
+        for (&def, &var) in defs.r(s).iter().zip(vars.r(s)) {
+            match var {
+                TyOrRe::Re(var) => {
+                    let clauses = HrtbSubstitutionFolder::new(self, vars, s).fold(def.clauses);
 
-                        for clause in clauses.r(s) {
-                            let TraitClause::Outlives(permitted_outlive_dir, permitted_outlive) =
-                                *clause
-                            else {
-                                unreachable!();
-                            };
-
-                            this.permit_universe_re_outlives_general(
-                                var,
-                                permitted_outlive,
-                                permitted_outlive_dir,
-                            );
-                        }
-                    }
-                    TyOrRe::Ty(var) => {
-                        let TyKind::UniversalVar(var) = *var.r(s) else {
-                            unreachable!()
+                    for clause in clauses.r(s) {
+                        let TraitClause::Outlives(permitted_outlive_dir, permitted_outlive) =
+                            *clause
+                        else {
+                            unreachable!();
                         };
 
-                        let clauses = HrtbSubstitutionFolder::new(this, vars, s).fold(def.clauses);
-
-                        this.init_ty_universal_var_direct_clauses(var, clauses);
+                        self.permit_universe_re_outlives_general(
+                            var,
+                            permitted_outlive,
+                            permitted_outlive_dir,
+                        );
                     }
                 }
-            }
+                TyOrRe::Ty(var) => {
+                    let TyKind::UniversalVar(var) = *var.r(s) else {
+                        unreachable!()
+                    };
 
-            // Fold the inner type
-            HrtbSubstitutionFolder::new(this, vars, s).fold(binder.inner)
-        })
+                    let clauses = HrtbSubstitutionFolder::new(self, vars, s).fold(def.clauses);
+
+                    self.init_ty_universal_var_direct_clauses(var, clauses);
+                }
+            }
+        }
+
+        // Fold the inner type
+        HrtbSubstitutionFolder::new(self, vars, s).fold(binder.inner)
     }
 
     pub fn instantiate_hrtb_infer(
@@ -101,50 +99,48 @@ impl<'tcx> ClauseCx<'tcx> {
             return binder.inner;
         }
 
-        self.suppress_obligation_eval(|this| {
-            // Make up new inference variables for our binder.
-            let vars = defs
-                .r(s)
-                .iter()
-                .map(|def| match def.kind {
-                    TyOrReKind::Re => TyOrRe::Re(this.fresh_re_infer()),
-                    TyOrReKind::Ty => TyOrRe::Ty(this.fresh_ty_infer()),
-                })
-                .collect::<Vec<_>>();
+        // Make up new inference variables for our binder.
+        let vars = defs
+            .r(s)
+            .iter()
+            .map(|def| match def.kind {
+                TyOrReKind::Re => TyOrRe::Re(self.fresh_re_infer()),
+                TyOrReKind::Ty => TyOrRe::Ty(self.fresh_ty_infer()),
+            })
+            .collect::<Vec<_>>();
 
-            let vars = tcx.intern_list(&vars);
+        let vars = tcx.intern_list(&vars);
 
-            // Constrain the new inference variables with their obligations.
-            for (&def, &var) in defs.r(s).iter().zip(vars.r(s)) {
-                match var {
-                    TyOrRe::Re(var) => {
-                        let clauses = HrtbSubstitutionFolder::new(this, vars, s).fold(def.clauses);
+        // Constrain the new inference variables with their obligations.
+        for (&def, &var) in defs.r(s).iter().zip(vars.r(s)) {
+            match var {
+                TyOrRe::Re(var) => {
+                    let clauses = HrtbSubstitutionFolder::new(self, vars, s).fold(def.clauses);
 
-                        this.oblige_re_meets_clauses(
-                            &origin.clone().child(CheckOriginKind::HrtbSelection {
-                                def: def.spawned_from,
-                            }),
-                            var,
-                            clauses,
-                        );
-                    }
-                    TyOrRe::Ty(var) => {
-                        let clauses = HrtbSubstitutionFolder::new(this, vars, s).fold(def.clauses);
+                    self.oblige_re_meets_clauses(
+                        &origin.clone().child(CheckOriginKind::HrtbSelection {
+                            def: def.spawned_from,
+                        }),
+                        var,
+                        clauses,
+                    );
+                }
+                TyOrRe::Ty(var) => {
+                    let clauses = HrtbSubstitutionFolder::new(self, vars, s).fold(def.clauses);
 
-                        this.oblige_ty_meets_clauses(
-                            &origin.clone().child(CheckOriginKind::HrtbSelection {
-                                def: def.spawned_from,
-                            }),
-                            var,
-                            clauses,
-                        );
-                    }
+                    self.oblige_ty_meets_clauses(
+                        &origin.clone().child(CheckOriginKind::HrtbSelection {
+                            def: def.spawned_from,
+                        }),
+                        var,
+                        clauses,
+                    );
                 }
             }
+        }
 
-            // Fold the inner type
-            HrtbSubstitutionFolder::new(this, vars, s).fold(binder.inner)
-        })
+        // Fold the inner type
+        HrtbSubstitutionFolder::new(self, vars, s).fold(binder.inner)
     }
 }
 

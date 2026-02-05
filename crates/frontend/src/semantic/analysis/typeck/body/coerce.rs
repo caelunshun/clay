@@ -4,9 +4,7 @@ use crate::{
         arena::{HasInterner, HasListInterner, Obj},
     },
     semantic::{
-        analysis::{
-            BodyCtxt, CheckOrigin, CheckOriginKind, ClauseCx, NoTraitImplError, ObligationNotReady,
-        },
+        analysis::{BodyCtxt, CheckOrigin, CheckOriginKind, ClauseCx},
         syntax::{
             Crate, Divergence, Expr, Mutability, Re, RelationMode, TraitClauseList, TraitItem,
             TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
@@ -295,7 +293,7 @@ impl CoercionPossibility {
 // === Deref Chains === //
 
 fn compute_deref_glb(ccx: &ClauseCx<'_>, krate: Obj<Crate>, pointees: &[Ty]) -> Vec<u32> {
-    ccx.fork_throwaway(|ccx| compute_deref_glb_clobber_obligations(ccx, krate, pointees))
+    compute_deref_glb_clobber_obligations(&mut ccx.clone(), krate, pointees)
 }
 
 fn compute_deref_glb_clobber_obligations(
@@ -369,19 +367,17 @@ fn compute_deref_chain_clobber_obligations(
         let next_infer_var = ccx.fresh_ty_infer_var();
         let next_infer = tcx.intern(TyKind::InferVar(next_infer_var));
 
-        match ccx.try_oblige_ty_meets_trait_instantiated(
-            &CheckOrigin::never_printed(),
+        // TODO: Silence this obligation, using it for error probing instead.
+        ccx.oblige_ty_meets_trait_instantiated(
+            CheckOrigin::never_printed(),
             curr,
             TraitSpec {
                 def: deref_lang_item(krate, s).unwrap(),
                 params: tcx.intern_list(&[TraitParam::Equals(TyOrRe::Ty(next_infer))]),
             },
-        ) {
-            Ok(Ok(())) => {
-                // (fallthrough)
-            }
-            Err(ObligationNotReady) | Ok(Err(NoTraitImplError { .. })) => break,
-        }
+        );
+
+        ccx.poll_obligations();
 
         if let Ok(resolved) = ccx.lookup_ty_infer_var(next_infer_var) {
             curr = resolved;

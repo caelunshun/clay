@@ -3,9 +3,8 @@ use crate::{
     semantic::analysis::{ObservedTyInferVar, TyCtxt, UnifyCx, UnifyCxMode},
     utils::hash::{FxHashMap, FxHashSet},
 };
-use derive_where::derive_where;
 use index_vec::{IndexVec, define_index_type};
-use std::{cell::Cell, collections::VecDeque, fmt, mem, rc::Rc};
+use std::{collections::VecDeque, fmt};
 
 // === Results === //
 
@@ -35,16 +34,6 @@ pub struct ObligationNotReady;
 #[derive(Clone)]
 pub struct ObligationCx<'tcx, K> {
     ucx: UnifyCx<'tcx>,
-    root: Rc<ObligationCxRoot<K>>,
-    local_obligation_queue: Rc<Vec<K>>,
-}
-
-#[derive_where(Default)]
-struct ObligationCxRoot<K> {
-    eval_suppressed: Cell<bool>,
-
-    /// The obligation we're currently in the process of executing.
-    current_obligation: Option<ObligationIdx>,
 
     /// All obligations ever registered with us.
     all_obligations: IndexVec<ObligationIdx, ObligationState<K>>,
@@ -65,6 +54,7 @@ define_index_type! {
     struct ObligationIdx = u32;
 }
 
+#[derive(Clone)]
 struct ObligationState<K> {
     /// The kind of obligation we're trying to prove.
     kind: K,
@@ -84,8 +74,10 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
     pub fn new(tcx: &'tcx TyCtxt, mode: UnifyCxMode) -> Self {
         Self {
             ucx: UnifyCx::new(tcx, mode),
-            root: Rc::default(),
-            local_obligation_queue: Rc::new(Vec::new()),
+            all_obligations: IndexVec::new(),
+            run_queue: VecDeque::new(),
+            var_wake_ups: FxHashMap::default(),
+            rerun_var_read_len: 0,
         }
     }
 
@@ -106,15 +98,12 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
     }
 
     pub fn push_obligation(&mut self, kind: K) {
-        Rc::make_mut(&mut self.local_obligation_queue).push(kind);
-    }
+        let idx = self.all_obligations.push(ObligationState {
+            kind,
+            can_wake_by: FxHashSet::default(),
+        });
 
-    pub fn obligation_eval_suppressed(&self) -> bool {
-        self.root.eval_suppressed.get()
-    }
-
-    pub fn set_obligation_eval_suppressed(&self, is_suppressed: bool) {
-        self.root.eval_suppressed.set(is_suppressed);
+        self.run_queue.push_back(idx);
     }
 
     pub fn poll_obligations<T>(
@@ -123,38 +112,17 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
         forker: impl Fn(&T) -> T,
         mut run: impl FnMut(&mut T, K) -> ObligationResult,
     ) {
-        let this = getter(target);
-
-        if this.root.current_obligation.is_some() || this.root.eval_suppressed.get() {
-            return;
-        }
-
         loop {
             let this = getter(target);
 
-            let root = Rc::get_mut(&mut this.root)
-                .expect("`ObligationCx` cannot be forked while polling obligations");
-
-            debug_assert!(root.current_obligation.is_none());
-
-            // Import queued obligations.
-            for obligation in mem::take(Rc::make_mut(&mut this.local_obligation_queue)) {
-                let obligation = root.all_obligations.push(ObligationState {
-                    kind: obligation,
-                    can_wake_by: FxHashSet::default(),
-                });
-
-                root.run_queue.push_back(obligation);
-            }
-
             // See whether any new obligations can be added to the queue yet.
-            for &var in &this.ucx.observed_infer_reveal_order()[root.rerun_var_read_len..] {
-                let Some(awoken) = root.var_wake_ups.remove(&var) else {
+            for &var in &this.ucx.observed_infer_reveal_order()[this.rerun_var_read_len..] {
+                let Some(awoken) = this.var_wake_ups.remove(&var) else {
                     continue;
                 };
 
                 for awoken_idx in awoken {
-                    let awoken = &mut root.all_obligations[awoken_idx];
+                    let awoken = &mut this.all_obligations[awoken_idx];
 
                     if !awoken.can_wake_by.contains(&var) {
                         continue;
@@ -162,23 +130,20 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
 
                     awoken.can_wake_by.clear();
 
-                    root.run_queue.push_back(awoken_idx);
+                    this.run_queue.push_back(awoken_idx);
                 }
             }
 
-            root.rerun_var_read_len = this.ucx.observed_infer_reveal_order().len();
+            this.rerun_var_read_len = this.ucx.observed_infer_reveal_order().len();
 
-            // Mark the next obligation as active.
-            let Some(curr_idx) = root.run_queue.pop_front() else {
+            // Obtain the next obligation.
+            let Some(curr_idx) = this.run_queue.pop_front() else {
                 break;
             };
 
-            root.current_obligation = Some(curr_idx);
+            let kind = this.all_obligations[curr_idx].kind.clone();
 
-            let kind = root.all_obligations[curr_idx].kind.clone();
-
-            // The `root` is set up so exclusive access to it is no longer needed; fork the
-            // `target`.
+            // Fork the context.
             let mut fork = forker(target);
 
             // We must trace on the `fork` since stopping the tracing process requires exactly one
@@ -193,28 +158,15 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
 
             match res {
                 Ok(()) => {
-                    // Merge the `fork` and the `target` and obtain the root.
                     *target = fork;
-                    let this = getter(target);
-                    let root = Rc::get_mut(&mut this.root).expect(
-                        "All other `ObligationCx` forks must be dropped after obligation returns",
-                    );
-
-                    // Stop the obligation.
-                    root.current_obligation = None;
                 }
                 Err(ObligationNotReady) => {
                     // Drop the fork to regain access to the `root`.
                     drop(fork);
                     let this = getter(target);
-                    let root = Rc::get_mut(&mut this.root).expect(
-                        "All other `ObligationCx` forks must be dropped after obligation returns",
-                    );
 
                     // Register wake-ups.
-                    root.current_obligation = None;
-
-                    let curr = &mut root.all_obligations[curr_idx];
+                    let curr = &mut this.all_obligations[curr_idx];
 
                     for var in traced_vars {
                         if this.ucx.lookup_ty_infer_var(var).is_ok() {
@@ -227,7 +179,7 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
                             continue;
                         }
 
-                        root.var_wake_ups.entry(var).or_default().push(curr_idx);
+                        this.var_wake_ups.entry(var).or_default().push(curr_idx);
                     }
                 }
             }
