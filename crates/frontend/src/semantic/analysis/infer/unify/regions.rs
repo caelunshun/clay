@@ -1,7 +1,7 @@
 use crate::{
     base::ErrorGuaranteed,
     semantic::{
-        analysis::{ClauseOrigin, ClauseCx, ReAndReUnifyError},
+        analysis::{ClauseCx, ClauseOrigin, ReAndReUnifyError},
         syntax::{InferReVar, Re, RelationDirection, UniversalReVar, UniversalReVarSourceInfo},
     },
     utils::hash::FxHashSet,

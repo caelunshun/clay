@@ -8,8 +8,8 @@ use crate::{
     parse::ast::AstLit,
     semantic::{
         analysis::{
-            ClauseOrigin, ClauseOriginKind, ClauseCx, ClauseImportEnvRef, CrateTypeckVisitor, TyCtxt,
-            TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
+            ClauseCx, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind, CrateTypeckVisitor,
+            TyCtxt, TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
         },
         syntax::{
             Block, Crate, Divergence, Expr, ExprKind, FnDef, FuncLocal, InferTyVar, Pat, PatKind,
@@ -58,6 +58,8 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
             let mut bcx = BodyCtxt::new(&mut ccx_body, self.krate, env_body.as_ref());
             _ = bcx.check_block(body);
+
+            ccx_body.verify();
         }
 
         ccx_sig.verify();

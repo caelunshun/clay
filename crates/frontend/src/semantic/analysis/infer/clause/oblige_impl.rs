@@ -4,7 +4,7 @@ use crate::{
     base::arena::Obj,
     semantic::{
         analysis::{
-            ClauseOrigin, ClauseCx, ClauseImportEnvRef, NoTraitImplError, ObligationNotReady,
+            ClauseCx, ClauseImportEnvRef, ClauseOrigin, NoTraitImplError, ObligationNotReady,
             ObligationResult, TyFolderInfallibleExt, UnboundVarHandlingMode, UniversalElaboration,
             infer::clause::ClauseObligation,
         },
@@ -19,7 +19,12 @@ use crate::{
 struct SelectionRejected;
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn oblige_ty_meets_clauses(&mut self, origin: &ClauseOrigin, lhs: Ty, rhs: TraitClauseList) {
+    pub fn oblige_ty_meets_clauses(
+        &mut self,
+        origin: &ClauseOrigin,
+        lhs: Ty,
+        rhs: TraitClauseList,
+    ) {
         let s = self.session();
 
         for &clause in rhs.r(s) {
@@ -67,7 +72,7 @@ impl<'tcx> ClauseCx<'tcx> {
         let s = self.session();
 
         // See whether the type itself can provide the implementation.
-        match *self.peel_ty_infer_var(lhs).r(s) {
+        match *self.ucx().peel_ty_infer_var(lhs).r(s) {
             TyKind::Trait(_re, _muta, clauses) => {
                 todo!()
             }

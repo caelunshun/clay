@@ -2,7 +2,7 @@ use crate::{
     base::{Session, arena::Obj},
     semantic::{
         analysis::{
-            ClauseOrigin, ClauseOriginKind, ClauseCx, ClauseImportEnvRef, CoherenceMap, TyCtxt,
+            ClauseCx, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind, CoherenceMap, TyCtxt,
             TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCxMode,
         },
         syntax::{

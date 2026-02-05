@@ -2,7 +2,7 @@ use crate::{
     base::{ErrorGuaranteed, Session, arena::HasInterner},
     semantic::{
         analysis::{
-            ClauseOrigin, ClauseCx, InferTyOccursError, TyAndTyUnifyCulprit, TyAndTyUnifyError,
+            ClauseCx, ClauseOrigin, InferTyOccursError, TyAndTyUnifyCulprit, TyAndTyUnifyError,
             TyCtxt, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyVisitor, TyVisitorExt,
             infer::unify::{regions::ReUnifyTracker, types::TyUnifyTracker},
         },

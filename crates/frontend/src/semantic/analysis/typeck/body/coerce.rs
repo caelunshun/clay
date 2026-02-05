@@ -46,6 +46,7 @@ impl BodyCtxt<'_, '_> {
         // Compute GLB
         let (&(_first_expr, first_actual), other) = exprs.split_first().unwrap();
 
+        self.ccx_mut().poll_obligations();
         let mut glb = CoercionPossibility::new(self, first_actual);
 
         for &(_other_expr, other_actual) in other {
@@ -186,9 +187,10 @@ enum CoercionPossibility {
 }
 
 impl CoercionPossibility {
-    fn new(bcx: &BodyCtxt<'_, '_>, ty: Ty) -> Self {
+    fn new(bcx: &mut BodyCtxt<'_, '_>, ty: Ty) -> Self {
         let s = bcx.session();
-        let ty = bcx.ccx().peel_ty_infer_var(ty);
+
+        let ty = bcx.ccx_mut().peel_ty_infer_var_after_poll(ty);
 
         match *ty.r(s) {
             TyKind::SigThis | TyKind::SigInfer | TyKind::SigGeneric(_) | TyKind::SigProject(_) => {
@@ -430,7 +432,7 @@ fn compute_deref_chain_clobber_obligations(
             break;
         }
 
-        if let Ok(resolved) = ccx.lookup_ty_infer_var(next_infer_var) {
+        if let Ok(resolved) = ccx.lookup_ty_infer_var_after_poll(next_infer_var) {
             curr = resolved;
             accum.push(resolved);
         } else {

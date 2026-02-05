@@ -200,11 +200,16 @@ impl<'tcx> ClauseCx<'tcx> {
         self.ucx_mut().fresh_ty_infer()
     }
 
-    pub fn lookup_ty_infer_var(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {
+    pub fn lookup_ty_infer_var_after_poll(
+        &mut self,
+        var: InferTyVar,
+    ) -> Result<Ty, FloatingInferVar<'_>> {
+        self.poll_obligations();
         self.ucx().lookup_ty_infer_var(var)
     }
 
-    pub fn peel_ty_infer_var(&self, ty: Ty) -> Ty {
+    pub fn peel_ty_infer_var_after_poll(&mut self, ty: Ty) -> Ty {
+        self.poll_obligations();
         self.ucx().peel_ty_infer_var(ty)
     }
 

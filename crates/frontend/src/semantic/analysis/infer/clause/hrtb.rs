@@ -4,7 +4,7 @@ use crate::{
     base::{Session, analysis::DebruijnTop, arena::HasListInterner},
     semantic::{
         analysis::{
-            ClauseOrigin, ClauseOriginKind, ClauseCx, TyCtxt, TyFoldable, TyFolder,
+            ClauseCx, ClauseOrigin, ClauseOriginKind, TyCtxt, TyFoldable, TyFolder,
             TyFolderInfallibleExt,
         },
         syntax::{

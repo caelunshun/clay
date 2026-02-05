@@ -7,7 +7,7 @@ use crate::{
     },
     semantic::{
         analysis::{
-            ClauseOrigin, ClauseOriginKind, ClauseCx, ClauseImportEnvRef, ObligationNotReady,
+            ClauseCx, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind, ObligationNotReady,
             ObligationResult, TyCtxt, TyVisitable, TyVisitor, TyVisitorInfallibleExt,
             infer::clause::ClauseObligation,
         },
@@ -36,7 +36,7 @@ impl<'tcx> ClauseCx<'tcx> {
     ) -> ObligationResult {
         let tcx = self.tcx();
 
-        let Ok(ty) = self.lookup_ty_infer_var(var) else {
+        let Ok(ty) = self.ucx().lookup_ty_infer_var(var) else {
             return Err(ObligationNotReady);
         };
 

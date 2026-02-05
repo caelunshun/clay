@@ -9,7 +9,7 @@ use crate::{
     },
     semantic::{
         analysis::{
-            ClauseOrigin, ClauseOriginKind, ClauseCx, TyCtxt, TyFoldable, TyFolder, TyFolderExt,
+            ClauseCx, ClauseOrigin, ClauseOriginKind, TyCtxt, TyFoldable, TyFolder, TyFolderExt,
             TyFolderInfallibleExt, TyFolderPreservesSpans, TyVisitorInfallibleExt,
         },
         syntax::{

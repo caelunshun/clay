@@ -2,7 +2,7 @@
 
 use crate::semantic::{
     analysis::{
-        ClauseOrigin, ClauseCx, ObligationNotReady, ObligationResult,
+        ClauseCx, ClauseOrigin, ObligationNotReady, ObligationResult,
         infer::clause::ClauseObligation,
     },
     syntax::{FnInstance, Re, RelationDirection, RelationMode, Ty, TyKind, TyOrRe},
@@ -186,7 +186,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 self.oblige_re_outlives_re(origin.clone(), lub_re, rhs, dir.to_mode());
             }
             TyKind::InferVar(inf_lhs) => {
-                if let Ok(inf_lhs) = self.lookup_ty_infer_var(inf_lhs) {
+                if let Ok(inf_lhs) = self.ucx().lookup_ty_infer_var(inf_lhs) {
                     self.oblige_ty_outlives_re(origin.clone(), inf_lhs, rhs, dir);
                 } else {
                     return Err(ObligationNotReady);
