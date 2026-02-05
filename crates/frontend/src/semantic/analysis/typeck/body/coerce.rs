@@ -111,18 +111,24 @@ impl BodyCtxt<'_, '_> {
                 to_muta,
                 deref_steps,
             } => {
-                let unify_pointee = self.ccx_mut().fresh_ty_infer();
+                let unify_ty = self.ccx_mut().fresh_ty_infer();
                 let mut deref_steps = deref_steps.iter();
 
                 for &(expr, actual) in exprs {
-                    let mut output_pointee = actual;
+                    let actual = self.ccx_mut().peel_ty_infer_var_after_poll(actual);
 
-                    match CoercionPossibility::new(self, actual) {
+                    let output_ty = match CoercionPossibility::new(self, actual) {
                         CoercionPossibility::Solid(_) | CoercionPossibility::WideReference(_) => {
-                            // (nothing to do)
+                            // Preserve the existing type.
+                            actual
                         }
                         CoercionPossibility::ThinReference(_) => {
                             let deref_step_count = *deref_steps.next().unwrap();
+
+                            let TyKind::Reference(_re, _muta, mut output_pointee) = *actual.r(s)
+                            else {
+                                unreachable!()
+                            };
 
                             for _ in 0..deref_step_count {
                                 let next_output = self.ccx_mut().fresh_ty_infer();
@@ -142,20 +148,22 @@ impl BodyCtxt<'_, '_> {
 
                                 output_pointee = next_output;
                             }
+
+                            tcx.intern(TyKind::Reference(Re::Erased, to_muta, output_pointee))
                         }
-                    }
+                    };
 
                     self.ccx_mut().oblige_ty_unifies_ty(
                         ClauseOrigin::root(ClauseOriginKind::Coercion {
                             expr_span: expr.r(s).span,
                         }),
-                        output_pointee,
-                        unify_pointee,
+                        output_ty,
+                        unify_ty,
                         RelationMode::Equate,
                     );
                 }
 
-                tcx.intern(TyKind::Reference(Re::Erased, to_muta, unify_pointee))
+                tcx.intern(TyKind::Reference(Re::Erased, to_muta, unify_ty))
             }
             CoercionResolution::WideReference {
                 to_muta,
@@ -265,14 +273,6 @@ impl CoercionPossibility {
                         .collect::<Vec<_>>(),
                 );
 
-                let deref_steps = if deref_steps.contains(&0) {
-                    deref_steps
-                } else {
-                    // Do not perform GLB coercion if the GLB target is not one of the existing
-                    // references to match `rustc`'s behavior.
-                    vec![0; refs.len()]
-                };
-
                 CoercionResolution::ThinReference {
                     to_muta,
                     deref_steps,
@@ -350,7 +350,7 @@ fn compute_deref_glb_clobber_obligations(
 
     chains
         .iter()
-        .map(|chain| chain.len() - glb_offset_from_back as usize)
+        .map(|chain| chain.len() - glb_offset_from_back as usize - 1)
         .map(|v| v as u32)
         .collect::<Vec<_>>()
 }

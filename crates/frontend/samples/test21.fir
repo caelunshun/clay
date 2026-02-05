@@ -19,9 +19,15 @@ impl Deref for Bar {
     type Target = Foo;
 }
 
+struct Baz;
+
+impl Deref for Baz {
+    type Target = Foo;
+}
+
 fn demo() {
-    let a: Foo;
-    let b: Bar;
+    let a: Bar;
+    let b: Baz;
 
     let foo = if true {
         &a
