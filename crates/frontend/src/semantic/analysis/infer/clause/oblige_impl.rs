@@ -4,7 +4,7 @@ use crate::{
     base::arena::Obj,
     semantic::{
         analysis::{
-            CheckOrigin, ClauseCx, ClauseImportEnvRef, NoTraitImplError, ObligationNotReady,
+            ClauseOrigin, ClauseCx, ClauseImportEnvRef, NoTraitImplError, ObligationNotReady,
             ObligationResult, TyFolderInfallibleExt, UnboundVarHandlingMode, UniversalElaboration,
             infer::clause::ClauseObligation,
         },
@@ -19,7 +19,7 @@ use crate::{
 struct SelectionRejected;
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn oblige_ty_meets_clauses(&mut self, origin: &CheckOrigin, lhs: Ty, rhs: TraitClauseList) {
+    pub fn oblige_ty_meets_clauses(&mut self, origin: &ClauseOrigin, lhs: Ty, rhs: TraitClauseList) {
         let s = self.session();
 
         for &clause in rhs.r(s) {
@@ -27,7 +27,7 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    pub fn oblige_ty_meets_clause(&mut self, origin: CheckOrigin, lhs: Ty, rhs: TraitClause) {
+    pub fn oblige_ty_meets_clause(&mut self, origin: ClauseOrigin, lhs: Ty, rhs: TraitClause) {
         match rhs {
             TraitClause::Outlives(rhs_dir, rhs) => {
                 self.oblige_general_outlives(origin, TyOrRe::Ty(lhs), rhs, rhs_dir);
@@ -40,7 +40,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn oblige_ty_meets_trait(
         &mut self,
-        origin: CheckOrigin,
+        origin: ClauseOrigin,
         lhs: Ty,
         rhs: HrtbBinder<TraitSpec>,
     ) {
@@ -50,7 +50,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn oblige_ty_meets_trait_instantiated(
         &mut self,
-        origin: CheckOrigin,
+        origin: ClauseOrigin,
         lhs: Ty,
         rhs: TraitSpec,
     ) {
@@ -59,7 +59,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub(super) fn run_oblige_ty_meets_trait_instantiated(
         &mut self,
-        origin: &CheckOrigin,
+        origin: &ClauseOrigin,
         lhs: Ty,
         rhs: TraitSpec,
     ) -> ObligationResult<Result<(), NoTraitImplError>> {
@@ -154,7 +154,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     fn try_select_inherent_impl(
         mut self,
-        origin: &CheckOrigin,
+        origin: &ClauseOrigin,
         lhs: UniversalElaboration,
         rhs: TraitSpec,
     ) -> Result<Self, SelectionRejected> {
@@ -247,7 +247,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     fn try_select_block_impl(
         mut self,
-        origin: &CheckOrigin,
+        origin: &ClauseOrigin,
         lhs: Ty,
         rhs: Obj<ImplItem>,
         spec: TraitSpec,

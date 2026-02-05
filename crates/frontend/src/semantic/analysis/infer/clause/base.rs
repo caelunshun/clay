@@ -1,8 +1,8 @@
 use crate::{
-    base::{ErrorGuaranteed, Session, arena::HasInterner, syntax::Span},
+    base::{Session, arena::HasInterner, syntax::Span},
     semantic::{
         analysis::{
-            CheckOrigin, CoherenceMap, FloatingInferVar, ObligationCx, ObligationNotReady,
+            ClauseOrigin, CoherenceMap, FloatingInferVar, ObligationCx, ObligationNotReady,
             RecursionLimitReached, TyAndTyUnifyError, TyCtxt, UnifyCx, UnifyCxMode,
         },
         syntax::{
@@ -13,30 +13,34 @@ use crate::{
     },
 };
 use index_vec::IndexVec;
+use std::ops::ControlFlow;
 
 const MAX_OBLIGATION_DEPTH: u32 = 256;
 
 #[derive(Debug, Clone)]
 pub(super) enum ClauseObligation {
-    TyUnifiesTy(CheckOrigin, Ty, Ty, RelationMode),
-    TyMeetsTrait(CheckOrigin, Ty, TraitSpec),
-    TyOutlivesRe(CheckOrigin, Ty, Re, RelationDirection),
+    TyUnifiesTy(ClauseOrigin, Ty, Ty, RelationMode),
+    TyMeetsTrait(ClauseOrigin, Ty, TraitSpec),
+    TyOutlivesRe(ClauseOrigin, Ty, Re, RelationDirection),
     InferTyWf(Span, InferTyVar),
 }
 
 impl ClauseObligation {
-    fn verify_depth(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
+    fn verify_depth(&self, ccx: &ClauseCx<'_>) -> ControlFlow<()> {
         match self {
             Self::TyUnifiesTy(origin, ..)
             | Self::TyMeetsTrait(origin, ..)
             | Self::TyOutlivesRe(origin, ..) => {
                 if origin.depth() > MAX_OBLIGATION_DEPTH {
-                    return Some(
+                    origin.report(
                         RecursionLimitReached {
                             origin: origin.clone(),
                         }
-                        .emit(ccx),
+                        .into(),
+                        ccx,
                     );
+
+                    return ControlFlow::Break(());
                 }
             }
             Self::InferTyWf(..) => {
@@ -44,7 +48,7 @@ impl ClauseObligation {
             }
         }
 
-        None
+        ControlFlow::Continue(())
     }
 }
 
@@ -152,14 +156,14 @@ impl<'tcx> ClauseCx<'tcx> {
             |this| &mut this.ocx,
             |this| this.clone(),
             |fork, kind| {
-                if let Some(_err) = kind.verify_depth(fork) {
+                if kind.verify_depth(fork).is_break() {
                     return Ok(());
                 }
 
                 match kind {
                     ClauseObligation::TyUnifiesTy(origin, lhs, rhs, mode) => {
                         if let Err(err) = fork.ucx_mut().unify_ty_and_ty(&origin, lhs, rhs, mode) {
-                            err.emit(fork);
+                            origin.report((*err).into(), fork);
                         }
 
                         Ok(())
@@ -168,7 +172,7 @@ impl<'tcx> ClauseCx<'tcx> {
                         match fork.run_oblige_ty_meets_trait_instantiated(&origin, lhs, rhs) {
                             Ok(Ok(())) => Ok(()),
                             Ok(Err(err)) => {
-                                err.emit(fork);
+                                origin.report(err.into(), fork);
                                 Ok(())
                             }
                             Err(ObligationNotReady) => Err(ObligationNotReady),
@@ -266,7 +270,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn oblige_re_outlives_re(
         &mut self,
-        origin: CheckOrigin,
+        origin: ClauseOrigin,
         lhs: Re,
         rhs: Re,
         mode: RelationMode,
@@ -276,7 +280,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn oblige_ty_unifies_ty(
         &mut self,
-        origin: CheckOrigin,
+        origin: ClauseOrigin,
         lhs: Ty,
         rhs: Ty,
         mode: RelationMode,
@@ -286,7 +290,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn unify_ty_and_ty(
         &mut self,
-        origin: &CheckOrigin,
+        origin: &ClauseOrigin,
         lhs: Ty,
         rhs: Ty,
         mode: RelationMode,
@@ -294,7 +298,12 @@ impl<'tcx> ClauseCx<'tcx> {
         self.ucx_mut().unify_ty_and_ty(origin, lhs, rhs, mode)
     }
 
-    pub fn oblige_re_meets_clauses(&mut self, origin: &CheckOrigin, lhs: Re, rhs: TraitClauseList) {
+    pub fn oblige_re_meets_clauses(
+        &mut self,
+        origin: &ClauseOrigin,
+        lhs: Re,
+        rhs: TraitClauseList,
+    ) {
         let s = self.session();
 
         for &clause in rhs.r(s) {

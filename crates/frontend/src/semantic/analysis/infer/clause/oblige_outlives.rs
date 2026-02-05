@@ -2,7 +2,7 @@
 
 use crate::semantic::{
     analysis::{
-        CheckOrigin, ClauseCx, ObligationNotReady, ObligationResult,
+        ClauseOrigin, ClauseCx, ObligationNotReady, ObligationResult,
         infer::clause::ClauseObligation,
     },
     syntax::{FnInstance, Re, RelationDirection, RelationMode, Ty, TyKind, TyOrRe},
@@ -54,7 +54,7 @@ impl<'tcx> ClauseCx<'tcx> {
         let joiner = self.fresh_re_infer();
 
         // `'a: other` (inverse: `other: 'a`)
-        self.oblige_ty_outlives_re(CheckOrigin::never_printed(), other, joiner, dir.invert());
+        self.oblige_ty_outlives_re(ClauseOrigin::never_printed(), other, joiner, dir.invert());
 
         // `universal: 'a` (inverse: `'a: universal`)
         self.permit_universe_re_outlives_re(universal, joiner, dir);
@@ -62,7 +62,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn oblige_general_outlives(
         &mut self,
-        origin: CheckOrigin,
+        origin: ClauseOrigin,
         lhs: TyOrRe,
         rhs: TyOrRe,
         dir: RelationDirection,
@@ -85,7 +85,7 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    pub fn oblige_ty_outlives_ty(&mut self, origin: CheckOrigin, lhs: Ty, rhs: Ty) {
+    pub fn oblige_ty_outlives_ty(&mut self, origin: ClauseOrigin, lhs: Ty, rhs: Ty) {
         // LHS: 'a
         // 'a: RHS
         // => LHS: RHS
@@ -101,7 +101,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn oblige_ty_outlives_re(
         &mut self,
-        origin: CheckOrigin,
+        origin: ClauseOrigin,
         lhs: Ty,
         rhs: Re,
         dir: RelationDirection,
@@ -111,7 +111,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub(super) fn run_oblige_ty_outlives_re(
         &mut self,
-        origin: &CheckOrigin,
+        origin: &ClauseOrigin,
         lhs: Ty,
         rhs: Re,
         dir: RelationDirection,

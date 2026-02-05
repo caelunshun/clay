@@ -4,7 +4,7 @@ use crate::{
     base::{Session, analysis::DebruijnTop, arena::HasListInterner},
     semantic::{
         analysis::{
-            CheckOrigin, CheckOriginKind, ClauseCx, TyCtxt, TyFoldable, TyFolder,
+            ClauseOrigin, ClauseOriginKind, ClauseCx, TyCtxt, TyFoldable, TyFolder,
             TyFolderInfallibleExt,
         },
         syntax::{
@@ -84,7 +84,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn instantiate_hrtb_infer(
         &mut self,
-        origin: &CheckOrigin,
+        origin: &ClauseOrigin,
         binder: HrtbBinder<TraitSpec>,
     ) -> TraitSpec {
         let tcx = self.tcx();
@@ -118,7 +118,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     let clauses = HrtbSubstitutionFolder::new(self, vars, s).fold(def.clauses);
 
                     self.oblige_re_meets_clauses(
-                        &origin.clone().child(CheckOriginKind::HrtbSelection {
+                        &origin.clone().child(ClauseOriginKind::HrtbSelection {
                             def: def.spawned_from,
                         }),
                         var,
@@ -129,7 +129,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     let clauses = HrtbSubstitutionFolder::new(self, vars, s).fold(def.clauses);
 
                     self.oblige_ty_meets_clauses(
-                        &origin.clone().child(CheckOriginKind::HrtbSelection {
+                        &origin.clone().child(ClauseOriginKind::HrtbSelection {
                             def: def.spawned_from,
                         }),
                         var,

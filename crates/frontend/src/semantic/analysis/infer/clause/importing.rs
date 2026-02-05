@@ -9,7 +9,7 @@ use crate::{
     },
     semantic::{
         analysis::{
-            CheckOrigin, CheckOriginKind, ClauseCx, TyCtxt, TyFoldable, TyFolder, TyFolderExt,
+            ClauseOrigin, ClauseOriginKind, ClauseCx, TyCtxt, TyFoldable, TyFolder, TyFolderExt,
             TyFolderInfallibleExt, TyFolderPreservesSpans, TyVisitorInfallibleExt,
         },
         syntax::{
@@ -166,7 +166,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn import_binder_list_as_infer(
         &mut self,
-        origin: &CheckOrigin,
+        origin: &ClauseOrigin,
         self_ty: Ty,
         binders: &[Obj<GenericBinder>],
     ) -> Vec<GenericSubst> {
@@ -219,7 +219,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn oblige_imported_infer_binder_meets_clauses(
         &mut self,
-        origin: &CheckOrigin,
+        origin: &ClauseOrigin,
         env: ClauseImportEnvRef<'_>,
     ) {
         let s = self.session();
@@ -230,9 +230,9 @@ impl<'tcx> ClauseCx<'tcx> {
                 &subst.binder.r(s).defs,
                 subst.substs.r(s),
                 |_this, _idx, clause| {
-                    CheckOrigin::new(
+                    ClauseOrigin::new(
                         Some(origin.clone()),
-                        CheckOriginKind::GenericRequirements { clause },
+                        ClauseOriginKind::GenericRequirements { clause },
                     )
                 },
             );
@@ -244,7 +244,7 @@ impl<'tcx> ClauseCx<'tcx> {
         def_env: ClauseImportEnvRef<'_>,
         defs: &[AnyGeneric],
         args: &[TyOrRe],
-        mut gen_reason: impl FnMut(&mut Self, usize, Span) -> CheckOrigin,
+        mut gen_reason: impl FnMut(&mut Self, usize, Span) -> ClauseOrigin,
     ) {
         let s = self.session();
         let tcx = self.tcx();
@@ -541,7 +541,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
                     .visit_spanned(Spanned::new_maybe_saturated(spec, assoc_span, tcx));
 
                 self.ccx.oblige_ty_meets_trait_instantiated(
-                    CheckOrigin::root(CheckOriginKind::InstantiatedProjection {
+                    ClauseOrigin::root(ClauseOriginKind::InstantiatedProjection {
                         span: projection.own_span(),
                     }),
                     target.value,

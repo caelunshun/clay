@@ -8,7 +8,7 @@ use crate::{
     parse::ast::AstLit,
     semantic::{
         analysis::{
-            CheckOrigin, CheckOriginKind, ClauseCx, ClauseImportEnvRef, CrateTypeckVisitor, TyCtxt,
+            ClauseOrigin, ClauseOriginKind, ClauseCx, ClauseImportEnvRef, CrateTypeckVisitor, TyCtxt,
             TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
         },
         syntax::{
@@ -155,7 +155,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                     if let Some(ascription) = stmt.r(s).ascription {
                         self.ccx_mut().oblige_ty_unifies_ty(
-                            CheckOrigin::root(CheckOriginKind::Pattern {
+                            ClauseOrigin::root(ClauseOriginKind::Pattern {
                                 pat_span: ascription.own_span(),
                             }),
                             pat_ty,
@@ -325,7 +325,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     let bind_as_ty = self.type_of_pat(bind_as, divergence);
 
                     self.ccx_mut().oblige_ty_unifies_ty(
-                        CheckOrigin::root(CheckOriginKind::Pattern {
+                        ClauseOrigin::root(ClauseOriginKind::Pattern {
                             pat_span: pat.r(s).span,
                         }),
                         local_ty,

@@ -7,7 +7,7 @@ use crate::{
     },
     semantic::{
         analysis::{
-            CheckOrigin, CheckOriginKind, ClauseCx, ClauseImportEnvRef, ObligationNotReady,
+            ClauseOrigin, ClauseOriginKind, ClauseCx, ClauseImportEnvRef, ObligationNotReady,
             ObligationResult, TyCtxt, TyVisitable, TyVisitor, TyVisitorInfallibleExt,
             infer::clause::ClauseObligation,
         },
@@ -97,7 +97,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             }
             SpannedTyView::Reference(re, _muta, pointee) => {
                 self.ccx.oblige_ty_outlives_re(
-                    CheckOrigin::root(CheckOriginKind::WfForReference {
+                    ClauseOrigin::root(ClauseOriginKind::WfForReference {
                         pointee: pointee.own_span(),
                     }),
                     pointee.value,
@@ -227,7 +227,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
                 let impl_ty = impl_ty.unwrap();
 
                 let trait_args = self.ccx.import_binder_list_as_infer(
-                    &CheckOrigin::root(CheckOriginKind::WfFnDef {
+                    &ClauseOrigin::root(ClauseOriginKind::WfFnDef {
                         fn_ty: instance.own_span(),
                     }),
                     impl_ty.value,
@@ -248,7 +248,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
                 let impl_ty = impl_ty.unwrap();
 
                 let impl_args = self.ccx.import_binder_list_as_infer(
-                    &CheckOrigin::root(CheckOriginKind::WfFnDef {
+                    &ClauseOrigin::root(ClauseOriginKind::WfFnDef {
                         fn_ty: instance.own_span(),
                     }),
                     impl_ty.value,
@@ -312,7 +312,7 @@ impl ClauseTyWfVisitor<'_, '_> {
             defs,
             validated_params,
             |_, param_idx, clause_span| {
-                CheckOrigin::root(CheckOriginKind::WfForGenericParam {
+                ClauseOrigin::root(ClauseOriginKind::WfForGenericParam {
                     use_span: all_params.nth(param_idx, tcx).own_span(),
                     clause_span,
                 })

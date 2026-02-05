@@ -2,7 +2,7 @@ use crate::{
     base::{ErrorGuaranteed, Session, arena::HasInterner},
     semantic::{
         analysis::{
-            CheckOrigin, ClauseCx, InferTyOccursError, TyAndTyUnifyCulprit, TyAndTyUnifyError,
+            ClauseOrigin, ClauseCx, InferTyOccursError, TyAndTyUnifyCulprit, TyAndTyUnifyError,
             TyCtxt, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyVisitor, TyVisitorExt,
             infer::unify::{regions::ReUnifyTracker, types::TyUnifyTracker},
         },
@@ -182,7 +182,7 @@ impl<'tcx> UnifyCx<'tcx> {
         }
     }
 
-    pub fn unify_re_and_re(&mut self, origin: &CheckOrigin, lhs: Re, rhs: Re, mode: RelationMode) {
+    pub fn unify_re_and_re(&mut self, origin: &ClauseOrigin, lhs: Re, rhs: Re, mode: RelationMode) {
         let Some(regions) = &mut self.regions else {
             debug_assert!(matches!(lhs, Re::Erased));
             debug_assert!(matches!(rhs, Re::Erased));
@@ -200,7 +200,7 @@ impl<'tcx> UnifyCx<'tcx> {
     /// `&'0 u32` and `&'1 u32` will result in the region relation `'0: '1`.
     pub fn unify_ty_and_ty(
         &mut self,
-        origin: &CheckOrigin,
+        origin: &ClauseOrigin,
         lhs: Ty,
         rhs: Ty,
         mode: RelationMode,
@@ -226,7 +226,7 @@ impl<'tcx> UnifyCx<'tcx> {
 
     fn unify_ty_and_ty_inner(
         &mut self,
-        origin: &CheckOrigin,
+        origin: &ClauseOrigin,
         lhs: Ty,
         rhs: Ty,
         culprits: &mut Vec<TyAndTyUnifyCulprit>,
@@ -475,7 +475,7 @@ impl<'tcx> UnifyCx<'tcx> {
 
     fn unify_dyn_trait_clauses_inner(
         &mut self,
-        origin: &CheckOrigin,
+        origin: &ClauseOrigin,
         lhs_root: TraitClauseList,
         rhs_root: TraitClauseList,
         culprits: &mut Vec<TyAndTyUnifyCulprit>,
