@@ -74,6 +74,10 @@ pub enum ClauseOriginKind {
         pat_span: Span,
     },
 
+    FunctionCall {
+        site_span: Span,
+    },
+
     /// This obligation is required to satisfy the requirements of a generic parameter for
     /// well-formedness.
     WfForGenericParam {

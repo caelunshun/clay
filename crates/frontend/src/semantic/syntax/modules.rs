@@ -17,6 +17,7 @@ use crate::{
     symbol,
     utils::hash::FxIndexMap,
 };
+use derive_where::derive_where;
 
 #[derive(Debug, Clone)]
 pub struct Crate {
@@ -27,9 +28,12 @@ pub struct Crate {
     pub lang_items: LangItems,
 }
 
-#[derive(Debug, Clone)]
+#[derive_where(Debug)]
+#[derive(Clone)]
 pub struct Item {
+    #[derive_where(skip)]
     pub krate: Obj<Crate>,
+    #[derive_where(skip)]
     pub direct_parent: ParentRef<Obj<Item>>,
     pub category: ItemCategory,
     pub name: Option<Ident>,

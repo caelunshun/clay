@@ -1,13 +1,10 @@
 use crate::{
-    base::{
-        Session,
-        arena::{HasInterner, HasListInterner, Obj},
-    },
+    base::arena::{HasInterner, HasListInterner, Obj},
     semantic::{
         analysis::{BodyCtxt, ClauseCx, ClauseErrorProbe, ClauseOrigin, ClauseOriginKind},
         syntax::{
-            Crate, Divergence, Expr, Mutability, Re, RelationMode, TraitClauseList, TraitItem,
-            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            Crate, Divergence, Expr, Mutability, Re, RelationMode, TraitClauseList, TraitParam,
+            TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -139,7 +136,7 @@ impl BodyCtxt<'_, '_> {
                                     }),
                                     output_pointee,
                                     TraitSpec {
-                                        def: deref_lang_item(krate, s).unwrap(),
+                                        def: krate.r(s).deref_lang_item(s).unwrap(),
                                         params: tcx.intern_list(&[TraitParam::Equals(TyOrRe::Ty(
                                             next_output,
                                         ))]),
@@ -421,7 +418,7 @@ fn compute_deref_chain_clobber_obligations(
             ClauseOrigin::never_printed().with_probe_sink(probe.clone()),
             curr,
             TraitSpec {
-                def: deref_lang_item(krate, s).unwrap(),
+                def: krate.r(s).deref_lang_item(s).unwrap(),
                 params: tcx.intern_list(&[TraitParam::Equals(TyOrRe::Ty(next_infer))]),
             },
         );
@@ -454,12 +451,4 @@ enum CoercionResolution {
         to_muta: Mutability,
         to_clauses: TraitClauseList,
     },
-}
-
-fn deref_lang_item(krate: Obj<Crate>, s: &Session) -> Option<Obj<TraitItem>> {
-    krate
-        .r(s)
-        .lang_items
-        .deref_trait()
-        .map(|v| v.r(s).kind.as_trait().unwrap())
 }

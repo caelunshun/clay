@@ -14,7 +14,7 @@ use crate::{
         syntax::{
             Block, Crate, Divergence, Expr, ExprKind, FnDef, FuncLocal, InferTyVar, Pat, PatKind,
             Re, RelationMode, SimpleTyKind, SpannedFnInstanceView, SpannedTyView, Stmt, StructExpr,
-            Ty, TyAndDivergence, TyKind,
+            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -198,7 +198,48 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         let mut divergence = Divergence::MayDiverge;
         let ty = match *expr.r(s).kind {
             ExprKind::Array(obj) => todo!(),
-            ExprKind::Call(obj, obj1) => todo!(),
+            ExprKind::Call(callee, actual_args) => 'call: {
+                let callee = self.check_expr(callee).and_do(&mut divergence);
+
+                let site_span = expr.r(s).span;
+                let fn_once_trait = self.krate.r(s).fn_once_lang_item(s).unwrap();
+                let input_ty = self.ccx_mut().fresh_ty_infer();
+                let output_ty = self.ccx_mut().fresh_ty_infer();
+
+                self.ccx_mut().oblige_ty_meets_trait_instantiated(
+                    ClauseOrigin::root(ClauseOriginKind::FunctionCall { site_span }),
+                    callee,
+                    TraitSpec {
+                        def: fn_once_trait,
+                        params: tcx.intern_list(&[
+                            TraitParam::Equals(TyOrRe::Ty(input_ty)),
+                            TraitParam::Equals(TyOrRe::Ty(output_ty)),
+                        ]),
+                    },
+                );
+
+                let TyKind::Tuple(expected_args) =
+                    self.ccx_mut().peel_ty_infer_var_after_poll(input_ty).r(s)
+                else {
+                    break 'call tcx.intern(TyKind::Error(
+                        Diag::span_err(site_span, "annotations needed on input type").emit(),
+                    ));
+                };
+
+                if expected_args.r(s).len() != actual_args.r(s).len() {
+                    break 'call tcx.intern(TyKind::Error(
+                        Diag::span_err(site_span, "argument count mismatch").emit(),
+                    ));
+                }
+
+                for (&actual, &expected) in actual_args.r(s).iter().zip(expected_args.r(s)) {
+                    _ = self
+                        .check_expr_demand(actual, expected)
+                        .and_do(&mut divergence);
+                }
+
+                output_ty
+            }
             ExprKind::Method {
                 callee,
                 generics,

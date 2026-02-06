@@ -1,9 +1,10 @@
 use crate::{
     base::{
+        Session,
         arena::{LateInit, Obj},
         syntax::{Span, Symbol},
     },
-    semantic::syntax::{Expr, Item},
+    semantic::syntax::{Crate, Expr, Item, TraitItem},
     symbol,
 };
 
@@ -77,8 +78,23 @@ macro_rules! define_lang_items {
 }
 
 define_lang_items! {
-    deref_trait,
     deref_mut_trait,
-    fn_trait,
+    deref_trait,
     fn_mut_trait,
+    fn_once_trait,
+    fn_trait,
+}
+
+impl Crate {
+    pub fn deref_lang_item(&self, s: &Session) -> Option<Obj<TraitItem>> {
+        self.lang_items
+            .deref_trait()
+            .map(|v| v.r(s).kind.as_trait().unwrap())
+    }
+
+    pub fn fn_once_lang_item(&self, s: &Session) -> Option<Obj<TraitItem>> {
+        self.lang_items
+            .fn_once_trait()
+            .map(|v| v.r(s).kind.as_trait().unwrap())
+    }
 }
