@@ -29,7 +29,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Setup a `ClauseCx` for signature validation.
         let mut ccx_sig = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env_sig = ccx_sig.import_fn_def_env(def);
+        let env_sig = ccx_sig.import_fn_def_env_as_universal(def);
 
         // WF-check the signature.
         self.visit_generic_binder(&mut ccx_sig, env_sig.as_ref(), def.r(s).generics);
@@ -55,7 +55,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         if let Some(body) = *def.r(s).body {
             let mut ccx_body =
                 ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionBlind);
-            let env_body = ccx_body.import_fn_def_env(def);
+            let env_body = ccx_body.import_fn_def_env_as_universal(def);
 
             let mut bcx = BodyCtxt::new(&mut ccx_body, env_body.as_ref());
 

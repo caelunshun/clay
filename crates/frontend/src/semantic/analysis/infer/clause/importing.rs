@@ -13,11 +13,12 @@ use crate::{
             TyFolderInfallibleExt, TyFolderPreservesSpans, TyVisitorInfallibleExt, UnifyCxMode,
         },
         syntax::{
-            AdtInstance, AdtItem, AnyGeneric, FnDef, FuncDefOwner, GenericBinder, GenericSubst,
-            HrtbBinder, HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef, ImplItem, Re,
+            AdtInstance, AdtItem, AnyGeneric, FnDef, FnInstance, FuncDefOwner, GenericBinder,
+            GenericSubst, HrtbBinder, HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef, ImplItem, Re,
             SpannedHrtbBinder, SpannedHrtbBinderView, SpannedRe, SpannedTy,
             SpannedTyProjectionView, SpannedTyView, TraitClause, TraitItem, TraitParam, TraitSpec,
-            Ty, TyKind, TyOrRe, TyOrReKind, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
+            Ty, TyKind, TyList, TyOrRe, TyOrReKind, UniversalReVarSourceInfo,
+            UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
@@ -296,9 +297,9 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    // === Specialized imports === //
+    // === Specialized universal imports === //
 
-    pub fn import_trait_def_env(&mut self, def: Obj<TraitItem>) -> ClauseImportEnv {
+    pub fn import_trait_def_env_as_universal(&mut self, def: Obj<TraitItem>) -> ClauseImportEnv {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -333,7 +334,7 @@ impl<'tcx> ClauseCx<'tcx> {
         ClauseImportEnv::new(self_ty, sig_generic_substs)
     }
 
-    pub fn import_adt_def_env(&mut self, def: Obj<AdtItem>) -> ClauseImportEnv {
+    pub fn import_adt_def_env_as_universal(&mut self, def: Obj<AdtItem>) -> ClauseImportEnv {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -356,7 +357,7 @@ impl<'tcx> ClauseCx<'tcx> {
         ClauseImportEnv::new(self_ty, sig_generic_substs)
     }
 
-    pub fn import_impl_block_env(&mut self, def: Obj<ImplItem>) -> ClauseImportEnv {
+    pub fn import_impl_block_env_as_universal(&mut self, def: Obj<ImplItem>) -> ClauseImportEnv {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -381,11 +382,15 @@ impl<'tcx> ClauseCx<'tcx> {
         ClauseImportEnv::new(self_ty, sig_generic_substs)
     }
 
-    pub fn import_fn_item_generics(&mut self, self_ty: Ty, def: Obj<FnDef>) -> Vec<GenericSubst> {
+    pub fn import_fn_item_generics_as_universal(
+        &mut self,
+        self_ty: Ty,
+        def: Obj<FnDef>,
+    ) -> Vec<GenericSubst> {
         self.import_binder_list_as_universal(self_ty, &[def.r(self.session()).generics])
     }
 
-    pub fn import_fn_def_env(&mut self, def: Obj<FnDef>) -> ClauseImportEnv {
+    pub fn import_fn_def_env_as_universal(&mut self, def: Obj<FnDef>) -> ClauseImportEnv {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -394,14 +399,37 @@ impl<'tcx> ClauseCx<'tcx> {
                 self_ty: tcx.intern(TyKind::SigThis),
                 sig_generic_substs: Vec::new(),
             },
-            FuncDefOwner::TraitMethod(def, _idx) => self.import_trait_def_env(def),
-            FuncDefOwner::ImplMethod(def, _idx) => self.import_impl_block_env(def),
+            FuncDefOwner::TraitMethod(def, _idx) => self.import_trait_def_env_as_universal(def),
+            FuncDefOwner::ImplMethod(def, _idx) => self.import_impl_block_env_as_universal(def),
         };
 
         env.sig_generic_substs
-            .extend_from_slice(&self.import_fn_item_generics(env.self_ty, def));
+            .extend_from_slice(&self.import_fn_item_generics_as_universal(env.self_ty, def));
 
         env
+    }
+
+    // === Specialized existential imports === //
+
+    pub fn import_fn_def_given_args(&mut self, instance: FnInstance) -> ClauseImportEnv {
+        todo!()
+    }
+
+    pub fn import_fn_def_sig_given_args(&mut self, instance: FnInstance) -> (TyList, Ty) {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let env = self.import_fn_def_given_args(instance);
+        let mut importer = self.importer(env.as_ref());
+
+        let args = &instance.def.r(s).args;
+        let args = args.r(s).iter().map(|v| v.ty.value).collect::<Vec<_>>();
+        let args = tcx.intern_list(&args);
+        let args = importer.fold(args);
+
+        let ret = importer.fold(instance.def.r(s).ret_ty.value);
+
+        (args, ret)
     }
 }
 

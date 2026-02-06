@@ -1,7 +1,7 @@
 //! Logic to implement the type-implements-trait obligation.
 
 use crate::{
-    base::arena::Obj,
+    base::arena::{HasInterner as _, Obj},
     semantic::{
         analysis::{
             ClauseCx, ClauseImportEnvRef, ClauseOrigin, NoTraitImplError, ObligationNotReady,
@@ -9,8 +9,8 @@ use crate::{
             infer::clause::ClauseObligation,
         },
         syntax::{
-            FnInstance, HrtbBinder, ImplItem, RelationMode, TraitClause, TraitClauseList,
-            TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            HrtbBinder, ImplItem, RelationMode, TraitClause, TraitClauseList, TraitParam,
+            TraitSpec, Ty, TyKind, TyOrRe,
         },
     },
 };
@@ -365,11 +365,12 @@ impl<'tcx> ClauseCx<'tcx> {
         rhs: TraitSpec,
     ) -> Result<Self, SelectionRejected> {
         let s = self.session();
+        let tcx = self.tcx();
         let krate = self.krate();
         let lhs = self.ucx().peel_ty_infer_var(lhs);
 
         if Some(rhs.def) == krate.r(s).fn_once_lang_item(s)
-            && let TyKind::FnDef(FnInstance { def, args, impl_ty }) = *lhs.r(s)
+            && let TyKind::FnDef(lhs) = *lhs.r(s)
         {
             let &[
                 TraitParam::Equals(TyOrRe::Ty(rhs_input)),
@@ -379,7 +380,24 @@ impl<'tcx> ClauseCx<'tcx> {
                 unreachable!()
             };
 
-            // TODO
+            let (lhs_input, lhs_output) = self.import_fn_def_sig_given_args(lhs);
+            let lhs_input = tcx.intern(TyKind::Tuple(lhs_input));
+
+            if self
+                .ucx_mut()
+                .unify_ty_and_ty(origin, lhs_input, rhs_input, RelationMode::Equate)
+                .is_err()
+            {
+                return Err(SelectionRejected);
+            }
+
+            if self
+                .ucx_mut()
+                .unify_ty_and_ty(origin, lhs_output, rhs_output, RelationMode::Equate)
+                .is_err()
+            {
+                return Err(SelectionRejected);
+            }
 
             return Ok(self);
         }

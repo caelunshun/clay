@@ -78,7 +78,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Setup a `ClauseCx` with our environment in mind.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.import_trait_def_env(def);
+        let env = ccx.import_trait_def_env_as_universal(def);
 
         // First, let's ensure that the inherited trait list is well-formed.
         {
@@ -114,7 +114,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Setup a `ClauseCx` with our environment in mind.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.import_impl_block_env(item);
+        let env = ccx.import_impl_block_env_as_universal(item);
 
         // Let's ensure that the target trait instance is well formed. This includes trait-checking
         // regular generic parameters *and* associated types.
@@ -178,7 +178,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Setup a `ClauseCx` with our environment in mind.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.import_adt_def_env(def);
+        let env = ccx.import_adt_def_env_as_universal(def);
 
         // First, let's ensure that each generic parameter's clauses are well-formed.
         self.visit_generic_binder(&mut ccx, env.as_ref(), def.r(s).generics);
