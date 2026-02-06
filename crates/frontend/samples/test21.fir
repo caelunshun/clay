@@ -39,8 +39,8 @@ impl Deref for Baz {
 }
 
 fn demo<
-    F: for<T> FnOnce<(T,), T>,
-    G: for<F: for<'a, T: &shorter 'a> FnOnce<(&'a T,), &'a T>> FnOnce<(F,), F>,
+    F: for<T: &longer 'gc> FnOnce<(T,), T>,
+    G: for<F: for<'a, T: &longer 'a> FnOnce<(&'a T,), &'a T>> FnOnce<(F,), F>,
 >(
     f: F,
     g: G,

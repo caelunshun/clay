@@ -10,7 +10,7 @@ use crate::{
     semantic::{
         analysis::{
             ClauseCx, ClauseOrigin, ClauseOriginKind, TyCtxt, TyFoldable, TyFolder, TyFolderExt,
-            TyFolderInfallibleExt, TyFolderPreservesSpans, TyVisitorInfallibleExt,
+            TyFolderInfallibleExt, TyFolderPreservesSpans, TyVisitorInfallibleExt, UnifyCxMode,
         },
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FuncDefOwner, GenericBinder, GenericSubst,
@@ -569,6 +569,10 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
     }
 
     fn fold_re(&mut self, re: SpannedRe) -> Result<Re, Self::Error> {
+        if self.ccx.mode() == UnifyCxMode::RegionBlind {
+            return Ok(Re::Erased);
+        }
+
         Ok(match re.value {
             Re::SigInfer => self.ccx.fresh_re_infer(),
             Re::SigGeneric(generic) => self.lookup_generic(AnyGeneric::Re(generic)).unwrap_re(),
