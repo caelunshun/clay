@@ -28,7 +28,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         let tcx = self.tcx();
 
         // Setup a `ClauseCx` for signature validation.
-        let mut ccx_sig = ClauseCx::new(tcx, self.coherence, UnifyCxMode::RegionAware);
+        let mut ccx_sig = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
         let env_sig = ccx_sig.import_fn_def_env(def);
 
         // WF-check the signature.
@@ -53,10 +53,11 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Check the body
         if let Some(body) = *def.r(s).body {
-            let mut ccx_body = ClauseCx::new(tcx, self.coherence, UnifyCxMode::RegionBlind);
+            let mut ccx_body =
+                ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionBlind);
             let env_body = ccx_body.import_fn_def_env(def);
 
-            let mut bcx = BodyCtxt::new(&mut ccx_body, self.krate, env_body.as_ref());
+            let mut bcx = BodyCtxt::new(&mut ccx_body, env_body.as_ref());
 
             for arg in def.r(s).args.r(s) {
                 bcx.check_pat_and_ascription(arg.pat, Some(arg.ty));
@@ -75,7 +76,6 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
 pub struct BodyCtxt<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
-    krate: Obj<Crate>,
     import_env: ClauseImportEnvRef<'a>,
     local_types: FxHashMap<Obj<FuncLocal>, Ty>,
     needs_infer: Vec<NeedsInfer>,
@@ -88,14 +88,9 @@ struct NeedsInfer {
 }
 
 impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
-    pub fn new(
-        ccx: &'a mut ClauseCx<'tcx>,
-        krate: Obj<Crate>,
-        import_env: ClauseImportEnvRef<'a>,
-    ) -> Self {
+    pub fn new(ccx: &'a mut ClauseCx<'tcx>, import_env: ClauseImportEnvRef<'a>) -> Self {
         Self {
             ccx,
-            krate,
             import_env,
             local_types: FxHashMap::default(),
             needs_infer: Vec::new(),
@@ -111,7 +106,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
     }
 
     pub fn krate(&self) -> Obj<Crate> {
-        self.krate
+        self.ccx().krate()
     }
 
     pub fn ccx(&self) -> &ClauseCx<'tcx> {
@@ -220,7 +215,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let callee = self.check_expr(callee).and_do(&mut divergence);
 
                 let site_span = expr.r(s).span;
-                let fn_once_trait = self.krate.r(s).fn_once_lang_item(s).unwrap();
+                let fn_once_trait = self.krate().r(s).fn_once_lang_item(s).unwrap();
                 let input_ty = self.ccx_mut().fresh_ty_infer();
                 let output_ty = self.ccx_mut().fresh_ty_infer();
 

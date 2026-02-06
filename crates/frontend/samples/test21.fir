@@ -38,8 +38,12 @@ impl Deref for Baz {
     type Target = Foo;
 }
 
+pub trait Meow {}
+
+impl<T> Meow for T {}
+
 fn demo<
-    F: for<T: &longer 'gc> FnOnce<(T,), T>,
+    F: for<T: Meow> FnOnce<(T,), T>,
     G: for<F: for<'a, T: &longer 'a> FnOnce<(&'a T,), &'a T>> FnOnce<(F,), F>,
 >(
     f: F,
@@ -53,4 +57,10 @@ fn demo<
     } else {
         g(f)(&b)
     };
+
+    meow();
+}
+
+fn meow<T>(v: T) -> T {
+    v
 }

@@ -623,7 +623,7 @@ pub enum SolidTyShapeKind {
     Adt(Obj<AdtItem>),
     Trait,
     Tuple(u32),
-    FnDef,
+    FnDef(Obj<FnDef>, bool),
 }
 
 // === Binders === //

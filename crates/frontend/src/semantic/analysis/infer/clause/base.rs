@@ -1,12 +1,16 @@
 use crate::{
-    base::{Session, arena::HasInterner, syntax::Span},
+    base::{
+        Session,
+        arena::{HasInterner, Obj},
+        syntax::Span,
+    },
     semantic::{
         analysis::{
             ClauseOrigin, CoherenceMap, FloatingInferVar, ObligationCx, ObligationNotReady,
             RecursionLimitReached, TyAndTyUnifyError, TyCtxt, UnifyCx, UnifyCxMode,
         },
         syntax::{
-            InferTyVar, Re, RelationDirection, RelationMode, TraitClause, TraitClauseList,
+            Crate, InferTyVar, Re, RelationDirection, RelationMode, TraitClause, TraitClauseList,
             TraitSpec, Ty, TyKind, TyOrRe, UniversalReVar, UniversalReVarSourceInfo,
             UniversalTyVar, UniversalTyVarSourceInfo,
         },
@@ -97,6 +101,7 @@ impl ClauseObligation {
 pub struct ClauseCx<'tcx> {
     ocx: ObligationCx<'tcx, ClauseObligation>,
     coherence: &'tcx CoherenceMap,
+    krate: Obj<Crate>,
     pub(super) universal_vars: IndexVec<UniversalTyVar, UniversalTyVarDescriptor>,
 }
 
@@ -114,10 +119,16 @@ pub struct UniversalElaboration {
 }
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn new(tcx: &'tcx TyCtxt, coherence: &'tcx CoherenceMap, mode: UnifyCxMode) -> Self {
+    pub fn new(
+        tcx: &'tcx TyCtxt,
+        coherence: &'tcx CoherenceMap,
+        krate: Obj<Crate>,
+        mode: UnifyCxMode,
+    ) -> Self {
         Self {
             ocx: ObligationCx::new(tcx, mode),
             coherence,
+            krate,
             universal_vars: IndexVec::new(),
         }
     }
@@ -132,6 +143,10 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn coherence(&self) -> &'tcx CoherenceMap {
         self.coherence
+    }
+
+    pub fn krate(&self) -> Obj<Crate> {
+        self.krate
     }
 
     pub fn ucx(&self) -> &UnifyCx<'tcx> {

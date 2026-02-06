@@ -9,8 +9,8 @@ use crate::{
             infer::clause::ClauseObligation,
         },
         syntax::{
-            HrtbBinder, ImplItem, RelationMode, TraitClause, TraitClauseList, TraitParam,
-            TraitSpec, Ty, TyKind, TyOrRe,
+            FnInstance, HrtbBinder, ImplItem, RelationMode, TraitClause, TraitClauseList,
+            TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
         },
     },
 };
@@ -128,6 +128,11 @@ impl<'tcx> ClauseCx<'tcx> {
                 .substitutor(UnboundVarHandlingMode::EraseToSigInfer)
                 .fold(rhs),
         );
+
+        if let Ok(confirmation) = self.clone().try_select_special_impl(origin, lhs, rhs) {
+            debug_assert!(prev_confirmation.is_none());
+            prev_confirmation = Some(confirmation)
+        }
 
         for candidate in candidates {
             let Ok(confirmation) = self
@@ -351,5 +356,34 @@ impl<'tcx> ClauseCx<'tcx> {
         }
 
         Ok(self)
+    }
+
+    fn try_select_special_impl(
+        mut self,
+        origin: &ClauseOrigin,
+        lhs: Ty,
+        rhs: TraitSpec,
+    ) -> Result<Self, SelectionRejected> {
+        let s = self.session();
+        let krate = self.krate();
+        let lhs = self.ucx().peel_ty_infer_var(lhs);
+
+        if Some(rhs.def) == krate.r(s).fn_once_lang_item(s)
+            && let TyKind::FnDef(FnInstance { def, args, impl_ty }) = *lhs.r(s)
+        {
+            let &[
+                TraitParam::Equals(TyOrRe::Ty(rhs_input)),
+                TraitParam::Equals(TyOrRe::Ty(rhs_output)),
+            ] = rhs.params.r(s)
+            else {
+                unreachable!()
+            };
+
+            // TODO
+
+            return Ok(self);
+        }
+
+        Err(SelectionRejected)
     }
 }
