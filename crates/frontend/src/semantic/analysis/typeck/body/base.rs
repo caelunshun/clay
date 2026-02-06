@@ -13,8 +13,8 @@ use crate::{
         },
         syntax::{
             Block, Crate, Divergence, Expr, ExprKind, FnDef, FuncLocal, InferTyVar, Pat, PatKind,
-            Re, RelationMode, SimpleTyKind, SpannedFnInstanceView, SpannedTyView, Stmt, StructExpr,
-            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            Re, RelationMode, SimpleTyKind, SpannedFnInstanceView, SpannedTy, SpannedTyView, Stmt,
+            StructExpr, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -57,6 +57,11 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
             let env_body = ccx_body.import_fn_def_env(def);
 
             let mut bcx = BodyCtxt::new(&mut ccx_body, self.krate, env_body.as_ref());
+
+            for arg in def.r(s).args.r(s) {
+                bcx.check_pat_and_ascription(arg.pat, Some(arg.ty));
+            }
+
             _ = bcx.check_block(body);
 
             ccx_body.verify();
@@ -153,23 +158,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     self.check_expr(*expr).and_do(&mut divergence);
                 }
                 Stmt::Let(stmt) => {
-                    let pat_ty = self.type_of_pat(stmt.r(s).pat, None);
-
-                    if let Some(ascription) = stmt.r(s).ascription {
-                        let env = self.import_env;
-                        let ascription = self.ccx_mut().importer(env).fold_preserved(ascription);
-
-                        self.ccx_mut().wf_visitor().visit_spanned(ascription);
-
-                        self.ccx_mut().oblige_ty_unifies_ty(
-                            ClauseOrigin::root(ClauseOriginKind::Pattern {
-                                pat_span: ascription.own_span(),
-                            }),
-                            pat_ty,
-                            ascription.value,
-                            RelationMode::Equate,
-                        );
-                    }
+                    let pat_ty = self.check_pat_and_ascription(stmt.r(s).pat, stmt.r(s).ascription);
 
                     if let Some(init) = stmt.r(s).init {
                         self.check_expr_demand(init, pat_ty).and_do(&mut divergence);
@@ -194,6 +183,30 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         };
 
         TyAndDivergence::new(output, divergence)
+    }
+
+    pub fn check_pat_and_ascription(&mut self, pat: Obj<Pat>, ascription: Option<SpannedTy>) -> Ty {
+        let pat_ty = self.type_of_pat(pat, None);
+
+        let Some(ascription) = ascription else {
+            return pat_ty;
+        };
+
+        let env = self.import_env;
+        let ascription = self.ccx_mut().importer(env).fold_preserved(ascription);
+
+        self.ccx_mut().wf_visitor().visit_spanned(ascription);
+
+        self.ccx_mut().oblige_ty_unifies_ty(
+            ClauseOrigin::root(ClauseOriginKind::Pattern {
+                pat_span: ascription.own_span(),
+            }),
+            pat_ty,
+            ascription.value,
+            RelationMode::Equate,
+        );
+
+        pat_ty
     }
 
     pub fn check_expr(&mut self, expr: Obj<Expr>) -> TyAndDivergence {

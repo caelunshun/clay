@@ -38,14 +38,21 @@ impl Deref for Baz {
     type Target = Foo;
 }
 
-fn demo<F: for<'a, T: &longer 'a> FnOnce<(&'a T,), &'a T>>() {
+fn demo<
+    F: for<'a, T: &longer 'a> FnOnce<(&'a T,), &'a T>,
+    G: for<F: for<'a, T: &longer 'a> FnOnce<(&'a T,), &'a T>> FnOnce<(F,), ()>,
+>(
+    f: F,
+    g: G,
+) {
     let a: Bar;
     let b: Baz;
-    let c: F;
 
     let foo = if true {
         &a
     } else {
-        c(&b)
+        f(&b)
     };
+
+    g(f);
 }
