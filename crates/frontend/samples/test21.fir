@@ -39,8 +39,8 @@ impl Deref for Baz {
 }
 
 fn demo<
-    F: for<'a, T: &longer 'a> FnOnce<(&'a T,), &'a T>,
-    G: for<F: for<'a, T: &longer 'a> FnOnce<(&'a T,), &'a T>> FnOnce<(F,), ()>,
+    F: for<T> FnOnce<(T,), T>,
+    G: for<F: for<'a, T: &shorter 'a> FnOnce<(&'a T,), &'a T>> FnOnce<(F,), F>,
 >(
     f: F,
     g: G,
@@ -51,8 +51,6 @@ fn demo<
     let foo = if true {
         &a
     } else {
-        f(&b)
+        g(f)(&b)
     };
-
-    g(f);
 }

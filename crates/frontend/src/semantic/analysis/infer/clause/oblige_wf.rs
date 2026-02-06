@@ -2,20 +2,22 @@
 
 use crate::{
     base::{
+        analysis::Spanned,
         arena::{HasInterner, Obj},
         syntax::Span,
     },
     semantic::{
         analysis::{
             ClauseCx, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind, ObligationNotReady,
-            ObligationResult, TyCtxt, TyVisitable, TyVisitor, TyVisitorInfallibleExt,
+            ObligationResult, TyCtxt, TyFoldable, TyVisitable, TyVisitor, TyVisitorInfallibleExt,
             infer::clause::ClauseObligation,
         },
         syntax::{
-            FuncDefOwner, GenericBinder, GenericSubst, HrtbBinderKind, InferTyVar,
-            RelationDirection, SpannedAdtInstance, SpannedFnInstance, SpannedFnInstanceView,
-            SpannedHrtbBinder, SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec,
-            SpannedTy, SpannedTyOrRe, SpannedTyOrReList, SpannedTyView, Ty, TyKind, TyOrRe,
+            FuncDefOwner, GenericBinder, GenericSubst, InferTyVar, RelationDirection,
+            SpannedAdtInstance, SpannedFnInstance, SpannedFnInstanceView, SpannedHrtbBinder,
+            SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedHrtbDebruijnDefView,
+            SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec, SpannedTy,
+            SpannedTyOrRe, SpannedTyOrReList, SpannedTyView, Ty, TyKind, TyOrRe,
         },
     },
 };
@@ -66,23 +68,40 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         self.ccx.tcx()
     }
 
-    fn visit_hrtb_binder<T: Copy + TyVisitable>(
+    fn visit_hrtb_binder<T: Copy + TyVisitable + TyFoldable>(
         &mut self,
         binder: SpannedHrtbBinder<T>,
     ) -> ControlFlow<Self::Break> {
-        let s = self.session();
+        let tcx = self.tcx();
 
-        match binder.value.kind {
-            HrtbBinderKind::Signature(_) => {
-                unreachable!()
-            }
-            HrtbBinderKind::Imported(definitions) => {
-                // Ill-formed HRTB binders will be checked later once a user tries to instantiate
-                // them.
-                if definitions.r(s).is_empty() {
-                    self.walk_spanned(binder);
-                }
-            }
+        let SpannedHrtbBinderView {
+            kind,
+            inner:
+                Spanned {
+                    value: _,
+                    span_info: inner_span_info,
+                },
+        } = binder.view(tcx);
+
+        let SpannedHrtbBinderKindView::Imported(defs) = kind.view(tcx) else {
+            unreachable!()
+        };
+
+        let bound = Spanned::new_raw(
+            self.ccx.instantiate_hrtb_universal(binder.value),
+            inner_span_info,
+        );
+
+        self.visit_spanned(bound);
+
+        for def in defs.iter(tcx) {
+            let SpannedHrtbDebruijnDefView {
+                spawned_from: _,
+                kind: _,
+                clauses,
+            } = def.view(tcx);
+
+            self.visit_spanned(clauses);
         }
 
         ControlFlow::Continue(())

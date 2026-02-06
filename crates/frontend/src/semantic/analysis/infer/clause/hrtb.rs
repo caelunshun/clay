@@ -17,7 +17,7 @@ use crate::{
 use std::convert::Infallible;
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn instantiate_hrtb_universal(&mut self, binder: HrtbBinder<TraitSpec>) -> TraitSpec {
+    pub fn instantiate_hrtb_universal<T: TyFoldable>(&mut self, binder: HrtbBinder<T>) -> T {
         let tcx = self.tcx();
         let s = self.session();
 

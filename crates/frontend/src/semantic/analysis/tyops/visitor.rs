@@ -1,7 +1,7 @@
 use crate::{
     base::{Session, analysis::Spanned},
     semantic::{
-        analysis::TyCtxt,
+        analysis::{TyCtxt, TyFoldable},
         syntax::{
             AdtInstance, FnInstance, HrtbBinder, HrtbBinderKind, HrtbDebruijnDef,
             HrtbDebruijnDefList, Re, SpannedAdtInstance, SpannedAdtInstanceView, SpannedFnInstance,
@@ -105,7 +105,7 @@ pub trait TyVisitor<'tcx> {
 
     // === Binders === //
 
-    fn visit_hrtb_binder<T: Copy + TyVisitable>(
+    fn visit_hrtb_binder<T: Copy + TyVisitable + TyFoldable>(
         &mut self,
         binder: SpannedHrtbBinder<T>,
     ) -> ControlFlow<Self::Break> {
@@ -528,7 +528,7 @@ impl TyVisitable for TyProjection {
 
 // === Binders === //
 
-impl<T: TyVisitable + Copy> TyVisitable for HrtbBinder<T> {
+impl<T: TyVisitable + TyFoldable + Copy> TyVisitable for HrtbBinder<T> {
     fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,

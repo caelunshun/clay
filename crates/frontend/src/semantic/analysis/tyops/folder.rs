@@ -5,7 +5,7 @@ use crate::{
         arena::{HasInterner, HasListInterner, Intern},
     },
     semantic::{
-        analysis::TyCtxt,
+        analysis::{TyCtxt, TyVisitable},
         syntax::{
             AdtInstance, FnInstance, HrtbBinder, HrtbBinderKind, HrtbDebruijnDef,
             HrtbDebruijnDefList, Re, SpannedAdtInstance, SpannedAdtInstanceView, SpannedFnInstance,
@@ -149,7 +149,7 @@ pub trait TyFolder<'tcx> {
 
     // === Binders === //
 
-    fn fold_hrtb_binder<T: Copy + TyFoldable>(
+    fn fold_hrtb_binder<T: Copy + TyVisitable + TyFoldable>(
         &mut self,
         binder: SpannedHrtbBinder<T>,
     ) -> Result<HrtbBinder<T>, Self::Error> {
@@ -603,7 +603,7 @@ impl TyFoldable for TyProjection {
 
 // === Binders === //
 
-impl<T: TyFoldable + Copy> TyFoldable for HrtbBinder<T> {
+impl<T: TyVisitable + TyFoldable + Copy> TyFoldable for HrtbBinder<T> {
     fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
