@@ -156,6 +156,11 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     let pat_ty = self.type_of_pat(stmt.r(s).pat, None);
 
                     if let Some(ascription) = stmt.r(s).ascription {
+                        let env = self.import_env;
+                        let ascription = self.ccx_mut().importer(env).fold_preserved(ascription);
+
+                        self.ccx_mut().wf_visitor().visit_spanned(ascription);
+
                         self.ccx_mut().oblige_ty_unifies_ty(
                             ClauseOrigin::root(ClauseOriginKind::Pattern {
                                 pat_span: ascription.own_span(),
