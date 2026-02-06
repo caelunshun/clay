@@ -7,8 +7,9 @@ use crate::{
     semantic::{
         analysis::{CoherenceMap, CrateTypeckVisitor},
         syntax::{
-            AttributeKind, Crate, EarlyAttrLang, HrtbDebruijnDef, LangItemDefineError, TraitClause,
-            TraitClauseList, TraitParam, Ty, TyKind, TyOrRe, TyShape,
+            AttributeKind, Crate, EarlyAttrLang, FnInstanceInner, HrtbDebruijnDef,
+            LangItemDefineError, TraitClause, TraitClauseList, TraitParam, Ty, TyKind, TyOrRe,
+            TyShape,
         },
     },
 };
@@ -28,6 +29,7 @@ pub struct TyCtxtInner {
 #[derive(Debug, Default)]
 pub struct Interners {
     pub ty: Interner<TyKind>,
+    pub fn_instance: Interner<FnInstanceInner>,
     pub ty_list: ListInterner<Ty>,
     pub ty_or_re_list: ListInterner<TyOrRe>,
     pub trait_param_list: ListInterner<TraitParam>,
@@ -109,6 +111,12 @@ impl HasSession for TyCtxt {
 impl HasInterner<TyKind> for TyCtxt {
     fn interner(&self) -> &Interner<TyKind> {
         &self.interners.ty
+    }
+}
+
+impl HasInterner<FnInstanceInner> for TyCtxt {
+    fn interner(&self) -> &Interner<FnInstanceInner> {
+        &self.interners.fn_instance
     }
 }
 

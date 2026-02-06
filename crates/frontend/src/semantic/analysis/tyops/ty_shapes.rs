@@ -86,18 +86,8 @@ impl TyCtxt {
                 ),
             }),
             TyKind::FnDef(instance) => TyShape::Solid(SolidTyShape {
-                kind: SolidTyShapeKind::FnDef(instance.def, instance.args.is_some()),
-                children: self.intern_list(
-                    &instance
-                        .args
-                        .map(|v| v.r(s))
-                        .iter()
-                        .flat_map(|v| v.iter())
-                        .filter_map(|v| v.as_ty())
-                        .chain(instance.impl_ty)
-                        .map(|ty| self.erase_ty_to_shape(ty))
-                        .collect::<Vec<_>>(),
-                ),
+                kind: SolidTyShapeKind::FnDef,
+                children: self.intern_list(&[]),
             }),
         }
     }

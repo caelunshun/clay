@@ -3,15 +3,15 @@ use crate::{
     semantic::{
         analysis::{TyCtxt, TyFoldable},
         syntax::{
-            AdtInstance, FnInstance, HrtbBinder, HrtbBinderKind, HrtbDebruijnDef,
+            AdtInstance, FnInstance, FnOwner, HrtbBinder, HrtbBinderKind, HrtbDebruijnDef,
             HrtbDebruijnDefList, Re, SpannedAdtInstance, SpannedAdtInstanceView, SpannedFnInstance,
-            SpannedFnInstanceView, SpannedHrtbBinder, SpannedHrtbBinderKind,
-            SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedHrtbDebruijnDef,
-            SpannedHrtbDebruijnDefList, SpannedHrtbDebruijnDefView, SpannedRe, SpannedTraitClause,
-            SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitInstance,
-            SpannedTraitInstanceView, SpannedTraitParam, SpannedTraitParamList,
-            SpannedTraitParamView, SpannedTraitSpec, SpannedTraitSpecView, SpannedTy,
-            SpannedTyList, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView,
+            SpannedFnInstanceView, SpannedFnOwner, SpannedFnOwnerView, SpannedHrtbBinder,
+            SpannedHrtbBinderKind, SpannedHrtbBinderKindView, SpannedHrtbBinderView,
+            SpannedHrtbDebruijnDef, SpannedHrtbDebruijnDefList, SpannedHrtbDebruijnDefView,
+            SpannedRe, SpannedTraitClause, SpannedTraitClauseList, SpannedTraitClauseView,
+            SpannedTraitInstance, SpannedTraitInstanceView, SpannedTraitParam,
+            SpannedTraitParamList, SpannedTraitParamView, SpannedTraitSpec, SpannedTraitSpecView,
+            SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView,
             SpannedTyProjection, SpannedTyProjectionView, SpannedTyView, TraitClause,
             TraitClauseList, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty, TyList,
             TyOrRe, TyOrReList, TyProjection,
@@ -75,6 +75,10 @@ pub trait TyVisitor<'tcx> {
 
     fn visit_fn_instance(&mut self, instance: SpannedFnInstance) -> ControlFlow<Self::Break> {
         self.walk_spanned_fallible(instance)
+    }
+
+    fn visit_fn_owner(&mut self, owner: SpannedFnOwner) -> ControlFlow<Self::Break> {
+        self.walk_spanned_fallible(owner)
     }
 
     // === Types === //
@@ -342,18 +346,51 @@ impl TyVisitable for FnInstance {
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        let SpannedFnInstanceView {
-            def: _,
-            impl_ty,
-            args,
-        } = me.view(visitor.tcx());
+        let SpannedFnInstanceView { owner, early_args } = me.view(visitor.tcx());
 
-        if let Some(impl_ty) = impl_ty {
-            visitor.visit_spanned_fallible(impl_ty)?;
+        visitor.visit_spanned_fallible(owner)?;
+
+        if let Some(early_args) = early_args {
+            visitor.visit_spanned_fallible(early_args)?;
         }
 
-        if let Some(args) = args {
-            visitor.visit_spanned_fallible(args)?;
+        ControlFlow::Continue(())
+    }
+}
+
+impl TyVisitable for FnOwner {
+    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + TyVisitor<'tcx>,
+    {
+        visitor.visit_fn_owner(me)
+    }
+
+    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + TyVisitor<'tcx>,
+    {
+        let tcx = visitor.tcx();
+
+        match me.view(tcx) {
+            SpannedFnOwnerView::Item(_) => {
+                // (dead end)
+            }
+            SpannedFnOwnerView::Trait {
+                instance,
+                self_ty,
+                method_idx: _,
+            } => {
+                visitor.visit_spanned_fallible(instance)?;
+                visitor.visit_spanned_fallible(self_ty)?;
+            }
+            SpannedFnOwnerView::Inherent {
+                self_ty,
+                block: _,
+                method_idx: _,
+            } => {
+                visitor.visit_spanned_fallible(self_ty)?;
+            }
         }
 
         ControlFlow::Continue(())

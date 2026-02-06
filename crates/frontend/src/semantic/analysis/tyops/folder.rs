@@ -7,18 +7,18 @@ use crate::{
     semantic::{
         analysis::{TyCtxt, TyVisitable},
         syntax::{
-            AdtInstance, FnInstance, HrtbBinder, HrtbBinderKind, HrtbDebruijnDef,
-            HrtbDebruijnDefList, Re, SpannedAdtInstance, SpannedAdtInstanceView, SpannedFnInstance,
-            SpannedFnInstanceView, SpannedHrtbBinder, SpannedHrtbBinderKind,
-            SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedHrtbDebruijnDef,
-            SpannedHrtbDebruijnDefList, SpannedHrtbDebruijnDefView, SpannedRe, SpannedTraitClause,
-            SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitInstance,
-            SpannedTraitInstanceView, SpannedTraitParam, SpannedTraitParamList,
-            SpannedTraitParamView, SpannedTraitSpec, SpannedTraitSpecView, SpannedTy,
-            SpannedTyList, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView,
-            SpannedTyProjection, SpannedTyProjectionView, SpannedTyView, TraitClause,
-            TraitClauseList, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty, TyKind,
-            TyList, TyOrRe, TyOrReList, TyProjection,
+            AdtInstance, FnInstance, FnInstanceInner, FnOwner, HrtbBinder, HrtbBinderKind,
+            HrtbDebruijnDef, HrtbDebruijnDefList, Re, SpannedAdtInstance, SpannedAdtInstanceView,
+            SpannedFnInstance, SpannedFnInstanceView, SpannedFnOwner, SpannedFnOwnerView,
+            SpannedHrtbBinder, SpannedHrtbBinderKind, SpannedHrtbBinderKindView,
+            SpannedHrtbBinderView, SpannedHrtbDebruijnDef, SpannedHrtbDebruijnDefList,
+            SpannedHrtbDebruijnDefView, SpannedRe, SpannedTraitClause, SpannedTraitClauseList,
+            SpannedTraitClauseView, SpannedTraitInstance, SpannedTraitInstanceView,
+            SpannedTraitParam, SpannedTraitParamList, SpannedTraitParamView, SpannedTraitSpec,
+            SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReList,
+            SpannedTyOrReView, SpannedTyProjection, SpannedTyProjectionView, SpannedTyView,
+            TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty,
+            TyKind, TyList, TyOrRe, TyOrReList, TyProjection,
         },
     },
 };
@@ -116,6 +116,10 @@ pub trait TyFolder<'tcx> {
 
     fn fold_fn_instance(&mut self, instance: SpannedFnInstance) -> Result<FnInstance, Self::Error> {
         self.super_spanned_fallible(instance)
+    }
+
+    fn fold_fn_owner(&mut self, owner: SpannedFnOwner) -> Result<FnOwner, Self::Error> {
+        self.super_spanned_fallible(owner)
     }
 
     // === Types === //
@@ -427,19 +431,52 @@ impl TyFoldable for FnInstance {
     where
         F: ?Sized + TyFolder<'tcx>,
     {
-        let SpannedFnInstanceView { def, impl_ty, args } = me.view(folder.tcx());
+        let tcx = folder.tcx();
+        let SpannedFnInstanceView { owner, early_args } = me.view(tcx);
 
-        Ok(FnInstance {
-            def,
-            impl_ty: match impl_ty {
-                Some(v) => Some(folder.fold_spanned_fallible(v)?),
+        Ok(tcx.intern(FnInstanceInner {
+            owner: folder.fold_spanned_fallible(owner)?,
+            early_args: match early_args {
+                Some(early_args) => Some(folder.fold_spanned_fallible(early_args)?),
                 None => None,
             },
-            args: match args {
-                Some(v) => Some(folder.fold_spanned_fallible(v)?),
-                None => None,
-            },
-        })
+        }))
+    }
+}
+
+impl TyFoldable for FnOwner {
+    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    where
+        F: ?Sized + TyFolder<'tcx>,
+    {
+        folder.fold_fn_owner(me)
+    }
+
+    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    where
+        F: ?Sized + TyFolder<'tcx>,
+    {
+        match me.view(folder.tcx()) {
+            SpannedFnOwnerView::Item(def) => Ok(FnOwner::Item(def)),
+            SpannedFnOwnerView::Trait {
+                instance,
+                self_ty,
+                method_idx,
+            } => Ok(FnOwner::Trait {
+                instance: folder.fold_spanned_fallible(instance)?,
+                self_ty: folder.fold_spanned_fallible(self_ty)?,
+                method_idx,
+            }),
+            SpannedFnOwnerView::Inherent {
+                self_ty,
+                block,
+                method_idx,
+            } => Ok(FnOwner::Inherent {
+                self_ty: folder.fold_spanned_fallible(self_ty)?,
+                block,
+                method_idx,
+            }),
+        }
     }
 }
 

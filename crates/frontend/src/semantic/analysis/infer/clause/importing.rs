@@ -416,20 +416,7 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     pub fn import_fn_def_sig_given_args(&mut self, instance: FnInstance) -> (TyList, Ty) {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        let env = self.import_fn_def_given_args(instance);
-        let mut importer = self.importer(env.as_ref());
-
-        let args = &instance.def.r(s).args;
-        let args = args.r(s).iter().map(|v| v.ty.value).collect::<Vec<_>>();
-        let args = tcx.intern_list(&args);
-        let args = importer.fold(args);
-
-        let ret = importer.fold(instance.def.r(s).ret_ty.value);
-
-        (args, ret)
+        todo!()
     }
 }
 

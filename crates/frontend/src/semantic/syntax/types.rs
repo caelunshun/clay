@@ -7,8 +7,8 @@ use crate::{
     },
     parse::token::{Ident, Lifetime},
     semantic::syntax::{
-        FnDef, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy, SpannedTyOrReList,
-        Visibility,
+        FnDef, FuncItem, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy,
+        SpannedTyOrReList, Visibility,
     },
     symbol,
     utils::hash::FxHashMap,
@@ -514,11 +514,31 @@ pub enum TyKind {
     Error(ErrorGuaranteed),
 }
 
+pub type FnInstance = Intern<FnInstanceInner>;
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct FnInstance {
-    pub def: Obj<FnDef>,
-    pub impl_ty: Option<Ty>,
-    pub args: Option<TyOrReList>,
+pub struct FnInstanceInner {
+    pub owner: FnOwner,
+
+    /// If the user provides an explicit set of generic arguments to a function, this will be
+    /// `Some`. Otherwise, the function is allowed to range over all generic instantiations of that
+    /// function.
+    pub early_args: Option<TyOrReList>,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum FnOwner {
+    Item(Obj<FuncItem>),
+    Trait {
+        instance: TraitSpec,
+        self_ty: Ty,
+        method_idx: u32,
+    },
+    Inherent {
+        self_ty: Ty,
+        block: Obj<ImplItem>,
+        method_idx: u32,
+    },
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -623,7 +643,10 @@ pub enum SolidTyShapeKind {
     Adt(Obj<AdtItem>),
     Trait,
     Tuple(u32),
-    FnDef(Obj<FnDef>, bool),
+
+    /// No need to specialize in an efficient manner because `impl`s naming these types are not
+    /// possible.
+    FnDef,
 }
 
 // === Binders === //

@@ -13,8 +13,9 @@ use crate::{
         },
         syntax::{
             Block, Crate, Divergence, Expr, ExprKind, FnDef, FuncLocal, InferTyVar, Pat, PatKind,
-            Re, RelationMode, SimpleTyKind, SpannedFnInstanceView, SpannedTy, SpannedTyView, Stmt,
-            StructExpr, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            Re, RelationMode, SimpleTyKind, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTy,
+            SpannedTyView, Stmt, StructExpr, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind,
+            TyOrRe,
         },
     },
 };
@@ -281,13 +282,12 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             ExprKind::TupleOrUnitCtor(adt_ctor_instance) => todo!(),
             ExprKind::FnItemLit(def, args) => {
                 let env = self.import_env;
-                let args = self.ccx_mut().importer(env).fold_preserved(args);
+                let early_args = self.ccx_mut().importer(env).fold_preserved(args);
 
                 let fn_ty = SpannedTyView::FnDef(
                     SpannedFnInstanceView {
-                        def: *def.r(s).def,
-                        impl_ty: None,
-                        args: Some(args),
+                        owner: SpannedFnOwnerView::Item(def).encode(expr.r(s).span, tcx),
+                        early_args: Some(early_args),
                     }
                     .encode(expr.r(s).span, tcx),
                 )

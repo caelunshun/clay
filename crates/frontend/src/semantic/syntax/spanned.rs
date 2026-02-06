@@ -8,11 +8,12 @@ use crate::{
     semantic::{
         analysis::TyCtxt,
         syntax::{
-            AdtInstance, AdtItem, FnDef, FnInstance, GenericBinder, HrtbBinder, HrtbBinderKind,
-            HrtbDebruijn, HrtbDebruijnDef, HrtbDebruijnDefList, InferTyVar, Mutability, Re,
-            RelationDirection, SimpleTyKind, TraitClause, TraitClauseList, TraitInstance,
-            TraitItem, TraitParam, TraitParamList, TraitSpec, Ty, TyKind, TyList, TyOrRe,
-            TyOrReKind, TyOrReList, TyProjection, TypeGeneric, UniversalTyVar,
+            AdtInstance, AdtItem, FnInstance, FnInstanceInner, FnOwner, FuncItem, GenericBinder,
+            HrtbBinder, HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef, HrtbDebruijnDefList,
+            ImplItem, InferTyVar, Mutability, Re, RelationDirection, SimpleTyKind, TraitClause,
+            TraitClauseList, TraitInstance, TraitItem, TraitParam, TraitParamList, TraitSpec, Ty,
+            TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList, TyProjection, TypeGeneric,
+            UniversalTyVar,
         },
     },
 };
@@ -409,23 +410,23 @@ pub type SpannedFnInstance = Spanned<FnInstance>;
 
 #[derive(Debug, Copy, Clone)]
 pub struct SpannedFnInstanceView {
-    pub def: Obj<FnDef>,
-    pub impl_ty: Option<SpannedTy>,
-    pub args: Option<SpannedTyOrReList>,
+    pub owner: SpannedFnOwner,
+    pub early_args: Option<SpannedTyOrReList>,
 }
 
 impl SpannedViewDecode<TyCtxt> for FnInstance {
     type View = SpannedFnInstanceView;
 
     fn decode(value: &Self, span_info: SpannedInfo, tcx: &TyCtxt) -> Self::View {
-        let [impl_ty_span, args_span] = span_info.child_spans(tcx);
+        let s = &tcx.session;
+
+        let FnInstanceInner { owner, early_args } = *value.r(s);
+
+        let [owner_span, early_args_span] = span_info.child_spans(tcx);
 
         SpannedFnInstanceView {
-            def: value.def,
-            impl_ty: value
-                .impl_ty
-                .map(|impl_ty| Spanned::new_raw(impl_ty, impl_ty_span)),
-            args: value.args.map(|args| Spanned::new_raw(args, args_span)),
+            owner: Spanned::new_raw(owner, owner_span),
+            early_args: early_args.map(|early_args| Spanned::new_raw(early_args, early_args_span)),
         }
     }
 }
@@ -435,20 +436,110 @@ impl SpannedViewEncode<TyCtxt> for SpannedFnInstanceView {
 
     fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
         Spanned::new_raw(
-            FnInstance {
-                def: self.def,
-                impl_ty: self.impl_ty.map(|v| v.value),
-                args: self.args.map(|v| v.value),
-            },
+            tcx.intern(FnInstanceInner {
+                owner: self.owner.value,
+                early_args: self.early_args.map(|v| v.value),
+            }),
             SpannedInfo::new_list(
                 own_span,
                 &[
-                    SpannedInfo::new_optional(self.impl_ty.map(|v| v.span_info)),
-                    SpannedInfo::new_optional(self.args.map(|v| v.span_info)),
+                    self.owner.span_info,
+                    SpannedInfo::new_optional(self.early_args.map(|v| v.span_info)),
                 ],
                 tcx,
             ),
         )
+    }
+}
+
+// === FnOwner === //
+
+pub type SpannedFnOwner = Spanned<FnOwner>;
+
+#[derive(Debug, Copy, Clone)]
+pub enum SpannedFnOwnerView {
+    Item(Obj<FuncItem>),
+    Trait {
+        instance: SpannedTraitSpec,
+        self_ty: SpannedTy,
+        method_idx: u32,
+    },
+    Inherent {
+        self_ty: SpannedTy,
+        block: Obj<ImplItem>,
+        method_idx: u32,
+    },
+}
+
+impl SpannedViewDecode<TyCtxt> for FnOwner {
+    type View = SpannedFnOwnerView;
+
+    fn decode(value: &Self, span_info: SpannedInfo, tcx: &TyCtxt) -> Self::View {
+        match *value {
+            FnOwner::Item(def) => SpannedFnOwnerView::Item(def),
+            FnOwner::Trait {
+                instance,
+                self_ty,
+                method_idx,
+            } => {
+                let [instance_span, self_ty_span] = span_info.child_spans(tcx);
+
+                SpannedFnOwnerView::Trait {
+                    instance: Spanned::new_raw(instance, instance_span),
+                    self_ty: Spanned::new_raw(self_ty, self_ty_span),
+                    method_idx,
+                }
+            }
+            FnOwner::Inherent {
+                self_ty,
+                block,
+                method_idx,
+            } => {
+                let self_ty_span = span_info.unwrap(tcx);
+
+                SpannedFnOwnerView::Inherent {
+                    self_ty: Spanned::new_raw(self_ty, self_ty_span),
+                    block,
+                    method_idx,
+                }
+            }
+        }
+    }
+}
+
+impl SpannedViewEncode<TyCtxt> for SpannedFnOwnerView {
+    type Unspanned = FnOwner;
+
+    fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
+        match self {
+            SpannedFnOwnerView::Item(def) => {
+                Spanned::new_raw(FnOwner::Item(def), SpannedInfo::new_terminal(own_span, tcx))
+            }
+            SpannedFnOwnerView::Trait {
+                instance,
+                self_ty,
+                method_idx,
+            } => Spanned::new_raw(
+                FnOwner::Trait {
+                    instance: instance.value,
+                    self_ty: self_ty.value,
+                    method_idx,
+                },
+                SpannedInfo::new_list(own_span, &[instance.span_info, self_ty.span_info], tcx),
+            ),
+            SpannedFnOwnerView::Inherent {
+                self_ty,
+                block,
+                method_idx,
+            } => Spanned::new_raw(
+                FnOwner::Inherent {
+                    self_ty: self_ty.value,
+                    block,
+                    method_idx,
+                },
+                self_ty.span_info.wrap(own_span, tcx),
+            ),
+        }
     }
 }
 

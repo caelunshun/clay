@@ -13,8 +13,8 @@ use crate::{
             infer::clause::ClauseObligation,
         },
         syntax::{
-            FuncDefOwner, GenericBinder, GenericSubst, InferTyVar, RelationDirection,
-            SpannedAdtInstance, SpannedFnInstance, SpannedFnInstanceView, SpannedHrtbBinder,
+            GenericBinder, GenericSubst, InferTyVar, RelationDirection, SpannedAdtInstance,
+            SpannedFnInstance, SpannedFnInstanceView, SpannedFnOwnerView, SpannedHrtbBinder,
             SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedHrtbDebruijnDefView,
             SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec, SpannedTy,
             SpannedTyOrRe, SpannedTyOrReList, SpannedTyView, Ty, TyKind, TyOrRe,
@@ -173,7 +173,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         // `impl` is found, we just rely on the fact that `impl` WF checks already validated the
         // type for its clauses and ensure that our `impl` matches what the trait spec said it would
         // contain.
-        self.check_generics(
+        self.check_generic_values(
             self.clause_applies_to.unwrap(),
             *spec.value.def.r(s).generics,
             [],
@@ -190,7 +190,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         let s = self.session();
         let tcx = self.tcx();
 
-        self.check_generics(
+        self.check_generic_values(
             self.clause_applies_to.unwrap(),
             *instance.value.def.r(s).generics,
             [],
@@ -207,7 +207,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         let tcx = self.tcx();
 
         // Check generics
-        self.check_generics(
+        self.check_generic_values(
             tcx.intern(TyKind::Adt(instance.value)),
             instance.value.def.r(s).generics,
             [],
@@ -225,61 +225,77 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         let s = self.session();
         let tcx = self.tcx();
 
-        let SpannedFnInstanceView { def, impl_ty, args } = instance.view(tcx);
+        let SpannedFnInstanceView { owner, early_args } = instance.view(tcx);
 
         // Validate the generic types against the function's binder(s).
-        match def.r(s).owner {
-            FuncDefOwner::Func(_) => {
-                assert!(impl_ty.is_none());
-
-                if let Some(args) = args {
-                    self.check_generics(
+        // FIXME
+        match owner.view(tcx) {
+            SpannedFnOwnerView::Item(def) => {
+                if let Some(early_args) = early_args {
+                    self.check_generic_values(
                         tcx.intern(TyKind::SigThis),
-                        def.r(s).generics,
+                        def.r(s).def.r(s).generics,
                         [],
-                        args,
+                        early_args,
                         None,
                     );
                 }
             }
-            FuncDefOwner::TraitMethod(trait_item, _idx) => {
-                let impl_ty = impl_ty.unwrap();
+            SpannedFnOwnerView::Trait {
+                instance,
+                self_ty,
+                method_idx,
+            } => {
+                let trait_item = instance.value.def;
+                let def = trait_item.r(s).methods[method_idx as usize];
+
+                self.ccx.oblige_ty_meets_trait_instantiated(
+                    ClauseOrigin::root(ClauseOriginKind::WfFnDef {
+                        fn_ty: self_ty.own_span(),
+                    }),
+                    self_ty.value,
+                    instance.value,
+                );
 
                 let trait_args = self.ccx.import_binder_list_as_infer(
                     &ClauseOrigin::root(ClauseOriginKind::WfFnDef {
                         fn_ty: instance.own_span(),
                     }),
-                    impl_ty.value,
+                    self_ty.value,
                     &[*trait_item.r(s).generics],
                 );
 
-                if let Some(args) = args {
-                    self.check_generics(
-                        tcx.intern(TyKind::SigThis),
+                if let Some(early_args) = early_args {
+                    self.check_generic_values(
+                        self_ty.value,
                         def.r(s).generics,
                         trait_args,
-                        args,
+                        early_args,
                         None,
                     );
                 }
             }
-            FuncDefOwner::ImplMethod(impl_block, _idx) => {
-                let impl_ty = impl_ty.unwrap();
+            SpannedFnOwnerView::Inherent {
+                self_ty,
+                block,
+                method_idx,
+            } => {
+                let def = block.r(s).methods[method_idx as usize];
 
                 let impl_args = self.ccx.import_binder_list_as_infer(
                     &ClauseOrigin::root(ClauseOriginKind::WfFnDef {
                         fn_ty: instance.own_span(),
                     }),
-                    impl_ty.value,
-                    &[impl_block.r(s).generics],
+                    self_ty.value,
+                    &[block.r(s).generics],
                 );
 
-                if let Some(args) = args {
-                    self.check_generics(
-                        tcx.intern(TyKind::SigThis),
+                if let Some(early_args) = early_args {
+                    self.check_generic_values(
+                        self_ty.value,
                         def.r(s).generics,
                         impl_args,
-                        args,
+                        early_args,
                         None,
                     );
                 }
@@ -294,7 +310,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
 }
 
 impl ClauseTyWfVisitor<'_, '_> {
-    fn check_generics(
+    fn check_generic_values(
         &mut self,
         clause_applies_to: Ty,
         binder: Obj<GenericBinder>,

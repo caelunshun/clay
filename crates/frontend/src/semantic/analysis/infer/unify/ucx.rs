@@ -7,9 +7,10 @@ use crate::{
             infer::unify::{regions::ReUnifyTracker, types::TyUnifyTracker},
         },
         syntax::{
-            FnInstance, HrtbBinderKind, InferTyVar, Mutability, Re, ReVariance, RelationDirection,
-            RelationMode, SpannedTy, SpannedTyView, TraitClause, TraitClauseList, TraitParam, Ty,
-            TyKind, TyOrRe, UniversalReVar, UniversalReVarSourceInfo,
+            FnInstanceInner, FnOwner, HrtbBinderKind, InferTyVar, Mutability, Re, ReVariance,
+            RelationDirection, RelationMode, SpannedTy, SpannedTyView, TraitClause,
+            TraitClauseList, TraitParam, TraitParamList, Ty, TyKind, TyOrRe, UniversalReVar,
+            UniversalReVarSourceInfo,
         },
     },
     utils::hash::FxHashSet,
@@ -302,30 +303,100 @@ impl<'tcx> UnifyCx<'tcx> {
                     mode.with_variance(variance),
                 );
             }
-            (
-                TyKind::FnDef(FnInstance {
-                    def: lhs_def,
-                    impl_ty: lhs_impl_ty,
-                    args: lhs_args,
-                }),
-                TyKind::FnDef(FnInstance {
-                    def: rhs_def,
-                    impl_ty: rhs_impl_ty,
-                    args: rhs_args,
-                }),
-            ) if lhs_def == rhs_def => 'func: {
-                match (lhs_args, rhs_args) {
+            (TyKind::FnDef(lhs_inst), TyKind::FnDef(rhs_inst)) => 'func: {
+                let FnInstanceInner {
+                    owner: lhs_owner,
+                    early_args: lhs_early_args,
+                } = *lhs_inst.r(s);
+
+                let FnInstanceInner {
+                    owner: rhs_owner,
+                    early_args: rhs_early_args,
+                } = *rhs_inst.r(s);
+
+                match (lhs_owner, rhs_owner) {
+                    (FnOwner::Item(lhs_def), FnOwner::Item(rhs_def)) => {
+                        if lhs_def != rhs_def {
+                            culprits.push(TyAndTyUnifyCulprit::Types(lhs, rhs));
+                            break 'func;
+                        }
+                    }
+                    (
+                        FnOwner::Trait {
+                            instance: lhs_instance,
+                            self_ty: lhs_self_ty,
+                            method_idx: lhs_method_idx,
+                        },
+                        FnOwner::Trait {
+                            instance: rhs_instance,
+                            self_ty: rhs_self_ty,
+                            method_idx: rhs_method_idx,
+                        },
+                    ) => {
+                        if lhs_instance.def != rhs_instance.def || lhs_method_idx != rhs_method_idx
+                        {
+                            culprits.push(TyAndTyUnifyCulprit::Types(lhs, rhs));
+                            break 'func;
+                        }
+
+                        self.unify_trait_spec_params_inner(
+                            origin,
+                            lhs_instance.params,
+                            rhs_instance.params,
+                            culprits,
+                        );
+
+                        self.unify_ty_and_ty_inner(
+                            origin,
+                            lhs_self_ty,
+                            rhs_self_ty,
+                            culprits,
+                            RelationMode::Equate,
+                        );
+                    }
+                    (
+                        FnOwner::Inherent {
+                            self_ty: lhs_self_ty,
+                            block: lhs_block,
+                            method_idx: lhs_method_idx,
+                        },
+                        FnOwner::Inherent {
+                            self_ty: rhs_self_ty,
+                            block: rhs_block,
+                            method_idx: rhs_method_idx,
+                        },
+                    ) => {
+                        if lhs_block != rhs_block || lhs_method_idx != rhs_method_idx {
+                            culprits.push(TyAndTyUnifyCulprit::Types(lhs, rhs));
+                            break 'func;
+                        }
+
+                        self.unify_ty_and_ty_inner(
+                            origin,
+                            lhs_self_ty,
+                            rhs_self_ty,
+                            culprits,
+                            RelationMode::Equate,
+                        );
+                    }
+                    _ => unreachable!(),
+                }
+
+                match (lhs_early_args, rhs_early_args) {
                     (Some(lhs_generics), Some(rhs_generics)) => {
                         for (&lhs, &rhs) in lhs_generics.r(s).iter().zip(rhs_generics.r(s)) {
-                            // TODO: The variance rules for these are a bit more complicated.
-                            let mode = RelationMode::Equate;
-
                             match (lhs, rhs) {
                                 (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                                    self.unify_re_and_re(origin, lhs, rhs, mode);
+                                    self.unify_re_and_re(origin, lhs, rhs, RelationMode::Equate);
                                 }
                                 (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
-                                    self.unify_ty_and_ty_inner(origin, lhs, rhs, culprits, mode);
+                                    self.unify_ty_and_ty_inner(
+                                        origin,
+                                        lhs,
+                                        rhs,
+                                        culprits,
+                                        RelationMode::Equate,
+                                    );
                                 }
                                 _ => unreachable!(),
                             }
@@ -338,16 +409,6 @@ impl<'tcx> UnifyCx<'tcx> {
                         culprits.push(TyAndTyUnifyCulprit::Types(lhs, rhs));
                         break 'func;
                     }
-                }
-
-                match (lhs_impl_ty, rhs_impl_ty) {
-                    (Some(lhs), Some(rhs)) => {
-                        self.unify_ty_and_ty_inner(origin, lhs, rhs, culprits, mode);
-                    }
-                    (None, None) => {
-                        // (trivially compatible)
-                    }
-                    _ => unreachable!(),
                 }
             }
             (TyKind::Tuple(lhs), TyKind::Tuple(rhs)) if lhs.r(s).len() == rhs.r(s).len() => {
@@ -537,48 +598,58 @@ impl<'tcx> UnifyCx<'tcx> {
 
                     // Ensure that the inner values are compatible. HRTBs are debruijn indexed so
                     // this properly checks for alpha-equivalence w.r.t the binders.
-                    for (&lhs, &rhs) in lhs.inner.params.r(s).iter().zip(rhs.inner.params.r(s)) {
-                        match (lhs, rhs) {
-                            (TraitParam::Equals(lhs), TraitParam::Equals(rhs)) => {
-                                match (lhs, rhs) {
-                                    (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                                        self.unify_re_and_re(
-                                            origin,
-                                            lhs,
-                                            rhs,
-                                            RelationMode::Equate,
-                                        );
-                                    }
-                                    (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
-                                        self.unify_ty_and_ty_inner(
-                                            origin,
-                                            lhs,
-                                            rhs,
-                                            culprits,
-                                            RelationMode::Equate,
-                                        );
-                                    }
-                                    _ => unreachable!(),
-                                }
-                            }
-                            (TraitParam::Unspecified(lhs), TraitParam::Unspecified(rhs)) => {
-                                self.unify_dyn_trait_clauses_inner(
-                                    origin,
-                                    lhs,
-                                    rhs,
-                                    culprits,
-                                    RelationMode::Equate,
-                                );
-                            }
-                            _ => {
-                                culprits.push(TyAndTyUnifyCulprit::Params(lhs, rhs));
-                            }
-                        }
-                    }
+                    self.unify_trait_spec_params_inner(
+                        origin,
+                        lhs.inner.params,
+                        rhs.inner.params,
+                        culprits,
+                    );
                 }
                 _ => {
                     culprits.push(TyAndTyUnifyCulprit::ClauseLists(lhs_root, rhs_root));
                     return;
+                }
+            }
+        }
+    }
+
+    fn unify_trait_spec_params_inner(
+        &mut self,
+        origin: &ClauseOrigin,
+        lhs: TraitParamList,
+        rhs: TraitParamList,
+        culprits: &mut Vec<TyAndTyUnifyCulprit>,
+    ) {
+        let s = self.session();
+
+        for (&lhs, &rhs) in lhs.r(s).iter().zip(rhs.r(s)) {
+            match (lhs, rhs) {
+                (TraitParam::Equals(lhs), TraitParam::Equals(rhs)) => match (lhs, rhs) {
+                    (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
+                        self.unify_re_and_re(origin, lhs, rhs, RelationMode::Equate);
+                    }
+                    (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
+                        self.unify_ty_and_ty_inner(
+                            origin,
+                            lhs,
+                            rhs,
+                            culprits,
+                            RelationMode::Equate,
+                        );
+                    }
+                    _ => unreachable!(),
+                },
+                (TraitParam::Unspecified(lhs), TraitParam::Unspecified(rhs)) => {
+                    self.unify_dyn_trait_clauses_inner(
+                        origin,
+                        lhs,
+                        rhs,
+                        culprits,
+                        RelationMode::Equate,
+                    );
+                }
+                _ => {
+                    culprits.push(TyAndTyUnifyCulprit::Params(lhs, rhs));
                 }
             }
         }
