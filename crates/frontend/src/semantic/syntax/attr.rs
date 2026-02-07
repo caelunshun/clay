@@ -97,4 +97,16 @@ impl Crate {
             .fn_once_trait()
             .map(|v| v.r(s).kind.as_trait().unwrap())
     }
+
+    pub fn fn_mut_lang_item(&self, s: &Session) -> Option<Obj<TraitItem>> {
+        self.lang_items
+            .fn_mut_trait()
+            .map(|v| v.r(s).kind.as_trait().unwrap())
+    }
+
+    pub fn fn_lang_item(&self, s: &Session) -> Option<Obj<TraitItem>> {
+        self.lang_items
+            .fn_trait()
+            .map(|v| v.r(s).kind.as_trait().unwrap())
+    }
 }

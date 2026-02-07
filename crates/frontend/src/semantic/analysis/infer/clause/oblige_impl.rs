@@ -4,9 +4,9 @@ use crate::{
     base::arena::{HasInterner as _, Obj},
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnv, ClauseImportEnvRef, ClauseOrigin, NoTraitImplError,
-            ObligationNotReady, ObligationResult, TyFolderInfallibleExt, UnboundVarHandlingMode,
-            UniversalElaboration, infer::clause::ClauseObligation,
+            ClauseCx, ClauseImportEnv, ClauseOrigin, NoTraitImplError, ObligationNotReady,
+            ObligationResult, TyFolderInfallibleExt, UnboundVarHandlingMode, UniversalElaboration,
+            infer::clause::ClauseObligation,
         },
         syntax::{
             HrtbBinder, ImplItem, RelationMode, TraitClause, TraitClauseList, TraitParam,
@@ -373,7 +373,9 @@ impl<'tcx> ClauseCx<'tcx> {
         let krate = self.krate();
         let lhs = self.ucx().peel_ty_infer_var(lhs);
 
-        if Some(rhs.def) == krate.r(s).fn_once_lang_item(s)
+        if (Some(rhs.def) == krate.r(s).fn_once_lang_item(s)
+            || Some(rhs.def) == krate.r(s).fn_mut_lang_item(s)
+            || Some(rhs.def) == krate.r(s).fn_lang_item(s))
             && let TyKind::FnDef(lhs) = *lhs.r(s)
         {
             let &[

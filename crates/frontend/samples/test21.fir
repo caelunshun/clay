@@ -64,7 +64,9 @@ fn demo<
         meow(&b)
     }
 
-    let funky = meow.as::<&'gc dyn for<T: Meow> FnOnce<(T,), T>>;
+    let hrtb = meow::<_>;
+    let funky = hrtb.as::<&'gc dyn for<T: Meow> FnOnce<(T,), T>>;
+    hrtb('a');  // Leaked universe :(
 }
 
 fn meow<T>(v: T) -> T {
