@@ -4,9 +4,9 @@ use crate::{
     base::arena::{HasInterner as _, Obj},
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, ClauseOrigin, NoTraitImplError, ObligationNotReady,
-            ObligationResult, TyFolderInfallibleExt, UnboundVarHandlingMode, UniversalElaboration,
-            infer::clause::ClauseObligation,
+            ClauseCx, ClauseImportEnv, ClauseImportEnvRef, ClauseOrigin, NoTraitImplError,
+            ObligationNotReady, ObligationResult, TyFolderInfallibleExt, UnboundVarHandlingMode,
+            UniversalElaboration, infer::clause::ClauseObligation,
         },
         syntax::{
             HrtbBinder, ImplItem, RelationMode, TraitClause, TraitClauseList, TraitParam,
@@ -266,17 +266,21 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // Obtain inference variables for all generics in the `impl` and tentatively create
         // obligations for them.
-        let trait_substs = self.import_binder_list_as_infer(origin, lhs, &[rhs.r(s).generics]);
+        let trait_env = self.instantiate_binder_list_as_infer(
+            origin,
+            ClauseImportEnv::new(lhs, Vec::new()),
+            &[rhs.r(s).generics],
+        );
 
         // Import the target type and trait. WF obligations are not needed on these types because
         // the `impl` itself has been WF-checked for all types compatible with the generic
         // parameters.
         let target_ty = self
-            .importer(ClauseImportEnvRef::new(lhs, &trait_substs))
+            .importer(trait_env.as_ref())
             .fold_spanned(rhs.r(s).target);
 
         let target_trait = self
-            .importer(ClauseImportEnvRef::new(lhs, &trait_substs))
+            .importer(trait_env.as_ref())
             .fold_spanned(rhs.r(s).trait_.unwrap());
 
         // Does the `lhs` type match the `rhs`'s target type?
@@ -380,7 +384,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 unreachable!()
             };
 
-            let (lhs_input, lhs_output) = self.import_fn_def_sig_given_args(lhs);
+            let (lhs_input, lhs_output) = self.instantiate_fn_instance_sig(origin, lhs);
             let lhs_input = tcx.intern(TyKind::Tuple(lhs_input));
 
             if self

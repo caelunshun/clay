@@ -227,80 +227,8 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
 
         let SpannedFnInstanceView { owner, early_args } = instance.view(tcx);
 
-        // Validate the generic types against the function's binder(s).
-        // FIXME
-        match owner.view(tcx) {
-            SpannedFnOwnerView::Item(def) => {
-                if let Some(early_args) = early_args {
-                    self.check_generic_values(
-                        tcx.intern(TyKind::SigThis),
-                        def.r(s).def.r(s).generics,
-                        [],
-                        early_args,
-                        None,
-                    );
-                }
-            }
-            SpannedFnOwnerView::Trait {
-                instance,
-                self_ty,
-                method_idx,
-            } => {
-                let trait_item = instance.value.def;
-                let def = trait_item.r(s).methods[method_idx as usize];
-
-                self.ccx.oblige_ty_meets_trait_instantiated(
-                    ClauseOrigin::root(ClauseOriginKind::WfFnDef {
-                        fn_ty: self_ty.own_span(),
-                    }),
-                    self_ty.value,
-                    instance.value,
-                );
-
-                let trait_args = self.ccx.import_binder_list_as_infer(
-                    &ClauseOrigin::root(ClauseOriginKind::WfFnDef {
-                        fn_ty: instance.own_span(),
-                    }),
-                    self_ty.value,
-                    &[*trait_item.r(s).generics],
-                );
-
-                if let Some(early_args) = early_args {
-                    self.check_generic_values(
-                        self_ty.value,
-                        def.r(s).generics,
-                        trait_args,
-                        early_args,
-                        None,
-                    );
-                }
-            }
-            SpannedFnOwnerView::Inherent {
-                self_ty,
-                block,
-                method_idx,
-            } => {
-                let def = block.r(s).methods[method_idx as usize];
-
-                let impl_args = self.ccx.import_binder_list_as_infer(
-                    &ClauseOrigin::root(ClauseOriginKind::WfFnDef {
-                        fn_ty: instance.own_span(),
-                    }),
-                    self_ty.value,
-                    &[block.r(s).generics],
-                );
-
-                if let Some(early_args) = early_args {
-                    self.check_generic_values(
-                        self_ty.value,
-                        def.r(s).generics,
-                        impl_args,
-                        early_args,
-                        None,
-                    );
-                }
-            }
-        }
+        // Validate the instance itself.
+        // TODO
 
         // Ensure parameter types are also well-formed.
         self.walk_spanned(instance);
@@ -333,7 +261,7 @@ impl ClauseTyWfVisitor<'_, '_> {
             None => validated_params,
         };
 
-        self.ccx.oblige_wf_args_meet_binder(
+        self.ccx.oblige_args_meet_binder_clauses(
             ClauseImportEnvRef::new(
                 clause_applies_to,
                 &[GenericSubst {

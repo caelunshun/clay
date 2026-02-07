@@ -13,12 +13,12 @@ use crate::{
             TyFolderInfallibleExt, TyFolderPreservesSpans, TyVisitorInfallibleExt, UnifyCxMode,
         },
         syntax::{
-            AdtInstance, AdtItem, AnyGeneric, FnDef, FnInstance, FuncDefOwner, GenericBinder,
-            GenericSubst, HrtbBinder, HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef, ImplItem, Re,
-            SpannedHrtbBinder, SpannedHrtbBinderView, SpannedRe, SpannedTy,
-            SpannedTyProjectionView, SpannedTyView, TraitClause, TraitItem, TraitParam, TraitSpec,
-            Ty, TyKind, TyList, TyOrRe, TyOrReKind, UniversalReVarSourceInfo,
-            UniversalTyVarSourceInfo,
+            AdtInstance, AdtItem, AnyGeneric, FnDef, FnInstance, FnInstanceInner, FnOwner,
+            FuncDefOwner, GenericBinder, GenericSubst, HrtbBinder, HrtbBinderKind, HrtbDebruijn,
+            HrtbDebruijnDef, ImplItem, Re, RelationMode, SpannedHrtbBinder, SpannedHrtbBinderView,
+            SpannedRe, SpannedTy, SpannedTyProjectionView, SpannedTyView, TraitClause, TraitItem,
+            TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReKind,
+            UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
@@ -163,140 +163,6 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    // === Infer === //
-
-    pub fn import_binder_list_as_infer(
-        &mut self,
-        origin: &ClauseOrigin,
-        self_ty: Ty,
-        binders: &[Obj<GenericBinder>],
-    ) -> Vec<GenericSubst> {
-        // Produce a substitution for each binder.
-        let substs = self.create_blank_infer_vars_from_binder_list(binders);
-
-        // Register clause obligations.
-        self.oblige_imported_infer_binder_meets_clauses(
-            origin,
-            ClauseImportEnvRef {
-                self_ty,
-                sig_generic_substs: &substs,
-            },
-        );
-
-        substs
-    }
-
-    pub fn create_blank_infer_vars_from_binder_list(
-        &mut self,
-        binders: &[Obj<GenericBinder>],
-    ) -> Vec<GenericSubst> {
-        binders
-            .iter()
-            .map(|&binder| self.create_blank_infer_vars_from_binder(binder))
-            .collect()
-    }
-
-    pub fn create_blank_infer_vars_from_binder(
-        &mut self,
-        binder: Obj<GenericBinder>,
-    ) -> GenericSubst {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        let substs = binder
-            .r(s)
-            .defs
-            .iter()
-            .map(|&generic| match generic {
-                AnyGeneric::Re(_) => TyOrRe::Re(self.fresh_re_infer()),
-                AnyGeneric::Ty(_) => TyOrRe::Ty(self.fresh_ty_infer()),
-            })
-            .collect::<Vec<_>>();
-
-        let substs = tcx.intern_list(&substs);
-
-        GenericSubst { binder, substs }
-    }
-
-    pub fn oblige_imported_infer_binder_meets_clauses(
-        &mut self,
-        origin: &ClauseOrigin,
-        env: ClauseImportEnvRef<'_>,
-    ) {
-        let s = self.session();
-
-        for &subst in env.sig_generic_substs {
-            self.oblige_wf_args_meet_binder(
-                env,
-                &subst.binder.r(s).defs,
-                subst.substs.r(s),
-                |_this, _idx, clause| {
-                    ClauseOrigin::new(
-                        Some(origin.clone()),
-                        ClauseOriginKind::GenericRequirements { clause },
-                    )
-                },
-            );
-        }
-    }
-
-    pub fn oblige_wf_args_meet_binder(
-        &mut self,
-        def_env: ClauseImportEnvRef<'_>,
-        defs: &[AnyGeneric],
-        args: &[TyOrRe],
-        mut gen_reason: impl FnMut(&mut Self, usize, Span) -> ClauseOrigin,
-    ) {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        for (i, (&generic, &subst)) in defs.iter().zip(args).enumerate() {
-            match (generic, subst) {
-                (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
-                    for clause in generic.r(s).clauses.iter(tcx) {
-                        let clause_span = clause.own_span();
-                        let clause = self.importer(def_env).fold(clause.value);
-
-                        let TraitClause::Outlives(must_outlive_dir, must_outlive) = clause else {
-                            unreachable!()
-                        };
-
-                        let reason = gen_reason(self, i, clause_span);
-
-                        self.oblige_general_outlives(
-                            reason,
-                            TyOrRe::Re(target),
-                            must_outlive,
-                            must_outlive_dir,
-                        );
-                    }
-                }
-                (AnyGeneric::Ty(generic), TyOrRe::Ty(target)) => {
-                    let clauses = self.importer(def_env).fold_preserved(*generic.r(s).clauses);
-
-                    for clause in clauses.iter(tcx) {
-                        let reason = gen_reason(self, i, clause.own_span());
-
-                        match clause.value {
-                            TraitClause::Outlives(must_outlive_dir, must_outlive) => {
-                                self.oblige_general_outlives(
-                                    reason,
-                                    TyOrRe::Ty(target),
-                                    must_outlive,
-                                    must_outlive_dir,
-                                );
-                            }
-                            TraitClause::Trait(rhs) => {
-                                self.oblige_ty_meets_trait(reason, target, rhs);
-                            }
-                        }
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
-    }
-
     // === Specialized universal imports === //
 
     pub fn import_trait_def_env_as_universal(&mut self, def: Obj<TraitItem>) -> ClauseImportEnv {
@@ -409,14 +275,269 @@ impl<'tcx> ClauseCx<'tcx> {
         env
     }
 
-    // === Specialized existential imports === //
+    // === Existential === //
 
-    pub fn import_fn_def_given_args(&mut self, instance: FnInstance) -> ClauseImportEnv {
-        todo!()
+    pub fn instantiate_binder_list_as_infer(
+        &mut self,
+        origin: &ClauseOrigin,
+        mut base_env: ClauseImportEnv,
+        binders: &[Obj<GenericBinder>],
+    ) -> ClauseImportEnv {
+        // Produce a substitution for each binder.
+        let substs = self.instantiate_blank_infer_vars_from_binder_list(binders);
+        base_env.sig_generic_substs.extend_from_slice(&substs);
+
+        // Register clause obligations.
+        self.oblige_import_env_meets_own_binder_clauses(origin, base_env.as_ref());
+
+        base_env
     }
 
-    pub fn import_fn_def_sig_given_args(&mut self, instance: FnInstance) -> (TyList, Ty) {
-        todo!()
+    pub fn instantiate_blank_infer_vars_from_binder_list(
+        &mut self,
+        binders: &[Obj<GenericBinder>],
+    ) -> Vec<GenericSubst> {
+        binders
+            .iter()
+            .map(|&binder| self.instantiate_blank_infer_vars_from_binder(binder))
+            .collect()
+    }
+
+    pub fn instantiate_blank_infer_vars_from_binder(
+        &mut self,
+        binder: Obj<GenericBinder>,
+    ) -> GenericSubst {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let substs = binder
+            .r(s)
+            .defs
+            .iter()
+            .map(|&generic| match generic {
+                AnyGeneric::Re(_) => TyOrRe::Re(self.fresh_re_infer()),
+                AnyGeneric::Ty(_) => TyOrRe::Ty(self.fresh_ty_infer()),
+            })
+            .collect::<Vec<_>>();
+
+        let substs = tcx.intern_list(&substs);
+
+        GenericSubst { binder, substs }
+    }
+
+    pub fn oblige_import_env_meets_own_binder_clauses(
+        &mut self,
+        origin: &ClauseOrigin,
+        env: ClauseImportEnvRef<'_>,
+    ) {
+        let s = self.session();
+
+        for &subst in env.sig_generic_substs {
+            self.oblige_args_meet_binder_clauses(
+                env,
+                &subst.binder.r(s).defs,
+                subst.substs.r(s),
+                |_this, _idx, clause| {
+                    ClauseOrigin::new(
+                        Some(origin.clone()),
+                        ClauseOriginKind::GenericRequirements { clause },
+                    )
+                },
+            );
+        }
+    }
+
+    pub fn oblige_args_meet_binder_clauses(
+        &mut self,
+        def_env: ClauseImportEnvRef<'_>,
+        defs: &[AnyGeneric],
+        args: &[TyOrRe],
+        mut gen_reason: impl FnMut(&mut Self, usize, Span) -> ClauseOrigin,
+    ) {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        for (i, (&generic, &subst)) in defs.iter().zip(args).enumerate() {
+            match (generic, subst) {
+                (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
+                    for clause in generic.r(s).clauses.iter(tcx) {
+                        let clause_span = clause.own_span();
+                        let clause = self.importer(def_env).fold(clause.value);
+
+                        let TraitClause::Outlives(must_outlive_dir, must_outlive) = clause else {
+                            unreachable!()
+                        };
+
+                        let reason = gen_reason(self, i, clause_span);
+
+                        self.oblige_general_outlives(
+                            reason,
+                            TyOrRe::Re(target),
+                            must_outlive,
+                            must_outlive_dir,
+                        );
+                    }
+                }
+                (AnyGeneric::Ty(generic), TyOrRe::Ty(target)) => {
+                    let clauses = self.importer(def_env).fold_preserved(*generic.r(s).clauses);
+
+                    for clause in clauses.iter(tcx) {
+                        let reason = gen_reason(self, i, clause.own_span());
+
+                        match clause.value {
+                            TraitClause::Outlives(must_outlive_dir, must_outlive) => {
+                                self.oblige_general_outlives(
+                                    reason,
+                                    TyOrRe::Ty(target),
+                                    must_outlive,
+                                    must_outlive_dir,
+                                );
+                            }
+                            TraitClause::Trait(rhs) => {
+                                self.oblige_ty_meets_trait(reason, target, rhs);
+                            }
+                        }
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    // === Specialized existential imports === //
+
+    pub fn instantiate_fn_owner_as_infer(
+        &mut self,
+        origin: &ClauseOrigin,
+        owner: FnOwner,
+    ) -> ClauseImportEnv {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        match owner {
+            FnOwner::Item(_) => ClauseImportEnv::new(tcx.intern(TyKind::SigThis), Vec::new()),
+            FnOwner::Trait {
+                instance,
+                self_ty,
+                method_idx: _,
+            } => {
+                let substs = instance
+                    .params
+                    .r(s)
+                    .iter()
+                    .map(|&param| match param {
+                        TraitParam::Equals(value) => value,
+                        TraitParam::Unspecified(clauses) => {
+                            let ty = self.fresh_ty_infer();
+                            self.oblige_ty_meets_clauses(origin, ty, clauses);
+
+                            TyOrRe::Ty(ty)
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                let substs = tcx.intern_list(&substs);
+
+                let params = substs
+                    .r(s)
+                    .iter()
+                    .copied()
+                    .map(TraitParam::Equals)
+                    .collect::<Vec<_>>();
+
+                let params = tcx.intern_list(&params);
+
+                self.oblige_ty_meets_trait_instantiated(
+                    origin.clone(),
+                    self_ty,
+                    TraitSpec {
+                        def: instance.def,
+                        params,
+                    },
+                );
+
+                ClauseImportEnv::new(
+                    self_ty,
+                    vec![GenericSubst {
+                        binder: *instance.def.r(s).generics,
+                        substs,
+                    }],
+                )
+            }
+            FnOwner::Inherent {
+                self_ty,
+                block,
+                method_idx: _,
+            } => {
+                let env = self.instantiate_binder_list_as_infer(
+                    origin,
+                    ClauseImportEnv::new(self_ty, Vec::new()),
+                    &[block.r(s).generics],
+                );
+
+                let expected_self_ty = self.importer(env.as_ref()).fold(block.r(s).target.value);
+
+                self.oblige_ty_unifies_ty(
+                    origin.clone(),
+                    self_ty,
+                    expected_self_ty,
+                    RelationMode::Equate,
+                );
+
+                env
+            }
+        }
+    }
+
+    pub fn instantiate_fn_instance_sig(
+        &mut self,
+        origin: &ClauseOrigin,
+        instance: FnInstance,
+    ) -> (TyList, Ty) {
+        let tcx = self.tcx();
+        let s = self.session();
+
+        let FnInstanceInner { owner, early_args } = *instance.r(s);
+
+        let mut env = self.instantiate_fn_owner_as_infer(origin, owner);
+
+        let def = match owner {
+            FnOwner::Item(def) => *def.r(s).def,
+            FnOwner::Trait {
+                instance,
+                self_ty: _,
+                method_idx,
+            } => instance.def.r(s).methods[method_idx as usize],
+            FnOwner::Inherent {
+                self_ty: _,
+                block,
+                method_idx,
+            } => block.r(s).methods[method_idx as usize],
+        };
+
+        if let Some(early_args) = early_args {
+            env.sig_generic_substs.push(GenericSubst {
+                binder: def.r(s).generics,
+                substs: early_args,
+            });
+        } else {
+            env = self.instantiate_binder_list_as_infer(origin, env, &[def.r(s).generics]);
+        }
+
+        let args = def
+            .r(s)
+            .args
+            .r(s)
+            .iter()
+            .map(|v| v.ty.value)
+            .collect::<Vec<_>>();
+
+        let args = tcx.intern_list(&args);
+
+        let args = self.importer(env.as_ref()).fold(args);
+        let ret_ty = self.importer(env.as_ref()).fold(def.r(s).ret_ty.value);
+
+        (args, ret_ty)
     }
 }
 

@@ -58,7 +58,13 @@ fn demo<
         g(f)(&b)
     };
 
-    meow();
+    if meow(true) {
+        meow(&a)
+    } else {
+        meow(&b)
+    }
+
+    let funky = meow.as::<&'gc dyn for<T: Meow> FnOnce<(T,), T>>;
 }
 
 fn meow<T>(v: T) -> T {
