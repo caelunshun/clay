@@ -13,8 +13,8 @@ use crate::{
             infer::clause::ClauseObligation,
         },
         syntax::{
-            GenericBinder, GenericSubst, InferTyVar, RelationDirection, SpannedAdtInstance,
-            SpannedFnInstance, SpannedFnInstanceView, SpannedFnOwnerView, SpannedHrtbBinder,
+            GenericBinder, GenericSubst, HrtbUniverse, HrtbUniverseInfo, InferTyVar,
+            RelationDirection, SpannedAdtInstance, SpannedFnInstance, SpannedHrtbBinder,
             SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedHrtbDebruijnDefView,
             SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec, SpannedTy,
             SpannedTyOrRe, SpannedTyOrReList, SpannedTyView, Ty, TyKind, TyOrRe,
@@ -24,10 +24,11 @@ use crate::{
 use std::{convert::Infallible, ops::ControlFlow};
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn wf_visitor(&mut self) -> ClauseTyWfVisitor<'_, 'tcx> {
+    pub fn wf_visitor(&mut self, universe: HrtbUniverse) -> ClauseTyWfVisitor<'_, 'tcx> {
         ClauseTyWfVisitor {
             ccx: self,
             clause_applies_to: None,
+            universe,
         }
     }
 
@@ -35,6 +36,7 @@ impl<'tcx> ClauseCx<'tcx> {
         &mut self,
         span: Span,
         var: InferTyVar,
+        universe: HrtbUniverse,
     ) -> ObligationResult {
         let tcx = self.tcx();
 
@@ -43,7 +45,7 @@ impl<'tcx> ClauseCx<'tcx> {
         };
 
         let ty = SpannedTy::new_saturated(ty, span, tcx);
-        self.wf_visitor().visit_spanned(ty);
+        self.wf_visitor(universe).visit_spanned(ty);
 
         Ok(())
     }
@@ -52,6 +54,7 @@ impl<'tcx> ClauseCx<'tcx> {
 pub struct ClauseTyWfVisitor<'a, 'tcx> {
     pub ccx: &'a mut ClauseCx<'tcx>,
     pub clause_applies_to: Option<Ty>,
+    pub universe: HrtbUniverse,
 }
 
 impl ClauseTyWfVisitor<'_, '_> {
@@ -72,6 +75,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         &mut self,
         binder: SpannedHrtbBinder<T>,
     ) -> ControlFlow<Self::Break> {
+        let s = self.session();
         let tcx = self.tcx();
 
         let SpannedHrtbBinderView {
@@ -87,22 +91,38 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             unreachable!()
         };
 
-        let bound = Spanned::new_raw(
-            self.ccx.instantiate_hrtb_universal(binder.value),
-            inner_span_info,
-        );
+        let old_universe = self.universe.clone();
+        let new_universe = if defs.is_empty(s) {
+            self.universe.clone()
+        } else {
+            self.universe.clone().nest(HrtbUniverseInfo {
+                origin: ClauseOrigin::root(ClauseOriginKind::WfHrtb {
+                    binder_span: kind.own_span(),
+                }),
+            })
+        };
 
-        self.visit_spanned(bound);
+        self.universe = new_universe;
+        {
+            let bound = Spanned::new_raw(
+                self.ccx
+                    .instantiate_hrtb_universal(binder.value, &self.universe),
+                inner_span_info,
+            );
 
-        for def in defs.iter(tcx) {
-            let SpannedHrtbDebruijnDefView {
-                spawned_from: _,
-                kind: _,
-                clauses,
-            } = def.view(tcx);
+            self.visit_spanned(bound);
 
-            self.visit_spanned(clauses);
+            for def in defs.iter(tcx) {
+                let SpannedHrtbDebruijnDefView {
+                    spawned_from: _,
+                    kind: _,
+                    clauses,
+                } = def.view(tcx);
+
+                self.visit_spanned(clauses);
+            }
         }
+        self.universe = old_universe;
 
         ControlFlow::Continue(())
     }
@@ -137,8 +157,11 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
                 self.walk_spanned(ty);
             }
             SpannedTyView::InferVar(var) => {
-                self.ccx
-                    .push_obligation(ClauseObligation::InferTyWf(ty.own_span(), var));
+                self.ccx.push_obligation(ClauseObligation::InferTyWf(
+                    ty.own_span(),
+                    var,
+                    self.universe.clone(),
+                ));
             }
             SpannedTyView::SigThis
             | SpannedTyView::SigInfer
@@ -161,9 +184,9 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             .iter(tcx)
             .map(|param| match param.view(tcx) {
                 SpannedTraitParamView::Equals(v) => v,
-                SpannedTraitParamView::Unspecified(_) => {
-                    SpannedTyOrRe::new_unspanned(TyOrRe::Ty(self.ccx.fresh_ty_infer()))
-                }
+                SpannedTraitParamView::Unspecified(_) => SpannedTyOrRe::new_unspanned(TyOrRe::Ty(
+                    self.ccx.fresh_ty_infer(self.universe.clone()),
+                )),
             })
             .collect::<Vec<_>>();
 
@@ -222,13 +245,14 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
     }
 
     fn visit_fn_instance(&mut self, instance: SpannedFnInstance) -> ControlFlow<Self::Break> {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        let SpannedFnInstanceView { owner, early_args } = instance.view(tcx);
-
         // Validate the instance itself.
-        // TODO
+        self.ccx.instantiate_fn_instance_sig(
+            &ClauseOrigin::root(ClauseOriginKind::WfFnDef {
+                fn_ty: instance.own_span(),
+            }),
+            instance.value,
+            &self.universe,
+        );
 
         // Ensure parameter types are also well-formed.
         self.walk_spanned(instance);
@@ -274,6 +298,7 @@ impl ClauseTyWfVisitor<'_, '_> {
             ),
             defs,
             validated_params,
+            &self.universe,
             |_, param_idx, clause_span| {
                 ClauseOrigin::root(ClauseOriginKind::WfForGenericParam {
                     use_span: all_params.nth(param_idx, tcx).own_span(),

@@ -24,9 +24,9 @@ const MAX_OBLIGATION_DEPTH: u32 = 256;
 #[derive(Debug, Clone)]
 pub(super) enum ClauseObligation {
     TyUnifiesTy(ClauseOrigin, Ty, Ty, RelationMode),
-    TyMeetsTrait(ClauseOrigin, Ty, TraitSpec),
+    TyMeetsTrait(ClauseOrigin, Ty, TraitSpec, HrtbUniverse),
     TyOutlivesRe(ClauseOrigin, Ty, Re, RelationDirection),
-    InferTyWf(Span, InferTyVar),
+    InferTyWf(Span, InferTyVar, HrtbUniverse),
 }
 
 impl ClauseObligation {
@@ -182,8 +182,10 @@ impl<'tcx> ClauseCx<'tcx> {
 
                         Ok(())
                     }
-                    ClauseObligation::TyMeetsTrait(origin, lhs, rhs) => {
-                        match fork.run_oblige_ty_meets_trait_instantiated(&origin, lhs, rhs) {
+                    ClauseObligation::TyMeetsTrait(origin, lhs, rhs, universe) => {
+                        match fork
+                            .run_oblige_ty_meets_trait_instantiated(&origin, lhs, rhs, universe)
+                        {
                             Ok(Ok(())) => Ok(()),
                             Ok(Err(err)) => {
                                 origin.report(err.into(), fork);
@@ -195,8 +197,8 @@ impl<'tcx> ClauseCx<'tcx> {
                     ClauseObligation::TyOutlivesRe(origin, lhs, rhs, dir) => {
                         fork.run_oblige_ty_outlives_re(&origin, lhs, rhs, dir)
                     }
-                    ClauseObligation::InferTyWf(span, var) => {
-                        fork.run_oblige_infer_ty_wf(span, var)
+                    ClauseObligation::InferTyWf(span, var, universe) => {
+                        fork.run_oblige_infer_ty_wf(span, var, universe)
                     }
                 }
             },
@@ -206,14 +208,12 @@ impl<'tcx> ClauseCx<'tcx> {
 
 // Basic operations
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn fresh_ty_infer_var(&mut self) -> InferTyVar {
-        // TODO
-        self.ucx_mut().fresh_ty_infer_var(HrtbUniverse::ROOT)
+    pub fn fresh_ty_infer_var(&mut self, max_universe: HrtbUniverse) -> InferTyVar {
+        self.ucx_mut().fresh_ty_infer_var(max_universe)
     }
 
-    pub fn fresh_ty_infer(&mut self) -> Ty {
-        // TODO
-        self.ucx_mut().fresh_ty_infer(HrtbUniverse::ROOT)
+    pub fn fresh_ty_infer(&mut self, max_universe: HrtbUniverse) -> Ty {
+        self.ucx_mut().fresh_ty_infer(max_universe)
     }
 
     pub fn lookup_ty_infer_var_after_poll(
@@ -254,11 +254,12 @@ impl<'tcx> ClauseCx<'tcx> {
             .permit_universe_re_outlives_re(universal, other, dir);
     }
 
-    pub fn fresh_ty_universal_var(&mut self, src_info: UniversalTyVarSourceInfo) -> UniversalTyVar {
-        // TODO
-        let var = self
-            .ucx_mut()
-            .fresh_ty_universal_var(src_info, HrtbUniverse::ROOT);
+    pub fn fresh_ty_universal_var(
+        &mut self,
+        src_info: UniversalTyVarSourceInfo,
+        in_universe: HrtbUniverse,
+    ) -> UniversalTyVar {
+        let var = self.ucx_mut().fresh_ty_universal_var(src_info, in_universe);
 
         let var_parallel = self.universal_vars.push(UniversalTyVarDescriptor {
             direct_clauses: None,
@@ -270,9 +271,14 @@ impl<'tcx> ClauseCx<'tcx> {
         var
     }
 
-    pub fn fresh_ty_universal(&mut self, src_info: UniversalTyVarSourceInfo) -> Ty {
-        self.tcx()
-            .intern(TyKind::UniversalVar(self.fresh_ty_universal_var(src_info)))
+    pub fn fresh_ty_universal(
+        &mut self,
+        src_info: UniversalTyVarSourceInfo,
+        in_universe: HrtbUniverse,
+    ) -> Ty {
+        self.tcx().intern(TyKind::UniversalVar(
+            self.fresh_ty_universal_var(src_info, in_universe),
+        ))
     }
 
     pub fn init_ty_universal_var_direct_clauses(

@@ -6,9 +6,12 @@ use crate::{
         syntax::{Span, Symbol},
     },
     parse::token::{Ident, Lifetime},
-    semantic::syntax::{
-        FnDef, FuncItem, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy,
-        SpannedTyOrReList, Visibility,
+    semantic::{
+        analysis::ClauseOrigin,
+        syntax::{
+            FnDef, FuncItem, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy,
+            SpannedTyOrReList, Visibility,
+        },
     },
     symbol,
     utils::hash::FxHashMap,
@@ -698,7 +701,7 @@ struct HrtbUniverseChild {
 
 #[derive(Debug, Clone)]
 pub struct HrtbUniverseInfo {
-    pub binder: Span,
+    pub origin: ClauseOrigin,
 }
 
 impl fmt::Debug for HrtbUniverse {

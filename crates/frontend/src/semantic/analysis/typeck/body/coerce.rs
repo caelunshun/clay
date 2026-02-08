@@ -3,8 +3,8 @@ use crate::{
     semantic::{
         analysis::{BodyCtxt, ClauseCx, ClauseErrorProbe, ClauseOrigin, ClauseOriginKind},
         syntax::{
-            Crate, Divergence, Expr, Mutability, Re, RelationMode, TraitClauseList, TraitParam,
-            TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            Crate, Divergence, Expr, HrtbUniverse, Mutability, Re, RelationMode, TraitClauseList,
+            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -108,7 +108,7 @@ impl BodyCtxt<'_, '_> {
                 to_muta,
                 deref_steps,
             } => {
-                let unify_ty = self.ccx_mut().fresh_ty_infer();
+                let unify_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
                 let mut deref_steps = deref_steps.iter();
 
                 for &(expr, actual) in exprs {
@@ -128,7 +128,7 @@ impl BodyCtxt<'_, '_> {
                             };
 
                             for _ in 0..deref_step_count {
-                                let next_output = self.ccx_mut().fresh_ty_infer();
+                                let next_output = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
 
                                 self.ccx_mut().oblige_ty_meets_trait_instantiated(
                                     ClauseOrigin::root(ClauseOriginKind::Coercion {
@@ -141,6 +141,7 @@ impl BodyCtxt<'_, '_> {
                                             next_output,
                                         ))]),
                                     },
+                                    HrtbUniverse::ROOT,
                                 );
 
                                 output_pointee = next_output;
@@ -173,6 +174,7 @@ impl BodyCtxt<'_, '_> {
                         }),
                         actual,
                         to_clauses,
+                        HrtbUniverse::ROOT_REF,
                     );
                 }
 
@@ -363,7 +365,7 @@ fn compute_deref_chain_clobber_obligations(
     let mut accum = smallvec![curr];
 
     loop {
-        let next_infer_var = ccx.fresh_ty_infer_var();
+        let next_infer_var = ccx.fresh_ty_infer_var(HrtbUniverse::ROOT);
         let next_infer = tcx.intern(TyKind::InferVar(next_infer_var));
 
         // This probing routine works by attempting to resolve an obligation as much as possible and
@@ -421,6 +423,7 @@ fn compute_deref_chain_clobber_obligations(
                 def: krate.r(s).deref_lang_item(s).unwrap(),
                 params: tcx.intern_list(&[TraitParam::Equals(TyOrRe::Ty(next_infer))]),
             },
+            HrtbUniverse::ROOT,
         );
 
         ccx.poll_obligations();

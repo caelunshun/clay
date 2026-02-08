@@ -97,6 +97,10 @@ impl<T: Clone> Spanned<Intern<[T]>> {
         self.value.r(s).len()
     }
 
+    pub fn is_empty(self, s: &Session) -> bool {
+        self.value.r(s).is_empty()
+    }
+
     pub fn nth(self, at: usize, cx: &impl HasListInterner<SpannedInfo>) -> Spanned<T> {
         Spanned::new_raw(
             self.value.r(cx.session())[at].clone(),

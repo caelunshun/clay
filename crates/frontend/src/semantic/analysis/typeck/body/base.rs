@@ -12,10 +12,10 @@ use crate::{
             TyCtxt, TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
         },
         syntax::{
-            Block, Crate, Divergence, Expr, ExprKind, FnDef, FuncLocal, InferTyVar, Pat, PatKind,
-            Re, RelationMode, SimpleTyKind, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTy,
-            SpannedTyView, Stmt, StructExpr, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind,
-            TyOrRe,
+            Block, Crate, Divergence, Expr, ExprKind, FnDef, FuncLocal, HrtbUniverse, InferTyVar,
+            Pat, PatKind, Re, RelationMode, SimpleTyKind, SpannedFnInstanceView,
+            SpannedFnOwnerView, SpannedTy, SpannedTyView, Stmt, StructExpr, TraitParam, TraitSpec,
+            Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -30,7 +30,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Setup a `ClauseCx` for signature validation.
         let mut ccx_sig = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env_sig = ccx_sig.import_fn_def_env_as_universal(def);
+        let env_sig = ccx_sig.import_fn_def_env_as_universal(def, HrtbUniverse::ROOT_REF);
 
         // WF-check the signature.
         self.visit_generic_binder(&mut ccx_sig, env_sig.as_ref(), def.r(s).generics);
@@ -41,22 +41,24 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         // }
 
         for arg in def.r(s).args.r(s) {
-            let arg = ccx_sig.importer(env_sig.as_ref()).fold_preserved(arg.ty);
+            let arg = ccx_sig
+                .importer(env_sig.as_ref(), HrtbUniverse::ROOT)
+                .fold_preserved(arg.ty);
 
-            ccx_sig.wf_visitor().visit_spanned(arg);
+            ccx_sig.wf_visitor(HrtbUniverse::ROOT).visit_spanned(arg);
         }
 
         let ret_ty = ccx_sig
-            .importer(env_sig.as_ref())
+            .importer(env_sig.as_ref(), HrtbUniverse::ROOT)
             .fold_preserved(*def.r(s).ret_ty);
 
-        ccx_sig.wf_visitor().visit_spanned(ret_ty);
+        ccx_sig.wf_visitor(HrtbUniverse::ROOT).visit_spanned(ret_ty);
 
         // Check the body
         if let Some(body) = *def.r(s).body {
             let mut ccx_body =
                 ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionBlind);
-            let env_body = ccx_body.import_fn_def_env_as_universal(def);
+            let env_body = ccx_body.import_fn_def_env_as_universal(def, HrtbUniverse::ROOT_REF);
 
             let mut bcx = BodyCtxt::new(&mut ccx_body, env_body.as_ref());
 
@@ -131,7 +133,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         let tcx = self.tcx();
 
         *self.local_types.entry(local).or_insert_with(|| {
-            let var = self.ccx.fresh_ty_infer_var();
+            let var = self.ccx.fresh_ty_infer_var(HrtbUniverse::ROOT);
 
             self.needs_infer.push(NeedsInfer {
                 span: local.r(s).name.span,
@@ -189,9 +191,14 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         };
 
         let env = self.import_env;
-        let ascription = self.ccx_mut().importer(env).fold_preserved(ascription);
+        let ascription = self
+            .ccx_mut()
+            .importer(env, HrtbUniverse::ROOT)
+            .fold_preserved(ascription);
 
-        self.ccx_mut().wf_visitor().visit_spanned(ascription);
+        self.ccx_mut()
+            .wf_visitor(HrtbUniverse::ROOT)
+            .visit_spanned(ascription);
 
         self.ccx_mut().oblige_ty_unifies_ty(
             ClauseOrigin::root(ClauseOriginKind::Pattern {
@@ -217,8 +224,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                 let site_span = expr.r(s).span;
                 let fn_once_trait = self.krate().r(s).fn_once_lang_item(s).unwrap();
-                let input_ty = self.ccx_mut().fresh_ty_infer();
-                let output_ty = self.ccx_mut().fresh_ty_infer();
+                let input_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
+                let output_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
 
                 self.ccx_mut().oblige_ty_meets_trait_instantiated(
                     ClauseOrigin::root(ClauseOriginKind::FunctionCall { site_span }),
@@ -230,6 +237,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                             TraitParam::Equals(TyOrRe::Ty(output_ty)),
                         ]),
                     },
+                    HrtbUniverse::ROOT,
                 );
 
                 let TyKind::Tuple(expected_args) =
@@ -273,7 +281,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             ExprKind::Literal(lit) => match lit {
                 AstLit::Number(_) => {
                     // TODO: Register inference constraints.
-                    self.ccx.fresh_ty_infer()
+                    self.ccx.fresh_ty_infer(HrtbUniverse::ROOT)
                 }
                 AstLit::Char(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Char)),
                 AstLit::String(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Str)),
@@ -282,7 +290,10 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             ExprKind::TupleOrUnitCtor(adt_ctor_instance) => todo!(),
             ExprKind::FnItemLit(def, args) => {
                 let env = self.import_env;
-                let early_args = self.ccx_mut().importer(env).fold_preserved(args);
+                let early_args = self
+                    .ccx_mut()
+                    .importer(env, HrtbUniverse::ROOT)
+                    .fold_preserved(args);
 
                 let fn_ty = SpannedTyView::FnDef(
                     SpannedFnInstanceView {
@@ -293,7 +304,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 )
                 .encode(expr.r(s).span, tcx);
 
-                self.ccx_mut().wf_visitor().visit_spanned(fn_ty);
+                self.ccx_mut()
+                    .wf_visitor(HrtbUniverse::ROOT)
+                    .visit_spanned(fn_ty);
 
                 fn_ty.value
             }
@@ -305,8 +318,15 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             } => todo!(),
             ExprKind::Cast(expr, as_ty) => {
                 let env = self.import_env;
-                let as_ty = self.ccx_mut().importer(env).fold_preserved(as_ty);
-                self.ccx_mut().wf_visitor().visit_spanned(as_ty);
+                let as_ty = self
+                    .ccx_mut()
+                    .importer(env, HrtbUniverse::ROOT)
+                    .fold_preserved(as_ty);
+
+                self.ccx_mut()
+                    .wf_visitor(HrtbUniverse::ROOT)
+                    .visit_spanned(as_ty);
+
                 self.check_expr_demand(expr, as_ty.value)
                     .and_do(&mut divergence)
             }
@@ -373,7 +393,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         let s = self.session();
 
         match pat.r(s).kind {
-            PatKind::Hole => self.ccx_mut().fresh_ty_infer(),
+            PatKind::Hole => self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT),
             PatKind::NewName(local, bind_as) => {
                 let local_ty = self.type_of_local(local);
 
@@ -402,7 +422,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             PatKind::AdtNamed(adt_ctor_instance, obj) => todo!(),
             PatKind::PlaceExpr(expr) => self.check_expr(expr).and_do(divergence.unwrap()),
             PatKind::Range(range_expr) => todo!(),
-            PatKind::Error(_) => self.ccx_mut().fresh_ty_infer(),
+            PatKind::Error(_) => self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT),
         }
     }
 }

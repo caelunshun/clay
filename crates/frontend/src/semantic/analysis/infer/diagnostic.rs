@@ -102,6 +102,10 @@ pub enum ClauseOriginKind {
         fn_ty: Span,
     },
 
+    WfHrtb {
+        binder_span: Span,
+    },
+
     /// This obligation is required by a generic parameter's clause list.
     GenericRequirements {
         clause: Span,

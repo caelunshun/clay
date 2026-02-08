@@ -66,6 +66,8 @@ impl<'tcx> ClauseCx<'tcx> {
                             TraitParam::Equals(ty_or_re) => ty_or_re,
                             TraitParam::Unspecified(_) => TyOrRe::Ty(self.fresh_ty_universal(
                                 UniversalTyVarSourceInfo::Projection(root, spec, idx as u32),
+                                // Associated types vary in the same way as their parent generic.
+                                self.lookup_universal_ty_hrtb_universe(root).clone(),
                             )),
                         })
                         .collect::<Vec<_>>();
@@ -92,13 +94,17 @@ impl<'tcx> ClauseCx<'tcx> {
                         };
 
                         let implicit_clauses = self
-                            .importer(ClauseImportEnvRef {
-                                self_ty: tcx.intern(TyKind::UniversalVar(root)),
-                                sig_generic_substs: &[GenericSubst {
-                                    binder: *spec.def.r(s).generics,
-                                    substs: new_params,
-                                }],
-                            })
+                            .importer(
+                                ClauseImportEnvRef {
+                                    self_ty: tcx.intern(TyKind::UniversalVar(root)),
+                                    sig_generic_substs: &[GenericSubst {
+                                        binder: *spec.def.r(s).generics,
+                                        substs: new_params,
+                                    }],
+                                },
+                                // Associated types vary in the same way as their parent generic.
+                                self.lookup_universal_ty_hrtb_universe(root).clone(),
+                            )
                             .fold(base.r(s).clauses.value);
 
                         let all_clauses = explicit_clauses
