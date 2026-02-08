@@ -59,18 +59,18 @@ impl<'tcx> ClauseCx<'tcx> {
     ) {
         let s = self.session();
 
-        let universe = 'universe: {
+        let universe = {
             let HrtbBinderKind::Imported(defs) = rhs.kind else {
                 unreachable!();
             };
 
             if defs.r(s).is_empty() {
-                break 'universe universe;
+                universe
+            } else {
+                universe.nest(HrtbUniverseInfo {
+                    origin: origin.clone(),
+                })
             }
-
-            universe.nest(HrtbUniverseInfo {
-                origin: origin.clone(),
-            })
         };
 
         let rhs = self.instantiate_hrtb_universal(rhs, &universe);

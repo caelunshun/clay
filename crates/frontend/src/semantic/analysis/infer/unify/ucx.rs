@@ -593,8 +593,9 @@ impl<'tcx> UnifyCx<'tcx> {
                     },
                     SpannedTyView::UniversalVar(var) => {
                         if !self
-                            .max_universe
-                            .is_leq_than(self.ucx.lookup_universal_ty_hrtb_universe(var))
+                            .ucx
+                            .lookup_universal_ty_hrtb_universe(var)
+                            .is_leq_than(self.max_universe)
                         {
                             return ControlFlow::Break(var);
                         }
@@ -646,7 +647,7 @@ impl<'tcx> UnifyCx<'tcx> {
                         Err(_) => {
                             self.ucx
                                 .types
-                                .constrain_infer_max_universe(var, self.max_universe);
+                                .restrict_floating_infer_max_universe(var, self.max_universe);
                         }
                     },
                     _ => self.walk_spanned_fallible(ty)?,

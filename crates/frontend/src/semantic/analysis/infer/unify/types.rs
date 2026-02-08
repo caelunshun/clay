@@ -149,18 +149,6 @@ impl TyUnifyTracker {
         &self.observed_reveal_order
     }
 
-    pub fn constrain_infer_max_universe(&mut self, var: InferTyVar, other: &HrtbUniverse) {
-        let root_var = self.disjoint.root_of(var.index());
-
-        if let DisjointTyInferRoot::Floating {
-            observed: _,
-            max_universe,
-        } = self.disjoint[root_var].root.as_mut().unwrap()
-        {
-            *max_universe = max_universe.min(other).clone();
-        }
-    }
-
     pub fn lookup_infer(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {
         let root_var = self.disjoint.root_of(var.index());
 
@@ -179,6 +167,20 @@ impl TyUnifyTracker {
                 })
             }
         }
+    }
+
+    pub fn restrict_floating_infer_max_universe(&mut self, var: InferTyVar, other: &HrtbUniverse) {
+        let root_var = self.disjoint.root_of(var.index());
+
+        let DisjointTyInferRoot::Floating {
+            observed: _,
+            max_universe,
+        } = self.disjoint[root_var].root.as_mut().unwrap()
+        else {
+            unreachable!()
+        };
+
+        *max_universe = max_universe.min(other).clone();
     }
 
     pub fn assign_floating_infer_to_non_var(&mut self, var: InferTyVar, ty: Ty) {

@@ -793,6 +793,7 @@ impl HrtbUniverse {
 
     #[must_use]
     pub fn min<'a>(&'a self, other: &'a HrtbUniverse) -> &'a HrtbUniverse {
+        #[expect(clippy::mutable_key_type)]
         let ancestors = self
             .ancestors()
             .filter(|v| !v.is_root())
