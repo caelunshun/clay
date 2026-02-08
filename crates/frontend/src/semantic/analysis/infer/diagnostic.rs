@@ -3,8 +3,8 @@ use crate::{
     semantic::{
         analysis::ClauseCx,
         syntax::{
-            InferTyVar, Re, TraitClauseList, TraitParam, TraitSpec, Ty, UniversalReVar,
-            UniversalTyVar,
+            HrtbUniverse, InferTyVar, Re, TraitClauseList, TraitParam, TraitSpec, Ty,
+            UniversalReVar, UniversalTyVar,
         },
     },
 };
@@ -304,5 +304,6 @@ pub struct InferTyOccursError {
 #[derive(Debug, Clone)]
 pub struct InferTyLeaksError {
     pub var: InferTyVar,
+    pub max_universe: HrtbUniverse,
     pub leaks_universal: UniversalTyVar,
 }

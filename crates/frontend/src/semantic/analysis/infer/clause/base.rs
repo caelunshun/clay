@@ -107,7 +107,6 @@ pub struct ClauseCx<'tcx> {
 
 #[derive(Clone)]
 pub(super) struct UniversalTyVarDescriptor {
-    src_info: UniversalTyVarSourceInfo,
     direct_clauses: Option<TraitClauseList>,
     pub(super) elaboration: Option<UniversalElaboration>,
 }
@@ -256,11 +255,19 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     pub fn fresh_ty_universal_var(&mut self, src_info: UniversalTyVarSourceInfo) -> UniversalTyVar {
-        self.universal_vars.push(UniversalTyVarDescriptor {
-            src_info,
+        // TODO
+        let var = self
+            .ucx_mut()
+            .fresh_ty_universal_var(src_info, HrtbUniverse::ROOT);
+
+        let var_parallel = self.universal_vars.push(UniversalTyVarDescriptor {
             direct_clauses: None,
             elaboration: None,
-        })
+        });
+
+        debug_assert_eq!(var, var_parallel);
+
+        var
     }
 
     pub fn fresh_ty_universal(&mut self, src_info: UniversalTyVarSourceInfo) -> Ty {
@@ -283,11 +290,12 @@ impl<'tcx> ClauseCx<'tcx> {
         self.universal_vars[var].direct_clauses.unwrap()
     }
 
-    pub fn lookup_universal_ty_src_info(
-        &mut self,
-        var: UniversalTyVar,
-    ) -> UniversalTyVarSourceInfo {
-        self.universal_vars[var].src_info
+    pub fn lookup_universal_ty_src_info(&self, var: UniversalTyVar) -> UniversalTyVarSourceInfo {
+        self.ucx().lookup_universal_ty_src_info(var)
+    }
+
+    pub fn lookup_universal_ty_hrtb_universe(&self, var: UniversalTyVar) -> &HrtbUniverse {
+        self.ucx().lookup_universal_ty_hrtb_universe(var)
     }
 
     pub fn oblige_re_outlives_re(

@@ -784,7 +784,7 @@ impl HrtbUniverse {
     }
 
     #[must_use]
-    pub fn is_less_than(&self, other: &HrtbUniverse) -> bool {
+    pub fn is_leq_than(&self, other: &HrtbUniverse) -> bool {
         other.ancestors().any(|v| v == self)
     }
 

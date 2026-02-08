@@ -11,7 +11,7 @@ use crate::{
             FnInstanceInner, FnOwner, HrtbBinderKind, HrtbUniverse, InferTyVar, Mutability, Re,
             ReVariance, RelationDirection, RelationMode, SpannedTy, SpannedTyView, TraitClause,
             TraitClauseList, TraitParam, TraitParamList, Ty, TyKind, TyOrRe, UniversalReVar,
-            UniversalReVarSourceInfo, UniversalTyVar,
+            UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashSet,
@@ -107,7 +107,7 @@ impl<'tcx> UnifyCx<'tcx> {
     }
 
     pub fn fresh_ty_infer_var(&mut self, max_universe: HrtbUniverse) -> InferTyVar {
-        self.types.fresh(max_universe)
+        self.types.fresh_infer(max_universe)
     }
 
     pub fn fresh_ty_infer(&mut self, max_universe: HrtbUniverse) -> Ty {
@@ -115,16 +115,42 @@ impl<'tcx> UnifyCx<'tcx> {
             .intern(TyKind::InferVar(self.fresh_ty_infer_var(max_universe)))
     }
 
+    pub fn fresh_ty_universal_var(
+        &mut self,
+        src_info: UniversalTyVarSourceInfo,
+        in_universe: HrtbUniverse,
+    ) -> UniversalTyVar {
+        self.types.fresh_universal(src_info, in_universe)
+    }
+
+    pub fn fresh_ty_universal(
+        &mut self,
+        src_info: UniversalTyVarSourceInfo,
+        in_universe: HrtbUniverse,
+    ) -> Ty {
+        self.tcx().intern(TyKind::UniversalVar(
+            self.fresh_ty_universal_var(src_info, in_universe),
+        ))
+    }
+
     pub fn observe_ty_infer_var(&mut self, var: InferTyVar) -> ObservedTyInferVar {
-        self.types.observe(var)
+        self.types.observe_infer(var)
     }
 
     pub fn observed_infer_reveal_order(&self) -> &[ObservedTyInferVar] {
-        self.types.observed_reveal_order()
+        self.types.observed_infer_reveal_order()
     }
 
     pub fn lookup_ty_infer_var(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {
-        self.types.lookup(var)
+        self.types.lookup_infer(var)
+    }
+
+    pub fn lookup_universal_ty_src_info(&self, var: UniversalTyVar) -> UniversalTyVarSourceInfo {
+        self.types.lookup_universal_src_info(var)
+    }
+
+    pub fn lookup_universal_ty_hrtb_universe(&self, var: UniversalTyVar) -> &HrtbUniverse {
+        self.types.lookup_universal_hrtb_universe(var)
     }
 
     pub fn peel_ty_infer_var(&self, ty: Ty) -> Ty {
@@ -132,7 +158,7 @@ impl<'tcx> UnifyCx<'tcx> {
 
         match *ty.r(s) {
             TyKind::InferVar(var) => {
-                if let Ok(var) = self.types.lookup(var) {
+                if let Ok(var) = self.types.lookup_infer(var) {
                     var
                 } else {
                     ty
@@ -419,7 +445,10 @@ impl<'tcx> UnifyCx<'tcx> {
                 }
             }
             (TyKind::InferVar(lhs_var), TyKind::InferVar(rhs_var)) => {
-                match (self.types.lookup(lhs_var), self.types.lookup(rhs_var)) {
+                match (
+                    self.types.lookup_infer(lhs_var),
+                    self.types.lookup_infer(rhs_var),
+                ) {
                     (Ok(lhs_ty), Ok(rhs_ty)) => {
                         self.unify_ty_and_ty_inner(origin, lhs_ty, rhs_ty, culprits, mode);
                     }
@@ -436,11 +465,11 @@ impl<'tcx> UnifyCx<'tcx> {
                     (Err(_), Err(_)) => {
                         // Cannot fail occurs check because neither type structurally includes the
                         // other.
-                        self.types.union_unrelated_floating(lhs_var, rhs_var);
+                        self.types.union_unrelated_infer_floating(lhs_var, rhs_var);
                     }
                 }
             }
-            (TyKind::InferVar(lhs_var), _) => match self.types.lookup(lhs_var) {
+            (TyKind::InferVar(lhs_var), _) => match self.types.lookup_infer(lhs_var) {
                 Ok(known_lhs) => {
                     self.unify_ty_and_ty_inner(origin, known_lhs, rhs, culprits, mode);
                 }
@@ -450,7 +479,7 @@ impl<'tcx> UnifyCx<'tcx> {
                     }
                 }
             },
-            (_, TyKind::InferVar(rhs_var)) => match self.types.lookup(rhs_var) {
+            (_, TyKind::InferVar(rhs_var)) => match self.types.lookup_infer(rhs_var) {
                 Ok(known_rhs) => {
                     self.unify_ty_and_ty_inner(origin, lhs, known_rhs, culprits, mode);
                 }
@@ -482,12 +511,14 @@ impl<'tcx> UnifyCx<'tcx> {
             root: actual_root,
             observed_equivalent: _,
             max_universe: lhs_max_universe,
-        }) = self.types.lookup(lhs_var_root)
+        }) = self.types.lookup_infer(lhs_var_root)
         else {
             unreachable!()
         };
 
         debug_assert_eq!(actual_root, lhs_var_root);
+
+        let lhs_max_universe = lhs_max_universe.clone();
 
         // Perform occurs check
         struct OccursVisitor<'a, 'tcx> {
@@ -504,7 +535,7 @@ impl<'tcx> UnifyCx<'tcx> {
 
             fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
                 if let SpannedTyView::InferVar(var) = ty.view(self.tcx()) {
-                    match self.ucx.types.lookup(var) {
+                    match self.ucx.types.lookup_infer(var) {
                         Ok(resolved) => self.visit_fallible(resolved),
                         Err(other_floating) => {
                             if self.reject == other_floating.root {
@@ -554,14 +585,19 @@ impl<'tcx> UnifyCx<'tcx> {
 
             fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
                 match ty.view(self.tcx()) {
-                    SpannedTyView::InferVar(var) => match self.ucx.types.lookup(var) {
+                    SpannedTyView::InferVar(var) => match self.ucx.types.lookup_infer(var) {
                         Ok(resolved) => self.visit_fallible(resolved)?,
                         Err(_) => {
                             // (don't constrain yet)
                         }
                     },
-                    SpannedTyView::UniversalVar(idx) => {
-                        // TODO
+                    SpannedTyView::UniversalVar(var) => {
+                        if !self
+                            .max_universe
+                            .is_leq_than(self.ucx.lookup_universal_ty_hrtb_universe(var))
+                        {
+                            return ControlFlow::Break(var);
+                        }
                     }
                     _ => self.walk_spanned_fallible(ty)?,
                 }
@@ -572,20 +608,21 @@ impl<'tcx> UnifyCx<'tcx> {
 
         let leak_result = HrtbLeakVisitor {
             ucx: self,
-            max_universe: lhs_max_universe,
+            max_universe: &lhs_max_universe,
         }
         .visit_fallible(rhs_ty);
 
         if let ControlFlow::Break(leaks_universal) = leak_result {
             return Err(InferTyUnifyError::Leaks(InferTyLeaksError {
                 var: lhs_var_root,
+                max_universe: lhs_max_universe,
                 leaks_universal,
             }));
         }
 
         // The operation is valid. Perform it!
-        let lhs_max_universe = lhs_max_universe.clone();
-        self.types.assign_floating_to_non_var(lhs_var_root, rhs_ty);
+        self.types
+            .assign_floating_infer_to_non_var(lhs_var_root, rhs_ty);
 
         // This is the second part of the HRTB universe check. Now that we know the operation is
         // valid, we need to ensure that any unbound inference variables in our concrete type are
@@ -604,12 +641,12 @@ impl<'tcx> UnifyCx<'tcx> {
 
             fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
                 match ty.view(self.tcx()) {
-                    SpannedTyView::InferVar(var) => match self.ucx.types.lookup(var) {
+                    SpannedTyView::InferVar(var) => match self.ucx.types.lookup_infer(var) {
                         Ok(resolved) => self.visit_fallible(resolved)?,
                         Err(_) => {
                             self.ucx
                                 .types
-                                .constrain_max_universe(var, self.max_universe);
+                                .constrain_infer_max_universe(var, self.max_universe);
                         }
                     },
                     _ => self.walk_spanned_fallible(ty)?,

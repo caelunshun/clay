@@ -1,16 +1,18 @@
 use crate::{
     semantic::{
         analysis::{FloatingInferVar, ObservedTyInferVar},
-        syntax::{HrtbUniverse, InferTyVar, Ty},
+        syntax::{HrtbUniverse, InferTyVar, Ty, UniversalTyVar, UniversalTyVarSourceInfo},
     },
     utils::hash::FxHashSet,
 };
 use disjoint::DisjointSetVec;
+use index_vec::IndexVec;
 use std::{cell::RefCell, rc::Rc};
 
 #[derive(Debug, Clone)]
 pub struct TyUnifyTracker {
     disjoint: DisjointSetVec<DisjointTyInferNode>,
+    universals: IndexVec<UniversalTyVar, UniversalTyVarDescriptor>,
     observed_reveal_order: Vec<ObservedTyInferVar>,
     next_observe_idx: ObservedTyInferVar,
     tracing_state: Option<Rc<TyInferTracingState>>,
@@ -31,6 +33,12 @@ enum DisjointTyInferRoot {
     },
 }
 
+#[derive(Debug, Clone)]
+struct UniversalTyVarDescriptor {
+    src_info: UniversalTyVarSourceInfo,
+    in_universe: HrtbUniverse,
+}
+
 #[derive(Debug)]
 struct TyInferTracingState {
     set: RefCell<FxHashSet<InferTyVar>>,
@@ -41,6 +49,7 @@ impl Default for TyUnifyTracker {
     fn default() -> Self {
         Self {
             disjoint: DisjointSetVec::new(),
+            universals: IndexVec::new(),
             observed_reveal_order: Vec::new(),
             next_observe_idx: ObservedTyInferVar::from_usize(0),
             tracing_state: None,
@@ -78,7 +87,7 @@ impl TyUnifyTracker {
         state.set.borrow_mut().insert(var);
     }
 
-    pub fn fresh(&mut self, max_universe: HrtbUniverse) -> InferTyVar {
+    pub fn fresh_infer(&mut self, max_universe: HrtbUniverse) -> InferTyVar {
         let var = InferTyVar::from_usize(self.disjoint.len());
         self.disjoint.push(DisjointTyInferNode {
             root: Some(DisjointTyInferRoot::Floating {
@@ -90,7 +99,26 @@ impl TyUnifyTracker {
         var
     }
 
-    pub fn observe(&mut self, var: InferTyVar) -> ObservedTyInferVar {
+    pub fn fresh_universal(
+        &mut self,
+        src_info: UniversalTyVarSourceInfo,
+        in_universe: HrtbUniverse,
+    ) -> UniversalTyVar {
+        self.universals.push(UniversalTyVarDescriptor {
+            src_info,
+            in_universe,
+        })
+    }
+
+    pub fn lookup_universal_src_info(&self, var: UniversalTyVar) -> UniversalTyVarSourceInfo {
+        self.universals[var].src_info
+    }
+
+    pub fn lookup_universal_hrtb_universe(&self, var: UniversalTyVar) -> &HrtbUniverse {
+        &self.universals[var].in_universe
+    }
+
+    pub fn observe_infer(&mut self, var: InferTyVar) -> ObservedTyInferVar {
         let observed_idx = &mut self.disjoint[var.index()].observed_idx;
 
         if let Some(observed_idx) = *observed_idx {
@@ -117,11 +145,11 @@ impl TyUnifyTracker {
         observed_idx
     }
 
-    pub fn observed_reveal_order(&self) -> &[ObservedTyInferVar] {
+    pub fn observed_infer_reveal_order(&self) -> &[ObservedTyInferVar] {
         &self.observed_reveal_order
     }
 
-    pub fn constrain_max_universe(&mut self, var: InferTyVar, other: &HrtbUniverse) {
+    pub fn constrain_infer_max_universe(&mut self, var: InferTyVar, other: &HrtbUniverse) {
         let root_var = self.disjoint.root_of(var.index());
 
         if let DisjointTyInferRoot::Floating {
@@ -133,7 +161,7 @@ impl TyUnifyTracker {
         }
     }
 
-    pub fn lookup(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {
+    pub fn lookup_infer(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {
         let root_var = self.disjoint.root_of(var.index());
 
         match self.disjoint[root_var].root.as_ref().unwrap() {
@@ -153,7 +181,7 @@ impl TyUnifyTracker {
         }
     }
 
-    pub fn assign_floating_to_non_var(&mut self, var: InferTyVar, ty: Ty) {
+    pub fn assign_floating_infer_to_non_var(&mut self, var: InferTyVar, ty: Ty) {
         let root_idx = self.disjoint.root_of(var.index());
         let root = self.disjoint[root_idx].root.as_mut().unwrap();
 
@@ -169,7 +197,7 @@ impl TyUnifyTracker {
         *root = DisjointTyInferRoot::Known(ty);
     }
 
-    pub fn union_unrelated_floating(&mut self, lhs: InferTyVar, rhs: InferTyVar) {
+    pub fn union_unrelated_infer_floating(&mut self, lhs: InferTyVar, rhs: InferTyVar) {
         let lhs_root = self.disjoint.root_of(lhs.index());
         let rhs_root = self.disjoint.root_of(rhs.index());
 
