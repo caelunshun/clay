@@ -58,15 +58,21 @@ fn demo<
         g(f)(&b)
     };
 
-    if meow(true) {
-        meow(&a)
+    let hehe = meow;
+
+    if hehe(true) {
+        hehe(&a)
     } else {
-        meow(&b)
+        hehe(&b)
     }
 
-    let hrtb = meow::<_>;
-    let funky = hrtb.as::<&'gc dyn for<T: Meow> FnOnce<(T,), T>>;
-    hrtb('a');  // Leaked universe :(
+    let early_bound = meow::<_>;
+    let funky = early_bound.as::<&'gc dyn for<T: Meow> FnOnce<(T,), T>>;
+    early_bound('a');
+
+    let late_bound = meow;
+    let funky = late_bound.as::<&'gc dyn for<T: Meow> FnOnce<(T,), T>>;
+    late_bound('a');
 }
 
 fn meow<T>(v: T) -> T {

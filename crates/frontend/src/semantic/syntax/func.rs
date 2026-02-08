@@ -177,7 +177,7 @@ pub enum ExprKind {
     Unary(AstUnOpKind, Obj<Expr>),
     Literal(AstLit),
     TupleOrUnitCtor(AdtCtorInstance),
-    FnItemLit(Obj<FuncItem>, SpannedTyOrReList),
+    FnItemLit(Obj<FuncItem>, Option<SpannedTyOrReList>),
     TypeRelative {
         self_ty: SpannedTy,
         as_trait: Option<SpannedTraitInstance>,

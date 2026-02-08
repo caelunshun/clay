@@ -47,7 +47,7 @@ pub enum ExprPathResolution {
     ResolvedEnumVariant(Obj<EnumVariantItem>, SpannedTyOrReList),
 
     /// A reference to a function item with some optional generic parameters.
-    ResolvedFn(Obj<FuncItem>, SpannedTyOrReList),
+    ResolvedFn(Obj<FuncItem>, Option<SpannedTyOrReList>),
 
     /// A reference to a trait.
     ResolvedTrait(Obj<TraitItem>, SpannedTyOrReList),
@@ -266,7 +266,7 @@ pub enum PathResolvedLocal {
 
 #[derive(Debug, Copy, Clone)]
 pub enum PathResolvedFnLit {
-    Item(Obj<FuncItem>, SpannedTyOrReList),
+    Item(Obj<FuncItem>, Option<SpannedTyOrReList>),
     TypeRelative {
         self_ty: SpannedTy,
         as_trait: Option<SpannedTraitInstance>,
@@ -643,24 +643,14 @@ impl IntraItemLowerCtxt<'_> {
             .emit();
         }
 
-        let generics = def_segment
-            .args
-            .as_ref()
-            .map(|args| {
-                self.lower_generics_of_entirely_positional(
-                    def.r(s).item,
-                    def.r(s).def.r(s).generics,
-                    args.span,
-                    &args.list,
-                )
-            })
-            .unwrap_or_else(|| {
-                self.synthesize_inferred_generics_for_elision(
-                    def.r(s).def.r(s).generics,
-                    None,
-                    def_segment.part.span(),
-                )
-            });
+        let generics = def_segment.args.as_ref().map(|args| {
+            self.lower_generics_of_entirely_positional(
+                def.r(s).item,
+                def.r(s).def.r(s).generics,
+                args.span,
+                &args.list,
+            )
+        });
 
         ExprPathResult::Resolved(ExprPathResolution::ResolvedFn(def, generics))
     }

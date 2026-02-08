@@ -288,17 +288,18 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 AstLit::Bool(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Bool)),
             },
             ExprKind::TupleOrUnitCtor(adt_ctor_instance) => todo!(),
-            ExprKind::FnItemLit(def, args) => {
+            ExprKind::FnItemLit(def, early_args) => {
                 let env = self.import_env;
-                let early_args = self
-                    .ccx_mut()
-                    .importer(env, HrtbUniverse::ROOT)
-                    .fold_preserved(args);
+                let early_args = early_args.map(|early_args| {
+                    self.ccx_mut()
+                        .importer(env, HrtbUniverse::ROOT)
+                        .fold_preserved(early_args)
+                });
 
                 let fn_ty = SpannedTyView::FnDef(
                     SpannedFnInstanceView {
                         owner: SpannedFnOwnerView::Item(def).encode(expr.r(s).span, tcx),
-                        early_args: Some(early_args),
+                        early_args,
                     }
                     .encode(expr.r(s).span, tcx),
                 )
