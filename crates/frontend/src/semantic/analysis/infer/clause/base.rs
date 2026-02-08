@@ -10,9 +10,9 @@ use crate::{
             RecursionLimitReached, TyAndTyUnifyError, TyCtxt, UnifyCx, UnifyCxMode,
         },
         syntax::{
-            Crate, InferTyVar, Re, RelationDirection, RelationMode, TraitClause, TraitClauseList,
-            TraitSpec, Ty, TyKind, TyOrRe, UniversalReVar, UniversalReVarSourceInfo,
-            UniversalTyVar, UniversalTyVarSourceInfo,
+            Crate, HrtbUniverse, InferTyVar, Re, RelationDirection, RelationMode, TraitClause,
+            TraitClauseList, TraitSpec, Ty, TyKind, TyOrRe, UniversalReVar,
+            UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -208,11 +208,13 @@ impl<'tcx> ClauseCx<'tcx> {
 // Basic operations
 impl<'tcx> ClauseCx<'tcx> {
     pub fn fresh_ty_infer_var(&mut self) -> InferTyVar {
-        self.ucx_mut().fresh_ty_infer_var()
+        // TODO
+        self.ucx_mut().fresh_ty_infer_var(HrtbUniverse::ROOT)
     }
 
     pub fn fresh_ty_infer(&mut self) -> Ty {
-        self.ucx_mut().fresh_ty_infer()
+        // TODO
+        self.ucx_mut().fresh_ty_infer(HrtbUniverse::ROOT)
     }
 
     pub fn lookup_ty_infer_var_after_poll(

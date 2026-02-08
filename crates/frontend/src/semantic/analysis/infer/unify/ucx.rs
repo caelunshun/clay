@@ -2,15 +2,16 @@ use crate::{
     base::{ErrorGuaranteed, Session, arena::HasInterner},
     semantic::{
         analysis::{
-            ClauseCx, ClauseOrigin, InferTyOccursError, TyAndTyUnifyCulprit, TyAndTyUnifyError,
-            TyCtxt, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyVisitor, TyVisitorExt,
+            ClauseCx, ClauseOrigin, InferTyLeaksError, InferTyOccursError, InferTyUnifyError,
+            TyAndTyUnifyCulprit, TyAndTyUnifyError, TyCtxt, TyFolder, TyFolderExt,
+            TyFolderInfallibleExt, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt,
             infer::unify::{regions::ReUnifyTracker, types::TyUnifyTracker},
         },
         syntax::{
-            FnInstanceInner, FnOwner, HrtbBinderKind, InferTyVar, Mutability, Re, ReVariance,
-            RelationDirection, RelationMode, SpannedTy, SpannedTyView, TraitClause,
+            FnInstanceInner, FnOwner, HrtbBinderKind, HrtbUniverse, InferTyVar, Mutability, Re,
+            ReVariance, RelationDirection, RelationMode, SpannedTy, SpannedTyView, TraitClause,
             TraitClauseList, TraitParam, TraitParamList, Ty, TyKind, TyOrRe, UniversalReVar,
-            UniversalReVarSourceInfo,
+            UniversalReVarSourceInfo, UniversalTyVar,
         },
     },
     utils::hash::FxHashSet,
@@ -52,6 +53,7 @@ define_index_type! {
 pub struct FloatingInferVar<'a> {
     pub root: InferTyVar,
     pub observed_equivalent: &'a [ObservedTyInferVar],
+    pub max_universe: &'a HrtbUniverse,
 }
 
 impl<'tcx> UnifyCx<'tcx> {
@@ -104,13 +106,13 @@ impl<'tcx> UnifyCx<'tcx> {
         self.types.mention_var_for_tracing(var);
     }
 
-    pub fn fresh_ty_infer_var(&mut self) -> InferTyVar {
-        self.types.fresh()
+    pub fn fresh_ty_infer_var(&mut self, max_universe: HrtbUniverse) -> InferTyVar {
+        self.types.fresh(max_universe)
     }
 
-    pub fn fresh_ty_infer(&mut self) -> Ty {
+    pub fn fresh_ty_infer(&mut self, max_universe: HrtbUniverse) -> Ty {
         self.tcx()
-            .intern(TyKind::InferVar(self.fresh_ty_infer_var()))
+            .intern(TyKind::InferVar(self.fresh_ty_infer_var(max_universe)))
     }
 
     pub fn observe_ty_infer_var(&mut self, var: InferTyVar) -> ObservedTyInferVar {
@@ -423,12 +425,12 @@ impl<'tcx> UnifyCx<'tcx> {
                     }
                     (Ok(lhs_ty), Err(rhs_floating)) => {
                         if let Err(err) = self.unify_var_and_non_var_ty(rhs_floating.root, lhs_ty) {
-                            culprits.push(TyAndTyUnifyCulprit::RecursiveType(err));
+                            culprits.push(TyAndTyUnifyCulprit::InferTyUnify(err));
                         }
                     }
                     (Err(lhs_floating), Ok(rhs_ty)) => {
                         if let Err(err) = self.unify_var_and_non_var_ty(lhs_floating.root, rhs_ty) {
-                            culprits.push(TyAndTyUnifyCulprit::RecursiveType(err));
+                            culprits.push(TyAndTyUnifyCulprit::InferTyUnify(err));
                         }
                     }
                     (Err(_), Err(_)) => {
@@ -444,7 +446,7 @@ impl<'tcx> UnifyCx<'tcx> {
                 }
                 Err(lhs_var) => {
                     if let Err(err) = self.unify_var_and_non_var_ty(lhs_var.root, rhs) {
-                        culprits.push(TyAndTyUnifyCulprit::RecursiveType(err));
+                        culprits.push(TyAndTyUnifyCulprit::InferTyUnify(err));
                     }
                 }
             },
@@ -454,7 +456,7 @@ impl<'tcx> UnifyCx<'tcx> {
                 }
                 Err(rhs_var) => {
                     if let Err(err) = self.unify_var_and_non_var_ty(rhs_var.root, lhs) {
-                        culprits.push(TyAndTyUnifyCulprit::RecursiveType(err));
+                        culprits.push(TyAndTyUnifyCulprit::InferTyUnify(err));
                     }
                 }
             },
@@ -475,12 +477,19 @@ impl<'tcx> UnifyCx<'tcx> {
         &mut self,
         lhs_var_root: InferTyVar,
         rhs_ty: Ty,
-    ) -> Result<(), InferTyOccursError> {
-        debug_assert_eq!(
-            self.types.lookup(lhs_var_root).map_err(|v| v.root),
-            Err(lhs_var_root),
-        );
+    ) -> Result<(), InferTyUnifyError> {
+        let Err(FloatingInferVar {
+            root: actual_root,
+            observed_equivalent: _,
+            max_universe: lhs_max_universe,
+        }) = self.types.lookup(lhs_var_root)
+        else {
+            unreachable!()
+        };
 
+        debug_assert_eq!(actual_root, lhs_var_root);
+
+        // Perform occurs check
         struct OccursVisitor<'a, 'tcx> {
             ucx: &'a UnifyCx<'tcx>,
             reject: InferTyVar,
@@ -523,13 +532,98 @@ impl<'tcx> UnifyCx<'tcx> {
                 .substitutor(UnboundVarHandlingMode::NormalizeToRoot)
                 .fold(rhs_ty);
 
-            return Err(InferTyOccursError {
+            return Err(InferTyUnifyError::Occurs(InferTyOccursError {
                 var: lhs_var_root,
                 occurs_in,
-            });
+            }));
         }
 
+        // Perform HRTB universe check. First, let's ensure that the root isn't being unified with
+        // a type beyond its maximum universe.
+        struct HrtbLeakVisitor<'a, 'tcx> {
+            ucx: &'a UnifyCx<'tcx>,
+            max_universe: &'a HrtbUniverse,
+        }
+
+        impl<'tcx> TyVisitor<'tcx> for HrtbLeakVisitor<'_, 'tcx> {
+            type Break = UniversalTyVar;
+
+            fn tcx(&self) -> &'tcx TyCtxt {
+                self.ucx.tcx()
+            }
+
+            fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
+                match ty.view(self.tcx()) {
+                    SpannedTyView::InferVar(var) => match self.ucx.types.lookup(var) {
+                        Ok(resolved) => self.visit_fallible(resolved)?,
+                        Err(_) => {
+                            // (don't constrain yet)
+                        }
+                    },
+                    SpannedTyView::UniversalVar(idx) => {
+                        // TODO
+                    }
+                    _ => self.walk_spanned_fallible(ty)?,
+                }
+
+                ControlFlow::Continue(())
+            }
+        }
+
+        let leak_result = HrtbLeakVisitor {
+            ucx: self,
+            max_universe: lhs_max_universe,
+        }
+        .visit_fallible(rhs_ty);
+
+        if let ControlFlow::Break(leaks_universal) = leak_result {
+            return Err(InferTyUnifyError::Leaks(InferTyLeaksError {
+                var: lhs_var_root,
+                leaks_universal,
+            }));
+        }
+
+        // The operation is valid. Perform it!
+        let lhs_max_universe = lhs_max_universe.clone();
         self.types.assign_floating_to_non_var(lhs_var_root, rhs_ty);
+
+        // This is the second part of the HRTB universe check. Now that we know the operation is
+        // valid, we need to ensure that any unbound inference variables in our concrete type are
+        // constrained to our universe as well to avoid late-bound violations.
+        struct InferUniverseConstrainVisitor<'a, 'tcx> {
+            ucx: &'a mut UnifyCx<'tcx>,
+            max_universe: &'a HrtbUniverse,
+        }
+
+        impl<'tcx> TyVisitor<'tcx> for InferUniverseConstrainVisitor<'_, 'tcx> {
+            type Break = Infallible;
+
+            fn tcx(&self) -> &'tcx TyCtxt {
+                self.ucx.tcx()
+            }
+
+            fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
+                match ty.view(self.tcx()) {
+                    SpannedTyView::InferVar(var) => match self.ucx.types.lookup(var) {
+                        Ok(resolved) => self.visit_fallible(resolved)?,
+                        Err(_) => {
+                            self.ucx
+                                .types
+                                .constrain_max_universe(var, self.max_universe);
+                        }
+                    },
+                    _ => self.walk_spanned_fallible(ty)?,
+                }
+
+                ControlFlow::Continue(())
+            }
+        }
+
+        InferUniverseConstrainVisitor {
+            ucx: self,
+            max_universe: &lhs_max_universe,
+        }
+        .visit(rhs_ty);
 
         Ok(())
     }

@@ -2,7 +2,10 @@ use crate::{
     base::{Diag, ErrorGuaranteed, syntax::Span},
     semantic::{
         analysis::ClauseCx,
-        syntax::{InferTyVar, Re, TraitClauseList, TraitParam, TraitSpec, Ty, UniversalReVar},
+        syntax::{
+            InferTyVar, Re, TraitClauseList, TraitParam, TraitSpec, Ty, UniversalReVar,
+            UniversalTyVar,
+        },
     },
 };
 use std::{cell::Cell, fmt, iter, rc::Rc};
@@ -283,11 +286,23 @@ pub enum TyAndTyUnifyCulprit {
     Types(Ty, Ty),
     ClauseLists(TraitClauseList, TraitClauseList),
     Params(TraitParam, TraitParam),
-    RecursiveType(InferTyOccursError),
+    InferTyUnify(InferTyUnifyError),
+}
+
+#[derive(Debug, Clone)]
+pub enum InferTyUnifyError {
+    Occurs(InferTyOccursError),
+    Leaks(InferTyLeaksError),
 }
 
 #[derive(Debug, Clone)]
 pub struct InferTyOccursError {
     pub var: InferTyVar,
     pub occurs_in: Ty,
+}
+
+#[derive(Debug, Clone)]
+pub struct InferTyLeaksError {
+    pub var: InferTyVar,
+    pub leaks_universal: UniversalTyVar,
 }

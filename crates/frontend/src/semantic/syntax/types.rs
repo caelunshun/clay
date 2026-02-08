@@ -666,8 +666,8 @@ pub enum SolidTyShapeKind {
 /// hrtb('a');  // Leaked universe :(
 /// ```
 ///
-/// Where we're expected to let `Char` unify with some universal that only exists within this HRTB
-/// context, which is *super* confusing.
+/// Where we're expected to let `char` unify with some universal that only exists within this HRTB
+/// context, which is *super* confusing and possibly unsound, although I'm not yet sure how.
 ///
 /// To prevent these types of scenarios, we extend the unify context with the following rules:
 ///
@@ -750,12 +750,14 @@ impl HrtbUniverse {
 
     pub const ROOT_REF: &'static HrtbUniverse = &Self::ROOT;
 
+    #[must_use]
     pub fn nest(self, info: HrtbUniverseInfo) -> Self {
         Self {
             inner: HrtbUniverseInner::Child(Rc::new(HrtbUniverseChild { parent: self, info })),
         }
     }
 
+    #[must_use]
     pub fn parent(&self) -> Option<&HrtbUniverse> {
         match &self.inner {
             HrtbUniverseInner::Root => None,
@@ -763,14 +765,17 @@ impl HrtbUniverse {
         }
     }
 
+    #[must_use]
     pub fn is_root(&self) -> bool {
         self == HrtbUniverse::ROOT_REF
     }
 
+    #[must_use]
     pub fn ancestors(&self) -> HrtbUniverseAncestors<'_> {
         HrtbUniverseAncestors { iter: Some(self) }
     }
 
+    #[must_use]
     pub fn info(&self) -> Option<&HrtbUniverseInfo> {
         match &self.inner {
             HrtbUniverseInner::Root => None,
@@ -778,10 +783,12 @@ impl HrtbUniverse {
         }
     }
 
+    #[must_use]
     pub fn is_less_than(&self, other: &HrtbUniverse) -> bool {
         other.ancestors().any(|v| v == self)
     }
 
+    #[must_use]
     pub fn min<'a>(&'a self, other: &'a HrtbUniverse) -> &'a HrtbUniverse {
         let ancestors = self
             .ancestors()

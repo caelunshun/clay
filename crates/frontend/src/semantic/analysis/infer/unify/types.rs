@@ -1,7 +1,7 @@
 use crate::{
     semantic::{
         analysis::{FloatingInferVar, ObservedTyInferVar},
-        syntax::{InferTyVar, Ty},
+        syntax::{HrtbUniverse, InferTyVar, Ty},
     },
     utils::hash::FxHashSet,
 };
@@ -25,7 +25,10 @@ struct DisjointTyInferNode {
 #[derive(Debug, Clone)]
 enum DisjointTyInferRoot {
     Known(Ty),
-    Floating(Vec<ObservedTyInferVar>),
+    Floating {
+        observed: Vec<ObservedTyInferVar>,
+        max_universe: HrtbUniverse,
+    },
 }
 
 #[derive(Debug)]
@@ -75,10 +78,13 @@ impl TyUnifyTracker {
         state.set.borrow_mut().insert(var);
     }
 
-    pub fn fresh(&mut self) -> InferTyVar {
+    pub fn fresh(&mut self, max_universe: HrtbUniverse) -> InferTyVar {
         let var = InferTyVar::from_usize(self.disjoint.len());
         self.disjoint.push(DisjointTyInferNode {
-            root: Some(DisjointTyInferRoot::Floating(Vec::new())),
+            root: Some(DisjointTyInferRoot::Floating {
+                observed: Vec::new(),
+                max_universe: max_universe.clone(),
+            }),
             observed_idx: None,
         });
         var
@@ -100,7 +106,10 @@ impl TyUnifyTracker {
             DisjointTyInferRoot::Known(_) => {
                 self.observed_reveal_order.push(observed_idx);
             }
-            DisjointTyInferRoot::Floating(observed) => {
+            DisjointTyInferRoot::Floating {
+                observed,
+                max_universe: _,
+            } => {
                 observed.push(observed_idx);
             }
         }
@@ -112,17 +121,33 @@ impl TyUnifyTracker {
         &self.observed_reveal_order
     }
 
+    pub fn constrain_max_universe(&mut self, var: InferTyVar, other: &HrtbUniverse) {
+        let root_var = self.disjoint.root_of(var.index());
+
+        if let DisjointTyInferRoot::Floating {
+            observed: _,
+            max_universe,
+        } = self.disjoint[root_var].root.as_mut().unwrap()
+        {
+            *max_universe = max_universe.min(other).clone();
+        }
+    }
+
     pub fn lookup(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {
         let root_var = self.disjoint.root_of(var.index());
 
         match self.disjoint[root_var].root.as_ref().unwrap() {
             &DisjointTyInferRoot::Known(ty) => Ok(ty),
-            DisjointTyInferRoot::Floating(observed_equivalent) => {
+            DisjointTyInferRoot::Floating {
+                observed: observed_equivalent,
+                max_universe,
+            } => {
                 self.mention_var_for_tracing(var);
 
                 Err(FloatingInferVar {
                     root: InferTyVar::from_usize(root_var),
                     observed_equivalent,
+                    max_universe,
                 })
             }
         }
@@ -132,7 +157,11 @@ impl TyUnifyTracker {
         let root_idx = self.disjoint.root_of(var.index());
         let root = self.disjoint[root_idx].root.as_mut().unwrap();
 
-        let DisjointTyInferRoot::Floating(observed) = root else {
+        let DisjointTyInferRoot::Floating {
+            observed,
+            max_universe: _,
+        } = root
+        else {
             unreachable!();
         };
 
@@ -152,8 +181,14 @@ impl TyUnifyTracker {
         let rhs_root = self.disjoint[rhs_root].root.take().unwrap();
 
         let (
-            DisjointTyInferRoot::Floating(mut lhs_observed),
-            DisjointTyInferRoot::Floating(mut rhs_observed),
+            DisjointTyInferRoot::Floating {
+                observed: mut lhs_observed,
+                max_universe: lhs_max_universe,
+            },
+            DisjointTyInferRoot::Floating {
+                observed: mut rhs_observed,
+                max_universe: rhs_max_universe,
+            },
         ) = (lhs_root, rhs_root)
         else {
             unreachable!()
@@ -168,6 +203,9 @@ impl TyUnifyTracker {
 
         lhs_observed.append(&mut rhs_observed);
 
-        *new_root = Some(DisjointTyInferRoot::Floating(lhs_observed));
+        *new_root = Some(DisjointTyInferRoot::Floating {
+            observed: lhs_observed,
+            max_universe: lhs_max_universe.min(&rhs_max_universe).clone(),
+        });
     }
 }
