@@ -495,6 +495,9 @@ pub enum TyKind {
     /// obligation to constrain the inference variable to its target associated type.
     SigProject(TyProjection),
 
+    /// An uninstantiated type alias. Resolved at import time.
+    SigAlias(Obj<TypeAliasItem>, TyOrReList),
+
     /// A simple primitive non-composite type living for `'gc`.
     Simple(SimpleTyKind),
 

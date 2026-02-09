@@ -592,6 +592,9 @@ impl TyFoldable for Ty {
             SpannedTyView::SigProject(project) => {
                 TyKind::SigProject(folder.fold_spanned_fallible(project)?)
             }
+            SpannedTyView::SigAlias(def, args) => {
+                TyKind::SigAlias(def, folder.fold_spanned_fallible(args)?)
+            }
             SpannedTyView::Reference(re, muta, pointee) => TyKind::Reference(
                 folder.fold_spanned_fallible(re)?,
                 muta,

@@ -514,6 +514,9 @@ impl TyVisitable for Ty {
             SpannedTyView::SigProject(project) => {
                 visitor.visit_spanned_fallible(project)?;
             }
+            SpannedTyView::SigAlias(_def, args) => {
+                visitor.visit_spanned_fallible(args)?;
+            }
             SpannedTyView::Reference(re, _muta, pointee) => {
                 visitor.visit_spanned_fallible(re)?;
                 visitor.visit_spanned_fallible(pointee)?;

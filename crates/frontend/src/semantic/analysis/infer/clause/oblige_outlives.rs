@@ -123,6 +123,7 @@ impl<'tcx> ClauseCx<'tcx> {
             | TyKind::SigInfer
             | TyKind::SigGeneric(_)
             | TyKind::SigProject(_)
+            | TyKind::SigAlias(_, _)
             | TyKind::HrtbVar(_) => {
                 unreachable!()
             }

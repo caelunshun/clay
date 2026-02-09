@@ -162,7 +162,14 @@ impl IntraItemLowerCtxt<'_> {
                         SpannedTyView::SigGeneric(def).encode(ast.span, self.tcx)
                     }
                     Ok(TyPathResolution::TypeAlias(def)) => {
-                        todo!()
+                        let params = self.lower_generics_of_entirely_positional(
+                            def.r(s).item,
+                            def.r(s).generics,
+                            ast.span,
+                            generics.as_ref().map_or(&[][..], |v| &v.list),
+                        );
+
+                        SpannedTyView::SigAlias(def, params).encode(ast.span, self.tcx)
                     }
                     Ok(TyPathResolution::Trait(def)) => SpannedTyView::Error(
                         Diag::span_err(

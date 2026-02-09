@@ -200,7 +200,11 @@ impl CoercionPossibility {
         let ty = bcx.ccx_mut().peel_ty_infer_var_after_poll(ty);
 
         match *ty.r(s) {
-            TyKind::SigThis | TyKind::SigInfer | TyKind::SigGeneric(_) | TyKind::SigProject(_) => {
+            TyKind::SigThis
+            | TyKind::SigInfer
+            | TyKind::SigGeneric(_)
+            | TyKind::SigProject(_)
+            | TyKind::SigAlias(_, _) => {
                 unreachable!()
             }
 

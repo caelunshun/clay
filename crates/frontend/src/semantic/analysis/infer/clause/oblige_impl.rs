@@ -129,6 +129,7 @@ impl<'tcx> ClauseCx<'tcx> {
             | TyKind::SigInfer
             | TyKind::SigGeneric(_)
             | TyKind::SigProject(_)
+            | TyKind::SigAlias(_, _)
             // LHS HRTBs should have been instantiated right before the obligation.
             | TyKind::HrtbVar(_) => {
                 unreachable!()

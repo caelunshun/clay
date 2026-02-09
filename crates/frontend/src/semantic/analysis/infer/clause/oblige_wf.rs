@@ -166,7 +166,8 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             SpannedTyView::SigThis
             | SpannedTyView::SigInfer
             | SpannedTyView::SigGeneric(_)
-            | SpannedTyView::SigProject(_) => {
+            | SpannedTyView::SigProject(_)
+            | SpannedTyView::SigAlias(_, _) => {
                 unreachable!()
             }
         }

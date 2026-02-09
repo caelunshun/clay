@@ -12,8 +12,8 @@ use crate::{
             HrtbBinder, HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef, HrtbDebruijnDefList,
             ImplItem, InferTyVar, Mutability, Re, RelationDirection, SimpleTyKind, TraitClause,
             TraitClauseList, TraitInstance, TraitItem, TraitParam, TraitParamList, TraitSpec, Ty,
-            TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList, TyProjection, TypeGeneric,
-            UniversalTyVar,
+            TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList, TyProjection, TypeAliasItem,
+            TypeGeneric, UniversalTyVar,
         },
     },
 };
@@ -71,6 +71,7 @@ pub enum SpannedTyView {
     SigInfer,
     SigGeneric(Obj<TypeGeneric>),
     SigProject(SpannedTyProjection),
+    SigAlias(Obj<TypeAliasItem>, SpannedTyOrReList),
     Simple(SimpleTyKind),
     Reference(SpannedRe, Mutability, SpannedTy),
     Adt(SpannedAdtInstance),
@@ -95,6 +96,9 @@ impl SpannedViewDecode<TyCtxt> for Ty {
             TyKind::SigGeneric(generic) => SpannedTyView::SigGeneric(generic),
             TyKind::SigProject(project) => {
                 SpannedTyView::SigProject(Spanned::new_raw(project, span_info.unwrap(tcx)))
+            }
+            TyKind::SigAlias(def, args) => {
+                SpannedTyView::SigAlias(def, Spanned::new_raw(args, span_info.unwrap(tcx)))
             }
             TyKind::Simple(kind) => SpannedTyView::Simple(kind),
             TyKind::Reference(re, muta, pointee) => {
@@ -150,6 +154,10 @@ impl SpannedViewEncode<TyCtxt> for SpannedTyView {
             SpannedTyView::SigProject(project) => Spanned::new_raw(
                 tcx.intern(TyKind::SigProject(project.value)),
                 project.span_info.wrap(own_span, tcx),
+            ),
+            SpannedTyView::SigAlias(def, args) => Spanned::new_raw(
+                tcx.intern(TyKind::SigAlias(def, args.value)),
+                args.span_info.wrap(own_span, tcx),
             ),
             SpannedTyView::Simple(kind) => Spanned::new_raw(
                 tcx.intern(TyKind::Simple(kind)),

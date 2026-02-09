@@ -104,6 +104,7 @@ where
             TyKind::SigThis
             | TyKind::SigInfer
             | TyKind::SigProject(_)
+            | TyKind::SigAlias(_, _)
             | TyKind::Simple(_)
             | TyKind::Reference(_, _, _)
             | TyKind::Adt(_)

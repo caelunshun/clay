@@ -3,6 +3,7 @@
 
 use crate::{
     base::{
+        Diag,
         analysis::{DebruijnAbsoluteRange, DebruijnTop, Spanned},
         arena::{HasInterner, HasListInterner, Obj},
         syntax::Span,
@@ -21,9 +22,9 @@ use crate::{
             TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
-    utils::hash::FxHashMap,
+    utils::hash::{FxHashMap, FxHashSet},
 };
-use std::convert::Infallible;
+use std::{convert::Infallible, mem};
 
 #[derive(Debug, Clone)]
 pub struct ClauseImportEnv {
@@ -60,6 +61,13 @@ impl<'a> ClauseImportEnvRef<'a> {
             sig_generic_substs,
         }
     }
+
+    pub fn to_owned(self) -> ClauseImportEnv {
+        ClauseImportEnv {
+            self_ty: self.self_ty,
+            sig_generic_substs: self.sig_generic_substs.to_vec(),
+        }
+    }
 }
 
 impl<'tcx> ClauseCx<'tcx> {
@@ -70,9 +78,10 @@ impl<'tcx> ClauseCx<'tcx> {
     ) -> ClauseCxImporter<'a, 'tcx> {
         ClauseCxImporter {
             ccx: self,
-            env,
+            env: env.to_owned(),
             hrtb_top: DebruijnTop::default(),
             hrtb_binder_ranges: FxHashMap::default(),
+            reentrant_aliases: FxHashSet::default(),
             universe,
         }
     }
@@ -625,9 +634,10 @@ impl<'tcx> ClauseCx<'tcx> {
 
 pub struct ClauseCxImporter<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
-    env: ClauseImportEnvRef<'a>,
+    env: ClauseImportEnv,
     hrtb_top: DebruijnTop,
     hrtb_binder_ranges: FxHashMap<Obj<GenericBinder>, DebruijnAbsoluteRange>,
+    reentrant_aliases: FxHashSet<Obj<TypeAliasItem>>,
     universe: HrtbUniverse,
 }
 
@@ -769,6 +779,32 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
                 );
 
                 assoc_infer_ty
+            }
+            SpannedTyView::SigAlias(def, args) => 'alias: {
+                if !self.reentrant_aliases.insert(def) {
+                    break 'alias tcx.intern(TyKind::Error(
+                        Diag::span_err(ty.own_span(), "recursive type alias").emit(),
+                    ));
+                }
+
+                let old_env = mem::replace(
+                    &mut self.env,
+                    ClauseImportEnv::new(
+                        tcx.intern(TyKind::SigThis),
+                        vec![GenericSubst {
+                            binder: def.r(s).generics,
+                            substs: args.value,
+                        }],
+                    ),
+                );
+
+                let body = self.fold_spanned(*def.r(s).body);
+
+                self.env = old_env;
+
+                self.reentrant_aliases.remove(&def);
+
+                body
             }
 
             SpannedTyView::Simple(_)
