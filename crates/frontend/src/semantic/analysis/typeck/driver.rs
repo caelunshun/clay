@@ -7,7 +7,7 @@ use crate::{
         },
         syntax::{
             AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FuncItem, GenericBinder, GenericSubst,
-            HrtbUniverse, ImplItem, ItemKind, TraitItem,
+            HrtbUniverse, ImplItem, ItemKind, TraitItem, TypeAliasItem,
         },
     },
 };
@@ -58,6 +58,9 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
                 }
                 ItemKind::Func(def) => {
                     self.visit_fn_item(def);
+                }
+                ItemKind::TypeAlias(def) => {
+                    self.visit_type_alias_item(def);
                 }
             }
         }
@@ -229,6 +232,27 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         let s = self.session();
 
         self.visit_fn_def(*def.r(s).def);
+    }
+
+    pub fn visit_type_alias_item(&mut self, def: Obj<TypeAliasItem>) {
+        let tcx = self.tcx();
+        let s = self.session();
+
+        // Setup a `ClauseCx` with our environment in mind.
+        let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
+        let env = ccx.import_type_alias_def_env_as_universal(def, HrtbUniverse::ROOT_REF);
+
+        // First, let's ensure that each generic parameter's clauses are well-formed.
+        self.visit_generic_binder(&mut ccx, env.as_ref(), def.r(s).generics);
+
+        // Now, WF-check the definition.
+        let body = ccx
+            .importer(env.as_ref(), HrtbUniverse::ROOT)
+            .fold_preserved(*def.r(s).body);
+
+        ccx.wf_visitor(HrtbUniverse::ROOT).visit_spanned(body);
+
+        ccx.verify();
     }
 
     pub fn visit_generic_binder(

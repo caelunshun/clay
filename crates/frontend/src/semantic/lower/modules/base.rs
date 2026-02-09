@@ -36,6 +36,7 @@ pub enum ItemCategory {
     Enum,
     EnumVariant,
     Func,
+    TypeAlias,
 }
 
 impl ItemCategory {
@@ -48,6 +49,7 @@ impl ItemCategory {
             ItemCategory::Enum => symbol!("enum"),
             ItemCategory::EnumVariant => symbol!("enum variant"),
             ItemCategory::Func => symbol!("function"),
+            ItemCategory::TypeAlias => symbol!("type"),
         }
     }
 
@@ -60,6 +62,7 @@ impl ItemCategory {
             ItemCategory::Enum => symbol!("an enum"),
             ItemCategory::EnumVariant => symbol!("an enum variant"),
             ItemCategory::Func => symbol!("a function"),
+            ItemCategory::TypeAlias => symbol!("a type"),
         }
     }
 
@@ -72,7 +75,8 @@ impl ItemCategory {
                 | ItemCategory::Struct
                 | ItemCategory::Enum
                 | ItemCategory::EnumVariant
-                | ItemCategory::Func => false,
+                | ItemCategory::Func
+                | ItemCategory::TypeAlias => false,
             },
             ItemCategoryUse::GlobUseTarget => match self {
                 ItemCategory::Module | ItemCategory::Scope | ItemCategory::Enum => true,
@@ -80,7 +84,8 @@ impl ItemCategory {
                 | ItemCategory::Trait
                 | ItemCategory::Struct
                 | ItemCategory::EnumVariant
-                | ItemCategory::Func => false,
+                | ItemCategory::Func
+                | ItemCategory::TypeAlias => false,
             },
         }
     }
@@ -93,7 +98,8 @@ impl ItemCategory {
             | ItemCategory::Struct
             | ItemCategory::Enum
             | ItemCategory::EnumVariant
-            | ItemCategory::Func => false,
+            | ItemCategory::Func
+            | ItemCategory::TypeAlias => false,
         }
     }
 }

@@ -175,6 +175,20 @@ pub struct AdtInstance {
     pub params: TyOrReList,
 }
 
+// === Type Aliases === //
+
+#[derive(Debug, Clone)]
+pub struct TypeAliasItem {
+    /// The item defining this trait.
+    pub item: Obj<Item>,
+
+    /// The set of parameter generics and associated types defined by this type alias.
+    pub generics: Obj<GenericBinder>,
+
+    /// The body to which the type is expanded.
+    pub body: LateInit<SpannedTy>,
+}
+
 // === Traits === //
 
 #[derive(Debug, Clone)]

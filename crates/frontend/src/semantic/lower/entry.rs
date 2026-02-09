@@ -9,9 +9,9 @@ use crate::{
         ast::{
             AstAttribute, AstBarePath, AstFnDef, AstGenericDef, AstImplLikeMemberKind, AstItem,
             AstItemEnum, AstItemFn, AstItemImpl, AstItemModuleContents, AstItemStruct,
-            AstItemTrait, AstPathPart, AstPathPartKind, AstPathPartKw, AstReturnTy, AstStructKind,
-            AstTraitClauseList, AstTreePath, AstTreePathKind, AstTy, AstVisibility,
-            AstVisibilityKind,
+            AstItemTrait, AstItemTypeAlias, AstPathPart, AstPathPartKind, AstPathPartKw,
+            AstReturnTy, AstStructKind, AstTraitClauseList, AstTreePath, AstTreePathKind, AstTy,
+            AstVisibility, AstVisibilityKind,
         },
         token::{Ident, Lifetime},
     },
@@ -26,7 +26,7 @@ use crate::{
             AdtEnumVariantIdx, AdtItem, AdtKind, AdtKindEnum, AdtKindStruct, AnyGeneric, Crate,
             EnumVariantItem, Expr, FnDef, FuncArg, FuncDefOwner, FuncItem, FuncLocal,
             GenericBinder, ImplItem, Item, ItemKind, LangItems, ModuleItem, RegionGeneric,
-            SpannedTy, TraitItem, TyKind, TypeGeneric, Visibility,
+            SpannedTy, TraitItem, TyKind, TypeAliasItem, TypeGeneric, Visibility,
         },
     },
     symbol,
@@ -262,6 +262,18 @@ impl<'ast> UseLowerCtxt<'ast> {
                             cx.lower_variant(cx.index_to_item[item_id], idx as u32);
                         });
                     }
+                }
+                AstItem::TypeAlias(item) => {
+                    let item_id = self.tree.push_named_item(
+                        parent_id,
+                        item.base.vis.clone(),
+                        ItemCategory::TypeAlias,
+                        item.name,
+                    );
+
+                    self.queue_task(parent_id, item_id, |cx| {
+                        cx.lower_type_alias(item);
+                    });
                 }
                 AstItem::Error(_, _) => {
                     // (ignored)
@@ -857,6 +869,33 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
 
         def
     }
+
+    pub fn lower_type_alias(&mut self, ast: &'ast AstItemTypeAlias) {
+        let s = &self.tcx.session;
+        let mut generics = GenericBinder::default();
+        let mut generic_clause_lists = Vec::new();
+
+        if let Some(ast) = &ast.generics {
+            self.lower_generic_defs(&mut generics, ast, &mut generic_clause_lists);
+        }
+
+        let def = Obj::new(
+            TypeAliasItem {
+                item: self.target,
+                generics: self.tcx.seal_generic_binder(generics),
+                body: LateInit::uninit(),
+            },
+            s,
+        );
+
+        LateInit::init(&self.target.r(s).kind, ItemKind::TypeAlias(def));
+
+        self.queue_lower_item_attributes(&ast.base.outer_attrs);
+
+        self.queue_task(move |cx| {
+            cx.lower_type_alias(def, ast, generic_clause_lists);
+        });
+    }
 }
 
 // === Third Phase === //
@@ -1054,5 +1093,19 @@ impl IntraItemLowerCtxt<'_> {
             &item.r(s).body,
             ast.body.as_ref().map(|body| self.lower_block(body)),
         );
+    }
+
+    pub fn lower_type_alias(
+        mut self,
+        item: Obj<TypeAliasItem>,
+        ast: &AstItemTypeAlias,
+        generic_clause_lists: Vec<Option<&AstTraitClauseList>>,
+    ) {
+        let s = &self.tcx.session;
+
+        self.define_generics_in_binder(item.r(s).generics);
+        self.lower_generic_def_clauses(item.r(s).generics, &generic_clause_lists);
+
+        LateInit::init(&item.r(s).body, self.lower_ty(&ast.body));
     }
 }

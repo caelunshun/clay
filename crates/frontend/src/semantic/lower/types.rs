@@ -22,7 +22,8 @@ use crate::{
             SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedRe, SpannedTraitClause,
             SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParamList,
             SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe,
-            SpannedTyOrReView, SpannedTyProjectionView, SpannedTyView, TraitItem, TypeGeneric,
+            SpannedTyOrReView, SpannedTyProjectionView, SpannedTyView, TraitItem, TypeAliasItem,
+            TypeGeneric,
         },
     },
     symbol,
@@ -35,6 +36,7 @@ pub enum TyPathResolution {
     Generic(Obj<TypeGeneric>),
     Adt(Obj<AdtItem>),
     Trait(Obj<TraitItem>),
+    TypeAlias(Obj<TypeAliasItem>),
     Other(Obj<Item>),
 }
 
@@ -66,7 +68,11 @@ impl IntraItemLowerCtxt<'_> {
         match *target.r(s).kind {
             ItemKind::Adt(def) => Ok(TyPathResolution::Adt(def)),
             ItemKind::Trait(def) => Ok(TyPathResolution::Trait(def)),
-            _ => Ok(TyPathResolution::Other(target)),
+            ItemKind::TypeAlias(def) => Ok(TyPathResolution::TypeAlias(def)),
+            ItemKind::Module(_)
+            | ItemKind::EnumVariant(_)
+            | ItemKind::Impl(_)
+            | ItemKind::Func(_) => Ok(TyPathResolution::Other(target)),
         }
     }
 
@@ -84,6 +90,7 @@ impl IntraItemLowerCtxt<'_> {
                 );
             }
             TyPathResolution::Adt(def) => def.r(s).item,
+            TyPathResolution::TypeAlias(def) => def.r(s).item,
             TyPathResolution::Other(item) => item,
         };
 
@@ -154,11 +161,14 @@ impl IntraItemLowerCtxt<'_> {
                     Ok(TyPathResolution::Generic(def)) => {
                         SpannedTyView::SigGeneric(def).encode(ast.span, self.tcx)
                     }
+                    Ok(TyPathResolution::TypeAlias(def)) => {
+                        todo!()
+                    }
                     Ok(TyPathResolution::Trait(def)) => SpannedTyView::Error(
                         Diag::span_err(
                             ast.span,
                             format_args!(
-                                "expected a struct or enum, found trait `{}`",
+                                "expected a struct, enum, or type alias, found trait `{}`",
                                 resolver.path(def.r(s).item),
                             ),
                         )
@@ -173,7 +183,7 @@ impl IntraItemLowerCtxt<'_> {
                         Diag::span_err(
                             ast.span,
                             format_args!(
-                                "expected a struct or enum, found {}",
+                                "expected a struct, enum, or type alias, found {}",
                                 def.r(s).bare_category_path(s),
                             ),
                         )

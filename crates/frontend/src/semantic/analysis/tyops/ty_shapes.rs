@@ -85,7 +85,7 @@ impl TyCtxt {
                         .collect::<Vec<_>>(),
                 ),
             }),
-            TyKind::FnDef(instance) => TyShape::Solid(SolidTyShape {
+            TyKind::FnDef(_instance) => TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::FnDef,
                 children: self.intern_list(&[]),
             }),

@@ -5,8 +5,8 @@ use crate::{
         ast::{
             AstAttribute, AstEnumVariant, AstImplLikeBody, AstImplLikeMember,
             AstImplLikeMemberKind, AstItem, AstItemBase, AstItemEnum, AstItemFn, AstItemImpl,
-            AstItemModule, AstItemModuleContents, AstItemStruct, AstItemTrait, AstItemUse,
-            AstStructAnonField, AstStructKind, AstStructNamedField, AstTraitClauseList,
+            AstItemModule, AstItemModuleContents, AstItemStruct, AstItemTrait, AstItemTypeAlias,
+            AstItemUse, AstStructAnonField, AstStructKind, AstStructNamedField, AstTraitClauseList,
             basic::{parse_attributes, parse_tree_path, parse_visibility},
             entry::P,
             func::parse_func,
@@ -110,6 +110,31 @@ fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
                 base: make_base(p),
             }));
         }
+    }
+
+    if match_kw(kw!("type")).expect(p).is_some() {
+        let Some(name) = match_ident().expect_to_parse(p, symbol!("type name")) else {
+            return Some(AstItem::Error(make_base(p), p.stuck().error()));
+        };
+
+        let generics = parse_generic_param_list(p);
+
+        if match_punct(punct!('=')).expect(p).is_none() {
+            p.stuck().ignore_not_in_loop();
+        }
+
+        let body = Box::new(parse_ty(p));
+
+        if match_punct(punct!(';')).expect(p).is_none() {
+            p.stuck().ignore_not_in_loop();
+        }
+
+        return Some(AstItem::TypeAlias(AstItemTypeAlias {
+            name,
+            generics,
+            body,
+            base: make_base(p),
+        }));
     }
 
     if match_kw(kw!("trait")).expect(p).is_some() {

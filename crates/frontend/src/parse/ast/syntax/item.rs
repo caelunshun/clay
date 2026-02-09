@@ -20,6 +20,7 @@ pub enum AstItem {
     Func(AstItemFn),
     Struct(AstItemStruct),
     Enum(AstItemEnum),
+    TypeAlias(AstItemTypeAlias),
     Error(AstItemBase, ErrorGuaranteed),
 }
 
@@ -32,6 +33,7 @@ impl AstItem {
         | AstItem::Func(AstItemFn { base, .. })
         | AstItem::Struct(AstItemStruct { base, .. })
         | AstItem::Enum(AstItemEnum { base, .. })
+        | AstItem::TypeAlias(AstItemTypeAlias { base, .. })
         | AstItem::Error(base, ..)) = self;
 
         base
@@ -62,6 +64,14 @@ pub struct AstItemModuleContents {
 pub struct AstItemUse {
     pub base: AstItemBase,
     pub path: AstTreePath,
+}
+
+#[derive(Debug, Clone)]
+pub struct AstItemTypeAlias {
+    pub base: AstItemBase,
+    pub name: Ident,
+    pub generics: Option<AstGenericParamList>,
+    pub body: Box<AstTy>,
 }
 
 #[derive(Debug, Clone)]

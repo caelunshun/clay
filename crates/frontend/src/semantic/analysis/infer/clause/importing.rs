@@ -18,7 +18,7 @@ use crate::{
             HrtbDebruijnDef, HrtbUniverse, ImplItem, Re, RelationMode, SpannedHrtbBinder,
             SpannedHrtbBinderView, SpannedRe, SpannedTy, SpannedTyProjectionView, SpannedTyView,
             TraitClause, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReKind,
-            UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
+            TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
@@ -322,6 +322,22 @@ impl<'tcx> ClauseCx<'tcx> {
             ));
 
         env
+    }
+
+    pub fn import_type_alias_def_env_as_universal(
+        &mut self,
+        def: Obj<TypeAliasItem>,
+        universe: &HrtbUniverse,
+    ) -> ClauseImportEnv {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let this_ty = tcx.intern(TyKind::SigThis);
+
+        ClauseImportEnv::new(
+            this_ty,
+            self.import_binder_list_as_universal(this_ty, &[def.r(s).generics], universe),
+        )
     }
 
     // === Existential === //

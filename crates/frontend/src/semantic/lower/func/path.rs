@@ -444,6 +444,7 @@ impl IntraItemLowerCtxt<'_> {
                         segments.as_slice(),
                     );
                 }
+                ItemKind::TypeAlias(item) => todo!(),
             }
 
             if let Some(args) = &segment.args {

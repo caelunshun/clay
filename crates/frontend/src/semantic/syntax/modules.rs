@@ -11,7 +11,7 @@ use crate::{
         },
         syntax::{
             AdtEnumVariant, AdtItem, AdtKindEnum, Attribute, FuncItem, ImplItem, LangItems,
-            TraitItem,
+            TraitItem, TypeAliasItem,
         },
     },
     symbol,
@@ -98,6 +98,7 @@ pub enum ItemKind {
     Trait(Obj<TraitItem>),
     Impl(Obj<ImplItem>),
     Func(Obj<FuncItem>),
+    TypeAlias(Obj<TypeAliasItem>),
 }
 
 impl ItemKind {

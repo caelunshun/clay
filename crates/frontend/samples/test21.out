@@ -1,0 +1,33 @@
+error: NoTraitImplError {
+    origin: [
+        Coercion {
+            expr_span: crates/frontend/samples/test21.fir:70:17-28,
+        },
+    ],
+    target: 0x15b028c60: InferVar(
+        31,
+    ),
+    spec: TraitSpec {
+        def: "FnOnce"#38,
+        params: 0x15b028850: [
+            Equals(
+                Ty(
+                    0x15b028890: Tuple(
+                        0x15b0288d8: [
+                            0x15b02a468: UniversalVar(
+                                4,
+                            ),
+                        ],
+                    ),
+                ),
+            ),
+            Equals(
+                Ty(
+                    0x15b02a468: UniversalVar(
+                        4,
+                    ),
+                ),
+            ),
+        ],
+    },
+}
