@@ -825,9 +825,16 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
                         // (no violation occurred)
                     }
                     ReentrantAliasState::Violated(span) => {
-                        Diag::span_err(ty.own_span(), "attempted to expand recursive type alias")
-                            .child(LeafDiag::span_note(span, "reentered here"))
-                            .emit();
+                        let mut diag = Diag::span_err(
+                            ty.own_span(),
+                            "attempted to expand recursive type alias",
+                        );
+
+                        if ty.own_span() != span {
+                            diag.push_child(LeafDiag::span_note(span, "reentered here"));
+                        }
+
+                        diag.emit();
                     }
                 }
 
