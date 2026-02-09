@@ -3,7 +3,7 @@
 
 use crate::{
     base::{
-        Diag,
+        Diag, ErrorGuaranteed, LeafDiag,
         analysis::{DebruijnAbsoluteRange, DebruijnTop, Spanned},
         arena::{HasInterner, HasListInterner, Obj},
         syntax::Span,
@@ -22,8 +22,9 @@ use crate::{
             TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
-    utils::hash::{FxHashMap, FxHashSet},
+    utils::hash::FxHashMap,
 };
+use hashbrown::hash_map;
 use std::{convert::Infallible, mem};
 
 #[derive(Debug, Clone)]
@@ -81,7 +82,7 @@ impl<'tcx> ClauseCx<'tcx> {
             env: env.to_owned(),
             hrtb_top: DebruijnTop::default(),
             hrtb_binder_ranges: FxHashMap::default(),
-            reentrant_aliases: FxHashSet::default(),
+            reentrant_aliases: FxHashMap::default(),
             universe,
         }
     }
@@ -637,8 +638,14 @@ pub struct ClauseCxImporter<'a, 'tcx> {
     env: ClauseImportEnv,
     hrtb_top: DebruijnTop,
     hrtb_binder_ranges: FxHashMap<Obj<GenericBinder>, DebruijnAbsoluteRange>,
-    reentrant_aliases: FxHashSet<Obj<TypeAliasItem>>,
+    reentrant_aliases: FxHashMap<Obj<TypeAliasItem>, ReentrantAliasState>,
     universe: HrtbUniverse,
+}
+
+#[derive(Debug, Copy, Clone)]
+enum ReentrantAliasState {
+    WaitingForViolation,
+    Violated(Span),
 }
 
 impl<'tcx> TyFolderPreservesSpans<'tcx> for ClauseCxImporter<'_, 'tcx> {}
@@ -781,10 +788,19 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
                 assoc_infer_ty
             }
             SpannedTyView::SigAlias(def, args) => 'alias: {
-                if !self.reentrant_aliases.insert(def) {
-                    break 'alias tcx.intern(TyKind::Error(
-                        Diag::span_err(ty.own_span(), "recursive type alias").emit(),
-                    ));
+                match self.reentrant_aliases.entry(def) {
+                    hash_map::Entry::Occupied(entry) => {
+                        let entry = entry.into_mut();
+
+                        if matches!(entry, ReentrantAliasState::WaitingForViolation) {
+                            *entry = ReentrantAliasState::Violated(ty.own_span());
+                        }
+
+                        break 'alias tcx.intern(TyKind::Error(ErrorGuaranteed::new_unchecked()));
+                    }
+                    hash_map::Entry::Vacant(entry) => {
+                        entry.insert(ReentrantAliasState::WaitingForViolation);
+                    }
                 }
 
                 let args = self.fold(args);
@@ -804,7 +820,16 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
 
                 self.env = old_env;
 
-                self.reentrant_aliases.remove(&def);
+                match self.reentrant_aliases.remove(&def).unwrap() {
+                    ReentrantAliasState::WaitingForViolation => {
+                        // (no violation occurred)
+                    }
+                    ReentrantAliasState::Violated(span) => {
+                        Diag::span_err(ty.own_span(), "attempted to expand recursive type alias")
+                            .child(LeafDiag::span_note(span, "reentered here"))
+                            .emit();
+                    }
+                }
 
                 body
             }
