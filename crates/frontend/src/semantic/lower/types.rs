@@ -22,8 +22,7 @@ use crate::{
             SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedRe, SpannedTraitClause,
             SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParamList,
             SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe,
-            SpannedTyOrReView, SpannedTyProjectionView, SpannedTyView, TraitItem, TypeAliasItem,
-            TypeGeneric,
+            SpannedTyOrReView, SpannedTyView, TraitItem, TyProjection, TypeAliasItem, TypeGeneric,
         },
     },
     symbol,
@@ -169,7 +168,7 @@ impl IntraItemLowerCtxt<'_> {
                             generics.as_ref().map_or(&[][..], |v| &v.list),
                         );
 
-                        SpannedTyView::SigAlias(def, params).encode(ast.span, self.tcx)
+                        SpannedTyView::SigAlias(def, params.value).encode(ast.span, self.tcx)
                     }
                     Ok(TyPathResolution::Trait(def)) => SpannedTyView::Error(
                         Diag::span_err(
@@ -223,29 +222,24 @@ impl IntraItemLowerCtxt<'_> {
                 SpannedTyView::Tuple(self.lower_tys(items)).encode(ast.span, self.tcx)
             }
             AstTyKind::Project(target, spec, assoc) => {
-                let target = self.lower_ty(target);
+                let target = self.lower_ty(target).value;
                 let spec = match self.lower_trait_spec(spec) {
-                    Ok(spec) => spec,
+                    Ok(spec) => spec.value,
                     Err(error) => return SpannedTyView::Error(error).encode(ast.span, self.tcx),
                 };
 
-                let Some(assoc_generic) = spec.value.def.r(s).associated_types.get(&assoc.text)
-                else {
+                let Some(assoc_generic) = spec.def.r(s).associated_types.get(&assoc.text) else {
                     return SpannedTyView::Error(
                         Diag::span_err(assoc.span, "no such associated type").emit(),
                     )
                     .encode(ast.span, self.tcx);
                 };
 
-                SpannedTyView::SigProject(
-                    SpannedTyProjectionView {
-                        target,
-                        spec,
-                        assoc_span: Some(assoc.span),
-                        assoc: assoc_generic.r(s).binder.idx,
-                    }
-                    .encode(ast.span, self.tcx),
-                )
+                SpannedTyView::SigProject(TyProjection {
+                    target,
+                    spec,
+                    assoc: assoc_generic.r(s).binder.idx,
+                })
                 .encode(ast.span, self.tcx)
             }
             AstTyKind::Infer => SpannedTyView::SigInfer.encode(ast.span, self.tcx),

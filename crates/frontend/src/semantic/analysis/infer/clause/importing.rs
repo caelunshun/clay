@@ -17,8 +17,8 @@ use crate::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnInstance, FnInstanceInner, FnOwner,
             FuncDefOwner, GenericBinder, GenericSubst, HrtbBinder, HrtbBinderKind, HrtbDebruijn,
             HrtbDebruijnDef, HrtbUniverse, ImplItem, Re, RelationMode, SpannedHrtbBinder,
-            SpannedHrtbBinderView, SpannedRe, SpannedTy, SpannedTyProjectionView, SpannedTyView,
-            TraitClause, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReKind,
+            SpannedHrtbBinderView, SpannedRe, SpannedTy, SpannedTyView, TraitClause, TraitItem,
+            TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReKind, TyProjection,
             TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
@@ -745,35 +745,35 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
             SpannedTyView::SigGeneric(generic) => {
                 self.lookup_generic(AnyGeneric::Ty(generic)).unwrap_ty()
             }
-            SpannedTyView::SigProject(projection) => {
-                let SpannedTyProjectionView {
-                    target,
-                    spec,
-                    assoc_span,
-                    assoc,
-                } = self.fold_preserved(projection).view(tcx);
+            SpannedTyView::SigProject(TyProjection {
+                target,
+                spec,
+                assoc,
+            }) => {
+                let target = self.fold(target);
+                let spec = self.fold(spec);
 
                 let assoc_infer_ty = self.ccx.fresh_ty_infer(self.universe.clone());
                 let spec = {
-                    let mut args = spec.value.params.r(s).to_vec();
+                    let mut args = spec.params.r(s).to_vec();
                     args[assoc as usize] = TraitParam::Equals(TyOrRe::Ty(assoc_infer_ty));
 
                     TraitSpec {
-                        def: spec.value.def,
+                        def: spec.def,
                         params: tcx.intern_list(&args),
                     }
                 };
 
                 self.ccx
                     .wf_visitor(self.universe.clone())
-                    .with_clause_applies_to(target.value)
-                    .visit_spanned(Spanned::new_maybe_saturated(spec, assoc_span, tcx));
+                    .with_clause_applies_to(target)
+                    .visit_spanned(Spanned::new_saturated(spec, ty.own_span(), tcx));
 
                 self.ccx.oblige_ty_meets_trait_instantiated(
                     ClauseOrigin::root(ClauseOriginKind::InstantiatedProjection {
-                        span: projection.own_span(),
+                        span: ty.own_span(),
                     }),
-                    target.value,
+                    target,
                     spec,
                     self.universe.clone(),
                 );
@@ -787,13 +787,15 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
                     ));
                 }
 
+                let args = self.fold(args);
+
                 let old_env = mem::replace(
                     &mut self.env,
                     ClauseImportEnv::new(
                         tcx.intern(TyKind::SigThis),
                         vec![GenericSubst {
                             binder: def.r(s).generics,
-                            substs: args.value,
+                            substs: args,
                         }],
                     ),
                 );

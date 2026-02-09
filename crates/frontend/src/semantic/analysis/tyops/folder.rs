@@ -16,9 +16,9 @@ use crate::{
             SpannedTraitClauseView, SpannedTraitInstance, SpannedTraitInstanceView,
             SpannedTraitParam, SpannedTraitParamList, SpannedTraitParamView, SpannedTraitSpec,
             SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReList,
-            SpannedTyOrReView, SpannedTyProjection, SpannedTyProjectionView, SpannedTyView,
-            TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty,
-            TyKind, TyList, TyOrRe, TyOrReList, TyProjection,
+            SpannedTyOrReView, SpannedTyView, TraitClause, TraitClauseList, TraitInstance,
+            TraitParam, TraitParamList, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReList,
+            TyProjection,
         },
     },
 };
@@ -142,13 +142,6 @@ pub trait TyFolder<'tcx> {
 
     fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
         self.super_spanned_fallible(ty)
-    }
-
-    fn fold_ty_projection(
-        &mut self,
-        projection: SpannedTyProjection,
-    ) -> Result<TyProjection, Self::Error> {
-        self.super_spanned_fallible(projection)
     }
 
     // === Binders === //
@@ -589,12 +582,27 @@ impl TyFoldable for Ty {
                 // (dead end)
                 *me.value.r(s)
             }
-            SpannedTyView::SigProject(project) => {
-                TyKind::SigProject(folder.fold_spanned_fallible(project)?)
-            }
-            SpannedTyView::SigAlias(def, args) => {
-                TyKind::SigAlias(def, folder.fold_spanned_fallible(args)?)
-            }
+            SpannedTyView::SigProject(TyProjection {
+                target,
+                spec,
+                assoc,
+            }) => TyKind::SigProject(TyProjection {
+                target: folder.fold_spanned_fallible(Spanned::new_saturated(
+                    target,
+                    me.own_span(),
+                    tcx,
+                ))?,
+                spec: folder.fold_spanned_fallible(Spanned::new_saturated(
+                    spec,
+                    me.own_span(),
+                    tcx,
+                ))?,
+                assoc,
+            }),
+            SpannedTyView::SigAlias(def, args) => TyKind::SigAlias(
+                def,
+                folder.fold_spanned_fallible(Spanned::new_saturated(args, me.own_span(), tcx))?,
+            ),
             SpannedTyView::Reference(re, muta, pointee) => TyKind::Reference(
                 folder.fold_spanned_fallible(re)?,
                 muta,
@@ -611,33 +619,6 @@ impl TyFoldable for Ty {
         };
 
         Ok(tcx.intern(kind))
-    }
-}
-
-impl TyFoldable for TyProjection {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
-    where
-        F: ?Sized + TyFolder<'tcx>,
-    {
-        folder.fold_ty_projection(me)
-    }
-
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
-    where
-        F: ?Sized + TyFolder<'tcx>,
-    {
-        let SpannedTyProjectionView {
-            target,
-            spec,
-            assoc_span: _,
-            assoc,
-        } = me.view(folder.tcx());
-
-        Ok(TyProjection {
-            target: folder.fold_spanned_fallible(target)?,
-            spec: folder.fold_spanned_fallible(spec)?,
-            assoc,
-        })
     }
 }
 

@@ -70,8 +70,8 @@ pub enum SpannedTyView {
     SigThis,
     SigInfer,
     SigGeneric(Obj<TypeGeneric>),
-    SigProject(SpannedTyProjection),
-    SigAlias(Obj<TypeAliasItem>, SpannedTyOrReList),
+    SigProject(TyProjection),
+    SigAlias(Obj<TypeAliasItem>, TyOrReList),
     Simple(SimpleTyKind),
     Reference(SpannedRe, Mutability, SpannedTy),
     Adt(SpannedAdtInstance),
@@ -94,12 +94,8 @@ impl SpannedViewDecode<TyCtxt> for Ty {
             TyKind::SigThis => SpannedTyView::SigThis,
             TyKind::SigInfer => SpannedTyView::SigInfer,
             TyKind::SigGeneric(generic) => SpannedTyView::SigGeneric(generic),
-            TyKind::SigProject(project) => {
-                SpannedTyView::SigProject(Spanned::new_raw(project, span_info.unwrap(tcx)))
-            }
-            TyKind::SigAlias(def, args) => {
-                SpannedTyView::SigAlias(def, Spanned::new_raw(args, span_info.unwrap(tcx)))
-            }
+            TyKind::SigProject(project) => SpannedTyView::SigProject(project),
+            TyKind::SigAlias(def, args) => SpannedTyView::SigAlias(def, args),
             TyKind::Simple(kind) => SpannedTyView::Simple(kind),
             TyKind::Reference(re, muta, pointee) => {
                 let [re_span, pointee_span] = span_info.child_spans(tcx);
@@ -152,12 +148,12 @@ impl SpannedViewEncode<TyCtxt> for SpannedTyView {
                 SpannedInfo::new_terminal(own_span, tcx),
             ),
             SpannedTyView::SigProject(project) => Spanned::new_raw(
-                tcx.intern(TyKind::SigProject(project.value)),
-                project.span_info.wrap(own_span, tcx),
+                tcx.intern(TyKind::SigProject(project)),
+                SpannedInfo::new_terminal(own_span, tcx),
             ),
             SpannedTyView::SigAlias(def, args) => Spanned::new_raw(
-                tcx.intern(TyKind::SigAlias(def, args.value)),
-                args.span_info.wrap(own_span, tcx),
+                tcx.intern(TyKind::SigAlias(def, args)),
+                SpannedInfo::new_terminal(own_span, tcx),
             ),
             SpannedTyView::Simple(kind) => Spanned::new_raw(
                 tcx.intern(TyKind::Simple(kind)),
@@ -548,56 +544,6 @@ impl SpannedViewEncode<TyCtxt> for SpannedFnOwnerView {
                 self_ty.span_info.wrap(own_span, tcx),
             ),
         }
-    }
-}
-
-// === TyProjection === //
-
-pub type SpannedTyProjection = Spanned<TyProjection>;
-
-#[derive(Debug, Copy, Clone)]
-pub struct SpannedTyProjectionView {
-    pub target: SpannedTy,
-    pub spec: SpannedTraitSpec,
-    pub assoc_span: Option<Span>,
-    pub assoc: u32,
-}
-
-impl SpannedViewDecode<TyCtxt> for TyProjection {
-    type View = SpannedTyProjectionView;
-
-    fn decode(value: &Self, span_info: SpannedInfo, tcx: &TyCtxt) -> Self::View {
-        let [target_span, spec_span, assoc_span] = span_info.child_spans(tcx);
-
-        SpannedTyProjectionView {
-            target: Spanned::new_raw(value.target, target_span),
-            spec: Spanned::new_raw(value.spec, spec_span),
-            assoc_span: assoc_span.own_span(),
-            assoc: value.assoc,
-        }
-    }
-}
-
-impl SpannedViewEncode<TyCtxt> for SpannedTyProjectionView {
-    type Unspanned = TyProjection;
-
-    fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
-        Spanned::new_raw(
-            TyProjection {
-                target: self.target.value,
-                spec: self.spec.value,
-                assoc: self.assoc,
-            },
-            SpannedInfo::new_list(
-                own_span,
-                &[
-                    self.target.span_info,
-                    self.spec.span_info,
-                    SpannedInfo::new_maybe_terminal(self.assoc_span, tcx),
-                ],
-                tcx,
-            ),
-        )
     }
 }
 

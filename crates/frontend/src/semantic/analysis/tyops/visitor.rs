@@ -12,9 +12,8 @@ use crate::{
             SpannedTraitInstance, SpannedTraitInstanceView, SpannedTraitParam,
             SpannedTraitParamList, SpannedTraitParamView, SpannedTraitSpec, SpannedTraitSpecView,
             SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView,
-            SpannedTyProjection, SpannedTyProjectionView, SpannedTyView, TraitClause,
-            TraitClauseList, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty, TyList,
-            TyOrRe, TyOrReList, TyProjection,
+            SpannedTyView, TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitParamList,
+            TraitSpec, Ty, TyList, TyOrRe, TyOrReList, TyProjection,
         },
     },
 };
@@ -101,10 +100,6 @@ pub trait TyVisitor<'tcx> {
 
     fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
         self.walk_spanned_fallible(ty)
-    }
-
-    fn visit_ty_projection(&mut self, projection: SpannedTyProjection) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(projection)
     }
 
     // === Binders === //
@@ -500,7 +495,9 @@ impl TyVisitable for Ty {
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        match me.view(visitor.tcx()) {
+        let tcx = visitor.tcx();
+
+        match me.view(tcx) {
             SpannedTyView::Simple(_)
             | SpannedTyView::SigInfer
             | SpannedTyView::Error(_)
@@ -511,11 +508,21 @@ impl TyVisitable for Ty {
             | SpannedTyView::UniversalVar(_) => {
                 // (dead end)
             }
-            SpannedTyView::SigProject(project) => {
-                visitor.visit_spanned_fallible(project)?;
+            SpannedTyView::SigProject(TyProjection {
+                target,
+                spec,
+                assoc: _,
+            }) => {
+                visitor.visit_spanned_fallible(Spanned::new_saturated(
+                    target,
+                    me.own_span(),
+                    tcx,
+                ))?;
+
+                visitor.visit_spanned_fallible(Spanned::new_saturated(spec, me.own_span(), tcx))?;
             }
             SpannedTyView::SigAlias(_def, args) => {
-                visitor.visit_spanned_fallible(args)?;
+                visitor.visit_spanned_fallible(Spanned::new_saturated(args, me.own_span(), tcx))?;
             }
             SpannedTyView::Reference(re, _muta, pointee) => {
                 visitor.visit_spanned_fallible(re)?;
@@ -535,32 +542,6 @@ impl TyVisitable for Ty {
                 visitor.visit_spanned_fallible(tys)?;
             }
         }
-
-        ControlFlow::Continue(())
-    }
-}
-
-impl TyVisitable for TyProjection {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
-    where
-        V: ?Sized + TyVisitor<'tcx>,
-    {
-        visitor.visit_ty_projection(me)
-    }
-
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
-    where
-        V: ?Sized + TyVisitor<'tcx>,
-    {
-        let SpannedTyProjectionView {
-            target,
-            spec,
-            assoc_span: _,
-            assoc: _,
-        } = me.view(visitor.tcx());
-
-        visitor.visit_spanned_fallible(target)?;
-        visitor.visit_spanned_fallible(spec)?;
 
         ControlFlow::Continue(())
     }
