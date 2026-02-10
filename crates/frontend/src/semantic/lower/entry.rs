@@ -18,8 +18,8 @@ use crate::{
     semantic::{
         analysis::TyCtxt,
         lower::modules::{
-            BuilderItemId, BuilderModuleTree, FrozenVisibilityResolver, ItemCategory,
-            VisibilityResolver,
+            BuilderItemId, BuilderModuleTree, FrozenModuleResolver, FrozenVisibilityResolver,
+            ItemCategory, PathResolver, VisibilityResolver,
         },
         syntax::{
             AdtCtor, AdtCtorField, AdtCtorFieldIdx, AdtCtorOwner, AdtCtorSyntax, AdtEnumVariant,
@@ -30,7 +30,10 @@ use crate::{
         },
     },
     symbol,
-    utils::hash::FxHashMap,
+    utils::{
+        hash::FxHashMap,
+        lang::{AND_LIST_GLUE, format_list},
+    },
 };
 use hashbrown::hash_map;
 use index_vec::{IndexSlice, IndexVec};
@@ -452,6 +455,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                 regular_generic_count: LateInit::uninit(),
                 associated_types: LateInit::uninit(),
                 methods: LateInit::uninit(),
+                name_to_method: LateInit::uninit(),
             },
             s,
         );
@@ -470,7 +474,8 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
 
         // Lower members
         let mut associated_types = FxHashMap::default();
-        let mut methods = Vec::new();
+        let mut methods = Vec::<Obj<FnDef>>::new();
+        let mut name_to_method = FxHashMap::<Symbol, u32>::default();
 
         for member in &ast.body.members {
             match &member.kind {
@@ -494,10 +499,33 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                         .emit();
                 }
                 AstImplLikeMemberKind::Func(ast) => {
-                    let method = self.lower_fn_def(
+                    let method = self.lower_fn_def(ast);
+                    LateInit::init(
+                        &method.r(s).owner,
                         FuncDefOwner::TraitMethod(trait_target, methods.len() as u32),
-                        ast,
                     );
+
+                    match name_to_method.entry(method.r(s).name.text) {
+                        hash_map::Entry::Occupied(entry) => {
+                            let prev = methods[*entry.get() as usize];
+
+                            Diag::span_err(
+                                method.r(s).name.span,
+                                format_args!(
+                                    "method name `{}` used more than once",
+                                    method.r(s).name.text,
+                                ),
+                            )
+                            .child(LeafDiag::span_note(
+                                prev.r(s).name.span,
+                                "previously defined here",
+                            ))
+                            .emit();
+                        }
+                        hash_map::Entry::Vacant(entry) => {
+                            entry.insert(methods.len() as u32);
+                        }
+                    }
 
                     methods.push(method);
                 }
@@ -518,8 +546,8 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         );
 
         LateInit::init(&trait_target.r(s).associated_types, associated_types);
-
         LateInit::init(&trait_target.r(s).methods, methods);
+        LateInit::init(&trait_target.r(s).name_to_method, name_to_method);
 
         self.queue_task(move |cx| {
             cx.lower_trait(trait_target, ast.inherits.as_ref(), generic_clause_lists);
@@ -836,19 +864,20 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
 
         LateInit::init(&self.target.r(s).kind, ItemKind::Impl(target_impl));
 
-        let mut member_defs = Vec::new();
+        let mut method_defs = Vec::new();
 
         for member in &ast.body.members {
             let AstImplLikeMemberKind::Func(def) = &member.kind else {
                 continue;
             };
 
-            member_defs.push(self.lower_fn_def(FuncDefOwner::ImplMethod(target_impl, 0), def));
+            // Keep `owner` uninit until later.
+            method_defs.push(self.lower_fn_def(def));
         }
 
         self.queue_lower_item_attributes(&ast.base.outer_attrs);
         self.queue_task(move |cx| {
-            cx.lower_impl(target_impl, ast, generic_clause_lists, member_defs)
+            cx.lower_impl(target_impl, ast, generic_clause_lists, method_defs)
         });
     }
 
@@ -865,15 +894,14 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
             s,
         );
 
-        LateInit::init(
-            &target_def.r(s).def,
-            self.lower_fn_def(FuncDefOwner::Func(target_def), &ast.def),
-        );
+        let def = self.lower_fn_def(&ast.def);
+        LateInit::init(&def.r(s).owner, FuncDefOwner::Func(target_def));
+        LateInit::init(&target_def.r(s).def, def);
 
         LateInit::init(&self.target.r(s).kind, ItemKind::Func(target_def));
     }
 
-    pub fn lower_fn_def(&mut self, owner: FuncDefOwner, ast: &'ast AstFnDef) -> Obj<FnDef> {
+    pub fn lower_fn_def(&mut self, ast: &'ast AstFnDef) -> Obj<FnDef> {
         let s = &self.tcx.session;
         let mut generics = GenericBinder::default();
         let mut generic_clause_lists = Vec::new();
@@ -885,7 +913,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let def = Obj::new(
             FnDef {
                 span: ast.span,
-                owner: LateInit::new(owner),
+                owner: LateInit::uninit(),
                 name: ast.name,
                 generics: self.tcx.seal_generic_binder(generics),
                 self_param: LateInit::uninit(),
@@ -989,7 +1017,7 @@ impl IntraItemLowerCtxt<'_> {
         item: Obj<ImplItem>,
         ast: &AstItemImpl,
         generic_clause_lists: Vec<Option<&AstTraitClauseList>>,
-        member_defs: Vec<Obj<FnDef>>,
+        method_defs: Vec<Obj<FnDef>>,
     ) {
         let s = &self.tcx.session;
 
@@ -1070,11 +1098,94 @@ impl IntraItemLowerCtxt<'_> {
         LateInit::init(&item.r(s).trait_, for_trait);
 
         // Establish a method order.
-        if let Some(for_trait) = for_trait {
-            // TODO: Check method
+        let method_defs = if let Some(for_trait) = for_trait {
+            let for_trait = for_trait.value.def;
+            let mut new_method_defs = (0..for_trait.r(s).methods.len())
+                .map(|_| None::<Obj<FnDef>>)
+                .collect::<Vec<_>>();
+
+            for method in method_defs {
+                let Some(&idx) = for_trait.r(s).name_to_method.get(&method.r(s).name.text) else {
+                    Diag::span_err(
+                        method.r(s).name.span,
+                        format_args!(
+                            "trait `{}` does not have method `{}`",
+                            FrozenModuleResolver(s).path(for_trait.r(s).item),
+                            method.r(s).name.text
+                        ),
+                    )
+                    .emit();
+
+                    continue;
+                };
+
+                let idx = idx as usize;
+
+                if let Some(prev) = new_method_defs[idx] {
+                    Diag::span_err(
+                        method.r(s).name.span,
+                        format_args!(
+                            "implementation of method `{}` provided more than once",
+                            prev.r(s).name.text,
+                        ),
+                    )
+                    .child(LeafDiag::span_note(
+                        prev.r(s).name.span,
+                        "previously implemented here",
+                    ))
+                    .emit();
+
+                    continue;
+                }
+
+                new_method_defs[idx] = Some(method);
+            }
+
+            let mut missing_names = Vec::new();
+
+            for (base, def) in for_trait.r(s).methods.iter().zip(&new_method_defs) {
+                if def.is_some() {
+                    continue;
+                }
+
+                if base.r(s).body.is_some() {
+                    continue;
+                }
+
+                missing_names.push(base.r(s).name.text);
+            }
+
+            if !missing_names.is_empty() {
+                Diag::span_err(
+                    ast.first_ty.span,
+                    format_args!(
+                        "missing definition{} for required method{} {}",
+                        if missing_names.len() == 1 { "" } else { "s" },
+                        if missing_names.len() == 1 { "" } else { "s" },
+                        format_list(
+                            missing_names.iter().map(|v| format!("`{v}`")),
+                            AND_LIST_GLUE
+                        ),
+                    ),
+                )
+                .emit();
+            }
+
+            new_method_defs
         } else {
-            LateInit::init(&item.r(s).methods, member_defs);
+            // Just use the user-defined order.
+            method_defs.into_iter().map(Some).collect::<Vec<_>>()
+        };
+
+        for (i, method) in method_defs.iter().enumerate() {
+            let Some(method) = method else {
+                continue;
+            };
+
+            LateInit::init(&method.r(s).owner, FuncDefOwner::ImplMethod(item, i as u32));
         }
+
+        LateInit::init(&item.r(s).methods, method_defs);
     }
 
     pub fn lower_adt(

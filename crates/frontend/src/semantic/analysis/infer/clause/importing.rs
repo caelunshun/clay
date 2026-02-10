@@ -601,7 +601,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 self_ty: _,
                 block,
                 method_idx,
-            } => block.r(s).methods[method_idx as usize],
+            } => block.r(s).methods[method_idx as usize].unwrap(),
         };
 
         if let Some(early_args) = early_args {

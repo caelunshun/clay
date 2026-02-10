@@ -77,6 +77,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
             regular_generic_count: _,
             associated_types: _,
             methods,
+            name_to_method: _,
         } = def.r(s);
 
         // Setup a `ClauseCx` with our environment in mind.
@@ -177,10 +178,13 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         self.visit_generic_binder(&mut ccx, env.as_ref(), *generics);
 
         // Finally, let's check method signatures and bodies.
-        // TODO
-        // for method in methods.iter() {
-        //     self.visit_fn_def(*method)?;
-        // }
+        for method in methods.iter() {
+            let Some(method) = method else {
+                continue;
+            };
+
+            self.visit_fn_def(*method);
+        }
 
         ccx.verify();
     }

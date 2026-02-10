@@ -51,6 +51,8 @@ impl CoherenceMap {
                 }
                 None => {
                     for &method in &**item.r(s).methods {
+                        let method = method.unwrap();
+
                         self.by_shape.insert(
                             TyShape::Solid(SolidTyShape {
                                 kind: SolidTyShapeKind::InherentMethodImpl(method.r(s).name.text),

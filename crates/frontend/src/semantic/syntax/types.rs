@@ -211,6 +211,9 @@ pub struct TraitItem {
 
     /// The set of methods defined by this trait.
     pub methods: LateInit<Vec<Obj<FnDef>>>,
+
+    /// A map from method names to index.
+    pub name_to_method: LateInit<FxHashMap<Symbol, u32>>,
 }
 
 pub type ListOfTraitClauseList = Intern<[TraitClauseList]>;
@@ -241,7 +244,7 @@ pub struct ImplItem {
     pub generics: Obj<GenericBinder>,
     pub trait_: LateInit<Option<SpannedTraitInstance>>,
     pub target: LateInit<SpannedTy>,
-    pub methods: LateInit<Vec<Obj<FnDef>>>,
+    pub methods: LateInit<Vec<Option<Obj<FnDef>>>>,
 }
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
