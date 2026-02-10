@@ -341,7 +341,8 @@ impl IntraItemLowerCtxt<'_> {
             Diag::span_err(
                 for_trait.span,
                 format_args!(
-                    "missing associated types {}",
+                    "missing associated type{} {}",
+                    if missing_mentions.len() == 1 { "" } else { "s" },
                     format_list(
                         missing_mentions.iter().map(|v| format!("`{v}`")),
                         AND_LIST_GLUE

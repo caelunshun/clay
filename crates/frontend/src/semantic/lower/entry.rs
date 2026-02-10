@@ -1012,31 +1012,92 @@ impl IntraItemLowerCtxt<'_> {
         }
 
         // Lower source trait
-        match (&ast.first_ty, &ast.second_ty) {
+        let (for_ty, for_trait) = match (&ast.first_ty, &ast.second_ty) {
             (for_trait, Some(for_ty)) => {
                 let for_ty = self.lower_ty(for_ty);
-                let Ok(for_trait) = self.lower_trait_instance_of_impl_block(for_trait, &ast.body)
-                else {
-                    // TODO: don't early return
-                    return;
-                };
 
-                let item_spec = Obj::new(
-                    ImplItem {
-                        item,
-                        generics: binder,
-                        trait_: Some(for_trait),
-                        target: for_ty,
-                        methods: LateInit::uninit(),
-                    },
-                    s,
-                );
+                // Validate members
+                for member in &ast.body.members {
+                    if !member.vis.kind.is_omitted() {
+                        Diag::span_err(
+                            member.vis.span,
+                            "trait `impl` block members cannot have visibilities",
+                        )
+                        .emit();
+                    }
 
-                LateInit::init(&item.r(s).kind, ItemKind::Impl(item_spec));
+                    match member.kind {
+                        AstImplLikeMemberKind::TypeEquals(_, _) => {
+                            // (verified in `lower_trait_instance_of_impl_block`)
+                        }
+                        AstImplLikeMemberKind::TypeInherits(name, _) => {
+                            Diag::span_err(name.span, "all associated type parameters must be specified in an `impl` block").emit();
+                        }
+                        AstImplLikeMemberKind::Func(_) => {
+                            // (verified in method lowering)
+                        }
+                        AstImplLikeMemberKind::Error(_) => {
+                            // (trivially accepted)
+                        }
+                    }
+                }
+
+                // Lower signature
+                if let Ok(for_trait) = self.lower_trait_instance_of_impl_block(for_trait, &ast.body)
+                {
+                    (for_ty, Some(for_trait))
+                } else {
+                    (for_ty, None)
+                }
             }
             (for_ty, None) => {
-                todo!()
+                let for_ty = self.lower_ty(for_ty);
+
+                // Validate members
+                for member in &ast.body.members {
+                    match member.kind {
+                        AstImplLikeMemberKind::TypeEquals(ident, _)
+                        | AstImplLikeMemberKind::TypeInherits(ident, _) => {
+                            Diag::span_err(
+                                ident.span,
+                                "associated types cannot be specified in inherent `impl` blocks",
+                            )
+                            .emit();
+                        }
+                        AstImplLikeMemberKind::Func(_) | AstImplLikeMemberKind::Error(_) => {
+                            // (accepted)
+                        }
+                    }
+                }
+
+                (for_ty, None)
             }
+        };
+
+        let item_spec = Obj::new(
+            ImplItem {
+                item,
+                generics: binder,
+                trait_: for_trait,
+                target: for_ty,
+                methods: LateInit::uninit(),
+            },
+            s,
+        );
+
+        LateInit::init(&item.r(s).kind, ItemKind::Impl(item_spec));
+
+        // Lower methods.
+        for member in &ast.body.members {
+            let AstImplLikeMemberKind::Func(def) = &member.kind else {
+                continue;
+            };
+
+            if def.body.is_none() {
+                Diag::span_err(def.name.span, "missing method body").emit();
+            }
+
+            // TODO
         }
     }
 
