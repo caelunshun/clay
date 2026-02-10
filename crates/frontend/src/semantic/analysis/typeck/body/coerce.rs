@@ -1,10 +1,18 @@
 use crate::{
-    base::arena::{HasInterner, HasListInterner, Obj},
+    base::{
+        Diag, ErrorGuaranteed,
+        arena::{HasInterner, HasListInterner, Obj},
+        syntax::Span,
+    },
+    parse::token::Ident,
     semantic::{
-        analysis::{BodyCtxt, ClauseCx, ClauseErrorProbe, ClauseOrigin, ClauseOriginKind},
+        analysis::{
+            BodyCtxt, ClauseCx, ClauseErrorProbe, ClauseOrigin, ClauseOriginKind,
+            TyFolderInfallibleExt, UnboundVarHandlingMode,
+        },
         syntax::{
-            Crate, Divergence, Expr, HrtbUniverse, Mutability, Re, RelationMode, TraitClauseList,
-            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            Crate, Divergence, Expr, FnDef, HrtbUniverse, Mutability, Re, RelationMode,
+            TraitClauseList, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -181,6 +189,40 @@ impl BodyCtxt<'_, '_> {
                 tcx.intern(TyKind::Trait(Re::Erased, to_muta, to_clauses))
             }
         }
+    }
+
+    pub fn lookup_method(
+        &mut self,
+        receiver_span: Span,
+        receiver: Ty,
+        name: Ident,
+    ) -> Result<Obj<FnDef>, ErrorGuaranteed> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        self.ccx_mut().poll_obligations();
+
+        let receiver = self
+            .ccx()
+            .ucx()
+            .substitutor(UnboundVarHandlingMode::NormalizeToRoot)
+            .fold(receiver);
+
+        if let TyKind::InferVar(_) = receiver.r(s) {
+            return Err(
+                Diag::span_err(receiver_span, "receiver type must be known by this point").emit(),
+            );
+        }
+
+        for candidate in self
+            .ccx()
+            .coherence()
+            .gather_inherent_impl_candidates(tcx, receiver, name.text)
+        {
+            dbg!(candidate);
+        }
+
+        Err(Diag::span_err(name.span, "not yet supported").emit())
     }
 }
 

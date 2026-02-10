@@ -1,28 +1,16 @@
-pub trait Meow {
-    type Haha;
+struct Hello {}
 
-    fn nyo() {
-        let foo: () = 'a';
-    }
-
-    fn required();
+impl Hello {
+    fn meow() {}
 }
 
-impl Meow for () {
-    type Haha = ();
+struct Hi {}
 
-    fn nyo() {}
-
-    fn nyo() {}
-
-    fn required() {}
+impl Hi {
+    fn meow() {}
 }
 
-impl () {
-    type H;
-    type E = ();
-
-    pub fn nyo() {
-        let foo: () = 'a';
-    }
+fn main(foo: Hello, bar: Hi) {
+    foo.meow;
+    bar.meow;
 }

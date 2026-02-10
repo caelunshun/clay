@@ -365,7 +365,14 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 self.check_expr_demand(expr, pat_ty).and_do(&mut divergence)
             }
             ExprKind::AssignOp(ast_assign_op_kind, obj, obj1) => todo!(),
-            ExprKind::Field(obj, ident) => todo!(),
+            ExprKind::Field(receiver, name) => {
+                let receiver_ty = self.check_expr(receiver).and_do(&mut divergence);
+
+                match self.lookup_method(receiver.r(s).span, receiver_ty, name) {
+                    Ok(_) => todo!(),
+                    Err(err) => tcx.intern(TyKind::Error(err)),
+                }
+            }
             ExprKind::GenericMethodCall {
                 target,
                 method,

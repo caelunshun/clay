@@ -146,7 +146,7 @@ impl<'tcx> ClauseCx<'tcx> {
         // Otherwise, scan for a suitable `impl`.
         let mut prev_confirmation = None;
 
-        let candidates = self.coherence().gather_impl_candidates(
+        let candidates = self.coherence().gather_trait_impl_candidates(
             tcx,
             self.ucx()
                 .substitutor(UnboundVarHandlingMode::EraseToSigInfer)

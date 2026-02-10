@@ -1,13 +1,10 @@
 use crate::{
-    base::{
-        Diag,
-        arena::{HasListInterner, Obj},
-    },
+    base::{Diag, arena::Obj, syntax::Symbol},
     semantic::{
         analysis::{TyCtxt, TyShapeMap},
         syntax::{
-            Crate, FnDef, GenericBinder, HrtbBinderKind, ImplItem, Re, SolidTyShape,
-            SolidTyShapeKind, TraitClause, TraitParam, TraitSpec, Ty, TyOrRe, TyShape,
+            Crate, FnDef, GenericBinder, HrtbBinderKind, ImplItem, Re, TraitClause, TraitParam,
+            TraitSpec, Ty, TyOrRe,
         },
     },
 };
@@ -54,11 +51,10 @@ impl CoherenceMap {
                         let method = method.unwrap();
 
                         self.by_shape.insert(
-                            TyShape::Solid(SolidTyShape {
-                                kind: SolidTyShapeKind::InherentMethodImpl(method.r(s).name.text),
-                                children: tcx
-                                    .intern_list(&[tcx.erase_ty_to_shape(item.r(s).target.value)]),
-                            }),
+                            tcx.shape_of_inherent_method(
+                                item.r(s).target.value,
+                                method.r(s).name.text,
+                            ),
                             CoherenceMapEntry::InherentMethod(method),
                             s,
                         );
@@ -71,7 +67,26 @@ impl CoherenceMap {
         // TODO
     }
 
-    pub fn gather_impl_candidates<'a>(
+    pub fn gather_inherent_impl_candidates<'a>(
+        &'a self,
+        tcx: &'a TyCtxt,
+        target: Ty,
+        name: Symbol,
+    ) -> impl Iterator<Item = Obj<FnDef>> + 'a {
+        let s = &tcx.session;
+
+        self.by_shape
+            .lookup(tcx.shape_of_inherent_method(target, name), s)
+            .map(|v| {
+                let CoherenceMapEntry::InherentMethod(v) = *v else {
+                    unreachable!()
+                };
+
+                v
+            })
+    }
+
+    pub fn gather_trait_impl_candidates<'a>(
         &'a self,
         tcx: &'a TyCtxt,
         lhs: Ty,

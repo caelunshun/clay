@@ -2,6 +2,7 @@ use crate::{
     base::{
         Session,
         arena::{HasListInterner as _, Obj},
+        syntax::Symbol,
     },
     semantic::{
         analysis::TyCtxt,
@@ -38,6 +39,13 @@ impl TyCtxt {
                     )
                     .collect::<Vec<_>>()),
             ),
+        })
+    }
+
+    pub fn shape_of_inherent_method(&self, target: Ty, name: Symbol) -> TyShape {
+        TyShape::Solid(SolidTyShape {
+            kind: SolidTyShapeKind::InherentMethodImpl(name),
+            children: self.intern_list(&[self.erase_ty_to_shape(target)]),
         })
     }
 
