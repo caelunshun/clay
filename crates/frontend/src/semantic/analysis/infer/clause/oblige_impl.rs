@@ -310,7 +310,7 @@ impl<'tcx> ClauseCx<'tcx> {
         // parameters.
         let target_ty = self
             .importer(trait_env.as_ref(), universe.clone())
-            .fold_spanned(rhs.r(s).target);
+            .fold_spanned(*rhs.r(s).target);
 
         let target_trait = self
             .importer(trait_env.as_ref(), universe.clone())

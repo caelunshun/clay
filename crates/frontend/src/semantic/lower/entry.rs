@@ -7,11 +7,11 @@ use crate::{
     },
     parse::{
         ast::{
-            AstAttribute, AstBarePath, AstFnDef, AstGenericDef, AstImplLikeMemberKind, AstItem,
-            AstItemEnum, AstItemFn, AstItemImpl, AstItemModuleContents, AstItemStruct,
-            AstItemTrait, AstItemTypeAlias, AstPathPart, AstPathPartKind, AstPathPartKw,
-            AstReturnTy, AstStructKind, AstTraitClauseList, AstTreePath, AstTreePathKind, AstTy,
-            AstVisibility, AstVisibilityKind,
+            AstAttribute, AstBarePath, AstFnDef, AstImplLikeMemberKind, AstItem, AstItemEnum,
+            AstItemFn, AstItemImpl, AstItemModuleContents, AstItemStruct, AstItemTrait,
+            AstItemTypeAlias, AstPathPart, AstPathPartKind, AstPathPartKw, AstReturnTy,
+            AstStructKind, AstTraitClauseList, AstTreePath, AstTreePathKind, AstTy, AstVisibility,
+            AstVisibilityKind,
         },
         token::{Ident, Lifetime},
     },
@@ -813,10 +813,31 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
     }
 
     pub fn lower_impl(&mut self, ast: &'ast AstItemImpl) {
-        let target = self.target;
+        let tcx = self.tcx;
+        let s = &self.tcx.session;
+
+        let mut generics = GenericBinder::default();
+        let mut generic_clause_lists = Vec::new();
+
+        if let Some(ast) = &ast.generics {
+            self.lower_generic_defs(&mut generics, ast, &mut generic_clause_lists);
+        }
+
+        let target_impl = Obj::new(
+            ImplItem {
+                item: self.target,
+                generics: tcx.seal_generic_binder(generics),
+                trait_: LateInit::uninit(),
+                target: LateInit::uninit(),
+                methods: LateInit::uninit(),
+            },
+            s,
+        );
+
+        LateInit::init(&self.target.r(s).kind, ItemKind::Impl(target_impl));
 
         self.queue_lower_item_attributes(&ast.base.outer_attrs);
-        self.queue_task(move |cx| cx.lower_impl(target, ast));
+        self.queue_task(move |cx| cx.lower_impl(target_impl, ast, generic_clause_lists));
     }
 
     pub fn lower_fn_item(&mut self, ast: &'ast AstItemFn) {
@@ -951,65 +972,16 @@ impl IntraItemLowerCtxt<'_> {
         LateInit::init(&item.r(s).inherits, self.lower_clauses(inherits));
     }
 
-    pub fn lower_impl(mut self, item: Obj<Item>, ast: &AstItemImpl) {
+    pub fn lower_impl(
+        mut self,
+        item: Obj<ImplItem>,
+        ast: &AstItemImpl,
+        generic_clause_lists: Vec<Option<&AstTraitClauseList>>,
+    ) {
         let s = &self.tcx.session;
 
-        // Lower generics
-        let mut binder = GenericBinder::default();
-        let mut generic_clause_lists = Vec::new();
-
-        if let Some(generics) = &ast.generics {
-            for def in &generics.list {
-                let Some(def_kind) = def.kind.as_generic_def() else {
-                    Diag::span_err(def.span, "expected generic parameter definition").emit();
-                    continue;
-                };
-
-                match def_kind {
-                    AstGenericDef::Re(lifetime, clauses) => {
-                        binder.defs.push(AnyGeneric::Re(Obj::new(
-                            RegionGeneric {
-                                span: def.span,
-                                lifetime,
-                                binder: LateInit::uninit(),
-                                clauses: LateInit::uninit(),
-                            },
-                            s,
-                        )));
-
-                        generic_clause_lists.push(clauses);
-                    }
-                    AstGenericDef::Ty(ident, clauses) => {
-                        binder.defs.push(AnyGeneric::Ty(Obj::new(
-                            TypeGeneric {
-                                span: def.span,
-                                ident,
-                                binder: LateInit::uninit(),
-                                clauses: LateInit::uninit(),
-                            },
-                            s,
-                        )));
-
-                        generic_clause_lists.push(clauses);
-                    }
-                }
-            }
-        }
-
-        let binder = self.tcx.seal_generic_binder(binder);
-        self.define_generics_in_binder(binder);
-
-        // Lower clauses
-        for (&generic, clause_list) in binder.r(s).defs.iter().zip(generic_clause_lists) {
-            match generic {
-                AnyGeneric::Re(generic) => {
-                    LateInit::init(&generic.r(s).clauses, self.lower_clauses(clause_list));
-                }
-                AnyGeneric::Ty(generic) => {
-                    LateInit::init(&generic.r(s).clauses, self.lower_clauses(clause_list));
-                }
-            }
-        }
+        self.define_generics_in_binder(item.r(s).generics);
+        self.lower_generic_def_clauses(item.r(s).generics, &generic_clause_lists);
 
         // Lower source trait
         let (for_ty, for_trait) = match (&ast.first_ty, &ast.second_ty) {
@@ -1074,18 +1046,8 @@ impl IntraItemLowerCtxt<'_> {
             }
         };
 
-        let item_spec = Obj::new(
-            ImplItem {
-                item,
-                generics: binder,
-                trait_: for_trait,
-                target: for_ty,
-                methods: LateInit::uninit(),
-            },
-            s,
-        );
-
-        LateInit::init(&item.r(s).kind, ItemKind::Impl(item_spec));
+        LateInit::init(&item.r(s).target, for_ty);
+        LateInit::init(&item.r(s).trait_, for_trait);
 
         // Lower methods.
         for member in &ast.body.members {

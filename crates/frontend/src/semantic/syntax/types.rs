@@ -239,8 +239,8 @@ pub enum TraitParam {
 pub struct ImplItem {
     pub item: Obj<Item>,
     pub generics: Obj<GenericBinder>,
-    pub trait_: Option<SpannedTraitInstance>,
-    pub target: SpannedTy,
+    pub trait_: LateInit<Option<SpannedTraitInstance>>,
+    pub target: LateInit<SpannedTy>,
     pub methods: LateInit<Vec<Obj<FnDef>>>,
 }
 

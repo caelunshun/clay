@@ -36,7 +36,7 @@ impl CoherenceMap {
                 continue;
             };
 
-            match item.r(s).trait_ {
+            match *item.r(s).trait_ {
                 Some(trait_) => {
                     let arg_count = *trait_.value.def.r(s).regular_generic_count as usize;
                     self.by_shape.insert(
@@ -264,7 +264,7 @@ impl TyCtxt {
             def.r(s).target.value,
         );
 
-        if let Some(trait_) = def.r(s).trait_ {
+        if let Some(trait_) = *def.r(s).trait_ {
             for &param in trait_.value.params.r(s) {
                 match param {
                     TyOrRe::Re(param) => {

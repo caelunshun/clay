@@ -123,7 +123,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Let's ensure that the target trait instance is well formed. This includes trait-checking
         // regular generic parameters *and* associated types.
-        if let Some(trait_) = *trait_ {
+        if let Some(trait_) = **trait_ {
             let trait_ = ccx
                 .importer(env.as_ref(), HrtbUniverse::ROOT)
                 .fold_preserved(trait_);
@@ -168,7 +168,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         {
             let target = ccx
                 .importer(env.as_ref(), HrtbUniverse::ROOT)
-                .fold_preserved(*target);
+                .fold_preserved(**target);
 
             ccx.wf_visitor(HrtbUniverse::ROOT).visit_spanned(target);
         }
