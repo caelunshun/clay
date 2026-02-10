@@ -836,8 +836,20 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
 
         LateInit::init(&self.target.r(s).kind, ItemKind::Impl(target_impl));
 
+        let mut member_defs = Vec::new();
+
+        for member in &ast.body.members {
+            let AstImplLikeMemberKind::Func(def) = &member.kind else {
+                continue;
+            };
+
+            member_defs.push(self.lower_fn_def(FuncDefOwner::ImplMethod(target_impl, 0), def));
+        }
+
         self.queue_lower_item_attributes(&ast.base.outer_attrs);
-        self.queue_task(move |cx| cx.lower_impl(target_impl, ast, generic_clause_lists));
+        self.queue_task(move |cx| {
+            cx.lower_impl(target_impl, ast, generic_clause_lists, member_defs)
+        });
     }
 
     pub fn lower_fn_item(&mut self, ast: &'ast AstItemFn) {
@@ -873,7 +885,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let def = Obj::new(
             FnDef {
                 span: ast.span,
-                owner,
+                owner: LateInit::new(owner),
                 name: ast.name,
                 generics: self.tcx.seal_generic_binder(generics),
                 self_param: LateInit::uninit(),
@@ -977,6 +989,7 @@ impl IntraItemLowerCtxt<'_> {
         item: Obj<ImplItem>,
         ast: &AstItemImpl,
         generic_clause_lists: Vec<Option<&AstTraitClauseList>>,
+        member_defs: Vec<Obj<FnDef>>,
     ) {
         let s = &self.tcx.session;
 
@@ -998,15 +1011,17 @@ impl IntraItemLowerCtxt<'_> {
                         .emit();
                     }
 
-                    match member.kind {
+                    match &member.kind {
                         AstImplLikeMemberKind::TypeEquals(_, _) => {
                             // (verified in `lower_trait_instance_of_impl_block`)
                         }
                         AstImplLikeMemberKind::TypeInherits(name, _) => {
                             Diag::span_err(name.span, "all associated type parameters must be specified in an `impl` block").emit();
                         }
-                        AstImplLikeMemberKind::Func(_) => {
-                            // (verified in method lowering)
+                        AstImplLikeMemberKind::Func(def) => {
+                            if def.body.is_none() {
+                                Diag::span_err(def.name.span, "missing method body").emit();
+                            }
                         }
                         AstImplLikeMemberKind::Error(_) => {
                             // (trivially accepted)
@@ -1027,7 +1042,7 @@ impl IntraItemLowerCtxt<'_> {
 
                 // Validate members
                 for member in &ast.body.members {
-                    match member.kind {
+                    match &member.kind {
                         AstImplLikeMemberKind::TypeEquals(ident, _)
                         | AstImplLikeMemberKind::TypeInherits(ident, _) => {
                             Diag::span_err(
@@ -1036,7 +1051,12 @@ impl IntraItemLowerCtxt<'_> {
                             )
                             .emit();
                         }
-                        AstImplLikeMemberKind::Func(_) | AstImplLikeMemberKind::Error(_) => {
+                        AstImplLikeMemberKind::Func(def) => {
+                            if def.body.is_none() {
+                                Diag::span_err(def.name.span, "missing method body").emit();
+                            }
+                        }
+                        AstImplLikeMemberKind::Error(_) => {
                             // (accepted)
                         }
                     }
@@ -1049,17 +1069,11 @@ impl IntraItemLowerCtxt<'_> {
         LateInit::init(&item.r(s).target, for_ty);
         LateInit::init(&item.r(s).trait_, for_trait);
 
-        // Lower methods.
-        for member in &ast.body.members {
-            let AstImplLikeMemberKind::Func(def) = &member.kind else {
-                continue;
-            };
-
-            if def.body.is_none() {
-                Diag::span_err(def.name.span, "missing method body").emit();
-            }
-
-            // TODO
+        // Establish a method order.
+        if let Some(for_trait) = for_trait {
+            // TODO: Check method
+        } else {
+            LateInit::init(&item.r(s).methods, member_defs);
         }
     }
 

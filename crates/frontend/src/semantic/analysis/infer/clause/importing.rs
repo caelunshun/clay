@@ -311,7 +311,7 @@ impl<'tcx> ClauseCx<'tcx> {
         let s = self.session();
         let tcx = self.tcx();
 
-        let mut env = match def.r(s).owner {
+        let mut env = match *def.r(s).owner {
             FuncDefOwner::Func(_item) => ClauseImportEnv {
                 self_ty: tcx.intern(TyKind::SigThis),
                 sig_generic_substs: Vec::new(),

@@ -26,7 +26,7 @@ pub struct FuncItem {
 #[derive(Debug, Clone)]
 pub struct FnDef {
     pub span: Span,
-    pub owner: FuncDefOwner,
+    pub owner: LateInit<FuncDefOwner>,
     pub name: Ident,
     pub generics: Obj<GenericBinder>,
     pub self_param: LateInit<Option<SpannedTy>>,
