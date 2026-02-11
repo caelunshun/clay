@@ -8,7 +8,7 @@ use crate::{
         },
         lower::modules::{FrozenModuleResolver, ParentResolver},
         syntax::{
-            Crate, Divergence, Expr, FnDef, FnInstanceInner, FnOwner, FuncDefOwner, HrtbUniverse,
+            Divergence, Expr, FnDef, FnInstanceInner, FnOwner, FuncDefOwner, HrtbUniverse,
             Mutability, Re, RelationMode, TraitClauseList, TraitParam, TraitSpec, Ty,
             TyAndDivergence, TyKind, TyOrRe,
         },
@@ -189,38 +189,10 @@ impl BodyCtxt<'_, '_> {
         }
     }
 
-    pub fn lookup_method(&mut self, receiver: Ty, name: Ident) -> Option<Obj<FnDef>> {
+    pub fn lookup_method(&mut self, mut receiver: Ty, name: Ident) -> Option<Obj<FnDef>> {
         let s = self.session();
         let tcx = self.tcx();
-
-        self.ccx_mut().poll_obligations();
-
-        let receiver = self
-            .ccx()
-            .ucx()
-            .substitutor(UnboundVarHandlingMode::NormalizeToRoot)
-            .fold(receiver);
-
-        if let TyKind::InferVar(_) = receiver.r(s) {
-            return None;
-        }
-
-        // Obtain a list of candidates.
         let resolver = FrozenModuleResolver(s);
-
-        let inherent_candidates = self
-            .ccx()
-            .coherence()
-            .gather_inherent_impl_candidates(tcx, receiver, name.text)
-            .filter(|candidate| {
-                debug_assert!(*candidate.r(s).has_self_param);
-
-                candidate
-                    .r(s)
-                    .impl_vis
-                    .unwrap()
-                    .is_visible_to(self.item(), s)
-            });
 
         let scope_trait_candidates = resolver
             .scope_components(self.item())
@@ -237,7 +209,81 @@ impl BodyCtxt<'_, '_> {
             .filter_map(|def| {
                 let &idx = def.r(s).name_to_method.get(&name.text)?;
                 Some(def.r(s).methods[idx as usize])
+            })
+            .collect::<Vec<_>>();
+
+        loop {
+            if let Some(res) =
+                self.lookup_method_single_receiver(receiver, name, &scope_trait_candidates)
+            {
+                return Some(res);
+            }
+
+            if let Some(res) = self.lookup_method_single_receiver(
+                tcx.intern(TyKind::Reference(Re::Erased, Mutability::Not, receiver)),
+                name,
+                &scope_trait_candidates,
+            ) {
+                return Some(res);
+            }
+
+            if let Some(res) = self.lookup_method_single_receiver(
+                tcx.intern(TyKind::Reference(Re::Erased, Mutability::Mut, receiver)),
+                name,
+                &scope_trait_candidates,
+            ) {
+                return Some(res);
+            }
+
+            let Some(next) = attempt_deref(self.ccx_mut(), receiver) else {
+                break;
+            };
+
+            receiver = next;
+        }
+
+        None
+    }
+
+    fn lookup_method_single_receiver(
+        &mut self,
+        receiver: Ty,
+        name: Ident,
+        scope_trait_candidates: &[Obj<FnDef>],
+    ) -> Option<Obj<FnDef>> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        self.ccx_mut().poll_obligations();
+
+        let receiver = self
+            .ccx()
+            .ucx()
+            .substitutor(UnboundVarHandlingMode::NormalizeToRoot)
+            .fold(receiver);
+
+        if let TyKind::InferVar(_) = receiver.r(s) {
+            return None;
+        }
+
+        // Obtain a list of candidates.
+        let inherent_candidates = self
+            .ccx()
+            .coherence()
+            .gather_inherent_impl_candidates(tcx, receiver, name.text)
+            .filter(|candidate| {
+                debug_assert!(*candidate.r(s).has_self_param);
+
+                candidate
+                    .r(s)
+                    .impl_vis
+                    .unwrap()
+                    .is_visible_to(self.item(), s)
             });
+
+        // TODO: Gather candidates from universal bounds.
+
+        let scope_trait_candidates = scope_trait_candidates.iter().copied();
 
         let candidates = inherent_candidates.chain(scope_trait_candidates);
 
@@ -393,7 +439,6 @@ impl CoercionPossibility {
 
                 let deref_steps = compute_deref_glb(
                     bcx.ccx(),
-                    bcx.krate(),
                     &refs
                         .clone()
                         .map(|(_muta, pointee)| pointee)
@@ -421,18 +466,14 @@ impl CoercionPossibility {
 
 // === Deref Chains === //
 
-fn compute_deref_glb(ccx: &ClauseCx<'_>, krate: Obj<Crate>, pointees: &[Ty]) -> Vec<u32> {
-    compute_deref_glb_clobber_obligations(&mut ccx.clone(), krate, pointees)
+fn compute_deref_glb(ccx: &ClauseCx<'_>, pointees: &[Ty]) -> Vec<u32> {
+    compute_deref_glb_clobber_obligations(&mut ccx.clone(), pointees)
 }
 
-fn compute_deref_glb_clobber_obligations(
-    ccx: &mut ClauseCx<'_>,
-    krate: Obj<Crate>,
-    pointees: &[Ty],
-) -> Vec<u32> {
+fn compute_deref_glb_clobber_obligations(ccx: &mut ClauseCx<'_>, pointees: &[Ty]) -> Vec<u32> {
     let chains = pointees
         .iter()
-        .map(|&origin| compute_deref_chain_clobber_obligations(ccx, krate, origin))
+        .map(|&origin| compute_deref_chain_clobber_obligations(ccx, origin))
         .collect::<Vec<_>>();
 
     let mut chain_iters = chains.iter().map(|v| v.iter().rev()).collect::<Vec<_>>();
@@ -484,91 +525,107 @@ fn compute_deref_glb_clobber_obligations(
 
 fn compute_deref_chain_clobber_obligations(
     ccx: &mut ClauseCx<'_>,
-    krate: Obj<Crate>,
     mut curr: Ty,
 ) -> SmallVec<[Ty; 1]> {
-    let tcx = ccx.tcx();
-    let s = ccx.session();
-
     let mut accum = smallvec![curr];
 
-    loop {
-        let next_infer_var = ccx.fresh_ty_infer_var(HrtbUniverse::ROOT);
-        let next_infer = tcx.intern(TyKind::InferVar(next_infer_var));
-
-        // This probing routine works by attempting to resolve an obligation as much as possible and
-        // bailing out if an error occurs.
-        //
-        // Doing this roughly matches `rustc`'s behavior...
-        //
-        // ```
-        // use core::ops::Deref;
-        //
-        // pub struct Foo;
-        //
-        // pub struct Bar<T>([T; 0]);
-        //
-        // impl<T> Bar<T> {
-        //     fn bind(&self, _: T) {}
-        // }
-        //
-        // impl<T: Copy> Deref for Bar<T> {
-        //     type Target = Foo;
-        //
-        //     fn deref(&self) -> &Foo {
-        //         &Foo
-        //     }
-        // }
-        //
-        // // Okay!
-        // fn example_1() {
-        //     let bar = &Bar::<_>([]);
-        //     [&Foo, bar];
-        //
-        //     bar.bind(3i32);
-        // }
-        //
-        // // No coercion is performed.
-        // fn example_2() {
-        //     let bar = &Bar::<_>([]);
-        //     bar.bind(Vec::new());
-        //     [&Foo, bar];
-        // }
-        //
-        // // We complain about `Vec` not being `Copy`.
-        // fn example_3() {
-        //     let bar = &Bar::<_>([]);
-        //     [&Foo, bar];
-        //     bar.bind(Vec::new());
-        // }
-        // ```
-        let probe = ClauseErrorProbe::default();
-
-        ccx.oblige_ty_meets_trait_instantiated(
-            ClauseOrigin::never_printed().with_probe_sink(probe.clone()),
-            curr,
-            TraitSpec {
-                def: krate.r(s).deref_lang_item(s).unwrap(),
-                params: tcx.intern_list(&[TraitParam::Equals(TyOrRe::Ty(next_infer))]),
-            },
-            HrtbUniverse::ROOT,
-        );
-
-        ccx.poll_obligations();
-
-        if probe.had_error() {
-            break;
-        }
-
-        if let Ok(resolved) = ccx.lookup_ty_infer_var_after_poll(next_infer_var) {
-            curr = resolved;
-            accum.push(resolved);
-        } else {
-            break;
-        }
+    while let Some(next) = attempt_deref_clobber_obligations(ccx, curr) {
+        accum.push(next);
+        curr = next;
     }
 
     accum
+}
+
+fn attempt_deref(ccx: &mut ClauseCx<'_>, curr: Ty) -> Option<Ty> {
+    let mut fork = ccx.clone();
+
+    let res = attempt_deref_clobber_obligations(&mut fork, curr);
+
+    if res.is_some() {
+        *ccx = fork;
+    }
+
+    res
+}
+
+fn attempt_deref_clobber_obligations(ccx: &mut ClauseCx<'_>, curr: Ty) -> Option<Ty> {
+    let s = ccx.session();
+    let tcx = ccx.tcx();
+    let krate = ccx.krate();
+
+    let next_infer_var = ccx.fresh_ty_infer_var(HrtbUniverse::ROOT);
+    let next_infer = tcx.intern(TyKind::InferVar(next_infer_var));
+
+    // This probing routine works by attempting to resolve an obligation as much as possible and
+    // bailing out if an error occurs.
+    //
+    // Doing this roughly matches `rustc`'s behavior...
+    //
+    // ```
+    // use core::ops::Deref;
+    //
+    // pub struct Foo;
+    //
+    // pub struct Bar<T>([T; 0]);
+    //
+    // impl<T> Bar<T> {
+    //     fn bind(&self, _: T) {}
+    // }
+    //
+    // impl<T: Copy> Deref for Bar<T> {
+    //     type Target = Foo;
+    //
+    //     fn deref(&self) -> &Foo {
+    //         &Foo
+    //     }
+    // }
+    //
+    // // Okay!
+    // fn example_1() {
+    //     let bar = &Bar::<_>([]);
+    //     [&Foo, bar];
+    //
+    //     bar.bind(3i32);
+    // }
+    //
+    // // No coercion is performed.
+    // fn example_2() {
+    //     let bar = &Bar::<_>([]);
+    //     bar.bind(Vec::new());
+    //     [&Foo, bar];
+    // }
+    //
+    // // We complain about `Vec` not being `Copy`.
+    // fn example_3() {
+    //     let bar = &Bar::<_>([]);
+    //     [&Foo, bar];
+    //     bar.bind(Vec::new());
+    // }
+    // ```
+    let probe = ClauseErrorProbe::default();
+
+    ccx.oblige_ty_meets_trait_instantiated(
+        ClauseOrigin::never_printed().with_probe_sink(probe.clone()),
+        curr,
+        TraitSpec {
+            def: krate.r(s).deref_lang_item(s).unwrap(),
+            params: tcx.intern_list(&[TraitParam::Equals(TyOrRe::Ty(next_infer))]),
+        },
+        HrtbUniverse::ROOT,
+    );
+
+    ccx.poll_obligations();
+
+    if probe.had_error() {
+        return None;
+    }
+
+    let Ok(resolved) = ccx.lookup_ty_infer_var_after_poll(next_infer_var) else {
+        return None;
+    };
+
+    Some(resolved)
 }
 
 #[derive(Debug, Clone)]

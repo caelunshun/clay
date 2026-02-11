@@ -1,45 +1,28 @@
-struct Hello {}
-
-struct Hi {}
-
-mod funky {
-    use super::*;
-
-    impl Hello {
-        pub fn meow<'a: &shorter Self>(me: &'a Self) {}
+pub mod std {
+    #[lang("deref_trait")]
+    pub trait Deref {
+        type Target;
     }
 
-    impl Hi {
-        pub fn meow<'a: &shorter Self>(me: &'a Self) {}
-
-        pub fn meow(me: Self) {}
+    impl<'a, T: &longer 'a> Deref for &'a T {
+        type Target = T;
     }
 
-    pub trait Haha<T> {
-        type Assoc;
-
-        fn me<'a: &shorter Self>(me: &'a Self);
-    }
-
-    impl<T> Haha<T> for Hi {
-        type Assoc = ();
-
-        fn me<'a: &shorter Self>(me: &'a Self, value: T) {}
+    impl<'a, T: &longer 'a> Deref for &'a mut T {
+        type Target = T;
     }
 }
 
-use funky::Haha;
+pub struct Vec<T> {
+    
+}
 
-fn main(foo: Hello, bar: Hi) {
-    (&foo).meow;
-    (&bar).meow;
-    (bar).meow;
-    (&foo).me;
-    (&bar).me;
+impl<T> Vec<T> {
+    pub fn push(me: &mut Self) {
 
-    fn meow(foo: Hey) {
-        kslfkj
     }
+}
 
-    type Hey = Hello;
+fn main<'a>(mut v: &'a &'a &'a Vec<()>) {
+    v.push;
 }
