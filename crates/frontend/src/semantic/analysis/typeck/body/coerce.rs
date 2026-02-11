@@ -11,8 +11,9 @@ use crate::{
             TyFolderInfallibleExt, UnboundVarHandlingMode,
         },
         syntax::{
-            Crate, Divergence, Expr, FnDef, HrtbUniverse, Mutability, Re, RelationMode,
-            TraitClauseList, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            Crate, Divergence, Expr, FnDef, FnInstanceInner, FnOwner, FuncDefOwner, HrtbUniverse,
+            Mutability, Re, RelationMode, TraitClauseList, TraitParam, TraitSpec, Ty,
+            TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -219,7 +220,22 @@ impl BodyCtxt<'_, '_> {
             .coherence()
             .gather_inherent_impl_candidates(tcx, receiver, name.text)
         {
-            dbg!(candidate);
+            // Check visibility
+            if !candidate
+                .r(s)
+                .impl_vis
+                .unwrap()
+                .is_visible_to(self.scope(), s)
+            {
+                continue;
+            }
+
+            let FuncDefOwner::ImplMethod(block, method_idx) = *candidate.r(s).owner else {
+                continue;
+            };
+
+            // See whether receiver is applicable.
+            dbg!(candidate.r(s).span);
         }
 
         Err(Diag::span_err(name.span, "not yet supported").emit())

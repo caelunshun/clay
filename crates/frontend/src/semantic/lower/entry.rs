@@ -499,7 +499,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                         .emit();
                 }
                 AstImplLikeMemberKind::Func(ast) => {
-                    let method = self.lower_fn_def(ast);
+                    let method = self.lower_fn_def(None, ast);
                     LateInit::init(
                         &method.r(s).owner,
                         FuncDefOwner::TraitMethod(trait_target, methods.len() as u32),
@@ -872,7 +872,8 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
             };
 
             // Keep `owner` uninit until later.
-            method_defs.push(self.lower_fn_def(def));
+            let impl_vis = self.resolve_visibility(&member.vis);
+            method_defs.push(self.lower_fn_def(Some(impl_vis), def));
         }
 
         self.queue_lower_item_attributes(&ast.base.outer_attrs);
@@ -894,14 +895,18 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
             s,
         );
 
-        let def = self.lower_fn_def(&ast.def);
+        let def = self.lower_fn_def(None, &ast.def);
         LateInit::init(&def.r(s).owner, FuncDefOwner::Func(target_def));
         LateInit::init(&target_def.r(s).def, def);
 
         LateInit::init(&self.target.r(s).kind, ItemKind::Func(target_def));
     }
 
-    pub fn lower_fn_def(&mut self, ast: &'ast AstFnDef) -> Obj<FnDef> {
+    pub fn lower_fn_def(
+        &mut self,
+        impl_vis: Option<Visibility>,
+        ast: &'ast AstFnDef,
+    ) -> Obj<FnDef> {
         let s = &self.tcx.session;
         let mut generics = GenericBinder::default();
         let mut generic_clause_lists = Vec::new();
@@ -915,6 +920,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                 span: ast.span,
                 owner: LateInit::uninit(),
                 name: ast.name,
+                impl_vis,
                 generics: self.tcx.seal_generic_binder(generics),
                 self_param: LateInit::uninit(),
                 args: LateInit::uninit(),

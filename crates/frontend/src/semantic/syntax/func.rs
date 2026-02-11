@@ -11,6 +11,7 @@ use crate::{
     semantic::syntax::{
         AdtCtorFieldIdx, AdtCtorInstance, GenericBinder, ImplItem, Item, Mutability,
         SpannedTraitInstance, SpannedTy, SpannedTyOrRe, SpannedTyOrReList, TraitItem, Ty,
+        Visibility,
     },
 };
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
@@ -28,6 +29,7 @@ pub struct FnDef {
     pub span: Span,
     pub owner: LateInit<FuncDefOwner>,
     pub name: Ident,
+    pub impl_vis: Option<Visibility>,
     pub generics: Obj<GenericBinder>,
     pub self_param: LateInit<Option<SpannedTy>>,
     pub args: LateInit<Obj<[FuncArg]>>,
@@ -40,6 +42,16 @@ pub enum FuncDefOwner {
     Func(Obj<FuncItem>),
     TraitMethod(Obj<TraitItem>, u32),
     ImplMethod(Obj<ImplItem>, u32),
+}
+
+impl FuncDefOwner {
+    pub fn as_item(self, s: &Session) -> Obj<Item> {
+        match self {
+            FuncDefOwner::Func(def) => def.r(s).item,
+            FuncDefOwner::TraitMethod(def, _) => def.r(s).item,
+            FuncDefOwner::ImplMethod(def, _) => def.r(s).item,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

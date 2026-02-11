@@ -11,9 +11,10 @@ use crate::{
             ClauseCx, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind, CrateTypeckVisitor,
             TyCtxt, TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
         },
+        lower::modules::{FrozenModuleResolver, ParentResolver},
         syntax::{
             Block, Crate, Divergence, Expr, ExprKind, FnDef, FuncLocal, HrtbUniverse, InferTyVar,
-            Pat, PatKind, Re, RelationMode, SimpleTyKind, SpannedFnInstanceView,
+            Item, Pat, PatKind, Re, RelationMode, SimpleTyKind, SpannedFnInstanceView,
             SpannedFnOwnerView, SpannedTy, SpannedTyView, Stmt, StructExpr, TraitParam, TraitSpec,
             Ty, TyAndDivergence, TyKind, TyOrRe,
         },
@@ -58,9 +59,10 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         if let Some(body) = *def.r(s).body {
             let mut ccx_body =
                 ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionBlind);
+
             let env_body = ccx_body.import_fn_def_env_as_universal(def, HrtbUniverse::ROOT_REF);
 
-            let mut bcx = BodyCtxt::new(&mut ccx_body, env_body.as_ref());
+            let mut bcx = BodyCtxt::new(&mut ccx_body, def, env_body.as_ref());
 
             for arg in def.r(s).args.r(s) {
                 bcx.check_pat_and_ascription(arg.pat, Some(arg.ty));
@@ -79,6 +81,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
 pub struct BodyCtxt<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
+    def: Obj<FnDef>,
     import_env: ClauseImportEnvRef<'a>,
     local_types: FxHashMap<Obj<FuncLocal>, Ty>,
     needs_infer: Vec<NeedsInfer>,
@@ -91,9 +94,14 @@ struct NeedsInfer {
 }
 
 impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
-    pub fn new(ccx: &'a mut ClauseCx<'tcx>, import_env: ClauseImportEnvRef<'a>) -> Self {
+    pub fn new(
+        ccx: &'a mut ClauseCx<'tcx>,
+        def: Obj<FnDef>,
+        import_env: ClauseImportEnvRef<'a>,
+    ) -> Self {
         Self {
             ccx,
+            def,
             import_env,
             local_types: FxHashMap::default(),
             needs_infer: Vec::new(),
@@ -110,6 +118,16 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
     pub fn krate(&self) -> Obj<Crate> {
         self.ccx().krate()
+    }
+
+    pub fn item(&self) -> Obj<Item> {
+        let s = self.session();
+        self.def.r(s).owner.as_item(s)
+    }
+
+    pub fn scope(&self) -> Obj<Item> {
+        let s = self.session();
+        FrozenModuleResolver(s).scope_root(self.item())
     }
 
     pub fn ccx(&self) -> &ClauseCx<'tcx> {

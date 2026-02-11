@@ -1,13 +1,17 @@
 struct Hello {}
 
-impl Hello {
-    fn meow() {}
-}
-
 struct Hi {}
 
-impl Hi {
-    fn meow() {}
+mod funky {
+    use super::*;
+
+    impl Hello {
+        pub fn meow() {}
+    }
+
+    impl Hi {
+        fn meow() {}
+    }
 }
 
 fn main(foo: Hello, bar: Hi) {
