@@ -32,7 +32,9 @@ fn main(foo: Hello, bar: Hi) {
     (bar).meow;
     (&bar).hi;
 
-    fn meow(foo: Hello) {
+    fn meow(foo: Hey) {
         kslfkj
     }
+
+    type Hey = Hello;
 }

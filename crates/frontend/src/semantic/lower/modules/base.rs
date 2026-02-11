@@ -7,6 +7,7 @@ use crate::{
     symbol,
     utils::{hash::FxHashSet, mem::Handle},
 };
+use smallvec::SmallVec;
 use std::fmt;
 
 // === ItemCategory === //
@@ -29,7 +30,6 @@ impl ItemCategoryUse {
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum ItemCategory {
     Module,
-    Scope,
     Impl,
     Trait,
     Struct,
@@ -42,7 +42,7 @@ pub enum ItemCategory {
 impl ItemCategory {
     pub fn bare_what(self) -> Symbol {
         match self {
-            ItemCategory::Module | ItemCategory::Scope => symbol!("module"),
+            ItemCategory::Module => symbol!("module"),
             ItemCategory::Impl => symbol!("impl"),
             ItemCategory::Trait => symbol!("trait"),
             ItemCategory::Struct => symbol!("struct"),
@@ -55,7 +55,7 @@ impl ItemCategory {
 
     pub fn a_what(self) -> Symbol {
         match self {
-            ItemCategory::Module | ItemCategory::Scope => symbol!("a module"),
+            ItemCategory::Module => symbol!("a module"),
             ItemCategory::Impl => symbol!("an impl"),
             ItemCategory::Trait => symbol!("a trait"),
             ItemCategory::Struct => symbol!("a struct"),
@@ -69,7 +69,7 @@ impl ItemCategory {
     pub fn is_valid_for_use(self, for_use: ItemCategoryUse) -> bool {
         match for_use {
             ItemCategoryUse::VisibilityTarget => match self {
-                ItemCategory::Module | ItemCategory::Scope => true,
+                ItemCategory::Module => true,
                 ItemCategory::Impl
                 | ItemCategory::Trait
                 | ItemCategory::Struct
@@ -79,7 +79,7 @@ impl ItemCategory {
                 | ItemCategory::TypeAlias => false,
             },
             ItemCategoryUse::GlobUseTarget => match self {
-                ItemCategory::Module | ItemCategory::Scope | ItemCategory::Enum => true,
+                ItemCategory::Module | ItemCategory::Enum => true,
                 ItemCategory::Impl
                 | ItemCategory::Trait
                 | ItemCategory::Struct
@@ -92,7 +92,7 @@ impl ItemCategory {
 
     pub fn is_valid_for_special(self) -> bool {
         match self {
-            ItemCategory::Module | ItemCategory::Scope => true,
+            ItemCategory::Module => true,
             ItemCategory::Impl
             | ItemCategory::Trait
             | ItemCategory::Struct
@@ -100,6 +100,19 @@ impl ItemCategory {
             | ItemCategory::EnumVariant
             | ItemCategory::Func
             | ItemCategory::TypeAlias => false,
+        }
+    }
+
+    pub fn looks_up_parent(self) -> bool {
+        match self {
+            ItemCategory::Module => false,
+            ItemCategory::Impl
+            | ItemCategory::Trait
+            | ItemCategory::Struct
+            | ItemCategory::Enum
+            | ItemCategory::EnumVariant
+            | ItemCategory::Func
+            | ItemCategory::TypeAlias => true,
         }
     }
 }
@@ -223,7 +236,7 @@ pub trait ParentResolver {
 
     fn categorize(&self, def: Self::Item) -> ItemCategory;
 
-    fn parent(&self, def: Self::Item) -> Option<Self::Item>;
+    fn direct_parent(&self, def: Self::Item) -> Option<Self::Item>;
 
     fn is_descendant(&self, mut descendant: Self::Item, ancestor: Self::Item) -> bool {
         loop {
@@ -231,12 +244,53 @@ pub trait ParentResolver {
                 return true;
             }
 
-            let Some(parent) = self.parent(descendant) else {
+            let Some(parent) = self.direct_parent(descendant) else {
                 return false;
             };
 
             descendant = parent;
         }
+    }
+
+    fn module_root(&self, mut def: Self::Item) -> Self::Item {
+        loop {
+            if !self.categorize(def).looks_up_parent() {
+                break;
+            }
+
+            let Some(parent) = self.direct_parent(def) else {
+                break;
+            };
+
+            def = parent;
+        }
+
+        def
+    }
+
+    fn module_parent(&self, def: Self::Item) -> Option<Self::Item> {
+        let def = self.module_root(def);
+        self.direct_parent(def)
+    }
+
+    fn parent_scopes(&self, mut def: Self::Item) -> SmallVec<[Self::Item; 2]> {
+        let mut collector = SmallVec::new();
+
+        loop {
+            collector.push(def);
+
+            if !self.categorize(def).looks_up_parent() {
+                break;
+            }
+
+            let Some(parent) = self.direct_parent(def) else {
+                break;
+            };
+
+            def = parent;
+        }
+
+        collector
     }
 }
 
@@ -268,6 +322,25 @@ pub trait PathResolver: ParentResolver {
         finger: Self::Item,
         part: AstPathPart,
     ) -> Result<Self::Item, StepResolveError<Self::Item>> {
+        // If we're in the visibility root, allow the first component to be
+        if vis_ctxt == finger {
+            for finger in self.parent_scopes(finger) {
+                match resolve_step_inner(
+                    self,
+                    local_crate_root,
+                    vis_ctxt,
+                    finger,
+                    part,
+                    &mut FxHashSet::default(),
+                ) {
+                    Err(StepResolveError::NotFound) => {}
+                    res @ (Ok(_) | Err(_)) => return res,
+                }
+            }
+
+            return Err(StepResolveError::NotFound);
+        }
+
         resolve_step_inner(
             self,
             local_crate_root,
@@ -390,7 +463,7 @@ where
                     return Ok(local_crate_root);
                 }
                 AstPathPartKw::Super => {
-                    let Some(parent) = resolver.parent(finger) else {
+                    let Some(parent) = resolver.direct_parent(finger) else {
                         return Err(StepResolveError::CannotSuperInRoot);
                     };
 

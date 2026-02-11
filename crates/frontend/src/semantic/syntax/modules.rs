@@ -32,7 +32,7 @@ pub struct Item {
     #[derive_where(skip)]
     pub krate: Obj<Crate>,
     #[derive_where(skip)]
-    pub parent: Option<Obj<Item>>,
+    pub direct_parent: Option<Obj<Item>>,
     pub category: ItemCategory,
     pub name: Option<Ident>,
     pub path: Symbol,

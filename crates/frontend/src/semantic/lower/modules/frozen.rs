@@ -27,8 +27,8 @@ impl ParentResolver for FrozenVisibilityResolver<'_> {
         def.r(self.0).category
     }
 
-    fn parent(&self, def: Self::Item) -> Option<Self::Item> {
-        def.r(self.0).parent
+    fn direct_parent(&self, def: Self::Item) -> Option<Self::Item> {
+        def.r(self.0).direct_parent
     }
 }
 
@@ -81,8 +81,8 @@ impl ParentResolver for FrozenModuleResolver<'_> {
         def.r(self.0).category
     }
 
-    fn parent(&self, def: Self::Item) -> Option<Self::Item> {
-        def.r(self.0).parent
+    fn direct_parent(&self, def: Self::Item) -> Option<Self::Item> {
+        def.r(self.0).direct_parent
     }
 }
 
