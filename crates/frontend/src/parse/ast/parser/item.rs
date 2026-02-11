@@ -72,7 +72,7 @@ pub fn parse_mod_contents(p: P) -> AstItemModuleContents {
     AstItemModuleContents { inner_attrs, items }
 }
 
-fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
+pub fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
     let start = p.next_span();
 
     let vis = parse_visibility(p);

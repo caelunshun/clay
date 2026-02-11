@@ -14,10 +14,25 @@ mod funky {
 
         pub fn meow(me: Self) {}
     }
+
+    pub trait Haha {
+        fn me<'a: &shorter Self>(me: &'a Self);
+    }
+
+    impl Haha for Hi {
+        fn me<'a: &shorter Self>(me: &'a Self) {}
+    }
 }
+
+use funky::Haha;
 
 fn main(foo: Hello, bar: Hi) {
     (&foo).meow;
     (&bar).meow;
     (bar).meow;
+    (&bar).hi;
+
+    fn meow(foo: Hello) {
+        kslfkj
+    }
 }

@@ -1,10 +1,6 @@
 use crate::{
-    base::{
-        Diag, ErrorGuaranteed,
-        arena::{HasInterner, HasListInterner, Obj},
-        syntax::Span,
-    },
-    parse::{ast::entry::C, token::Ident},
+    base::arena::{HasInterner, HasListInterner, Obj},
+    parse::token::Ident,
     semantic::{
         analysis::{
             BodyCtxt, ClauseCx, ClauseErrorProbe, ClauseOrigin, ClauseOriginKind,
@@ -192,12 +188,7 @@ impl BodyCtxt<'_, '_> {
         }
     }
 
-    pub fn lookup_method(
-        &mut self,
-        receiver_span: Span,
-        receiver: Ty,
-        name: Ident,
-    ) -> Result<Obj<FnDef>, ErrorGuaranteed> {
+    pub fn lookup_method(&mut self, receiver: Ty, name: Ident) -> Option<Obj<FnDef>> {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -210,11 +201,10 @@ impl BodyCtxt<'_, '_> {
             .fold(receiver);
 
         if let TyKind::InferVar(_) = receiver.r(s) {
-            return Err(
-                Diag::span_err(receiver_span, "receiver type must be known by this point").emit(),
-            );
+            return None;
         }
 
+        // Scan for inherent `impl` candidates.
         for candidate in self
             .ccx()
             .coherence()
@@ -263,10 +253,13 @@ impl BodyCtxt<'_, '_> {
                 continue;
             }
 
-            dbg!(candidate.r(s).span);
+            return Some(candidate);
         }
 
-        Err(Diag::span_err(name.span, "not yet supported").emit())
+        // Scan for trait candidates.
+        // TODO
+
+        None
     }
 }
 

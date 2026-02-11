@@ -10,8 +10,8 @@ use crate::{
             AstAttribute, AstBarePath, AstFnDef, AstImplLikeMemberKind, AstItem, AstItemEnum,
             AstItemFn, AstItemImpl, AstItemModuleContents, AstItemStruct, AstItemTrait,
             AstItemTypeAlias, AstPathPart, AstPathPartKind, AstPathPartKw, AstReturnTy,
-            AstStructKind, AstTraitClauseList, AstTreePath, AstTreePathKind, AstTy, AstVisibility,
-            AstVisibilityKind,
+            AstStmtKind, AstStructKind, AstTraitClauseList, AstTreePath, AstTreePathKind, AstTy,
+            AstVisibility, AstVisibilityKind,
         },
         token::{Ident, Lifetime},
     },
@@ -53,7 +53,7 @@ impl TyCtxt {
             inter_tasks: Vec::new(),
         };
 
-        ctxt.lower_initial_tree(BuilderItemId::ROOT, ast);
+        ctxt.lower_module(BuilderItemId::ROOT, ast);
 
         let krate = Obj::new(
             Crate {
@@ -156,131 +156,141 @@ impl<'ast> UseLowerCtxt<'ast> {
         });
     }
 
-    pub fn lower_initial_tree(
-        &mut self,
-        parent_id: BuilderItemId,
-        ast: &'ast AstItemModuleContents,
-    ) {
+    pub fn lower_module(&mut self, parent_id: BuilderItemId, ast: &'ast AstItemModuleContents) {
         for item in &ast.items {
-            match item {
-                AstItem::Mod(item) => {
-                    let item_id = self.tree.push_named_item(
-                        parent_id,
-                        item.base.vis.clone(),
-                        ItemCategory::Module,
-                        item.name,
-                    );
+            self.lower_item(parent_id, item);
+        }
+    }
 
-                    self.queue_task(item_id, item_id, |cx| {
-                        cx.lower_module(
-                            item.contents.as_ref().unwrap(),
-                            Some(&item.base.outer_attrs),
-                        )
-                    });
+    pub fn lower_item(&mut self, parent_id: BuilderItemId, ast: &'ast AstItem) {
+        match ast {
+            AstItem::Mod(item) => {
+                let item_id = self.tree.push_named_item(
+                    parent_id,
+                    item.base.vis.clone(),
+                    ItemCategory::Module,
+                    item.name,
+                );
 
-                    self.lower_initial_tree(item_id, item.contents.as_ref().unwrap());
-                }
-                AstItem::Use(item) => {
-                    let mut prefix = Vec::new();
+                self.queue_task(item_id, item_id, |cx| {
+                    cx.lower_module(
+                        item.contents.as_ref().unwrap(),
+                        Some(&item.base.outer_attrs),
+                    )
+                });
 
-                    self.lower_use(parent_id, &item.base.vis, &mut prefix, &item.path);
-                }
-                AstItem::Trait(item) => {
-                    let item_id = self.tree.push_named_item(
-                        parent_id,
-                        item.base.vis.clone(),
-                        ItemCategory::Trait,
-                        item.name,
-                    );
+                self.lower_module(item_id, item.contents.as_ref().unwrap());
+            }
+            AstItem::Use(item) => {
+                let mut prefix = Vec::new();
 
-                    self.queue_task(parent_id, item_id, |cx| {
-                        cx.lower_trait(item);
-                    });
-                }
-                AstItem::Impl(item) => {
-                    if !item.base.vis.kind.is_omitted() {
-                        Diag::span_err(
-                            item.base.vis.span,
-                            "`impl` blocks cannot have visibilities",
-                        )
+                self.lower_use(parent_id, &item.base.vis, &mut prefix, &item.path);
+            }
+            AstItem::Trait(item) => {
+                let item_id = self.tree.push_named_item(
+                    parent_id,
+                    item.base.vis.clone(),
+                    ItemCategory::Trait,
+                    item.name,
+                );
+
+                self.queue_task(parent_id, item_id, |cx| {
+                    cx.lower_trait(item);
+                });
+            }
+            AstItem::Impl(item) => {
+                if !item.base.vis.kind.is_omitted() {
+                    Diag::span_err(item.base.vis.span, "`impl` blocks cannot have visibilities")
                         .emit();
-                    }
-
-                    let item_id = self
-                        .tree
-                        .push_unnamed_item(parent_id, ItemCategory::Impl, None);
-
-                    self.queue_task(parent_id, item_id, |cx| {
-                        cx.lower_impl(item);
-                    });
                 }
-                AstItem::Func(item) => {
-                    let item_id = self.tree.push_named_item(
-                        parent_id,
-                        item.base.vis.clone(),
-                        ItemCategory::Func,
-                        item.def.name,
-                    );
 
-                    self.queue_task(parent_id, item_id, |cx| {
-                        cx.lower_fn_item(item);
-                    });
-                }
-                AstItem::Struct(item) => {
-                    let item_id = self.tree.push_named_item(
-                        parent_id,
-                        item.base.vis.clone(),
-                        ItemCategory::Struct,
-                        item.name,
-                    );
+                let item_id = self
+                    .tree
+                    .push_unnamed_item(parent_id, ItemCategory::Impl, None);
 
-                    self.queue_task(parent_id, item_id, |cx| {
-                        cx.lower_struct(item);
-                    });
-                }
-                AstItem::Enum(item) => {
-                    let item_id = self.tree.push_named_item(
-                        parent_id,
-                        item.base.vis.clone(),
-                        ItemCategory::Enum,
-                        item.name,
-                    );
+                self.queue_task(parent_id, item_id, |cx| {
+                    cx.lower_impl(item);
+                });
+            }
+            AstItem::Func(item) => {
+                let item_id = self.tree.push_named_item(
+                    parent_id,
+                    item.base.vis.clone(),
+                    ItemCategory::Func,
+                    item.def.name,
+                );
 
-                    self.queue_task(parent_id, item_id, |cx| {
-                        cx.lower_enum(item);
-                    });
-
-                    for (idx, variant) in item.variants.iter().enumerate() {
-                        let variant_id = self.tree.push_named_item(
-                            item_id,
-                            AstVisibility {
-                                span: Span::DUMMY,
-                                kind: AstVisibilityKind::Pub,
-                            },
-                            ItemCategory::EnumVariant,
-                            variant.name,
-                        );
-
-                        self.queue_task(parent_id, variant_id, move |cx| {
-                            cx.lower_variant(cx.index_to_item[item_id], idx as u32);
-                        });
+                if let Some(body) = &item.def.body {
+                    for stmt in &body.stmts {
+                        match &stmt.kind {
+                            AstStmtKind::Item(item) => {
+                                self.lower_item(item_id, item);
+                            }
+                            AstStmtKind::Expr(_) | AstStmtKind::Let(_) => {
+                                // (fallthrough)
+                            }
+                        }
                     }
                 }
-                AstItem::TypeAlias(item) => {
-                    let item_id = self.tree.push_named_item(
-                        parent_id,
-                        item.base.vis.clone(),
-                        ItemCategory::TypeAlias,
-                        item.name,
+
+                self.queue_task(parent_id, item_id, |cx| {
+                    cx.lower_fn_item(item);
+                });
+            }
+            AstItem::Struct(item) => {
+                let item_id = self.tree.push_named_item(
+                    parent_id,
+                    item.base.vis.clone(),
+                    ItemCategory::Struct,
+                    item.name,
+                );
+
+                self.queue_task(parent_id, item_id, |cx| {
+                    cx.lower_struct(item);
+                });
+            }
+            AstItem::Enum(item) => {
+                let item_id = self.tree.push_named_item(
+                    parent_id,
+                    item.base.vis.clone(),
+                    ItemCategory::Enum,
+                    item.name,
+                );
+
+                self.queue_task(parent_id, item_id, |cx| {
+                    cx.lower_enum(item);
+                });
+
+                for (idx, variant) in item.variants.iter().enumerate() {
+                    let variant_id = self.tree.push_named_item(
+                        item_id,
+                        AstVisibility {
+                            span: Span::DUMMY,
+                            kind: AstVisibilityKind::Pub,
+                        },
+                        ItemCategory::EnumVariant,
+                        variant.name,
                     );
 
-                    self.queue_task(parent_id, item_id, |cx| {
-                        cx.lower_type_alias(item);
+                    self.queue_task(parent_id, variant_id, move |cx| {
+                        cx.lower_variant(cx.index_to_item[item_id], idx as u32);
                     });
                 }
-                AstItem::Error(_, _) => {
-                    // (ignored)
-                }
+            }
+            AstItem::TypeAlias(item) => {
+                let item_id = self.tree.push_named_item(
+                    parent_id,
+                    item.base.vis.clone(),
+                    ItemCategory::TypeAlias,
+                    item.name,
+                );
+
+                self.queue_task(parent_id, item_id, |cx| {
+                    cx.lower_type_alias(item);
+                });
+            }
+            AstItem::Error(_, _) => {
+                // (ignored)
             }
         }
     }

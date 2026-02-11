@@ -386,9 +386,13 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             ExprKind::Field(receiver, name) => {
                 let receiver_ty = self.check_expr(receiver).and_do(&mut divergence);
 
-                match self.lookup_method(receiver.r(s).span, receiver_ty, name) {
-                    Ok(_) => todo!(),
-                    Err(err) => tcx.intern(TyKind::Error(err)),
+                match self.lookup_method(receiver_ty, name) {
+                    Some(def) => tcx.intern(TyKind::Error(
+                        Diag::span_err(name.span, format_args!("found {}", def.r(s).span)).emit(),
+                    )),
+                    None => tcx.intern(TyKind::Error(
+                        Diag::span_err(name.span, "failed to find applicable method").emit(),
+                    )),
                 }
             }
             ExprKind::GenericMethodCall {

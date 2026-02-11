@@ -15,6 +15,7 @@ use crate::{
             basic::{parse_mutability, parse_paramed_path, parse_paramed_path_no_guard},
             bp::expr_bp,
             entry::P,
+            item::parse_item,
             types::{parse_generic_param_list, parse_return_ty, parse_ty},
             utils::{
                 match_char_lit, match_eos, match_group, match_ident, match_kw, match_lifetime,
@@ -1027,6 +1028,15 @@ fn parse_block(p: P) -> AstBlock {
                         init: Some(Box::new(init)),
                         else_clause,
                     }),
+                });
+
+                continue 'stmt;
+            }
+
+            if let Some(item) = parse_item(p, Vec::new()) {
+                stmts.push(AstStmt {
+                    span: item.base().span,
+                    kind: AstStmtKind::Item(Box::new(item)),
                 });
 
                 continue 'stmt;
