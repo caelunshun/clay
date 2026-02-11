@@ -10,7 +10,7 @@ use crate::{
     },
     semantic::{
         lower::modules::{
-            ItemCategory, ItemCategoryUse, ItemPathFmt, ParentRef, ParentResolver, PathResolver,
+            ItemCategory, ItemCategoryUse, ItemPathFmt, ParentResolver, PathResolver,
             StepLookupError, VisibilityResolver,
         },
         syntax::{Crate, DirectUse, GlobUse, Item, Visibility},
@@ -38,7 +38,7 @@ pub struct BuilderModuleTree {
 }
 
 struct BuilderItem {
-    direct_parent: ParentRef<BuilderItemId>,
+    parent: Option<BuilderItemId>,
     category: ItemCategory,
     name: Option<Ident>,
     public_path: Option<Symbol>,
@@ -76,7 +76,7 @@ impl Default for BuilderModuleTree {
     fn default() -> Self {
         Self {
             items: IndexVec::from_iter([BuilderItem {
-                direct_parent: ParentRef::Real(None),
+                parent: None,
                 category: ItemCategory::Module,
                 name: None,
                 public_path: None,
@@ -121,7 +121,7 @@ impl BuilderModuleTree {
         name: Ident,
     ) -> BuilderItemId {
         let child = self.items.push(BuilderItem {
-            direct_parent: ParentRef::Real(Some(parent)),
+            parent: Some(parent),
             category,
             name: Some(name),
             public_path: None,
@@ -149,7 +149,7 @@ impl BuilderModuleTree {
         name: Option<Ident>,
     ) -> BuilderItemId {
         self.items.push(BuilderItem {
-            direct_parent: ParentRef::Real(Some(parent)),
+            parent: Some(parent),
             category,
             name,
             public_path: None,
@@ -197,7 +197,7 @@ impl BuilderModuleTree {
         // Determine public paths for each module.
         // TODO: improve this algorithm.
         for item_id in self.items.indices() {
-            match self.items[item_id].direct_parent.as_option() {
+            match self.items[item_id].parent {
                 Some(parent) => {
                     let parent_name = self.items[parent].public_path.unwrap();
 
@@ -288,7 +288,7 @@ impl BuilderModuleTree {
             out_items.push(Obj::new(
                 Item {
                     krate,
-                    direct_parent: item.direct_parent.map(|idx| out_items[idx]),
+                    parent: item.parent.map(|idx| out_items[idx]),
                     category: item.category,
                     name: item.name,
                     path: item.public_path.unwrap(),
@@ -373,8 +373,8 @@ impl ParentResolver for BuilderModuleTree {
         self.items[def].category
     }
 
-    fn direct_parent(&self, def: Self::Item) -> ParentRef<Self::Item> {
-        self.items[def].direct_parent
+    fn parent(&self, def: Self::Item) -> Option<Self::Item> {
+        self.items[def].parent
     }
 }
 
@@ -398,8 +398,8 @@ impl ParentResolver for ModuleTreeVisibilityCx<'_> {
         self.0.items[def].category
     }
 
-    fn direct_parent(&self, def: Self::Item) -> ParentRef<Self::Item> {
-        self.0.items[def].direct_parent
+    fn parent(&self, def: Self::Item) -> Option<Self::Item> {
+        self.0.items[def].parent
     }
 }
 
@@ -449,8 +449,8 @@ impl ParentResolver for ModuleTreeSolverCx<'_> {
         self.0.items[def].category
     }
 
-    fn direct_parent(&self, def: Self::Item) -> ParentRef<Self::Item> {
-        self.0.items[def].direct_parent
+    fn parent(&self, def: Self::Item) -> Option<Self::Item> {
+        self.0.items[def].parent
     }
 }
 

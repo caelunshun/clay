@@ -125,11 +125,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         self.def.r(s).owner.as_item(s)
     }
 
-    pub fn scope(&self) -> Obj<Item> {
-        let s = self.session();
-        FrozenModuleResolver(s).scope_root(self.item())
-    }
-
     pub fn ccx(&self) -> &ClauseCx<'tcx> {
         self.ccx
     }

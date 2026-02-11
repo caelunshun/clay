@@ -217,7 +217,7 @@ impl BodyCtxt<'_, '_> {
                 .r(s)
                 .impl_vis
                 .unwrap()
-                .is_visible_to(self.scope(), s)
+                .is_visible_to(self.item(), s)
             {
                 continue;
             }

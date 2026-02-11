@@ -6,9 +6,7 @@ use crate::{
     },
     parse::token::Ident,
     semantic::{
-        lower::modules::{
-            FrozenModuleResolver, ItemCategory, ItemPathFmt, ParentRef, ParentResolver as _,
-        },
+        lower::modules::{FrozenModuleResolver, ItemCategory, ItemPathFmt, ParentResolver as _},
         syntax::{
             AdtEnumVariant, AdtItem, AdtKindEnum, Attribute, FuncItem, ImplItem, LangItems,
             TraitItem, TypeAliasItem,
@@ -34,7 +32,7 @@ pub struct Item {
     #[derive_where(skip)]
     pub krate: Obj<Crate>,
     #[derive_where(skip)]
-    pub direct_parent: ParentRef<Obj<Item>>,
+    pub parent: Option<Obj<Item>>,
     pub category: ItemCategory,
     pub name: Option<Ident>,
     pub path: Symbol,

@@ -6,7 +6,7 @@ use crate::{
     },
     semantic::{
         lower::modules::{
-            ItemCategory, ItemPathFmt, ParentRef, ParentResolver, PathResolver, StepLookupError,
+            ItemCategory, ItemPathFmt, ParentResolver, PathResolver, StepLookupError,
             VisibilityResolver,
         },
         syntax::Item,
@@ -27,8 +27,8 @@ impl ParentResolver for FrozenVisibilityResolver<'_> {
         def.r(self.0).category
     }
 
-    fn direct_parent(&self, def: Self::Item) -> ParentRef<Self::Item> {
-        def.r(self.0).direct_parent
+    fn parent(&self, def: Self::Item) -> Option<Self::Item> {
+        def.r(self.0).parent
     }
 }
 
@@ -81,8 +81,8 @@ impl ParentResolver for FrozenModuleResolver<'_> {
         def.r(self.0).category
     }
 
-    fn direct_parent(&self, def: Self::Item) -> ParentRef<Self::Item> {
-        def.r(self.0).direct_parent
+    fn parent(&self, def: Self::Item) -> Option<Self::Item> {
+        def.r(self.0).parent
     }
 }
 
