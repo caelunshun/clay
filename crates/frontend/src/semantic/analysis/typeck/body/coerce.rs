@@ -4,7 +4,7 @@ use crate::{
         arena::{HasInterner, HasListInterner, Obj},
         syntax::Span,
     },
-    parse::token::Ident,
+    parse::{ast::entry::C, token::Ident},
     semantic::{
         analysis::{
             BodyCtxt, ClauseCx, ClauseErrorProbe, ClauseOrigin, ClauseOriginKind,
@@ -220,6 +220,8 @@ impl BodyCtxt<'_, '_> {
             .coherence()
             .gather_inherent_impl_candidates(tcx, receiver, name.text)
         {
+            debug_assert!(*candidate.r(s).has_self_param);
+
             // Check visibility
             if !candidate
                 .r(s)
@@ -235,6 +237,32 @@ impl BodyCtxt<'_, '_> {
             };
 
             // See whether receiver is applicable.
+            let mut fork = self.ccx().clone();
+
+            let probe = ClauseErrorProbe::default();
+            let origin = ClauseOrigin::never_printed().with_probe_sink(probe.clone());
+
+            let self_ty = fork.fresh_ty_infer(HrtbUniverse::ROOT);
+            let expected_receiver = fork.instantiate_fn_instance_receiver_as_infer(
+                &origin,
+                tcx.intern(FnInstanceInner {
+                    owner: FnOwner::Inherent {
+                        self_ty,
+                        block,
+                        method_idx,
+                    },
+                    early_args: None,
+                }),
+                HrtbUniverse::ROOT_REF,
+            );
+
+            fork.oblige_ty_unifies_ty(origin, receiver, expected_receiver, RelationMode::Equate);
+            fork.poll_obligations();
+
+            if probe.had_error() {
+                continue;
+            }
+
             dbg!(candidate.r(s).span);
         }
 

@@ -6,15 +6,18 @@ mod funky {
     use super::*;
 
     impl Hello {
-        pub fn meow() {}
+        pub fn meow<'a: &shorter Self>(me: &'a Self) {}
     }
 
     impl Hi {
-        fn meow() {}
+        pub fn meow<'a: &shorter Self>(me: &'a Self) {}
+
+        pub fn meow(me: Self) {}
     }
 }
 
 fn main(foo: Hello, bar: Hi) {
-    foo.meow;
-    bar.meow;
+    (&foo).meow;
+    (&bar).meow;
+    (bar).meow;
 }

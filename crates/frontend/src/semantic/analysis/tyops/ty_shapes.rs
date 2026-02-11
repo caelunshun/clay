@@ -42,10 +42,10 @@ impl TyCtxt {
         })
     }
 
-    pub fn shape_of_inherent_method(&self, target: Ty, name: Symbol) -> TyShape {
+    pub fn shape_of_inherent_method(&self, receiver: Ty, name: Symbol) -> TyShape {
         TyShape::Solid(SolidTyShape {
             kind: SolidTyShapeKind::InherentMethodImpl(name),
-            children: self.intern_list(&[self.erase_ty_to_shape(target)]),
+            children: self.intern_list(&[self.erase_ty_to_shape(receiver)]),
         })
     }
 

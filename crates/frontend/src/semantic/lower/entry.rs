@@ -922,7 +922,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                 name: ast.name,
                 impl_vis,
                 generics: self.tcx.seal_generic_binder(generics),
-                self_param: LateInit::uninit(),
+                has_self_param: LateInit::uninit(),
                 args: LateInit::uninit(),
                 ret_ty: LateInit::uninit(),
                 body: LateInit::uninit(),
@@ -1232,6 +1232,9 @@ impl IntraItemLowerCtxt<'_> {
                 s,
             ),
         );
+
+        // TODO: Actually detect these!
+        LateInit::init(&item.r(s).has_self_param, !item.r(s).args.r(s).is_empty());
 
         LateInit::init(
             &item.r(s).ret_ty,

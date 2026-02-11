@@ -565,6 +565,24 @@ pub enum FnOwner {
     },
 }
 
+impl FnOwner {
+    pub fn def(self, s: &Session) -> Obj<FnDef> {
+        match self {
+            FnOwner::Item(def) => *def.r(s).def,
+            FnOwner::Trait {
+                instance,
+                self_ty: _,
+                method_idx,
+            } => instance.def.r(s).methods[method_idx as usize],
+            FnOwner::Inherent {
+                self_ty: _,
+                block,
+                method_idx,
+            } => block.r(s).methods[method_idx as usize].unwrap(),
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct TyProjection {
     pub target: Ty,

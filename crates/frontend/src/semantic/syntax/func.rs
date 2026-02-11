@@ -31,7 +31,7 @@ pub struct FnDef {
     pub name: Ident,
     pub impl_vis: Option<Visibility>,
     pub generics: Obj<GenericBinder>,
-    pub self_param: LateInit<Option<SpannedTy>>,
+    pub has_self_param: LateInit<bool>,
     pub args: LateInit<Obj<[FuncArg]>>,
     pub ret_ty: LateInit<SpannedTy>,
     pub body: LateInit<Option<Obj<Block>>>,

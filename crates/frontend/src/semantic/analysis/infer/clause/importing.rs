@@ -489,7 +489,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     // === Specialized existential imports === //
 
-    pub fn instantiate_fn_owner_as_infer(
+    pub fn instantiate_fn_owner_env_as_infer(
         &mut self,
         origin: &ClauseOrigin,
         owner: FnOwner,
@@ -577,32 +577,19 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    pub fn instantiate_fn_instance_sig(
+    pub fn instantiate_fn_instance_env_as_infer(
         &mut self,
         origin: &ClauseOrigin,
         instance: FnInstance,
         universe: &HrtbUniverse,
-    ) -> (TyList, Ty) {
+    ) -> ClauseImportEnv {
         let tcx = self.tcx();
         let s = self.session();
 
         let FnInstanceInner { owner, early_args } = *instance.r(s);
 
-        let mut env = self.instantiate_fn_owner_as_infer(origin, owner, universe);
-
-        let def = match owner {
-            FnOwner::Item(def) => *def.r(s).def,
-            FnOwner::Trait {
-                instance,
-                self_ty: _,
-                method_idx,
-            } => instance.def.r(s).methods[method_idx as usize],
-            FnOwner::Inherent {
-                self_ty: _,
-                block,
-                method_idx,
-            } => block.r(s).methods[method_idx as usize].unwrap(),
-        };
+        let mut env = self.instantiate_fn_owner_env_as_infer(origin, owner, universe);
+        let def = owner.def(s);
 
         if let Some(early_args) = early_args {
             env.sig_generic_substs.push(GenericSubst {
@@ -613,6 +600,38 @@ impl<'tcx> ClauseCx<'tcx> {
             env =
                 self.instantiate_binder_list_as_infer(origin, env, &[def.r(s).generics], universe);
         }
+
+        env
+    }
+
+    pub fn instantiate_fn_instance_receiver_as_infer(
+        &mut self,
+        origin: &ClauseOrigin,
+        instance: FnInstance,
+        universe: &HrtbUniverse,
+    ) -> Ty {
+        let s = self.session();
+
+        let env = self.instantiate_fn_instance_env_as_infer(origin, instance, universe);
+        let def = instance.r(s).owner.def(s);
+
+        debug_assert!(*def.r(s).has_self_param);
+
+        self.importer(env.as_ref(), universe.clone())
+            .fold(def.r(s).args.r(s)[0].ty.value)
+    }
+
+    pub fn instantiate_fn_instance_sig(
+        &mut self,
+        origin: &ClauseOrigin,
+        instance: FnInstance,
+        universe: &HrtbUniverse,
+    ) -> (TyList, Ty) {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let env = self.instantiate_fn_instance_env_as_infer(origin, instance, universe);
+        let def = instance.r(s).owner.def(s);
 
         let args = def
             .r(s)

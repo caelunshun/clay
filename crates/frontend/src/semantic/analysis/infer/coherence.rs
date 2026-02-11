@@ -1,14 +1,15 @@
 use crate::{
     base::{Diag, arena::Obj, syntax::Symbol},
     semantic::{
-        analysis::{TyCtxt, TyShapeMap},
+        analysis::{TyCtxt, TyFolder, TyFolderInfallibleExt, TyShapeMap},
         syntax::{
-            Crate, FnDef, GenericBinder, HrtbBinderKind, ImplItem, Re, TraitClause, TraitParam,
-            TraitSpec, Ty, TyOrRe,
+            Crate, FnDef, GenericBinder, HrtbBinderKind, ImplItem, Re, SpannedTy, TraitClause,
+            TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
         },
     },
 };
 use index_vec::{IndexVec, define_index_type};
+use std::convert::Infallible;
 
 // === CoherenceMap === //
 
@@ -50,11 +51,22 @@ impl CoherenceMap {
                     for &method in &**item.r(s).methods {
                         let method = method.unwrap();
 
+                        if !*method.r(s).has_self_param {
+                            continue;
+                        }
+
+                        // We perform an ad-hoc self-type substitution on the receiver to tighten
+                        // its bounds. We don't need to bring in a full `ClauseCx` to do this
+                        // because entries in the `CoherenceMap` are only approximations.
+                        let receiver = method.r(s).args.r(s)[0].ty.value;
+                        let receiver = SigSelfTypeFolder {
+                            tcx,
+                            self_ty: item.r(s).target.value,
+                        }
+                        .fold(receiver);
+
                         self.by_shape.insert(
-                            tcx.shape_of_inherent_method(
-                                item.r(s).target.value,
-                                method.r(s).name.text,
-                            ),
+                            tcx.shape_of_inherent_method(receiver, method.r(s).name.text),
                             CoherenceMapEntry::InherentMethod(method),
                             s,
                         );
@@ -70,13 +82,13 @@ impl CoherenceMap {
     pub fn gather_inherent_impl_candidates<'a>(
         &'a self,
         tcx: &'a TyCtxt,
-        target: Ty,
+        receiver: Ty,
         name: Symbol,
     ) -> impl Iterator<Item = Obj<FnDef>> + 'a {
         let s = &tcx.session;
 
         self.by_shape
-            .lookup(tcx.shape_of_inherent_method(target, name), s)
+            .lookup(tcx.shape_of_inherent_method(receiver, name), s)
             .map(|v| {
                 let CoherenceMapEntry::InherentMethod(v) = *v else {
                     unreachable!()
@@ -351,5 +363,30 @@ impl TyCtxt {
                 Diag::span_err(def.span(s), "generic parameter not covered by `impl`").emit();
             }
         }
+    }
+}
+
+// === Helpers === //
+
+struct SigSelfTypeFolder<'tcx> {
+    tcx: &'tcx TyCtxt,
+    self_ty: Ty,
+}
+
+impl<'tcx> TyFolder<'tcx> for SigSelfTypeFolder<'tcx> {
+    type Error = Infallible;
+
+    fn tcx(&self) -> &'tcx TyCtxt {
+        self.tcx
+    }
+
+    fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
+        let s = self.session();
+
+        if matches!(ty.value.r(s), TyKind::SigThis) {
+            return Ok(self.self_ty);
+        }
+
+        Ok(self.super_spanned(ty))
     }
 }
