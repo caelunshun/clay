@@ -15,16 +15,20 @@ mod funky {
         pub fn meow(me: Self) {}
     }
 
-    pub trait Haha {
+    pub trait Haha<T> {
+        type Assoc;
+
         fn me<'a: &shorter Self>(me: &'a Self);
     }
 
-    impl Haha for Hi {
-        fn me<'a: &shorter Self>(me: &'a Self) {}
+    impl<T> Haha<T> for Hi {
+        type Assoc = ();
+
+        fn me<'a: &shorter Self>(me: &'a Self, value: T) {}
     }
 }
 
-use funky::Haha as _;
+use funky::Haha;
 
 fn main(foo: Hello, bar: Hi) {
     (&foo).meow;

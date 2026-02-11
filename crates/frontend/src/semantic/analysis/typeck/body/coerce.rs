@@ -208,37 +208,18 @@ impl BodyCtxt<'_, '_> {
         // Obtain a list of candidates.
         let resolver = FrozenModuleResolver(s);
 
-        let self_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
-
         let inherent_candidates = self
             .ccx()
             .coherence()
             .gather_inherent_impl_candidates(tcx, receiver, name.text)
-            .filter_map(|candidate| {
+            .filter(|candidate| {
                 debug_assert!(*candidate.r(s).has_self_param);
 
-                // Check visibility
-                if !candidate
+                candidate
                     .r(s)
                     .impl_vis
                     .unwrap()
                     .is_visible_to(self.item(), s)
-                {
-                    return None;
-                }
-
-                let FuncDefOwner::ImplMethod(block, method_idx) = *candidate.r(s).owner else {
-                    return None;
-                };
-
-                Some(tcx.intern(FnInstanceInner {
-                    owner: FnOwner::Inherent {
-                        self_ty,
-                        block,
-                        method_idx,
-                    },
-                    early_args: None,
-                }))
             });
 
         let scope_trait_candidates = resolver
@@ -255,37 +236,61 @@ impl BodyCtxt<'_, '_> {
             // : Iterator<Item = Obj<TraitItem>>
             .filter_map(|def| {
                 let &idx = def.r(s).name_to_method.get(&name.text)?;
-                Some((def, idx))
-            })
-            // : Iterator<Item = (Obj<TraitItem>, u32)>
-            .map(|(trait_item, method_idx)| {
-                tcx.intern(FnInstanceInner {
-                    owner: FnOwner::Trait {
-                        instance: TraitSpec {
-                            def: trait_item,
-                            // TODO
-                            params: tcx.intern_list(&[]),
-                        },
-                        self_ty,
-                        method_idx,
-                    },
-                    early_args: None,
-                })
+                Some(def.r(s).methods[idx as usize])
             });
 
         let candidates = inherent_candidates.chain(scope_trait_candidates);
 
         // Scan for inherent `impl` candidates.
-        for instance in candidates {
+        for candidate in candidates {
             // See whether receiver is applicable.
             let mut fork = self.ccx().clone();
 
             let probe = ClauseErrorProbe::default();
             let origin = ClauseOrigin::never_printed().with_probe_sink(probe.clone());
 
+            let self_ty = fork.fresh_ty_infer(HrtbUniverse::ROOT);
+            let expected_owner = match *candidate.r(s).owner {
+                FuncDefOwner::Func(_) => unreachable!(),
+                FuncDefOwner::ImplMethod(block, method_idx) => FnOwner::Inherent {
+                    self_ty,
+                    block,
+                    method_idx,
+                },
+                FuncDefOwner::TraitMethod(trait_item, method_idx) => {
+                    let params = fork
+                        .instantiate_blank_infer_vars_from_binder(
+                            *trait_item.r(s).generics,
+                            HrtbUniverse::ROOT_REF,
+                        )
+                        .substs;
+
+                    let params = tcx.intern_list(
+                        &params
+                            .r(s)
+                            .iter()
+                            .copied()
+                            .map(TraitParam::Equals)
+                            .collect::<Vec<_>>(),
+                    );
+
+                    FnOwner::Trait {
+                        instance: TraitSpec {
+                            def: trait_item,
+                            params,
+                        },
+                        self_ty,
+                        method_idx,
+                    }
+                }
+            };
+
             let expected_receiver = fork.instantiate_fn_instance_receiver_as_infer(
                 &origin,
-                instance,
+                tcx.intern(FnInstanceInner {
+                    owner: expected_owner,
+                    early_args: None,
+                }),
                 HrtbUniverse::ROOT_REF,
             );
 
@@ -296,7 +301,7 @@ impl BodyCtxt<'_, '_> {
                 continue;
             }
 
-            return Some(instance.r(s).owner.def(s));
+            return Some(candidate);
         }
 
         None

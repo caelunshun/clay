@@ -583,7 +583,6 @@ impl<'tcx> ClauseCx<'tcx> {
         instance: FnInstance,
         universe: &HrtbUniverse,
     ) -> ClauseImportEnv {
-        let tcx = self.tcx();
         let s = self.session();
 
         let FnInstanceInner { owner, early_args } = *instance.r(s);
