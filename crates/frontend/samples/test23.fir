@@ -24,13 +24,14 @@ mod funky {
     }
 }
 
-use funky::Haha;
+use funky::Haha as _;
 
 fn main(foo: Hello, bar: Hi) {
     (&foo).meow;
     (&bar).meow;
     (bar).meow;
-    (&bar).hi;
+    (&foo).me;
+    (&bar).me;
 
     fn meow(foo: Hey) {
         kslfkj

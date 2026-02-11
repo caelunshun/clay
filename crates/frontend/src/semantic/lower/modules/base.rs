@@ -273,7 +273,7 @@ pub trait ParentResolver {
         self.direct_parent(def)
     }
 
-    fn parent_scopes(&self, mut def: Self::Item) -> SmallVec<[Self::Item; 2]> {
+    fn scope_components(&self, mut def: Self::Item) -> SmallVec<[Self::Item; 2]> {
         let mut collector = SmallVec::new();
 
         loop {
@@ -324,7 +324,7 @@ pub trait PathResolver: ParentResolver {
     ) -> Result<Self::Item, StepResolveError<Self::Item>> {
         // If we're in the visibility root, allow the first component to be
         if vis_ctxt == finger {
-            for finger in self.parent_scopes(finger) {
+            for finger in self.scope_components(finger) {
                 match resolve_step_inner(
                     self,
                     local_crate_root,

@@ -11,7 +11,6 @@ use crate::{
             ClauseCx, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind, CrateTypeckVisitor,
             TyCtxt, TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
         },
-        lower::modules::{FrozenModuleResolver, ParentResolver},
         syntax::{
             Block, Crate, Divergence, Expr, ExprKind, FnDef, FuncLocal, HrtbUniverse, InferTyVar,
             Item, Pat, PatKind, Re, RelationMode, SimpleTyKind, SpannedFnInstanceView,

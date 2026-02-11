@@ -6,6 +6,7 @@ use crate::{
             BodyCtxt, ClauseCx, ClauseErrorProbe, ClauseOrigin, ClauseOriginKind,
             TyFolderInfallibleExt, UnboundVarHandlingMode,
         },
+        lower::modules::{FrozenModuleResolver, ParentResolver},
         syntax::{
             Crate, Divergence, Expr, FnDef, FnInstanceInner, FnOwner, FuncDefOwner, HrtbUniverse,
             Mutability, Re, RelationMode, TraitClauseList, TraitParam, TraitSpec, Ty,
@@ -204,45 +205,87 @@ impl BodyCtxt<'_, '_> {
             return None;
         }
 
-        // Scan for inherent `impl` candidates.
-        for candidate in self
+        // Obtain a list of candidates.
+        let resolver = FrozenModuleResolver(s);
+
+        let self_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
+
+        let inherent_candidates = self
             .ccx()
             .coherence()
             .gather_inherent_impl_candidates(tcx, receiver, name.text)
-        {
-            debug_assert!(*candidate.r(s).has_self_param);
+            .filter_map(|candidate| {
+                debug_assert!(*candidate.r(s).has_self_param);
 
-            // Check visibility
-            if !candidate
-                .r(s)
-                .impl_vis
-                .unwrap()
-                .is_visible_to(self.item(), s)
-            {
-                continue;
-            }
+                // Check visibility
+                if !candidate
+                    .r(s)
+                    .impl_vis
+                    .unwrap()
+                    .is_visible_to(self.item(), s)
+                {
+                    return None;
+                }
 
-            let FuncDefOwner::ImplMethod(block, method_idx) = *candidate.r(s).owner else {
-                continue;
-            };
+                let FuncDefOwner::ImplMethod(block, method_idx) = *candidate.r(s).owner else {
+                    return None;
+                };
 
-            // See whether receiver is applicable.
-            let mut fork = self.ccx().clone();
-
-            let probe = ClauseErrorProbe::default();
-            let origin = ClauseOrigin::never_printed().with_probe_sink(probe.clone());
-
-            let self_ty = fork.fresh_ty_infer(HrtbUniverse::ROOT);
-            let expected_receiver = fork.instantiate_fn_instance_receiver_as_infer(
-                &origin,
-                tcx.intern(FnInstanceInner {
+                Some(tcx.intern(FnInstanceInner {
                     owner: FnOwner::Inherent {
                         self_ty,
                         block,
                         method_idx,
                     },
                     early_args: None,
-                }),
+                }))
+            });
+
+        let scope_trait_candidates = resolver
+            .scope_components(self.item())
+            .into_iter()
+            // : Iterator<Item = Obj<Item>>
+            .flat_map(|scope| {
+                scope
+                    .r(s)
+                    .direct_uses
+                    .values()
+                    .filter_map(|target| target.target.r(s).kind.as_trait())
+            })
+            // : Iterator<Item = Obj<TraitItem>>
+            .filter_map(|def| {
+                let &idx = def.r(s).name_to_method.get(&name.text)?;
+                Some((def, idx))
+            })
+            // : Iterator<Item = (Obj<TraitItem>, u32)>
+            .map(|(trait_item, method_idx)| {
+                tcx.intern(FnInstanceInner {
+                    owner: FnOwner::Trait {
+                        instance: TraitSpec {
+                            def: trait_item,
+                            // TODO
+                            params: tcx.intern_list(&[]),
+                        },
+                        self_ty,
+                        method_idx,
+                    },
+                    early_args: None,
+                })
+            });
+
+        let candidates = inherent_candidates.chain(scope_trait_candidates);
+
+        // Scan for inherent `impl` candidates.
+        for instance in candidates {
+            // See whether receiver is applicable.
+            let mut fork = self.ccx().clone();
+
+            let probe = ClauseErrorProbe::default();
+            let origin = ClauseOrigin::never_printed().with_probe_sink(probe.clone());
+
+            let expected_receiver = fork.instantiate_fn_instance_receiver_as_infer(
+                &origin,
+                instance,
                 HrtbUniverse::ROOT_REF,
             );
 
@@ -253,11 +296,8 @@ impl BodyCtxt<'_, '_> {
                 continue;
             }
 
-            return Some(candidate);
+            return Some(instance.r(s).owner.def(s));
         }
-
-        // Scan for trait candidates.
-        // TODO
 
         None
     }
