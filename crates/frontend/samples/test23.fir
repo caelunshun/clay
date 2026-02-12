@@ -34,9 +34,10 @@ use std::*;
 struct Miau {}
 
 impl Miau {
-    // fn meow(me: Self) {}
+    fn meow(me: Self, v: ()) {}
 }
 
 fn demo(v: Miau) {
-    v.meow;
+    v.meow(());
+    ().meow();
 }

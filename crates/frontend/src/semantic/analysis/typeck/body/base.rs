@@ -12,10 +12,10 @@ use crate::{
             TyCtxt, TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
         },
         syntax::{
-            Block, Crate, Divergence, Expr, ExprKind, FnDef, FuncLocal, HrtbUniverse, InferTyVar,
-            Item, Pat, PatKind, Re, RelationMode, SimpleTyKind, SpannedFnInstanceView,
-            SpannedFnOwnerView, SpannedTy, SpannedTyView, Stmt, StructExpr, TraitParam, TraitSpec,
-            Ty, TyAndDivergence, TyKind, TyOrRe,
+            Block, Crate, Divergence, Expr, ExprKind, FnDef, FnInstanceInner, FuncLocal,
+            HrtbUniverse, InferTyVar, Item, Pat, PatKind, Re, RelationMode, SimpleTyKind,
+            SpannedFnInstanceView, SpannedFnOwnerView, SpannedTy, SpannedTyView, Stmt, StructExpr,
+            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -274,11 +274,50 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                 output_ty
             }
-            ExprKind::Method {
-                callee,
+            ExprKind::MethodCall {
+                receiver,
+                name,
                 generics,
                 args,
-            } => todo!(),
+            } => 'call: {
+                let receiver_ty = self.check_expr(receiver).and_do(&mut divergence);
+
+                let Some(def) = self.lookup_method(receiver_ty, name) else {
+                    break 'call tcx.intern(TyKind::Error(
+                        Diag::span_err(name.span, "failed to find applicable method").emit(),
+                    ));
+                };
+
+                let owner = self.ccx_mut().instantiate_fn_def_as_owner_infer(def);
+                let instance = tcx.intern(FnInstanceInner {
+                    owner,
+                    early_args: generics.map(|v| v.value),
+                });
+
+                let (expected_args, expected_output) = self.ccx_mut().instantiate_fn_instance_sig(
+                    &ClauseOrigin::root(ClauseOriginKind::FunctionCall {
+                        site_span: name.span,
+                    }),
+                    instance,
+                    HrtbUniverse::ROOT_REF,
+                );
+
+                let expected_args = &expected_args.r(s)[1..];
+
+                if expected_args.len() != args.r(s).len() {
+                    break 'call tcx.intern(TyKind::Error(
+                        Diag::span_err(name.span, "argument count mismatch").emit(),
+                    ));
+                }
+
+                for (&actual, &expected) in args.r(s).iter().zip(expected_args) {
+                    _ = self
+                        .check_expr_demand(actual, expected)
+                        .and_do(&mut divergence);
+                }
+
+                expected_output
+            }
             ExprKind::Tuple(children) => {
                 let children = children
                     .r(s)
@@ -377,24 +416,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 self.check_expr_demand(expr, pat_ty).and_do(&mut divergence)
             }
             ExprKind::AssignOp(ast_assign_op_kind, obj, obj1) => todo!(),
-            ExprKind::Field(receiver, name) => {
-                let receiver_ty = self.check_expr(receiver).and_do(&mut divergence);
-
-                match self.lookup_method(receiver_ty, name) {
-                    Some(def) => tcx.intern(TyKind::Error(
-                        Diag::span_err(name.span, format_args!("found {}", def.r(s).span)).emit(),
-                    )),
-                    None => tcx.intern(TyKind::Error(
-                        Diag::span_err(name.span, "failed to find applicable method").emit(),
-                    )),
-                }
-            }
-            ExprKind::GenericMethodCall {
-                target,
-                method,
-                generics,
-                args,
-            } => todo!(),
+            ExprKind::Field(receiver, name) => todo!(),
             ExprKind::Index(obj, obj1) => todo!(),
             ExprKind::Range(range_expr) => todo!(),
             ExprKind::LocalSelf => todo!(),

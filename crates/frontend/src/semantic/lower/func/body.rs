@@ -152,7 +152,16 @@ impl IntraItemLowerCtxt<'_> {
         let kind = match &ast.kind {
             AstExprKind::Array(exprs) => ExprKind::Array(self.lower_exprs(exprs)),
             AstExprKind::Call(callee, args) => {
-                ExprKind::Call(self.lower_expr(callee), self.lower_exprs(args))
+                if let AstExprKind::Field(receiver, method) = &callee.kind {
+                    ExprKind::MethodCall {
+                        receiver: self.lower_expr(receiver),
+                        name: *method,
+                        generics: None,
+                        args: self.lower_exprs(args),
+                    }
+                } else {
+                    ExprKind::Call(self.lower_expr(callee), self.lower_exprs(args))
+                }
             }
             AstExprKind::Paren(expr) => {
                 return self.lower_expr(expr);
@@ -233,10 +242,14 @@ impl IntraItemLowerCtxt<'_> {
                     .emit();
                 }
 
-                ExprKind::GenericMethodCall {
-                    target: self.lower_expr(target),
-                    method: *method,
-                    generics: SpannedTyOrReList::alloc_list(generics.span, &positional, self.tcx),
+                ExprKind::MethodCall {
+                    receiver: self.lower_expr(target),
+                    name: *method,
+                    generics: Some(SpannedTyOrReList::alloc_list(
+                        generics.span,
+                        &positional,
+                        self.tcx,
+                    )),
                     args: self.lower_exprs(args),
                 }
             }
