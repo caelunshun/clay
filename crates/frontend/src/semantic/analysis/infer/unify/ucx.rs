@@ -281,6 +281,9 @@ impl<'tcx> UnifyCx<'tcx> {
             | (_, TyKind::SigAlias(_, _)) => {
                 unreachable!()
             }
+            (TyKind::Error(_), _) | (_, TyKind::Error(_)) => {
+                // (trivially accepted)
+            }
             (
                 TyKind::Reference(lhs_re, lhs_muta, lhs_pointee),
                 TyKind::Reference(rhs_re, rhs_muta, rhs_pointee),
