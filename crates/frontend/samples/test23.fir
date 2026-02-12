@@ -12,32 +12,44 @@ pub mod std {
         type Target = T;
     }
 
-    pub trait Hehe {
-        fn meow(me: Self);
-    }
+    #[lang("fn_once_trait")]
+    pub trait FnOnce<I, O> {}
 
-    impl<T> Hehe for T {
-        fn meow(me: Self) {}
-    }
+    #[lang("fn_mut_trait")]
+    pub trait FnMut<I, O>: FnOnce<I, O> {}
 
-    pub trait Haha {
-        fn meow(me: Self);
-    }
+    #[lang("fn_trait")]
+    pub trait Fn<I, O>: FnMut<I, O> {}
 
-    impl<T> Haha for T {
-        fn meow(me: Self) {}
+    pub trait Clone {
+        fn clone<'a: &shorter Self>(me: &'a Self) -> Self;
     }
 }
 
-use std::*;
+use std::Clone;
 
-struct Miau {}
+pub struct Vec<T> {}
 
-impl Miau {
-    fn meow(me: Self, v: ()) {}
+impl<T> Vec<T> {
+    pub fn push<'a: &shorter Self>(me: &'a mut Self, value: T) {}
+
+    pub fn clear<'a: &shorter Self>(me: &'a mut Self) {}
+
+    pub fn get<'a: &shorter Self>(me: &'a Self, idx: ()) -> &'a T {}
 }
 
-fn demo(v: Miau) {
-    v.meow(());
-    ().meow();
+impl<T: Clone> Clone for Vec<T> {
+    fn clone<'a: &shorter Self>(me: &'a Self) -> Self {}
+}
+
+fn make_vec<T>() -> Vec<T> {}
+
+fn main() {
+    let vec = make_vec();
+
+    vec.push('a');
+    vec.push(());
+    let elem = vec.get(0);
+    vec.clear();
+    vec.push(elem);
 }
