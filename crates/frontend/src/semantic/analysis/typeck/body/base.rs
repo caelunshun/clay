@@ -281,7 +281,27 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 generics,
                 args,
             } => 'call: {
+                let receiver_span = receiver.r(s).span;
                 let receiver = self.check_expr(receiver).and_do(&mut divergence);
+                let receiver = self.ccx_mut().peel_ty_infer_var_after_poll(receiver);
+
+                match *receiver.r(s) {
+                    TyKind::InferVar(_) => {
+                        break 'call tcx.intern(TyKind::Error(
+                            Diag::span_err(
+                                receiver_span,
+                                "type of receiver must be known by this point",
+                            )
+                            .emit(),
+                        ));
+                    }
+                    TyKind::Error(error) => {
+                        break 'call tcx.intern(TyKind::Error(error));
+                    }
+                    _ => {
+                        // (fallthrough)
+                    }
+                }
 
                 let Some(LookupMethodResult {
                     receiver,

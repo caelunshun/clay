@@ -42,7 +42,7 @@ impl<T: Clone> Clone for Vec<T> {
     fn clone<'a: &shorter Self>(me: &'a Self) -> Self {}
 }
 
-impl Clone for () {
+impl<T> Clone for (T,) {
     fn clone<'a: &shorter Self>(me: &'a Self) -> Self {}
 }
 
@@ -56,6 +56,5 @@ fn main() {
     vec.push(elem.clone());
 
     let vec2 = vec.clone();
-
     vec2.push(());
 }

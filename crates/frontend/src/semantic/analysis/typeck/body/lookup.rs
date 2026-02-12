@@ -53,7 +53,7 @@ impl BodyCtxt<'_, '_> {
                 .substitutor(UnboundVarHandlingMode::NormalizeToRoot)
                 .fold(receiver_iter);
 
-            if let TyKind::InferVar(_) = receiver.r(s) {
+            if matches!(receiver.r(s), TyKind::InferVar(_) | TyKind::Error(_)) {
                 break;
             }
 
