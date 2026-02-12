@@ -418,10 +418,9 @@ impl<'tcx> ClauseCx<'tcx> {
                 subst.substs.r(s),
                 universe,
                 |_this, _idx, clause| {
-                    ClauseOrigin::new(
-                        Some(origin.clone()),
-                        ClauseOriginKind::GenericRequirements { clause },
-                    )
+                    origin
+                        .clone()
+                        .child(ClauseOriginKind::GenericRequirements { clause })
                 },
             );
         }

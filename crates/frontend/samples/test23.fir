@@ -42,12 +42,20 @@ impl<T: Clone> Clone for Vec<T> {
     fn clone<'a: &shorter Self>(me: &'a Self) -> Self {}
 }
 
+impl Clone for () {
+    fn clone<'a: &shorter Self>(me: &'a Self) -> Self {}
+}
+
 fn make_vec<T>() -> Vec<T> {}
 
 fn main() {
     let vec = make_vec();
 
-    (&mut vec).push('a');
+    vec.push(());
+    let elem = vec.get(0);
+    vec.push(elem.clone());
 
-    let vec2 = (&vec).clone();
+    let vec2 = vec.clone();
+
+    vec2.push(());
 }
