@@ -1,5 +1,8 @@
 mod base;
 pub use self::base::*;
 
+mod deref;
+pub use self::deref::*;
+
 mod coerce;
-pub use self::coerce::*;
+mod lookup;

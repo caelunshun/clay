@@ -138,7 +138,10 @@ impl ClauseOrigin {
         let depth = parent.as_ref().map_or(0, |v| v.depth() + 1);
 
         Self {
-            sink: ClauseErrorSink::Report,
+            sink: match &parent {
+                Some(parent) => parent.sink.clone(),
+                None => ClauseErrorSink::Report,
+            },
             inner: Rc::new(ClauseOriginInner {
                 parent,
                 depth,

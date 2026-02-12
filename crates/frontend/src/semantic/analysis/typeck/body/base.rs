@@ -10,6 +10,7 @@ use crate::{
         analysis::{
             ClauseCx, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind, CrateTypeckVisitor,
             TyCtxt, TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
+            typeck::body::lookup::LookupMethodResult,
         },
         syntax::{
             Block, Crate, Divergence, Expr, ExprKind, FnDef, FnInstanceInner, FuncLocal,
@@ -280,15 +281,19 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 generics,
                 args,
             } => 'call: {
-                let receiver_ty = self.check_expr(receiver).and_do(&mut divergence);
+                let receiver = self.check_expr(receiver).and_do(&mut divergence);
 
-                let Some(def) = self.lookup_method(receiver_ty, name) else {
+                let Some(LookupMethodResult {
+                    receiver,
+                    resolution,
+                }) = self.lookup_method(receiver, name)
+                else {
                     break 'call tcx.intern(TyKind::Error(
                         Diag::span_err(name.span, "failed to find applicable method").emit(),
                     ));
                 };
 
-                let owner = self.ccx_mut().instantiate_fn_def_as_owner_infer(def);
+                let owner = self.ccx_mut().instantiate_fn_def_as_owner_infer(resolution);
                 let instance = tcx.intern(FnInstanceInner {
                     owner,
                     early_args: generics.map(|v| v.value),
@@ -309,7 +314,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         site_span: name.span,
                     }),
                     *self_ty,
-                    receiver_ty,
+                    receiver,
                     RelationMode::Equate,
                 );
 
