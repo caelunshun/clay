@@ -1,13 +1,13 @@
 [workspace]
+resolver = "3"
 members = [
     "crates/codegen",
     "crates/core",
+    "crates/frontend",
     "crates/mir",
     "crates/mir/filetests",
     "crates/runtime",
-    "crates/frontend",
 ]
-resolver = "3"
 
 [workspace.dependencies]
 #fir-runtime = { path = "crates/runtime" }
