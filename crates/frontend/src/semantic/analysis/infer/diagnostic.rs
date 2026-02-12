@@ -8,7 +8,7 @@ use crate::{
         },
     },
 };
-use std::{cell::Cell, fmt, iter, rc::Rc};
+use std::{cell::Cell, fmt, iter, panic::Location, rc::Rc};
 
 // === ClauseErrorSink === //
 
@@ -121,7 +121,16 @@ pub enum ClauseOriginKind {
         def: Span,
     },
 
-    NeverPrinted,
+    NeverPrinted(NeverPrintedDebugInfo),
+}
+
+#[derive(Copy, Clone)]
+pub struct NeverPrintedDebugInfo(pub &'static Location<'static>);
+
+impl fmt::Debug for NeverPrintedDebugInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0, f)
+    }
 }
 
 impl ClauseOrigin {
@@ -142,8 +151,11 @@ impl ClauseOrigin {
         Self::new(None, kind)
     }
 
+    #[track_caller]
     pub fn never_printed() -> Self {
-        Self::root(ClauseOriginKind::NeverPrinted)
+        Self::root(ClauseOriginKind::NeverPrinted(NeverPrintedDebugInfo(
+            Location::caller(),
+        )))
     }
 
     pub fn child(self, kind: ClauseOriginKind) -> Self {
