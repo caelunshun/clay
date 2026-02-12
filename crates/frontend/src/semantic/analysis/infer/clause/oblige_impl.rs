@@ -103,9 +103,11 @@ impl<'tcx> ClauseCx<'tcx> {
                 todo!()
             }
             TyKind::UniversalVar(universal) => {
+                let universal_elab = self.elaborate_ty_universal_clauses(universal);
+
                 match self
                     .clone()
-                    .try_select_inherent_impl(origin, self.elaborate_ty_universal_clauses(universal), rhs, &universe)
+                    .try_select_inherent_impl(origin, universal_elab, rhs, &universe)
                 {
                     Ok(res) => {
                         *self = res;
