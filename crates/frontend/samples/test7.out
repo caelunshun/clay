@@ -1,0 +1,17 @@
+error: failed to prove 0x1370129d0: UniversalVar(2) implements TraitSpec { def: "Meow"#18, params: 0x13700f518: [] }
+   ┌─ crates/frontend/samples/test7.fir:23:32
+   │
+23 │     type Bar: NeedsMeowGeneric<<Self as Demo3<T>>::Foo>;
+   │                                ^^^^^^^^^^^^^^^^^^^^^^^
+
+error: failed to prove 0x137012b58: UniversalVar(0) implements TraitSpec { def: "Meow"#18, params: 0x13700f518: [] }
+   ┌─ crates/frontend/samples/test7.fir:27:45
+   │
+27 │ pub struct Demo4<Foo, Bar: NeedsMeowGeneric<Foo>>(Foo, Bar);
+   │                                             ^^^
+
+error: failed to prove 0x137012d20: Tuple(0x137012d68: []) implements TraitSpec { def: "Meow"#18, params: 0x13700f518: [] }
+   ┌─ crates/frontend/samples/test7.fir:32:14
+   │
+32 │     type T = ();
+   │              ^^

@@ -1,0 +1,17 @@
+error: `impl` blocks cannot have visibilities
+  ┌─ crates/frontend/samples/test5.fir:4:1
+  │
+4 │ pub impl MyTrait for () {}
+  │ ^^^
+
+error: `impl` blocks cannot have visibilities
+  ┌─ crates/frontend/samples/test5.fir:7:1
+  │
+7 │ priv impl MyTrait for ((),) {}
+  │ ^^^^
+
+error: `impl` blocks cannot have visibilities
+   ┌─ crates/frontend/samples/test5.fir:10:1
+   │
+10 │ pub(self) impl MyTrait for ((),) {}
+   │ ^^^^^^^^^

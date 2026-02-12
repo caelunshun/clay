@@ -1,0 +1,77 @@
+error: duplicate field name
+  ┌─ crates/frontend/samples/test12.fir:4:5
+  │
+4 │     foo: (),
+  │     ^^^^^^^
+
+note: name first used here
+  ┌─ crates/frontend/samples/test12.fir:2:9
+  │
+2 │     pub foo: T,
+  │         ^^^
+
+error: enum fields are all implicitly public
+  ┌─ crates/frontend/samples/test12.fir:8:11
+  │
+8 │     Foo { pub foo: (), foo: () },
+  │           ^^^
+
+error: duplicate field name
+  ┌─ crates/frontend/samples/test12.fir:8:24
+  │
+8 │     Foo { pub foo: (), foo: () },
+  │                        ^^^^^^^
+
+note: name first used here
+  ┌─ crates/frontend/samples/test12.fir:8:15
+  │
+8 │     Foo { pub foo: (), foo: () },
+  │               ^^^
+
+error: name `Foo` used more than once in enum
+   ┌─ crates/frontend/samples/test12.fir:10:5
+   │
+10 │     Foo((), pub (), ()),
+   │     ^^^
+
+note: name previously used here
+  ┌─ crates/frontend/samples/test12.fir:8:5
+  │
+8 │     Foo { pub foo: (), foo: () },
+  │     ^^^
+
+error: enum fields are all implicitly public
+   ┌─ crates/frontend/samples/test12.fir:10:13
+   │
+10 │     Foo((), pub (), ()),
+   │             ^^^
+
+error: expected enum or struct
+   ┌─ crates/frontend/samples/test12.fir:17:9
+   │
+17 │     Kaz(Foo),
+   │         ^^^
+
+error: `u32` not found in `crate`
+   ┌─ crates/frontend/samples/test12.fir:21:9
+   │
+21 │     Huh(u32),
+   │         ^^^
+
+error: `Huh` not found in `crate`
+   ┌─ crates/frontend/samples/test12.fir:22:11
+   │
+22 │     Quois(Huh),
+   │           ^^^
+
+error: `does_not_exist` not found in `crate::What::Huh`
+   ┌─ crates/frontend/samples/test12.fir:25:16
+   │
+25 │ use What::Huh::does_not_exist;
+   │                ^^^^^^^^^^^^^^
+
+error: `super` can only be applied to a module, not an enum variant
+   ┌─ crates/frontend/samples/test12.fir:27:16
+   │
+27 │ use What::Huh::super as lolwut;
+   │                ^^^^^

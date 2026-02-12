@@ -1,0 +1,17 @@
+error: could not unify Universal(0x13d8116c0: RegionGeneric { lifetime: Lifetime { span: crates/frontend/samples/test8.fir:22:14-16, name: "b"#33 }, clauses: 0x13d8121b8: [], is_synthetic: false, .. }) and Universal(0x13d811738: RegionGeneric { lifetime: Lifetime { span: crates/frontend/samples/test8.fir:22:10-12, name: "a"#30 }, clauses: 0x13d8121b8: [], is_synthetic: false, .. })
+   ┌─ crates/frontend/samples/test8.fir:23:20
+   │
+23 │         type Foo = &'b ();
+   │                    ^^^^^^
+
+error: failed to prove 0x13d815128: Tuple(0x13d815158: [0x13d815268: Reference(Universal(0x13d815390: RegionGeneric { lifetime: Lifetime { span: crates/frontend/samples/test8.fir:42:10-12, name: "b"#33 }, clauses: 0x13d815298: [Outlives(Universal(0x13d815318: RegionGeneric { lifetime: Lifetime { span: crates/frontend/samples/test8.fir:42:18-20, name: "c"#25 }, clauses: 0x13d8121b8: [], is_synthetic: false, .. }))], is_synthetic: false, .. }), Not, 0x13d812090: Tuple(0x13d8120c0: [])), 0x13d8151f8: Reference(Universal(0x13d815318: RegionGeneric { lifetime: Lifetime { span: crates/frontend/samples/test8.fir:42:18-20, name: "c"#25 }, clauses: 0x13d8121b8: [], is_synthetic: false, .. }), Not, 0x13d812090: Tuple(0x13d8120c0: []))]) implements TraitSpec { def: "Whee"#35, params: 0x13d815ab8: [] }
+   ┌─ crates/frontend/samples/test8.fir:43:20
+   │
+43 │         type Huh = (&'b (), &'c ());
+   │                    ^^^^^^^^^^^^^^^^
+
+error: failed to prove 0x13d814b30: Tuple(0x13d814b60: [0x13d814c70: Reference(Universal(0x13d814d30: RegionGeneric { lifetime: Lifetime { span: crates/frontend/samples/test8.fir:47:10-12, name: "b"#33 }, clauses: 0x13d8121b8: [], is_synthetic: false, .. }), Not, 0x13d812090: Tuple(0x13d8120c0: [])), 0x13d814c00: Reference(Universal(0x13d814cb8: RegionGeneric { lifetime: Lifetime { span: crates/frontend/samples/test8.fir:47:14-16, name: "c"#25 }, clauses: 0x13d8121b8: [], is_synthetic: false, .. }), Not, 0x13d812090: Tuple(0x13d8120c0: []))]) implements TraitSpec { def: "Whee"#35, params: 0x13d815ab8: [] }
+   ┌─ crates/frontend/samples/test8.fir:48:20
+   │
+48 │         type Huh = (&'b (), &'c ());
+   │                    ^^^^^^^^^^^^^^^^

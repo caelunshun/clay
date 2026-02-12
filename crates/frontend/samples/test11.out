@@ -1,0 +1,65 @@
+error: expected byte order mark, end-of-file, `{`, `[`, `(`, `//`, `/*`, identifier, `"`, digit, `'`, punctuation, or whitespace
+  ┌─ crates/frontend/samples/test11.fir:1:1
+  │
+1 │ `
+  │ ^
+
+error: expected attribute (`#`), visibility (`pub` or `priv`), item (`mod`, `trait`, `impl`, `use`, `struct`, `enum`, or `fn`), or `}`
+  ┌─ crates/frontend/samples/test11.fir:4:5
+  │
+4 │     whee
+  │     ^^^^
+
+error: expected item (`mod`, `trait`, `impl`, `use`, `struct`, `enum`, or `fn`) or `(`
+  ┌─ crates/frontend/samples/test11.fir:8:8
+  │
+8 │     pub
+  │        ^
+
+error: expected path part (identifier, `super`, `crate`, or `self`), type (`Self`, `dyn`, `&`, `(`, or `_`), `>`, or lifetime
+   ┌─ crates/frontend/samples/test11.fir:12:13
+   │
+12 │     fn whee<
+   │             ^
+   │
+   ┌─ crates/frontend/samples/test11.fir:14:5
+   │
+14 │     ;
+   │     - unexpected syntax
+
+error: expected `<`, `:`, or `{`
+   ┌─ crates/frontend/samples/test11.fir:18:19
+   │
+18 │     pub trait Whee
+   │                   ^
+
+error: expected `}` or identifier
+   ┌─ crates/frontend/samples/test11.fir:23:15
+   │
+23 │         foo { pub foo: u32, bar },
+   │               ^^^
+
+note: `pub` is a reserved keyword
+
+error: expected item (`mod`, `trait`, `impl`, `use`, `struct`, `enum`, or `fn`) or `(`
+   ┌─ crates/frontend/samples/test11.fir:28:9
+   │
+28 │     pub whee
+   │         ^^^^
+
+error: expected `->`, `{`, or `;`
+   ┌─ crates/frontend/samples/test11.fir:30:18
+   │
+30 │     pub fn whee()
+   │                  ^
+
+error: expected path part (identifier, `super`, `crate`, or `self`) or lifetime
+   ┌─ crates/frontend/samples/test11.fir:34:17
+   │
+34 │     fn whee<Foo:
+   │                 ^
+   │
+   ┌─ crates/frontend/samples/test11.fir:36:5
+   │
+36 │     ;
+   │     - unexpected syntax

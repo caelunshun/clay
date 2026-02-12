@@ -1,0 +1,75 @@
+error: ReAndReUnifyError {
+    origin: [
+        WfForGenericParam {
+            use_span: crates/frontend/samples/test19.fir:29:43-45,
+            clause_span: crates/frontend/samples/test19.fir:31:24-33,
+        },
+    ],
+    lhs: UniversalVar(
+        0,
+    ),
+    rhs: UniversalVar(
+        1,
+    ),
+    requires_var: 0,
+    to_outlive: UniversalVar(
+        1,
+    ),
+}
+
+error: ReAndReUnifyError {
+    origin: [
+        WfForGenericParam {
+            use_span: crates/frontend/samples/test19.fir:35:47-48,
+            clause_span: crates/frontend/samples/test19.fir:37:27-38,
+        },
+    ],
+    lhs: UniversalVar(
+        0,
+    ),
+    rhs: UniversalVar(
+        1,
+    ),
+    requires_var: 0,
+    to_outlive: UniversalVar(
+        1,
+    ),
+}
+
+error: ReAndReUnifyError {
+    origin: [
+        WfForGenericParam {
+            use_span: crates/frontend/samples/test19.fir:41:44-46,
+            clause_span: crates/frontend/samples/test19.fir:43:24-34,
+        },
+    ],
+    lhs: UniversalVar(
+        1,
+    ),
+    rhs: UniversalVar(
+        0,
+    ),
+    requires_var: 1,
+    to_outlive: UniversalVar(
+        0,
+    ),
+}
+
+error: ReAndReUnifyError {
+    origin: [
+        WfForGenericParam {
+            use_span: crates/frontend/samples/test19.fir:47:46-47,
+            clause_span: crates/frontend/samples/test19.fir:49:27-37,
+        },
+    ],
+    lhs: UniversalVar(
+        1,
+    ),
+    rhs: UniversalVar(
+        0,
+    ),
+    requires_var: 1,
+    to_outlive: UniversalVar(
+        0,
+    ),
+}

@@ -1,0 +1,5 @@
+error: failed to prove 0x123812f00: Universal(0x123812f48: TypeGeneric { ident: Ident { span: crates/frontend/samples/test3.fir:27:43-44, text: "V"#25, raw: false }, user_clauses: 0x12380ff18: [], is_synthetic: false, .. }) implements TraitSpec { def: "Generic"#19, params: 0x123811a58: [Equals(Ty(0x123811af8: InferVar(InferTyVar(5))))] }
+   ┌─ crates/frontend/samples/test3.fir:28:16
+   │
+28 │     type Woo = ((D, D), V, T);
+   │                ^^^^^^^^^^^^^^
