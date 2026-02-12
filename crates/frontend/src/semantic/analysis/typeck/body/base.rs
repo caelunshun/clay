@@ -302,7 +302,16 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     HrtbUniverse::ROOT_REF,
                 );
 
-                let expected_args = &expected_args.r(s)[1..];
+                let (self_ty, expected_args) = expected_args.r(s).split_first().unwrap();
+
+                self.ccx_mut().oblige_ty_unifies_ty(
+                    ClauseOrigin::root(ClauseOriginKind::FunctionCall {
+                        site_span: name.span,
+                    }),
+                    *self_ty,
+                    receiver_ty,
+                    RelationMode::Equate,
+                );
 
                 if expected_args.len() != args.r(s).len() {
                     break 'call tcx.intern(TyKind::Error(

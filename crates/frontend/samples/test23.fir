@@ -47,9 +47,7 @@ fn make_vec<T>() -> Vec<T> {}
 fn main() {
     let vec = make_vec();
 
-    vec.push('a');
-    vec.push(());
-    let elem = vec.get(0);
-    vec.clear();
-    vec.push(elem);
+    (&mut vec).push('a');
+
+    let vec2 = (&vec).clone();
 }
