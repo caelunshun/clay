@@ -1,8 +1,9 @@
 use crate::{
     Func, InstrData, PrimType, TypeKind, ValId,
     ir::{
-        AlgebraicType, AlgebraicTypeKind, BasicBlockId, ConstantValue, Context, FieldId, FuncData,
-        FuncInstance, MaybeAssocFunc, Trait, TraitImpl, TraitInstance, Type, TypeArgs, TypeParams,
+        AbstractFuncInstance, AlgebraicType, AlgebraicTypeKind, BasicBlockId, ConstantValue,
+        Context, FieldId, FuncData, MaybeAssocFunc, Trait, TraitImpl, TraitInstance, Type,
+        TypeArgs, TypeParams,
         instr::{self, CompareMode},
     },
 };
@@ -218,7 +219,7 @@ impl<'db> Formatter<'db> {
         list(items)
     }
 
-    fn format_func_instance(&self, func_instance: FuncInstance<'db>) -> SExpr {
+    fn format_func_instance(&self, func_instance: AbstractFuncInstance<'db>) -> SExpr {
         match func_instance.func(self.db) {
             MaybeAssocFunc::Func(func_id) => {
                 let name = symbol(func_id.resolve_header(self.db, &self.cx).name.clone());
@@ -312,7 +313,7 @@ impl<'db> Formatter<'db> {
             ]));
         }
 
-        for instr in &block_data.instrs {
+        for (_, instr) in &block_data.instrs {
             items.push(self.format_instr(func_data, instr));
         }
 
@@ -533,7 +534,7 @@ impl<'db> Formatter<'db> {
                 self.val_name(ins.dst_val),
                 list([self.val_name(ins.src_bufref), self.val_name(ins.src_index)]),
             ]),
-            InstrData::BufregGetMRef(ins) => list([
+            InstrData::BufrefGetMRef(ins) => list([
                 symbol("bufref.get_mref"),
                 self.val_name(ins.dst_ref),
                 list([self.val_name(ins.src_bufref), self.val_name(ins.src_index)]),

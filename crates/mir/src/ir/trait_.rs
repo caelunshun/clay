@@ -1,6 +1,7 @@
-use crate::ir::{FuncInstance, Type, TypeArgs, TypeParams, context::TraitId};
+use crate::ir::{AbstractFuncInstance, Type, TypeArgs, TypeParams, context::TraitId};
 use compact_str::CompactString;
 use cranelift_entity::{PrimaryMap, SecondaryMap};
+use salsa::Database;
 
 #[salsa::tracked(debug)]
 pub struct Trait<'db> {
@@ -35,6 +36,19 @@ pub struct TraitInstance<'db> {
     pub type_args: TypeArgs<'db>,
 }
 
+impl<'db> TraitInstance<'db> {
+    pub fn substitute_type_args(&self, db: &'db dyn Database, type_args: &TypeArgs<'db>) -> Self {
+        Self::new(
+            db,
+            self.trait_(db),
+            self.type_args(db)
+                .iter()
+                .map(|(&param, ty)| (param, ty.substitute_type_args(db, type_args)))
+                .collect::<TypeArgs<'db>>(),
+        )
+    }
+}
+
 #[salsa::tracked(debug)]
 pub struct TraitImpl<'db> {
     #[returns(ref)]
@@ -50,5 +64,5 @@ pub struct TraitImplData<'db> {
     pub trait_: TraitInstance<'db>,
     /// Binds associated functions in the trait
     /// to the FuncInstances they should reference.
-    pub assoc_func_bindings: SecondaryMap<AssocFuncId, Option<FuncInstance<'db>>>,
+    pub assoc_func_bindings: SecondaryMap<AssocFuncId, Option<AbstractFuncInstance<'db>>>,
 }

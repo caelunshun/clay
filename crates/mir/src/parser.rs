@@ -2,11 +2,11 @@ use crate::{
     Func, TypeKind, ValId,
     builder::FuncBuilder,
     ir::{
-        AlgebraicType, AlgebraicTypeId, AlgebraicTypeInstance, AlgebraicTypeKind, AssocFunc,
-        BasicBlockId, Constant, ConstantValue, Context, ContextBuilder, Field, FuncHeader, FuncId,
-        FuncInstance, MaybeAssocFunc, StructTypeData, Trait, TraitData, TraitId, TraitImpl,
-        TraitImplData, TraitInstance, Type, TypeArgs, TypeParam, TypeParamId, TypeParamIndex,
-        TypeParamScope, TypeParams, instr::CompareMode,
+        AbstractFuncInstance, AlgebraicType, AlgebraicTypeId, AlgebraicTypeInstance,
+        AlgebraicTypeKind, AssocFunc, BasicBlockId, Constant, ConstantValue, Context,
+        ContextBuilder, Field, FuncHeader, FuncId, MaybeAssocFunc, StructTypeData, Trait,
+        TraitData, TraitId, TraitImpl, TraitImplData, TraitInstance, Type, TypeArgs, TypeParam,
+        TypeParamId, TypeParamIndex, TypeParamScope, TypeParams, instr::CompareMode,
     },
 };
 use SExprRef::*;
@@ -493,7 +493,7 @@ impl<'a, 'db> Parser<'a, 'db> {
 
                     let mut return_type = None;
                     let mut entry_block = None;
-                    let mut blocks = HashMap::default();
+                    let mut blocks = HashMap::new();
 
                     #[derive(Default)]
                     struct BlockHeader<'db> {
@@ -1063,11 +1063,11 @@ impl<'a, 'db> Parser<'a, 'db> {
     fn parse_func_instance(
         &mut self,
         expr: &SExprRef<'a>,
-    ) -> Result<FuncInstance<'db>, ParseError> {
+    ) -> Result<AbstractFuncInstance<'db>, ParseError> {
         match expr {
             Symbol(func_name) => {
                 let func_id = self.get_func(func_name)?;
-                Ok(FuncInstance::new(
+                Ok(AbstractFuncInstance::new(
                     self.db,
                     MaybeAssocFunc::Func(func_id),
                     TypeArgs::default(),
@@ -1109,7 +1109,7 @@ impl<'a, 'db> Parser<'a, 'db> {
                     TypeParamScope::AssocFunc(for_trait_instance.trait_(self.db), assoc_func),
                 )?;
 
-                Ok(FuncInstance::new(
+                Ok(AbstractFuncInstance::new(
                     self.db,
                     MaybeAssocFunc::AssocFunc {
                         trait_: for_trait_instance,
@@ -1122,7 +1122,7 @@ impl<'a, 'db> Parser<'a, 'db> {
             List([Symbol(func_name), decls @ ..]) => {
                 let func_id = self.get_func(func_name)?;
                 let type_args = self.parse_type_args(decls, TypeParamScope::Func(func_id))?;
-                Ok(FuncInstance::new(
+                Ok(AbstractFuncInstance::new(
                     self.db,
                     MaybeAssocFunc::Func(func_id),
                     type_args,
@@ -1251,7 +1251,7 @@ impl<'a, 'db> FuncParserState<'a, 'db> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{InstrData, ir::Type};
+    use crate::{InstrData, InstrId, ir::Type};
     use indoc::indoc;
     use salsa::DatabaseImpl;
 
@@ -1294,7 +1294,13 @@ mod tests {
         let block = &func_data.basic_blocks[func_data.entry_block];
 
         assert_eq!(block.instrs.len(), 2);
-        assert!(matches!(block.instrs[0], InstrData::IntAdd(_)));
-        assert!(matches!(block.instrs[1], InstrData::Return(_)));
+        assert!(matches!(
+            block.instrs[InstrId::new(0)],
+            InstrData::IntAdd(_)
+        ));
+        assert!(matches!(
+            block.instrs[InstrId::new(1)],
+            InstrData::Return(_)
+        ));
     }
 }

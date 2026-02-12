@@ -1,32 +1,48 @@
-use crate::compiled_strand::CompiledStrand;
+use crate::{
+    compiled_strand::{CompiledStrand, Symbol},
+    intrinsic::IntrinsicCall,
+    isa::Isa,
+};
 use bumpalo::Bump;
 use fir_mir::{
     entity_ref,
     instr::{CompareMode, LoadOrdering, StoreOrdering},
 };
+use salsa::Database;
 use std::hash::Hash;
 
 /// Defines a backend that can produce machine code.
 pub trait CodegenBackend {
-    type CodeBuilder<'bump>: CodeBuilder<'bump>;
+    type CodeBuilder<'db, 'bump>: CodeBuilder<'db, 'bump>
+    where
+        'db: 'bump;
+
+    /// Returns the ISA being compiled for.
+    fn isa(&self) -> &Isa;
 
     /// Creates a new builder for a machine-level function.
     ///
     /// It will be initialized with an entry block having arguments matching
     /// the provided signature.
-    fn make_code_builder<'bump>(
+    fn make_code_builder<'db, 'bump>(
         &self,
+        db: &'db dyn Database,
         bump: &'bump Bump,
         signature: Signature<'bump>,
-    ) -> Self::CodeBuilder<'bump>;
+    ) -> Self::CodeBuilder<'db, 'bump>
+    where
+        'db: 'bump;
 }
 
 /// Builder for a CompiledStrand (machine-level function).
-pub trait CodeBuilder<'bump> {
+pub trait CodeBuilder<'db, 'bump>
+where
+    'db: 'bump,
+{
     type Backend: CodegenBackend;
 
     /// Finishes compilation of this function.
-    fn finish(self) -> CompiledStrand;
+    fn finish(self) -> CompiledStrand<'db>;
 
     /// Gets the ID of the current block.
     /// This is the entry block initially.
@@ -34,6 +50,7 @@ pub trait CodeBuilder<'bump> {
 
     /// Gets the value at the given index for a parameter of the current block.
     fn block_param(&self, index: u32) -> ValId;
+    fn block_params(&self) -> &[ValId];
 
     /// Creates a new basic block.
     fn create_block(&mut self) -> BasicBlockId;
@@ -161,6 +178,17 @@ pub trait CodeBuilder<'bump> {
     /// Instruction that tells the processor we are in a spin-wait loop.
     /// Implementation as a no-op is valid.
     fn hint_spin_loop(&mut self);
+
+    /// Call a function whose address will be provided by the given
+    /// relocation symbol.
+    fn call(&mut self, symbol: Symbol, sig: Signature, args: &[ValId]) -> &'bump [ValId];
+
+    fn call_intrinsic(&mut self, intrinsic: IntrinsicCall, args: &[ValId]) -> &'bump [ValId] {
+        self.call(Symbol::Intrinsic(intrinsic), intrinsic.signature(), args)
+    }
+
+    /// Tail call. This is a block terminator.
+    fn tailcall(&mut self, symbol: Symbol, sig: Signature, args: &[ValId]);
 
     /// Call a function whose address is given as a pointer-sized
     /// integer in `addr`, and whose signature must match the given signature.

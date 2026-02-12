@@ -1,6 +1,6 @@
 use crate::{
     ValId,
-    ir::{BasicBlockId, Constant, FieldId, FuncInstance, Type},
+    ir::{AbstractFuncInstance, BasicBlockId, Constant, FieldId, Type},
 };
 use cranelift_entity::{EntityList, ListPool};
 
@@ -55,7 +55,7 @@ pub enum InstrData<'db> {
     BufrefTrunc(BufrefTrunc),
     BufrefLen(BufrefLen),
     BufrefGet(BufrefGet),
-    BufregGetMRef(BufrefGetMRef),
+    BufrefGetMRef(BufrefGetMRef),
 }
 
 impl InstrData<'_> {
@@ -182,7 +182,7 @@ impl InstrData<'_> {
                 ins.src_bufref = map(ins.src_bufref);
                 ins.src_index = map(ins.src_index);
             }
-            InstrData::BufregGetMRef(ins) => {
+            InstrData::BufrefGetMRef(ins) => {
                 ins.src_bufref = map(ins.src_bufref);
                 ins.src_index = map(ins.src_index);
             }
@@ -268,7 +268,7 @@ impl InstrData<'_> {
             InstrData::BufrefGet(ins) => {
                 ins.dst_val = map(ins.dst_val);
             }
-            InstrData::BufregGetMRef(ins) => {
+            InstrData::BufrefGetMRef(ins) => {
                 ins.dst_ref = map(ins.dst_ref);
             }
         }
@@ -360,7 +360,7 @@ pub struct Call<'db> {
     /// Statically known function to call.
     /// It must have a unit captures type (i.e.
     /// be a top-level function).
-    pub func: FuncInstance<'db>,
+    pub func: AbstractFuncInstance<'db>,
     /// Arguments to pass to the function.
     pub args: EntityList<ValId>,
     /// Destination for the return value.

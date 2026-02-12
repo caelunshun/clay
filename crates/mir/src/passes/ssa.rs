@@ -48,7 +48,7 @@ impl<'db, 'a> SsaConverter<'db, 'a> {
             }
 
             let new_block_id = self.new_func.basic_blocks.push(BasicBlock {
-                instrs: vec![],
+                instrs: PrimaryMap::new(),
                 params,
                 name: block_data.name.clone(),
             });
@@ -64,7 +64,7 @@ impl<'db, 'a> SsaConverter<'db, 'a> {
                 self.vars_in_blocks[block][param_var] = Some(param_val);
             }
 
-            for instr in &block_data.instrs {
+            for (_, instr) in &block_data.instrs {
                 let new_instr =
                     instr.move_to_list_pool(&self.func.val_lists, &mut self.new_func.val_lists);
 
@@ -107,6 +107,7 @@ impl<'db, 'a> SsaConverter<'db, 'a> {
                 .instrs
                 .last_mut()
                 .unwrap()
+                .1
                 .successor_args_mut(successor_block)
                 .push(val, &mut self.new_func.val_lists);
         }

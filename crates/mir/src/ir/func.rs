@@ -1,9 +1,10 @@
 use crate::{
-    InstrData,
+    Context, InstrData,
     ir::{
         ContextLike, TraitInstance, TypeArgs, TypeParamScope, TypeParams, context::FuncId,
         merge_type_args, trait_::AssocFuncId, typ::Type,
     },
+    trait_resolution::find_trait_impl,
 };
 use compact_str::CompactString;
 use cranelift_entity::{EntityList, EntitySet, ListPool, PrimaryMap, SecondaryMap};
@@ -47,6 +48,16 @@ pub struct FuncData<'db> {
 }
 
 impl<'db> FuncData<'db> {
+    pub fn block_by_name(&self, name: &str) -> Option<BasicBlockId> {
+        self.basic_blocks.iter().find_map(|(bb, data)| {
+            if data.name.as_deref() == Some(name) {
+                Some(bb)
+            } else {
+                None
+            }
+        })
+    }
+
     /// Visits all basic blocks in an order such that
     /// a block B is not visited until after all blocks that
     /// appear in any *path* (not a walk) from the entry block to B (exclusive)
@@ -134,6 +145,7 @@ impl<'db> FuncData<'db> {
             .instrs
             .last()
             .unwrap()
+            .1
             .visit_successors(visit)
     }
 
@@ -154,6 +166,21 @@ impl<'db> FuncData<'db> {
             }
         })
     }
+
+    pub fn visit_block_called_funcs(
+        &self,
+        block: BasicBlockId,
+        mut visit: impl FnMut(InstrId, AbstractFuncInstance<'db>),
+    ) {
+        self.basic_blocks[block]
+            .instrs
+            .iter()
+            .for_each(|(id, instr)| {
+                if let InstrData::Call(call) = instr {
+                    visit(id, call.func);
+                }
+            })
+    }
 }
 
 entity_ref_16bit! {
@@ -172,25 +199,30 @@ entity_ref_16bit! {
     pub struct BasicBlockId;
 }
 
+entity_ref! {
+    pub struct InstrId;
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, salsa::Update)]
 pub struct BasicBlock<'db> {
     /// Optional name, for debugging and testing.
     pub name: Option<CompactString>,
-    pub instrs: Vec<InstrData<'db>>,
+    pub instrs: PrimaryMap<InstrId, InstrData<'db>>,
     /// Only used after SSA transformation; empty before then, except for
     /// the entry block, where the function arguments are assigned
     /// here.
     pub params: EntityList<ValId>,
 }
 
+/// A function, or a reference to an associated function, and its type arguments.
 #[salsa::interned(debug)]
-pub struct FuncInstance<'db> {
+pub struct AbstractFuncInstance<'db> {
     pub func: MaybeAssocFunc<'db>,
     #[returns(ref)]
     pub type_args: TypeArgs<'db>,
 }
 
-impl<'db> FuncInstance<'db> {
+impl<'db> AbstractFuncInstance<'db> {
     pub fn type_param_scope(&self, db: &'db dyn Database) -> TypeParamScope {
         match self.func(db) {
             MaybeAssocFunc::Func(func_id) => TypeParamScope::Func(func_id),
@@ -273,6 +305,30 @@ impl<'db> FuncInstance<'db> {
             }
         }
     }
+
+    pub fn resolve(
+        &self,
+        db: &'db dyn Database,
+        cx: Context<'db>,
+        type_args: &TypeArgs<'db>,
+    ) -> Option<FuncInstance<'db>> {
+        match self.func(db) {
+            MaybeAssocFunc::Func(func_id) => {
+                Some(FuncInstance::new(db, func_id, self.type_args(db).clone()))
+            }
+            MaybeAssocFunc::AssocFunc {
+                trait_,
+                typ,
+                assoc_func,
+            } => {
+                let trait_ = trait_.substitute_type_args(db, type_args);
+                let trait_impl = find_trait_impl(db, cx, typ, trait_)?;
+
+                let binding = trait_impl.data(db).assoc_func_bindings[assoc_func]?;
+                binding.resolve(db, cx, trait_.type_args(db))
+            }
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, salsa::Update)]
@@ -283,4 +339,12 @@ pub enum MaybeAssocFunc<'db> {
         typ: Type<'db>,
         assoc_func: AssocFuncId,
     },
+}
+
+/// A concrete function (not an associated function)
+/// and its type arguments.
+#[salsa::interned(debug)]
+pub struct FuncInstance<'db> {
+    pub id: FuncId,
+    pub type_args: TypeArgs<'db>,
 }

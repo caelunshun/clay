@@ -13,10 +13,6 @@ pub enum IntrinsicCall {
     /// Safepoint that should be invoked if request_pause
     /// in the VM context is true.
     Safepoint,
-    /// On-stack replacement implementation, used
-    /// to upgrade the optimization of a function
-    /// while it is running.
-    OnStackReplace,
 }
 
 impl IntrinsicCall {
@@ -51,11 +47,6 @@ impl IntrinsicCall {
                 Signature::new(PARAMS, RETURNS)
             }
             IntrinsicCall::Safepoint => {
-                // Parameters: none.
-                // Returns: none.
-                Signature::new(&[], &[])
-            }
-            IntrinsicCall::OnStackReplace => {
                 // Parameters: none.
                 // Returns: none.
                 Signature::new(&[], &[])

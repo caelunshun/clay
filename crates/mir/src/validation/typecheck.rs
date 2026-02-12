@@ -1,7 +1,7 @@
 use crate::{
     InstrData, PrimType, TypeKind, ValId,
     ir::{
-        AlgebraicTypeKind, BasicBlockId, Context, FuncData, FuncInstance, MaybeAssocFunc,
+        AbstractFuncInstance, AlgebraicTypeKind, BasicBlockId, Context, FuncData, MaybeAssocFunc,
         StructTypeData, TraitImpl, Type, TypeArgs, TypeParamId,
     },
     trait_resolution,
@@ -31,7 +31,7 @@ pub fn verify_instr_types<'db>(
     let verifier = InstrTypeVerifier { func, db, cx };
     verifier.verify_entry_block_params()?;
     for (_, block) in &func.basic_blocks {
-        for instr in &block.instrs {
+        for (_, instr) in &block.instrs {
             verifier.verify_types_for_instr(instr)?;
         }
     }
@@ -216,7 +216,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 self.verify_type_data_matches(ins.src_index, &[TypeKind::Prim(PrimType::Int)])?;
                 self.verify_type_equals(ins.dst_val, element_type)?;
             }
-            InstrData::BufregGetMRef(ins) => {
+            InstrData::BufrefGetMRef(ins) => {
                 let element_type = self.expect_bufref(ins.src_bufref)?;
                 self.verify_type_data_matches(ins.src_index, &[TypeKind::Prim(PrimType::Int)])?;
                 self.verify_type_data_matches(ins.dst_ref, &[TypeKind::MRef(element_type)])?;
@@ -345,7 +345,7 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
 
     fn verify_func_instance(
         &self,
-        func_instance: FuncInstance<'db>,
+        func_instance: AbstractFuncInstance<'db>,
     ) -> Result<(), ValidationError> {
         let type_params = func_instance.type_params(self.db, &self.cx);
         let type_args = func_instance.type_args(self.db);

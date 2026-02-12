@@ -73,6 +73,7 @@ extern crate fir_mir as mir;
 
 pub mod backend;
 pub mod compiled_strand;
+pub mod continuation;
 pub mod intrinsic;
 pub mod isa;
 pub mod layout;
