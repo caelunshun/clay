@@ -294,6 +294,7 @@ impl BuilderModuleTree {
                     path: item.public_path.unwrap(),
                     direct_uses: LateInit::uninit(),
                     glob_uses: LateInit::uninit(),
+                    traits_in_scope: LateInit::uninit(),
                     attrs: LateInit::uninit(),
                     kind: LateInit::uninit(),
                 },

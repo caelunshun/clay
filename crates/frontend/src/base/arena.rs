@@ -351,7 +351,7 @@ impl<T> LateInit<T> {
         }
     }
 
-    pub fn init(me: &Self, value: T) {
+    pub fn init(me: &Self, value: T) -> &T {
         // Ensure that the cell is only initialized once.
         if me.is_init.get() {
             panic!("cannot initialize `LateInit` more than once");
@@ -362,6 +362,8 @@ impl<T> LateInit<T> {
 
         // Mark the cell as initialized.
         me.is_init.set(true);
+
+        unsafe { (*me.cell.get()).assume_init_ref() }
     }
 
     pub fn get(me: &Self) -> Option<&T> {

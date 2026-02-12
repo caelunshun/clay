@@ -1,7 +1,7 @@
 use crate::{
     base::{
         Session,
-        arena::Obj,
+        arena::{LateInit, Obj},
         syntax::{Span, Symbol},
     },
     semantic::{
@@ -9,8 +9,9 @@ use crate::{
             ItemCategory, ItemPathFmt, ParentResolver, PathResolver, StepLookupError,
             VisibilityResolver,
         },
-        syntax::Item,
+        syntax::{Item, TraitItem},
     },
+    utils::hash::FxHashSet,
 };
 
 // === Visibility Resolver === //
@@ -131,4 +132,42 @@ impl PathResolver for FrozenModuleResolver<'_> {
 
         Ok(direct_use.target)
     }
+}
+
+// === Trait Enumeration === //
+
+pub fn traits_in_single_scope(root: Obj<Item>, s: &Session) -> &FxHashSet<Obj<TraitItem>> {
+    if let Some(cached) = LateInit::get(&root.r(s).traits_in_scope) {
+        return cached;
+    }
+
+    let mut visited_modules = FxHashSet::from_iter([root]);
+    let mut discovered_traits = FxHashSet::default();
+    let mut stack = vec![root];
+
+    while let Some(top) = stack.pop() {
+        for direct in top.r(s).direct_uses.values() {
+            if !direct.visibility.is_visible_to(root, s) {
+                continue;
+            }
+
+            if let Some(trait_) = direct.target.r(s).kind.as_trait() {
+                discovered_traits.insert(trait_);
+            }
+        }
+
+        for glob in &**top.r(s).glob_uses {
+            if !glob.visibility.is_visible_to(root, s) {
+                continue;
+            }
+
+            if !visited_modules.insert(glob.target) {
+                continue;
+            }
+
+            stack.push(glob.target);
+        }
+    }
+
+    LateInit::init(&root.r(s).traits_in_scope, discovered_traits)
 }

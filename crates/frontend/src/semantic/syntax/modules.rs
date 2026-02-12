@@ -13,7 +13,7 @@ use crate::{
         },
     },
     symbol,
-    utils::hash::FxIndexMap,
+    utils::hash::{FxHashSet, FxIndexMap},
 };
 use derive_where::derive_where;
 
@@ -38,6 +38,7 @@ pub struct Item {
     pub path: Symbol,
     pub direct_uses: LateInit<FxIndexMap<Symbol, DirectUse>>,
     pub glob_uses: LateInit<Vec<GlobUse>>,
+    pub traits_in_scope: LateInit<FxHashSet<Obj<TraitItem>>>,
     pub attrs: LateInit<Vec<Obj<Attribute>>>,
     pub kind: LateInit<ItemKind>,
 }

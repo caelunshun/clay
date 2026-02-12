@@ -6,7 +6,7 @@ use crate::{
             BodyCtxt, ClauseCx, ClauseErrorProbe, ClauseOrigin, ClauseOriginKind,
             TyFolderInfallibleExt, UnboundVarHandlingMode,
         },
-        lower::modules::{FrozenModuleResolver, ParentResolver},
+        lower::modules::{FrozenModuleResolver, ParentResolver, traits_in_single_scope},
         syntax::{
             Divergence, Expr, FnDef, FnInstanceInner, FnOwner, FuncDefOwner, HrtbUniverse,
             Mutability, Re, RelationMode, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty,
@@ -198,14 +198,7 @@ impl BodyCtxt<'_, '_> {
             .scope_components(self.item())
             .into_iter()
             // : Iterator<Item = Obj<Item>>
-            .flat_map(|scope| {
-                // TODO: Scan global imports
-                scope
-                    .r(s)
-                    .direct_uses
-                    .values()
-                    .filter_map(|target| target.target.r(s).kind.as_trait())
-            })
+            .flat_map(|scope| traits_in_single_scope(scope, s).iter().copied())
             // : Iterator<Item = Obj<TraitItem>>
             .filter_map(|def| {
                 let &idx = def.r(s).name_to_method.get(&name.text)?;

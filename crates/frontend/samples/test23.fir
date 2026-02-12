@@ -21,6 +21,8 @@ pub mod std {
     }
 }
 
-fn demo<'a: &shorter T, T: std::Hehe>(v: &'a &'a T) {
+use std::*;
+
+fn demo<'a: &shorter T, T>(v: &'a &'a T) {
     v.meow;
 }
