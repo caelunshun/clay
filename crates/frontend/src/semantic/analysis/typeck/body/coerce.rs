@@ -1,5 +1,8 @@
 use crate::{
-    base::arena::{HasInterner, HasListInterner, Obj},
+    base::{
+        Diag, LeafDiag,
+        arena::{HasInterner, HasListInterner, Obj},
+    },
     parse::token::Ident,
     semantic::{
         analysis::{
@@ -311,8 +314,18 @@ impl BodyCtxt<'_, '_> {
             .chain(scope_trait_candidates);
 
         // Scan for inherent `impl` candidates.
-        // TODO: Report conflicts.
+        let mut selections = SmallVec::<[Obj<FnDef>; 1]>::new();
+
         for candidate in candidates {
+            // If we started finding trait candidates and already made an inherent selection, break
+            // out.
+            if let Some(selection) = selections.first()
+                && matches!(*selection.r(s).owner, FuncDefOwner::ImplMethod(_, _))
+                && !matches!(*candidate.r(s).owner, FuncDefOwner::ImplMethod(_, _))
+            {
+                break;
+            }
+
             // See whether receiver is applicable.
             let mut fork = self.ccx().clone();
 
@@ -371,10 +384,29 @@ impl BodyCtxt<'_, '_> {
                 continue;
             }
 
-            return Some(candidate);
+            if selections.iter().all(|&v| candidate != v) {
+                selections.push(candidate);
+            }
         }
 
-        None
+        if selections.len() > 1 {
+            let mut diag = Diag::span_err(name.span, "multiple applicable items in scope");
+
+            for (idx, selection) in selections.iter().enumerate() {
+                diag.push_child(LeafDiag::span_note(
+                    selection.r(s).name.span,
+                    format_args!(
+                        "candidate #{} is defined in {}",
+                        idx + 1,
+                        selection.r(s).owner.as_item(s).r(s).bare_category_path(s)
+                    ),
+                ));
+            }
+
+            diag.emit();
+        }
+
+        selections.first().copied()
     }
 }
 

@@ -19,10 +19,24 @@ pub mod std {
     impl<T> Hehe for T {
         fn meow(me: Self) {}
     }
+
+    pub trait Haha {
+        fn meow(me: Self);
+    }
+
+    impl<T> Haha for T {
+        fn meow(me: Self) {}
+    }
 }
 
 use std::*;
 
-fn demo<'a: &shorter T, T>(v: &'a &'a T) {
+struct Miau {}
+
+impl Miau {
+    // fn meow(me: Self) {}
+}
+
+fn demo(v: Miau) {
     v.meow;
 }
