@@ -398,6 +398,13 @@ pub struct IntraLowerTask<'ast> {
     handler: Box<dyn 'ast + FnMut(IntraItemLowerCtxt<'_>)>,
 }
 
+#[derive(Clone)]
+pub struct FnDefLowerTask<'ast> {
+    pub def: Obj<FnDef>,
+    pub ast: &'ast AstFnDef,
+    pub generic_clause_lists: Vec<Option<&'ast AstTraitClauseList>>,
+}
+
 impl<'ast> InterItemLowerCtxt<'_, 'ast> {
     pub fn queue_task(&mut self, task: impl 'ast + FnOnce(IntraItemLowerCtxt<'_>)) {
         let mut task = Some(task);
@@ -484,7 +491,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
 
         // Lower members
         let mut associated_types = FxHashMap::default();
-        let mut methods = Vec::<Obj<FnDef>>::new();
+        let mut methods = Vec::<FnDefLowerTask>::new();
         let mut name_to_method = FxHashMap::<Symbol, u32>::default();
 
         for member in &ast.body.members {
@@ -509,7 +516,9 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                         .emit();
                 }
                 AstImplLikeMemberKind::Func(ast) => {
-                    let method = self.lower_fn_def(None, ast);
+                    let method_task = self.lower_fn_def(None, ast);
+                    let method = method_task.def;
+
                     LateInit::init(
                         &method.r(s).owner,
                         FuncDefOwner::TraitMethod(trait_target, methods.len() as u32),
@@ -517,7 +526,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
 
                     match name_to_method.entry(method.r(s).name.text) {
                         hash_map::Entry::Occupied(entry) => {
-                            let prev = methods[*entry.get() as usize];
+                            let prev = &methods[*entry.get() as usize];
 
                             Diag::span_err(
                                 method.r(s).name.span,
@@ -527,7 +536,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                                 ),
                             )
                             .child(LeafDiag::span_note(
-                                prev.r(s).name.span,
+                                prev.def.r(s).name.span,
                                 "previously defined here",
                             ))
                             .emit();
@@ -537,7 +546,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                         }
                     }
 
-                    methods.push(method);
+                    methods.push(method_task);
                 }
                 AstImplLikeMemberKind::Error(_) => {
                     // (ignored)
@@ -556,11 +565,19 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         );
 
         LateInit::init(&trait_target.r(s).associated_types, associated_types);
-        LateInit::init(&trait_target.r(s).methods, methods);
+        LateInit::init(
+            &trait_target.r(s).methods,
+            methods.iter().map(|v| v.def).collect::<Vec<_>>(),
+        );
         LateInit::init(&trait_target.r(s).name_to_method, name_to_method);
 
         self.queue_task(move |cx| {
-            cx.lower_trait(trait_target, ast.inherits.as_ref(), generic_clause_lists);
+            cx.lower_trait(
+                trait_target,
+                ast.inherits.as_ref(),
+                methods,
+                generic_clause_lists,
+            );
         });
     }
 
@@ -905,18 +922,21 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
             s,
         );
 
-        let def = self.lower_fn_def(None, &ast.def);
-        LateInit::init(&def.r(s).owner, FuncDefOwner::Func(target_def));
-        LateInit::init(&target_def.r(s).def, def);
+        let fn_task = self.lower_fn_def(None, &ast.def);
+        LateInit::init(&fn_task.def.r(s).owner, FuncDefOwner::Func(target_def));
+        LateInit::init(&target_def.r(s).def, fn_task.def);
 
         LateInit::init(&self.target.r(s).kind, ItemKind::Func(target_def));
+
+        self.queue_task(|mut ctxt| ctxt.lower_fn_def(fn_task));
     }
 
+    #[must_use]
     pub fn lower_fn_def(
         &mut self,
         impl_vis: Option<Visibility>,
         ast: &'ast AstFnDef,
-    ) -> Obj<FnDef> {
+    ) -> FnDefLowerTask<'ast> {
         let s = &self.tcx.session;
         let mut generics = GenericBinder::default();
         let mut generic_clause_lists = Vec::new();
@@ -940,11 +960,11 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
             s,
         );
 
-        self.queue_task(move |cx| {
-            cx.lower_fn_def(def, ast, generic_clause_lists);
-        });
-
-        def
+        FnDefLowerTask {
+            def,
+            ast,
+            generic_clause_lists,
+        }
     }
 
     pub fn lower_type_alias(&mut self, ast: &'ast AstItemTypeAlias) {
@@ -1018,6 +1038,7 @@ impl IntraItemLowerCtxt<'_> {
         mut self,
         item: Obj<TraitItem>,
         inherits: Option<&AstTraitClauseList>,
+        methods: Vec<FnDefLowerTask>,
         generic_clause_lists: Vec<Option<&AstTraitClauseList>>,
     ) {
         let s = &self.tcx.session;
@@ -1026,6 +1047,10 @@ impl IntraItemLowerCtxt<'_> {
         self.lower_generic_def_clauses(*item.r(s).generics, &generic_clause_lists);
 
         LateInit::init(&item.r(s).inherits, self.lower_clauses(inherits));
+
+        for method in methods {
+            self.lower_fn_def(method);
+        }
     }
 
     pub fn lower_impl(
@@ -1033,12 +1058,22 @@ impl IntraItemLowerCtxt<'_> {
         item: Obj<ImplItem>,
         ast: &AstItemImpl,
         generic_clause_lists: Vec<Option<&AstTraitClauseList>>,
-        method_defs: Vec<Obj<FnDef>>,
+        method_defs: Vec<FnDefLowerTask>,
     ) {
         let s = &self.tcx.session;
 
         self.define_generics_in_binder(item.r(s).generics);
         self.lower_generic_def_clauses(item.r(s).generics, &generic_clause_lists);
+
+        // Lower function definitions
+        let method_defs = method_defs
+            .into_iter()
+            .map(|task| {
+                let def = task.def;
+                self.lower_fn_def(task);
+                def
+            })
+            .collect::<Vec<_>>();
 
         // Lower source trait
         let (for_ty, for_trait) = match (&ast.first_ty, &ast.second_ty) {
@@ -1220,19 +1255,24 @@ impl IntraItemLowerCtxt<'_> {
         }
     }
 
-    pub fn lower_fn_def(
-        mut self,
-        item: Obj<FnDef>,
-        ast: &AstFnDef,
-        generic_clause_lists: Vec<Option<&AstTraitClauseList>>,
-    ) {
+    fn lower_fn_def(&mut self, task: FnDefLowerTask) {
+        self.scoped(|ctxt| ctxt.lower_fn_def_pre_scoped(task))
+    }
+
+    fn lower_fn_def_pre_scoped(&mut self, task: FnDefLowerTask) {
         let s = &self.tcx.session;
 
-        self.define_generics_in_binder(item.r(s).generics);
-        self.lower_generic_def_clauses(item.r(s).generics, &generic_clause_lists);
+        let FnDefLowerTask {
+            def,
+            ast,
+            generic_clause_lists,
+        } = task;
+
+        self.define_generics_in_binder(def.r(s).generics);
+        self.lower_generic_def_clauses(def.r(s).generics, &generic_clause_lists);
 
         LateInit::init(
-            &item.r(s).args,
+            &def.r(s).args,
             Obj::new_iter(
                 ast.args.iter().map(|arg| FuncArg {
                     span: arg.span,
@@ -1244,10 +1284,10 @@ impl IntraItemLowerCtxt<'_> {
         );
 
         // TODO: Actually detect these!
-        LateInit::init(&item.r(s).has_self_param, !item.r(s).args.r(s).is_empty());
+        LateInit::init(&def.r(s).has_self_param, !def.r(s).args.r(s).is_empty());
 
         LateInit::init(
-            &item.r(s).ret_ty,
+            &def.r(s).ret_ty,
             match &ast.ret_ty {
                 AstReturnTy::Omitted => SpannedTy::new_unspanned(
                     self.tcx.intern(TyKind::Tuple(self.tcx.intern_list(&[]))),
@@ -1257,7 +1297,7 @@ impl IntraItemLowerCtxt<'_> {
         );
 
         LateInit::init(
-            &item.r(s).body,
+            &def.r(s).body,
             ast.body.as_ref().map(|body| self.lower_block(body)),
         );
     }
