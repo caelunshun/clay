@@ -9,7 +9,7 @@ use crate::{
         lower::modules::{FrozenModuleResolver, ParentResolver},
         syntax::{
             Divergence, Expr, FnDef, FnInstanceInner, FnOwner, FuncDefOwner, HrtbUniverse,
-            Mutability, Re, RelationMode, TraitClauseList, TraitParam, TraitSpec, Ty,
+            Mutability, Re, RelationMode, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty,
             TyAndDivergence, TyKind, TyOrRe,
         },
     },
@@ -189,7 +189,7 @@ impl BodyCtxt<'_, '_> {
         }
     }
 
-    pub fn lookup_method(&mut self, mut receiver: Ty, name: Ident) -> Option<Obj<FnDef>> {
+    pub fn lookup_method(&mut self, receiver: Ty, name: Ident) -> Option<Obj<FnDef>> {
         let s = self.session();
         let tcx = self.tcx();
         let resolver = FrozenModuleResolver(s);
@@ -199,6 +199,7 @@ impl BodyCtxt<'_, '_> {
             .into_iter()
             // : Iterator<Item = Obj<Item>>
             .flat_map(|scope| {
+                // TODO: Scan global imports
                 scope
                     .r(s)
                     .direct_uses
@@ -212,10 +213,46 @@ impl BodyCtxt<'_, '_> {
             })
             .collect::<Vec<_>>();
 
+        let mut receiver_iter = receiver;
+
         loop {
-            if let Some(res) =
-                self.lookup_method_single_receiver(receiver, name, &scope_trait_candidates)
-            {
+            self.ccx_mut().poll_obligations();
+
+            let receiver = self
+                .ccx()
+                .ucx()
+                .substitutor(UnboundVarHandlingMode::NormalizeToRoot)
+                .fold(receiver_iter);
+
+            if let TyKind::InferVar(_) = receiver.r(s) {
+                break;
+            }
+
+            let generic_clause_candidates = if let TyKind::UniversalVar(var) = *receiver.r(s) {
+                self.ccx_mut()
+                    .elaborate_ty_universal_clauses(var)
+                    .clauses
+                    .r(s)
+                    .iter()
+                    .flat_map(|clause| match clause {
+                        TraitClause::Outlives(_, _) => None,
+                        TraitClause::Trait(binder) => Some(binder.inner.def),
+                    })
+                    .filter_map(|def| {
+                        let &idx = def.r(s).name_to_method.get(&name.text)?;
+                        Some(def.r(s).methods[idx as usize])
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+
+            if let Some(res) = self.lookup_method_single_receiver(
+                receiver,
+                name,
+                &scope_trait_candidates,
+                &generic_clause_candidates,
+            ) {
                 return Some(res);
             }
 
@@ -223,6 +260,7 @@ impl BodyCtxt<'_, '_> {
                 tcx.intern(TyKind::Reference(Re::Erased, Mutability::Not, receiver)),
                 name,
                 &scope_trait_candidates,
+                &generic_clause_candidates,
             ) {
                 return Some(res);
             }
@@ -231,6 +269,7 @@ impl BodyCtxt<'_, '_> {
                 tcx.intern(TyKind::Reference(Re::Erased, Mutability::Mut, receiver)),
                 name,
                 &scope_trait_candidates,
+                &generic_clause_candidates,
             ) {
                 return Some(res);
             }
@@ -239,7 +278,7 @@ impl BodyCtxt<'_, '_> {
                 break;
             };
 
-            receiver = next;
+            receiver_iter = next;
         }
 
         None
@@ -250,21 +289,10 @@ impl BodyCtxt<'_, '_> {
         receiver: Ty,
         name: Ident,
         scope_trait_candidates: &[Obj<FnDef>],
+        generic_clause_candidates: &[Obj<FnDef>],
     ) -> Option<Obj<FnDef>> {
         let s = self.session();
         let tcx = self.tcx();
-
-        self.ccx_mut().poll_obligations();
-
-        let receiver = self
-            .ccx()
-            .ucx()
-            .substitutor(UnboundVarHandlingMode::NormalizeToRoot)
-            .fold(receiver);
-
-        if let TyKind::InferVar(_) = receiver.r(s) {
-            return None;
-        }
 
         // Obtain a list of candidates.
         let inherent_candidates = self
@@ -281,13 +309,16 @@ impl BodyCtxt<'_, '_> {
                     .is_visible_to(self.item(), s)
             });
 
-        // TODO: Gather candidates from universal bounds.
+        let generic_clause_candidates = generic_clause_candidates.iter().copied();
 
         let scope_trait_candidates = scope_trait_candidates.iter().copied();
 
-        let candidates = inherent_candidates.chain(scope_trait_candidates);
+        let candidates = inherent_candidates
+            .chain(generic_clause_candidates)
+            .chain(scope_trait_candidates);
 
         // Scan for inherent `impl` candidates.
+        // TODO: Report conflicts.
         for candidate in candidates {
             // See whether receiver is applicable.
             let mut fork = self.ccx().clone();

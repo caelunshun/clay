@@ -11,18 +11,16 @@ pub mod std {
     impl<'a, T: &longer 'a> Deref for &'a mut T {
         type Target = T;
     }
-}
 
-pub struct Vec<T> {
-    
-}
+    pub trait Hehe {
+        fn meow(me: Self);
+    }
 
-impl<T> Vec<T> {
-    pub fn push(me: &mut Self) {
-
+    impl<T> Hehe for T {
+        fn meow(me: Self) {}
     }
 }
 
-fn main<'a>(mut v: &'a &'a &'a Vec<()>) {
-    v.push;
+fn demo<'a: &shorter T, T: std::Hehe>(v: &'a &'a T) {
+    v.meow;
 }
