@@ -603,6 +603,48 @@ impl<'tcx> ClauseCx<'tcx> {
         env
     }
 
+    pub fn instantiate_fn_def_as_owner_infer(&mut self, def: Obj<FnDef>) -> FnOwner {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let self_ty = self.fresh_ty_infer(HrtbUniverse::ROOT);
+
+        match *def.r(s).owner {
+            FuncDefOwner::Func(_) => unreachable!(),
+            FuncDefOwner::ImplMethod(block, method_idx) => FnOwner::Inherent {
+                self_ty,
+                block,
+                method_idx,
+            },
+            FuncDefOwner::TraitMethod(trait_item, method_idx) => {
+                let params = self
+                    .instantiate_blank_infer_vars_from_binder(
+                        *trait_item.r(s).generics,
+                        HrtbUniverse::ROOT_REF,
+                    )
+                    .substs;
+
+                let params = tcx.intern_list(
+                    &params
+                        .r(s)
+                        .iter()
+                        .copied()
+                        .map(TraitParam::Equals)
+                        .collect::<Vec<_>>(),
+                );
+
+                FnOwner::Trait {
+                    instance: TraitSpec {
+                        def: trait_item,
+                        params,
+                    },
+                    self_ty,
+                    method_idx,
+                }
+            }
+        }
+    }
+
     pub fn instantiate_fn_instance_receiver_as_infer(
         &mut self,
         origin: &ClauseOrigin,

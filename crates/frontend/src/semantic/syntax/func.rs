@@ -10,8 +10,7 @@ use crate::{
     },
     semantic::syntax::{
         AdtCtorFieldIdx, AdtCtorInstance, GenericBinder, ImplItem, Item, Mutability,
-        SpannedTraitInstance, SpannedTy, SpannedTyOrRe, SpannedTyOrReList, TraitItem, Ty,
-        Visibility,
+        SpannedTraitInstance, SpannedTy, SpannedTyOrReList, TraitItem, Ty, Visibility,
     },
 };
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
@@ -179,11 +178,6 @@ pub struct Expr {
 pub enum ExprKind {
     Array(Obj<[Obj<Expr>]>),
     Call(Obj<Expr>, Obj<[Obj<Expr>]>),
-    Method {
-        callee: Obj<Expr>,
-        generics: Option<SpannedTyOrRe>,
-        args: Obj<[Obj<Expr>]>,
-    },
     Tuple(Obj<[Obj<Expr>]>),
     Binary(AstBinOpSpanned, Obj<Expr>, Obj<Expr>),
     Unary(AstUnOpKind, Obj<Expr>),
@@ -215,10 +209,10 @@ pub enum ExprKind {
     Assign(Obj<Pat>, Obj<Expr>),
     AssignOp(AstAssignOpKind, Obj<Pat>, Obj<Expr>),
     Field(Obj<Expr>, Ident),
-    GenericMethodCall {
-        target: Obj<Expr>,
-        method: Ident,
-        generics: SpannedTyOrReList,
+    MethodCall {
+        receiver: Obj<Expr>,
+        name: Ident,
+        generics: Option<SpannedTyOrReList>,
         args: Obj<[Obj<Expr>]>,
     },
     Index(Obj<Expr>, Obj<Expr>),

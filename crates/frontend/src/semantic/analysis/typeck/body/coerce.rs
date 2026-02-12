@@ -11,9 +11,9 @@ use crate::{
         },
         lower::modules::{FrozenModuleResolver, ParentResolver, traits_in_single_scope},
         syntax::{
-            Divergence, Expr, FnDef, FnInstanceInner, FnOwner, FuncDefOwner, HrtbUniverse,
-            Mutability, Re, RelationMode, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty,
-            TyAndDivergence, TyKind, TyOrRe,
+            Divergence, Expr, FnDef, FnInstanceInner, FuncDefOwner, HrtbUniverse, Mutability, Re,
+            RelationMode, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyAndDivergence,
+            TyKind, TyOrRe,
         },
     },
 };
@@ -332,42 +332,7 @@ impl BodyCtxt<'_, '_> {
             let probe = ClauseErrorProbe::default();
             let origin = ClauseOrigin::never_printed().with_probe_sink(probe.clone());
 
-            let self_ty = fork.fresh_ty_infer(HrtbUniverse::ROOT);
-            let expected_owner = match *candidate.r(s).owner {
-                FuncDefOwner::Func(_) => unreachable!(),
-                FuncDefOwner::ImplMethod(block, method_idx) => FnOwner::Inherent {
-                    self_ty,
-                    block,
-                    method_idx,
-                },
-                FuncDefOwner::TraitMethod(trait_item, method_idx) => {
-                    let params = fork
-                        .instantiate_blank_infer_vars_from_binder(
-                            *trait_item.r(s).generics,
-                            HrtbUniverse::ROOT_REF,
-                        )
-                        .substs;
-
-                    let params = tcx.intern_list(
-                        &params
-                            .r(s)
-                            .iter()
-                            .copied()
-                            .map(TraitParam::Equals)
-                            .collect::<Vec<_>>(),
-                    );
-
-                    FnOwner::Trait {
-                        instance: TraitSpec {
-                            def: trait_item,
-                            params,
-                        },
-                        self_ty,
-                        method_idx,
-                    }
-                }
-            };
-
+            let expected_owner = fork.instantiate_fn_def_as_owner_infer(candidate);
             let expected_receiver = fork.instantiate_fn_instance_receiver_as_infer(
                 &origin,
                 tcx.intern(FnInstanceInner {
