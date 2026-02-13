@@ -6,13 +6,13 @@ use crate::{
     parse::token::Ident,
     semantic::{
         analysis::{
-            BodyCtxt, ClauseErrorProbe, ClauseOrigin, TyFolderInfallibleExt as _,
-            UnboundVarHandlingMode, attempt_deref,
+            BodyCtxt, ClauseErrorProbe, ClauseImportEnvRef, ClauseOrigin,
+            TyFolderInfallibleExt as _, UnboundVarHandlingMode, attempt_deref,
         },
         lower::modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},
         syntax::{
-            FnDef, FnInstanceInner, FuncDefOwner, HrtbUniverse, Mutability, Re, RelationMode,
-            TraitClause, Ty, TyKind,
+            AdtCtorSyntax, AdtKind, FnDef, FnInstanceInner, FuncDefOwner, GenericSubst,
+            HrtbUniverse, Mutability, Re, RelationMode, TraitClause, Ty, TyKind,
         },
     },
 };
@@ -25,6 +25,97 @@ pub struct LookupMethodResult {
 }
 
 impl BodyCtxt<'_, '_> {
+    pub fn lookup_field(&mut self, receiver: Ty, name: Ident) -> Option<Ty> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let mut receiver_iter = receiver;
+
+        let name_as_idx = name.text.as_str(s).parse::<u32>().ok();
+
+        loop {
+            let receiver = self.ccx_mut().peel_ty_infer_var_after_poll(receiver_iter);
+
+            match *receiver.r(s) {
+                TyKind::Adt(instance) => match *instance.def.r(s).kind {
+                    AdtKind::Struct(def) => 'search: {
+                        let ctor = def.r(s).ctor.r(s);
+
+                        let field = match &ctor.syntax {
+                            AdtCtorSyntax::Unit => None,
+                            AdtCtorSyntax::Tuple => {
+                                name_as_idx.and_then(|idx| ctor.fields.get(idx as usize))
+                            }
+                            AdtCtorSyntax::Named(fields) => {
+                                fields.get(&name.text).copied().map(|idx| &ctor.fields[idx])
+                            }
+                        };
+
+                        let Some(field) = field else {
+                            break 'search;
+                        };
+
+                        if !field.vis.is_visible_to(self.item(), s) {
+                            break 'search;
+                        }
+
+                        let env_args = [GenericSubst {
+                            binder: instance.def.r(s).generics,
+                            substs: instance.params,
+                        }];
+
+                        let env = ClauseImportEnvRef::new(receiver, &env_args);
+
+                        let field = self
+                            .ccx_mut()
+                            .importer(env, HrtbUniverse::ROOT)
+                            .fold(field.ty.value);
+
+                        return Some(field);
+                    }
+                    AdtKind::Enum(_) => {
+                        // (fallthrough)
+                    }
+                },
+                TyKind::Tuple(fields) => {
+                    if let Some(name_as_idx) = name_as_idx
+                        && let Some(&field_ty) = fields.r(s).get(name_as_idx as usize)
+                    {
+                        return Some(field_ty);
+                    }
+                }
+
+                TyKind::Simple(_)
+                | TyKind::Reference(_, _, _)
+                | TyKind::Trait(_, _, _)
+                | TyKind::FnDef(_)
+                | TyKind::UniversalVar(_) => {
+                    // (fallthrough, no special handling)
+                }
+                TyKind::SigThis
+                | TyKind::SigInfer
+                | TyKind::SigGeneric(_)
+                | TyKind::SigProject(_)
+                | TyKind::SigAlias(_, _)
+                | TyKind::HrtbVar(_) => unreachable!(),
+                TyKind::InferVar(_) => {
+                    return Some(tcx.intern(TyKind::Error(
+                        Diag::span_err(name.span, "type must be known by this point").emit(),
+                    )));
+                }
+                TyKind::Error(error) => return Some(tcx.intern(TyKind::Error(error))),
+            }
+
+            let Some(next) = attempt_deref(self.ccx_mut(), receiver) else {
+                break;
+            };
+
+            receiver_iter = next;
+        }
+
+        None
+    }
+
     pub fn lookup_method(&mut self, receiver: Ty, name: Ident) -> Option<LookupMethodResult> {
         let s = self.session();
         let tcx = self.tcx();
