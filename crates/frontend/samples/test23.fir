@@ -28,7 +28,9 @@ pub mod std {
 
 use std::Clone;
 
-pub struct Vec<T> {}
+pub struct Vec<T> {
+    my_field: (),
+}
 
 impl<T> Vec<T> {
     pub fn push<'a: &shorter Self>(me: &'a mut Self, value: T) {}
@@ -42,7 +44,7 @@ impl<T: Clone> Clone for Vec<T> {
     fn clone<'a: &shorter Self>(me: &'a Self) -> Self {}
 }
 
-impl<T> Clone for (T,) {
+impl Clone for () {
     fn clone<'a: &shorter Self>(me: &'a Self) -> Self {}
 }
 
@@ -51,7 +53,7 @@ fn make_vec<T>() -> Vec<T> {}
 fn main() {
     let vec = make_vec();
 
-    vec.push(());
+    vec.push(vec.my_field);
     let elem = vec.get(0);
     vec.push(elem.clone());
 

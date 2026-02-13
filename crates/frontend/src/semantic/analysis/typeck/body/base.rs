@@ -450,7 +450,17 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 self.check_expr_demand(expr, pat_ty).and_do(&mut divergence)
             }
             ExprKind::AssignOp(ast_assign_op_kind, obj, obj1) => todo!(),
-            ExprKind::Field(receiver, name) => todo!(),
+            ExprKind::Field(receiver, name) => {
+                let receiver = self.check_expr(receiver).and_do(&mut divergence);
+
+                if let Some(ty) = self.lookup_field(receiver, name) {
+                    ty
+                } else {
+                    tcx.intern(TyKind::Error(
+                        Diag::span_err(name.span, "no such field").emit(),
+                    ))
+                }
+            }
             ExprKind::Index(obj, obj1) => todo!(),
             ExprKind::Range(range_expr) => todo!(),
             ExprKind::LocalSelf => todo!(),
