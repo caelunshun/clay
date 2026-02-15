@@ -247,7 +247,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
 
     fn visit_fn_instance(&mut self, instance: SpannedFnInstance) -> ControlFlow<Self::Break> {
         // Validate the instance itself.
-        self.ccx.instantiate_fn_instance_sig(
+        self.ccx.instantiate_fn_instance_env_as_infer(
             &ClauseOrigin::root(ClauseOriginKind::WfFnDef {
                 fn_ty: instance.own_span(),
             }),

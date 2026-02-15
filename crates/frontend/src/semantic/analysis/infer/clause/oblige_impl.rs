@@ -422,7 +422,11 @@ impl<'tcx> ClauseCx<'tcx> {
                 unreachable!()
             };
 
-            let (lhs_input, lhs_output) = self.instantiate_fn_instance_sig(origin, lhs, universe);
+            let lhs_env = self.instantiate_fn_instance_env_as_infer(origin, lhs, universe);
+
+            let (lhs_input, lhs_output) =
+                self.import_fn_instance_sig(lhs_env.as_ref(), lhs.r(s).owner.def(s), universe);
+
             let lhs_input = tcx.intern(TyKind::Tuple(lhs_input));
 
             if self

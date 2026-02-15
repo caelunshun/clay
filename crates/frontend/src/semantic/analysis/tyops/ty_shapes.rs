@@ -49,6 +49,13 @@ impl TyCtxt {
         })
     }
 
+    pub fn shape_of_inherent_function(&self, self_ty: Ty, name: Symbol) -> TyShape {
+        TyShape::Solid(SolidTyShape {
+            kind: SolidTyShapeKind::InherentFunctionImpl(name),
+            children: self.intern_list(&[self.erase_ty_to_shape(self_ty)]),
+        })
+    }
+
     pub fn erase_ty_to_shape(&self, ty: Ty) -> TyShape {
         let s = &self.session;
 

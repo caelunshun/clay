@@ -488,6 +488,50 @@ impl<'tcx> ClauseCx<'tcx> {
 
     // === Specialized existential imports === //
 
+    pub fn instantiate_fn_def_as_blank_owner_infer(
+        &mut self,
+        def: Obj<FnDef>,
+        self_ty: Ty,
+    ) -> FnOwner {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        match *def.r(s).owner {
+            FuncDefOwner::Func(_) => unreachable!(),
+            FuncDefOwner::ImplMethod(block, method_idx) => FnOwner::Inherent {
+                self_ty,
+                block,
+                method_idx,
+            },
+            FuncDefOwner::TraitMethod(trait_item, method_idx) => {
+                let params = self
+                    .instantiate_blank_infer_vars_from_binder(
+                        *trait_item.r(s).generics,
+                        HrtbUniverse::ROOT_REF,
+                    )
+                    .substs;
+
+                let params = tcx.intern_list(
+                    &params
+                        .r(s)
+                        .iter()
+                        .copied()
+                        .map(TraitParam::Equals)
+                        .collect::<Vec<_>>(),
+                );
+
+                FnOwner::Trait {
+                    instance: TraitSpec {
+                        def: trait_item,
+                        params,
+                    },
+                    self_ty,
+                    method_idx,
+                }
+            }
+        }
+    }
+
     pub fn instantiate_fn_owner_env_as_infer(
         &mut self,
         origin: &ClauseOrigin,
@@ -602,76 +646,28 @@ impl<'tcx> ClauseCx<'tcx> {
         env
     }
 
-    pub fn instantiate_fn_def_as_owner_infer(&mut self, def: Obj<FnDef>) -> FnOwner {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        let self_ty = self.fresh_ty_infer(HrtbUniverse::ROOT);
-
-        match *def.r(s).owner {
-            FuncDefOwner::Func(_) => unreachable!(),
-            FuncDefOwner::ImplMethod(block, method_idx) => FnOwner::Inherent {
-                self_ty,
-                block,
-                method_idx,
-            },
-            FuncDefOwner::TraitMethod(trait_item, method_idx) => {
-                let params = self
-                    .instantiate_blank_infer_vars_from_binder(
-                        *trait_item.r(s).generics,
-                        HrtbUniverse::ROOT_REF,
-                    )
-                    .substs;
-
-                let params = tcx.intern_list(
-                    &params
-                        .r(s)
-                        .iter()
-                        .copied()
-                        .map(TraitParam::Equals)
-                        .collect::<Vec<_>>(),
-                );
-
-                FnOwner::Trait {
-                    instance: TraitSpec {
-                        def: trait_item,
-                        params,
-                    },
-                    self_ty,
-                    method_idx,
-                }
-            }
-        }
-    }
-
-    pub fn instantiate_fn_instance_receiver_as_infer(
+    pub fn import_fn_instance_receiver_as_infer(
         &mut self,
-        origin: &ClauseOrigin,
-        instance: FnInstance,
+        env: ClauseImportEnvRef<'_>,
+        def: Obj<FnDef>,
         universe: &HrtbUniverse,
     ) -> Ty {
         let s = self.session();
 
-        let env = self.instantiate_fn_instance_env_as_infer(origin, instance, universe);
-        let def = instance.r(s).owner.def(s);
-
         debug_assert!(*def.r(s).has_self_param);
 
-        self.importer(env.as_ref(), universe.clone())
+        self.importer(env, universe.clone())
             .fold(def.r(s).args.r(s)[0].ty.value)
     }
 
-    pub fn instantiate_fn_instance_sig(
+    pub fn import_fn_instance_sig(
         &mut self,
-        origin: &ClauseOrigin,
-        instance: FnInstance,
+        env: ClauseImportEnvRef<'_>,
+        def: Obj<FnDef>,
         universe: &HrtbUniverse,
     ) -> (TyList, Ty) {
         let s = self.session();
         let tcx = self.tcx();
-
-        let env = self.instantiate_fn_instance_env_as_infer(origin, instance, universe);
-        let def = instance.r(s).owner.def(s);
 
         let args = def
             .r(s)
@@ -683,9 +679,9 @@ impl<'tcx> ClauseCx<'tcx> {
 
         let args = tcx.intern_list(&args);
 
-        let args = self.importer(env.as_ref(), universe.clone()).fold(args);
+        let args = self.importer(env, universe.clone()).fold(args);
         let ret_ty = self
-            .importer(env.as_ref(), universe.clone())
+            .importer(env, universe.clone())
             .fold(def.r(s).ret_ty.value);
 
         (args, ret_ty)
