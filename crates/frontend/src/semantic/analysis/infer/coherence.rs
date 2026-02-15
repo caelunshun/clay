@@ -51,6 +51,15 @@ impl CoherenceMap {
                     for &method in &**item.r(s).methods {
                         let method = method.unwrap();
 
+                        self.by_shape.insert(
+                            tcx.shape_of_inherent_function(
+                                item.r(s).target.value,
+                                method.r(s).name.text,
+                            ),
+                            CoherenceMapEntry::InherentMethod(method),
+                            s,
+                        );
+
                         if !*method.r(s).has_self_param {
                             continue;
                         }
@@ -79,7 +88,7 @@ impl CoherenceMap {
         // TODO
     }
 
-    pub fn gather_inherent_impl_candidates<'a>(
+    pub fn gather_inherent_impl_method_candidates<'a>(
         &'a self,
         tcx: &'a TyCtxt,
         receiver: Ty,
@@ -89,6 +98,25 @@ impl CoherenceMap {
 
         self.by_shape
             .lookup(tcx.shape_of_inherent_method(receiver, name), s)
+            .map(|v| {
+                let CoherenceMapEntry::InherentMethod(v) = *v else {
+                    unreachable!()
+                };
+
+                v
+            })
+    }
+
+    pub fn gather_inherent_impl_function_candidates<'a>(
+        &'a self,
+        tcx: &'a TyCtxt,
+        self_ty: Ty,
+        name: Symbol,
+    ) -> impl Iterator<Item = Obj<FnDef>> + 'a {
+        let s = &tcx.session;
+
+        self.by_shape
+            .lookup(tcx.shape_of_inherent_function(self_ty, name), s)
             .map(|v| {
                 let CoherenceMapEntry::InherentMethod(v) = *v else {
                     unreachable!()

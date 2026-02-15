@@ -80,17 +80,17 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 // === BodyCtxt === //
 
 pub struct BodyCtxt<'a, 'tcx> {
-    ccx: &'a mut ClauseCx<'tcx>,
-    def: Obj<FnDef>,
-    import_env: ClauseImportEnvRef<'a>,
-    local_types: FxHashMap<Obj<FuncLocal>, Ty>,
-    needs_infer: Vec<NeedsInfer>,
+    pub ccx: &'a mut ClauseCx<'tcx>,
+    pub def: Obj<FnDef>,
+    pub import_env: ClauseImportEnvRef<'a>,
+    pub local_types: FxHashMap<Obj<FuncLocal>, Ty>,
+    pub needs_infer: Vec<NeedsInfer>,
 }
 
 #[derive(Copy, Clone)]
-struct NeedsInfer {
-    span: Span,
-    var: InferTyVar,
+pub struct NeedsInfer {
+    pub span: Span,
+    pub var: InferTyVar,
 }
 
 impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
@@ -313,17 +313,27 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     ));
                 };
 
-                let owner = self.ccx_mut().instantiate_fn_def_as_owner_infer(resolution);
+                let self_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
+                let owner = self
+                    .ccx_mut()
+                    .instantiate_fn_def_as_blank_owner_infer(resolution, self_ty);
+
                 let instance = tcx.intern(FnInstanceInner {
                     owner,
                     early_args: generics.map(|v| v.value),
                 });
 
-                let (expected_args, expected_output) = self.ccx_mut().instantiate_fn_instance_sig(
+                let instance_env = self.ccx_mut().instantiate_fn_instance_env_as_infer(
                     &ClauseOrigin::root(ClauseOriginKind::FunctionCall {
                         site_span: name.span,
                     }),
                     instance,
+                    HrtbUniverse::ROOT_REF,
+                );
+
+                let (expected_args, expected_output) = self.ccx_mut().import_fn_instance_sig(
+                    instance_env.as_ref(),
+                    resolution,
                     HrtbUniverse::ROOT_REF,
                 );
 
@@ -401,7 +411,33 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 as_trait,
                 assoc_name,
                 assoc_args,
-            } => todo!(),
+            } => {
+                let env = self.import_env;
+
+                let self_ty = self
+                    .ccx_mut()
+                    .importer(env, HrtbUniverse::ROOT)
+                    .fold_preserved(self_ty);
+
+                self.ccx_mut()
+                    .wf_visitor(HrtbUniverse::ROOT)
+                    .visit_spanned(self_ty);
+
+                let as_trait = as_trait.map(|as_trait| {
+                    let out = self
+                        .ccx_mut()
+                        .importer(env, HrtbUniverse::ROOT)
+                        .fold_preserved(as_trait);
+
+                    self.ccx_mut()
+                        .wf_visitor(HrtbUniverse::ROOT)
+                        .visit_spanned(out);
+
+                    out
+                });
+
+                todo!()
+            }
             ExprKind::Cast(expr, as_ty) => {
                 let env = self.import_env;
                 let as_ty = self

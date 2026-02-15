@@ -677,8 +677,13 @@ pub enum SolidTyShapeKind {
     TraitImpl(Obj<TraitItem>),
 
     /// A top-level coherence type indicating the implementation of a specific method in an inherent
-    /// `impl` block. This type has exactly one child type indicating the implementation target.
+    /// `impl` block. This type has exactly one child type indicating the *receiver target*.
     InherentMethodImpl(Symbol),
+
+    /// A top-level coherence type indicating the implementation of a specific associated function
+    /// in an inherent `impl` block. This type has exactly one child type indicating the *self
+    /// type*.
+    InherentFunctionImpl(Symbol),
 
     Simple(SimpleTyKind),
     Re(Mutability),
