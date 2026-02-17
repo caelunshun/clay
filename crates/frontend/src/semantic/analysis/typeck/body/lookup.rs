@@ -397,7 +397,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
     fn attempt_single_candidate(&mut self, candidate: Obj<FnDef>, query: MethodQuery) -> bool {
         let tcx = self.tcx();
 
-        let mut fork = self.ccx().clone();
+        let mut fork = self.ccx().clone().with_silent();
 
         let probe = ClauseErrorProbe::default();
         let origin = ClauseOrigin::never_printed().with_probe_sink(probe.clone());

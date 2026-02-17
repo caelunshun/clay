@@ -227,7 +227,15 @@ macro_rules! clause_error {
         )*
 
         impl ClauseError {
-            pub fn emit(&self, ccx: &ClauseCx<'_>) -> ErrorGuaranteed {
+            pub fn emit(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
+                if ccx.is_silent() {
+                    return None;
+                }
+
+                Some(self.force_emit(ccx))
+            }
+
+            pub fn force_emit(&self, ccx: &ClauseCx<'_>) -> ErrorGuaranteed {
                 match self {
                     $(Self::$name(err) => err.emit(ccx),)*
                 }
