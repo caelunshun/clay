@@ -60,5 +60,5 @@ fn main() {
     vec.push(elem.clone());
 
     let vec2 = <_>::clone(&vec);
-    // vec2.push(());
+    vec2.push(());
 }

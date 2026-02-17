@@ -216,7 +216,8 @@ impl CoercionPossibility {
             | TyKind::SigInfer
             | TyKind::SigGeneric(_)
             | TyKind::SigProject(_)
-            | TyKind::SigAlias(_, _) => {
+            | TyKind::SigAlias(_, _)
+            | TyKind::HrtbVar(_) => {
                 unreachable!()
             }
 
@@ -224,7 +225,6 @@ impl CoercionPossibility {
             | TyKind::Adt(_)
             | TyKind::Tuple(_)
             | TyKind::FnDef(_)
-            | TyKind::HrtbVar(_)
             | TyKind::InferVar(_)
             | TyKind::UniversalVar(_)
             | TyKind::Error(_) => Self::Solid(ty),
