@@ -9,7 +9,10 @@ use crate::{
             BodyCtxt, ClauseErrorProbe, ClauseImportEnvRef, ClauseOrigin,
             TyFolderInfallibleExt as _, UnboundVarHandlingMode, attempt_deref,
         },
-        lower::modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},
+        lower::{
+            generics::normalize_positional_generic_arity,
+            modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},
+        },
         syntax::{
             AdtCtorSyntax, AdtKind, FnDef, FnInstanceInner, FuncDefOwner, GenericSubst,
             HrtbUniverse, Mutability, Re, RelationMode, SpannedTyOrReList, TraitClause, TraitSpec,
@@ -214,26 +217,18 @@ impl BodyCtxt<'_, '_> {
 
         let early_binder = owner.def(s).r(s).generics;
 
-        let assoc_args_are_valid = 'validate: {
-            let Some(assoc_args) = assoc_args else {
-                break 'validate true;
-            };
-
-            if early_binder.r(s).defs.len() != assoc_args.len(s) {
-                Diag::span_err(assoc_args.own_span(), "wrong number of generic arguments").emit();
-
-                break 'validate false;
-            }
-
-            // TODO: Bring in validation from lowering
-
-            true
-        };
-
-        let instance = tcx.intern(FnInstanceInner {
-            owner,
-            early_args: assoc_args.filter(|_| assoc_args_are_valid).map(|v| v.value),
+        let early_args = assoc_args.map(|assoc_args| {
+            normalize_positional_generic_arity(
+                tcx,
+                early_binder,
+                None,
+                assoc_args.own_span(),
+                &assoc_args.iter(tcx).collect::<Vec<_>>(),
+            )
+            .value
         });
+
+        let instance = tcx.intern(FnInstanceInner { owner, early_args });
 
         Some(tcx.intern(TyKind::FnDef(instance)))
     }
