@@ -75,11 +75,21 @@ impl BodyCtxt<'_, '_> {
     }
 
     pub fn check_expr_demand(&mut self, expr: Obj<Expr>, demand: Ty) -> TyAndDivergence {
+        let s = self.session();
         let mut divergence = Divergence::MayDiverge;
 
         let actual = self.check_expr(expr).and_do(&mut divergence);
         let target = CoercionPossibility::new(self, demand).resolve(self);
-        self.apply_coercions(&[(expr, actual)], target);
+        let out_ty = self.apply_coercions(&[(expr, actual)], target);
+
+        self.ccx_mut().oblige_ty_unifies_ty(
+            ClauseOrigin::root(ClauseOriginKind::Coercion {
+                expr_span: expr.r(s).span,
+            }),
+            out_ty,
+            demand,
+            RelationMode::Equate,
+        );
 
         TyAndDivergence::new(demand, divergence)
     }
