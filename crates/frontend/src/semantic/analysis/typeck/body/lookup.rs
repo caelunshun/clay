@@ -12,7 +12,8 @@ use crate::{
         lower::modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},
         syntax::{
             AdtCtorSyntax, AdtKind, FnDef, FnInstanceInner, FuncDefOwner, GenericSubst,
-            HrtbUniverse, Mutability, Re, RelationMode, TraitClause, TraitSpec, Ty, TyKind,
+            HrtbUniverse, Mutability, Re, RelationMode, SpannedTyOrReList, TraitClause, TraitSpec,
+            Ty, TyKind,
         },
     },
     utils::lang::IterEither,
@@ -120,19 +121,8 @@ impl BodyCtxt<'_, '_> {
     pub fn lookup_method(&mut self, receiver: Ty, name: Ident) -> Option<LookupMethodResult> {
         let s = self.session();
         let tcx = self.tcx();
-        let resolver = FrozenModuleResolver(s);
 
-        let scope_trait_candidates = resolver
-            .scope_components(self.item())
-            .into_iter()
-            // : Iterator<Item = Obj<Item>>
-            .flat_map(|scope| traits_in_single_scope(scope, s).iter().copied())
-            // : Iterator<Item = Obj<TraitItem>>
-            .filter_map(|def| {
-                let &idx = def.r(s).name_to_method.get(&name.text)?;
-                Some(def.r(s).methods[idx as usize])
-            })
-            .collect::<Vec<_>>();
+        let scope_trait_candidates = self.collect_scope_trait_candidates(name);
 
         let mut receiver_iter = receiver;
 
@@ -149,24 +139,7 @@ impl BodyCtxt<'_, '_> {
                 break;
             }
 
-            let generic_clause_candidates = if let TyKind::UniversalVar(var) = *receiver.r(s) {
-                self.ccx_mut()
-                    .elaborate_ty_universal_clauses(var)
-                    .clauses
-                    .r(s)
-                    .iter()
-                    .flat_map(|clause| match clause {
-                        TraitClause::Outlives(_, _) => None,
-                        TraitClause::Trait(binder) => Some(binder.inner.def),
-                    })
-                    .filter_map(|def| {
-                        let &idx = def.r(s).name_to_method.get(&name.text)?;
-                        Some(def.r(s).methods[idx as usize])
-                    })
-                    .collect::<Vec<_>>()
-            } else {
-                Vec::new()
-            };
+            let generic_clause_candidates = self.collect_generic_clause_candidates(receiver, name);
 
             if let Some(res) = self.lookup_single_method(
                 receiver,
@@ -209,35 +182,60 @@ impl BodyCtxt<'_, '_> {
         &mut self,
         self_ty: Ty,
         as_trait: Option<TraitSpec>,
-        name: Ident,
+        assoc_name: Ident,
+        assoc_args: Option<SpannedTyOrReList>,
     ) -> Option<Ty> {
         let s = self.session();
         let tcx = self.tcx();
 
         let self_ty = self.ccx_mut().peel_ty_infer_var_after_poll(self_ty);
 
-        match *self_ty.r(s) {
-            TyKind::SigThis
-            | TyKind::SigInfer
-            | TyKind::SigGeneric(_)
-            | TyKind::SigProject(_)
-            | TyKind::SigAlias(_, _) => unreachable!(),
-
-            TyKind::Adt(adt_instance) => todo!(),
-
-            TyKind::Simple(simple_ty_kind) => todo!(),
-            TyKind::Reference(re, mutability, intern) => todo!(),
-            TyKind::Trait(re, mutability, intern) => todo!(),
-            TyKind::Tuple(intern) => todo!(),
-            TyKind::FnDef(intern) => todo!(),
-            TyKind::HrtbVar(hrtb_debruijn) => todo!(),
-            TyKind::InferVar(infer_ty_var) => todo!(),
-            TyKind::UniversalVar(universal_ty_var) => todo!(),
-
-            TyKind::Error(err) => return Some(tcx.intern(TyKind::Error(err))),
+        if let TyKind::Error(err) = *self_ty.r(s) {
+            return Some(tcx.intern(TyKind::Error(err)));
         }
 
-        todo!()
+        let owner = if let Some(as_trait) = as_trait {
+            todo!()
+        } else {
+            let scope_trait_candidates = self.collect_scope_trait_candidates(assoc_name);
+            let generic_clause_candidates =
+                self.collect_generic_clause_candidates(self_ty, assoc_name);
+
+            let resolution = self.lookup_single(
+                MethodQuery::Function(self_ty),
+                assoc_name,
+                &scope_trait_candidates,
+                &generic_clause_candidates,
+            )?;
+
+            self.ccx_mut()
+                .instantiate_fn_def_as_blank_owner_infer(resolution, self_ty)
+        };
+
+        let early_binder = owner.def(s).r(s).generics;
+
+        let assoc_args_are_valid = 'validate: {
+            let Some(assoc_args) = assoc_args else {
+                break 'validate true;
+            };
+
+            if early_binder.r(s).defs.len() != assoc_args.len(s) {
+                Diag::span_err(assoc_args.own_span(), "wrong number of generic arguments").emit();
+
+                break 'validate false;
+            }
+
+            // TODO: Bring in validation from lowering
+
+            true
+        };
+
+        let instance = tcx.intern(FnInstanceInner {
+            owner,
+            early_args: assoc_args.filter(|_| assoc_args_are_valid).map(|v| v.value),
+        });
+
+        Some(tcx.intern(TyKind::FnDef(instance)))
     }
 }
 
@@ -270,14 +268,10 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
             ),
         };
 
-        candidates.filter(move |candidate| {
-            debug_assert!(*candidate.r(s).has_self_param);
-
-            candidate.r(s).impl_vis.unwrap().is_visible_to(item, s)
-        })
+        candidates.filter(move |candidate| candidate.r(s).impl_vis.unwrap().is_visible_to(item, s))
     }
 
-    fn collect_scope_trait_candidates(&mut self, ty: Ty, name: Ident) -> Vec<Obj<FnDef>> {
+    fn collect_scope_trait_candidates(&mut self, name: Ident) -> Vec<Obj<FnDef>> {
         let s = self.session();
         let resolver = FrozenModuleResolver(s);
 
@@ -345,7 +339,6 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
         generic_clause_candidates: &[Obj<FnDef>],
     ) -> Option<Obj<FnDef>> {
         let s = self.session();
-        let tcx = self.tcx();
 
         // Obtain a list of candidates.
         let inherent_candidates = self.collect_inherent_candidates(query, name);
@@ -371,7 +364,6 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
             }
 
             // See whether receiver is applicable.
-
             if !self.attempt_single_candidate(candidate, query) {
                 continue;
             }
@@ -415,6 +407,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                 let self_ty = fork.fresh_ty_infer(HrtbUniverse::ROOT);
                 let expected_owner =
                     fork.instantiate_fn_def_as_blank_owner_infer(candidate, self_ty);
+
                 let expected_instance = tcx.intern(FnInstanceInner {
                     owner: expected_owner,
                     early_args: None,
