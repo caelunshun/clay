@@ -411,7 +411,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 as_trait,
                 assoc_name,
                 assoc_args,
-            } => {
+            } => 'res: {
                 let env = self.import_env;
 
                 let self_ty = self
@@ -436,7 +436,28 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     out
                 });
 
-                todo!()
+                let assoc_args = assoc_args.map(|assoc_args| {
+                    let out = self
+                        .ccx_mut()
+                        .importer(env, HrtbUniverse::ROOT)
+                        .fold_preserved(assoc_args);
+
+                    self.ccx_mut()
+                        .wf_visitor(HrtbUniverse::ROOT)
+                        .visit_spanned(out);
+
+                    out
+                });
+
+                let Some(resolution) =
+                    self.lookup_type_relative(self_ty.value, None, assoc_name, assoc_args)
+                else {
+                    break 'res tcx.intern(TyKind::Error(
+                        Diag::span_err(assoc_name.span, "not found").emit(),
+                    ));
+                };
+
+                resolution
             }
             ExprKind::Cast(expr, as_ty) => {
                 let env = self.import_env;

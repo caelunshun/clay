@@ -33,6 +33,8 @@ pub struct Vec<T> {
 }
 
 impl<T> Vec<T> {
+    pub fn new<V>() -> (Self, V) {}
+
     pub fn push<'a: &shorter Self>(me: &'a mut Self, value: T) {}
 
     pub fn clear<'a: &shorter Self>(me: &'a mut Self) {}
@@ -51,7 +53,7 @@ impl Clone for () {
 fn make_vec<T>() -> Vec<T> {}
 
 fn main() {
-    let vec = make_vec();
+    let vec = Vec::new::<>();
 
     vec.push(vec.my_field);
     let elem = vec.get(0);
