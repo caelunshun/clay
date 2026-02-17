@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        Diag, LeafDiag,
+        Diag, LeafDiag, Session,
         arena::{HasInterner as _, Obj},
     },
     parse::token::Ident,
@@ -197,25 +197,27 @@ impl BodyCtxt<'_, '_> {
             return Some(tcx.intern(TyKind::Error(err)));
         }
 
-        let owner = if let Some(as_trait) = as_trait {
-            todo!()
+        let resolution = if let Some(as_trait) = as_trait {
+            let &idx = as_trait.def.r(s).name_to_method.get(&assoc_name.text)?;
+            as_trait.def.r(s).methods[idx as usize]
         } else {
             let scope_trait_candidates = self.collect_scope_trait_candidates(assoc_name);
             let generic_clause_candidates =
                 self.collect_generic_clause_candidates(self_ty, assoc_name);
 
-            let resolution = self.lookup_single(
+            self.lookup_single(
                 MethodQuery::Function(self_ty),
                 assoc_name,
                 &scope_trait_candidates,
                 &generic_clause_candidates,
-            )?;
-
-            self.ccx_mut()
-                .instantiate_fn_def_as_blank_owner_infer(resolution, self_ty)
+            )?
         };
 
-        let early_binder = owner.def(s).r(s).generics;
+        let owner = self
+            .ccx_mut()
+            .instantiate_fn_def_as_blank_owner_infer(resolution, self_ty);
+
+        let early_binder = resolution.r(s).generics;
 
         let early_args = assoc_args.map(|assoc_args| {
             normalize_positional_generic_arity(
@@ -250,20 +252,59 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
         let s = self.session();
         let item = self.item();
 
+        fn is_too_general(ty: Ty, s: &Session) -> bool {
+            match ty.r(s) {
+                TyKind::SigThis
+                | TyKind::SigInfer
+                | TyKind::SigGeneric(_)
+                | TyKind::SigProject(_)
+                | TyKind::SigAlias(_, _)
+                | TyKind::HrtbVar(_) => unreachable!(),
+
+                TyKind::Simple(_)
+                | TyKind::Reference(_, _, _)
+                | TyKind::Adt(_)
+                | TyKind::Trait(_, _, _)
+                | TyKind::Tuple(_)
+                | TyKind::FnDef(_) => false,
+
+                TyKind::InferVar(_) | TyKind::UniversalVar(_) | TyKind::Error(_) => true,
+            }
+        }
+
         let candidates = match query {
-            MethodQuery::Method(receiver) => IterEither::Left(
-                self.ccx()
-                    .coherence()
-                    .gather_inherent_impl_method_candidates(tcx, receiver, name.text),
-            ),
-            MethodQuery::Function(self_ty) => IterEither::Right(
-                self.ccx()
-                    .coherence()
-                    .gather_inherent_impl_function_candidates(tcx, self_ty, name.text),
-            ),
+            MethodQuery::Method(receiver) => {
+                let receiver = self.ccx_mut().peel_ty_infer_var_after_poll(receiver);
+
+                if is_too_general(receiver, s) {
+                    return IterEither::Left([].into_iter());
+                }
+
+                IterEither::Left(
+                    self.ccx()
+                        .coherence()
+                        .gather_inherent_impl_method_candidates(tcx, receiver, name.text),
+                )
+            }
+            MethodQuery::Function(self_ty) => {
+                let self_ty = self.ccx_mut().peel_ty_infer_var_after_poll(self_ty);
+
+                if is_too_general(self_ty, s) {
+                    return IterEither::Left([].into_iter());
+                }
+
+                IterEither::Right(
+                    self.ccx()
+                        .coherence()
+                        .gather_inherent_impl_function_candidates(tcx, self_ty, name.text),
+                )
+            }
         };
 
-        candidates.filter(move |candidate| candidate.r(s).impl_vis.unwrap().is_visible_to(item, s))
+        let candidates = candidates
+            .filter(move |candidate| candidate.r(s).impl_vis.unwrap().is_visible_to(item, s));
+
+        IterEither::Right(candidates)
     }
 
     fn collect_scope_trait_candidates(&mut self, name: Ident) -> Vec<Obj<FnDef>> {
