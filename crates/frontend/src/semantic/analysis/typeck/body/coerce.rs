@@ -173,7 +173,7 @@ impl BodyCtxt<'_, '_> {
                     );
                 }
 
-                tcx.intern(TyKind::Reference(Re::Erased, to_muta, unify_ty))
+                unify_ty
             }
             CoercionResolution::WideReference {
                 to_muta,
