@@ -7,7 +7,7 @@ use crate::{
 };
 
 pub fn attempt_deref(ccx: &mut ClauseCx<'_>, curr: Ty) -> Option<Ty> {
-    let mut fork = ccx.clone();
+    let mut fork = ccx.clone().with_silent();
 
     let res = attempt_deref_clobber_obligations(&mut fork, curr);
 

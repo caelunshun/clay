@@ -102,6 +102,7 @@ pub struct ClauseCx<'tcx> {
     ocx: ObligationCx<'tcx, ClauseObligation>,
     coherence: &'tcx CoherenceMap,
     krate: Obj<Crate>,
+    is_silent: bool,
     pub(super) universal_vars: IndexVec<UniversalTyVar, UniversalTyVarDescriptor>,
 }
 
@@ -128,6 +129,7 @@ impl<'tcx> ClauseCx<'tcx> {
             ocx: ObligationCx::new(tcx, mode),
             coherence,
             krate,
+            is_silent: false,
             universal_vars: IndexVec::new(),
         }
     }
@@ -154,6 +156,19 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn ucx_mut(&mut self) -> &mut UnifyCx<'tcx> {
         self.ocx.ucx_mut()
+    }
+
+    pub fn is_silent(&self) -> bool {
+        self.is_silent
+    }
+
+    pub fn set_is_silent(&mut self, is_silent: bool) {
+        self.is_silent = is_silent;
+    }
+
+    pub fn with_silent(mut self) -> Self {
+        self.set_is_silent(true);
+        self
     }
 
     pub fn mode(&self) -> UnifyCxMode {
