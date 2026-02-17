@@ -151,13 +151,10 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
                     .fold_preserved(super_clause);
 
                 ccx.oblige_ty_meets_clause(
-                    ClauseOrigin::new(
-                        None,
-                        ClauseOriginKind::WfSuperTrait {
-                            block: target.own_span(),
-                            clause: super_clause.own_span(),
-                        },
-                    ),
+                    ClauseOrigin::root(ClauseOriginKind::WfSuperTrait {
+                        block: target.own_span(),
+                        clause: super_clause.own_span(),
+                    }),
                     env.self_ty,
                     super_clause.value,
                     HrtbUniverse::ROOT_REF,

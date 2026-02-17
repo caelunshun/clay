@@ -13,6 +13,7 @@ use crate::{
         token::Ident,
     },
     semantic::{
+        analysis::TyCtxt,
         lower::entry::{InterItemLowerCtxt, IntraItemLowerCtxt},
         syntax::{
             AnyGeneric, GenericBinder, Item, Re, RegionGeneric, SpannedTraitClauseList,
@@ -478,84 +479,13 @@ impl IntraItemLowerCtxt<'_> {
         segment_span: Span,
         orig_params: &[SpannedTyOrRe],
     ) -> SpannedTyOrReList {
-        let s = &self.tcx.session;
-
-        let binder_len = binder_len_override.map_or(binder.r(s).defs.len(), |v| v as usize);
-
-        let mut errored_out_missing = None;
-
-        let resolved_params = binder.r(s).defs[..binder_len]
-            .iter()
-            .zip(orig_params.iter().map(Some).chain(iter::repeat(None)))
-            .map(|(expected, actual)| {
-                let actual_span = actual.map_or(segment_span, |v| {
-                    v.own_span().not_dummy().unwrap_or(segment_span)
-                });
-
-                let para_or_err = 'para_or_err: {
-                    let Some(&actual) = actual else {
-                        break 'para_or_err Err(*errored_out_missing.get_or_insert_with(|| {
-                            Diag::span_err(segment_span, "missing generic parameters")
-                                .child(LeafDiag::new(
-                                    Level::Note,
-                                    format_args!(
-                                        "expected {} generic parameter{} but got {}",
-                                        binder_len,
-                                        if binder_len == 1 { "" } else { "s" },
-                                        orig_params.len(),
-                                    ),
-                                ))
-                                .emit()
-                        }));
-                    };
-
-                    match (actual.view(self.tcx), expected) {
-                        (SpannedTyOrReView::Ty(_), AnyGeneric::Ty(_)) => Ok(actual),
-                        (SpannedTyOrReView::Re(_), AnyGeneric::Re(_)) => Ok(actual),
-                        (_, AnyGeneric::Ty(_)) => Err(Diag::span_err(
-                            actual_span,
-                            "expected a type but got a lifetime",
-                        )
-                        .emit()),
-                        (_, AnyGeneric::Re(_)) => Err(Diag::span_err(
-                            actual_span,
-                            "expected a lifetime but got a type",
-                        )
-                        .emit()),
-                    }
-                };
-
-                para_or_err.unwrap_or_else(|err| match expected {
-                    AnyGeneric::Re(_) => {
-                        SpannedTyOrReView::Re(Re::Error(err).encode(actual_span, self.tcx))
-                            .encode(actual_span, self.tcx)
-                    }
-                    AnyGeneric::Ty(_) => SpannedTyOrReView::Ty(
-                        SpannedTyView::Error(err).encode(actual_span, self.tcx),
-                    )
-                    .encode(actual_span, self.tcx),
-                })
-            })
-            .collect::<Vec<_>>();
-
-        if orig_params.len() > binder_len {
-            Diag::span_err(
-                orig_params[binder_len].own_span(),
-                "too many generic parameters",
-            )
-            .child(LeafDiag::new(
-                Level::Note,
-                format_args!(
-                    "expected {} generic parameter{} but got {}",
-                    binder_len,
-                    if binder_len == 1 { "" } else { "s" },
-                    orig_params.len(),
-                ),
-            ))
-            .emit();
-        }
-
-        SpannedTyOrReList::alloc_list(segment_span, &resolved_params, self.tcx)
+        normalize_positional_generic_arity(
+            self.tcx,
+            binder,
+            binder_len_override,
+            segment_span,
+            orig_params,
+        )
     }
 
     pub fn synthesize_inferred_generics_for_elision(
@@ -662,4 +592,91 @@ impl IntraItemLowerCtxt<'_> {
             params[idx] = associated.param;
         }
     }
+}
+
+// === Cross-phase === //
+
+pub fn normalize_positional_generic_arity(
+    tcx: &TyCtxt,
+    binder: Obj<GenericBinder>,
+    binder_len_override: Option<u32>,
+    segment_span: Span,
+    orig_params: &[SpannedTyOrRe],
+) -> SpannedTyOrReList {
+    let s = &tcx.session;
+
+    let binder_len = binder_len_override.map_or(binder.r(s).defs.len(), |v| v as usize);
+
+    let mut errored_out_missing = None;
+
+    let resolved_params = binder.r(s).defs[..binder_len]
+        .iter()
+        .zip(orig_params.iter().map(Some).chain(iter::repeat(None)))
+        .map(|(expected, actual)| {
+            let actual_span = actual.map_or(segment_span, |v| {
+                v.own_span().not_dummy().unwrap_or(segment_span)
+            });
+
+            let para_or_err = 'para_or_err: {
+                let Some(&actual) = actual else {
+                    break 'para_or_err Err(*errored_out_missing.get_or_insert_with(|| {
+                        Diag::span_err(segment_span, "missing generic parameters")
+                            .child(LeafDiag::new(
+                                Level::Note,
+                                format_args!(
+                                    "expected {} generic parameter{} but got {}",
+                                    binder_len,
+                                    if binder_len == 1 { "" } else { "s" },
+                                    orig_params.len(),
+                                ),
+                            ))
+                            .emit()
+                    }));
+                };
+
+                match (actual.view(tcx), expected) {
+                    (SpannedTyOrReView::Ty(_), AnyGeneric::Ty(_)) => Ok(actual),
+                    (SpannedTyOrReView::Re(_), AnyGeneric::Re(_)) => Ok(actual),
+                    (_, AnyGeneric::Ty(_)) => Err(Diag::span_err(
+                        actual_span,
+                        "expected a type but got a lifetime",
+                    )
+                    .emit()),
+                    (_, AnyGeneric::Re(_)) => Err(Diag::span_err(
+                        actual_span,
+                        "expected a lifetime but got a type",
+                    )
+                    .emit()),
+                }
+            };
+
+            para_or_err.unwrap_or_else(|err| match expected {
+                AnyGeneric::Re(_) => SpannedTyOrReView::Re(Re::Error(err).encode(actual_span, tcx))
+                    .encode(actual_span, tcx),
+                AnyGeneric::Ty(_) => {
+                    SpannedTyOrReView::Ty(SpannedTyView::Error(err).encode(actual_span, tcx))
+                        .encode(actual_span, tcx)
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+
+    if orig_params.len() > binder_len {
+        Diag::span_err(
+            orig_params[binder_len].own_span(),
+            "too many generic parameters",
+        )
+        .child(LeafDiag::new(
+            Level::Note,
+            format_args!(
+                "expected {} generic parameter{} but got {}",
+                binder_len,
+                if binder_len == 1 { "" } else { "s" },
+                orig_params.len(),
+            ),
+        ))
+        .emit();
+    }
+
+    SpannedTyOrReList::alloc_list(segment_span, &resolved_params, tcx)
 }
