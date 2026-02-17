@@ -431,6 +431,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                     self.ccx_mut()
                         .wf_visitor(HrtbUniverse::ROOT)
+                        .with_clause_applies_to(self_ty.value)
                         .visit_spanned(out);
 
                     out

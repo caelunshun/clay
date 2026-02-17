@@ -1,7 +1,7 @@
 use crate::{
     base::{Diag, ErrorGuaranteed, syntax::Span},
     semantic::{
-        analysis::ClauseCx,
+        analysis::{ClauseCx, TyFolderInfallibleExt, UnboundVarHandlingMode},
         syntax::{
             HrtbUniverse, InferTyVar, Re, TraitClauseList, TraitParam, TraitSpec, Ty,
             UniversalReVar, UniversalTyVar,
@@ -272,8 +272,17 @@ pub struct NoTraitImplError {
 
 impl NoTraitImplError {
     pub fn emit(&self, ccx: &ClauseCx<'_>) -> ErrorGuaranteed {
-        // TODO
-        Diag::anon_err(format!("{self:#?}")).emit()
+        let mut sub = ccx
+            .ucx()
+            .substitutor(UnboundVarHandlingMode::NormalizeToRoot);
+
+        let me = Self {
+            origin: self.origin.clone(),
+            target: sub.fold(self.target),
+            spec: sub.fold(self.spec),
+        };
+
+        Diag::anon_err(format!("{me:#?}")).emit()
     }
 }
 

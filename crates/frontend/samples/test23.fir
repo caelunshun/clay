@@ -53,12 +53,12 @@ impl Clone for () {
 fn make_vec<T>() -> Vec<T> {}
 
 fn main() {
-    let vec = Vec::new::<>();
+    let vec = Vec::new();
 
     vec.push(vec.my_field);
     let elem = vec.get(0);
     vec.push(elem.clone());
 
-    let vec2 = vec.clone();
-    vec2.push(());
+    let vec2 = <_>::clone(&vec);
+    // vec2.push(());
 }

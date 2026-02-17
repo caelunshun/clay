@@ -24,11 +24,19 @@ use std::{fmt, hash, rc::Rc};
 
 // === Adt Items === //
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AdtItem {
     pub item: Obj<Item>,
     pub generics: Obj<GenericBinder>,
     pub kind: LateInit<AdtKind>,
+}
+
+impl fmt::Debug for AdtItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("AdtItem")
+            .field(&self.item.r(&Session::fetch()).path)
+            .finish()
+    }
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
