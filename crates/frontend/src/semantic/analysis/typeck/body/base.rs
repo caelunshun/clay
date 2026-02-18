@@ -8,9 +8,9 @@ use crate::{
     parse::ast::AstLit,
     semantic::{
         analysis::{
-            ClauseCx, ClauseErrorSink, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind,
-            CrateTypeckVisitor, TyCtxt, TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx,
-            UnifyCxMode, typeck::body::lookup::LookupMethodResult,
+            ClauseCx, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind, CrateTypeckVisitor,
+            TyCtxt, TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
+            typeck::body::lookup::LookupMethodResult,
         },
         lower::generics::normalize_positional_generic_arity,
         syntax::{
@@ -231,12 +231,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             .visit_spanned(ascription);
 
         self.ccx_mut().oblige_ty_unifies_ty(
-            ClauseOrigin::root(
-                ClauseErrorSink::Report,
-                ClauseOriginKind::Pattern {
-                    pat_span: ascription.own_span(),
-                },
-            ),
+            ClauseOrigin::root_report(ClauseOriginKind::Pattern {
+                pat_span: ascription.own_span(),
+            }),
             pat_ty,
             ascription.value,
             RelationMode::Equate,
@@ -261,10 +258,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let output_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
 
                 self.ccx_mut().oblige_ty_meets_trait_instantiated(
-                    ClauseOrigin::root(
-                        ClauseErrorSink::Report,
-                        ClauseOriginKind::FunctionCall { site_span },
-                    ),
+                    ClauseOrigin::root_report(ClauseOriginKind::FunctionCall { site_span }),
                     HrtbUniverse::ROOT,
                     callee,
                     TraitSpec {
@@ -372,12 +366,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 });
 
                 let instance_env = self.ccx_mut().instantiate_fn_instance_env_as_infer(
-                    &ClauseOrigin::root(
-                        ClauseErrorSink::Report,
-                        ClauseOriginKind::FunctionCall {
-                            site_span: name.span,
-                        },
-                    ),
+                    &ClauseOrigin::root_report(ClauseOriginKind::FunctionCall {
+                        site_span: name.span,
+                    }),
                     HrtbUniverse::ROOT_REF,
                     instance,
                 );
@@ -392,12 +383,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let (self_ty, expected_args) = expected_args.r(s).split_first().unwrap();
 
                 self.ccx_mut().oblige_ty_unifies_ty(
-                    ClauseOrigin::root(
-                        ClauseErrorSink::Report,
-                        ClauseOriginKind::FunctionCall {
-                            site_span: name.span,
-                        },
-                    ),
+                    ClauseOrigin::root_report(ClauseOriginKind::FunctionCall {
+                        site_span: name.span,
+                    }),
                     *self_ty,
                     receiver,
                     RelationMode::Equate,
@@ -604,12 +592,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     let bind_as_ty = self.type_of_pat(bind_as, divergence);
 
                     self.ccx_mut().oblige_ty_unifies_ty(
-                        ClauseOrigin::root(
-                            ClauseErrorSink::Report,
-                            ClauseOriginKind::Pattern {
-                                pat_span: pat.r(s).span,
-                            },
-                        ),
+                        ClauseOrigin::root_report(ClauseOriginKind::Pattern {
+                            pat_span: pat.r(s).span,
+                        }),
                         local_ty,
                         bind_as_ty,
                         RelationMode::Equate,

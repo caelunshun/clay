@@ -160,6 +160,10 @@ impl ClauseOrigin {
         Self::empty(sink).child(kind)
     }
 
+    pub fn root_report(kind: ClauseOriginKind) -> Self {
+        Self::empty_report().child(kind)
+    }
+
     pub fn child(self, kind: ClauseOriginKind) -> Self {
         let sink = self.sink().clone();
         let depth = self.depth() + 1;

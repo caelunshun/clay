@@ -8,9 +8,9 @@ use crate::{
     },
     semantic::{
         analysis::{
-            ClauseCx, ClauseErrorSink, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind,
-            ObligationNotReady, ObligationResult, TyCtxt, TyFoldable, TyVisitable, TyVisitor,
-            TyVisitorInfallibleExt, infer::clause::ClauseObligation,
+            ClauseCx, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind, ObligationNotReady,
+            ObligationResult, TyCtxt, TyFoldable, TyVisitable, TyVisitor, TyVisitorInfallibleExt,
+            infer::clause::ClauseObligation,
         },
         syntax::{
             GenericBinder, GenericSubst, HrtbUniverse, HrtbUniverseInfo, InferTyVar,
@@ -96,12 +96,9 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             self.universe.clone()
         } else {
             self.universe.clone().nest(HrtbUniverseInfo {
-                origin: ClauseOrigin::root(
-                    ClauseErrorSink::Report,
-                    ClauseOriginKind::WfHrtb {
-                        binder_span: kind.own_span(),
-                    },
-                ),
+                origin: ClauseOrigin::root_report(ClauseOriginKind::WfHrtb {
+                    binder_span: kind.own_span(),
+                }),
             })
         };
 
@@ -139,12 +136,9 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             }
             SpannedTyView::Reference(re, _muta, pointee) => {
                 self.ccx.oblige_ty_outlives_re(
-                    ClauseOrigin::root(
-                        ClauseErrorSink::Report,
-                        ClauseOriginKind::WfForReference {
-                            pointee: pointee.own_span(),
-                        },
-                    ),
+                    ClauseOrigin::root_report(ClauseOriginKind::WfForReference {
+                        pointee: pointee.own_span(),
+                    }),
                     pointee.value,
                     re.value,
                     RelationDirection::LhsOntoRhs,
@@ -254,12 +248,9 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
     fn visit_fn_instance(&mut self, instance: SpannedFnInstance) -> ControlFlow<Self::Break> {
         // Validate the instance itself.
         self.ccx.instantiate_fn_instance_env_as_infer(
-            &ClauseOrigin::root(
-                ClauseErrorSink::Report,
-                ClauseOriginKind::WfFnDef {
-                    fn_ty: instance.own_span(),
-                },
-            ),
+            &ClauseOrigin::root_report(ClauseOriginKind::WfFnDef {
+                fn_ty: instance.own_span(),
+            }),
             &self.universe,
             instance.value,
         );
@@ -310,13 +301,10 @@ impl ClauseTyWfVisitor<'_, '_> {
             defs,
             validated_params,
             |_, param_idx, clause_span| {
-                ClauseOrigin::root(
-                    ClauseErrorSink::Report,
-                    ClauseOriginKind::WfForGenericParam {
-                        use_span: all_params.nth(param_idx, tcx).own_span(),
-                        clause_span,
-                    },
-                )
+                ClauseOrigin::root_report(ClauseOriginKind::WfForGenericParam {
+                    use_span: all_params.nth(param_idx, tcx).own_span(),
+                    clause_span,
+                })
             },
         );
     }
