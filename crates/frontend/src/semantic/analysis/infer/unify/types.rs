@@ -1,7 +1,11 @@
 use crate::{
+    base::arena::HasInterner,
     semantic::{
-        analysis::{FloatingInferVar, HrtbUniverse, ObservedTyInferVar},
-        syntax::{InferTyVar, Ty, UniversalTyVar, UniversalTyVarSourceInfo},
+        analysis::{FloatingInferVar, HrtbUniverse, ObservedTyInferVar, TyCtxt},
+        syntax::{
+            FloatKind, InferTyPermSet, InferTyVar, IntKind, SimpleTyKind, Ty, TyKind,
+            UniversalTyVar, UniversalTyVarSourceInfo,
+        },
     },
     utils::hash::FxHashSet,
 };
@@ -29,6 +33,7 @@ enum DisjointTyInferRoot {
     Known(Ty),
     Floating {
         max_universe: HrtbUniverse,
+        perm_set: InferTyPermSet,
         observed: Vec<ObservedTyInferVar>,
     },
 }
@@ -87,11 +92,16 @@ impl TyUnifyTracker {
         state.set.borrow_mut().insert(var);
     }
 
-    pub fn fresh_infer(&mut self, max_universe: HrtbUniverse) -> InferTyVar {
+    pub fn fresh_infer_restricted(
+        &mut self,
+        max_universe: HrtbUniverse,
+        perm_set: InferTyPermSet,
+    ) -> InferTyVar {
         let var = InferTyVar::from_usize(self.disjoint.len());
         self.disjoint.push(DisjointTyInferNode {
             root: Some(DisjointTyInferRoot::Floating {
                 max_universe: max_universe.clone(),
+                perm_set,
                 observed: Vec::new(),
             }),
             observed_idx: None,
@@ -136,6 +146,7 @@ impl TyUnifyTracker {
             }
             DisjointTyInferRoot::Floating {
                 max_universe: _,
+                perm_set: _,
                 observed,
             } => {
                 observed.push(observed_idx);
@@ -156,6 +167,7 @@ impl TyUnifyTracker {
             &DisjointTyInferRoot::Known(ty) => Ok(ty),
             DisjointTyInferRoot::Floating {
                 observed: observed_equivalent,
+                perm_set,
                 max_universe,
             } => {
                 self.mention_var_for_tracing(var);
@@ -164,6 +176,7 @@ impl TyUnifyTracker {
                     root: InferTyVar::from_usize(root_var),
                     observed_equivalent,
                     max_universe,
+                    perm_set: *perm_set,
                 })
             }
         }
@@ -174,6 +187,7 @@ impl TyUnifyTracker {
 
         let DisjointTyInferRoot::Floating {
             observed: _,
+            perm_set: _,
             max_universe,
         } = self.disjoint[root_var].root.as_mut().unwrap()
         else {
@@ -189,6 +203,7 @@ impl TyUnifyTracker {
 
         let DisjointTyInferRoot::Floating {
             max_universe: _,
+            perm_set: _,
             observed,
         } = root
         else {
@@ -199,7 +214,12 @@ impl TyUnifyTracker {
         *root = DisjointTyInferRoot::Known(ty);
     }
 
-    pub fn union_unrelated_infer_floating(&mut self, lhs: InferTyVar, rhs: InferTyVar) {
+    pub fn union_unrelated_infer_floating(
+        &mut self,
+        tcx: &TyCtxt,
+        lhs: InferTyVar,
+        rhs: InferTyVar,
+    ) {
         let lhs_root = self.disjoint.root_of(lhs.index());
         let rhs_root = self.disjoint.root_of(rhs.index());
 
@@ -214,10 +234,12 @@ impl TyUnifyTracker {
             DisjointTyInferRoot::Floating {
                 max_universe: lhs_max_universe,
                 observed: mut lhs_observed,
+                perm_set: lhs_perm_set,
             },
             DisjointTyInferRoot::Floating {
                 max_universe: rhs_max_universe,
                 observed: mut rhs_observed,
+                perm_set: rhs_perm_set,
             },
         ) = (lhs_root, rhs_root)
         else {
@@ -233,9 +255,37 @@ impl TyUnifyTracker {
 
         lhs_observed.append(&mut rhs_observed);
 
-        *new_root = Some(DisjointTyInferRoot::Floating {
-            max_universe: lhs_max_universe.min(&rhs_max_universe).clone(),
-            observed: lhs_observed,
-        });
+        let perm_set = lhs_perm_set.intersection(rhs_perm_set);
+        debug_assert!(!perm_set.is_empty());
+
+        let unique_restrict = (perm_set.iter().count() == 1)
+            .then(|| match perm_set.iter().next().unwrap() {
+                InferTyPermSet::ALL_INT => None,
+                InferTyPermSet::U8 => Some(SimpleTyKind::Uint(IntKind::S8)),
+                InferTyPermSet::U16 => Some(SimpleTyKind::Uint(IntKind::S16)),
+                InferTyPermSet::U32 => Some(SimpleTyKind::Uint(IntKind::S32)),
+                InferTyPermSet::U64 => Some(SimpleTyKind::Uint(IntKind::S64)),
+                InferTyPermSet::I8 => Some(SimpleTyKind::Int(IntKind::S8)),
+                InferTyPermSet::I16 => Some(SimpleTyKind::Int(IntKind::S16)),
+                InferTyPermSet::I32 => Some(SimpleTyKind::Int(IntKind::S32)),
+                InferTyPermSet::I64 => Some(SimpleTyKind::Int(IntKind::S64)),
+                InferTyPermSet::F32 => Some(SimpleTyKind::Float(FloatKind::S32)),
+                InferTyPermSet::F64 => Some(SimpleTyKind::Float(FloatKind::S64)),
+
+                _ => unreachable!(),
+            })
+            .flatten();
+
+        if let Some(unique_restrict) = unique_restrict {
+            *new_root = Some(DisjointTyInferRoot::Known(
+                tcx.intern(TyKind::Simple(unique_restrict)),
+            ));
+        } else {
+            *new_root = Some(DisjointTyInferRoot::Floating {
+                max_universe: lhs_max_universe.min(&rhs_max_universe).clone(),
+                perm_set,
+                observed: lhs_observed,
+            });
+        }
     }
 }

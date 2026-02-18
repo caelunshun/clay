@@ -10,9 +10,9 @@ use crate::{
             UnifyCxMode,
         },
         syntax::{
-            Crate, InferTyVar, Re, RelationDirection, RelationMode, TraitClause, TraitClauseList,
-            TraitSpec, Ty, TyKind, TyOrRe, UniversalReVar, UniversalReVarSourceInfo,
-            UniversalTyVar, UniversalTyVarSourceInfo,
+            Crate, InferTyPermSet, InferTyVar, Re, RelationDirection, RelationMode, TraitClause,
+            TraitClauseList, TraitSpec, Ty, TyKind, TyOrRe, UniversalReVar,
+            UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -217,12 +217,30 @@ impl<'tcx> ClauseCx<'tcx> {
 
 // Basic operations
 impl<'tcx> ClauseCx<'tcx> {
+    pub fn fresh_ty_infer_var_restricted(
+        &mut self,
+        max_universe: HrtbUniverse,
+        perm_set: InferTyPermSet,
+    ) -> InferTyVar {
+        self.ucx_mut().fresh_ty_infer_var(max_universe, perm_set)
+    }
+
+    pub fn fresh_ty_infer_restricted(
+        &mut self,
+        max_universe: HrtbUniverse,
+        perm_set: InferTyPermSet,
+    ) -> Ty {
+        self.tcx().intern(TyKind::InferVar(
+            self.fresh_ty_infer_var_restricted(max_universe, perm_set),
+        ))
+    }
+
     pub fn fresh_ty_infer_var(&mut self, max_universe: HrtbUniverse) -> InferTyVar {
-        self.ucx_mut().fresh_ty_infer_var(max_universe)
+        self.fresh_ty_infer_var_restricted(max_universe, InferTyPermSet::all())
     }
 
     pub fn fresh_ty_infer(&mut self, max_universe: HrtbUniverse) -> Ty {
-        self.ucx_mut().fresh_ty_infer(max_universe)
+        self.fresh_ty_infer_restricted(max_universe, InferTyPermSet::all())
     }
 
     pub fn lookup_ty_infer_var_after_poll(

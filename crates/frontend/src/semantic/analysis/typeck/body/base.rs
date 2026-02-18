@@ -14,10 +14,10 @@ use crate::{
         },
         lower::generics::normalize_positional_generic_arity,
         syntax::{
-            Block, Crate, Divergence, Expr, ExprKind, FnDef, FnInstanceInner, FnLocal, InferTyVar,
-            Item, Pat, PatKind, Re, RelationMode, SimpleTyKind, SpannedFnInstanceView,
-            SpannedFnOwnerView, SpannedTy, SpannedTyView, Stmt, StructExpr, TraitParam, TraitSpec,
-            Ty, TyAndDivergence, TyKind, TyOrRe,
+            Block, Crate, Divergence, Expr, ExprKind, FnDef, FnInstanceInner, FnLocal,
+            InferTyPermSet, InferTyVar, Item, Pat, PatKind, Re, RelationMode, SimpleTyKind,
+            SpannedFnInstanceView, SpannedFnOwnerView, SpannedTy, SpannedTyView, Stmt, StructExpr,
+            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -428,8 +428,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             ExprKind::Unary(ast_un_op_kind, obj) => todo!(),
             ExprKind::Literal(lit) => match lit {
                 AstLit::Number(_) => {
-                    // TODO: Register inference constraints.
-                    self.ccx.fresh_ty_infer(HrtbUniverse::ROOT)
+                    // TODO: Register the correct inference constraints.
+                    self.ccx
+                        .fresh_ty_infer_restricted(HrtbUniverse::ROOT, InferTyPermSet::ALL_INT)
                 }
                 AstLit::Char(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Char)),
                 AstLit::String(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Str)),

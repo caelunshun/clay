@@ -610,6 +610,28 @@ define_index_type! {
     pub struct UniversalReVar = u32;
 }
 
+bitflags::bitflags! {
+    #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+    pub struct InferTyPermSet: u16 {
+        const OTHER = 1 << 0;
+        const U8 = 1 << 1;
+        const U16 = 1 << 2;
+        const U32 = 1 << 3;
+        const U64 = 1 << 4;
+        const I8 = 1 << 5;
+        const I16 = 1 << 6;
+        const I32 = 1 << 7;
+        const I64 = 1 << 8;
+        const F32 = 1 << 9;
+        const F64 = 1 << 10;
+
+        const UINT = Self::U8.bits() | Self::U16.bits() | Self::U32.bits() | Self::U64.bits();
+        const SINT = Self::I8.bits() | Self::I16.bits() | Self::I32.bits() | Self::I64.bits();
+        const ALL_INT = Self::UINT.bits() | Self::SINT.bits();
+        const FLOAT = Self::F32.bits() | Self::F64.bits();
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub enum UniversalReVarSourceInfo {
     Root(Obj<RegionGeneric>),
@@ -643,7 +665,6 @@ pub enum IntKind {
     S16,
     S32,
     S64,
-    S128,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
