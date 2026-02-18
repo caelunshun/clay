@@ -431,6 +431,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
     #[must_use]
     fn attempt_single_candidate(&mut self, candidate: Obj<FnDef>, query: MethodQuery) -> bool {
         let tcx = self.tcx();
+        let s = self.session();
 
         let mut fork = self.ccx().clone().with_silent();
 
@@ -439,6 +440,10 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
 
         match query {
             MethodQuery::Method(receiver) => {
+                if !*candidate.r(s).has_self_param {
+                    return false;
+                }
+
                 let self_ty = fork.fresh_ty_infer(HrtbUniverse::ROOT);
                 let expected_owner =
                     fork.instantiate_fn_def_as_blank_owner_infer(candidate, self_ty);
