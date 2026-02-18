@@ -3,15 +3,16 @@ use crate::{
     semantic::{
         analysis::{
             ClauseCx, ClauseOrigin, HrtbUniverse, InferTyLeaksError, InferTyOccursError,
-            InferTyUnifyError, TyAndTyUnifyCulprit, TyAndTyUnifyError, TyCtxt, TyFolder,
-            TyFolderExt, TyFolderInfallibleExt, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt,
+            TyAndTyUnifyCulprit, TyAndTyUnifyError, TyCtxt, TyFolder, TyFolderExt,
+            TyFolderInfallibleExt, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt,
             infer::unify::{regions::ReUnifyTracker, types::TyUnifyTracker},
         },
         syntax::{
-            FnInstanceInner, FnOwner, HrtbBinderKind, InferTyVar, Mutability, Re, ReVariance,
-            RelationDirection, RelationMode, SpannedTy, SpannedTyView, TraitClause,
-            TraitClauseList, TraitParam, TraitParamList, Ty, TyKind, TyOrRe, UniversalReVar,
-            UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
+            FloatKind, FnInstanceInner, FnOwner, HrtbBinderKind, InferTyPermSet, InferTyVar,
+            IntKind, Mutability, Re, ReVariance, RelationDirection, RelationMode, SimpleTyKind,
+            SpannedTy, SpannedTyView, TraitClause, TraitClauseList, TraitParam, TraitParamList, Ty,
+            TyKind, TyOrRe, UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar,
+            UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashSet,
@@ -54,6 +55,7 @@ pub struct FloatingInferVar<'a> {
     pub root: InferTyVar,
     pub observed_equivalent: &'a [ObservedTyInferVar],
     pub max_universe: &'a HrtbUniverse,
+    pub perm_set: InferTyPermSet,
 }
 
 impl<'tcx> UnifyCx<'tcx> {
@@ -106,13 +108,12 @@ impl<'tcx> UnifyCx<'tcx> {
         self.types.mention_var_for_tracing(var);
     }
 
-    pub fn fresh_ty_infer_var(&mut self, max_universe: HrtbUniverse) -> InferTyVar {
-        self.types.fresh_infer(max_universe)
-    }
-
-    pub fn fresh_ty_infer(&mut self, max_universe: HrtbUniverse) -> Ty {
-        self.tcx()
-            .intern(TyKind::InferVar(self.fresh_ty_infer_var(max_universe)))
+    pub fn fresh_ty_infer_var(
+        &mut self,
+        max_universe: HrtbUniverse,
+        perm_set: InferTyPermSet,
+    ) -> InferTyVar {
+        self.types.fresh_infer_restricted(max_universe, perm_set)
     }
 
     pub fn fresh_ty_universal_var(
@@ -121,16 +122,6 @@ impl<'tcx> UnifyCx<'tcx> {
         src_info: UniversalTyVarSourceInfo,
     ) -> UniversalTyVar {
         self.types.fresh_universal(in_universe, src_info)
-    }
-
-    pub fn fresh_ty_universal(
-        &mut self,
-        in_universe: HrtbUniverse,
-        src_info: UniversalTyVarSourceInfo,
-    ) -> Ty {
-        self.tcx().intern(TyKind::UniversalVar(
-            self.fresh_ty_universal_var(in_universe, src_info),
-        ))
     }
 
     pub fn observe_ty_infer_var(&mut self, var: InferTyVar) -> ObservedTyInferVar {
@@ -459,18 +450,35 @@ impl<'tcx> UnifyCx<'tcx> {
                     }
                     (Ok(lhs_ty), Err(rhs_floating)) => {
                         if let Err(err) = self.unify_var_and_non_var_ty(rhs_floating.root, lhs_ty) {
-                            culprits.push(TyAndTyUnifyCulprit::InferTyUnify(err));
+                            culprits.push(err);
                         }
                     }
                     (Err(lhs_floating), Ok(rhs_ty)) => {
                         if let Err(err) = self.unify_var_and_non_var_ty(lhs_floating.root, rhs_ty) {
-                            culprits.push(TyAndTyUnifyCulprit::InferTyUnify(err));
+                            culprits.push(err);
                         }
                     }
-                    (Err(_), Err(_)) => {
+                    (
+                        Err(FloatingInferVar {
+                            perm_set: lhs_perm_set,
+                            ..
+                        }),
+                        Err(FloatingInferVar {
+                            perm_set: rhs_perm_set,
+                            ..
+                        }),
+                    ) => {
                         // Cannot fail occurs check because neither type structurally includes the
                         // other.
-                        self.types.union_unrelated_infer_floating(lhs_var, rhs_var);
+                        if lhs_perm_set.intersection(rhs_perm_set).is_empty() {
+                            culprits.push(TyAndTyUnifyCulprit::NotPermittedFloating(
+                                lhs_perm_set,
+                                rhs_perm_set,
+                            ));
+                        } else {
+                            self.types
+                                .union_unrelated_infer_floating(self.tcx, lhs_var, rhs_var);
+                        }
                     }
                 }
             }
@@ -480,7 +488,7 @@ impl<'tcx> UnifyCx<'tcx> {
                 }
                 Err(lhs_var) => {
                     if let Err(err) = self.unify_var_and_non_var_ty(lhs_var.root, rhs) {
-                        culprits.push(TyAndTyUnifyCulprit::InferTyUnify(err));
+                        culprits.push(err);
                     }
                 }
             },
@@ -490,7 +498,7 @@ impl<'tcx> UnifyCx<'tcx> {
                 }
                 Err(rhs_var) => {
                     if let Err(err) = self.unify_var_and_non_var_ty(rhs_var.root, lhs) {
-                        culprits.push(TyAndTyUnifyCulprit::InferTyUnify(err));
+                        culprits.push(err);
                     }
                 }
             },
@@ -511,11 +519,14 @@ impl<'tcx> UnifyCx<'tcx> {
         &mut self,
         lhs_var_root: InferTyVar,
         rhs_ty: Ty,
-    ) -> Result<(), InferTyUnifyError> {
+    ) -> Result<(), TyAndTyUnifyCulprit> {
+        let s = self.session();
+
         let Err(FloatingInferVar {
             root: actual_root,
             observed_equivalent: _,
             max_universe: lhs_max_universe,
+            perm_set: lhs_perm_set,
         }) = self.types.lookup_infer(lhs_var_root)
         else {
             unreachable!()
@@ -524,6 +535,64 @@ impl<'tcx> UnifyCx<'tcx> {
         debug_assert_eq!(actual_root, lhs_var_root);
 
         let lhs_max_universe = lhs_max_universe.clone();
+
+        // Check permissions
+        let has_permission = match *rhs_ty.r(s) {
+            TyKind::SigThis
+            | TyKind::SigInfer
+            | TyKind::SigGeneric(_)
+            | TyKind::SigProject(_)
+            | TyKind::SigAlias(_, _) => unreachable!(),
+
+            TyKind::Simple(SimpleTyKind::Uint(IntKind::S8)) => {
+                lhs_perm_set.contains(InferTyPermSet::U8)
+            }
+            TyKind::Simple(SimpleTyKind::Uint(IntKind::S16)) => {
+                lhs_perm_set.contains(InferTyPermSet::U16)
+            }
+            TyKind::Simple(SimpleTyKind::Uint(IntKind::S32)) => {
+                lhs_perm_set.contains(InferTyPermSet::U32)
+            }
+            TyKind::Simple(SimpleTyKind::Uint(IntKind::S64)) => {
+                lhs_perm_set.contains(InferTyPermSet::U64)
+            }
+            TyKind::Simple(SimpleTyKind::Int(IntKind::S8)) => {
+                lhs_perm_set.contains(InferTyPermSet::I8)
+            }
+            TyKind::Simple(SimpleTyKind::Int(IntKind::S16)) => {
+                lhs_perm_set.contains(InferTyPermSet::I16)
+            }
+            TyKind::Simple(SimpleTyKind::Int(IntKind::S32)) => {
+                lhs_perm_set.contains(InferTyPermSet::I32)
+            }
+            TyKind::Simple(SimpleTyKind::Int(IntKind::S64)) => {
+                lhs_perm_set.contains(InferTyPermSet::I64)
+            }
+            TyKind::Simple(SimpleTyKind::Float(FloatKind::S32)) => {
+                lhs_perm_set.contains(InferTyPermSet::F32)
+            }
+            TyKind::Simple(SimpleTyKind::Float(FloatKind::S64)) => {
+                lhs_perm_set.contains(InferTyPermSet::F64)
+            }
+
+            TyKind::Reference(_, _, _)
+            | TyKind::Adt(_)
+            | TyKind::Trait(_, _, _)
+            | TyKind::Tuple(_)
+            | TyKind::FnDef(_)
+            | TyKind::HrtbVar(_)
+            | TyKind::UniversalVar(_)
+            | TyKind::Simple(
+                SimpleTyKind::Bool | SimpleTyKind::Char | SimpleTyKind::Str | SimpleTyKind::Never,
+            ) => lhs_perm_set.contains(InferTyPermSet::OTHER),
+
+            // Avoided above.
+            TyKind::InferVar(_) | TyKind::Error(_) => unreachable!(),
+        };
+
+        if !has_permission {
+            return Err(TyAndTyUnifyCulprit::NotPermittedSolid(lhs_perm_set, rhs_ty));
+        }
 
         // Perform occurs check
         struct OccursVisitor<'a, 'tcx> {
@@ -568,7 +637,7 @@ impl<'tcx> UnifyCx<'tcx> {
                 .substitutor(UnboundVarHandlingMode::NormalizeToRoot)
                 .fold(rhs_ty);
 
-            return Err(InferTyUnifyError::Occurs(InferTyOccursError {
+            return Err(TyAndTyUnifyCulprit::Occurs(InferTyOccursError {
                 var: lhs_var_root,
                 occurs_in,
             }));
@@ -619,7 +688,7 @@ impl<'tcx> UnifyCx<'tcx> {
         .visit_fallible(rhs_ty);
 
         if let ControlFlow::Break(leaks_universal) = leak_result {
-            return Err(InferTyUnifyError::Leaks(InferTyLeaksError {
+            return Err(TyAndTyUnifyCulprit::Leaks(InferTyLeaksError {
                 var: lhs_var_root,
                 max_universe: lhs_max_universe,
                 leaks_universal,

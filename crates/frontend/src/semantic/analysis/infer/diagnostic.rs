@@ -3,8 +3,8 @@ use crate::{
     semantic::{
         analysis::{ClauseCx, HrtbUniverse, TyFolderInfallibleExt, UnboundVarHandlingMode},
         syntax::{
-            InferTyVar, Re, TraitClauseList, TraitParam, TraitSpec, Ty, UniversalReVar,
-            UniversalTyVar,
+            InferTyPermSet, InferTyVar, Re, TraitClauseList, TraitParam, TraitSpec, Ty,
+            UniversalReVar, UniversalTyVar,
         },
     },
 };
@@ -325,13 +325,10 @@ pub enum TyAndTyUnifyCulprit {
     Types(Ty, Ty),
     ClauseLists(TraitClauseList, TraitClauseList),
     Params(TraitParam, TraitParam),
-    InferTyUnify(InferTyUnifyError),
-}
-
-#[derive(Debug, Clone)]
-pub enum InferTyUnifyError {
     Occurs(InferTyOccursError),
     Leaks(InferTyLeaksError),
+    NotPermittedSolid(InferTyPermSet, Ty),
+    NotPermittedFloating(InferTyPermSet, InferTyPermSet),
 }
 
 #[derive(Debug, Clone)]
