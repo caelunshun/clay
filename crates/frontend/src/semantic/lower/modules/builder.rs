@@ -10,8 +10,8 @@ use crate::{
     },
     semantic::{
         lower::modules::{
-            ItemCategory, ItemCategoryUse, ItemPathFmt, ParentResolver, PathResolver,
-            StepLookupError, VisibilityResolver,
+            FrozenModuleResolver, ItemCategory, ItemCategoryUse, ItemPathFmt, ParentResolver,
+            PathResolver, StepLookupError, VisibilityResolver,
         },
         syntax::{Crate, DirectUse, GlobUse, Item, Visibility},
     },
@@ -22,6 +22,12 @@ use index_vec::{IndexVec, define_index_type};
 use std::mem;
 
 // === Handles === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum AnyItemId {
+    Local(BuilderItemId),
+    Extern(Obj<Item>),
+}
 
 define_index_type! {
     pub struct BuilderItemId = u32;
@@ -34,6 +40,7 @@ impl BuilderItemId {
 // === BuilderModuleTree === //
 
 pub struct BuilderModuleTree {
+    session: Session,
     items: IndexVec<BuilderItemId, BuilderItem>,
 }
 
@@ -62,7 +69,7 @@ struct BuilderDirectUse {
 enum CachedPath {
     Ignore,
     Unresolved(AstBarePath),
-    Resolved(BuilderItemId),
+    Resolved(AnyItemId),
 }
 
 #[derive(Clone)]
@@ -72,9 +79,10 @@ enum BuilderVisibility {
     PubInUnresolved(AstBarePath),
 }
 
-impl Default for BuilderModuleTree {
-    fn default() -> Self {
+impl BuilderModuleTree {
+    pub fn new(session: Session) -> Self {
         Self {
+            session,
             items: IndexVec::from_iter([BuilderItem {
                 direct_parent: None,
                 category: ItemCategory::Module,
@@ -85,9 +93,6 @@ impl Default for BuilderModuleTree {
             }]),
         }
     }
-}
-
-impl BuilderModuleTree {
     fn push_direct_use(&mut self, target: BuilderItemId, direct: BuilderDirectUse) {
         let target_category = self.categorize(target);
 
@@ -134,7 +139,7 @@ impl BuilderModuleTree {
             BuilderDirectUse {
                 name,
                 visibility: convert_visibility(parent, visibility),
-                target: CachedPath::Resolved(child),
+                target: CachedPath::Resolved(AnyItemId::Local(child)),
                 is_direct_child: true,
             },
         );
@@ -184,6 +189,24 @@ impl BuilderModuleTree {
                 name,
                 visibility: convert_visibility(parent, visibility),
                 target: CachedPath::Unresolved(path),
+                is_direct_child: false,
+            },
+        )
+    }
+
+    pub fn push_single_external_use(
+        &mut self,
+        parent: BuilderItemId,
+        visibility: AstVisibility,
+        name: Ident,
+        target: Obj<Item>,
+    ) {
+        self.push_direct_use(
+            parent,
+            BuilderDirectUse {
+                name,
+                visibility: convert_visibility(parent, visibility),
+                target: CachedPath::Resolved(AnyItemId::Extern(target)),
                 is_direct_child: false,
             },
         )
@@ -263,25 +286,6 @@ impl BuilderModuleTree {
         }
 
         // Resolve each item's use paths.
-        for item_id in self.items.indices() {
-            for use_idx in 0..self.items[item_id].direct_uses.len() {
-                _ = ModuleTreeSolverCx(&mut self).stash_path(
-                    item_id,
-                    |tree| &mut tree.0.items[item_id].direct_uses[use_idx].target,
-                    None,
-                );
-            }
-
-            for use_idx in 0..self.items[item_id].glob_uses.len() {
-                _ = ModuleTreeSolverCx(&mut self).stash_path(
-                    item_id,
-                    |tree| &mut tree.0.items[item_id].glob_uses[use_idx].target,
-                    Some(ItemCategoryUse::GlobUseTarget),
-                );
-            }
-        }
-
-        // Create a graph of frozen items.
         let mut out_items = IndexVec::new();
 
         for item in &self.items {
@@ -302,6 +306,35 @@ impl BuilderModuleTree {
             ));
         }
 
+        let wip_root = out_items[BuilderItemId::ROOT];
+
+        for item_id in self.items.indices() {
+            for use_idx in 0..self.items[item_id].direct_uses.len() {
+                _ = ModuleTreeSolverCx {
+                    builder: &mut self,
+                    wip_root,
+                }
+                .stash_path(
+                    item_id,
+                    |tree| &mut tree.builder.items[item_id].direct_uses[use_idx].target,
+                    None,
+                );
+            }
+
+            for use_idx in 0..self.items[item_id].glob_uses.len() {
+                _ = ModuleTreeSolverCx {
+                    builder: &mut self,
+                    wip_root,
+                }
+                .stash_path(
+                    item_id,
+                    |tree| &mut tree.builder.items[item_id].glob_uses[use_idx].target,
+                    Some(ItemCategoryUse::GlobUseTarget),
+                );
+            }
+        }
+
+        // Create a graph of frozen items.
         for (idx, in_module) in self.items.iter().enumerate() {
             let direct_uses = in_module
                 .direct_uses
@@ -320,7 +353,8 @@ impl BuilderModuleTree {
                             target: match item.target {
                                 CachedPath::Ignore => return None,
                                 CachedPath::Unresolved(_) => unreachable!(),
-                                CachedPath::Resolved(target) => out_items[target],
+                                CachedPath::Resolved(AnyItemId::Local(target)) => out_items[target],
+                                CachedPath::Resolved(AnyItemId::Extern(target)) => target,
                             },
                             is_direct_child: item.is_direct_child,
                         },
@@ -344,7 +378,8 @@ impl BuilderModuleTree {
                         target: match item.target {
                             CachedPath::Ignore => return None,
                             CachedPath::Unresolved(_) => unreachable!(),
-                            CachedPath::Resolved(target) => out_items[target],
+                            CachedPath::Resolved(AnyItemId::Local(target)) => out_items[target],
+                            CachedPath::Resolved(AnyItemId::Extern(target)) => target,
                         },
                     })
                 })
@@ -435,37 +470,61 @@ impl PathResolver for ModuleTreeVisibilityCx<'_> {
         name: Symbol,
     ) -> Result<Self::Item, StepLookupError> {
         match self.0.items[curr].direct_uses[&name].target {
-            CachedPath::Resolved(target) => Ok(target),
+            CachedPath::Resolved(AnyItemId::Local(target)) => Ok(target),
             _ => Err(StepLookupError::NotFound),
         }
     }
 }
 
-struct ModuleTreeSolverCx<'a>(&'a mut BuilderModuleTree);
+struct ModuleTreeSolverCx<'a> {
+    builder: &'a mut BuilderModuleTree,
+    wip_root: Obj<Item>,
+}
 
 impl ParentResolver for ModuleTreeSolverCx<'_> {
-    type Item = BuilderItemId;
+    type Item = AnyItemId;
 
     fn categorize(&self, def: Self::Item) -> ItemCategory {
-        self.0.items[def].category
+        match def {
+            AnyItemId::Local(def) => self.builder.items[def].category,
+            AnyItemId::Extern(def) => FrozenModuleResolver(&self.builder.session).categorize(def),
+        }
     }
 
     fn direct_parent(&self, def: Self::Item) -> Option<Self::Item> {
-        self.0.items[def].direct_parent
+        match def {
+            AnyItemId::Local(def) => self.builder.items[def].direct_parent.map(AnyItemId::Local),
+            AnyItemId::Extern(def) => FrozenModuleResolver(&self.builder.session)
+                .direct_parent(def)
+                .map(AnyItemId::Extern),
+        }
     }
 }
 
 impl PathResolver for ModuleTreeSolverCx<'_> {
     fn path(&self, def: Self::Item) -> ItemPathFmt {
-        self.0.path(symbol!("crate"), def)
+        match def {
+            AnyItemId::Local(def) => self.builder.path(symbol!("crate"), def),
+            AnyItemId::Extern(def) => FrozenModuleResolver(&self.builder.session).path(def),
+        }
     }
 
     fn global_use_count(&mut self, curr: Self::Item) -> u32 {
-        self.0.items[curr].glob_uses.len() as u32
+        match curr {
+            AnyItemId::Local(curr) => self.builder.items[curr].glob_uses.len() as u32,
+            AnyItemId::Extern(curr) => {
+                FrozenModuleResolver(&self.builder.session).global_use_count(curr)
+            }
+        }
     }
 
     fn global_use_span(&mut self, curr: Self::Item, use_idx: u32) -> Span {
-        self.0.items[curr].glob_uses[use_idx as usize].span
+        match curr {
+            AnyItemId::Local(curr) => self.builder.items[curr].glob_uses[use_idx as usize].span,
+            AnyItemId::Extern(curr) => {
+                FrozenModuleResolver(&self.builder.session).global_use_span(curr, use_idx)
+            }
+        }
     }
 
     fn global_use_target(
@@ -474,14 +533,23 @@ impl PathResolver for ModuleTreeSolverCx<'_> {
         curr: Self::Item,
         use_idx: u32,
     ) -> Result<Self::Item, StepLookupError> {
-        let glob = &self.0.items[curr].glob_uses[use_idx as usize];
+        let curr = match curr {
+            AnyItemId::Local(curr) => curr,
+            AnyItemId::Extern(curr) => {
+                return FrozenModuleResolver(&self.builder.session)
+                    .global_use_target(self.wip_root, curr, use_idx)
+                    .map(AnyItemId::Extern);
+            }
+        };
+
+        let glob = &self.builder.items[curr].glob_uses[use_idx as usize];
 
         match glob.visibility {
             BuilderVisibility::Pub => {
                 // (fallthrough)
             }
             BuilderVisibility::PubInResolved(within) => {
-                if !self.is_descendant(vis_ctxt, within) {
+                if !self.is_descendant(vis_ctxt, AnyItemId::Local(within)) {
                     return Err(StepLookupError::NotVisible);
                 }
             }
@@ -490,7 +558,7 @@ impl PathResolver for ModuleTreeSolverCx<'_> {
 
         let Some(target) = self.stash_path(
             curr,
-            |tree| &mut tree.0.items[curr].glob_uses[use_idx as usize].target,
+            |tree| &mut tree.builder.items[curr].glob_uses[use_idx as usize].target,
             Some(ItemCategoryUse::GlobUseTarget),
         ) else {
             return Err(StepLookupError::NotFound);
@@ -505,18 +573,27 @@ impl PathResolver for ModuleTreeSolverCx<'_> {
         curr: Self::Item,
         name: Symbol,
     ) -> Result<Self::Item, StepLookupError> {
-        let Some(target_idx) = self.0.items[curr].direct_uses.get_index_of(&name) else {
+        let curr = match curr {
+            AnyItemId::Local(curr) => curr,
+            AnyItemId::Extern(curr) => {
+                return FrozenModuleResolver(&self.builder.session)
+                    .lookup_direct(self.wip_root, curr, name)
+                    .map(AnyItemId::Extern);
+            }
+        };
+
+        let Some(target_idx) = self.builder.items[curr].direct_uses.get_index_of(&name) else {
             return Err(StepLookupError::NotFound);
         };
 
-        let target = &self.0.items[curr].direct_uses[target_idx];
+        let target = &self.builder.items[curr].direct_uses[target_idx];
 
         match target.visibility {
             BuilderVisibility::Pub => {
                 // (fallthrough)
             }
             BuilderVisibility::PubInResolved(within) => {
-                if !self.is_descendant(vis_ctxt, within) {
+                if !self.is_descendant(vis_ctxt, AnyItemId::Local(within)) {
                     return Err(StepLookupError::NotVisible);
                 }
             }
@@ -525,7 +602,7 @@ impl PathResolver for ModuleTreeSolverCx<'_> {
 
         let target = self.stash_path(
             curr,
-            |tree| &mut tree.0.items[curr].direct_uses[target_idx].target,
+            |tree| &mut tree.builder.items[curr].direct_uses[target_idx].target,
             None,
         );
 
@@ -542,7 +619,7 @@ impl ModuleTreeSolverCx<'_> {
         path_owner: BuilderItemId,
         fetch: impl Fn(&mut Self) -> &mut CachedPath,
         for_use: Option<ItemCategoryUse>,
-    ) -> Option<BuilderItemId> {
+    ) -> Option<AnyItemId> {
         let path = fetch(self);
 
         match path {
@@ -557,9 +634,12 @@ impl ModuleTreeSolverCx<'_> {
             unreachable!()
         };
 
-        let Ok(target) =
-            self.resolve_bare_path_for_use(BuilderItemId::ROOT, path_owner, &path, for_use)
-        else {
+        let Ok(target) = self.resolve_bare_path_for_use(
+            AnyItemId::Local(BuilderItemId::ROOT),
+            AnyItemId::Local(path_owner),
+            &path,
+            for_use,
+        ) else {
             // (leave the path as `Ignore`)
             return None;
         };

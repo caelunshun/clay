@@ -1,4 +1,10 @@
 pub mod std {
+    pub use crate::__clay_synthetic_core as synthetic_core;
+
+    pub use synthetic_core::{
+        meow,
+    };
+
     #[lang("deref_trait")]
     pub trait Deref {
         type Target;
