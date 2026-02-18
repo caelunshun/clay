@@ -14,9 +14,8 @@ use crate::{
             modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},
         },
         syntax::{
-            AdtCtorSyntax, AdtKind, FnDef, FnInstanceInner, FuncDefOwner, GenericSubst,
-            HrtbUniverse, Mutability, Re, RelationMode, SpannedTyOrReList, TraitClause, TraitSpec,
-            Ty, TyKind,
+            AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, GenericSubst, HrtbUniverse,
+            Mutability, Re, RelationMode, SpannedTyOrReList, TraitClause, TraitSpec, Ty, TyKind,
         },
     },
     utils::lang::IterEither,
@@ -206,7 +205,7 @@ impl BodyCtxt<'_, '_> {
                 self.collect_generic_clause_candidates(self_ty, assoc_name);
 
             self.lookup_single(
-                MethodQuery::Function(self_ty),
+                MethodQuery::AssocFn(self_ty),
                 assoc_name,
                 &scope_trait_candidates,
                 &generic_clause_candidates,
@@ -239,7 +238,7 @@ impl BodyCtxt<'_, '_> {
 #[derive(Debug, Copy, Clone)]
 pub enum MethodQuery {
     Method(Ty),
-    Function(Ty),
+    AssocFn(Ty),
 }
 
 impl<'tcx> BodyCtxt<'tcx, '_> {
@@ -286,7 +285,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                         .gather_inherent_impl_method_candidates(tcx, receiver, name.text),
                 )
             }
-            MethodQuery::Function(self_ty) => {
+            MethodQuery::AssocFn(self_ty) => {
                 let self_ty = self.ccx_mut().peel_ty_infer_var_after_poll(self_ty);
 
                 if is_too_general(self_ty, s) {
@@ -393,8 +392,8 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
             // If we started finding trait candidates and already made an inherent selection, break
             // out.
             if let Some(selection) = selections.first()
-                && matches!(*selection.r(s).owner, FuncDefOwner::ImplMethod(_, _))
-                && !matches!(*candidate.r(s).owner, FuncDefOwner::ImplMethod(_, _))
+                && matches!(*selection.r(s).owner, FnDefOwner::ImplMethod(_, _))
+                && !matches!(*candidate.r(s).owner, FnDefOwner::ImplMethod(_, _))
             {
                 break;
             }
@@ -468,7 +467,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                     RelationMode::Equate,
                 );
             }
-            MethodQuery::Function(self_ty) => {
+            MethodQuery::AssocFn(self_ty) => {
                 let expected_owner =
                     fork.instantiate_fn_def_as_blank_owner_infer(candidate, self_ty);
                 let expected_instance = tcx.intern(FnInstanceInner {

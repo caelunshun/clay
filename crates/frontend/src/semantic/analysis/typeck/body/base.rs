@@ -13,7 +13,7 @@ use crate::{
             typeck::body::lookup::LookupMethodResult,
         },
         syntax::{
-            Block, Crate, Divergence, Expr, ExprKind, FnDef, FnInstanceInner, FuncLocal,
+            Block, Crate, Divergence, Expr, ExprKind, FnDef, FnInstanceInner, FnLocal,
             HrtbUniverse, InferTyVar, Item, Pat, PatKind, Re, RelationMode, SimpleTyKind,
             SpannedFnInstanceView, SpannedFnOwnerView, SpannedTy, SpannedTyView, Stmt, StructExpr,
             TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
@@ -83,7 +83,7 @@ pub struct BodyCtxt<'a, 'tcx> {
     pub ccx: &'a mut ClauseCx<'tcx>,
     pub def: Obj<FnDef>,
     pub import_env: ClauseImportEnvRef<'a>,
-    pub local_types: FxHashMap<Obj<FuncLocal>, Ty>,
+    pub local_types: FxHashMap<Obj<FnLocal>, Ty>,
     pub needs_infer: Vec<NeedsInfer>,
 }
 
@@ -141,7 +141,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         self.ccx.ucx_mut()
     }
 
-    pub fn type_of_local(&mut self, local: Obj<FuncLocal>) -> Ty {
+    pub fn type_of_local(&mut self, local: Obj<FnLocal>) -> Ty {
         let s = self.session();
         let tcx = self.tcx();
 

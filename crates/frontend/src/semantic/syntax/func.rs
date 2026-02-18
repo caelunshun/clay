@@ -15,10 +15,10 @@ use crate::{
 };
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 
-// === FuncItem === //
+// === FnItem === //
 
 #[derive(Debug, Clone)]
-pub struct FuncItem {
+pub struct FnItem {
     pub item: Obj<Item>,
     pub def: LateInit<Obj<FnDef>>,
 }
@@ -26,42 +26,42 @@ pub struct FuncItem {
 #[derive(Debug, Clone)]
 pub struct FnDef {
     pub span: Span,
-    pub owner: LateInit<FuncDefOwner>,
+    pub owner: LateInit<FnDefOwner>,
     pub name: Ident,
     pub impl_vis: Option<Visibility>,
     pub generics: Obj<GenericBinder>,
     pub has_self_param: LateInit<bool>,
-    pub args: LateInit<Obj<[FuncArg]>>,
+    pub args: LateInit<Obj<[FnArg]>>,
     pub ret_ty: LateInit<SpannedTy>,
     pub body: LateInit<Option<Obj<Block>>>,
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum FuncDefOwner {
-    Func(Obj<FuncItem>),
+pub enum FnDefOwner {
+    Item(Obj<FnItem>),
     TraitMethod(Obj<TraitItem>, u32),
     ImplMethod(Obj<ImplItem>, u32),
 }
 
-impl FuncDefOwner {
+impl FnDefOwner {
     pub fn as_item(self, s: &Session) -> Obj<Item> {
         match self {
-            FuncDefOwner::Func(def) => def.r(s).item,
-            FuncDefOwner::TraitMethod(def, _) => def.r(s).item,
-            FuncDefOwner::ImplMethod(def, _) => def.r(s).item,
+            FnDefOwner::Item(def) => def.r(s).item,
+            FnDefOwner::TraitMethod(def, _) => def.r(s).item,
+            FnDefOwner::ImplMethod(def, _) => def.r(s).item,
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct FuncArg {
+pub struct FnArg {
     pub span: Span,
     pub pat: Obj<Pat>,
     pub ty: SpannedTy,
 }
 
 #[derive(Debug, Clone)]
-pub struct FuncLocal {
+pub struct FnLocal {
     pub mutability: Mutability,
     pub name: Ident,
 }
@@ -80,7 +80,7 @@ pub enum PatKind {
     Hole,
 
     /// Define a new local. Only available in defining patterns.
-    NewName(Obj<FuncLocal>, Option<Obj<Pat>>),
+    NewName(Obj<FnLocal>, Option<Obj<Pat>>),
 
     /// Match an array or slice of patterns.
     Slice(PatListFrontAndTail),
@@ -183,7 +183,7 @@ pub enum ExprKind {
     Unary(AstUnOpKind, Obj<Expr>),
     Literal(AstLit),
     TupleOrUnitCtor(AdtCtorInstance),
-    FnItemLit(Obj<FuncItem>, Option<SpannedTyOrReList>),
+    FnItemLit(Obj<FnItem>, Option<SpannedTyOrReList>),
     TypeRelative {
         self_ty: SpannedTy,
         as_trait: Option<SpannedTraitInstance>,
@@ -218,7 +218,7 @@ pub enum ExprKind {
     Index(Obj<Expr>, Obj<Expr>),
     Range(RangeExpr),
     LocalSelf,
-    Local(Obj<FuncLocal>),
+    Local(Obj<FnLocal>),
     AddrOf(Mutability, Obj<Expr>),
     Break {
         label: Option<Obj<Expr>>,

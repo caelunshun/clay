@@ -8,7 +8,7 @@ use crate::{
     semantic::{
         lower::modules::{FrozenModuleResolver, ItemCategory, ItemPathFmt, ParentResolver as _},
         syntax::{
-            AdtEnumVariant, AdtItem, AdtKindEnum, Attribute, FuncItem, ImplItem, LangItems,
+            AdtEnumVariant, AdtItem, AdtKindEnum, Attribute, FnItem, ImplItem, LangItems,
             TraitItem, TypeAliasItem,
         },
     },
@@ -96,7 +96,7 @@ pub enum ItemKind {
     EnumVariant(Obj<EnumVariantItem>),
     Trait(Obj<TraitItem>),
     Impl(Obj<ImplItem>),
-    Func(Obj<FuncItem>),
+    Fn(Obj<FnItem>),
     TypeAlias(Obj<TypeAliasItem>),
 }
 
@@ -129,9 +129,9 @@ impl ItemKind {
         }
     }
 
-    pub fn as_func(self) -> Option<Obj<FuncItem>> {
+    pub fn as_func(self) -> Option<Obj<FnItem>> {
         match self {
-            ItemKind::Func(v) => Some(v),
+            ItemKind::Fn(v) => Some(v),
             _ => None,
         }
     }

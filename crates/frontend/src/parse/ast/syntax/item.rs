@@ -17,7 +17,7 @@ pub enum AstItem {
     Use(AstItemUse),
     Trait(AstItemTrait),
     Impl(AstItemImpl),
-    Func(AstItemFn),
+    Fn(AstItemFn),
     Struct(AstItemStruct),
     Enum(AstItemEnum),
     TypeAlias(AstItemTypeAlias),
@@ -30,7 +30,7 @@ impl AstItem {
         | AstItem::Use(AstItemUse { base, .. })
         | AstItem::Trait(AstItemTrait { base, .. })
         | AstItem::Impl(AstItemImpl { base, .. })
-        | AstItem::Func(AstItemFn { base, .. })
+        | AstItem::Fn(AstItemFn { base, .. })
         | AstItem::Struct(AstItemStruct { base, .. })
         | AstItem::Enum(AstItemEnum { base, .. })
         | AstItem::TypeAlias(AstItemTypeAlias { base, .. })
@@ -172,6 +172,6 @@ pub struct AstImplLikeMember {
 pub enum AstImplLikeMemberKind {
     TypeEquals(Ident, AstTy),
     TypeInherits(Ident, AstTraitClauseList),
-    Func(AstFnDef),
+    Fn(AstFnDef),
     Error(ErrorGuaranteed),
 }

@@ -35,7 +35,7 @@ pub enum ItemCategory {
     Struct,
     Enum,
     EnumVariant,
-    Func,
+    Fn,
     TypeAlias,
 }
 
@@ -48,7 +48,7 @@ impl ItemCategory {
             ItemCategory::Struct => symbol!("struct"),
             ItemCategory::Enum => symbol!("enum"),
             ItemCategory::EnumVariant => symbol!("enum variant"),
-            ItemCategory::Func => symbol!("function"),
+            ItemCategory::Fn => symbol!("function"),
             ItemCategory::TypeAlias => symbol!("type"),
         }
     }
@@ -61,7 +61,7 @@ impl ItemCategory {
             ItemCategory::Struct => symbol!("a struct"),
             ItemCategory::Enum => symbol!("an enum"),
             ItemCategory::EnumVariant => symbol!("an enum variant"),
-            ItemCategory::Func => symbol!("a function"),
+            ItemCategory::Fn => symbol!("a function"),
             ItemCategory::TypeAlias => symbol!("a type"),
         }
     }
@@ -75,7 +75,7 @@ impl ItemCategory {
                 | ItemCategory::Struct
                 | ItemCategory::Enum
                 | ItemCategory::EnumVariant
-                | ItemCategory::Func
+                | ItemCategory::Fn
                 | ItemCategory::TypeAlias => false,
             },
             ItemCategoryUse::GlobUseTarget => match self {
@@ -84,7 +84,7 @@ impl ItemCategory {
                 | ItemCategory::Trait
                 | ItemCategory::Struct
                 | ItemCategory::EnumVariant
-                | ItemCategory::Func
+                | ItemCategory::Fn
                 | ItemCategory::TypeAlias => false,
             },
         }
@@ -98,7 +98,7 @@ impl ItemCategory {
             | ItemCategory::Struct
             | ItemCategory::Enum
             | ItemCategory::EnumVariant
-            | ItemCategory::Func
+            | ItemCategory::Fn
             | ItemCategory::TypeAlias => false,
         }
     }
@@ -111,7 +111,7 @@ impl ItemCategory {
             | ItemCategory::Struct
             | ItemCategory::Enum
             | ItemCategory::EnumVariant
-            | ItemCategory::Func
+            | ItemCategory::Fn
             | ItemCategory::TypeAlias => true,
         }
     }

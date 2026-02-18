@@ -14,8 +14,8 @@ use crate::{
             TyFolderInfallibleExt, TyFolderPreservesSpans, TyVisitorInfallibleExt, UnifyCxMode,
         },
         syntax::{
-            AdtInstance, AdtItem, AnyGeneric, FnDef, FnInstance, FnInstanceInner, FnOwner,
-            FuncDefOwner, GenericBinder, GenericSubst, HrtbBinder, HrtbBinderKind, HrtbDebruijn,
+            AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnInstanceInner,
+            FnOwner, GenericBinder, GenericSubst, HrtbBinder, HrtbBinderKind, HrtbDebruijn,
             HrtbDebruijnDef, HrtbUniverse, ImplItem, Re, RelationMode, SpannedHrtbBinder,
             SpannedHrtbBinderView, SpannedRe, SpannedTy, SpannedTyView, TraitClause, TraitItem,
             TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReKind, TyProjection,
@@ -312,14 +312,14 @@ impl<'tcx> ClauseCx<'tcx> {
         let tcx = self.tcx();
 
         let mut env = match *def.r(s).owner {
-            FuncDefOwner::Func(_item) => ClauseImportEnv {
+            FnDefOwner::Item(_item) => ClauseImportEnv {
                 self_ty: tcx.intern(TyKind::SigThis),
                 sig_generic_substs: Vec::new(),
             },
-            FuncDefOwner::TraitMethod(def, _idx) => {
+            FnDefOwner::TraitMethod(def, _idx) => {
                 self.import_trait_def_env_as_universal(def, universe)
             }
-            FuncDefOwner::ImplMethod(def, _idx) => {
+            FnDefOwner::ImplMethod(def, _idx) => {
                 self.import_impl_block_env_as_universal(def, universe)
             }
         };
@@ -497,13 +497,13 @@ impl<'tcx> ClauseCx<'tcx> {
         let tcx = self.tcx();
 
         match *def.r(s).owner {
-            FuncDefOwner::Func(_) => unreachable!(),
-            FuncDefOwner::ImplMethod(block, method_idx) => FnOwner::Inherent {
+            FnDefOwner::Item(_) => unreachable!(),
+            FnDefOwner::ImplMethod(block, method_idx) => FnOwner::Inherent {
                 self_ty,
                 block,
                 method_idx,
             },
-            FuncDefOwner::TraitMethod(trait_item, method_idx) => {
+            FnDefOwner::TraitMethod(trait_item, method_idx) => {
                 let params = self
                     .instantiate_blank_infer_vars_from_binder(
                         *trait_item.r(s).generics,

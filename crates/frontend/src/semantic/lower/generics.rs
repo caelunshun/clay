@@ -318,7 +318,7 @@ impl IntraItemLowerCtxt<'_> {
                     }
                 }
                 AstImplLikeMemberKind::TypeInherits(..)
-                | AstImplLikeMemberKind::Func(..)
+                | AstImplLikeMemberKind::Fn(..)
                 | AstImplLikeMemberKind::Error(_) => {
                     // (ignored)
                 }
