@@ -71,7 +71,7 @@ impl IntraItemLowerCtxt<'_> {
             ItemKind::Module(_)
             | ItemKind::EnumVariant(_)
             | ItemKind::Impl(_)
-            | ItemKind::Func(_) => Ok(TyPathResolution::Other(target)),
+            | ItemKind::Fn(_) => Ok(TyPathResolution::Other(target)),
         }
     }
 

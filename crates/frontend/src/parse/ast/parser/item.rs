@@ -254,7 +254,7 @@ pub fn parse_item(p: P, outer_attrs: Vec<AstAttribute>) -> Option<AstItem> {
 
     match parse_func(p) {
         Ok(Some(def)) => {
-            return Some(AstItem::Func(AstItemFn {
+            return Some(AstItem::Fn(AstItemFn {
                 base: make_base(p),
                 def,
             }));
@@ -364,7 +364,7 @@ pub fn parse_impl_ish_member(p: P) -> Option<AstImplLikeMember> {
 
     match parse_func(p) {
         Ok(Some(def)) => {
-            return make_member(AstImplLikeMemberKind::Func(def), p);
+            return make_member(AstImplLikeMemberKind::Fn(def), p);
         }
         Ok(None) => {
             // (fallthrough)

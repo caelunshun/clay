@@ -24,9 +24,9 @@ use crate::{
         syntax::{
             AdtCtor, AdtCtorField, AdtCtorFieldIdx, AdtCtorOwner, AdtCtorSyntax, AdtEnumVariant,
             AdtEnumVariantIdx, AdtItem, AdtKind, AdtKindEnum, AdtKindStruct, AnyGeneric, Crate,
-            EnumVariantItem, Expr, FnDef, FuncArg, FuncDefOwner, FuncItem, FuncLocal,
-            GenericBinder, ImplItem, Item, ItemKind, LangItems, ModuleItem, RegionGeneric,
-            SpannedTy, TraitItem, TyKind, TypeAliasItem, TypeGeneric, Visibility,
+            EnumVariantItem, Expr, FnArg, FnDef, FnDefOwner, FnItem, FnLocal, GenericBinder,
+            ImplItem, Item, ItemKind, LangItems, ModuleItem, RegionGeneric, SpannedTy, TraitItem,
+            TyKind, TypeAliasItem, TypeGeneric, Visibility,
         },
     },
     symbol,
@@ -212,11 +212,11 @@ impl<'ast> UseLowerCtxt<'ast> {
                     cx.lower_impl(item);
                 });
             }
-            AstItem::Func(item) => {
+            AstItem::Fn(item) => {
                 let item_id = self.tree.push_named_item(
                     parent_id,
                     item.base.vis.clone(),
-                    ItemCategory::Func,
+                    ItemCategory::Fn,
                     item.def.name,
                 );
 
@@ -515,13 +515,13 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                     Diag::span_err(member.span, "default associated types are not supported")
                         .emit();
                 }
-                AstImplLikeMemberKind::Func(ast) => {
+                AstImplLikeMemberKind::Fn(ast) => {
                     let method_task = self.lower_fn_def(None, ast);
                     let method = method_task.def;
 
                     LateInit::init(
                         &method.r(s).owner,
-                        FuncDefOwner::TraitMethod(trait_target, methods.len() as u32),
+                        FnDefOwner::TraitMethod(trait_target, methods.len() as u32),
                     );
 
                     match name_to_method.entry(method.r(s).name.text) {
@@ -894,7 +894,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let mut method_defs = Vec::new();
 
         for member in &ast.body.members {
-            let AstImplLikeMemberKind::Func(def) = &member.kind else {
+            let AstImplLikeMemberKind::Fn(def) = &member.kind else {
                 continue;
             };
 
@@ -915,7 +915,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         self.queue_lower_item_attributes(&ast.base.outer_attrs);
 
         let target_def = Obj::new(
-            FuncItem {
+            FnItem {
                 item: self.target,
                 def: LateInit::uninit(),
             },
@@ -923,10 +923,10 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         );
 
         let fn_task = self.lower_fn_def(None, &ast.def);
-        LateInit::init(&fn_task.def.r(s).owner, FuncDefOwner::Func(target_def));
+        LateInit::init(&fn_task.def.r(s).owner, FnDefOwner::Item(target_def));
         LateInit::init(&target_def.r(s).def, fn_task.def);
 
-        LateInit::init(&self.target.r(s).kind, ItemKind::Func(target_def));
+        LateInit::init(&self.target.r(s).kind, ItemKind::Fn(target_def));
 
         self.queue_task(|mut ctxt| ctxt.lower_fn_def(fn_task));
     }
@@ -1005,7 +1005,7 @@ pub struct IntraItemLowerCtxt<'tcx> {
     pub generic_ty_names: NameResolver<Obj<TypeGeneric>>,
     pub generic_re_names: NameResolver<Obj<RegionGeneric>>,
     pub block_label_names: NameResolver<(Span, Obj<Expr>)>,
-    pub func_local_names: NameResolver<Obj<FuncLocal>>,
+    pub func_local_names: NameResolver<Obj<FnLocal>>,
 }
 
 impl IntraItemLowerCtxt<'_> {
@@ -1097,7 +1097,7 @@ impl IntraItemLowerCtxt<'_> {
                         AstImplLikeMemberKind::TypeInherits(name, _) => {
                             Diag::span_err(name.span, "all associated type parameters must be specified in an `impl` block").emit();
                         }
-                        AstImplLikeMemberKind::Func(def) => {
+                        AstImplLikeMemberKind::Fn(def) => {
                             if def.body.is_none() {
                                 Diag::span_err(def.name.span, "missing method body").emit();
                             }
@@ -1130,7 +1130,7 @@ impl IntraItemLowerCtxt<'_> {
                             )
                             .emit();
                         }
-                        AstImplLikeMemberKind::Func(def) => {
+                        AstImplLikeMemberKind::Fn(def) => {
                             if def.body.is_none() {
                                 Diag::span_err(def.name.span, "missing method body").emit();
                             }
@@ -1233,7 +1233,7 @@ impl IntraItemLowerCtxt<'_> {
                 continue;
             };
 
-            LateInit::init(&method.r(s).owner, FuncDefOwner::ImplMethod(item, i as u32));
+            LateInit::init(&method.r(s).owner, FnDefOwner::ImplMethod(item, i as u32));
         }
 
         LateInit::init(&item.r(s).methods, method_defs);
@@ -1274,7 +1274,7 @@ impl IntraItemLowerCtxt<'_> {
         LateInit::init(
             &def.r(s).args,
             Obj::new_iter(
-                ast.args.iter().map(|arg| FuncArg {
+                ast.args.iter().map(|arg| FnArg {
                     span: arg.span,
                     pat: self.lower_pat(&arg.pat),
                     ty: self.lower_ty(&arg.ty),

@@ -14,7 +14,7 @@ use crate::{
             func::path::{ExprPathIdentOrResolution, PathResolvedPattern},
         },
         syntax::{
-            FuncLocal, Mutability, Pat, PatKind, PatListFrontAndTail, PatListFrontAndTailLen,
+            FnLocal, Mutability, Pat, PatKind, PatListFrontAndTail, PatListFrontAndTailLen,
             PatNamedField,
         },
     },
@@ -35,7 +35,7 @@ pub struct PatLocalBranchResolver<'a> {
 struct PatLocal {
     currently_bound_at: Option<Span>,
     original_binder_span: Span,
-    local: Obj<FuncLocal>,
+    local: Obj<FnLocal>,
 }
 
 impl PatLocalBranchResolver<'_> {
@@ -95,11 +95,11 @@ impl PatLocalBranchResolver<'_> {
         ident: Ident,
         mutability: Mutability,
         s: &Session,
-    ) -> Result<Obj<FuncLocal>, ErrorGuaranteed> {
+    ) -> Result<Obj<FnLocal>, ErrorGuaranteed> {
         let local = match self.locals.entry(ident.text) {
             hashbrown::hash_map::Entry::Vacant(entry) => {
                 let local = Obj::new(
-                    FuncLocal {
+                    FnLocal {
                         mutability,
                         name: ident,
                     },

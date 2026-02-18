@@ -62,3 +62,11 @@ fn main() {
     let vec2 = <_>::clone(&vec);
     vec2.push(());
 }
+
+trait Generic<I> {
+    fn funky(me: Self);
+}
+
+fn meow<T: for<I> Generic<I>>(v: T) {
+    v.funky();
+}

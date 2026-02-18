@@ -9,7 +9,7 @@ use crate::{
     semantic::{
         analysis::ClauseOrigin,
         syntax::{
-            FnDef, FuncItem, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy,
+            FnDef, FnItem, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy,
             SpannedTyOrReList, Visibility,
         },
     },
@@ -560,7 +560,7 @@ pub struct FnInstanceInner {
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum FnOwner {
-    Item(Obj<FuncItem>),
+    Item(Obj<FnItem>),
     Trait {
         instance: TraitSpec,
         self_ty: Ty,

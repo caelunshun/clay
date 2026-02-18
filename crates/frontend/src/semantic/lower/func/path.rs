@@ -16,9 +16,9 @@ use crate::{
             modules::{FrozenModuleResolver, PathResolver, StepResolveError},
         },
         syntax::{
-            AdtCtorInstance, AdtItem, AdtKind, EnumVariantItem, FuncItem, FuncLocal, Item,
-            ItemKind, SpannedAdtInstanceView, SpannedTraitInstance, SpannedTraitInstanceView,
-            SpannedTy, SpannedTyOrReList, SpannedTyView, TraitItem, TypeGeneric,
+            AdtCtorInstance, AdtItem, AdtKind, EnumVariantItem, FnItem, FnLocal, Item, ItemKind,
+            SpannedAdtInstanceView, SpannedTraitInstance, SpannedTraitInstanceView, SpannedTy,
+            SpannedTyOrReList, SpannedTyView, TraitItem, TypeGeneric,
         },
     },
 };
@@ -47,7 +47,7 @@ pub enum ExprPathResolution {
     ResolvedEnumVariant(Obj<EnumVariantItem>, SpannedTyOrReList),
 
     /// A reference to a function item with some optional generic parameters.
-    ResolvedFn(Obj<FuncItem>, Option<SpannedTyOrReList>),
+    ResolvedFn(Obj<FnItem>, Option<SpannedTyOrReList>),
 
     /// A reference to a trait.
     ResolvedTrait(Obj<TraitItem>, SpannedTyOrReList),
@@ -102,7 +102,7 @@ pub enum ExprPathResolution {
     SelfLocal,
 
     /// A reference to a local defined within the current function.
-    Local(Obj<FuncLocal>),
+    Local(Obj<FnLocal>),
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -260,13 +260,13 @@ pub enum PathResolvedValue {
 
 #[derive(Debug, Copy, Clone)]
 pub enum PathResolvedLocal {
-    Local(Obj<FuncLocal>),
+    Local(Obj<FnLocal>),
     LowerSelf,
 }
 
 #[derive(Debug, Copy, Clone)]
 pub enum PathResolvedFnLit {
-    Item(Obj<FuncItem>, Option<SpannedTyOrReList>),
+    Item(Obj<FnItem>, Option<SpannedTyOrReList>),
     TypeRelative {
         self_ty: SpannedTy,
         as_trait: Option<SpannedTraitInstance>,
@@ -437,7 +437,7 @@ impl IntraItemLowerCtxt<'_> {
                         segments.as_slice(),
                     );
                 }
-                ItemKind::Func(def) => {
+                ItemKind::Fn(def) => {
                     return self.resolve_bare_expr_path_from_func(
                         def,
                         segment,
@@ -630,7 +630,7 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn resolve_bare_expr_path_from_func(
         &mut self,
-        def: Obj<FuncItem>,
+        def: Obj<FnItem>,
         def_segment: &AstParamedPathSegment,
         segments: &[AstParamedPathSegment],
     ) -> ExprPathResult {

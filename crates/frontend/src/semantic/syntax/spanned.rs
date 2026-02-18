@@ -8,7 +8,7 @@ use crate::{
     semantic::{
         analysis::TyCtxt,
         syntax::{
-            AdtInstance, AdtItem, FnInstance, FnInstanceInner, FnOwner, FuncItem, GenericBinder,
+            AdtInstance, AdtItem, FnInstance, FnInstanceInner, FnItem, FnOwner, GenericBinder,
             HrtbBinder, HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef, HrtbDebruijnDefList,
             ImplItem, InferTyVar, Mutability, Re, RelationDirection, SimpleTyKind, TraitClause,
             TraitClauseList, TraitInstance, TraitItem, TraitParam, TraitParamList, TraitSpec, Ty,
@@ -462,7 +462,7 @@ pub type SpannedFnOwner = Spanned<FnOwner>;
 
 #[derive(Debug, Copy, Clone)]
 pub enum SpannedFnOwnerView {
-    Item(Obj<FuncItem>),
+    Item(Obj<FnItem>),
     Trait {
         instance: SpannedTraitSpec,
         self_ty: SpannedTy,

@@ -6,7 +6,7 @@ use crate::{
             TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCxMode,
         },
         syntax::{
-            AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FuncItem, GenericBinder, GenericSubst,
+            AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FnItem, GenericBinder, GenericSubst,
             HrtbUniverse, ImplItem, ItemKind, TraitItem, TypeAliasItem,
         },
     },
@@ -56,7 +56,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
                 ItemKind::Impl(def) => {
                     self.visit_impl(def);
                 }
-                ItemKind::Func(def) => {
+                ItemKind::Fn(def) => {
                     self.visit_fn_item(def);
                 }
                 ItemKind::TypeAlias(def) => {
@@ -229,7 +229,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         }
     }
 
-    pub fn visit_fn_item(&mut self, def: Obj<FuncItem>) {
+    pub fn visit_fn_item(&mut self, def: Obj<FnItem>) {
         let s = self.session();
 
         self.visit_fn_def(*def.r(s).def);
