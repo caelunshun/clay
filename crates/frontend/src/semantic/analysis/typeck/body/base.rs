@@ -8,9 +8,9 @@ use crate::{
     parse::ast::AstLit,
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind, CrateTypeckVisitor,
-            TyCtxt, TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
-            typeck::body::lookup::LookupMethodResult,
+            ClauseCx, ClauseErrorSink, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind,
+            CrateTypeckVisitor, TyCtxt, TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx,
+            UnifyCxMode, typeck::body::lookup::LookupMethodResult,
         },
         syntax::{
             Block, Crate, Divergence, Expr, ExprKind, FnDef, FnInstanceInner, FnLocal,
@@ -31,7 +31,11 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Setup a `ClauseCx` for signature validation.
         let mut ccx_sig = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env_sig = ccx_sig.import_fn_def_env_as_universal(def, HrtbUniverse::ROOT_REF);
+        let env_sig = ccx_sig.import_fn_def_env_as_universal(
+            &ClauseOrigin::empty_report(),
+            def,
+            HrtbUniverse::ROOT_REF,
+        );
 
         // WF-check the signature.
         self.visit_generic_binder(&mut ccx_sig, env_sig.as_ref(), def.r(s).generics);
@@ -43,14 +47,22 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         for arg in def.r(s).args.r(s) {
             let arg = ccx_sig
-                .importer(env_sig.as_ref(), HrtbUniverse::ROOT)
+                .importer(
+                    &ClauseOrigin::empty_report(),
+                    env_sig.as_ref(),
+                    HrtbUniverse::ROOT,
+                )
                 .fold_preserved(arg.ty);
 
             ccx_sig.wf_visitor(HrtbUniverse::ROOT).visit_spanned(arg);
         }
 
         let ret_ty = ccx_sig
-            .importer(env_sig.as_ref(), HrtbUniverse::ROOT)
+            .importer(
+                &ClauseOrigin::empty_report(),
+                env_sig.as_ref(),
+                HrtbUniverse::ROOT,
+            )
             .fold_preserved(*def.r(s).ret_ty);
 
         ccx_sig.wf_visitor(HrtbUniverse::ROOT).visit_spanned(ret_ty);
@@ -60,7 +72,11 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
             let mut ccx_body =
                 ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionBlind);
 
-            let env_body = ccx_body.import_fn_def_env_as_universal(def, HrtbUniverse::ROOT_REF);
+            let env_body = ccx_body.import_fn_def_env_as_universal(
+                &ClauseOrigin::empty_report(),
+                def,
+                HrtbUniverse::ROOT_REF,
+            );
 
             let mut bcx = BodyCtxt::new(&mut ccx_body, def, env_body.as_ref());
 
@@ -206,7 +222,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         let env = self.import_env;
         let ascription = self
             .ccx_mut()
-            .importer(env, HrtbUniverse::ROOT)
+            .importer(&ClauseOrigin::empty_report(), env, HrtbUniverse::ROOT)
             .fold_preserved(ascription);
 
         self.ccx_mut()
@@ -214,9 +230,12 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             .visit_spanned(ascription);
 
         self.ccx_mut().oblige_ty_unifies_ty(
-            ClauseOrigin::root(ClauseOriginKind::Pattern {
-                pat_span: ascription.own_span(),
-            }),
+            ClauseOrigin::root(
+                ClauseErrorSink::Report,
+                ClauseOriginKind::Pattern {
+                    pat_span: ascription.own_span(),
+                },
+            ),
             pat_ty,
             ascription.value,
             RelationMode::Equate,
@@ -241,7 +260,10 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let output_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
 
                 self.ccx_mut().oblige_ty_meets_trait_instantiated(
-                    ClauseOrigin::root(ClauseOriginKind::FunctionCall { site_span }),
+                    ClauseOrigin::root(
+                        ClauseErrorSink::Report,
+                        ClauseOriginKind::FunctionCall { site_span },
+                    ),
                     callee,
                     TraitSpec {
                         def: fn_once_trait,
@@ -324,14 +346,18 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 });
 
                 let instance_env = self.ccx_mut().instantiate_fn_instance_env_as_infer(
-                    &ClauseOrigin::root(ClauseOriginKind::FunctionCall {
-                        site_span: name.span,
-                    }),
+                    &ClauseOrigin::root(
+                        ClauseErrorSink::Report,
+                        ClauseOriginKind::FunctionCall {
+                            site_span: name.span,
+                        },
+                    ),
                     instance,
                     HrtbUniverse::ROOT_REF,
                 );
 
                 let (expected_args, expected_output) = self.ccx_mut().import_fn_instance_sig(
+                    &ClauseOrigin::empty_report(),
                     instance_env.as_ref(),
                     resolution,
                     HrtbUniverse::ROOT_REF,
@@ -340,9 +366,12 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let (self_ty, expected_args) = expected_args.r(s).split_first().unwrap();
 
                 self.ccx_mut().oblige_ty_unifies_ty(
-                    ClauseOrigin::root(ClauseOriginKind::FunctionCall {
-                        site_span: name.span,
-                    }),
+                    ClauseOrigin::root(
+                        ClauseErrorSink::Report,
+                        ClauseOriginKind::FunctionCall {
+                            site_span: name.span,
+                        },
+                    ),
                     *self_ty,
                     receiver,
                     RelationMode::Equate,
@@ -387,7 +416,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let env = self.import_env;
                 let early_args = early_args.map(|early_args| {
                     self.ccx_mut()
-                        .importer(env, HrtbUniverse::ROOT)
+                        .importer(&ClauseOrigin::empty_report(), env, HrtbUniverse::ROOT)
                         .fold_preserved(early_args)
                 });
 
@@ -416,7 +445,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                 let self_ty = self
                     .ccx_mut()
-                    .importer(env, HrtbUniverse::ROOT)
+                    .importer(&ClauseOrigin::empty_report(), env, HrtbUniverse::ROOT)
                     .fold_preserved(self_ty);
 
                 self.ccx_mut()
@@ -426,7 +455,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let as_trait = as_trait.map(|as_trait| {
                     let out = self
                         .ccx_mut()
-                        .importer(env, HrtbUniverse::ROOT)
+                        .importer(&ClauseOrigin::empty_report(), env, HrtbUniverse::ROOT)
                         .fold_preserved(as_trait);
 
                     self.ccx_mut()
@@ -440,7 +469,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let assoc_args = assoc_args.map(|assoc_args| {
                     let out = self
                         .ccx_mut()
-                        .importer(env, HrtbUniverse::ROOT)
+                        .importer(&ClauseOrigin::empty_report(), env, HrtbUniverse::ROOT)
                         .fold_preserved(assoc_args);
 
                     self.ccx_mut()
@@ -464,7 +493,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let env = self.import_env;
                 let as_ty = self
                     .ccx_mut()
-                    .importer(env, HrtbUniverse::ROOT)
+                    .importer(&ClauseOrigin::empty_report(), env, HrtbUniverse::ROOT)
                     .fold_preserved(as_ty);
 
                 self.ccx_mut()
@@ -549,9 +578,12 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     let bind_as_ty = self.type_of_pat(bind_as, divergence);
 
                     self.ccx_mut().oblige_ty_unifies_ty(
-                        ClauseOrigin::root(ClauseOriginKind::Pattern {
-                            pat_span: pat.r(s).span,
-                        }),
+                        ClauseOrigin::root(
+                            ClauseErrorSink::Report,
+                            ClauseOriginKind::Pattern {
+                                pat_span: pat.r(s).span,
+                            },
+                        ),
                         local_ty,
                         bind_as_ty,
                         RelationMode::Equate,

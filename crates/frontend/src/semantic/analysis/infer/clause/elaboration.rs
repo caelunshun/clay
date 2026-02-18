@@ -3,7 +3,9 @@
 use crate::{
     base::arena::{HasInterner, HasListInterner},
     semantic::{
-        analysis::{ClauseCx, ClauseImportEnvRef, TyFolderInfallibleExt, UniversalElaboration},
+        analysis::{
+            ClauseCx, ClauseImportEnvRef, ClauseOrigin, TyFolderInfallibleExt, UniversalElaboration,
+        },
         syntax::{
             AnyGeneric, GenericSubst, HrtbBinder, Re, TraitClause, TraitClauseList, TraitParam,
             TraitSpec, TyKind, TyOrRe, UniversalReVarSourceInfo, UniversalTyVar,
@@ -95,6 +97,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
                         let implicit_clauses = self
                             .importer(
+                                &ClauseOrigin::empty_report(),
                                 ClauseImportEnvRef {
                                     self_ty: tcx.intern(TyKind::UniversalVar(root)),
                                     sig_generic_substs: &[GenericSubst {

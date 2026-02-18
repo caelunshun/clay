@@ -72,7 +72,7 @@ impl BodyCtxt<'_, '_> {
 
                         let field = self
                             .ccx_mut()
-                            .importer(env, HrtbUniverse::ROOT)
+                            .importer(&ClauseOrigin::empty_report(), env, HrtbUniverse::ROOT)
                             .fold(field.ty.value);
 
                         return Some(field);
@@ -435,7 +435,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
         let mut fork = self.ccx().clone().with_silent();
 
         let probe = ClauseErrorProbe::default();
-        let origin = ClauseOrigin::never_printed().with_probe_sink(probe.clone());
+        let origin = ClauseOrigin::probe(probe.clone());
 
         match query {
             MethodQuery::Method(receiver) => {
@@ -455,6 +455,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                 );
 
                 let expected_receiver = fork.import_fn_instance_receiver_as_infer(
+                    &ClauseOrigin::empty_report(),
                     expected_env.as_ref(),
                     candidate,
                     HrtbUniverse::ROOT_REF,
