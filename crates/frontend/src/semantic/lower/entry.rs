@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        Diag, LeafDiag,
+        Diag, LeafDiag, Session,
         analysis::NameResolver,
         arena::{HasInterner, HasListInterner, LateInit, Obj},
         syntax::{HasSpan as _, Span, Symbol},
@@ -31,7 +31,7 @@ use crate::{
     },
     symbol,
     utils::{
-        hash::FxHashMap,
+        hash::{FxHashMap, FxIndexMap},
         lang::{AND_LIST_GLUE, format_list},
     },
 };
@@ -49,10 +49,11 @@ impl TyCtxt {
 
         // Build the module tree.
         let mut ctxt = UseLowerCtxt {
-            tree: BuilderModuleTree::default(),
+            tree: BuilderModuleTree::new(self.session.clone()),
             inter_tasks: Vec::new(),
         };
 
+        ctxt.link_synthetic_core(s);
         ctxt.lower_module(BuilderItemId::ROOT, ast);
 
         let krate = Obj::new(
@@ -378,6 +379,60 @@ impl<'ast> UseLowerCtxt<'ast> {
         }
 
         prefix.truncate(old_len);
+    }
+
+    pub fn link_synthetic_core(&mut self, s: &Session) {
+        let krate = Obj::new(
+            Crate {
+                name: symbol!("__clay_synthetic_core"),
+                is_local: false,
+                root: LateInit::uninit(),
+                items: LateInit::uninit(),
+                lang_items: LangItems::default(),
+            },
+            s,
+        );
+
+        let root = Obj::new(
+            Item {
+                krate,
+                direct_parent: None,
+                category: ItemCategory::Module,
+                name: Some(Ident {
+                    span: Span::DUMMY,
+                    text: symbol!(""),
+                    raw: false,
+                }),
+                path: symbol!(""),
+                direct_uses: LateInit::new(FxIndexMap::default()),
+                glob_uses: LateInit::new(Vec::new()),
+                traits_in_scope: LateInit::uninit(),
+                attrs: LateInit::uninit(),
+                kind: LateInit::uninit(),
+            },
+            s,
+        );
+
+        LateInit::init(
+            &root.r(s).kind,
+            ItemKind::Module(Obj::new(ModuleItem { item: root }, s)),
+        );
+        LateInit::init(&krate.r(s).root, root);
+        LateInit::init(&krate.r(s).items, vec![root]);
+
+        self.tree.push_single_external_use(
+            BuilderItemId::ROOT,
+            AstVisibility {
+                span: Span::DUMMY,
+                kind: AstVisibilityKind::Priv,
+            },
+            Ident {
+                span: Span::DUMMY,
+                text: symbol!("__clay_synthetic_core"),
+                raw: false,
+            },
+            root,
+        );
     }
 }
 
