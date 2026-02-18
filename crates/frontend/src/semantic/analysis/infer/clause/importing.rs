@@ -10,16 +10,17 @@ use crate::{
     },
     semantic::{
         analysis::{
-            ClauseCx, ClauseOrigin, ClauseOriginKind, TyCtxt, TyFoldable, TyFolder, TyFolderExt,
-            TyFolderInfallibleExt, TyFolderPreservesSpans, TyVisitorInfallibleExt, UnifyCxMode,
+            ClauseCx, ClauseOrigin, ClauseOriginKind, HrtbUniverse, TyCtxt, TyFoldable, TyFolder,
+            TyFolderExt, TyFolderInfallibleExt, TyFolderPreservesSpans, TyVisitorInfallibleExt,
+            UnifyCxMode,
         },
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnInstanceInner,
             FnOwner, GenericBinder, GenericSubst, HrtbBinder, HrtbBinderKind, HrtbDebruijn,
-            HrtbDebruijnDef, HrtbUniverse, ImplItem, Re, RelationMode, SpannedHrtbBinder,
-            SpannedHrtbBinderView, SpannedRe, SpannedTraitClauseView, SpannedTy, SpannedTyView,
-            TraitClause, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReKind,
-            TyProjection, TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
+            HrtbDebruijnDef, ImplItem, Re, RelationMode, SpannedHrtbBinder, SpannedHrtbBinderView,
+            SpannedRe, SpannedTraitClauseView, SpannedTy, SpannedTyView, TraitClause, TraitItem,
+            TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReKind, TyProjection,
+            TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,

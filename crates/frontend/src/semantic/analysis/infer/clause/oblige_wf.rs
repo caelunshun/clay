@@ -7,15 +7,15 @@ use crate::{
     },
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind, TyCtxt, TyFoldable,
-            TyVisitable, TyVisitor, TyVisitorInfallibleExt,
+            ClauseCx, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind, HrtbUniverse,
+            HrtbUniverseInfo, TyCtxt, TyFoldable, TyVisitable, TyVisitor, TyVisitorInfallibleExt,
         },
         syntax::{
-            GenericBinder, GenericSubst, HrtbUniverse, HrtbUniverseInfo, RelationDirection,
-            SpannedAdtInstance, SpannedFnInstance, SpannedHrtbBinder, SpannedHrtbBinderKindView,
-            SpannedHrtbBinderView, SpannedHrtbDebruijnDefView, SpannedTraitInstance,
-            SpannedTraitParamView, SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList,
-            SpannedTyView, Ty, TyKind, TyOrRe,
+            GenericBinder, GenericSubst, RelationDirection, SpannedAdtInstance, SpannedFnInstance,
+            SpannedHrtbBinder, SpannedHrtbBinderKindView, SpannedHrtbBinderView,
+            SpannedHrtbDebruijnDefView, SpannedTraitInstance, SpannedTraitParamView,
+            SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList, SpannedTyView, Ty,
+            TyKind, TyOrRe,
         },
     },
 };

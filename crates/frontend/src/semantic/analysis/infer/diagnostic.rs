@@ -1,10 +1,10 @@
 use crate::{
     base::{Diag, ErrorGuaranteed, syntax::Span},
     semantic::{
-        analysis::{ClauseCx, TyFolderInfallibleExt, UnboundVarHandlingMode},
+        analysis::{ClauseCx, HrtbUniverse, TyFolderInfallibleExt, UnboundVarHandlingMode},
         syntax::{
-            HrtbUniverse, InferTyVar, Re, TraitClauseList, TraitParam, TraitSpec, Ty,
-            UniversalReVar, UniversalTyVar,
+            InferTyVar, Re, TraitClauseList, TraitParam, TraitSpec, Ty, UniversalReVar,
+            UniversalTyVar,
         },
     },
 };
