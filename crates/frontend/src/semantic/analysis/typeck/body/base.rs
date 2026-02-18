@@ -252,6 +252,16 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             ExprKind::Call(callee, actual_args) => 'call: {
                 let callee = self.check_expr(callee).and_do(&mut divergence);
 
+                if let TyKind::Error(err) =
+                    *self.ccx_mut().peel_ty_infer_var_after_poll(callee).r(s)
+                {
+                    for &actual in actual_args.r(s) {
+                        self.check_expr(actual).and_do(&mut divergence);
+                    }
+
+                    break 'call tcx.intern(TyKind::Error(err));
+                }
+
                 let site_span = expr.r(s).span;
                 let fn_once_trait = self.krate().r(s).fn_once_lang_item(s).unwrap();
                 let input_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
@@ -477,7 +487,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         .with_clause_applies_to(self_ty.value)
                         .visit_spanned(out);
 
-                    out
+                    out.value
                 });
 
                 let assoc_args = assoc_args.map(|assoc_args| {
@@ -494,7 +504,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 });
 
                 let Some(resolution) =
-                    self.lookup_type_relative(self_ty.value, None, assoc_name, assoc_args)
+                    self.lookup_type_relative(self_ty.value, as_trait, assoc_name, assoc_args)
                 else {
                     break 'res tcx.intern(TyKind::Error(
                         Diag::span_err(assoc_name.span, "not found").emit(),

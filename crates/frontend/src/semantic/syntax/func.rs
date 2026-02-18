@@ -10,7 +10,7 @@ use crate::{
     },
     semantic::syntax::{
         AdtCtorFieldIdx, AdtCtorInstance, GenericBinder, ImplItem, Item, Mutability,
-        SpannedTraitInstance, SpannedTy, SpannedTyOrReList, TraitItem, Ty, Visibility,
+        SpannedTraitSpec, SpannedTy, SpannedTyOrReList, TraitItem, Ty, Visibility,
     },
 };
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
@@ -186,7 +186,7 @@ pub enum ExprKind {
     FnItemLit(Obj<FnItem>, Option<SpannedTyOrReList>),
     TypeRelative {
         self_ty: SpannedTy,
-        as_trait: Option<SpannedTraitInstance>,
+        as_trait: Option<SpannedTraitSpec>,
         assoc_name: Ident,
         assoc_args: Option<SpannedTyOrReList>,
     },

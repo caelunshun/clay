@@ -17,8 +17,8 @@ use crate::{
         },
         syntax::{
             AdtCtorInstance, AdtItem, AdtKind, EnumVariantItem, FnItem, FnLocal, Item, ItemKind,
-            SpannedAdtInstanceView, SpannedTraitInstance, SpannedTraitInstanceView, SpannedTy,
-            SpannedTyOrReList, SpannedTyView, TraitItem, TypeGeneric,
+            SpannedAdtInstanceView, SpannedTraitParamList, SpannedTraitSpec, SpannedTraitSpecView,
+            SpannedTy, SpannedTyOrReList, SpannedTyView, TraitItem, TypeGeneric,
         },
     },
 };
@@ -50,7 +50,7 @@ pub enum ExprPathResolution {
     ResolvedFn(Obj<FnItem>, Option<SpannedTyOrReList>),
 
     /// A reference to a trait.
-    ResolvedTrait(Obj<TraitItem>, SpannedTyOrReList),
+    ResolvedTrait(Obj<TraitItem>, SpannedTraitParamList),
 
     /// A reference to a generic type.
     ResolvedGeneric(Obj<TypeGeneric>),
@@ -94,7 +94,7 @@ pub enum ExprPathResolution {
     ///
     TypeRelative {
         self_ty: SpannedTy,
-        as_trait: Option<SpannedTraitInstance>,
+        as_trait: Option<SpannedTraitSpec>,
         assoc: TypeRelativeAssoc,
     },
 
@@ -269,7 +269,7 @@ pub enum PathResolvedFnLit {
     Item(Obj<FnItem>, Option<SpannedTyOrReList>),
     TypeRelative {
         self_ty: SpannedTy,
-        as_trait: Option<SpannedTraitInstance>,
+        as_trait: Option<SpannedTraitSpec>,
         assoc: TypeRelativeAssoc,
     },
 }
@@ -309,13 +309,13 @@ impl IntraItemLowerCtxt<'_> {
                         return None;
                     };
 
-                    let params = self.lower_generics_of_trait_instance_in_fn_body(
+                    let params = self.lower_generics_of_trait_spec_in_fn(
                         def,
                         for_trait.span,
                         params.as_ref(),
                     );
 
-                    Some(SpannedTraitInstanceView { def, params }.encode(for_trait.span, self.tcx))
+                    Some(SpannedTraitSpecView { def, params }.encode(for_trait.span, self.tcx))
                 });
 
                 let assoc = match self.lower_rest_as_type_relative_assoc(&rest.segments) {
@@ -600,7 +600,7 @@ impl IntraItemLowerCtxt<'_> {
         def_segment: &AstParamedPathSegment,
         segments: &[AstParamedPathSegment],
     ) -> ExprPathResult {
-        let as_trait_generics = self.lower_generics_of_trait_instance_in_fn_body(
+        let as_trait_generics = self.lower_generics_of_trait_spec_in_fn(
             def,
             def_segment.part.span(),
             def_segment.args.as_deref(),
@@ -618,7 +618,7 @@ impl IntraItemLowerCtxt<'_> {
         ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
             self_ty,
             as_trait: Some(
-                SpannedTraitInstanceView {
+                SpannedTraitSpecView {
                     def,
                     params: as_trait_generics,
                 }
