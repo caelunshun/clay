@@ -2,8 +2,7 @@ use crate::{
     base::arena::{HasInterner, HasListInterner, Obj},
     semantic::{
         analysis::{
-            BodyCtxt, ClauseCx, ClauseErrorSink, ClauseOrigin, ClauseOriginKind,
-            attempt_deref_clobber_obligations,
+            BodyCtxt, ClauseCx, ClauseOrigin, ClauseOriginKind, attempt_deref_clobber_obligations,
         },
         syntax::{
             Divergence, Expr, HrtbUniverse, Mutability, Re, RelationMode, TraitClauseList,
@@ -84,12 +83,9 @@ impl BodyCtxt<'_, '_> {
         let out_ty = self.apply_coercions(&[(expr, actual)], target);
 
         self.ccx_mut().oblige_ty_unifies_ty(
-            ClauseOrigin::root(
-                ClauseErrorSink::Report,
-                ClauseOriginKind::Coercion {
-                    expr_span: expr.r(s).span,
-                },
-            ),
+            ClauseOrigin::root_report(ClauseOriginKind::Coercion {
+                expr_span: expr.r(s).span,
+            }),
             out_ty,
             demand,
             RelationMode::Equate,
@@ -109,12 +105,9 @@ impl BodyCtxt<'_, '_> {
             CoercionResolution::Solid(solid) => {
                 for &(expr, actual) in exprs {
                     self.ccx_mut().oblige_ty_unifies_ty(
-                        ClauseOrigin::root(
-                            ClauseErrorSink::Report,
-                            ClauseOriginKind::Coercion {
-                                expr_span: expr.r(s).span,
-                            },
-                        ),
+                        ClauseOrigin::root_report(ClauseOriginKind::Coercion {
+                            expr_span: expr.r(s).span,
+                        }),
                         actual,
                         solid,
                         RelationMode::Equate,
@@ -150,12 +143,9 @@ impl BodyCtxt<'_, '_> {
                                 let next_output = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
 
                                 self.ccx_mut().oblige_ty_meets_trait_instantiated(
-                                    ClauseOrigin::root(
-                                        ClauseErrorSink::Report,
-                                        ClauseOriginKind::Coercion {
-                                            expr_span: expr.r(s).span,
-                                        },
-                                    ),
+                                    ClauseOrigin::root_report(ClauseOriginKind::Coercion {
+                                        expr_span: expr.r(s).span,
+                                    }),
                                     HrtbUniverse::ROOT,
                                     output_pointee,
                                     TraitSpec {
@@ -174,12 +164,9 @@ impl BodyCtxt<'_, '_> {
                     };
 
                     self.ccx_mut().oblige_ty_unifies_ty(
-                        ClauseOrigin::root(
-                            ClauseErrorSink::Report,
-                            ClauseOriginKind::Coercion {
-                                expr_span: expr.r(s).span,
-                            },
-                        ),
+                        ClauseOrigin::root_report(ClauseOriginKind::Coercion {
+                            expr_span: expr.r(s).span,
+                        }),
                         output_ty,
                         unify_ty,
                         RelationMode::Equate,
@@ -194,12 +181,9 @@ impl BodyCtxt<'_, '_> {
             } => {
                 for &(expr, actual) in exprs {
                     self.ccx_mut().oblige_ty_meets_clauses(
-                        &ClauseOrigin::root(
-                            ClauseErrorSink::Report,
-                            ClauseOriginKind::Coercion {
-                                expr_span: expr.r(s).span,
-                            },
-                        ),
+                        &ClauseOrigin::root_report(ClauseOriginKind::Coercion {
+                            expr_span: expr.r(s).span,
+                        }),
                         HrtbUniverse::ROOT_REF,
                         actual,
                         to_clauses,
