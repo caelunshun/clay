@@ -4,20 +4,18 @@ use crate::{
     base::{
         analysis::Spanned,
         arena::{HasInterner, Obj},
-        syntax::Span,
     },
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind, ObligationNotReady,
-            ObligationResult, TyCtxt, TyFoldable, TyVisitable, TyVisitor, TyVisitorInfallibleExt,
-            infer::clause::ClauseObligation,
+            ClauseCx, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind, TyCtxt, TyFoldable,
+            TyVisitable, TyVisitor, TyVisitorInfallibleExt,
         },
         syntax::{
-            GenericBinder, GenericSubst, HrtbUniverse, HrtbUniverseInfo, InferTyVar,
-            RelationDirection, SpannedAdtInstance, SpannedFnInstance, SpannedHrtbBinder,
-            SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedHrtbDebruijnDefView,
-            SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec, SpannedTy,
-            SpannedTyOrRe, SpannedTyOrReList, SpannedTyView, Ty, TyKind, TyOrRe,
+            GenericBinder, GenericSubst, HrtbUniverse, HrtbUniverseInfo, RelationDirection,
+            SpannedAdtInstance, SpannedFnInstance, SpannedHrtbBinder, SpannedHrtbBinderKindView,
+            SpannedHrtbBinderView, SpannedHrtbDebruijnDefView, SpannedTraitInstance,
+            SpannedTraitParamView, SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList,
+            SpannedTyView, Ty, TyKind, TyOrRe,
         },
     },
 };
@@ -30,24 +28,6 @@ impl<'tcx> ClauseCx<'tcx> {
             universe,
             clause_applies_to: None,
         }
-    }
-
-    pub(super) fn run_oblige_infer_ty_wf(
-        &mut self,
-        universe: HrtbUniverse,
-        span: Span,
-        var: InferTyVar,
-    ) -> ObligationResult {
-        let tcx = self.tcx();
-
-        let Ok(ty) = self.ucx().lookup_ty_infer_var(var) else {
-            return Err(ObligationNotReady);
-        };
-
-        let ty = SpannedTy::new_saturated(ty, span, tcx);
-        self.wf_visitor(universe).visit_spanned(ty);
-
-        Ok(())
     }
 }
 
@@ -156,12 +136,9 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             | SpannedTyView::Error(_) => {
                 self.walk_spanned(ty);
             }
-            SpannedTyView::InferVar(var) => {
-                self.ccx.push_obligation(ClauseObligation::InferTyWf(
-                    self.universe.clone(),
-                    ty.own_span(),
-                    var,
-                ));
+            SpannedTyView::InferVar(_) => {
+                // It is assumed that inference variables are checked for well-formed'ness somewhere
+                // else.
             }
             SpannedTyView::SigThis
             | SpannedTyView::SigInfer
