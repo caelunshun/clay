@@ -18,8 +18,8 @@ use crate::{
         syntax::{
             AnyGeneric, GenericBinder, Item, Re, RegionGeneric, SpannedTraitClauseList,
             SpannedTraitInstance, SpannedTraitInstanceView, SpannedTraitParam,
-            SpannedTraitParamView, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView,
-            SpannedTyView, TraitItem, TypeGeneric,
+            SpannedTraitParamList, SpannedTraitParamView, SpannedTyOrRe, SpannedTyOrReList,
+            SpannedTyOrReView, SpannedTyView, TraitItem, TypeGeneric,
         },
     },
     utils::{
@@ -214,7 +214,7 @@ impl IntraItemLowerCtxt<'_> {
         params
     }
 
-    pub fn lower_generics_of_trait_instance_in_fn_body(
+    pub fn lower_generics_of_trait_instance_in_fn(
         &mut self,
         def: Obj<TraitItem>,
         segment_span: Span,
@@ -227,7 +227,7 @@ impl IntraItemLowerCtxt<'_> {
                 def,
                 self.synthesize_inferred_generics_for_elision(
                     *def.r(s).generics,
-                    None,
+                    Some(*def.r(s).regular_generic_count),
                     segment_span,
                 ),
                 segment_span,
@@ -248,6 +248,46 @@ impl IntraItemLowerCtxt<'_> {
         }
 
         self.construct_trait_instance_from_positionals(def, params, segment_span)
+    }
+
+    pub fn lower_generics_of_trait_spec_in_fn(
+        &mut self,
+        def: Obj<TraitItem>,
+        segment_span: Span,
+        generics: Option<&AstGenericParamList>,
+    ) -> SpannedTraitParamList {
+        let s = &self.tcx.session;
+
+        let Some(generics) = generics else {
+            return SpannedTraitParamList::alloc_list(
+                segment_span,
+                &self.construct_trait_spec_from_positionals(
+                    def,
+                    self.synthesize_inferred_generics_for_elision(
+                        *def.r(s).generics,
+                        Some(*def.r(s).regular_generic_count),
+                        segment_span,
+                    ),
+                    segment_span,
+                ),
+                self.tcx,
+            );
+        };
+
+        // Lower generic parameters.
+        let (positional, associated) = self.lower_generic_params_syntactic(&generics.list);
+
+        let params = self.normalize_positional_generic_arity(
+            *def.r(s).generics,
+            Some(*def.r(s).regular_generic_count),
+            segment_span,
+            &positional,
+        );
+        let mut params = self.construct_trait_spec_from_positionals(def, params, segment_span);
+
+        self.lower_associated_type_generic_params(def, &mut params, &associated);
+
+        SpannedTraitParamList::alloc_list(segment_span, &params, self.tcx)
     }
 
     pub fn lower_trait_instance_of_impl_block(
