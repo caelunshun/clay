@@ -1,11 +1,7 @@
 use crate::{
-    base::arena::HasInterner,
     semantic::{
         analysis::{FloatingInferVar, HrtbUniverse, ObservedTyInferVar, TyCtxt},
-        syntax::{
-            FloatKind, InferTyPermSet, InferTyVar, IntKind, SimpleTyKind, Ty, TyKind,
-            UniversalTyVar, UniversalTyVarSourceInfo,
-        },
+        syntax::{InferTyPermSet, InferTyVar, Ty, UniversalTyVar, UniversalTyVarSourceInfo},
     },
     utils::hash::FxHashSet,
 };
@@ -258,28 +254,8 @@ impl TyUnifyTracker {
         let perm_set = lhs_perm_set.intersection(rhs_perm_set);
         debug_assert!(!perm_set.is_empty());
 
-        let unique_restrict = (perm_set.iter().count() == 1)
-            .then(|| match perm_set.iter().next().unwrap() {
-                InferTyPermSet::ALL_INT => None,
-                InferTyPermSet::U8 => Some(SimpleTyKind::Uint(IntKind::S8)),
-                InferTyPermSet::U16 => Some(SimpleTyKind::Uint(IntKind::S16)),
-                InferTyPermSet::U32 => Some(SimpleTyKind::Uint(IntKind::S32)),
-                InferTyPermSet::U64 => Some(SimpleTyKind::Uint(IntKind::S64)),
-                InferTyPermSet::I8 => Some(SimpleTyKind::Int(IntKind::S8)),
-                InferTyPermSet::I16 => Some(SimpleTyKind::Int(IntKind::S16)),
-                InferTyPermSet::I32 => Some(SimpleTyKind::Int(IntKind::S32)),
-                InferTyPermSet::I64 => Some(SimpleTyKind::Int(IntKind::S64)),
-                InferTyPermSet::F32 => Some(SimpleTyKind::Float(FloatKind::S32)),
-                InferTyPermSet::F64 => Some(SimpleTyKind::Float(FloatKind::S64)),
-
-                _ => unreachable!(),
-            })
-            .flatten();
-
-        if let Some(unique_restrict) = unique_restrict {
-            *new_root = Some(DisjointTyInferRoot::Known(
-                tcx.intern(TyKind::Simple(unique_restrict)),
-            ));
+        if let Some(unique_ty) = perm_set.to_unique_type(tcx) {
+            *new_root = Some(DisjointTyInferRoot::Known(unique_ty));
         } else {
             *new_root = Some(DisjointTyInferRoot::Floating {
                 max_universe: lhs_max_universe.min(&rhs_max_universe).clone(),
