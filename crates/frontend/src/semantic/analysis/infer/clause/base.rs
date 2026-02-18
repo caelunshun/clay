@@ -2,7 +2,6 @@ use crate::{
     base::{
         Session,
         arena::{HasInterner, Obj},
-        syntax::Span,
     },
     semantic::{
         analysis::{
@@ -22,11 +21,11 @@ use std::ops::ControlFlow;
 const MAX_OBLIGATION_DEPTH: u32 = 256;
 
 #[derive(Debug, Clone)]
+#[expect(clippy::enum_variant_names)]
 pub(super) enum ClauseObligation {
     TyUnifiesTy(ClauseOrigin, Ty, Ty, RelationMode),
     TyMeetsTrait(ClauseOrigin, HrtbUniverse, Ty, TraitSpec),
     TyOutlivesRe(ClauseOrigin, Ty, Re, RelationDirection),
-    InferTyWf(HrtbUniverse, Span, InferTyVar),
 }
 
 impl ClauseObligation {
@@ -46,9 +45,6 @@ impl ClauseObligation {
 
                     return ControlFlow::Break(());
                 }
-            }
-            Self::InferTyWf(..) => {
-                // (has no depth)
             }
         }
 
@@ -211,9 +207,6 @@ impl<'tcx> ClauseCx<'tcx> {
                     }
                     ClauseObligation::TyOutlivesRe(origin, lhs, rhs, dir) => {
                         fork.run_oblige_ty_outlives_re(&origin, lhs, rhs, dir)
-                    }
-                    ClauseObligation::InferTyWf(universe, span, var) => {
-                        fork.run_oblige_infer_ty_wf(universe, span, var)
                     }
                 }
             },
