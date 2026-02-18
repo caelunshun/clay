@@ -2,13 +2,16 @@ use crate::{
     base::{
         ErrorGuaranteed, Session,
         analysis::DebruijnRelative,
-        arena::{Intern, LateInit, Obj},
+        arena::{HasInterner, Intern, LateInit, Obj},
         syntax::{Span, Symbol},
     },
     parse::token::{Ident, Lifetime},
-    semantic::syntax::{
-        FnDef, FnItem, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy,
-        SpannedTyOrReList, Visibility,
+    semantic::{
+        analysis::TyCtxt,
+        syntax::{
+            FnDef, FnItem, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy,
+            SpannedTyOrReList, Visibility,
+        },
     },
     symbol,
     utils::hash::FxHashMap,
@@ -629,6 +632,67 @@ bitflags::bitflags! {
         const SINT = Self::I8.bits() | Self::I16.bits() | Self::I32.bits() | Self::I64.bits();
         const ALL_INT = Self::UINT.bits() | Self::SINT.bits();
         const FLOAT = Self::F32.bits() | Self::F64.bits();
+    }
+}
+
+impl InferTyPermSet {
+    pub fn can_accept_type(self, ty: Ty, s: &Session) -> bool {
+        match *ty.r(s) {
+            TyKind::SigThis
+            | TyKind::SigInfer
+            | TyKind::SigGeneric(_)
+            | TyKind::SigProject(_)
+            | TyKind::SigAlias(_, _) => unreachable!(),
+
+            TyKind::Simple(SimpleTyKind::Uint(IntKind::S8)) => self.contains(InferTyPermSet::U8),
+            TyKind::Simple(SimpleTyKind::Uint(IntKind::S16)) => self.contains(InferTyPermSet::U16),
+            TyKind::Simple(SimpleTyKind::Uint(IntKind::S32)) => self.contains(InferTyPermSet::U32),
+            TyKind::Simple(SimpleTyKind::Uint(IntKind::S64)) => self.contains(InferTyPermSet::U64),
+            TyKind::Simple(SimpleTyKind::Int(IntKind::S8)) => self.contains(InferTyPermSet::I8),
+            TyKind::Simple(SimpleTyKind::Int(IntKind::S16)) => self.contains(InferTyPermSet::I16),
+            TyKind::Simple(SimpleTyKind::Int(IntKind::S32)) => self.contains(InferTyPermSet::I32),
+            TyKind::Simple(SimpleTyKind::Int(IntKind::S64)) => self.contains(InferTyPermSet::I64),
+            TyKind::Simple(SimpleTyKind::Float(FloatKind::S32)) => {
+                self.contains(InferTyPermSet::F32)
+            }
+            TyKind::Simple(SimpleTyKind::Float(FloatKind::S64)) => {
+                self.contains(InferTyPermSet::F64)
+            }
+
+            TyKind::Reference(_, _, _)
+            | TyKind::Adt(_)
+            | TyKind::Trait(_, _, _)
+            | TyKind::Tuple(_)
+            | TyKind::FnDef(_)
+            | TyKind::HrtbVar(_)
+            | TyKind::UniversalVar(_)
+            | TyKind::Simple(
+                SimpleTyKind::Bool | SimpleTyKind::Char | SimpleTyKind::Str | SimpleTyKind::Never,
+            ) => self.contains(InferTyPermSet::OTHER),
+
+            TyKind::InferVar(_) | TyKind::Error(_) => unreachable!(),
+        }
+    }
+
+    pub fn to_unique_type(self, tcx: &TyCtxt) -> Option<Ty> {
+        (self.iter().count() == 1)
+            .then(|| match self.iter().next().unwrap() {
+                InferTyPermSet::ALL_INT => None,
+                InferTyPermSet::U8 => Some(SimpleTyKind::Uint(IntKind::S8)),
+                InferTyPermSet::U16 => Some(SimpleTyKind::Uint(IntKind::S16)),
+                InferTyPermSet::U32 => Some(SimpleTyKind::Uint(IntKind::S32)),
+                InferTyPermSet::U64 => Some(SimpleTyKind::Uint(IntKind::S64)),
+                InferTyPermSet::I8 => Some(SimpleTyKind::Int(IntKind::S8)),
+                InferTyPermSet::I16 => Some(SimpleTyKind::Int(IntKind::S16)),
+                InferTyPermSet::I32 => Some(SimpleTyKind::Int(IntKind::S32)),
+                InferTyPermSet::I64 => Some(SimpleTyKind::Int(IntKind::S64)),
+                InferTyPermSet::F32 => Some(SimpleTyKind::Float(FloatKind::S32)),
+                InferTyPermSet::F64 => Some(SimpleTyKind::Float(FloatKind::S64)),
+
+                _ => unreachable!(),
+            })
+            .flatten()
+            .map(|kind| tcx.intern(TyKind::Simple(kind)))
     }
 }
 

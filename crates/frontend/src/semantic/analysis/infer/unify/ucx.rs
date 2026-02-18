@@ -8,11 +8,10 @@ use crate::{
             infer::unify::{regions::ReUnifyTracker, types::TyUnifyTracker},
         },
         syntax::{
-            FloatKind, FnInstanceInner, FnOwner, HrtbBinderKind, InferTyPermSet, InferTyVar,
-            IntKind, Mutability, Re, ReVariance, RelationDirection, RelationMode, SimpleTyKind,
-            SpannedTy, SpannedTyView, TraitClause, TraitClauseList, TraitParam, TraitParamList, Ty,
-            TyKind, TyOrRe, UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar,
-            UniversalTyVarSourceInfo,
+            FnInstanceInner, FnOwner, HrtbBinderKind, InferTyPermSet, InferTyVar, Mutability, Re,
+            ReVariance, RelationDirection, RelationMode, SpannedTy, SpannedTyView, TraitClause,
+            TraitClauseList, TraitParam, TraitParamList, Ty, TyKind, TyOrRe, UniversalReVar,
+            UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashSet,
@@ -537,60 +536,7 @@ impl<'tcx> UnifyCx<'tcx> {
         let lhs_max_universe = lhs_max_universe.clone();
 
         // Check permissions
-        let has_permission = match *rhs_ty.r(s) {
-            TyKind::SigThis
-            | TyKind::SigInfer
-            | TyKind::SigGeneric(_)
-            | TyKind::SigProject(_)
-            | TyKind::SigAlias(_, _) => unreachable!(),
-
-            TyKind::Simple(SimpleTyKind::Uint(IntKind::S8)) => {
-                lhs_perm_set.contains(InferTyPermSet::U8)
-            }
-            TyKind::Simple(SimpleTyKind::Uint(IntKind::S16)) => {
-                lhs_perm_set.contains(InferTyPermSet::U16)
-            }
-            TyKind::Simple(SimpleTyKind::Uint(IntKind::S32)) => {
-                lhs_perm_set.contains(InferTyPermSet::U32)
-            }
-            TyKind::Simple(SimpleTyKind::Uint(IntKind::S64)) => {
-                lhs_perm_set.contains(InferTyPermSet::U64)
-            }
-            TyKind::Simple(SimpleTyKind::Int(IntKind::S8)) => {
-                lhs_perm_set.contains(InferTyPermSet::I8)
-            }
-            TyKind::Simple(SimpleTyKind::Int(IntKind::S16)) => {
-                lhs_perm_set.contains(InferTyPermSet::I16)
-            }
-            TyKind::Simple(SimpleTyKind::Int(IntKind::S32)) => {
-                lhs_perm_set.contains(InferTyPermSet::I32)
-            }
-            TyKind::Simple(SimpleTyKind::Int(IntKind::S64)) => {
-                lhs_perm_set.contains(InferTyPermSet::I64)
-            }
-            TyKind::Simple(SimpleTyKind::Float(FloatKind::S32)) => {
-                lhs_perm_set.contains(InferTyPermSet::F32)
-            }
-            TyKind::Simple(SimpleTyKind::Float(FloatKind::S64)) => {
-                lhs_perm_set.contains(InferTyPermSet::F64)
-            }
-
-            TyKind::Reference(_, _, _)
-            | TyKind::Adt(_)
-            | TyKind::Trait(_, _, _)
-            | TyKind::Tuple(_)
-            | TyKind::FnDef(_)
-            | TyKind::HrtbVar(_)
-            | TyKind::UniversalVar(_)
-            | TyKind::Simple(
-                SimpleTyKind::Bool | SimpleTyKind::Char | SimpleTyKind::Str | SimpleTyKind::Never,
-            ) => lhs_perm_set.contains(InferTyPermSet::OTHER),
-
-            // Avoided above.
-            TyKind::InferVar(_) | TyKind::Error(_) => unreachable!(),
-        };
-
-        if !has_permission {
+        if !lhs_perm_set.can_accept_type(rhs_ty, s) {
             return Err(TyAndTyUnifyCulprit::NotPermittedSolid(lhs_perm_set, rhs_ty));
         }
 
