@@ -27,16 +27,16 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn wf_visitor(&mut self, universe: HrtbUniverse) -> ClauseTyWfVisitor<'_, 'tcx> {
         ClauseTyWfVisitor {
             ccx: self,
-            clause_applies_to: None,
             universe,
+            clause_applies_to: None,
         }
     }
 
     pub(super) fn run_oblige_infer_ty_wf(
         &mut self,
+        universe: HrtbUniverse,
         span: Span,
         var: InferTyVar,
-        universe: HrtbUniverse,
     ) -> ObligationResult {
         let tcx = self.tcx();
 
@@ -53,8 +53,8 @@ impl<'tcx> ClauseCx<'tcx> {
 
 pub struct ClauseTyWfVisitor<'a, 'tcx> {
     pub ccx: &'a mut ClauseCx<'tcx>,
-    pub clause_applies_to: Option<Ty>,
     pub universe: HrtbUniverse,
+    pub clause_applies_to: Option<Ty>,
 }
 
 impl ClauseTyWfVisitor<'_, '_> {
@@ -109,7 +109,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         {
             let bound = Spanned::new_raw(
                 self.ccx
-                    .instantiate_hrtb_universal(binder.value, &self.universe),
+                    .instantiate_hrtb_universal(&self.universe, binder.value),
                 inner_span_info,
             );
 
@@ -164,9 +164,9 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             }
             SpannedTyView::InferVar(var) => {
                 self.ccx.push_obligation(ClauseObligation::InferTyWf(
+                    self.universe.clone(),
                     ty.own_span(),
                     var,
-                    self.universe.clone(),
                 ));
             }
             SpannedTyView::SigThis
@@ -260,8 +260,8 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
                     fn_ty: instance.own_span(),
                 },
             ),
-            instance.value,
             &self.universe,
+            instance.value,
         );
 
         // Ensure parameter types are also well-formed.
@@ -296,6 +296,7 @@ impl ClauseTyWfVisitor<'_, '_> {
         };
 
         self.ccx.oblige_args_meet_binder_clauses(
+            &self.universe,
             ClauseImportEnvRef::new(
                 clause_applies_to,
                 &[GenericSubst {
@@ -308,7 +309,6 @@ impl ClauseTyWfVisitor<'_, '_> {
             ),
             defs,
             validated_params,
-            &self.universe,
             |_, param_idx, clause_span| {
                 ClauseOrigin::root(
                     ClauseErrorSink::Report,

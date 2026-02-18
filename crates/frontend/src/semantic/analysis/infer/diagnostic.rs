@@ -140,16 +140,20 @@ impl ClauseOrigin {
     }
 
     pub fn empty_report() -> Self {
-        Self::empty(ClauseErrorSink::Report)
-    }
+        thread_local! {
+            static EMPTY_REPORT: ClauseOrigin = ClauseOrigin::empty(ClauseErrorSink::Report);
+        }
 
-    pub fn probe(probe: ClauseErrorProbe) -> Self {
-        Self::empty(ClauseErrorSink::Probe(probe))
+        EMPTY_REPORT.with(|v| v.clone())
     }
 
     #[track_caller]
     pub fn never_printed() -> Self {
         Self::empty(ClauseErrorSink::NeverReport(Location::caller()))
+    }
+
+    pub fn probe(probe: ClauseErrorProbe) -> Self {
+        Self::empty(ClauseErrorSink::Probe(probe))
     }
 
     pub fn root(sink: ClauseErrorSink, kind: ClauseOriginKind) -> Self {

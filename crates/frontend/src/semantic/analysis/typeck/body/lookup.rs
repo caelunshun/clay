@@ -72,7 +72,7 @@ impl BodyCtxt<'_, '_> {
 
                         let field = self
                             .ccx_mut()
-                            .importer(&ClauseOrigin::empty_report(), env, HrtbUniverse::ROOT)
+                            .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
                             .fold(field.ty.value);
 
                         return Some(field);
@@ -455,15 +455,15 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
 
                 let expected_env = fork.instantiate_fn_instance_env_as_infer(
                     &origin,
-                    expected_instance,
                     HrtbUniverse::ROOT_REF,
+                    expected_instance,
                 );
 
                 let expected_receiver = fork.import_fn_instance_receiver_as_infer(
                     &ClauseOrigin::empty_report(),
+                    HrtbUniverse::ROOT_REF,
                     expected_env.as_ref(),
                     candidate,
-                    HrtbUniverse::ROOT_REF,
                 );
 
                 fork.oblige_ty_unifies_ty(
@@ -484,8 +484,8 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                 // Call for validation side-effect.
                 _ = fork.instantiate_fn_instance_env_as_infer(
                     &origin,
-                    expected_instance,
                     HrtbUniverse::ROOT_REF,
+                    expected_instance,
                 );
             }
         }

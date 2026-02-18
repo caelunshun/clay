@@ -24,9 +24,9 @@ const MAX_OBLIGATION_DEPTH: u32 = 256;
 #[derive(Debug, Clone)]
 pub(super) enum ClauseObligation {
     TyUnifiesTy(ClauseOrigin, Ty, Ty, RelationMode),
-    TyMeetsTrait(ClauseOrigin, Ty, TraitSpec, HrtbUniverse),
+    TyMeetsTrait(ClauseOrigin, HrtbUniverse, Ty, TraitSpec),
     TyOutlivesRe(ClauseOrigin, Ty, Re, RelationDirection),
-    InferTyWf(Span, InferTyVar, HrtbUniverse),
+    InferTyWf(HrtbUniverse, Span, InferTyVar),
 }
 
 impl ClauseObligation {
@@ -212,8 +212,8 @@ impl<'tcx> ClauseCx<'tcx> {
                     ClauseObligation::TyOutlivesRe(origin, lhs, rhs, dir) => {
                         fork.run_oblige_ty_outlives_re(&origin, lhs, rhs, dir)
                     }
-                    ClauseObligation::InferTyWf(span, var, universe) => {
-                        fork.run_oblige_infer_ty_wf(span, var, universe)
+                    ClauseObligation::InferTyWf(universe, span, var) => {
+                        fork.run_oblige_infer_ty_wf(universe, span, var)
                     }
                 }
             },
@@ -271,10 +271,10 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn fresh_ty_universal_var(
         &mut self,
-        src_info: UniversalTyVarSourceInfo,
         in_universe: HrtbUniverse,
+        src_info: UniversalTyVarSourceInfo,
     ) -> UniversalTyVar {
-        let var = self.ucx_mut().fresh_ty_universal_var(src_info, in_universe);
+        let var = self.ucx_mut().fresh_ty_universal_var(in_universe, src_info);
 
         let var_parallel = self.universal_vars.push(UniversalTyVarDescriptor {
             direct_clauses: None,
@@ -288,11 +288,11 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn fresh_ty_universal(
         &mut self,
-        src_info: UniversalTyVarSourceInfo,
         in_universe: HrtbUniverse,
+        src_info: UniversalTyVarSourceInfo,
     ) -> Ty {
         self.tcx().intern(TyKind::UniversalVar(
-            self.fresh_ty_universal_var(src_info, in_universe),
+            self.fresh_ty_universal_var(in_universe, src_info),
         ))
     }
 

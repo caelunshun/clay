@@ -117,19 +117,19 @@ impl<'tcx> UnifyCx<'tcx> {
 
     pub fn fresh_ty_universal_var(
         &mut self,
-        src_info: UniversalTyVarSourceInfo,
         in_universe: HrtbUniverse,
+        src_info: UniversalTyVarSourceInfo,
     ) -> UniversalTyVar {
-        self.types.fresh_universal(src_info, in_universe)
+        self.types.fresh_universal(in_universe, src_info)
     }
 
     pub fn fresh_ty_universal(
         &mut self,
-        src_info: UniversalTyVarSourceInfo,
         in_universe: HrtbUniverse,
+        src_info: UniversalTyVarSourceInfo,
     ) -> Ty {
         self.tcx().intern(TyKind::UniversalVar(
-            self.fresh_ty_universal_var(src_info, in_universe),
+            self.fresh_ty_universal_var(in_universe, src_info),
         ))
     }
 
