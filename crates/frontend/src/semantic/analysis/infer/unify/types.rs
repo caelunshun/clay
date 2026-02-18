@@ -28,15 +28,15 @@ struct DisjointTyInferNode {
 enum DisjointTyInferRoot {
     Known(Ty),
     Floating {
-        observed: Vec<ObservedTyInferVar>,
         max_universe: HrtbUniverse,
+        observed: Vec<ObservedTyInferVar>,
     },
 }
 
 #[derive(Debug, Clone)]
 struct UniversalTyVarDescriptor {
-    src_info: UniversalTyVarSourceInfo,
     in_universe: HrtbUniverse,
+    src_info: UniversalTyVarSourceInfo,
 }
 
 #[derive(Debug)]
@@ -91,8 +91,8 @@ impl TyUnifyTracker {
         let var = InferTyVar::from_usize(self.disjoint.len());
         self.disjoint.push(DisjointTyInferNode {
             root: Some(DisjointTyInferRoot::Floating {
-                observed: Vec::new(),
                 max_universe: max_universe.clone(),
+                observed: Vec::new(),
             }),
             observed_idx: None,
         });
@@ -101,12 +101,12 @@ impl TyUnifyTracker {
 
     pub fn fresh_universal(
         &mut self,
-        src_info: UniversalTyVarSourceInfo,
         in_universe: HrtbUniverse,
+        src_info: UniversalTyVarSourceInfo,
     ) -> UniversalTyVar {
         self.universals.push(UniversalTyVarDescriptor {
-            src_info,
             in_universe,
+            src_info,
         })
     }
 
@@ -135,8 +135,8 @@ impl TyUnifyTracker {
                 self.observed_reveal_order.push(observed_idx);
             }
             DisjointTyInferRoot::Floating {
-                observed,
                 max_universe: _,
+                observed,
             } => {
                 observed.push(observed_idx);
             }
@@ -188,8 +188,8 @@ impl TyUnifyTracker {
         let root = self.disjoint[root_idx].root.as_mut().unwrap();
 
         let DisjointTyInferRoot::Floating {
-            observed,
             max_universe: _,
+            observed,
         } = root
         else {
             unreachable!();
@@ -212,12 +212,12 @@ impl TyUnifyTracker {
 
         let (
             DisjointTyInferRoot::Floating {
-                observed: mut lhs_observed,
                 max_universe: lhs_max_universe,
+                observed: mut lhs_observed,
             },
             DisjointTyInferRoot::Floating {
-                observed: mut rhs_observed,
                 max_universe: rhs_max_universe,
+                observed: mut rhs_observed,
             },
         ) = (lhs_root, rhs_root)
         else {
@@ -234,8 +234,8 @@ impl TyUnifyTracker {
         lhs_observed.append(&mut rhs_observed);
 
         *new_root = Some(DisjointTyInferRoot::Floating {
-            observed: lhs_observed,
             max_universe: lhs_max_universe.min(&rhs_max_universe).clone(),
+            observed: lhs_observed,
         });
     }
 }

@@ -19,8 +19,8 @@ use std::convert::Infallible;
 impl<'tcx> ClauseCx<'tcx> {
     pub fn instantiate_hrtb_universal<T: TyFoldable>(
         &mut self,
-        binder: HrtbBinder<T>,
         universe: &HrtbUniverse,
+        binder: HrtbBinder<T>,
     ) -> T {
         let tcx = self.tcx();
         let s = self.session();
@@ -43,7 +43,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     TyOrRe::Re(self.fresh_re_universal(UniversalReVarSourceInfo::HrtbVar))
                 }
                 TyOrReKind::Ty => TyOrRe::Ty(
-                    self.fresh_ty_universal(UniversalTyVarSourceInfo::HrtbVar, universe.clone()),
+                    self.fresh_ty_universal(universe.clone(), UniversalTyVarSourceInfo::HrtbVar),
                 ),
             })
             .collect::<Vec<_>>();
@@ -89,8 +89,8 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn instantiate_hrtb_infer(
         &mut self,
         origin: &ClauseOrigin,
-        binder: HrtbBinder<TraitSpec>,
         universe: &HrtbUniverse,
+        binder: HrtbBinder<TraitSpec>,
     ) -> TraitSpec {
         let tcx = self.tcx();
         let s = self.session();
@@ -137,9 +137,9 @@ impl<'tcx> ClauseCx<'tcx> {
                         &origin.clone().child(ClauseOriginKind::HrtbSelection {
                             def: def.spawned_from,
                         }),
+                        universe,
                         var,
                         clauses,
-                        universe,
                     );
                 }
             }

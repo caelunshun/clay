@@ -156,6 +156,7 @@ impl BodyCtxt<'_, '_> {
                                             expr_span: expr.r(s).span,
                                         },
                                     ),
+                                    HrtbUniverse::ROOT,
                                     output_pointee,
                                     TraitSpec {
                                         def: krate.r(s).deref_lang_item(s).unwrap(),
@@ -163,7 +164,6 @@ impl BodyCtxt<'_, '_> {
                                             next_output,
                                         ))]),
                                     },
-                                    HrtbUniverse::ROOT,
                                 );
 
                                 output_pointee = next_output;
@@ -200,9 +200,9 @@ impl BodyCtxt<'_, '_> {
                                 expr_span: expr.r(s).span,
                             },
                         ),
+                        HrtbUniverse::ROOT_REF,
                         actual,
                         to_clauses,
-                        HrtbUniverse::ROOT_REF,
                     );
                 }
 

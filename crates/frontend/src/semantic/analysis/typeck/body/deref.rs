@@ -76,12 +76,12 @@ pub fn attempt_deref_clobber_obligations(ccx: &mut ClauseCx<'_>, curr: Ty) -> Op
 
     ccx.oblige_ty_meets_trait_instantiated(
         ClauseOrigin::probe(probe.clone()),
+        HrtbUniverse::ROOT,
         curr,
         TraitSpec {
             def: krate.r(s).deref_lang_item(s).unwrap(),
             params: tcx.intern_list(&[TraitParam::Equals(TyOrRe::Ty(next_infer))]),
         },
-        HrtbUniverse::ROOT,
     );
 
     ccx.poll_obligations();

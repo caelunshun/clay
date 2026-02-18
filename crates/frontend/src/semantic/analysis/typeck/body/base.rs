@@ -34,8 +34,8 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         let mut ccx_sig = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
         let env_sig = ccx_sig.import_fn_def_env_as_universal(
             &ClauseOrigin::empty_report(),
-            def,
             HrtbUniverse::ROOT_REF,
+            def,
         );
 
         // WF-check the signature.
@@ -50,8 +50,8 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
             let arg = ccx_sig
                 .importer(
                     &ClauseOrigin::empty_report(),
-                    env_sig.as_ref(),
                     HrtbUniverse::ROOT,
+                    env_sig.as_ref(),
                 )
                 .fold_preserved(arg.ty);
 
@@ -61,8 +61,8 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         let ret_ty = ccx_sig
             .importer(
                 &ClauseOrigin::empty_report(),
-                env_sig.as_ref(),
                 HrtbUniverse::ROOT,
+                env_sig.as_ref(),
             )
             .fold_preserved(*def.r(s).ret_ty);
 
@@ -75,8 +75,8 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
             let env_body = ccx_body.import_fn_def_env_as_universal(
                 &ClauseOrigin::empty_report(),
-                def,
                 HrtbUniverse::ROOT_REF,
+                def,
             );
 
             let mut bcx = BodyCtxt::new(&mut ccx_body, def, env_body.as_ref());
@@ -223,7 +223,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         let env = self.import_env;
         let ascription = self
             .ccx_mut()
-            .importer(&ClauseOrigin::empty_report(), env, HrtbUniverse::ROOT)
+            .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
             .fold_preserved(ascription);
 
         self.ccx_mut()
@@ -265,6 +265,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         ClauseErrorSink::Report,
                         ClauseOriginKind::FunctionCall { site_span },
                     ),
+                    HrtbUniverse::ROOT,
                     callee,
                     TraitSpec {
                         def: fn_once_trait,
@@ -273,7 +274,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                             TraitParam::Equals(TyOrRe::Ty(output_ty)),
                         ]),
                     },
-                    HrtbUniverse::ROOT,
                 );
 
                 let TyKind::Tuple(expected_args) =
@@ -312,7 +312,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let generics = generics.map(|generics| {
                     let out = self
                         .ccx_mut()
-                        .importer(&ClauseOrigin::empty_report(), env, HrtbUniverse::ROOT)
+                        .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
                         .fold_preserved(generics);
 
                     self.ccx_mut()
@@ -378,15 +378,15 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                             site_span: name.span,
                         },
                     ),
-                    instance,
                     HrtbUniverse::ROOT_REF,
+                    instance,
                 );
 
                 let (expected_args, expected_output) = self.ccx_mut().import_fn_instance_sig(
                     &ClauseOrigin::empty_report(),
+                    HrtbUniverse::ROOT_REF,
                     instance_env.as_ref(),
                     resolution,
-                    HrtbUniverse::ROOT_REF,
                 );
 
                 let (self_ty, expected_args) = expected_args.r(s).split_first().unwrap();
@@ -442,7 +442,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let env = self.import_env;
                 let early_args = early_args.map(|early_args| {
                     self.ccx_mut()
-                        .importer(&ClauseOrigin::empty_report(), env, HrtbUniverse::ROOT)
+                        .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
                         .fold_preserved(early_args)
                 });
 
@@ -471,7 +471,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                 let self_ty = self
                     .ccx_mut()
-                    .importer(&ClauseOrigin::empty_report(), env, HrtbUniverse::ROOT)
+                    .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
                     .fold_preserved(self_ty);
 
                 self.ccx_mut()
@@ -481,7 +481,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let as_trait = as_trait.map(|as_trait| {
                     let out = self
                         .ccx_mut()
-                        .importer(&ClauseOrigin::empty_report(), env, HrtbUniverse::ROOT)
+                        .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
                         .fold_preserved(as_trait);
 
                     self.ccx_mut()
@@ -495,7 +495,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let assoc_args = assoc_args.map(|assoc_args| {
                     let out = self
                         .ccx_mut()
-                        .importer(&ClauseOrigin::empty_report(), env, HrtbUniverse::ROOT)
+                        .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
                         .fold_preserved(assoc_args);
 
                     self.ccx_mut()
@@ -519,7 +519,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let env = self.import_env;
                 let as_ty = self
                     .ccx_mut()
-                    .importer(&ClauseOrigin::empty_report(), env, HrtbUniverse::ROOT)
+                    .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
                     .fold_preserved(as_ty);
 
                 self.ccx_mut()
