@@ -17,9 +17,9 @@ use crate::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnInstanceInner,
             FnOwner, GenericBinder, GenericSubst, HrtbBinder, HrtbBinderKind, HrtbDebruijn,
             HrtbDebruijnDef, HrtbUniverse, ImplItem, Re, RelationMode, SpannedHrtbBinder,
-            SpannedHrtbBinderView, SpannedRe, SpannedTy, SpannedTyView, TraitClause, TraitItem,
-            TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReKind, TyProjection,
-            TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
+            SpannedHrtbBinderView, SpannedRe, SpannedTraitClauseView, SpannedTy, SpannedTyView,
+            TraitClause, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReKind,
+            TyProjection, TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
@@ -74,11 +74,13 @@ impl<'a> ClauseImportEnvRef<'a> {
 impl<'tcx> ClauseCx<'tcx> {
     pub fn importer<'a>(
         &'a mut self,
+        origin: &'a ClauseOrigin,
         env: ClauseImportEnvRef<'a>,
         universe: HrtbUniverse,
     ) -> ClauseCxImporter<'a, 'tcx> {
         ClauseCxImporter {
             ccx: self,
+            origin,
             env: env.to_owned(),
             hrtb_top: DebruijnTop::default(),
             hrtb_binder_ranges: FxHashMap::default(),
@@ -91,6 +93,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn import_binder_list_as_universal(
         &mut self,
+        origin: &ClauseOrigin,
         self_ty: Ty,
         binders: &[Obj<GenericBinder>],
         universe: &HrtbUniverse,
@@ -98,6 +101,7 @@ impl<'tcx> ClauseCx<'tcx> {
         let substs = self.create_blank_universal_vars_from_binder_list(binders, universe);
 
         self.init_universal_var_clauses_from_binder(
+            origin,
             ClauseImportEnvRef {
                 self_ty,
                 sig_generic_substs: &substs,
@@ -150,6 +154,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn init_universal_var_clauses_from_binder(
         &mut self,
+        origin: &ClauseOrigin,
         env: ClauseImportEnvRef<'_>,
         universe: &HrtbUniverse,
     ) {
@@ -160,7 +165,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 match (generic, subst) {
                     (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
                         for &clause in generic.r(s).clauses.value.r(s) {
-                            let clause = self.importer(env, universe.clone()).fold(clause);
+                            let clause = self.importer(origin, env, universe.clone()).fold(clause);
 
                             let TraitClause::Outlives(allowed_to_outlive_dir, allowed_to_outlive) =
                                 clause
@@ -181,7 +186,7 @@ impl<'tcx> ClauseCx<'tcx> {
                         };
 
                         let clauses = self
-                            .importer(env, universe.clone())
+                            .importer(origin, env, universe.clone())
                             .fold(generic.r(s).clauses.value);
 
                         self.init_ty_universal_var_direct_clauses(target, clauses);
@@ -196,6 +201,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn import_trait_def_env_as_universal(
         &mut self,
+        origin: &ClauseOrigin,
         def: Obj<TraitItem>,
         universe: &HrtbUniverse,
     ) -> ClauseImportEnv {
@@ -210,7 +216,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // Create universal variables for each parameter.
         let sig_generic_substs =
-            self.import_binder_list_as_universal(self_ty, &[*def.r(s).generics], universe);
+            self.import_binder_list_as_universal(origin, self_ty, &[*def.r(s).generics], universe);
 
         let generic_params = sig_generic_substs[0].substs;
 
@@ -237,6 +243,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn import_adt_def_env_as_universal(
         &mut self,
+        origin: &ClauseOrigin,
         def: Obj<AdtItem>,
         universe: &HrtbUniverse,
     ) -> ClauseImportEnv {
@@ -255,6 +262,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // Initialize the clauses.
         self.init_universal_var_clauses_from_binder(
+            origin,
             ClauseImportEnvRef {
                 self_ty,
                 sig_generic_substs: &sig_generic_substs,
@@ -267,6 +275,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn import_impl_block_env_as_universal(
         &mut self,
+        origin: &ClauseOrigin,
         def: Obj<ImplItem>,
         universe: &HrtbUniverse,
     ) -> ClauseImportEnv {
@@ -280,6 +289,7 @@ impl<'tcx> ClauseCx<'tcx> {
         // Create the `Self` type. This type cannot contain `Self` so we give a dummy self type.
         let self_ty = self
             .importer(
+                origin,
                 ClauseImportEnvRef::new(tcx.intern(TyKind::SigThis), &sig_generic_substs),
                 universe.clone(),
             )
@@ -287,6 +297,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // Initialize the clauses.
         self.init_universal_var_clauses_from_binder(
+            origin,
             ClauseImportEnvRef::new(self_ty, &sig_generic_substs),
             universe,
         );
@@ -296,15 +307,22 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn import_fn_item_generics_as_universal(
         &mut self,
+        origin: &ClauseOrigin,
         self_ty: Ty,
         def: Obj<FnDef>,
         universe: &HrtbUniverse,
     ) -> Vec<GenericSubst> {
-        self.import_binder_list_as_universal(self_ty, &[def.r(self.session()).generics], universe)
+        self.import_binder_list_as_universal(
+            origin,
+            self_ty,
+            &[def.r(self.session()).generics],
+            universe,
+        )
     }
 
     pub fn import_fn_def_env_as_universal(
         &mut self,
+        origin: &ClauseOrigin,
         def: Obj<FnDef>,
         universe: &HrtbUniverse,
     ) -> ClauseImportEnv {
@@ -317,15 +335,16 @@ impl<'tcx> ClauseCx<'tcx> {
                 sig_generic_substs: Vec::new(),
             },
             FnDefOwner::TraitMethod(def, _idx) => {
-                self.import_trait_def_env_as_universal(def, universe)
+                self.import_trait_def_env_as_universal(origin, def, universe)
             }
             FnDefOwner::ImplMethod(def, _idx) => {
-                self.import_impl_block_env_as_universal(def, universe)
+                self.import_impl_block_env_as_universal(origin, def, universe)
             }
         };
 
         env.sig_generic_substs
             .extend_from_slice(&self.import_fn_item_generics_as_universal(
+                origin,
                 env.self_ty,
                 def,
                 universe,
@@ -336,6 +355,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn import_type_alias_def_env_as_universal(
         &mut self,
+        origin: &ClauseOrigin,
         def: Obj<TypeAliasItem>,
         universe: &HrtbUniverse,
     ) -> ClauseImportEnv {
@@ -346,7 +366,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
         ClauseImportEnv::new(
             this_ty,
-            self.import_binder_list_as_universal(this_ty, &[def.r(s).generics], universe),
+            self.import_binder_list_as_universal(origin, this_ty, &[def.r(s).generics], universe),
         )
     }
 
@@ -442,29 +462,34 @@ impl<'tcx> ClauseCx<'tcx> {
                 (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
                     for clause in generic.r(s).clauses.iter(tcx) {
                         let clause_span = clause.own_span();
-                        let clause = self.importer(def_env, universe.clone()).fold(clause.value);
 
-                        let TraitClause::Outlives(must_outlive_dir, must_outlive) = clause else {
+                        let SpannedTraitClauseView::Outlives(must_outlive_dir, must_outlive) =
+                            clause.view(tcx)
+                        else {
                             unreachable!()
                         };
 
                         let reason = gen_reason(self, i, clause_span);
 
+                        let must_outlive = self
+                            .importer(&reason, def_env, universe.clone())
+                            .fold_preserved(must_outlive);
+
                         self.oblige_general_outlives(
                             reason,
                             TyOrRe::Re(target),
-                            must_outlive,
+                            must_outlive.value,
                             must_outlive_dir,
                         );
                     }
                 }
                 (AnyGeneric::Ty(generic), TyOrRe::Ty(target)) => {
-                    let clauses = self
-                        .importer(def_env, universe.clone())
-                        .fold_preserved(*generic.r(s).clauses);
-
-                    for clause in clauses.iter(tcx) {
+                    for clause in generic.r(s).clauses.iter(tcx) {
                         let reason = gen_reason(self, i, clause.own_span());
+
+                        let clause = self
+                            .importer(&reason, def_env, universe.clone())
+                            .fold_preserved(clause);
 
                         match clause.value {
                             TraitClause::Outlives(must_outlive_dir, must_outlive) => {
@@ -605,7 +630,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 );
 
                 let expected_self_ty = self
-                    .importer(env.as_ref(), universe.clone())
+                    .importer(origin, env.as_ref(), universe.clone())
                     .fold(block.r(s).target.value);
 
                 self.oblige_ty_unifies_ty(
@@ -648,6 +673,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn import_fn_instance_receiver_as_infer(
         &mut self,
+        origin: &ClauseOrigin,
         env: ClauseImportEnvRef<'_>,
         def: Obj<FnDef>,
         universe: &HrtbUniverse,
@@ -656,12 +682,13 @@ impl<'tcx> ClauseCx<'tcx> {
 
         debug_assert!(*def.r(s).has_self_param);
 
-        self.importer(env, universe.clone())
+        self.importer(origin, env, universe.clone())
             .fold(def.r(s).args.r(s)[0].ty.value)
     }
 
     pub fn import_fn_instance_sig(
         &mut self,
+        origin: &ClauseOrigin,
         env: ClauseImportEnvRef<'_>,
         def: Obj<FnDef>,
         universe: &HrtbUniverse,
@@ -679,9 +706,9 @@ impl<'tcx> ClauseCx<'tcx> {
 
         let args = tcx.intern_list(&args);
 
-        let args = self.importer(env, universe.clone()).fold(args);
+        let args = self.importer(origin, env, universe.clone()).fold(args);
         let ret_ty = self
-            .importer(env, universe.clone())
+            .importer(origin, env, universe.clone())
             .fold(def.r(s).ret_ty.value);
 
         (args, ret_ty)
@@ -690,6 +717,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
 pub struct ClauseCxImporter<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
+    origin: &'a ClauseOrigin,
     env: ClauseImportEnv,
     hrtb_top: DebruijnTop,
     hrtb_binder_ranges: FxHashMap<Obj<GenericBinder>, DebruijnAbsoluteRange>,
@@ -832,9 +860,11 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
                     .visit_spanned(Spanned::new_saturated(spec, ty.own_span(), tcx));
 
                 self.ccx.oblige_ty_meets_trait_instantiated(
-                    ClauseOrigin::root(ClauseOriginKind::InstantiatedProjection {
-                        span: ty.own_span(),
-                    }),
+                    self.origin
+                        .clone()
+                        .child(ClauseOriginKind::InstantiatedProjection {
+                            span: ty.own_span(),
+                        }),
                     target,
                     spec,
                     self.universe.clone(),

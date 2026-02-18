@@ -75,7 +75,7 @@ pub fn attempt_deref_clobber_obligations(ccx: &mut ClauseCx<'_>, curr: Ty) -> Op
     let probe = ClauseErrorProbe::default();
 
     ccx.oblige_ty_meets_trait_instantiated(
-        ClauseOrigin::never_printed().with_probe_sink(probe.clone()),
+        ClauseOrigin::probe(probe.clone()),
         curr,
         TraitSpec {
             def: krate.r(s).deref_lang_item(s).unwrap(),

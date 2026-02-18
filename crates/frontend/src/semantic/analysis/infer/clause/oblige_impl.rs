@@ -311,11 +311,11 @@ impl<'tcx> ClauseCx<'tcx> {
         // the `impl` itself has been WF-checked for all types compatible with the generic
         // parameters.
         let target_ty = self
-            .importer(trait_env.as_ref(), universe.clone())
+            .importer(origin, trait_env.as_ref(), universe.clone())
             .fold_spanned(*rhs.r(s).target);
 
         let target_trait = self
-            .importer(trait_env.as_ref(), universe.clone())
+            .importer(origin, trait_env.as_ref(), universe.clone())
             .fold_spanned(rhs.r(s).trait_.unwrap());
 
         // Does the `lhs` type match the `rhs`'s target type?
@@ -424,8 +424,12 @@ impl<'tcx> ClauseCx<'tcx> {
 
             let lhs_env = self.instantiate_fn_instance_env_as_infer(origin, lhs, universe);
 
-            let (lhs_input, lhs_output) =
-                self.import_fn_instance_sig(lhs_env.as_ref(), lhs.r(s).owner.def(s), universe);
+            let (lhs_input, lhs_output) = self.import_fn_instance_sig(
+                origin,
+                lhs_env.as_ref(),
+                lhs.r(s).owner.def(s),
+                universe,
+            );
 
             let lhs_input = tcx.intern(TyKind::Tuple(lhs_input));
 

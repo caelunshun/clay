@@ -16,6 +16,7 @@ use std::{cell::Cell, fmt, iter, panic::Location, rc::Rc};
 pub enum ClauseErrorSink {
     #[default]
     Report,
+    NeverReport(&'static Location<'static>),
     Probe(ClauseErrorProbe),
 }
 
@@ -24,6 +25,9 @@ impl ClauseErrorSink {
         match self {
             ClauseErrorSink::Report => {
                 error.emit(ccx);
+            }
+            ClauseErrorSink::NeverReport(_) => {
+                unreachable!();
             }
             ClauseErrorSink::Probe(probe) => {
                 probe.mark_error();
@@ -49,22 +53,24 @@ impl ClauseErrorProbe {
 
 #[derive(Clone)]
 pub struct ClauseOrigin {
-    sink: ClauseErrorSink,
     inner: Rc<ClauseOriginInner>,
 }
 
 impl fmt::Debug for ClauseOrigin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_list()
-            .entries(self.ancestors().map(|v| &v.inner.kind))
-            .finish()
+        f.debug_list().entries(self.ancestors()).finish()
     }
 }
 
 struct ClauseOriginInner {
-    parent: Option<ClauseOrigin>,
+    branch: Option<ClauseOriginBranch>,
+    sink: ClauseErrorSink,
     depth: u32,
-    kind: ClauseOriginKind,
+}
+
+pub struct ClauseOriginBranch {
+    pub parent: ClauseOrigin,
+    pub kind: ClauseOriginKind,
 }
 
 #[derive(Debug, Clone)]
@@ -120,62 +126,68 @@ pub enum ClauseOriginKind {
     HrtbSelection {
         def: Span,
     },
-
-    NeverPrinted(NeverPrintedDebugInfo),
-}
-
-#[derive(Copy, Clone)]
-pub struct NeverPrintedDebugInfo(pub &'static Location<'static>);
-
-impl fmt::Debug for NeverPrintedDebugInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
-    }
 }
 
 impl ClauseOrigin {
-    pub fn new(parent: Option<ClauseOrigin>, kind: ClauseOriginKind) -> Self {
-        let depth = parent.as_ref().map_or(0, |v| v.depth() + 1);
-
+    pub fn empty(sink: ClauseErrorSink) -> Self {
         Self {
-            sink: match &parent {
-                Some(parent) => parent.sink.clone(),
-                None => ClauseErrorSink::Report,
-            },
             inner: Rc::new(ClauseOriginInner {
-                parent,
-                depth,
-                kind,
+                branch: None,
+                depth: 0,
+                sink,
             }),
         }
     }
 
-    pub fn root(kind: ClauseOriginKind) -> Self {
-        Self::new(None, kind)
+    pub fn empty_report() -> Self {
+        Self::empty(ClauseErrorSink::Report)
+    }
+
+    pub fn probe(probe: ClauseErrorProbe) -> Self {
+        Self::empty(ClauseErrorSink::Probe(probe))
     }
 
     #[track_caller]
     pub fn never_printed() -> Self {
-        Self::root(ClauseOriginKind::NeverPrinted(NeverPrintedDebugInfo(
-            Location::caller(),
-        )))
+        Self::empty(ClauseErrorSink::NeverReport(Location::caller()))
+    }
+
+    pub fn root(sink: ClauseErrorSink, kind: ClauseOriginKind) -> Self {
+        Self::empty(sink).child(kind)
     }
 
     pub fn child(self, kind: ClauseOriginKind) -> Self {
-        ClauseOrigin::new(Some(self), kind)
+        let sink = self.sink().clone();
+        let depth = self.depth() + 1;
+
+        Self {
+            inner: Rc::new(ClauseOriginInner {
+                branch: Some(ClauseOriginBranch { parent: self, kind }),
+                sink,
+                depth,
+            }),
+        }
+    }
+
+    pub fn as_branch(&self) -> Option<&ClauseOriginBranch> {
+        self.inner.branch.as_ref()
     }
 
     pub fn parent(&self) -> Option<&ClauseOrigin> {
-        self.inner.parent.as_ref()
+        self.as_branch().map(|v| &v.parent)
     }
 
-    pub fn ancestors(&self) -> impl Iterator<Item = &ClauseOrigin> {
-        let mut iter = Some(self);
+    pub fn kind(&self) -> Option<&ClauseOriginKind> {
+        self.as_branch().map(|v| &v.kind)
+    }
+
+    pub fn ancestors(&self) -> impl Iterator<Item = &ClauseOriginKind> {
+        let mut iter = self.as_branch();
 
         iter::from_fn(move || {
             let curr = iter?;
-            iter = curr.parent();
-            Some(curr)
+            iter = curr.parent.as_branch();
+            Some(&curr.kind)
         })
     }
 
@@ -183,25 +195,8 @@ impl ClauseOrigin {
         self.inner.depth
     }
 
-    pub fn kind(&self) -> &ClauseOriginKind {
-        &self.inner.kind
-    }
-
     pub fn sink(&self) -> &ClauseErrorSink {
-        &self.sink
-    }
-
-    pub fn set_sink(&mut self, sink: ClauseErrorSink) {
-        self.sink = sink;
-    }
-
-    pub fn with_sink(mut self, sink: ClauseErrorSink) -> Self {
-        self.set_sink(sink);
-        self
-    }
-
-    pub fn with_probe_sink(self, probe: ClauseErrorProbe) -> Self {
-        self.with_sink(ClauseErrorSink::Probe(probe))
+        &self.inner.sink
     }
 
     pub fn report(&self, error: ClauseError, ccx: &ClauseCx<'_>) {
