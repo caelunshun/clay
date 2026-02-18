@@ -4,13 +4,13 @@ use crate::{
     base::arena::{HasInterner as _, Obj},
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnv, ClauseOrigin, NoTraitImplError, ObligationNotReady,
-            ObligationResult, TyFolderInfallibleExt, UnboundVarHandlingMode, UniversalElaboration,
-            infer::clause::ClauseObligation,
+            ClauseCx, ClauseImportEnv, ClauseOrigin, HrtbUniverse, HrtbUniverseInfo,
+            NoTraitImplError, ObligationNotReady, ObligationResult, TyFolderInfallibleExt,
+            UnboundVarHandlingMode, UniversalElaboration, infer::clause::ClauseObligation,
         },
         syntax::{
-            HrtbBinder, HrtbBinderKind, HrtbUniverse, HrtbUniverseInfo, ImplItem, RelationMode,
-            TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            HrtbBinder, HrtbBinderKind, ImplItem, RelationMode, TraitClause, TraitClauseList,
+            TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
         },
     },
 };

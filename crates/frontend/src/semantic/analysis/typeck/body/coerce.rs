@@ -2,11 +2,12 @@ use crate::{
     base::arena::{HasInterner, HasListInterner, Obj},
     semantic::{
         analysis::{
-            BodyCtxt, ClauseCx, ClauseOrigin, ClauseOriginKind, attempt_deref_clobber_obligations,
+            BodyCtxt, ClauseCx, ClauseOrigin, ClauseOriginKind, HrtbUniverse,
+            attempt_deref_clobber_obligations,
         },
         syntax::{
-            Divergence, Expr, HrtbUniverse, Mutability, Re, RelationMode, TraitClauseList,
-            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            Divergence, Expr, Mutability, Re, RelationMode, TraitClauseList, TraitParam, TraitSpec,
+            Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };

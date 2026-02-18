@@ -5,13 +5,14 @@ use crate::{
     },
     semantic::{
         analysis::{
-            ClauseOrigin, CoherenceMap, FloatingInferVar, ObligationCx, ObligationNotReady,
-            RecursionLimitReached, TyAndTyUnifyError, TyCtxt, UnifyCx, UnifyCxMode,
+            ClauseOrigin, CoherenceMap, FloatingInferVar, HrtbUniverse, ObligationCx,
+            ObligationNotReady, RecursionLimitReached, TyAndTyUnifyError, TyCtxt, UnifyCx,
+            UnifyCxMode,
         },
         syntax::{
-            Crate, HrtbUniverse, InferTyVar, Re, RelationDirection, RelationMode, TraitClause,
-            TraitClauseList, TraitSpec, Ty, TyKind, TyOrRe, UniversalReVar,
-            UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
+            Crate, InferTyVar, Re, RelationDirection, RelationMode, TraitClause, TraitClauseList,
+            TraitSpec, Ty, TyKind, TyOrRe, UniversalReVar, UniversalReVarSourceInfo,
+            UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };

@@ -6,7 +6,7 @@ use crate::{
     parse::token::Ident,
     semantic::{
         analysis::{
-            BodyCtxt, ClauseErrorProbe, ClauseImportEnvRef, ClauseOrigin,
+            BodyCtxt, ClauseErrorProbe, ClauseImportEnvRef, ClauseOrigin, HrtbUniverse,
             TyFolderInfallibleExt as _, UnboundVarHandlingMode, attempt_deref,
         },
         lower::{
@@ -14,8 +14,8 @@ use crate::{
             modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},
         },
         syntax::{
-            AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, GenericSubst, HrtbUniverse,
-            Mutability, Re, RelationMode, SpannedTyOrReList, TraitClause, TraitSpec, Ty, TyKind,
+            AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, GenericSubst, Mutability,
+            Re, RelationMode, SpannedTyOrReList, TraitClause, TraitSpec, Ty, TyKind,
         },
     },
     utils::lang::IterEither,

@@ -9,15 +9,15 @@ use crate::{
     semantic::{
         analysis::{
             ClauseCx, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind, CrateTypeckVisitor,
-            TyCtxt, TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
-            typeck::body::lookup::LookupMethodResult,
+            HrtbUniverse, TyCtxt, TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx,
+            UnifyCxMode, typeck::body::lookup::LookupMethodResult,
         },
         lower::generics::normalize_positional_generic_arity,
         syntax::{
-            Block, Crate, Divergence, Expr, ExprKind, FnDef, FnInstanceInner, FnLocal,
-            HrtbUniverse, InferTyVar, Item, Pat, PatKind, Re, RelationMode, SimpleTyKind,
-            SpannedFnInstanceView, SpannedFnOwnerView, SpannedTy, SpannedTyView, Stmt, StructExpr,
-            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            Block, Crate, Divergence, Expr, ExprKind, FnDef, FnInstanceInner, FnLocal, InferTyVar,
+            Item, Pat, PatKind, Re, RelationMode, SimpleTyKind, SpannedFnInstanceView,
+            SpannedFnOwnerView, SpannedTy, SpannedTyView, Stmt, StructExpr, TraitParam, TraitSpec,
+            Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };

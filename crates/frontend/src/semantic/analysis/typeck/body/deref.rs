@@ -1,8 +1,8 @@
 use crate::{
     base::arena::{HasInterner as _, HasListInterner as _},
     semantic::{
-        analysis::{ClauseCx, ClauseErrorProbe, ClauseOrigin},
-        syntax::{HrtbUniverse, TraitParam, TraitSpec, Ty, TyKind, TyOrRe},
+        analysis::{ClauseCx, ClauseErrorProbe, ClauseOrigin, HrtbUniverse},
+        syntax::{TraitParam, TraitSpec, Ty, TyKind, TyOrRe},
     },
 };
 

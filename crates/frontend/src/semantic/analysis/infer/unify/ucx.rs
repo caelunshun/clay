@@ -2,14 +2,14 @@ use crate::{
     base::{ErrorGuaranteed, Session, arena::HasInterner},
     semantic::{
         analysis::{
-            ClauseCx, ClauseOrigin, InferTyLeaksError, InferTyOccursError, InferTyUnifyError,
-            TyAndTyUnifyCulprit, TyAndTyUnifyError, TyCtxt, TyFolder, TyFolderExt,
-            TyFolderInfallibleExt, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt,
+            ClauseCx, ClauseOrigin, HrtbUniverse, InferTyLeaksError, InferTyOccursError,
+            InferTyUnifyError, TyAndTyUnifyCulprit, TyAndTyUnifyError, TyCtxt, TyFolder,
+            TyFolderExt, TyFolderInfallibleExt, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt,
             infer::unify::{regions::ReUnifyTracker, types::TyUnifyTracker},
         },
         syntax::{
-            FnInstanceInner, FnOwner, HrtbBinderKind, HrtbUniverse, InferTyVar, Mutability, Re,
-            ReVariance, RelationDirection, RelationMode, SpannedTy, SpannedTyView, TraitClause,
+            FnInstanceInner, FnOwner, HrtbBinderKind, InferTyVar, Mutability, Re, ReVariance,
+            RelationDirection, RelationMode, SpannedTy, SpannedTyView, TraitClause,
             TraitClauseList, TraitParam, TraitParamList, Ty, TyKind, TyOrRe, UniversalReVar,
             UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },

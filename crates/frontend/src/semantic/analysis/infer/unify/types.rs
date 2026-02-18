@@ -1,7 +1,7 @@
 use crate::{
     semantic::{
-        analysis::{FloatingInferVar, ObservedTyInferVar},
-        syntax::{HrtbUniverse, InferTyVar, Ty, UniversalTyVar, UniversalTyVarSourceInfo},
+        analysis::{FloatingInferVar, HrtbUniverse, ObservedTyInferVar},
+        syntax::{InferTyVar, Ty, UniversalTyVar, UniversalTyVarSourceInfo},
     },
     utils::hash::FxHashSet,
 };
