@@ -12,6 +12,7 @@ use crate::{
             CrateTypeckVisitor, TyCtxt, TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx,
             UnifyCxMode, typeck::body::lookup::LookupMethodResult,
         },
+        lower::generics::normalize_positional_generic_arity,
         syntax::{
             Block, Crate, Divergence, Expr, ExprKind, FnDef, FnInstanceInner, FnLocal,
             HrtbUniverse, InferTyVar, Item, Pat, PatKind, Re, RelationMode, SimpleTyKind,
@@ -307,6 +308,20 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let receiver = self.check_expr(receiver).and_do(&mut divergence);
                 let receiver = self.ccx_mut().peel_ty_infer_var_after_poll(receiver);
 
+                let env = self.import_env;
+                let generics = generics.map(|generics| {
+                    let out = self
+                        .ccx_mut()
+                        .importer(&ClauseOrigin::empty_report(), env, HrtbUniverse::ROOT)
+                        .fold_preserved(generics);
+
+                    self.ccx_mut()
+                        .wf_visitor(HrtbUniverse::ROOT)
+                        .visit_spanned(out);
+
+                    out
+                });
+
                 match *receiver.r(s) {
                     TyKind::InferVar(_) => {
                         break 'call tcx.intern(TyKind::Error(
@@ -340,9 +355,20 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     .ccx_mut()
                     .instantiate_fn_def_as_blank_owner_infer(resolution, self_ty);
 
+                let generics = generics.map(|generics| {
+                    normalize_positional_generic_arity(
+                        tcx,
+                        owner.def(s).r(s).generics,
+                        None,
+                        generics.own_span(),
+                        &generics.iter(tcx).collect::<Vec<_>>(),
+                    )
+                    .value
+                });
+
                 let instance = tcx.intern(FnInstanceInner {
                     owner,
-                    early_args: generics.map(|v| v.value),
+                    early_args: generics,
                 });
 
                 let instance_env = self.ccx_mut().instantiate_fn_instance_env_as_infer(

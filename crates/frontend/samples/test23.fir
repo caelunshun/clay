@@ -53,7 +53,7 @@ impl Clone for () {
 fn make_vec<T>() -> Vec<T> {}
 
 fn main() {
-    let vec = Vec::new();
+    let vec = ().make::<_>();
 
     vec.push(vec.my_field);
     let elem = vec.get(0);
@@ -63,10 +63,10 @@ fn main() {
     vec2.push(());
 }
 
-trait Generic<I> {
-    fn funky(me: Self);
+pub trait MakeVec {
+    fn make<T>(me: Self) -> Vec<T> {}
 }
 
-fn meow<T: for<I> Generic<I>>(v: T) {
-    v.funky();
+impl MakeVec for () {
+    fn make<T>(me: Self) -> Vec<T> {}
 }
