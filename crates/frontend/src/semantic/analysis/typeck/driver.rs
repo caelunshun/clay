@@ -31,15 +31,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
     pub fn visit_crate(&mut self) {
         let s = self.session();
 
-        let Crate {
-            name: _,
-            is_local: _,
-            root: _,
-            items,
-            lang_items: _,
-        } = self.krate.r(s);
-
-        for &item in &**items {
+        for &item in &**self.krate.r(s).items {
             match *item.r(s).kind {
                 ItemKind::Module(_) => {
                     // (intentionally empty)

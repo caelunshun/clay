@@ -238,6 +238,8 @@ pub trait ParentResolver {
 
     fn direct_parent(&self, def: Self::Item) -> Option<Self::Item>;
 
+    fn scope_prelude(&self, def: Self::Item) -> Option<Self::Item>;
+
     fn is_descendant(&self, mut descendant: Self::Item, ancestor: Self::Item) -> bool {
         loop {
             if descendant == ancestor {
@@ -273,7 +275,7 @@ pub trait ParentResolver {
         self.direct_parent(def)
     }
 
-    fn scope_components(&self, mut def: Self::Item) -> SmallVec<[Self::Item; 2]> {
+    fn scope_components(&self, mut def: Self::Item) -> SmallVec<[Self::Item; 3]> {
         let mut collector = SmallVec::new();
 
         loop {
@@ -288,6 +290,10 @@ pub trait ParentResolver {
             };
 
             def = parent;
+        }
+
+        if let Some(prelude) = self.scope_prelude(def) {
+            collector.push(prelude);
         }
 
         collector
