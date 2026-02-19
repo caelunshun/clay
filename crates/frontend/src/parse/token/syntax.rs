@@ -209,6 +209,14 @@ pub struct Ident {
 }
 
 impl Ident {
+    pub fn new(span: Span, text: Symbol) -> Self {
+        Self {
+            span,
+            text,
+            raw: true,
+        }
+    }
+
     pub fn matches_unescaped(self, kw: Symbol) -> bool {
         !self.raw && self.text == kw
     }

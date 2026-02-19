@@ -35,6 +35,7 @@ define_index_type! {
 
 impl BuilderItemId {
     pub const ROOT: Self = BuilderItemId { _raw: 0 };
+    pub const PRELUDE: Self = BuilderItemId { _raw: 1 };
 }
 
 // === BuilderModuleTree === //
@@ -83,16 +84,27 @@ impl BuilderModuleTree {
     pub fn new(session: Session) -> Self {
         Self {
             session,
-            items: IndexVec::from_iter([BuilderItem {
-                direct_parent: None,
-                category: ItemCategory::Module,
-                name: None,
-                public_path: None,
-                glob_uses: Vec::new(),
-                direct_uses: FxIndexMap::default(),
-            }]),
+            items: IndexVec::from_iter([
+                BuilderItem {
+                    direct_parent: None,
+                    category: ItemCategory::Module,
+                    name: None,
+                    public_path: None,
+                    glob_uses: Vec::new(),
+                    direct_uses: FxIndexMap::default(),
+                },
+                BuilderItem {
+                    direct_parent: None,
+                    category: ItemCategory::Module,
+                    name: Some(Ident::new(Span::DUMMY, symbol!("prelude"))),
+                    public_path: None,
+                    glob_uses: Vec::new(),
+                    direct_uses: FxIndexMap::default(),
+                },
+            ]),
         }
     }
+
     fn push_direct_use(&mut self, target: BuilderItemId, direct: BuilderDirectUse) {
         let target_category = self.categorize(target);
 
@@ -173,6 +185,20 @@ impl BuilderModuleTree {
             span: path.span,
             visibility: convert_visibility(parent, visibility),
             target: CachedPath::Unresolved(path),
+        });
+    }
+
+    pub fn push_glob_external_use(
+        &mut self,
+        parent: BuilderItemId,
+        span: Span,
+        visibility: AstVisibility,
+        target: Obj<Item>,
+    ) {
+        self.items[parent].glob_uses.push(BuilderGlobUse {
+            span,
+            visibility: convert_visibility(parent, visibility),
+            target: CachedPath::Resolved(AnyItemId::Extern(target)),
         });
     }
 
@@ -390,6 +416,7 @@ impl BuilderModuleTree {
         }
 
         LateInit::init(&krate.r(s).root, out_items[BuilderItemId::ROOT]);
+        LateInit::init(&krate.r(s).prelude, out_items[BuilderItemId::PRELUDE]);
 
         out_items
     }
@@ -411,6 +438,10 @@ impl ParentResolver for BuilderModuleTree {
 
     fn direct_parent(&self, def: Self::Item) -> Option<Self::Item> {
         self.items[def].direct_parent
+    }
+
+    fn scope_prelude(&self, _def: Self::Item) -> Option<Self::Item> {
+        Some(BuilderItemId::PRELUDE)
     }
 }
 
@@ -436,6 +467,10 @@ impl ParentResolver for ModuleTreeVisibilityCx<'_> {
 
     fn direct_parent(&self, def: Self::Item) -> Option<Self::Item> {
         self.0.items[def].direct_parent
+    }
+
+    fn scope_prelude(&self, _def: Self::Item) -> Option<Self::Item> {
+        Some(BuilderItemId::PRELUDE)
     }
 }
 
@@ -496,6 +531,15 @@ impl ParentResolver for ModuleTreeSolverCx<'_> {
             AnyItemId::Local(def) => self.builder.items[def].direct_parent.map(AnyItemId::Local),
             AnyItemId::Extern(def) => FrozenModuleResolver(&self.builder.session)
                 .direct_parent(def)
+                .map(AnyItemId::Extern),
+        }
+    }
+
+    fn scope_prelude(&self, def: Self::Item) -> Option<Self::Item> {
+        match def {
+            AnyItemId::Local(_) => Some(AnyItemId::Local(BuilderItemId::PRELUDE)),
+            AnyItemId::Extern(def) => FrozenModuleResolver(&self.builder.session)
+                .scope_prelude(def)
                 .map(AnyItemId::Extern),
         }
     }

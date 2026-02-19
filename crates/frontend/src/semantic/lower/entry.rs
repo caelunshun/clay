@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        Diag, LeafDiag, Session,
+        Diag, LeafDiag,
         analysis::NameResolver,
         arena::{HasInterner, HasListInterner, LateInit, Obj},
         syntax::{HasSpan as _, Span, Symbol},
@@ -17,9 +17,12 @@ use crate::{
     },
     semantic::{
         analysis::TyCtxt,
-        lower::modules::{
-            BuilderItemId, BuilderModuleTree, FrozenModuleResolver, FrozenVisibilityResolver,
-            ItemCategory, PathResolver, VisibilityResolver,
+        lower::{
+            bootstrap::{lower_synthetic_module, synthesize_bootstrap_prelude},
+            modules::{
+                BuilderItemId, BuilderModuleTree, FrozenModuleResolver, FrozenVisibilityResolver,
+                ItemCategory, PathResolver, VisibilityResolver,
+            },
         },
         syntax::{
             AdtCtor, AdtCtorField, AdtCtorFieldIdx, AdtCtorOwner, AdtCtorSyntax, AdtEnumVariant,
@@ -31,7 +34,7 @@ use crate::{
     },
     symbol,
     utils::{
-        hash::{FxHashMap, FxIndexMap},
+        hash::FxHashMap,
         lang::{AND_LIST_GLUE, format_list},
     },
 };
@@ -53,14 +56,15 @@ impl TyCtxt {
             inter_tasks: Vec::new(),
         };
 
-        ctxt.link_synthetic_core(s);
         ctxt.lower_module(BuilderItemId::ROOT, ast);
+        ctxt.push_prelude_glob(*synthesize_bootstrap_prelude(self).r(s).root);
 
         let krate = Obj::new(
             Crate {
                 name: symbol!("demo"),
                 is_local: true,
                 root: LateInit::uninit(),
+                prelude: LateInit::uninit(),
                 items: LateInit::uninit(),
                 lang_items: LangItems::default(),
             },
@@ -68,6 +72,7 @@ impl TyCtxt {
         );
         let index_to_item = ctxt.tree.freeze_and_check(krate, s);
         let root = index_to_item[BuilderItemId::ROOT];
+        let prelude = index_to_item[BuilderItemId::PRELUDE];
 
         let UseLowerCtxt {
             tree: _,
@@ -86,6 +91,8 @@ impl TyCtxt {
             index_to_item: &index_to_item,
         }
         .lower_module(ast, None);
+
+        lower_synthetic_module(prelude, s);
 
         for InterTask {
             target,
@@ -381,57 +388,15 @@ impl<'ast> UseLowerCtxt<'ast> {
         prefix.truncate(old_len);
     }
 
-    pub fn link_synthetic_core(&mut self, s: &Session) {
-        let krate = Obj::new(
-            Crate {
-                name: symbol!("__clay_synthetic_core"),
-                is_local: false,
-                root: LateInit::uninit(),
-                items: LateInit::uninit(),
-                lang_items: LangItems::default(),
-            },
-            s,
-        );
-
-        let root = Obj::new(
-            Item {
-                krate,
-                direct_parent: None,
-                category: ItemCategory::Module,
-                name: Some(Ident {
-                    span: Span::DUMMY,
-                    text: symbol!(""),
-                    raw: false,
-                }),
-                path: symbol!(""),
-                direct_uses: LateInit::new(FxIndexMap::default()),
-                glob_uses: LateInit::new(Vec::new()),
-                traits_in_scope: LateInit::uninit(),
-                attrs: LateInit::uninit(),
-                kind: LateInit::uninit(),
-            },
-            s,
-        );
-
-        LateInit::init(
-            &root.r(s).kind,
-            ItemKind::Module(Obj::new(ModuleItem { item: root }, s)),
-        );
-        LateInit::init(&krate.r(s).root, root);
-        LateInit::init(&krate.r(s).items, vec![root]);
-
-        self.tree.push_single_external_use(
-            BuilderItemId::ROOT,
+    pub fn push_prelude_glob(&mut self, target: Obj<Item>) {
+        self.tree.push_glob_external_use(
+            BuilderItemId::PRELUDE,
+            Span::DUMMY,
             AstVisibility {
                 span: Span::DUMMY,
-                kind: AstVisibilityKind::Priv,
+                kind: AstVisibilityKind::Pub,
             },
-            Ident {
-                span: Span::DUMMY,
-                text: symbol!("__clay_synthetic_core"),
-                raw: false,
-            },
-            root,
+            target,
         );
     }
 }

@@ -31,6 +31,10 @@ impl ParentResolver for FrozenVisibilityResolver<'_> {
     fn direct_parent(&self, def: Self::Item) -> Option<Self::Item> {
         def.r(self.0).direct_parent
     }
+
+    fn scope_prelude(&self, def: Self::Item) -> Option<Self::Item> {
+        Some(*def.r(self.0).krate.r(self.0).prelude)
+    }
 }
 
 impl PathResolver for FrozenVisibilityResolver<'_> {
@@ -84,6 +88,10 @@ impl ParentResolver for FrozenModuleResolver<'_> {
 
     fn direct_parent(&self, def: Self::Item) -> Option<Self::Item> {
         def.r(self.0).direct_parent
+    }
+
+    fn scope_prelude(&self, def: Self::Item) -> Option<Self::Item> {
+        Some(*def.r(self.0).krate.r(self.0).prelude)
     }
 }
 

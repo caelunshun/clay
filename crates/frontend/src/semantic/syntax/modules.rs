@@ -22,6 +22,7 @@ pub struct Crate {
     pub name: Symbol,
     pub is_local: bool,
     pub root: LateInit<Obj<Item>>,
+    pub prelude: LateInit<Obj<Item>>,
     pub items: LateInit<Vec<Obj<Item>>>,
     pub lang_items: LangItems,
 }

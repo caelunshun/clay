@@ -1,10 +1,4 @@
 pub mod std {
-    pub use crate::__clay_synthetic_core as synthetic_core;
-
-    pub use synthetic_core::{
-        meow,
-    };
-
     #[lang("deref_trait")]
     pub trait Deref {
         type Target;
@@ -45,7 +39,7 @@ impl<T> Vec<T> {
 
     pub fn clear<'a: &shorter Self>(me: &'a mut Self) {}
 
-    pub fn get<'a: &shorter Self>(me: &'a Self, idx: ()) -> &'a T {}
+    pub fn get<'a: &shorter Self>(me: &'a Self, idx: u32) -> &'a T {}
 }
 
 impl<T: Clone> Clone for Vec<T> {
