@@ -79,7 +79,7 @@ pub fn attempt_deref_clobber_obligations(ccx: &mut ClauseCx<'_>, curr: Ty) -> Op
         HrtbUniverse::ROOT,
         curr,
         TraitSpec {
-            def: krate.r(s).deref_lang_item(s).unwrap(),
+            def: krate.r(s).lang_items.deref_trait().unwrap(),
             params: tcx.intern_list(&[TraitParam::Equals(TyOrRe::Ty(next_infer))]),
         },
     );

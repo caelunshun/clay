@@ -331,6 +331,10 @@ impl<'tcx> ClauseCx<'tcx> {
         self.ucx().lookup_universal_ty_hrtb_universe(var)
     }
 
+    pub fn lookup_ty_infer_var(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {
+        self.ucx().lookup_ty_infer_var(var)
+    }
+
     pub fn oblige_re_outlives_re(
         &mut self,
         origin: ClauseOrigin,
