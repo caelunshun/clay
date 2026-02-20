@@ -42,6 +42,7 @@ pub trait LangItemValidator: Sized {
         &self,
         tcx: &TyCtxt,
         item: Obj<Item>,
+        name: Symbol,
         span: Span,
     ) -> Result<Self::Stored, ErrorGuaranteed>;
 }
@@ -60,12 +61,12 @@ impl LangItemValidator for TraitValidator {
         &self,
         tcx: &TyCtxt,
         item: Obj<Item>,
+        name: Symbol,
         span: Span,
     ) -> Result<Self::Stored, ErrorGuaranteed> {
-        item.r(&tcx.session)
-            .kind
-            .as_trait()
-            .ok_or_else(|| Diag::span_err(span, "not a trait").emit())
+        item.r(&tcx.session).kind.as_trait().ok_or_else(|| {
+            Diag::span_err(span, format_args!("`{name}` language item must be a trait")).emit()
+        })
     }
 }
 
@@ -104,7 +105,7 @@ macro_rules! define_lang_items {
                             let mut diag = Diag::span_err(
                                 name_span,
                                 format_args!(
-                                    "language item `{name}` already defined at {}",
+                                    "language item `{name}` already defined at `{}`",
                                     old.r(&tcx.session).display_path(&tcx.session),
                                 ),
                             );
@@ -121,7 +122,12 @@ macro_rules! define_lang_items {
                             return Err(diag.emit());
                         }
 
-                        let output = VALIDATOR.with(|validator| validator.assign(tcx, item, name_span))?;
+                        let output = VALIDATOR.with(|validator| validator.assign(
+                            tcx,
+                            item,
+                            name,
+                            name_span
+                        ))?;
 
                         LateInit::init(&self.$name, output);
 
