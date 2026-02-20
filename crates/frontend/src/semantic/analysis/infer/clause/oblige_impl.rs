@@ -9,8 +9,8 @@ use crate::{
             UnboundVarHandlingMode, UniversalElaboration, infer::clause::ClauseObligation,
         },
         syntax::{
-            HrtbBinder, HrtbBinderKind, ImplItem, RelationMode, TraitClause, TraitClauseList,
-            TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            HrtbBinder, HrtbBinderKind, ImplItem, InferTyPermSet, RelationMode, TraitClause,
+            TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
         },
     },
 };
@@ -118,10 +118,12 @@ impl<'tcx> ClauseCx<'tcx> {
                     }
                 }
             }
-            TyKind::InferVar(_) => {
-                // We can't yet rule out the possibility that this obligation is inherently
-                // fulfilled.
-                return Err(ObligationNotReady);
+            TyKind::InferVar(var) => {
+                if self.lookup_ty_infer_var(var).unwrap_err().perm_set.contains(InferTyPermSet::OTHER) {
+                    // We can't yet rule out the possibility that this obligation is inherently
+                    // fulfilled.
+                    return Err(ObligationNotReady);
+                }
             }
             TyKind::Error(_) => {
                 // Error types can do anything.
@@ -409,9 +411,11 @@ impl<'tcx> ClauseCx<'tcx> {
         let krate = self.krate();
         let lhs = self.ucx().peel_ty_infer_var(lhs);
 
-        if (Some(rhs.def) == krate.r(s).fn_once_lang_item(s)
-            || Some(rhs.def) == krate.r(s).fn_mut_lang_item(s)
-            || Some(rhs.def) == krate.r(s).fn_lang_item(s))
+        let lang_items = &krate.r(s).lang_items;
+
+        if (Some(rhs.def) == lang_items.fn_once_trait()
+            || Some(rhs.def) == lang_items.fn_mut_trait()
+            || Some(rhs.def) == lang_items.fn_trait())
             && let TyKind::FnDef(lhs) = *lhs.r(s)
         {
             let &[

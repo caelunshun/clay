@@ -78,6 +78,10 @@ pub fn synthesize_bootstrap_prelude(tcx: &TyCtxt) -> Obj<Crate> {
             symbol!("str"),
             tcx.intern(TyKind::Simple(SimpleTyKind::Str)),
         ),
+        (
+            symbol!("Never"),
+            tcx.intern(TyKind::Simple(SimpleTyKind::Never)),
+        ),
     ];
 
     // Build crate

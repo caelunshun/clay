@@ -263,7 +263,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 }
 
                 let site_span = expr.r(s).span;
-                let fn_once_trait = self.krate().r(s).fn_once_lang_item(s).unwrap();
+                let fn_once_trait = self.krate().r(s).lang_items.fn_once_trait().unwrap();
                 let input_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
                 let output_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
 

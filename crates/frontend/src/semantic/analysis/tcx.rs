@@ -1,15 +1,14 @@
 use crate::{
     base::{
-        Diag, HasSession, Session,
+        ErrorGuaranteed, HasSession, Session,
         analysis::SpannedInfo,
         arena::{HasInterner, HasListInterner, Interner, ListInterner, Obj},
     },
     semantic::{
         analysis::{CoherenceMap, CrateTypeckVisitor},
         syntax::{
-            AttributeKind, Crate, EarlyAttrLang, FnInstanceInner, HrtbDebruijnDef,
-            LangItemDefineError, TraitClause, TraitClauseList, TraitParam, Ty, TyKind, TyOrRe,
-            TyShape,
+            AttributeKind, Crate, EarlyAttrLang, FnInstanceInner, HrtbDebruijnDef, TraitClause,
+            TraitClauseList, TraitParam, Ty, TyKind, TyOrRe, TyShape,
         },
     },
 };
@@ -71,17 +70,11 @@ impl TyCtxt {
                     continue;
                 };
 
-                match krate.r(s).lang_items.define(name, def) {
-                    Ok(_) => {
-                        // (fallthrough)
-                    }
-                    Err(LangItemDefineError::AlreadyDefined(_there)) => {
-                        Diag::span_err(attr.r(s).span, "duplicate language").emit();
-                    }
-                    Err(LangItemDefineError::NoSuchName) => {
-                        Diag::span_err(attr.r(s).span, "no such language item").emit();
-                    }
-                }
+                let (Ok(()) | Err(ErrorGuaranteed)) =
+                    krate
+                        .r(s)
+                        .lang_items
+                        .define(self, name, attr.r(s).span, def);
             }
         }
 

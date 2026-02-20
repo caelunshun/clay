@@ -150,7 +150,7 @@ impl BodyCtxt<'_, '_> {
                                     HrtbUniverse::ROOT,
                                     output_pointee,
                                     TraitSpec {
-                                        def: krate.r(s).deref_lang_item(s).unwrap(),
+                                        def: krate.r(s).lang_items.deref_trait().unwrap(),
                                         params: tcx.intern_list(&[TraitParam::Equals(TyOrRe::Ty(
                                             next_output,
                                         ))]),
