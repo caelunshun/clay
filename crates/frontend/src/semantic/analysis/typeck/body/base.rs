@@ -573,7 +573,34 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     ))
                 }
             }
-            ExprKind::Index(obj, obj1) => todo!(),
+            ExprKind::Index(target, index) => {
+                let target_ty = self.check_expr(target).and_do(&mut divergence);
+                let index_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
+                let output_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
+
+                let index_trait = self.krate().r(s).lang_items.index_trait().unwrap();
+
+                self.ccx_mut().oblige_ty_meets_trait_instantiated(
+                    ClauseOrigin::root_report(ClauseOriginKind::Index {
+                        target_span: target.r(s).span,
+                        index_span: index.r(s).span,
+                    }),
+                    HrtbUniverse::ROOT,
+                    target_ty,
+                    TraitSpec {
+                        def: index_trait,
+                        params: tcx.intern_list(&[
+                            TraitParam::Equals(TyOrRe::Ty(index_ty)),
+                            TraitParam::Equals(TyOrRe::Ty(output_ty)),
+                        ]),
+                    },
+                );
+
+                self.check_expr_demand(index, index_ty)
+                    .and_do(&mut divergence);
+
+                output_ty
+            }
             ExprKind::Range(range_expr) => todo!(),
             ExprKind::LocalSelf => todo!(),
             ExprKind::Local(local) => self.type_of_local(local),
