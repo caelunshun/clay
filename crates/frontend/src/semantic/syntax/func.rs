@@ -33,7 +33,7 @@ pub struct FnDef {
     pub has_self_param: LateInit<bool>,
     pub args: LateInit<Obj<[FnArg]>>,
     pub ret_ty: LateInit<SpannedTy>,
-    pub body: LateInit<Option<Obj<Block>>>,
+    pub body: LateInit<Option<Obj<Expr>>>,
 }
 
 #[derive(Debug, Copy, Clone)]

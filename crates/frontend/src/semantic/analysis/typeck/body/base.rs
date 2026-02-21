@@ -85,7 +85,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
                 bcx.check_pat_and_ascription(arg.pat, Some(arg.ty));
             }
 
-            _ = bcx.check_block(body);
+            _ = bcx.check_expr_demand(body, bcx.return_ty);
 
             ccx_body.verify();
         }
@@ -102,6 +102,7 @@ pub struct BodyCtxt<'a, 'tcx> {
     pub import_env: ClauseImportEnvRef<'a>,
     pub local_types: FxHashMap<Obj<FnLocal>, Ty>,
     pub needs_infer: Vec<NeedsInfer>,
+    pub return_ty: Ty,
 }
 
 #[derive(Copy, Clone)]
@@ -116,12 +117,23 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         def: Obj<FnDef>,
         import_env: ClauseImportEnvRef<'a>,
     ) -> Self {
+        let s = ccx.session();
+
+        let return_ty = ccx
+            .importer(
+                &ClauseOrigin::empty_report(),
+                HrtbUniverse::ROOT,
+                import_env,
+            )
+            .fold_spanned(*def.r(s).ret_ty);
+
         Self {
             ccx,
             def,
             import_env,
             local_types: FxHashMap::default(),
             needs_infer: Vec::new(),
+            return_ty,
         }
     }
 
@@ -610,7 +622,25 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             }
             ExprKind::Break { label, expr } => todo!(),
             ExprKind::Continue { label } => todo!(),
-            ExprKind::Return(obj) => todo!(),
+            ExprKind::Return(rv) => {
+                if let Some(rv) = rv {
+                    _ = self.check_expr_demand(rv, self.return_ty);
+                } else {
+                    let return_ty = self.return_ty;
+
+                    self.ccx_mut().oblige_ty_unifies_ty(
+                        ClauseOrigin::root_report(ClauseOriginKind::ReturnUnit {
+                            span: expr.r(s).span,
+                        }),
+                        return_ty,
+                        tcx.intern(TyKind::Tuple(tcx.intern_list(&[]))),
+                        RelationMode::Equate,
+                    );
+                }
+
+                divergence = Divergence::MustDiverge;
+                tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
+            }
             ExprKind::Struct(StructExpr { ctor, fields, rest }) => todo!(),
             ExprKind::Error(err) => tcx.intern(TyKind::Error(err)),
         };
