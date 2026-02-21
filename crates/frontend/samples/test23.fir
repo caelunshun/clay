@@ -21,6 +21,11 @@ pub mod std {
     #[lang("fn_trait")]
     pub trait Fn<I, O>: FnMut<I, O> {}
 
+    #[lang("index_trait")]
+    pub trait Index<I> {
+        type Output: &longer Self;
+    }
+
     pub trait Clone {
         fn clone<'a: &shorter Self>(me: &'a Self) -> Self;
     }
@@ -42,6 +47,10 @@ impl<T> Vec<T> {
     pub fn get<'a: &shorter Self>(me: &'a Self, idx: u32) -> &'a T {}
 }
 
+impl<T> std::Index<u32> for Vec<T> {
+    type Output = T;
+}
+
 impl<T: Clone> Clone for Vec<T> {
     fn clone<'a: &shorter Self>(me: &'a Self) -> Self {}
 }
@@ -56,7 +65,7 @@ fn main() {
     let vec = ().make::<_>();
 
     vec.push(vec.my_field);
-    let elem = vec.get(0);
+    let elem = vec[1];
     vec.push(elem.clone());
 
     let vec2 = Clone::clone(&vec);
