@@ -22,7 +22,7 @@ pub struct AstFnDef {
     pub generics: Option<AstGenericParamList>,
     pub args: Vec<AstFnArg>,
     pub ret_ty: AstReturnTy,
-    pub body: Option<AstBlock>,
+    pub body: Option<AstExpr>,
 }
 
 #[derive(Debug, Clone)]

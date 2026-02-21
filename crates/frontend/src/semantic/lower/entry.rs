@@ -7,10 +7,11 @@ use crate::{
     },
     parse::{
         ast::{
-            AstAttribute, AstBarePath, AstFnDef, AstImplLikeMemberKind, AstItem, AstItemEnum,
-            AstItemFn, AstItemImpl, AstItemModuleContents, AstItemStruct, AstItemTrait,
-            AstItemTypeAlias, AstPathPart, AstPathPartKind, AstPathPartKw, AstReturnTy,
-            AstStmtKind, AstStructKind, AstTraitClauseList, AstTreePath, AstTreePathKind, AstTy,
+            AstAttribute, AstBarePath, AstBlock, AstExpr, AstExprField, AstExprKind, AstFnDef,
+            AstImplLikeMemberKind, AstItem, AstItemEnum, AstItemFn, AstItemImpl,
+            AstItemModuleContents, AstItemStruct, AstItemTrait, AstItemTypeAlias, AstMatchArm,
+            AstPathPart, AstPathPartKind, AstPathPartKw, AstRangeExpr, AstReturnTy, AstStmtKind,
+            AstStructKind, AstStructRest, AstTraitClauseList, AstTreePath, AstTreePathKind, AstTy,
             AstVisibility, AstVisibilityKind,
         },
         token::{Ident, Lifetime},
@@ -229,16 +230,7 @@ impl<'ast> UseLowerCtxt<'ast> {
                 );
 
                 if let Some(body) = &item.def.body {
-                    for stmt in &body.stmts {
-                        match &stmt.kind {
-                            AstStmtKind::Item(item) => {
-                                self.lower_item(item_id, item);
-                            }
-                            AstStmtKind::Expr(_) | AstStmtKind::Let(_) => {
-                                // (fallthrough)
-                            }
-                        }
-                    }
+                    self.lower_expr_items(item_id, body);
                 }
 
                 self.queue_task(parent_id, item_id, |cx| {
@@ -299,6 +291,187 @@ impl<'ast> UseLowerCtxt<'ast> {
             }
             AstItem::Error(_, _) => {
                 // (ignored)
+            }
+        }
+    }
+
+    pub fn lower_expr_items(&mut self, item_id: BuilderItemId, ast: &'ast AstExpr) {
+        match &ast.kind {
+            AstExprKind::Array(elems) => {
+                for elem in elems {
+                    self.lower_expr_items(item_id, elem);
+                }
+            }
+            AstExprKind::Call(callee, args) => {
+                self.lower_expr_items(item_id, callee);
+
+                for arg in args {
+                    self.lower_expr_items(item_id, arg);
+                }
+            }
+            AstExprKind::GenericMethodCall {
+                target,
+                method: _,
+                generics: _,
+                args,
+            } => {
+                self.lower_expr_items(item_id, target);
+
+                for arg in args {
+                    self.lower_expr_items(item_id, arg);
+                }
+            }
+            AstExprKind::Paren(item) => {
+                self.lower_expr_items(item_id, item);
+            }
+            AstExprKind::Tuple(items) => {
+                for item in items {
+                    self.lower_expr_items(item_id, item);
+                }
+            }
+            AstExprKind::Binary(_op, lhs, rhs) => {
+                self.lower_expr_items(item_id, lhs);
+                self.lower_expr_items(item_id, rhs);
+            }
+            AstExprKind::Unary(_op, target) => {
+                self.lower_expr_items(item_id, target);
+            }
+            AstExprKind::Lit(_lit) => {
+                // (empty)
+            }
+            AstExprKind::Cast(target, _ty) => {
+                self.lower_expr_items(item_id, target);
+            }
+            AstExprKind::Let(_path, scrutinee, _span) => {
+                self.lower_expr_items(item_id, scrutinee);
+            }
+            AstExprKind::If {
+                cond,
+                truthy,
+                falsy,
+            } => {
+                self.lower_expr_items(item_id, cond);
+                self.lower_block_items(item_id, truthy);
+
+                if let Some(falsy) = falsy {
+                    self.lower_expr_items(item_id, falsy);
+                }
+            }
+            AstExprKind::While {
+                cond,
+                block,
+                label: _,
+            } => {
+                self.lower_expr_items(item_id, cond);
+                self.lower_block_items(item_id, block);
+            }
+            AstExprKind::ForLoop {
+                pat: _,
+                iter,
+                body,
+                label: _,
+            } => {
+                self.lower_expr_items(item_id, iter);
+                self.lower_block_items(item_id, body);
+            }
+            AstExprKind::Loop(block, _label) => {
+                self.lower_block_items(item_id, block);
+            }
+            AstExprKind::Match(scrutinee, arms) => {
+                self.lower_expr_items(item_id, scrutinee);
+
+                for AstMatchArm {
+                    span: _,
+                    pat: _,
+                    guard,
+                    body,
+                } in arms
+                {
+                    if let Some(guard) = guard {
+                        self.lower_expr_items(item_id, guard);
+                    }
+
+                    self.lower_expr_items(item_id, body);
+                }
+            }
+            AstExprKind::Block(block, _label) => {
+                self.lower_block_items(item_id, block);
+            }
+            AstExprKind::Assign(lhs, rhs) => {
+                self.lower_expr_items(item_id, lhs);
+                self.lower_expr_items(item_id, rhs);
+            }
+            AstExprKind::AssignOp(_op, lhs, rhs) => {
+                self.lower_expr_items(item_id, lhs);
+                self.lower_expr_items(item_id, rhs);
+            }
+            AstExprKind::Field(target, _name) => {
+                self.lower_expr_items(item_id, target);
+            }
+            AstExprKind::Index(target, index) => {
+                self.lower_expr_items(item_id, target);
+                self.lower_expr_items(item_id, index);
+            }
+            AstExprKind::Range(AstRangeExpr {
+                low,
+                high,
+                limits: _,
+            }) => {
+                if let Some(low) = low {
+                    self.lower_expr_items(item_id, low);
+                }
+
+                if let Some(high) = high {
+                    self.lower_expr_items(item_id, high);
+                }
+            }
+            AstExprKind::Underscore => todo!(),
+            AstExprKind::Path(_path) => todo!(),
+            AstExprKind::AddrOf(_muta, target) => {
+                self.lower_expr_items(item_id, target);
+            }
+            AstExprKind::Break(_label, value) => {
+                if let Some(value) = value {
+                    self.lower_expr_items(item_id, value);
+                }
+            }
+            AstExprKind::Continue(_label) => todo!(),
+            AstExprKind::Return(value) => {
+                if let Some(value) = value {
+                    self.lower_expr_items(item_id, value);
+                }
+            }
+            AstExprKind::Struct(_path, fields, rest) => {
+                for AstExprField { name: _, expr } in fields {
+                    if let Some(expr) = expr {
+                        self.lower_expr_items(item_id, expr);
+                    }
+                }
+
+                match rest {
+                    AstStructRest::Base(rest) => {
+                        self.lower_expr_items(item_id, rest);
+                    }
+                    AstStructRest::Rest(_) | AstStructRest::None => {
+                        // (empty)
+                    }
+                }
+            }
+            AstExprKind::Error(_err) => {
+                // (empty)
+            }
+        }
+    }
+
+    pub fn lower_block_items(&mut self, item_id: BuilderItemId, ast: &'ast AstBlock) {
+        for stmt in &ast.stmts {
+            match &stmt.kind {
+                AstStmtKind::Item(item) => {
+                    self.lower_item(item_id, item);
+                }
+                AstStmtKind::Expr(_) | AstStmtKind::Let(_) => {
+                    // (fallthrough)
+                }
             }
         }
     }
@@ -1318,7 +1491,7 @@ impl IntraItemLowerCtxt<'_> {
 
         LateInit::init(
             &def.r(s).body,
-            ast.body.as_ref().map(|body| self.lower_block(body)),
+            ast.body.as_ref().map(|body| self.lower_expr(body)),
         );
     }
 

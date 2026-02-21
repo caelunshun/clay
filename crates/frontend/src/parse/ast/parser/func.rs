@@ -54,8 +54,21 @@ pub fn parse_func(p: P) -> Result<Option<AstFnDef>, ErrorGuaranteed> {
     let ret_ty = parse_return_ty(p);
 
     let body = 'body: {
+        if match_punct_seq(puncts!("=>")).expect(p).is_some() {
+            let body = parse_expr(p, AstExprFlags::ALLOW_REGULAR);
+
+            if match_punct(punct!(';')).expect(p).is_none() {
+                p.stuck().ignore_not_in_loop();
+            }
+
+            break 'body body;
+        }
+
         if let Some(block) = parse_brace_block(p) {
-            break 'body Some(block);
+            break 'body Some(AstExpr {
+                span: block.span,
+                kind: AstExprKind::Block(Box::new(block), None),
+            });
         }
 
         if match_punct(punct!(';')).expect(p).is_some() {

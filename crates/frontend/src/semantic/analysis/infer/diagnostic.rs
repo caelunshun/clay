@@ -88,6 +88,10 @@ pub enum ClauseOriginKind {
         index_span: Span,
     },
 
+    ReturnUnit {
+        span: Span,
+    },
+
     FunctionCall {
         site_span: Span,
     },
