@@ -75,7 +75,9 @@ fn make_vec<T>() -> Vec<T> {
     todo()
 }
 
-fn todo() -> Never {}
+fn todo() -> Never {
+    todo();
+}
 
 fn main() {
     let vec = ().make::<_>();

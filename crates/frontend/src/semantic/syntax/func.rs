@@ -221,16 +221,17 @@ pub enum ExprKind {
     Local(Obj<FnLocal>),
     AddrOf(Mutability, Obj<Expr>),
     Break {
-        label: Option<Obj<Expr>>,
+        label: LabelledBlock,
         expr: Option<Obj<Expr>>,
     },
-    Continue {
-        label: Option<Obj<Expr>>,
-    },
+    Continue(LabelledBlock),
     Return(Option<Obj<Expr>>),
     Struct(StructExpr),
     Error(ErrorGuaranteed),
 }
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct LabelledBlock(pub Obj<Expr>);
 
 #[derive(Debug, Copy, Clone)]
 pub struct RangeExpr {
