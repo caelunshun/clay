@@ -110,8 +110,7 @@ fn main() {
     vec2.push(());
 
     for v in &vec2 {
-        let v2 = &();
-        v2 = v;
+        let _: &() = v;
     }
 }
 
@@ -123,4 +122,50 @@ impl MakeVec for () {
     fn make<T>(me: Self) -> Vec<T> {
         todo();
     }
+}
+
+fn fail_1() {
+    fn meow() {}
+
+    meow
+}
+
+fn fail_2() {
+    let mut v = ();
+
+    let a = 'b: {
+        if true {
+            break 'b &v;
+        }
+
+        if true {
+            break 'b &mut v;
+        }
+
+        todo()
+    };
+
+    let b = 'b: {
+        if true {
+            break 'b &mut v;
+        }
+
+        if true {
+            break 'b &v;
+        }
+
+        todo()
+    };
+
+    let c: &() = 'b: {
+        if true {
+            break 'b &mut v;
+        }
+
+        if true {
+            break 'b &v;
+        }
+
+        todo()
+    };
 }

@@ -15,9 +15,10 @@ use crate::{
         lower::generics::normalize_positional_generic_arity,
         syntax::{
             Block, Crate, Divergence, Expr, ExprKind, FnDef, FnInstanceInner, FnLocal,
-            InferTyPermSet, InferTyVar, Item, LabelledBlock, Pat, PatKind, Re, RelationMode,
-            SimpleTyKind, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTy, SpannedTyView,
-            Stmt, StructExpr, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            InferTyPermSet, InferTyVar, Item, LabelTargetKind, LabelledBlock, Pat, PatKind, Re,
+            RelationMode, SimpleTyKind, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTy,
+            SpannedTyView, Stmt, StructExpr, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind,
+            TyOrRe,
         },
     },
     utils::hash::FxHashMap,
@@ -101,7 +102,7 @@ pub struct BodyCtxt<'a, 'tcx> {
     pub def: Obj<FnDef>,
     pub import_env: ClauseImportEnvRef<'a>,
     pub local_types: FxHashMap<Obj<FnLocal>, Ty>,
-    pub labelled_exprs: FxHashMap<LabelledBlock, Option<Ty>>,
+    pub block_break_demands: FxHashMap<LabelledBlock, Option<Ty>>,
     pub needs_infer: Vec<NeedsInfer>,
     pub return_ty: Ty,
 }
@@ -133,7 +134,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             def,
             import_env,
             local_types: FxHashMap::default(),
-            labelled_exprs: FxHashMap::default(),
+            block_break_demands: FxHashMap::default(),
             needs_infer: Vec::new(),
             return_ty,
         }
@@ -561,7 +562,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 self.check_expr_demand(cond, tcx.intern(TyKind::Simple(SimpleTyKind::Bool)))
                     .and_do(&mut divergence);
 
-                self.labelled_exprs.insert(LabelledBlock(expr), None);
                 self.check_block_with_no_final_expr(block);
 
                 tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
@@ -604,16 +604,20 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     RelationMode::Equate,
                 );
 
-                self.labelled_exprs.insert(LabelledBlock(expr), None);
                 self.check_block_with_no_final_expr(body);
 
                 tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
             }
             ExprKind::Loop(block) => {
-                self.labelled_exprs.insert(LabelledBlock(expr), None);
+                let label = LabelledBlock {
+                    target: expr,
+                    kind: LabelTargetKind::Loop,
+                };
+
+                self.block_break_demands.insert(label, None);
                 self.check_block_with_no_final_expr(block);
 
-                if let Some(break_ty) = self.labelled_exprs[&LabelledBlock(expr)] {
+                if let Some(break_ty) = self.block_break_demands[&label] {
                     break_ty
                 } else {
                     tcx.intern(TyKind::Simple(SimpleTyKind::Never))
@@ -621,11 +625,16 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             }
             ExprKind::Match(obj, obj1) => todo!(),
             ExprKind::Block(block) => {
-                self.labelled_exprs.insert(LabelledBlock(expr), None);
+                let label = LabelledBlock {
+                    target: expr,
+                    kind: LabelTargetKind::Block,
+                };
+
+                self.block_break_demands.insert(label, None);
                 self.check_block_stmts(&block.r(s).stmts, &mut divergence);
 
                 if let Some(last_expr) = block.r(s).last_expr {
-                    if let Some(demand) = self.labelled_exprs[&LabelledBlock(expr)] {
+                    if let Some(demand) = self.block_break_demands[&label] {
                         self.check_expr_demand(last_expr, demand)
                             .and_do(&mut divergence)
                     } else {
@@ -635,7 +644,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     if divergence.must_diverge() {
                         tcx.intern(TyKind::Simple(SimpleTyKind::Never))
                     } else {
-                        if let Some(demand) = self.labelled_exprs[&LabelledBlock(expr)] {
+                        if let Some(demand) = self.block_break_demands[&label] {
                             demand
                         } else {
                             tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
@@ -694,14 +703,18 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let pointee = self.check_expr(pointee).and_do(&mut divergence);
                 tcx.intern(TyKind::Reference(Re::Erased, mutability, pointee))
             }
-            ExprKind::Break { label, expr } => {
-                let demand = *self
-                    .labelled_exprs
-                    .get_mut(&label)
-                    .unwrap()
-                    .get_or_insert_with(|| self.ccx.fresh_ty_infer(HrtbUniverse::ROOT));
+            ExprKind::Break { label, value } => {
+                if label.kind.can_break_with_value() {
+                    let demand = *self
+                        .block_break_demands
+                        .get_mut(&label)
+                        .unwrap()
+                        .get_or_insert_with(|| self.ccx.fresh_ty_infer(HrtbUniverse::ROOT));
 
-                self.check_expr_demand(expr, demand).ignore();
+                    self.check_expr_demand(value.unwrap(), demand).ignore();
+                } else {
+                    debug_assert!(value.is_none());
+                }
 
                 tcx.intern(TyKind::Simple(SimpleTyKind::Never))
             }
@@ -714,7 +727,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             ExprKind::Error(err) => tcx.intern(TyKind::Error(err)),
         };
 
-        // Matches Rustc behavior—we don't mark a subsequent expression as unreachable unless the
+        // Matches rustc behavior—we don't mark a subsequent expression as unreachable unless the
         // primitive `Never` type is returned.
         if let TyKind::Simple(SimpleTyKind::Never) =
             self.ccx_mut().peel_ty_infer_var_after_poll(ty).r(s)

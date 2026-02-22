@@ -14,16 +14,16 @@ use crate::{
     },
     semantic::{
         lower::{
-            entry::{AllowsContinue, IntraItemLowerCtxt},
+            entry::IntraItemLowerCtxt,
             func::{
                 pat::PatOrRest,
                 path::{PathResolvedFnLit, PathResolvedLocal, PathResolvedValue},
             },
         },
         syntax::{
-            AdtCtor, AdtCtorFieldIdx, AdtCtorSyntax, Block, Expr, ExprKind, LabelledBlock, LetStmt,
-            MatchArm, Pat, PatKind, PatListFrontAndTail, RangeExpr, SpannedTyOrReList, Stmt,
-            StructExpr, StructNamedField,
+            AdtCtor, AdtCtorFieldIdx, AdtCtorSyntax, Block, Expr, ExprKind, LabelTargetKind,
+            LabelledBlock, LetStmt, MatchArm, Pat, PatKind, PatListFrontAndTail, RangeExpr,
+            SpannedTyOrReList, Stmt, StructExpr, StructNamedField,
         },
     },
     utils::{
@@ -41,10 +41,10 @@ impl IntraItemLowerCtxt<'_> {
         &mut self,
         expr_span: Span,
         label: Option<Lifetime>,
-    ) -> Result<(LabelledBlock, AllowsContinue), ErrorGuaranteed> {
+    ) -> Result<LabelledBlock, ErrorGuaranteed> {
         let Some(label) = label else {
-            return match self.innermost_continuable_block {
-                Some(block) => Ok((block, AllowsContinue::Yes)),
+            return match self.innermost_block {
+                Some(block) => Ok(block),
                 None => Err(Diag::span_err(expr_span, "no parent block").emit()),
             };
         };
@@ -62,33 +62,30 @@ impl IntraItemLowerCtxt<'_> {
         &mut self,
         owner: LabelledBlock,
         label: Option<Lifetime>,
-        allows_continue: AllowsContinue,
         block: &AstBlock,
     ) -> Obj<Block> {
         self.scoped(|this| {
             if let Some(label) = label {
-                this.block_label_names.define(
-                    label.name,
-                    (owner, allows_continue),
-                    |_| unreachable!(),
-                );
+                this.block_label_names
+                    .define(label.name, owner, |_| unreachable!());
             }
 
             let prev_block = {
-                let value = this.innermost_continuable_block;
+                let value = this.innermost_block;
 
                 mem::replace(
-                    &mut this.innermost_continuable_block,
-                    match allows_continue {
-                        AllowsContinue::Yes => Some(owner),
-                        AllowsContinue::No => value,
+                    &mut this.innermost_block,
+                    if owner.kind.implicit_innermost() {
+                        Some(owner)
+                    } else {
+                        value
                     },
                 )
             };
 
             let res = this.lower_block_inner(block);
 
-            this.innermost_continuable_block = prev_block;
+            this.innermost_block = prev_block;
 
             res
         })
@@ -255,9 +252,11 @@ impl IntraItemLowerCtxt<'_> {
                 ExprKind::While(
                     this.lower_let_chain(cond),
                     this.lower_block_with_label(
-                        LabelledBlock(expr),
+                        LabelledBlock {
+                            target: expr,
+                            kind: LabelTargetKind::While,
+                        },
                         *label,
-                        AllowsContinue::Yes,
                         block,
                     ),
                 )
@@ -271,18 +270,22 @@ impl IntraItemLowerCtxt<'_> {
                 let iter = self.lower_expr(iter);
                 let pat = self.lower_pat(pat);
                 let body = self.lower_block_with_label(
-                    LabelledBlock(expr),
+                    LabelledBlock {
+                        target: expr,
+                        kind: LabelTargetKind::For,
+                    },
                     *label,
-                    AllowsContinue::Yes,
                     body,
                 );
 
                 ExprKind::ForLoop { pat, iter, body }
             }
             AstExprKind::Loop(block, label) => ExprKind::Loop(self.lower_block_with_label(
-                LabelledBlock(expr),
+                LabelledBlock {
+                    target: expr,
+                    kind: LabelTargetKind::Loop,
+                },
                 *label,
-                AllowsContinue::Yes,
                 block,
             )),
             AstExprKind::Match(scrutinee, arms) => ExprKind::Match(
@@ -290,9 +293,11 @@ impl IntraItemLowerCtxt<'_> {
                 Obj::new_iter(arms.iter().map(|arm| self.lower_match_arm(arm)), s),
             ),
             AstExprKind::Block(block, label) => ExprKind::Block(self.lower_block_with_label(
-                LabelledBlock(expr),
+                LabelledBlock {
+                    target: expr,
+                    kind: LabelTargetKind::Block,
+                },
                 *label,
-                AllowsContinue::No,
                 block,
             )),
             AstExprKind::Assign(lhs, rhs) => {
@@ -434,21 +439,55 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::AddrOf(muta, expr) => {
                 ExprKind::AddrOf(muta.as_muta(), self.lower_expr(expr))
             }
-            AstExprKind::Break(label, expr) => match self.lookup_label(ast.span, *label) {
-                Ok((label, _allows_continue)) => ExprKind::Break {
-                    label,
-                    expr: self.lower_opt_expr_or_unit(ast.span, expr.as_deref()),
-                },
+            AstExprKind::Break(label, value) => match self.lookup_label(ast.span, *label) {
+                Ok(label) => {
+                    if let Some(value) = &value
+                        && !label.kind.can_break_with_value()
+                    {
+                        Diag::span_err(
+                            value.span,
+                            format_args!(
+                                "cannot `break` with a value from {}",
+                                label.kind.a_what()
+                            ),
+                        )
+                        .child(LeafDiag::span_err(
+                            label.target.r(s).span,
+                            format_args!("{} the `break` points to", label.kind.what()),
+                        ))
+                        .emit();
+                    }
+
+                    ExprKind::Break {
+                        label,
+                        value: label.kind.can_break_with_value().then(|| {
+                            self.lower_opt_expr_or_unit(
+                                ast.span,
+                                value
+                                    .as_deref()
+                                    .filter(|_| label.kind.can_break_with_value()),
+                            )
+                        }),
+                    }
+                }
                 Err(err) => ExprKind::Error(err),
             },
             AstExprKind::Continue(label) => 'lower: {
-                let (label, allows_continue) = match self.lookup_label(ast.span, *label) {
+                let label = match self.lookup_label(ast.span, *label) {
                     Ok(v) => v,
                     Err(err) => break 'lower ExprKind::Error(err),
                 };
 
-                if allows_continue == AllowsContinue::No {
-                    Diag::span_err(ast.span, "cannot `continue` in this block").emit();
+                if !label.kind.can_continue() {
+                    Diag::span_err(
+                        ast.span,
+                        format_args!("cannot `continue` inside {}", label.kind.a_what()),
+                    )
+                    .child(LeafDiag::span_err(
+                        label.target.r(s).span,
+                        format_args!("{} the `continue` points to", label.kind.what()),
+                    ))
+                    .emit();
                 }
 
                 ExprKind::Continue(label)
