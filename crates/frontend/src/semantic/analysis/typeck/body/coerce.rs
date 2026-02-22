@@ -6,8 +6,8 @@ use crate::{
             attempt_deref_clobber_obligations,
         },
         syntax::{
-            Divergence, Expr, Mutability, Re, RelationMode, TraitClauseList, TraitParam, TraitSpec,
-            Ty, TyAndDivergence, TyKind, TyOrRe,
+            Divergence, Expr, Mutability, Re, RelationMode, SimpleTyKind, TraitClauseList,
+            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -105,6 +105,12 @@ impl BodyCtxt<'_, '_> {
         match target {
             CoercionResolution::Solid(solid) => {
                 for &(expr, actual) in exprs {
+                    let actual = self.ccx_mut().peel_ty_infer_var_after_poll(actual);
+
+                    if let TyKind::Simple(SimpleTyKind::Never) = actual.r(s) {
+                        continue;
+                    }
+
                     self.ccx_mut().oblige_ty_unifies_ty(
                         ClauseOrigin::root_report(ClauseOriginKind::Coercion {
                             expr_span: expr.r(s).span,
@@ -130,6 +136,10 @@ impl BodyCtxt<'_, '_> {
                     let output_ty = match CoercionPossibility::new(self, actual) {
                         CoercionPossibility::Solid(_) | CoercionPossibility::WideReference(_) => {
                             // Preserve the existing type.
+                            if let TyKind::Simple(SimpleTyKind::Never) = actual.r(s) {
+                                continue;
+                            }
+
                             actual
                         }
                         CoercionPossibility::ThinReference(_) => {
@@ -181,6 +191,12 @@ impl BodyCtxt<'_, '_> {
                 to_clauses,
             } => {
                 for &(expr, actual) in exprs {
+                    let actual = self.ccx_mut().peel_ty_infer_var_after_poll(actual);
+
+                    if let TyKind::Simple(SimpleTyKind::Never) = actual.r(s) {
+                        continue;
+                    }
+
                     self.ccx_mut().oblige_ty_meets_clauses(
                         &ClauseOrigin::root_report(ClauseOriginKind::Coercion {
                             expr_span: expr.r(s).span,
