@@ -625,7 +625,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 tcx.intern(TyKind::Reference(Re::Erased, mutability, pointee))
             }
             ExprKind::Break { label, expr } => todo!(),
-            ExprKind::Continue { label } => todo!(),
+            ExprKind::Continue(label) => todo!(),
             ExprKind::Return(rv) => {
                 if let Some(rv) = rv {
                     _ = self.check_expr_demand(rv, self.return_ty);

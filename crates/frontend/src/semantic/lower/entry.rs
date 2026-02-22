@@ -14,7 +14,7 @@ use crate::{
             AstStructKind, AstStructRest, AstTraitClauseList, AstTreePath, AstTreePathKind, AstTy,
             AstVisibility, AstVisibilityKind,
         },
-        token::{Ident, Lifetime},
+        token::Ident,
     },
     semantic::{
         analysis::TyCtxt,
@@ -28,9 +28,9 @@ use crate::{
         syntax::{
             AdtCtor, AdtCtorField, AdtCtorFieldIdx, AdtCtorOwner, AdtCtorSyntax, AdtEnumVariant,
             AdtEnumVariantIdx, AdtItem, AdtKind, AdtKindEnum, AdtKindStruct, AnyGeneric, Crate,
-            EnumVariantItem, Expr, FnArg, FnDef, FnDefOwner, FnItem, FnLocal, GenericBinder,
-            ImplItem, Item, ItemKind, LangItems, ModuleItem, RegionGeneric, SpannedTy, TraitItem,
-            TyKind, TypeAliasItem, TypeGeneric, Visibility,
+            EnumVariantItem, FnArg, FnDef, FnDefOwner, FnItem, FnLocal, GenericBinder, ImplItem,
+            Item, ItemKind, LabelledBlock, LangItems, ModuleItem, RegionGeneric, SpannedTy,
+            TraitItem, TyKind, TypeAliasItem, TypeGeneric, Visibility,
         },
     },
     symbol,
@@ -125,8 +125,9 @@ impl TyCtxt {
                 target,
                 generic_ty_names: NameResolver::new(),
                 generic_re_names: NameResolver::new(),
-                block_label_names: NameResolver::new(),
                 func_local_names: NameResolver::new(),
+                block_label_names: NameResolver::new(),
+                innermost_continuable_block: None,
             });
         }
 
@@ -1197,22 +1198,18 @@ pub struct IntraItemLowerCtxt<'tcx> {
     pub target: Obj<Item>,
     pub generic_ty_names: NameResolver<Obj<TypeGeneric>>,
     pub generic_re_names: NameResolver<Obj<RegionGeneric>>,
-    pub block_label_names: NameResolver<(Span, Obj<Expr>)>,
     pub func_local_names: NameResolver<Obj<FnLocal>>,
+    pub block_label_names: NameResolver<(LabelledBlock, AllowsContinue)>,
+    pub innermost_continuable_block: Option<LabelledBlock>,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum AllowsContinue {
+    Yes,
+    No,
 }
 
 impl IntraItemLowerCtxt<'_> {
-    pub fn lookup_label(&mut self, label: Option<Lifetime>) -> Option<Obj<Expr>> {
-        let label = label?;
-        let resolved = self.block_label_names.lookup(label.name).map(|v| v.1);
-
-        if resolved.is_none() {
-            Diag::span_err(label.span, "block label not found").emit();
-        }
-
-        resolved
-    }
-
     pub fn scoped<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
         self.generic_ty_names.push_rib();
         self.generic_re_names.push_rib();

@@ -14,16 +14,16 @@ use crate::{
     },
     semantic::{
         lower::{
-            entry::IntraItemLowerCtxt,
+            entry::{AllowsContinue, IntraItemLowerCtxt},
             func::{
                 pat::PatOrRest,
                 path::{PathResolvedFnLit, PathResolvedLocal, PathResolvedValue},
             },
         },
         syntax::{
-            AdtCtor, AdtCtorFieldIdx, AdtCtorSyntax, Block, Expr, ExprKind, LetStmt, MatchArm, Pat,
-            PatKind, PatListFrontAndTail, RangeExpr, SpannedTyOrReList, Stmt, StructExpr,
-            StructNamedField,
+            AdtCtor, AdtCtorFieldIdx, AdtCtorSyntax, Block, Expr, ExprKind, LabelledBlock, LetStmt,
+            MatchArm, Pat, PatKind, PatListFrontAndTail, RangeExpr, SpannedTyOrReList, Stmt,
+            StructExpr, StructNamedField,
         },
     },
     utils::{
@@ -32,24 +32,65 @@ use crate::{
     },
 };
 use hashbrown::hash_map;
-use std::fmt;
+use std::{fmt, mem};
 
 // === Body lowering === //
 
 impl IntraItemLowerCtxt<'_> {
+    pub fn lookup_label(
+        &mut self,
+        expr_span: Span,
+        label: Option<Lifetime>,
+    ) -> Result<(LabelledBlock, AllowsContinue), ErrorGuaranteed> {
+        let Some(label) = label else {
+            return match self.innermost_continuable_block {
+                Some(block) => Ok((block, AllowsContinue::Yes)),
+                None => Err(Diag::span_err(expr_span, "no parent block").emit()),
+            };
+        };
+
+        let resolved = self.block_label_names.lookup(label.name);
+
+        let Some(&resolved) = resolved else {
+            return Err(Diag::span_err(label.span, "block label not found").emit());
+        };
+
+        Ok(resolved)
+    }
+
     pub fn lower_block_with_label(
         &mut self,
         owner: Obj<Expr>,
         label: Option<Lifetime>,
+        allows_continue: AllowsContinue,
         block: &AstBlock,
     ) -> Obj<Block> {
         self.scoped(|this| {
             if let Some(label) = label {
-                this.block_label_names
-                    .define(label.name, (label.span, owner), |_| unreachable!());
+                this.block_label_names.define(
+                    label.name,
+                    (LabelledBlock(owner), allows_continue),
+                    |_| unreachable!(),
+                );
             }
 
-            this.lower_block_inner(block)
+            let prev_block = {
+                let value = this.innermost_continuable_block;
+
+                mem::replace(
+                    &mut this.innermost_continuable_block,
+                    match allows_continue {
+                        AllowsContinue::Yes => Some(LabelledBlock(owner)),
+                        AllowsContinue::No => value,
+                    },
+                )
+            };
+
+            let res = this.lower_block_inner(block);
+
+            this.innermost_continuable_block = prev_block;
+
+            res
         })
     }
 
@@ -194,7 +235,7 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::While { cond, block, label } => self.scoped(|this| {
                 ExprKind::While(
                     this.lower_let_chain(cond),
-                    this.lower_block_with_label(expr, *label, block),
+                    this.lower_block_with_label(expr, *label, AllowsContinue::Yes, block),
                 )
             }),
             AstExprKind::ForLoop {
@@ -205,20 +246,26 @@ impl IntraItemLowerCtxt<'_> {
             } => {
                 let iter = self.lower_expr(iter);
                 let pat = self.lower_pat(pat);
-                let body = self.lower_block_with_label(expr, *label, body);
+                let body = self.lower_block_with_label(expr, *label, AllowsContinue::Yes, body);
 
                 ExprKind::ForLoop { pat, iter, body }
             }
-            AstExprKind::Loop(block, label) => {
-                ExprKind::Loop(self.lower_block_with_label(expr, *label, block))
-            }
+            AstExprKind::Loop(block, label) => ExprKind::Loop(self.lower_block_with_label(
+                expr,
+                *label,
+                AllowsContinue::Yes,
+                block,
+            )),
             AstExprKind::Match(scrutinee, arms) => ExprKind::Match(
                 self.lower_expr(scrutinee),
                 Obj::new_iter(arms.iter().map(|arm| self.lower_match_arm(arm)), s),
             ),
-            AstExprKind::Block(block, label) => {
-                ExprKind::Block(self.lower_block_with_label(expr, *label, block))
-            }
+            AstExprKind::Block(block, label) => ExprKind::Block(self.lower_block_with_label(
+                expr,
+                *label,
+                AllowsContinue::No,
+                block,
+            )),
             AstExprKind::Assign(lhs, rhs) => {
                 ExprKind::Assign(self.lower_lvalue(lhs), self.lower_expr(rhs))
             }
@@ -358,13 +405,25 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::AddrOf(muta, expr) => {
                 ExprKind::AddrOf(muta.as_muta(), self.lower_expr(expr))
             }
-            AstExprKind::Break(label, expr) => ExprKind::Break {
-                label: self.lookup_label(*label),
-                expr: self.lower_opt_expr(expr.as_deref()),
+            AstExprKind::Break(label, expr) => match self.lookup_label(ast.span, *label) {
+                Ok((label, _allows_continue)) => ExprKind::Break {
+                    label,
+                    expr: self.lower_opt_expr(expr.as_deref()),
+                },
+                Err(err) => ExprKind::Error(err),
             },
-            AstExprKind::Continue(label) => ExprKind::Continue {
-                label: self.lookup_label(*label),
-            },
+            AstExprKind::Continue(label) => 'lower: {
+                let (label, allows_continue) = match self.lookup_label(ast.span, *label) {
+                    Ok(v) => v,
+                    Err(err) => break 'lower ExprKind::Error(err),
+                };
+
+                if allows_continue == AllowsContinue::No {
+                    Diag::span_err(ast.span, "cannot `continue` in this block").emit();
+                }
+
+                ExprKind::Continue(label)
+            }
             AstExprKind::Return(expr) => ExprKind::Return(self.lower_opt_expr(expr.as_deref())),
             AstExprKind::Struct(path, fields, rest) => 'path: {
                 let res = match self.resolve_expr_path(path).fail_on_unbound_local() {
