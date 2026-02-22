@@ -219,7 +219,11 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         let output = if let Some(last_expr) = block.r(s).last_expr {
             self.check_expr(last_expr).and_do(&mut divergence)
         } else {
-            tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
+            if divergence.must_diverge() {
+                tcx.intern(TyKind::Simple(SimpleTyKind::Never))
+            } else {
+                tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
+            }
         };
 
         TyAndDivergence::new(output, divergence)
@@ -639,11 +643,19 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 }
 
                 divergence = Divergence::MustDiverge;
-                tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
+                tcx.intern(TyKind::Simple(SimpleTyKind::Never))
             }
             ExprKind::Struct(StructExpr { ctor, fields, rest }) => todo!(),
             ExprKind::Error(err) => tcx.intern(TyKind::Error(err)),
         };
+
+        // Matches Rustc behavior—we don't mark a subsequent expression as unreachable unless the
+        // primitive `Never` type is returned.
+        if let TyKind::Simple(SimpleTyKind::Never) =
+            self.ccx_mut().peel_ty_infer_var_after_poll(ty).r(s)
+        {
+            divergence = Divergence::MustDiverge;
+        }
 
         TyAndDivergence::new(ty, divergence)
     }

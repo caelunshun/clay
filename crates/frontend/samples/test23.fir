@@ -38,13 +38,21 @@ pub struct Vec<T> {
 }
 
 impl<T> Vec<T> {
-    pub fn new() -> Self {}
+    pub fn new() -> Self {
+        todo()
+    }
 
-    pub fn push<'a: &shorter Self>(me: &'a mut Self, value: T) {}
+    pub fn push<'a: &shorter Self>(me: &'a mut Self, value: T) {
+        todo()
+    }
 
-    pub fn clear<'a: &shorter Self>(me: &'a mut Self) {}
+    pub fn clear<'a: &shorter Self>(me: &'a mut Self) {
+        todo()
+    }
 
-    pub fn get<'a: &shorter Self>(me: &'a Self, idx: u32) -> &'a T {}
+    pub fn get<'a: &shorter Self>(me: &'a Self, idx: u32) -> &'a T {
+        todo()
+    }
 }
 
 impl<T> std::Index<u32> for Vec<T> {
@@ -52,14 +60,22 @@ impl<T> std::Index<u32> for Vec<T> {
 }
 
 impl<T: Clone> Clone for Vec<T> {
-    fn clone<'a: &shorter Self>(me: &'a Self) -> Self {}
+    fn clone<'a: &shorter Self>(me: &'a Self) -> Self {
+        todo()
+    }
 }
 
 impl Clone for () {
-    fn clone<'a: &shorter Self>(me: &'a Self) -> Self {}
+    fn clone<'a: &shorter Self>(me: &'a Self) -> Self {
+        todo()
+    }
 }
 
-fn make_vec<T>() -> Vec<T> {}
+fn make_vec<T>() -> Vec<T> {
+    todo()
+}
+
+fn todo() -> Never {}
 
 fn main() {
     let vec = ().make::<_>();
@@ -73,9 +89,11 @@ fn main() {
 }
 
 pub trait MakeVec {
-    fn make<T>(me: Self) -> Vec<T> {}
+    fn make<T>(me: Self) -> Vec<T>;
 }
 
 impl MakeVec for () {
-    fn make<T>(me: Self) -> Vec<T> {}
+    fn make<T>(me: Self) -> Vec<T> {
+        todo();
+    }
 }
