@@ -20,8 +20,8 @@ use crate::{
             Stmt, StructExpr, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
+    utils::hash::FxHashMap,
 };
-use rustc_hash::FxHashMap;
 
 // === Driver === //
 
@@ -85,7 +85,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
                 bcx.check_pat_and_ascription(arg.pat, Some(arg.ty));
             }
 
-            _ = bcx.check_expr_demand(body, bcx.return_ty);
+            bcx.check_expr_demand(body, bcx.return_ty).ignore();
 
             ccx_body.verify();
         }
@@ -315,8 +315,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 }
 
                 for (&actual, &expected) in actual_args.r(s).iter().zip(expected_args.r(s)) {
-                    _ = self
-                        .check_expr_demand(actual, expected)
+                    self.check_expr_demand(actual, expected)
                         .and_do(&mut divergence);
                 }
 
@@ -428,8 +427,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 }
 
                 for (&actual, &expected) in args.r(s).iter().zip(expected_args) {
-                    _ = self
-                        .check_expr_demand(actual, expected)
+                    self.check_expr_demand(actual, expected)
                         .and_do(&mut divergence);
                 }
 
@@ -574,7 +572,43 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                 tcx.intern(TyKind::Simple(SimpleTyKind::Bool))
             }
-            ExprKind::ForLoop { pat, iter, body } => todo!(),
+            ExprKind::ForLoop { pat, iter, body } => {
+                let iter_ty = self.check_expr(iter).and_do(&mut divergence);
+                let elem_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
+                let into_iter_trait = self.krate().r(s).lang_items.into_iterator_trait().unwrap();
+
+                self.ccx_mut().oblige_ty_meets_trait_instantiated(
+                    ClauseOrigin::root_report(ClauseOriginKind::ForLoopIter {
+                        iter_span: iter.r(s).span,
+                    }),
+                    HrtbUniverse::ROOT,
+                    iter_ty,
+                    TraitSpec {
+                        def: into_iter_trait,
+                        params: tcx.intern_list(&[
+                            TraitParam::Unspecified(tcx.intern_list(&[])),
+                            TraitParam::Equals(TyOrRe::Ty(elem_ty)),
+                        ]),
+                    },
+                );
+
+                let pat_ty = self.type_of_pat(pat, Some(&mut divergence));
+
+                self.ccx_mut().oblige_ty_unifies_ty(
+                    ClauseOrigin::root_report(ClauseOriginKind::ForLoopPat {
+                        iter_span: iter.r(s).span,
+                        pat_span: pat.r(s).span,
+                    }),
+                    pat_ty,
+                    elem_ty,
+                    RelationMode::Equate,
+                );
+
+                self.labelled_exprs.insert(LabelledBlock(expr), None);
+                self.check_block_with_no_final_expr(body);
+
+                tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
+            }
             ExprKind::Loop(block) => {
                 self.labelled_exprs.insert(LabelledBlock(expr), None);
                 self.check_block_with_no_final_expr(block);
@@ -667,13 +701,13 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     .unwrap()
                     .get_or_insert_with(|| self.ccx.fresh_ty_infer(HrtbUniverse::ROOT));
 
-                _ = self.check_expr_demand(expr, demand);
+                self.check_expr_demand(expr, demand).ignore();
 
                 tcx.intern(TyKind::Simple(SimpleTyKind::Never))
             }
             ExprKind::Continue(_label) => tcx.intern(TyKind::Simple(SimpleTyKind::Never)),
             ExprKind::Return(rv) => {
-                _ = self.check_expr_demand(rv, self.return_ty);
+                self.check_expr_demand(rv, self.return_ty).ignore();
                 tcx.intern(TyKind::Simple(SimpleTyKind::Never))
             }
             ExprKind::Struct(StructExpr { ctor, fields, rest }) => todo!(),

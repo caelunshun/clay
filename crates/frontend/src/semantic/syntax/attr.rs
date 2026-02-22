@@ -163,4 +163,6 @@ define_lang_items! {
     fn_once_trait => TraitValidator;
     fn_trait => TraitValidator;
     index_trait => TraitValidator;
+    iterator_trait => TraitValidator;
+    into_iterator_trait => TraitValidator;
 }
