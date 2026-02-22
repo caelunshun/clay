@@ -222,10 +222,10 @@ pub enum ExprKind {
     AddrOf(Mutability, Obj<Expr>),
     Break {
         label: LabelledBlock,
-        expr: Option<Obj<Expr>>,
+        expr: Obj<Expr>,
     },
     Continue(LabelledBlock),
-    Return(Option<Obj<Expr>>),
+    Return(Obj<Expr>),
     Struct(StructExpr),
     Error(ErrorGuaranteed),
 }

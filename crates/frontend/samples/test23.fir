@@ -76,7 +76,7 @@ fn make_vec<T>() -> Vec<T> {
 }
 
 fn todo() -> Never {
-    todo();
+    loop {}
 }
 
 fn main() {
