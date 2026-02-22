@@ -641,14 +641,12 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         self.check_expr(last_expr).and_do(&mut divergence)
                     }
                 } else {
-                    if divergence.must_diverge() {
+                    if let Some(demand) = self.block_break_demands[&label] {
+                        demand
+                    } else if divergence.must_diverge() {
                         tcx.intern(TyKind::Simple(SimpleTyKind::Never))
                     } else {
-                        if let Some(demand) = self.block_break_demands[&label] {
-                            demand
-                        } else {
-                            tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
-                        }
+                        tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
                     }
                 }
             }
