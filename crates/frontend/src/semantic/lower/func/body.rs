@@ -60,7 +60,7 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn lower_block_with_label(
         &mut self,
-        owner: Obj<Expr>,
+        owner: LabelledBlock,
         label: Option<Lifetime>,
         allows_continue: AllowsContinue,
         block: &AstBlock,
@@ -69,7 +69,7 @@ impl IntraItemLowerCtxt<'_> {
             if let Some(label) = label {
                 this.block_label_names.define(
                     label.name,
-                    (LabelledBlock(owner), allows_continue),
+                    (owner, allows_continue),
                     |_| unreachable!(),
                 );
             }
@@ -80,7 +80,7 @@ impl IntraItemLowerCtxt<'_> {
                 mem::replace(
                     &mut this.innermost_continuable_block,
                     match allows_continue {
-                        AllowsContinue::Yes => Some(LabelledBlock(owner)),
+                        AllowsContinue::Yes => Some(owner),
                         AllowsContinue::No => value,
                     },
                 )
@@ -179,6 +179,25 @@ impl IntraItemLowerCtxt<'_> {
         expr.map(|v| self.lower_expr(v))
     }
 
+    pub fn lower_opt_expr_or_unit(
+        &mut self,
+        parent_span: Span,
+        expr: Option<&AstExpr>,
+    ) -> Obj<Expr> {
+        let s = &self.tcx.session;
+
+        match expr {
+            Some(expr) => self.lower_expr(expr),
+            None => Obj::new(
+                Expr {
+                    span: parent_span,
+                    kind: LateInit::new(ExprKind::Tuple(Obj::new_slice(&[], s))),
+                },
+                s,
+            ),
+        }
+    }
+
     pub fn lower_expr(&mut self, ast: &AstExpr) -> Obj<Expr> {
         let s = &self.tcx.session;
 
@@ -235,7 +254,12 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::While { cond, block, label } => self.scoped(|this| {
                 ExprKind::While(
                     this.lower_let_chain(cond),
-                    this.lower_block_with_label(expr, *label, AllowsContinue::Yes, block),
+                    this.lower_block_with_label(
+                        LabelledBlock(expr),
+                        *label,
+                        AllowsContinue::Yes,
+                        block,
+                    ),
                 )
             }),
             AstExprKind::ForLoop {
@@ -246,12 +270,17 @@ impl IntraItemLowerCtxt<'_> {
             } => {
                 let iter = self.lower_expr(iter);
                 let pat = self.lower_pat(pat);
-                let body = self.lower_block_with_label(expr, *label, AllowsContinue::Yes, body);
+                let body = self.lower_block_with_label(
+                    LabelledBlock(expr),
+                    *label,
+                    AllowsContinue::Yes,
+                    body,
+                );
 
                 ExprKind::ForLoop { pat, iter, body }
             }
             AstExprKind::Loop(block, label) => ExprKind::Loop(self.lower_block_with_label(
-                expr,
+                LabelledBlock(expr),
                 *label,
                 AllowsContinue::Yes,
                 block,
@@ -261,7 +290,7 @@ impl IntraItemLowerCtxt<'_> {
                 Obj::new_iter(arms.iter().map(|arm| self.lower_match_arm(arm)), s),
             ),
             AstExprKind::Block(block, label) => ExprKind::Block(self.lower_block_with_label(
-                expr,
+                LabelledBlock(expr),
                 *label,
                 AllowsContinue::No,
                 block,
@@ -408,7 +437,7 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::Break(label, expr) => match self.lookup_label(ast.span, *label) {
                 Ok((label, _allows_continue)) => ExprKind::Break {
                     label,
-                    expr: self.lower_opt_expr(expr.as_deref()),
+                    expr: self.lower_opt_expr_or_unit(ast.span, expr.as_deref()),
                 },
                 Err(err) => ExprKind::Error(err),
             },
@@ -424,7 +453,9 @@ impl IntraItemLowerCtxt<'_> {
 
                 ExprKind::Continue(label)
             }
-            AstExprKind::Return(expr) => ExprKind::Return(self.lower_opt_expr(expr.as_deref())),
+            AstExprKind::Return(expr) => {
+                ExprKind::Return(self.lower_opt_expr_or_unit(ast.span, expr.as_deref()))
+            }
             AstExprKind::Struct(path, fields, rest) => 'path: {
                 let res = match self.resolve_expr_path(path).fail_on_unbound_local() {
                     Ok(v) => v,

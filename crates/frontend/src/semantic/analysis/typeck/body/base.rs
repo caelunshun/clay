@@ -15,9 +15,9 @@ use crate::{
         lower::generics::normalize_positional_generic_arity,
         syntax::{
             Block, Crate, Divergence, Expr, ExprKind, FnDef, FnInstanceInner, FnLocal,
-            InferTyPermSet, InferTyVar, Item, Pat, PatKind, Re, RelationMode, SimpleTyKind,
-            SpannedFnInstanceView, SpannedFnOwnerView, SpannedTy, SpannedTyView, Stmt, StructExpr,
-            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            InferTyPermSet, InferTyVar, Item, LabelledBlock, Pat, PatKind, Re, RelationMode,
+            SimpleTyKind, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTy, SpannedTyView,
+            Stmt, StructExpr, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -101,6 +101,7 @@ pub struct BodyCtxt<'a, 'tcx> {
     pub def: Obj<FnDef>,
     pub import_env: ClauseImportEnvRef<'a>,
     pub local_types: FxHashMap<Obj<FnLocal>, Ty>,
+    pub labelled_exprs: FxHashMap<LabelledBlock, Option<Ty>>,
     pub needs_infer: Vec<NeedsInfer>,
     pub return_ty: Ty,
 }
@@ -132,6 +133,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             def,
             import_env,
             local_types: FxHashMap::default(),
+            labelled_exprs: FxHashMap::default(),
             needs_infer: Vec::new(),
             return_ty,
         }
@@ -186,28 +188,42 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         })
     }
 
-    pub fn check_block(&mut self, block: Obj<Block>) -> TyAndDivergence {
+    pub fn check_block_with_no_final_expr(&mut self, block: Obj<Block>) -> Divergence {
         let s = self.session();
-        let tcx = self.tcx();
 
         let mut divergence = Divergence::MayDiverge;
+        self.check_block_stmts(&block.r(s).stmts, &mut divergence);
 
-        for stmt in &block.r(s).stmts {
+        if let Some(last_expr) = block.r(s).last_expr {
+            Diag::span_err(
+                last_expr.r(s).span,
+                "trailing block expression not expected",
+            )
+            .emit();
+        }
+
+        divergence
+    }
+
+    pub fn check_block_stmts(&mut self, stmts: &[Stmt], divergence: &mut Divergence) {
+        let s = self.session();
+
+        for stmt in stmts {
             match stmt {
                 Stmt::Expr(expr) => {
-                    self.check_expr(*expr).and_do(&mut divergence);
+                    self.check_expr(*expr).and_do(divergence);
                 }
                 Stmt::Let(stmt) => {
                     let pat_ty = self.check_pat_and_ascription(stmt.r(s).pat, stmt.r(s).ascription);
 
                     if let Some(init) = stmt.r(s).init {
-                        self.check_expr_demand(init, pat_ty).and_do(&mut divergence);
+                        self.check_expr_demand(init, pat_ty).and_do(divergence);
                     }
 
                     if let Some(else_clause) = stmt.r(s).else_clause {
-                        let block = self.check_block(else_clause);
+                        let divergence = self.check_block_with_no_final_expr(else_clause);
 
-                        if block.divergence != Divergence::MustDiverge {
+                        if divergence != Divergence::MustDiverge {
                             Diag::span_err(else_clause.r(s).span, "`else` block must diverge")
                                 .emit();
                         }
@@ -215,18 +231,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 }
             }
         }
-
-        let output = if let Some(last_expr) = block.r(s).last_expr {
-            self.check_expr(last_expr).and_do(&mut divergence)
-        } else {
-            if divergence.must_diverge() {
-                tcx.intern(TyKind::Simple(SimpleTyKind::Never))
-            } else {
-                tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
-            }
-        };
-
-        TyAndDivergence::new(output, divergence)
     }
 
     pub fn check_pat_and_ascription(&mut self, pat: Obj<Pat>, ascription: Option<SpannedTy>) -> Ty {
@@ -559,7 +563,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 self.check_expr_demand(cond, tcx.intern(TyKind::Simple(SimpleTyKind::Bool)))
                     .and_do(&mut divergence);
 
-                _ = self.check_block(block);
+                self.labelled_exprs.insert(LabelledBlock(expr), None);
+                self.check_block_with_no_final_expr(block);
 
                 tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
             }
@@ -570,9 +575,40 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 tcx.intern(TyKind::Simple(SimpleTyKind::Bool))
             }
             ExprKind::ForLoop { pat, iter, body } => todo!(),
-            ExprKind::Loop(block) => todo!(),
+            ExprKind::Loop(block) => {
+                self.labelled_exprs.insert(LabelledBlock(expr), None);
+                self.check_block_with_no_final_expr(block);
+
+                if let Some(break_ty) = self.labelled_exprs[&LabelledBlock(expr)] {
+                    break_ty
+                } else {
+                    tcx.intern(TyKind::Simple(SimpleTyKind::Never))
+                }
+            }
             ExprKind::Match(obj, obj1) => todo!(),
-            ExprKind::Block(block) => self.check_block(block).and_do(&mut divergence),
+            ExprKind::Block(block) => {
+                self.labelled_exprs.insert(LabelledBlock(expr), None);
+                self.check_block_stmts(&block.r(s).stmts, &mut divergence);
+
+                if let Some(last_expr) = block.r(s).last_expr {
+                    if let Some(demand) = self.labelled_exprs[&LabelledBlock(expr)] {
+                        self.check_expr_demand(last_expr, demand)
+                            .and_do(&mut divergence)
+                    } else {
+                        self.check_expr(last_expr).and_do(&mut divergence)
+                    }
+                } else {
+                    if divergence.must_diverge() {
+                        tcx.intern(TyKind::Simple(SimpleTyKind::Never))
+                    } else {
+                        if let Some(demand) = self.labelled_exprs[&LabelledBlock(expr)] {
+                            demand
+                        } else {
+                            tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
+                        }
+                    }
+                }
+            }
             ExprKind::Assign(pat, expr) => {
                 let pat_ty = self.type_of_pat(pat, Some(&mut divergence));
                 self.check_expr_demand(expr, pat_ty).and_do(&mut divergence)
@@ -624,25 +660,20 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let pointee = self.check_expr(pointee).and_do(&mut divergence);
                 tcx.intern(TyKind::Reference(Re::Erased, mutability, pointee))
             }
-            ExprKind::Break { label, expr } => todo!(),
-            ExprKind::Continue(label) => todo!(),
+            ExprKind::Break { label, expr } => {
+                let demand = *self
+                    .labelled_exprs
+                    .get_mut(&label)
+                    .unwrap()
+                    .get_or_insert_with(|| self.ccx.fresh_ty_infer(HrtbUniverse::ROOT));
+
+                _ = self.check_expr_demand(expr, demand);
+
+                tcx.intern(TyKind::Simple(SimpleTyKind::Never))
+            }
+            ExprKind::Continue(_label) => tcx.intern(TyKind::Simple(SimpleTyKind::Never)),
             ExprKind::Return(rv) => {
-                if let Some(rv) = rv {
-                    _ = self.check_expr_demand(rv, self.return_ty);
-                } else {
-                    let return_ty = self.return_ty;
-
-                    self.ccx_mut().oblige_ty_unifies_ty(
-                        ClauseOrigin::root_report(ClauseOriginKind::ReturnUnit {
-                            span: expr.r(s).span,
-                        }),
-                        return_ty,
-                        tcx.intern(TyKind::Tuple(tcx.intern_list(&[]))),
-                        RelationMode::Equate,
-                    );
-                }
-
-                divergence = Divergence::MustDiverge;
+                _ = self.check_expr_demand(rv, self.return_ty);
                 tcx.intern(TyKind::Simple(SimpleTyKind::Never))
             }
             ExprKind::Struct(StructExpr { ctor, fields, rest }) => todo!(),
