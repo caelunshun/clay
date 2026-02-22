@@ -2,7 +2,7 @@ use crate::{
     base::{
         ErrorGuaranteed, Session,
         arena::{LateInit, Obj},
-        syntax::Span,
+        syntax::{Span, Symbol},
     },
     parse::{
         ast::{AstAssignOpKind, AstBinOpSpanned, AstLit, AstRangeLimits, AstUnOpKind},
@@ -12,6 +12,7 @@ use crate::{
         AdtCtorFieldIdx, AdtCtorInstance, GenericBinder, ImplItem, Item, Mutability,
         SpannedTraitSpec, SpannedTy, SpannedTyOrReList, TraitItem, Ty, Visibility,
     },
+    symbol,
 };
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 
@@ -222,7 +223,7 @@ pub enum ExprKind {
     AddrOf(Mutability, Obj<Expr>),
     Break {
         label: LabelledBlock,
-        expr: Obj<Expr>,
+        value: Option<Obj<Expr>>,
     },
     Continue(LabelledBlock),
     Return(Obj<Expr>),
@@ -231,7 +232,59 @@ pub enum ExprKind {
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct LabelledBlock(pub Obj<Expr>);
+pub struct LabelledBlock {
+    pub target: Obj<Expr>,
+    pub kind: LabelTargetKind,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum LabelTargetKind {
+    Loop,
+    While,
+    For,
+    Block,
+}
+
+impl LabelTargetKind {
+    pub fn implicit_innermost(self) -> bool {
+        match self {
+            LabelTargetKind::Loop | LabelTargetKind::While | LabelTargetKind::For => true,
+            LabelTargetKind::Block => false,
+        }
+    }
+
+    pub fn can_break_with_value(self) -> bool {
+        match self {
+            LabelTargetKind::Loop | LabelTargetKind::Block => true,
+            LabelTargetKind::While | LabelTargetKind::For => false,
+        }
+    }
+
+    pub fn can_continue(self) -> bool {
+        match self {
+            LabelTargetKind::Loop | LabelTargetKind::While | LabelTargetKind::For => true,
+            LabelTargetKind::Block => false,
+        }
+    }
+
+    pub fn what(self) -> Symbol {
+        match self {
+            LabelTargetKind::Loop => symbol!("`loop`"),
+            LabelTargetKind::While => symbol!("`while` loop"),
+            LabelTargetKind::For => symbol!("`for` loop"),
+            LabelTargetKind::Block => symbol!("named block"),
+        }
+    }
+
+    pub fn a_what(self) -> Symbol {
+        match self {
+            LabelTargetKind::Loop => symbol!("a `loop`"),
+            LabelTargetKind::While => symbol!("a `while` loop"),
+            LabelTargetKind::For => symbol!("a `for` loop"),
+            LabelTargetKind::Block => symbol!("a named block"),
+        }
+    }
+}
 
 #[derive(Debug, Copy, Clone)]
 pub struct RangeExpr {

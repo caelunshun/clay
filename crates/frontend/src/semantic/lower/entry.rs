@@ -127,7 +127,7 @@ impl TyCtxt {
                 generic_re_names: NameResolver::new(),
                 func_local_names: NameResolver::new(),
                 block_label_names: NameResolver::new(),
-                innermost_continuable_block: None,
+                innermost_block: None,
             });
         }
 
@@ -1199,14 +1199,8 @@ pub struct IntraItemLowerCtxt<'tcx> {
     pub generic_ty_names: NameResolver<Obj<TypeGeneric>>,
     pub generic_re_names: NameResolver<Obj<RegionGeneric>>,
     pub func_local_names: NameResolver<Obj<FnLocal>>,
-    pub block_label_names: NameResolver<(LabelledBlock, AllowsContinue)>,
-    pub innermost_continuable_block: Option<LabelledBlock>,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum AllowsContinue {
-    Yes,
-    No,
+    pub block_label_names: NameResolver<LabelledBlock>,
+    pub innermost_block: Option<LabelledBlock>,
 }
 
 impl IntraItemLowerCtxt<'_> {
