@@ -95,8 +95,6 @@ impl BodyCtxt<'_, '_> {
         TyAndDivergence::new(demand, divergence)
     }
 
-    // TODO: Save the coercions to a fact map
-    // TODO: Check mutabilities
     fn apply_coercions(&mut self, exprs: &[(Obj<Expr>, Ty)], target: CoercionResolution) -> Ty {
         let s = self.session();
         let tcx = self.tcx();
@@ -142,13 +140,18 @@ impl BodyCtxt<'_, '_> {
 
                             actual
                         }
-                        CoercionPossibility::ThinReference(_) => {
+                        CoercionPossibility::ThinReference(_) => 'coerce: {
                             let deref_step_count = *deref_steps.next().unwrap();
 
-                            let TyKind::Reference(_re, _muta, mut output_pointee) = *actual.r(s)
+                            let TyKind::Reference(_re, from_muta, mut output_pointee) =
+                                *actual.r(s)
                             else {
                                 unreachable!()
                             };
+
+                            if to_muta > from_muta {
+                                break 'coerce actual;
+                            }
 
                             for _ in 0..deref_step_count {
                                 let next_output = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);

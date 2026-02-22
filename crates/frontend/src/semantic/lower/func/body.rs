@@ -451,7 +451,7 @@ impl IntraItemLowerCtxt<'_> {
                                 label.kind.a_what()
                             ),
                         )
-                        .child(LeafDiag::span_err(
+                        .child(LeafDiag::span_note(
                             label.target.r(s).span,
                             format_args!("{} the `break` points to", label.kind.what()),
                         ))
@@ -483,7 +483,7 @@ impl IntraItemLowerCtxt<'_> {
                         ast.span,
                         format_args!("cannot `continue` inside {}", label.kind.a_what()),
                     )
-                    .child(LeafDiag::span_err(
+                    .child(LeafDiag::span_note(
                         label.target.r(s).span,
                         format_args!("{} the `continue` points to", label.kind.what()),
                     ))
