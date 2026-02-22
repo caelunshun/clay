@@ -12,6 +12,22 @@ pub mod std {
         type Target = T;
     }
 
+    #[lang("into_iterator_trait")]
+    pub trait IntoIterator {
+        type IntoIter: Iterator<Item = Item>;
+        type Item;
+    }
+
+    impl<I: Iterator> IntoIterator for I {
+        type IntoIter = I;
+        type Item = <I as Iterator>::Item;
+    }
+
+    #[lang("iterator_trait")]
+    pub trait Iterator {
+        type Item;
+    }
+
     #[lang("fn_once_trait")]
     pub trait FnOnce<I, O> {}
 
@@ -65,6 +81,10 @@ impl<T: Clone> Clone for Vec<T> {
     }
 }
 
+impl<'a: &shorter T, T> std::Iterator for &'a Vec<T> {
+    type Item = &'a T;
+}
+
 impl Clone for () {
     fn clone<'a: &shorter Self>(me: &'a Self) -> Self {
         todo()
@@ -88,6 +108,11 @@ fn main() {
 
     let vec2 = Clone::clone(&vec);
     vec2.push(());
+
+    for v in &vec2 {
+        let v2 = &();
+        v2 = v;
+    }
 }
 
 pub trait MakeVec {

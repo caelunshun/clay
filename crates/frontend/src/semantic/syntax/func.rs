@@ -275,6 +275,10 @@ impl TyAndDivergence {
         Self { ty, divergence }
     }
 
+    pub fn ignore(self) {
+        // (empty)
+    }
+
     pub fn and_do(self, divergence: &mut Divergence) -> Ty {
         *divergence &= self.divergence;
         self.ty
