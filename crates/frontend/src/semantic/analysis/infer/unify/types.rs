@@ -1,7 +1,7 @@
 use crate::{
     semantic::{
         analysis::{FloatingInferVar, HrtbUniverse, ObservedTyInferVar, TyCtxt},
-        syntax::{InferTyPermSet, InferTyVar, Ty, UniversalTyVar, UniversalTyVarSourceInfo},
+        syntax::{InferTyVar, SimpleTySet, Ty, UniversalTyVar, UniversalTyVarSourceInfo},
     },
     utils::hash::FxHashSet,
 };
@@ -29,7 +29,7 @@ enum DisjointTyInferRoot {
     Known(Ty),
     Floating {
         max_universe: HrtbUniverse,
-        perm_set: InferTyPermSet,
+        perm_set: SimpleTySet,
         observed: Vec<ObservedTyInferVar>,
     },
 }
@@ -91,7 +91,7 @@ impl TyUnifyTracker {
     pub fn fresh_infer_restricted(
         &mut self,
         max_universe: HrtbUniverse,
-        perm_set: InferTyPermSet,
+        perm_set: SimpleTySet,
     ) -> InferTyVar {
         let var = InferTyVar::from_usize(self.disjoint.len());
         self.disjoint.push(DisjointTyInferNode {
@@ -250,11 +250,14 @@ impl TyUnifyTracker {
         debug_assert!(new_root.is_none());
 
         lhs_observed.append(&mut rhs_observed);
+        _ = rhs_observed;
 
         let perm_set = lhs_perm_set.intersection(rhs_perm_set);
         debug_assert!(!perm_set.is_empty());
 
         if let Some(unique_ty) = perm_set.to_unique_type(tcx) {
+            self.observed_reveal_order.extend_from_slice(&lhs_observed);
+
             *new_root = Some(DisjointTyInferRoot::Known(unique_ty));
         } else {
             *new_root = Some(DisjointTyInferRoot::Floating {
@@ -262,6 +265,32 @@ impl TyUnifyTracker {
                 perm_set,
                 observed: lhs_observed,
             });
+        }
+    }
+
+    pub fn restrict_perm_set_of_floating(
+        &mut self,
+        tcx: &TyCtxt,
+        lhs: InferTyVar,
+        rhs: SimpleTySet,
+    ) {
+        let lhs_root = self.disjoint.root_of(lhs.index());
+
+        let Some(DisjointTyInferRoot::Floating {
+            perm_set, observed, ..
+        }) = &mut self.disjoint[lhs_root].root
+        else {
+            unreachable!()
+        };
+
+        let new_perm_set = perm_set.intersection(rhs);
+        debug_assert!(!new_perm_set.is_empty());
+
+        if let Some(unique_ty) = new_perm_set.to_unique_type(tcx) {
+            self.observed_reveal_order.extend_from_slice(observed);
+            self.disjoint[lhs_root].root = Some(DisjointTyInferRoot::Known(unique_ty));
+        } else {
+            *perm_set = new_perm_set;
         }
     }
 }

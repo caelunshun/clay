@@ -615,7 +615,7 @@ define_index_type! {
 
 bitflags::bitflags! {
     #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-    pub struct InferTyPermSet: u16 {
+    pub struct SimpleTySet: u16 {
         const OTHER = 1 << 0;
         const U8 = 1 << 1;
         const U16 = 1 << 2;
@@ -628,14 +628,21 @@ bitflags::bitflags! {
         const F32 = 1 << 9;
         const F64 = 1 << 10;
 
-        const UINT = Self::U8.bits() | Self::U16.bits() | Self::U32.bits() | Self::U64.bits();
-        const SINT = Self::I8.bits() | Self::I16.bits() | Self::I32.bits() | Self::I64.bits();
-        const ALL_INT = Self::UINT.bits() | Self::SINT.bits();
+        // Not used for inference. We just reuse the `InferTyPermSet` machinery to simplify
+        // arithmetic checking.
+        const BOOL = 1 << 11;
+        const CHAR = 1 << 12;
+
+        const UNSIGNED_INT = Self::U8.bits() | Self::U16.bits() | Self::U32.bits() | Self::U64.bits();
+        const SIGNED_INT = Self::I8.bits() | Self::I16.bits() | Self::I32.bits() | Self::I64.bits();
+        const INT = Self::UNSIGNED_INT.bits() | Self::SIGNED_INT.bits();
         const FLOAT = Self::F32.bits() | Self::F64.bits();
+        const NUM = Self::INT.bits() | Self::FLOAT.bits();
+        const SIGNED_NUM = Self::SIGNED_INT.bits() | Self::FLOAT.bits();
     }
 }
 
-impl InferTyPermSet {
+impl SimpleTySet {
     pub fn can_accept_type(self, ty: Ty, s: &Session) -> bool {
         match *ty.r(s) {
             TyKind::SigThis
@@ -644,20 +651,16 @@ impl InferTyPermSet {
             | TyKind::SigProject(_)
             | TyKind::SigAlias(_, _) => unreachable!(),
 
-            TyKind::Simple(SimpleTyKind::Uint(IntKind::S8)) => self.contains(InferTyPermSet::U8),
-            TyKind::Simple(SimpleTyKind::Uint(IntKind::S16)) => self.contains(InferTyPermSet::U16),
-            TyKind::Simple(SimpleTyKind::Uint(IntKind::S32)) => self.contains(InferTyPermSet::U32),
-            TyKind::Simple(SimpleTyKind::Uint(IntKind::S64)) => self.contains(InferTyPermSet::U64),
-            TyKind::Simple(SimpleTyKind::Int(IntKind::S8)) => self.contains(InferTyPermSet::I8),
-            TyKind::Simple(SimpleTyKind::Int(IntKind::S16)) => self.contains(InferTyPermSet::I16),
-            TyKind::Simple(SimpleTyKind::Int(IntKind::S32)) => self.contains(InferTyPermSet::I32),
-            TyKind::Simple(SimpleTyKind::Int(IntKind::S64)) => self.contains(InferTyPermSet::I64),
-            TyKind::Simple(SimpleTyKind::Float(FloatKind::S32)) => {
-                self.contains(InferTyPermSet::F32)
-            }
-            TyKind::Simple(SimpleTyKind::Float(FloatKind::S64)) => {
-                self.contains(InferTyPermSet::F64)
-            }
+            TyKind::Simple(SimpleTyKind::Uint(IntKind::S8)) => self.contains(SimpleTySet::U8),
+            TyKind::Simple(SimpleTyKind::Uint(IntKind::S16)) => self.contains(SimpleTySet::U16),
+            TyKind::Simple(SimpleTyKind::Uint(IntKind::S32)) => self.contains(SimpleTySet::U32),
+            TyKind::Simple(SimpleTyKind::Uint(IntKind::S64)) => self.contains(SimpleTySet::U64),
+            TyKind::Simple(SimpleTyKind::Int(IntKind::S8)) => self.contains(SimpleTySet::I8),
+            TyKind::Simple(SimpleTyKind::Int(IntKind::S16)) => self.contains(SimpleTySet::I16),
+            TyKind::Simple(SimpleTyKind::Int(IntKind::S32)) => self.contains(SimpleTySet::I32),
+            TyKind::Simple(SimpleTyKind::Int(IntKind::S64)) => self.contains(SimpleTySet::I64),
+            TyKind::Simple(SimpleTyKind::Float(FloatKind::S32)) => self.contains(SimpleTySet::F32),
+            TyKind::Simple(SimpleTyKind::Float(FloatKind::S64)) => self.contains(SimpleTySet::F64),
 
             TyKind::Reference(_, _, _)
             | TyKind::Adt(_)
@@ -668,7 +671,7 @@ impl InferTyPermSet {
             | TyKind::UniversalVar(_)
             | TyKind::Simple(
                 SimpleTyKind::Bool | SimpleTyKind::Char | SimpleTyKind::Str | SimpleTyKind::Never,
-            ) => self.contains(InferTyPermSet::OTHER),
+            ) => self.contains(SimpleTySet::OTHER),
 
             TyKind::InferVar(_) | TyKind::Error(_) => unreachable!(),
         }
@@ -677,17 +680,17 @@ impl InferTyPermSet {
     pub fn to_unique_type(self, tcx: &TyCtxt) -> Option<Ty> {
         (self.iter().count() == 1)
             .then(|| match self.iter().next().unwrap() {
-                InferTyPermSet::ALL_INT => None,
-                InferTyPermSet::U8 => Some(SimpleTyKind::Uint(IntKind::S8)),
-                InferTyPermSet::U16 => Some(SimpleTyKind::Uint(IntKind::S16)),
-                InferTyPermSet::U32 => Some(SimpleTyKind::Uint(IntKind::S32)),
-                InferTyPermSet::U64 => Some(SimpleTyKind::Uint(IntKind::S64)),
-                InferTyPermSet::I8 => Some(SimpleTyKind::Int(IntKind::S8)),
-                InferTyPermSet::I16 => Some(SimpleTyKind::Int(IntKind::S16)),
-                InferTyPermSet::I32 => Some(SimpleTyKind::Int(IntKind::S32)),
-                InferTyPermSet::I64 => Some(SimpleTyKind::Int(IntKind::S64)),
-                InferTyPermSet::F32 => Some(SimpleTyKind::Float(FloatKind::S32)),
-                InferTyPermSet::F64 => Some(SimpleTyKind::Float(FloatKind::S64)),
+                SimpleTySet::INT => None,
+                SimpleTySet::U8 => Some(SimpleTyKind::Uint(IntKind::S8)),
+                SimpleTySet::U16 => Some(SimpleTyKind::Uint(IntKind::S16)),
+                SimpleTySet::U32 => Some(SimpleTyKind::Uint(IntKind::S32)),
+                SimpleTySet::U64 => Some(SimpleTyKind::Uint(IntKind::S64)),
+                SimpleTySet::I8 => Some(SimpleTyKind::Int(IntKind::S8)),
+                SimpleTySet::I16 => Some(SimpleTyKind::Int(IntKind::S16)),
+                SimpleTySet::I32 => Some(SimpleTyKind::Int(IntKind::S32)),
+                SimpleTySet::I64 => Some(SimpleTyKind::Int(IntKind::S64)),
+                SimpleTySet::F32 => Some(SimpleTyKind::Float(FloatKind::S32)),
+                SimpleTySet::F64 => Some(SimpleTyKind::Float(FloatKind::S64)),
 
                 _ => unreachable!(),
             })

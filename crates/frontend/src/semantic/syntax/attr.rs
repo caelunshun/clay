@@ -165,4 +165,18 @@ define_lang_items! {
     index_trait => TraitValidator;
     iterator_trait => TraitValidator;
     into_iterator_trait => TraitValidator;
+    add_trait => TraitValidator;
+    sub_trait => TraitValidator;
+    mul_trait => TraitValidator;
+    div_trait => TraitValidator;
+    rem_trait => TraitValidator;
+    bit_xor_trait => TraitValidator;
+    bit_and_trait => TraitValidator;
+    bit_or_trait => TraitValidator;
+    bit_shl_trait => TraitValidator;
+    bit_shr_trait => TraitValidator;
+    partial_eq_trait => TraitValidator;
+    ord_trait => TraitValidator;
+    not_trait => TraitValidator;
+    neg_trait => TraitValidator;
 }

@@ -6,11 +6,11 @@ use crate::{
     semantic::{
         analysis::{
             ClauseOrigin, CoherenceMap, FloatingInferVar, HrtbUniverse, ObligationCx,
-            ObligationNotReady, RecursionLimitReached, TyAndTyUnifyError, TyCtxt, UnifyCx,
-            UnifyCxMode,
+            ObligationNotReady, RecursionLimitReached, TyAndSimpleTySetUnifyError,
+            TyAndTyUnifyError, TyCtxt, UnifyCx, UnifyCxMode,
         },
         syntax::{
-            Crate, InferTyPermSet, InferTyVar, Re, RelationDirection, RelationMode, TraitClause,
+            Crate, InferTyVar, Re, RelationDirection, RelationMode, SimpleTySet, TraitClause,
             TraitClauseList, TraitSpec, Ty, TyKind, TyOrRe, UniversalReVar,
             UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
@@ -220,7 +220,7 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn fresh_ty_infer_var_restricted(
         &mut self,
         max_universe: HrtbUniverse,
-        perm_set: InferTyPermSet,
+        perm_set: SimpleTySet,
     ) -> InferTyVar {
         self.ucx_mut().fresh_ty_infer_var(max_universe, perm_set)
     }
@@ -228,7 +228,7 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn fresh_ty_infer_restricted(
         &mut self,
         max_universe: HrtbUniverse,
-        perm_set: InferTyPermSet,
+        perm_set: SimpleTySet,
     ) -> Ty {
         self.tcx().intern(TyKind::InferVar(
             self.fresh_ty_infer_var_restricted(max_universe, perm_set),
@@ -236,11 +236,18 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     pub fn fresh_ty_infer_var(&mut self, max_universe: HrtbUniverse) -> InferTyVar {
-        self.fresh_ty_infer_var_restricted(max_universe, InferTyPermSet::all())
+        self.fresh_ty_infer_var_restricted(max_universe, SimpleTySet::all())
     }
 
     pub fn fresh_ty_infer(&mut self, max_universe: HrtbUniverse) -> Ty {
-        self.fresh_ty_infer_restricted(max_universe, InferTyPermSet::all())
+        self.fresh_ty_infer_restricted(max_universe, SimpleTySet::all())
+    }
+
+    pub fn lookup_ty_infer_var_without_poll(
+        &self,
+        var: InferTyVar,
+    ) -> Result<Ty, FloatingInferVar<'_>> {
+        self.ucx().lookup_ty_infer_var(var)
     }
 
     pub fn lookup_ty_infer_var_after_poll(
@@ -248,12 +255,16 @@ impl<'tcx> ClauseCx<'tcx> {
         var: InferTyVar,
     ) -> Result<Ty, FloatingInferVar<'_>> {
         self.poll_obligations();
-        self.ucx().lookup_ty_infer_var(var)
+        self.lookup_ty_infer_var_without_poll(var)
+    }
+
+    pub fn peel_ty_infer_var_without_poll(&self, ty: Ty) -> Ty {
+        self.ucx().peel_ty_infer_var(ty)
     }
 
     pub fn peel_ty_infer_var_after_poll(&mut self, ty: Ty) -> Ty {
         self.poll_obligations();
-        self.ucx().peel_ty_infer_var(ty)
+        self.peel_ty_infer_var_without_poll(ty)
     }
 
     pub fn fresh_re_infer(&mut self) -> Re {
@@ -331,10 +342,6 @@ impl<'tcx> ClauseCx<'tcx> {
         self.ucx().lookup_universal_ty_hrtb_universe(var)
     }
 
-    pub fn lookup_ty_infer_var(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {
-        self.ucx().lookup_ty_infer_var(var)
-    }
-
     pub fn oblige_re_outlives_re(
         &mut self,
         origin: ClauseOrigin,
@@ -363,6 +370,15 @@ impl<'tcx> ClauseCx<'tcx> {
         mode: RelationMode,
     ) -> Result<(), Box<TyAndTyUnifyError>> {
         self.ucx_mut().unify_ty_and_ty(origin, lhs, rhs, mode)
+    }
+
+    pub fn unify_ty_and_simple_set(
+        &mut self,
+        origin: &ClauseOrigin,
+        lhs: Ty,
+        rhs: SimpleTySet,
+    ) -> Result<(), TyAndSimpleTySetUnifyError> {
+        self.ucx_mut().unify_ty_and_simple_set(origin, lhs, rhs)
     }
 
     pub fn oblige_re_meets_clauses(
