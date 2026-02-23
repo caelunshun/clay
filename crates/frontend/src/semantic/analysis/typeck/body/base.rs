@@ -8,17 +8,16 @@ use crate::{
     parse::ast::AstLit,
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind, CrateTypeckVisitor,
-            HrtbUniverse, TyCtxt, TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCx,
-            UnifyCxMode, typeck::body::lookup::LookupMethodResult,
+            ClauseCx, ClauseError, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind,
+            CrateTypeckVisitor, HrtbUniverse, TyCtxt, TyFolderInfallibleExt,
+            TyVisitorInfallibleExt, UnifyCx, UnifyCxMode, typeck::body::lookup::LookupMethodResult,
         },
         lower::generics::normalize_positional_generic_arity,
         syntax::{
-            Block, Crate, Divergence, Expr, ExprKind, FnDef, FnInstanceInner, FnLocal,
-            InferTyPermSet, InferTyVar, Item, LabelTargetKind, LabelledBlock, Pat, PatKind, Re,
-            RelationMode, SimpleTyKind, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTy,
-            SpannedTyView, Stmt, StructExpr, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind,
-            TyOrRe,
+            Block, Crate, Divergence, Expr, ExprKind, FnDef, FnInstanceInner, FnLocal, InferTyVar,
+            Item, LabelTargetKind, LabelledBlock, Pat, PatKind, Re, RelationMode, SimpleTyKind,
+            SimpleTySet, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTy, SpannedTyView, Stmt,
+            StructExpr, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
     utils::hash::FxHashMap,
@@ -443,13 +442,67 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                 tcx.intern(TyKind::Tuple(tcx.intern_list(&children)))
             }
-            ExprKind::Binary(ast_bin_op_spanned, obj, obj1) => todo!(),
-            ExprKind::Unary(ast_un_op_kind, obj) => todo!(),
+            ExprKind::Binary(kind, lhs, rhs) => 'op: {
+                let lhs = self.check_expr(lhs).and_do(&mut divergence);
+                let rhs = self.check_expr(rhs).and_do(&mut divergence);
+
+                let kind_info = self.decode_bin_op_kind(kind.kind);
+                let origin =
+                    ClauseOrigin::root_report(ClauseOriginKind::Arithmetic { op_span: kind.span });
+
+                // Attempt a primitive operation.
+                let fallback_err = 'try_prim: {
+                    if let Err(err) =
+                        self.ccx_mut()
+                            .unify_ty_and_simple_set(&origin, lhs, kind_info.prim_types)
+                    {
+                        break 'try_prim ClauseError::TyAndSimpleTySetUnifyError(err);
+                    }
+
+                    if let Err(err) =
+                        self.ccx_mut()
+                            .unify_ty_and_ty(&origin, lhs, rhs, RelationMode::Equate)
+                    {
+                        break 'try_prim ClauseError::TyAndTyUnifyError(*err);
+                    }
+
+                    break 'op lhs;
+                };
+
+                // Otherwise, attempt to perform an overloaded operation.
+                if let Some(overload_trait) = kind_info.overload_trait {
+                    let result_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
+
+                    self.ccx_mut().oblige_ty_meets_trait_instantiated(
+                        origin,
+                        HrtbUniverse::ROOT,
+                        lhs,
+                        TraitSpec {
+                            def: overload_trait,
+                            params: tcx.intern_list(&[
+                                TraitParam::Equals(TyOrRe::Ty(rhs)),
+                                TraitParam::Equals(TyOrRe::Ty(result_ty)),
+                            ]),
+                        },
+                    );
+
+                    break 'op result_ty;
+                }
+
+                tcx.intern(TyKind::Error(fallback_err.force_emit(self.ccx())))
+            }
+            ExprKind::Unary(kind, lhs) => {
+                let lhs = self.check_expr(lhs).and_do(&mut divergence);
+                let lhs = self.ccx_mut().peel_ty_infer_var_after_poll(lhs);
+                let lhs = self.ccx_mut().peel_ty_infer_var_after_poll(lhs);
+
+                todo!()
+            }
             ExprKind::Literal(lit) => match lit {
                 AstLit::Number(_) => {
                     // TODO: Register the correct inference constraints.
                     self.ccx
-                        .fresh_ty_infer_restricted(HrtbUniverse::ROOT, InferTyPermSet::ALL_INT)
+                        .fresh_ty_infer_restricted(HrtbUniverse::ROOT, SimpleTySet::INT)
                 }
                 AstLit::Char(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Char)),
                 AstLit::String(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Str)),

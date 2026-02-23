@@ -3,7 +3,7 @@ use crate::{
     semantic::{
         analysis::{ClauseCx, HrtbUniverse, TyFolderInfallibleExt, UnboundVarHandlingMode},
         syntax::{
-            InferTyPermSet, InferTyVar, Re, TraitClauseList, TraitParam, TraitSpec, Ty,
+            InferTyVar, Re, SimpleTySet, TraitClauseList, TraitParam, TraitSpec, Ty,
             UniversalReVar, UniversalTyVar,
         },
     },
@@ -75,6 +75,10 @@ pub struct ClauseOriginBranch {
 
 #[derive(Debug, Clone)]
 pub enum ClauseOriginKind {
+    Arithmetic {
+        op_span: Span,
+    },
+
     Coercion {
         expr_span: Span,
     },
@@ -270,6 +274,7 @@ clause_error! {
     NoTraitImplError,
     ReAndReUnifyError,
     TyAndTyUnifyError,
+    TyAndSimpleTySetUnifyError,
 }
 
 #[derive(Debug, Clone)]
@@ -345,8 +350,8 @@ pub enum TyAndTyUnifyCulprit {
     Params(TraitParam, TraitParam),
     Occurs(InferTyOccursError),
     Leaks(InferTyLeaksError),
-    NotPermittedSolid(InferTyPermSet, Ty),
-    NotPermittedFloating(InferTyPermSet, InferTyPermSet),
+    NotPermittedSolid(SimpleTySet, Ty),
+    NotPermittedFloating(SimpleTySet, SimpleTySet),
 }
 
 #[derive(Debug, Clone)]
@@ -360,4 +365,18 @@ pub struct InferTyLeaksError {
     pub var: InferTyVar,
     pub max_universe: HrtbUniverse,
     pub leaks_universal: UniversalTyVar,
+}
+
+#[derive(Debug, Clone)]
+pub struct TyAndSimpleTySetUnifyError {
+    pub origin: ClauseOrigin,
+    pub lhs: Ty,
+    pub rhs: SimpleTySet,
+}
+
+impl TyAndSimpleTySetUnifyError {
+    pub fn emit(&self, ccx: &ClauseCx<'_>) -> ErrorGuaranteed {
+        // TODO
+        Diag::anon_err(format!("{self:#?}")).emit()
+    }
 }

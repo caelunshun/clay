@@ -3,13 +3,13 @@ use crate::{
     semantic::{
         analysis::{
             ClauseCx, ClauseOrigin, HrtbUniverse, InferTyLeaksError, InferTyOccursError,
-            TyAndTyUnifyCulprit, TyAndTyUnifyError, TyCtxt, TyFolder, TyFolderExt,
-            TyFolderInfallibleExt, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt,
+            TyAndSimpleTySetUnifyError, TyAndTyUnifyCulprit, TyAndTyUnifyError, TyCtxt, TyFolder,
+            TyFolderExt, TyFolderInfallibleExt, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt,
             infer::unify::{regions::ReUnifyTracker, types::TyUnifyTracker},
         },
         syntax::{
-            FnInstanceInner, FnOwner, HrtbBinderKind, InferTyPermSet, InferTyVar, Mutability, Re,
-            ReVariance, RelationDirection, RelationMode, SpannedTy, SpannedTyView, TraitClause,
+            FnInstanceInner, FnOwner, HrtbBinderKind, InferTyVar, Mutability, Re, ReVariance,
+            RelationDirection, RelationMode, SimpleTySet, SpannedTy, SpannedTyView, TraitClause,
             TraitClauseList, TraitParam, TraitParamList, Ty, TyKind, TyOrRe, UniversalReVar,
             UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
@@ -54,7 +54,7 @@ pub struct FloatingInferVar<'a> {
     pub root: InferTyVar,
     pub observed_equivalent: &'a [ObservedTyInferVar],
     pub max_universe: &'a HrtbUniverse,
-    pub perm_set: InferTyPermSet,
+    pub perm_set: SimpleTySet,
 }
 
 impl<'tcx> UnifyCx<'tcx> {
@@ -110,7 +110,7 @@ impl<'tcx> UnifyCx<'tcx> {
     pub fn fresh_ty_infer_var(
         &mut self,
         max_universe: HrtbUniverse,
-        perm_set: InferTyPermSet,
+        perm_set: SimpleTySet,
     ) -> InferTyVar {
         self.types.fresh_infer_restricted(max_universe, perm_set)
     }
@@ -804,6 +804,42 @@ impl<'tcx> UnifyCx<'tcx> {
                     culprits.push(TyAndTyUnifyCulprit::Params(lhs, rhs));
                 }
             }
+        }
+    }
+
+    pub fn unify_ty_and_simple_set(
+        &mut self,
+        origin: &ClauseOrigin,
+        lhs: Ty,
+        rhs: SimpleTySet,
+    ) -> Result<(), TyAndSimpleTySetUnifyError> {
+        let tcx = self.tcx();
+        let s = self.session();
+
+        let success = match *lhs.r(s) {
+            TyKind::InferVar(var) => match self.lookup_ty_infer_var(var) {
+                Ok(ty) => rhs.can_accept_type(ty, s),
+                Err(FloatingInferVar { perm_set, .. }) => {
+                    if perm_set.intersects(rhs) {
+                        self.types.restrict_perm_set_of_floating(tcx, var, rhs);
+                        true
+                    } else {
+                        false
+                    }
+                }
+            },
+            TyKind::Error(_err) => true,
+            _ => rhs.can_accept_type(lhs, s),
+        };
+
+        if success {
+            Ok(())
+        } else {
+            Err(TyAndSimpleTySetUnifyError {
+                origin: origin.clone(),
+                lhs,
+                rhs,
+            })
         }
     }
 }
