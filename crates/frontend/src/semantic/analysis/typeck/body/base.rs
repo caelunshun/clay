@@ -505,7 +505,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     break 'op result_ty;
                 }
 
-                tcx.intern(TyKind::Error(fallback_err.force_emit(self.ccx())))
+                tcx.intern(TyKind::Error(fallback_err.force_emit(&prim_fork)))
             }
             ExprKind::Unary(kind, lhs) => 'op: {
                 let lhs_ty = self.check_expr(lhs).and_do(&mut divergence);
@@ -757,7 +757,74 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 self.check_expr_demand(expr, pat_ty).and_do(&mut divergence)
             }
             ExprKind::AssignOp(kind, lhs, rhs) => {
-                todo!()
+                'assign: {
+                    let lhs = self.type_of_pat(lhs, Some(&mut divergence));
+                    let rhs = self.check_expr(rhs).and_do(&mut divergence);
+
+                    let kind_info = self.decode_assign_op_kind(kind);
+                    let origin = ClauseOrigin::root_report(ClauseOriginKind::Arithmetic {
+                        op_span: expr.r(s).span,
+                    });
+
+                    // Attempt a primitive operation.
+                    let mut prim_fork = self.ccx().clone();
+
+                    let fallback_err = 'try_prim: {
+                        let lhs = peel_ref_for_prim_op(&mut prim_fork, lhs);
+                        let rhs = peel_ref_for_prim_op(&mut prim_fork, rhs);
+
+                        if let Err(err) =
+                            prim_fork.unify_ty_and_simple_set(&origin, lhs, kind_info.lhs)
+                        {
+                            break 'try_prim ClauseError::TyAndSimpleTySetUnifyError(err);
+                        }
+
+                        match kind_info.rhs {
+                            EquateOrSet::EqualsLhs => {
+                                if let Err(err) = prim_fork.unify_ty_and_ty(
+                                    &origin,
+                                    lhs,
+                                    rhs,
+                                    RelationMode::Equate,
+                                ) {
+                                    break 'try_prim ClauseError::TyAndTyUnifyError(*err);
+                                }
+                            }
+                            EquateOrSet::Unrelated(rhs_set) => {
+                                if let Err(err) =
+                                    prim_fork.unify_ty_and_simple_set(&origin, lhs, rhs_set)
+                                {
+                                    break 'try_prim ClauseError::TyAndSimpleTySetUnifyError(err);
+                                }
+                            }
+                        }
+
+                        *self.ccx_mut() = prim_fork;
+                        break 'assign;
+                    };
+
+                    // Otherwise, attempt to perform an overloaded operation.
+                    if let Some(overload) = kind_info.overload {
+                        let result_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
+
+                        self.ccx_mut().oblige_ty_meets_trait_instantiated(
+                            origin,
+                            HrtbUniverse::ROOT,
+                            lhs,
+                            TraitSpec {
+                                def: overload,
+                                params: tcx.intern_list(&[
+                                    TraitParam::Equals(TyOrRe::Ty(rhs)),
+                                    TraitParam::Equals(TyOrRe::Ty(result_ty)),
+                                ]),
+                            },
+                        );
+                    }
+
+                    fallback_err.emit(&prim_fork);
+                }
+
+                tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
             }
             ExprKind::Field(receiver, name) => {
                 let receiver = self.check_expr(receiver).and_do(&mut divergence);
