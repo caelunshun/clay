@@ -234,7 +234,7 @@ impl<'ast> UseLowerCtxt<'ast> {
                     self.lower_expr_items(item_id, body);
                 }
 
-                self.queue_task(parent_id, item_id, |cx| {
+                self.queue_task(item_id, item_id, |cx| {
                     cx.lower_fn_item(item);
                 });
             }
