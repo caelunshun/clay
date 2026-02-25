@@ -129,7 +129,7 @@ impl MakeVec for () {
 fn fail_1() {
     fn meow() {}
 
-    meow
+    meow;
 }
 
 fn fail_2() {
