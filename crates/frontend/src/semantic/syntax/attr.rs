@@ -179,4 +179,14 @@ define_lang_items! {
     ord_trait => TraitValidator;
     not_trait => TraitValidator;
     neg_trait => TraitValidator;
+    add_assign_trait => TraitValidator;
+    sub_assign_trait => TraitValidator;
+    mul_assign_trait => TraitValidator;
+    div_assign_trait => TraitValidator;
+    rem_assign_trait => TraitValidator;
+    bit_xor_assign_trait => TraitValidator;
+    bit_and_assign_trait => TraitValidator;
+    bit_or_assign_trait => TraitValidator;
+    bit_shl_assign_trait => TraitValidator;
+    bit_shr_assign_trait => TraitValidator;
 }

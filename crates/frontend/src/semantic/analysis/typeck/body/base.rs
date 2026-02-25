@@ -9,8 +9,9 @@ use crate::{
     semantic::{
         analysis::{
             ClauseCx, ClauseError, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind,
-            CrateTypeckVisitor, HrtbUniverse, TyCtxt, TyFolderInfallibleExt,
-            TyVisitorInfallibleExt, UnifyCx, UnifyCxMode, typeck::body::lookup::LookupMethodResult,
+            CrateTypeckVisitor, EquateOrSet, HrtbUniverse, TyCtxt, TyFolderInfallibleExt,
+            TyVisitorInfallibleExt, UnifyCx, UnifyCxMode, peel_ref_for_prim_op,
+            typeck::body::lookup::LookupMethodResult,
         },
         lower::generics::normalize_positional_generic_arity,
         syntax::{
@@ -451,26 +452,41 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     ClauseOrigin::root_report(ClauseOriginKind::Arithmetic { op_span: kind.span });
 
                 // Attempt a primitive operation.
+                let mut prim_fork = self.ccx().clone();
+
                 let fallback_err = 'try_prim: {
-                    if let Err(err) =
-                        self.ccx_mut()
-                            .unify_ty_and_simple_set(&origin, lhs, kind_info.prim_types)
+                    let lhs = peel_ref_for_prim_op(&mut prim_fork, lhs);
+                    let rhs = peel_ref_for_prim_op(&mut prim_fork, rhs);
+
+                    if let Err(err) = prim_fork.unify_ty_and_simple_set(&origin, lhs, kind_info.lhs)
                     {
                         break 'try_prim ClauseError::TyAndSimpleTySetUnifyError(err);
                     }
 
-                    if let Err(err) =
-                        self.ccx_mut()
-                            .unify_ty_and_ty(&origin, lhs, rhs, RelationMode::Equate)
-                    {
-                        break 'try_prim ClauseError::TyAndTyUnifyError(*err);
+                    match kind_info.rhs {
+                        EquateOrSet::EqualsLhs => {
+                            if let Err(err) =
+                                prim_fork.unify_ty_and_ty(&origin, lhs, rhs, RelationMode::Equate)
+                            {
+                                break 'try_prim ClauseError::TyAndTyUnifyError(*err);
+                            }
+                        }
+                        EquateOrSet::Unrelated(rhs_set) => {
+                            if let Err(err) =
+                                prim_fork.unify_ty_and_simple_set(&origin, lhs, rhs_set)
+                            {
+                                break 'try_prim ClauseError::TyAndSimpleTySetUnifyError(err);
+                            }
+                        }
                     }
+
+                    *self.ccx_mut() = prim_fork;
 
                     break 'op lhs;
                 };
 
                 // Otherwise, attempt to perform an overloaded operation.
-                if let Some(overload_trait) = kind_info.overload_trait {
+                if let Some(overload) = kind_info.overload {
                     let result_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
 
                     self.ccx_mut().oblige_ty_meets_trait_instantiated(
@@ -478,7 +494,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         HrtbUniverse::ROOT,
                         lhs,
                         TraitSpec {
-                            def: overload_trait,
+                            def: overload,
                             params: tcx.intern_list(&[
                                 TraitParam::Equals(TyOrRe::Ty(rhs)),
                                 TraitParam::Equals(TyOrRe::Ty(result_ty)),
@@ -491,12 +507,45 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                 tcx.intern(TyKind::Error(fallback_err.force_emit(self.ccx())))
             }
-            ExprKind::Unary(kind, lhs) => {
-                let lhs = self.check_expr(lhs).and_do(&mut divergence);
-                let lhs = self.ccx_mut().peel_ty_infer_var_after_poll(lhs);
-                let lhs = self.ccx_mut().peel_ty_infer_var_after_poll(lhs);
+            ExprKind::Unary(kind, lhs) => 'op: {
+                let lhs_ty = self.check_expr(lhs).and_do(&mut divergence);
 
-                todo!()
+                let kind_info = self.decode_un_op_kind(kind);
+                let origin = ClauseOrigin::root_report(ClauseOriginKind::Arithmetic {
+                    op_span: lhs.r(s).span,
+                });
+
+                // Attempt a primitive operation.
+                let fallback_err = {
+                    let lhs_ty = peel_ref_for_prim_op(self.ccx_mut(), lhs_ty);
+
+                    match self
+                        .ccx_mut()
+                        .unify_ty_and_simple_set(&origin, lhs_ty, kind_info.lhs)
+                    {
+                        Ok(()) => break 'op lhs_ty,
+                        Err(err) => err,
+                    }
+                };
+
+                // Otherwise, attempt to perform an overloaded operation.
+                if let Some(overload) = kind_info.overload {
+                    let result_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
+
+                    self.ccx_mut().oblige_ty_meets_trait_instantiated(
+                        origin,
+                        HrtbUniverse::ROOT,
+                        lhs_ty,
+                        TraitSpec {
+                            def: overload,
+                            params: tcx.intern_list(&[TraitParam::Equals(TyOrRe::Ty(result_ty))]),
+                        },
+                    );
+
+                    break 'op result_ty;
+                }
+
+                tcx.intern(TyKind::Error(fallback_err.emit(self.ccx())))
             }
             ExprKind::Literal(lit) => match lit {
                 AstLit::Number(_) => {
@@ -707,7 +756,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let pat_ty = self.type_of_pat(pat, Some(&mut divergence));
                 self.check_expr_demand(expr, pat_ty).and_do(&mut divergence)
             }
-            ExprKind::AssignOp(ast_assign_op_kind, obj, obj1) => todo!(),
+            ExprKind::AssignOp(kind, lhs, rhs) => {
+                todo!()
+            }
             ExprKind::Field(receiver, name) => {
                 let receiver = self.check_expr(receiver).and_do(&mut divergence);
 
