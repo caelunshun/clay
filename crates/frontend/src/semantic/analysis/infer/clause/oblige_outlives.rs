@@ -5,7 +5,7 @@ use crate::semantic::{
         ClauseCx, ClauseOrigin, ObligationNotReady, ObligationResult,
         infer::clause::ClauseObligation,
     },
-    syntax::{Re, RelationDirection, RelationMode, Ty, TyKind, TyOrRe},
+    syntax::{Re, RelationDirection, RelationMode, SimpleTySet, Ty, TyKind, TyOrRe},
 };
 
 impl<'tcx> ClauseCx<'tcx> {
@@ -164,10 +164,17 @@ impl<'tcx> ClauseCx<'tcx> {
                 self.oblige_re_outlives_re(origin.clone(), lub_re, rhs, dir.to_mode());
             }
             TyKind::InferVar(inf_lhs) => {
-                if let Ok(inf_lhs) = self.ucx().lookup_ty_infer_var(inf_lhs) {
-                    self.oblige_ty_outlives_re(origin.clone(), inf_lhs, rhs, dir);
-                } else {
-                    return Err(ObligationNotReady);
+                match self.ucx().lookup_ty_infer_var(inf_lhs) {
+                    Ok(inf_lhs) => {
+                        self.oblige_ty_outlives_re(origin.clone(), inf_lhs, rhs, dir);
+                    }
+                    Err(err) => {
+                        if err.perm_set.contains(SimpleTySet::OTHER) {
+                            return Err(ObligationNotReady);
+                        }
+
+                        // (trivially true of all remaining types)
+                    }
                 }
             }
         }
