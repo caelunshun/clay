@@ -6,7 +6,7 @@ use crate::{
     },
     semantic::{
         analysis::TyCtxt,
-        syntax::{Expr, Item, TraitItem},
+        syntax::{AdtItem, Expr, Item, TraitItem},
     },
     symbol,
 };
@@ -66,6 +66,29 @@ impl LangItemValidator for TraitValidator {
     ) -> Result<Self::Stored, ErrorGuaranteed> {
         item.r(&tcx.session).kind.as_trait().ok_or_else(|| {
             Diag::span_err(span, format_args!("`{name}` language item must be a trait")).emit()
+        })
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+pub struct TypeValidator;
+
+impl LangItemValidator for TypeValidator {
+    type Stored = Obj<AdtItem>;
+
+    fn as_item(&self, tcx: &TyCtxt, stored: Self::Stored) -> Obj<Item> {
+        stored.r(&tcx.session).item
+    }
+
+    fn assign(
+        &self,
+        tcx: &TyCtxt,
+        item: Obj<Item>,
+        name: Symbol,
+        span: Span,
+    ) -> Result<Self::Stored, ErrorGuaranteed> {
+        item.r(&tcx.session).kind.as_adt().ok_or_else(|| {
+            Diag::span_err(span, format_args!("`{name}` language item must be an ADT")).emit()
         })
     }
 }
@@ -189,4 +212,5 @@ define_lang_items! {
     bit_or_assign_trait => TraitValidator;
     bit_shl_assign_trait => TraitValidator;
     bit_shr_assign_trait => TraitValidator;
+    vec => TypeValidator;
 }

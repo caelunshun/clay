@@ -49,6 +49,7 @@ pub mod std {
 
 use std::Clone;
 
+#[lang("vec")]
 pub struct Vec<T> {
     my_field: (),
 }
@@ -100,7 +101,8 @@ fn todo() -> Never {
 }
 
 fn main() {
-    let vec = ().make::<_>();
+    // let vec = ().make::<_>();
+    let vec = [(), (), ()];
 
     vec.push(vec.my_field);
     let elem = vec[1];
@@ -131,6 +133,7 @@ fn fail_1() {
 }
 
 fn fail_2() {
+
     let mut v = ();
 
     let a = 'b: {

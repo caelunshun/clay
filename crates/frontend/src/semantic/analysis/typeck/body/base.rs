@@ -15,10 +15,11 @@ use crate::{
         },
         lower::generics::normalize_positional_generic_arity,
         syntax::{
-            Block, Crate, Divergence, Expr, ExprKind, FnDef, FnInstanceInner, FnLocal, InferTyVar,
-            Item, LabelTargetKind, LabelledBlock, Pat, PatKind, Re, RelationMode, SimpleTyKind,
-            SimpleTySet, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTy, SpannedTyView, Stmt,
-            StructExpr, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            AdtInstance, Block, Crate, Divergence, Expr, ExprKind, FnDef, FnInstanceInner, FnLocal,
+            InferTyVar, Item, LabelTargetKind, LabelledBlock, Pat, PatKind, Re, RelationMode,
+            SimpleTyKind, SimpleTySet, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTy,
+            SpannedTyView, Stmt, StructExpr, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind,
+            TyOrRe,
         },
     },
     utils::hash::FxHashMap,
@@ -269,7 +270,18 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
         let mut divergence = Divergence::MayDiverge;
         let ty = match *expr.r(s).kind {
-            ExprKind::Array(obj) => todo!(),
+            ExprKind::Array(elems) => {
+                let elem = self
+                    .check_exprs_equate(elems.r(s).iter().copied())
+                    .and_do(&mut divergence);
+
+                let vec_lang_item = self.krate().r(s).lang_items.vec().unwrap();
+
+                tcx.intern(TyKind::Adt(AdtInstance {
+                    def: vec_lang_item,
+                    params: tcx.intern_list(&[TyOrRe::Ty(elem)]),
+                }))
+            }
             ExprKind::Call(callee, actual_args) => 'call: {
                 let callee = self.check_expr(callee).and_do(&mut divergence);
 
@@ -725,7 +737,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     tcx.intern(TyKind::Simple(SimpleTyKind::Never))
                 }
             }
-            ExprKind::Match(obj, obj1) => todo!(),
+            ExprKind::Match(scrutinee, arms) => todo!(),
             ExprKind::Block(block) => {
                 let label = LabelledBlock {
                     target: expr,
