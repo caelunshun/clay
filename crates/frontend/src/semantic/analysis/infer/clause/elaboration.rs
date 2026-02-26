@@ -44,13 +44,13 @@ use crate::{
     base::arena::{HasInterner, HasListInterner},
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, ClauseOrigin, ObligationResult, TyFolderInfallibleExt,
-            UniversalElaboration,
+            ClauseCx, ClauseImportEnvRef, ClauseObligation, ClauseOrigin, ObligationNotReady,
+            ObligationResult, TyFolderInfallibleExt, UniversalElaboration,
         },
         syntax::{
-            AnyGeneric, GenericSubst, HrtbBinder, InferTyVar, TraitClause, TraitClauseList,
-            TraitParam, TraitSpec, TyKind, TyOrRe, UniversalReVarSourceInfo, UniversalTyVar,
-            UniversalTyVarSourceInfo,
+            AnyGeneric, GenericSubst, HrtbBinder, InferTyVar, SimpleTySet, TraitClause,
+            TraitClauseList, TraitParam, TraitSpec, TyKind, TyOrRe, UniversalReVarSourceInfo,
+            UniversalTyVar,
         },
     },
     utils::hash::FxHashMap,
@@ -74,6 +74,8 @@ impl<'tcx> ClauseCx<'tcx> {
         let mut queue =
             VecDeque::from_iter(self.direct_ty_universal_clauses(var).r(s).iter().copied());
 
+        let mut reified_vars = FxHashMap::default();
+
         while let Some(target) = queue.pop_front() {
             match target {
                 TraitClause::Outlives(outlive_dir, outlive) => {
@@ -89,11 +91,29 @@ impl<'tcx> ClauseCx<'tcx> {
                         .enumerate()
                         .map(|(idx, param)| match *param {
                             TraitParam::Equals(ty_or_re) => ty_or_re,
-                            TraitParam::Unspecified(_) => TyOrRe::Ty(self.fresh_ty_universal(
-                                // Associated types vary in the same way as their parent generic.
-                                self.lookup_universal_ty_hrtb_universe(var).clone(),
-                                UniversalTyVarSourceInfo::Projection(var, spec, idx as u32),
-                            )),
+                            TraitParam::Unspecified(_) => {
+                                let var = self.fresh_ty_infer_var_restricted(
+                                    // Associated types vary in the same way as their parent generic.
+                                    self.lookup_universal_ty_hrtb_universe(var).clone(),
+                                    // The restrictions ensure that only we can assign to this
+                                    // elaboration variable. We'll reject all attempts at unifying
+                                    // it with anything, which is valid because we instantiate a
+                                    // fresh universal type which certainly does not alias with any
+                                    // of the previous types.
+                                    SimpleTySet::SPECIAL_ELAB_VAR,
+                                );
+
+                                reified_vars.insert(
+                                    var,
+                                    WipReifiedVar {
+                                        reified_clauses: None,
+                                        src_info_spec: spec,
+                                        src_info_idx: idx as u32,
+                                    },
+                                );
+
+                                TyOrRe::Ty(tcx.intern(TyKind::InferVar(var)))
+                            }
                         })
                         .collect::<Vec<_>>();
 
@@ -115,7 +135,7 @@ impl<'tcx> ClauseCx<'tcx> {
                             unreachable!()
                         };
 
-                        let TyKind::UniversalVar(new_param) = *new_param.r(s) else {
+                        let TyKind::InferVar(new_param) = *new_param.r(s) else {
                             unreachable!()
                         };
 
@@ -143,7 +163,8 @@ impl<'tcx> ClauseCx<'tcx> {
 
                         let all_clauses = tcx.intern_list(&all_clauses);
 
-                        self.init_ty_universal_var_direct_clauses(new_param, all_clauses);
+                        reified_vars.get_mut(&new_param).unwrap().reified_clauses =
+                            Some(all_clauses);
                     }
 
                     // Push on the elaborated trait `impl` constraint.
@@ -184,13 +205,19 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         }
 
+        let elaborated = self.tcx().intern_list(&elaborated);
+
         // Create an obligation to properly resolve reified associated type inference variables to
         // proper universals (see module comment).
-        // TODO
+        self.push_obligation(ClauseObligation::UnifyReifiedElaboratedClauses(
+            ClauseOrigin::empty_report(),
+            elaborated,
+            Rc::new(reified_vars),
+        ));
 
         // Record the elaboration and return it.
         let elaborated = UniversalElaboration {
-            clauses: self.tcx().intern_list(&elaborated),
+            clauses: elaborated,
             lub_re,
         };
         self.universal_vars[var].elaboration = Some(elaborated);
@@ -200,9 +227,17 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub(super) fn oblige_unify_reified_elaborated_clauses(
         &mut self,
+        origin: &ClauseOrigin,
         clauses: TraitClauseList,
-        reified_vars: Rc<FxHashMap<InferTyVar, TraitClauseList>>,
+        reified_vars: Rc<FxHashMap<InferTyVar, WipReifiedVar>>,
     ) -> ObligationResult {
-        todo!()
+        Err(ObligationNotReady)
     }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct WipReifiedVar {
+    reified_clauses: Option<TraitClauseList>,
+    src_info_spec: TraitSpec,
+    src_info_idx: u32,
 }

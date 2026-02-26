@@ -692,24 +692,29 @@ impl SimpleTySet {
     }
 
     pub fn to_unique_type(self, tcx: &TyCtxt) -> Option<Ty> {
-        (self.iter().count() == 1)
-            .then(|| match self.iter().next().unwrap() {
-                SimpleTySet::OTHER_REGULAR | SimpleTySet::SPECIAL_ELAB_VAR => None,
-                SimpleTySet::U8 => Some(SimpleTyKind::Uint(IntKind::S8)),
-                SimpleTySet::U16 => Some(SimpleTyKind::Uint(IntKind::S16)),
-                SimpleTySet::U32 => Some(SimpleTyKind::Uint(IntKind::S32)),
-                SimpleTySet::U64 => Some(SimpleTyKind::Uint(IntKind::S64)),
-                SimpleTySet::I8 => Some(SimpleTyKind::Int(IntKind::S8)),
-                SimpleTySet::I16 => Some(SimpleTyKind::Int(IntKind::S16)),
-                SimpleTySet::I32 => Some(SimpleTyKind::Int(IntKind::S32)),
-                SimpleTySet::I64 => Some(SimpleTyKind::Int(IntKind::S64)),
-                SimpleTySet::F32 => Some(SimpleTyKind::Float(FloatKind::S32)),
-                SimpleTySet::F64 => Some(SimpleTyKind::Float(FloatKind::S64)),
+        if self.bits().count_ones() != 1 {
+            return None;
+        }
 
-                _ => unreachable!(),
-            })
-            .flatten()
-            .map(|kind| tcx.intern(TyKind::Simple(kind)))
+        let kind = match SimpleTySet::from_bits_retain(1 << self.bits().trailing_zeros()) {
+            SimpleTySet::OTHER_REGULAR | SimpleTySet::SPECIAL_ELAB_VAR => None,
+            SimpleTySet::U8 => Some(SimpleTyKind::Uint(IntKind::S8)),
+            SimpleTySet::U16 => Some(SimpleTyKind::Uint(IntKind::S16)),
+            SimpleTySet::U32 => Some(SimpleTyKind::Uint(IntKind::S32)),
+            SimpleTySet::U64 => Some(SimpleTyKind::Uint(IntKind::S64)),
+            SimpleTySet::I8 => Some(SimpleTyKind::Int(IntKind::S8)),
+            SimpleTySet::I16 => Some(SimpleTyKind::Int(IntKind::S16)),
+            SimpleTySet::I32 => Some(SimpleTyKind::Int(IntKind::S32)),
+            SimpleTySet::I64 => Some(SimpleTyKind::Int(IntKind::S64)),
+            SimpleTySet::F32 => Some(SimpleTyKind::Float(FloatKind::S32)),
+            SimpleTySet::F64 => Some(SimpleTyKind::Float(FloatKind::S64)),
+            SimpleTySet::BOOL => Some(SimpleTyKind::Bool),
+            SimpleTySet::CHAR => Some(SimpleTyKind::Char),
+
+            v => unreachable!("{v:?}"),
+        }?;
+
+        Some(tcx.intern(TyKind::Simple(kind)))
     }
 }
 

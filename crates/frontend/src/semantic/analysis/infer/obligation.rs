@@ -62,6 +62,12 @@ struct ObligationState<K> {
     /// The set of variables whose inference could cause us to rerun. Cleared once the obligation is
     /// enqueued to re-run and re-populated if, after the re-run, the obligation is still ambiguous.
     can_wake_by: FxHashSet<ObservedTyInferVar>,
+
+    /// Whether the obligation finished executing. We can't fully derive this from `can_wake_by`
+    /// since, sometimes, an obligation never registers any wake-up variables before returning
+    /// `ObligationNotReady`. This should not happen in practice but I'd rather return an error in
+    /// those cases than accept the program silently.
+    finished: bool,
 }
 
 impl<'tcx, K> fmt::Debug for ObligationCx<'tcx, K> {
@@ -101,6 +107,7 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
         let idx = self.all_obligations.push(ObligationState {
             kind,
             can_wake_by: FxHashSet::default(),
+            finished: false,
         });
 
         self.run_queue.push_back(idx);
@@ -159,6 +166,9 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
             match res {
                 Ok(()) => {
                     *target = fork;
+
+                    let this = getter(target);
+                    this.all_obligations[curr_idx].finished = true;
                 }
                 Err(ObligationNotReady) => {
                     // Drop the fork to regain access to the `root`.
@@ -189,12 +199,7 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
     pub fn unfulfilled_obligations(&self) -> impl Iterator<Item = &K> {
         self.all_obligations
             .iter()
-            .filter(|v| !v.can_wake_by.is_empty())
+            .filter(|v| !v.finished)
             .map(|v| &v.kind)
-            .chain(
-                self.run_queue
-                    .iter()
-                    .map(|&idx| &self.all_obligations[idx].kind),
-            )
     }
 }
