@@ -9,7 +9,7 @@ use crate::{
             UnboundVarHandlingMode, UniversalElaboration, infer::clause::ClauseObligation,
         },
         syntax::{
-            HrtbBinder, HrtbBinderKind, ImplItem, SimpleTySet, RelationMode, TraitClause,
+            HrtbBinder, HrtbBinderKind, ImplItem, RelationMode, SimpleTySet, TraitClause,
             TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
         },
     },
@@ -213,6 +213,7 @@ impl<'tcx> ClauseCx<'tcx> {
             .copied()
             .find(|&clause| match clause {
                 TraitClause::Outlives(_, _) => false,
+                // TODO: Use more proper selection criteria.
                 TraitClause::Trait(lhs) => lhs.inner.def == rhs.def,
             });
 

@@ -185,4 +185,16 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
             }
         }
     }
+
+    pub fn unfulfilled_obligations(&self) -> impl Iterator<Item = &K> {
+        self.all_obligations
+            .iter()
+            .filter(|v| !v.can_wake_by.is_empty())
+            .map(|v| &v.kind)
+            .chain(
+                self.run_queue
+                    .iter()
+                    .map(|&idx| &self.all_obligations[idx].kind),
+            )
+    }
 }

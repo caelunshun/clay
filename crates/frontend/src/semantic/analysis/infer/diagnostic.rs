@@ -1,7 +1,9 @@
 use crate::{
     base::{Diag, ErrorGuaranteed, syntax::Span},
     semantic::{
-        analysis::{ClauseCx, HrtbUniverse, TyFolderInfallibleExt, UnboundVarHandlingMode},
+        analysis::{
+            ClauseCx, ClauseObligation, HrtbUniverse, TyFolderInfallibleExt, UnboundVarHandlingMode,
+        },
         syntax::{
             InferTyVar, Re, SimpleTySet, TraitClauseList, TraitParam, TraitSpec, Ty,
             UniversalReVar, UniversalTyVar,
@@ -271,6 +273,7 @@ macro_rules! clause_error {
 
 clause_error! {
     RecursionLimitReached,
+    ObligationUnfulfilled,
     NoTraitImplError,
     ReAndReUnifyError,
     TyAndTyUnifyError,
@@ -283,6 +286,18 @@ pub struct RecursionLimitReached {
 }
 
 impl RecursionLimitReached {
+    pub fn emit(&self, ccx: &ClauseCx<'_>) -> ErrorGuaranteed {
+        // TODO
+        Diag::anon_err(format!("{self:#?}")).emit()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ObligationUnfulfilled {
+    pub obligation: ClauseObligation,
+}
+
+impl ObligationUnfulfilled {
     pub fn emit(&self, ccx: &ClauseCx<'_>) -> ErrorGuaranteed {
         // TODO
         Diag::anon_err(format!("{self:#?}")).emit()
