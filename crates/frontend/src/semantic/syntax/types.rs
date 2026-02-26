@@ -616,7 +616,17 @@ define_index_type! {
 bitflags::bitflags! {
     #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
     pub struct SimpleTySet: u16 {
-        const OTHER = 1 << 0;
+        const MAYBE_UNIVERSAL = Self::OTHER_REGULAR.bits() | Self::SPECIAL_ELAB_VAR.bits();
+
+        // === Regular === //
+
+        const ALL_REGULAR =
+            Self::OTHER_REGULAR.bits()
+            | Self::NUM.bits()
+            | Self::BOOL.bits()
+            | Self::CHAR.bits();
+
+        const OTHER_REGULAR = 1 << 0;
         const U8 = 1 << 1;
         const U16 = 1 << 2;
         const U32 = 1 << 3;
@@ -639,6 +649,10 @@ bitflags::bitflags! {
         const FLOAT = Self::F32.bits() | Self::F64.bits();
         const NUM = Self::INT.bits() | Self::FLOAT.bits();
         const SIGNED_NUM = Self::SIGNED_INT.bits() | Self::FLOAT.bits();
+
+        // === Special === //
+
+        const SPECIAL_ELAB_VAR = 1 << 13;
     }
 }
 
@@ -671,7 +685,7 @@ impl SimpleTySet {
             | TyKind::UniversalVar(_)
             | TyKind::Simple(
                 SimpleTyKind::Bool | SimpleTyKind::Char | SimpleTyKind::Str | SimpleTyKind::Never,
-            ) => self.contains(SimpleTySet::OTHER),
+            ) => self.contains(SimpleTySet::OTHER_REGULAR),
 
             TyKind::InferVar(_) | TyKind::Error(_) => unreachable!(),
         }
@@ -680,7 +694,7 @@ impl SimpleTySet {
     pub fn to_unique_type(self, tcx: &TyCtxt) -> Option<Ty> {
         (self.iter().count() == 1)
             .then(|| match self.iter().next().unwrap() {
-                SimpleTySet::INT => None,
+                SimpleTySet::OTHER_REGULAR | SimpleTySet::SPECIAL_ELAB_VAR => None,
                 SimpleTySet::U8 => Some(SimpleTyKind::Uint(IntKind::S8)),
                 SimpleTySet::U16 => Some(SimpleTyKind::Uint(IntKind::S16)),
                 SimpleTySet::U32 => Some(SimpleTyKind::Uint(IntKind::S32)),

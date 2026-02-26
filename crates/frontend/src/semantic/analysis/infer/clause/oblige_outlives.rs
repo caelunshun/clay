@@ -169,7 +169,7 @@ impl<'tcx> ClauseCx<'tcx> {
                         self.oblige_ty_outlives_re(origin.clone(), inf_lhs, rhs, dir);
                     }
                     Err(err) => {
-                        if err.perm_set.contains(SimpleTySet::OTHER) {
+                        if err.perm_set.intersects(SimpleTySet::MAYBE_UNIVERSAL) {
                             return Err(ObligationNotReady);
                         }
 
