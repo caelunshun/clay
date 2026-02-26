@@ -1,18 +1,61 @@
 //! Logic to elaborate a trait clause list.
+//!
+//! Elaboration transforms a clause like `Inherited<A, B: Additional>` into a clause list which...
+//!
+//! a) includes all super-traits.
+//! b) reifies all `Unspecified` trait parameters like `B: Additional` into fresh universals with
+//!    direct clauses encompassing both `B`'s direct clauses (i.e. `Additional`) and all the clauses
+//!    on that given associated type's definition.
+//!
+//! This process is made slightly more involved by the way in which `impl` obligation works. If you
+//! have a universal type `T` such that its elaborated trait clause list is `T: Foo<Assoc = U1> +
+//! Foo<Assoc = U2>`, only the `T: Foo<Assoc = U1>` clause will be used because that will be the
+//! first clause which could be selected. This is sound because, if `U1` and `U2` are properly
+//! disjoint, nothing could ever satisfy that constraint.
+//!
+//! This behavior, however, means that elaboration should make a best-effort to merge similar trait
+//! clauses into a single clause before generating reified universal types since, otherwise, implied
+//! constraints may be forgotten.
+//!
+//! To implement this, we spawn an inference variable for every single reified variable and
+//! construct an obligation which, after fully resolving all inference variables in the clause
+//! list's generic parameter list, unifies the appropriate universals with the inference variables.
+//!
+//! This is sensible to do because universals can only ever be created from a) importing types from
+//! signatures, b) instantiating HRTBs, and c) elaborating existing universals. Besides HRTBs inside
+//! function bodies, the universal clause list should not contain inference variables beyond those
+//! produced by projection resolution. Projections, even if they depend on the universal being
+//! elaborated, should usually end up treating universals and blank inference variables the same
+//! except under really contrived and evil scenarios like this...
+//!
+//! ```ignore
+//! pub trait Helper<T> {
+//!     type Assoc;
+//! }
+//!
+//! pub trait Foo {}
+//!
+//! fn mewo<T: Helper<<T as Helper<()>>::Assoc, Assoc: Foo>>() {}
+//! ```
+//!
+//! ...which rustc doesn't even handle correctly.
 
 use crate::{
     base::arena::{HasInterner, HasListInterner},
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, ClauseOrigin, TyFolderInfallibleExt, UniversalElaboration,
+            ClauseCx, ClauseImportEnvRef, ClauseOrigin, ObligationResult, TyFolderInfallibleExt,
+            UniversalElaboration,
         },
         syntax::{
-            AnyGeneric, GenericSubst, HrtbBinder, Re, TraitClause, TraitClauseList, TraitParam,
-            TraitSpec, TyKind, TyOrRe, UniversalReVarSourceInfo, UniversalTyVar,
+            AnyGeneric, GenericSubst, HrtbBinder, InferTyVar, Re, TraitClause, TraitClauseList,
+            TraitParam, TraitSpec, TyKind, TyOrRe, UniversalReVarSourceInfo, UniversalTyVar,
             UniversalTyVarSourceInfo,
         },
     },
+    utils::hash::FxHashMap,
 };
+use std::rc::Rc;
 
 impl<'tcx> ClauseCx<'tcx> {
     pub fn elaborate_ty_universal_clauses(&mut self, var: UniversalTyVar) -> UniversalElaboration {
@@ -181,5 +224,13 @@ impl<'tcx> ClauseCx<'tcx> {
             .fold_spanned(*spec.def.r(s).inherits);
 
         self.elaborate_clause_list(root, lub_re, accum, inherits);
+    }
+
+    pub(super) fn oblige_unify_reified_elaborated_clauses(
+        &mut self,
+        clauses: TraitClauseList,
+        reified_vars: Rc<FxHashMap<InferTyVar, TraitClauseList>>,
+    ) -> ObligationResult {
+        todo!()
     }
 }
