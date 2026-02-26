@@ -8,6 +8,7 @@ use crate::{
             ClauseError, ClauseOrigin, CoherenceMap, FloatingInferVar, HrtbUniverse, ObligationCx,
             ObligationNotReady, ObligationUnfulfilled, RecursionLimitReached,
             TyAndSimpleTySetUnifyError, TyAndTyUnifyError, TyCtxt, UnifyCx, UnifyCxMode,
+            infer::clause::elaboration::WipReifiedVar,
         },
         syntax::{
             Crate, InferTyVar, Re, RelationDirection, RelationMode, SimpleTySet, TraitClause,
@@ -15,8 +16,10 @@ use crate::{
             UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
+    utils::hash::FxHashMap,
 };
 use index_vec::IndexVec;
+use std::rc::Rc;
 
 const MAX_OBLIGATION_DEPTH: u32 = 256;
 
@@ -25,13 +28,19 @@ pub enum ClauseObligation {
     TyUnifiesTy(ClauseOrigin, Ty, Ty, RelationMode),
     TyMeetsTrait(ClauseOrigin, HrtbUniverse, Ty, TraitSpec),
     TyOutlivesRe(ClauseOrigin, Ty, Re, RelationDirection),
+    UnifyReifiedElaboratedClauses(
+        ClauseOrigin,
+        TraitClauseList,
+        Rc<FxHashMap<InferTyVar, WipReifiedVar>>,
+    ),
 }
 
 impl ClauseObligation {
     pub fn origin(&self) -> &ClauseOrigin {
         let (Self::TyUnifiesTy(origin, ..)
         | Self::TyMeetsTrait(origin, ..)
-        | Self::TyOutlivesRe(origin, ..)) = self;
+        | Self::TyOutlivesRe(origin, ..)
+        | Self::UnifyReifiedElaboratedClauses(origin, ..)) = self;
 
         origin
     }
@@ -200,6 +209,13 @@ impl<'tcx> ClauseCx<'tcx> {
                     }
                     ClauseObligation::TyOutlivesRe(origin, lhs, rhs, dir) => {
                         fork.run_oblige_ty_outlives_re(&origin, lhs, rhs, dir)
+                    }
+                    ClauseObligation::UnifyReifiedElaboratedClauses(
+                        origin,
+                        clauses,
+                        reified_vars,
+                    ) => {
+                        fork.oblige_unify_reified_elaborated_clauses(&origin, clauses, reified_vars)
                     }
                 }
             },
