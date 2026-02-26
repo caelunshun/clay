@@ -133,7 +133,6 @@ fn fail_1() {
 }
 
 fn fail_2() {
-
     let mut v = ();
 
     let a = 'b: {
