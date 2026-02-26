@@ -228,11 +228,11 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     pub fn fresh_ty_infer_var(&mut self, max_universe: HrtbUniverse) -> InferTyVar {
-        self.fresh_ty_infer_var_restricted(max_universe, SimpleTySet::all())
+        self.fresh_ty_infer_var_restricted(max_universe, SimpleTySet::ALL_REGULAR)
     }
 
     pub fn fresh_ty_infer(&mut self, max_universe: HrtbUniverse) -> Ty {
-        self.fresh_ty_infer_restricted(max_universe, SimpleTySet::all())
+        self.fresh_ty_infer_restricted(max_universe, SimpleTySet::ALL_REGULAR)
     }
 
     pub fn lookup_ty_infer_var_without_poll(
