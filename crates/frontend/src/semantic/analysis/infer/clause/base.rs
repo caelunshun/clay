@@ -5,9 +5,9 @@ use crate::{
     },
     semantic::{
         analysis::{
-            ClauseOrigin, CoherenceMap, FloatingInferVar, HrtbUniverse, ObligationCx,
-            ObligationNotReady, RecursionLimitReached, TyAndSimpleTySetUnifyError,
-            TyAndTyUnifyError, TyCtxt, UnifyCx, UnifyCxMode,
+            ClauseError, ClauseOrigin, CoherenceMap, FloatingInferVar, HrtbUniverse, ObligationCx,
+            ObligationNotReady, ObligationUnfulfilled, RecursionLimitReached,
+            TyAndSimpleTySetUnifyError, TyAndTyUnifyError, TyCtxt, UnifyCx, UnifyCxMode,
         },
         syntax::{
             Crate, InferTyVar, Re, RelationDirection, RelationMode, SimpleTySet, TraitClause,
@@ -17,39 +17,23 @@ use crate::{
     },
 };
 use index_vec::IndexVec;
-use std::ops::ControlFlow;
 
 const MAX_OBLIGATION_DEPTH: u32 = 256;
 
 #[derive(Debug, Clone)]
-#[expect(clippy::enum_variant_names)]
-pub(super) enum ClauseObligation {
+pub enum ClauseObligation {
     TyUnifiesTy(ClauseOrigin, Ty, Ty, RelationMode),
     TyMeetsTrait(ClauseOrigin, HrtbUniverse, Ty, TraitSpec),
     TyOutlivesRe(ClauseOrigin, Ty, Re, RelationDirection),
 }
 
 impl ClauseObligation {
-    fn verify_depth(&self, ccx: &ClauseCx<'_>) -> ControlFlow<()> {
-        match self {
-            Self::TyUnifiesTy(origin, ..)
-            | Self::TyMeetsTrait(origin, ..)
-            | Self::TyOutlivesRe(origin, ..) => {
-                if origin.depth() > MAX_OBLIGATION_DEPTH {
-                    origin.report(
-                        RecursionLimitReached {
-                            origin: origin.clone(),
-                        }
-                        .into(),
-                        ccx,
-                    );
+    pub fn origin(&self) -> &ClauseOrigin {
+        let (Self::TyUnifiesTy(origin, ..)
+        | Self::TyMeetsTrait(origin, ..)
+        | Self::TyOutlivesRe(origin, ..)) = self;
 
-                    return ControlFlow::Break(());
-                }
-            }
-        }
-
-        ControlFlow::Continue(())
+        origin
     }
 }
 
@@ -182,7 +166,15 @@ impl<'tcx> ClauseCx<'tcx> {
             |this| &mut this.ocx,
             |this| this.clone(),
             |fork, kind| {
-                if kind.verify_depth(fork).is_break() {
+                if kind.origin().depth() > MAX_OBLIGATION_DEPTH {
+                    kind.origin().report(
+                        RecursionLimitReached {
+                            origin: kind.origin().clone(),
+                        }
+                        .into(),
+                        fork,
+                    );
+
                     return Ok(());
                 }
 
@@ -403,6 +395,16 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn verify(&mut self) {
         self.poll_obligations();
+
+        for obligation in self.ocx.unfulfilled_obligations() {
+            obligation.origin().report(
+                ClauseError::ObligationUnfulfilled(ObligationUnfulfilled {
+                    obligation: obligation.clone(),
+                }),
+                self,
+            );
+        }
+
         self.ucx().verify(self);
     }
 }

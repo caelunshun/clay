@@ -16,16 +16,12 @@ pub mod std {
     pub trait FnOnce<I, O> {}
 }
 
-pub trait Meow {
+pub trait Forever {
     type Out;
 }
 
-impl Meow for () {
-    type Out = ();
+impl Forever for () {
+    type Out = <() as Forever>::Out;
 }
 
-fn demo() {
-    hehe(((),));
-}
-
-fn hehe<T: Meow<Out = <T as Meow>::Out>>(v: T) {}
+fn meow(v: <() as Forever>::Out) {}
