@@ -12,10 +12,10 @@ use crate::{
         },
         syntax::{
             GenericBinder, GenericSubst, RelationDirection, SpannedAdtInstance, SpannedFnInstance,
-            SpannedHrtbBinder, SpannedHrtbBinderKindView, SpannedHrtbBinderView,
-            SpannedHrtbDebruijnDefView, SpannedTraitInstance, SpannedTraitParamView,
-            SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList, SpannedTyView, Ty,
-            TyKind, TyOrRe,
+            SpannedFnInstanceView, SpannedHrtbBinder, SpannedHrtbBinderKindView,
+            SpannedHrtbBinderView, SpannedHrtbDebruijnDefView, SpannedTraitInstance,
+            SpannedTraitParamView, SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList,
+            SpannedTyView, Ty, TyKind, TyOrRe,
         },
     },
 };
@@ -223,14 +223,35 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
     }
 
     fn visit_fn_instance(&mut self, instance: SpannedFnInstance) -> ControlFlow<Self::Break> {
-        // Validate the instance itself.
-        self.ccx.instantiate_fn_instance_env_as_infer(
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let SpannedFnInstanceView { owner, early_args } = instance.view(tcx);
+
+        // Construct an environment, validating the `owner` in the process.
+        let env = self.ccx.instantiate_fn_instance_env_as_infer(
             &ClauseOrigin::root_report(ClauseOriginKind::WfFnDef {
                 fn_ty: instance.own_span(),
             }),
             &self.universe,
             instance.value,
         );
+
+        // Validate the `early_args`.
+        if let Some(early_args) = early_args {
+            self.ccx.oblige_args_meet_binder_clauses(
+                &self.universe,
+                env.as_ref(),
+                &owner.value.def(s).r(s).generics.r(s).defs,
+                early_args.value.r(s),
+                |_, param_idx, clause_span| {
+                    ClauseOrigin::root_report(ClauseOriginKind::WfForGenericParam {
+                        use_span: early_args.nth(param_idx, tcx).own_span(),
+                        clause_span,
+                    })
+                },
+            );
+        }
 
         // Ensure parameter types are also well-formed.
         self.walk_spanned(instance);
