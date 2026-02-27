@@ -10,7 +10,7 @@ use crate::{
         analysis::{
             ClauseCx, ClauseError, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind,
             CrateTypeckVisitor, EquateOrSet, HrtbUniverse, TyCtxt, TyFolderInfallibleExt,
-            TyVisitorInfallibleExt, UnifyAllowed, UnifyCx, UnifyCxMode, peel_ref_for_prim_op,
+            TyVisitorInfallibleExt, UnifyCx, UnifyCxMode, peel_ref_for_prim_op,
             typeck::body::lookup::LookupMethodResult,
         },
         lower::generics::normalize_positional_generic_arity,
@@ -562,11 +562,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             ExprKind::Literal(lit) => match lit {
                 AstLit::Number(_) => {
                     // TODO: Register the correct inference constraints.
-                    self.ccx.fresh_ty_infer_restricted(
-                        HrtbUniverse::ROOT,
-                        SimpleTySet::INT,
-                        UnifyAllowed::Yes,
-                    )
+                    self.ccx
+                        .fresh_ty_infer_restricted(HrtbUniverse::ROOT, SimpleTySet::INT)
                 }
                 AstLit::Char(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Char)),
                 AstLit::String(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Str)),

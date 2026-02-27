@@ -27,12 +27,6 @@ pub enum UnifyCxMode {
     RegionAware,
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum UnifyAllowed {
-    Yes,
-    No,
-}
-
 /// A type inference context for solving type obligations of the form...
 ///
 /// - `Region: Region`
@@ -61,7 +55,6 @@ pub struct FloatingInferVar<'a> {
     pub observed_equivalent: &'a [ObservedTyInferVar],
     pub max_universe: &'a HrtbUniverse,
     pub perm_set: SimpleTySet,
-    pub unify_allowed: UnifyAllowed,
 }
 
 impl<'tcx> UnifyCx<'tcx> {
@@ -118,10 +111,8 @@ impl<'tcx> UnifyCx<'tcx> {
         &mut self,
         max_universe: HrtbUniverse,
         perm_set: SimpleTySet,
-        unify_allowed: UnifyAllowed,
     ) -> InferTyVar {
-        self.types
-            .fresh_infer_restricted(max_universe, perm_set, unify_allowed)
+        self.types.fresh_infer_restricted(max_universe, perm_set)
     }
 
     pub fn fresh_ty_universal_var(
@@ -221,10 +212,6 @@ impl<'tcx> UnifyCx<'tcx> {
         for (lhs, rhs) in mode.enumerate(lhs, rhs) {
             regions.constrain(origin.clone(), lhs, rhs);
         }
-    }
-
-    pub fn liberate_unification_of_unique(&mut self, var: InferTyVar) {
-        self.types.liberate_unification_of_unique(var);
     }
 
     /// Unifies two types such that they match. The `mode` specifies how the regions inside the
@@ -473,34 +460,24 @@ impl<'tcx> UnifyCx<'tcx> {
                     (
                         Err(FloatingInferVar {
                             perm_set: lhs_perm_set,
-                            unify_allowed: lhs_unify_allowed,
                             ..
                         }),
                         Err(FloatingInferVar {
                             perm_set: rhs_perm_set,
-                            unify_allowed: rhs_unify_allowed,
                             ..
                         }),
                     ) => {
                         // Cannot fail occurs check because neither type structurally includes the
                         // other.
-                        if lhs_perm_set.intersection(rhs_perm_set).is_empty() {
+                        if !lhs_perm_set.intersection(rhs_perm_set).is_empty() {
+                            self.types
+                                .union_unrelated_infer_floating(self.tcx, lhs_var, rhs_var);
+                        } else {
                             culprits.push(TyAndTyUnifyCulprit::NotPermittedFloating(
                                 lhs_perm_set,
                                 rhs_perm_set,
                             ));
-                            return;
                         }
-
-                        if lhs_unify_allowed == UnifyAllowed::No
-                            || rhs_unify_allowed == UnifyAllowed::No
-                        {
-                            culprits.push(TyAndTyUnifyCulprit::UnifyDenied);
-                            return;
-                        }
-
-                        self.types
-                            .union_unrelated_infer_floating(self.tcx, lhs_var, rhs_var);
                     }
                 }
             }
@@ -549,7 +526,6 @@ impl<'tcx> UnifyCx<'tcx> {
             observed_equivalent: _,
             max_universe: lhs_max_universe,
             perm_set: lhs_perm_set,
-            unify_allowed: lhs_unify_allowed,
         }) = self.types.lookup_infer(lhs_var_root)
         else {
             unreachable!()
@@ -562,10 +538,6 @@ impl<'tcx> UnifyCx<'tcx> {
         // Check permissions
         if !lhs_perm_set.can_accept_type(rhs_ty, s) {
             return Err(TyAndTyUnifyCulprit::NotPermittedSolid(lhs_perm_set, rhs_ty));
-        }
-
-        if lhs_unify_allowed == UnifyAllowed::No {
-            return Err(TyAndTyUnifyCulprit::UnifyDenied);
         }
 
         // Perform occurs check
