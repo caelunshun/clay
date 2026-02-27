@@ -193,6 +193,22 @@ impl TyUnifyTracker {
         *max_universe = max_universe.min(other).clone();
     }
 
+    pub fn liberate_unification_of_unique(&mut self, var: InferTyVar, new_perms: SimpleTySet) {
+        assert_eq!(self.disjoint.root_of(var.index()), var.index());
+
+        let DisjointTyInferRoot::Floating {
+            observed: _,
+            perm_set,
+            max_universe: _,
+        } = self.disjoint[var.index()].root.as_mut().unwrap()
+        else {
+            unreachable!()
+        };
+
+        assert!(perm_set.intersects(SimpleTySet::UNIQUE_NEVER_UNIFY));
+        *perm_set = new_perms;
+    }
+
     pub fn assign_floating_infer_to_non_var(&mut self, var: InferTyVar, ty: Ty) {
         let root_idx = self.disjoint.root_of(var.index());
         let root = self.disjoint[root_idx].root.as_mut().unwrap();

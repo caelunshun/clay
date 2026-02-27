@@ -616,15 +616,29 @@ define_index_type! {
 bitflags::bitflags! {
     #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
     pub struct SimpleTySet: u16 {
+        // === Categories === //
+
+        /// Types which could be a `UniversalVar`.
         const MAYBE_UNIVERSAL = Self::OTHER_REGULAR.bits() | Self::SPECIAL_ELAB_VAR.bits();
 
-        // === Regular === //
+        /// Inference variables which must never unify automatically with other inference variables.
+        const UNIQUE_NEVER_UNIFY = Self::SPECIAL_ELAB_VAR.bits();
 
+        /// All ordinary types a user would expect their variables to unify with.
         const ALL_REGULAR =
             Self::OTHER_REGULAR.bits()
             | Self::NUM.bits()
             | Self::BOOL.bits()
             | Self::CHAR.bits();
+
+        const UNSIGNED_INT = Self::U8.bits() | Self::U16.bits() | Self::U32.bits() | Self::U64.bits();
+        const SIGNED_INT = Self::I8.bits() | Self::I16.bits() | Self::I32.bits() | Self::I64.bits();
+        const INT = Self::UNSIGNED_INT.bits() | Self::SIGNED_INT.bits();
+        const FLOAT = Self::F32.bits() | Self::F64.bits();
+        const NUM = Self::INT.bits() | Self::FLOAT.bits();
+        const SIGNED_NUM = Self::SIGNED_INT.bits() | Self::FLOAT.bits();
+
+        // === Regular === //
 
         const OTHER_REGULAR = 1 << 0;
         const U8 = 1 << 1;
@@ -638,20 +652,14 @@ bitflags::bitflags! {
         const F32 = 1 << 9;
         const F64 = 1 << 10;
 
-        // Not used for inference. We just reuse the `InferTyPermSet` machinery to simplify
+        // Not used for inference. We just reuse the `SimpleTySet` machinery to simplify
         // arithmetic checking.
         const BOOL = 1 << 11;
         const CHAR = 1 << 12;
 
-        const UNSIGNED_INT = Self::U8.bits() | Self::U16.bits() | Self::U32.bits() | Self::U64.bits();
-        const SIGNED_INT = Self::I8.bits() | Self::I16.bits() | Self::I32.bits() | Self::I64.bits();
-        const INT = Self::UNSIGNED_INT.bits() | Self::SIGNED_INT.bits();
-        const FLOAT = Self::F32.bits() | Self::F64.bits();
-        const NUM = Self::INT.bits() | Self::FLOAT.bits();
-        const SIGNED_NUM = Self::SIGNED_INT.bits() | Self::FLOAT.bits();
-
         // === Special === //
 
+        /// See `elaboration` in `infcx`.
         const SPECIAL_ELAB_VAR = 1 << 13;
     }
 }

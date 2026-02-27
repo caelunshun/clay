@@ -214,6 +214,10 @@ impl<'tcx> UnifyCx<'tcx> {
         }
     }
 
+    pub fn liberate_unification_of_unique(&mut self, var: InferTyVar, new_perms: SimpleTySet) {
+        self.types.liberate_unification_of_unique(var, new_perms);
+    }
+
     /// Unifies two types such that they match. The `mode` specifies how the regions inside the
     /// types should be unified. For example, if it is `RelationMode::LhsOntoRhs`, relating
     /// `&'0 u32` and `&'1 u32` will result in the region relation `'0: '1`.
@@ -474,10 +478,21 @@ impl<'tcx> UnifyCx<'tcx> {
                                 lhs_perm_set,
                                 rhs_perm_set,
                             ));
-                        } else {
-                            self.types
-                                .union_unrelated_infer_floating(self.tcx, lhs_var, rhs_var);
+                            return;
                         }
+
+                        if lhs_perm_set.intersects(SimpleTySet::UNIQUE_NEVER_UNIFY)
+                            || rhs_perm_set.intersects(SimpleTySet::UNIQUE_NEVER_UNIFY)
+                        {
+                            culprits.push(TyAndTyUnifyCulprit::NotPermittedFloating(
+                                lhs_perm_set,
+                                rhs_perm_set,
+                            ));
+                            return;
+                        }
+
+                        self.types
+                            .union_unrelated_infer_floating(self.tcx, lhs_var, rhs_var);
                     }
                 }
             }
@@ -539,6 +554,8 @@ impl<'tcx> UnifyCx<'tcx> {
         if !lhs_perm_set.can_accept_type(rhs_ty, s) {
             return Err(TyAndTyUnifyCulprit::NotPermittedSolid(lhs_perm_set, rhs_ty));
         }
+
+        debug_assert!(!lhs_perm_set.intersects(SimpleTySet::UNIQUE_NEVER_UNIFY));
 
         // Perform occurs check
         struct OccursVisitor<'a, 'tcx> {
