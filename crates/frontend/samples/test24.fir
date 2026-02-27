@@ -26,10 +26,8 @@ pub trait Foo {}
 
 pub trait Bar {}
 
-pub trait Baz {}
-
 fn hello<T: Meow<Hey: Foo> + Meow<Hey: Bar>>(v: T) {
     demo(T::obtain(v));
 }
 
-fn demo<T: Foo + Bar + Baz>(v: T) {}
+fn demo<T: Foo + Bar>(v: T) {}
