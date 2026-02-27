@@ -45,7 +45,7 @@ use crate::{
     semantic::{
         analysis::{
             ClauseCx, ClauseImportEnvRef, ClauseObligation, ClauseOrigin, ObligationNotReady,
-            ObligationResult, TyFolderInfallibleExt, UniversalElaboration,
+            ObligationResult, TyFolderInfallibleExt, UnifyAllowed, UniversalElaboration,
         },
         syntax::{
             AnyGeneric, GenericSubst, HrtbBinder, InferTyVar, SimpleTySet, TraitClause,
@@ -56,6 +56,13 @@ use crate::{
     utils::hash::FxHashMap,
 };
 use std::{collections::VecDeque, rc::Rc};
+
+#[derive(Debug, Copy, Clone)]
+pub struct WipReifiedVar {
+    reified_clauses: Option<TraitClauseList>,
+    src_info_spec: TraitSpec,
+    src_info_idx: u32,
+}
 
 impl<'tcx> ClauseCx<'tcx> {
     pub fn elaborate_ty_universal_clauses(&mut self, var: UniversalTyVar) -> UniversalElaboration {
@@ -95,12 +102,15 @@ impl<'tcx> ClauseCx<'tcx> {
                                 let var = self.fresh_ty_infer_var_restricted(
                                     // Associated types vary in the same way as their parent generic.
                                     self.lookup_universal_ty_hrtb_universe(var).clone(),
-                                    // The restrictions ensure that only we can assign to this
-                                    // elaboration variable. We'll reject all attempts at unifying
-                                    // it with anything, which is valid because we instantiate a
-                                    // fresh universal type which certainly does not alias with any
-                                    // of the previous types.
+                                    // The restrictions ensure that, during the merging step, we're
+                                    // only merging elaboration variables with other elaboration
+                                    // variables.
                                     SimpleTySet::SPECIAL_ELAB_VAR,
+                                    //  We'll reject all attempts at unifying it with anything,
+                                    // which is valid because we instantiate a fresh universal type
+                                    // which certainly does not alias with any of the previous
+                                    // types.
+                                    UnifyAllowed::No,
                                 );
 
                                 reified_vars.insert(
@@ -231,13 +241,18 @@ impl<'tcx> ClauseCx<'tcx> {
         clauses: TraitClauseList,
         reified_vars: Rc<FxHashMap<InferTyVar, WipReifiedVar>>,
     ) -> ObligationResult {
+        // First, we must ensure that all remaining inference variables are either resolved or are
+        // in the `reified_vars` set. If they aren't, the obligation isn't ready to run.
+        // TODO
+
+        // Next, we extend all `reified_vars`'s permission sets to allow them to unify with other
+        // types. We also mark each `reified_var` as observed so we can see what they unify to.
+        // TODO
+
+        // Next, we attempt to merge trait clauses as much as possible by unifying them leftwards.
+        // TODO
+
+        //
         Err(ObligationNotReady)
     }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub struct WipReifiedVar {
-    reified_clauses: Option<TraitClauseList>,
-    src_info_spec: TraitSpec,
-    src_info_idx: u32,
 }
