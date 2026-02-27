@@ -389,6 +389,11 @@ impl<'tcx> ClauseCx<'tcx> {
         self.ucx_mut().unify_ty_and_simple_set(origin, lhs, rhs)
     }
 
+    pub fn liberate_unification_of_unique(&mut self, var: InferTyVar, new_perms: SimpleTySet) {
+        self.ucx_mut()
+            .liberate_unification_of_unique(var, new_perms);
+    }
+
     pub fn oblige_re_meets_clauses(
         &mut self,
         origin: &ClauseOrigin,
