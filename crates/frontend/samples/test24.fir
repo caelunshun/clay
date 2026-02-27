@@ -27,7 +27,11 @@ pub trait Foo {}
 pub trait Bar {}
 
 fn hello<T: Meow<Hey: Foo> + Meow<Hey: Bar>>(v: T) {
-    demo(T::obtain(v));
+    let v = T::obtain(v);
+    // demo::<<T as Meow>::Hey>(T::obtain(v));
+    demo(v);
+    // demo::<_>(v);
+    v
 }
 
 fn demo<T: Foo + Bar>(v: T) {}

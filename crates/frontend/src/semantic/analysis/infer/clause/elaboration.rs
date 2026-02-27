@@ -46,7 +46,7 @@ use crate::{
         analysis::{
             ClauseCx, ClauseImportEnvRef, ClauseObligation, ClauseOrigin, HrtbUniverse,
             ObligationNotReady, ObligationResult, TyCtxt, TyFolder, TyFolderInfallibleExt,
-            TyVisitor, TyVisitorExt, UnifyAllowed, UniversalElaboration,
+            TyVisitor, TyVisitorExt, UniversalElaboration,
         },
         syntax::{
             AnyGeneric, GenericSubst, HrtbBinder, InferTyVar, Mutability, Re, RelationMode,
@@ -107,11 +107,6 @@ impl<'tcx> ClauseCx<'tcx> {
                                     // Associated types vary in the same way as their parent generic.
                                     universal.clone(),
                                     SimpleTySet::all(),
-                                    //  We'll reject all attempts at unifying it with anything,
-                                    // which is valid because we instantiate a fresh universal type
-                                    // which certainly does not alias with any of the previous
-                                    // types.
-                                    UnifyAllowed::No,
                                 );
 
                                 reified_vars.insert(
@@ -419,14 +414,6 @@ impl<'tcx> ClauseCx<'tcx> {
                         unreachable!()
                     };
 
-                    // If this parameter is a reified parameter, liberate it.
-                    if let TyKind::InferVar(var) = *actual.r(s)
-                        && reified_vars.contains_key(&var)
-                    {
-                        self.liberate_unification_of_unique(var);
-                    }
-
-                    // Now, unify it!
                     self.oblige_ty_unifies_ty(
                         origin.clone(),
                         resolved,
