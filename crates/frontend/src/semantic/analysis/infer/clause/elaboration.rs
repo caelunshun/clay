@@ -45,17 +45,19 @@ use crate::{
     semantic::{
         analysis::{
             ClauseCx, ClauseImportEnvRef, ClauseObligation, ClauseOrigin, ObligationNotReady,
-            ObligationResult, TyFolderInfallibleExt, UnifyAllowed, UniversalElaboration,
+            ObligationResult, TyCtxt, TyFolder, TyFolderInfallibleExt, TyVisitor, TyVisitorExt,
+            UnifyAllowed, UniversalElaboration,
         },
         syntax::{
-            AnyGeneric, GenericSubst, HrtbBinder, InferTyVar, SimpleTySet, TraitClause,
-            TraitClauseList, TraitParam, TraitSpec, TyKind, TyOrRe, UniversalReVarSourceInfo,
-            UniversalTyVar,
+            AnyGeneric, GenericSubst, HrtbBinder, InferTyVar, Re, SimpleTySet, SpannedRe,
+            SpannedTy, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            UniversalReVarSourceInfo, UniversalTyVar,
         },
     },
     utils::hash::FxHashMap,
 };
-use std::{collections::VecDeque, rc::Rc};
+use smallvec::SmallVec;
+use std::{collections::VecDeque, convert::Infallible, ops::ControlFlow, rc::Rc};
 
 #[derive(Debug, Copy, Clone)]
 pub struct WipReifiedVar {
@@ -102,10 +104,7 @@ impl<'tcx> ClauseCx<'tcx> {
                                 let var = self.fresh_ty_infer_var_restricted(
                                     // Associated types vary in the same way as their parent generic.
                                     self.lookup_universal_ty_hrtb_universe(var).clone(),
-                                    // The restrictions ensure that, during the merging step, we're
-                                    // only merging elaboration variables with other elaboration
-                                    // variables.
-                                    SimpleTySet::SPECIAL_ELAB_VAR,
+                                    SimpleTySet::all(),
                                     //  We'll reject all attempts at unifying it with anything,
                                     // which is valid because we instantiate a fresh universal type
                                     // which certainly does not alias with any of the previous
@@ -241,18 +240,146 @@ impl<'tcx> ClauseCx<'tcx> {
         clauses: TraitClauseList,
         reified_vars: Rc<FxHashMap<InferTyVar, WipReifiedVar>>,
     ) -> ObligationResult {
+        let s = self.session();
+        let tcx = self.tcx();
+
         // First, we must ensure that all remaining inference variables are either resolved or are
         // in the `reified_vars` set. If they aren't, the obligation isn't ready to run.
-        // TODO
+        for &clause in clauses.r(s) {
+            let TraitClause::Trait(clause) = clause else {
+                continue;
+            };
 
-        // Next, we extend all `reified_vars`'s permission sets to allow them to unify with other
-        // types. We also mark each `reified_var` as observed so we can see what they unify to.
-        // TODO
+            if (FloatingInfVarVisitor {
+                ccx: self,
+                reified_vars: &reified_vars,
+            }
+            .visit_fallible(clause)
+            .is_break())
+            {
+                return Err(ObligationNotReady);
+            }
+        }
 
-        // Next, we attempt to merge trait clauses as much as possible by unifying them leftwards.
-        // TODO
+        // Next, let's attempt to determine which clauses should be merged together. Since there are
+        // no inference variables in the types beyond our unique-constrained ones and unification
+        // only allows region-based sub-typing, we can simply erase lifetimes and normalize types to
+        // their roots to obtain a representative type indicating whether two types could possibly
+        // unify. We still have to perform actual unification after this phase to ensure regions are
+        // properly constrained.
+        let mut merged_clauses =
+            FxHashMap::<HrtbBinder<TraitSpec>, SmallVec<[HrtbBinder<TraitSpec>; 1]>>::default();
 
-        //
-        Err(ObligationNotReady)
+        for &clause in clauses.r(s) {
+            let TraitClause::Trait(
+                clause @ HrtbBinder {
+                    kind,
+                    inner: TraitSpec { def, params },
+                },
+            ) = clause
+            else {
+                continue;
+            };
+
+            let (regular_params, assoc_params) = params
+                .r(s)
+                .split_at(*def.r(s).regular_generic_count as usize);
+
+            let key_params = regular_params
+                .iter()
+                .copied()
+                .chain(
+                    assoc_params
+                        .iter()
+                        .map(|_| TraitParam::Unspecified(tcx.intern_list(&[]))),
+                )
+                .collect::<Vec<_>>();
+
+            let key = HrtbBinder {
+                kind,
+                inner: TraitSpec {
+                    def,
+                    params: tcx.intern_list(&key_params),
+                },
+            };
+
+            let key = MergeRepresentativeFolder(self).fold(key);
+
+            merged_clauses.entry(key).or_default().push(clause);
+        }
+
+        // Finally, let's give our unification variables their actual identities.
+        for clauses in merged_clauses.into_values() {
+            let (&first, remaining) = clauses.split_first().unwrap();
+
+            let def = first.inner.def;
+
+            // Give unification variables an actual universal.
+            // TODO
+
+            // Unify the remaining generic parameters to ensure lifetimes are correct.
+            // TODO
+        }
+
+        Ok(())
+    }
+}
+
+struct FloatingInfVarVisitor<'a, 'tcx> {
+    ccx: &'a ClauseCx<'tcx>,
+    reified_vars: &'a FxHashMap<InferTyVar, WipReifiedVar>,
+}
+
+impl<'tcx> TyVisitor<'tcx> for FloatingInfVarVisitor<'_, 'tcx> {
+    type Break = ();
+
+    fn tcx(&self) -> &'tcx TyCtxt {
+        self.ccx.tcx()
+    }
+
+    fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
+        let s = self.session();
+        let ty = ty.value;
+
+        match *ty.r(s) {
+            TyKind::InferVar(var) => match self.ccx.lookup_ty_infer_var_without_poll(var) {
+                Ok(ty) => self.walk_fallible(ty),
+                Err(_) => {
+                    if self.reified_vars.contains_key(&var) {
+                        ControlFlow::Continue(())
+                    } else {
+                        ControlFlow::Break(())
+                    }
+                }
+            },
+            _ => self.walk_fallible(ty),
+        }
+    }
+}
+
+struct MergeRepresentativeFolder<'a, 'tcx>(&'a ClauseCx<'tcx>);
+
+impl<'tcx> TyFolder<'tcx> for MergeRepresentativeFolder<'_, 'tcx> {
+    type Error = Infallible;
+
+    fn tcx(&self) -> &'tcx TyCtxt {
+        self.0.tcx()
+    }
+
+    fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
+        let s = self.session();
+        let ty = ty.value;
+
+        Ok(match *ty.r(s) {
+            TyKind::InferVar(var) => match self.0.lookup_ty_infer_var_without_poll(var) {
+                Ok(ty) => self.fold(ty),
+                Err(_) => ty,
+            },
+            _ => self.fold(ty),
+        })
+    }
+
+    fn fold_re(&mut self, _re: SpannedRe) -> Result<Re, Self::Error> {
+        Ok(Re::Erased)
     }
 }
