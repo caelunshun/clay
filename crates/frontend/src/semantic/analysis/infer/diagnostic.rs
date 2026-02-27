@@ -299,8 +299,26 @@ pub struct ObligationUnfulfilled {
 
 impl ObligationUnfulfilled {
     pub fn emit(&self, ccx: &ClauseCx<'_>) -> ErrorGuaranteed {
-        // TODO
-        Diag::anon_err(format!("{self:#?}")).emit()
+        let mut sub = ccx
+            .ucx()
+            .substitutor(UnboundVarHandlingMode::NormalizeToRoot);
+
+        let me = Self {
+            obligation: match self.obligation.clone() {
+                ClauseObligation::TyUnifiesTy(origin, lhs, rhs, mode) => {
+                    ClauseObligation::TyUnifiesTy(origin, sub.fold(lhs), sub.fold(rhs), mode)
+                }
+                ClauseObligation::TyMeetsTrait(origin, universe, lhs, rhs) => {
+                    ClauseObligation::TyMeetsTrait(origin, universe, sub.fold(lhs), sub.fold(rhs))
+                }
+                ClauseObligation::TyOutlivesRe(origin, lhs, rhs, dir) => {
+                    ClauseObligation::TyOutlivesRe(origin, sub.fold(lhs), sub.fold(rhs), dir)
+                }
+                v @ ClauseObligation::UnifyReifiedElaboratedClauses(..) => v,
+            },
+        };
+
+        Diag::anon_err(format!("{me:#?}")).emit()
     }
 }
 
