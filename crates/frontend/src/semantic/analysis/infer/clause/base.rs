@@ -30,6 +30,7 @@ pub enum ClauseObligation {
     TyOutlivesRe(ClauseOrigin, Ty, Re, RelationDirection),
     UnifyReifiedElaboratedClauses(
         ClauseOrigin,
+        UniversalTyVar,
         TraitClauseList,
         Rc<FxHashMap<InferTyVar, WipReifiedVar>>,
     ),
@@ -212,11 +213,15 @@ impl<'tcx> ClauseCx<'tcx> {
                     }
                     ClauseObligation::UnifyReifiedElaboratedClauses(
                         origin,
+                        root,
                         clauses,
                         reified_vars,
-                    ) => {
-                        fork.oblige_unify_reified_elaborated_clauses(&origin, clauses, reified_vars)
-                    }
+                    ) => fork.oblige_unify_reified_elaborated_clauses(
+                        &origin,
+                        root,
+                        clauses,
+                        reified_vars,
+                    ),
                 }
             },
         );

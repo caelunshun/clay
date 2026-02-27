@@ -44,24 +44,25 @@ use crate::{
     base::arena::{HasInterner, HasListInterner},
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, ClauseObligation, ClauseOrigin, ObligationNotReady,
-            ObligationResult, TyCtxt, TyFolder, TyFolderInfallibleExt, TyVisitor, TyVisitorExt,
-            UnifyAllowed, UniversalElaboration,
+            ClauseCx, ClauseImportEnvRef, ClauseObligation, ClauseOrigin, HrtbUniverse,
+            ObligationNotReady, ObligationResult, TyCtxt, TyFolder, TyFolderInfallibleExt,
+            TyVisitor, TyVisitorExt, UnifyAllowed, UniversalElaboration,
         },
         syntax::{
             AnyGeneric, GenericSubst, HrtbBinder, InferTyVar, Re, SimpleTySet, SpannedRe,
             SpannedTy, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
-            UniversalReVarSourceInfo, UniversalTyVar,
+            UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
 };
 use smallvec::SmallVec;
-use std::{collections::VecDeque, convert::Infallible, ops::ControlFlow, rc::Rc};
+use std::{collections::VecDeque, convert::Infallible, mem, ops::ControlFlow, rc::Rc};
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub struct WipReifiedVar {
     reified_clauses: Option<TraitClauseList>,
+    universal: HrtbUniverse,
     src_info_spec: TraitSpec,
     src_info_idx: u32,
 }
@@ -101,9 +102,10 @@ impl<'tcx> ClauseCx<'tcx> {
                         .map(|(idx, param)| match *param {
                             TraitParam::Equals(ty_or_re) => ty_or_re,
                             TraitParam::Unspecified(_) => {
+                                let universal = self.lookup_universal_ty_hrtb_universe(var).clone();
                                 let var = self.fresh_ty_infer_var_restricted(
                                     // Associated types vary in the same way as their parent generic.
-                                    self.lookup_universal_ty_hrtb_universe(var).clone(),
+                                    universal.clone(),
                                     SimpleTySet::all(),
                                     //  We'll reject all attempts at unifying it with anything,
                                     // which is valid because we instantiate a fresh universal type
@@ -116,6 +118,7 @@ impl<'tcx> ClauseCx<'tcx> {
                                     var,
                                     WipReifiedVar {
                                         reified_clauses: None,
+                                        universal,
                                         src_info_spec: spec,
                                         src_info_idx: idx as u32,
                                     },
@@ -220,6 +223,7 @@ impl<'tcx> ClauseCx<'tcx> {
         // proper universals (see module comment).
         self.push_obligation(ClauseObligation::UnifyReifiedElaboratedClauses(
             ClauseOrigin::empty_report(),
+            var,
             elaborated,
             Rc::new(reified_vars),
         ));
@@ -237,6 +241,7 @@ impl<'tcx> ClauseCx<'tcx> {
     pub(super) fn oblige_unify_reified_elaborated_clauses(
         &mut self,
         origin: &ClauseOrigin,
+        root: UniversalTyVar,
         clauses: TraitClauseList,
         reified_vars: Rc<FxHashMap<InferTyVar, WipReifiedVar>>,
     ) -> ObligationResult {
@@ -281,25 +286,13 @@ impl<'tcx> ClauseCx<'tcx> {
                 continue;
             };
 
-            let (regular_params, assoc_params) = params
-                .r(s)
-                .split_at(*def.r(s).regular_generic_count as usize);
-
-            let key_params = regular_params
-                .iter()
-                .copied()
-                .chain(
-                    assoc_params
-                        .iter()
-                        .map(|_| TraitParam::Unspecified(tcx.intern_list(&[]))),
-                )
-                .collect::<Vec<_>>();
-
             let key = HrtbBinder {
                 kind,
                 inner: TraitSpec {
                     def,
-                    params: tcx.intern_list(&key_params),
+                    // No need to replace the associated parameters because this is just a key.
+                    params: tcx
+                        .intern_list(&params.r(s)[..*def.r(s).regular_generic_count as usize]),
                 },
             };
 
@@ -310,11 +303,107 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // Finally, let's give our unification variables their actual identities.
         for clauses in merged_clauses.into_values() {
-            let (&first, remaining) = clauses.split_first().unwrap();
+            let def = clauses.first().unwrap().inner.def;
+            let regular_generic_count = *def.r(s).regular_generic_count as usize;
 
-            let def = first.inner.def;
+            // Determine what the associated type parameter should be.
+            #[derive(Debug)]
+            enum AssocParam<'a> {
+                Uninit,
+                Reified(&'a WipReifiedVar, SmallVec<[TraitClauseList; 1]>),
+                Concrete(Ty),
+            }
 
-            // Give unification variables an actual universal.
+            let mut assoc_params = def
+                .r(s)
+                .generics
+                .r(s)
+                .defs
+                .iter()
+                .skip(regular_generic_count)
+                .map(|_| AssocParam::Uninit)
+                .collect::<Vec<_>>();
+
+            for &HrtbBinder {
+                kind: _,
+                inner: spec,
+            } in &clauses
+            {
+                for (resolved, actual) in assoc_params
+                    .iter_mut()
+                    .zip(&spec.params.r(s)[regular_generic_count..])
+                {
+                    let TraitParam::Equals(TyOrRe::Ty(actual)) = *actual else {
+                        unreachable!()
+                    };
+
+                    // See whether this parameter is a reified parameter.
+                    if let TyKind::InferVar(var) = *actual.r(s)
+                        && let Some(reified) = reified_vars.get(&var)
+                    {
+                        match resolved {
+                            AssocParam::Uninit => {
+                                *resolved = AssocParam::Reified(
+                                    reified,
+                                    smallvec::smallvec![reified.reified_clauses.unwrap()],
+                                );
+                            }
+                            AssocParam::Reified(_, clauses) => {
+                                clauses.push(reified.reified_clauses.unwrap());
+                            }
+                            AssocParam::Concrete(_) => {
+                                // (ignored)
+                            }
+                        }
+
+                        continue;
+                    }
+
+                    // Otherwise, turn the parameter into a concrete one.
+                    match resolved {
+                        AssocParam::Uninit | AssocParam::Reified(..) => {
+                            *resolved = AssocParam::Concrete(actual);
+                        }
+                        AssocParam::Concrete(_) => {
+                            // (keep the previous value)
+                        }
+                    }
+                }
+            }
+
+            for assoc_param in &mut assoc_params {
+                match assoc_param {
+                    AssocParam::Uninit => unreachable!(),
+                    AssocParam::Concrete(_) => {
+                        // (keep as is)
+                    }
+                    AssocParam::Reified(first_wip, clauses) => {
+                        let var = self.fresh_ty_universal_var(
+                            first_wip.universal.clone(),
+                            UniversalTyVarSourceInfo::Projection(
+                                root,
+                                first_wip.src_info_spec,
+                                first_wip.src_info_idx,
+                            ),
+                        );
+                        let clauses = clauses
+                            .iter()
+                            .flat_map(|v| v.r(s))
+                            .copied()
+                            .collect::<Vec<_>>();
+
+                        let clauses = tcx.intern_list(&clauses);
+
+                        self.init_ty_universal_var_direct_clauses(var, clauses);
+
+                        *assoc_param = AssocParam::Concrete(tcx.intern(TyKind::UniversalVar(var)));
+                    }
+                }
+            }
+
+            dbg!(&assoc_params);
+
+            // Unify all the associated parameters with the target.
             // TODO
 
             // Unify the remaining generic parameters to ensure lifetimes are correct.
