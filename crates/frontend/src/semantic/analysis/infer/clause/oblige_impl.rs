@@ -119,7 +119,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 }
             }
             TyKind::InferVar(var) => {
-                if self.lookup_ty_infer_var_without_poll(var).unwrap_err().perm_set.contains(SimpleTySet::OTHER_REGULAR) {
+                if self.lookup_ty_infer_var_without_poll(var).unwrap_err().perm_set.contains(SimpleTySet::OTHER) {
                     // We can't yet rule out the possibility that this obligation is inherently
                     // fulfilled.
                     return Err(ObligationNotReady);
