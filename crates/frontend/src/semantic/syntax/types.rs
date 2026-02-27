@@ -621,9 +621,6 @@ bitflags::bitflags! {
         /// Types which could be a `UniversalVar`.
         const MAYBE_UNIVERSAL = Self::OTHER_REGULAR.bits() | Self::SPECIAL_ELAB_VAR.bits();
 
-        /// Inference variables which must never unify automatically with other inference variables.
-        const UNIQUE_NEVER_UNIFY = Self::SPECIAL_ELAB_VAR.bits();
-
         /// All ordinary types a user would expect their variables to unify with.
         const ALL_REGULAR =
             Self::OTHER_REGULAR.bits()

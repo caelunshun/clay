@@ -367,6 +367,7 @@ pub enum TyAndTyUnifyCulprit {
     Leaks(InferTyLeaksError),
     NotPermittedSolid(SimpleTySet, Ty),
     NotPermittedFloating(SimpleTySet, SimpleTySet),
+    UnifyDenied,
 }
 
 #[derive(Debug, Clone)]

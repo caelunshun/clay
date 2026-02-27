@@ -1,6 +1,6 @@
 use crate::{
     semantic::{
-        analysis::{FloatingInferVar, HrtbUniverse, ObservedTyInferVar, TyCtxt},
+        analysis::{FloatingInferVar, HrtbUniverse, ObservedTyInferVar, TyCtxt, UnifyAllowed},
         syntax::{InferTyVar, SimpleTySet, Ty, UniversalTyVar, UniversalTyVarSourceInfo},
     },
     utils::hash::FxHashSet,
@@ -30,6 +30,7 @@ enum DisjointTyInferRoot {
     Floating {
         max_universe: HrtbUniverse,
         perm_set: SimpleTySet,
+        unify_allowed: UnifyAllowed,
         observed: Vec<ObservedTyInferVar>,
     },
 }
@@ -92,12 +93,14 @@ impl TyUnifyTracker {
         &mut self,
         max_universe: HrtbUniverse,
         perm_set: SimpleTySet,
+        unify_allowed: UnifyAllowed,
     ) -> InferTyVar {
         let var = InferTyVar::from_usize(self.disjoint.len());
         self.disjoint.push(DisjointTyInferNode {
             root: Some(DisjointTyInferRoot::Floating {
                 max_universe: max_universe.clone(),
                 perm_set,
+                unify_allowed,
                 observed: Vec::new(),
             }),
             observed_idx: None,
@@ -143,6 +146,7 @@ impl TyUnifyTracker {
             DisjointTyInferRoot::Floating {
                 max_universe: _,
                 perm_set: _,
+                unify_allowed: _,
                 observed,
             } => {
                 observed.push(observed_idx);
@@ -165,6 +169,7 @@ impl TyUnifyTracker {
                 observed: observed_equivalent,
                 perm_set,
                 max_universe,
+                unify_allowed,
             } => {
                 self.mention_var_for_tracing(var);
 
@@ -173,6 +178,7 @@ impl TyUnifyTracker {
                     observed_equivalent,
                     max_universe,
                     perm_set: *perm_set,
+                    unify_allowed: *unify_allowed,
                 })
             }
         }
@@ -184,6 +190,7 @@ impl TyUnifyTracker {
         let DisjointTyInferRoot::Floating {
             observed: _,
             perm_set: _,
+            unify_allowed: _,
             max_universe,
         } = self.disjoint[root_var].root.as_mut().unwrap()
         else {
@@ -193,20 +200,21 @@ impl TyUnifyTracker {
         *max_universe = max_universe.min(other).clone();
     }
 
-    pub fn liberate_unification_of_unique(&mut self, var: InferTyVar, new_perms: SimpleTySet) {
-        assert_eq!(self.disjoint.root_of(var.index()), var.index());
+    pub fn liberate_unification_of_unique(&mut self, var: InferTyVar) {
+        debug_assert_eq!(self.disjoint.root_of(var.index()), var.index());
 
         let DisjointTyInferRoot::Floating {
             observed: _,
-            perm_set,
+            perm_set: _,
+            unify_allowed,
             max_universe: _,
         } = self.disjoint[var.index()].root.as_mut().unwrap()
         else {
             unreachable!()
         };
 
-        assert!(perm_set.intersects(SimpleTySet::UNIQUE_NEVER_UNIFY));
-        *perm_set = new_perms;
+        assert_eq!(*unify_allowed, UnifyAllowed::No);
+        *unify_allowed = UnifyAllowed::Yes;
     }
 
     pub fn assign_floating_infer_to_non_var(&mut self, var: InferTyVar, ty: Ty) {
@@ -216,11 +224,14 @@ impl TyUnifyTracker {
         let DisjointTyInferRoot::Floating {
             max_universe: _,
             perm_set: _,
+            unify_allowed,
             observed,
         } = root
         else {
             unreachable!();
         };
+
+        debug_assert_eq!(*unify_allowed, UnifyAllowed::Yes);
 
         self.observed_reveal_order.extend_from_slice(observed);
         *root = DisjointTyInferRoot::Known(ty);
@@ -246,17 +257,22 @@ impl TyUnifyTracker {
             DisjointTyInferRoot::Floating {
                 max_universe: lhs_max_universe,
                 observed: mut lhs_observed,
+                unify_allowed: lhs_unify_allowed,
                 perm_set: lhs_perm_set,
             },
             DisjointTyInferRoot::Floating {
                 max_universe: rhs_max_universe,
                 observed: mut rhs_observed,
+                unify_allowed: rhs_unify_allowed,
                 perm_set: rhs_perm_set,
             },
         ) = (lhs_root, rhs_root)
         else {
             unreachable!()
         };
+
+        debug_assert_eq!(lhs_unify_allowed, UnifyAllowed::Yes);
+        debug_assert_eq!(rhs_unify_allowed, UnifyAllowed::Yes);
 
         self.disjoint.join(lhs.index(), rhs.index());
 
@@ -279,6 +295,7 @@ impl TyUnifyTracker {
             *new_root = Some(DisjointTyInferRoot::Floating {
                 max_universe: lhs_max_universe.min(&rhs_max_universe).clone(),
                 perm_set,
+                unify_allowed: UnifyAllowed::Yes,
                 observed: lhs_observed,
             });
         }

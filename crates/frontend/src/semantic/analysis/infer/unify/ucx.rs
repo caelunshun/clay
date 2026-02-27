@@ -27,6 +27,12 @@ pub enum UnifyCxMode {
     RegionAware,
 }
 
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum UnifyAllowed {
+    Yes,
+    No,
+}
+
 /// A type inference context for solving type obligations of the form...
 ///
 /// - `Region: Region`
@@ -55,6 +61,7 @@ pub struct FloatingInferVar<'a> {
     pub observed_equivalent: &'a [ObservedTyInferVar],
     pub max_universe: &'a HrtbUniverse,
     pub perm_set: SimpleTySet,
+    pub unify_allowed: UnifyAllowed,
 }
 
 impl<'tcx> UnifyCx<'tcx> {
@@ -111,8 +118,10 @@ impl<'tcx> UnifyCx<'tcx> {
         &mut self,
         max_universe: HrtbUniverse,
         perm_set: SimpleTySet,
+        unify_allowed: UnifyAllowed,
     ) -> InferTyVar {
-        self.types.fresh_infer_restricted(max_universe, perm_set)
+        self.types
+            .fresh_infer_restricted(max_universe, perm_set, unify_allowed)
     }
 
     pub fn fresh_ty_universal_var(
@@ -214,8 +223,8 @@ impl<'tcx> UnifyCx<'tcx> {
         }
     }
 
-    pub fn liberate_unification_of_unique(&mut self, var: InferTyVar, new_perms: SimpleTySet) {
-        self.types.liberate_unification_of_unique(var, new_perms);
+    pub fn liberate_unification_of_unique(&mut self, var: InferTyVar) {
+        self.types.liberate_unification_of_unique(var);
     }
 
     /// Unifies two types such that they match. The `mode` specifies how the regions inside the
@@ -464,10 +473,12 @@ impl<'tcx> UnifyCx<'tcx> {
                     (
                         Err(FloatingInferVar {
                             perm_set: lhs_perm_set,
+                            unify_allowed: lhs_unify_allowed,
                             ..
                         }),
                         Err(FloatingInferVar {
                             perm_set: rhs_perm_set,
+                            unify_allowed: rhs_unify_allowed,
                             ..
                         }),
                     ) => {
@@ -481,13 +492,10 @@ impl<'tcx> UnifyCx<'tcx> {
                             return;
                         }
 
-                        if lhs_perm_set.intersects(SimpleTySet::UNIQUE_NEVER_UNIFY)
-                            || rhs_perm_set.intersects(SimpleTySet::UNIQUE_NEVER_UNIFY)
+                        if lhs_unify_allowed == UnifyAllowed::No
+                            || rhs_unify_allowed == UnifyAllowed::No
                         {
-                            culprits.push(TyAndTyUnifyCulprit::NotPermittedFloating(
-                                lhs_perm_set,
-                                rhs_perm_set,
-                            ));
+                            culprits.push(TyAndTyUnifyCulprit::UnifyDenied);
                             return;
                         }
 
@@ -541,6 +549,7 @@ impl<'tcx> UnifyCx<'tcx> {
             observed_equivalent: _,
             max_universe: lhs_max_universe,
             perm_set: lhs_perm_set,
+            unify_allowed: lhs_unify_allowed,
         }) = self.types.lookup_infer(lhs_var_root)
         else {
             unreachable!()
@@ -555,7 +564,9 @@ impl<'tcx> UnifyCx<'tcx> {
             return Err(TyAndTyUnifyCulprit::NotPermittedSolid(lhs_perm_set, rhs_ty));
         }
 
-        debug_assert!(!lhs_perm_set.intersects(SimpleTySet::UNIQUE_NEVER_UNIFY));
+        if lhs_unify_allowed == UnifyAllowed::No {
+            return Err(TyAndTyUnifyCulprit::UnifyDenied);
+        }
 
         // Perform occurs check
         struct OccursVisitor<'a, 'tcx> {
@@ -871,9 +882,16 @@ pub struct InferTySubstitutor<'a, 'tcx> {
 
 #[derive(Debug, Copy, Clone)]
 pub enum UnboundVarHandlingMode {
+    /// All unbound type variables are turned into `Ty::Error`.
     Error(ErrorGuaranteed),
+
+    /// All unbound type variables are turned into their unique root representation.
     NormalizeToRoot,
+
+    /// All unbound type variables are turned into `Ty::SigInfer`.
     EraseToSigInfer,
+
+    /// Panic on encountering an unbound type variable.
     Panic,
 }
 
