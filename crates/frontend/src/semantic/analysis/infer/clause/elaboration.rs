@@ -49,15 +49,15 @@ use crate::{
             TyVisitor, TyVisitorExt, UnifyAllowed, UniversalElaboration,
         },
         syntax::{
-            AnyGeneric, GenericSubst, HrtbBinder, InferTyVar, Re, SimpleTySet, SpannedRe,
-            SpannedTy, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
-            UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
+            AnyGeneric, GenericSubst, HrtbBinder, InferTyVar, Mutability, Re, RelationMode,
+            SimpleTySet, SpannedRe, SpannedTy, TraitClause, TraitClauseList, TraitParam, TraitSpec,
+            Ty, TyKind, TyOrRe, UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
 };
 use smallvec::SmallVec;
-use std::{collections::VecDeque, convert::Infallible, mem, ops::ControlFlow, rc::Rc};
+use std::{collections::VecDeque, convert::Infallible, ops::ControlFlow, rc::Rc};
 
 #[derive(Debug, Clone)]
 pub struct WipReifiedVar {
@@ -401,13 +401,62 @@ impl<'tcx> ClauseCx<'tcx> {
                 }
             }
 
-            dbg!(&assoc_params);
-
             // Unify all the associated parameters with the target.
-            // TODO
+            for &HrtbBinder {
+                kind: _,
+                inner: spec,
+            } in &clauses
+            {
+                for (resolved, actual) in assoc_params
+                    .iter_mut()
+                    .zip(&spec.params.r(s)[regular_generic_count..])
+                {
+                    let AssocParam::Concrete(resolved) = *resolved else {
+                        unreachable!()
+                    };
 
-            // Unify the remaining generic parameters to ensure lifetimes are correct.
-            // TODO
+                    let TraitParam::Equals(TyOrRe::Ty(actual)) = *actual else {
+                        unreachable!()
+                    };
+
+                    // If this parameter is a reified parameter, liberate it.
+                    if let TyKind::InferVar(var) = *actual.r(s)
+                        && reified_vars.contains_key(&var)
+                    {
+                        self.liberate_unification_of_unique(var);
+                    }
+
+                    // Now, unify it!
+                    self.oblige_ty_unifies_ty(
+                        origin.clone(),
+                        resolved,
+                        actual,
+                        RelationMode::Equate,
+                    );
+                }
+            }
+
+            // Unify the non-associated generic parameters to ensure lifetimes are correct.
+            let (&first, remaining) = clauses.split_first().unwrap();
+
+            for &remaining in remaining {
+                let fresh_re = self.fresh_re_infer();
+
+                self.oblige_ty_unifies_ty(
+                    origin.clone(),
+                    tcx.intern(TyKind::Trait(
+                        fresh_re,
+                        Mutability::Mut,
+                        tcx.intern_list(&[TraitClause::Trait(first)]),
+                    )),
+                    tcx.intern(TyKind::Trait(
+                        fresh_re,
+                        Mutability::Mut,
+                        tcx.intern_list(&[TraitClause::Trait(remaining)]),
+                    )),
+                    RelationMode::Equate,
+                );
+            }
         }
 
         Ok(())
