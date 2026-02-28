@@ -25,7 +25,7 @@ impl Meow for () {
 }
 
 fn demo() {
-    hehe(((),));
+    hehe(());
 }
 
 fn hehe<T: Meow<Out = <T as Meow>::Out>>(v: T) {}
