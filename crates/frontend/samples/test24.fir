@@ -16,18 +16,30 @@ pub mod std {
     pub trait FnOnce<I, O> {}
 }
 
-pub trait Meow {
+pub trait Meow<T> {
     type Hey;
 
-    fn obtain(me: Self) -> <Self as Meow>::Hey;
+    fn obtain(me: Self) -> <Self as Meow<T>>::Hey;
 }
 
 pub trait Foo {}
 
 pub trait Bar {}
 
-fn hello<T: Meow<Hey: Foo> + Meow<Hey: Bar>>(v: T) {
-    demo::<<T as Meow>::Hey>(T::obtain(v));
+pub trait Baz {}
+
+pub trait Projector {
+    type Out;
+}
+
+fn hello<
+    T: Projector<Out = ()>
+     + Meow<<T as Projector>::Out, Hey: Foo>
+     + Meow<<T as Projector>::Out, Hey: Bar>
+>(
+    v: T,
+) {
+    demo::<<T as Meow<<T as Projector>::Out>>::Hey>(T::obtain(v));
 
     let v = T::obtain(v);
     demo::<_>(v);
