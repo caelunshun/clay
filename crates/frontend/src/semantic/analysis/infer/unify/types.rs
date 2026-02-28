@@ -178,6 +178,21 @@ impl TyUnifyTracker {
         }
     }
 
+    pub fn force_update_permissions_of_ty_var(&mut self, var: InferTyVar, perms: SimpleTySet) {
+        let root_var = self.disjoint.root_of(var.index());
+
+        let DisjointTyInferRoot::Floating {
+            observed: _,
+            perm_set,
+            max_universe: _,
+        } = self.disjoint[root_var].root.as_mut().unwrap()
+        else {
+            unreachable!()
+        };
+
+        *perm_set = perms;
+    }
+
     pub fn restrict_floating_infer_max_universe(&mut self, var: InferTyVar, other: &HrtbUniverse) {
         let root_var = self.disjoint.root_of(var.index());
 

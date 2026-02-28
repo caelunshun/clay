@@ -33,17 +33,19 @@ pub trait Projector {
 }
 
 fn hello<
-    T: Projector<Out = ()>
+    T: Projector
      + Meow<<T as Projector>::Out, Hey: Foo>
      + Meow<<T as Projector>::Out, Hey: Bar>
 >(
     v: T,
 ) {
+/*
     demo::<<T as Meow<<T as Projector>::Out>>::Hey>(T::obtain(v));
 
     let v = T::obtain(v);
     demo::<_>(v);
     demo(v);
+*/
 }
 
 fn demo<T: Foo + Bar>(v: T) {}

@@ -263,6 +263,11 @@ impl<'tcx> ClauseCx<'tcx> {
         self.ucx().lookup_ty_infer_var(var)
     }
 
+    pub fn force_update_permissions_of_ty_var(&mut self, var: InferTyVar, perms: SimpleTySet) {
+        self.ucx_mut()
+            .force_update_permissions_of_ty_var(var, perms);
+    }
+
     pub fn lookup_ty_infer_var_after_poll(
         &mut self,
         var: InferTyVar,
