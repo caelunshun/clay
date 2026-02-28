@@ -60,7 +60,19 @@ use smallvec::SmallVec;
 use std::{collections::VecDeque, convert::Infallible, ops::ControlFlow, rc::Rc};
 
 #[derive(Debug, Clone)]
-pub struct WipReifiedVar {
+pub struct WipReificationState(Rc<FxHashMap<InferTyVar, WipReifiedVar>>);
+
+impl WipReificationState {
+    pub fn collect_roots(&self, ccx: &ClauseCx<'_>) -> FxHashSet<InferTyVar> {
+        self.0
+            .keys()
+            .map(|&var| ccx.lookup_ty_infer_var_without_poll(var).unwrap_err().root)
+            .collect::<FxHashSet<_>>()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct WipReifiedVar {
     reified_clauses: Option<TraitClauseList>,
     universal: HrtbUniverse,
     src_info_spec: TraitSpec,
@@ -73,7 +85,7 @@ impl<'tcx> ClauseCx<'tcx> {
         let tcx = self.tcx();
 
         // See whether this universal variable has been elaborated yet.
-        if let Some(elaborated) = self.universal_vars[var].elaboration {
+        if let Some(elaborated) = self.universal_vars[var].elaboration.clone() {
             return elaborated;
         }
 
@@ -216,21 +228,24 @@ impl<'tcx> ClauseCx<'tcx> {
 
         let elaborated = self.tcx().intern_list(&elaborated);
 
+        let reified_vars = WipReificationState(Rc::new(reified_vars));
+
         // Create an obligation to properly resolve reified associated type inference variables to
         // proper universals (see module comment).
         self.push_obligation(ClauseObligation::UnifyReifiedElaboratedClauses(
             ClauseOrigin::empty_report(),
             var,
             elaborated,
-            Rc::new(reified_vars),
+            reified_vars.clone(),
         ));
 
         // Record the elaboration and return it.
         let elaborated = UniversalElaboration {
             clauses: elaborated,
             lub_re,
+            wip_reification_state: Some(reified_vars),
         };
-        self.universal_vars[var].elaboration = Some(elaborated);
+        self.universal_vars[var].elaboration = Some(elaborated.clone());
 
         elaborated
     }
@@ -240,15 +255,12 @@ impl<'tcx> ClauseCx<'tcx> {
         origin: &ClauseOrigin,
         root: UniversalTyVar,
         clauses: TraitClauseList,
-        reified_vars: Rc<FxHashMap<InferTyVar, WipReifiedVar>>,
+        reified_vars: WipReificationState,
     ) -> ObligationResult {
         let s = self.session();
         let tcx = self.tcx();
 
-        let reified_var_roots = reified_vars
-            .keys()
-            .map(|&var| self.lookup_ty_infer_var_without_poll(var).unwrap_err().root)
-            .collect::<FxHashSet<_>>();
+        let reified_var_roots = reified_vars.collect_roots(self);
 
         // First, we must ensure that all remaining inference variables are either resolved or are
         // in the `reified_vars` set. If they aren't, the obligation isn't ready to run.
@@ -345,7 +357,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
                     // See whether this parameter is a reified parameter.
                     if let TyKind::InferVar(var) = *actual.r(s)
-                        && let Some(reified) = reified_vars.get(&var)
+                        && let Some(reified) = reified_vars.0.get(&var)
                     {
                         match resolved {
                             AssocParam::Uninit => {
@@ -461,13 +473,19 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         }
 
+        self.universal_vars[root]
+            .elaboration
+            .as_mut()
+            .unwrap()
+            .wip_reification_state = None;
+
         Ok(())
     }
 }
 
-struct FloatingInfVarVisitor<'a, 'tcx> {
-    ccx: &'a ClauseCx<'tcx>,
-    reified_var_roots: &'a FxHashSet<InferTyVar>,
+pub(super) struct FloatingInfVarVisitor<'a, 'tcx> {
+    pub ccx: &'a ClauseCx<'tcx>,
+    pub reified_var_roots: &'a FxHashSet<InferTyVar>,
 }
 
 impl<'tcx> TyVisitor<'tcx> for FloatingInfVarVisitor<'_, 'tcx> {

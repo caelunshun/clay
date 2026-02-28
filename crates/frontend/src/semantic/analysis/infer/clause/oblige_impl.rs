@@ -6,7 +6,8 @@ use crate::{
         analysis::{
             ClauseCx, ClauseImportEnv, ClauseOrigin, HrtbUniverse, HrtbUniverseInfo,
             NoTraitImplError, ObligationNotReady, ObligationResult, TyFolderInfallibleExt,
-            UnboundVarHandlingMode, UniversalElaboration, infer::clause::ClauseObligation,
+            TyVisitorExt, UnboundVarHandlingMode, UniversalElaboration,
+            infer::clause::{ClauseObligation, elaboration::FloatingInfVarVisitor},
         },
         syntax::{
             HrtbBinder, HrtbBinderKind, ImplItem, RelationMode, SimpleTySet, TraitClause,
@@ -107,7 +108,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
                 match self
                     .clone()
-                    .try_select_inherent_impl(origin, &universe, universal_elab, rhs)
+                    .try_select_inherent_impl(origin, &universe, universal_elab, rhs)?
                 {
                     Ok(res) => {
                         *self = res;
@@ -202,98 +203,130 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     fn try_select_inherent_impl(
-        mut self,
+        self,
         origin: &ClauseOrigin,
         universe: &HrtbUniverse,
         lhs: UniversalElaboration,
         rhs: TraitSpec,
-    ) -> Result<Self, SelectionRejected> {
+    ) -> ObligationResult<Result<Self, SelectionRejected>> {
         let s = self.session();
 
-        // Find the clause that could prove our trait.
-        let lhs = lhs
-            .clauses
-            .r(s)
-            .iter()
-            .copied()
-            .find(|&clause| match clause {
-                TraitClause::Outlives(_, _) => false,
-                // TODO: Use more proper selection criteria.
-                TraitClause::Trait(lhs) => lhs.inner.def == rhs.def,
-            });
+        let reified_var_roots = lhs
+            .wip_reification_state
+            .as_ref()
+            .map(|v| v.collect_roots(&self));
 
-        let Some(lhs) = lhs else {
-            return Err(SelectionRejected);
-        };
-
-        let TraitClause::Trait(lhs) = lhs else {
-            unreachable!()
-        };
-
-        // Instantiate the binder with inference variables so that we may select the correct
-        // implementation of it.
-        let lhs = self.instantiate_hrtb_infer(origin, universe, lhs);
-
-        // See whether we can select an inherent `impl`.
-        let mut param_iter = lhs.params.r(s).iter().zip(rhs.params.r(s));
-
-        for (&lhs_param, &rhs_param) in
-            (&mut param_iter).take(*rhs.def.r(s).regular_generic_count as usize)
-        {
-            let TraitParam::Equals(lhs) = lhs_param else {
-                unreachable!();
+        'select: for &lhs in lhs.clauses.r(s) {
+            let TraitClause::Trait(lhs) = lhs else {
+                continue;
             };
 
-            match rhs_param {
-                TraitParam::Equals(rhs) => match (lhs, rhs) {
-                    (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                        // This can be an obligation because selection shouldn't depend on regions.
-                        self.oblige_re_outlives_re(origin.clone(), lhs, rhs, RelationMode::Equate);
-                    }
-                    (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
-                        if let Err(_err) =
-                            self.ucx_mut()
-                                .unify_ty_and_ty(origin, lhs, rhs, RelationMode::Equate)
-                        {
-                            return Err(SelectionRejected);
+            if lhs.inner.def != rhs.def {
+                continue;
+            }
+
+            let mut fork = self.clone();
+
+            // Instantiate the binder with inference variables so that we may select the correct
+            // implementation of it.
+            let lhs = fork.instantiate_hrtb_infer(origin, universe, lhs);
+
+            // See whether we can select an inherent `impl`.
+            let mut param_iter = lhs.params.r(s).iter().zip(rhs.params.r(s));
+
+            for (&lhs_param, &rhs_param) in
+                (&mut param_iter).take(*rhs.def.r(s).regular_generic_count as usize)
+            {
+                let TraitParam::Equals(lhs) = lhs_param else {
+                    unreachable!();
+                };
+
+                match rhs_param {
+                    TraitParam::Equals(rhs) => match (lhs, rhs) {
+                        (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
+                            // This can be an obligation because selection shouldn't depend on regions.
+                            fork.oblige_re_outlives_re(
+                                origin.clone(),
+                                lhs,
+                                rhs,
+                                RelationMode::Equate,
+                            );
                         }
+                        (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
+                            // See whether we can reject this parameter.
+                            if let Err(_err) = fork.ucx_mut().unify_ty_and_ty(
+                                origin,
+                                lhs,
+                                rhs,
+                                RelationMode::Equate,
+                            ) {
+                                continue 'select;
+                            }
+
+                            // If we can't, ensure that we haven't just unified some still-inferred
+                            // generic definition parameters unexpectedly.
+                            if let Some(reified_var_roots) = &reified_var_roots {
+                                let is_resolved = FloatingInfVarVisitor {
+                                    ccx: &self,
+                                    reified_var_roots,
+                                }
+                                .visit_fallible(rhs)
+                                .is_continue();
+
+                                if !is_resolved {
+                                    return Err(ObligationNotReady);
+                                }
+                            }
+                        }
+                        _ => unreachable!(),
+                    },
+                    TraitParam::Unspecified(_) => {
+                        unreachable!()
                     }
-                    _ => unreachable!(),
-                },
-                TraitParam::Unspecified(_) => {
-                    unreachable!()
                 }
             }
-        }
 
-        // If we can, push its obligations.
-        for (&lhs_param, &rhs_param) in param_iter {
-            let TraitParam::Equals(lhs) = lhs_param else {
-                unreachable!();
-            };
+            // If we can, push its obligations.
+            for (&lhs_param, &rhs_param) in param_iter {
+                let TraitParam::Equals(lhs) = lhs_param else {
+                    unreachable!();
+                };
 
-            match rhs_param {
-                TraitParam::Equals(rhs) => match (lhs, rhs) {
-                    (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                        self.oblige_re_outlives_re(origin.clone(), lhs, rhs, RelationMode::Equate);
-                    }
-                    (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
-                        self.oblige_ty_unifies_ty(origin.clone(), lhs, rhs, RelationMode::Equate);
-                    }
-                    _ => unreachable!(),
-                },
-                TraitParam::Unspecified(rhs) => match lhs {
-                    TyOrRe::Re(lhs) => {
-                        self.oblige_re_meets_clauses(origin, lhs, rhs);
-                    }
-                    TyOrRe::Ty(lhs) => {
-                        self.oblige_ty_meets_clauses(origin, universe, lhs, rhs);
-                    }
-                },
+                match rhs_param {
+                    TraitParam::Equals(rhs) => match (lhs, rhs) {
+                        (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
+                            fork.oblige_re_outlives_re(
+                                origin.clone(),
+                                lhs,
+                                rhs,
+                                RelationMode::Equate,
+                            );
+                        }
+                        (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
+                            fork.oblige_ty_unifies_ty(
+                                origin.clone(),
+                                lhs,
+                                rhs,
+                                RelationMode::Equate,
+                            );
+                        }
+                        _ => unreachable!(),
+                    },
+                    TraitParam::Unspecified(rhs) => match lhs {
+                        TyOrRe::Re(lhs) => {
+                            fork.oblige_re_meets_clauses(origin, lhs, rhs);
+                        }
+                        TyOrRe::Ty(lhs) => {
+                            fork.oblige_ty_meets_clauses(origin, universe, lhs, rhs);
+                        }
+                    },
+                }
             }
+
+            return Ok(Ok(fork));
         }
 
-        Ok(self)
+        Ok(Err(SelectionRejected))
     }
 
     fn try_select_block_impl(
