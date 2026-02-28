@@ -291,7 +291,11 @@ impl<'tcx> ClauseCx<'tcx> {
                 },
             };
 
-            let key = MergeRepresentativeFolder(self).fold(key);
+            let key = MergeRepresentativeFolder {
+                ccx: self,
+                reified_vars: &reified_vars,
+            }
+            .fold(key);
 
             merged_clauses.entry(key).or_default().push(clause);
         }
@@ -467,28 +471,32 @@ impl<'tcx> TyVisitor<'tcx> for FloatingInfVarVisitor<'_, 'tcx> {
         let ty = ty.value;
 
         match *ty.r(s) {
-            TyKind::InferVar(var) => match self.ccx.lookup_ty_infer_var_without_poll(var) {
-                Ok(ty) => self.walk_fallible(ty),
-                Err(_) => {
-                    if self.reified_vars.contains_key(&var) {
-                        ControlFlow::Continue(())
-                    } else {
-                        ControlFlow::Break(())
-                    }
+            TyKind::InferVar(var) => {
+                // Assume that `reified_var`s have not been unified with anything else.
+                if self.reified_vars.contains_key(&var) {
+                    return ControlFlow::Continue(());
                 }
-            },
+
+                match self.ccx.lookup_ty_infer_var_without_poll(var) {
+                    Ok(ty) => self.walk_fallible(ty),
+                    Err(_) => ControlFlow::Break(()),
+                }
+            }
             _ => self.walk_fallible(ty),
         }
     }
 }
 
-struct MergeRepresentativeFolder<'a, 'tcx>(&'a ClauseCx<'tcx>);
+struct MergeRepresentativeFolder<'a, 'tcx> {
+    ccx: &'a ClauseCx<'tcx>,
+    reified_vars: &'a FxHashMap<InferTyVar, WipReifiedVar>,
+}
 
 impl<'tcx> TyFolder<'tcx> for MergeRepresentativeFolder<'_, 'tcx> {
     type Error = Infallible;
 
     fn tcx(&self) -> &'tcx TyCtxt {
-        self.0.tcx()
+        self.ccx.tcx()
     }
 
     fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
@@ -496,11 +504,15 @@ impl<'tcx> TyFolder<'tcx> for MergeRepresentativeFolder<'_, 'tcx> {
         let ty = ty.value;
 
         Ok(match *ty.r(s) {
-            TyKind::InferVar(var) => match self.0.lookup_ty_infer_var_without_poll(var) {
-                Ok(ty) => self.fold(ty),
-                Err(_) => ty,
-            },
-            _ => self.fold(ty),
+            TyKind::InferVar(var) => {
+                if self.reified_vars.contains_key(&var) {
+                    return Ok(ty);
+                }
+
+                let ty = self.ccx.lookup_ty_infer_var_without_poll(var).unwrap();
+                self.fold(ty)
+            }
+            _ => self.super_(ty),
         })
     }
 
