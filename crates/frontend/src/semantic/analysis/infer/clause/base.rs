@@ -8,7 +8,7 @@ use crate::{
             ClauseError, ClauseOrigin, CoherenceMap, FloatingInferVar, HrtbUniverse, ObligationCx,
             ObligationNotReady, ObligationUnfulfilled, RecursionLimitReached,
             TyAndSimpleTySetUnifyError, TyAndTyUnifyError, TyCtxt, UnifyCx, UnifyCxMode,
-            infer::clause::elaboration::WipReifiedVar,
+            infer::clause::elaboration::WipReificationState,
         },
         syntax::{
             Crate, InferTyVar, Re, RelationDirection, RelationMode, SimpleTySet, TraitClause,
@@ -16,10 +16,8 @@ use crate::{
             UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
-    utils::hash::FxHashMap,
 };
 use index_vec::IndexVec;
-use std::rc::Rc;
 
 const MAX_OBLIGATION_DEPTH: u32 = 256;
 
@@ -32,7 +30,7 @@ pub enum ClauseObligation {
         ClauseOrigin,
         UniversalTyVar,
         TraitClauseList,
-        Rc<FxHashMap<InferTyVar, WipReifiedVar>>,
+        WipReificationState,
     ),
 }
 
@@ -103,10 +101,11 @@ pub(super) struct UniversalTyVarDescriptor {
     pub(super) elaboration: Option<UniversalElaboration>,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub struct UniversalElaboration {
     pub clauses: TraitClauseList,
     pub lub_re: Re,
+    pub wip_reification_state: Option<WipReificationState>,
 }
 
 impl<'tcx> ClauseCx<'tcx> {
