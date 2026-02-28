@@ -516,17 +516,13 @@ impl<'tcx> TyFolder<'tcx> for MergeRepresentativeFolder<'_, 'tcx> {
         let ty = ty.value;
 
         Ok(match *ty.r(s) {
-            TyKind::InferVar(var) => {
-                match self.ccx.lookup_ty_infer_var_without_poll(var) {
-                    Ok(_) => todo!(),
-                    Err(FloatingInferVar { root: root_var, .. }) => {
-                        debug_assert!(self.reified_var_roots.contains(&root_var));
-
-                        tcx.intern(TyKind::InferVar(root_var));
-                    }
+            TyKind::InferVar(var) => match self.ccx.lookup_ty_infer_var_without_poll(var) {
+                Ok(ty) => self.fold(ty),
+                Err(FloatingInferVar { root: root_var, .. }) => {
+                    debug_assert!(self.reified_var_roots.contains(&root_var));
+                    tcx.intern(TyKind::InferVar(root_var))
                 }
-                self.fold(ty)
-            }
+            },
             _ => self.super_(ty),
         })
     }
