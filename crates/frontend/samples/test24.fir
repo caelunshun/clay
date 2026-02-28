@@ -39,13 +39,11 @@ fn hello<
 >(
     v: T,
 ) {
-/*
     demo::<<T as Meow<<T as Projector>::Out>>::Hey>(T::obtain(v));
 
     let v = T::obtain(v);
     demo::<_>(v);
     demo(v);
-*/
 }
 
 fn demo<T: Foo + Bar>(v: T) {}

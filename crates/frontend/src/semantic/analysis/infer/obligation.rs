@@ -1,10 +1,8 @@
 use crate::{
     base::Session,
-    semantic::analysis::{ObservedTyInferVar, TyCtxt, UnifyCx, UnifyCxMode},
-    utils::hash::{FxHashMap, FxHashSet},
+    semantic::analysis::{TyCtxt, UnifyCx, UnifyCxMode},
 };
-use index_vec::{IndexVec, define_index_type};
-use std::{collections::VecDeque, fmt};
+use std::fmt;
 
 // === Results === //
 
@@ -19,9 +17,8 @@ pub struct ObligationNotReady;
 ///
 /// An obligation is something that must unconditionally hold in order for a program to compile.
 /// This means that, unlike `UnifyCx` relations, obligations cannot be tried for success. In return
-/// for this strict structure, obligations are automatically scheduled out of order to ensure that
-/// all inference variables are solved in the correct order. Additionally, obligations can be solved
-/// co-inductively—that is, an obligation can assume itself to be true while proving itself.
+/// for this strict structure, obligations are automatically scheduled out-of-order to ensure that
+/// all inference variables are solved in the correct order.
 ///
 /// To push an obligation to an `ObligationCx`, you simply have to call [`push_obligation`].
 /// You can then poll these obligations for progress using [`poll_obligations`].
@@ -34,40 +31,8 @@ pub struct ObligationNotReady;
 #[derive(Clone)]
 pub struct ObligationCx<'tcx, K> {
     ucx: UnifyCx<'tcx>,
-
-    /// All obligations ever registered with us.
-    all_obligations: IndexVec<ObligationIdx, ObligationState<K>>,
-
-    /// The queue obligations to invoke. These are invoked in FIFO order to ensure that we properly
-    /// explore all branches of the proof tree simultaneously.
-    run_queue: VecDeque<ObligationIdx>,
-
-    /// A map from inference variables to obligations they could re-run upon being inferred.
-    var_wake_ups: FxHashMap<ObservedTyInferVar, Vec<ObligationIdx>>,
-
-    /// The number of observed inference variables we have processed from `ucx`'s
-    /// `observed_reveal_order` list.
-    rerun_var_read_len: usize,
-}
-
-define_index_type! {
-    struct ObligationIdx = u32;
-}
-
-#[derive(Clone)]
-struct ObligationState<K> {
-    /// The kind of obligation we're trying to prove.
-    kind: K,
-
-    /// The set of variables whose inference could cause us to rerun. Cleared once the obligation is
-    /// enqueued to re-run and re-populated if, after the re-run, the obligation is still ambiguous.
-    can_wake_by: FxHashSet<ObservedTyInferVar>,
-
-    /// Whether the obligation finished executing. We can't fully derive this from `can_wake_by`
-    /// since, sometimes, an obligation never registers any wake-up variables before returning
-    /// `ObligationNotReady`. This should not happen in practice but I'd rather return an error in
-    /// those cases than accept the program silently.
-    finished: bool,
+    pending_obligations: Vec<K>,
+    made_progress: bool,
 }
 
 impl<'tcx, K> fmt::Debug for ObligationCx<'tcx, K> {
@@ -80,10 +45,8 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
     pub fn new(tcx: &'tcx TyCtxt, mode: UnifyCxMode) -> Self {
         Self {
             ucx: UnifyCx::new(tcx, mode),
-            all_obligations: IndexVec::new(),
-            run_queue: VecDeque::new(),
-            var_wake_ups: FxHashMap::default(),
-            rerun_var_read_len: 0,
+            pending_obligations: Vec::new(),
+            made_progress: false,
         }
     }
 
@@ -104,13 +67,8 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
     }
 
     pub fn push_obligation(&mut self, kind: K) {
-        let idx = self.all_obligations.push(ObligationState {
-            kind,
-            can_wake_by: FxHashSet::default(),
-            finished: false,
-        });
-
-        self.run_queue.push_back(idx);
+        self.pending_obligations.push(kind);
+        self.made_progress = true;
     }
 
     pub fn poll_obligations<T>(
@@ -122,84 +80,39 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
         loop {
             let this = getter(target);
 
-            // See whether any new obligations can be added to the queue yet.
-            for &var in &this.ucx.observed_infer_reveal_order()[this.rerun_var_read_len..] {
-                let Some(awoken) = this.var_wake_ups.remove(&var) else {
-                    continue;
-                };
-
-                for awoken_idx in awoken {
-                    let awoken = &mut this.all_obligations[awoken_idx];
-
-                    if !awoken.can_wake_by.contains(&var) {
-                        continue;
-                    }
-
-                    awoken.can_wake_by.clear();
-
-                    this.run_queue.push_back(awoken_idx);
-                }
+            if !this.made_progress {
+                break;
             }
 
-            this.rerun_var_read_len = this.ucx.observed_infer_reveal_order().len();
+            this.made_progress = false;
 
-            // Obtain the next obligation.
-            let Some(curr_idx) = this.run_queue.pop_front() else {
-                break;
-            };
+            // Process all obligations back to front.
+            let mut curr_idx = this.pending_obligations.len();
 
-            let kind = this.all_obligations[curr_idx].kind.clone();
+            while curr_idx > 0 {
+                curr_idx -= 1;
 
-            // Fork the context.
-            let mut fork = forker(target);
+                let this = getter(target);
+                let kind = this.pending_obligations[curr_idx].clone();
+                let mut fork = forker(target);
 
-            // We must trace on the `fork` since stopping the tracing process requires exactly one
-            // `UnifyCx` to remain.
-            getter(&mut fork).ucx.start_tracing();
+                // Process the obligation.
+                let res = run(&mut fork, kind);
 
-            // Process the obligation.
-            let res = run(&mut fork, kind);
-
-            // Interpret the result.
-            let traced_vars = getter(&mut fork).ucx.finish_tracing();
-
-            match res {
-                Ok(()) => {
+                // If we finished processing the obligation, remove it from the queue and mark
+                // progress so we can continue processing.
+                if res.is_ok() {
                     *target = fork;
 
                     let this = getter(target);
-                    this.all_obligations[curr_idx].finished = true;
-                }
-                Err(ObligationNotReady) => {
-                    // Drop the fork to regain access to the `root`.
-                    drop(fork);
-                    let this = getter(target);
-
-                    // Register wake-ups.
-                    let curr = &mut this.all_obligations[curr_idx];
-
-                    for var in traced_vars {
-                        if this.ucx.lookup_ty_infer_var(var).is_ok() {
-                            continue;
-                        }
-
-                        let var = this.ucx.observe_ty_infer_var(var);
-
-                        if !curr.can_wake_by.insert(var) {
-                            continue;
-                        }
-
-                        this.var_wake_ups.entry(var).or_default().push(curr_idx);
-                    }
+                    this.pending_obligations.swap_remove(curr_idx);
+                    this.made_progress = true;
                 }
             }
         }
     }
 
-    pub fn unfulfilled_obligations(&self) -> impl Iterator<Item = &K> {
-        self.all_obligations
-            .iter()
-            .filter(|v| !v.finished)
-            .map(|v| &v.kind)
+    pub fn pending_obligations(&self) -> &[K] {
+        &self.pending_obligations
     }
 }

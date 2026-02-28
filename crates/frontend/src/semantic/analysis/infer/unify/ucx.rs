@@ -14,9 +14,7 @@ use crate::{
             UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
-    utils::hash::FxHashSet,
 };
-use index_vec::define_index_type;
 use std::{convert::Infallible, ops::ControlFlow};
 
 // === UnifyCx === //
@@ -45,14 +43,9 @@ pub struct UnifyCx<'tcx> {
     regions: Option<ReUnifyTracker>,
 }
 
-define_index_type! {
-    pub struct ObservedTyInferVar = u32;
-}
-
 #[derive(Debug, Copy, Clone)]
 pub struct FloatingInferVar<'a> {
     pub root: InferTyVar,
-    pub observed_equivalent: &'a [ObservedTyInferVar],
     pub max_universe: &'a HrtbUniverse,
     pub perm_set: SimpleTySet,
 }
@@ -95,18 +88,6 @@ impl<'tcx> UnifyCx<'tcx> {
         InferTySubstitutor { ucx: self, mode }
     }
 
-    pub fn start_tracing(&mut self) {
-        self.types.start_tracing();
-    }
-
-    pub fn finish_tracing(&mut self) -> FxHashSet<InferTyVar> {
-        self.types.finish_tracing()
-    }
-
-    pub fn mention_var_for_tracing(&self, var: InferTyVar) {
-        self.types.mention_var_for_tracing(var);
-    }
-
     pub fn fresh_ty_infer_var(
         &mut self,
         max_universe: HrtbUniverse,
@@ -121,14 +102,6 @@ impl<'tcx> UnifyCx<'tcx> {
         src_info: UniversalTyVarSourceInfo,
     ) -> UniversalTyVar {
         self.types.fresh_universal(in_universe, src_info)
-    }
-
-    pub fn observe_ty_infer_var(&mut self, var: InferTyVar) -> ObservedTyInferVar {
-        self.types.observe_infer(var)
-    }
-
-    pub fn observed_infer_reveal_order(&self) -> &[ObservedTyInferVar] {
-        self.types.observed_infer_reveal_order()
     }
 
     pub fn lookup_ty_infer_var(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {
@@ -527,7 +500,6 @@ impl<'tcx> UnifyCx<'tcx> {
 
         let Err(FloatingInferVar {
             root: actual_root,
-            observed_equivalent: _,
             max_universe: lhs_max_universe,
             perm_set: lhs_perm_set,
         }) = self.types.lookup_infer(lhs_var_root)

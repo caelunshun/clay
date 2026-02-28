@@ -422,7 +422,7 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn verify(&mut self) {
         self.poll_obligations();
 
-        for obligation in self.ocx.unfulfilled_obligations() {
+        for obligation in self.ocx.pending_obligations() {
             obligation.origin().report(
                 ClauseError::ObligationUnfulfilled(ObligationUnfulfilled {
                     obligation: obligation.clone(),
