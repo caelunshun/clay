@@ -46,4 +46,4 @@ fn hello<
     demo(v);
 }
 
-fn demo<T: Foo + Bar>(v: T) {}
+fn demo<T: Foo + Bar + Baz>(v: T) {}
