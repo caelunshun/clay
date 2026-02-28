@@ -1,13 +1,9 @@
-use crate::{
-    semantic::{
-        analysis::{FloatingInferVar, HrtbUniverse, TyCtxt},
-        syntax::{InferTyVar, SimpleTySet, Ty, UniversalTyVar, UniversalTyVarSourceInfo},
-    },
-    utils::hash::FxHashSet,
+use crate::semantic::{
+    analysis::{FloatingInferVar, HrtbUniverse, TyCtxt},
+    syntax::{InferTyVar, SimpleTySet, Ty, UniversalTyVar, UniversalTyVarSourceInfo},
 };
 use disjoint::DisjointSetVec;
 use index_vec::IndexVec;
-use std::cell::RefCell;
 
 #[derive(Debug, Clone)]
 pub struct TyUnifyTracker {
@@ -33,12 +29,6 @@ enum DisjointTyInferRoot {
 struct UniversalTyVarDescriptor {
     in_universe: HrtbUniverse,
     src_info: UniversalTyVarSourceInfo,
-}
-
-#[derive(Debug)]
-struct TyInferTracingState {
-    set: RefCell<FxHashSet<InferTyVar>>,
-    var_count: InferTyVar,
 }
 
 impl Default for TyUnifyTracker {
@@ -109,7 +99,7 @@ impl TyUnifyTracker {
             max_universe: _,
         } = self.disjoint[root_var].root.as_mut().unwrap()
         else {
-            unreachable!()
+            return;
         };
 
         *perm_set = perms;
