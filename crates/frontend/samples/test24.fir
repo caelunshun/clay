@@ -36,15 +36,11 @@ fn hello<
     T: Projector<i32>
      + Projector<u32, Out = <T as Projector<i32>>::Out>
      + Meow<<T as Projector<i32>>::Out, Hey: Foo>
-     + Meow<<T as Projector<u32>>::Out, Hey: Bar>
+     + Meow<<T as Projector<u32>>::Out, Hey: Bar>,
 >(
     v: T,
 ) {
-    demo::<<T as Meow<<T as Projector<i32>>::Out>>::Hey>(T::obtain(v));
-
-    let v = T::obtain(v);
-    demo::<_>(v);
-    demo(v);
+    demo(T::obtain(v));
 }
 
-fn demo<T: Foo + Bar + Baz>(v: T) {}
+fn demo<T: Foo + Bar>(v: T) {}
