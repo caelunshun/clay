@@ -269,6 +269,19 @@ impl<'tcx> ClauseCx<'tcx> {
                 continue;
             };
 
+            let clause = HrtbBinder {
+                kind: clause.kind,
+                inner: TraitSpec {
+                    def: clause.inner.def,
+                    // No need to replace the associated parameters because this is just used for
+                    // visiting.
+                    params: tcx.intern_list(
+                        &clause.inner.params.r(s)
+                            [..*clause.inner.def.r(s).regular_generic_count as usize],
+                    ),
+                },
+            };
+
             if (FloatingInfVarVisitor {
                 ccx: self,
                 reified_var_roots: &reified_var_roots,
