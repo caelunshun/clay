@@ -119,7 +119,12 @@ impl<'tcx> ClauseCx<'tcx> {
                 }
             }
             TyKind::InferVar(var) => {
-                if self.lookup_ty_infer_var_without_poll(var).unwrap_err().perm_set.contains(SimpleTySet::OTHER) {
+                let is_possibly_universal = self.lookup_ty_infer_var_without_poll(var)
+                    .unwrap_err()
+                    .perm_set
+                    .intersects(SimpleTySet::MAYBE_UNIVERSAL);
+
+                if is_possibly_universal {
                     // We can't yet rule out the possibility that this obligation is inherently
                     // fulfilled.
                     return Err(ObligationNotReady);
