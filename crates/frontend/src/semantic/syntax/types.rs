@@ -619,7 +619,7 @@ bitflags::bitflags! {
         // === Categories === //
 
         /// Types which could be a `UniversalVar`.
-        const MAYBE_UNIVERSAL = Self::OTHER.bits();
+        const MAYBE_UNIVERSAL = Self::OTHER.bits() | Self::ELAB_UNIVERSAL_VAR.bits();
 
         const UNSIGNED_INT = Self::U8.bits() | Self::U16.bits() | Self::U32.bits() | Self::U64.bits();
         const SIGNED_INT = Self::I8.bits() | Self::I16.bits() | Self::I32.bits() | Self::I64.bits();
@@ -646,6 +646,8 @@ bitflags::bitflags! {
         // arithmetic checking.
         const BOOL = 1 << 11;
         const CHAR = 1 << 12;
+
+        const ELAB_UNIVERSAL_VAR = 1 << 13;
     }
 }
 
@@ -690,7 +692,7 @@ impl SimpleTySet {
         }
 
         let kind = match SimpleTySet::from_bits_retain(1 << self.bits().trailing_zeros()) {
-            SimpleTySet::OTHER => None,
+            SimpleTySet::OTHER | SimpleTySet::ELAB_UNIVERSAL_VAR => None,
             SimpleTySet::U8 => Some(SimpleTyKind::Uint(IntKind::S8)),
             SimpleTySet::U16 => Some(SimpleTyKind::Uint(IntKind::S16)),
             SimpleTySet::U32 => Some(SimpleTyKind::Uint(IntKind::S32)),

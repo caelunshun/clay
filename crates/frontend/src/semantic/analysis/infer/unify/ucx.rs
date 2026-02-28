@@ -135,6 +135,10 @@ impl<'tcx> UnifyCx<'tcx> {
         self.types.lookup_infer(var)
     }
 
+    pub fn force_update_permissions_of_ty_var(&mut self, var: InferTyVar, perms: SimpleTySet) {
+        self.types.force_update_permissions_of_ty_var(var, perms);
+    }
+
     pub fn lookup_universal_ty_src_info(&self, var: UniversalTyVar) -> UniversalTyVarSourceInfo {
         self.types.lookup_universal_src_info(var)
     }

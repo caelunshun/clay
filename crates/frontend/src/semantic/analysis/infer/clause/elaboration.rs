@@ -44,9 +44,9 @@ use crate::{
     base::arena::{HasInterner, HasListInterner},
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, ClauseObligation, ClauseOrigin, HrtbUniverse,
-            ObligationNotReady, ObligationResult, TyCtxt, TyFolder, TyFolderInfallibleExt,
-            TyVisitor, TyVisitorExt, UniversalElaboration,
+            ClauseCx, ClauseImportEnvRef, ClauseObligation, ClauseOrigin, FloatingInferVar,
+            HrtbUniverse, ObligationNotReady, ObligationResult, TyCtxt, TyFolder,
+            TyFolderInfallibleExt, TyVisitor, TyVisitorExt, UniversalElaboration,
         },
         syntax::{
             AnyGeneric, GenericSubst, HrtbBinder, InferTyVar, Mutability, Re, RelationMode,
@@ -54,7 +54,7 @@ use crate::{
             Ty, TyKind, TyOrRe, UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
-    utils::hash::FxHashMap,
+    utils::hash::{FxHashMap, FxHashSet},
 };
 use smallvec::SmallVec;
 use std::{collections::VecDeque, convert::Infallible, ops::ControlFlow, rc::Rc};
@@ -106,7 +106,9 @@ impl<'tcx> ClauseCx<'tcx> {
                                 let var = self.fresh_ty_infer_var_restricted(
                                     // Associated types vary in the same way as their parent generic.
                                     universal.clone(),
-                                    SimpleTySet::all(),
+                                    // Prevent this type from unifying with other concrete types
+                                    // until elaboration is finished.
+                                    SimpleTySet::ELAB_UNIVERSAL_VAR,
                                 );
 
                                 reified_vars.insert(
@@ -243,6 +245,11 @@ impl<'tcx> ClauseCx<'tcx> {
         let s = self.session();
         let tcx = self.tcx();
 
+        let reified_var_roots = reified_vars
+            .keys()
+            .map(|&var| self.lookup_ty_infer_var_without_poll(var).unwrap_err().root)
+            .collect::<FxHashSet<_>>();
+
         // First, we must ensure that all remaining inference variables are either resolved or are
         // in the `reified_vars` set. If they aren't, the obligation isn't ready to run.
         for &clause in clauses.r(s) {
@@ -252,7 +259,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
             if (FloatingInfVarVisitor {
                 ccx: self,
-                reified_vars: &reified_vars,
+                reified_var_roots: &reified_var_roots,
             }
             .visit_fallible(clause)
             .is_break())
@@ -293,7 +300,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
             let key = MergeRepresentativeFolder {
                 ccx: self,
-                reified_vars: &reified_vars,
+                reified_var_roots: &reified_var_roots,
             }
             .fold(key);
 
@@ -418,6 +425,10 @@ impl<'tcx> ClauseCx<'tcx> {
                         unreachable!()
                     };
 
+                    if let TyKind::InferVar(var) = *actual.r(s) {
+                        self.force_update_permissions_of_ty_var(var, SimpleTySet::all());
+                    }
+
                     self.oblige_ty_unifies_ty(
                         origin.clone(),
                         resolved,
@@ -456,7 +467,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
 struct FloatingInfVarVisitor<'a, 'tcx> {
     ccx: &'a ClauseCx<'tcx>,
-    reified_vars: &'a FxHashMap<InferTyVar, WipReifiedVar>,
+    reified_var_roots: &'a FxHashSet<InferTyVar>,
 }
 
 impl<'tcx> TyVisitor<'tcx> for FloatingInfVarVisitor<'_, 'tcx> {
@@ -471,17 +482,16 @@ impl<'tcx> TyVisitor<'tcx> for FloatingInfVarVisitor<'_, 'tcx> {
         let ty = ty.value;
 
         match *ty.r(s) {
-            TyKind::InferVar(var) => {
-                // Assume that `reified_var`s have not been unified with anything else.
-                if self.reified_vars.contains_key(&var) {
-                    return ControlFlow::Continue(());
-                }
+            TyKind::InferVar(var) => match self.ccx.lookup_ty_infer_var_without_poll(var) {
+                Ok(ty) => self.walk_fallible(ty),
+                Err(FloatingInferVar { root: var_root, .. }) => {
+                    if self.reified_var_roots.contains(&var_root) {
+                        return ControlFlow::Continue(());
+                    }
 
-                match self.ccx.lookup_ty_infer_var_without_poll(var) {
-                    Ok(ty) => self.walk_fallible(ty),
-                    Err(_) => ControlFlow::Break(()),
+                    ControlFlow::Break(())
                 }
-            }
+            },
             _ => self.walk_fallible(ty),
         }
     }
@@ -489,7 +499,7 @@ impl<'tcx> TyVisitor<'tcx> for FloatingInfVarVisitor<'_, 'tcx> {
 
 struct MergeRepresentativeFolder<'a, 'tcx> {
     ccx: &'a ClauseCx<'tcx>,
-    reified_vars: &'a FxHashMap<InferTyVar, WipReifiedVar>,
+    reified_var_roots: &'a FxHashSet<InferTyVar>,
 }
 
 impl<'tcx> TyFolder<'tcx> for MergeRepresentativeFolder<'_, 'tcx> {
@@ -501,15 +511,20 @@ impl<'tcx> TyFolder<'tcx> for MergeRepresentativeFolder<'_, 'tcx> {
 
     fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
         let s = self.session();
+        let tcx = self.tcx();
+
         let ty = ty.value;
 
         Ok(match *ty.r(s) {
             TyKind::InferVar(var) => {
-                if self.reified_vars.contains_key(&var) {
-                    return Ok(ty);
-                }
+                match self.ccx.lookup_ty_infer_var_without_poll(var) {
+                    Ok(_) => todo!(),
+                    Err(FloatingInferVar { root: root_var, .. }) => {
+                        debug_assert!(self.reified_var_roots.contains(&root_var));
 
-                let ty = self.ccx.lookup_ty_infer_var_without_poll(var).unwrap();
+                        tcx.intern(TyKind::InferVar(root_var));
+                    }
+                }
                 self.fold(ty)
             }
             _ => self.super_(ty),
