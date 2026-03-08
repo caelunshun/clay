@@ -94,8 +94,11 @@ impl<'tcx> UnifyCx<'tcx> {
         source_info: InferTyVarSourceInfo,
         perm_set: SimpleTySet,
     ) -> InferTyVar {
-        self.types
-            .fresh_infer_restricted(max_universe, source_info, perm_set)
+        self.types.fresh_infer(max_universe, source_info, perm_set)
+    }
+
+    pub fn next_ty_infer_var(&self) -> InferTyVar {
+        self.types.next_infer()
     }
 
     pub fn fresh_ty_universal_var(

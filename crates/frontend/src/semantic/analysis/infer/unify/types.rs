@@ -44,13 +44,13 @@ impl Default for TyUnifyTracker {
 }
 
 impl TyUnifyTracker {
-    pub fn fresh_infer_restricted(
+    pub fn fresh_infer(
         &mut self,
         max_universe: HrtbUniverse,
         source_info: InferTyVarSourceInfo,
         perm_set: SimpleTySet,
     ) -> InferTyVar {
-        let var = InferTyVar::from_usize(self.disjoint.len());
+        let var = self.next_infer();
         self.disjoint.push(DisjointTyInferNode {
             root: Some(DisjointTyInferRoot::Floating {
                 max_universe: max_universe.clone(),
@@ -59,6 +59,10 @@ impl TyUnifyTracker {
             source_info,
         });
         var
+    }
+
+    pub fn next_infer(&self) -> InferTyVar {
+        InferTyVar::from_usize(self.disjoint.len())
     }
 
     pub fn fresh_universal(
