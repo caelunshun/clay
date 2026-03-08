@@ -11,9 +11,9 @@ use crate::{
             infer::clause::elaboration::WipReificationState,
         },
         syntax::{
-            Crate, InferTyVar, Re, RelationDirection, RelationMode, SimpleTySet, TraitClause,
-            TraitClauseList, TraitSpec, Ty, TyKind, TyOrRe, UniversalReVar,
-            UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
+            Crate, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection, RelationMode,
+            SimpleTySet, TraitClause, TraitClauseList, TraitSpec, Ty, TyKind, TyOrRe,
+            UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -232,27 +232,41 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn fresh_ty_infer_var_restricted(
         &mut self,
         max_universe: HrtbUniverse,
+        source_info: InferTyVarSourceInfo,
         perm_set: SimpleTySet,
     ) -> InferTyVar {
-        self.ucx_mut().fresh_ty_infer_var(max_universe, perm_set)
+        self.ucx_mut()
+            .fresh_ty_infer_var(max_universe, source_info, perm_set)
     }
 
     pub fn fresh_ty_infer_restricted(
         &mut self,
         max_universe: HrtbUniverse,
+        source_info: InferTyVarSourceInfo,
         perm_set: SimpleTySet,
     ) -> Ty {
-        self.tcx().intern(TyKind::InferVar(
-            self.fresh_ty_infer_var_restricted(max_universe, perm_set),
-        ))
+        self.tcx()
+            .intern(TyKind::InferVar(self.fresh_ty_infer_var_restricted(
+                max_universe,
+                source_info,
+                perm_set,
+            )))
     }
 
-    pub fn fresh_ty_infer_var(&mut self, max_universe: HrtbUniverse) -> InferTyVar {
-        self.fresh_ty_infer_var_restricted(max_universe, SimpleTySet::all())
+    pub fn fresh_ty_infer_var(
+        &mut self,
+        max_universe: HrtbUniverse,
+        source_info: InferTyVarSourceInfo,
+    ) -> InferTyVar {
+        self.fresh_ty_infer_var_restricted(max_universe, source_info, SimpleTySet::all())
     }
 
-    pub fn fresh_ty_infer(&mut self, max_universe: HrtbUniverse) -> Ty {
-        self.fresh_ty_infer_restricted(max_universe, SimpleTySet::all())
+    pub fn fresh_ty_infer(
+        &mut self,
+        max_universe: HrtbUniverse,
+        source_info: InferTyVarSourceInfo,
+    ) -> Ty {
+        self.fresh_ty_infer_restricted(max_universe, source_info, SimpleTySet::all())
     }
 
     pub fn lookup_ty_infer_var_without_poll(
@@ -353,6 +367,10 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn lookup_universal_ty_src_info(&self, var: UniversalTyVar) -> UniversalTyVarSourceInfo {
         self.ucx().lookup_universal_ty_src_info(var)
+    }
+
+    pub fn lookup_infer_ty_src_info(&mut self, var: InferTyVar) -> InferTyVarSourceInfo {
+        self.ucx_mut().lookup_infer_ty_src_info(var)
     }
 
     pub fn lookup_universal_ty_hrtb_universe(&self, var: UniversalTyVar) -> &HrtbUniverse {

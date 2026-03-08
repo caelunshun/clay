@@ -49,9 +49,10 @@ use crate::{
             TyFolderInfallibleExt, TyVisitor, TyVisitorExt, UniversalElaboration,
         },
         syntax::{
-            AnyGeneric, GenericSubst, HrtbBinder, InferTyVar, Mutability, Re, RelationMode,
-            SimpleTySet, SpannedRe, SpannedTy, TraitClause, TraitClauseList, TraitParam, TraitSpec,
-            Ty, TyKind, TyOrRe, UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
+            AnyGeneric, GenericSubst, HrtbBinder, InferTyVar, InferTyVarSourceInfo, Mutability, Re,
+            RelationMode, SimpleTySet, SpannedRe, SpannedTy, TraitClause, TraitClauseList,
+            TraitParam, TraitSpec, Ty, TyKind, TyOrRe, UniversalReVarSourceInfo, UniversalTyVar,
+            UniversalTyVarSourceInfo,
         },
     },
     utils::hash::{FxHashMap, FxHashSet},
@@ -118,6 +119,7 @@ impl<'tcx> ClauseCx<'tcx> {
                                 let var = self.fresh_ty_infer_var_restricted(
                                     // Associated types vary in the same way as their parent generic.
                                     universal.clone(),
+                                    InferTyVarSourceInfo::UniversalElabHelper,
                                     // Prevent this type from unifying with other concrete types
                                     // until elaboration is finished.
                                     SimpleTySet::ELAB_UNIVERSAL_VAR,

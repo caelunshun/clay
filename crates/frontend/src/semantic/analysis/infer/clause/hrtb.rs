@@ -8,9 +8,9 @@ use crate::{
             TyFolderInfallibleExt,
         },
         syntax::{
-            HrtbBinder, HrtbBinderKind, Re, SpannedHrtbBinder, SpannedRe, SpannedTy, TraitClause,
-            TraitSpec, Ty, TyKind, TyOrRe, TyOrReKind, TyOrReList, UniversalReVarSourceInfo,
-            UniversalTyVarSourceInfo,
+            HrtbBinder, HrtbBinderKind, InferTyVarSourceInfo, Re, SpannedHrtbBinder, SpannedRe,
+            SpannedTy, TraitClause, TraitSpec, Ty, TyKind, TyOrRe, TyOrReKind, TyOrReList,
+            UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -110,7 +110,12 @@ impl<'tcx> ClauseCx<'tcx> {
             .iter()
             .map(|def| match def.kind {
                 TyOrReKind::Re => TyOrRe::Re(self.fresh_re_infer()),
-                TyOrReKind::Ty => TyOrRe::Ty(self.fresh_ty_infer(universe.clone())),
+                TyOrReKind::Ty => TyOrRe::Ty(self.fresh_ty_infer(
+                    universe.clone(),
+                    InferTyVarSourceInfo::HrtbLhsInstantiation {
+                        span: def.spawned_from,
+                    },
+                )),
             })
             .collect::<Vec<_>>();
 

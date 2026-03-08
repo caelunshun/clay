@@ -6,8 +6,8 @@ use crate::{
             attempt_deref_clobber_obligations,
         },
         syntax::{
-            Divergence, Expr, Mutability, Re, RelationMode, SimpleTyKind, TraitClauseList,
-            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            Divergence, Expr, InferTyVarSourceInfo, Mutability, Re, RelationMode, SimpleTyKind,
+            TraitClauseList, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -125,7 +125,10 @@ impl BodyCtxt<'_, '_> {
                 to_muta,
                 deref_steps,
             } => {
-                let unify_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
+                let unify_ty = self
+                    .ccx_mut()
+                    .fresh_ty_infer(HrtbUniverse::ROOT, InferTyVarSourceInfo::UnifyHelper);
+
                 let mut deref_steps = deref_steps.iter();
 
                 for &(expr, actual) in exprs {
@@ -154,7 +157,10 @@ impl BodyCtxt<'_, '_> {
                             }
 
                             for _ in 0..deref_step_count {
-                                let next_output = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
+                                let next_output = self.ccx_mut().fresh_ty_infer(
+                                    HrtbUniverse::ROOT,
+                                    InferTyVarSourceInfo::UnifyHelper,
+                                );
 
                                 self.ccx_mut().oblige_ty_meets_trait_instantiated(
                                     ClauseOrigin::root_report(ClauseOriginKind::Coercion {

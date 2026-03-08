@@ -14,8 +14,9 @@ use crate::{
             modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},
         },
         syntax::{
-            AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, GenericSubst, Mutability,
-            Re, RelationMode, SpannedTyOrReList, TraitClause, TraitSpec, Ty, TyKind,
+            AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, GenericSubst,
+            InferTyVarSourceInfo, Mutability, Re, RelationMode, SpannedTyOrReList, TraitClause,
+            TraitSpec, Ty, TyKind,
         },
     },
     utils::lang::IterEither,
@@ -444,7 +445,9 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                     return false;
                 }
 
-                let self_ty = fork.fresh_ty_infer(HrtbUniverse::ROOT);
+                let self_ty = fork
+                    .fresh_ty_infer(HrtbUniverse::ROOT, InferTyVarSourceInfo::MethodLookupHelper);
+
                 let expected_owner =
                     fork.instantiate_fn_def_as_blank_owner_infer(candidate, self_ty);
 

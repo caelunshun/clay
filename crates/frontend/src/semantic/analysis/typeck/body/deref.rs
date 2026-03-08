@@ -2,7 +2,7 @@ use crate::{
     base::arena::{HasInterner as _, HasListInterner as _},
     semantic::{
         analysis::{ClauseCx, ClauseErrorProbe, ClauseOrigin, HrtbUniverse},
-        syntax::{TraitParam, TraitSpec, Ty, TyKind, TyOrRe},
+        syntax::{InferTyVarSourceInfo, TraitParam, TraitSpec, Ty, TyKind, TyOrRe},
     },
 };
 
@@ -23,7 +23,9 @@ pub fn attempt_deref_clobber_obligations(ccx: &mut ClauseCx<'_>, curr: Ty) -> Op
     let tcx = ccx.tcx();
     let krate = ccx.krate();
 
-    let next_infer_var = ccx.fresh_ty_infer_var(HrtbUniverse::ROOT);
+    let next_infer_var =
+        ccx.fresh_ty_infer_var(HrtbUniverse::ROOT, InferTyVarSourceInfo::DerefHelper);
+
     let next_infer = tcx.intern(TyKind::InferVar(next_infer_var));
 
     // This probing routine works by attempting to resolve an obligation as much as possible and

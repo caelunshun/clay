@@ -11,11 +11,11 @@ use crate::{
             HrtbUniverseInfo, TyCtxt, TyFoldable, TyVisitable, TyVisitor, TyVisitorInfallibleExt,
         },
         syntax::{
-            GenericBinder, GenericSubst, RelationDirection, SpannedAdtInstance, SpannedFnInstance,
-            SpannedFnInstanceView, SpannedHrtbBinder, SpannedHrtbBinderKindView,
-            SpannedHrtbBinderView, SpannedHrtbDebruijnDefView, SpannedTraitInstance,
-            SpannedTraitParamView, SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList,
-            SpannedTyView, Ty, TyKind, TyOrRe,
+            GenericBinder, GenericSubst, InferTyVarSourceInfo, RelationDirection,
+            SpannedAdtInstance, SpannedFnInstance, SpannedFnInstanceView, SpannedHrtbBinder,
+            SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedHrtbDebruijnDefView,
+            SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec, SpannedTy,
+            SpannedTyOrRe, SpannedTyOrReList, SpannedTyView, Ty, TyKind, TyOrRe,
         },
     },
 };
@@ -162,9 +162,12 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             .iter(tcx)
             .map(|param| match param.view(tcx) {
                 SpannedTraitParamView::Equals(v) => v,
-                SpannedTraitParamView::Unspecified(_) => SpannedTyOrRe::new_unspanned(TyOrRe::Ty(
-                    self.ccx.fresh_ty_infer(self.universe.clone()),
-                )),
+                SpannedTraitParamView::Unspecified(_) => {
+                    SpannedTyOrRe::new_unspanned(TyOrRe::Ty(self.ccx.fresh_ty_infer(
+                        self.universe.clone(),
+                        InferTyVarSourceInfo::TraitAssocPlaceholderHelper,
+                    )))
+                }
             })
             .collect::<Vec<_>>();
 

@@ -7,7 +7,7 @@ use crate::{
     },
     parse::token::{Ident, Lifetime},
     semantic::{
-        analysis::TyCtxt,
+        analysis::{ClauseOrigin, TyCtxt},
         syntax::{
             FnDef, FnItem, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy,
             SpannedTyOrReList, Visibility,
@@ -719,6 +719,29 @@ pub enum UniversalReVarSourceInfo {
     ElaboratedLub,
     HrtbVar,
     TestPlaceholder,
+}
+
+#[derive(Debug, Clone)]
+pub enum InferTyVarSourceInfo {
+    UniversalElabHelper,
+    TraitAssocPlaceholderHelper,
+    HrtbLhsInstantiation { span: Span },
+    ProjectionResult { origin: ClauseOrigin, span: Span },
+    Imported { origin: ClauseOrigin, span: Span },
+    Local { name: Ident },
+    FunctionArgs { span: Span },
+    FunctionRetVal { span: Span },
+    MethodReceiver { span: Span },
+    OverloadedResult { span: Span },
+    Literal { span: Span },
+    ForLoopElem { span: Span },
+    IndexInput { span: Span },
+    IndexOutput { span: Span },
+    LoopDemand { span: Span },
+    HoleInfer { span: Span },
+    UnifyHelper,
+    DerefHelper,
+    MethodLookupHelper,
 }
 
 #[derive(Debug, Copy, Clone)]

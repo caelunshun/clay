@@ -17,10 +17,10 @@ use crate::{
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnInstanceInner,
             FnOwner, GenericBinder, GenericSubst, HrtbBinder, HrtbBinderKind, HrtbDebruijn,
-            HrtbDebruijnDef, ImplItem, Re, RelationMode, SpannedHrtbBinder, SpannedHrtbBinderView,
-            SpannedRe, SpannedTraitClauseView, SpannedTy, SpannedTyView, TraitClause, TraitItem,
-            TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReKind, TyProjection,
-            TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
+            HrtbDebruijnDef, ImplItem, InferTyVarSourceInfo, Re, RelationMode, SpannedHrtbBinder,
+            SpannedHrtbBinderView, SpannedRe, SpannedTraitClauseView, SpannedTy, SpannedTyView,
+            TraitClause, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReKind,
+            TyProjection, TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
@@ -409,15 +409,19 @@ impl<'tcx> ClauseCx<'tcx> {
         let s = self.session();
         let tcx = self.tcx();
 
-        let substs = binder
-            .r(s)
-            .defs
-            .iter()
-            .map(|&generic| match generic {
-                AnyGeneric::Re(_) => TyOrRe::Re(self.fresh_re_infer()),
-                AnyGeneric::Ty(_) => TyOrRe::Ty(self.fresh_ty_infer(universe.clone())),
-            })
-            .collect::<Vec<_>>();
+        let substs =
+            binder
+                .r(s)
+                .defs
+                .iter()
+                .map(|&generic| match generic {
+                    AnyGeneric::Re(_) => TyOrRe::Re(self.fresh_re_infer()),
+                    AnyGeneric::Ty(_) => TyOrRe::Ty(self.fresh_ty_infer(
+                        universe.clone(),
+                        InferTyVarSourceInfo::UniversalElabHelper,
+                    )),
+                })
+                .collect::<Vec<_>>();
 
         let substs = tcx.intern_list(&substs);
 
@@ -581,7 +585,10 @@ impl<'tcx> ClauseCx<'tcx> {
                     .map(|&param| match param {
                         TraitParam::Equals(value) => value,
                         TraitParam::Unspecified(clauses) => {
-                            let ty = self.fresh_ty_infer(universe.clone());
+                            let ty = self.fresh_ty_infer(
+                                universe.clone(),
+                                InferTyVarSourceInfo::TraitAssocPlaceholderHelper,
+                            );
                             self.oblige_ty_meets_clauses(origin, universe, ty, clauses);
 
                             TyOrRe::Ty(ty)
@@ -832,7 +839,13 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
 
         Ok(match ty.view(tcx) {
             SpannedTyView::SigThis => self.env.self_ty,
-            SpannedTyView::SigInfer => self.ccx.fresh_ty_infer(self.universe.clone()),
+            SpannedTyView::SigInfer => self.ccx.fresh_ty_infer(
+                self.universe.clone(),
+                InferTyVarSourceInfo::Imported {
+                    origin: self.origin.clone(),
+                    span: ty.own_span(),
+                },
+            ),
             SpannedTyView::SigGeneric(generic) => {
                 self.lookup_generic(AnyGeneric::Ty(generic)).unwrap_ty()
             }
@@ -844,7 +857,13 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
                 let target = self.fold(target);
                 let spec = self.fold(spec);
 
-                let assoc_infer_ty = self.ccx.fresh_ty_infer(self.universe.clone());
+                let assoc_infer_ty = self.ccx.fresh_ty_infer(
+                    self.universe.clone(),
+                    InferTyVarSourceInfo::ProjectionResult {
+                        origin: self.origin.clone(),
+                        span: ty.own_span(),
+                    },
+                );
                 let spec = {
                     let mut args = spec.params.r(s).to_vec();
                     args[assoc as usize] = TraitParam::Equals(TyOrRe::Ty(assoc_infer_ty));

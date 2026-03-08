@@ -8,10 +8,10 @@ use crate::{
             infer::unify::{regions::ReUnifyTracker, types::TyUnifyTracker},
         },
         syntax::{
-            FnInstanceInner, FnOwner, HrtbBinderKind, InferTyVar, Mutability, Re, ReVariance,
-            RelationDirection, RelationMode, SimpleTySet, SpannedTy, SpannedTyView, TraitClause,
-            TraitClauseList, TraitParam, TraitParamList, Ty, TyKind, TyOrRe, UniversalReVar,
-            UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
+            FnInstanceInner, FnOwner, HrtbBinderKind, InferTyVar, InferTyVarSourceInfo, Mutability,
+            Re, ReVariance, RelationDirection, RelationMode, SimpleTySet, SpannedTy, SpannedTyView,
+            TraitClause, TraitClauseList, TraitParam, TraitParamList, Ty, TyKind, TyOrRe,
+            UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -91,9 +91,11 @@ impl<'tcx> UnifyCx<'tcx> {
     pub fn fresh_ty_infer_var(
         &mut self,
         max_universe: HrtbUniverse,
+        source_info: InferTyVarSourceInfo,
         perm_set: SimpleTySet,
     ) -> InferTyVar {
-        self.types.fresh_infer_restricted(max_universe, perm_set)
+        self.types
+            .fresh_infer_restricted(max_universe, source_info, perm_set)
     }
 
     pub fn fresh_ty_universal_var(
@@ -114,6 +116,10 @@ impl<'tcx> UnifyCx<'tcx> {
 
     pub fn lookup_universal_ty_src_info(&self, var: UniversalTyVar) -> UniversalTyVarSourceInfo {
         self.types.lookup_universal_src_info(var)
+    }
+
+    pub fn lookup_infer_ty_src_info(&self, var: InferTyVar) -> InferTyVarSourceInfo {
+        self.types.lookup_infer_src_info(var)
     }
 
     pub fn lookup_universal_ty_hrtb_universe(&self, var: UniversalTyVar) -> &HrtbUniverse {

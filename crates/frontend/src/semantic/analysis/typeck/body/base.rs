@@ -3,7 +3,7 @@ use crate::{
         Diag, Session,
         analysis::SpannedViewEncode,
         arena::{HasInterner, HasListInterner as _, Obj},
-        syntax::Span,
+        syntax::{HasSpan, Span},
     },
     parse::ast::AstLit,
     semantic::{
@@ -16,10 +16,10 @@ use crate::{
         lower::generics::normalize_positional_generic_arity,
         syntax::{
             AdtInstance, Block, Crate, Divergence, Expr, ExprKind, FnDef, FnInstanceInner, FnLocal,
-            InferTyVar, Item, LabelTargetKind, LabelledBlock, Pat, PatKind, Re, RelationMode,
-            SimpleTyKind, SimpleTySet, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTy,
-            SpannedTyView, Stmt, StructExpr, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind,
-            TyOrRe,
+            InferTyVar, InferTyVarSourceInfo, Item, LabelTargetKind, LabelledBlock, Pat, PatKind,
+            Re, RelationMode, SimpleTyKind, SimpleTySet, SpannedFnInstanceView, SpannedFnOwnerView,
+            SpannedTy, SpannedTyView, Stmt, StructExpr, TraitParam, TraitSpec, Ty, TyAndDivergence,
+            TyKind, TyOrRe,
         },
     },
     utils::hash::FxHashMap,
@@ -179,7 +179,12 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         let tcx = self.tcx();
 
         *self.local_types.entry(local).or_insert_with(|| {
-            let var = self.ccx.fresh_ty_infer_var(HrtbUniverse::ROOT);
+            let var = self.ccx.fresh_ty_infer_var(
+                HrtbUniverse::ROOT,
+                InferTyVarSourceInfo::Local {
+                    name: local.r(s).name,
+                },
+            );
 
             self.needs_infer.push(NeedsInfer {
                 span: local.r(s).name.span,
@@ -297,8 +302,15 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                 let site_span = expr.r(s).span;
                 let fn_once_trait = self.krate().r(s).lang_items.fn_once_trait().unwrap();
-                let input_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
-                let output_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
+                let input_ty = self.ccx_mut().fresh_ty_infer(
+                    HrtbUniverse::ROOT,
+                    InferTyVarSourceInfo::FunctionArgs { span: site_span },
+                );
+
+                let output_ty = self.ccx_mut().fresh_ty_infer(
+                    HrtbUniverse::ROOT,
+                    InferTyVarSourceInfo::FunctionRetVal { span: site_span },
+                );
 
                 self.ccx_mut().oblige_ty_meets_trait_instantiated(
                     ClauseOrigin::root_report(ClauseOriginKind::FunctionCall { site_span }),
@@ -386,7 +398,11 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     ));
                 };
 
-                let self_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
+                let self_ty = self.ccx_mut().fresh_ty_infer(
+                    HrtbUniverse::ROOT,
+                    InferTyVarSourceInfo::MethodReceiver { span: name.span },
+                );
+
                 let owner = self
                     .ccx_mut()
                     .instantiate_fn_def_as_blank_owner_infer(resolution, self_ty);
@@ -499,7 +515,10 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                 // Otherwise, attempt to perform an overloaded operation.
                 if let Some(overload) = kind_info.overload {
-                    let result_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
+                    let result_ty = self.ccx_mut().fresh_ty_infer(
+                        HrtbUniverse::ROOT,
+                        InferTyVarSourceInfo::OverloadedResult { span: kind.span },
+                    );
 
                     self.ccx_mut().oblige_ty_meets_trait_instantiated(
                         origin,
@@ -542,7 +561,12 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                 // Otherwise, attempt to perform an overloaded operation.
                 if let Some(overload) = kind_info.overload {
-                    let result_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
+                    let result_ty = self.ccx_mut().fresh_ty_infer(
+                        HrtbUniverse::ROOT,
+                        InferTyVarSourceInfo::OverloadedResult {
+                            span: expr.r(s).span,
+                        },
+                    );
 
                     self.ccx_mut().oblige_ty_meets_trait_instantiated(
                         origin,
@@ -562,8 +586,11 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             ExprKind::Literal(lit) => match lit {
                 AstLit::Number(_) => {
                     // TODO: Register the correct inference constraints.
-                    self.ccx
-                        .fresh_ty_infer_restricted(HrtbUniverse::ROOT, SimpleTySet::INT)
+                    self.ccx.fresh_ty_infer_restricted(
+                        HrtbUniverse::ROOT,
+                        InferTyVarSourceInfo::Literal { span: lit.span() },
+                        SimpleTySet::INT,
+                    )
                 }
                 AstLit::Char(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Char)),
                 AstLit::String(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Str)),
@@ -688,7 +715,12 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             }
             ExprKind::ForLoop { pat, iter, body } => {
                 let iter_ty = self.check_expr(iter).and_do(&mut divergence);
-                let elem_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
+                let elem_ty = self.ccx_mut().fresh_ty_infer(
+                    HrtbUniverse::ROOT,
+                    InferTyVarSourceInfo::ForLoopElem {
+                        span: pat.r(s).span,
+                    },
+                );
                 let into_iter_trait = self.krate().r(s).lang_items.into_iterator_trait().unwrap();
 
                 self.ccx_mut().oblige_ty_meets_trait_instantiated(
@@ -817,7 +849,12 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                     // Otherwise, attempt to perform an overloaded operation.
                     if let Some(overload) = kind_info.overload {
-                        let result_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
+                        let result_ty = self.ccx_mut().fresh_ty_infer(
+                            HrtbUniverse::ROOT,
+                            InferTyVarSourceInfo::OverloadedResult {
+                                span: expr.r(s).span,
+                            },
+                        );
 
                         self.ccx_mut().oblige_ty_meets_trait_instantiated(
                             origin,
@@ -851,8 +888,18 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             }
             ExprKind::Index(target, index) => {
                 let target_ty = self.check_expr(target).and_do(&mut divergence);
-                let index_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
-                let output_ty = self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT);
+                let index_ty = self.ccx_mut().fresh_ty_infer(
+                    HrtbUniverse::ROOT,
+                    InferTyVarSourceInfo::IndexInput {
+                        span: index.r(s).span,
+                    },
+                );
+                let output_ty = self.ccx_mut().fresh_ty_infer(
+                    HrtbUniverse::ROOT,
+                    InferTyVarSourceInfo::IndexOutput {
+                        span: expr.r(s).span,
+                    },
+                );
 
                 let index_trait = self.krate().r(s).lang_items.index_trait().unwrap();
 
@@ -890,7 +937,14 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         .block_break_demands
                         .get_mut(&label)
                         .unwrap()
-                        .get_or_insert_with(|| self.ccx.fresh_ty_infer(HrtbUniverse::ROOT));
+                        .get_or_insert_with(|| {
+                            self.ccx.fresh_ty_infer(
+                                HrtbUniverse::ROOT,
+                                InferTyVarSourceInfo::LoopDemand {
+                                    span: label.target.r(s).span,
+                                },
+                            )
+                        });
 
                     self.check_expr_demand(value.unwrap(), demand).ignore();
                 } else {
@@ -921,9 +975,15 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
     pub fn type_of_pat(&mut self, pat: Obj<Pat>, divergence: Option<&mut Divergence>) -> Ty {
         let s = self.session();
+        let tcx = self.tcx();
 
         match pat.r(s).kind {
-            PatKind::Hole => self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT),
+            PatKind::Hole => self.ccx_mut().fresh_ty_infer(
+                HrtbUniverse::ROOT,
+                InferTyVarSourceInfo::HoleInfer {
+                    span: pat.r(s).span,
+                },
+            ),
             PatKind::NewName(local, bind_as) => {
                 let local_ty = self.type_of_local(local);
 
@@ -952,7 +1012,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             PatKind::AdtNamed(adt_ctor_instance, obj) => todo!(),
             PatKind::PlaceExpr(expr) => self.check_expr(expr).and_do(divergence.unwrap()),
             PatKind::Range(range_expr) => todo!(),
-            PatKind::Error(_) => self.ccx_mut().fresh_ty_infer(HrtbUniverse::ROOT),
+            PatKind::Error(error) => tcx.intern(TyKind::Error(error)),
         }
     }
 }

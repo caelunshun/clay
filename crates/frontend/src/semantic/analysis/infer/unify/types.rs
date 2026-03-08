@@ -1,6 +1,8 @@
 use crate::semantic::{
     analysis::{FloatingInferVar, HrtbUniverse, TyCtxt},
-    syntax::{InferTyVar, SimpleTySet, Ty, UniversalTyVar, UniversalTyVarSourceInfo},
+    syntax::{
+        InferTyVar, InferTyVarSourceInfo, SimpleTySet, Ty, UniversalTyVar, UniversalTyVarSourceInfo,
+    },
 };
 use disjoint::DisjointSetVec;
 use index_vec::IndexVec;
@@ -14,6 +16,7 @@ pub struct TyUnifyTracker {
 #[derive(Debug, Clone)]
 struct DisjointTyInferNode {
     root: Option<DisjointTyInferRoot>,
+    source_info: InferTyVarSourceInfo,
 }
 
 #[derive(Debug, Clone)]
@@ -28,7 +31,7 @@ enum DisjointTyInferRoot {
 #[derive(Debug, Clone)]
 struct UniversalTyVarDescriptor {
     in_universe: HrtbUniverse,
-    src_info: UniversalTyVarSourceInfo,
+    source_info: UniversalTyVarSourceInfo,
 }
 
 impl Default for TyUnifyTracker {
@@ -44,6 +47,7 @@ impl TyUnifyTracker {
     pub fn fresh_infer_restricted(
         &mut self,
         max_universe: HrtbUniverse,
+        source_info: InferTyVarSourceInfo,
         perm_set: SimpleTySet,
     ) -> InferTyVar {
         let var = InferTyVar::from_usize(self.disjoint.len());
@@ -52,6 +56,7 @@ impl TyUnifyTracker {
                 max_universe: max_universe.clone(),
                 perm_set,
             }),
+            source_info,
         });
         var
     }
@@ -59,16 +64,20 @@ impl TyUnifyTracker {
     pub fn fresh_universal(
         &mut self,
         in_universe: HrtbUniverse,
-        src_info: UniversalTyVarSourceInfo,
+        source_info: UniversalTyVarSourceInfo,
     ) -> UniversalTyVar {
         self.universals.push(UniversalTyVarDescriptor {
             in_universe,
-            src_info,
+            source_info,
         })
     }
 
     pub fn lookup_universal_src_info(&self, var: UniversalTyVar) -> UniversalTyVarSourceInfo {
-        self.universals[var].src_info
+        self.universals[var].source_info
+    }
+
+    pub fn lookup_infer_src_info(&self, var: InferTyVar) -> InferTyVarSourceInfo {
+        self.disjoint[var.index()].source_info.clone()
     }
 
     pub fn lookup_universal_hrtb_universe(&self, var: UniversalTyVar) -> &HrtbUniverse {
