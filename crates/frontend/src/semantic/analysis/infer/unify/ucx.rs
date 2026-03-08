@@ -237,6 +237,7 @@ impl<'tcx> UnifyCx<'tcx> {
         culprits: &mut Vec<TyAndTyUnifyCulprit>,
         mode: RelationMode,
     ) {
+        let tcx = self.tcx();
         let s = self.session();
 
         if lhs == rhs {
@@ -257,8 +258,17 @@ impl<'tcx> UnifyCx<'tcx> {
             | (_, TyKind::SigAlias(_, _)) => {
                 unreachable!()
             }
-            (TyKind::Error(_), _) | (_, TyKind::Error(_)) => {
-                // (trivially accepted)
+            (TyKind::Error(error), _) | (_, TyKind::Error(error)) => {
+                // This is accepted regardless of the other side.
+
+                // We do, however, wish to propagate inference errors.
+                if let (TyKind::InferVar(var), _) | (_, TyKind::InferVar(var)) =
+                    (*lhs.r(s), *rhs.r(s))
+                    && let Err(FloatingInferVar { root, .. }) = self.lookup_ty_infer_var(var)
+                {
+                    // Ignore errors if permissions prevent the propagation.
+                    _ = self.unify_var_and_non_var_ty(root, tcx.intern(TyKind::Error(error)));
+                }
             }
             (
                 TyKind::Reference(lhs_re, lhs_muta, lhs_pointee),
