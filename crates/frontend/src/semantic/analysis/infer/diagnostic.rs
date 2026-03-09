@@ -414,19 +414,3 @@ impl TyAndSimpleTySetUnifyError {
         Diag::anon_err(format!("{self:#?}")).emit()
     }
 }
-
-#[derive(Debug, Clone)]
-pub struct InferVarNotInferred {
-    pub var: InferTyVar,
-}
-
-impl InferVarNotInferred {
-    pub fn emit(&self, ccx: &ClauseCx<'_>) -> ErrorGuaranteed {
-        Diag::anon_err(format_args!(
-            "inference var {:?} not inferred with source info: {:#?}",
-            self.var,
-            ccx.lookup_infer_ty_src_info(self.var)
-        ))
-        .emit()
-    }
-}

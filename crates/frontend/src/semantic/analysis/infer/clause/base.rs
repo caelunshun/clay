@@ -5,10 +5,10 @@ use crate::{
     },
     semantic::{
         analysis::{
-            ClauseError, ClauseOrigin, CoherenceMap, FloatingInferVar, HrtbUniverse,
-            InferVarNotInferred, ObligationCx, ObligationNotReady, ObligationUnfulfilled,
-            RecursionLimitReached, TyAndSimpleTySetUnifyError, TyAndTyUnifyError, TyCtxt, UnifyCx,
-            UnifyCxMode, infer::clause::elaboration::WipReificationState,
+            ClauseError, ClauseOrigin, CoherenceMap, FloatingInferVar, HrtbUniverse, ObligationCx,
+            ObligationNotReady, ObligationUnfulfilled, RecursionLimitReached,
+            TyAndSimpleTySetUnifyError, TyAndTyUnifyError, TyCtxt, UnifyCx, UnifyCxMode,
+            infer::clause::elaboration::WipReificationState,
         },
         syntax::{
             Crate, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection, RelationMode,
@@ -18,7 +18,6 @@ use crate::{
     },
 };
 use index_vec::IndexVec;
-use std::mem;
 
 const MAX_OBLIGATION_DEPTH: u32 = 256;
 
@@ -445,33 +444,6 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     pub fn verify(&mut self) {
-        let tcx = self.tcx();
-
-        self.poll_obligations();
-
-        let mut iter = InferTyVar::from_usize(0);
-        while iter < self.ucx().next_ty_infer_var() {
-            let next = InferTyVar::from_usize(iter.index() + 1);
-            let curr = mem::replace(&mut iter, next);
-
-            if self.lookup_ty_infer_var_without_poll(curr).is_ok() {
-                continue;
-            }
-
-            let error = InferVarNotInferred { var: curr }.emit(self);
-
-            self.ucx_mut()
-                .unify_ty_and_ty(
-                    &ClauseOrigin::never_printed(),
-                    tcx.intern(TyKind::InferVar(curr)),
-                    tcx.intern(TyKind::Error(error)),
-                    RelationMode::Equate,
-                )
-                .unwrap();
-
-            self.poll_obligations();
-        }
-
         self.poll_obligations();
 
         for obligation in self.ocx.pending_obligations() {

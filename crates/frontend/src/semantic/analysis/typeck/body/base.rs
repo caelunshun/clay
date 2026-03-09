@@ -3,7 +3,7 @@ use crate::{
         Diag, Session,
         analysis::SpannedViewEncode,
         arena::{HasInterner, HasListInterner as _, Obj},
-        syntax::{HasSpan, Span},
+        syntax::HasSpan,
     },
     parse::ast::AstLit,
     semantic::{
@@ -104,14 +104,8 @@ pub struct BodyCtxt<'a, 'tcx> {
     pub import_env: ClauseImportEnvRef<'a>,
     pub local_types: FxHashMap<Obj<FnLocal>, Ty>,
     pub block_break_demands: FxHashMap<LabelledBlock, Option<Ty>>,
-    pub needs_infer: Vec<NeedsInfer>,
+    pub needs_infer: Vec<InferTyVar>,
     pub return_ty: Ty,
-}
-
-#[derive(Copy, Clone)]
-pub struct NeedsInfer {
-    pub span: Span,
-    pub var: InferTyVar,
 }
 
 impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
@@ -176,22 +170,14 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
     pub fn type_of_local(&mut self, local: Obj<FnLocal>) -> Ty {
         let s = self.session();
-        let tcx = self.tcx();
 
         *self.local_types.entry(local).or_insert_with(|| {
-            let var = self.ccx.fresh_ty_infer_var(
+            self.ccx.fresh_ty_infer(
                 HrtbUniverse::ROOT,
                 InferTyVarSourceInfo::Local {
                     name: local.r(s).name,
                 },
-            );
-
-            self.needs_infer.push(NeedsInfer {
-                span: local.r(s).name.span,
-                var,
-            });
-
-            tcx.intern(TyKind::InferVar(var))
+            )
         })
     }
 

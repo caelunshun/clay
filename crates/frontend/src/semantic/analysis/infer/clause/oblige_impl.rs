@@ -267,7 +267,9 @@ impl<'tcx> ClauseCx<'tcx> {
                             // generic definition parameters unexpectedly.
                             if let Some(reified_var_roots) = &reified_var_roots {
                                 let is_resolved = FloatingInfVarVisitor {
-                                    // N.B. this is not the fork.
+                                    // N.B. this is not the fork to ensure that we look for
+                                    // still-inferred types before the potentially hazardous
+                                    // unification.
                                     ccx: &self,
                                     reified_var_roots,
                                 }
