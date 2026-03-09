@@ -69,6 +69,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
             .fold_preserved(*def.r(s).ret_ty);
 
         ccx_sig.wf_visitor(HrtbUniverse::ROOT).visit_spanned(ret_ty);
+        ccx_sig.verify();
 
         // Check the body
         if let Some(body) = *def.r(s).body {
@@ -91,8 +92,6 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
             ccx_body.verify();
         }
-
-        ccx_sig.verify();
     }
 }
 

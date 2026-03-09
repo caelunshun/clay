@@ -224,51 +224,59 @@ impl<'a, 'tcx> ClauseCxPrinter<'a, 'tcx> {
 
         write!(&mut self.out, "{}", def.r(s).item.r(s).display_path(s)).unwrap();
 
-        if !params.r(s).is_empty() {
-            self.out.push('<');
+        let regular_generic_count = *def.r(s).regular_generic_count;
+        let mut idx = 0;
 
-            let regular_generic_count = *def.r(s).regular_generic_count;
+        fn fmt_arg<'a, 'tcx>(
+            me: &mut ClauseCxPrinter<'a, 'tcx>,
+            idx: &mut usize,
+            f: impl FnOnce(&mut ClauseCxPrinter<'a, 'tcx>),
+        ) {
+            if *idx == 0 {
+                me.out.push('<');
+            } else {
+                me.out.push_str(", ");
+            }
 
-            for (idx, (&actual, definition)) in params
-                .r(s)
-                .iter()
-                .zip(&def.r(s).generics.r(s).defs)
-                .enumerate()
-            {
-                if idx > 0 {
-                    self.out.push_str(", ");
-                }
+            f(me);
 
-                match actual {
-                    TraitParam::Equals(actual) => match (actual, definition) {
-                        (TyOrRe::Re(actual), AnyGeneric::Re(_definition)) => {
-                            self.push_re(actual);
-                        }
-                        (TyOrRe::Ty(actual), AnyGeneric::Ty(definition)) => {
-                            if idx >= regular_generic_count as usize {
-                                self.out.push_str(definition.r(s).ident.text.as_str(s));
-                                self.out.push_str(" = ");
+            *idx += 1;
+        }
+
+        for (&actual, definition) in params.r(s).iter().zip(&def.r(s).generics.r(s).defs) {
+            match actual {
+                TraitParam::Equals(actual) => match (actual, definition) {
+                    (TyOrRe::Re(actual), AnyGeneric::Re(_definition)) => {
+                        fmt_arg(self, &mut idx, |this| this.push_re(actual));
+                    }
+                    (TyOrRe::Ty(actual), AnyGeneric::Ty(definition)) => {
+                        fmt_arg(self, &mut idx, |this| {
+                            if definition.r(s).binder.idx >= regular_generic_count {
+                                this.out.push_str(definition.r(s).ident.text.as_str(s));
+                                this.out.push_str(" = ");
                             }
 
-                            self.push_ty(actual);
-                        }
-                        _ => unreachable!(),
-                    },
-                    TraitParam::Unspecified(params) => {
-                        let definition = definition.as_ty().unwrap();
-
-                        if params.r(s).is_empty() {
-                            continue;
-                        }
-
-                        self.out.push_str(definition.r(s).ident.text.as_str(s));
-                        self.out.push_str(": ");
-                        self.push_trait_clauses(params);
+                            this.push_ty(actual);
+                        });
                     }
+                    _ => unreachable!(),
+                },
+                TraitParam::Unspecified(params) => {
+                    let definition = definition.as_ty().unwrap();
+
+                    if params.r(s).is_empty() {
+                        continue;
+                    }
+
+                    fmt_arg(self, &mut idx, |this| {
+                        this.out.push_str(definition.r(s).ident.text.as_str(s));
+                        this.out.push_str(": ");
+                        this.push_trait_clauses(params);
+                    });
                 }
             }
-            self.out.push('>');
         }
+        self.out.push('>');
     }
 
     pub fn finish(&mut self) -> String {

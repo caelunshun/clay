@@ -309,8 +309,22 @@ impl ObligationUnfulfilled {
                 ClauseObligation::TyUnifiesTy(origin, lhs, rhs, mode) => {
                     ClauseObligation::TyUnifiesTy(origin, sub.fold(lhs), sub.fold(rhs), mode)
                 }
-                ClauseObligation::TyMeetsTrait(origin, universe, lhs, rhs) => {
-                    ClauseObligation::TyMeetsTrait(origin, universe, sub.fold(lhs), sub.fold(rhs))
+                ClauseObligation::TyMeetsTrait(origin, _universe, lhs, rhs) => {
+                    let mut printer = ClauseCxPrinter::new(ccx);
+
+                    return Diag::anon_err(format_args!(
+                        "could not make necessary inferences to show that `{}` implements `{}`\n{:#?}",
+                        {
+                            printer.push_ty(lhs);
+                            printer.finish()
+                        },
+                        {
+                            printer.push_trait_spec(rhs);
+                            printer.finish()
+                        },
+                        origin,
+                    ))
+                    .emit();
                 }
                 ClauseObligation::TyOutlivesRe(origin, lhs, rhs, dir) => {
                     ClauseObligation::TyOutlivesRe(origin, sub.fold(lhs), sub.fold(rhs), dir)
@@ -376,8 +390,21 @@ pub struct TyAndTyUnifyError {
 
 impl TyAndTyUnifyError {
     pub fn emit(&self, ccx: &ClauseCx<'_>) -> ErrorGuaranteed {
-        // TODO
-        Diag::anon_err(format!("{self:#?}")).emit()
+        let mut printer = ClauseCxPrinter::new(ccx);
+
+        Diag::anon_err(format_args!(
+            "could not unify {} and {}\n{:#?}",
+            {
+                printer.push_ty(self.origin_lhs);
+                printer.finish()
+            },
+            {
+                printer.push_ty(self.origin_rhs);
+                printer.finish()
+            },
+            self.origin,
+        ))
+        .emit()
     }
 }
 
