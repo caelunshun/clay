@@ -8,12 +8,12 @@ use crate::{
     semantic::{
         analysis::TyCtxt,
         syntax::{
-            AdtInstance, AdtItem, FnInstance, FnInstanceInner, FnItem, FnOwner, GenericBinder,
-            HrtbBinder, HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef, HrtbDebruijnDefList,
-            ImplItem, InferTyVar, Mutability, Re, RelationDirection, SimpleTyKind, TraitClause,
-            TraitClauseList, TraitInstance, TraitItem, TraitParam, TraitParamList, TraitSpec, Ty,
-            TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList, TyProjection, TypeAliasItem,
-            TypeGeneric, UniversalTyVar,
+            AdtInstance, AdtItem, AnyGeneric, FnInstance, FnInstanceInner, FnItem, FnOwner,
+            GenericBinder, HrtbBinder, HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef,
+            HrtbDebruijnDefList, ImplItem, InferTyVar, Mutability, Re, RelationDirection,
+            SimpleTyKind, TraitClause, TraitClauseList, TraitInstance, TraitItem, TraitParam,
+            TraitParamList, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList,
+            TyProjection, TypeAliasItem, TypeGeneric, UniversalTyVar,
         },
     },
 };
@@ -631,7 +631,7 @@ pub type SpannedHrtbDebruijnDef = Spanned<HrtbDebruijnDef>;
 
 #[derive(Debug, Copy, Clone)]
 pub struct SpannedHrtbDebruijnDefView {
-    pub spawned_from: Span,
+    pub spawned_from: AnyGeneric,
     pub kind: TyOrReKind,
     pub clauses: SpannedTraitClauseList,
 }

@@ -113,7 +113,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 TyOrReKind::Ty => TyOrRe::Ty(self.fresh_ty_infer(
                     universe.clone(),
                     InferTyVarSourceInfo::HrtbLhsInstantiation {
-                        span: def.spawned_from,
+                        span: def.spawned_from.span(s),
                     },
                 )),
             })
@@ -129,7 +129,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
                     self.oblige_re_meets_clauses(
                         &origin.clone().child(ClauseOriginKind::HrtbSelection {
-                            def: def.spawned_from,
+                            def: def.spawned_from.span(s),
                         }),
                         var,
                         clauses,
@@ -140,7 +140,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
                     self.oblige_ty_meets_clauses(
                         &origin.clone().child(ClauseOriginKind::HrtbSelection {
-                            def: def.spawned_from,
+                            def: def.spawned_from.span(s),
                         }),
                         universe,
                         var,

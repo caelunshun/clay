@@ -846,7 +846,7 @@ pub type HrtbDebruijnDefList = Intern<[HrtbDebruijnDef]>;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct HrtbDebruijnDef {
-    pub spawned_from: Span,
+    pub spawned_from: AnyGeneric,
     pub kind: TyOrReKind,
     pub clauses: TraitClauseList,
 }
@@ -880,6 +880,13 @@ pub enum RelationDirection {
 }
 
 impl RelationDirection {
+    pub fn kw(self) -> Symbol {
+        match self {
+            RelationDirection::LhsOntoRhs => symbol!("&shorter"),
+            RelationDirection::RhsOntoLhs => symbol!("&longer"),
+        }
+    }
+
     #[must_use]
     pub fn to_mode(self) -> RelationMode {
         match self {
@@ -950,6 +957,13 @@ impl Mutability {
         match self {
             Mutability::Mut => symbol!("mutably"),
             Mutability::Not => symbol!("immutably"),
+        }
+    }
+
+    pub fn opt_space_qual(self) -> Symbol {
+        match self {
+            Mutability::Not => symbol!(""),
+            Mutability::Mut => symbol!(" mut"),
         }
     }
 }

@@ -805,7 +805,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxImporter<'_, 'tcx> {
             .defs
             .iter()
             .map(|def| HrtbDebruijnDef {
-                spawned_from: def.span(s),
+                spawned_from: *def,
                 kind: def.kind(),
                 clauses: self.fold_spanned(def.clauses(s)),
             })

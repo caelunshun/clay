@@ -2,7 +2,8 @@ use crate::{
     base::{Diag, ErrorGuaranteed, syntax::Span},
     semantic::{
         analysis::{
-            ClauseCx, ClauseObligation, HrtbUniverse, TyFolderInfallibleExt, UnboundVarHandlingMode,
+            ClauseCx, ClauseCxPrinter, ClauseObligation, HrtbUniverse, TyFolderInfallibleExt,
+            UnboundVarHandlingMode,
         },
         syntax::{
             InferTyVar, Re, SimpleTySet, TraitClauseList, TraitParam, TraitSpec, Ty,
@@ -331,17 +332,21 @@ pub struct NoTraitImplError {
 
 impl NoTraitImplError {
     pub fn emit(&self, ccx: &ClauseCx<'_>) -> ErrorGuaranteed {
-        let mut sub = ccx
-            .ucx()
-            .substitutor(UnboundVarHandlingMode::NormalizeToRoot);
+        let mut printer = ClauseCxPrinter::new(ccx);
 
-        let me = Self {
-            origin: self.origin.clone(),
-            target: sub.fold(self.target),
-            spec: sub.fold(self.spec),
-        };
-
-        Diag::anon_err(format!("{me:#?}")).emit()
+        Diag::anon_err(format_args!(
+            "type {} does not implement {}\n{:#?}",
+            {
+                printer.push_ty(self.target);
+                printer.finish()
+            },
+            {
+                printer.push_trait_spec(self.spec);
+                printer.finish()
+            },
+            self.origin,
+        ))
+        .emit()
     }
 }
 
