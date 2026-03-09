@@ -81,7 +81,10 @@ struct WipReifiedVar {
 }
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn elaborate_ty_universal_clauses(&mut self, var: UniversalTyVar) -> UniversalElaboration {
+    pub fn elaborate_ty_universal_clauses_possibly_floating(
+        &mut self,
+        var: UniversalTyVar,
+    ) -> UniversalElaboration {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -94,8 +97,12 @@ impl<'tcx> ClauseCx<'tcx> {
         let lub_re = self.fresh_re_universal(UniversalReVarSourceInfo::ElaboratedLub);
 
         let mut elaborated = Vec::new();
-        let mut queue =
-            VecDeque::from_iter(self.direct_ty_universal_clauses(var).r(s).iter().copied());
+        let mut queue = VecDeque::from_iter(
+            self.direct_ty_universal_clauses_possibly_floating(var)
+                .r(s)
+                .iter()
+                .copied(),
+        );
 
         let mut reified_vars = FxHashMap::default();
 
@@ -362,6 +369,8 @@ impl<'tcx> ClauseCx<'tcx> {
                 inner: spec,
             } in &clauses
             {
+                // N.B. we use `spec` without any late lookup to allow us to detect which types were
+                // originally elaboration universals.
                 for (resolved, actual) in assoc_params
                     .iter_mut()
                     .zip(&spec.params.r(s)[regular_generic_count..])

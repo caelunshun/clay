@@ -159,7 +159,9 @@ impl<'tcx> ClauseCx<'tcx> {
                 }
             }
             TyKind::UniversalVar(var) => {
-                let lub_re = self.elaborate_ty_universal_clauses(var).lub_re;
+                let lub_re = self
+                    .elaborate_ty_universal_clauses_possibly_floating(var)
+                    .lub_re;
 
                 self.oblige_re_outlives_re(origin.clone(), lub_re, rhs, dir.to_mode());
             }

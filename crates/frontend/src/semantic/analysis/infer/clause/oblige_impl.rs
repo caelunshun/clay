@@ -104,7 +104,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 todo!()
             }
             TyKind::UniversalVar(universal) => {
-                let universal_elab = self.elaborate_ty_universal_clauses(universal);
+                let universal_elab = self.elaborate_ty_universal_clauses_possibly_floating(universal);
 
                 match self
                     .clone()
@@ -267,10 +267,11 @@ impl<'tcx> ClauseCx<'tcx> {
                             // generic definition parameters unexpectedly.
                             if let Some(reified_var_roots) = &reified_var_roots {
                                 let is_resolved = FloatingInfVarVisitor {
+                                    // N.B. this is not the fork.
                                     ccx: &self,
                                     reified_var_roots,
                                 }
-                                .visit_fallible(rhs)
+                                .visit_fallible(lhs)
                                 .is_continue();
 
                                 if !is_resolved {
@@ -282,6 +283,61 @@ impl<'tcx> ClauseCx<'tcx> {
                     },
                     TraitParam::Unspecified(_) => {
                         unreachable!()
+                    }
+                }
+            }
+
+            // We need to be careful to ensure that we don't leak the inferred types inside an
+            // universal elaboration list. This is to prevent scenarios like these...
+            //
+            // ```
+            // pub trait Meow {
+            //     type Out;
+            // }
+            //
+            // fn hehe<T: Meow<Out = <T as Meow>::Out>>(v: <T as Meow>::Out) {
+            //     let u: i32 = v;
+            // }
+            // ```
+            //
+            // ...where `<T as Meow>::Out` is allowed to unify with itself, letting the universal
+            // be decided circumstance of the type-checking context.
+            //
+            // That being said, code like this...
+            //
+            // ```
+            // fn hello<
+            //     T: Projector<i32>
+            //      + Projector<u32, Out = <T as Projector<i32>>::Out>
+            //      + Meow<<T as Projector<i32>>::Out, Hey: Foo>
+            //      + Meow<<T as Projector<u32>>::Out, Hey: Bar>,
+            // >(
+            //     v: T,
+            // ) {
+            //    ...
+            // }
+            // ```
+            //
+            // ...*should* compile. Hence, we create an exception for universal elaboration helpers.
+            // This is okay because these types aren't allowed to be left floating without also
+            // causing issues with the elaboration obligation either never resolving or attempting
+            // to unify some disjoint variable. This corresponds to `FloatingInfVarVisitor`'s
+            // existing behavior so we use that.
+            if let Some(reified_var_roots) = &reified_var_roots {
+                for (&lhs, &_rhs) in param_iter.clone() {
+                    let TraitParam::Equals(TyOrRe::Ty(lhs)) = lhs else {
+                        unreachable!()
+                    };
+
+                    let is_resolved = FloatingInfVarVisitor {
+                        ccx: &self,
+                        reified_var_roots,
+                    }
+                    .visit_fallible(lhs)
+                    .is_continue();
+
+                    if !is_resolved {
+                        return Err(ObligationNotReady);
                     }
                 }
             }

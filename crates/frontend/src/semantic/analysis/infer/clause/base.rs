@@ -366,7 +366,10 @@ impl<'tcx> ClauseCx<'tcx> {
         descriptor.direct_clauses = Some(clauses);
     }
 
-    pub fn direct_ty_universal_clauses(&self, var: UniversalTyVar) -> TraitClauseList {
+    pub fn direct_ty_universal_clauses_possibly_floating(
+        &self,
+        var: UniversalTyVar,
+    ) -> TraitClauseList {
         self.universal_vars[var].direct_clauses.unwrap()
     }
 

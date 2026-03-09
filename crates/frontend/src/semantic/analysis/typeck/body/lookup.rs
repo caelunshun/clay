@@ -333,7 +333,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
         };
 
         self.ccx_mut()
-            .elaborate_ty_universal_clauses(var)
+            .elaborate_ty_universal_clauses_possibly_floating(var)
             .clauses
             .r(s)
             .iter()
