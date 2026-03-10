@@ -10,8 +10,8 @@ use crate::{
         analysis::{
             ClauseCx, ClauseError, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind,
             CrateTypeckVisitor, EquateOrSet, HrtbUniverse, TyCtxt, TyFolderInfallibleExt,
-            TyVisitable, TyVisitor, TyVisitorInfallibleExt, UnifyCx, UnifyCxMode,
-            peel_ref_for_prim_op, typeck::body::lookup::LookupMethodResult,
+            TyVisitorInfallibleExt, UnifyCx, UnifyCxMode, peel_ref_for_prim_op,
+            typeck::body::lookup::LookupMethodResult,
         },
         lower::generics::normalize_positional_generic_arity,
         syntax::{
@@ -24,7 +24,6 @@ use crate::{
     },
     utils::hash::FxHashMap,
 };
-use std::{convert::Infallible, ops::ControlFlow};
 
 // === Driver === //
 
@@ -96,7 +95,6 @@ pub struct BodyCtxt<'a, 'tcx> {
     pub import_env: ClauseImportEnvRef<'a>,
     pub local_types: FxHashMap<Obj<FnLocal>, Ty>,
     pub block_break_demands: FxHashMap<LabelledBlock, Option<Ty>>,
-    pub needs_infer: Vec<InferTyVar>,
     pub int_infers: Vec<InferTyVar>,
     pub return_ty: Ty,
 }
@@ -123,7 +121,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             import_env,
             local_types: FxHashMap::default(),
             block_break_demands: FxHashMap::default(),
-            needs_infer: Vec::new(),
             int_infers: Vec::new(),
             return_ty,
         }
@@ -162,46 +159,16 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         self.ccx.ucx_mut()
     }
 
-    pub fn oblige_infer(&mut self, ty: impl TyVisitable) {
-        struct InferVisitor<'a, 'b, 'tcx> {
-            ctxt: &'a mut BodyCtxt<'b, 'tcx>,
-        }
-
-        impl<'tcx> TyVisitor<'tcx> for InferVisitor<'_, '_, 'tcx> {
-            type Break = Infallible;
-
-            fn tcx(&self) -> &'tcx TyCtxt {
-                self.ctxt.tcx()
-            }
-
-            fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
-                let s = self.session();
-
-                if let TyKind::InferVar(var) = *ty.value.r(s) {
-                    self.ctxt.needs_infer.push(var);
-                }
-
-                self.walk(ty.value);
-                ControlFlow::Continue(())
-            }
-        }
-
-        InferVisitor { ctxt: self }.visit(ty);
-    }
-
     pub fn type_of_local(&mut self, local: Obj<FnLocal>) -> Ty {
         let s = self.session();
-        let tcx = self.tcx();
 
         *self.local_types.entry(local).or_insert_with(|| {
-            let var = self.ccx.fresh_ty_infer_var(
+            self.ccx.fresh_ty_infer(
                 HrtbUniverse::ROOT,
                 InferTyVarSourceInfo::Local {
                     name: local.r(s).name,
                 },
-            );
-            self.needs_infer.push(var);
-            tcx.intern(TyKind::InferVar(var))
+            )
         })
     }
 
@@ -322,9 +289,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     InferTyVarSourceInfo::FunctionRetVal { span: site_span },
                 );
 
-                self.oblige_infer(input_ty);
-                self.oblige_infer(output_ty);
-
                 self.ccx_mut().oblige_ty_meets_trait_instantiated(
                     ClauseOrigin::root_report(ClauseOriginKind::FunctionCall { site_span }),
                     HrtbUniverse::ROOT,
@@ -435,8 +399,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     owner,
                     early_args: generics,
                 });
-
-                self.oblige_infer(instance);
 
                 let instance_env = self.ccx_mut().instantiate_fn_instance_env_as_infer(
                     &ClauseOrigin::root_report(ClauseOriginKind::FunctionCall {
