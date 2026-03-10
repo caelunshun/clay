@@ -8,4 +8,5 @@ mod math;
 pub use self::math::*;
 
 mod coerce;
+mod confirm;
 mod lookup;

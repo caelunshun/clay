@@ -714,6 +714,34 @@ impl SimpleTySet {
 
         Some(tcx.intern(TyKind::Simple(kind)))
     }
+
+    pub fn to_infer_fallback(self, tcx: &TyCtxt) -> Option<Ty> {
+        if self.intersects(SimpleTySet::I32) {
+            return Some(tcx.intern(TyKind::Simple(SimpleTyKind::Int(IntKind::S32))));
+        }
+
+        if self.intersects(SimpleTySet::I64) {
+            return Some(tcx.intern(TyKind::Simple(SimpleTyKind::Int(IntKind::S64))));
+        }
+
+        if self.intersects(SimpleTySet::U32) {
+            return Some(tcx.intern(TyKind::Simple(SimpleTyKind::Uint(IntKind::S32))));
+        }
+
+        if self.intersects(SimpleTySet::U64) {
+            return Some(tcx.intern(TyKind::Simple(SimpleTyKind::Uint(IntKind::S64))));
+        }
+
+        if self.intersects(SimpleTySet::F32) {
+            return Some(tcx.intern(TyKind::Simple(SimpleTyKind::Float(FloatKind::S32))));
+        }
+
+        if self.intersects(SimpleTySet::F64) {
+            return Some(tcx.intern(TyKind::Simple(SimpleTyKind::Float(FloatKind::S64))));
+        }
+
+        None
+    }
 }
 
 #[derive(Debug, Copy, Clone)]

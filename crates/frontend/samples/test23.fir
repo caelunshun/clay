@@ -134,6 +134,7 @@ fn fail_1() {
 
 fn fail_2() {
     let mut v = ();
+    let hehe = ().make::<_>();
 
     let a = 'b: {
         if true {
