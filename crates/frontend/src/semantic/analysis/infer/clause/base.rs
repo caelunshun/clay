@@ -91,7 +91,7 @@ pub struct ClauseCx<'tcx> {
     ocx: ObligationCx<'tcx, ClauseObligation>,
     coherence: &'tcx CoherenceMap,
     krate: Obj<Crate>,
-    is_silent: bool,
+    loud_errors: Option<Vec<ClauseError>>,
     pub(super) universal_vars: IndexVec<UniversalTyVar, UniversalTyVarDescriptor>,
 }
 
@@ -119,7 +119,7 @@ impl<'tcx> ClauseCx<'tcx> {
             ocx: ObligationCx::new(tcx, mode),
             coherence,
             krate,
-            is_silent: false,
+            loud_errors: Some(Vec::new()),
             universal_vars: IndexVec::new(),
         }
     }
@@ -149,16 +149,22 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     pub fn is_silent(&self) -> bool {
-        self.is_silent
+        self.loud_errors.is_some()
     }
 
-    pub fn set_is_silent(&mut self, is_silent: bool) {
-        self.is_silent = is_silent;
+    pub fn make_silent(&mut self) {
+        self.loud_errors = None;
     }
 
     pub fn with_silent(mut self) -> Self {
-        self.set_is_silent(true);
+        self.make_silent();
         self
+    }
+
+    pub fn queue_loud_report(&mut self, error: ClauseError) {
+        if let Some(queue) = &mut self.loud_errors {
+            queue.push(error);
+        }
     }
 
     pub fn mode(&self) -> UnifyCxMode {
@@ -446,13 +452,21 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn verify(&mut self) {
         self.poll_obligations();
 
-        for obligation in self.ocx.pending_obligations() {
+        for obligation in self.ocx.pending_obligations().to_vec() {
             obligation.origin().report(
                 ClauseError::ObligationUnfulfilled(ObligationUnfulfilled {
                     obligation: obligation.clone(),
                 }),
                 self,
             );
+        }
+
+        let Some(errors) = &self.loud_errors else {
+            unreachable!()
+        };
+
+        for error in errors {
+            error.emit(self);
         }
 
         self.ucx().verify(self);

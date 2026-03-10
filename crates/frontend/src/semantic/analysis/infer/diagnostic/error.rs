@@ -24,10 +24,10 @@ pub enum ClauseErrorSink {
 }
 
 impl ClauseErrorSink {
-    pub fn report(&self, error: ClauseError, ccx: &ClauseCx<'_>) {
+    pub fn report(&self, error: ClauseError, ccx: &mut ClauseCx<'_>) {
         match self {
             ClauseErrorSink::Report => {
-                error.emit(ccx);
+                ccx.queue_loud_report(error);
             }
             ClauseErrorSink::NeverReport(_) => {
                 unreachable!();
@@ -232,7 +232,7 @@ impl ClauseOrigin {
         &self.inner.sink
     }
 
-    pub fn report(&self, error: ClauseError, ccx: &ClauseCx<'_>) {
+    pub fn report(&self, error: ClauseError, ccx: &mut ClauseCx<'_>) {
         self.sink().report(error, ccx);
     }
 }
@@ -255,15 +255,7 @@ macro_rules! clause_error {
         )*
 
         impl ClauseError {
-            pub fn emit(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
-                if ccx.is_silent() {
-                    return None;
-                }
-
-                Some(self.force_emit(ccx))
-            }
-
-            pub fn force_emit(&self, ccx: &ClauseCx<'_>) -> ErrorGuaranteed {
+            pub fn emit(&self, ccx: &ClauseCx<'_>) -> ErrorGuaranteed {
                 match self {
                     $(Self::$name(err) => err.emit(ccx),)*
                 }
@@ -349,7 +341,7 @@ impl NoTraitImplError {
         let mut printer = ClauseCxPrinter::new(ccx);
 
         Diag::anon_err(format_args!(
-            "type {} does not implement {}\n{:#?}",
+            "type `{}` does not implement `{}`\n{:#?}",
             {
                 printer.push_ty(self.target);
                 printer.finish()
@@ -393,7 +385,7 @@ impl TyAndTyUnifyError {
         let mut printer = ClauseCxPrinter::new(ccx);
 
         Diag::anon_err(format_args!(
-            "could not unify {} and {}\n{:#?}",
+            "could not unify `{}` and `{}`\n{:#?}",
             {
                 printer.push_ty(self.origin_lhs);
                 printer.finish()

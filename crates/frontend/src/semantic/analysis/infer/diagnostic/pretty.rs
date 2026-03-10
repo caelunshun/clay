@@ -276,7 +276,10 @@ impl<'a, 'tcx> ClauseCxPrinter<'a, 'tcx> {
                 }
             }
         }
-        self.out.push('>');
+
+        if idx > 0 {
+            self.out.push('>');
+        }
     }
 
     pub fn finish(&mut self) -> String {

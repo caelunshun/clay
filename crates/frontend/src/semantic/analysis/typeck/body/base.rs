@@ -33,43 +33,15 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         let tcx = self.tcx();
 
         // Setup a `ClauseCx` for signature validation.
-        let mut ccx_sig = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env_sig = ccx_sig.import_fn_def_env_as_universal(
+        let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionBlind);
+        let env_sig = ccx.import_fn_def_env_as_universal(
             &ClauseOrigin::empty_report(),
             HrtbUniverse::ROOT_REF,
             def,
         );
 
         // WF-check the signature.
-        self.visit_generic_binder(&mut ccx_sig, env_sig.as_ref(), def.r(s).generics);
-
-        // TODO
-        // if let Some(self_param) = *def.r(s).self_param {
-        //     self.visit_spanned_ty(self_param)?;
-        // }
-
-        for arg in def.r(s).args.r(s) {
-            let arg = ccx_sig
-                .importer(
-                    &ClauseOrigin::empty_report(),
-                    HrtbUniverse::ROOT,
-                    env_sig.as_ref(),
-                )
-                .fold_preserved(arg.ty);
-
-            ccx_sig.wf_visitor(HrtbUniverse::ROOT).visit_spanned(arg);
-        }
-
-        let ret_ty = ccx_sig
-            .importer(
-                &ClauseOrigin::empty_report(),
-                HrtbUniverse::ROOT,
-                env_sig.as_ref(),
-            )
-            .fold_preserved(*def.r(s).ret_ty);
-
-        ccx_sig.wf_visitor(HrtbUniverse::ROOT).visit_spanned(ret_ty);
-        ccx_sig.verify();
+        self.visit_generic_binder(&mut ccx, env_sig.as_ref(), def.r(s).generics);
 
         // Check the body
         if let Some(body) = *def.r(s).body {
@@ -91,7 +63,31 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
             bcx.check_expr_demand(body, bcx.return_ty).ignore();
 
             ccx_body.verify();
+        } else {
+            for arg in def.r(s).args.r(s) {
+                let arg = ccx
+                    .importer(
+                        &ClauseOrigin::empty_report(),
+                        HrtbUniverse::ROOT,
+                        env_sig.as_ref(),
+                    )
+                    .fold_preserved(arg.ty);
+
+                ccx.wf_visitor(HrtbUniverse::ROOT).visit_spanned(arg);
+            }
+
+            let ret_ty = ccx
+                .importer(
+                    &ClauseOrigin::empty_report(),
+                    HrtbUniverse::ROOT,
+                    env_sig.as_ref(),
+                )
+                .fold_preserved(*def.r(s).ret_ty);
+
+            ccx.wf_visitor(HrtbUniverse::ROOT).visit_spanned(ret_ty);
         }
+
+        ccx.verify();
     }
 }
 
@@ -521,7 +517,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     break 'op result_ty;
                 }
 
-                tcx.intern(TyKind::Error(fallback_err.force_emit(&prim_fork)))
+                tcx.intern(TyKind::Error(fallback_err.emit(&prim_fork)))
             }
             ExprKind::Unary(kind, lhs) => 'op: {
                 let lhs_ty = self.check_expr(lhs).and_do(&mut divergence);
