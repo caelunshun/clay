@@ -21,9 +21,10 @@ use crate::{
             },
         },
         syntax::{
-            AdtCtor, AdtCtorFieldIdx, AdtCtorSyntax, Block, Expr, ExprKind, LabelTargetKind,
-            LabelledBlock, LetStmt, MatchArm, Pat, PatKind, PatListFrontAndTail, RangeExpr,
-            SpannedTyOrReList, Stmt, StructExpr, StructNamedField,
+            AdtCtor, AdtCtorFieldIdx, AdtCtorSyntax, HirBlock, HirExpr, HirExprKind,
+            HirLabelTargetKind, HirLabelledBlock, HirLetStmt, HirMatchArm, HirPat, HirPatKind,
+            HirPatListFrontAndTail, HirRangeExpr, HirStmt, HirStructExpr, HirStructNamedField,
+            SpannedTyOrReList,
         },
     },
     utils::{
@@ -41,7 +42,7 @@ impl IntraItemLowerCtxt<'_> {
         &mut self,
         expr_span: Span,
         label: Option<Lifetime>,
-    ) -> Result<LabelledBlock, ErrorGuaranteed> {
+    ) -> Result<HirLabelledBlock, ErrorGuaranteed> {
         let Some(label) = label else {
             return match self.innermost_block {
                 Some(block) => Ok(block),
@@ -60,10 +61,10 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn lower_block_with_label(
         &mut self,
-        owner: LabelledBlock,
+        owner: HirLabelledBlock,
         label: Option<Lifetime>,
         block: &AstBlock,
-    ) -> Obj<Block> {
+    ) -> Obj<HirBlock> {
         self.scoped(|this| {
             if let Some(label) = label {
                 this.block_label_names
@@ -91,15 +92,15 @@ impl IntraItemLowerCtxt<'_> {
         })
     }
 
-    pub fn lower_opt_block(&mut self, block: Option<&AstBlock>) -> Option<Obj<Block>> {
+    pub fn lower_opt_block(&mut self, block: Option<&AstBlock>) -> Option<Obj<HirBlock>> {
         block.map(|block| self.lower_block(block))
     }
 
-    pub fn lower_block(&mut self, block: &AstBlock) -> Obj<Block> {
+    pub fn lower_block(&mut self, block: &AstBlock) -> Obj<HirBlock> {
         self.scoped(|this| this.lower_block_inner(block))
     }
 
-    fn lower_block_inner(&mut self, block: &AstBlock) -> Obj<Block> {
+    fn lower_block_inner(&mut self, block: &AstBlock) -> Obj<HirBlock> {
         let s = &self.tcx.session;
 
         let stmts = block
@@ -111,7 +112,7 @@ impl IntraItemLowerCtxt<'_> {
         let last_expr = self.lower_opt_expr(block.last_expr.as_ref());
 
         Obj::new(
-            Block {
+            HirBlock {
                 span: block.span,
                 stmts,
                 last_expr,
@@ -120,24 +121,24 @@ impl IntraItemLowerCtxt<'_> {
         )
     }
 
-    pub fn lower_block_as_expr(&mut self, block: &AstBlock) -> Obj<Expr> {
+    pub fn lower_block_as_expr(&mut self, block: &AstBlock) -> Obj<HirExpr> {
         let s = &self.tcx.session;
         let block = self.lower_block(block);
 
         Obj::new(
-            Expr {
+            HirExpr {
                 span: block.r(s).span,
-                kind: LateInit::new(ExprKind::Block(block)),
+                kind: LateInit::new(HirExprKind::Block(block)),
             },
             s,
         )
     }
 
-    pub fn lower_stmt(&mut self, stmt: &AstStmt) -> Option<Stmt> {
+    pub fn lower_stmt(&mut self, stmt: &AstStmt) -> Option<HirStmt> {
         let s = &self.tcx.session;
 
         match &stmt.kind {
-            AstStmtKind::Expr(expr) => Some(Stmt::Expr(self.lower_expr(expr))),
+            AstStmtKind::Expr(expr) => Some(HirStmt::Expr(self.lower_expr(expr))),
             AstStmtKind::Let(AstStmtLet {
                 pat,
                 ascription,
@@ -148,8 +149,8 @@ impl IntraItemLowerCtxt<'_> {
                 let else_clause = self.lower_opt_block(else_clause.as_deref());
                 let pat = self.lower_pat(pat);
 
-                Some(Stmt::Let(Obj::new(
-                    LetStmt {
+                Some(HirStmt::Let(Obj::new(
+                    HirLetStmt {
                         span: stmt.span,
                         pat,
                         ascription: self.lower_opt_ty(ascription.as_deref()),
@@ -166,13 +167,13 @@ impl IntraItemLowerCtxt<'_> {
         }
     }
 
-    pub fn lower_exprs(&mut self, exprs: &[AstExpr]) -> Obj<[Obj<Expr>]> {
+    pub fn lower_exprs(&mut self, exprs: &[AstExpr]) -> Obj<[Obj<HirExpr>]> {
         let s = &self.tcx.session;
 
         Obj::new_iter(exprs.iter().map(|expr| self.lower_expr(expr)), s)
     }
 
-    pub fn lower_opt_expr(&mut self, expr: Option<&AstExpr>) -> Option<Obj<Expr>> {
+    pub fn lower_opt_expr(&mut self, expr: Option<&AstExpr>) -> Option<Obj<HirExpr>> {
         expr.map(|v| self.lower_expr(v))
     }
 
@@ -180,26 +181,26 @@ impl IntraItemLowerCtxt<'_> {
         &mut self,
         parent_span: Span,
         expr: Option<&AstExpr>,
-    ) -> Obj<Expr> {
+    ) -> Obj<HirExpr> {
         let s = &self.tcx.session;
 
         match expr {
             Some(expr) => self.lower_expr(expr),
             None => Obj::new(
-                Expr {
+                HirExpr {
                     span: parent_span,
-                    kind: LateInit::new(ExprKind::Tuple(Obj::new_slice(&[], s))),
+                    kind: LateInit::new(HirExprKind::Tuple(Obj::new_slice(&[], s))),
                 },
                 s,
             ),
         }
     }
 
-    pub fn lower_expr(&mut self, ast: &AstExpr) -> Obj<Expr> {
+    pub fn lower_expr(&mut self, ast: &AstExpr) -> Obj<HirExpr> {
         let s = &self.tcx.session;
 
         let expr = Obj::new(
-            Expr {
+            HirExpr {
                 span: ast.span,
                 kind: LateInit::uninit(),
             },
@@ -207,32 +208,32 @@ impl IntraItemLowerCtxt<'_> {
         );
 
         let kind = match &ast.kind {
-            AstExprKind::Array(exprs) => ExprKind::Array(self.lower_exprs(exprs)),
+            AstExprKind::Array(exprs) => HirExprKind::Array(self.lower_exprs(exprs)),
             AstExprKind::Call(callee, args) => {
                 if let AstExprKind::Field(receiver, method) = &callee.kind {
-                    ExprKind::MethodCall {
+                    HirExprKind::MethodCall {
                         receiver: self.lower_expr(receiver),
                         name: *method,
                         generics: None,
                         args: self.lower_exprs(args),
                     }
                 } else {
-                    ExprKind::Call(self.lower_expr(callee), self.lower_exprs(args))
+                    HirExprKind::Call(self.lower_expr(callee), self.lower_exprs(args))
                 }
             }
             AstExprKind::Paren(expr) => {
                 return self.lower_expr(expr);
             }
-            AstExprKind::Tuple(exprs) => ExprKind::Tuple(self.lower_exprs(exprs)),
+            AstExprKind::Tuple(exprs) => HirExprKind::Tuple(self.lower_exprs(exprs)),
             AstExprKind::Binary(op, lhs, rhs) => {
-                ExprKind::Binary(*op, self.lower_expr(lhs), self.lower_expr(rhs))
+                HirExprKind::Binary(*op, self.lower_expr(lhs), self.lower_expr(rhs))
             }
-            AstExprKind::Unary(op, expr) => ExprKind::Unary(*op, self.lower_expr(expr)),
-            AstExprKind::Lit(lit) => ExprKind::Literal(*lit),
+            AstExprKind::Unary(op, expr) => HirExprKind::Unary(*op, self.lower_expr(expr)),
+            AstExprKind::Lit(lit) => HirExprKind::Literal(*lit),
             AstExprKind::Cast(expr, as_ty) => {
-                ExprKind::Cast(self.lower_expr(expr), self.lower_ty(as_ty))
+                HirExprKind::Cast(self.lower_expr(expr), self.lower_ty(as_ty))
             }
-            AstExprKind::Let(..) => ExprKind::Error(
+            AstExprKind::Let(..) => HirExprKind::Error(
                 Diag::span_err(
                     ast.span,
                     "`let` only allowed in statements or if-`let` chains",
@@ -243,18 +244,18 @@ impl IntraItemLowerCtxt<'_> {
                 cond,
                 truthy,
                 falsy,
-            } => self.scoped(|this| ExprKind::If {
+            } => self.scoped(|this| HirExprKind::If {
                 cond: this.lower_let_chain(cond),
                 truthy: this.lower_block_as_expr(truthy),
                 falsy: this.lower_opt_expr(falsy.as_deref()),
             }),
             AstExprKind::While { cond, block, label } => self.scoped(|this| {
-                ExprKind::While(
+                HirExprKind::While(
                     this.lower_let_chain(cond),
                     this.lower_block_with_label(
-                        LabelledBlock {
+                        HirLabelledBlock {
                             target: expr,
-                            kind: LabelTargetKind::While,
+                            kind: HirLabelTargetKind::While,
                         },
                         *label,
                         block,
@@ -270,43 +271,43 @@ impl IntraItemLowerCtxt<'_> {
                 let iter = self.lower_expr(iter);
                 let pat = self.lower_pat(pat);
                 let body = self.lower_block_with_label(
-                    LabelledBlock {
+                    HirLabelledBlock {
                         target: expr,
-                        kind: LabelTargetKind::For,
+                        kind: HirLabelTargetKind::For,
                     },
                     *label,
                     body,
                 );
 
-                ExprKind::ForLoop { pat, iter, body }
+                HirExprKind::ForLoop { pat, iter, body }
             }
-            AstExprKind::Loop(block, label) => ExprKind::Loop(self.lower_block_with_label(
-                LabelledBlock {
+            AstExprKind::Loop(block, label) => HirExprKind::Loop(self.lower_block_with_label(
+                HirLabelledBlock {
                     target: expr,
-                    kind: LabelTargetKind::Loop,
+                    kind: HirLabelTargetKind::Loop,
                 },
                 *label,
                 block,
             )),
-            AstExprKind::Match(scrutinee, arms) => ExprKind::Match(
+            AstExprKind::Match(scrutinee, arms) => HirExprKind::Match(
                 self.lower_expr(scrutinee),
                 Obj::new_iter(arms.iter().map(|arm| self.lower_match_arm(arm)), s),
             ),
-            AstExprKind::Block(block, label) => ExprKind::Block(self.lower_block_with_label(
-                LabelledBlock {
+            AstExprKind::Block(block, label) => HirExprKind::Block(self.lower_block_with_label(
+                HirLabelledBlock {
                     target: expr,
-                    kind: LabelTargetKind::Block,
+                    kind: HirLabelTargetKind::Block,
                 },
                 *label,
                 block,
             )),
             AstExprKind::Assign(lhs, rhs) => {
-                ExprKind::Assign(self.lower_lvalue(lhs), self.lower_expr(rhs))
+                HirExprKind::Assign(self.lower_lvalue(lhs), self.lower_expr(rhs))
             }
             AstExprKind::AssignOp(op, lhs, rhs) => {
-                ExprKind::AssignOp(*op, self.lower_lvalue(lhs), self.lower_expr(rhs))
+                HirExprKind::AssignOp(*op, self.lower_lvalue(lhs), self.lower_expr(rhs))
             }
-            AstExprKind::Field(expr, name) => ExprKind::Field(self.lower_expr(expr), *name),
+            AstExprKind::Field(expr, name) => HirExprKind::Field(self.lower_expr(expr), *name),
             AstExprKind::GenericMethodCall {
                 target,
                 method,
@@ -323,7 +324,7 @@ impl IntraItemLowerCtxt<'_> {
                     .emit();
                 }
 
-                ExprKind::MethodCall {
+                HirExprKind::MethodCall {
                     receiver: self.lower_expr(target),
                     name: *method,
                     generics: Some(SpannedTyOrReList::alloc_list(
@@ -335,10 +336,10 @@ impl IntraItemLowerCtxt<'_> {
                 }
             }
             AstExprKind::Index(expr, index) => {
-                ExprKind::Index(self.lower_expr(expr), self.lower_expr(index))
+                HirExprKind::Index(self.lower_expr(expr), self.lower_expr(index))
             }
-            AstExprKind::Range(inner) => ExprKind::Range(self.lower_range_expr(ast.span, inner)),
-            AstExprKind::Underscore => ExprKind::Error(
+            AstExprKind::Range(inner) => HirExprKind::Range(self.lower_range_expr(ast.span, inner)),
+            AstExprKind::Underscore => HirExprKind::Error(
                 Diag::span_err(
                     ast.span,
                     "in expressions, `_` can only be used on the left-hand side of an assignment",
@@ -349,12 +350,12 @@ impl IntraItemLowerCtxt<'_> {
                 let res = match self.resolve_expr_path(path).fail_on_unbound_local() {
                     Ok(v) => v,
                     Err(err) => {
-                        break 'path ExprKind::Error(err);
+                        break 'path HirExprKind::Error(err);
                     }
                 };
 
                 let Some(res_val) = res.as_value(s) else {
-                    break 'path ExprKind::Error(
+                    break 'path HirExprKind::Error(
                         Diag::span_err(
                             path.span,
                             format_args!("expected value, got {}", res.bare_what(s)),
@@ -365,16 +366,16 @@ impl IntraItemLowerCtxt<'_> {
 
                 match res_val {
                     PathResolvedValue::Local(local) => match local {
-                        PathResolvedLocal::LowerSelf => ExprKind::LocalSelf,
-                        PathResolvedLocal::Local(def) => ExprKind::Local(def),
+                        PathResolvedLocal::LowerSelf => HirExprKind::LocalSelf,
+                        PathResolvedLocal::Local(def) => HirExprKind::Local(def),
                     },
                     PathResolvedValue::FnLit(fn_lit) => match fn_lit {
-                        PathResolvedFnLit::Item(def, params) => ExprKind::FnItemLit(def, params),
+                        PathResolvedFnLit::Item(def, params) => HirExprKind::FnItemLit(def, params),
                         PathResolvedFnLit::TypeRelative {
                             self_ty,
                             as_trait,
                             assoc,
-                        } => ExprKind::TypeRelative {
+                        } => HirExprKind::TypeRelative {
                             self_ty,
                             as_trait,
                             assoc_name: assoc.name,
@@ -382,7 +383,7 @@ impl IntraItemLowerCtxt<'_> {
                         },
                     },
                     PathResolvedValue::AdtCtor(ctor) => match ctor.def.r(s).syntax {
-                        AdtCtorSyntax::Unit => ExprKind::TupleOrUnitCtor(ctor),
+                        AdtCtorSyntax::Unit => HirExprKind::TupleOrUnitCtor(ctor),
                         AdtCtorSyntax::Tuple => {
                             let offending_fields = ctor
                                 .def
@@ -417,9 +418,9 @@ impl IntraItemLowerCtxt<'_> {
                                 .emit();
                             }
 
-                            ExprKind::TupleOrUnitCtor(ctor)
+                            HirExprKind::TupleOrUnitCtor(ctor)
                         }
-                        AdtCtorSyntax::Named(_) => ExprKind::Error(
+                        AdtCtorSyntax::Named(_) => HirExprKind::Error(
                             Diag::span_err(
                                 path.span,
                                 format_args!("expected value, got {}", res.bare_what(s)),
@@ -437,7 +438,7 @@ impl IntraItemLowerCtxt<'_> {
                 }
             }
             AstExprKind::AddrOf(muta, expr) => {
-                ExprKind::AddrOf(muta.as_muta(), self.lower_expr(expr))
+                HirExprKind::AddrOf(muta.as_muta(), self.lower_expr(expr))
             }
             AstExprKind::Break(label, value) => match self.lookup_label(ast.span, *label) {
                 Ok(label) => {
@@ -458,7 +459,7 @@ impl IntraItemLowerCtxt<'_> {
                         .emit();
                     }
 
-                    ExprKind::Break {
+                    HirExprKind::Break {
                         label,
                         value: label.kind.can_break_with_value().then(|| {
                             self.lower_opt_expr_or_unit(
@@ -470,12 +471,12 @@ impl IntraItemLowerCtxt<'_> {
                         }),
                     }
                 }
-                Err(err) => ExprKind::Error(err),
+                Err(err) => HirExprKind::Error(err),
             },
             AstExprKind::Continue(label) => 'lower: {
                 let label = match self.lookup_label(ast.span, *label) {
                     Ok(v) => v,
-                    Err(err) => break 'lower ExprKind::Error(err),
+                    Err(err) => break 'lower HirExprKind::Error(err),
                 };
 
                 if !label.kind.can_continue() {
@@ -490,19 +491,19 @@ impl IntraItemLowerCtxt<'_> {
                     .emit();
                 }
 
-                ExprKind::Continue(label)
+                HirExprKind::Continue(label)
             }
             AstExprKind::Return(expr) => {
-                ExprKind::Return(self.lower_opt_expr_or_unit(ast.span, expr.as_deref()))
+                HirExprKind::Return(self.lower_opt_expr_or_unit(ast.span, expr.as_deref()))
             }
             AstExprKind::Struct(path, fields, rest) => 'path: {
                 let res = match self.resolve_expr_path(path).fail_on_unbound_local() {
                     Ok(v) => v,
-                    Err(err) => break 'path ExprKind::Error(err),
+                    Err(err) => break 'path HirExprKind::Error(err),
                 };
 
                 let Some(ctor) = res.as_adt_ctor(s).filter(|v| v.def.r(s).syntax.is_named()) else {
-                    break 'path ExprKind::Error(
+                    break 'path HirExprKind::Error(
                         Diag::span_err(
                             path.span,
                             format_args!(
@@ -523,9 +524,9 @@ impl IntraItemLowerCtxt<'_> {
                                 let kind = if let Some(def) =
                                     self.func_local_names.lookup(field.name.text)
                                 {
-                                    ExprKind::Local(*def)
+                                    HirExprKind::Local(*def)
                                 } else {
-                                    ExprKind::Error(
+                                    HirExprKind::Error(
                                         Diag::span_err(
                                             field.name.span,
                                             format_args!(
@@ -538,7 +539,7 @@ impl IntraItemLowerCtxt<'_> {
                                 };
 
                                 Obj::new(
-                                    Expr {
+                                    HirExpr {
                                         span: field.name.span,
                                         kind: LateInit::new(kind),
                                     },
@@ -565,13 +566,13 @@ impl IntraItemLowerCtxt<'_> {
                 let fields = Obj::new_iter(
                     self.match_up_ctor_members(ctor.def, fields, deny_missing)
                         .into_iter()
-                        .map(|(idx, init)| StructNamedField { idx, init }),
+                        .map(|(idx, init)| HirStructNamedField { idx, init }),
                     s,
                 );
 
-                ExprKind::Struct(StructExpr { ctor, fields, rest })
+                HirExprKind::Struct(HirStructExpr { ctor, fields, rest })
             }
-            AstExprKind::Error(err) => ExprKind::Error(*err),
+            AstExprKind::Error(err) => HirExprKind::Error(*err),
         };
 
         LateInit::init(&expr.r(s).kind, kind);
@@ -579,7 +580,7 @@ impl IntraItemLowerCtxt<'_> {
         expr
     }
 
-    pub fn lower_range_expr(&mut self, span: Span, ast: &AstRangeExpr) -> RangeExpr {
+    pub fn lower_range_expr(&mut self, span: Span, ast: &AstRangeExpr) -> HirRangeExpr {
         let mut limits = ast.limits;
 
         if ast.low.is_none() && ast.high.is_none() && ast.limits == AstRangeLimits::Closed {
@@ -587,14 +588,14 @@ impl IntraItemLowerCtxt<'_> {
             limits = AstRangeLimits::HalfOpen;
         }
 
-        RangeExpr {
+        HirRangeExpr {
             low: self.lower_opt_expr(ast.low.as_deref()),
             high: self.lower_opt_expr(ast.high.as_deref()),
             limits,
         }
     }
 
-    pub fn lower_let_chain(&mut self, expr: &AstExpr) -> Obj<Expr> {
+    pub fn lower_let_chain(&mut self, expr: &AstExpr) -> Obj<HirExpr> {
         let s = &self.tcx.session;
 
         #[derive(Debug, Copy, Clone)]
@@ -642,9 +643,9 @@ impl IntraItemLowerCtxt<'_> {
                             *broken_out_violation = BrokenOutViolation::AlreadyReported(err);
 
                             Obj::new(
-                                Expr {
+                                HirExpr {
                                     span: expr.span,
-                                    kind: LateInit::new(ExprKind::Error(err)),
+                                    kind: LateInit::new(HirExprKind::Error(err)),
                                 },
                                 s,
                             )
@@ -658,9 +659,9 @@ impl IntraItemLowerCtxt<'_> {
                             let pat = self.lower_pat(pat);
 
                             Obj::new(
-                                Expr {
+                                HirExpr {
                                     span: expr.span,
-                                    kind: LateInit::new(ExprKind::Let(pat, scrutinee)),
+                                    kind: LateInit::new(HirExprKind::Let(pat, scrutinee)),
                                 },
                                 s,
                             )
@@ -676,7 +677,7 @@ impl IntraItemLowerCtxt<'_> {
         self.recombine_right_associative_bin_op_chain(parts)
     }
 
-    pub fn lower_match_arm(&mut self, arm: &AstMatchArm) -> Obj<MatchArm> {
+    pub fn lower_match_arm(&mut self, arm: &AstMatchArm) -> Obj<HirMatchArm> {
         self.scoped(|this| {
             let s = &this.tcx.session;
             let pat = this.lower_pat(&arm.pat);
@@ -684,7 +685,7 @@ impl IntraItemLowerCtxt<'_> {
             let body = this.lower_expr(&arm.body);
 
             Obj::new(
-                MatchArm {
+                HirMatchArm {
                     span: arm.span,
                     pat,
                     guard,
@@ -695,7 +696,7 @@ impl IntraItemLowerCtxt<'_> {
         })
     }
 
-    pub fn lower_lvalue(&mut self, expr: &AstExpr) -> Obj<Pat> {
+    pub fn lower_lvalue(&mut self, expr: &AstExpr) -> Obj<HirPat> {
         let s = &self.tcx.session;
 
         let kind = match &expr.kind {
@@ -704,13 +705,13 @@ impl IntraItemLowerCtxt<'_> {
             }
 
             AstExprKind::Array(elems) => {
-                PatKind::Slice(self.lower_lvalue_list_front_and_tail("slice", elems))
+                HirPatKind::Slice(self.lower_lvalue_list_front_and_tail("slice", elems))
             }
             AstExprKind::Tuple(elems) => {
-                PatKind::Tuple(self.lower_lvalue_list_front_and_tail("tuple", elems))
+                HirPatKind::Tuple(self.lower_lvalue_list_front_and_tail("tuple", elems))
             }
-            AstExprKind::Lit(_) => PatKind::Lit(self.lower_expr(expr)),
-            AstExprKind::Underscore => PatKind::Hole,
+            AstExprKind::Lit(_) => HirPatKind::Lit(self.lower_expr(expr)),
+            AstExprKind::Underscore => HirPatKind::Hole,
 
             AstExprKind::Binary(
                 AstBinOpSpanned {
@@ -719,14 +720,14 @@ impl IntraItemLowerCtxt<'_> {
                 },
                 _lhs,
                 _rhs,
-            ) => PatKind::Or(Obj::new_iter(
+            ) => HirPatKind::Or(Obj::new_iter(
                 self.flatten_right_associative_bin_op_chain(expr, |op| op == AstBinOpKind::BitOr)
                     .into_iter()
                     .map(|(_span, pat)| self.lower_lvalue(pat)),
                 s,
             )),
             AstExprKind::AddrOf(muta, pointee) => {
-                PatKind::Ref(muta.as_muta(), self.lower_lvalue(pointee))
+                HirPatKind::Ref(muta.as_muta(), self.lower_lvalue(pointee))
             }
 
             AstExprKind::Struct(..) | AstExprKind::Call(..) => todo!(),
@@ -736,7 +737,7 @@ impl IntraItemLowerCtxt<'_> {
             | AstExprKind::Index(..)
             | AstExprKind::Path(..)
             | AstExprKind::Unary(AstUnOpKind::Deref, ..) => {
-                PatKind::PlaceExpr(self.lower_expr(expr))
+                HirPatKind::PlaceExpr(self.lower_expr(expr))
             }
 
             AstExprKind::Cast(..)
@@ -778,15 +779,15 @@ impl IntraItemLowerCtxt<'_> {
                 },
                 ..,
             )
-            | AstExprKind::Range(..) => PatKind::Error(
+            | AstExprKind::Range(..) => HirPatKind::Error(
                 Diag::span_err(expr.span, "invalid left-hand side of assignment").emit(),
             ),
 
-            AstExprKind::Error(err) => PatKind::Error(*err),
+            AstExprKind::Error(err) => HirPatKind::Error(*err),
         };
 
         Obj::new(
-            Pat {
+            HirPat {
                 span: expr.span,
                 kind,
             },
@@ -797,7 +798,7 @@ impl IntraItemLowerCtxt<'_> {
     pub fn lower_lvalue_list<'a>(
         &mut self,
         exprs: impl IntoIterator<Item = &'a AstExpr, IntoIter: ExactSizeIterator>,
-    ) -> Obj<[Obj<Pat>]> {
+    ) -> Obj<[Obj<HirPat>]> {
         let s = &self.tcx.session;
 
         Obj::new_iter(exprs.into_iter().map(|expr| self.lower_lvalue(expr)), s)
@@ -807,7 +808,7 @@ impl IntraItemLowerCtxt<'_> {
         &mut self,
         kind_name: impl fmt::Display,
         exprs: impl IntoIterator<Item = &'a AstExpr>,
-    ) -> PatListFrontAndTail {
+    ) -> HirPatListFrontAndTail {
         self.lower_pat_list_front_and_tail_generic(kind_name, exprs, |this, expr| match expr.kind {
             AstExprKind::Range(AstRangeExpr {
                 low: None,
@@ -849,8 +850,8 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn recombine_right_associative_bin_op_chain(
         &mut self,
-        parts: impl IntoIterator<Item = (Option<AstBinOpSpanned>, Obj<Expr>)>,
-    ) -> Obj<Expr> {
+        parts: impl IntoIterator<Item = (Option<AstBinOpSpanned>, Obj<HirExpr>)>,
+    ) -> Obj<HirExpr> {
         let s = &self.tcx.session;
 
         let mut parts = parts.into_iter();
@@ -859,9 +860,9 @@ impl IntraItemLowerCtxt<'_> {
 
         for (op, part) in parts {
             outer = Obj::new(
-                Expr {
+                HirExpr {
                     span: outer.r(s).span,
-                    kind: LateInit::new(ExprKind::Binary(op.unwrap(), outer, part)),
+                    kind: LateInit::new(HirExprKind::Binary(op.unwrap(), outer, part)),
                 },
                 s,
             );

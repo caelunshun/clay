@@ -6,7 +6,7 @@ use crate::{
             attempt_deref_clobber_obligations,
         },
         syntax::{
-            Divergence, Expr, InferTyVarSourceInfo, Mutability, Re, RelationMode, SimpleTyKind,
+            Divergence, HirExpr, InferTyVarSourceInfo, Mutability, Re, RelationMode, SimpleTyKind,
             TraitClauseList, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
@@ -19,7 +19,7 @@ use std::cmp::Ordering;
 impl BodyCtxt<'_, '_> {
     pub fn check_exprs_equate_with_demand(
         &mut self,
-        exprs: impl IntoIterator<Item = Obj<Expr>>,
+        exprs: impl IntoIterator<Item = Obj<HirExpr>>,
         demand: Option<Ty>,
     ) -> TyAndDivergence {
         if let Some(demand) = demand {
@@ -31,7 +31,7 @@ impl BodyCtxt<'_, '_> {
 
     pub fn check_exprs_equate(
         &mut self,
-        exprs: impl IntoIterator<Item = Obj<Expr>>,
+        exprs: impl IntoIterator<Item = Obj<HirExpr>>,
     ) -> TyAndDivergence {
         let mut divergence = Divergence::MayDiverge;
 
@@ -63,7 +63,7 @@ impl BodyCtxt<'_, '_> {
 
     pub fn check_exprs_demand(
         &mut self,
-        exprs: impl IntoIterator<Item = Obj<Expr>>,
+        exprs: impl IntoIterator<Item = Obj<HirExpr>>,
         demand: Ty,
     ) -> TyAndDivergence {
         let mut divergence = Divergence::MayDiverge;
@@ -75,7 +75,7 @@ impl BodyCtxt<'_, '_> {
         TyAndDivergence::new(demand, divergence)
     }
 
-    pub fn check_expr_demand(&mut self, expr: Obj<Expr>, demand: Ty) -> TyAndDivergence {
+    pub fn check_expr_demand(&mut self, expr: Obj<HirExpr>, demand: Ty) -> TyAndDivergence {
         let s = self.session();
         let mut divergence = Divergence::MayDiverge;
 
@@ -95,7 +95,7 @@ impl BodyCtxt<'_, '_> {
         TyAndDivergence::new(demand, divergence)
     }
 
-    fn apply_coercions(&mut self, exprs: &[(Obj<Expr>, Ty)], target: CoercionResolution) -> Ty {
+    fn apply_coercions(&mut self, exprs: &[(Obj<HirExpr>, Ty)], target: CoercionResolution) -> Ty {
         let s = self.session();
         let tcx = self.tcx();
         let krate = self.krate();

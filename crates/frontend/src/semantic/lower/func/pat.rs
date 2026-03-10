@@ -14,8 +14,8 @@ use crate::{
             func::path::{ExprPathIdentOrResolution, PathResolvedPattern},
         },
         syntax::{
-            FnLocal, Mutability, Pat, PatKind, PatListFrontAndTail, PatListFrontAndTailLen,
-            PatNamedField,
+            FnLocal, HirPat, HirPatKind, HirPatListFrontAndTail, HirPatListFrontAndTailLen,
+            HirPatNamedField, Mutability,
         },
     },
     utils::hash::FxHashMap,
@@ -242,15 +242,19 @@ impl PatLocalForkResolver<'_> {
 // === Lowering === //
 
 impl IntraItemLowerCtxt<'_> {
-    pub fn lower_pat(&mut self, ast: &AstPat) -> Obj<Pat> {
+    pub fn lower_pat(&mut self, ast: &AstPat) -> Obj<HirPat> {
         PatLocalBranchResolver::start(|locals| self.lower_pat_inner(ast, locals))
     }
 
-    fn lower_pat_inner(&mut self, ast: &AstPat, locals: &mut PatLocalBranchResolver) -> Obj<Pat> {
+    fn lower_pat_inner(
+        &mut self,
+        ast: &AstPat,
+        locals: &mut PatLocalBranchResolver,
+    ) -> Obj<HirPat> {
         let s = &self.tcx.session;
 
         let kind = match &ast.kind {
-            AstPatKind::Hole => PatKind::Hole,
+            AstPatKind::Hole => HirPatKind::Hole,
             AstPatKind::Path {
                 binding_mode,
                 path,
@@ -264,19 +268,19 @@ impl IntraItemLowerCtxt<'_> {
                             Ok(local) => {
                                 self.func_local_names.define_force_shadow(name.text, local);
 
-                                PatKind::NewName(
+                                HirPatKind::NewName(
                                     local,
                                     and_bind
                                         .as_ref()
                                         .map(|ast| self.lower_pat_inner(ast, locals)),
                                 )
                             }
-                            Err(err) => PatKind::Error(err),
+                            Err(err) => HirPatKind::Error(err),
                         }
                     }
                     Ok(ExprPathIdentOrResolution::Resolution(res)) => {
                         let Some(kind) = res.as_pat(s) else {
-                            break 'path PatKind::Error(
+                            break 'path HirPatKind::Error(
                                 Diag::span_err(
                                     path.span,
                                     format_args!("expected pattern, got {}", res.bare_what(s)),
@@ -291,20 +295,20 @@ impl IntraItemLowerCtxt<'_> {
                         }
 
                         match kind {
-                            PathResolvedPattern::UnitCtor(ctor) => PatKind::AdtUnit(ctor),
+                            PathResolvedPattern::UnitCtor(ctor) => HirPatKind::AdtUnit(ctor),
                         }
                     }
-                    Err(err) => PatKind::Error(err),
+                    Err(err) => HirPatKind::Error(err),
                 }
             }
             AstPatKind::PathAndBrace(path, fields, rest) => 'path: {
                 let res = match self.resolve_expr_path(path).fail_on_unbound_local() {
                     Ok(v) => v,
-                    Err(err) => break 'path PatKind::Error(err),
+                    Err(err) => break 'path HirPatKind::Error(err),
                 };
 
                 let Some(ctor) = res.as_adt_ctor(s).filter(|v| v.def.r(s).syntax.is_named()) else {
-                    break 'path PatKind::Error(
+                    break 'path HirPatKind::Error(
                         Diag::span_err(
                             path.span,
                             format_args!(
@@ -324,14 +328,14 @@ impl IntraItemLowerCtxt<'_> {
                         }
                         AstPatFieldKind::Bare(muta) => {
                             let kind = match locals.resolve(field.name, muta.as_muta(), s) {
-                                Ok(name) => PatKind::NewName(name, None),
-                                Err(err) => PatKind::Error(err),
+                                Ok(name) => HirPatKind::NewName(name, None),
+                                Err(err) => HirPatKind::Error(err),
                             };
 
                             (
                                 field.name,
                                 Obj::new(
-                                    Pat {
+                                    HirPat {
                                         span: field.name.span,
                                         kind,
                                     },
@@ -350,20 +354,20 @@ impl IntraItemLowerCtxt<'_> {
                 let fields = Obj::new_iter(
                     self.match_up_ctor_members(ctor.def, fields, deny_missing)
                         .into_iter()
-                        .map(|(idx, pat)| PatNamedField { idx, pat }),
+                        .map(|(idx, pat)| HirPatNamedField { idx, pat }),
                     s,
                 );
 
-                PatKind::AdtNamed(ctor, fields)
+                HirPatKind::AdtNamed(ctor, fields)
             }
             AstPatKind::PathAndParen(path, children) => 'pat: {
                 let res = match self.resolve_expr_path(path).fail_on_unbound_local() {
                     Ok(v) => v,
-                    Err(err) => break 'pat PatKind::Error(err),
+                    Err(err) => break 'pat HirPatKind::Error(err),
                 };
 
                 let Some(ctor) = res.as_adt_ctor(s).filter(|v| v.def.r(s).syntax.is_tuple()) else {
-                    break 'pat PatKind::Error(
+                    break 'pat HirPatKind::Error(
                         Diag::span_err(
                             path.span,
                             format_args!(
@@ -379,15 +383,15 @@ impl IntraItemLowerCtxt<'_> {
                 let expected_len = ctor.def.r(s).fields.len() as u32;
 
                 let arity_offense = match children.len(s) {
-                    PatListFrontAndTailLen::Exactly(v) if v != expected_len => Some((v, "", "")),
-                    PatListFrontAndTailLen::AtLeast(v) if v > expected_len => {
+                    HirPatListFrontAndTailLen::Exactly(v) if v != expected_len => Some((v, "", "")),
+                    HirPatListFrontAndTailLen::AtLeast(v) if v > expected_len => {
                         Some((v, " at least", "only "))
                     }
                     _ => None,
                 };
 
                 if let Some((child_count, at_least, only)) = arity_offense {
-                    break 'pat PatKind::Error(
+                    break 'pat HirPatKind::Error(
                         Diag::span_err(
                             path.span,
                             format_args!(
@@ -427,7 +431,7 @@ impl IntraItemLowerCtxt<'_> {
                     }
                 }
 
-                PatKind::AdtTuple(ctor, children)
+                HirPatKind::AdtTuple(ctor, children)
             }
             AstPatKind::Or(pats) => {
                 match locals.fork(|locals| {
@@ -441,21 +445,21 @@ impl IntraItemLowerCtxt<'_> {
 
                     Obj::new_slice(&forks, s)
                 }) {
-                    Ok(forks) => PatKind::Or(forks),
-                    Err(err) => PatKind::Error(err),
+                    Ok(forks) => HirPatKind::Or(forks),
+                    Err(err) => HirPatKind::Error(err),
                 }
             }
             AstPatKind::Tuple(pats) => {
-                PatKind::Tuple(self.lower_pat_list_front_and_tail("tuple", pats, locals))
+                HirPatKind::Tuple(self.lower_pat_list_front_and_tail("tuple", pats, locals))
             }
             AstPatKind::Paren(pat) => return self.lower_pat(pat),
             AstPatKind::Ref(muta, inner) => {
-                PatKind::Ref(muta.as_muta(), self.lower_pat_inner(inner, locals))
+                HirPatKind::Ref(muta.as_muta(), self.lower_pat_inner(inner, locals))
             }
             AstPatKind::Slice(pats) => {
-                PatKind::Slice(self.lower_pat_list_front_and_tail("slice", pats, locals))
+                HirPatKind::Slice(self.lower_pat_list_front_and_tail("slice", pats, locals))
             }
-            AstPatKind::Rest => PatKind::Error(
+            AstPatKind::Rest => HirPatKind::Error(
                 Diag::span_err(ast.span, "`..` patterns are not allowed here")
                     .child(LeafDiag::new(
                         Level::Note,
@@ -463,13 +467,13 @@ impl IntraItemLowerCtxt<'_> {
                     ))
                     .emit(),
             ),
-            AstPatKind::Range(inner) => PatKind::Range(self.lower_range_expr(ast.span, inner)),
-            AstPatKind::Lit(expr) => PatKind::Lit(self.lower_expr(expr)),
-            AstPatKind::Error(err) => PatKind::Error(*err),
+            AstPatKind::Range(inner) => HirPatKind::Range(self.lower_range_expr(ast.span, inner)),
+            AstPatKind::Lit(expr) => HirPatKind::Lit(self.lower_expr(expr)),
+            AstPatKind::Error(err) => HirPatKind::Error(*err),
         };
 
         Obj::new(
-            Pat {
+            HirPat {
                 span: ast.span,
                 kind,
             },
@@ -482,7 +486,7 @@ impl IntraItemLowerCtxt<'_> {
         kind_name: impl fmt::Display,
         list: impl IntoIterator<Item = T>,
         mut lower: impl FnMut(&mut Self, T) -> PatOrRest,
-    ) -> PatListFrontAndTail {
+    ) -> HirPatListFrontAndTail {
         let s = &self.tcx.session;
 
         let mut found_rest = None;
@@ -517,7 +521,7 @@ impl IntraItemLowerCtxt<'_> {
             }
         }
 
-        PatListFrontAndTail {
+        HirPatListFrontAndTail {
             front: Obj::new_slice(&front, s),
             tail: found_rest.map(|_| Obj::new_slice(&tail, s)),
         }
@@ -528,7 +532,7 @@ impl IntraItemLowerCtxt<'_> {
         kind_name: impl fmt::Display,
         asts: &[AstPat],
         locals: &mut PatLocalBranchResolver,
-    ) -> PatListFrontAndTail {
+    ) -> HirPatListFrontAndTail {
         self.lower_pat_list_front_and_tail_generic(kind_name, asts, |this, ast| match &ast.kind {
             AstPatKind::Rest => PatOrRest::Rest(ast.span),
             _ => PatOrRest::Pat(this.lower_pat_inner(ast, locals)),
@@ -538,6 +542,6 @@ impl IntraItemLowerCtxt<'_> {
 
 #[derive(Debug, Copy, Clone)]
 pub enum PatOrRest {
-    Pat(Obj<Pat>),
+    Pat(Obj<HirPat>),
     Rest(Span),
 }

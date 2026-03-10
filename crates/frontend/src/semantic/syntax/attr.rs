@@ -6,7 +6,7 @@ use crate::{
     },
     semantic::{
         analysis::TyCtxt,
-        syntax::{AdtItem, Expr, Item, TraitItem},
+        syntax::{AdtItem, HirExpr, Item, TraitItem},
     },
     symbol,
 };
@@ -23,7 +23,7 @@ pub struct Attribute {
 #[derive(Debug, Clone)]
 pub enum AttributeKind {
     Lang(EarlyAttrLang),
-    Late(Obj<Expr>),
+    Late(Obj<HirExpr>),
 }
 
 #[derive(Debug, Copy, Clone)]

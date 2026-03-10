@@ -8,7 +8,7 @@ use crate::{
             BodyCtxt, ClauseCxPrinter, ClauseOrigin, FloatingInferVar, TyCtxt, TyFoldable,
             TyFolder, TyFolderInfallibleExt,
         },
-        syntax::{Expr, InferTyVarSourceInfo, RelationMode, SpannedTy, Ty, TyKind},
+        syntax::{HirExpr, InferTyVarSourceInfo, RelationMode, SpannedTy, Ty, TyKind},
     },
 };
 use std::convert::Infallible;
@@ -49,7 +49,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         // TODO
     }
 
-    fn confirm_expr_without_adjustments(&mut self, expr: Obj<Expr>) {
+    fn confirm_expr_without_adjustments(&mut self, expr: Obj<HirExpr>) {
         todo!()
     }
 
