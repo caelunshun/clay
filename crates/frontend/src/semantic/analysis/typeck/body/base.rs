@@ -5,7 +5,7 @@ use crate::{
         arena::{HasInterner, HasListInterner as _, Obj},
         syntax::HasSpan,
     },
-    parse::ast::AstLit,
+    parse::ast::{AstLit, AstUnOpKind},
     semantic::{
         analysis::{
             ClauseCx, ClauseError, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind,
@@ -566,7 +566,15 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     }
                 };
 
-                // TODO: We should treat pointer-deref as a primitive operation.
+                if kind == AstUnOpKind::Deref
+                    && let lhs_ty = self.ccx_mut().peel_ty_infer_var_after_poll(lhs_ty)
+                    && let TyKind::Reference(_re, _muta, pointee) = *lhs_ty.r(s)
+                {
+                    self.overload_resolutions
+                        .insert(expr, OverloadResolution::Primitive);
+
+                    break 'op pointee;
+                }
 
                 // Otherwise, attempt to perform an overloaded operation.
                 if let Some(overload) = kind_info.overload {

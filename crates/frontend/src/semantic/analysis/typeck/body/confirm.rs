@@ -9,9 +9,9 @@ use crate::{
             TyFoldable, TyFolder, TyFolderInfallibleExt,
         },
         syntax::{
-            FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirStmt,
+            FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirPat, HirStmt,
             InferTyVarSourceInfo, RelationMode, SpannedTy, ThirBlock, ThirExpr, ThirExprKind,
-            ThirStmt, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            ThirPat, ThirStmt, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
         },
     },
 };
@@ -185,7 +185,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             HirExprKind::Index(obj, obj1) => todo!(),
             HirExprKind::Range(hir_range_expr) => todo!(),
             HirExprKind::LocalSelf => todo!(),
-            HirExprKind::Local(obj) => todo!(),
+            HirExprKind::Local(local) => ThirExprKind::Local(local),
             HirExprKind::AddrOf(muta, expr) => ThirExprKind::AddrOf(muta, self.confirm_expr(expr)),
             HirExprKind::Break { label, value } => todo!(),
             HirExprKind::Continue(hir_labelled_block) => todo!(),
@@ -232,6 +232,10 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             HirStmt::Expr(expr) => ThirStmt::Expr(self.confirm_expr(expr)),
             HirStmt::Let(obj) => todo!(),
         }
+    }
+
+    fn confirm_pat(&mut self, pat: Obj<HirPat>) -> Obj<ThirPat> {
+        todo!()
     }
 
     fn confirm_ty<T: TyFoldable>(&mut self, ty: T) -> T {
