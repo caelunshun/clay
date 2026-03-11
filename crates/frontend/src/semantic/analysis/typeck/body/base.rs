@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        Diag, Session,
+        Diag, ErrorGuaranteed, Session,
         analysis::SpannedViewEncode,
         arena::{HasInterner, HasListInterner as _, Obj},
         syntax::HasSpan,
@@ -58,7 +58,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
             }
 
             bcx.check_expr_demand(body, bcx.return_ty).ignore();
-            bcx.confirm();
+            bcx.confirm(body);
         } else {
             for arg in def.r(s).args.r(s) {
                 let arg = ccx
@@ -96,7 +96,16 @@ pub struct BodyCtxt<'a, 'tcx> {
     pub local_types: FxHashMap<Obj<FnLocal>, Ty>,
     pub block_break_demands: FxHashMap<HirLabelledBlock, Option<Ty>>,
     pub int_infers: Vec<InferTyVar>,
+    pub expr_types_pre_coerce: FxHashMap<Obj<HirExpr>, Ty>,
+    pub overload_resolutions: FxHashMap<Obj<HirExpr>, OverloadResolution>,
     pub return_ty: Ty,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum OverloadResolution {
+    Primitive,
+    Call,
+    Error(ErrorGuaranteed),
 }
 
 impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
@@ -122,6 +131,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             local_types: FxHashMap::default(),
             block_break_demands: FxHashMap::default(),
             int_infers: Vec::new(),
+            expr_types_pre_coerce: FxHashMap::default(),
+            overload_resolutions: FxHashMap::default(),
             return_ty,
         }
     }
@@ -490,6 +501,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     }
 
                     *self.ccx_mut() = prim_fork;
+                    self.overload_resolutions
+                        .insert(expr, OverloadResolution::Primitive);
 
                     break 'op lhs;
                 };
@@ -514,10 +527,18 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         },
                     );
 
+                    self.overload_resolutions
+                        .insert(expr, OverloadResolution::Call);
+
                     break 'op result_ty;
                 }
 
-                tcx.intern(TyKind::Error(fallback_err.emit(&prim_fork)))
+                let error = fallback_err.emit(&prim_fork);
+
+                self.overload_resolutions
+                    .insert(expr, OverloadResolution::Error(error));
+
+                tcx.intern(TyKind::Error(error))
             }
             HirExprKind::Unary(kind, lhs) => 'op: {
                 let lhs_ty = self.check_expr(lhs).and_do(&mut divergence);
@@ -535,10 +556,17 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         .ccx_mut()
                         .unify_ty_and_simple_set(&origin, lhs_ty, kind_info.lhs)
                     {
-                        Ok(()) => break 'op lhs_ty,
+                        Ok(()) => {
+                            self.overload_resolutions
+                                .insert(expr, OverloadResolution::Primitive);
+
+                            break 'op lhs_ty;
+                        }
                         Err(err) => err,
                     }
                 };
+
+                // TODO: We should treat pointer-deref as a primitive operation.
 
                 // Otherwise, attempt to perform an overloaded operation.
                 if let Some(overload) = kind_info.overload {
@@ -559,10 +587,18 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         },
                     );
 
+                    self.overload_resolutions
+                        .insert(expr, OverloadResolution::Call);
+
                     break 'op result_ty;
                 }
 
-                tcx.intern(TyKind::Error(fallback_err.emit(self.ccx())))
+                let error = fallback_err.emit(self.ccx());
+
+                self.overload_resolutions
+                    .insert(expr, OverloadResolution::Error(error));
+
+                tcx.intern(TyKind::Error(error))
             }
             HirExprKind::Literal(lit) => match lit {
                 AstLit::Number(_) => {
@@ -952,6 +988,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         {
             divergence = Divergence::MustDiverge;
         }
+
+        self.expr_types_pre_coerce.insert(expr, ty);
 
         TyAndDivergence::new(ty, divergence)
     }

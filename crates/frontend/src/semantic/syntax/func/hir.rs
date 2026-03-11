@@ -1,5 +1,3 @@
-// === Pattern === //
-
 use crate::{
     base::{
         ErrorGuaranteed, Session,
@@ -16,6 +14,8 @@ use crate::{
     },
     symbol,
 };
+
+// === Pattern === //
 
 #[derive(Debug, Clone)]
 pub struct HirPat {
@@ -95,7 +95,7 @@ pub enum HirPatListFrontAndTailLen {
     AtLeast(u32),
 }
 
-// === Block === //
+// === Body === //
 
 #[derive(Debug, Clone)]
 pub struct HirBlock {
