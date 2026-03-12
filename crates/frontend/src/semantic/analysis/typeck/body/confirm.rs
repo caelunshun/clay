@@ -9,9 +9,9 @@ use crate::{
             TyFoldable, TyFolder, TyFolderInfallibleExt,
         },
         syntax::{
-            FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirPat, HirStmt,
+            FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirPat, HirPatKind, HirStmt,
             InferTyVarSourceInfo, RelationMode, SpannedTy, ThirBlock, ThirExpr, ThirExprKind,
-            ThirPat, ThirStmt, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            ThirLetStmt, ThirPat, ThirPatKind, ThirStmt, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
         },
     },
 };
@@ -56,6 +56,10 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
     fn confirm_expr(&mut self, expr: Obj<HirExpr>) -> Obj<ThirExpr> {
         // TODO: Apply coercions
         self.confirm_expr_without_adjustments(expr)
+    }
+
+    fn confirm_opt_expr(&mut self, expr: Option<Obj<HirExpr>>) -> Option<Obj<ThirExpr>> {
+        expr.map(|expr| self.confirm_expr(expr))
     }
 
     fn confirm_expr_list(&mut self, exprs: Obj<[Obj<HirExpr>]>) -> Obj<[Obj<ThirExpr>]> {
@@ -227,15 +231,73 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         )
     }
 
+    fn confirm_opt_block(
+        &mut self,
+        block: Option<Obj<HirBlock>>,
+        ty: Ty,
+    ) -> Option<Obj<ThirBlock>> {
+        block.map(|block| self.confirm_block(block, ty))
+    }
+
     fn confirm_stmt(&mut self, stmt: HirStmt) -> ThirStmt {
+        let s = self.session();
+        let tcx = self.tcx();
+
         match stmt {
             HirStmt::Expr(expr) => ThirStmt::Expr(self.confirm_expr(expr)),
-            HirStmt::Let(obj) => todo!(),
+            HirStmt::Let(stmt) => ThirStmt::Let(Obj::new(
+                ThirLetStmt {
+                    span: stmt.r(s).span,
+                    pat: self.confirm_pat(stmt.r(s).pat),
+                    init: self.confirm_opt_expr(stmt.r(s).init),
+                    else_clause: self.confirm_opt_block(
+                        stmt.r(s).else_clause,
+                        tcx.intern(TyKind::Tuple(tcx.intern_list(&[]))),
+                    ),
+                },
+                s,
+            )),
         }
     }
 
     fn confirm_pat(&mut self, pat: Obj<HirPat>) -> Obj<ThirPat> {
-        todo!()
+        // TODO: Apply adjustments
+        self.confirm_pat_without_adjustments(pat)
+    }
+
+    fn confirm_opt_pat(&mut self, pat: Option<Obj<HirPat>>) -> Option<Obj<ThirPat>> {
+        pat.map(|pat| self.confirm_pat(pat))
+    }
+
+    fn confirm_pat_without_adjustments(&mut self, pat: Obj<HirPat>) -> Obj<ThirPat> {
+        let s = self.session();
+
+        let kind = match pat.r(s).kind {
+            HirPatKind::Hole => ThirPatKind::Wild,
+            HirPatKind::Binding(_muta, local, binding) => {
+                ThirPatKind::Binding(local, self.confirm_opt_pat(binding))
+            }
+            HirPatKind::Slice(hir_pat_list_front_and_tail) => todo!(),
+            HirPatKind::Tuple(hir_pat_list_front_and_tail) => todo!(),
+            HirPatKind::Lit(obj) => todo!(),
+            HirPatKind::Or(obj) => todo!(),
+            HirPatKind::Deref(mutability, obj) => todo!(),
+            HirPatKind::AdtUnit(adt_ctor_instance) => todo!(),
+            HirPatKind::AdtTuple(adt_ctor_instance, hir_pat_list_front_and_tail) => todo!(),
+            HirPatKind::AdtNamed(adt_ctor_instance, obj) => todo!(),
+            HirPatKind::PlaceExpr(obj) => todo!(),
+            HirPatKind::Range(hir_range_expr) => todo!(),
+            HirPatKind::Error(error) => ThirPatKind::Error(error),
+        };
+
+        Obj::new(
+            ThirPat {
+                span: pat.r(s).span,
+                ty: self.pat_types_pre_adjust[&pat],
+                kind,
+            },
+            s,
+        )
     }
 
     fn confirm_ty<T: TyFoldable>(&mut self, ty: T) -> T {

@@ -58,4 +58,13 @@ pub struct ThirBlock {
 #[derive(Debug, Clone)]
 pub enum ThirStmt {
     Expr(Obj<ThirExpr>),
+    Let(Obj<ThirLetStmt>),
+}
+
+#[derive(Debug, Clone)]
+pub struct ThirLetStmt {
+    pub span: Span,
+    pub pat: Obj<ThirPat>,
+    pub init: Option<Obj<ThirExpr>>,
+    pub else_clause: Option<Obj<ThirBlock>>,
 }

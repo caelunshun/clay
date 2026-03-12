@@ -91,6 +91,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             }
             HirPatKind::Range(hir_range_expr) => todo!(),
         }
+
+        self.pat_types_pre_adjust.insert(pat, demand);
     }
 
     fn peel_references_for_pat(

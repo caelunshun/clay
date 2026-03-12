@@ -16,8 +16,8 @@ use crate::{
         lower::generics::normalize_positional_generic_arity,
         syntax::{
             AdtInstance, Crate, Divergence, FnDef, FnInstanceInner, FnLocal, HirBlock, HirExpr,
-            HirExprKind, HirLabelTargetKind, HirLabelledBlock, HirStmt, HirStructExpr, InferTyVar,
-            InferTyVarSourceInfo, Item, Re, RelationMode, SimpleTyKind, SimpleTySet,
+            HirExprKind, HirLabelTargetKind, HirLabelledBlock, HirPat, HirStmt, HirStructExpr,
+            InferTyVar, InferTyVarSourceInfo, Item, Re, RelationMode, SimpleTyKind, SimpleTySet,
             SpannedFnInstanceView, SpannedFnOwnerView, SpannedTyView, TraitParam, TraitSpec, Ty,
             TyAndDivergence, TyKind, TyOrRe,
         },
@@ -108,6 +108,7 @@ pub struct BodyCtxt<'a, 'tcx> {
     pub int_infers: Vec<InferTyVar>,
     pub expr_types_pre_coerce: FxHashMap<Obj<HirExpr>, Ty>,
     pub overload_resolutions: FxHashMap<Obj<HirExpr>, OverloadResolution>,
+    pub pat_types_pre_adjust: FxHashMap<Obj<HirPat>, Ty>,
     pub return_ty: Ty,
 }
 
@@ -143,6 +144,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             int_infers: Vec::new(),
             expr_types_pre_coerce: FxHashMap::default(),
             overload_resolutions: FxHashMap::default(),
+            pat_types_pre_adjust: FxHashMap::default(),
             return_ty,
         }
     }
@@ -234,6 +236,11 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         self.ccx_mut()
                             .wf_visitor(HrtbUniverse::ROOT)
                             .visit_spanned(ascription);
+
+                        if let Some(init) = stmt.r(s).init {
+                            self.check_expr_demand(init, ascription.value)
+                                .and_do(divergence);
+                        }
 
                         ascription.value
                     } else if let Some(init) = stmt.r(s).init {
