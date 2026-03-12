@@ -1,27 +1,44 @@
 use crate::{
-    base::{
-        Diag,
-        arena::{HasInterner as _, Obj},
-    },
+    base::arena::{HasInterner as _, Obj},
     parse::ast::AstMutability,
     semantic::{
-        analysis::{BodyCtxt, ClauseCxPrinter, ClauseOrigin, ClauseOriginKind},
+        analysis::{BodyCtxt, ClauseOrigin, ClauseOriginKind, HrtbUniverse},
         syntax::{
-            HirPat, HirPatKind, HirPatListFrontAndTailLen, Mutability, Re, RelationMode, Ty, TyKind,
+            Divergence, HirPat, HirPatKind, InferTyVarSourceInfo, Mutability, Re, RelationMode, Ty,
+            TyKind,
         },
     },
 };
 
 impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
-    pub fn check_pat(&mut self, pat: Obj<HirPat>, demand: Ty) {
-        self.check_pat_inner(pat, demand, None)
+    pub fn check_pat_infer(&mut self, pat: Obj<HirPat>, divergence: Option<&mut Divergence>) -> Ty {
+        let s = self.session();
+        let infer = self.ccx_mut().fresh_ty_infer(
+            HrtbUniverse::ROOT,
+            InferTyVarSourceInfo::PatType {
+                span: pat.r(s).span,
+            },
+        );
+
+        self.check_pat_demand(pat, infer, divergence);
+        infer
+    }
+
+    pub fn check_pat_demand(
+        &mut self,
+        pat: Obj<HirPat>,
+        demand: Ty,
+        divergence: Option<&mut Divergence>,
+    ) {
+        self.check_pat_inner(pat, demand, None, divergence)
     }
 
     fn check_pat_inner(
         &mut self,
         pat: Obj<HirPat>,
-        mut demand: Ty,
-        mut default_by_ref: Option<Mutability>,
+        demand: Ty,
+        default_by_ref: Option<Mutability>,
+        mut divergence: Option<&mut Divergence>,
     ) {
         let s = self.session();
         let tcx = self.tcx();
@@ -53,43 +70,25 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 );
 
                 if let Some(binding) = binding {
-                    self.check_pat_inner(binding, demand, default_by_ref);
+                    self.check_pat_inner(binding, demand, default_by_ref, divergence);
                 }
             }
             HirPatKind::Slice(hir_pat_list_front_and_tail) => todo!(),
-            HirPatKind::Tuple(params) => {
-                self.peel_references_for_pat(&mut demand, &mut default_by_ref);
-
-                let TyKind::Tuple(expected_args) = demand.r(s) else {
-                    Diag::span_err(
-                        pat.r(s).span,
-                        format_args!("expected tuple, got `{}`", {
-                            let mut pretty = ClauseCxPrinter::new(self.ccx());
-                            pretty.push_ty(demand);
-                            pretty.finish()
-                        }),
-                    )
-                    .emit();
-
-                    return;
-                };
-
-                match params.len(s) {
-                    HirPatListFrontAndTailLen::Exactly(count) => {}
-                    HirPatListFrontAndTailLen::AtLeast(_) => todo!(),
-                }
-            }
+            HirPatKind::Tuple(params) => todo!(),
             HirPatKind::Lit(obj) => todo!(),
             HirPatKind::Or(patterns) => {
                 for &pat in patterns.r(s) {
-                    self.check_pat_inner(pat, demand, default_by_ref);
+                    self.check_pat_inner(pat, demand, default_by_ref, divergence.as_deref_mut());
                 }
             }
             HirPatKind::Deref(mutability, obj) => todo!(),
             HirPatKind::AdtUnit(adt_ctor_instance) => todo!(),
             HirPatKind::AdtTuple(adt_ctor_instance, hir_pat_list_front_and_tail) => todo!(),
             HirPatKind::AdtNamed(adt_ctor_instance, obj) => todo!(),
-            HirPatKind::PlaceExpr(obj) => todo!(),
+            HirPatKind::PlaceExpr(place) => {
+                self.check_expr_demand(place, demand)
+                    .and_do(divergence.unwrap());
+            }
             HirPatKind::Range(hir_range_expr) => todo!(),
         }
     }

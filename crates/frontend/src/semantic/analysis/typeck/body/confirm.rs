@@ -282,7 +282,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     | InferTyVarSourceInfo::IndexInput { span }
                     | InferTyVarSourceInfo::IndexOutput { span }
                     | InferTyVarSourceInfo::LoopDemand { span }
-                    | InferTyVarSourceInfo::HoleInfer { span } => Diag::span_err(
+                    | InferTyVarSourceInfo::HoleInfer { span }
+                    | InferTyVarSourceInfo::PatType { span } => Diag::span_err(
                         span,
                         format_args!("failed to infer a type of `{}`", {
                             let mut printer = ClauseCxPrinter::new(self.bcx.ccx());

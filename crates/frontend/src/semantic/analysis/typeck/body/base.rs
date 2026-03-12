@@ -16,10 +16,10 @@ use crate::{
         lower::generics::normalize_positional_generic_arity,
         syntax::{
             AdtInstance, Crate, Divergence, FnDef, FnInstanceInner, FnLocal, HirBlock, HirExpr,
-            HirExprKind, HirLabelTargetKind, HirLabelledBlock, HirPat, HirPatKind, HirStmt,
-            HirStructExpr, InferTyVar, InferTyVarSourceInfo, Item, Re, RelationMode, SimpleTyKind,
-            SimpleTySet, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTy, SpannedTyView,
-            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            HirExprKind, HirLabelTargetKind, HirLabelledBlock, HirStmt, HirStructExpr, InferTyVar,
+            InferTyVarSourceInfo, Item, Re, RelationMode, SimpleTyKind, SimpleTySet,
+            SpannedFnInstanceView, SpannedFnOwnerView, SpannedTyView, TraitParam, TraitSpec, Ty,
+            TyAndDivergence, TyKind, TyOrRe,
         },
     },
     utils::hash::FxHashMap,
@@ -54,7 +54,17 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
             let mut bcx = BodyCtxt::new(&mut ccx, def, env_body.as_ref());
 
             for arg in def.r(s).args.r(s) {
-                bcx.check_pat_and_ascription(arg.pat, Some(arg.ty));
+                let env = bcx.import_env;
+                let ascription = bcx
+                    .ccx_mut()
+                    .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
+                    .fold_preserved(arg.ty);
+
+                bcx.ccx_mut()
+                    .wf_visitor(HrtbUniverse::ROOT)
+                    .visit_spanned(ascription);
+
+                bcx.check_pat_demand(arg.pat, ascription.value, None);
             }
 
             bcx.check_expr_demand(body, bcx.return_ty).ignore();
@@ -209,11 +219,35 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     self.check_expr(*expr).and_do(divergence);
                 }
                 HirStmt::Let(stmt) => {
-                    let pat_ty = self.check_pat_and_ascription(stmt.r(s).pat, stmt.r(s).ascription);
+                    let ascription = if let Some(ascription) = stmt.r(s).ascription {
+                        let import_env = self.import_env;
 
-                    if let Some(init) = stmt.r(s).init {
-                        self.check_expr_demand(init, pat_ty).and_do(divergence);
-                    }
+                        let ascription = self
+                            .ccx_mut()
+                            .importer(
+                                &ClauseOrigin::empty_report(),
+                                HrtbUniverse::ROOT,
+                                import_env,
+                            )
+                            .fold_preserved(ascription);
+
+                        self.ccx_mut()
+                            .wf_visitor(HrtbUniverse::ROOT)
+                            .visit_spanned(ascription);
+
+                        ascription.value
+                    } else if let Some(init) = stmt.r(s).init {
+                        self.check_expr(init).and_do(divergence)
+                    } else {
+                        self.ccx_mut().fresh_ty_infer(
+                            HrtbUniverse::ROOT,
+                            InferTyVarSourceInfo::PatType {
+                                span: stmt.r(s).pat.r(s).span,
+                            },
+                        )
+                    };
+
+                    self.check_pat_demand(stmt.r(s).pat, ascription, Some(divergence));
 
                     if let Some(else_clause) = stmt.r(s).else_clause {
                         let divergence = self.check_block_with_no_final_expr(else_clause);
@@ -226,39 +260,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 }
             }
         }
-    }
-
-    pub fn check_pat_and_ascription(
-        &mut self,
-        pat: Obj<HirPat>,
-        ascription: Option<SpannedTy>,
-    ) -> Ty {
-        let pat_ty = self.type_of_pat(pat, None);
-
-        let Some(ascription) = ascription else {
-            return pat_ty;
-        };
-
-        let env = self.import_env;
-        let ascription = self
-            .ccx_mut()
-            .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
-            .fold_preserved(ascription);
-
-        self.ccx_mut()
-            .wf_visitor(HrtbUniverse::ROOT)
-            .visit_spanned(ascription);
-
-        self.ccx_mut().oblige_ty_unifies_ty(
-            ClauseOrigin::root_report(ClauseOriginKind::Pattern {
-                pat_span: ascription.own_span(),
-            }),
-            pat_ty,
-            ascription.value,
-            RelationMode::Equate,
-        );
-
-        pat_ty
     }
 
     pub fn check_expr(&mut self, expr: Obj<HirExpr>) -> TyAndDivergence {
@@ -735,8 +736,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
             }
             HirExprKind::Let(pat, expr) => {
-                let pat_ty = self.type_of_pat(pat, Some(&mut divergence));
-                self.check_expr_demand(expr, pat_ty).and_do(&mut divergence);
+                let scrutinee = self.check_expr(expr).and_do(&mut divergence);
+                self.check_pat_demand(pat, scrutinee, Some(&mut divergence));
 
                 tcx.intern(TyKind::Simple(SimpleTyKind::Bool))
             }
@@ -765,17 +766,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     },
                 );
 
-                let pat_ty = self.type_of_pat(pat, Some(&mut divergence));
-
-                self.ccx_mut().oblige_ty_unifies_ty(
-                    ClauseOrigin::root_report(ClauseOriginKind::ForLoopPat {
-                        iter_span: iter.r(s).span,
-                        pat_span: pat.r(s).span,
-                    }),
-                    pat_ty,
-                    elem_ty,
-                    RelationMode::Equate,
-                );
+                self.check_pat_demand(pat, elem_ty, Some(&mut divergence));
 
                 self.check_block_with_no_final_expr(body);
 
@@ -824,12 +815,12 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 }
             }
             HirExprKind::Assign(pat, expr) => {
-                let pat_ty = self.type_of_pat(pat, Some(&mut divergence));
+                let pat_ty = self.check_pat_infer(pat, Some(&mut divergence));
                 self.check_expr_demand(expr, pat_ty).and_do(&mut divergence)
             }
             HirExprKind::AssignOp(kind, lhs, rhs) => {
                 'assign: {
-                    let lhs = self.type_of_pat(lhs, Some(&mut divergence));
+                    let lhs = self.check_pat_infer(lhs, Some(&mut divergence));
                     let rhs = self.check_expr(rhs).and_do(&mut divergence);
 
                     let kind_info = self.decode_assign_op_kind(kind);
@@ -1000,48 +991,5 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         self.expr_types_pre_coerce.insert(expr, ty);
 
         TyAndDivergence::new(ty, divergence)
-    }
-
-    pub fn type_of_pat(&mut self, pat: Obj<HirPat>, divergence: Option<&mut Divergence>) -> Ty {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        match pat.r(s).kind {
-            HirPatKind::Hole => self.ccx_mut().fresh_ty_infer(
-                HrtbUniverse::ROOT,
-                InferTyVarSourceInfo::HoleInfer {
-                    span: pat.r(s).span,
-                },
-            ),
-            HirPatKind::Binding(_by_ref, local, bind_as) => {
-                let local_ty = self.type_of_local(local);
-
-                if let Some(bind_as) = bind_as {
-                    let bind_as_ty = self.type_of_pat(bind_as, divergence);
-
-                    self.ccx_mut().oblige_ty_unifies_ty(
-                        ClauseOrigin::root_report(ClauseOriginKind::Pattern {
-                            pat_span: pat.r(s).span,
-                        }),
-                        local_ty,
-                        bind_as_ty,
-                        RelationMode::Equate,
-                    );
-                }
-
-                local_ty
-            }
-            HirPatKind::Slice(pat_list_front_and_tail) => todo!(),
-            HirPatKind::Tuple(pat_list_front_and_tail) => todo!(),
-            HirPatKind::Lit(obj) => todo!(),
-            HirPatKind::Or(obj) => todo!(),
-            HirPatKind::Deref(mutability, obj) => todo!(),
-            HirPatKind::AdtUnit(adt_ctor_instance) => todo!(),
-            HirPatKind::AdtTuple(adt_ctor_instance, pat_list_front_and_tail) => todo!(),
-            HirPatKind::AdtNamed(adt_ctor_instance, obj) => todo!(),
-            HirPatKind::PlaceExpr(expr) => self.check_expr(expr).and_do(divergence.unwrap()),
-            HirPatKind::Range(range_expr) => todo!(),
-            HirPatKind::Error(error) => tcx.intern(TyKind::Error(error)),
-        }
     }
 }

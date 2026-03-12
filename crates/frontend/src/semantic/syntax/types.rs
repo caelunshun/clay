@@ -770,6 +770,7 @@ pub enum InferTyVarSourceInfo {
     IndexOutput { span: Span },
     LoopDemand { span: Span },
     HoleInfer { span: Span },
+    PatType { span: Span },
     UnifyHelper,
     DerefHelper,
     MethodLookupHelper,
