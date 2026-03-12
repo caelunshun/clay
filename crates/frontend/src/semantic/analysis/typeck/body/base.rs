@@ -1013,7 +1013,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     span: pat.r(s).span,
                 },
             ),
-            HirPatKind::NewName(local, bind_as) => {
+            HirPatKind::Binding(_by_ref, local, bind_as) => {
                 let local_ty = self.type_of_local(local);
 
                 if let Some(bind_as) = bind_as {
@@ -1035,7 +1035,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             HirPatKind::Tuple(pat_list_front_and_tail) => todo!(),
             HirPatKind::Lit(obj) => todo!(),
             HirPatKind::Or(obj) => todo!(),
-            HirPatKind::Ref(mutability, obj) => todo!(),
+            HirPatKind::Deref(mutability, obj) => todo!(),
             HirPatKind::AdtUnit(adt_ctor_instance) => todo!(),
             HirPatKind::AdtTuple(adt_ctor_instance, pat_list_front_and_tail) => todo!(),
             HirPatKind::AdtNamed(adt_ctor_instance, obj) => todo!(),

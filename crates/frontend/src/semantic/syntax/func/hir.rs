@@ -5,7 +5,9 @@ use crate::{
         syntax::{Span, Symbol},
     },
     parse::{
-        ast::{AstAssignOpKind, AstBinOpSpanned, AstLit, AstRangeLimits, AstUnOpKind},
+        ast::{
+            AstAssignOpKind, AstBinOpSpanned, AstLit, AstOptMutability, AstRangeLimits, AstUnOpKind,
+        },
         token::Ident,
     },
     semantic::syntax::{
@@ -29,7 +31,7 @@ pub enum HirPatKind {
     Hole,
 
     /// Define a new local. Only available in defining patterns.
-    NewName(Obj<FnLocal>, Option<Obj<HirPat>>),
+    Binding(AstOptMutability, Obj<FnLocal>, Option<Obj<HirPat>>),
 
     /// Match an array or slice of patterns.
     Slice(HirPatListFrontAndTail),
@@ -44,7 +46,7 @@ pub enum HirPatKind {
     Or(Obj<[Obj<HirPat>]>),
 
     /// Match the dereference of something.
-    Ref(Mutability, Obj<HirPat>),
+    Deref(Mutability, Obj<HirPat>),
 
     /// Match a unit struct or enum variant.
     AdtUnit(AdtCtorInstance),

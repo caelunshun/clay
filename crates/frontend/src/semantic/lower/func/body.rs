@@ -727,7 +727,7 @@ impl IntraItemLowerCtxt<'_> {
                 s,
             )),
             AstExprKind::AddrOf(muta, pointee) => {
-                HirPatKind::Ref(muta.as_muta(), self.lower_lvalue(pointee))
+                HirPatKind::Deref(muta.as_muta(), self.lower_lvalue(pointee))
             }
 
             AstExprKind::Struct(..) | AstExprKind::Call(..) => todo!(),

@@ -5,7 +5,7 @@ use crate::{
         syntax::{Span, Symbol},
     },
     parse::{
-        ast::{AstPat, AstPatFieldKind, AstPatKind, AstPatStructRest},
+        ast::{AstOptMutability, AstPat, AstPatFieldKind, AstPatKind, AstPatStructRest},
         token::Ident,
     },
     semantic::{
@@ -268,7 +268,8 @@ impl IntraItemLowerCtxt<'_> {
                             Ok(local) => {
                                 self.func_local_names.define_force_shadow(name.text, local);
 
-                                HirPatKind::NewName(
+                                HirPatKind::Binding(
+                                    binding_mode.by_ref,
                                     local,
                                     and_bind
                                         .as_ref()
@@ -328,7 +329,9 @@ impl IntraItemLowerCtxt<'_> {
                         }
                         AstPatFieldKind::Bare(muta) => {
                             let kind = match locals.resolve(field.name, muta.as_muta(), s) {
-                                Ok(name) => HirPatKind::NewName(name, None),
+                                Ok(name) => {
+                                    HirPatKind::Binding(AstOptMutability::Implicit, name, None)
+                                }
                                 Err(err) => HirPatKind::Error(err),
                             };
 
@@ -454,7 +457,7 @@ impl IntraItemLowerCtxt<'_> {
             }
             AstPatKind::Paren(pat) => return self.lower_pat(pat),
             AstPatKind::Ref(muta, inner) => {
-                HirPatKind::Ref(muta.as_muta(), self.lower_pat_inner(inner, locals))
+                HirPatKind::Deref(muta.as_muta(), self.lower_pat_inner(inner, locals))
             }
             AstPatKind::Slice(pats) => {
                 HirPatKind::Slice(self.lower_pat_list_front_and_tail("slice", pats, locals))
