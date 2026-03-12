@@ -276,9 +276,17 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         let mut divergence = Divergence::MayDiverge;
         let ty = match *expr.r(s).kind {
             HirExprKind::Array(elems) => {
-                let elem = self
-                    .check_exprs_equate(elems.r(s).iter().copied())
-                    .and_do(&mut divergence);
+                let elem = if !elems.r(s).is_empty() {
+                    self.ccx_mut().fresh_ty_infer(
+                        HrtbUniverse::ROOT,
+                        InferTyVarSourceInfo::EmptyArrayElem {
+                            span: expr.r(s).span,
+                        },
+                    )
+                } else {
+                    self.check_exprs_equate(elems.r(s).iter().copied())
+                        .and_do(&mut divergence)
+                };
 
                 let vec_lang_item = self.krate().r(s).lang_items.vec().unwrap();
 

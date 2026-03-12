@@ -32,7 +32,6 @@ pub struct ObligationNotReady;
 pub struct ObligationCx<'tcx, K> {
     ucx: UnifyCx<'tcx>,
     pending_obligations: Vec<K>,
-    made_progress: bool,
 }
 
 impl<'tcx, K> fmt::Debug for ObligationCx<'tcx, K> {
@@ -46,7 +45,6 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
         Self {
             ucx: UnifyCx::new(tcx, mode),
             pending_obligations: Vec::new(),
-            made_progress: false,
         }
     }
 
@@ -68,7 +66,6 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
 
     pub fn push_obligation(&mut self, kind: K) {
         self.pending_obligations.push(kind);
-        self.made_progress = true;
     }
 
     pub fn poll_obligations<T>(
@@ -79,12 +76,7 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
     ) {
         loop {
             let this = getter(target);
-
-            if !this.made_progress {
-                break;
-            }
-
-            this.made_progress = false;
+            let mut made_progress = false;
 
             // Process all obligations back to front.
             let mut curr_idx = this.pending_obligations.len();
@@ -106,8 +98,12 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
 
                     let this = getter(target);
                     this.pending_obligations.swap_remove(curr_idx);
-                    this.made_progress = true;
+                    made_progress = true;
                 }
+            }
+
+            if !made_progress {
+                break;
             }
         }
     }

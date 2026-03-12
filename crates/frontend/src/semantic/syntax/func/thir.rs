@@ -19,6 +19,7 @@ pub enum ThirPatKind {
     Binding(Obj<FnLocal>, Option<Obj<ThirPat>>),
     Deref(Obj<ThirPat>),
     Or(Obj<[Obj<ThirPat>]>),
+    Place(Obj<ThirExpr>),
     Error(ErrorGuaranteed),
 }
 
@@ -39,11 +40,19 @@ pub enum ThirExprKind {
     PrimitiveBinOp(AstBinOpKind, Obj<ThirExpr>, Obj<ThirExpr>),
     PrimitiveUnOp(AstUnOpKind, Obj<ThirExpr>),
     Return(Obj<ThirExpr>),
+    Assign(Obj<ThirPat>, Obj<ThirExpr>),
     Block(Obj<ThirBlock>),
     Loop(Obj<ThirBlock>),
     AddrOf(Mutability, Obj<ThirExpr>),
     Call(Obj<ThirExpr>, Obj<[Obj<ThirExpr>]>),
     Local(Obj<FnLocal>),
+    If {
+        cond: Obj<ThirExpr>,
+        truthy: Obj<ThirExpr>,
+        falsy: Option<Obj<ThirExpr>>,
+    },
+    While(Obj<ThirExpr>, Obj<ThirBlock>),
+    Let(Obj<ThirPat>, Obj<ThirExpr>),
     Error(ErrorGuaranteed),
 }
 

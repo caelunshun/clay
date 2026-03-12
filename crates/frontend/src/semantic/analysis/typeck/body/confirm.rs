@@ -168,16 +168,27 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 cond,
                 truthy,
                 falsy,
-            } => todo!(),
-            HirExprKind::While(obj, obj1) => todo!(),
-            HirExprKind::Let(obj, obj1) => todo!(),
+            } => ThirExprKind::If {
+                cond: self.confirm_expr(cond),
+                truthy: self.confirm_expr(truthy),
+                falsy: self.confirm_opt_expr(falsy),
+            },
+            HirExprKind::While(cond, block) => ThirExprKind::While(
+                self.confirm_expr(cond),
+                self.confirm_block(block, tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))),
+            ),
+            HirExprKind::Let(lhs, rhs) => {
+                ThirExprKind::Let(self.confirm_pat(lhs), self.confirm_expr(rhs))
+            }
             HirExprKind::ForLoop { pat, iter, body } => todo!(),
             HirExprKind::Loop(block) => ThirExprKind::Loop(
                 self.confirm_block(block, tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))),
             ),
             HirExprKind::Match(obj, obj1) => todo!(),
             HirExprKind::Block(block) => ThirExprKind::Block(self.confirm_block(block, ty)),
-            HirExprKind::Assign(obj, obj1) => todo!(),
+            HirExprKind::Assign(lhs, rhs) => {
+                ThirExprKind::Assign(self.confirm_pat(lhs), self.confirm_expr(rhs))
+            }
             HirExprKind::AssignOp(ast_assign_op_kind, obj, obj1) => todo!(),
             HirExprKind::Field(obj, ident) => todo!(),
             HirExprKind::MethodCall {
@@ -269,6 +280,12 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         pat.map(|pat| self.confirm_pat(pat))
     }
 
+    fn confirm_pat_list(&mut self, pats: Obj<[Obj<HirPat>]>) -> Obj<[Obj<ThirPat>]> {
+        let s = self.session();
+
+        Obj::new_iter(pats.r(s).iter().map(|&pat| self.confirm_pat(pat)), s)
+    }
+
     fn confirm_pat_without_adjustments(&mut self, pat: Obj<HirPat>) -> Obj<ThirPat> {
         let s = self.session();
 
@@ -280,12 +297,12 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             HirPatKind::Slice(hir_pat_list_front_and_tail) => todo!(),
             HirPatKind::Tuple(hir_pat_list_front_and_tail) => todo!(),
             HirPatKind::Lit(obj) => todo!(),
-            HirPatKind::Or(obj) => todo!(),
-            HirPatKind::Deref(mutability, obj) => todo!(),
+            HirPatKind::Or(pats) => ThirPatKind::Or(self.confirm_pat_list(pats)),
+            HirPatKind::Deref(_mutability, pat) => ThirPatKind::Deref(self.confirm_pat(pat)),
             HirPatKind::AdtUnit(adt_ctor_instance) => todo!(),
             HirPatKind::AdtTuple(adt_ctor_instance, hir_pat_list_front_and_tail) => todo!(),
             HirPatKind::AdtNamed(adt_ctor_instance, obj) => todo!(),
-            HirPatKind::PlaceExpr(obj) => todo!(),
+            HirPatKind::PlaceExpr(expr) => ThirPatKind::Place(self.confirm_expr(expr)),
             HirPatKind::Range(hir_range_expr) => todo!(),
             HirPatKind::Error(error) => ThirPatKind::Error(error),
         };
@@ -345,7 +362,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     | InferTyVarSourceInfo::IndexOutput { span }
                     | InferTyVarSourceInfo::LoopDemand { span }
                     | InferTyVarSourceInfo::HoleInfer { span }
-                    | InferTyVarSourceInfo::PatType { span } => Diag::span_err(
+                    | InferTyVarSourceInfo::PatType { span }
+                    | InferTyVarSourceInfo::EmptyArrayElem { span } => Diag::span_err(
                         span,
                         format_args!("failed to infer a type of `{}`", {
                             let mut printer = ClauseCxPrinter::new(self.bcx.ccx());

@@ -11,7 +11,11 @@ use crate::{
 };
 
 impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
-    pub fn check_pat_infer(&mut self, pat: Obj<HirPat>, divergence: Option<&mut Divergence>) -> Ty {
+    pub fn check_pat_infer(
+        &mut self,
+        pat: Obj<HirPat>,
+        place_divergence: Option<&mut Divergence>,
+    ) -> Ty {
         let s = self.session();
         let infer = self.ccx_mut().fresh_ty_infer(
             HrtbUniverse::ROOT,
@@ -20,7 +24,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             },
         );
 
-        self.check_pat_demand(pat, infer, divergence);
+        self.check_pat_demand(pat, infer, place_divergence);
         infer
     }
 
@@ -28,9 +32,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         &mut self,
         pat: Obj<HirPat>,
         demand: Ty,
-        divergence: Option<&mut Divergence>,
+        place_divergence: Option<&mut Divergence>,
     ) {
-        self.check_pat_inner(pat, demand, None, divergence)
+        self.check_pat_inner(pat, demand, None, place_divergence)
     }
 
     fn check_pat_inner(
@@ -38,7 +42,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         pat: Obj<HirPat>,
         demand: Ty,
         default_by_ref: Option<Mutability>,
-        mut divergence: Option<&mut Divergence>,
+        mut place_divergence: Option<&mut Divergence>,
     ) {
         let s = self.session();
         let tcx = self.tcx();
@@ -70,7 +74,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 );
 
                 if let Some(binding) = binding {
-                    self.check_pat_inner(binding, demand, default_by_ref, divergence);
+                    self.check_pat_inner(binding, demand, default_by_ref, place_divergence);
                 }
             }
             HirPatKind::Slice(hir_pat_list_front_and_tail) => todo!(),
@@ -78,7 +82,12 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             HirPatKind::Lit(obj) => todo!(),
             HirPatKind::Or(patterns) => {
                 for &pat in patterns.r(s) {
-                    self.check_pat_inner(pat, demand, default_by_ref, divergence.as_deref_mut());
+                    self.check_pat_inner(
+                        pat,
+                        demand,
+                        default_by_ref,
+                        place_divergence.as_deref_mut(),
+                    );
                 }
             }
             HirPatKind::Deref(mutability, obj) => todo!(),
@@ -87,7 +96,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             HirPatKind::AdtNamed(adt_ctor_instance, obj) => todo!(),
             HirPatKind::PlaceExpr(place) => {
                 self.check_expr_demand(place, demand)
-                    .and_do(divergence.unwrap());
+                    .and_do(place_divergence.unwrap());
             }
             HirPatKind::Range(hir_range_expr) => todo!(),
         }
