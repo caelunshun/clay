@@ -1,16 +1,109 @@
-use crate::semantic::syntax::{MirBlockIdx, MirLocalIdx};
+use crate::{
+    base::Session,
+    semantic::{
+        analysis::TyCtxt,
+        syntax::{MirBlock, MirBlockIdx, MirBody, MirLocalIdx},
+    },
+};
 use index_vec::IndexVec;
 use smallvec::SmallVec;
-use std::{collections::VecDeque, mem};
+use std::{collections::VecDeque, fmt, iter, mem, ops::ControlFlow};
 
 // === Main Calculations === //
 
-pub fn compute_occupied() {
+#[derive(Debug, Copy, Clone)]
+pub enum MirBbOperation {
+    Provide(MirLocalIdx),
+    Steal(MirLocalIdx),
+    Use(MirLocalIdx),
+}
+
+pub fn iter_bb_successors<B>(
+    bb: &MirBlock,
+    s: &Session,
+    mut f: impl FnMut(MirBlockIdx) -> ControlFlow<B>,
+) -> ControlFlow<B> {
     todo!()
 }
 
-pub fn compute_liveness() {
+pub fn iter_bb_operations<B>(
+    bb: &MirBlock,
+    s: &Session,
+    mut f: impl FnMut(MirBbOperation) -> ControlFlow<B>,
+) -> ControlFlow<B> {
     todo!()
+}
+
+#[derive(Debug, Clone)]
+pub struct MirDataflowFacts {
+    pub occupied: IndexVec<MirBlockIdx, LocalSet>,
+    pub live: IndexVec<MirBlockIdx, LocalSet>,
+}
+
+impl MirDataflowFacts {
+    pub fn compute(tcx: &TyCtxt, body: &MirBody) -> Self {
+        let s = &tcx.session;
+
+        // Compute occupancy
+        let occupied = {
+            let mut df = Dataflow::new(
+                DataflowJoinOp::Intersect,
+                body.blocks.len(),
+                body.locals.len(),
+            );
+
+            for (curr, curr_state) in body.blocks.iter_enumerated() {
+                cbit::cbit!(for succ in iter_bb_successors(curr_state, s) {
+                    df.add_successor(curr, succ);
+                });
+
+                cbit::cbit!(for op in iter_bb_operations(curr_state, s) {
+                    match op {
+                        MirBbOperation::Provide(idx) => {
+                            df.add_gen(curr, idx);
+                        }
+                        MirBbOperation::Steal(idx) => {
+                            df.add_kill(curr, idx);
+                        }
+                        MirBbOperation::Use(_) => {
+                            // (ignored)
+                        }
+                    }
+                });
+            }
+
+            df.compute()
+        };
+
+        // Compute liveness
+        let live = {
+            let mut df = Dataflow::new(DataflowJoinOp::Union, body.blocks.len(), body.locals.len());
+
+            for (curr, curr_state) in body.blocks.iter_enumerated() {
+                cbit::cbit!(for succ in iter_bb_successors(curr_state, s) {
+                    df.add_successor(succ, curr);
+                });
+
+                cbit::cbit!(for op in iter_bb_operations(curr_state, s) {
+                    match op {
+                        MirBbOperation::Provide(idx) => {
+                            df.add_kill(curr, idx);
+                        }
+                        MirBbOperation::Steal(idx) | MirBbOperation::Use(idx) => {
+                            df.add_gen(curr, idx);
+                        }
+                    }
+                });
+            }
+
+            df.compute()
+        };
+
+        // Detect uses of unoccupied values.
+        // TODO
+
+        Self { occupied, live }
+    }
 }
 
 // === Infrastructure === //
@@ -56,11 +149,15 @@ impl Dataflow {
     }
 
     pub fn add_gen(&mut self, bb: MirBlockIdx, local: MirLocalIdx) {
-        self.blocks[bb].gen_set.add(local);
+        let bb = &mut self.blocks[bb];
+        bb.gen_set.add(local);
+        bb.kill_set.remove(local);
     }
 
     pub fn add_kill(&mut self, bb: MirBlockIdx, local: MirLocalIdx) {
-        self.blocks[bb].kill_set.add(local);
+        let bb = &mut self.blocks[bb];
+        bb.kill_set.add(local);
+        bb.gen_set.remove(local);
     }
 
     #[must_use]
@@ -135,6 +232,12 @@ pub struct LocalSet {
     set: SmallVec<[u64; 1]>,
 }
 
+impl fmt::Debug for LocalSet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
+    }
+}
+
 impl Clone for LocalSet {
     fn clone(&self) -> Self {
         Self {
@@ -197,19 +300,24 @@ impl LocalSet {
             *lhs &= !*rhs;
         }
     }
-}
 
-#[derive(Debug, Copy, Clone)]
-#[must_use]
-pub enum MadeProgress {
-    Yes,
-    No,
-}
+    pub fn iter(&self) -> impl Iterator<Item = MirLocalIdx> {
+        let mut next_word_idx = 1usize;
+        let mut curr_word_val = self.set.first().copied().unwrap_or(0);
 
-impl MadeProgress {
-    #[must_use]
-    pub fn made_progress(self) -> bool {
-        matches!(self, MadeProgress::Yes)
+        iter::from_fn(move || {
+            loop {
+                if curr_word_val != 0 {
+                    let idx = curr_word_val.trailing_zeros() as usize;
+                    curr_word_val ^= 1 << idx;
+                    return Some(MirLocalIdx::from_usize((next_word_idx - 1) * 64 + idx));
+                }
+
+                let &next_word = self.set.get(next_word_idx)?;
+                curr_word_val = next_word;
+                next_word_idx += 1;
+            }
+        })
     }
 }
 

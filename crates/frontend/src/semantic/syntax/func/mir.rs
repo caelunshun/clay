@@ -10,8 +10,12 @@ define_index_type! {
 
 #[derive(Debug, Clone)]
 pub struct MirBody {
+    pub locals: IndexVec<MirLocalIdx, MirLocal>,
     pub blocks: IndexVec<MirBlockIdx, MirBlock>,
 }
+
+#[derive(Debug, Clone)]
+pub struct MirLocal {}
 
 #[derive(Debug, Clone)]
 pub struct MirBlock {
