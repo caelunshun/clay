@@ -9,7 +9,7 @@ use index_vec::IndexVec;
 use smallvec::SmallVec;
 use std::{collections::VecDeque, fmt, iter, mem, ops::ControlFlow};
 
-// === Main Calculations === //
+// === MirDataflowFacts === //
 
 #[derive(Debug, Copy, Clone)]
 pub enum MirBbOperation {
@@ -28,6 +28,7 @@ pub fn iter_bb_successors<B>(
 
 pub fn iter_bb_operations<B>(
     bb: &MirBlock,
+    reverse: bool,
     s: &Session,
     mut f: impl FnMut(MirBbOperation) -> ControlFlow<B>,
 ) -> ControlFlow<B> {
@@ -57,19 +58,21 @@ impl MirDataflowFacts {
                     df.add_successor(curr, succ);
                 });
 
-                cbit::cbit!(for op in iter_bb_operations(curr_state, s) {
-                    match op {
-                        MirBbOperation::Provide(idx) => {
-                            df.add_gen(curr, idx);
-                        }
-                        MirBbOperation::Steal(idx) => {
-                            df.add_kill(curr, idx);
-                        }
-                        MirBbOperation::Use(_) => {
-                            // (ignored)
+                cbit::cbit!(
+                    for op in iter_bb_operations(curr_state, /* reverse */ false, s) {
+                        match op {
+                            MirBbOperation::Provide(idx) => {
+                                df.add_gen(curr, idx);
+                            }
+                            MirBbOperation::Steal(idx) => {
+                                df.add_kill(curr, idx);
+                            }
+                            MirBbOperation::Use(_) => {
+                                // (ignored)
+                            }
                         }
                     }
-                });
+                );
             }
 
             df.compute()
@@ -84,16 +87,18 @@ impl MirDataflowFacts {
                     df.add_successor(succ, curr);
                 });
 
-                cbit::cbit!(for op in iter_bb_operations(curr_state, s) {
-                    match op {
-                        MirBbOperation::Provide(idx) => {
-                            df.add_kill(curr, idx);
-                        }
-                        MirBbOperation::Steal(idx) | MirBbOperation::Use(idx) => {
-                            df.add_gen(curr, idx);
+                cbit::cbit!(
+                    for op in iter_bb_operations(curr_state, /* reverse */ true, s) {
+                        match op {
+                            MirBbOperation::Provide(idx) => {
+                                df.add_kill(curr, idx);
+                            }
+                            MirBbOperation::Steal(idx) | MirBbOperation::Use(idx) => {
+                                df.add_gen(curr, idx);
+                            }
                         }
                     }
-                });
+                );
             }
 
             df.compute()
@@ -104,9 +109,75 @@ impl MirDataflowFacts {
 
         Self { occupied, live }
     }
+
+    #[must_use]
+    pub fn can_outlive(&self, lhs: MirLocalIdx, rhs: MirLocalIdx) -> bool {
+        // `lhs` is allowed to outlive `rhs` if, for every instruction, `live(rhs)` implies
+        // `occupied(lhs)`. In other words, a local is allowed to outlive another one if, whenever
+        // the `rhs` local is in use, `lhs` can be referred to.
+        //
+        // Here is a pair of examples to help demonstrate this idea.
+        //
+        // This program is accepted:
+        //
+        // ```
+        // // occupied: {}, live: {}
+        // let mut a = Vec::<i32>::new();
+        // // occupied: {a}, live: {a}
+        // let mut b: &'_ mut Vec<i32> = &mut a;
+        // // occupied: {a, b}, live: {a, b}
+        // b.clear();
+        // // occupied: {a, b}, live: {a}
+        // drop(a);
+        // // occupied: {b}, live: {}
+        // a = Vec::<i32>::new();
+        // // occupied: {a, b}, live: {a}
+        // b = &mut a;
+        // // occupied: {a, b}, live: {b}
+        // b.clear();
+        // // occupied: {a, b}, live: {}
+        //
+        // // 'a can outlive 'b iff, for all instructions, live(b) implies occupied(a)
+        // // This is satisfied by this code so it compiles!
+        // ```
+        //
+        // ...while this program is rejected:
+        //
+        // ```
+        // // occupied: {}, live: {}
+        // let mut a = Vec::<i32>::new();
+        // // occupied: {a}, live: {a}
+        // let mut b: &'_ mut Vec<i32> = &mut a;
+        // // occupied: {a, b}, live: {a, b}
+        // b.clear();
+        // // occupied: {a, b}, live: {a, b}
+        // drop(a);
+        // // occupied: {b}, live: {b}
+        // a = Vec::<i32>::new();
+        // // occupied: {a, b}, live: {a, b}
+        // b.clear();
+        // // occupied: {a, b}, live: {a, b}
+        // b = &mut a;
+        // // occupied: {a, b}, live: {b}
+        // b.clear();
+        // // occupied: {a, b}, live: {}
+        //
+        // // 'a can outlive 'b iff, for all instructions, live(b) implies occupied(a)
+        // // This is broken by...
+        // //
+        // // ```
+        // // drop(a);
+        // // // occupied: {b}, live: {b}
+        // // ```
+        // //
+        // // ...so the code fails to compile!
+        // ```
+
+        todo!()
+    }
 }
 
-// === Infrastructure === //
+// === Dataflow Infrastructure === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum DataflowJoinOp {
