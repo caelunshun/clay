@@ -652,6 +652,38 @@ bitflags::bitflags! {
 }
 
 impl SimpleTySet {
+    pub fn names(self) -> Vec<Symbol> {
+        let mut names = Vec::new();
+        let mut bits = self.bits();
+
+        while bits != 0 {
+            let curr = 1 << bits.trailing_zeros();
+            bits ^= curr;
+
+            match SimpleTySet::from_bits_retain(curr) {
+                SimpleTySet::OTHER | SimpleTySet::ELAB_UNIVERSAL_VAR => {
+                    // (ignored)
+                }
+                SimpleTySet::U8 => names.push(symbol!("u8")),
+                SimpleTySet::U16 => names.push(symbol!("u16")),
+                SimpleTySet::U32 => names.push(symbol!("u32")),
+                SimpleTySet::U64 => names.push(symbol!("u64")),
+                SimpleTySet::I8 => names.push(symbol!("i8")),
+                SimpleTySet::I16 => names.push(symbol!("i16")),
+                SimpleTySet::I32 => names.push(symbol!("i32")),
+                SimpleTySet::I64 => names.push(symbol!("i64")),
+                SimpleTySet::F32 => names.push(symbol!("f32")),
+                SimpleTySet::F64 => names.push(symbol!("f64")),
+                SimpleTySet::BOOL => names.push(symbol!("bool")),
+                SimpleTySet::CHAR => names.push(symbol!("char")),
+
+                v => unreachable!("{v:?}"),
+            }
+        }
+
+        names
+    }
+
     pub fn can_accept_type(self, ty: Ty, s: &Session) -> bool {
         match *ty.r(s) {
             TyKind::SigThis
@@ -749,7 +781,6 @@ pub enum UniversalReVarSourceInfo {
     Root(Obj<RegionGeneric>),
     ElaboratedLub,
     HrtbVar,
-    TestPlaceholder,
 }
 
 #[derive(Debug, Clone)]
@@ -993,7 +1024,7 @@ impl Mutability {
     pub fn opt_space_qual(self) -> Symbol {
         match self {
             Mutability::Not => symbol!(""),
-            Mutability::Mut => symbol!(" mut"),
+            Mutability::Mut => symbol!("mut "),
         }
     }
 }

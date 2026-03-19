@@ -3,6 +3,23 @@ pub trait Deref {
     type Target;
 }
 
+impl<'a, T: &longer 'a> Deref for &'a T {
+    type Target = T;
+}
+
+impl<'a, T: &longer 'a> Deref for &'a mut T {
+    type Target = T;
+}
+
+#[lang("fn_once_trait")]
+pub trait FnOnce<I, O> {}
+
+#[lang("fn_mut_trait")]
+pub trait FnMut<I, O>: FnOnce<I, O> {}
+
+#[lang("fn_trait")]
+pub trait Fn<I, O>: FnMut<I, O> {}
+
 pub enum Option<T> {
     Some(T),
     None,
@@ -21,12 +38,6 @@ pub trait IteratorItem<'a> {
     type Out: &longer 'a;
 }
 
-pub struct IteratorItemRef<T>;
-
-impl<'a, T: &longer 'a> IteratorItem<'a> for IteratorItemRef<T> {
-    type Out = &'a T;
-}
-
 pub struct IteratorItemMut<T>;
 
 impl<'a, T: &longer 'a> IteratorItem<'a> for IteratorItemMut<T> {
@@ -34,7 +45,13 @@ impl<'a, T: &longer 'a> IteratorItem<'a> for IteratorItemMut<T> {
 }
 
 pub struct Forever<T> {
-    pub elem: T,
+    elem: T,
+}
+
+impl<T> Forever<T> {
+    pub fn new(elem: T) -> Self {
+        Self { elem }
+    }
 }
 
 impl<T> Iterator for Forever<T> {
@@ -45,10 +62,8 @@ impl<T> Iterator for Forever<T> {
     }
 }
 
-pub trait Demo {
-    fn demo();
-}
-
 fn main() {
-    Demo::demo;
+    let mut foo = true;
+    let bar = Forever::new(4).next();
+    foo = bar;
 }

@@ -4,7 +4,7 @@ use crate::{
         analysis::{ClauseCx, TyCtxt},
         syntax::{
             AdtInstance, AnyGeneric, FloatKind, HrtbBinderKind, IntKind, Re, SimpleTyKind,
-            TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
             UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
@@ -77,6 +77,7 @@ impl<'a, 'tcx> ClauseCxPrinter<'a, 'tcx> {
             TyKind::Reference(re, muta, ty) => {
                 self.out.push('&');
                 self.push_re(re);
+                self.out.push(' ');
                 self.out.push_str(muta.opt_space_qual().as_str(s));
                 self.push_ty(ty);
             }
@@ -98,6 +99,7 @@ impl<'a, 'tcx> ClauseCxPrinter<'a, 'tcx> {
             TyKind::Trait(re, muta, clauses) => {
                 self.out.push('&');
                 self.push_re(re);
+                self.out.push(' ');
                 self.out.push_str(muta.opt_space_qual().as_str(s));
                 self.push_trait_clauses(clauses);
             }
@@ -122,13 +124,33 @@ impl<'a, 'tcx> ClauseCxPrinter<'a, 'tcx> {
             TyKind::FnDef(_def) => todo!(),
             TyKind::HrtbVar(_debruijn) => todo!(),
             TyKind::InferVar(var) => {
-                write!(
-                    &mut self.out,
-                    "?{} {{{:?}}}",
-                    var.index(),
-                    self.ccx.lookup_infer_ty_src_info(var),
-                )
-                .unwrap();
+                let set = self
+                    .ccx()
+                    .lookup_ty_infer_var_without_poll(var)
+                    .unwrap_err()
+                    .perm_set;
+
+                if !set.intersects(SimpleTySet::OTHER) {
+                    write!(
+                        &mut self.out,
+                        "?{} {{{}}}",
+                        var.index(),
+                        set.names()
+                            .into_iter()
+                            .map(|v| v.as_str(s))
+                            .collect::<Vec<_>>()
+                            .join(" | ")
+                    )
+                    .unwrap();
+                } else {
+                    write!(
+                        &mut self.out,
+                        "?{} {{{:?}}}",
+                        var.index(),
+                        self.ccx.lookup_infer_ty_src_info(var),
+                    )
+                    .unwrap();
+                }
             }
             TyKind::UniversalVar(var) => self.push_universal_ty(var),
 
