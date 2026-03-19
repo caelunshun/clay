@@ -1,11 +1,14 @@
+mod borrowck;
+pub use self::borrowck::*;
+
 mod infer;
-pub use infer::*;
+pub use self::infer::*;
 
 mod tcx;
-pub use tcx::*;
+pub use self::tcx::*;
 
 mod tyops;
-pub use tyops::*;
+pub use self::tyops::*;
 
 mod typeck;
-pub use typeck::*;
+pub use self::typeck::*;

@@ -1,6 +1,10 @@
 use index_vec::{IndexVec, define_index_type};
 
 define_index_type! {
+    pub struct MirLocalIdx = u32;
+}
+
+define_index_type! {
     pub struct MirBlockIdx = u32;
 }
 
