@@ -44,7 +44,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         self.visit_generic_binder(&mut ccx, env_sig.as_ref(), def.r(s).generics);
 
         // Check the body
-        if let Some(body) = *def.r(s).body {
+        if let Some(body) = *def.r(s).hir_body {
             let env_body = ccx.import_fn_def_env_as_universal(
                 &ClauseOrigin::empty_report(),
                 HrtbUniverse::ROOT_REF,

@@ -1,7 +1,7 @@
 use crate::{
     base::{
         Diag,
-        arena::{HasInterner, HasListInterner, Obj},
+        arena::{HasInterner, HasListInterner, LateInit, Obj},
     },
     semantic::{
         analysis::{
@@ -20,6 +20,7 @@ use std::convert::Infallible;
 impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
     pub fn confirm(&mut self, body: Obj<HirExpr>) {
         let tcx = self.tcx();
+        let s = self.session();
 
         // Assign fallbacks to integer literal inference holes.
         self.ccx_mut().poll_obligations();
@@ -50,7 +51,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         }
 
         // Lower the function to its THIR representation.
-        self.confirm_expr(body);
+        LateInit::init(&self.def.r(s).thir_body, Some(self.confirm_expr(body)));
     }
 
     fn confirm_expr(&mut self, expr: Obj<HirExpr>) -> Obj<ThirExpr> {

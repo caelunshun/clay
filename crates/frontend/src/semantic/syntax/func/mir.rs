@@ -1,3 +1,8 @@
+use crate::{
+    base::arena::Intern,
+    parse::ast::{AstBinOpKind, AstUnOpKind},
+    semantic::syntax::Mutability,
+};
 use index_vec::{IndexVec, define_index_type};
 
 define_index_type! {
@@ -24,14 +29,45 @@ pub struct MirBlock {
 }
 
 #[derive(Debug, Clone)]
-pub struct MirStmt {}
+pub struct MirStmt {
+    pub kind: MirStmtKind,
+}
 
 #[derive(Debug, Clone)]
-pub enum MirStmtKind {}
+pub enum MirStmtKind {
+    Assign(Box<(MirPlace, MirAssignRvalue)>),
+}
 
 #[derive(Debug, Clone)]
 pub enum MirTerminator {
     Goto(MirBlockIdx),
-    Switch(),
     Unreachable,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct MirPlace {
+    pub local: MirLocalIdx,
+    pub projections: MirPlaceElemList,
+}
+
+pub type MirPlaceElemList = Intern<[MirPlaceElem]>;
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirPlaceElem {
+    DerefPtr,
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub enum MirAssignRvalue {
+    Use(MirOperand),
+    Ref(Mutability, MirPlace),
+    BinaryOp(AstBinOpKind, Box<(MirOperand, MirOperand)>),
+    UnaryOp(AstUnOpKind, Box<MirOperand>),
+    Discriminant(MirPlace),
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirOperand {
+    Copy(MirPlace),
+    Move(MirPlace),
 }

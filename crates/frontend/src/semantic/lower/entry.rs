@@ -1149,7 +1149,8 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                 has_self_param: LateInit::uninit(),
                 args: LateInit::uninit(),
                 ret_ty: LateInit::uninit(),
-                body: LateInit::uninit(),
+                hir_body: LateInit::uninit(),
+                thir_body: LateInit::uninit(),
             },
             s,
         );
@@ -1383,7 +1384,7 @@ impl IntraItemLowerCtxt<'_> {
                     continue;
                 }
 
-                if base.r(s).body.is_some() {
+                if base.r(s).hir_body.is_some() {
                     continue;
                 }
 
@@ -1481,7 +1482,7 @@ impl IntraItemLowerCtxt<'_> {
         );
 
         LateInit::init(
-            &def.r(s).body,
+            &def.r(s).hir_body,
             ast.body.as_ref().map(|body| self.lower_expr(body)),
         );
     }

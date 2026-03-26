@@ -5,7 +5,7 @@ use crate::{
         arena::{HasInterner, HasListInterner, Interner, ListInterner, Obj},
     },
     semantic::{
-        analysis::{CoherenceMap, CrateTypeckVisitor},
+        analysis::{CoherenceMap, CrateBorrowCheckVisitor, CrateTypeckVisitor},
         syntax::{
             AttributeKind, Crate, EarlyAttrLang, FnInstanceInner, HrtbDebruijnDef, TraitClause,
             TraitClauseList, TraitParam, Ty, TyKind, TyOrRe, TyShape,
@@ -92,6 +92,8 @@ impl TyCtxt {
             krate,
         }
         .visit_crate();
+
+        CrateBorrowCheckVisitor { tcx: self, krate }.visit_crate();
     }
 }
 
