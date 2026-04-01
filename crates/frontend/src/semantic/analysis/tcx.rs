@@ -7,8 +7,8 @@ use crate::{
     semantic::{
         analysis::{CoherenceMap, CrateBorrowCheckVisitor, CrateTypeckVisitor},
         syntax::{
-            AttributeKind, Crate, EarlyAttrLang, FnInstanceInner, HrtbDebruijnDef, TraitClause,
-            TraitClauseList, TraitParam, Ty, TyKind, TyOrRe, TyShape,
+            AttributeKind, Crate, EarlyAttrLang, FnInstanceInner, HrtbDebruijnDef, MirPlaceElem,
+            TraitClause, TraitClauseList, TraitParam, Ty, TyKind, TyOrRe, TyShape,
         },
     },
 };
@@ -37,6 +37,7 @@ pub struct Interners {
     pub spanned_info_list: ListInterner<SpannedInfo>,
     pub coherence_ty_list: ListInterner<TyShape>,
     pub hrtb_debruijn_list: ListInterner<HrtbDebruijnDef>,
+    pub mir_place_elem_list: ListInterner<MirPlaceElem>,
 }
 
 impl Deref for TyCtxt {
@@ -160,5 +161,11 @@ impl HasListInterner<TyShape> for TyCtxt {
 impl HasListInterner<HrtbDebruijnDef> for TyCtxt {
     fn interner(&self) -> &ListInterner<HrtbDebruijnDef> {
         &self.interners.hrtb_debruijn_list
+    }
+}
+
+impl HasListInterner<MirPlaceElem> for TyCtxt {
+    fn interner(&self) -> &ListInterner<MirPlaceElem> {
+        &self.interners.mir_place_elem_list
     }
 }

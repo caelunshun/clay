@@ -22,9 +22,9 @@ pub struct MirBody {
 #[derive(Debug, Clone)]
 pub struct MirLocal {}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MirBlock {
-    pub stmt: Vec<MirStmt>,
+    pub stmts: Vec<MirStmt>,
     pub terminator: MirTerminator,
 }
 
@@ -38,10 +38,26 @@ pub enum MirStmtKind {
     Assign(Box<(MirPlace, MirAssignRvalue)>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum MirTerminator {
     Goto(MirBlockIdx),
+    Call {
+        callee: MirOperand,
+        args: Box<[MirOperand]>,
+        destination: MirPlace,
+        target: MirBlockIdx,
+    },
+    Drop {
+        place: MirPlace,
+        target: MirBlockIdx,
+    },
+    Switch {
+        scrutinee: MirPlace,
+        targets: Box<[MirBlockIdx]>,
+    },
     Unreachable,
+    #[default]
+    Placeholder,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
