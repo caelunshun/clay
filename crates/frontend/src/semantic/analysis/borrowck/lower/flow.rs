@@ -22,32 +22,18 @@ impl MirLowerFlow {
         self.curr.is_some()
     }
 
-    pub fn opt_curr(&self) -> Option<MirBlockIdx> {
-        self.curr
-    }
-
-    pub fn expect_curr(&self) -> MirBlockIdx {
-        self.curr.expect("flow is finished")
-    }
-
-    pub fn start_new_curr(&mut self, body: &mut MirBody) -> MirBlockIdx {
-        assert!(self.curr.is_none(), "flow is not yet finished");
-        let curr = body.blocks.push(MirBlock::default());
-        self.curr = Some(curr);
-        curr
-    }
-
-    pub fn ensure_curr(&mut self, body: &mut MirBody) -> MirBlockIdx {
+    pub fn curr(&mut self, body: &mut MirBody) -> MirBlockIdx {
         *self
             .curr
             .get_or_insert_with(|| body.blocks.push(MirBlock::default()))
     }
 
-    pub fn push_stmt(&self, body: &mut MirBody, stmt: MirStmt) {
-        body.blocks[self.expect_curr()].stmts.push(stmt);
+    pub fn push_stmt(&mut self, body: &mut MirBody, stmt: MirStmt) {
+        let curr = self.curr(body);
+        body.blocks[curr].stmts.push(stmt);
     }
 
-    pub fn push_assign(&self, body: &mut MirBody, lhs: MirPlace, rhs: MirAssignRvalue) {
+    pub fn push_assign(&mut self, body: &mut MirBody, lhs: MirPlace, rhs: MirAssignRvalue) {
         self.push_stmt(
             body,
             MirStmt {
@@ -56,12 +42,13 @@ impl MirLowerFlow {
         );
     }
 
-    pub fn push_assign_use(&self, body: &mut MirBody, lhs: MirPlace, rhs: MirOperand) {
+    pub fn push_assign_use(&mut self, body: &mut MirBody, lhs: MirPlace, rhs: MirOperand) {
         self.push_assign(body, lhs, MirAssignRvalue::Use(rhs));
     }
 
     pub fn push_terminator_final(&mut self, body: &mut MirBody, terminator: MirTerminator) {
-        body.blocks[self.expect_curr()].terminator = terminator;
+        let curr = self.curr(body);
+        body.blocks[curr].terminator = terminator;
         self.curr = None;
     }
 
@@ -70,9 +57,10 @@ impl MirLowerFlow {
         body: &mut MirBody,
         f: impl FnOnce(MirBlockIdx) -> MirTerminator,
     ) {
+        let curr = self.curr(body);
         let successor = body.blocks.push(MirBlock::default());
         let terminator = f(successor);
-        body.blocks[self.expect_curr()].terminator = terminator;
+        body.blocks[curr].terminator = terminator;
         self.curr = Some(successor);
     }
 
@@ -99,6 +87,10 @@ impl MirLowerFlow {
         self.push_terminator_final(body, MirTerminator::Goto(target));
     }
 
+    pub fn push_return(&mut self, body: &mut MirBody) {
+        self.push_terminator_final(body, MirTerminator::Return);
+    }
+
     pub fn push_unreachable(&mut self, body: &mut MirBody) {
         self.push_terminator_final(body, MirTerminator::Unreachable);
     }
@@ -117,7 +109,7 @@ impl MirLowerFlow {
             return;
         }
 
-        let bb = target.ensure_curr(body);
+        let bb = target.curr(body);
         self.push_goto(body, bb);
     }
 }

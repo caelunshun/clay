@@ -1,12 +1,16 @@
 use crate::{
     base::arena::Intern,
-    parse::ast::{AstBinOpKind, AstUnOpKind},
+    parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
     semantic::syntax::Mutability,
 };
 use index_vec::{IndexVec, define_index_type};
 
 define_index_type! {
     pub struct MirLocalIdx = u32;
+}
+
+impl MirLocalIdx {
+    pub const RETURN: Self = MirLocalIdx { _raw: 0 };
 }
 
 define_index_type! {
@@ -55,6 +59,7 @@ pub enum MirTerminator {
         scrutinee: MirPlace,
         targets: Box<[MirBlockIdx]>,
     },
+    Return,
     Unreachable,
     #[default]
     Placeholder,
@@ -73,12 +78,14 @@ pub enum MirPlaceElem {
     DerefPtr,
 }
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum MirAssignRvalue {
+    Tuple(Box<[MirOperand]>),
     Use(MirOperand),
     Ref(Mutability, MirPlace),
+    Literal(AstLit),
     BinaryOp(AstBinOpKind, Box<(MirOperand, MirOperand)>),
-    UnaryOp(AstUnOpKind, Box<MirOperand>),
+    UnaryOp(AstUnOpKind, MirOperand),
     Discriminant(MirPlace),
 }
 

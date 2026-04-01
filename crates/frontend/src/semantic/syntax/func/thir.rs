@@ -64,7 +64,7 @@ pub struct ThirBlock {
     pub last_expr: Option<Obj<ThirExpr>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum ThirStmt {
     Expr(Obj<ThirExpr>),
     Let(Obj<ThirLetStmt>),
