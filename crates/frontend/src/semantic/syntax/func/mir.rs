@@ -83,6 +83,7 @@ pub enum MirAssignRvalue {
     Tuple(Box<[MirOperand]>),
     Use(MirOperand),
     Ref(Mutability, MirPlace),
+    Zst,
     Literal(AstLit),
     BinaryOp(AstBinOpKind, Box<(MirOperand, MirOperand)>),
     UnaryOp(AstUnOpKind, MirOperand),

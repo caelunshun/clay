@@ -16,7 +16,11 @@ pub struct ThirPat {
 #[derive(Debug, Clone)]
 pub enum ThirPatKind {
     Wild,
-    Binding(Obj<FnLocal>, Option<Obj<ThirPat>>),
+    Binding {
+        by_ref: Option<Mutability>,
+        local: Obj<FnLocal>,
+        and_bind: Option<Obj<ThirPat>>,
+    },
     Deref(Obj<ThirPat>),
     Or(Obj<[Obj<ThirPat>]>),
     Place(Obj<ThirExpr>),

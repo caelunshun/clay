@@ -7,7 +7,7 @@ use crate::{
         analysis::{MirLowerFlow, TyCtxt},
         syntax::{
             FnDef, FnLocal, MirAssignRvalue, MirBody, MirLocal, MirLocalIdx, MirOperand, MirPlace,
-            ThirExpr, ThirExprKind, ThirStmt,
+            MirPlaceElem, ThirExpr, ThirExprKind, ThirPat, ThirPatKind, ThirStmt,
         },
     },
     utils::hash::FxHashMap,
@@ -33,9 +33,6 @@ impl<'tcx> MirLowerCtxt<'tcx> {
         body.locals.push(MirLocal {});
 
         // Define arguments
-        // TODO
-
-        // Define locals
         // TODO
 
         Self {
@@ -73,17 +70,25 @@ impl<'tcx> MirLowerCtxt<'tcx> {
         flow.push_return(&mut self.body);
     }
 
+    pub fn lower_local(&mut self, local: Obj<FnLocal>) -> MirPlace {
+        let tcx = self.tcx();
+
+        MirPlace {
+            local: *self
+                .locals
+                .entry(local)
+                .or_insert_with(|| self.body.locals.push(MirLocal {})),
+            projections: tcx.intern_list(&[]),
+        }
+    }
+
     pub fn lower(&mut self, expr: Obj<ThirExpr>, flow: &mut MirLowerFlow) -> MirRvalueOrPlace {
         let tcx = self.tcx();
         let s = self.session();
 
         match expr.r(s).kind {
-            ThirExprKind::Local(local) => {
-                todo!()
-            }
-            ThirExprKind::CreatePathZst => {
-                todo!()
-            }
+            ThirExprKind::Local(local) => MirRvalueOrPlace::Place(self.lower_local(local)),
+            ThirExprKind::CreatePathZst => MirRvalueOrPlace::Rvalue(MirAssignRvalue::Zst),
             ThirExprKind::CreateLiteral(lit) => {
                 MirRvalueOrPlace::Rvalue(MirAssignRvalue::Literal(lit))
             }
@@ -116,7 +121,10 @@ impl<'tcx> MirLowerCtxt<'tcx> {
                 MirRvalueOrPlace::Rvalue(MirAssignRvalue::Tuple(Box::new([])))
             }
             ThirExprKind::Assign(lhs, rhs) => {
-                todo!()
+                let rhs = self.lower_place(rhs, flow);
+                self.lower_pat(lhs, rhs, flow);
+
+                MirRvalueOrPlace::Place(rhs)
             }
             ThirExprKind::Block(block) => {
                 for &stmt in &block.r(s).stmts {
@@ -202,7 +210,11 @@ impl<'tcx> MirLowerCtxt<'tcx> {
                 self.lower(expr, flow);
             }
             ThirStmt::Let(stmt) => {
-                todo!()
+                // TODO: divergent patterns
+                if let Some(init) = stmt.r(s).init {
+                    let rhs = self.lower_place(init, flow);
+                    self.lower_pat(stmt.r(s).pat, rhs, flow);
+                }
             }
         }
     }
@@ -256,6 +268,58 @@ impl<'tcx> MirLowerCtxt<'tcx> {
             .iter()
             .map(|&arg| self.lower_operand(arg, flow))
             .collect()
+    }
+
+    pub fn lower_pat(&mut self, pat: Obj<ThirPat>, rhs: MirPlace, flow: &mut MirLowerFlow) {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        match pat.r(s).kind {
+            ThirPatKind::Wild => {
+                // (no assignment)
+            }
+            ThirPatKind::Binding {
+                by_ref,
+                local,
+                and_bind,
+            } => {
+                let rvalue = match by_ref {
+                    Some(muta) => MirAssignRvalue::Ref(muta, rhs),
+                    None => MirAssignRvalue::Use(self.convert_place_to_operand(rhs)),
+                };
+
+                let local = self.lower_local(local);
+                flow.push_assign(&mut self.body, local, rvalue);
+
+                if let Some(and_bind) = and_bind {
+                    self.lower_pat(and_bind, rhs, flow);
+                }
+            }
+            ThirPatKind::Deref(pat) => {
+                self.lower_pat(
+                    pat,
+                    MirPlace {
+                        local: rhs.local,
+                        projections: tcx.intern_list(
+                            &rhs.projections
+                                .r(s)
+                                .iter()
+                                .copied()
+                                .chain([MirPlaceElem::DerefPtr])
+                                .collect::<Vec<_>>(),
+                        ),
+                    },
+                    flow,
+                );
+            }
+            ThirPatKind::Or(obj) => todo!(),
+            ThirPatKind::Place(lhs) => {
+                let lhs = self.lower_place(lhs, flow);
+                let rhs = self.convert_place_to_operand(rhs);
+                flow.push_assign(&mut self.body, lhs, MirAssignRvalue::Use(rhs));
+            }
+            ThirPatKind::Error(_) => unreachable!(),
+        }
     }
 
     pub fn convert_place_to_operand(&mut self, place: MirPlace) -> MirOperand {

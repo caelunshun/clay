@@ -292,9 +292,11 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
         let kind = match pat.r(s).kind {
             HirPatKind::Hole => ThirPatKind::Wild,
-            HirPatKind::Binding(_muta, local, binding) => {
-                ThirPatKind::Binding(local, self.confirm_opt_pat(binding))
-            }
+            HirPatKind::Binding(by_ref, local, binding) => ThirPatKind::Binding {
+                by_ref: by_ref.as_explicit().map(|v| v.strip_span()),
+                local,
+                and_bind: self.confirm_opt_pat(binding),
+            },
             HirPatKind::Slice(hir_pat_list_front_and_tail) => todo!(),
             HirPatKind::Tuple(hir_pat_list_front_and_tail) => todo!(),
             HirPatKind::Lit(obj) => todo!(),

@@ -56,7 +56,9 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
             return;
         }
 
-        MirLowerCtxt::new(self.tcx, def).lower_entry();
+        let mut ctxt = MirLowerCtxt::new(self.tcx, def);
+        ctxt.lower_entry();
+        dbg!(ctxt.body);
 
         // TODO: Borrow-check
     }
