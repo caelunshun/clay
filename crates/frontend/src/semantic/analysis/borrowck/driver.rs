@@ -1,7 +1,7 @@
 use crate::{
     base::{Session, arena::Obj},
     semantic::{
-        analysis::{MirLowerCtxt, TyCtxt},
+        analysis::{MirDataflowFacts, MirLowerCtxt, TyCtxt},
         syntax::{Crate, FnDef, ItemKind},
     },
 };
@@ -58,8 +58,8 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
 
         let mut ctxt = MirLowerCtxt::new(self.tcx, def);
         ctxt.lower_entry();
-        dbg!(ctxt.body);
 
-        // TODO: Borrow-check
+        let df = MirDataflowFacts::compute(self.tcx, &ctxt.body);
+        dbg!(df);
     }
 }

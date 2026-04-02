@@ -4,6 +4,7 @@ use crate::{
     semantic::syntax::Mutability,
 };
 use index_vec::{IndexVec, define_index_type};
+use std::slice;
 
 define_index_type! {
     pub struct MirLocalIdx = u32;
@@ -63,6 +64,26 @@ pub enum MirTerminator {
     Unreachable,
     #[default]
     Placeholder,
+}
+
+impl MirTerminator {
+    pub fn successors(&self) -> &[MirBlockIdx] {
+        match self {
+            MirTerminator::Goto(target)
+            | MirTerminator::Call {
+                callee: _,
+                args: _,
+                destination: _,
+                target,
+            }
+            | MirTerminator::Drop { place: _, target } => slice::from_ref(target),
+            MirTerminator::Switch {
+                scrutinee: _,
+                targets,
+            } => targets,
+            MirTerminator::Return | MirTerminator::Unreachable | MirTerminator::Placeholder => &[],
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

@@ -2,38 +2,148 @@ use crate::{
     base::Session,
     semantic::{
         analysis::TyCtxt,
-        syntax::{MirBlock, MirBlockIdx, MirBody, MirLocalIdx},
+        syntax::{
+            MirAssignRvalue, MirBlock, MirBlockIdx, MirBody, MirLocalIdx, MirOperand, MirPlace,
+            MirStmt, MirStmtKind, MirTerminator,
+        },
     },
 };
 use index_vec::IndexVec;
 use smallvec::SmallVec;
-use std::{collections::VecDeque, fmt, iter, mem, ops::ControlFlow};
+use std::{collections::VecDeque, fmt, iter, mem};
+
+// === MirBbOperation === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct MirBbOperation {
+    pub kind: MirBbOperationKind,
+    pub place: MirLocalIdx,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirBbOperationKind {
+    Provide,
+    Steal,
+    Use,
+}
+
+pub fn mir_block_operations(bb: &MirBlock, s: &Session) -> SmallVec<[MirBbOperation; 2]> {
+    struct Collector<'a> {
+        collector: SmallVec<[MirBbOperation; 2]>,
+        s: &'a Session,
+    }
+
+    impl Collector<'_> {
+        fn visit_block(&mut self, bb: &MirBlock) {
+            for stmt in &bb.stmts {
+                self.visit_stmt(stmt);
+            }
+
+            self.visit_terminator(&bb.terminator);
+        }
+
+        fn visit_stmt(&mut self, stmt: &MirStmt) {
+            match &stmt.kind {
+                MirStmtKind::Assign(stmt) => {
+                    let (lhs, rhs) = &**stmt;
+                    self.visit_rvalue(rhs);
+                    self.visit_place(MirBbOperationKind::Provide, *lhs);
+                }
+            }
+        }
+
+        fn visit_terminator(&mut self, terminator: &MirTerminator) {
+            match terminator {
+                MirTerminator::Call {
+                    callee,
+                    args,
+                    destination,
+                    target: _,
+                } => {
+                    self.visit_operand(*callee);
+                    self.visit_operand_list(args);
+                    self.visit_place(MirBbOperationKind::Provide, *destination);
+                }
+                MirTerminator::Drop { place, target: _ } => {
+                    self.visit_place(MirBbOperationKind::Steal, *place);
+                }
+                MirTerminator::Switch {
+                    scrutinee,
+                    targets: _,
+                } => {
+                    self.visit_place(MirBbOperationKind::Use, *scrutinee);
+                }
+                MirTerminator::Goto(_)
+                | MirTerminator::Return
+                | MirTerminator::Unreachable
+                | MirTerminator::Placeholder => {
+                    // (empty)
+                }
+            }
+        }
+
+        fn visit_rvalue(&mut self, rvalue: &MirAssignRvalue) {
+            match rvalue {
+                MirAssignRvalue::Tuple(elems) => {
+                    self.visit_operand_list(elems);
+                }
+                MirAssignRvalue::Use(operand) => {
+                    self.visit_operand(*operand);
+                }
+                MirAssignRvalue::Ref(_muta, place) => {
+                    self.visit_place(MirBbOperationKind::Use, *place);
+                }
+                MirAssignRvalue::Zst | MirAssignRvalue::Literal(_) => {
+                    // (empty)
+                }
+                MirAssignRvalue::BinaryOp(_kind, operands) => {
+                    let (lhs, rhs) = &**operands;
+                    self.visit_operand(*lhs);
+                    self.visit_operand(*rhs);
+                }
+                MirAssignRvalue::UnaryOp(_kind, operand) => {
+                    self.visit_operand(*operand);
+                }
+                MirAssignRvalue::Discriminant(place) => {
+                    self.visit_place(MirBbOperationKind::Use, *place);
+                }
+            }
+        }
+
+        fn visit_operand_list(&mut self, operands: &[MirOperand]) {
+            for &operand in operands {
+                self.visit_operand(operand);
+            }
+        }
+
+        fn visit_operand(&mut self, operand: MirOperand) {
+            match operand {
+                MirOperand::Copy(place) => self.visit_place(MirBbOperationKind::Use, place),
+                MirOperand::Move(place) => self.visit_place(MirBbOperationKind::Steal, place),
+            }
+        }
+
+        fn visit_place(&mut self, kind: MirBbOperationKind, place: MirPlace) {
+            if place.projections.r(self.s).is_empty() {
+                return;
+            }
+
+            self.collector.push(MirBbOperation {
+                kind,
+                place: place.local,
+            });
+        }
+    }
+
+    let mut collector = Collector {
+        collector: SmallVec::new(),
+        s,
+    };
+    collector.visit_block(bb);
+    collector.collector
+}
 
 // === MirDataflowFacts === //
-
-#[derive(Debug, Copy, Clone)]
-pub enum MirBbOperation {
-    Provide(MirLocalIdx),
-    Steal(MirLocalIdx),
-    Use(MirLocalIdx),
-}
-
-pub fn iter_bb_successors<B>(
-    bb: &MirBlock,
-    s: &Session,
-    mut f: impl FnMut(MirBlockIdx) -> ControlFlow<B>,
-) -> ControlFlow<B> {
-    todo!()
-}
-
-pub fn iter_bb_operations<B>(
-    bb: &MirBlock,
-    reverse: bool,
-    s: &Session,
-    mut f: impl FnMut(MirBbOperation) -> ControlFlow<B>,
-) -> ControlFlow<B> {
-    todo!()
-}
 
 #[derive(Debug, Clone)]
 pub struct MirDataflowFacts {
@@ -54,25 +164,23 @@ impl MirDataflowFacts {
             );
 
             for (curr, curr_state) in body.blocks.iter_enumerated() {
-                cbit::cbit!(for succ in iter_bb_successors(curr_state, s) {
+                for &succ in curr_state.terminator.successors() {
                     df.add_successor(curr, succ);
-                });
+                }
 
-                cbit::cbit!(
-                    for op in iter_bb_operations(curr_state, /* reverse */ false, s) {
-                        match op {
-                            MirBbOperation::Provide(idx) => {
-                                df.add_gen(curr, idx);
-                            }
-                            MirBbOperation::Steal(idx) => {
-                                df.add_kill(curr, idx);
-                            }
-                            MirBbOperation::Use(_) => {
-                                // (ignored)
-                            }
+                for op in mir_block_operations(curr_state, s) {
+                    match op.kind {
+                        MirBbOperationKind::Provide => {
+                            df.add_gen(curr, op.place);
+                        }
+                        MirBbOperationKind::Steal => {
+                            df.add_kill(curr, op.place);
+                        }
+                        MirBbOperationKind::Use => {
+                            // (ignored)
                         }
                     }
-                );
+                }
             }
 
             df.compute()
@@ -83,22 +191,20 @@ impl MirDataflowFacts {
             let mut df = Dataflow::new(DataflowJoinOp::Union, body.blocks.len(), body.locals.len());
 
             for (curr, curr_state) in body.blocks.iter_enumerated() {
-                cbit::cbit!(for succ in iter_bb_successors(curr_state, s) {
+                for &succ in curr_state.terminator.successors() {
                     df.add_successor(succ, curr);
-                });
+                }
 
-                cbit::cbit!(
-                    for op in iter_bb_operations(curr_state, /* reverse */ true, s) {
-                        match op {
-                            MirBbOperation::Provide(idx) => {
-                                df.add_kill(curr, idx);
-                            }
-                            MirBbOperation::Steal(idx) | MirBbOperation::Use(idx) => {
-                                df.add_gen(curr, idx);
-                            }
+                for &op in mir_block_operations(curr_state, s).iter().rev() {
+                    match op.kind {
+                        MirBbOperationKind::Provide => {
+                            df.add_kill(curr, op.place);
+                        }
+                        MirBbOperationKind::Steal | MirBbOperationKind::Use => {
+                            df.add_gen(curr, op.place);
                         }
                     }
-                );
+                }
             }
 
             df.compute()
