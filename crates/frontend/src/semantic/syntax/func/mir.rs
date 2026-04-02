@@ -41,6 +41,7 @@ pub struct MirStmt {
 #[derive(Debug, Clone)]
 pub enum MirStmtKind {
     Assign(Box<(MirPlace, MirAssignRvalue)>),
+    Discard(MirOperand),
 }
 
 #[derive(Debug, Clone, Default)]

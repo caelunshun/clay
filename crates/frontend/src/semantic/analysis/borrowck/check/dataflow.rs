@@ -49,6 +49,9 @@ pub fn mir_block_operations(bb: &MirBlock, s: &Session) -> SmallVec<[MirBbOperat
                     self.visit_rvalue(rhs);
                     self.visit_place(MirBbOperationKind::Provide, *lhs);
                 }
+                MirStmtKind::Discard(operand) => {
+                    self.visit_operand(*operand);
+                }
             }
         }
 
@@ -124,7 +127,8 @@ pub fn mir_block_operations(bb: &MirBlock, s: &Session) -> SmallVec<[MirBbOperat
         }
 
         fn visit_place(&mut self, kind: MirBbOperationKind, place: MirPlace) {
-            if place.projections.r(self.s).is_empty() {
+            // TODO
+            if !place.projections.r(self.s).is_empty() {
                 return;
             }
 
@@ -168,7 +172,9 @@ impl MirDataflowFacts {
                     df.add_successor(curr, succ);
                 }
 
-                for op in mir_block_operations(curr_state, s) {
+                dbg!(curr);
+
+                for op in dbg!(mir_block_operations(curr_state, s)) {
                     match op.kind {
                         MirBbOperationKind::Provide => {
                             df.add_gen(curr, op.place);
@@ -181,6 +187,8 @@ impl MirDataflowFacts {
                         }
                     }
                 }
+
+                dbg!(&curr_state.terminator);
             }
 
             df.compute()
@@ -439,7 +447,7 @@ impl LocalSet {
     }
 
     pub fn remove(&mut self, idx: MirLocalIdx) {
-        self.set[idx.index() / 64] ^= !(1 << (idx.index() % 64));
+        self.set[idx.index() / 64] &= !(1 << (idx.index() % 64));
     }
 
     pub fn clear(&mut self) {

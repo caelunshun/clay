@@ -46,6 +46,15 @@ impl MirLowerFlow {
         self.push_assign(body, lhs, MirAssignRvalue::Use(rhs));
     }
 
+    pub fn push_discard(&mut self, body: &mut MirBody, rhs: MirOperand) {
+        self.push_stmt(
+            body,
+            MirStmt {
+                kind: MirStmtKind::Discard(rhs),
+            },
+        );
+    }
+
     pub fn push_terminator_final(&mut self, body: &mut MirBody, terminator: MirTerminator) {
         let curr = self.curr(body);
         body.blocks[curr].terminator = terminator;

@@ -190,6 +190,12 @@ impl<'tcx> MirLowerCtxt<'tcx> {
                     if falsy_flow.is_continuing() {
                         falsy_flow.push_assign_use(&mut self.body, destination, falsy_out_operand);
                     }
+                } else {
+                    falsy_flow.push_assign(
+                        &mut self.body,
+                        destination,
+                        MirAssignRvalue::Tuple(Box::new([])),
+                    );
                 }
 
                 falsy_flow.fallthrough_to(&mut self.body, flow);
@@ -207,7 +213,8 @@ impl<'tcx> MirLowerCtxt<'tcx> {
 
         match stmt {
             ThirStmt::Expr(expr) => {
-                self.lower(expr, flow);
+                let res = self.lower_operand(expr, flow);
+                flow.push_discard(&mut self.body, res);
             }
             ThirStmt::Let(stmt) => {
                 // TODO: divergent patterns
