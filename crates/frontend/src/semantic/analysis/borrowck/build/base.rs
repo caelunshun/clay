@@ -21,6 +21,13 @@ pub struct MirBuildCtxt<'tcx> {
     pub locals: FxHashMap<Obj<FnLocal>, MirLocalIdx>,
 }
 
+#[derive(Debug, Clone)]
+pub enum MirRvalueOrPlace {
+    Rvalue(MirAssignRvalue),
+    Place(MirPlace),
+    Unreachable,
+}
+
 impl<'tcx> MirBuildCtxt<'tcx> {
     pub fn new(tcx: &'tcx TyCtxt, def: Obj<FnDef>) -> Self {
         let mut body = MirBody {
@@ -205,6 +212,12 @@ impl<'tcx> MirBuildCtxt<'tcx> {
                     local: self.body.locals.push(MirLocal {}),
                     projections: tcx.intern_list(&[]),
                 };
+
+                // We don't want to create sub-flows unless we know we're reachable to avoid
+                // pushing unreachable code to the MIR, which could cause analysis to report borrow
+                // errors in normally ignored code. This assertion is safe because `lower`
+                // early-returns if the provided flow is finished.
+                assert!(flow.is_continuing());
 
                 let mut truthy_flow = MirLowerFlow::new(&mut self.body);
                 let mut falsy_flow = MirLowerFlow::new(&mut self.body);
@@ -399,11 +412,4 @@ impl<'tcx> MirBuildCtxt<'tcx> {
         // TODO
         MirOperand::Move(place)
     }
-}
-
-#[derive(Debug, Clone)]
-pub enum MirRvalueOrPlace {
-    Rvalue(MirAssignRvalue),
-    Place(MirPlace),
-    Unreachable,
 }

@@ -161,7 +161,7 @@ impl MirDataflowFacts {
 
         // Compute occupancy
         let occupied = {
-            let mut df = Dataflow::new(
+            let mut df = DataflowBuilder::new(
                 DataflowJoinOp::Intersect,
                 body.blocks.len(),
                 body.locals.len(),
@@ -196,7 +196,8 @@ impl MirDataflowFacts {
 
         // Compute liveness
         let live = {
-            let mut df = Dataflow::new(DataflowJoinOp::Union, body.blocks.len(), body.locals.len());
+            let mut df =
+                DataflowBuilder::new(DataflowJoinOp::Union, body.blocks.len(), body.locals.len());
 
             for (curr, curr_state) in body.blocks.iter_enumerated() {
                 for &succ in curr_state.terminator.successors() {
@@ -291,7 +292,7 @@ impl MirDataflowFacts {
     }
 }
 
-// === Dataflow Infrastructure === //
+// === DataflowBuilder === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum DataflowJoinOp {
@@ -299,7 +300,7 @@ pub enum DataflowJoinOp {
     Intersect,
 }
 
-pub struct Dataflow {
+pub struct DataflowBuilder {
     join_op: DataflowJoinOp,
     blocks: IndexVec<MirBlockIdx, DataflowBlock>,
     local_count: usize,
@@ -313,7 +314,7 @@ struct DataflowBlock {
     in_work_list: bool,
 }
 
-impl Dataflow {
+impl DataflowBuilder {
     pub fn new(join_op: DataflowJoinOp, bb_count: usize, local_count: usize) -> Self {
         Self {
             join_op,
@@ -348,7 +349,7 @@ impl Dataflow {
     #[must_use]
     pub fn compute(self) -> IndexVec<MirBlockIdx, LocalSet> {
         struct Worker {
-            dataflow: Dataflow,
+            dataflow: DataflowBuilder,
             block_outputs: IndexVec<MirBlockIdx, LocalSet>,
             work_queue: VecDeque<MirBlockIdx>,
             tmp_set: LocalSet,
@@ -363,17 +364,26 @@ impl Dataflow {
                 while let Some(curr) = self.work_queue.pop_front() {
                     self.dataflow.blocks[curr].in_work_list = false;
 
-                    self.tmp_set.clear();
+                    // Join predecessors
+                    if let Some((first, remaining)) =
+                        self.dataflow.blocks[curr].flow_from.split_first()
+                    {
+                        self.tmp_set.clone_from(&self.block_outputs[*first]);
 
-                    for &flow_from in &self.dataflow.blocks[curr].flow_from {
-                        self.tmp_set
-                            .join(self.dataflow.join_op, &self.block_outputs[flow_from]);
+                        for &flow_from in remaining {
+                            self.tmp_set
+                                .join(self.dataflow.join_op, &self.block_outputs[flow_from]);
+                        }
+                    } else {
+                        self.tmp_set.clear();
                     }
 
+                    // Transition through the block.
                     self.tmp_set.union(&self.dataflow.blocks[curr].gen_set);
                     self.tmp_set
                         .remove_all(&self.dataflow.blocks[curr].kill_set);
 
+                    // If our set changed, mark the successors as dirty.
                     if self.tmp_set == self.block_outputs[curr] {
                         continue;
                     }
@@ -411,6 +421,8 @@ impl Dataflow {
         worker.block_outputs
     }
 }
+
+// === LocalSet === //
 
 #[derive(Eq, PartialEq)]
 pub struct LocalSet {
@@ -514,7 +526,7 @@ mod tests {
 
     #[test]
     fn simple_dataflow_liveness_1() {
-        let mut df = Dataflow::new(DataflowJoinOp::Union, 3, 1);
+        let mut df = DataflowBuilder::new(DataflowJoinOp::Union, 3, 1);
 
         df.add_successor(MirBlockIdx::from_usize(0), MirBlockIdx::from_usize(1));
         df.add_successor(MirBlockIdx::from_usize(1), MirBlockIdx::from_usize(2));
@@ -532,7 +544,7 @@ mod tests {
 
     #[test]
     fn simple_dataflow_liveness_2() {
-        let mut df = Dataflow::new(DataflowJoinOp::Union, 3, 1);
+        let mut df = DataflowBuilder::new(DataflowJoinOp::Union, 3, 1);
 
         df.add_successor(MirBlockIdx::from_usize(0), MirBlockIdx::from_usize(1));
         df.add_successor(MirBlockIdx::from_usize(1), MirBlockIdx::from_usize(2));
