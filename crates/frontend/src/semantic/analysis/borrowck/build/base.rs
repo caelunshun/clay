@@ -14,14 +14,14 @@ use crate::{
 };
 use index_vec::IndexVec;
 
-pub struct MirLowerCtxt<'tcx> {
+pub struct MirBuildCtxt<'tcx> {
     pub tcx: &'tcx TyCtxt,
     pub def: Obj<FnDef>,
     pub body: MirBody,
     pub locals: FxHashMap<Obj<FnLocal>, MirLocalIdx>,
 }
 
-impl<'tcx> MirLowerCtxt<'tcx> {
+impl<'tcx> MirBuildCtxt<'tcx> {
     pub fn new(tcx: &'tcx TyCtxt, def: Obj<FnDef>) -> Self {
         let mut body = MirBody {
             locals: IndexVec::new(),
