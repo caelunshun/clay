@@ -57,15 +57,13 @@ impl<'tcx> MirLowerCtxt<'tcx> {
 
         let mut flow = MirLowerFlow::new(&mut self.body);
 
-        let output = self.lower_rvalue(self.def.r(s).thir_body.unwrap(), &mut flow);
-
-        flow.push_assign(
-            &mut self.body,
+        self.lower_assign(
             MirPlace {
                 local: MirLocalIdx::RETURN,
                 projections: tcx.intern_list(&[]),
             },
-            output,
+            self.def.r(s).thir_body.unwrap(),
+            &mut flow,
         );
         flow.push_return(&mut self.body);
     }
@@ -83,6 +81,22 @@ impl<'tcx> MirLowerCtxt<'tcx> {
     }
 
     pub fn lower(&mut self, expr: Obj<ThirExpr>, flow: &mut MirLowerFlow) -> MirRvalueOrPlace {
+        if flow.is_finished() {
+            return MirRvalueOrPlace::Unreachable;
+        }
+
+        let rv = self.lower_inner(expr, flow);
+
+        if matches!(rv, MirRvalueOrPlace::Unreachable) {
+            assert!(flow.is_finished());
+        } else if flow.is_finished() {
+            return MirRvalueOrPlace::Unreachable;
+        }
+
+        rv
+    }
+
+    fn lower_inner(&mut self, expr: Obj<ThirExpr>, flow: &mut MirLowerFlow) -> MirRvalueOrPlace {
         let tcx = self.tcx();
         let s = self.session();
 
@@ -92,36 +106,48 @@ impl<'tcx> MirLowerCtxt<'tcx> {
             ThirExprKind::CreateLiteral(lit) => {
                 MirRvalueOrPlace::Rvalue(MirAssignRvalue::Literal(lit))
             }
-            ThirExprKind::CreateTuple(args) => MirRvalueOrPlace::Rvalue(MirAssignRvalue::Tuple(
-                self.lower_operand_list(args, flow),
-            )),
-            ThirExprKind::PrimitiveBinOp(op, lhs, rhs) => {
-                MirRvalueOrPlace::Rvalue(MirAssignRvalue::BinaryOp(
-                    op,
-                    Box::new((self.lower_operand(lhs, flow), self.lower_operand(rhs, flow))),
-                ))
-            }
-            ThirExprKind::PrimitiveUnOp(op, lhs) => MirRvalueOrPlace::Rvalue(
-                MirAssignRvalue::UnaryOp(op, self.lower_operand(lhs, flow)),
-            ),
-            ThirExprKind::Return(ret_val) => {
-                let value = self.lower_rvalue(ret_val, flow);
+            ThirExprKind::CreateTuple(args) => {
+                let Some(args) = self.lower_operand_list(args, flow) else {
+                    return MirRvalueOrPlace::Unreachable;
+                };
 
-                flow.push_assign(
-                    &mut self.body,
+                MirRvalueOrPlace::Rvalue(MirAssignRvalue::Tuple(args))
+            }
+            ThirExprKind::PrimitiveBinOp(op, lhs, rhs) => {
+                let (Some(lhs), Some(rhs)) =
+                    (self.lower_operand(lhs, flow), self.lower_operand(rhs, flow))
+                else {
+                    return MirRvalueOrPlace::Unreachable;
+                };
+
+                MirRvalueOrPlace::Rvalue(MirAssignRvalue::BinaryOp(op, Box::new((lhs, rhs))))
+            }
+            ThirExprKind::PrimitiveUnOp(op, lhs) => {
+                let Some(lhs) = self.lower_operand(lhs, flow) else {
+                    return MirRvalueOrPlace::Unreachable;
+                };
+
+                MirRvalueOrPlace::Rvalue(MirAssignRvalue::UnaryOp(op, lhs))
+            }
+            ThirExprKind::Return(ret_val) => {
+                self.lower_assign(
                     MirPlace {
                         local: MirLocalIdx::RETURN,
                         projections: tcx.intern_list(&[]),
                     },
-                    value,
+                    ret_val,
+                    flow,
                 );
 
                 flow.push_return(&mut self.body);
 
-                MirRvalueOrPlace::Rvalue(MirAssignRvalue::Tuple(Box::new([])))
+                MirRvalueOrPlace::Unreachable
             }
             ThirExprKind::Assign(lhs, rhs) => {
-                let rhs = self.lower_place(rhs, flow);
+                let Some(rhs) = self.lower_place(rhs, flow) else {
+                    return MirRvalueOrPlace::Unreachable;
+                };
+
                 self.lower_pat(lhs, rhs, flow);
 
                 MirRvalueOrPlace::Place(rhs)
@@ -129,6 +155,10 @@ impl<'tcx> MirLowerCtxt<'tcx> {
             ThirExprKind::Block(block) => {
                 for &stmt in &block.r(s).stmts {
                     self.lower_stmt(stmt, flow);
+
+                    if flow.is_finished() {
+                        return MirRvalueOrPlace::Unreachable;
+                    }
                 }
 
                 if let Some(last_expr) = block.r(s).last_expr {
@@ -138,13 +168,21 @@ impl<'tcx> MirLowerCtxt<'tcx> {
                 }
             }
             ThirExprKind::Loop(block) => todo!(),
-            ThirExprKind::AddrOf(muta, pointee) => MirRvalueOrPlace::Rvalue(MirAssignRvalue::Ref(
-                muta,
-                self.lower_place(pointee, flow),
-            )),
+            ThirExprKind::AddrOf(muta, pointee) => {
+                let Some(pointee) = self.lower_place(pointee, flow) else {
+                    return MirRvalueOrPlace::Unreachable;
+                };
+
+                MirRvalueOrPlace::Rvalue(MirAssignRvalue::Ref(muta, pointee))
+            }
             ThirExprKind::Call(callee, args) => {
-                let callee = self.lower_operand(callee, flow);
-                let args = self.lower_operand_list(args, flow);
+                let (Some(callee), Some(args)) = (
+                    self.lower_operand(callee, flow),
+                    self.lower_operand_list(args, flow),
+                ) else {
+                    return MirRvalueOrPlace::Unreachable;
+                };
+
                 let destination = MirPlace {
                     local: self.body.locals.push(MirLocal {}),
                     projections: tcx.intern_list(&[]),
@@ -159,7 +197,9 @@ impl<'tcx> MirLowerCtxt<'tcx> {
                 truthy,
                 falsy,
             } => {
-                let cond = self.lower_place(cond, flow);
+                let Some(cond) = self.lower_place(cond, flow) else {
+                    return MirRvalueOrPlace::Unreachable;
+                };
 
                 let destination = MirPlace {
                     local: self.body.locals.push(MirLocal {}),
@@ -169,8 +209,8 @@ impl<'tcx> MirLowerCtxt<'tcx> {
                 let mut truthy_flow = MirLowerFlow::new(&mut self.body);
                 let mut falsy_flow = MirLowerFlow::new(&mut self.body);
 
-                let truthy_flow_entry = truthy_flow.curr(&mut self.body);
-                let falsy_flow_entry = falsy_flow.curr(&mut self.body);
+                let truthy_flow_entry = truthy_flow.expect_curr();
+                let falsy_flow_entry = falsy_flow.expect_curr();
 
                 flow.push_switch(
                     &mut self.body,
@@ -178,16 +218,13 @@ impl<'tcx> MirLowerCtxt<'tcx> {
                     Box::new([truthy_flow_entry, falsy_flow_entry]),
                 );
 
-                let truthy_out_operand = self.lower_operand(truthy, &mut truthy_flow);
-                if truthy_flow.is_continuing() {
+                if let Some(truthy_out_operand) = self.lower_operand(truthy, &mut truthy_flow) {
                     truthy_flow.push_assign_use(&mut self.body, destination, truthy_out_operand);
-                    truthy_flow.fallthrough_to(&mut self.body, flow);
+                    truthy_flow.push_goto_flow(&mut self.body, flow);
                 }
 
                 if let Some(falsy) = falsy {
-                    let falsy_out_operand = self.lower_operand(falsy, &mut falsy_flow);
-
-                    if falsy_flow.is_continuing() {
+                    if let Some(falsy_out_operand) = self.lower_operand(falsy, &mut falsy_flow) {
                         falsy_flow.push_assign_use(&mut self.body, destination, falsy_out_operand);
                     }
                 } else {
@@ -198,7 +235,7 @@ impl<'tcx> MirLowerCtxt<'tcx> {
                     );
                 }
 
-                falsy_flow.fallthrough_to(&mut self.body, flow);
+                falsy_flow.push_goto_flow(&mut self.body, flow);
 
                 MirRvalueOrPlace::Place(destination)
             }
@@ -213,13 +250,19 @@ impl<'tcx> MirLowerCtxt<'tcx> {
 
         match stmt {
             ThirStmt::Expr(expr) => {
-                let res = self.lower_operand(expr, flow);
+                let Some(res) = self.lower_operand(expr, flow) else {
+                    return;
+                };
+
                 flow.push_discard(&mut self.body, res);
             }
             ThirStmt::Let(stmt) => {
                 // TODO: divergent patterns
                 if let Some(init) = stmt.r(s).init {
-                    let rhs = self.lower_place(init, flow);
+                    let Some(rhs) = self.lower_place(init, flow) else {
+                        return;
+                    };
+
                     self.lower_pat(stmt.r(s).pat, rhs, flow);
                 }
             }
@@ -230,21 +273,35 @@ impl<'tcx> MirLowerCtxt<'tcx> {
         &mut self,
         expr: Obj<ThirExpr>,
         flow: &mut MirLowerFlow,
-    ) -> MirAssignRvalue {
+    ) -> Option<MirAssignRvalue> {
         match self.lower(expr, flow) {
-            MirRvalueOrPlace::Rvalue(rvalue) => rvalue,
+            MirRvalueOrPlace::Rvalue(rvalue) => Some(rvalue),
             MirRvalueOrPlace::Place(place) => {
-                MirAssignRvalue::Use(self.convert_place_to_operand(place))
+                Some(MirAssignRvalue::Use(self.convert_place_to_operand(place)))
             }
+            MirRvalueOrPlace::Unreachable => None,
         }
     }
 
-    pub fn lower_place(&mut self, expr: Obj<ThirExpr>, flow: &mut MirLowerFlow) -> MirPlace {
+    pub fn lower_assign(&mut self, lhs: MirPlace, rhs: Obj<ThirExpr>, flow: &mut MirLowerFlow) {
+        let Some(rhs) = self.lower_rvalue(rhs, flow) else {
+            return;
+        };
+
+        flow.push_assign(&mut self.body, lhs, rhs);
+    }
+
+    pub fn lower_place(
+        &mut self,
+        expr: Obj<ThirExpr>,
+        flow: &mut MirLowerFlow,
+    ) -> Option<MirPlace> {
         let tcx = self.tcx();
 
         let rvalue = match self.lower(expr, flow) {
             MirRvalueOrPlace::Rvalue(rvalue) => rvalue,
-            MirRvalueOrPlace::Place(place) => return place,
+            MirRvalueOrPlace::Place(place) => return Some(place),
+            MirRvalueOrPlace::Unreachable => return None,
         };
 
         let destination = MirPlace {
@@ -252,29 +309,35 @@ impl<'tcx> MirLowerCtxt<'tcx> {
             projections: tcx.intern_list(&[]),
         };
 
-        if flow.is_continuing() {
-            flow.push_assign(&mut self.body, destination, rvalue);
-        }
+        flow.push_assign(&mut self.body, destination, rvalue);
 
-        destination
+        Some(destination)
     }
 
-    pub fn lower_operand(&mut self, expr: Obj<ThirExpr>, flow: &mut MirLowerFlow) -> MirOperand {
-        let place = self.lower_place(expr, flow);
-        self.convert_place_to_operand(place)
+    pub fn lower_operand(
+        &mut self,
+        expr: Obj<ThirExpr>,
+        flow: &mut MirLowerFlow,
+    ) -> Option<MirOperand> {
+        self.lower_place(expr, flow)
+            .map(|place| self.convert_place_to_operand(place))
     }
 
     pub fn lower_operand_list(
         &mut self,
         args: Obj<[Obj<ThirExpr>]>,
         flow: &mut MirLowerFlow,
-    ) -> Box<[MirOperand]> {
+    ) -> Option<Box<[MirOperand]>> {
         let s = self.session();
 
-        args.r(s)
-            .iter()
-            .map(|&arg| self.lower_operand(arg, flow))
-            .collect()
+        let mut collector = Vec::with_capacity(args.r(s).len());
+
+        for &arg in args.r(s) {
+            let arg = self.lower_operand(arg, flow)?;
+            collector.push(arg);
+        }
+
+        Some(collector.into())
     }
 
     pub fn lower_pat(&mut self, pat: Obj<ThirPat>, rhs: MirPlace, flow: &mut MirLowerFlow) {
@@ -321,7 +384,10 @@ impl<'tcx> MirLowerCtxt<'tcx> {
             }
             ThirPatKind::Or(obj) => todo!(),
             ThirPatKind::Place(lhs) => {
-                let lhs = self.lower_place(lhs, flow);
+                let Some(lhs) = self.lower_place(lhs, flow) else {
+                    return;
+                };
+
                 let rhs = self.convert_place_to_operand(rhs);
                 flow.push_assign(&mut self.body, lhs, MirAssignRvalue::Use(rhs));
             }
@@ -339,4 +405,5 @@ impl<'tcx> MirLowerCtxt<'tcx> {
 pub enum MirRvalueOrPlace {
     Rvalue(MirAssignRvalue),
     Place(MirPlace),
+    Unreachable,
 }

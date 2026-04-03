@@ -22,14 +22,25 @@ impl MirLowerFlow {
         self.curr.is_some()
     }
 
-    pub fn curr(&mut self, body: &mut MirBody) -> MirBlockIdx {
+    pub fn curr_opt(&self) -> Option<MirBlockIdx> {
+        self.curr
+    }
+
+    pub fn expect_curr(&self) -> MirBlockIdx {
+        self.curr.expect("flow is finished")
+    }
+
+    pub fn curr_or_restart(&mut self, body: &mut MirBody) -> MirBlockIdx {
         *self
             .curr
             .get_or_insert_with(|| body.blocks.push(MirBlock::default()))
     }
 
     pub fn push_stmt(&mut self, body: &mut MirBody, stmt: MirStmt) {
-        let curr = self.curr(body);
+        let Some(curr) = self.curr_opt() else {
+            return;
+        };
+
         body.blocks[curr].stmts.push(stmt);
     }
 
@@ -56,7 +67,10 @@ impl MirLowerFlow {
     }
 
     pub fn push_terminator_final(&mut self, body: &mut MirBody, terminator: MirTerminator) {
-        let curr = self.curr(body);
+        let Some(curr) = self.curr_opt() else {
+            return;
+        };
+
         body.blocks[curr].terminator = terminator;
         self.curr = None;
     }
@@ -66,7 +80,10 @@ impl MirLowerFlow {
         body: &mut MirBody,
         f: impl FnOnce(MirBlockIdx) -> MirTerminator,
     ) {
-        let curr = self.curr(body);
+        let Some(curr) = self.curr_opt() else {
+            return;
+        };
+
         let successor = body.blocks.push(MirBlock::default());
         let terminator = f(successor);
         body.blocks[curr].terminator = terminator;
@@ -113,12 +130,12 @@ impl MirLowerFlow {
         self.push_terminator_final(body, MirTerminator::Switch { scrutinee, targets });
     }
 
-    pub fn fallthrough_to(&mut self, body: &mut MirBody, target: &mut MirLowerFlow) {
+    pub fn push_goto_flow(&mut self, body: &mut MirBody, target: &mut MirLowerFlow) {
         if self.is_finished() {
             return;
         }
 
-        let bb = target.curr(body);
+        let bb = target.curr_or_restart(body);
         self.push_goto(body, bb);
     }
 }
