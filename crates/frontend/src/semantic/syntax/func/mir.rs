@@ -4,7 +4,23 @@ use crate::{
     semantic::syntax::Mutability,
 };
 use index_vec::{IndexVec, define_index_type};
+use smallvec::SmallVec;
 use std::slice;
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirDirection {
+    Forward,
+    Backward,
+}
+
+impl MirDirection {
+    pub fn invert(self) -> MirDirection {
+        match self {
+            MirDirection::Forward => MirDirection::Backward,
+            MirDirection::Backward => MirDirection::Forward,
+        }
+    }
+}
 
 define_index_type! {
     pub struct MirLocalIdx = u32;
@@ -31,6 +47,24 @@ pub struct MirLocal {}
 pub struct MirBlock {
     pub stmts: Vec<MirStmt>,
     pub terminator: MirTerminator,
+    pub predecessors: SmallVec<[MirBlockIdx; 1]>,
+}
+
+impl MirBlock {
+    pub fn successors(&self) -> &[MirBlockIdx] {
+        self.terminator.successors()
+    }
+
+    pub fn predecessors(&self) -> &[MirBlockIdx] {
+        &self.predecessors
+    }
+
+    pub fn next(&self, direction: MirDirection) -> &[MirBlockIdx] {
+        match direction {
+            MirDirection::Forward => self.successors(),
+            MirDirection::Backward => self.predecessors(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

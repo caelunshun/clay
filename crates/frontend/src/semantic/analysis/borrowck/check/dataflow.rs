@@ -219,10 +219,15 @@ impl MirDataflowFacts {
             df.compute()
         };
 
-        // Detect uses of unoccupied values.
-        // TODO
-
         Self { occupied, live }
+    }
+
+    pub fn find_last_thief(&self) {
+        todo!()
+    }
+
+    pub fn find_next_use(&self) {
+        todo!()
     }
 
     #[must_use]
