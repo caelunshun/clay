@@ -404,6 +404,7 @@ impl MirDataflow {
 
                 // Create the entry-point state.
                 solver.import_start(block_idx, &mut next_point);
+                points.push(next_point.clone());
 
                 // Create all intermediate states.
                 for trans in &block_scratch.natural_gen_kill {
