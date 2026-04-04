@@ -3,15 +3,21 @@ use crate::{
     semantic::{
         analysis::TyCtxt,
         syntax::{
-            MirAssignRvalue, MirBlockIdx, MirBody, MirDirection, MirInstructionLoc,
-            MirInstructionRef, MirLocalIdx, MirOperand, MirPlace, MirStmt, MirStmtKind,
-            MirTerminator,
+            MirAssignRvalue, MirBlock, MirBlockIdx, MirBody, MirDirection, MirInstructionIdx,
+            MirInstructionLoc, MirInstructionRef, MirLocalIdx, MirOperand, MirPlace, MirStmt,
+            MirStmtKind, MirTerminator,
         },
     },
 };
 use index_vec::IndexVec;
+use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
-use std::{collections::VecDeque, fmt, iter, mem};
+use std::{
+    collections::VecDeque,
+    convert::Infallible,
+    fmt, iter, mem,
+    ops::{ControlFlow, RangeBounds},
+};
 
 // === MirBbOperation === //
 
@@ -28,35 +34,37 @@ pub enum MirBbOperationKind {
     Use,
 }
 
-pub struct MirBbOperationVisitor<'a, F>(pub &'a Session, pub F)
+pub struct MirBbOperationVisitor<'a, F, B>(pub &'a Session, pub F)
 where
-    F: FnMut(MirBbOperation);
+    F: FnMut(MirBbOperation) -> ControlFlow<B>;
 
-impl<F> MirBbOperationVisitor<'_, F>
+impl<F, B> MirBbOperationVisitor<'_, F, B>
 where
-    F: FnMut(MirBbOperation),
+    F: FnMut(MirBbOperation) -> ControlFlow<B>,
 {
-    pub fn visit_instr(&mut self, instr: MirInstructionRef<'_>) {
+    pub fn visit_instr(&mut self, instr: MirInstructionRef<'_>) -> ControlFlow<B> {
         match instr {
             MirInstructionRef::Stmt(stmt) => self.visit_stmt(stmt),
             MirInstructionRef::Terminator(terminator) => self.visit_terminator(terminator),
         }
     }
 
-    pub fn visit_stmt(&mut self, stmt: &MirStmt) {
+    pub fn visit_stmt(&mut self, stmt: &MirStmt) -> ControlFlow<B> {
         match &stmt.kind {
             MirStmtKind::Assign(stmt) => {
                 let (lhs, rhs) = &**stmt;
-                self.visit_rvalue(rhs);
-                self.visit_place(MirBbOperationKind::Provide, *lhs);
+                self.visit_rvalue(rhs)?;
+                self.visit_place(MirBbOperationKind::Provide, *lhs)?;
             }
             MirStmtKind::Discard(operand) => {
-                self.visit_operand(*operand);
+                self.visit_operand(*operand)?;
             }
         }
+
+        ControlFlow::Continue(())
     }
 
-    pub fn visit_terminator(&mut self, terminator: &MirTerminator) {
+    pub fn visit_terminator(&mut self, terminator: &MirTerminator) -> ControlFlow<B> {
         match terminator {
             MirTerminator::Call {
                 callee,
@@ -64,18 +72,18 @@ where
                 destination,
                 target: _,
             } => {
-                self.visit_operand(*callee);
-                self.visit_operand_list(args);
-                self.visit_place(MirBbOperationKind::Provide, *destination);
+                self.visit_operand(*callee)?;
+                self.visit_operand_list(args)?;
+                self.visit_place(MirBbOperationKind::Provide, *destination)?;
             }
             MirTerminator::Drop { place, target: _ } => {
-                self.visit_place(MirBbOperationKind::Steal, *place);
+                self.visit_place(MirBbOperationKind::Steal, *place)?;
             }
             MirTerminator::Switch {
                 scrutinee,
                 targets: _,
             } => {
-                self.visit_place(MirBbOperationKind::Use, *scrutinee);
+                self.visit_place(MirBbOperationKind::Use, *scrutinee)?;
             }
             MirTerminator::Goto(_)
             | MirTerminator::Return
@@ -84,59 +92,65 @@ where
                 // (empty)
             }
         }
+
+        ControlFlow::Continue(())
     }
 
-    pub fn visit_rvalue(&mut self, rvalue: &MirAssignRvalue) {
+    pub fn visit_rvalue(&mut self, rvalue: &MirAssignRvalue) -> ControlFlow<B> {
         match rvalue {
             MirAssignRvalue::Tuple(elems) => {
-                self.visit_operand_list(elems);
+                self.visit_operand_list(elems)?;
             }
             MirAssignRvalue::Use(operand) => {
-                self.visit_operand(*operand);
+                self.visit_operand(*operand)?;
             }
             MirAssignRvalue::Ref(_muta, place) => {
-                self.visit_place(MirBbOperationKind::Use, *place);
+                self.visit_place(MirBbOperationKind::Use, *place)?;
             }
             MirAssignRvalue::Zst | MirAssignRvalue::Literal(_) => {
                 // (empty)
             }
             MirAssignRvalue::BinaryOp(_kind, operands) => {
                 let (lhs, rhs) = &**operands;
-                self.visit_operand(*lhs);
-                self.visit_operand(*rhs);
+                self.visit_operand(*lhs)?;
+                self.visit_operand(*rhs)?;
             }
             MirAssignRvalue::UnaryOp(_kind, operand) => {
-                self.visit_operand(*operand);
+                self.visit_operand(*operand)?;
             }
             MirAssignRvalue::Discriminant(place) => {
-                self.visit_place(MirBbOperationKind::Use, *place);
+                self.visit_place(MirBbOperationKind::Use, *place)?;
             }
         }
+
+        ControlFlow::Continue(())
     }
 
-    pub fn visit_operand_list(&mut self, operands: &[MirOperand]) {
+    pub fn visit_operand_list(&mut self, operands: &[MirOperand]) -> ControlFlow<B> {
         for &operand in operands {
-            self.visit_operand(operand);
+            self.visit_operand(operand)?;
         }
+
+        ControlFlow::Continue(())
     }
 
-    pub fn visit_operand(&mut self, operand: MirOperand) {
+    pub fn visit_operand(&mut self, operand: MirOperand) -> ControlFlow<B> {
         match operand {
             MirOperand::Copy(place) => self.visit_place(MirBbOperationKind::Use, place),
             MirOperand::Move(place) => self.visit_place(MirBbOperationKind::Steal, place),
         }
     }
 
-    pub fn visit_place(&mut self, kind: MirBbOperationKind, place: MirPlace) {
+    pub fn visit_place(&mut self, kind: MirBbOperationKind, place: MirPlace) -> ControlFlow<B> {
         // TODO
         if !place.projections.r(self.0).is_empty() {
-            return;
+            return ControlFlow::Continue(());
         }
 
         (self.1)(MirBbOperation {
             kind,
             place: place.local,
-        });
+        })
     }
 }
 
@@ -158,16 +172,20 @@ impl MirDataflowFacts {
             MirDirection::Forward,
             |loc| {
                 let mut gk = GenKillTrans::new(body.locals.len());
-                MirBbOperationVisitor(s, |op| match op.kind {
-                    MirBbOperationKind::Provide => {
-                        gk.push_gen(op.place);
+                MirBbOperationVisitor(s, |op| {
+                    match op.kind {
+                        MirBbOperationKind::Provide => {
+                            gk.push_gen(op.place);
+                        }
+                        MirBbOperationKind::Steal => {
+                            gk.push_kill(op.place);
+                        }
+                        MirBbOperationKind::Use => {
+                            // (no effect)
+                        }
                     }
-                    MirBbOperationKind::Steal => {
-                        gk.push_kill(op.place);
-                    }
-                    MirBbOperationKind::Use => {
-                        // (no effect)
-                    }
+
+                    ControlFlow::<Infallible>::Continue(())
                 })
                 .visit_instr(body.lookup(loc));
                 gk
@@ -178,13 +196,17 @@ impl MirDataflowFacts {
         let liveness =
             MirDataflow::new(body, LocalSetJoinOp::Union, MirDirection::Backward, |loc| {
                 let mut gk = GenKillTrans::new(body.locals.len());
-                MirBbOperationVisitor(s, |op| match op.kind {
-                    MirBbOperationKind::Provide => {
-                        gk.push_kill(op.place);
+                MirBbOperationVisitor(s, |op| {
+                    match op.kind {
+                        MirBbOperationKind::Provide => {
+                            gk.push_kill(op.place);
+                        }
+                        MirBbOperationKind::Use | MirBbOperationKind::Steal => {
+                            gk.push_gen(op.place);
+                        }
                     }
-                    MirBbOperationKind::Use | MirBbOperationKind::Steal => {
-                        gk.push_gen(op.place);
-                    }
+
+                    ControlFlow::<Infallible>::Continue(())
                 })
                 .visit_instr(body.lookup(loc));
                 gk
@@ -196,8 +218,76 @@ impl MirDataflowFacts {
         }
     }
 
-    pub fn find_last_thief(&self) {
-        todo!()
+    pub fn find_last_thief(
+        &self,
+        s: &Session,
+        body: &MirBody,
+        location: MirInstructionLoc,
+        place: MirLocalIdx,
+    ) -> MirInstructionLoc {
+        fn find_local_thief(
+            s: &Session,
+            block: &MirBlock,
+            range: impl RangeBounds<MirInstructionIdx>,
+            place: MirLocalIdx,
+        ) -> Option<MirInstructionIdx> {
+            block.instructions_ranged(range).find(|&idx| {
+                MirBbOperationVisitor(s, |op| {
+                    if op.kind == MirBbOperationKind::Steal && op.place == place {
+                        ControlFlow::Break(())
+                    } else {
+                        ControlFlow::Continue(())
+                    }
+                })
+                .visit_instr(block.lookup(idx))
+                .is_break()
+            })
+        }
+
+        if let Some(thief) =
+            find_local_thief(s, &body.blocks[location.block], ..location.instr, place)
+        {
+            return MirInstructionLoc {
+                block: location.block,
+                instr: thief,
+            };
+        }
+
+        let mut dfs_set = FxHashSet::default();
+        let mut dfs_stack = Vec::new();
+        let mut candidates = Vec::new();
+
+        for &pred in body.blocks[location.block].predecessors() {
+            if !dfs_set.insert(pred) {
+                continue;
+            }
+
+            dfs_stack.push(pred);
+        }
+
+        while let Some(curr) = dfs_stack.pop() {
+            if let Some(thief) = find_local_thief(s, &body.blocks[curr], .., place) {
+                candidates.push(MirInstructionLoc {
+                    block: curr,
+                    instr: thief,
+                });
+
+                continue;
+            }
+
+            for &pred in body.blocks[curr].predecessors() {
+                if !dfs_set.insert(pred) {
+                    continue;
+                }
+
+                dfs_stack.push(pred);
+            }
+        }
+
+        candidates
+            .into_iter()
+            .max_by_key(|&instr| body.lookup(instr).span().hi)
+            .unwrap()
     }
 
     pub fn find_next_use(&self) {

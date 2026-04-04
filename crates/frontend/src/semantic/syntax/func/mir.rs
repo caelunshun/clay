@@ -5,9 +5,12 @@ use crate::{
 };
 use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
-use std::slice;
+use std::{
+    ops::{Bound, RangeBounds},
+    slice,
+};
 
-// === MirLocation === //
+// === MirInstructionLoc === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct MirInstructionLoc {
@@ -15,7 +18,7 @@ pub struct MirInstructionLoc {
     pub instr: MirInstructionIdx,
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, Eq, PartialEq)]
 pub struct MirInstructionIdx(pub usize);
 
 #[derive(Debug, Copy, Clone)]
@@ -98,8 +101,27 @@ pub struct MirBlock {
 }
 
 impl MirBlock {
-    pub fn instructions(&self) -> impl Iterator<Item = MirInstructionIdx> + 'static {
-        (0..=self.stmts.len()).map(MirInstructionIdx)
+    pub fn instructions_ranged(
+        &self,
+        range: impl RangeBounds<MirInstructionIdx>,
+    ) -> impl DoubleEndedIterator<Item = MirInstructionIdx> + 'static {
+        let start = match range.start_bound() {
+            Bound::Included(v) => v.0,
+            Bound::Excluded(v) => v.0 + 1,
+            Bound::Unbounded => 0,
+        };
+
+        let end = match range.start_bound() {
+            Bound::Included(v) => v.0 + 1,
+            Bound::Excluded(v) => v.0,
+            Bound::Unbounded => self.stmts.len() + 1,
+        };
+
+        (start..end).map(MirInstructionIdx)
+    }
+
+    pub fn instructions(&self) -> impl DoubleEndedIterator<Item = MirInstructionIdx> + 'static {
+        self.instructions_ranged(..)
     }
 
     pub fn terminator_idx(&self) -> MirInstructionIdx {

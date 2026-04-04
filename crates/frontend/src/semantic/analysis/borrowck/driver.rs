@@ -1,5 +1,5 @@
 use crate::{
-    base::{Diag, Session, arena::Obj},
+    base::{Diag, LeafDiag, Session, arena::Obj},
     semantic::{
         analysis::{
             MirBbOperationKind, MirBbOperationVisitor, MirBuildCtxt, MirDataflowFacts, TyCtxt,
@@ -7,6 +7,7 @@ use crate::{
         syntax::{Crate, FnDef, ItemKind, MirInstructionLoc},
     },
 };
+use std::ops::ControlFlow;
 
 pub struct CrateBorrowCheckVisitor<'tcx> {
     pub tcx: &'tcx TyCtxt,
@@ -71,19 +72,31 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
                 };
                 let occupancy = df.occupancy.state_before(location);
 
-                MirBbOperationVisitor(s, |op| match op.kind {
-                    MirBbOperationKind::Provide => {
-                        // (no-op)
-                    }
-                    MirBbOperationKind::Steal | MirBbOperationKind::Use => {
-                        if !occupancy.contains(op.place) {
-                            Diag::span_err(
-                                block.lookup(instr_idx).span(),
-                                "local used after ownership transferred",
-                            )
-                            .emit();
+                _ = MirBbOperationVisitor(s, |op| {
+                    match op.kind {
+                        MirBbOperationKind::Provide => {
+                            // (no-op)
+                        }
+                        MirBbOperationKind::Steal | MirBbOperationKind::Use => {
+                            if !occupancy.contains(op.place) {
+                                let thief = df.find_last_thief(s, &ctxt.body, location, op.place);
+
+                                Diag::span_err(
+                                    block.lookup(instr_idx).span(),
+                                    "local used after ownership transferred",
+                                )
+                                .child(LeafDiag::span_note(
+                                    ctxt.body.lookup(thief).span(),
+                                    "ownership previously transferred here",
+                                ))
+                                .emit();
+
+                                return ControlFlow::Break(());
+                            }
                         }
                     }
+
+                    ControlFlow::Continue(())
                 })
                 .visit_instr(block.lookup(instr_idx));
             }
