@@ -33,6 +33,14 @@ pub enum MirDirection {
 }
 
 impl MirDirection {
+    pub fn is_forward(self) -> bool {
+        matches!(self, Self::Forward)
+    }
+
+    pub fn is_backward(self) -> bool {
+        matches!(self, Self::Backward)
+    }
+
     pub fn invert(self) -> MirDirection {
         match self {
             MirDirection::Forward => MirDirection::Backward,

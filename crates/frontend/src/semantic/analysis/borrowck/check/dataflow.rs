@@ -286,13 +286,13 @@ impl MirDataflow {
             body: &'a MirBody,
             join_op: LocalSetJoinOp,
             direction: MirDirection,
-            block_states: IndexVec<MirBlockIdx, BlockState>,
+            block_scratch: IndexVec<MirBlockIdx, BlockScratch>,
             work_queue: VecDeque<MirBlockIdx>,
             tmp_set: LocalSet,
         }
 
-        struct BlockState {
-            forward_gen_kill: Vec<GenKillTrans>,
+        struct BlockScratch {
+            natural_gen_kill: Vec<GenKillTrans>,
             natural_total_trans: GenKillTrans,
             results: LocalSet,
             in_work_list: bool,
@@ -300,22 +300,22 @@ impl MirDataflow {
 
         impl Solver<'_> {
             fn update_to_fixpoint(&mut self) {
-                for bb in self.block_states.indices() {
+                for bb in self.block_scratch.indices() {
                     self.mark_dirty(bb);
                 }
 
                 while let Some(curr) = self.work_queue.pop_front() {
-                    self.block_states[curr].in_work_list = false;
+                    self.block_scratch[curr].in_work_list = false;
 
                     // Join predecessors
                     if let Some((first, remaining)) =
                         self.body.blocks[curr].prev(self.direction).split_first()
                     {
-                        self.tmp_set.clone_from(&self.block_states[*first].results);
+                        self.tmp_set.clone_from(&self.block_scratch[*first].results);
 
                         for &flow_from in remaining {
                             self.tmp_set
-                                .join(self.join_op, &self.block_states[flow_from].results);
+                                .join(self.join_op, &self.block_scratch[flow_from].results);
                         }
                     } else {
                         self.tmp_set.clear();
@@ -323,14 +323,14 @@ impl MirDataflow {
 
                     // Transition through the block.
                     self.tmp_set
-                        .trans(&self.block_states[curr].natural_total_trans);
+                        .trans(&self.block_scratch[curr].natural_total_trans);
 
                     // If our set changed, mark the successors as dirty.
-                    if self.tmp_set == self.block_states[curr].results {
+                    if self.tmp_set == self.block_scratch[curr].results {
                         continue;
                     }
 
-                    self.block_states[curr].results.clone_from(&self.tmp_set);
+                    self.block_scratch[curr].results.clone_from(&self.tmp_set);
 
                     for &succ in self.body.blocks[curr].next(self.direction) {
                         self.mark_dirty(succ);
@@ -339,7 +339,7 @@ impl MirDataflow {
             }
 
             fn mark_dirty(&mut self, bb: MirBlockIdx) {
-                if mem::replace(&mut self.block_states[bb].in_work_list, true) {
+                if mem::replace(&mut self.block_scratch[bb].in_work_list, true) {
                     return;
                 }
 
@@ -347,11 +347,11 @@ impl MirDataflow {
             }
         }
 
-        let block_states = body
+        let block_tmp = body
             .blocks
             .iter_enumerated()
             .map(|(block_idx, block)| {
-                let forward_gen_kill = block
+                let mut natural_gen_kill = block
                     .instructions()
                     .map(|instr_idx| {
                         trans(MirInstructionLoc {
@@ -361,23 +361,18 @@ impl MirDataflow {
                     })
                     .collect::<Vec<_>>();
 
+                if direction.is_backward() {
+                    natural_gen_kill.reverse();
+                }
+
                 let mut natural_total_trans = GenKillTrans::new(body.locals.len());
 
-                match direction {
-                    MirDirection::Forward => {
-                        for step in &forward_gen_kill {
-                            natural_total_trans.push_all(step);
-                        }
-                    }
-                    MirDirection::Backward => {
-                        for step in forward_gen_kill.iter().rev() {
-                            natural_total_trans.push_all(step);
-                        }
-                    }
-                };
+                for step in &natural_gen_kill {
+                    natural_total_trans.push_all(step);
+                }
 
-                BlockState {
-                    forward_gen_kill,
+                BlockScratch {
+                    natural_gen_kill,
                     natural_total_trans,
                     results: LocalSet::new(body.locals.len()),
                     in_work_list: false,
@@ -389,13 +384,45 @@ impl MirDataflow {
             body,
             join_op,
             direction,
-            block_states,
+            block_scratch: block_tmp,
             work_queue: VecDeque::new(),
             tmp_set: LocalSet::new(body.locals.len()),
         };
         solver.update_to_fixpoint();
 
-        todo!()
+        let results = body
+            .blocks
+            .iter()
+            .zip(&solver.block_scratch)
+            .map(|(block_def, block_scratch)| {
+                let mut points = Vec::new();
+                let mut next_point = LocalSet::new(body.locals.len());
+
+                // Create the entry-point state.
+                for &pred in block_def.prev(direction) {
+                    next_point.join(join_op, &solver.block_scratch[pred].results);
+                }
+
+                points.push(next_point.clone());
+
+                // Create all intermediate states.
+                for trans in &block_scratch.natural_gen_kill {
+                    next_point.trans(trans);
+                    points.push(next_point.clone());
+                }
+
+                // Reorder into forward direction
+                if direction.is_backward() {
+                    points.reverse();
+                }
+
+                debug_assert_eq!(points.last().unwrap(), &block_scratch.results);
+
+                points
+            })
+            .collect::<IndexVec<MirBlockIdx, _>>();
+
+        Self { results }
     }
 
     pub fn state_before(&self, location: MirInstructionLoc) -> &LocalSet {
