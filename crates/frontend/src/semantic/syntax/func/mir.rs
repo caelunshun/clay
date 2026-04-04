@@ -1,5 +1,5 @@
 use crate::{
-    base::arena::Intern,
+    base::{arena::Intern, syntax::Span},
     parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
     semantic::syntax::Mutability,
 };
@@ -22,6 +22,16 @@ pub struct MirInstructionIdx(pub usize);
 pub enum MirInstructionRef<'a> {
     Stmt(&'a MirStmt),
     Terminator(&'a MirTerminator),
+}
+
+impl MirInstructionRef<'_> {
+    pub fn span(&self) -> Span {
+        match self {
+            MirInstructionRef::Stmt(stmt) => stmt.span,
+            // TODO
+            MirInstructionRef::Terminator(_) => Span::DUMMY,
+        }
+    }
 }
 
 // === MirDirection === //
@@ -126,6 +136,7 @@ impl MirBlock {
 
 #[derive(Debug, Clone)]
 pub struct MirStmt {
+    pub span: Span,
     pub kind: MirStmtKind,
 }
 

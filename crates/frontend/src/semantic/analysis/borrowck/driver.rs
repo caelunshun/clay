@@ -1,5 +1,5 @@
 use crate::{
-    base::{Session, arena::Obj},
+    base::{Diag, Session, arena::Obj},
     semantic::{
         analysis::{
             MirBbOperationKind, MirBbOperationVisitor, MirBuildCtxt, MirDataflowFacts, TyCtxt,
@@ -65,10 +65,11 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
 
         for (block_idx, block) in ctxt.body.blocks.iter_enumerated() {
             for instr_idx in block.instructions() {
-                let occupancy = df.occupancy.state_before(MirInstructionLoc {
+                let location = MirInstructionLoc {
                     block: block_idx,
                     instr: instr_idx,
-                });
+                };
+                let occupancy = df.occupancy.state_before(location);
 
                 MirBbOperationVisitor(s, |op| match op.kind {
                     MirBbOperationKind::Provide => {
@@ -76,10 +77,11 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
                     }
                     MirBbOperationKind::Steal | MirBbOperationKind::Use => {
                         if !occupancy.contains(op.place) {
-                            dbg!(MirInstructionLoc {
-                                block: block_idx,
-                                instr: instr_idx,
-                            });
+                            Diag::span_err(
+                                block.lookup(instr_idx).span(),
+                                "local used after ownership transferred",
+                            )
+                            .emit();
                         }
                     }
                 })

@@ -831,7 +831,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             }
             HirExprKind::Assign(pat, expr) => {
                 let pat_ty = self.check_pat_infer(pat, Some(&mut divergence));
-                self.check_expr_demand(expr, pat_ty).and_do(&mut divergence)
+                self.check_expr_demand(expr, pat_ty).and_do(&mut divergence);
+
+                tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
             }
             HirExprKind::AssignOp(kind, lhs, rhs) => {
                 'assign: {

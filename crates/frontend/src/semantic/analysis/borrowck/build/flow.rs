@@ -1,6 +1,9 @@
-use crate::semantic::syntax::{
-    MirAssignRvalue, MirBlock, MirBlockIdx, MirBody, MirOperand, MirPlace, MirStmt, MirStmtKind,
-    MirTerminator,
+use crate::{
+    base::syntax::Span,
+    semantic::syntax::{
+        MirAssignRvalue, MirBlock, MirBlockIdx, MirBody, MirOperand, MirPlace, MirStmt,
+        MirStmtKind, MirTerminator,
+    },
 };
 
 pub struct MirLowerFlow {
@@ -44,23 +47,37 @@ impl MirLowerFlow {
         body.blocks[curr].stmts.push(stmt);
     }
 
-    pub fn push_assign(&mut self, body: &mut MirBody, lhs: MirPlace, rhs: MirAssignRvalue) {
+    pub fn push_assign(
+        &mut self,
+        body: &mut MirBody,
+        span: Span,
+        lhs: MirPlace,
+        rhs: MirAssignRvalue,
+    ) {
         self.push_stmt(
             body,
             MirStmt {
+                span,
                 kind: MirStmtKind::Assign(Box::new((lhs, rhs))),
             },
         );
     }
 
-    pub fn push_assign_use(&mut self, body: &mut MirBody, lhs: MirPlace, rhs: MirOperand) {
-        self.push_assign(body, lhs, MirAssignRvalue::Use(rhs));
+    pub fn push_assign_use(
+        &mut self,
+        body: &mut MirBody,
+        span: Span,
+        lhs: MirPlace,
+        rhs: MirOperand,
+    ) {
+        self.push_assign(body, span, lhs, MirAssignRvalue::Use(rhs));
     }
 
-    pub fn push_discard(&mut self, body: &mut MirBody, rhs: MirOperand) {
+    pub fn push_discard(&mut self, body: &mut MirBody, span: Span, rhs: MirOperand) {
         self.push_stmt(
             body,
             MirStmt {
+                span,
                 kind: MirStmtKind::Discard(rhs),
             },
         );
