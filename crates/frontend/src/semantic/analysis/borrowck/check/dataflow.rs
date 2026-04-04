@@ -288,7 +288,6 @@ impl MirDataflow {
             direction: MirDirection,
             block_scratch: IndexVec<MirBlockIdx, BlockScratch>,
             work_queue: VecDeque<MirBlockIdx>,
-            tmp_set: LocalSet,
         }
 
         struct BlockScratch {
@@ -300,6 +299,8 @@ impl MirDataflow {
 
         impl Solver<'_> {
             fn update_to_fixpoint(&mut self) {
+                let mut tmp_set = LocalSet::new(self.body.locals.len());
+
                 for bb in self.block_scratch.indices() {
                     self.mark_dirty(bb);
                 }
@@ -308,33 +309,35 @@ impl MirDataflow {
                     self.block_scratch[curr].in_work_list = false;
 
                     // Join predecessors
-                    if let Some((first, remaining)) =
-                        self.body.blocks[curr].prev(self.direction).split_first()
-                    {
-                        self.tmp_set.clone_from(&self.block_scratch[*first].results);
-
-                        for &flow_from in remaining {
-                            self.tmp_set
-                                .join(self.join_op, &self.block_scratch[flow_from].results);
-                        }
-                    } else {
-                        self.tmp_set.clear();
-                    }
+                    self.import_start(curr, &mut tmp_set);
 
                     // Transition through the block.
-                    self.tmp_set
-                        .trans(&self.block_scratch[curr].natural_total_trans);
+                    tmp_set.trans(&self.block_scratch[curr].natural_total_trans);
 
                     // If our set changed, mark the successors as dirty.
-                    if self.tmp_set == self.block_scratch[curr].results {
+                    if tmp_set == self.block_scratch[curr].results {
                         continue;
                     }
 
-                    self.block_scratch[curr].results.clone_from(&self.tmp_set);
+                    self.block_scratch[curr].results.clone_from(&tmp_set);
 
                     for &succ in self.body.blocks[curr].next(self.direction) {
                         self.mark_dirty(succ);
                     }
+                }
+            }
+
+            fn import_start(&self, curr: MirBlockIdx, target: &mut LocalSet) {
+                if let Some((first, remaining)) =
+                    self.body.blocks[curr].prev(self.direction).split_first()
+                {
+                    target.clone_from(&self.block_scratch[*first].results);
+
+                    for &flow_from in remaining {
+                        target.join(self.join_op, &self.block_scratch[flow_from].results);
+                    }
+                } else {
+                    target.clear();
                 }
             }
 
@@ -386,24 +389,18 @@ impl MirDataflow {
             direction,
             block_scratch: block_tmp,
             work_queue: VecDeque::new(),
-            tmp_set: LocalSet::new(body.locals.len()),
         };
         solver.update_to_fixpoint();
 
-        let results = body
-            .blocks
-            .iter()
-            .zip(&solver.block_scratch)
-            .map(|(block_def, block_scratch)| {
+        let results = solver
+            .block_scratch
+            .iter_enumerated()
+            .map(|(block_idx, block_scratch)| {
                 let mut points = Vec::new();
                 let mut next_point = LocalSet::new(body.locals.len());
 
                 // Create the entry-point state.
-                for &pred in block_def.prev(direction) {
-                    next_point.join(join_op, &solver.block_scratch[pred].results);
-                }
-
-                points.push(next_point.clone());
+                solver.import_start(block_idx, &mut next_point);
 
                 // Create all intermediate states.
                 for trans in &block_scratch.natural_gen_kill {
@@ -411,12 +408,12 @@ impl MirDataflow {
                     points.push(next_point.clone());
                 }
 
+                debug_assert_eq!(points.last().unwrap(), &block_scratch.results);
+
                 // Reorder into forward direction
                 if direction.is_backward() {
                     points.reverse();
                 }
-
-                debug_assert_eq!(points.last().unwrap(), &block_scratch.results);
 
                 points
             })
@@ -426,11 +423,11 @@ impl MirDataflow {
     }
 
     pub fn state_before(&self, location: MirInstructionLoc) -> &LocalSet {
-        todo!()
+        &self.results[location.block][location.instr.0]
     }
 
     pub fn state_after(&self, location: MirInstructionLoc) -> &LocalSet {
-        todo!()
+        &self.results[location.block][location.instr.0 + 1]
     }
 }
 
@@ -521,9 +518,9 @@ impl LocalSet {
         self.set[idx.index() / 64] &= !(1 << (idx.index() % 64));
     }
 
-    pub fn trans(&mut self, gk_set: &GenKillTrans) {
-        self.union(&gk_set.gen_set);
-        self.remove_all(&gk_set.kill_set);
+    pub fn trans(&mut self, trans: &GenKillTrans) {
+        self.union(&trans.gen_set);
+        self.remove_all(&trans.kill_set);
     }
 
     pub fn clear(&mut self) {
