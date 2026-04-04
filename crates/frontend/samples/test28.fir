@@ -1,5 +1,5 @@
 fn main() {
-    let x = 0;
+    let x;
 
     if false {
         x;

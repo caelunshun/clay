@@ -79,17 +79,25 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
                         }
                         MirBbOperationKind::Steal | MirBbOperationKind::Use => {
                             if !occupancy.contains(op.place) {
-                                let thief = df.find_last_thief(s, &ctxt.body, location, op.place);
-
-                                Diag::span_err(
-                                    block.lookup(instr_idx).span(),
-                                    "local used after ownership transferred",
-                                )
-                                .child(LeafDiag::span_note(
-                                    ctxt.body.lookup(thief).span(),
-                                    "ownership previously transferred here",
-                                ))
-                                .emit();
+                                if let Some(thief) =
+                                    df.find_last_thief(s, &ctxt.body, location, op.place)
+                                {
+                                    Diag::span_err(
+                                        block.lookup(instr_idx).span(),
+                                        "local used after ownership transferred",
+                                    )
+                                    .child(LeafDiag::span_note(
+                                        ctxt.body.lookup(thief).span(),
+                                        "ownership previously transferred here",
+                                    ))
+                                    .emit();
+                                } else {
+                                    Diag::span_err(
+                                        block.lookup(instr_idx).span(),
+                                        "local used before initialized",
+                                    )
+                                    .emit();
+                                }
 
                                 return ControlFlow::Break(());
                             }

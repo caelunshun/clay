@@ -712,10 +712,8 @@ impl SimpleTySet {
             | TyKind::UniversalVar(_)
             | TyKind::Simple(
                 SimpleTyKind::Bool | SimpleTyKind::Char | SimpleTyKind::Str | SimpleTyKind::Never,
-            ) => self.contains(SimpleTySet::OTHER),
-
-            // `ELAB_UNIVERSAL_VAR` should not be overridden unexpectedly.
-            TyKind::Error(_) => !self.contains(SimpleTySet::ELAB_UNIVERSAL_VAR),
+            )
+            | TyKind::Error(_) => self.contains(SimpleTySet::OTHER),
 
             TyKind::InferVar(_) => unreachable!(),
         }

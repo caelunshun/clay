@@ -224,7 +224,7 @@ impl MirDataflowFacts {
         body: &MirBody,
         location: MirInstructionLoc,
         place: MirLocalIdx,
-    ) -> MirInstructionLoc {
+    ) -> Option<MirInstructionLoc> {
         fn find_local_thief(
             s: &Session,
             block: &MirBlock,
@@ -247,10 +247,10 @@ impl MirDataflowFacts {
         if let Some(thief) =
             find_local_thief(s, &body.blocks[location.block], ..location.instr, place)
         {
-            return MirInstructionLoc {
+            return Some(MirInstructionLoc {
                 block: location.block,
                 instr: thief,
-            };
+            });
         }
 
         let mut dfs_set = FxHashSet::default();
@@ -287,7 +287,6 @@ impl MirDataflowFacts {
         candidates
             .into_iter()
             .max_by_key(|&instr| body.lookup(instr).span().hi)
-            .unwrap()
     }
 
     pub fn find_next_use(&self) {
