@@ -7,6 +7,25 @@ use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
 use std::slice;
 
+// === MirLocation === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct MirInstructionLoc {
+    pub block: MirBlockIdx,
+    pub instr: MirInstructionIdx,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct MirInstructionIdx(pub usize);
+
+#[derive(Debug, Copy, Clone)]
+pub enum MirInstructionRef<'a> {
+    Stmt(&'a MirStmt),
+    Terminator(&'a MirTerminator),
+}
+
+// === MirDirection === //
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum MirDirection {
     Forward,
@@ -22,6 +41,8 @@ impl MirDirection {
     }
 }
 
+// === MirLocal === //
+
 define_index_type! {
     pub struct MirLocalIdx = u32;
 }
@@ -29,6 +50,11 @@ define_index_type! {
 impl MirLocalIdx {
     pub const RETURN: Self = MirLocalIdx { _raw: 0 };
 }
+
+#[derive(Debug, Clone)]
+pub struct MirLocal {}
+
+// === MirBody === //
 
 define_index_type! {
     pub struct MirBlockIdx = u32;
@@ -40,8 +66,11 @@ pub struct MirBody {
     pub blocks: IndexVec<MirBlockIdx, MirBlock>,
 }
 
-#[derive(Debug, Clone)]
-pub struct MirLocal {}
+impl MirBody {
+    pub fn lookup(&self, loc: MirInstructionLoc) -> MirInstructionRef<'_> {
+        self.blocks[loc.block].lookup(loc.instr)
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct MirBlock {
@@ -51,12 +80,32 @@ pub struct MirBlock {
 }
 
 impl MirBlock {
+    pub fn instructions(&self) -> impl Iterator<Item = MirInstructionIdx> + 'static {
+        (0..=self.stmts.len()).map(MirInstructionIdx)
+    }
+
+    pub fn terminator_idx(&self) -> MirInstructionIdx {
+        MirInstructionIdx(self.stmts.len())
+    }
+
+    pub fn lookup(&self, idx: MirInstructionIdx) -> MirInstructionRef<'_> {
+        if idx.0 == self.stmts.len() {
+            MirInstructionRef::Terminator(&self.terminator)
+        } else {
+            MirInstructionRef::Stmt(&self.stmts[idx.0])
+        }
+    }
+
     pub fn successors(&self) -> &[MirBlockIdx] {
         self.terminator.successors()
     }
 
     pub fn predecessors(&self) -> &[MirBlockIdx] {
         &self.predecessors
+    }
+
+    pub fn prev(&self, direction: MirDirection) -> &[MirBlockIdx] {
+        self.next(direction.invert())
     }
 
     pub fn next(&self, direction: MirDirection) -> &[MirBlockIdx] {

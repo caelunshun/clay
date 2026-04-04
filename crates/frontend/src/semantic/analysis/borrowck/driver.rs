@@ -60,6 +60,6 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
         ctxt.lower_entry();
 
         let df = MirDataflowFacts::compute(self.tcx, &ctxt.body);
-        dbg!(df);
+        // TODO
     }
 }

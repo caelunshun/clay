@@ -3,8 +3,9 @@ use crate::{
     semantic::{
         analysis::TyCtxt,
         syntax::{
-            MirAssignRvalue, MirBlock, MirBlockIdx, MirBody, MirLocalIdx, MirOperand, MirPlace,
-            MirStmt, MirStmtKind, MirTerminator,
+            MirAssignRvalue, MirBlockIdx, MirBody, MirDirection, MirInstructionLoc,
+            MirInstructionRef, MirLocalIdx, MirOperand, MirPlace, MirStmt, MirStmtKind,
+            MirTerminator,
         },
     },
 };
@@ -27,132 +28,123 @@ pub enum MirBbOperationKind {
     Use,
 }
 
-pub fn mir_block_operations(bb: &MirBlock, s: &Session) -> SmallVec<[MirBbOperation; 2]> {
-    struct Collector<'a> {
-        collector: SmallVec<[MirBbOperation; 2]>,
-        s: &'a Session,
-    }
+struct MirBbOperationVisitor<'a, F>(&'a Session, F)
+where
+    F: FnMut(MirBbOperation);
 
-    impl Collector<'_> {
-        fn visit_block(&mut self, bb: &MirBlock) {
-            for stmt in &bb.stmts {
-                self.visit_stmt(stmt);
-            }
-
-            self.visit_terminator(&bb.terminator);
-        }
-
-        fn visit_stmt(&mut self, stmt: &MirStmt) {
-            match &stmt.kind {
-                MirStmtKind::Assign(stmt) => {
-                    let (lhs, rhs) = &**stmt;
-                    self.visit_rvalue(rhs);
-                    self.visit_place(MirBbOperationKind::Provide, *lhs);
-                }
-                MirStmtKind::Discard(operand) => {
-                    self.visit_operand(*operand);
-                }
-            }
-        }
-
-        fn visit_terminator(&mut self, terminator: &MirTerminator) {
-            match terminator {
-                MirTerminator::Call {
-                    callee,
-                    args,
-                    destination,
-                    target: _,
-                } => {
-                    self.visit_operand(*callee);
-                    self.visit_operand_list(args);
-                    self.visit_place(MirBbOperationKind::Provide, *destination);
-                }
-                MirTerminator::Drop { place, target: _ } => {
-                    self.visit_place(MirBbOperationKind::Steal, *place);
-                }
-                MirTerminator::Switch {
-                    scrutinee,
-                    targets: _,
-                } => {
-                    self.visit_place(MirBbOperationKind::Use, *scrutinee);
-                }
-                MirTerminator::Goto(_)
-                | MirTerminator::Return
-                | MirTerminator::Unreachable
-                | MirTerminator::Placeholder => {
-                    // (empty)
-                }
-            }
-        }
-
-        fn visit_rvalue(&mut self, rvalue: &MirAssignRvalue) {
-            match rvalue {
-                MirAssignRvalue::Tuple(elems) => {
-                    self.visit_operand_list(elems);
-                }
-                MirAssignRvalue::Use(operand) => {
-                    self.visit_operand(*operand);
-                }
-                MirAssignRvalue::Ref(_muta, place) => {
-                    self.visit_place(MirBbOperationKind::Use, *place);
-                }
-                MirAssignRvalue::Zst | MirAssignRvalue::Literal(_) => {
-                    // (empty)
-                }
-                MirAssignRvalue::BinaryOp(_kind, operands) => {
-                    let (lhs, rhs) = &**operands;
-                    self.visit_operand(*lhs);
-                    self.visit_operand(*rhs);
-                }
-                MirAssignRvalue::UnaryOp(_kind, operand) => {
-                    self.visit_operand(*operand);
-                }
-                MirAssignRvalue::Discriminant(place) => {
-                    self.visit_place(MirBbOperationKind::Use, *place);
-                }
-            }
-        }
-
-        fn visit_operand_list(&mut self, operands: &[MirOperand]) {
-            for &operand in operands {
-                self.visit_operand(operand);
-            }
-        }
-
-        fn visit_operand(&mut self, operand: MirOperand) {
-            match operand {
-                MirOperand::Copy(place) => self.visit_place(MirBbOperationKind::Use, place),
-                MirOperand::Move(place) => self.visit_place(MirBbOperationKind::Steal, place),
-            }
-        }
-
-        fn visit_place(&mut self, kind: MirBbOperationKind, place: MirPlace) {
-            // TODO
-            if !place.projections.r(self.s).is_empty() {
-                return;
-            }
-
-            self.collector.push(MirBbOperation {
-                kind,
-                place: place.local,
-            });
+impl<F> MirBbOperationVisitor<'_, F>
+where
+    F: FnMut(MirBbOperation),
+{
+    fn visit_instruction(&mut self, instr: MirInstructionRef<'_>) {
+        match instr {
+            MirInstructionRef::Stmt(stmt) => self.visit_stmt(stmt),
+            MirInstructionRef::Terminator(terminator) => self.visit_terminator(terminator),
         }
     }
 
-    let mut collector = Collector {
-        collector: SmallVec::new(),
-        s,
-    };
-    collector.visit_block(bb);
-    collector.collector
+    fn visit_stmt(&mut self, stmt: &MirStmt) {
+        match &stmt.kind {
+            MirStmtKind::Assign(stmt) => {
+                let (lhs, rhs) = &**stmt;
+                self.visit_rvalue(rhs);
+                self.visit_place(MirBbOperationKind::Provide, *lhs);
+            }
+            MirStmtKind::Discard(operand) => {
+                self.visit_operand(*operand);
+            }
+        }
+    }
+
+    fn visit_terminator(&mut self, terminator: &MirTerminator) {
+        match terminator {
+            MirTerminator::Call {
+                callee,
+                args,
+                destination,
+                target: _,
+            } => {
+                self.visit_operand(*callee);
+                self.visit_operand_list(args);
+                self.visit_place(MirBbOperationKind::Provide, *destination);
+            }
+            MirTerminator::Drop { place, target: _ } => {
+                self.visit_place(MirBbOperationKind::Steal, *place);
+            }
+            MirTerminator::Switch {
+                scrutinee,
+                targets: _,
+            } => {
+                self.visit_place(MirBbOperationKind::Use, *scrutinee);
+            }
+            MirTerminator::Goto(_)
+            | MirTerminator::Return
+            | MirTerminator::Unreachable
+            | MirTerminator::Placeholder => {
+                // (empty)
+            }
+        }
+    }
+
+    fn visit_rvalue(&mut self, rvalue: &MirAssignRvalue) {
+        match rvalue {
+            MirAssignRvalue::Tuple(elems) => {
+                self.visit_operand_list(elems);
+            }
+            MirAssignRvalue::Use(operand) => {
+                self.visit_operand(*operand);
+            }
+            MirAssignRvalue::Ref(_muta, place) => {
+                self.visit_place(MirBbOperationKind::Use, *place);
+            }
+            MirAssignRvalue::Zst | MirAssignRvalue::Literal(_) => {
+                // (empty)
+            }
+            MirAssignRvalue::BinaryOp(_kind, operands) => {
+                let (lhs, rhs) = &**operands;
+                self.visit_operand(*lhs);
+                self.visit_operand(*rhs);
+            }
+            MirAssignRvalue::UnaryOp(_kind, operand) => {
+                self.visit_operand(*operand);
+            }
+            MirAssignRvalue::Discriminant(place) => {
+                self.visit_place(MirBbOperationKind::Use, *place);
+            }
+        }
+    }
+
+    fn visit_operand_list(&mut self, operands: &[MirOperand]) {
+        for &operand in operands {
+            self.visit_operand(operand);
+        }
+    }
+
+    fn visit_operand(&mut self, operand: MirOperand) {
+        match operand {
+            MirOperand::Copy(place) => self.visit_place(MirBbOperationKind::Use, place),
+            MirOperand::Move(place) => self.visit_place(MirBbOperationKind::Steal, place),
+        }
+    }
+
+    fn visit_place(&mut self, kind: MirBbOperationKind, place: MirPlace) {
+        // TODO
+        if !place.projections.r(self.0).is_empty() {
+            return;
+        }
+
+        (self.1)(MirBbOperation {
+            kind,
+            place: place.local,
+        });
+    }
 }
 
 // === MirDataflowFacts === //
 
-#[derive(Debug, Clone)]
 pub struct MirDataflowFacts {
-    pub occupied: IndexVec<MirBlockIdx, LocalSet>,
-    pub live: IndexVec<MirBlockIdx, LocalSet>,
+    pub occupied: MirDataflow,
+    pub liveness: MirDataflow,
 }
 
 impl MirDataflowFacts {
@@ -160,66 +152,45 @@ impl MirDataflowFacts {
         let s = &tcx.session;
 
         // Compute occupancy
-        let occupied = {
-            let mut df = DataflowBuilder::new(
-                DataflowJoinOp::Intersect,
-                body.blocks.len(),
-                body.locals.len(),
-            );
-
-            for (curr, curr_state) in body.blocks.iter_enumerated() {
-                for &succ in curr_state.terminator.successors() {
-                    df.add_successor(curr, succ);
-                }
-
-                dbg!(curr);
-
-                for op in dbg!(mir_block_operations(curr_state, s)) {
-                    match op.kind {
-                        MirBbOperationKind::Provide => {
-                            df.add_gen(curr, op.place);
-                        }
-                        MirBbOperationKind::Steal => {
-                            df.add_kill(curr, op.place);
-                        }
-                        MirBbOperationKind::Use => {
-                            // (ignored)
-                        }
+        let occupied = MirDataflow::new(
+            body,
+            LocalSetJoinOp::Intersect,
+            MirDirection::Forward,
+            |loc| {
+                let mut gk = GenKillTrans::new(body.locals.len());
+                MirBbOperationVisitor(s, |op| match op.kind {
+                    MirBbOperationKind::Provide => {
+                        gk.push_gen(op.place);
                     }
-                }
-
-                dbg!(&curr_state.terminator);
-            }
-
-            df.compute()
-        };
+                    MirBbOperationKind::Steal => {
+                        gk.push_kill(op.place);
+                    }
+                    MirBbOperationKind::Use => {
+                        // (no effect)
+                    }
+                })
+                .visit_instruction(body.lookup(loc));
+                gk
+            },
+        );
 
         // Compute liveness
-        let live = {
-            let mut df =
-                DataflowBuilder::new(DataflowJoinOp::Union, body.blocks.len(), body.locals.len());
-
-            for (curr, curr_state) in body.blocks.iter_enumerated() {
-                for &succ in curr_state.terminator.successors() {
-                    df.add_successor(succ, curr);
-                }
-
-                for &op in mir_block_operations(curr_state, s).iter().rev() {
-                    match op.kind {
-                        MirBbOperationKind::Provide => {
-                            df.add_kill(curr, op.place);
-                        }
-                        MirBbOperationKind::Steal | MirBbOperationKind::Use => {
-                            df.add_gen(curr, op.place);
-                        }
+        let liveness =
+            MirDataflow::new(body, LocalSetJoinOp::Union, MirDirection::Backward, |loc| {
+                let mut gk = GenKillTrans::new(body.locals.len());
+                MirBbOperationVisitor(s, |op| match op.kind {
+                    MirBbOperationKind::Provide => {
+                        gk.push_kill(op.place);
                     }
-                }
-            }
+                    MirBbOperationKind::Use | MirBbOperationKind::Steal => {
+                        gk.push_gen(op.place);
+                    }
+                })
+                .visit_instruction(body.lookup(loc));
+                gk
+            });
 
-            df.compute()
-        };
-
-        Self { occupied, live }
+        Self { occupied, liveness }
     }
 
     pub fn find_last_thief(&self) {
@@ -297,112 +268,78 @@ impl MirDataflowFacts {
     }
 }
 
-// === DataflowBuilder === //
+// === MirDataflow === //
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum DataflowJoinOp {
-    Union,
-    Intersect,
+#[derive(Clone)]
+pub struct MirDataflow {
+    results: IndexVec<MirBlockIdx, Vec<LocalSet>>,
 }
 
-pub struct DataflowBuilder {
-    join_op: DataflowJoinOp,
-    blocks: IndexVec<MirBlockIdx, DataflowBlock>,
-    local_count: usize,
-}
-
-struct DataflowBlock {
-    gen_set: LocalSet,
-    kill_set: LocalSet,
-    flow_from: Vec<MirBlockIdx>,
-    flow_into: Vec<MirBlockIdx>,
-    in_work_list: bool,
-}
-
-impl DataflowBuilder {
-    pub fn new(join_op: DataflowJoinOp, bb_count: usize, local_count: usize) -> Self {
-        Self {
-            join_op,
-            blocks: IndexVec::from_iter((0..bb_count).map(|_| DataflowBlock {
-                gen_set: LocalSet::new(local_count),
-                kill_set: LocalSet::new(local_count),
-                flow_from: Vec::new(),
-                flow_into: Vec::new(),
-                in_work_list: false,
-            })),
-            local_count,
-        }
-    }
-
-    pub fn add_successor(&mut self, src: MirBlockIdx, dst: MirBlockIdx) {
-        self.blocks[src].flow_into.push(dst);
-        self.blocks[dst].flow_from.push(src);
-    }
-
-    pub fn add_gen(&mut self, bb: MirBlockIdx, local: MirLocalIdx) {
-        let bb = &mut self.blocks[bb];
-        bb.gen_set.add(local);
-        bb.kill_set.remove(local);
-    }
-
-    pub fn add_kill(&mut self, bb: MirBlockIdx, local: MirLocalIdx) {
-        let bb = &mut self.blocks[bb];
-        bb.kill_set.add(local);
-        bb.gen_set.remove(local);
-    }
-
-    #[must_use]
-    pub fn compute(self) -> IndexVec<MirBlockIdx, LocalSet> {
-        struct Worker {
-            dataflow: DataflowBuilder,
-            block_outputs: IndexVec<MirBlockIdx, LocalSet>,
+impl MirDataflow {
+    pub fn new(
+        body: &MirBody,
+        join_op: LocalSetJoinOp,
+        direction: MirDirection,
+        mut trans: impl FnMut(MirInstructionLoc) -> GenKillTrans,
+    ) -> Self {
+        struct Solver<'a> {
+            body: &'a MirBody,
+            join_op: LocalSetJoinOp,
+            direction: MirDirection,
+            block_states: IndexVec<MirBlockIdx, BlockState>,
             work_queue: VecDeque<MirBlockIdx>,
             tmp_set: LocalSet,
         }
 
-        impl Worker {
+        struct BlockState {
+            forward_gen_kill: Vec<GenKillTrans>,
+            natural_total_trans: GenKillTrans,
+            results: LocalSet,
+            in_work_list: bool,
+        }
+
+        impl Solver<'_> {
             fn update_to_fixpoint(&mut self) {
-                for bb in self.block_outputs.indices() {
+                for bb in self.block_states.indices() {
                     self.mark_dirty(bb);
                 }
 
                 while let Some(curr) = self.work_queue.pop_front() {
-                    self.dataflow.blocks[curr].in_work_list = false;
+                    self.block_states[curr].in_work_list = false;
 
                     // Join predecessors
                     if let Some((first, remaining)) =
-                        self.dataflow.blocks[curr].flow_from.split_first()
+                        self.body.blocks[curr].prev(self.direction).split_first()
                     {
-                        self.tmp_set.clone_from(&self.block_outputs[*first]);
+                        self.tmp_set.clone_from(&self.block_states[*first].results);
 
                         for &flow_from in remaining {
                             self.tmp_set
-                                .join(self.dataflow.join_op, &self.block_outputs[flow_from]);
+                                .join(self.join_op, &self.block_states[flow_from].results);
                         }
                     } else {
                         self.tmp_set.clear();
                     }
 
                     // Transition through the block.
-                    self.tmp_set.union(&self.dataflow.blocks[curr].gen_set);
                     self.tmp_set
-                        .remove_all(&self.dataflow.blocks[curr].kill_set);
+                        .trans(&self.block_states[curr].natural_total_trans);
 
                     // If our set changed, mark the successors as dirty.
-                    if self.tmp_set == self.block_outputs[curr] {
+                    if self.tmp_set == self.block_states[curr].results {
                         continue;
                     }
 
-                    self.block_outputs[curr].clone_from(&self.tmp_set);
+                    self.block_states[curr].results.clone_from(&self.tmp_set);
 
-                    for succ_idx in 0..self.dataflow.blocks[curr].flow_into.len() {
-                        self.mark_dirty(self.dataflow.blocks[curr].flow_into[succ_idx]);
+                    for &succ in self.body.blocks[curr].next(self.direction) {
+                        self.mark_dirty(succ);
                     }
                 }
             }
 
             fn mark_dirty(&mut self, bb: MirBlockIdx) {
-                if mem::replace(&mut self.dataflow.blocks[bb].in_work_list, true) {
+                if mem::replace(&mut self.block_states[bb].in_work_list, true) {
                     return;
                 }
 
@@ -410,24 +347,114 @@ impl DataflowBuilder {
             }
         }
 
-        let mut worker = Worker {
-            block_outputs: self
-                .blocks
-                .iter()
-                .map(|_| LocalSet::new(self.local_count))
-                .collect::<IndexVec<MirBlockIdx, LocalSet>>(),
-            tmp_set: LocalSet::new(self.local_count),
+        let block_states = body
+            .blocks
+            .iter_enumerated()
+            .map(|(block_idx, block)| {
+                let forward_gen_kill = block
+                    .instructions()
+                    .map(|instr_idx| {
+                        trans(MirInstructionLoc {
+                            block: block_idx,
+                            instr: instr_idx,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+
+                let mut natural_total_trans = GenKillTrans::new(body.locals.len());
+
+                match direction {
+                    MirDirection::Forward => {
+                        for step in &forward_gen_kill {
+                            natural_total_trans.push_all(step);
+                        }
+                    }
+                    MirDirection::Backward => {
+                        for step in forward_gen_kill.iter().rev() {
+                            natural_total_trans.push_all(step);
+                        }
+                    }
+                };
+
+                BlockState {
+                    forward_gen_kill,
+                    natural_total_trans,
+                    results: LocalSet::new(body.locals.len()),
+                    in_work_list: false,
+                }
+            })
+            .collect();
+
+        let mut solver = Solver {
+            body,
+            join_op,
+            direction,
+            block_states,
             work_queue: VecDeque::new(),
-            dataflow: self,
+            tmp_set: LocalSet::new(body.locals.len()),
         };
+        solver.update_to_fixpoint();
 
-        worker.update_to_fixpoint();
+        todo!()
+    }
 
-        worker.block_outputs
+    pub fn state_before(&self, location: MirInstructionLoc) -> &LocalSet {
+        todo!()
+    }
+
+    pub fn state_after(&self, location: MirInstructionLoc) -> &LocalSet {
+        todo!()
     }
 }
 
 // === LocalSet === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum LocalSetJoinOp {
+    Union,
+    Intersect,
+}
+
+#[derive(Eq, PartialEq)]
+pub struct GenKillTrans {
+    gen_set: LocalSet,
+    kill_set: LocalSet,
+}
+
+impl GenKillTrans {
+    pub fn new(local_count: usize) -> Self {
+        Self {
+            gen_set: LocalSet::new(local_count),
+            kill_set: LocalSet::new(local_count),
+        }
+    }
+
+    pub fn push_gen(&mut self, idx: MirLocalIdx) {
+        self.gen_set.add(idx);
+        self.kill_set.remove(idx);
+    }
+
+    pub fn push_kill(&mut self, idx: MirLocalIdx) {
+        self.kill_set.add(idx);
+        self.gen_set.remove(idx);
+    }
+
+    pub fn push_all(&mut self, other: &GenKillTrans) {
+        self.gen_set.union(&other.gen_set);
+        self.kill_set.remove_all(&other.gen_set);
+
+        self.gen_set.remove_all(&other.kill_set);
+        self.kill_set.union(&other.kill_set);
+    }
+
+    pub fn gen_set(&self) -> &LocalSet {
+        &self.gen_set
+    }
+
+    pub fn kill_set(&self) -> &LocalSet {
+        &self.kill_set
+    }
+}
 
 #[derive(Eq, PartialEq)]
 pub struct LocalSet {
@@ -467,6 +494,11 @@ impl LocalSet {
         self.set[idx.index() / 64] &= !(1 << (idx.index() % 64));
     }
 
+    pub fn trans(&mut self, gk_set: &GenKillTrans) {
+        self.union(&gk_set.gen_set);
+        self.remove_all(&gk_set.kill_set);
+    }
+
     pub fn clear(&mut self) {
         for v in &mut self.set {
             *v = 0u64;
@@ -478,10 +510,10 @@ impl LocalSet {
         self.set[idx.index() / 64] & 1 << (idx.index() % 64) != 0
     }
 
-    pub fn join(&mut self, op: DataflowJoinOp, other: &LocalSet) {
+    pub fn join(&mut self, op: LocalSetJoinOp, other: &LocalSet) {
         match op {
-            DataflowJoinOp::Union => self.union(other),
-            DataflowJoinOp::Intersect => self.intersect(other),
+            LocalSetJoinOp::Union => self.union(other),
+            LocalSetJoinOp::Intersect => self.intersect(other),
         }
     }
 
@@ -520,48 +552,5 @@ impl LocalSet {
                 next_word_idx += 1;
             }
         })
-    }
-}
-
-// === Tests === //
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn simple_dataflow_liveness_1() {
-        let mut df = DataflowBuilder::new(DataflowJoinOp::Union, 3, 1);
-
-        df.add_successor(MirBlockIdx::from_usize(0), MirBlockIdx::from_usize(1));
-        df.add_successor(MirBlockIdx::from_usize(1), MirBlockIdx::from_usize(2));
-        df.add_successor(MirBlockIdx::from_usize(2), MirBlockIdx::from_usize(0));
-
-        df.add_gen(MirBlockIdx::from_usize(0), MirLocalIdx::from_usize(0));
-        df.add_kill(MirBlockIdx::from_usize(2), MirLocalIdx::from_usize(0));
-
-        let df = df.compute();
-
-        assert!(df[0].contains(MirLocalIdx::from_usize(0)));
-        assert!(df[1].contains(MirLocalIdx::from_usize(0)));
-        assert!(!df[2].contains(MirLocalIdx::from_usize(0)));
-    }
-
-    #[test]
-    fn simple_dataflow_liveness_2() {
-        let mut df = DataflowBuilder::new(DataflowJoinOp::Union, 3, 1);
-
-        df.add_successor(MirBlockIdx::from_usize(0), MirBlockIdx::from_usize(1));
-        df.add_successor(MirBlockIdx::from_usize(1), MirBlockIdx::from_usize(2));
-        df.add_successor(MirBlockIdx::from_usize(2), MirBlockIdx::from_usize(0));
-
-        df.add_gen(MirBlockIdx::from_usize(0), MirLocalIdx::from_usize(0));
-        df.add_kill(MirBlockIdx::from_usize(1), MirLocalIdx::from_usize(0));
-
-        let df = df.compute();
-
-        assert!(df[0].contains(MirLocalIdx::from_usize(0)));
-        assert!(!df[1].contains(MirLocalIdx::from_usize(0)));
-        assert!(!df[2].contains(MirLocalIdx::from_usize(0)));
     }
 }
