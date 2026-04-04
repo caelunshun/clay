@@ -1,8 +1,10 @@
 use crate::{
     base::{Session, arena::Obj},
     semantic::{
-        analysis::{MirBuildCtxt, MirDataflowFacts, TyCtxt},
-        syntax::{Crate, FnDef, ItemKind},
+        analysis::{
+            MirBbOperationKind, MirBbOperationVisitor, MirBuildCtxt, MirDataflowFacts, TyCtxt,
+        },
+        syntax::{Crate, FnDef, ItemKind, MirInstructionLoc},
     },
 };
 
@@ -60,6 +62,29 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
         ctxt.lower_entry();
 
         let df = MirDataflowFacts::compute(self.tcx, &ctxt.body);
-        // TODO
+
+        for (block_idx, block) in ctxt.body.blocks.iter_enumerated() {
+            for instr_idx in block.instructions() {
+                let occupancy = df.occupancy.state_before(MirInstructionLoc {
+                    block: block_idx,
+                    instr: instr_idx,
+                });
+
+                MirBbOperationVisitor(s, |op| match op.kind {
+                    MirBbOperationKind::Provide => {
+                        // (no-op)
+                    }
+                    MirBbOperationKind::Steal | MirBbOperationKind::Use => {
+                        if !occupancy.contains(op.place) {
+                            dbg!(MirInstructionLoc {
+                                block: block_idx,
+                                instr: instr_idx,
+                            });
+                        }
+                    }
+                })
+                .visit_instr(block.lookup(instr_idx));
+            }
+        }
     }
 }

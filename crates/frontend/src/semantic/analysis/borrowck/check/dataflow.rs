@@ -28,7 +28,7 @@ pub enum MirBbOperationKind {
     Use,
 }
 
-struct MirBbOperationVisitor<'a, F>(&'a Session, F)
+pub struct MirBbOperationVisitor<'a, F>(pub &'a Session, pub F)
 where
     F: FnMut(MirBbOperation);
 
@@ -36,14 +36,14 @@ impl<F> MirBbOperationVisitor<'_, F>
 where
     F: FnMut(MirBbOperation),
 {
-    fn visit_instruction(&mut self, instr: MirInstructionRef<'_>) {
+    pub fn visit_instr(&mut self, instr: MirInstructionRef<'_>) {
         match instr {
             MirInstructionRef::Stmt(stmt) => self.visit_stmt(stmt),
             MirInstructionRef::Terminator(terminator) => self.visit_terminator(terminator),
         }
     }
 
-    fn visit_stmt(&mut self, stmt: &MirStmt) {
+    pub fn visit_stmt(&mut self, stmt: &MirStmt) {
         match &stmt.kind {
             MirStmtKind::Assign(stmt) => {
                 let (lhs, rhs) = &**stmt;
@@ -56,7 +56,7 @@ where
         }
     }
 
-    fn visit_terminator(&mut self, terminator: &MirTerminator) {
+    pub fn visit_terminator(&mut self, terminator: &MirTerminator) {
         match terminator {
             MirTerminator::Call {
                 callee,
@@ -86,7 +86,7 @@ where
         }
     }
 
-    fn visit_rvalue(&mut self, rvalue: &MirAssignRvalue) {
+    pub fn visit_rvalue(&mut self, rvalue: &MirAssignRvalue) {
         match rvalue {
             MirAssignRvalue::Tuple(elems) => {
                 self.visit_operand_list(elems);
@@ -114,20 +114,20 @@ where
         }
     }
 
-    fn visit_operand_list(&mut self, operands: &[MirOperand]) {
+    pub fn visit_operand_list(&mut self, operands: &[MirOperand]) {
         for &operand in operands {
             self.visit_operand(operand);
         }
     }
 
-    fn visit_operand(&mut self, operand: MirOperand) {
+    pub fn visit_operand(&mut self, operand: MirOperand) {
         match operand {
             MirOperand::Copy(place) => self.visit_place(MirBbOperationKind::Use, place),
             MirOperand::Move(place) => self.visit_place(MirBbOperationKind::Steal, place),
         }
     }
 
-    fn visit_place(&mut self, kind: MirBbOperationKind, place: MirPlace) {
+    pub fn visit_place(&mut self, kind: MirBbOperationKind, place: MirPlace) {
         // TODO
         if !place.projections.r(self.0).is_empty() {
             return;
@@ -143,7 +143,7 @@ where
 // === MirDataflowFacts === //
 
 pub struct MirDataflowFacts {
-    pub occupied: MirDataflow,
+    pub occupancy: MirDataflow,
     pub liveness: MirDataflow,
 }
 
@@ -152,7 +152,7 @@ impl MirDataflowFacts {
         let s = &tcx.session;
 
         // Compute occupancy
-        let occupied = MirDataflow::new(
+        let occupancy = MirDataflow::new(
             body,
             LocalSetJoinOp::Intersect,
             MirDirection::Forward,
@@ -169,7 +169,7 @@ impl MirDataflowFacts {
                         // (no effect)
                     }
                 })
-                .visit_instruction(body.lookup(loc));
+                .visit_instr(body.lookup(loc));
                 gk
             },
         );
@@ -186,11 +186,14 @@ impl MirDataflowFacts {
                         gk.push_gen(op.place);
                     }
                 })
-                .visit_instruction(body.lookup(loc));
+                .visit_instr(body.lookup(loc));
                 gk
             });
 
-        Self { occupied, liveness }
+        Self {
+            occupancy,
+            liveness,
+        }
     }
 
     pub fn find_last_thief(&self) {
