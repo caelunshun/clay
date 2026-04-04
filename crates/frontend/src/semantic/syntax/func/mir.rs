@@ -111,7 +111,7 @@ impl MirBlock {
             Bound::Unbounded => 0,
         };
 
-        let end = match range.start_bound() {
+        let end = match range.end_bound() {
             Bound::Included(v) => v.0 + 1,
             Bound::Excluded(v) => v.0,
             Bound::Unbounded => self.stmts.len() + 1,

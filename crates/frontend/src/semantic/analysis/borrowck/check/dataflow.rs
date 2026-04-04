@@ -231,7 +231,7 @@ impl MirDataflowFacts {
             range: impl RangeBounds<MirInstructionIdx>,
             place: MirLocalIdx,
         ) -> Option<MirInstructionIdx> {
-            block.instructions_ranged(range).find(|&idx| {
+            block.instructions_ranged(range).rev().find(|&idx| {
                 MirBbOperationVisitor(s, |op| {
                     if op.kind == MirBbOperationKind::Steal && op.place == place {
                         ControlFlow::Break(())
