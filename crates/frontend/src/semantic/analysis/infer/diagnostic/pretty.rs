@@ -122,7 +122,10 @@ impl<'a, 'tcx> ClauseCxPrinter<'a, 'tcx> {
                 }
             }
             TyKind::FnDef(_def) => todo!(),
-            TyKind::HrtbVar(_debruijn) => todo!(),
+            TyKind::HrtbVar(debruijn) => {
+                // TODO
+                write!(&mut self.out, "HrtbVar({:?})", debruijn.0).unwrap();
+            }
             TyKind::InferVar(var) => {
                 let set = self
                     .ccx()
