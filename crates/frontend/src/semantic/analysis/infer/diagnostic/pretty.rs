@@ -231,7 +231,7 @@ impl<'a, 'tcx> ClauseCxPrinter<'a, 'tcx> {
                         }
                     }
 
-                    self.out.push('>');
+                    self.out.push_str("> ");
                 }
 
                 self.push_trait_spec(binder.inner);

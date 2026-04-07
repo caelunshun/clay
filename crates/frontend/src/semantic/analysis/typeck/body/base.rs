@@ -278,7 +278,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         let mut divergence = Divergence::MayDiverge;
         let ty = match *expr.r(s).kind {
             HirExprKind::Array(elems) => {
-                let elem = if !elems.r(s).is_empty() {
+                let elem = if elems.r(s).is_empty() {
                     self.ccx_mut().fresh_ty_infer(
                         HrtbUniverse::ROOT,
                         InferTyVarSourceInfo::EmptyArrayElem {
