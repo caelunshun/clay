@@ -11,13 +11,19 @@ use crate::{
         token::Ident,
     },
     semantic::syntax::{
-        AdtCtorFieldIdx, AdtCtorInstance, FnItem, FnLocal, Mutability, SpannedTraitSpec, SpannedTy,
+        AdtCtorFieldIdx, AdtCtorInstance, FnItem, Mutability, SpannedTraitSpec, SpannedTy,
         SpannedTyOrReList,
     },
     symbol,
 };
 
 // === Pattern === //
+
+#[derive(Debug, Clone)]
+pub struct HirLocal {
+    pub mutability: Mutability,
+    pub name: Ident,
+}
 
 #[derive(Debug, Clone)]
 pub struct HirPat {
@@ -31,7 +37,7 @@ pub enum HirPatKind {
     Hole,
 
     /// Define a new local. Only available in defining patterns.
-    Binding(AstOptMutability, Obj<FnLocal>, Option<Obj<HirPat>>),
+    Binding(AstOptMutability, Obj<HirLocal>, Option<Obj<HirPat>>),
 
     /// Match an array or slice of patterns.
     Slice(HirPatListFrontAndTail),
@@ -171,7 +177,7 @@ pub enum HirExprKind {
     Index(Obj<HirExpr>, Obj<HirExpr>),
     Range(HirRangeExpr),
     LocalSelf,
-    Local(Obj<FnLocal>),
+    Local(Obj<HirLocal>),
     AddrOf(Mutability, Obj<HirExpr>),
     Break {
         label: HirLabelledBlock,

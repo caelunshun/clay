@@ -9,9 +9,10 @@ use crate::{
             TyFoldable, TyFolder, TyFolderInfallibleExt,
         },
         syntax::{
-            FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirPat, HirPatKind, HirStmt,
-            InferTyVarSourceInfo, RelationMode, SpannedTy, ThirBlock, ThirExpr, ThirExprKind,
-            ThirLetStmt, ThirPat, ThirPatKind, ThirStmt, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirLocal, HirPat, HirPatKind,
+            HirStmt, InferTyVarSourceInfo, RelationMode, SpannedTy, ThirBlock, ThirExpr,
+            ThirExprKind, ThirLetStmt, ThirLocal, ThirPat, ThirPatKind, ThirStmt, TraitParam,
+            TraitSpec, Ty, TyKind, TyOrRe,
         },
     },
 };
@@ -201,7 +202,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             HirExprKind::Index(obj, obj1) => todo!(),
             HirExprKind::Range(hir_range_expr) => todo!(),
             HirExprKind::LocalSelf => todo!(),
-            HirExprKind::Local(local) => ThirExprKind::Local(local),
+            HirExprKind::Local(local) => ThirExprKind::Local(self.confirm_local(local)),
             HirExprKind::AddrOf(muta, expr) => ThirExprKind::AddrOf(muta, self.confirm_expr(expr)),
             HirExprKind::Break { label, value } => todo!(),
             HirExprKind::Continue(hir_labelled_block) => todo!(),
@@ -294,7 +295,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             HirPatKind::Hole => ThirPatKind::Wild,
             HirPatKind::Binding(by_ref, local, binding) => ThirPatKind::Binding {
                 by_ref: by_ref.as_explicit().map(|v| v.strip_span()),
-                local,
+                local: self.confirm_local(local),
                 and_bind: self.confirm_opt_pat(binding),
             },
             HirPatKind::Slice(hir_pat_list_front_and_tail) => todo!(),
@@ -318,6 +319,29 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             },
             s,
         )
+    }
+
+    fn confirm_local(&mut self, local: Obj<HirLocal>) -> Obj<ThirLocal> {
+        let s = self.session();
+
+        if let Some(&confirmation) = self.local_confirmations.get(&local) {
+            return confirmation;
+        }
+
+        let ty = self.type_of_local(local);
+        let ty = self.confirm_ty(ty);
+        let thir = Obj::new(
+            ThirLocal {
+                mutability: local.r(s).mutability,
+                name: local.r(s).name,
+                ty,
+            },
+            s,
+        );
+
+        self.local_confirmations.insert(local, thir);
+
+        thir
     }
 
     fn confirm_ty<T: TyFoldable>(&mut self, ty: T) -> T {

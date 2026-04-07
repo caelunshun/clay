@@ -15,11 +15,11 @@ use crate::{
         },
         lower::generics::normalize_positional_generic_arity,
         syntax::{
-            AdtInstance, Crate, Divergence, FnDef, FnInstanceInner, FnLocal, HirBlock, HirExpr,
-            HirExprKind, HirLabelTargetKind, HirLabelledBlock, HirPat, HirStmt, HirStructExpr,
+            AdtInstance, Crate, Divergence, FnDef, FnInstanceInner, HirBlock, HirExpr, HirExprKind,
+            HirLabelTargetKind, HirLabelledBlock, HirLocal, HirPat, HirStmt, HirStructExpr,
             InferTyVar, InferTyVarSourceInfo, Item, Re, RelationMode, SimpleTyKind, SimpleTySet,
-            SpannedFnInstanceView, SpannedFnOwnerView, SpannedTyView, TraitParam, TraitSpec, Ty,
-            TyAndDivergence, TyKind, TyOrRe,
+            SpannedFnInstanceView, SpannedFnOwnerView, SpannedTyView, ThirLocal, TraitParam,
+            TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
     utils::hash::FxHashMap,
@@ -103,7 +103,8 @@ pub struct BodyCtxt<'a, 'tcx> {
     pub ccx: &'a mut ClauseCx<'tcx>,
     pub def: Obj<FnDef>,
     pub import_env: ClauseImportEnvRef<'a>,
-    pub local_types: FxHashMap<Obj<FnLocal>, Ty>,
+    pub local_types: FxHashMap<Obj<HirLocal>, Ty>,
+    pub local_confirmations: FxHashMap<Obj<HirLocal>, Obj<ThirLocal>>,
     pub block_break_demands: FxHashMap<HirLabelledBlock, Option<Ty>>,
     pub int_infers: Vec<InferTyVar>,
     pub expr_types_pre_coerce: FxHashMap<Obj<HirExpr>, Ty>,
@@ -140,6 +141,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             def,
             import_env,
             local_types: FxHashMap::default(),
+            local_confirmations: FxHashMap::default(),
             block_break_demands: FxHashMap::default(),
             int_infers: Vec::new(),
             expr_types_pre_coerce: FxHashMap::default(),
@@ -182,7 +184,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         self.ccx.ucx_mut()
     }
 
-    pub fn type_of_local(&mut self, local: Obj<FnLocal>) -> Ty {
+    pub fn type_of_local(&mut self, local: Obj<HirLocal>) -> Ty {
         let s = self.session();
 
         *self.local_types.entry(local).or_insert_with(|| {

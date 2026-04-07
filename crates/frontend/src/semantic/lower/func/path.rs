@@ -16,7 +16,7 @@ use crate::{
             modules::{FrozenModuleResolver, PathResolver, StepResolveError},
         },
         syntax::{
-            AdtCtorInstance, AdtItem, AdtKind, EnumVariantItem, FnItem, FnLocal, Item, ItemKind,
+            AdtCtorInstance, AdtItem, AdtKind, EnumVariantItem, FnItem, HirLocal, Item, ItemKind,
             SpannedAdtInstanceView, SpannedTraitParamList, SpannedTraitSpec, SpannedTraitSpecView,
             SpannedTy, SpannedTyOrReList, SpannedTyView, TraitItem, TypeGeneric,
         },
@@ -102,7 +102,7 @@ pub enum ExprPathResolution {
     SelfLocal,
 
     /// A reference to a local defined within the current function.
-    Local(Obj<FnLocal>),
+    Local(Obj<HirLocal>),
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -260,7 +260,7 @@ pub enum PathResolvedValue {
 
 #[derive(Debug, Copy, Clone)]
 pub enum PathResolvedLocal {
-    Local(Obj<FnLocal>),
+    Local(Obj<HirLocal>),
     LowerSelf,
 }
 

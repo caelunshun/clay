@@ -6,8 +6,8 @@ use crate::{
     semantic::{
         analysis::{MirLowerFlow, TyCtxt},
         syntax::{
-            FnDef, FnLocal, MirAssignRvalue, MirBody, MirLocal, MirLocalIdx, MirOperand, MirPlace,
-            MirPlaceElem, ThirExpr, ThirExprKind, ThirPat, ThirPatKind, ThirStmt,
+            FnDef, MirAssignRvalue, MirBody, MirLocal, MirLocalIdx, MirOperand, MirPlace,
+            MirPlaceElem, ThirExpr, ThirExprKind, ThirLocal, ThirPat, ThirPatKind, ThirStmt,
         },
     },
     utils::hash::FxHashMap,
@@ -18,7 +18,7 @@ pub struct MirBuildCtxt<'tcx> {
     pub tcx: &'tcx TyCtxt,
     pub def: Obj<FnDef>,
     pub body: MirBody,
-    pub locals: FxHashMap<Obj<FnLocal>, MirLocalIdx>,
+    pub locals: FxHashMap<Obj<ThirLocal>, MirLocalIdx>,
 }
 
 #[derive(Debug, Clone)]
@@ -75,7 +75,7 @@ impl<'tcx> MirBuildCtxt<'tcx> {
         flow.push_return(&mut self.body);
     }
 
-    pub fn lower_local(&mut self, local: Obj<FnLocal>) -> MirPlace {
+    pub fn lower_local(&mut self, local: Obj<ThirLocal>) -> MirPlace {
         let tcx = self.tcx();
 
         MirPlace {

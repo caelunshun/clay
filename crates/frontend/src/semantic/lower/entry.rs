@@ -28,9 +28,9 @@ use crate::{
         syntax::{
             AdtCtor, AdtCtorField, AdtCtorFieldIdx, AdtCtorOwner, AdtCtorSyntax, AdtEnumVariant,
             AdtEnumVariantIdx, AdtItem, AdtKind, AdtKindEnum, AdtKindStruct, AnyGeneric, Crate,
-            EnumVariantItem, FnArg, FnDef, FnDefOwner, FnItem, FnLocal, GenericBinder,
-            HirLabelledBlock, ImplItem, Item, ItemKind, LangItems, ModuleItem, RegionGeneric,
-            SpannedTy, TraitItem, TyKind, TypeAliasItem, TypeGeneric, Visibility,
+            EnumVariantItem, FnArg, FnDef, FnDefOwner, FnItem, GenericBinder, HirLabelledBlock,
+            HirLocal, ImplItem, Item, ItemKind, LangItems, ModuleItem, RegionGeneric, SpannedTy,
+            TraitItem, TyKind, TypeAliasItem, TypeGeneric, Visibility,
         },
     },
     symbol,
@@ -1199,7 +1199,7 @@ pub struct IntraItemLowerCtxt<'tcx> {
     pub target: Obj<Item>,
     pub generic_ty_names: NameResolver<Obj<TypeGeneric>>,
     pub generic_re_names: NameResolver<Obj<RegionGeneric>>,
-    pub func_local_names: NameResolver<Obj<FnLocal>>,
+    pub func_local_names: NameResolver<Obj<HirLocal>>,
     pub block_label_names: NameResolver<HirLabelledBlock>,
     pub innermost_block: Option<HirLabelledBlock>,
 }

@@ -1,10 +1,20 @@
 use crate::{
     base::{ErrorGuaranteed, arena::Obj, syntax::Span},
-    parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
-    semantic::syntax::{FnLocal, Mutability, Ty},
+    parse::{
+        ast::{AstBinOpKind, AstLit, AstUnOpKind},
+        token::Ident,
+    },
+    semantic::syntax::{Mutability, Ty},
 };
 
 // === Pattern === //
+
+#[derive(Debug, Clone)]
+pub struct ThirLocal {
+    pub mutability: Mutability,
+    pub name: Ident,
+    pub ty: Ty,
+}
 
 #[derive(Debug, Clone)]
 pub struct ThirPat {
@@ -18,7 +28,7 @@ pub enum ThirPatKind {
     Wild,
     Binding {
         by_ref: Option<Mutability>,
-        local: Obj<FnLocal>,
+        local: Obj<ThirLocal>,
         and_bind: Option<Obj<ThirPat>>,
     },
     Deref(Obj<ThirPat>),
@@ -49,7 +59,7 @@ pub enum ThirExprKind {
     Loop(Obj<ThirBlock>),
     AddrOf(Mutability, Obj<ThirExpr>),
     Call(Obj<ThirExpr>, Obj<[Obj<ThirExpr>]>),
-    Local(Obj<FnLocal>),
+    Local(Obj<ThirLocal>),
     If {
         cond: Obj<ThirExpr>,
         truthy: Obj<ThirExpr>,

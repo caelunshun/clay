@@ -6,8 +6,8 @@ use crate::{
     },
     parse::token::Ident,
     semantic::syntax::{
-        GenericBinder, HirExpr, HirPat, ImplItem, Item, Mutability, SpannedTy, ThirExpr, TraitItem,
-        Ty, Visibility,
+        GenericBinder, HirExpr, HirPat, ImplItem, Item, SpannedTy, ThirExpr, TraitItem, Ty,
+        Visibility,
     },
 };
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
@@ -56,12 +56,6 @@ pub struct FnArg {
     pub span: Span,
     pub pat: Obj<HirPat>,
     pub ty: SpannedTy,
-}
-
-#[derive(Debug, Clone)]
-pub struct FnLocal {
-    pub mutability: Mutability,
-    pub name: Ident,
 }
 
 // === Divergence === //
