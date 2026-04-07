@@ -66,6 +66,11 @@ impl DebruijnTop {
     }
 
     #[must_use]
+    pub const fn try_lookup_relative(&self, index: DebruijnRelative) -> Option<DebruijnAbsolute> {
+        self.head.try_lookup_outer(index)
+    }
+
+    #[must_use]
     pub const fn lookup_relative(&self, index: DebruijnRelative) -> DebruijnAbsolute {
         self.head.lookup_outer(index)
     }
@@ -169,11 +174,14 @@ impl DebruijnAbsolute {
 
     #[must_use]
     pub const fn lookup_outer(self, relative: DebruijnRelative) -> DebruijnAbsolute {
-        DebruijnAbsolute {
-            raw: self
-                .raw
-                .checked_sub(relative.raw.get())
-                .expect(OVERFLOW_ERR),
+        self.try_lookup_outer(relative).expect(OVERFLOW_ERR)
+    }
+
+    #[must_use]
+    pub const fn try_lookup_outer(self, relative: DebruijnRelative) -> Option<DebruijnAbsolute> {
+        match self.raw.checked_sub(relative.raw.get()) {
+            Some(raw) => Some(DebruijnAbsolute { raw }),
+            None => None,
         }
     }
 }

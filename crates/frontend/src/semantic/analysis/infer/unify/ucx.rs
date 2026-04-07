@@ -1,17 +1,19 @@
 use crate::{
-    base::{ErrorGuaranteed, Session, arena::HasInterner},
+    base::{ErrorGuaranteed, Session, analysis::DebruijnTop, arena::HasInterner},
     semantic::{
         analysis::{
-            ClauseCx, ClauseOrigin, HrtbUniverse, InferTyLeaksError, InferTyOccursError,
-            TyAndSimpleTySetUnifyError, TyAndTyUnifyCulprit, TyAndTyUnifyError, TyCtxt, TyFolder,
-            TyFolderExt, TyFolderInfallibleExt, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt,
+            ClauseCx, ClauseOrigin, HrtbUniverse, InferTyLeaksHrtbVarError,
+            InferTyLeaksUniversalError, InferTyOccursError, TyAndSimpleTySetUnifyError,
+            TyAndTyUnifyCulprit, TyAndTyUnifyError, TyCtxt, TyFoldable, TyFolder, TyFolderExt,
+            TyFolderInfallibleExt, TyVisitable, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt,
             infer::unify::{regions::ReUnifyTracker, types::TyUnifyTracker},
         },
         syntax::{
             FnInstanceInner, FnOwner, HrtbBinderKind, InferTyVar, InferTyVarSourceInfo, Mutability,
-            Re, ReVariance, RelationDirection, RelationMode, SimpleTySet, SpannedTy, SpannedTyView,
-            TraitClause, TraitClauseList, TraitParam, TraitParamList, Ty, TyKind, TyOrRe,
-            UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
+            Re, ReVariance, RelationDirection, RelationMode, SimpleTySet, SpannedHrtbBinder,
+            SpannedTy, SpannedTyView, TraitClause, TraitClauseList, TraitParam, TraitParamList, Ty,
+            TyKind, TyOrRe, UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar,
+            UniversalTyVarSourceInfo,
         },
     },
 };
@@ -586,12 +588,12 @@ impl<'tcx> UnifyCx<'tcx> {
 
         // Perform HRTB universe check. First, let's ensure that the root isn't being unified with
         // a type beyond its maximum universe.
-        struct HrtbLeakVisitor<'a, 'tcx> {
+        struct HrtbLeakUniversalVisitor<'a, 'tcx> {
             ucx: &'a UnifyCx<'tcx>,
             max_universe: &'a HrtbUniverse,
         }
 
-        impl<'tcx> TyVisitor<'tcx> for HrtbLeakVisitor<'_, 'tcx> {
+        impl<'tcx> TyVisitor<'tcx> for HrtbLeakUniversalVisitor<'_, 'tcx> {
             type Break = UniversalTyVar;
 
             fn tcx(&self) -> &'tcx TyCtxt {
@@ -622,18 +624,83 @@ impl<'tcx> UnifyCx<'tcx> {
             }
         }
 
-        let leak_result = HrtbLeakVisitor {
+        let leak_universal_result = HrtbLeakUniversalVisitor {
             ucx: self,
             max_universe: &lhs_max_universe,
         }
         .visit_fallible(rhs_ty);
 
-        if let ControlFlow::Break(leaks_universal) = leak_result {
-            return Err(TyAndTyUnifyCulprit::Leaks(InferTyLeaksError {
-                var: lhs_var_root,
-                max_universe: lhs_max_universe,
-                leaks_universal,
-            }));
+        if let ControlFlow::Break(leaks_universal) = leak_universal_result {
+            return Err(TyAndTyUnifyCulprit::LeaksUniversal(
+                InferTyLeaksUniversalError {
+                    var: lhs_var_root,
+                    max_universe: lhs_max_universe,
+                    leaks_universal,
+                },
+            ));
+        }
+
+        // We should also ensure that inference variables never have unbound HRTB variables. This is
+        // an acceptable restriction which doesn't have to take universes into account because we
+        // will only ever get into this scenario if we attempt to unify two `Trait` objects. All
+        // inference variables in such a unification will necessarily be outside of the binder and
+        // so we can treat them identically to a leaked universal.
+        struct HrtbLeakHrtbVarVisitor<'a, 'tcx> {
+            ucx: &'a UnifyCx<'tcx>,
+            debruijn: DebruijnTop,
+        }
+
+        impl<'tcx> TyVisitor<'tcx> for HrtbLeakHrtbVarVisitor<'_, 'tcx> {
+            type Break = ();
+
+            fn tcx(&self) -> &'tcx TyCtxt {
+                self.ucx.tcx()
+            }
+
+            fn visit_hrtb_binder<T: Copy + TyVisitable + TyFoldable>(
+                &mut self,
+                binder: SpannedHrtbBinder<T>,
+            ) -> ControlFlow<Self::Break> {
+                let s = self.session();
+
+                let HrtbBinderKind::Imported(imported) = binder.value.kind else {
+                    unreachable!()
+                };
+
+                self.debruijn.move_inwards_by(imported.r(s).len());
+                self.visit_fallible(binder.value.inner)?;
+                self.debruijn.move_outwards_by(imported.r(s).len());
+                ControlFlow::Continue(())
+            }
+
+            fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
+                match ty.view(self.tcx()) {
+                    SpannedTyView::InferVar(_) => {
+                        // We can skip this because, by invariant, inference variables will never
+                        // contain these types of variables.
+                    }
+                    SpannedTyView::HrtbVar(var) => {
+                        if self.debruijn.try_lookup_relative(var.0).is_none() {
+                            return ControlFlow::Break(());
+                        }
+                    }
+                    _ => self.walk_spanned_fallible(ty)?,
+                }
+
+                ControlFlow::Continue(())
+            }
+        }
+
+        let leak_hrtb_var_result = HrtbLeakHrtbVarVisitor {
+            ucx: self,
+            debruijn: DebruijnTop::ZERO,
+        }
+        .visit_fallible(rhs_ty);
+
+        if leak_hrtb_var_result.is_break() {
+            return Err(TyAndTyUnifyCulprit::LeaksHrtbVar(
+                InferTyLeaksHrtbVarError { var: lhs_var_root },
+            ));
         }
 
         // The operation is valid. Perform it!

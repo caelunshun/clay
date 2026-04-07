@@ -1,0 +1,6 @@
+error: could not unify `(&'_ for<T> crate::Trait<((),)>,)` and `(&'_ for<T> crate::Trait<(HrtbVar(DebruijnRelative { raw: 1 }),)>,)`
+[
+    Coercion {
+        expr_span: crates/frontend/samples/test29.fir:30:28-31,
+    },
+]

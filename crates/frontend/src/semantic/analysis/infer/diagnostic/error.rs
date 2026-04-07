@@ -406,7 +406,8 @@ pub enum TyAndTyUnifyCulprit {
     ClauseLists(TraitClauseList, TraitClauseList),
     Params(TraitParam, TraitParam),
     Occurs(InferTyOccursError),
-    Leaks(InferTyLeaksError),
+    LeaksUniversal(InferTyLeaksUniversalError),
+    LeaksHrtbVar(InferTyLeaksHrtbVarError),
     NotPermittedSolid(SimpleTySet, Ty),
     NotPermittedFloating(SimpleTySet, SimpleTySet),
     UnifyDenied,
@@ -419,10 +420,15 @@ pub struct InferTyOccursError {
 }
 
 #[derive(Debug, Clone)]
-pub struct InferTyLeaksError {
+pub struct InferTyLeaksUniversalError {
     pub var: InferTyVar,
     pub max_universe: HrtbUniverse,
     pub leaks_universal: UniversalTyVar,
+}
+
+#[derive(Debug, Clone)]
+pub struct InferTyLeaksHrtbVarError {
+    pub var: InferTyVar,
 }
 
 #[derive(Debug, Clone)]
