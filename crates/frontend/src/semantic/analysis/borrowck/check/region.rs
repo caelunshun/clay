@@ -6,9 +6,9 @@ use crate::{
             TyCtxt, TyFolderInfallibleExt as _, TyVisitorInfallibleExt as _, UnifyCxMode,
         },
         syntax::{
-            FnDef, IntKind, MirAssignRvalue, MirBody, MirLocal, MirLocalIdx, MirOperand, MirPlace,
-            MirStmt, MirStmtKind, MirTerminator, Re, RelationDirection, RelationMode, SimpleTyKind,
-            Ty, TyKind, UniversalReVarSourceInfo,
+            FnDef, IntKind, MirAssignRvalue, MirBody, MirLocalIdx, MirOperand, MirPlace, MirStmt,
+            MirStmtKind, MirTerminator, Re, RelationDirection, RelationMode, SimpleTyKind, Ty,
+            TyKind, UniversalReVarSourceInfo,
         },
     },
 };
@@ -17,6 +17,8 @@ use index_vec::IndexVec;
 impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
     pub fn borrow_check(&self, def: Obj<FnDef>, body: &MirBody, df: &MirDataflowFacts) {
         let tcx = self.tcx();
+
+        let mut body = body.clone();
 
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
 
@@ -37,7 +39,7 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
             .collect::<IndexVec<MirLocalIdx, Re>>();
 
         for (rhs_local, &rhs_re) in local_universals.iter_enumerated() {
-            let lhs_outlive_mask = df.can_outlive_rhs_mask(body, rhs_local);
+            let lhs_outlive_mask = df.can_outlive_rhs_mask(&body, rhs_local);
 
             for lhs_local in lhs_outlive_mask.iter() {
                 let lhs_re = local_universals[lhs_local];
@@ -48,9 +50,7 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
 
         // Import all types within the body and ensure that they're well-formed. Additionally, local
         // types must outlive the universal region associated with that local.
-        let mut imported_locals = body.locals.clone();
-
-        for (local_idx, local) in imported_locals.iter_mut_enumerated() {
+        for (local_idx, local) in body.locals.iter_mut_enumerated() {
             local.ty = ccx
                 .importer(
                     &ClauseOrigin::empty_report(),
@@ -69,12 +69,13 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
             );
         }
 
+        // TODO: Import
+
         // Type-check the MIR body to create obligations between regions.
         RegionCheckCx {
             ccx: &mut ccx,
-            imported_locals: &imported_locals,
+            body: &body,
             local_universals: &local_universals,
-            body,
         }
         .check_body();
 
@@ -84,9 +85,8 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
 
 pub struct RegionCheckCx<'a, 'tcx> {
     pub ccx: &'a mut ClauseCx<'tcx>,
-    pub imported_locals: &'a IndexVec<MirLocalIdx, MirLocal>,
-    pub local_universals: &'a IndexVec<MirLocalIdx, Re>,
     pub body: &'a MirBody,
+    pub local_universals: &'a IndexVec<MirLocalIdx, Re>,
 }
 
 impl<'tcx> RegionCheckCx<'_, 'tcx> {
@@ -114,8 +114,8 @@ impl<'tcx> RegionCheckCx<'_, 'tcx> {
 
                 self.ccx.oblige_ty_unifies_ty(
                     ClauseOrigin::empty_report(),
-                    lhs_ty,
                     rhs_ty,
+                    lhs_ty,
                     RelationMode::LhsOntoRhs,
                 );
             }
@@ -156,7 +156,7 @@ impl<'tcx> RegionCheckCx<'_, 'tcx> {
 
     fn check_place(&mut self, place: MirPlace) -> Ty {
         // TODO: projections
-        self.imported_locals[place.local].ty
+        self.body.locals[place.local].ty
     }
 
     fn check_operand(&mut self, operand: MirOperand) -> Ty {
@@ -185,7 +185,6 @@ impl<'tcx> RegionCheckCx<'_, 'tcx> {
                     pointee,
                 ))
             }
-            // TODO: Ensure that the body is imported before doing this.
             MirAssignRvalue::Zst(ty) => *ty,
             MirAssignRvalue::Literal(ty, _lit) => *ty,
             MirAssignRvalue::BinaryOp(_op_kind, sides) => {

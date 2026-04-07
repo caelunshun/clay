@@ -80,6 +80,8 @@ impl ReUnifyTracker {
             return;
         };
 
+        eprintln!("constrain {lhs:?}: {rhs:?}");
+
         self.constraints.push(ReConstraint { lhs, rhs, origin });
     }
 
@@ -91,9 +93,11 @@ impl ReUnifyTracker {
         match dir {
             RelationDirection::LhsOntoRhs => {
                 self.universals[universal].allowed_outlive.push(other);
+                eprintln!("permit {universal:?}: {other:?}");
             }
             RelationDirection::RhsOntoLhs => {
                 self.universals[universal].allowed_outlived_by.push(other);
+                eprintln!("permit {other:?}: {universal:?}");
             }
         }
     }

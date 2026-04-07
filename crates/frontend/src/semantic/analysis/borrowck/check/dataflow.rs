@@ -357,13 +357,14 @@ impl MirDataflowFacts {
         // ```
 
         let mut outlive_mask = LocalSet::new(body.locals.len());
+        outlive_mask.fill();
 
         let mut push = |occupancy: &LocalSet, liveness: &LocalSet| {
             if !liveness.contains(rhs) {
                 return;
             }
 
-            outlive_mask.remove_all(occupancy);
+            outlive_mask.intersect(occupancy);
         };
 
         for (block_idx, block) in body.blocks.iter_enumerated() {
