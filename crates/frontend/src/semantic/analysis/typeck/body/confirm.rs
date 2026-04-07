@@ -6,13 +6,14 @@ use crate::{
     semantic::{
         analysis::{
             BodyCtxt, ClauseCxPrinter, ClauseOrigin, FloatingInferVar, OverloadResolution, TyCtxt,
-            TyFoldable, TyFolder, TyFolderInfallibleExt,
+            TyFoldable, TyFolder, TyFolderInfallibleExt, TyVisitable,
         },
         syntax::{
             FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirLocal, HirPat, HirPatKind,
-            HirStmt, InferTyVarSourceInfo, RelationMode, SpannedTy, ThirBlock, ThirExpr,
-            ThirExprKind, ThirLetStmt, ThirLocal, ThirPat, ThirPatKind, ThirStmt, TraitParam,
-            TraitSpec, Ty, TyKind, TyOrRe,
+            HirStmt, HrtbBinder, InferTyVarSourceInfo, Re, RelationMode, SpannedHrtbBinder,
+            SpannedRe, SpannedTy, ThirBlock, ThirExpr, ThirExprKind, ThirLetStmt, ThirLocal,
+            ThirPat, ThirPatKind, ThirStmt, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            TyProjection, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -356,6 +357,14 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 self.bcx.tcx()
             }
 
+            fn fold_hrtb_binder<T: Copy + TyVisitable + TyFoldable>(
+                &mut self,
+                binder: SpannedHrtbBinder<T>,
+            ) -> Result<HrtbBinder<T>, Self::Error> {
+                // TODO: Fold whatever we need to.
+                Ok(self.super_(binder.value))
+            }
+
             fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
                 let s = self.session();
                 let tcx = self.tcx();
@@ -364,61 +373,113 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     return Ok(self.super_(ty.value));
                 };
 
-                if let Ok(resolved) = self.bcx.ccx().lookup_ty_infer_var_without_poll(var) {
-                    return Ok(self.super_(resolved));
-                }
+                let Ok(resolved) = self.bcx.ccx().lookup_ty_infer_var_without_poll(var) else {
+                    let var_ty = tcx.intern(TyKind::InferVar(var));
 
-                let var_ty = tcx.intern(TyKind::InferVar(var));
+                    let error = match self.bcx.ccx().lookup_infer_ty_src_info(var) {
+                        InferTyVarSourceInfo::Local { name } => Diag::span_err(
+                            name.span,
+                            format_args!("type annotations required for local `{}`", name.text),
+                        )
+                        .emit(),
+                        InferTyVarSourceInfo::HrtbLhsInstantiation { span }
+                        | InferTyVarSourceInfo::ProjectionResult { span, .. }
+                        | InferTyVarSourceInfo::Imported { span, .. }
+                        | InferTyVarSourceInfo::FunctionArgs { span }
+                        | InferTyVarSourceInfo::FunctionRetVal { span }
+                        | InferTyVarSourceInfo::MethodReceiver { span }
+                        | InferTyVarSourceInfo::OverloadedResult { span }
+                        | InferTyVarSourceInfo::Literal { span }
+                        | InferTyVarSourceInfo::ForLoopElem { span }
+                        | InferTyVarSourceInfo::IndexInput { span }
+                        | InferTyVarSourceInfo::IndexOutput { span }
+                        | InferTyVarSourceInfo::LoopDemand { span }
+                        | InferTyVarSourceInfo::HoleInfer { span }
+                        | InferTyVarSourceInfo::PatType { span }
+                        | InferTyVarSourceInfo::EmptyArrayElem { span } => Diag::span_err(
+                            span,
+                            format_args!("failed to infer a type of `{}`", {
+                                let mut printer = ClauseCxPrinter::new(self.bcx.ccx());
+                                printer.push_ty(var_ty);
+                                printer.finish()
+                            }),
+                        )
+                        .emit(),
 
-                let error = match self.bcx.ccx().lookup_infer_ty_src_info(var) {
-                    InferTyVarSourceInfo::Local { name } => Diag::span_err(
-                        name.span,
-                        format_args!("type annotations required for local `{}`", name.text),
-                    )
-                    .emit(),
-                    InferTyVarSourceInfo::HrtbLhsInstantiation { span }
-                    | InferTyVarSourceInfo::ProjectionResult { span, .. }
-                    | InferTyVarSourceInfo::Imported { span, .. }
-                    | InferTyVarSourceInfo::FunctionArgs { span }
-                    | InferTyVarSourceInfo::FunctionRetVal { span }
-                    | InferTyVarSourceInfo::MethodReceiver { span }
-                    | InferTyVarSourceInfo::OverloadedResult { span }
-                    | InferTyVarSourceInfo::Literal { span }
-                    | InferTyVarSourceInfo::ForLoopElem { span }
-                    | InferTyVarSourceInfo::IndexInput { span }
-                    | InferTyVarSourceInfo::IndexOutput { span }
-                    | InferTyVarSourceInfo::LoopDemand { span }
-                    | InferTyVarSourceInfo::HoleInfer { span }
-                    | InferTyVarSourceInfo::PatType { span }
-                    | InferTyVarSourceInfo::EmptyArrayElem { span } => Diag::span_err(
-                        span,
-                        format_args!("failed to infer a type of `{}`", {
-                            let mut printer = ClauseCxPrinter::new(self.bcx.ccx());
-                            printer.push_ty(var_ty);
-                            printer.finish()
-                        }),
-                    )
-                    .emit(),
+                        InferTyVarSourceInfo::UniversalElabHelper => todo!(),
+                        InferTyVarSourceInfo::TraitAssocPlaceholderHelper => todo!(),
+                        InferTyVarSourceInfo::UnifyHelper => todo!(),
+                        InferTyVarSourceInfo::DerefHelper => todo!(),
+                        InferTyVarSourceInfo::MethodLookupHelper => todo!(),
+                    };
 
-                    InferTyVarSourceInfo::UniversalElabHelper => todo!(),
-                    InferTyVarSourceInfo::TraitAssocPlaceholderHelper => todo!(),
-                    InferTyVarSourceInfo::UnifyHelper => todo!(),
-                    InferTyVarSourceInfo::DerefHelper => todo!(),
-                    InferTyVarSourceInfo::MethodLookupHelper => todo!(),
+                    let error_ty = tcx.intern(TyKind::Error(error));
+
+                    _ = self.bcx.ucx_mut().unify_ty_and_ty(
+                        &ClauseOrigin::never_printed(),
+                        var_ty,
+                        error_ty,
+                        RelationMode::Equate,
+                    );
+
+                    self.bcx.ccx_mut().poll_obligations();
+
+                    return Ok(error_ty);
                 };
 
-                let error_ty = tcx.intern(TyKind::Error(error));
+                match *resolved.r(s) {
+                    TyKind::SigThis
+                    | TyKind::SigInfer
+                    | TyKind::SigGeneric(_)
+                    | TyKind::SigProject(_)
+                    | TyKind::SigAlias(_, _)
+                    | TyKind::InferVar(_) => unreachable!(),
 
-                _ = self.bcx.ucx_mut().unify_ty_and_ty(
-                    &ClauseOrigin::never_printed(),
-                    var_ty,
-                    error_ty,
-                    RelationMode::Equate,
-                );
+                    TyKind::Simple(_)
+                    | TyKind::Reference(_, _, _)
+                    | TyKind::Adt(_)
+                    | TyKind::Trait(_, _, _)
+                    | TyKind::Tuple(_)
+                    | TyKind::FnDef(_)
+                    | TyKind::Error(_) => Ok(self.super_(resolved)),
 
-                self.bcx.ccx_mut().poll_obligations();
+                    TyKind::UniversalVar(var) => Ok(self.fold_universal_var(var)),
 
-                Ok(error_ty)
+                    TyKind::HrtbVar(hrtb_debruijn) => todo!(),
+                }
+            }
+
+            fn fold_re(&mut self, re: SpannedRe) -> Result<Re, Self::Error> {
+                assert_eq!(re.value, Re::Erased);
+                Ok(Re::SigInfer)
+            }
+        }
+
+        impl ConfirmFolder<'_, '_, '_> {
+            fn fold_universal_var(&mut self, var: UniversalTyVar) -> Ty {
+                let tcx = self.tcx();
+
+                match self.bcx.ccx().lookup_universal_ty_src_info(var) {
+                    // `Self` in trait method body.
+                    UniversalTyVarSourceInfo::TraitSelf => tcx.intern(TyKind::SigThis),
+
+                    // No universal leaks.
+                    UniversalTyVarSourceInfo::HrtbVar => unreachable!(),
+
+                    UniversalTyVarSourceInfo::Root(generic) => {
+                        // This must belong to us because we cannot leak other universals
+                        // into the root scope.
+                        tcx.intern(TyKind::SigGeneric(generic))
+                    }
+
+                    UniversalTyVarSourceInfo::Projection(var, spec, assoc) => {
+                        tcx.intern(TyKind::SigProject(TyProjection {
+                            target: self.fold_universal_var(var),
+                            spec: self.fold(spec),
+                            assoc,
+                        }))
+                    }
+                }
             }
         }
 
