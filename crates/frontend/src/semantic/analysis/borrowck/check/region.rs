@@ -1,8 +1,5 @@
 use crate::{
-    base::{
-        Session,
-        arena::{HasInterner, HasListInterner, Obj},
-    },
+    base::arena::{HasInterner, HasListInterner, Obj},
     semantic::{
         analysis::{
             ClauseCx, ClauseOrigin, CrateBorrowCheckVisitor, HrtbUniverse, MirDataflowFacts,
@@ -29,6 +26,10 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
             def,
         );
 
+        // Give each local a universal region representing its lifetime within the function body.
+        // We permit a given local to outlive another if `live(rhs)` implies `occupied(lhs)`—in
+        // other words, whenever `rhs` is used by some later statement, `lhs` will contain a value
+        // that can be accessed.
         let local_universals = body
             .locals
             .indices()
@@ -45,9 +46,11 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
             }
         }
 
-        let mut instantiated_locals = body.locals.clone();
+        // Import all types within the body and ensure that they're well-formed. Additionally, local
+        // types must outlive the universal region associated with that local.
+        let mut imported_locals = body.locals.clone();
 
-        for (local_idx, local) in instantiated_locals.iter_mut_enumerated() {
+        for (local_idx, local) in imported_locals.iter_mut_enumerated() {
             local.ty = ccx
                 .importer(
                     &ClauseOrigin::empty_report(),
@@ -66,9 +69,11 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
             );
         }
 
+        // Type-check the MIR body to create obligations between regions.
         RegionCheckCx {
             ccx: &mut ccx,
-            instantiated_locals: &instantiated_locals,
+            imported_locals: &imported_locals,
+            local_universals: &local_universals,
             body,
         }
         .check_body();
@@ -79,7 +84,8 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
 
 pub struct RegionCheckCx<'a, 'tcx> {
     pub ccx: &'a mut ClauseCx<'tcx>,
-    pub instantiated_locals: &'a IndexVec<MirLocalIdx, MirLocal>,
+    pub imported_locals: &'a IndexVec<MirLocalIdx, MirLocal>,
+    pub local_universals: &'a IndexVec<MirLocalIdx, Re>,
     pub body: &'a MirBody,
 }
 
@@ -149,7 +155,8 @@ impl<'tcx> RegionCheckCx<'_, 'tcx> {
     }
 
     fn check_place(&mut self, place: MirPlace) -> Ty {
-        self.instantiated_locals[place.local].ty
+        // TODO: projections
+        self.imported_locals[place.local].ty
     }
 
     fn check_operand(&mut self, operand: MirOperand) -> Ty {
@@ -170,17 +177,13 @@ impl<'tcx> RegionCheckCx<'_, 'tcx> {
             )),
             MirAssignRvalue::Use(operand) => self.check_operand(*operand),
             MirAssignRvalue::Ref(muta, place) => {
-                let re = self.ccx.fresh_re_infer();
                 let pointee = self.check_place(*place);
 
-                self.ccx.oblige_ty_outlives_re(
-                    ClauseOrigin::empty_report(),
+                tcx.intern(TyKind::Reference(
+                    self.local_universals[place.local],
+                    *muta,
                     pointee,
-                    re,
-                    RelationDirection::LhsOntoRhs,
-                );
-
-                tcx.intern(TyKind::Reference(re, *muta, pointee))
+                ))
             }
             // TODO: Ensure that the body is imported before doing this.
             MirAssignRvalue::Zst(ty) => *ty,
