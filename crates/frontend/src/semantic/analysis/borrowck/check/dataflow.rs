@@ -294,7 +294,7 @@ impl MirDataflowFacts {
     }
 
     #[must_use]
-    pub fn can_outlive(&self, lhs: MirLocalIdx, rhs: MirLocalIdx) -> bool {
+    pub fn can_outlive_rhs_mask(&self, body: &MirBody, rhs: MirLocalIdx) -> LocalSet {
         // `lhs` is allowed to outlive `rhs` if, for every instruction, `live(rhs)` implies
         // `occupied(lhs)`. In other words, a local is allowed to outlive another one if, whenever
         // the `rhs` local is in use, `lhs` can be referred to.
@@ -356,7 +356,41 @@ impl MirDataflowFacts {
         // // ...so the code fails to compile!
         // ```
 
-        todo!()
+        let mut outlive_mask = LocalSet::new(body.locals.len());
+
+        let mut push = |occupancy: &LocalSet, liveness: &LocalSet| {
+            if !liveness.contains(rhs) {
+                return;
+            }
+
+            outlive_mask.remove_all(occupancy);
+        };
+
+        for (block_idx, block) in body.blocks.iter_enumerated() {
+            for instr_idx in block.instructions() {
+                let loc = MirInstructionLoc {
+                    block: block_idx,
+                    instr: instr_idx,
+                };
+
+                push(
+                    self.occupancy.state_before(loc),
+                    self.liveness.state_before(loc),
+                );
+            }
+
+            let loc = MirInstructionLoc {
+                block: block_idx,
+                instr: block.terminator_idx(),
+            };
+
+            push(
+                self.occupancy.state_after(loc),
+                self.liveness.state_after(loc),
+            );
+        }
+
+        outlive_mask
     }
 }
 
@@ -576,6 +610,7 @@ impl GenKillTrans {
 #[derive(Eq, PartialEq)]
 pub struct LocalSet {
     set: SmallVec<[u64; 1]>,
+    len: usize,
 }
 
 impl fmt::Debug for LocalSet {
@@ -588,11 +623,13 @@ impl Clone for LocalSet {
     fn clone(&self) -> Self {
         Self {
             set: self.set.clone(),
+            len: self.len,
         }
     }
 
     fn clone_from(&mut self, source: &Self) {
         self.set.clone_from(&source.set);
+        self.len = source.len;
     }
 }
 
@@ -600,6 +637,7 @@ impl LocalSet {
     pub fn new(local_count: usize) -> Self {
         Self {
             set: (0..local_count.div_ceil(64)).map(|_| 0u64).collect(),
+            len: local_count,
         }
     }
 
@@ -614,6 +652,16 @@ impl LocalSet {
     pub fn trans(&mut self, trans: &GenKillTrans) {
         self.union(&trans.gen_set);
         self.remove_all(&trans.kill_set);
+    }
+
+    pub fn fill(&mut self) {
+        for v in &mut self.set {
+            *v = u64::MAX;
+        }
+
+        if let Some(last) = self.set.last_mut() {
+            *last = (1 << (self.len % 64)) - 1;
+        }
     }
 
     pub fn clear(&mut self) {

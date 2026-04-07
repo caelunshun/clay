@@ -30,6 +30,7 @@ pub enum MirRvalueOrPlace {
 
 impl<'tcx> MirBuildCtxt<'tcx> {
     pub fn new(tcx: &'tcx TyCtxt, def: Obj<FnDef>) -> Self {
+        let s = &tcx.session;
         let mut body = MirBody {
             locals: IndexVec::new(),
             blocks: IndexVec::new(),
@@ -37,7 +38,9 @@ impl<'tcx> MirBuildCtxt<'tcx> {
         let mut locals = FxHashMap::default();
 
         // Define return value
-        body.locals.push(MirLocal {});
+        body.locals.push(MirLocal {
+            ty: def.r(s).ret_ty.value,
+        });
 
         // Define arguments
         // TODO
@@ -76,13 +79,14 @@ impl<'tcx> MirBuildCtxt<'tcx> {
     }
 
     pub fn lower_local(&mut self, local: Obj<ThirLocal>) -> MirPlace {
+        let s = self.session();
         let tcx = self.tcx();
 
         MirPlace {
             local: *self
                 .locals
                 .entry(local)
-                .or_insert_with(|| self.body.locals.push(MirLocal {})),
+                .or_insert_with(|| self.body.locals.push(MirLocal { ty: local.r(s).ty })),
             projections: tcx.intern_list(&[]),
         }
     }
@@ -191,7 +195,7 @@ impl<'tcx> MirBuildCtxt<'tcx> {
                 };
 
                 let destination = MirPlace {
-                    local: self.body.locals.push(MirLocal {}),
+                    local: self.body.locals.push(MirLocal { ty: expr.r(s).ty }),
                     projections: tcx.intern_list(&[]),
                 };
 
@@ -209,7 +213,7 @@ impl<'tcx> MirBuildCtxt<'tcx> {
                 };
 
                 let destination = MirPlace {
-                    local: self.body.locals.push(MirLocal {}),
+                    local: self.body.locals.push(MirLocal { ty: expr.r(s).ty }),
                     projections: tcx.intern_list(&[]),
                 };
 
@@ -333,7 +337,7 @@ impl<'tcx> MirBuildCtxt<'tcx> {
         };
 
         let destination = MirPlace {
-            local: self.body.locals.push(MirLocal {}),
+            local: self.body.locals.push(MirLocal { ty: expr.r(s).ty }),
             projections: tcx.intern_list(&[]),
         };
 

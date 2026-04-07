@@ -1,9 +1,6 @@
-trait Meow<A> {
-    type Assoc;
-}
-
-fn main<T: Meow<V>, V>() {
-    let x: <T as Meow<V>>::Assoc;
+fn main() {
+    let x = 1;
+    let y = &x;
 
     if false {
         x;

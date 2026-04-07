@@ -94,7 +94,12 @@ impl TyCtxt {
         }
         .visit_crate();
 
-        CrateBorrowCheckVisitor { tcx: self, krate }.visit_crate();
+        CrateBorrowCheckVisitor {
+            tcx: self,
+            krate,
+            coherence: &coherence,
+        }
+        .visit_crate();
     }
 }
 

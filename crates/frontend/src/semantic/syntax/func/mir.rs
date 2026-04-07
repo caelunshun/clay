@@ -1,7 +1,7 @@
 use crate::{
     base::{arena::Intern, syntax::Span},
     parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
-    semantic::syntax::Mutability,
+    semantic::syntax::{Mutability, Ty},
 };
 use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
@@ -73,7 +73,9 @@ impl MirLocalIdx {
 }
 
 #[derive(Debug, Clone)]
-pub struct MirLocal {}
+pub struct MirLocal {
+    pub ty: Ty,
+}
 
 // === MirBody === //
 

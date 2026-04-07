@@ -9,8 +9,8 @@ use crate::{
     semantic::{
         analysis::{ClauseOrigin, TyCtxt},
         syntax::{
-            FnDef, FnItem, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy,
-            SpannedTyOrReList, Visibility,
+            FnDef, FnItem, Item, MirLocalIdx, SpannedTraitClauseList, SpannedTraitInstance,
+            SpannedTy, SpannedTyOrReList, Visibility,
         },
     },
     symbol,
@@ -779,6 +779,7 @@ pub enum UniversalReVarSourceInfo {
     Root(Obj<RegionGeneric>),
     ElaboratedLub,
     HrtbVar,
+    MirLocal(MirLocalIdx),
 }
 
 #[derive(Debug, Clone)]
