@@ -107,7 +107,7 @@ where
             MirAssignRvalue::Ref(_muta, place) => {
                 self.visit_place(MirBbOperationKind::Use, *place)?;
             }
-            MirAssignRvalue::Zst | MirAssignRvalue::Literal(_) => {
+            MirAssignRvalue::Zst(_) | MirAssignRvalue::Literal(_, _) => {
                 // (empty)
             }
             MirAssignRvalue::BinaryOp(_kind, operands) => {

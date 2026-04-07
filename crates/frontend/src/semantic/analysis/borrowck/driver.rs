@@ -2,17 +2,12 @@ use crate::{
     base::{Diag, LeafDiag, Session, arena::Obj},
     semantic::{
         analysis::{
-            ClauseCx, ClauseOrigin, CoherenceMap, HrtbUniverse, MirBbOperationKind,
-            MirBbOperationVisitor, MirBuildCtxt, MirDataflowFacts, TyCtxt, TyFolderInfallibleExt,
-            TyVisitorInfallibleExt, UnifyCxMode,
+            CoherenceMap, MirBbOperationKind, MirBbOperationVisitor, MirBuildCtxt,
+            MirDataflowFacts, TyCtxt,
         },
-        syntax::{
-            Crate, FnDef, ItemKind, MirInstructionLoc, MirLocalIdx, Re, RelationDirection,
-            UniversalReVarSourceInfo,
-        },
+        syntax::{Crate, FnDef, ItemKind, MirInstructionLoc},
     },
 };
-use index_vec::IndexVec;
 use std::ops::ControlFlow;
 
 pub struct CrateBorrowCheckVisitor<'tcx> {
@@ -30,7 +25,7 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
         &self.tcx.session
     }
 
-    pub fn visit_crate(&mut self) {
+    pub fn visit_crate(&self) {
         let s = self.session();
 
         for &item in self.krate.r(s).items.iter() {
@@ -64,7 +59,6 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
     }
 
     pub fn visit_fn_def(&self, def: Obj<FnDef>) {
-        let tcx = self.tcx();
         let s = self.session();
 
         if def.r(s).hir_body.is_none() {
@@ -127,53 +121,6 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
         }
 
         // Type-check regions.
-        let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-
-        let env = ccx.import_fn_def_env_as_universal(
-            &ClauseOrigin::never_printed(),
-            HrtbUniverse::ROOT_REF,
-            def,
-        );
-
-        let local_universals = body
-            .locals
-            .indices()
-            .map(|idx| ccx.fresh_re_universal(UniversalReVarSourceInfo::MirLocal(idx)))
-            .collect::<IndexVec<MirLocalIdx, Re>>();
-
-        for (rhs_local, &rhs_re) in local_universals.iter_enumerated() {
-            let lhs_outlive_mask = df.can_outlive_rhs_mask(&body, rhs_local);
-
-            for lhs_local in lhs_outlive_mask.iter() {
-                let lhs_re = local_universals[lhs_local];
-
-                ccx.permit_universe_re_outlives_re(lhs_re, rhs_re, RelationDirection::LhsOntoRhs);
-            }
-        }
-
-        let mut body_instantiated = body.clone();
-
-        for (local_idx, local) in body_instantiated.locals.iter_mut_enumerated() {
-            local.ty = ccx
-                .importer(
-                    &ClauseOrigin::never_printed(),
-                    HrtbUniverse::ROOT,
-                    env.as_ref(),
-                )
-                .fold(local.ty);
-
-            ccx.wf_visitor(HrtbUniverse::ROOT).visit(local.ty);
-
-            ccx.oblige_ty_outlives_re(
-                ClauseOrigin::empty_report(),
-                local.ty,
-                local_universals[local_idx],
-                RelationDirection::LhsOntoRhs,
-            );
-        }
-
-        // TODO: type-check
-
-        ccx.verify();
+        self.borrow_check(def, &body, &df);
     }
 }

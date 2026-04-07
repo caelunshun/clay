@@ -113,9 +113,11 @@ impl<'tcx> MirBuildCtxt<'tcx> {
 
         match expr.r(s).kind {
             ThirExprKind::Local(local) => MirRvalueOrPlace::Place(self.lower_local(local)),
-            ThirExprKind::CreatePathZst => MirRvalueOrPlace::Rvalue(MirAssignRvalue::Zst),
+            ThirExprKind::CreatePathZst => {
+                MirRvalueOrPlace::Rvalue(MirAssignRvalue::Zst(expr.r(s).ty))
+            }
             ThirExprKind::CreateLiteral(lit) => {
-                MirRvalueOrPlace::Rvalue(MirAssignRvalue::Literal(lit))
+                MirRvalueOrPlace::Rvalue(MirAssignRvalue::Literal(expr.r(s).ty, lit))
             }
             ThirExprKind::CreateTuple(args) => {
                 let Some(args) = self.lower_operand_list(args, flow) else {

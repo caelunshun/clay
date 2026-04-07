@@ -231,8 +231,8 @@ pub enum MirAssignRvalue {
     Tuple(Box<[MirOperand]>),
     Use(MirOperand),
     Ref(Mutability, MirPlace),
-    Zst,
-    Literal(AstLit),
+    Zst(Ty),
+    Literal(Ty, AstLit),
     BinaryOp(AstBinOpKind, Box<(MirOperand, MirOperand)>),
     UnaryOp(AstUnOpKind, MirOperand),
     Discriminant(MirPlace),
@@ -242,4 +242,12 @@ pub enum MirAssignRvalue {
 pub enum MirOperand {
     Copy(MirPlace),
     Move(MirPlace),
+}
+
+impl MirOperand {
+    pub fn place(self) -> MirPlace {
+        let (MirOperand::Copy(place) | MirOperand::Move(place)) = self;
+
+        place
+    }
 }
