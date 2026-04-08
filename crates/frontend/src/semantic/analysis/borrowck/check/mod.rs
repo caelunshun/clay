@@ -1,5 +1,5 @@
 mod dataflow;
 pub use self::dataflow::*;
 
-mod region;
-pub use self::region::*;
+mod check_regions;
+pub use self::check_regions::*;

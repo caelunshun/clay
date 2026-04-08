@@ -42,9 +42,27 @@
 // 'u2: '?0: 'u3
 // ```
 //
-// Is it sound to let `'u2` outlive `'u4`? Well, does `live('u2)` imply `occupied('u4)`?
+// Is it sound to let `'u2` outlive `'u4`? This would require `_2`, the pointee of `_4`, to be
+// occupied whenever `_4` is live. This is where dataflow gets its `live('rhs) => occupied('lhs)`
+// condition from. We note, however, that `_4` is live at the data-flow point between `discard(_2)`
+// and `discard(_4)` but that `_2` is not occupied, causing the outlives constraint to be rejected.
 //
-// TODO
+// This is exactly what the permission set reports...
+//
+// ```
+// permit 'u0: 'u0
+// permit 'u0: 'u1
+// permit 'u0: 'u2
+// permit 'u0: 'u3
+// permit 'u0: 'u4
+// permit 'u1: 'u1
+// permit 'u2: 'u2
+// permit 'u3: 'u2
+// permit 'u3: 'u3
+// permit 'u4: 'u4
+// ```
+//
+// ...and so, the program is rejected.
 fn main() {
     let x = 1;
     let y = &x;

@@ -80,8 +80,6 @@ impl ReUnifyTracker {
             return;
         };
 
-        eprintln!("constrain {lhs:?}: {rhs:?}");
-
         self.constraints.push(ReConstraint { lhs, rhs, origin });
     }
 
@@ -93,11 +91,9 @@ impl ReUnifyTracker {
         match dir {
             RelationDirection::LhsOntoRhs => {
                 self.universals[universal].allowed_outlive.push(other);
-                eprintln!("permit {universal:?}: {other:?}");
             }
             RelationDirection::RhsOntoLhs => {
                 self.universals[universal].allowed_outlived_by.push(other);
-                eprintln!("permit {other:?}: {universal:?}");
             }
         }
     }
@@ -146,12 +142,8 @@ struct ReElaboratedPermissions {
 
 impl ReElaboratedPermissions {
     fn new(tracker: &ReUnifyTracker) -> Self {
-        // Convert constraints and permissions into a graph.
-        let mut graph = InferReGraph::default();
-
-        for cst in &tracker.constraints {
-            graph.add(cst.lhs, cst.rhs);
-        }
+        // Convert permissions into a graph.
+        let mut perm_graph = InferReGraph::default();
 
         for (var, state) in tracker.universals.iter_enumerated() {
             // Permissions introduce edges on this graph to ensure that...
@@ -165,12 +157,19 @@ impl ReElaboratedPermissions {
             //
             // ...works properly.
             for &outlives in &state.allowed_outlive {
-                graph.add(InferRe::Universal(var), outlives);
+                perm_graph.add(InferRe::Universal(var), outlives);
             }
 
             for &outlived_by in &state.allowed_outlived_by {
-                graph.add(outlived_by, InferRe::Universal(var));
+                perm_graph.add(outlived_by, InferRe::Universal(var));
             }
+        }
+
+        // Also convert direct constraints, excluding permissions, into a graph.
+        let mut cst_graph = InferReGraph::default();
+
+        for cst in &tracker.constraints {
+            cst_graph.add(cst.lhs, cst.rhs);
         }
 
         // DFS each universal's permission set to figure out which universals they are allowed to
@@ -178,19 +177,41 @@ impl ReElaboratedPermissions {
         let mut permitted_uni_outlives = FxHashSet::default();
         let mut permitted_gc_outlives = FxHashSet::default();
 
-        let mut dfs = InferReDfs::default();
+        let mut perm_dfs = InferReDfs::default();
+        let mut cst_dfs = InferReDfs::default();
 
         for (var, state) in tracker.universals.iter_enumerated() {
             // Find regions for which `'var: 'other` is permitted.
 
             // Allow `dfs` to get saturated within the `allowed_outlive` loop since we only ever
             // need to see a given DFS target once.
-            dfs.clear();
+            perm_dfs.clear();
 
             for &root in &state.allowed_outlive {
-                dfs.visit(root);
+                match root {
+                    InferRe::Gc | InferRe::Universal(_) => {
+                        perm_dfs.visit(root);
+                    }
+                    InferRe::Infer(_) => {
+                        // We only want to traverse constraints until we reach a universal when
+                        // permitting universals to outlive an inference variable.
+                        cst_dfs.visit(root);
+                        cbit::cbit!(for (dfs, other) in cst_dfs.flush() {
+                            match other {
+                                InferRe::Gc | InferRe::Universal(_) => {
+                                    perm_dfs.visit(other);
+                                }
+                                InferRe::Infer(_) => {
+                                    dfs.visit_slice(cst_graph.outlives().successors(other));
+                                }
+                            }
+                        });
 
-                cbit::cbit!(for (dfs, other) in dfs.flush() {
+                        cst_dfs.clear();
+                    }
+                }
+
+                cbit::cbit!(for (dfs, other) in perm_dfs.flush() {
                     match other {
                         InferRe::Gc => {
                             permitted_gc_outlives.insert(var);
@@ -203,17 +224,36 @@ impl ReElaboratedPermissions {
                         }
                     }
 
-                    dfs.visit_slice(graph.outlives().successors(other));
+                    dfs.visit_slice(perm_graph.outlives().successors(other));
                 });
             }
 
             // Find regions for which `'other: 'var` is permitted.
-            dfs.clear();
+            perm_dfs.clear();
 
             for &root in &state.allowed_outlived_by {
-                dfs.visit(root);
+                match root {
+                    InferRe::Gc | InferRe::Universal(_) => {
+                        perm_dfs.visit(root);
+                    }
+                    InferRe::Infer(_) => {
+                        cst_dfs.visit(root);
+                        cbit::cbit!(for (dfs, other) in cst_dfs.flush() {
+                            match other {
+                                InferRe::Gc | InferRe::Universal(_) => {
+                                    perm_dfs.visit(other);
+                                }
+                                InferRe::Infer(_) => {
+                                    dfs.visit_slice(cst_graph.outlived_by().successors(other));
+                                }
+                            }
+                        });
 
-                cbit::cbit!(for (dfs, other) in dfs.flush() {
+                        cst_dfs.clear();
+                    }
+                }
+
+                cbit::cbit!(for (dfs, other) in perm_dfs.flush() {
                     match other {
                         InferRe::Gc => {
                             // (implicit, no need to register)
@@ -226,7 +266,7 @@ impl ReElaboratedPermissions {
                         }
                     }
 
-                    dfs.visit_slice(graph.outlived_by().successors(other));
+                    dfs.visit_slice(perm_graph.outlived_by().successors(other));
                 });
             }
         }
