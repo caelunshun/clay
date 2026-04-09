@@ -1,14 +1,17 @@
 use crate::{
-    base::arena::{HasInterner, HasListInterner, Obj},
+    base::{
+        Session,
+        arena::{HasInterner, HasListInterner, Obj},
+    },
     semantic::{
         analysis::{
             ClauseCx, ClauseOrigin, CrateBorrowCheckVisitor, HrtbUniverse, MirDataflowFacts,
             TyCtxt, TyFolderInfallibleExt as _, TyVisitorInfallibleExt as _, UnifyCxMode,
         },
         syntax::{
-            FnDef, IntKind, MirAssignRvalue, MirBody, MirLocalIdx, MirOperand, MirPlace, MirStmt,
-            MirStmtKind, MirTerminator, Re, RelationDirection, RelationMode, SimpleTyKind, Ty,
-            TyKind, UniversalReVarSourceInfo,
+            FnDef, IntKind, MirAssignRvalue, MirBody, MirLocalIdx, MirOperand, MirPlace,
+            MirPlaceElem, MirStmt, MirStmtKind, MirTerminator, Re, RelationDirection, RelationMode,
+            SimpleTyKind, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, UniversalReVarSourceInfo,
         },
     },
 };
@@ -90,6 +93,10 @@ pub struct RegionCheckCx<'a, 'tcx> {
 }
 
 impl<'tcx> RegionCheckCx<'_, 'tcx> {
+    fn session(&self) -> &'tcx Session {
+        self.ccx.session()
+    }
+
     fn tcx(&self) -> &'tcx TyCtxt {
         self.ccx.tcx()
     }
@@ -126,6 +133,9 @@ impl<'tcx> RegionCheckCx<'_, 'tcx> {
     }
 
     fn check_terminator(&mut self, terminator: &MirTerminator) {
+        let s = self.session();
+        let tcx = self.tcx();
+
         match terminator {
             MirTerminator::Goto(_)
             | MirTerminator::Return
@@ -137,26 +147,66 @@ impl<'tcx> RegionCheckCx<'_, 'tcx> {
             } => {
                 // (empty)
             }
+            MirTerminator::Switch {
+                scrutinee: _,
+                targets: _,
+            } => {
+                // (assumed valid)
+            }
             MirTerminator::Call {
                 callee,
                 args,
                 destination,
                 target: _,
             } => {
-                // TODO
-            }
-            MirTerminator::Switch {
-                scrutinee,
-                targets: _,
-            } => {
-                // TODO
+                let callee = self.check_operand(*callee);
+                let destination = self.check_place(*destination);
+                let args = tcx.intern_list(
+                    &args
+                        .iter()
+                        .map(|&arg| self.check_operand(arg))
+                        .collect::<Vec<_>>(),
+                );
+
+                self.ccx.oblige_ty_meets_trait_instantiated(
+                    ClauseOrigin::empty_report(),
+                    HrtbUniverse::ROOT,
+                    callee,
+                    TraitSpec {
+                        def: self.ccx.krate().r(s).lang_items.fn_once_trait().unwrap(),
+                        params: tcx.intern_list(&[
+                            TraitParam::Equals(TyOrRe::Ty(tcx.intern(TyKind::Tuple(args)))),
+                            TraitParam::Equals(TyOrRe::Ty(destination)),
+                        ]),
+                    },
+                );
             }
         }
     }
 
     fn check_place(&mut self, place: MirPlace) -> Ty {
-        // TODO: projections
-        self.body.locals[place.local].ty
+        let s = self.session();
+        let mut ty = self.body.locals[place.local].ty;
+
+        for &projection in place.projections.r(s) {
+            match projection {
+                MirPlaceElem::DerefPtr => {
+                    self.ccx.poll_obligations();
+
+                    // We know we can't have an inference variable after `ClauseCx` progress because
+                    // all types are known at every point.
+                    let TyKind::Reference(_re, _muta, pointee) =
+                        *self.ccx.peel_ty_infer_var_after_poll(ty).r(s)
+                    else {
+                        unreachable!()
+                    };
+
+                    ty = pointee;
+                }
+            }
+        }
+
+        ty
     }
 
     fn check_operand(&mut self, operand: MirOperand) -> Ty {
@@ -188,7 +238,19 @@ impl<'tcx> RegionCheckCx<'_, 'tcx> {
             MirAssignRvalue::Zst(ty) => *ty,
             MirAssignRvalue::Literal(ty, _lit) => *ty,
             MirAssignRvalue::BinaryOp(_op_kind, sides) => {
-                todo!()
+                let (lhs, rhs) = &**sides;
+
+                let lhs = self.check_operand(*lhs);
+                let rhs = self.check_operand(*rhs);
+
+                self.ccx.oblige_ty_unifies_ty(
+                    ClauseOrigin::never_printed(),
+                    lhs,
+                    rhs,
+                    RelationMode::Equate,
+                );
+
+                lhs
             }
             MirAssignRvalue::UnaryOp(_op_kind, side) => self.check_operand(*side),
             MirAssignRvalue::Discriminant(_place) => {
