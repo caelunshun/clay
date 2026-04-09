@@ -220,7 +220,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         for stmt in stmts {
             match stmt {
                 HirStmt::Expr(expr) => {
-                    self.check_expr(*expr).and_do(divergence);
+                    self.check_expr(*expr, None).and_do(divergence);
                 }
                 HirStmt::Let(stmt) => {
                     let ascription = if let Some(ascription) = stmt.r(s).ascription {
@@ -246,7 +246,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                         ascription.value
                     } else if let Some(init) = stmt.r(s).init {
-                        self.check_expr(init).and_do(divergence)
+                        self.check_expr(init, None).and_do(divergence)
                     } else {
                         self.ccx_mut().fresh_ty_infer(
                             HrtbUniverse::ROOT,
@@ -271,7 +271,11 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         }
     }
 
-    pub fn check_expr(&mut self, expr: Obj<HirExpr>) -> TyAndDivergence {
+    pub fn check_expr_inner(
+        &mut self,
+        expr: Obj<HirExpr>,
+        demand_hint: Option<Ty>,
+    ) -> TyAndDivergence {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -298,13 +302,13 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 }))
             }
             HirExprKind::Call(callee, actual_args) => 'call: {
-                let callee = self.check_expr(callee).and_do(&mut divergence);
+                let callee = self.check_expr(callee, None).and_do(&mut divergence);
 
                 if let TyKind::Error(err) =
                     *self.ccx_mut().peel_ty_infer_var_after_poll(callee).r(s)
                 {
                     for &actual in actual_args.r(s) {
-                        self.check_expr(actual).and_do(&mut divergence);
+                        self.check_expr(actual, None).and_do(&mut divergence);
                     }
 
                     break 'call tcx.intern(TyKind::Error(err));
@@ -363,7 +367,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 args,
             } => 'call: {
                 let receiver_span = receiver.r(s).span;
-                let receiver = self.check_expr(receiver).and_do(&mut divergence);
+                let receiver = self.check_expr(receiver, None).and_do(&mut divergence);
                 let receiver = self.ccx_mut().peel_ty_infer_var_after_poll(receiver);
 
                 let env = self.import_env;
@@ -476,14 +480,14 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let children = children
                     .r(s)
                     .iter()
-                    .map(|&expr| self.check_expr(expr).and_do(&mut divergence))
+                    .map(|&expr| self.check_expr(expr, None).and_do(&mut divergence))
                     .collect::<Vec<_>>();
 
                 tcx.intern(TyKind::Tuple(tcx.intern_list(&children)))
             }
             HirExprKind::Binary(kind, lhs, rhs) => 'op: {
-                let lhs = self.check_expr(lhs).and_do(&mut divergence);
-                let rhs = self.check_expr(rhs).and_do(&mut divergence);
+                let lhs = self.check_expr(lhs, None).and_do(&mut divergence);
+                let rhs = self.check_expr(rhs, None).and_do(&mut divergence);
 
                 let kind_info = self.decode_bin_op_kind(kind.kind);
                 let origin =
@@ -559,7 +563,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 tcx.intern(TyKind::Error(error))
             }
             HirExprKind::Unary(kind, lhs) => 'op: {
-                let lhs_ty = self.check_expr(lhs).and_do(&mut divergence);
+                let lhs_ty = self.check_expr(lhs, None).and_do(&mut divergence);
 
                 let kind_info = self.decode_un_op_kind(kind);
                 let origin = ClauseOrigin::root_report(ClauseOriginKind::Arithmetic {
@@ -753,13 +757,13 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
             }
             HirExprKind::Let(pat, expr) => {
-                let scrutinee = self.check_expr(expr).and_do(&mut divergence);
+                let scrutinee = self.check_expr(expr, None).and_do(&mut divergence);
                 self.check_pat_demand(pat, scrutinee, Some(&mut divergence));
 
                 tcx.intern(TyKind::Simple(SimpleTyKind::Bool))
             }
             HirExprKind::ForLoop { pat, iter, body } => {
-                let iter_ty = self.check_expr(iter).and_do(&mut divergence);
+                let iter_ty = self.check_expr(iter, None).and_do(&mut divergence);
                 let elem_ty = self.ccx_mut().fresh_ty_infer(
                     HrtbUniverse::ROOT,
                     InferTyVarSourceInfo::ForLoopElem {
@@ -811,7 +815,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     kind: HirLabelTargetKind::Block,
                 };
 
-                self.block_break_demands.insert(label, None);
+                self.block_break_demands.insert(label, demand_hint);
                 self.check_block_stmts(&block.r(s).stmts, &mut divergence);
 
                 if let Some(last_expr) = block.r(s).last_expr {
@@ -819,7 +823,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         self.check_expr_demand(last_expr, demand)
                             .and_do(&mut divergence)
                     } else {
-                        self.check_expr(last_expr).and_do(&mut divergence)
+                        self.check_expr(last_expr, demand_hint)
+                            .and_do(&mut divergence)
                     }
                 } else {
                     if let Some(demand) = self.block_break_demands[&label] {
@@ -840,7 +845,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             HirExprKind::AssignOp(kind, lhs, rhs) => {
                 'assign: {
                     let lhs = self.check_pat_infer(lhs, Some(&mut divergence));
-                    let rhs = self.check_expr(rhs).and_do(&mut divergence);
+                    let rhs = self.check_expr(rhs, None).and_do(&mut divergence);
 
                     let kind_info = self.decode_assign_op_kind(kind);
                     let origin = ClauseOrigin::root_report(ClauseOriginKind::Arithmetic {
@@ -913,7 +918,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
             }
             HirExprKind::Field(receiver, name) => {
-                let receiver = self.check_expr(receiver).and_do(&mut divergence);
+                let receiver = self.check_expr(receiver, None).and_do(&mut divergence);
 
                 if let Some(ty) = self.lookup_field(receiver, name) {
                     ty
@@ -924,7 +929,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 }
             }
             HirExprKind::Index(target, index) => {
-                let target_ty = self.check_expr(target).and_do(&mut divergence);
+                let target_ty = self.check_expr(target, None).and_do(&mut divergence);
                 let index_ty = self.ccx_mut().fresh_ty_infer(
                     HrtbUniverse::ROOT,
                     InferTyVarSourceInfo::IndexInput {
@@ -965,7 +970,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             HirExprKind::LocalSelf => todo!(),
             HirExprKind::Local(local) => self.type_of_local(local),
             HirExprKind::AddrOf(mutability, pointee) => {
-                let pointee = self.check_expr(pointee).and_do(&mut divergence);
+                let pointee = self.check_expr(pointee, None).and_do(&mut divergence);
                 tcx.intern(TyKind::Reference(Re::Erased, mutability, pointee))
             }
             HirExprKind::Break { label, value } => {

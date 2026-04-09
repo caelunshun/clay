@@ -17,15 +17,10 @@ use std::cmp::Ordering;
 // === BodyCtxt === //
 
 impl BodyCtxt<'_, '_> {
-    pub fn check_exprs_equate_with_demand(
-        &mut self,
-        exprs: impl IntoIterator<Item = Obj<HirExpr>>,
-        demand: Option<Ty>,
-    ) -> TyAndDivergence {
-        if let Some(demand) = demand {
-            self.check_exprs_demand(exprs, demand)
-        } else {
-            self.check_exprs_equate(exprs)
+    pub fn check_expr(&mut self, expr: Obj<HirExpr>, demand: Option<Ty>) -> TyAndDivergence {
+        match demand {
+            Some(demand) => self.check_expr_demand(expr, demand),
+            None => self.check_expr_inner(expr, None),
         }
     }
 
@@ -38,7 +33,7 @@ impl BodyCtxt<'_, '_> {
         let exprs = exprs
             .into_iter()
             .map(|expr| {
-                let actual = self.check_expr(expr).and_do(&mut divergence);
+                let actual = self.check_expr_inner(expr, None).and_do(&mut divergence);
                 (expr, actual)
             })
             .collect::<Vec<_>>();
@@ -61,25 +56,13 @@ impl BodyCtxt<'_, '_> {
         TyAndDivergence::new(output, divergence)
     }
 
-    pub fn check_exprs_demand(
-        &mut self,
-        exprs: impl IntoIterator<Item = Obj<HirExpr>>,
-        demand: Ty,
-    ) -> TyAndDivergence {
-        let mut divergence = Divergence::MayDiverge;
-
-        for expr in exprs {
-            self.check_expr_demand(expr, demand).and_do(&mut divergence);
-        }
-
-        TyAndDivergence::new(demand, divergence)
-    }
-
     pub fn check_expr_demand(&mut self, expr: Obj<HirExpr>, demand: Ty) -> TyAndDivergence {
         let s = self.session();
         let mut divergence = Divergence::MayDiverge;
 
-        let actual = self.check_expr(expr).and_do(&mut divergence);
+        let actual = self
+            .check_expr_inner(expr, Some(demand))
+            .and_do(&mut divergence);
         let target = CoercionPossibility::new(self, demand).resolve(self);
         let out_ty = self.apply_coercions(&[(expr, actual)], target);
 
