@@ -503,6 +503,380 @@ impl StuckHinter<'_> {
     }
 }
 
+// === Parser Helpers === //
+
+pub trait ParserLike: Sized {
+    type Cursor: CursorIter;
+    type ParserGuard<'a>: DerefMut<Target = Self>
+    where
+        Self: 'a;
+
+    fn emits_errors(&self) -> bool;
+
+    fn enter(&self, sub: impl Into<Self::Cursor>) -> Self;
+
+    #[must_use]
+    #[track_caller]
+    fn expect_covert_hinted<R>(
+        &mut self,
+        visible: bool,
+        what: Symbol,
+        f: impl FnOnce(&mut Cursor<Self::Cursor>, &mut StuckHinter<'_>) -> R,
+    ) -> R
+    where
+        R: LookaheadResult + DefaultReject;
+
+    #[must_use]
+    #[track_caller]
+    fn expect_covert<R>(
+        &mut self,
+        visible: bool,
+        what: Symbol,
+        f: impl FnOnce(&mut Cursor<Self::Cursor>) -> R,
+    ) -> R
+    where
+        R: LookaheadResult + DefaultReject;
+
+    #[must_use]
+    #[track_caller]
+    fn expect_hinted<R>(
+        &mut self,
+        what: Symbol,
+        f: impl FnOnce(&mut Cursor<Self::Cursor>, &mut StuckHinter<'_>) -> R,
+    ) -> R
+    where
+        R: LookaheadResult + DefaultReject;
+
+    #[must_use]
+    #[track_caller]
+    fn expect<R>(&mut self, what: Symbol, f: impl FnOnce(&mut Cursor<Self::Cursor>) -> R) -> R
+    where
+        R: LookaheadResult + DefaultReject;
+
+    fn next_span(&self) -> Span;
+
+    fn next_span_not_eos(&self) -> Option<Span>;
+
+    fn prev_span(&self) -> Span;
+
+    fn prev_span_not_sof(&self) -> Option<Span>;
+
+    fn to_parse_guard(&mut self, what: Symbol) -> Self::ParserGuard<'_>;
+
+    fn to_parse<R>(&mut self, what: Symbol, f: impl FnOnce(&mut Self) -> R) -> R;
+
+    fn hint_syntactic(&mut self, f: impl FnOnce(&mut Cursor<Self::Cursor>, &mut StuckHinter<'_>));
+
+    fn hint_if_passes<R>(
+        &mut self,
+        parse: impl FnOnce(&mut Cursor<Self::Cursor>, &mut StuckHinter<'_>) -> R,
+        gen_diag: impl FnOnce(Span, R) -> LeafDiag,
+    ) where
+        R: LookaheadResult;
+
+    #[track_caller]
+    fn expect_or_hint<R>(
+        &mut self,
+        is_expected: bool,
+        what: Symbol,
+        parse: impl FnOnce(&mut Cursor<Self::Cursor>, &mut StuckHinter<'_>) -> R,
+        gen_diag: impl FnOnce(Span, R) -> LeafDiag,
+    ) -> R
+    where
+        R: LookaheadResult + DefaultReject;
+
+    #[track_caller]
+    fn maybe_expect<R>(
+        &mut self,
+        is_expected: bool,
+        what: Symbol,
+        f: impl FnOnce(&mut Cursor<Self::Cursor>, &mut StuckHinter<'_>) -> R,
+    ) -> R
+    where
+        R: LookaheadResult + DefaultReject;
+
+    fn hint(&mut self, diag: LeafDiag);
+
+    fn cursor_unsafe(&self) -> &Cursor<Self::Cursor>;
+
+    fn cursor_unsafe_mut(&mut self) -> &mut Cursor<Self::Cursor>;
+}
+
+impl<I: CursorIter> ParserLike for Parser<I> {
+    type Cursor = I;
+    type ParserGuard<'a>
+        = ParserGuard<'a, I>
+    where
+        Self: 'a;
+
+    fn emits_errors(&self) -> bool {
+        true
+    }
+
+    fn enter(&self, sub: impl Into<Self::Cursor>) -> Self {
+        self.enter(sub)
+    }
+
+    fn expect_covert_hinted<R>(
+        &mut self,
+        visible: bool,
+        what: Symbol,
+        f: impl FnOnce(&mut Cursor<Self::Cursor>, &mut StuckHinter<'_>) -> R,
+    ) -> R
+    where
+        R: LookaheadResult + DefaultReject,
+    {
+        self.expect_covert_hinted(visible, what, f)
+    }
+
+    fn expect_covert<R>(
+        &mut self,
+        visible: bool,
+        what: Symbol,
+        f: impl FnOnce(&mut Cursor<Self::Cursor>) -> R,
+    ) -> R
+    where
+        R: LookaheadResult + DefaultReject,
+    {
+        self.expect_covert(visible, what, f)
+    }
+
+    fn expect_hinted<R>(
+        &mut self,
+        what: Symbol,
+        f: impl FnOnce(&mut Cursor<Self::Cursor>, &mut StuckHinter<'_>) -> R,
+    ) -> R
+    where
+        R: LookaheadResult + DefaultReject,
+    {
+        self.expect_hinted(what, f)
+    }
+
+    fn expect<R>(&mut self, what: Symbol, f: impl FnOnce(&mut Cursor<Self::Cursor>) -> R) -> R
+    where
+        R: LookaheadResult + DefaultReject,
+    {
+        self.expect(what, f)
+    }
+
+    fn next_span(&self) -> Span {
+        self.next_span()
+    }
+
+    fn next_span_not_eos(&self) -> Option<Span> {
+        self.next_span_not_eos()
+    }
+
+    fn prev_span(&self) -> Span {
+        self.prev_span()
+    }
+
+    fn prev_span_not_sof(&self) -> Option<Span> {
+        self.prev_span_not_sof()
+    }
+
+    fn to_parse_guard(&mut self, what: Symbol) -> Self::ParserGuard<'_> {
+        self.to_parse_guard(what)
+    }
+
+    fn to_parse<R>(&mut self, what: Symbol, f: impl FnOnce(&mut Self) -> R) -> R {
+        self.to_parse(what, f)
+    }
+
+    fn hint_syntactic(&mut self, f: impl FnOnce(&mut Cursor<Self::Cursor>, &mut StuckHinter<'_>)) {
+        self.hint_syntactic(f);
+    }
+
+    fn hint_if_passes<R>(
+        &mut self,
+        parse: impl FnOnce(&mut Cursor<Self::Cursor>, &mut StuckHinter<'_>) -> R,
+        gen_diag: impl FnOnce(Span, R) -> LeafDiag,
+    ) where
+        R: LookaheadResult,
+    {
+        self.hint_if_passes(parse, gen_diag);
+    }
+
+    fn expect_or_hint<R>(
+        &mut self,
+        is_expected: bool,
+        what: Symbol,
+        parse: impl FnOnce(&mut Cursor<Self::Cursor>, &mut StuckHinter<'_>) -> R,
+        gen_diag: impl FnOnce(Span, R) -> LeafDiag,
+    ) -> R
+    where
+        R: LookaheadResult + DefaultReject,
+    {
+        self.expect_or_hint(is_expected, what, parse, gen_diag)
+    }
+
+    fn maybe_expect<R>(
+        &mut self,
+        is_expected: bool,
+        what: Symbol,
+        f: impl FnOnce(&mut Cursor<Self::Cursor>, &mut StuckHinter<'_>) -> R,
+    ) -> R
+    where
+        R: LookaheadResult + DefaultReject,
+    {
+        self.maybe_expect(is_expected, what, f)
+    }
+
+    fn hint(&mut self, diag: LeafDiag) {
+        self.hint(diag);
+    }
+
+    fn cursor_unsafe(&self) -> &Cursor<Self::Cursor> {
+        self.cursor_unsafe()
+    }
+
+    fn cursor_unsafe_mut(&mut self) -> &mut Cursor<Self::Cursor> {
+        self.cursor_unsafe_mut()
+    }
+}
+
+impl<I: CursorIter> ParserLike for Cursor<I> {
+    type Cursor = I;
+
+    type ParserGuard<'a>
+        = &'a mut Cursor<I>
+    where
+        Self: 'a;
+
+    fn emits_errors(&self) -> bool {
+        false
+    }
+
+    fn enter(&self, sub: impl Into<Self::Cursor>) -> Self {
+        Cursor::new(sub.into())
+    }
+
+    fn expect_covert_hinted<R>(
+        &mut self,
+        _visible: bool,
+        _what: Symbol,
+        f: impl FnOnce(&mut Cursor<Self::Cursor>, &mut StuckHinter<'_>) -> R,
+    ) -> R
+    where
+        R: LookaheadResult + DefaultReject,
+    {
+        self.lookahead(|c| f(c, &mut StuckHinter::new_dummy()))
+    }
+
+    fn expect_covert<R>(
+        &mut self,
+        visible: bool,
+        what: Symbol,
+        f: impl FnOnce(&mut Cursor<Self::Cursor>) -> R,
+    ) -> R
+    where
+        R: LookaheadResult + DefaultReject,
+    {
+        self.expect_covert_hinted(visible, what, |c, _h| f(c))
+    }
+
+    fn expect_hinted<R>(
+        &mut self,
+        what: Symbol,
+        f: impl FnOnce(&mut Cursor<Self::Cursor>, &mut StuckHinter<'_>) -> R,
+    ) -> R
+    where
+        R: LookaheadResult + DefaultReject,
+    {
+        self.expect_covert_hinted(true, what, f)
+    }
+
+    fn expect<R>(&mut self, what: Symbol, f: impl FnOnce(&mut Cursor<Self::Cursor>) -> R) -> R
+    where
+        R: LookaheadResult + DefaultReject,
+    {
+        self.expect_covert_hinted(true, what, |c, _h| f(c))
+    }
+
+    fn next_span(&self) -> Span {
+        self.next_span()
+    }
+
+    fn next_span_not_eos(&self) -> Option<Span> {
+        self.next_span_not_eos()
+    }
+
+    fn prev_span(&self) -> Span {
+        self.prev_span()
+    }
+
+    fn prev_span_not_sof(&self) -> Option<Span> {
+        self.prev_span_not_sof()
+    }
+
+    fn to_parse_guard(&mut self, _what: Symbol) -> Self::ParserGuard<'_> {
+        self
+    }
+
+    fn to_parse<R>(&mut self, _what: Symbol, f: impl FnOnce(&mut Self) -> R) -> R {
+        f(self)
+    }
+
+    fn hint_syntactic(&mut self, _f: impl FnOnce(&mut Cursor<Self::Cursor>, &mut StuckHinter<'_>)) {
+        // (no-op)
+    }
+
+    fn hint_if_passes<R>(
+        &mut self,
+        _parse: impl FnOnce(&mut Cursor<Self::Cursor>, &mut StuckHinter<'_>) -> R,
+        _gen_diag: impl FnOnce(Span, R) -> LeafDiag,
+    ) where
+        R: LookaheadResult,
+    {
+        // (no-op)
+    }
+
+    fn expect_or_hint<R>(
+        &mut self,
+        is_expected: bool,
+        what: Symbol,
+        parse: impl FnOnce(&mut Cursor<Self::Cursor>, &mut StuckHinter<'_>) -> R,
+        _gen_diag: impl FnOnce(Span, R) -> LeafDiag,
+    ) -> R
+    where
+        R: LookaheadResult + DefaultReject,
+    {
+        if is_expected {
+            self.expect_hinted(what, parse)
+        } else {
+            R::default_reject()
+        }
+    }
+
+    fn maybe_expect<R>(
+        &mut self,
+        is_expected: bool,
+        what: Symbol,
+        f: impl FnOnce(&mut Cursor<Self::Cursor>, &mut StuckHinter<'_>) -> R,
+    ) -> R
+    where
+        R: LookaheadResult + DefaultReject,
+    {
+        if is_expected {
+            self.expect_hinted(what, f)
+        } else {
+            R::default_reject()
+        }
+    }
+
+    fn hint(&mut self, _diag: LeafDiag) {
+        // (no-op)
+    }
+
+    fn cursor_unsafe(&self) -> &Cursor<Self::Cursor> {
+        self
+    }
+
+    fn cursor_unsafe_mut(&mut self) -> &mut Cursor<Self::Cursor> {
+        self
+    }
+}
+
 pub trait Matcher<I: CursorIter> {
     type Handler: Fn(&mut Cursor<I>, &mut StuckHinter<'_>) -> Self::Output;
     type Output: LookaheadResult;
@@ -524,7 +898,7 @@ pub trait Matcher<I: CursorIter> {
     }
 
     #[track_caller]
-    fn expect(&self, p: &mut Parser<I>) -> Self::Output
+    fn expect(&self, p: &mut impl ParserLike<Cursor = I>) -> Self::Output
     where
         Self::Output: DefaultReject,
     {
@@ -532,16 +906,16 @@ pub trait Matcher<I: CursorIter> {
     }
 
     #[track_caller]
-    fn expect_to_parse(&self, p: &mut Parser<I>, to_parse: Symbol) -> Self::Output
+    fn expect_to_parse(&self, p: &mut impl ParserLike<Cursor = I>, to_parse: Symbol) -> Self::Output
     where
         Self::Output: DefaultReject,
     {
         let mut p = p.to_parse_guard(to_parse);
-        self.expect(&mut p)
+        self.expect(&mut *p)
     }
 
     #[track_caller]
-    fn expect_covert(&self, visible: bool, p: &mut Parser<I>) -> Self::Output
+    fn expect_covert(&self, visible: bool, p: &mut impl ParserLike<Cursor = I>) -> Self::Output
     where
         Self::Output: DefaultReject,
     {
@@ -550,7 +924,7 @@ pub trait Matcher<I: CursorIter> {
 
     fn hint_if_match(
         &self,
-        p: &mut Parser<I>,
+        p: &mut impl ParserLike<Cursor = I>,
         gen_diag: impl FnOnce(Span, Self::Output) -> LeafDiag,
     ) {
         p.hint_if_passes(self.matcher(), gen_diag);
@@ -559,7 +933,7 @@ pub trait Matcher<I: CursorIter> {
     #[track_caller]
     fn expect_or_hint(
         &mut self,
-        p: &mut Parser<I>,
+        p: &mut impl ParserLike<Cursor = I>,
         is_expected: bool,
         gen_diag: impl FnOnce(Span, Self::Output) -> LeafDiag,
     ) -> Self::Output
@@ -570,7 +944,11 @@ pub trait Matcher<I: CursorIter> {
     }
 
     #[track_caller]
-    fn maybe_expect(&mut self, p: &mut Parser<I>, is_expected: bool) -> Self::Output
+    fn maybe_expect(
+        &mut self,
+        p: &mut impl ParserLike<Cursor = I>,
+        is_expected: bool,
+    ) -> Self::Output
     where
         Self::Output: DefaultReject,
     {
@@ -595,6 +973,8 @@ where
         &self.1
     }
 }
+
+// === Cursor === //
 
 #[derive(Debug, Clone)]
 pub struct Cursor<I> {

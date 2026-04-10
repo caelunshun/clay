@@ -2,8 +2,8 @@ use crate::{
     base::{
         Session,
         syntax::{
-            AtomSimplify, Cursor, Delimited, HasSpan, LookaheadResult, Matcher, Parser, Span,
-            StuckHinter, Symbol,
+            AtomSimplify, Cursor, Delimited, HasSpan, LookaheadResult, Matcher, Parser, ParserLike,
+            Span, StuckHinter, Symbol,
         },
     },
     parse::ast::Keyword,
@@ -536,6 +536,10 @@ impl<'a> AtomSimplify for TokenCursorElement<'a> {
 pub trait TokenMatcher: for<'a> Matcher<RawTokenCursor<'a>> {}
 
 impl<T> TokenMatcher for T where T: for<'a> Matcher<RawTokenCursor<'a>> {}
+
+pub trait TokenParserLike<'a>: ParserLike<Cursor = RawTokenCursor<'a>> {}
+
+impl<'a, T> TokenParserLike<'a> for T where T: ParserLike<Cursor = RawTokenCursor<'a>> {}
 
 pub fn token_matcher<F, R>(name: Symbol, matcher: F) -> (Symbol, F)
 where

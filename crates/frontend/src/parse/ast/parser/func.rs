@@ -12,7 +12,9 @@ use crate::{
             AstPatField, AstPatFieldKind, AstPatKind, AstPatStructRest, AstQualification,
             AstRangeExpr, AstRangeLimits, AstStmt, AstStmtKind, AstStmtLet, AstStructRest, AstTy,
             AstTyKind, AstUnOpKind,
-            basic::{parse_mutability, parse_paramed_path, parse_paramed_path_no_guard},
+            basic::{
+                parse_mutability, parse_paramed_path, parse_paramed_path_no_guard, parse_ref_prefix,
+            },
             bp::expr_bp,
             entry::P,
             item::parse_item,
@@ -92,6 +94,51 @@ pub fn parse_func(p: P) -> Result<Option<AstFnDef>, ErrorGuaranteed> {
 
 pub fn parse_func_arg(p: P) -> AstFnArg {
     let start = p.next_span();
+
+    // There is quite a bit of overlap between patterns and shorthands but we can't attempt to
+    // reinterpret a pattern as a shorthand parameter because reference patterns don't have
+    // lifetimes. We'll just attempt to parse the entire thing as its own syntax and, if failed,
+    // parse it as a pattern—patterns give fairly good diagnostics as a fallback.
+    if let Some((prefix, muta)) = p.expect_covert(false, symbol!("self parameter"), |c| {
+        let prefix = parse_ref_prefix(c)?;
+        let muta = parse_mutability(c);
+        match_kw(kw!("self")).consume(c)?;
+        Some((prefix, muta))
+    }) {
+        let span = start.to(p.prev_span());
+
+        p.hint_if_passes(
+            |c, _| match_punct(punct!(':')).consume(c),
+            |_, _| {
+                LeafDiag::span_note(
+                    span,
+                    format_args!(
+                        "`self` parameters prefixed with {} cannot have type annotations",
+                        prefix.kind.expectation_name()
+                    ),
+                )
+            },
+        );
+
+        return AstFnArg {
+            span,
+            pat: Box::new(AstPat {
+                span,
+                kind: AstPatKind::self_token(span, AstOptMutability::Ref(span)),
+            }),
+            ty: Box::new(AstTy {
+                span,
+                kind: AstTyKind::Reference(
+                    prefix.lifetime,
+                    muta,
+                    Box::new(AstTy {
+                        span,
+                        kind: AstTyKind::This,
+                    }),
+                ),
+            }),
+        };
+    }
 
     let pat = parse_pat(p);
 
@@ -891,7 +938,7 @@ pub fn parse_expr_range_limits(p: P) -> Option<(Span, AstRangeLimits)> {
 
 pub fn parse_expr_path(p: P) -> Option<AstExprPath> {
     let mut p = p.to_parse_guard(symbol!("path"));
-    let p = &mut p;
+    let p = &mut *p;
 
     let start = p.next_span();
 

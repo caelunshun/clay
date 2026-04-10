@@ -1,18 +1,25 @@
 use crate::{
-    base::syntax::{Matcher as _, Span, Symbol},
+    base::{
+        Diag,
+        syntax::{Matcher as _, Span, Symbol},
+    },
     kw,
     parse::{
         ast::{
-            AstAttribute, AstBarePath, AstOptMutability, AstParamedPath, AstParamedPathSegment,
-            AstPathPart, AstTreePath, AstTreePathKind, AstVisibility, AstVisibilityKind, Keyword,
+            AstAttribute, AstBarePath, AstMutability, AstOptMutability, AstParamedPath,
+            AstParamedPathSegment, AstPathPart, AstRefPrefix, AstRefPrefixKind, AstTreePath,
+            AstTreePathKind, AstVisibility, AstVisibilityKind, Keyword,
             entry::P,
             types::parse_generic_param_list,
             utils::{
-                match_eos, match_group, match_ident, match_kw, match_punct, match_punct_seq,
-                parse_delimited_until_terminator,
+                match_eos, match_group, match_ident, match_kw, match_lifetime, match_punct,
+                match_punct_seq, parse_delimited_until_terminator,
             },
         },
-        token::{GroupDelimiter, TokenCursor, TokenGroup, TokenStream},
+        token::{
+            GroupDelimiter, Lifetime, TokenCursor, TokenGroup, TokenMatcher, TokenParserLike,
+            TokenStream, token_matcher,
+        },
     },
     punct, puncts, symbol,
 };
@@ -32,7 +39,7 @@ pub fn parse_attribute(p: P) -> Option<AstAttribute> {
     let start = p.next_span();
 
     let mut p = p.to_parse_guard(symbol!("attribute"));
-    let p = &mut p;
+    let p = &mut *p;
 
     match_punct(punct!('#')).expect(p)?;
 
@@ -77,7 +84,7 @@ pub fn parse_bare_path(p: P) -> Option<AstBarePath> {
     let start = p.next_span();
 
     let mut p = p.to_parse_guard(symbol!("path"));
-    let p = &mut p;
+    let p = &mut *p;
 
     let mut parts = Vec::new();
 
@@ -109,7 +116,7 @@ pub fn parse_bare_path(p: P) -> Option<AstBarePath> {
 
 pub fn parse_path_part(p: P) -> Option<AstPathPart> {
     let mut p = p.to_parse_guard(symbol!("path part"));
-    let p = &mut p;
+    let p = &mut *p;
 
     if let Some(ident) = match_ident().expect(p) {
         return Some(AstPathPart::wrap_raw(ident));
@@ -128,7 +135,7 @@ pub fn parse_tree_path(p: P) -> Option<AstTreePath> {
     let start = p.next_span();
 
     let mut p = p.to_parse_guard(symbol!("path"));
-    let p = &mut p;
+    let p = &mut *p;
 
     let mut parts = Vec::new();
 
@@ -245,19 +252,62 @@ pub fn parse_paramed_path_no_guard(p: P) -> Option<AstParamedPath> {
     })
 }
 
-pub fn parse_mutability(p: P) -> AstOptMutability {
-    let mut p = p.to_parse_guard(symbol!("mutability"));
-    let p = &mut p;
+pub fn match_mutability() -> impl TokenMatcher<Output = Option<AstMutability>> {
+    token_matcher(symbol!("mutability"), |c, _| {
+        if let Some(kw) = match_kw(kw!("mut")).consume(c) {
+            return Some(AstMutability::Mut(kw.span));
+        }
 
-    if let Some(kw) = match_kw(kw!("mut")).expect(p) {
-        return AstOptMutability::Mut(kw.span);
+        if let Some(kw) = match_kw(kw!("ref")).consume(c) {
+            return Some(AstMutability::Ref(kw.span));
+        }
+
+        None
+    })
+}
+
+pub fn parse_mutability<'g>(p: &mut impl TokenParserLike<'g>) -> AstOptMutability {
+    match_mutability().expect(p).into()
+}
+
+pub fn parse_ref_prefix_kind<'g>(p: &mut impl TokenParserLike<'g>) -> Option<AstRefPrefixKind> {
+    if match_punct(punct!('&')).expect(p).is_some() {
+        return Some(AstRefPrefixKind::Regular);
     }
 
-    if let Some(kw) = match_kw(kw!("ref")).expect(p) {
-        return AstOptMutability::Ref(kw.span);
+    if match_punct(punct!('@')).expect(p).is_some() {
+        return Some(AstRefPrefixKind::Gc);
     }
 
-    AstOptMutability::Implicit
+    None
+}
+
+pub fn parse_ref_prefix<'g>(p: &mut impl TokenParserLike<'g>) -> Option<AstRefPrefix> {
+    let start = p.next_span();
+
+    let kind = parse_ref_prefix_kind(p)?;
+
+    let lifetime = match kind {
+        AstRefPrefixKind::Regular => match_lifetime().expect(p),
+        AstRefPrefixKind::Gc => {
+            if let Some(lt) = match_lifetime().expect_covert(false, p)
+                && p.emits_errors()
+            {
+                Diag::span_err(
+                    lt.span,
+                    "lifetimes are not permitted for garbage collected references",
+                )
+                .emit();
+            }
+
+            Some(Lifetime {
+                span: start,
+                name: symbol!("gc"),
+            })
+        }
+    };
+
+    Some(AstRefPrefix { kind, lifetime })
 }
 
 pub fn parse_visibility(p: P) -> AstVisibility {

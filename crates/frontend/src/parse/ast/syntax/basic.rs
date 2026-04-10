@@ -3,8 +3,9 @@ use crate::{
     kw,
     parse::{
         ast::{AstGenericParamList, Keyword},
-        token::{Ident, TokenGroup},
+        token::{Ident, Lifetime, Punct, TokenGroup},
     },
+    punct,
     semantic::syntax::Mutability,
 };
 use std::rc::Rc;
@@ -197,6 +198,16 @@ pub enum AstOptMutability {
     Implicit,
 }
 
+impl From<Option<AstMutability>> for AstOptMutability {
+    fn from(value: Option<AstMutability>) -> Self {
+        match value {
+            Some(AstMutability::Mut(span)) => AstOptMutability::Mut(span),
+            Some(AstMutability::Ref(span)) => AstOptMutability::Ref(span),
+            None => AstOptMutability::Implicit,
+        }
+    }
+}
+
 impl AstOptMutability {
     pub fn as_explicit(self) -> Option<AstMutability> {
         match self {
@@ -237,5 +248,32 @@ pub enum AstVisibilityKind {
 impl AstVisibilityKind {
     pub fn is_omitted(&self) -> bool {
         matches!(self, Self::Implicit)
+    }
+}
+
+// === Reference Prefix === //
+
+#[derive(Debug, Copy, Clone)]
+pub struct AstRefPrefix {
+    pub kind: AstRefPrefixKind,
+    pub lifetime: Option<Lifetime>,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum AstRefPrefixKind {
+    Regular,
+    Gc,
+}
+
+impl AstRefPrefixKind {
+    pub fn punct(self) -> Punct {
+        match self {
+            AstRefPrefixKind::Regular => punct!('&'),
+            AstRefPrefixKind::Gc => punct!('@'),
+        }
+    }
+
+    pub fn expectation_name(self) -> Symbol {
+        self.punct().expectation_name()
     }
 }

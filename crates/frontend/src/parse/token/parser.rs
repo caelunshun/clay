@@ -248,7 +248,7 @@ fn parse_ident(p: P, visible: bool) -> Option<TokenTree> {
 
     let mut accum = String::new();
 
-    let raw = if first_ch == '@' {
+    let raw = if first_ch == '\\' {
         true
     } else {
         accum.push(first_ch);
@@ -262,14 +262,13 @@ fn parse_ident(p: P, visible: bool) -> Option<TokenTree> {
     }
 
     if raw && accum.is_empty() {
-        return Some(
-            TokenPunct {
-                span: start,
-                ch: punct!('@'),
-                glued: false,
-            }
-            .into(),
-        );
+        Diag::span_err(
+            start,
+            "expected identifier character after escape character",
+        )
+        .emit();
+
+        return None;
     }
 
     Some(
@@ -285,7 +284,7 @@ fn parse_ident(p: P, visible: bool) -> Option<TokenTree> {
 fn match_ident_first_char(c: C) -> Option<char> {
     c.lookahead(|c| {
         c.eat()
-            .filter(|&c| c.is_xid_start() || c == '_' || c == '@')
+            .filter(|&c| c.is_xid_start() || c == '_' || c == '\\')
     })
 }
 

@@ -395,6 +395,22 @@ pub enum AstPatKind {
     Error(ErrorGuaranteed),
 }
 
+impl AstPatKind {
+    pub fn self_token(span: Span, muta: AstOptMutability) -> Self {
+        AstPatKind::Path {
+            binding_mode: AstBindingMode {
+                by_ref: AstOptMutability::Implicit,
+                local_muta: muta,
+            },
+            path: AstExprPath {
+                span,
+                kind: AstExprPathKind::SelfTy(span, None),
+            },
+            and_bind: None,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub struct AstBindingMode {
     pub by_ref: AstOptMutability,

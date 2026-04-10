@@ -7,9 +7,9 @@ use crate::{
     parse::{
         ast::{
             AstGenericParam, AstGenericParamKind, AstGenericParamList, AstHrtbBinder, AstNamedSpec,
-            AstReturnTy, AstTraitClause, AstTraitClauseList, AstTraitImplClause,
+            AstRefPrefix, AstReturnTy, AstTraitClause, AstTraitClauseList, AstTraitImplClause,
             AstTraitOutlivesClause, AstTy, AstTyKind, AstTyOrRe, OutlivesKind,
-            basic::{parse_bare_path, parse_mutability},
+            basic::{parse_bare_path, parse_mutability, parse_ref_prefix},
             bp::ty_bp,
             entry::P,
             utils::{
@@ -218,7 +218,7 @@ pub fn parse_ty_pratt(p: P, min_bp: Bp) -> AstTy {
 
 pub fn parse_ty_pratt_seed(p: P) -> AstTy {
     let mut p = p.to_parse_guard(symbol!("type"));
-    let p = &mut p;
+    let p = &mut *p;
 
     let seed_start = p.next_span();
     let build_ty = move |kind: AstTyKind, p: P| AstTy {
@@ -237,8 +237,11 @@ pub fn parse_ty_pratt_seed(p: P) -> AstTy {
     }
 
     // Parse reference
-    if match_punct(punct!('&')).expect(p).is_some() {
-        let lt = match_lifetime().expect(p);
+    if let Some(AstRefPrefix {
+        kind: _,
+        lifetime: lt,
+    }) = parse_ref_prefix(p)
+    {
         let muta = parse_mutability(p);
 
         if match_kw(kw!("dyn")).expect(p).is_some() {
