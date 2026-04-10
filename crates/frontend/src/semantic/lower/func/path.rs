@@ -17,8 +17,9 @@ use crate::{
         },
         syntax::{
             AdtCtorInstance, AdtItem, AdtKind, EnumVariantItem, FnItem, HirLocal, Item, ItemKind,
-            SpannedAdtInstanceView, SpannedTraitParamList, SpannedTraitSpec, SpannedTraitSpecView,
-            SpannedTy, SpannedTyOrReList, SpannedTyView, TraitItem, TypeGeneric,
+            LocalNameIdent, LocalNameSymbol, SpannedAdtInstanceView, SpannedTraitParamList,
+            SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyOrReList, SpannedTyView,
+            TraitItem, TypeGeneric,
         },
     },
 };
@@ -28,7 +29,7 @@ use crate::{
 #[derive(Debug, Copy, Clone)]
 pub enum ExprPathResult {
     Resolved(ExprPathResolution),
-    UnboundLocal(Ident),
+    UnboundLocal(LocalNameIdent),
     Fail(ErrorGuaranteed),
 }
 
@@ -98,9 +99,6 @@ pub enum ExprPathResolution {
         assoc: TypeRelativeAssoc,
     },
 
-    /// The regular `self` keyword, which refers to a local.
-    SelfLocal,
-
     /// A reference to a local defined within the current function.
     Local(Obj<HirLocal>),
 }
@@ -116,8 +114,8 @@ impl ExprPathResult {
         match self {
             ExprPathResult::Resolved(res) => Ok(res),
             ExprPathResult::UnboundLocal(ident) => Err(Diag::span_err(
-                ident.span,
-                format_args!("`{}` not found in scope", ident.text),
+                ident.span(),
+                format_args!("`{ident}` not found in scope"),
             )
             .emit()),
             ExprPathResult::Fail(err) => Err(err),
@@ -132,11 +130,9 @@ impl ExprPathResult {
         match self {
             ExprPathResult::Resolved(res) => {
                 if let ExprPathResolution::Local(def) = res {
-                    Ok(ExprPathIdentOrResolution::Ident(Ident {
-                        span: path.span,
-                        text: def.r(s).name.text,
-                        raw: false,
-                    }))
+                    Ok(ExprPathIdentOrResolution::Ident(
+                        def.r(s).name.with_span(path.span),
+                    ))
                 } else {
                     Ok(ExprPathIdentOrResolution::Resolution(res))
                 }
@@ -164,8 +160,10 @@ impl ExprPathResolution {
             ExprPathResolution::TypeRelative { .. } => {
                 "fully-qualified constant or method".to_string()
             }
-            ExprPathResolution::SelfLocal => "`self`".to_string(),
-            ExprPathResolution::Local(def) => format!("local variable `{}`", def.r(s).name.text),
+            ExprPathResolution::Local(def) => match def.r(s).name {
+                LocalNameIdent::User(ident) => format!("local variable `{}`", ident.text),
+                LocalNameIdent::SelfName(span) => format!("`self`"),
+            },
         }
     }
 
@@ -195,10 +193,9 @@ impl ExprPathResolution {
         None
     }
 
-    pub fn as_local(self) -> Option<PathResolvedLocal> {
+    pub fn as_local(self) -> Option<Obj<HirLocal>> {
         match self {
-            ExprPathResolution::SelfLocal => Some(PathResolvedLocal::LowerSelf),
-            ExprPathResolution::Local(local) => Some(PathResolvedLocal::Local(local)),
+            ExprPathResolution::Local(local) => Some(local),
             _ => None,
         }
     }
@@ -242,7 +239,7 @@ impl ExprPathResolution {
 
 #[derive(Debug, Copy, Clone)]
 pub enum ExprPathIdentOrResolution {
-    Ident(Ident),
+    Ident(LocalNameIdent),
     Resolution(ExprPathResolution),
 }
 
@@ -253,15 +250,9 @@ pub enum PathResolvedPattern {
 
 #[derive(Debug, Copy, Clone)]
 pub enum PathResolvedValue {
-    Local(PathResolvedLocal),
+    Local(Obj<HirLocal>),
     FnLit(PathResolvedFnLit),
     AdtCtor(AdtCtorInstance),
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum PathResolvedLocal {
-    Local(Obj<HirLocal>),
-    LowerSelf,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -341,7 +332,10 @@ impl IntraItemLowerCtxt<'_> {
             && let Some(ident) = single_segment.part.ident()
             && single_segment.args.is_none()
         {
-            if let Some(local) = self.func_local_names.lookup(ident.text) {
+            if let Some(local) = self
+                .func_local_names
+                .lookup(LocalNameSymbol::User(ident.text))
+            {
                 return ExprPathResult::Resolved(ExprPathResolution::Local(*local));
             }
 
@@ -357,7 +351,11 @@ impl IntraItemLowerCtxt<'_> {
                 Diag::span_err(args.span, "type arguments are not allowed on `self`").emit();
             }
 
-            return ExprPathResult::Resolved(ExprPathResolution::SelfLocal);
+            return if let Some(local) = self.func_local_names.lookup(LocalNameSymbol::SelfName) {
+                ExprPathResult::Resolved(ExprPathResolution::Local(*local))
+            } else {
+                ExprPathResult::UnboundLocal(LocalNameIdent::SelfName(single_segment.part.span()))
+            };
         }
 
         // See whether we're referring to a generic type.
@@ -403,7 +401,7 @@ impl IntraItemLowerCtxt<'_> {
                 Ok(target) => finger = target,
                 Err(err @ StepResolveError::NotFound) => {
                     if let Some(local_like) = local_like {
-                        return ExprPathResult::UnboundLocal(local_like);
+                        return ExprPathResult::UnboundLocal(LocalNameIdent::User(local_like));
                     } else {
                         return ExprPathResult::Fail(err.emit(&resolver, finger, segment.part));
                     }

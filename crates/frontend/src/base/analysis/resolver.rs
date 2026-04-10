@@ -3,13 +3,14 @@ use crate::{
     utils::hash::FxHashMap,
 };
 use derive_where::derive_where;
+use std::hash;
 
 #[derive(Debug, Clone)]
 #[derive_where(Default)]
-pub struct NameResolver<T> {
+pub struct NameResolver<K, T> {
     depth: u32,
-    map: FxHashMap<Symbol, DefinedName<T>>,
-    stack: Vec<Op<T>>,
+    map: FxHashMap<K, DefinedName<T>>,
+    stack: Vec<Op<K, T>>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -19,19 +20,23 @@ struct DefinedName<T> {
 }
 
 #[derive(Debug, Clone)]
-enum Op<T> {
-    Set(Symbol, Option<DefinedName<T>>),
+enum Op<K, T> {
+    Set(K, Option<DefinedName<T>>),
     Rib,
 }
 
-impl<T: Copy> NameResolver<T> {
+impl<K, T> NameResolver<K, T>
+where
+    K: Copy + hash::Hash + Eq,
+    T: Copy,
+{
     pub fn new() -> Self {
         Self::default()
     }
 
     pub fn define(
         &mut self,
-        sym: Symbol,
+        sym: K,
         value: T,
         on_shadow: impl FnOnce(T) -> ErrorGuaranteed,
     ) -> Option<ErrorGuaranteed> {
@@ -44,11 +49,11 @@ impl<T: Copy> NameResolver<T> {
         None
     }
 
-    pub fn define_force_shadow(&mut self, sym: Symbol, value: T) {
+    pub fn define_force_shadow(&mut self, sym: K, value: T) {
         self.define_inner(sym, value);
     }
 
-    fn define_inner(&mut self, sym: Symbol, value: T) -> Option<DefinedName<T>> {
+    fn define_inner(&mut self, sym: K, value: T) -> Option<DefinedName<T>> {
         let replaced = self.map.insert(
             sym,
             DefinedName {
@@ -62,7 +67,7 @@ impl<T: Copy> NameResolver<T> {
         replaced
     }
 
-    pub fn lookup(&self, sym: Symbol) -> Option<&T> {
+    pub fn lookup(&self, sym: K) -> Option<&T> {
         self.map.get(&sym).map(|v| &v.value)
     }
 

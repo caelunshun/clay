@@ -20,6 +20,7 @@ use crate::{
         analysis::TyCtxt,
         lower::{
             bootstrap::{lower_synthetic_module, synthesize_bootstrap_prelude},
+            func::pat::PatLocalBranchResolver,
             modules::{
                 BuilderItemId, BuilderModuleTree, FrozenModuleResolver, FrozenVisibilityResolver,
                 ItemCategory, PathResolver, VisibilityResolver,
@@ -29,8 +30,8 @@ use crate::{
             AdtCtor, AdtCtorField, AdtCtorFieldIdx, AdtCtorOwner, AdtCtorSyntax, AdtEnumVariant,
             AdtEnumVariantIdx, AdtItem, AdtKind, AdtKindEnum, AdtKindStruct, AnyGeneric, Crate,
             EnumVariantItem, FnArg, FnDef, FnDefOwner, FnItem, GenericBinder, HirLabelledBlock,
-            HirLocal, ImplItem, Item, ItemKind, LangItems, ModuleItem, RegionGeneric, SpannedTy,
-            TraitItem, TyKind, TypeAliasItem, TypeGeneric, Visibility,
+            HirLocal, ImplItem, Item, ItemKind, LangItems, LocalNameSymbol, ModuleItem,
+            RegionGeneric, SpannedTy, TraitItem, TyKind, TypeAliasItem, TypeGeneric, Visibility,
         },
     },
     symbol,
@@ -1197,10 +1198,10 @@ pub struct IntraItemLowerCtxt<'tcx> {
     pub root: Obj<Item>,
     pub scope: Obj<Item>,
     pub target: Obj<Item>,
-    pub generic_ty_names: NameResolver<Obj<TypeGeneric>>,
-    pub generic_re_names: NameResolver<Obj<RegionGeneric>>,
-    pub func_local_names: NameResolver<Obj<HirLocal>>,
-    pub block_label_names: NameResolver<HirLabelledBlock>,
+    pub generic_ty_names: NameResolver<Symbol, Obj<TypeGeneric>>,
+    pub generic_re_names: NameResolver<Symbol, Obj<RegionGeneric>>,
+    pub func_local_names: NameResolver<LocalNameSymbol, Obj<HirLocal>>,
+    pub block_label_names: NameResolver<Symbol, HirLabelledBlock>,
     pub innermost_block: Option<HirLabelledBlock>,
 }
 
@@ -1456,17 +1457,19 @@ impl IntraItemLowerCtxt<'_> {
         self.define_generics_in_binder(def.r(s).generics);
         self.lower_generic_def_clauses(def.r(s).generics, &generic_clause_lists);
 
-        LateInit::init(
-            &def.r(s).args,
-            Obj::new_iter(
-                ast.args.iter().map(|arg| FnArg {
-                    span: arg.span,
-                    pat: self.lower_pat(&arg.pat),
-                    ty: self.lower_ty(&arg.ty),
-                }),
-                s,
-            ),
-        );
+        PatLocalBranchResolver::start(|locals| {
+            LateInit::init(
+                &def.r(s).args,
+                Obj::new_iter(
+                    ast.args.iter().map(|arg| FnArg {
+                        span: arg.span,
+                        pat: self.lower_pat_inner(&arg.pat, locals),
+                        ty: self.lower_ty(&arg.ty),
+                    }),
+                    s,
+                ),
+            );
+        });
 
         // TODO: Actually detect these!
         LateInit::init(&def.r(s).has_self_param, !def.r(s).args.r(s).is_empty());

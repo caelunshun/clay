@@ -2,7 +2,7 @@ use crate::{
     base::{
         ErrorGuaranteed, Session,
         arena::{LateInit, Obj},
-        syntax::{Span, Symbol},
+        syntax::{HasSpan, Span, Symbol},
     },
     parse::{
         ast::{
@@ -16,13 +16,66 @@ use crate::{
     },
     symbol,
 };
+use std::fmt;
 
 // === Pattern === //
 
 #[derive(Debug, Clone)]
 pub struct HirLocal {
     pub mutability: Mutability,
-    pub name: Ident,
+    pub name: LocalNameIdent,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum LocalNameIdent {
+    User(Ident),
+    SelfName(Span),
+}
+
+impl fmt::Display for LocalNameIdent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_symbol().fmt(f)
+    }
+}
+
+impl LocalNameIdent {
+    pub fn with_span(self, span: Span) -> Self {
+        match self {
+            LocalNameIdent::User(ident) => LocalNameIdent::User(ident.with_span(span)),
+            LocalNameIdent::SelfName(_span) => LocalNameIdent::SelfName(span),
+        }
+    }
+
+    pub fn as_symbol(self) -> LocalNameSymbol {
+        match self {
+            LocalNameIdent::User(ident) => LocalNameSymbol::User(ident.text),
+            LocalNameIdent::SelfName(_span) => LocalNameSymbol::SelfName,
+        }
+    }
+}
+
+impl HasSpan for LocalNameIdent {
+    fn span(&self) -> Span {
+        match *self {
+            LocalNameIdent::User(ident) => ident.span,
+            LocalNameIdent::SelfName(span) => span,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum LocalNameSymbol {
+    User(Symbol),
+    SelfName,
+}
+
+impl fmt::Display for LocalNameSymbol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LocalNameSymbol::User(symbol) => symbol.fmt(f),
+            LocalNameSymbol::SelfName => f.write_str("self"),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -176,7 +229,6 @@ pub enum HirExprKind {
     },
     Index(Obj<HirExpr>, Obj<HirExpr>),
     Range(HirRangeExpr),
-    LocalSelf,
     Local(Obj<HirLocal>),
     AddrOf(Mutability, Obj<HirExpr>),
     Break {

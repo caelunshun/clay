@@ -1,12 +1,14 @@
 pub struct Counter {
-    count: @'a mut u32,
+    count: @mut u32,
 }
 
 impl Counter {
     fn new() -> Self {
-        Self {
+        let (self, self) = (self, self);
+
+        /*Self {
             count: 0.gc,
-        }
+        }*/
     }
 
     fn count(&self) -> u32 => *self.count;

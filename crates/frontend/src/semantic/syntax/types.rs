@@ -9,8 +9,8 @@ use crate::{
     semantic::{
         analysis::{ClauseOrigin, TyCtxt},
         syntax::{
-            FnDef, FnItem, Item, MirLocalIdx, SpannedTraitClauseList, SpannedTraitInstance,
-            SpannedTy, SpannedTyOrReList, Visibility,
+            FnDef, FnItem, Item, LocalNameIdent, MirLocalIdx, SpannedTraitClauseList,
+            SpannedTraitInstance, SpannedTy, SpannedTyOrReList, Visibility,
         },
     },
     symbol,
@@ -789,7 +789,7 @@ pub enum InferTyVarSourceInfo {
     HrtbLhsInstantiation { span: Span },
     ProjectionResult { origin: ClauseOrigin, span: Span },
     Imported { origin: ClauseOrigin, span: Span },
-    Local { name: Ident },
+    Local { name: LocalNameIdent },
     FunctionArgs { span: Span },
     FunctionRetVal { span: Span },
     MethodReceiver { span: Span },

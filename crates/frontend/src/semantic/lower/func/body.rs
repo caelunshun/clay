@@ -17,14 +17,14 @@ use crate::{
             entry::IntraItemLowerCtxt,
             func::{
                 pat::PatOrRest,
-                path::{PathResolvedFnLit, PathResolvedLocal, PathResolvedValue},
+                path::{PathResolvedFnLit, PathResolvedValue},
             },
         },
         syntax::{
             AdtCtor, AdtCtorFieldIdx, AdtCtorSyntax, HirBlock, HirExpr, HirExprKind,
             HirLabelTargetKind, HirLabelledBlock, HirLetStmt, HirMatchArm, HirPat, HirPatKind,
             HirPatListFrontAndTail, HirRangeExpr, HirStmt, HirStructExpr, HirStructNamedField,
-            SpannedTyOrReList,
+            LocalNameSymbol, SpannedTyOrReList,
         },
     },
     utils::{
@@ -365,10 +365,7 @@ impl IntraItemLowerCtxt<'_> {
                 };
 
                 match res_val {
-                    PathResolvedValue::Local(local) => match local {
-                        PathResolvedLocal::LowerSelf => HirExprKind::LocalSelf,
-                        PathResolvedLocal::Local(def) => HirExprKind::Local(def),
-                    },
+                    PathResolvedValue::Local(local) => HirExprKind::Local(local),
                     PathResolvedValue::FnLit(fn_lit) => match fn_lit {
                         PathResolvedFnLit::Item(def, params) => HirExprKind::FnItemLit(def, params),
                         PathResolvedFnLit::TypeRelative {
@@ -521,8 +518,9 @@ impl IntraItemLowerCtxt<'_> {
                         let initializer = match &field.expr {
                             Some(expr) => self.lower_expr(expr),
                             None => {
-                                let kind = if let Some(def) =
-                                    self.func_local_names.lookup(field.name.text)
+                                let kind = if let Some(def) = self
+                                    .func_local_names
+                                    .lookup(LocalNameSymbol::User(field.name.text))
                                 {
                                     HirExprKind::Local(*def)
                                 } else {

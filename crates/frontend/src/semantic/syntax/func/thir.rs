@@ -4,7 +4,7 @@ use crate::{
         ast::{AstBinOpKind, AstLit, AstUnOpKind},
         token::Ident,
     },
-    semantic::syntax::{Mutability, Ty},
+    semantic::syntax::{LocalNameIdent, Mutability, Ty},
 };
 
 // === Pattern === //
@@ -12,7 +12,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct ThirLocal {
     pub mutability: Mutability,
-    pub name: Ident,
+    pub name: LocalNameIdent,
     pub ty: Ty,
 }
 

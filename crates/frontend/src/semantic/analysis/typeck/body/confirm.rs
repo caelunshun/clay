@@ -2,6 +2,7 @@ use crate::{
     base::{
         Diag,
         arena::{HasInterner, HasListInterner, LateInit, Obj},
+        syntax::HasSpan as _,
     },
     semantic::{
         analysis::{
@@ -202,7 +203,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             } => todo!(),
             HirExprKind::Index(obj, obj1) => todo!(),
             HirExprKind::Range(hir_range_expr) => todo!(),
-            HirExprKind::LocalSelf => todo!(),
             HirExprKind::Local(local) => ThirExprKind::Local(self.confirm_local(local)),
             HirExprKind::AddrOf(muta, expr) => ThirExprKind::AddrOf(muta, self.confirm_expr(expr)),
             HirExprKind::Break { label, value } => todo!(),
@@ -378,8 +378,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                     let error = match self.bcx.ccx().lookup_infer_ty_src_info(var) {
                         InferTyVarSourceInfo::Local { name } => Diag::span_err(
-                            name.span,
-                            format_args!("type annotations required for local `{}`", name.text),
+                            name.span(),
+                            format_args!("type annotations required for local `{name}`"),
                         )
                         .emit(),
                         InferTyVarSourceInfo::HrtbLhsInstantiation { span }

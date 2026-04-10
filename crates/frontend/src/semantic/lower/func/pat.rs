@@ -2,7 +2,7 @@ use crate::{
     base::{
         Diag, ErrorGuaranteed, LeafDiag, Level, Session,
         arena::Obj,
-        syntax::{Span, Symbol},
+        syntax::{HasSpan as _, Span, Symbol},
     },
     parse::{
         ast::{AstOptMutability, AstPat, AstPatFieldKind, AstPatKind, AstPatStructRest},
@@ -15,7 +15,7 @@ use crate::{
         },
         syntax::{
             HirLocal, HirPat, HirPatKind, HirPatListFrontAndTail, HirPatListFrontAndTailLen,
-            HirPatNamedField, Mutability,
+            HirPatNamedField, LocalNameIdent, LocalNameSymbol, Mutability,
         },
     },
     utils::hash::FxHashMap,
@@ -26,8 +26,8 @@ use std::{fmt, mem};
 
 #[derive(Debug)]
 pub struct PatLocalBranchResolver<'a> {
-    locals: &'a mut FxHashMap<Symbol, PatLocal>,
-    case_mention_stack: &'a mut Vec<Symbol>,
+    locals: &'a mut FxHashMap<LocalNameSymbol, PatLocal>,
+    case_mention_stack: &'a mut Vec<LocalNameSymbol>,
     should_use_case_mention_stack: bool,
 }
 
@@ -92,23 +92,17 @@ impl PatLocalBranchResolver<'_> {
 
     pub fn resolve(
         &mut self,
-        ident: Ident,
+        name: LocalNameIdent,
         mutability: Mutability,
         s: &Session,
     ) -> Result<Obj<HirLocal>, ErrorGuaranteed> {
-        let local = match self.locals.entry(ident.text) {
+        let local = match self.locals.entry(name.as_symbol()) {
             hashbrown::hash_map::Entry::Vacant(entry) => {
-                let local = Obj::new(
-                    HirLocal {
-                        mutability,
-                        name: ident,
-                    },
-                    s,
-                );
+                let local = Obj::new(HirLocal { mutability, name }, s);
 
                 entry.insert(PatLocal {
-                    currently_bound_at: Some(ident.span),
-                    original_binder_span: ident.span,
+                    currently_bound_at: Some(name.span()),
+                    original_binder_span: name.span(),
                     local,
                 });
 
@@ -119,10 +113,9 @@ impl PatLocalBranchResolver<'_> {
 
                 if let Some(prev_binding) = entry.currently_bound_at {
                     return Err(Diag::span_err(
-                        ident.span,
+                        name.span(),
                         format_args!(
-                            "identifier `{}` is bound more than once in the same pattern",
-                            ident.text
+                            "identifier `{name}` is bound more than once in the same pattern"
                         ),
                     )
                     .child(LeafDiag::span_note(
@@ -134,13 +127,9 @@ impl PatLocalBranchResolver<'_> {
 
                 if entry.local.r(s).mutability != mutability {
                     return Err(Diag::anon_err(format_args!(
-                        "identifier `{}` is bound with differing mutabilities in the same pattern",
-                        ident.text
+                        "identifier `{name}` is bound with differing mutabilities in the same pattern"
                     ))
-                    .primary(
-                        ident.span,
-                        format_args!("now bound {}", mutability.adverb()),
-                    )
+                    .primary(name.span(), format_args!("now bound {}", mutability.adverb()))
                     .secondary(
                         entry.original_binder_span,
                         format_args!("originally bound {}", entry.local.r(s).mutability.adverb()),
@@ -148,14 +137,14 @@ impl PatLocalBranchResolver<'_> {
                     .emit());
                 }
 
-                entry.currently_bound_at = Some(ident.span);
+                entry.currently_bound_at = Some(name.span());
 
                 entry.local
             }
         };
 
         if self.should_use_case_mention_stack {
-            self.case_mention_stack.push(ident.text);
+            self.case_mention_stack.push(name.as_symbol());
         }
 
         Ok(local)
@@ -164,9 +153,9 @@ impl PatLocalBranchResolver<'_> {
 
 #[derive(Debug)]
 pub struct PatLocalForkResolver<'a> {
-    locals: &'a mut FxHashMap<Symbol, PatLocal>,
-    case_mention_stack: &'a mut Vec<Symbol>,
-    fork_locals: FxHashMap<Symbol, ForkLocalState>,
+    locals: &'a mut FxHashMap<LocalNameSymbol, PatLocal>,
+    case_mention_stack: &'a mut Vec<LocalNameSymbol>,
+    fork_locals: FxHashMap<LocalNameSymbol, ForkLocalState>,
     fork_spans: Vec<Span>,
     fork_had_errors: bool,
 }
@@ -246,7 +235,7 @@ impl IntraItemLowerCtxt<'_> {
         PatLocalBranchResolver::start(|locals| self.lower_pat_inner(ast, locals))
     }
 
-    fn lower_pat_inner(
+    pub fn lower_pat_inner(
         &mut self,
         ast: &AstPat,
         locals: &mut PatLocalBranchResolver,
@@ -266,7 +255,8 @@ impl IntraItemLowerCtxt<'_> {
                     Ok(ExprPathIdentOrResolution::Ident(name)) => {
                         match locals.resolve(name, binding_mode.local_muta.as_muta(), s) {
                             Ok(local) => {
-                                self.func_local_names.define_force_shadow(name.text, local);
+                                self.func_local_names
+                                    .define_force_shadow(name.as_symbol(), local);
 
                                 HirPatKind::Binding(
                                     binding_mode.by_ref,
@@ -328,7 +318,11 @@ impl IntraItemLowerCtxt<'_> {
                             (field.name, self.lower_pat_inner(pat, locals))
                         }
                         AstPatFieldKind::Bare(muta) => {
-                            let kind = match locals.resolve(field.name, muta.as_muta(), s) {
+                            let kind = match locals.resolve(
+                                LocalNameIdent::User(field.name),
+                                muta.as_muta(),
+                                s,
+                            ) {
                                 Ok(name) => {
                                     HirPatKind::Binding(AstOptMutability::Implicit, name, None)
                                 }

@@ -967,7 +967,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 output_ty
             }
             HirExprKind::Range(range_expr) => todo!(),
-            HirExprKind::LocalSelf => todo!(),
             HirExprKind::Local(local) => self.type_of_local(local),
             HirExprKind::AddrOf(mutability, pointee) => {
                 let pointee = self.check_expr(pointee, None).and_do(&mut divergence);

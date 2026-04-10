@@ -5,13 +5,14 @@ use crate::{
     },
     parse::{
         ast::{
-            AnyPunct, AstGenericParamList, AstItem, AstOptMutability, AstParamedPath, AstReturnTy,
-            AstTy,
+            AnyPunct, AstGenericParamList, AstItem, AstOptMutability, AstParamedPath,
+            AstParamedPathSegment, AstPathPart, AstReturnTy, AstTy,
         },
         token::{Ident, Lifetime, TokenCharLit, TokenNumLit, TokenStrLit},
     },
-    punct, puncts,
+    punct, puncts, symbol,
 };
+use std::rc::Rc;
 
 // === Functions === //
 
@@ -404,7 +405,17 @@ impl AstPatKind {
             },
             path: AstExprPath {
                 span,
-                kind: AstExprPathKind::SelfTy(span, None),
+                kind: AstExprPathKind::Bare(AstParamedPath {
+                    span,
+                    segments: Rc::from_iter([AstParamedPathSegment {
+                        part: AstPathPart::wrap_raw(Ident {
+                            span,
+                            text: symbol!("self"),
+                            raw: false,
+                        }),
+                        args: None,
+                    }]),
+                }),
             },
             and_bind: None,
         }

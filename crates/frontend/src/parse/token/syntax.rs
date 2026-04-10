@@ -217,6 +217,14 @@ impl Ident {
         }
     }
 
+    pub fn with_span(self, span: Span) -> Self {
+        Self {
+            span,
+            text: self.text,
+            raw: self.raw,
+        }
+    }
+
     pub fn matches_unescaped(self, kw: Symbol) -> bool {
         !self.raw && self.text == kw
     }
