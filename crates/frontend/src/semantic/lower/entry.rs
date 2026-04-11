@@ -20,7 +20,7 @@ use crate::{
         analysis::TyCtxt,
         lower::{
             bootstrap::{lower_synthetic_module, synthesize_bootstrap_prelude},
-            func::pat::PatLocalBranchResolver,
+            func::pat::{PatLocalBranchResolver, PatLowerContext},
             modules::{
                 BuilderItemId, BuilderModuleTree, FrozenModuleResolver, FrozenVisibilityResolver,
                 ItemCategory, PathResolver, VisibilityResolver,
@@ -42,7 +42,7 @@ use crate::{
 };
 use hashbrown::hash_map;
 use index_vec::{IndexSlice, IndexVec};
-use std::rc::Rc;
+use std::{cell::Cell, rc::Rc};
 
 // === Driver === //
 
@@ -1457,13 +1457,23 @@ impl IntraItemLowerCtxt<'_> {
         self.define_generics_in_binder(def.r(s).generics);
         self.lower_generic_def_clauses(def.r(s).generics, &generic_clause_lists);
 
+        let has_self_param = Cell::new(false);
+
         PatLocalBranchResolver::start(|locals| {
             LateInit::init(
                 &def.r(s).args,
                 Obj::new_iter(
-                    ast.args.iter().map(|arg| FnArg {
+                    ast.args.iter().enumerate().map(|(idx, arg)| FnArg {
                         span: arg.span,
-                        pat: self.lower_pat_inner(&arg.pat, locals),
+                        pat: self.lower_pat_inner(
+                            &arg.pat,
+                            locals,
+                            if idx == 0 {
+                                PatLowerContext::FnSigFirstToplevel(&has_self_param)
+                            } else {
+                                PatLowerContext::FnSigSubsequent
+                            },
+                        ),
                         ty: self.lower_ty(&arg.ty),
                     }),
                     s,
@@ -1471,8 +1481,7 @@ impl IntraItemLowerCtxt<'_> {
             );
         });
 
-        // TODO: Actually detect these!
-        LateInit::init(&def.r(s).has_self_param, !def.r(s).args.r(s).is_empty());
+        LateInit::init(&def.r(s).has_self_param, has_self_param.get());
 
         LateInit::init(
             &def.r(s).ret_ty,

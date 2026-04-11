@@ -1,7 +1,4 @@
-use crate::{
-    base::{ErrorGuaranteed, syntax::Symbol},
-    utils::hash::FxHashMap,
-};
+use crate::{base::ErrorGuaranteed, utils::hash::FxHashMap};
 use derive_where::derive_where;
 use std::hash;
 

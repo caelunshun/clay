@@ -43,7 +43,7 @@ pub mod std {
     }
 
     pub trait Clone {
-        fn clone<'a: &shorter Self>(me: &'a Self) -> Self;
+        fn clone<'a: &shorter Self>(&'a self) -> Self;
     }
 }
 
@@ -59,15 +59,15 @@ impl<T> Vec<T> {
         todo()
     }
 
-    pub fn push<'a: &shorter Self>(me: &'a mut Self, value: T) {
+    pub fn push<'a: &shorter Self>(&'a mut self, value: T) {
         todo()
     }
 
-    pub fn clear<'a: &shorter Self>(me: &'a mut Self) {
+    pub fn clear<'a: &shorter Self>(&'a mut self) {
         todo()
     }
 
-    pub fn get<'a: &shorter Self>(me: &'a Self, idx: u32) -> &'a T {
+    pub fn get<'a: &shorter Self>(&'a self, idx: u32) -> &'a T {
         todo()
     }
 }
@@ -77,7 +77,7 @@ impl<T> std::Index<u32> for Vec<T> {
 }
 
 impl<T: Clone> Clone for Vec<T> {
-    fn clone<'a: &shorter Self>(me: &'a Self) -> Self {
+    fn clone<'a: &shorter Self>(&'a self) -> Self {
         todo()
     }
 }
@@ -87,7 +87,7 @@ impl<'a: &shorter T, T> std::Iterator for &'a Vec<T> {
 }
 
 impl Clone for () {
-    fn clone<'a: &shorter Self>(me: &'a Self) -> Self {
+    fn clone<'a: &shorter Self>(&'a self) -> Self {
         todo()
     }
 }
@@ -117,11 +117,11 @@ fn main() {
 }
 
 pub trait MakeVec {
-    fn make<T>(me: Self) -> Vec<T>;
+    fn make<T>(self) -> Vec<T>;
 }
 
 impl MakeVec for () {
-    fn make<T>(me: Self) -> Vec<T> {
+    fn make<T>(self) -> Vec<T> {
         todo();
     }
 }

@@ -420,6 +420,29 @@ impl AstPatKind {
             and_bind: None,
         }
     }
+
+    pub fn is_self_token(&self) -> bool {
+        if let AstPatKind::Path {
+            binding_mode:
+                AstBindingMode {
+                    by_ref: AstOptMutability::Implicit,
+                    local_muta: _,
+                },
+            path:
+                AstExprPath {
+                    span: _,
+                    kind: AstExprPathKind::Bare(AstParamedPath { span: _, segments }),
+                },
+            and_bind: None,
+        } = self
+            && let [AstParamedPathSegment { part, args: None }] = &**segments
+            && part.keyword() == Some(super::AstPathPartKw::Self_)
+        {
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]

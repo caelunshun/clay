@@ -143,6 +143,19 @@ pub fn parse_func_arg(p: P) -> AstFnArg {
     let pat = parse_pat(p);
 
     if match_punct(punct!(':')).expect(p).is_none() {
+        if pat.kind.is_self_token() {
+            let span = start.to(p.prev_span());
+
+            return AstFnArg {
+                span,
+                pat: Box::new(pat),
+                ty: Box::new(AstTy {
+                    span,
+                    kind: AstTyKind::This,
+                }),
+            };
+        }
+
         p.stuck().ignore_not_in_loop();
     }
 

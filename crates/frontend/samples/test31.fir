@@ -4,8 +4,6 @@ pub struct Counter {
 
 impl Counter {
     fn new() -> Self {
-        let (self, self) = (self, self);
-
         /*Self {
             count: 0.gc,
         }*/

@@ -2,12 +2,9 @@ use crate::{
     base::{
         Diag, ErrorGuaranteed, LeafDiag, Level, Session,
         arena::Obj,
-        syntax::{HasSpan as _, Span, Symbol},
+        syntax::{HasSpan as _, Span},
     },
-    parse::{
-        ast::{AstOptMutability, AstPat, AstPatFieldKind, AstPatKind, AstPatStructRest},
-        token::Ident,
-    },
+    parse::ast::{AstOptMutability, AstPat, AstPatFieldKind, AstPatKind, AstPatStructRest},
     semantic::{
         lower::{
             entry::IntraItemLowerCtxt,
@@ -20,7 +17,7 @@ use crate::{
     },
     utils::hash::FxHashMap,
 };
-use std::{fmt, mem};
+use std::{cell::Cell, fmt, mem};
 
 // === Fork Resolution === //
 
@@ -230,15 +227,37 @@ impl PatLocalForkResolver<'_> {
 
 // === Lowering === //
 
+#[derive(Debug, Copy, Clone)]
+pub enum PatLowerContext<'a> {
+    Body,
+    FnSigFirstToplevel(&'a Cell<bool>),
+    FnSigFirstNested,
+    FnSigSubsequent,
+}
+
+impl PatLowerContext<'_> {
+    pub fn move_inwards(self) -> Self {
+        match self {
+            PatLowerContext::Body
+            | PatLowerContext::FnSigFirstNested
+            | PatLowerContext::FnSigSubsequent => self,
+            PatLowerContext::FnSigFirstToplevel(_) => PatLowerContext::FnSigFirstNested,
+        }
+    }
+}
+
 impl IntraItemLowerCtxt<'_> {
     pub fn lower_pat(&mut self, ast: &AstPat) -> Obj<HirPat> {
-        PatLocalBranchResolver::start(|locals| self.lower_pat_inner(ast, locals))
+        PatLocalBranchResolver::start(|locals| {
+            self.lower_pat_inner(ast, locals, PatLowerContext::Body)
+        })
     }
 
     pub fn lower_pat_inner(
         &mut self,
         ast: &AstPat,
         locals: &mut PatLocalBranchResolver,
+        cx: PatLowerContext,
     ) -> Obj<HirPat> {
         let s = &self.tcx.session;
 
@@ -253,6 +272,36 @@ impl IntraItemLowerCtxt<'_> {
 
                 match res.as_ident_or_res(path, s) {
                     Ok(ExprPathIdentOrResolution::Ident(name)) => {
+                        match name {
+                            LocalNameIdent::SelfName(span) => match cx {
+                                PatLowerContext::Body => {
+                                    // (fallthrough)
+                                }
+                                PatLowerContext::FnSigFirstToplevel(self_param_span) => {
+                                    self_param_span.set(true);
+                                }
+                                PatLowerContext::FnSigFirstNested => {
+                                    Diag::span_err(
+                                        span,
+                                        "`self` can only appear at the top-level of the first \
+                                         argument's pattern in the function signature",
+                                    )
+                                    .emit();
+                                }
+                                PatLowerContext::FnSigSubsequent => {
+                                    Diag::span_err(
+                                        span,
+                                        "`self` can only appear in the first argument of a function's \
+                                         signature",
+                                    )
+                                    .emit();
+                                }
+                            },
+                            LocalNameIdent::User(_name) => {
+                                // (fallthrough)
+                            }
+                        }
+
                         match locals.resolve(name, binding_mode.local_muta.as_muta(), s) {
                             Ok(local) => {
                                 self.func_local_names
@@ -261,9 +310,9 @@ impl IntraItemLowerCtxt<'_> {
                                 HirPatKind::Binding(
                                     binding_mode.by_ref,
                                     local,
-                                    and_bind
-                                        .as_ref()
-                                        .map(|ast| self.lower_pat_inner(ast, locals)),
+                                    and_bind.as_ref().map(|ast| {
+                                        self.lower_pat_inner(ast, locals, cx.move_inwards())
+                                    }),
                                 )
                             }
                             Err(err) => HirPatKind::Error(err),
@@ -314,9 +363,10 @@ impl IntraItemLowerCtxt<'_> {
                 let fields = fields
                     .iter()
                     .map(|field| match &field.kind {
-                        AstPatFieldKind::WithPat(pat) => {
-                            (field.name, self.lower_pat_inner(pat, locals))
-                        }
+                        AstPatFieldKind::WithPat(pat) => (
+                            field.name,
+                            self.lower_pat_inner(pat, locals, cx.move_inwards()),
+                        ),
                         AstPatFieldKind::Bare(muta) => {
                             let kind = match locals.resolve(
                                 LocalNameIdent::User(field.name),
@@ -376,7 +426,12 @@ impl IntraItemLowerCtxt<'_> {
                     );
                 };
 
-                let children = self.lower_pat_list_front_and_tail("tuple", children, locals);
+                let children = self.lower_pat_list_front_and_tail(
+                    "tuple",
+                    children,
+                    locals,
+                    cx.move_inwards(),
+                );
                 let expected_len = ctor.def.r(s).fields.len() as u32;
 
                 let arity_offense = match children.len(s) {
@@ -435,9 +490,9 @@ impl IntraItemLowerCtxt<'_> {
                     let mut forks = Vec::new();
 
                     for pat in pats {
-                        forks.push(
-                            locals.case(pat.span, |locals| self.lower_pat_inner(pat, locals)),
-                        );
+                        forks.push(locals.case(pat.span, |locals| {
+                            self.lower_pat_inner(pat, locals, cx.move_inwards())
+                        }));
                     }
 
                     Obj::new_slice(&forks, s)
@@ -446,16 +501,23 @@ impl IntraItemLowerCtxt<'_> {
                     Err(err) => HirPatKind::Error(err),
                 }
             }
-            AstPatKind::Tuple(pats) => {
-                HirPatKind::Tuple(self.lower_pat_list_front_and_tail("tuple", pats, locals))
-            }
+            AstPatKind::Tuple(pats) => HirPatKind::Tuple(self.lower_pat_list_front_and_tail(
+                "tuple",
+                pats,
+                locals,
+                cx.move_inwards(),
+            )),
             AstPatKind::Paren(pat) => return self.lower_pat(pat),
-            AstPatKind::Ref(muta, inner) => {
-                HirPatKind::Deref(muta.as_muta(), self.lower_pat_inner(inner, locals))
-            }
-            AstPatKind::Slice(pats) => {
-                HirPatKind::Slice(self.lower_pat_list_front_and_tail("slice", pats, locals))
-            }
+            AstPatKind::Ref(muta, inner) => HirPatKind::Deref(
+                muta.as_muta(),
+                self.lower_pat_inner(inner, locals, cx.move_inwards()),
+            ),
+            AstPatKind::Slice(pats) => HirPatKind::Slice(self.lower_pat_list_front_and_tail(
+                "slice",
+                pats,
+                locals,
+                cx.move_inwards(),
+            )),
             AstPatKind::Rest => HirPatKind::Error(
                 Diag::span_err(ast.span, "`..` patterns are not allowed here")
                     .child(LeafDiag::new(
@@ -529,10 +591,11 @@ impl IntraItemLowerCtxt<'_> {
         kind_name: impl fmt::Display,
         asts: &[AstPat],
         locals: &mut PatLocalBranchResolver,
+        cx: PatLowerContext,
     ) -> HirPatListFrontAndTail {
         self.lower_pat_list_front_and_tail_generic(kind_name, asts, |this, ast| match &ast.kind {
             AstPatKind::Rest => PatOrRest::Rest(ast.span),
-            _ => PatOrRest::Pat(this.lower_pat_inner(ast, locals)),
+            _ => PatOrRest::Pat(this.lower_pat_inner(ast, locals, cx.move_inwards())),
         })
     }
 }
