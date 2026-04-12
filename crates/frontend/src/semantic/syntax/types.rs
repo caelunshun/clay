@@ -8,9 +8,11 @@ use crate::{
     parse::token::{Ident, Lifetime},
     semantic::{
         analysis::{ClauseOrigin, TyCtxt},
+        lower::func::path::TypeRelativeAssoc,
         syntax::{
-            FnDef, FnItem, Item, LocalNameIdent, MirLocalIdx, SpannedTraitClauseList,
-            SpannedTraitInstance, SpannedTy, SpannedTyOrReList, Visibility,
+            EnumVariantItem, FnDef, FnItem, Item, LocalNameIdent, MirLocalIdx,
+            SpannedTraitClauseList, SpannedTraitInstance, SpannedTraitSpec, SpannedTy,
+            SpannedTyOrReList, Visibility,
         },
     },
     symbol,
@@ -128,6 +130,17 @@ pub struct AdtCtor {
     pub owner: AdtCtorOwner,
     pub syntax: AdtCtorSyntax,
     pub fields: IndexVec<AdtCtorFieldIdx, AdtCtorField>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum AdtCtorUnresolved {
+    ResolvedTy(SpannedTy),
+    ResolvedEnumVariant(Obj<EnumVariantItem>, SpannedTyOrReList),
+    TypeRelative {
+        self_ty: SpannedTy,
+        as_trait: Option<SpannedTraitSpec>,
+        assoc: TypeRelativeAssoc,
+    },
 }
 
 #[derive(Debug, Copy, Clone)]

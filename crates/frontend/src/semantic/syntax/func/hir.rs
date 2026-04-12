@@ -11,8 +11,8 @@ use crate::{
         token::Ident,
     },
     semantic::syntax::{
-        AdtCtorFieldIdx, AdtCtorInstance, FnItem, Mutability, SpannedTraitSpec, SpannedTy,
-        SpannedTyOrReList,
+        AdtCtorFieldIdx, AdtCtorInstance, AdtCtorUnresolved, EnumVariantItem, FnItem, Mutability,
+        SpannedTraitSpec, SpannedTy, SpannedTyOrReList,
     },
     symbol,
 };
@@ -194,7 +194,8 @@ pub enum HirExprKind {
     Binary(AstBinOpSpanned, Obj<HirExpr>, Obj<HirExpr>),
     Unary(AstUnOpKind, Obj<HirExpr>),
     Literal(AstLit),
-    TupleOrUnitCtor(AdtCtorInstance),
+    AdtCtorTy(SpannedTy),
+    AdtCtorEnumVariant(Obj<EnumVariantItem>, SpannedTyOrReList),
     FnItemLit(Obj<FnItem>, Option<SpannedTyOrReList>),
     TypeRelative {
         self_ty: SpannedTy,
@@ -305,14 +306,15 @@ pub struct HirRangeExpr {
 
 #[derive(Debug, Copy, Clone)]
 pub struct HirStructExpr {
-    pub ctor: AdtCtorInstance,
+    pub ctor_span: Span,
+    pub ctor: AdtCtorUnresolved,
     pub fields: Obj<[HirStructNamedField]>,
     pub rest: Option<Obj<HirExpr>>,
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct HirStructNamedField {
-    pub idx: AdtCtorFieldIdx,
+    pub name: Ident,
     pub init: Obj<HirExpr>,
 }
 

@@ -16,8 +16,8 @@ use crate::{
         lower::generics::normalize_positional_generic_arity,
         syntax::{
             AdtInstance, Crate, Divergence, FnDef, FnInstanceInner, HirBlock, HirExpr, HirExprKind,
-            HirLabelTargetKind, HirLabelledBlock, HirLocal, HirPat, HirStmt, HirStructExpr,
-            InferTyVar, InferTyVarSourceInfo, Item, Re, RelationMode, SimpleTyKind, SimpleTySet,
+            HirLabelTargetKind, HirLabelledBlock, HirLocal, HirPat, HirStmt, InferTyVar,
+            InferTyVarSourceInfo, Item, Re, RelationMode, SimpleTyKind, SimpleTySet,
             SpannedFnInstanceView, SpannedFnOwnerView, SpannedTyView, ThirLocal, TraitParam,
             TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
@@ -645,7 +645,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 AstLit::String(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Str)),
                 AstLit::Bool(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Bool)),
             },
-            HirExprKind::TupleOrUnitCtor(adt_ctor_instance) => todo!(),
             HirExprKind::FnItemLit(def, early_args) => {
                 let env = self.import_env;
                 let early_args = early_args.map(|early_args| {
@@ -999,7 +998,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 self.check_expr_demand(rv, self.return_ty).ignore();
                 tcx.intern(TyKind::Simple(SimpleTyKind::Never))
             }
-            HirExprKind::Struct(HirStructExpr { ctor, fields, rest }) => todo!(),
+            HirExprKind::AdtCtorTy(spanned) => todo!(),
+            HirExprKind::AdtCtorEnumVariant(obj, spanned) => todo!(),
+            HirExprKind::Struct(hir_struct_expr) => todo!(),
             HirExprKind::Error(err) => tcx.intern(TyKind::Error(err)),
         };
 

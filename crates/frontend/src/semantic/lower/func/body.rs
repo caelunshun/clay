@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        Diag, ErrorGuaranteed, LeafDiag, Level,
+        Diag, ErrorGuaranteed, LeafDiag,
         arena::{LateInit, Obj},
         syntax::Span,
     },
@@ -10,29 +10,20 @@ use crate::{
             AstRangeExpr, AstRangeLimits, AstStmt, AstStmtKind, AstStmtLet, AstStructRest,
             AstUnOpKind,
         },
-        token::{Ident, Lifetime},
+        token::Lifetime,
     },
     semantic::{
         lower::{
             entry::IntraItemLowerCtxt,
-            func::{
-                pat::PatOrRest,
-                path::{PathResolvedFnLit, PathResolvedValue},
-            },
+            func::{pat::PatOrRest, path::PathResolvedValue},
         },
         syntax::{
-            AdtCtor, AdtCtorFieldIdx, AdtCtorSyntax, HirBlock, HirExpr, HirExprKind,
-            HirLabelTargetKind, HirLabelledBlock, HirLetStmt, HirMatchArm, HirPat, HirPatKind,
-            HirPatListFrontAndTail, HirRangeExpr, HirStmt, HirStructExpr, HirStructNamedField,
-            LocalNameSymbol, SpannedTyOrReList,
+            HirBlock, HirExpr, HirExprKind, HirLabelTargetKind, HirLabelledBlock, HirLetStmt,
+            HirMatchArm, HirPat, HirPatKind, HirPatListFrontAndTail, HirRangeExpr, HirStmt,
+            HirStructExpr, HirStructNamedField, LocalNameSymbol, SpannedTyOrReList,
         },
     },
-    utils::{
-        hash::FxHashMap,
-        lang::{AND_LIST_GLUE, format_list},
-    },
 };
-use hashbrown::hash_map;
 use std::{fmt, mem};
 
 // === Body lowering === //
@@ -197,6 +188,7 @@ impl IntraItemLowerCtxt<'_> {
     }
 
     pub fn lower_expr(&mut self, ast: &AstExpr) -> Obj<HirExpr> {
+        let tcx = self.tcx;
         let s = &self.tcx.session;
 
         let expr = Obj::new(
@@ -354,7 +346,7 @@ impl IntraItemLowerCtxt<'_> {
                     }
                 };
 
-                let Some(res_val) = res.as_value(s) else {
+                let Some(res_val) = res.as_value(path, tcx) else {
                     break 'path HirExprKind::Error(
                         Diag::span_err(
                             path.span,
@@ -366,72 +358,21 @@ impl IntraItemLowerCtxt<'_> {
 
                 match res_val {
                     PathResolvedValue::Local(local) => HirExprKind::Local(local),
-                    PathResolvedValue::FnLit(fn_lit) => match fn_lit {
-                        PathResolvedFnLit::Item(def, params) => HirExprKind::FnItemLit(def, params),
-                        PathResolvedFnLit::TypeRelative {
-                            self_ty,
-                            as_trait,
-                            assoc,
-                        } => HirExprKind::TypeRelative {
-                            self_ty,
-                            as_trait,
-                            assoc_name: assoc.name,
-                            assoc_args: assoc.args,
-                        },
+                    PathResolvedValue::FnItem(def, params) => HirExprKind::FnItemLit(def, params),
+                    PathResolvedValue::TypeRelative {
+                        self_ty,
+                        as_trait,
+                        assoc,
+                    } => HirExprKind::TypeRelative {
+                        self_ty,
+                        as_trait,
+                        assoc_name: assoc.name,
+                        assoc_args: assoc.args,
                     },
-                    PathResolvedValue::AdtCtor(ctor) => match ctor.def.r(s).syntax {
-                        AdtCtorSyntax::Unit => HirExprKind::TupleOrUnitCtor(ctor),
-                        AdtCtorSyntax::Tuple => {
-                            let offending_fields = ctor
-                                .def
-                                .r(s)
-                                .fields
-                                .iter()
-                                .filter(|field| !field.vis.is_visible_to(self.scope, s))
-                                .collect::<Vec<_>>();
-
-                            if !offending_fields.is_empty() {
-                                Diag::span_err(
-                                    path.span,
-                                    format_args!(
-                                        "tuple constructor for {} is not visible to {} because \
-                                         field{} {} {} inaccessible",
-                                        ctor.def.r(s).owner.bare_identified_what(s),
-                                        self.scope.r(s).bare_category_path(s),
-                                        if offending_fields.len() == 1 { "" } else { "s" },
-                                        format_list(
-                                            offending_fields
-                                                .iter()
-                                                .map(|v| format!("`{}`", v.idx.raw())),
-                                            AND_LIST_GLUE,
-                                        ),
-                                        if offending_fields.len() == 1 {
-                                            "is"
-                                        } else {
-                                            "are"
-                                        },
-                                    ),
-                                )
-                                .emit();
-                            }
-
-                            HirExprKind::TupleOrUnitCtor(ctor)
-                        }
-                        AdtCtorSyntax::Named(_) => HirExprKind::Error(
-                            Diag::span_err(
-                                path.span,
-                                format_args!("expected value, got {}", res.bare_what(s)),
-                            )
-                            .child(LeafDiag::new(
-                                Level::Note,
-                                format_args!(
-                                    "only unit and tuple {} can be turned into functions",
-                                    ctor.def.r(s).owner.bare_whats()
-                                ),
-                            ))
-                            .emit(),
-                        ),
-                    },
+                    PathResolvedValue::AdtCtorTy(ty) => HirExprKind::AdtCtorTy(ty),
+                    PathResolvedValue::AdtCtorEnumVariant(def, params) => {
+                        HirExprKind::AdtCtorEnumVariant(def, params)
+                    }
                 }
             }
             AstExprKind::AddrOf(muta, expr) => {
@@ -499,7 +440,7 @@ impl IntraItemLowerCtxt<'_> {
                     Err(err) => break 'path HirExprKind::Error(err),
                 };
 
-                let Some(ctor) = res.as_adt(s).filter(|v| v.def.r(s).syntax.is_named()) else {
+                let Some(ctor) = res.as_adt(path, tcx) else {
                     break 'path HirExprKind::Error(
                         Diag::span_err(
                             path.span,
@@ -512,9 +453,8 @@ impl IntraItemLowerCtxt<'_> {
                     );
                 };
 
-                let fields = fields
-                    .iter()
-                    .map(|field| {
+                let fields = Obj::new_iter(
+                    fields.iter().map(|field| {
                         let initializer = match &field.expr {
                             Some(expr) => self.lower_expr(expr),
                             None => {
@@ -546,29 +486,31 @@ impl IntraItemLowerCtxt<'_> {
                             }
                         };
 
-                        (field.name, initializer)
-                    })
-                    .collect::<Vec<_>>();
+                        HirStructNamedField {
+                            name: field.name,
+                            init: initializer,
+                        }
+                    }),
+                    s,
+                );
 
-                let (deny_missing, rest) = match rest {
-                    AstStructRest::Base(expr) => (None, Some(self.lower_expr(expr))),
+                let rest = match rest {
+                    AstStructRest::Base(expr) => Some(self.lower_expr(expr)),
                     AstStructRest::Rest(span) => {
                         Diag::span_err(span.shrink_to_hi(), "base expression required after `..`")
                             .emit();
 
-                        (None, None)
+                        None
                     }
-                    AstStructRest::None => (Some(path.span), None),
+                    AstStructRest::None => None,
                 };
 
-                let fields = Obj::new_iter(
-                    self.match_up_ctor_members(ctor.def, fields, deny_missing)
-                        .into_iter()
-                        .map(|(idx, init)| HirStructNamedField { idx, init }),
-                    s,
-                );
-
-                HirExprKind::Struct(HirStructExpr { ctor, fields, rest })
+                HirExprKind::Struct(HirStructExpr {
+                    ctor_span: path.span,
+                    ctor,
+                    fields,
+                    rest,
+                })
             }
             AstExprKind::Error(err) => HirExprKind::Error(*err),
         };
@@ -867,96 +809,5 @@ impl IntraItemLowerCtxt<'_> {
         }
 
         outer
-    }
-
-    pub fn match_up_ctor_members<T>(
-        &self,
-        ctor: Obj<AdtCtor>,
-        fields: Vec<(Ident, T)>,
-        deny_missing: Option<Span>,
-    ) -> Vec<(AdtCtorFieldIdx, T)> {
-        let s = &self.tcx.session;
-        let name_map = ctor.r(s).syntax.unwrap_names();
-
-        let mut mentions = FxHashMap::default();
-        let mut accum = Vec::new();
-
-        for (name, value) in fields {
-            let Some(&resolved_idx) = name_map.get(&name.text) else {
-                Diag::span_err(
-                    name.span,
-                    format_args!(
-                        "{} does not have field `{}`",
-                        ctor.r(s).owner.bare_identified_what(s),
-                        name.text
-                    ),
-                )
-                .emit();
-
-                continue;
-            };
-
-            if !ctor.r(s).fields[resolved_idx]
-                .vis
-                .is_visible_to(self.scope, s)
-            {
-                Diag::span_err(
-                    name.span,
-                    format_args!(
-                        "field `{}` is not visible to {}",
-                        name.text,
-                        self.scope.r(s).bare_category_path(s)
-                    ),
-                )
-                .emit();
-            }
-
-            match mentions.entry(resolved_idx) {
-                hash_map::Entry::Vacant(entry) => {
-                    entry.insert(name.span);
-                }
-                hash_map::Entry::Occupied(entry) => {
-                    Diag::anon_err(format_args!("field `{}` used more than once", name.text))
-                        .primary(name.span, "used here again")
-                        .secondary(*entry.get(), "first used here")
-                        .emit();
-
-                    continue;
-                }
-            }
-
-            accum.push((resolved_idx, value));
-        }
-
-        if let Some(deny_missing) = deny_missing
-            && ctor.r(s).fields.len() != accum.len()
-        {
-            let mut missing_field_list = Vec::new();
-
-            for (idx, field_info) in ctor.r(s).fields.iter_enumerated() {
-                if mentions.contains_key(&idx) {
-                    continue;
-                }
-
-                missing_field_list.push(field_info.ident.unwrap().text);
-            }
-
-            Diag::span_err(
-                deny_missing,
-                format_args!(
-                    "{} is missing field{}: {}",
-                    ctor.r(s).owner.bare_identified_what(s),
-                    if missing_field_list.len() == 1 {
-                        ""
-                    } else {
-                        "s"
-                    },
-                    format_list(missing_field_list, AND_LIST_GLUE),
-                ),
-            )
-            .emit();
-        }
-
-        accum
     }
 }

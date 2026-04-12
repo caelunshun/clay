@@ -6,10 +6,7 @@ use crate::{
     },
     parse::ast::{AstOptMutability, AstPat, AstPatFieldKind, AstPatKind, AstPatStructRest},
     semantic::{
-        lower::{
-            entry::IntraItemLowerCtxt,
-            func::path::{ExprPathIdentOrResolution, PathResolvedPattern},
-        },
+        lower::{entry::IntraItemLowerCtxt, func::path::ExprPathIdentOrResolution},
         syntax::{
             HirLocal, HirPat, HirPatKind, HirPatListFrontAndTail, HirPatListFrontAndTailLen,
             HirPatNamedField, LocalNameIdent, LocalNameSymbol, Mutability,

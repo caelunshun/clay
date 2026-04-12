@@ -17,10 +17,10 @@ use crate::{
             modules::{FrozenModuleResolver, PathResolver, StepResolveError},
         },
         syntax::{
-            AdtItem, EnumVariantItem, FnItem, HirLocal, Item, ItemKind, LocalNameIdent,
-            LocalNameSymbol, SpannedAdtInstanceView, SpannedTraitParamList, SpannedTraitSpec,
-            SpannedTraitSpecView, SpannedTy, SpannedTyOrReList, SpannedTyView, TraitItem,
-            TypeAliasItem, TypeGeneric,
+            AdtCtorUnresolved, AdtItem, EnumVariantItem, FnItem, HirLocal, Item, ItemKind,
+            LocalNameIdent, LocalNameSymbol, SpannedAdtInstanceView, SpannedTraitParamList,
+            SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyOrReList, SpannedTyView,
+            TraitItem, TypeAliasItem, TypeGeneric,
         },
     },
 };
@@ -193,17 +193,6 @@ pub enum PathResolvedValue {
     AdtCtorEnumVariant(Obj<EnumVariantItem>, SpannedTyOrReList),
 }
 
-#[derive(Debug, Copy, Clone)]
-pub enum PathResolvedAdt {
-    ResolvedTy(SpannedTy),
-    ResolvedEnumVariant(Obj<EnumVariantItem>, SpannedTyOrReList),
-    TypeRelative {
-        self_ty: SpannedTy,
-        as_trait: Option<SpannedTraitSpec>,
-        assoc: TypeRelativeAssoc,
-    },
-}
-
 impl ExprPathResolution {
     pub fn as_value(self, path: &AstExprPath, tcx: &TyCtxt) -> Option<PathResolvedValue> {
         if let Some(resolved_ty) = self.as_resolved_ty(path, tcx) {
@@ -231,20 +220,20 @@ impl ExprPathResolution {
         }
     }
 
-    pub fn as_adt(self, path: &AstExprPath, tcx: &TyCtxt) -> Option<PathResolvedAdt> {
+    pub fn as_adt(self, path: &AstExprPath, tcx: &TyCtxt) -> Option<AdtCtorUnresolved> {
         if let Some(resolved_ty) = self.as_resolved_ty(path, tcx) {
-            return Some(PathResolvedAdt::ResolvedTy(resolved_ty));
+            return Some(AdtCtorUnresolved::ResolvedTy(resolved_ty));
         }
 
         match self {
             ExprPathResolution::ResolvedEnumVariant(def, params) => {
-                Some(PathResolvedAdt::ResolvedEnumVariant(def, params))
+                Some(AdtCtorUnresolved::ResolvedEnumVariant(def, params))
             }
             ExprPathResolution::TypeRelative {
                 self_ty,
                 as_trait,
                 assoc,
-            } => Some(PathResolvedAdt::TypeRelative {
+            } => Some(AdtCtorUnresolved::TypeRelative {
                 self_ty,
                 as_trait,
                 assoc,

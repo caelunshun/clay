@@ -159,7 +159,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 }
             }
             HirExprKind::Literal(lit) => ThirExprKind::CreateLiteral(lit),
-            HirExprKind::TupleOrUnitCtor(_) => ThirExprKind::CreatePathZst,
             HirExprKind::FnItemLit(_, _) => ThirExprKind::CreatePathZst,
             HirExprKind::TypeRelative {
                 self_ty: _,
@@ -208,6 +207,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             HirExprKind::Break { label, value } => todo!(),
             HirExprKind::Continue(hir_labelled_block) => todo!(),
             HirExprKind::Return(expr) => ThirExprKind::Return(self.confirm_expr(expr)),
+            HirExprKind::AdtCtorTy(_) => ThirExprKind::CreatePathZst,
+            HirExprKind::AdtCtorEnumVariant(_, _) => ThirExprKind::CreatePathZst,
             HirExprKind::Struct(hir_struct_expr) => todo!(),
             HirExprKind::Error(error) => ThirExprKind::Error(error),
         };
