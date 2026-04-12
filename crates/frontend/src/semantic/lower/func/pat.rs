@@ -4,12 +4,12 @@ use crate::{
         arena::Obj,
         syntax::{HasSpan as _, Span},
     },
-    parse::ast::{AstOptMutability, AstPat, AstPatFieldKind, AstPatKind, AstPatStructRest},
+    parse::ast::{AstOptMutability, AstPat, AstPatFieldKind, AstPatKind},
     semantic::{
         lower::{entry::IntraItemLowerCtxt, func::path::ExprPathIdentOrResolution},
         syntax::{
-            HirLocal, HirPat, HirPatKind, HirPatListFrontAndTail, HirPatListFrontAndTailLen,
-            HirPatNamedField, LocalNameIdent, LocalNameSymbol, Mutability,
+            HirLocal, HirPat, HirPatKind, HirPatListFrontAndTail, HirPatNamedField, LocalNameIdent,
+            LocalNameSymbol, Mutability,
         },
     },
     utils::hash::FxHashMap,
@@ -256,6 +256,7 @@ impl IntraItemLowerCtxt<'_> {
         locals: &mut PatLocalBranchResolver,
         cx: PatLowerContext,
     ) -> Obj<HirPat> {
+        let tcx = self.tcx;
         let s = &self.tcx.session;
 
         let kind = match &ast.kind {
@@ -316,7 +317,7 @@ impl IntraItemLowerCtxt<'_> {
                         }
                     }
                     Ok(ExprPathIdentOrResolution::Resolution(res)) => {
-                        let Some(kind) = res.as_pat(s) else {
+                        let Some(ctor) = res.as_adt(path, tcx) else {
                             break 'path HirPatKind::Error(
                                 Diag::span_err(
                                     path.span,
@@ -331,9 +332,7 @@ impl IntraItemLowerCtxt<'_> {
                                 .emit();
                         }
 
-                        match kind {
-                            PathResolvedPattern::UnitCtor(ctor) => HirPatKind::AdtUnit(ctor),
-                        }
+                        HirPatKind::AdtUnit(ctor)
                     }
                     Err(err) => HirPatKind::Error(err),
                 }
@@ -344,7 +343,7 @@ impl IntraItemLowerCtxt<'_> {
                     Err(err) => break 'path HirPatKind::Error(err),
                 };
 
-                let Some(ctor) = res.as_adt(s).filter(|v| v.def.r(s).syntax.is_named()) else {
+                let Some(ctor) = res.as_adt(path, tcx) else {
                     break 'path HirPatKind::Error(
                         Diag::span_err(
                             path.span,
@@ -357,13 +356,12 @@ impl IntraItemLowerCtxt<'_> {
                     );
                 };
 
-                let fields = fields
-                    .iter()
-                    .map(|field| match &field.kind {
-                        AstPatFieldKind::WithPat(pat) => (
-                            field.name,
-                            self.lower_pat_inner(pat, locals, cx.move_inwards()),
-                        ),
+                let fields = Obj::new_iter(
+                    fields.iter().map(|field| match &field.kind {
+                        AstPatFieldKind::WithPat(pat) => HirPatNamedField {
+                            name: field.name,
+                            pat: self.lower_pat_inner(pat, locals, cx.move_inwards()),
+                        },
                         AstPatFieldKind::Bare(muta) => {
                             let kind = match locals.resolve(
                                 LocalNameIdent::User(field.name),
@@ -376,29 +374,18 @@ impl IntraItemLowerCtxt<'_> {
                                 Err(err) => HirPatKind::Error(err),
                             };
 
-                            (
-                                field.name,
-                                Obj::new(
+                            HirPatNamedField {
+                                name: field.name,
+                                pat: Obj::new(
                                     HirPat {
                                         span: field.name.span,
                                         kind,
                                     },
                                     s,
                                 ),
-                            )
+                            }
                         }
-                    })
-                    .collect::<Vec<_>>();
-
-                let deny_missing = match rest {
-                    AstPatStructRest::Rest(_span) => None,
-                    AstPatStructRest::None => Some(path.span),
-                };
-
-                let fields = Obj::new_iter(
-                    self.match_up_ctor_members(ctor.def, fields, deny_missing)
-                        .into_iter()
-                        .map(|(idx, pat)| HirPatNamedField { idx, pat }),
+                    }),
                     s,
                 );
 
@@ -410,7 +397,7 @@ impl IntraItemLowerCtxt<'_> {
                     Err(err) => break 'pat HirPatKind::Error(err),
                 };
 
-                let Some(ctor) = res.as_adt(s).filter(|v| v.def.r(s).syntax.is_tuple()) else {
+                let Some(ctor) = res.as_adt(path, tcx) else {
                     break 'pat HirPatKind::Error(
                         Diag::span_err(
                             path.span,
@@ -429,56 +416,6 @@ impl IntraItemLowerCtxt<'_> {
                     locals,
                     cx.move_inwards(),
                 );
-                let expected_len = ctor.def.r(s).fields.len() as u32;
-
-                let arity_offense = match children.len(s) {
-                    HirPatListFrontAndTailLen::Exactly(v) if v != expected_len => Some((v, "", "")),
-                    HirPatListFrontAndTailLen::AtLeast(v) if v > expected_len => {
-                        Some((v, " at least", "only "))
-                    }
-                    _ => None,
-                };
-
-                if let Some((child_count, at_least, only)) = arity_offense {
-                    break 'pat HirPatKind::Error(
-                        Diag::span_err(
-                            path.span,
-                            format_args!(
-                                "this pattern has{at_least} {child_count} field{}, but the \
-                                 corresponding tuple {} {only}has {}",
-                                if child_count == 1 { "" } else { "s" },
-                                res.bare_what(s),
-                                expected_len,
-                            ),
-                        )
-                        .emit(),
-                    );
-                }
-
-                let front_fields = children.front.r(s).iter().zip(&ctor.def.r(s).fields);
-
-                let back_fields = children
-                    .tail
-                    .iter()
-                    .flat_map(|v| v.r(s).iter())
-                    .zip(ctor.def.r(s).fields.iter().rev());
-
-                for (pat, field) in front_fields.chain(back_fields) {
-                    if field.vis.is_visible_to(self.scope, s) {
-                        continue;
-                    }
-
-                    Diag::span_err(
-                        pat.r(s).span,
-                        format_args!(
-                            "field `{}` of {} is not visible to {}",
-                            field.idx.raw(),
-                            ctor.def.r(s).owner.bare_identified_what(s),
-                            self.scope.r(s).bare_category_path(s),
-                        ),
-                    )
-                    .emit();
-                }
 
                 HirPatKind::AdtTuple(ctor, children)
             }

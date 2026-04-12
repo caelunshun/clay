@@ -132,23 +132,6 @@ pub struct AdtCtor {
     pub fields: IndexVec<AdtCtorFieldIdx, AdtCtorField>,
 }
 
-#[derive(Debug, Copy, Clone)]
-pub enum AdtCtorUnresolved {
-    ResolvedTy(SpannedTy),
-    ResolvedEnumVariant(Obj<EnumVariantItem>, SpannedTyOrReList),
-    TypeRelative {
-        self_ty: SpannedTy,
-        as_trait: Option<SpannedTraitSpec>,
-        assoc: TypeRelativeAssoc,
-    },
-}
-
-#[derive(Debug, Copy, Clone)]
-pub struct AdtCtorInstance {
-    pub def: Obj<AdtCtor>,
-    pub params: SpannedTyOrReList,
-}
-
 #[derive(Debug, Clone)]
 pub enum AdtCtorSyntax {
     Unit,
@@ -193,6 +176,24 @@ pub struct AdtCtorField {
 pub struct AdtInstance {
     pub def: Obj<AdtItem>,
     pub params: TyOrReList,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum AdtCtorUnresolved {
+    ResolvedTy(SpannedTy),
+    ResolvedEnumVariant(Obj<EnumVariantItem>, SpannedTyOrReList),
+    TypeRelative {
+        self_ty: SpannedTy,
+        as_trait: Option<SpannedTraitSpec>,
+        assoc: TypeRelativeAssoc,
+    },
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct AdtCtorInstance {
+    pub span: Span,
+    pub def: Obj<AdtCtor>,
+    pub params: SpannedTyOrReList,
 }
 
 // === Type Aliases === //

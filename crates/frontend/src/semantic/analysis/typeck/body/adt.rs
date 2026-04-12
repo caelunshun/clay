@@ -1,15 +1,11 @@
 use crate::{
-    base::{
-        Diag, ErrorGuaranteed, LeafDiag, Level,
-        arena::{HasInterner as _, Obj},
-        syntax::Span,
-    },
+    base::{Diag, ErrorGuaranteed, arena::Obj, syntax::Span},
     parse::token::Ident,
     semantic::{
         analysis::BodyCtxt,
         syntax::{
-            AdtCtor, AdtCtorFieldIdx, AdtCtorInstance, AdtCtorSyntax, AdtCtorUnresolved,
-            HirStructExpr, Ty, TyKind,
+            AdtCtor, AdtCtorFieldIdx, AdtCtorInstance, AdtCtorUnresolved, HirPatListFrontAndTail,
+            HirPatListFrontAndTailLen,
         },
     },
     utils::{
@@ -20,106 +16,112 @@ use crate::{
 use hashbrown::hash_map;
 
 impl BodyCtxt<'_, '_> {
-    pub fn check_adt_ctor_expr(&mut self, span: Span, ctor: AdtCtorInstance) -> Ty {
-        let tcx = self.tcx();
-        let s = self.session();
-
-        match ctor.def.r(s).syntax {
-            AdtCtorSyntax::Unit => {
-                todo!()
-            }
-            AdtCtorSyntax::Tuple => {
-                let offending_fields = ctor
-                    .def
-                    .r(s)
-                    .fields
-                    .iter()
-                    .filter(|field| !field.vis.is_visible_to(self.item(), s))
-                    .collect::<Vec<_>>();
-
-                if !offending_fields.is_empty() {
-                    Diag::span_err(
-                        span,
-                        format_args!(
-                            "tuple constructor for {} is not visible to {} because field{} {} {} \
-                             inaccessible",
-                            ctor.def.r(s).owner.bare_identified_what(s),
-                            self.item().r(s).bare_category_path(s),
-                            if offending_fields.len() == 1 { "" } else { "s" },
-                            format_list(
-                                offending_fields
-                                    .iter()
-                                    .map(|v| format!("`{}`", v.idx.raw())),
-                                AND_LIST_GLUE,
-                            ),
-                            if offending_fields.len() == 1 {
-                                "is"
-                            } else {
-                                "are"
-                            },
-                        ),
-                    )
-                    .emit();
-                }
-
-                todo!()
-            }
-            AdtCtorSyntax::Named(_) => tcx.intern(TyKind::Error(
-                Diag::span_err(
-                    span,
-                    format_args!(
-                        "expected value, got {}",
-                        ctor.def.r(s).owner.bare_identified_what(s),
-                    ),
-                )
-                .child(LeafDiag::new(
-                    Level::Note,
-                    format_args!(
-                        "only unit and tuple {} can be turned into functions",
-                        ctor.def.r(s).owner.bare_whats()
-                    ),
-                ))
-                .emit(),
-            )),
-        }
-    }
-
-    pub fn check_struct_expr(&mut self, expr: HirStructExpr) -> Ty {
-        let tcx = self.tcx();
-        let s = self.session();
-
-        let ctor = match self.resolve_adt_ctor(expr.ctor) {
-            Ok(v) => v,
-            Err(_) => todo!(),
-        };
-
-        if !ctor.def.r(s).syntax.is_named() {
-            return tcx.intern(TyKind::Error(
-                Diag::span_err(
-                    expr.ctor_span,
-                    format_args!(
-                        "expected named struct or enum variant, got {}",
-                        ctor.def.r(s).owner.bare_identified_what(s),
-                    ),
-                )
-                .emit(),
-            ));
-        }
-
-        let fields = self.match_up_ctor_members(
-            ctor.def,
-            expr.fields.r(s).iter().map(|v| (v.name, v.init)).collect(),
-            expr.rest.is_none().then_some(expr.ctor_span),
-        );
-
-        todo!()
-    }
-
     pub fn resolve_adt_ctor(
         &mut self,
         ctor: AdtCtorUnresolved,
     ) -> Result<AdtCtorInstance, ErrorGuaranteed> {
         todo!()
+    }
+
+    pub fn check_tuple_ctor_visibilities(
+        &mut self,
+        span: Span,
+        ctor: AdtCtorInstance,
+    ) -> Result<(), ErrorGuaranteed> {
+        let s = self.session();
+
+        let offending_fields = ctor
+            .def
+            .r(s)
+            .fields
+            .iter()
+            .filter(|field| !field.vis.is_visible_to(self.item(), s))
+            .collect::<Vec<_>>();
+
+        if offending_fields.is_empty() {
+            Ok(())
+        } else {
+            Err(Diag::span_err(
+                span,
+                format_args!(
+                    "tuple constructor for {} is not visible to {} because field{} {} {} \
+                             inaccessible",
+                    ctor.def.r(s).owner.bare_identified_what(s),
+                    self.item().r(s).bare_category_path(s),
+                    if offending_fields.len() == 1 { "" } else { "s" },
+                    format_list(
+                        offending_fields
+                            .iter()
+                            .map(|v| format!("`{}`", v.idx.raw())),
+                        AND_LIST_GLUE,
+                    ),
+                    if offending_fields.len() == 1 {
+                        "is"
+                    } else {
+                        "are"
+                    },
+                ),
+            )
+            .emit())
+        }
+    }
+
+    pub fn check_pat_tuple_visibilities(
+        &mut self,
+        span: Span,
+        ctor: AdtCtorInstance,
+        children: HirPatListFrontAndTail,
+    ) {
+        let s = self.session();
+
+        let expected_len = ctor.def.r(s).fields.len() as u32;
+
+        let arity_offense = match children.len(s) {
+            HirPatListFrontAndTailLen::Exactly(v) if v != expected_len => Some((v, "", "")),
+            HirPatListFrontAndTailLen::AtLeast(v) if v > expected_len => {
+                Some((v, " at least", "only "))
+            }
+            _ => None,
+        };
+
+        if let Some((child_count, at_least, only)) = arity_offense {
+            Diag::span_err(
+                span,
+                format_args!(
+                    "this pattern has{at_least} {child_count} field{}, but the \
+                     corresponding tuple {} {only}has {}",
+                    if child_count == 1 { "" } else { "s" },
+                    ctor.def.r(s).owner.bare_identified_what(s),
+                    expected_len,
+                ),
+            )
+            .emit();
+        }
+
+        let front_fields = children.front.r(s).iter().zip(&ctor.def.r(s).fields);
+
+        let back_fields = children
+            .tail
+            .iter()
+            .flat_map(|v| v.r(s).iter())
+            .zip(ctor.def.r(s).fields.iter().rev());
+
+        for (pat, field) in front_fields.chain(back_fields) {
+            if field.vis.is_visible_to(self.item(), s) {
+                continue;
+            }
+
+            Diag::span_err(
+                pat.r(s).span,
+                format_args!(
+                    "field `{}` of {} is not visible to {}",
+                    field.idx.raw(),
+                    ctor.def.r(s).owner.bare_identified_what(s),
+                    self.item().r(s).bare_category_path(s),
+                ),
+            )
+            .emit();
+        }
     }
 
     pub fn match_up_ctor_members<T>(

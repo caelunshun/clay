@@ -11,8 +11,8 @@ use crate::{
         token::Ident,
     },
     semantic::syntax::{
-        AdtCtorFieldIdx, AdtCtorInstance, AdtCtorUnresolved, EnumVariantItem, FnItem, Mutability,
-        SpannedTraitSpec, SpannedTy, SpannedTyOrReList,
+        AdtCtorUnresolved, EnumVariantItem, FnItem, Mutability, SpannedTraitSpec, SpannedTy,
+        SpannedTyOrReList,
     },
     symbol,
 };
@@ -108,13 +108,13 @@ pub enum HirPatKind {
     Deref(Mutability, Obj<HirPat>),
 
     /// Match a unit struct or enum variant.
-    AdtUnit(AdtCtorInstance),
+    AdtUnit(AdtCtorUnresolved),
 
     /// Match a tuple struct or enum variant.
-    AdtTuple(AdtCtorInstance, HirPatListFrontAndTail),
+    AdtTuple(AdtCtorUnresolved, HirPatListFrontAndTail),
 
     /// Match a named struct or enum variant.
-    AdtNamed(AdtCtorInstance, Obj<[HirPatNamedField]>),
+    AdtNamed(AdtCtorUnresolved, Obj<[HirPatNamedField]>),
 
     /// Bind to a target place expression. Only available in destructuring patterns.
     PlaceExpr(Obj<HirExpr>),
@@ -128,7 +128,7 @@ pub enum HirPatKind {
 
 #[derive(Debug, Copy, Clone)]
 pub struct HirPatNamedField {
-    pub idx: AdtCtorFieldIdx,
+    pub name: Ident,
     pub pat: Obj<HirPat>,
 }
 
