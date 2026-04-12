@@ -4,11 +4,12 @@ pub use self::base::*;
 mod deref;
 pub use self::deref::*;
 
-mod math;
-pub use self::math::*;
+mod ops;
+pub use self::ops::*;
 
 mod adt;
 mod coerce;
 mod confirm;
+mod expr;
 mod lookup;
 mod pat;
