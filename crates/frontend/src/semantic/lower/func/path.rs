@@ -19,7 +19,7 @@ use crate::{
             AdtCtorInstance, AdtItem, AdtKind, EnumVariantItem, FnItem, HirLocal, Item, ItemKind,
             LocalNameIdent, LocalNameSymbol, SpannedAdtInstanceView, SpannedTraitParamList,
             SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyOrReList, SpannedTyView,
-            TraitItem, TypeGeneric,
+            TraitItem, TypeAliasItem, TypeGeneric,
         },
     },
 };
@@ -31,6 +31,40 @@ pub enum ExprPathResult {
     Resolved(ExprPathResolution),
     UnboundLocal(LocalNameIdent),
     Fail(ErrorGuaranteed),
+}
+
+impl ExprPathResult {
+    pub fn fail_on_unbound_local(self) -> Result<ExprPathResolution, ErrorGuaranteed> {
+        match self {
+            ExprPathResult::Resolved(res) => Ok(res),
+            ExprPathResult::UnboundLocal(ident) => Err(Diag::span_err(
+                ident.span(),
+                format_args!("`{ident}` not found in scope"),
+            )
+            .emit()),
+            ExprPathResult::Fail(err) => Err(err),
+        }
+    }
+
+    pub fn as_ident_or_res(
+        self,
+        path: &AstExprPath,
+        s: &Session,
+    ) -> Result<ExprPathIdentOrResolution, ErrorGuaranteed> {
+        match self {
+            ExprPathResult::Resolved(res) => {
+                if let ExprPathResolution::Local(def) = res {
+                    Ok(ExprPathIdentOrResolution::Ident(
+                        def.r(s).name.with_span(path.span),
+                    ))
+                } else {
+                    Ok(ExprPathIdentOrResolution::Resolution(res))
+                }
+            }
+            ExprPathResult::UnboundLocal(ident) => Ok(ExprPathIdentOrResolution::Ident(ident)),
+            ExprPathResult::Fail(err) => Err(err),
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -53,12 +87,16 @@ pub enum ExprPathResolution {
     /// A reference to a trait.
     ResolvedTrait(Obj<TraitItem>, SpannedTraitParamList),
 
+    /// A reference to a type alias.
+    ResolvedTypeAlias(Obj<TypeAliasItem>, SpannedTyOrReList),
+
     /// A reference to a generic type.
     ResolvedGeneric(Obj<TypeGeneric>),
 
-    /// A reference to a type with some further qualifications for methods or constants that cannot
-    /// be solved at lowering time. Note that types without further qualifications will be treated
-    /// as `Resolved` or `ResolvedSelfTy` to maintain exactly one representation for such scenarios.
+    /// A reference to a type with some further qualifications for methods or enum variants that
+    /// cannot be solved at lowering time. Note that types without further qualifications will be
+    /// treated as `Resolved` or `ResolvedSelfTy` to maintain exactly one representation for such
+    /// scenarios.
     ///
     /// For example...
     ///
@@ -109,40 +147,6 @@ pub struct TypeRelativeAssoc {
     pub args: Option<SpannedTyOrReList>,
 }
 
-impl ExprPathResult {
-    pub fn fail_on_unbound_local(self) -> Result<ExprPathResolution, ErrorGuaranteed> {
-        match self {
-            ExprPathResult::Resolved(res) => Ok(res),
-            ExprPathResult::UnboundLocal(ident) => Err(Diag::span_err(
-                ident.span(),
-                format_args!("`{ident}` not found in scope"),
-            )
-            .emit()),
-            ExprPathResult::Fail(err) => Err(err),
-        }
-    }
-
-    pub fn as_ident_or_res(
-        self,
-        path: &AstExprPath,
-        s: &Session,
-    ) -> Result<ExprPathIdentOrResolution, ErrorGuaranteed> {
-        match self {
-            ExprPathResult::Resolved(res) => {
-                if let ExprPathResolution::Local(def) = res {
-                    Ok(ExprPathIdentOrResolution::Ident(
-                        def.r(s).name.with_span(path.span),
-                    ))
-                } else {
-                    Ok(ExprPathIdentOrResolution::Resolution(res))
-                }
-            }
-            ExprPathResult::UnboundLocal(ident) => Ok(ExprPathIdentOrResolution::Ident(ident)),
-            ExprPathResult::Fail(err) => Err(err),
-        }
-    }
-}
-
 impl ExprPathResolution {
     pub fn bare_what(self, s: &Session) -> String {
         match self {
@@ -154,15 +158,16 @@ impl ExprPathResolution {
             }
             ExprPathResolution::ResolvedFn(def, _) => def.r(s).item.r(s).bare_category_path(s),
             ExprPathResolution::ResolvedTrait(def, _) => def.r(s).item.r(s).bare_category_path(s),
+            ExprPathResolution::ResolvedTypeAlias(def, _) => {
+                def.r(s).item.r(s).bare_category_path(s)
+            }
             ExprPathResolution::ResolvedGeneric(def) => {
                 format!("generic type `{}`", def.r(s).ident.text)
             }
-            ExprPathResolution::TypeRelative { .. } => {
-                "fully-qualified constant or method".to_string()
-            }
+            ExprPathResolution::TypeRelative { .. } => "method or enum variant".to_string(),
             ExprPathResolution::Local(def) => match def.r(s).name {
                 LocalNameIdent::User(ident) => format!("local variable `{}`", ident.text),
-                LocalNameIdent::SelfName(span) => format!("`self`"),
+                LocalNameIdent::SelfName(_) => format!("`self`"),
             },
         }
     }
@@ -442,7 +447,13 @@ impl IntraItemLowerCtxt<'_> {
                         segments.as_slice(),
                     );
                 }
-                ItemKind::TypeAlias(item) => todo!(),
+                ItemKind::TypeAlias(def) => {
+                    return self.resolve_bare_expr_path_from_type_alias(
+                        def,
+                        segment,
+                        segments.as_slice(),
+                    );
+                }
             }
 
             if let Some(args) = &segment.args {
@@ -626,6 +637,33 @@ impl IntraItemLowerCtxt<'_> {
         })
     }
 
+    pub fn resolve_bare_expr_path_from_type_alias(
+        &mut self,
+        def: Obj<TypeAliasItem>,
+        def_segment: &AstParamedPathSegment,
+        segments: &[AstParamedPathSegment],
+    ) -> ExprPathResult {
+        let s = &self.tcx.session;
+
+        let params = self.lower_generics_of_entirely_positional(
+            def.r(s).item,
+            def.r(s).generics,
+            def_segment.part.span(),
+            def_segment.args.as_ref().map_or(&[][..], |v| &v.list),
+        );
+
+        let Ok(Some(assoc)) = self.lower_rest_as_type_relative_assoc(segments) else {
+            return ExprPathResult::Resolved(ExprPathResolution::ResolvedTypeAlias(def, params));
+        };
+
+        ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
+            self_ty: SpannedTyView::SigAlias(def, params.value)
+                .encode(def_segment.part.span(), self.tcx),
+            as_trait: None,
+            assoc,
+        })
+    }
+
     pub fn resolve_bare_expr_path_from_func(
         &mut self,
         def: Obj<FnItem>,
@@ -666,7 +704,7 @@ impl IntraItemLowerCtxt<'_> {
             [segment, extra_segment, ..] => {
                 Diag::span_err(
                     extra_segment.part.span(),
-                    "method or constant cannot be accessed like a module",
+                    "method or enum variant cannot be accessed like a module",
                 )
                 .emit();
 

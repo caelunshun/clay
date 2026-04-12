@@ -177,7 +177,7 @@ impl IntraItemLowerCtxt<'_> {
             if let Some(associated) = associated.first() {
                 Diag::span_err(
                     associated.span,
-                    "method or constant does not have associated type constraints",
+                    "method or enum variant does not have associated type constraints",
                 )
                 .emit();
             }

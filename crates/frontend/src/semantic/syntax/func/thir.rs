@@ -1,9 +1,6 @@
 use crate::{
     base::{ErrorGuaranteed, arena::Obj, syntax::Span},
-    parse::{
-        ast::{AstBinOpKind, AstLit, AstUnOpKind},
-        token::Ident,
-    },
+    parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
     semantic::syntax::{LocalNameIdent, Mutability, Ty},
 };
 
