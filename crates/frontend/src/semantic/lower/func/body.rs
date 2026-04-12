@@ -499,7 +499,7 @@ impl IntraItemLowerCtxt<'_> {
                     Err(err) => break 'path HirExprKind::Error(err),
                 };
 
-                let Some(ctor) = res.as_adt_ctor(s).filter(|v| v.def.r(s).syntax.is_named()) else {
+                let Some(ctor) = res.as_adt(s).filter(|v| v.def.r(s).syntax.is_named()) else {
                     break 'path HirExprKind::Error(
                         Diag::span_err(
                             path.span,

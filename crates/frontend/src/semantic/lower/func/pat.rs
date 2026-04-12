@@ -347,7 +347,7 @@ impl IntraItemLowerCtxt<'_> {
                     Err(err) => break 'path HirPatKind::Error(err),
                 };
 
-                let Some(ctor) = res.as_adt_ctor(s).filter(|v| v.def.r(s).syntax.is_named()) else {
+                let Some(ctor) = res.as_adt(s).filter(|v| v.def.r(s).syntax.is_named()) else {
                     break 'path HirPatKind::Error(
                         Diag::span_err(
                             path.span,
@@ -413,7 +413,7 @@ impl IntraItemLowerCtxt<'_> {
                     Err(err) => break 'pat HirPatKind::Error(err),
                 };
 
-                let Some(ctor) = res.as_adt_ctor(s).filter(|v| v.def.r(s).syntax.is_tuple()) else {
+                let Some(ctor) = res.as_adt(s).filter(|v| v.def.r(s).syntax.is_tuple()) else {
                     break 'pat HirPatKind::Error(
                         Diag::span_err(
                             path.span,

@@ -11,15 +11,16 @@ use crate::{
         token::Ident,
     },
     semantic::{
+        analysis::TyCtxt,
         lower::{
             entry::IntraItemLowerCtxt,
             modules::{FrozenModuleResolver, PathResolver, StepResolveError},
         },
         syntax::{
-            AdtCtorInstance, AdtItem, AdtKind, EnumVariantItem, FnItem, HirLocal, Item, ItemKind,
-            LocalNameIdent, LocalNameSymbol, SpannedAdtInstanceView, SpannedTraitParamList,
-            SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyOrReList, SpannedTyView,
-            TraitItem, TypeAliasItem, TypeGeneric,
+            AdtItem, EnumVariantItem, FnItem, HirLocal, Item, ItemKind, LocalNameIdent,
+            LocalNameSymbol, SpannedAdtInstanceView, SpannedTraitParamList, SpannedTraitSpec,
+            SpannedTraitSpecView, SpannedTy, SpannedTyOrReList, SpannedTyView, TraitItem,
+            TypeAliasItem, TypeGeneric,
         },
     },
 };
@@ -171,75 +172,6 @@ impl ExprPathResolution {
             },
         }
     }
-
-    pub fn as_value(self, s: &Session) -> Option<PathResolvedValue> {
-        if let Some(local) = self.as_local() {
-            return Some(PathResolvedValue::Local(local));
-        }
-
-        if let Some(fn_lit) = self.as_fn_lit() {
-            return Some(PathResolvedValue::FnLit(fn_lit));
-        }
-
-        if let Some(adt_ctor) = self.as_adt_ctor(s) {
-            return Some(PathResolvedValue::AdtCtor(adt_ctor));
-        }
-
-        None
-    }
-
-    pub fn as_pat(self, s: &Session) -> Option<PathResolvedPattern> {
-        if let Some(adt_ctor) = self.as_adt_ctor(s)
-            && adt_ctor.def.r(s).syntax.is_unit()
-        {
-            return Some(PathResolvedPattern::UnitCtor(adt_ctor));
-        }
-
-        None
-    }
-
-    pub fn as_local(self) -> Option<Obj<HirLocal>> {
-        match self {
-            ExprPathResolution::Local(local) => Some(local),
-            _ => None,
-        }
-    }
-
-    pub fn as_fn_lit(self) -> Option<PathResolvedFnLit> {
-        match self {
-            ExprPathResolution::TypeRelative {
-                self_ty,
-                as_trait,
-                assoc,
-            } => Some(PathResolvedFnLit::TypeRelative {
-                self_ty,
-                as_trait,
-                assoc,
-            }),
-            ExprPathResolution::ResolvedFn(def, params) => {
-                Some(PathResolvedFnLit::Item(def, params))
-            }
-            _ => None,
-        }
-    }
-
-    pub fn as_adt_ctor(self, s: &Session) -> Option<AdtCtorInstance> {
-        match self {
-            ExprPathResolution::ResolvedSelfTy => todo!(),
-            ExprPathResolution::ResolvedAdt(def, params) => match *def.r(s).kind {
-                AdtKind::Struct(def) => Some(AdtCtorInstance {
-                    def: *def.r(s).ctor,
-                    params,
-                }),
-                AdtKind::Enum(_) => None,
-            },
-            ExprPathResolution::ResolvedEnumVariant(def, params) => Some(AdtCtorInstance {
-                def: *def.r(s).adt_variant(s).r(s).ctor,
-                params,
-            }),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -249,25 +181,101 @@ pub enum ExprPathIdentOrResolution {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum PathResolvedPattern {
-    UnitCtor(AdtCtorInstance),
-}
-
-#[derive(Debug, Copy, Clone)]
 pub enum PathResolvedValue {
     Local(Obj<HirLocal>),
-    FnLit(PathResolvedFnLit),
-    AdtCtor(AdtCtorInstance),
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum PathResolvedFnLit {
-    Item(Obj<FnItem>, Option<SpannedTyOrReList>),
+    FnItem(Obj<FnItem>, Option<SpannedTyOrReList>),
     TypeRelative {
         self_ty: SpannedTy,
         as_trait: Option<SpannedTraitSpec>,
         assoc: TypeRelativeAssoc,
     },
+    AdtCtorTy(SpannedTy),
+    AdtCtorEnumVariant(Obj<EnumVariantItem>, SpannedTyOrReList),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum PathResolvedAdt {
+    ResolvedTy(SpannedTy),
+    ResolvedEnumVariant(Obj<EnumVariantItem>, SpannedTyOrReList),
+    TypeRelative {
+        self_ty: SpannedTy,
+        as_trait: Option<SpannedTraitSpec>,
+        assoc: TypeRelativeAssoc,
+    },
+}
+
+impl ExprPathResolution {
+    pub fn as_value(self, path: &AstExprPath, tcx: &TyCtxt) -> Option<PathResolvedValue> {
+        if let Some(resolved_ty) = self.as_resolved_ty(path, tcx) {
+            return Some(PathResolvedValue::AdtCtorTy(resolved_ty));
+        }
+
+        match self {
+            ExprPathResolution::Local(local) => Some(PathResolvedValue::Local(local)),
+            ExprPathResolution::ResolvedFn(def, params) => {
+                Some(PathResolvedValue::FnItem(def, params))
+            }
+            ExprPathResolution::TypeRelative {
+                self_ty,
+                as_trait,
+                assoc,
+            } => Some(PathResolvedValue::TypeRelative {
+                self_ty,
+                as_trait,
+                assoc,
+            }),
+            ExprPathResolution::ResolvedEnumVariant(def, params) => {
+                Some(PathResolvedValue::AdtCtorEnumVariant(def, params))
+            }
+            _ => None,
+        }
+    }
+
+    pub fn as_adt(self, path: &AstExprPath, tcx: &TyCtxt) -> Option<PathResolvedAdt> {
+        if let Some(resolved_ty) = self.as_resolved_ty(path, tcx) {
+            return Some(PathResolvedAdt::ResolvedTy(resolved_ty));
+        }
+
+        match self {
+            ExprPathResolution::ResolvedEnumVariant(def, params) => {
+                Some(PathResolvedAdt::ResolvedEnumVariant(def, params))
+            }
+            ExprPathResolution::TypeRelative {
+                self_ty,
+                as_trait,
+                assoc,
+            } => Some(PathResolvedAdt::TypeRelative {
+                self_ty,
+                as_trait,
+                assoc,
+            }),
+            _ => None,
+        }
+    }
+
+    pub fn as_resolved_ty(self, path: &AstExprPath, tcx: &TyCtxt) -> Option<SpannedTy> {
+        match self {
+            ExprPathResolution::ResolvedSelfTy => {
+                Some(SpannedTyView::SigThis.encode(path.span, tcx))
+            }
+            ExprPathResolution::ResolvedAdt(def, params) => Some(
+                SpannedTyView::Adt(SpannedAdtInstanceView { def, params }.encode(path.span, tcx))
+                    .encode(path.span, tcx),
+            ),
+            ExprPathResolution::ResolvedTypeAlias(def, params) => {
+                Some(SpannedTyView::SigAlias(def, params.value).encode(path.span, tcx))
+            }
+            ExprPathResolution::ResolvedGeneric(generic) => {
+                Some(SpannedTyView::SigGeneric(generic).encode(path.span, tcx))
+            }
+            ExprPathResolution::ResolvedModule(_)
+            | ExprPathResolution::ResolvedEnumVariant(_, _)
+            | ExprPathResolution::ResolvedFn(_, _)
+            | ExprPathResolution::ResolvedTrait(_, _)
+            | ExprPathResolution::TypeRelative { .. }
+            | ExprPathResolution::Local(_) => None,
+        }
+    }
 }
 
 // === Resolution Routine === //
