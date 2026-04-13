@@ -2,6 +2,7 @@ mod base;
 pub use self::base::*;
 
 mod elaboration;
+mod exporting;
 
 mod hrtb;
 pub use self::hrtb::*;

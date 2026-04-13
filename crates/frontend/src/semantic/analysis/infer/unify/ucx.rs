@@ -335,6 +335,7 @@ impl<'tcx> UnifyCx<'tcx> {
                     early_args: rhs_early_args,
                 } = *rhs_inst.r(s);
 
+                // TODO: Check exhaustiveness automatically.
                 match (lhs_owner, rhs_owner) {
                     (FnOwner::Item(lhs_def), FnOwner::Item(rhs_def)) => {
                         if lhs_def != rhs_def {
