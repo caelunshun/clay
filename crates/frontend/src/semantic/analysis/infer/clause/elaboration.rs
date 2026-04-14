@@ -45,13 +45,13 @@ use crate::{
     semantic::{
         analysis::{
             ClauseCx, ClauseImportEnvRef, ClauseObligation, ClauseOrigin, FloatingInferVar,
-            HrtbUniverse, ObligationNotReady, ObligationResult, TyCtxt, TyFolder,
-            TyFolderInfallibleExt, TyVisitor, TyVisitorExt, UniversalElaboration,
+            HrtbUniverse, ObligationNotReady, ObligationResult, UniversalElaboration,
         },
         syntax::{
             AnyGeneric, GenericSubst, HrtbBinder, InferTyVar, InferTyVarSourceInfo, Mutability, Re,
             RelationMode, SimpleTySet, SpannedRe, SpannedTy, TraitClause, TraitClauseList,
-            TraitParam, TraitSpec, Ty, TyKind, TyOrRe, UniversalReVarSourceInfo, UniversalTyVar,
+            TraitParam, TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt, TyKind, TyOrRe,
+            TyVisitor, TyVisitorExt, UniversalReVarSourceInfo, UniversalTyVar,
             UniversalTyVarSourceInfo,
         },
     },

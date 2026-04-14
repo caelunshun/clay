@@ -1,7 +1,8 @@
 use crate::semantic::{
-    analysis::{FloatingInferVar, HrtbUniverse, TyCtxt},
+    analysis::{FloatingInferVar, HrtbUniverse},
     syntax::{
-        InferTyVar, InferTyVarSourceInfo, SimpleTySet, Ty, UniversalTyVar, UniversalTyVarSourceInfo,
+        InferTyVar, InferTyVarSourceInfo, SimpleTySet, Ty, TyCtxt, UniversalTyVar,
+        UniversalTyVarSourceInfo,
     },
 };
 use disjoint::DisjointSetVec;

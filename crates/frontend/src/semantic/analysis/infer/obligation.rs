@@ -1,6 +1,9 @@
 use crate::{
     base::Session,
-    semantic::analysis::{TyCtxt, UnifyCx, UnifyCxMode},
+    semantic::{
+        analysis::{UnifyCx, UnifyCxMode},
+        syntax::TyCtxt,
+    },
 };
 use std::fmt;
 

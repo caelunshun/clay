@@ -11,7 +11,6 @@ use crate::{
         token::Ident,
     },
     semantic::{
-        analysis::TyCtxt,
         lower::{
             entry::IntraItemLowerCtxt,
             modules::{FrozenModuleResolver, PathResolver, StepResolveError},
@@ -20,7 +19,7 @@ use crate::{
             AdtCtorUnresolved, AdtItem, EnumVariantItem, FnItem, HirLocal, Item, ItemKind,
             LocalNameIdent, LocalNameSymbol, SpannedAdtInstanceView, SpannedTraitParamList,
             SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyOrReList, SpannedTyView,
-            TraitItem, TypeAliasItem, TypeGeneric,
+            TraitItem, TyCtxt, TypeAliasItem, TypeGeneric,
         },
     },
 };

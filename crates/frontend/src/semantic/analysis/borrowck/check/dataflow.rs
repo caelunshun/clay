@@ -1,12 +1,9 @@
 use crate::{
     base::Session,
-    semantic::{
-        analysis::TyCtxt,
-        syntax::{
-            MirAssignRvalue, MirBlock, MirBlockIdx, MirBody, MirDirection, MirInstructionIdx,
-            MirInstructionLoc, MirInstructionRef, MirLocalIdx, MirOperand, MirPlace, MirStmt,
-            MirStmtKind, MirTerminator,
-        },
+    semantic::syntax::{
+        MirAssignRvalue, MirBlock, MirBlockIdx, MirBody, MirDirection, MirInstructionIdx,
+        MirInstructionLoc, MirInstructionRef, MirLocalIdx, MirOperand, MirPlace, MirStmt,
+        MirStmtKind, MirTerminator, TyCtxt,
     },
 };
 use index_vec::IndexVec;

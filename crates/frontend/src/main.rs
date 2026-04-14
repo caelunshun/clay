@@ -4,7 +4,7 @@ use fir_frontend::{
         syntax::{NaiveSegmenter, SourceFileOrigin},
     },
     parse::{ast::parse_file, token::tokenize},
-    semantic::analysis::TyCtxt,
+    semantic::syntax::TyCtxt,
 };
 use std::{env, fs, path::Path, rc::Rc};
 

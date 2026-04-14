@@ -1,11 +1,9 @@
 use crate::{
     base::{Diag, arena::Obj, syntax::Symbol},
-    semantic::{
-        analysis::{TyCtxt, TyFolder, TyFolderInfallibleExt, TyShapeMap},
-        syntax::{
-            Crate, FnDef, GenericBinder, HrtbBinderKind, ImplItem, Re, SpannedTy, TraitClause,
-            TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
-        },
+    semantic::syntax::{
+        Crate, FnDef, GenericBinder, HrtbBinderKind, ImplItem, Re, SpannedTy, TraitClause,
+        TraitParam, TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt, TyKind, TyOrRe,
+        TyShapeMap,
     },
 };
 use index_vec::{IndexVec, define_index_type};

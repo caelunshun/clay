@@ -9,18 +9,16 @@ use crate::{
         syntax::Span,
     },
     semantic::{
-        analysis::{
-            ClauseCx, ClauseOrigin, ClauseOriginKind, HrtbUniverse, TyCtxt, TyFoldable, TyFolder,
-            TyFolderExt, TyFolderInfallibleExt, TyFolderPreservesSpans, TyVisitorInfallibleExt,
-            UnifyCxMode,
-        },
+        analysis::{ClauseCx, ClauseOrigin, ClauseOriginKind, HrtbUniverse, UnifyCxMode},
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnInstanceInner,
             FnOwner, GenericBinder, GenericSubst, HrtbBinder, HrtbBinderKind, HrtbDebruijn,
             HrtbDebruijnDef, ImplItem, InferTyVarSourceInfo, Re, RelationMode, SpannedHrtbBinder,
             SpannedHrtbBinderView, SpannedRe, SpannedTraitClauseView, SpannedTy, SpannedTyView,
-            TraitClause, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReKind,
-            TyProjection, TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
+            TraitClause, TraitItem, TraitParam, TraitSpec, Ty, TyCtxt, TyFoldable, TyFolder,
+            TyFolderExt, TyFolderInfallibleExt, TyFolderPreservesSpans, TyKind, TyList, TyOrRe,
+            TyOrReKind, TyProjection, TyVisitorInfallibleExt, TypeAliasItem,
+            UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,

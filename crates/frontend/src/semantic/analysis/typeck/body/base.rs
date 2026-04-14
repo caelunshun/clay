@@ -1,25 +1,14 @@
 use crate::{
-    base::{
-        Diag, ErrorGuaranteed, Session,
-        analysis::SpannedViewEncode,
-        arena::{HasInterner, HasListInterner as _, Obj},
-        syntax::HasSpan,
-    },
-    parse::ast::{AstLit, AstUnOpKind},
+    base::{ErrorGuaranteed, Session, arena::Obj},
     semantic::{
         analysis::{
-            ClauseCx, ClauseError, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind,
-            CrateTypeckVisitor, EquateOrSet, HrtbUniverse, TyCtxt, TyFolderInfallibleExt,
-            TyVisitorInfallibleExt, UnifyCx, UnifyCxMode, peel_ref_for_prim_op,
-            typeck::body::lookup::LookupMethodResult,
+            ClauseCx, ClauseImportEnvRef, ClauseOrigin, CrateTypeckVisitor, HrtbUniverse, UnifyCx,
+            UnifyCxMode,
         },
-        lower::generics::normalize_positional_generic_arity,
         syntax::{
-            AdtInstance, Crate, Divergence, FnDef, FnInstanceInner, HirBlock, HirExpr, HirExprKind,
-            HirLabelTargetKind, HirLabelledBlock, HirLocal, HirPat, HirStmt, InferTyVar,
-            InferTyVarSourceInfo, Item, Re, RelationMode, SimpleTyKind, SimpleTySet,
-            SpannedFnInstanceView, SpannedFnOwnerView, SpannedTyView, ThirLocal, TraitParam,
-            TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            Crate, FnDef, HirExpr, HirLabelledBlock, HirLocal, HirPat, InferTyVar,
+            InferTyVarSourceInfo, Item, ThirLocal, Ty, TyCtxt, TyFolderInfallibleExt,
+            TyVisitorInfallibleExt,
         },
     },
     utils::hash::FxHashMap,

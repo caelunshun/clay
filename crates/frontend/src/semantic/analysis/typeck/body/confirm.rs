@@ -1,14 +1,12 @@
 use crate::{
     base::arena::{HasInterner, HasListInterner, LateInit, Obj},
     semantic::{
-        analysis::{
-            BodyCtxt, ClauseOrigin, FloatingInferVar, OverloadResolution, TyFoldable,
-            TyFolderInfallibleExt,
-        },
+        analysis::{BodyCtxt, ClauseOrigin, FloatingInferVar, OverloadResolution},
         syntax::{
             FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirLocal, HirPat, HirPatKind,
             HirStmt, RelationMode, ThirBlock, ThirExpr, ThirExprKind, ThirLetStmt, ThirLocal,
-            ThirPat, ThirPatKind, ThirStmt, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            ThirPat, ThirPatKind, ThirStmt, TraitParam, TraitSpec, Ty, TyFoldable,
+            TyFolderInfallibleExt, TyKind, TyOrRe,
         },
     },
 };

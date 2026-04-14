@@ -1,13 +1,11 @@
 use crate::{
     base::{Diag, arena::HasInterner as _, syntax::HasSpan as _},
     semantic::{
-        analysis::{
-            ClauseCx, ClauseCxPrinter, ClauseOrigin, TyCtxt, TyFoldable, TyFolder,
-            TyFolderInfallibleExt as _, TyVisitable,
-        },
+        analysis::{ClauseCx, ClauseCxPrinter, ClauseOrigin},
         syntax::{
             HrtbBinder, InferTyVarSourceInfo, Re, RelationMode, SpannedHrtbBinder, SpannedRe,
-            SpannedTy, Ty, TyKind, TyProjection, UniversalTyVar, UniversalTyVarSourceInfo,
+            SpannedTy, Ty, TyCtxt, TyFoldable, TyFolder, TyFolderInfallibleExt as _, TyKind,
+            TyProjection, TyVisitable, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };

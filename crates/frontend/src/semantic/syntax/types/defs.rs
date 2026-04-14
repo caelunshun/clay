@@ -7,12 +7,12 @@ use crate::{
     },
     parse::token::{Ident, Lifetime},
     semantic::{
-        analysis::{ClauseOrigin, TyCtxt},
+        analysis::ClauseOrigin,
         lower::func::path::TypeRelativeAssoc,
         syntax::{
             EnumVariantItem, FnDef, FnItem, Item, LocalNameIdent, MirLocalIdx,
             SpannedTraitClauseList, SpannedTraitInstance, SpannedTraitSpec, SpannedTy,
-            SpannedTyOrReList, Visibility,
+            SpannedTyOrReList, TyCtxt, Visibility,
         },
     },
     symbol,

@@ -1,11 +1,11 @@
 use crate::{
     base::Session,
     semantic::{
-        analysis::{ClauseCx, TyCtxt},
+        analysis::ClauseCx,
         syntax::{
             AdtInstance, AnyGeneric, FloatKind, HrtbBinderKind, IntKind, Re, SimpleTyKind,
-            SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
-            UniversalTyVar, UniversalTyVarSourceInfo,
+            SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyKind,
+            TyOrRe, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };

@@ -4,10 +4,11 @@ use crate::{
         arena::{HasListInterner, Obj},
     },
     semantic::{
-        analysis::{MirLowerFlow, TyCtxt},
+        analysis::MirLowerFlow,
         syntax::{
             FnDef, MirAssignRvalue, MirBody, MirLocal, MirLocalIdx, MirOperand, MirPlace,
             MirPlaceElem, ThirExpr, ThirExprKind, ThirLocal, ThirPat, ThirPatKind, ThirStmt,
+            TyCtxt,
         },
     },
     utils::hash::FxHashMap,

@@ -3,13 +3,11 @@
 use crate::{
     base::{Session, analysis::DebruijnTop, arena::HasListInterner},
     semantic::{
-        analysis::{
-            ClauseCx, ClauseOrigin, ClauseOriginKind, HrtbUniverse, TyCtxt, TyFoldable, TyFolder,
-            TyFolderInfallibleExt,
-        },
+        analysis::{ClauseCx, ClauseOrigin, ClauseOriginKind, HrtbUniverse},
         syntax::{
             HrtbBinder, HrtbBinderKind, InferTyVarSourceInfo, Re, SpannedHrtbBinder, SpannedRe,
-            SpannedTy, TraitClause, TraitSpec, Ty, TyKind, TyOrRe, TyOrReKind, TyOrReList,
+            SpannedTy, TraitClause, TraitSpec, Ty, TyCtxt, TyFoldable, TyFolder,
+            TyFolderInfallibleExt, TyKind, TyOrRe, TyOrReKind, TyOrReList,
             UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },

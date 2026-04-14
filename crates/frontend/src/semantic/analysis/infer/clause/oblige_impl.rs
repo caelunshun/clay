@@ -5,13 +5,14 @@ use crate::{
     semantic::{
         analysis::{
             ClauseCx, ClauseImportEnv, ClauseOrigin, HrtbUniverse, HrtbUniverseInfo,
-            NoTraitImplError, ObligationNotReady, ObligationResult, TyFolderInfallibleExt,
-            TyVisitorExt, UnboundVarHandlingMode, UniversalElaboration,
+            NoTraitImplError, ObligationNotReady, ObligationResult, UnboundVarHandlingMode,
+            UniversalElaboration,
             infer::clause::{ClauseObligation, elaboration::FloatingInfVarVisitor},
         },
         syntax::{
             HrtbBinder, HrtbBinderKind, ImplItem, RelationMode, SimpleTySet, TraitClause,
-            TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            TraitClauseList, TraitParam, TraitSpec, Ty, TyFolderInfallibleExt, TyKind, TyOrRe,
+            TyVisitorExt,
         },
     },
 };

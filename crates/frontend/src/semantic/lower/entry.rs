@@ -17,7 +17,6 @@ use crate::{
         token::Ident,
     },
     semantic::{
-        analysis::TyCtxt,
         lower::{
             bootstrap::{lower_synthetic_module, synthesize_bootstrap_prelude},
             func::pat::{PatLocalBranchResolver, PatLowerContext},
@@ -31,7 +30,8 @@ use crate::{
             AdtEnumVariantIdx, AdtItem, AdtKind, AdtKindEnum, AdtKindStruct, AnyGeneric, Crate,
             EnumVariantItem, FnArg, FnDef, FnDefOwner, FnItem, GenericBinder, HirLabelledBlock,
             HirLocal, ImplItem, Item, ItemKind, LangItems, LocalNameSymbol, ModuleItem,
-            RegionGeneric, SpannedTy, TraitItem, TyKind, TypeAliasItem, TypeGeneric, Visibility,
+            RegionGeneric, SpannedTy, TraitItem, TyCtxt, TyKind, TypeAliasItem, TypeGeneric,
+            Visibility,
         },
     },
     symbol,

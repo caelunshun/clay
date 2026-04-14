@@ -4,10 +4,7 @@ use crate::{
         arena::{LateInit, Obj},
         syntax::{Span, Symbol},
     },
-    semantic::{
-        analysis::TyCtxt,
-        syntax::{AdtItem, HirExpr, Item, TraitItem},
-    },
+    semantic::syntax::{AdtItem, HirExpr, Item, TraitItem, TyCtxt},
     symbol,
 };
 use std::fmt;

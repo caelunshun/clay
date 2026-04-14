@@ -7,7 +7,7 @@ use crate::{
     semantic::{
         analysis::{
             BodyCtxt, ClauseErrorProbe, ClauseImportEnvRef, ClauseOrigin, HrtbUniverse,
-            TyFolderInfallibleExt as _, UnboundVarHandlingMode, attempt_deref,
+            UnboundVarHandlingMode, attempt_deref,
         },
         lower::{
             generics::normalize_positional_generic_arity,
@@ -16,7 +16,7 @@ use crate::{
         syntax::{
             AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, GenericSubst,
             InferTyVarSourceInfo, Mutability, Re, RelationMode, SpannedTyOrReList, TraitClause,
-            TraitSpec, Ty, TyKind,
+            TraitSpec, Ty, TyFolderInfallibleExt as _, TyKind,
         },
     },
     utils::lang::IterEither,

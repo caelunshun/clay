@@ -4,16 +4,16 @@ use crate::{
         analysis::{
             ClauseCx, ClauseOrigin, HrtbUniverse, InferTyLeaksHrtbVarError,
             InferTyLeaksUniversalError, InferTyOccursError, TyAndSimpleTySetUnifyError,
-            TyAndTyUnifyCulprit, TyAndTyUnifyError, TyCtxt, TyFoldable, TyFolder, TyFolderExt,
-            TyFolderInfallibleExt, TyVisitable, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt,
+            TyAndTyUnifyCulprit, TyAndTyUnifyError,
             infer::unify::{regions::ReUnifyTracker, types::TyUnifyTracker},
         },
         syntax::{
             FnInstanceInner, FnOwner, HrtbBinderKind, InferTyVar, InferTyVarSourceInfo, Mutability,
             Re, ReVariance, RelationDirection, RelationMode, SimpleTySet, SpannedHrtbBinder,
             SpannedTy, SpannedTyView, TraitClause, TraitClauseList, TraitParam, TraitParamList, Ty,
-            TyKind, TyOrRe, UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar,
-            UniversalTyVarSourceInfo,
+            TyCtxt, TyFoldable, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyKind, TyOrRe,
+            TyVisitable, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt, UniversalReVar,
+            UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };

@@ -3,11 +3,12 @@ use crate::{
     semantic::{
         analysis::{
             ClauseCx, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind, CoherenceMap,
-            HrtbUniverse, TyCtxt, TyFolderInfallibleExt, TyVisitorInfallibleExt, UnifyCxMode,
+            HrtbUniverse, UnifyCxMode,
         },
         syntax::{
             AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FnItem, GenericBinder, GenericSubst,
-            ImplItem, ItemKind, TraitItem, TypeAliasItem,
+            ImplItem, ItemKind, TraitItem, TyCtxt, TyFolderInfallibleExt, TyVisitorInfallibleExt,
+            TypeAliasItem,
         },
     },
 };

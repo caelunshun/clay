@@ -2,10 +2,9 @@ use crate::{
     base::{Diag, LeafDiag, Session, arena::Obj},
     semantic::{
         analysis::{
-            CoherenceMap, MirBbOperationKind, MirBbOperationVisitor, MirBuildCtxt,
-            MirDataflowFacts, TyCtxt,
+            CoherenceMap, MirBbOperationKind, MirBbOperationVisitor, MirBuildCtxt, MirDataflowFacts,
         },
-        syntax::{Crate, FnDef, ItemKind, MirInstructionLoc},
+        syntax::{Crate, FnDef, ItemKind, MirInstructionLoc, TyCtxt},
     },
 };
 use std::ops::ControlFlow;

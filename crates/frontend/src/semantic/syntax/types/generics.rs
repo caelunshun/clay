@@ -1,8 +1,8 @@
 use crate::{
     base::arena::{LateInit, Obj},
-    semantic::{
-        analysis::{TyCtxt, TyVisitable, TyVisitor, TyVisitorExt},
-        syntax::{AnyGeneric, GenericBinder, PosInBinder, Re, SpannedRe, SpannedTy, TyKind},
+    semantic::syntax::{
+        AnyGeneric, GenericBinder, PosInBinder, Re, SpannedRe, SpannedTy, TyCtxt, TyKind,
+        TyVisitable, TyVisitor, TyVisitorExt,
     },
 };
 use derive_where::derive_where;

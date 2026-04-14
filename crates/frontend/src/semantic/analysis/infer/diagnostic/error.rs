@@ -2,12 +2,11 @@ use crate::{
     base::{Diag, ErrorGuaranteed, syntax::Span},
     semantic::{
         analysis::{
-            ClauseCx, ClauseCxPrinter, ClauseObligation, HrtbUniverse, TyFolderInfallibleExt,
-            UnboundVarHandlingMode,
+            ClauseCx, ClauseCxPrinter, ClauseObligation, HrtbUniverse, UnboundVarHandlingMode,
         },
         syntax::{
             InferTyVar, Re, SimpleTySet, TraitClauseList, TraitParam, TraitSpec, Ty,
-            UniversalReVar, UniversalTyVar,
+            TyFolderInfallibleExt, UniversalReVar, UniversalTyVar,
         },
     },
 };

@@ -4,11 +4,8 @@ use crate::{
         arena::{HasListInterner as _, Obj},
         syntax::Symbol,
     },
-    semantic::{
-        analysis::TyCtxt,
-        syntax::{
-            AdtInstance, SolidTyShape, SolidTyShapeKind, TraitItem, Ty, TyKind, TyOrRe, TyShape,
-        },
+    semantic::syntax::{
+        AdtInstance, SolidTyShape, SolidTyShapeKind, TraitItem, Ty, TyCtxt, TyKind, TyOrRe, TyShape,
     },
     utils::{
         hash::FxHashMap,
@@ -263,7 +260,7 @@ impl MapLayer {
 mod tests {
     use super::*;
     use crate::{
-        semantic::{analysis::TyCtxt, syntax::SimpleTyKind},
+        semantic::syntax::{SimpleTyKind, TyCtxt},
         utils::hash::FxHashSet,
     };
 

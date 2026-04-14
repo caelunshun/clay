@@ -1,20 +1,17 @@
 use crate::{
     base::{Session, analysis::Spanned},
-    semantic::{
-        analysis::{TyCtxt, TyFoldable},
-        syntax::{
-            AdtInstance, FnInstance, FnOwner, HrtbBinder, HrtbBinderKind, HrtbDebruijnDef,
-            HrtbDebruijnDefList, Re, SpannedAdtInstance, SpannedAdtInstanceView, SpannedFnInstance,
-            SpannedFnInstanceView, SpannedFnOwner, SpannedFnOwnerView, SpannedHrtbBinder,
-            SpannedHrtbBinderKind, SpannedHrtbBinderKindView, SpannedHrtbBinderView,
-            SpannedHrtbDebruijnDef, SpannedHrtbDebruijnDefList, SpannedHrtbDebruijnDefView,
-            SpannedRe, SpannedTraitClause, SpannedTraitClauseList, SpannedTraitClauseView,
-            SpannedTraitInstance, SpannedTraitInstanceView, SpannedTraitParam,
-            SpannedTraitParamList, SpannedTraitParamView, SpannedTraitSpec, SpannedTraitSpecView,
-            SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReList, SpannedTyOrReView,
-            SpannedTyView, TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitParamList,
-            TraitSpec, Ty, TyList, TyOrRe, TyOrReList, TyProjection,
-        },
+    semantic::syntax::{
+        AdtInstance, FnInstance, FnOwner, HrtbBinder, HrtbBinderKind, HrtbDebruijnDef,
+        HrtbDebruijnDefList, Re, SpannedAdtInstance, SpannedAdtInstanceView, SpannedFnInstance,
+        SpannedFnInstanceView, SpannedFnOwner, SpannedFnOwnerView, SpannedHrtbBinder,
+        SpannedHrtbBinderKind, SpannedHrtbBinderKindView, SpannedHrtbBinderView,
+        SpannedHrtbDebruijnDef, SpannedHrtbDebruijnDefList, SpannedHrtbDebruijnDefView, SpannedRe,
+        SpannedTraitClause, SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitInstance,
+        SpannedTraitInstanceView, SpannedTraitParam, SpannedTraitParamList, SpannedTraitParamView,
+        SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe,
+        SpannedTyOrReList, SpannedTyOrReView, SpannedTyView, TraitClause, TraitClauseList,
+        TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty, TyCtxt, TyFoldable, TyList,
+        TyOrRe, TyOrReList, TyProjection,
     },
 };
 use std::{convert::Infallible, ops::ControlFlow};

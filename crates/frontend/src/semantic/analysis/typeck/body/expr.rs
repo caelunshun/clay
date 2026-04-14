@@ -9,15 +9,15 @@ use crate::{
     semantic::{
         analysis::{
             BodyCtxt, ClauseError, ClauseOrigin, ClauseOriginKind, EquateOrSet, HrtbUniverse,
-            OverloadResolution, TyFolderInfallibleExt as _, TyVisitorInfallibleExt as _,
-            peel_ref_for_prim_op, typeck::body::lookup::LookupMethodResult,
+            OverloadResolution, peel_ref_for_prim_op, typeck::body::lookup::LookupMethodResult,
         },
         lower::generics::normalize_positional_generic_arity,
         syntax::{
             AdtInstance, Divergence, FnInstanceInner, HirBlock, HirExpr, HirExprKind,
             HirLabelTargetKind, HirLabelledBlock, HirStmt, InferTyVarSourceInfo, Re, RelationMode,
             SimpleTyKind, SimpleTySet, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTyView,
-            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            TraitParam, TraitSpec, Ty, TyAndDivergence, TyFolderInfallibleExt as _, TyKind, TyOrRe,
+            TyVisitorInfallibleExt as _,
         },
     },
 };

@@ -6,12 +6,13 @@ use crate::{
     semantic::{
         analysis::{
             ClauseCx, ClauseOrigin, CrateBorrowCheckVisitor, HrtbUniverse, MirDataflowFacts,
-            TyCtxt, TyFolderInfallibleExt as _, TyVisitorInfallibleExt as _, UnifyCxMode,
+            UnifyCxMode,
         },
         syntax::{
             FnDef, IntKind, MirAssignRvalue, MirBody, MirLocalIdx, MirOperand, MirPlace,
             MirPlaceElem, MirStmt, MirStmtKind, MirTerminator, Re, RelationDirection, RelationMode,
-            SimpleTyKind, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, UniversalReVarSourceInfo,
+            SimpleTyKind, TraitParam, TraitSpec, Ty, TyCtxt, TyFolderInfallibleExt as _, TyKind,
+            TyOrRe, TyVisitorInfallibleExt as _, UniversalReVarSourceInfo,
         },
     },
 };

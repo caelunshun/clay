@@ -7,12 +7,12 @@ use crate::{
         analysis::{
             ClauseError, ClauseOrigin, CoherenceMap, FloatingInferVar, HrtbUniverse, ObligationCx,
             ObligationNotReady, ObligationUnfulfilled, RecursionLimitReached,
-            TyAndSimpleTySetUnifyError, TyAndTyUnifyError, TyCtxt, UnifyCx, UnifyCxMode,
+            TyAndSimpleTySetUnifyError, TyAndTyUnifyError, UnifyCx, UnifyCxMode,
             infer::clause::elaboration::WipReificationState,
         },
         syntax::{
             Crate, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection, RelationMode,
-            SimpleTySet, TraitClause, TraitClauseList, TraitSpec, Ty, TyKind, TyOrRe,
+            SimpleTySet, TraitClause, TraitClauseList, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe,
             UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },

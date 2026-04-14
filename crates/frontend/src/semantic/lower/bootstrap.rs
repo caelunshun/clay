@@ -10,11 +10,10 @@ use crate::{
         token::Ident,
     },
     semantic::{
-        analysis::TyCtxt,
         lower::modules::{BuilderItemId, BuilderModuleTree, ItemCategory},
         syntax::{
             Crate, FloatKind, GenericBinder, IntKind, Item, ItemKind, LangItems, ModuleItem,
-            SimpleTyKind, TyKind, TypeAliasItem,
+            SimpleTyKind, TyCtxt, TyKind, TypeAliasItem,
         },
     },
     symbol,

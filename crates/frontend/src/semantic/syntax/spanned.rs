@@ -5,16 +5,13 @@ use crate::{
         arena::{HasInterner, Obj},
         syntax::Span,
     },
-    semantic::{
-        analysis::TyCtxt,
-        syntax::{
-            AdtInstance, AdtItem, AnyGeneric, FnInstance, FnInstanceInner, FnItem, FnOwner,
-            GenericBinder, HrtbBinder, HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef,
-            HrtbDebruijnDefList, ImplItem, InferTyVar, Mutability, Re, RelationDirection,
-            SimpleTyKind, TraitClause, TraitClauseList, TraitInstance, TraitItem, TraitParam,
-            TraitParamList, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList,
-            TyProjection, TypeAliasItem, TypeGeneric, UniversalTyVar,
-        },
+    semantic::syntax::{
+        AdtInstance, AdtItem, AnyGeneric, FnInstance, FnInstanceInner, FnItem, FnOwner,
+        GenericBinder, HrtbBinder, HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef,
+        HrtbDebruijnDefList, ImplItem, InferTyVar, Mutability, Re, RelationDirection, SimpleTyKind,
+        TraitClause, TraitClauseList, TraitInstance, TraitItem, TraitParam, TraitParamList,
+        TraitSpec, Ty, TyCtxt, TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList, TyProjection,
+        TypeAliasItem, TypeGeneric, UniversalTyVar,
     },
 };
 

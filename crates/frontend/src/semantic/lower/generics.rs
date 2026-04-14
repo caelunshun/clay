@@ -13,13 +13,12 @@ use crate::{
         token::Ident,
     },
     semantic::{
-        analysis::TyCtxt,
         lower::entry::{InterItemLowerCtxt, IntraItemLowerCtxt},
         syntax::{
             AnyGeneric, GenericBinder, Item, Re, RegionGeneric, SpannedTraitClauseList,
             SpannedTraitInstance, SpannedTraitInstanceView, SpannedTraitParam,
             SpannedTraitParamList, SpannedTraitParamView, SpannedTyOrRe, SpannedTyOrReList,
-            SpannedTyOrReView, SpannedTyView, TraitItem, TypeGeneric,
+            SpannedTyOrReView, SpannedTyView, TraitItem, TyCtxt, TypeGeneric,
         },
     },
     utils::{
