@@ -7,6 +7,9 @@ mod exporting;
 mod hrtb;
 pub use self::hrtb::*;
 
+mod env;
+pub use self::env::*;
+
 mod importing;
 pub use self::importing::*;
 
