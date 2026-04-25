@@ -1,24 +1,51 @@
 //! Logic to import a user-written type in a signature or function body into a form the inference
 //! context can understand.
 //!
-//! There are three phases to this process:
+//! There are four visitors used in this process:
 //!
-//! 1. **Environment Substitution:** First, we substitute in a given `ClauseImportEnv` to a
-//!    signature type. This creates a type which is no longer sensitive to its environment. This
-//!    means that we get rid of `SigThis`, `SigInfer`, and `SigGeneric`. We maintain `SigProject`
-//!    and `SigAlias` for WF checking but include their arguments in this import process.
+//! 1. **Environment substitution:** Before doing anything with a signature type, we substitute in a
+//!    given `ClauseImportEnv` to a signature type. This creates a type which is no longer sensitive
+//!    to its environment. This means that we get rid of `SigThis`, `SigInfer`, and `SigGeneric`. We
+//!    maintain `SigProject` and `SigAlias` for WF checking but include their arguments in this
+//!    import process.
 //!
-//! 2. **WF-Checking:** Next, for the top-level layer of a binder, we perform WF-checking. This
-//!    includes eager WF-checking of `SigProject` and `SigAlias` to ensure that errors are caught at
-//!    the instantiation site rather than in the substituted body. If there are binders in the type,
-//!    we instantiate the binder as universal using the third-phase HRTB instantiation visitor and
-//!    WF check that produced type.
+//!    This folder does not call into other folders—it simply performs a substitution.
 //!
-//! 3. **HRTB instantiation:** Finally, we provide a collection of visitors to instantiate the
-//!    single top-most layer of a given HRTB binder body as either existential or universal. In
-//!    either case, this process also instantiates `SigProject` and `SigAlias` types at this top
-//!    unbound level of that type. We do not instantiate `SigProject` and `SigAlias` types within
-//!    the binder because `HrtbVar` is not allowed to be mentioned within a projection.
+//! 2. **HRTB instantiation:** We also provide a collection of visitors to instantiate the
+//!    top-most layer of a given HRTB binder body as either existential or universal variables. This
+//!    maintains `SigProject` and `SigAlias` types to allow WF-checking of binders to check the
+//!    pre-normalized types. Most users, however, will also perform normalizing instantiations of
+//!    the binder contents after performing HRTB instantiation.
+//!
+//!    This folder does not call into other folders—it simply performs a substitution.
+//!
+//! 3. **Normalize instantiation:** This visitor instantiates `SigProject` and `SigAlias` types at
+//!    the top unbound level of that type. We do not instantiate `SigProject` and `SigAlias` types
+//!    within binders because `HrtbVar` is not allowed to be mentioned within a projection.
+//!
+//!    Obligations are only capable of working with normalized types.
+//!
+//!    Normalizing type aliases requires us to substitute in the type aliases' environment and
+//!    then transitively normalize the contents of that alias.
+//!
+//!    In order to instantiate projection types, we spawn nested obligation queries which resolve
+//!    the requested associated type as an inference type. These queries operate on a fully
+//!    normalized body.
+//!
+//! 4. **WF-Checking:** WF-checking traverses both the HRTB-instantiated version of a type and its
+//!    normalized form in parallel. This is necessary because, e.g., generic parameter verification
+//!    requires us to create obligations on those parameters and obligations must operate on
+//!    normalized types.
+//!
+//!    If there are binders in the type, we instantiate the binder as universal using the
+//!    HRTB instantiation folder and WF check that produced type alongside its normalized
+//!    counterpart.
+//!
+//! None of these visitors should be used by the outside world. Instead, they should use drivers
+//! which either...
+//!
+//! 1. Convert the top level of a signature type into a normalized type with WF-checking.
+//! 2. Instantiate HRTBs as either existential or universal and normalize that top level.
 //!
 
 use crate::{
