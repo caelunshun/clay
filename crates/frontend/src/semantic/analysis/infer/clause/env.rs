@@ -4,7 +4,10 @@ use crate::{
         syntax::Span,
     },
     semantic::{
-        analysis::{ClauseCx, ClauseOrigin, ClauseOriginKind, HrtbUniverse},
+        analysis::{
+            ClauseCx, ClauseImportEnv, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind,
+            HrtbUniverse,
+        },
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnInstanceInner,
             FnOwner, GenericBinder, GenericSubst, HrtbBinder, HrtbBinderKind, ImplItem,
@@ -14,50 +17,6 @@ use crate::{
         },
     },
 };
-
-#[derive(Debug, Clone)]
-pub struct ClauseImportEnv {
-    pub self_ty: Ty,
-    pub sig_generic_substs: Vec<GenericSubst>,
-}
-
-impl ClauseImportEnv {
-    pub fn new(self_ty: Ty, sig_generic_substs: Vec<GenericSubst>) -> Self {
-        Self {
-            self_ty,
-            sig_generic_substs,
-        }
-    }
-
-    pub fn as_ref(&self) -> ClauseImportEnvRef<'_> {
-        ClauseImportEnvRef {
-            self_ty: self.self_ty,
-            sig_generic_substs: &self.sig_generic_substs,
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub struct ClauseImportEnvRef<'a> {
-    pub self_ty: Ty,
-    pub sig_generic_substs: &'a [GenericSubst],
-}
-
-impl<'a> ClauseImportEnvRef<'a> {
-    pub fn new(self_ty: Ty, sig_generic_substs: &'a [GenericSubst]) -> Self {
-        Self {
-            self_ty,
-            sig_generic_substs,
-        }
-    }
-
-    pub fn to_owned(self) -> ClauseImportEnv {
-        ClauseImportEnv {
-            self_ty: self.self_ty,
-            sig_generic_substs: self.sig_generic_substs.to_vec(),
-        }
-    }
-}
 
 impl<'tcx> ClauseCx<'tcx> {
     // === Universal === //
