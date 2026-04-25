@@ -62,14 +62,15 @@ use crate::{
         },
         syntax::{
             AnyGeneric, GenericBinder, GenericSubst, HrtbBinder, HrtbBinderKind, HrtbDebruijn,
-            HrtbDebruijnDef, InferTyVarSourceInfo, Re, RelationDirection, SpannedAdtInstance,
-            SpannedFnInstance, SpannedFnInstanceView, SpannedHrtbBinder, SpannedHrtbBinderKindView,
-            SpannedHrtbBinderView, SpannedHrtbDebruijnDefView, SpannedRe, SpannedTraitInstance,
-            SpannedTraitParamView, SpannedTraitSpec, SpannedTy, SpannedTyOrRe, SpannedTyOrReList,
-            SpannedTyView, TraitClause, TraitParam, TraitSpec, Ty, TyCtxt, TyFoldable, TyFolder,
-            TyFolderExt, TyFolderInfallibleExt, TyFolderPreservesSpans, TyKind, TyOrRe, TyOrReKind,
-            TyOrReList, TyProjection, TyVisitable, TyVisitor, TyVisitorInfallibleExt,
-            TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
+            HrtbDebruijnDef, HrtbDebruijnDefList, InferTyVarSourceInfo, Re, RelationDirection,
+            SpannedAdtInstance, SpannedFnInstance, SpannedFnInstanceView, SpannedHrtbBinder,
+            SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedHrtbDebruijnDefView,
+            SpannedRe, SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec, SpannedTy,
+            SpannedTyOrRe, SpannedTyOrReList, SpannedTyView, TraitClause, TraitParam, TraitSpec,
+            Ty, TyCtxt, TyFoldable, TyFolder, TyFolderExt, TyFolderInfallibleExt,
+            TyFolderPreservesSpans, TyKind, TyOrRe, TyOrReKind, TyOrReList, TyProjection,
+            TyVisitable, TyVisitorInfallibleExt, TypeAliasItem, UniversalReVarSourceInfo,
+            UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
@@ -308,22 +309,13 @@ impl<'tcx> TyFolder<'tcx> for EnvSubstitutor<'_, 'tcx> {
 // === HRTB Instantiation === //
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn instantiate_hrtb_universal_without_normalization<T: TyFoldable>(
-        &mut self,
-        universe: &HrtbUniverse,
-        binder: HrtbBinder<T>,
-    ) -> T {
+    pub fn instantiate_hrtb_universal_without_normalization<'a, T: TyFoldable>(
+        &'a mut self,
+        universe: &'a HrtbUniverse,
+        defs: HrtbDebruijnDefList,
+    ) -> HrtbSubstitutionFolder<'a, 'tcx> {
         let tcx = self.tcx();
         let s = self.session();
-
-        let HrtbBinderKind::Imported(defs) = binder.kind else {
-            unreachable!();
-        };
-
-        // Fast path :)
-        if defs.r(s).is_empty() {
-            return binder.inner;
-        }
 
         // Make up new universal variables for our binder.
         let vars = defs
@@ -373,27 +365,17 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         }
 
-        // Fold the inner type
-        HrtbSubstitutionFolder::new(self, vars, s).fold(binder.inner)
+        HrtbSubstitutionFolder::new(self, vars, s)
     }
 
-    pub fn instantiate_hrtb_infer_without_normalization(
-        &mut self,
-        origin: &ClauseOrigin,
-        universe: &HrtbUniverse,
-        binder: HrtbBinder<TraitSpec>,
-    ) -> TraitSpec {
+    pub fn instantiate_hrtb_infer_without_normalization<'a>(
+        &'a mut self,
+        origin: &'a ClauseOrigin,
+        universe: &'a HrtbUniverse,
+        defs: HrtbDebruijnDefList,
+    ) -> HrtbSubstitutionFolder<'a, 'tcx> {
         let tcx = self.tcx();
         let s = self.session();
-
-        let HrtbBinderKind::Imported(defs) = binder.kind else {
-            unreachable!();
-        };
-
-        // Fast path :)
-        if defs.r(s).is_empty() {
-            return binder.inner;
-        }
 
         // Make up new inference variables for our binder.
         let vars = defs
@@ -442,7 +424,7 @@ impl<'tcx> ClauseCx<'tcx> {
         }
 
         // Fold the inner type
-        HrtbSubstitutionFolder::new(self, vars, s).fold(binder.inner)
+        HrtbSubstitutionFolder::new(self, vars, s)
     }
 }
 
@@ -570,111 +552,138 @@ impl<'tcx> TyFolder<'tcx> for ClauseNormalizer<'_, 'tcx> {
     }
 
     fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
+        let s = self.session();
+
         let own_span = ty.own_span();
         let ty = self.super_spanned(ty);
-        let ty = self.normalize_pre_super_normalized_ty(own_span, ty);
-        Ok(ty)
+
+        Ok(match *ty.r(s) {
+            TyKind::SigProject(projection) => {
+                self.normalize_super_normalized_projection(own_span, projection)
+            }
+            TyKind::SigAlias(def, args) => {
+                self.normalize_super_normalized_alias(own_span, def, args)
+            }
+
+            TyKind::Simple(_)
+            | TyKind::Reference(_, _, _)
+            | TyKind::Adt(_)
+            | TyKind::Trait(_, _, _)
+            | TyKind::Tuple(_)
+            | TyKind::FnDef(_)
+            | TyKind::InferVar(_)
+            | TyKind::UniversalVar(_)
+            | TyKind::Error(_) => ty,
+
+            TyKind::SigThis | TyKind::SigInfer | TyKind::SigGeneric(_) | TyKind::HrtbVar(_) => {
+                unreachable!()
+            }
+        })
     }
 }
 
 impl ClauseNormalizer<'_, '_> {
-    fn normalize_pre_super_normalized_ty(&mut self, own_span: Span, ty: Ty) -> Ty {
+    fn normalize_super_normalized_projection(
+        &mut self,
+        own_span: Span,
+        projection: TyProjection,
+    ) -> Ty {
         let s = self.session();
         let tcx = self.tcx();
 
-        match *ty.r(s) {
-            TyKind::SigAlias(def, args) => {
-                // Substitute in the alias's environment.
-                let env = ClauseImportEnv::new(
-                    tcx.intern(TyKind::SigThis),
-                    vec![GenericSubst {
-                        binder: def.r(s).generics,
-                        substs: args,
-                    }],
-                );
+        let TyProjection {
+            target,
+            spec,
+            assoc,
+        } = projection;
 
-                let body = self
-                    .ccx
-                    .env_substitutor(self.origin, self.universe.clone(), env.as_ref())
-                    .fold_preserved(*def.r(s).body);
+        let assoc_infer_ty = self.ccx.fresh_ty_infer(
+            self.universe.clone(),
+            InferTyVarSourceInfo::ProjectionResult {
+                origin: self.origin.clone(),
+                span: own_span,
+            },
+        );
+        let spec = {
+            let mut args = spec.params.r(s).to_vec();
+            args[assoc as usize] = TraitParam::Equals(TyOrRe::Ty(assoc_infer_ty));
 
-                // Normalize the target, reporting errors on guaranteed reentrancy (that is,
-                // reentrancy for a given alias not involving projections).
-                match self.reentrant_aliases.entry(def) {
-                    hash_map::Entry::Occupied(entry) => {
-                        let entry = entry.into_mut();
+            TraitSpec {
+                def: spec.def,
+                params: tcx.intern_list(&args),
+            }
+        };
 
-                        if matches!(entry, ReentrantAliasState::WaitingForViolation) {
-                            *entry = ReentrantAliasState::Violated(own_span);
-                        }
+        self.ccx.oblige_ty_meets_trait_instantiated(
+            self.origin
+                .clone()
+                .child(ClauseOriginKind::InstantiatedProjection { span: own_span }),
+            self.universe.clone(),
+            target,
+            spec,
+        );
 
-                        return tcx.intern(TyKind::Error(ErrorGuaranteed::new_unchecked()));
-                    }
-                    hash_map::Entry::Vacant(entry) => {
-                        entry.insert(ReentrantAliasState::WaitingForViolation);
-                    }
+        assoc_infer_ty
+    }
+
+    fn normalize_super_normalized_alias(
+        &mut self,
+        own_span: Span,
+        def: Obj<TypeAliasItem>,
+        args: TyOrReList,
+    ) -> Ty {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        // Substitute in the alias's environment.
+        let env = ClauseImportEnv::new(
+            tcx.intern(TyKind::SigThis),
+            vec![GenericSubst {
+                binder: def.r(s).generics,
+                substs: args,
+            }],
+        );
+
+        let body = self
+            .ccx
+            .env_substitutor(self.origin, self.universe.clone(), env.as_ref())
+            .fold_preserved(*def.r(s).body);
+
+        // Normalize the target, reporting errors on guaranteed reentrancy (that is,
+        // reentrancy for a given alias not involving projections).
+        match self.reentrant_aliases.entry(def) {
+            hash_map::Entry::Occupied(entry) => {
+                let entry = entry.into_mut();
+
+                if matches!(entry, ReentrantAliasState::WaitingForViolation) {
+                    *entry = ReentrantAliasState::Violated(own_span);
                 }
 
-                let body = self.fold_spanned(body);
-
-                match self.reentrant_aliases.remove(&def).unwrap() {
-                    ReentrantAliasState::WaitingForViolation => {
-                        // (no violation occurred)
-                    }
-                    ReentrantAliasState::Violated(span) => {
-                        let mut diag =
-                            Diag::span_err(own_span, "attempted to expand recursive type alias");
-
-                        if own_span != span {
-                            diag.push_child(LeafDiag::span_note(span, "reentered here"));
-                        }
-
-                        diag.emit();
-                    }
-                }
-
-                body
+                return tcx.intern(TyKind::Error(ErrorGuaranteed::new_unchecked()));
             }
-            TyKind::SigProject(TyProjection {
-                target,
-                spec,
-                assoc,
-            }) => {
-                let assoc_infer_ty = self.ccx.fresh_ty_infer(
-                    self.universe.clone(),
-                    InferTyVarSourceInfo::ProjectionResult {
-                        origin: self.origin.clone(),
-                        span: own_span,
-                    },
-                );
-                let spec = {
-                    let mut args = spec.params.r(s).to_vec();
-                    args[assoc as usize] = TraitParam::Equals(TyOrRe::Ty(assoc_infer_ty));
-
-                    TraitSpec {
-                        def: spec.def,
-                        params: tcx.intern_list(&args),
-                    }
-                };
-
-                self.ccx
-                    .wf_visitor(self.universe.clone())
-                    .with_clause_applies_to(target)
-                    .visit_spanned(Spanned::new_saturated(spec, own_span, tcx));
-
-                self.ccx.oblige_ty_meets_trait_instantiated(
-                    self.origin
-                        .clone()
-                        .child(ClauseOriginKind::InstantiatedProjection { span: own_span }),
-                    self.universe.clone(),
-                    target,
-                    spec,
-                );
-
-                assoc_infer_ty
+            hash_map::Entry::Vacant(entry) => {
+                entry.insert(ReentrantAliasState::WaitingForViolation);
             }
-            _ => ty,
         }
+
+        let body = self.fold_spanned(body);
+
+        match self.reentrant_aliases.remove(&def).unwrap() {
+            ReentrantAliasState::WaitingForViolation => {
+                // (no violation occurred)
+            }
+            ReentrantAliasState::Violated(span) => {
+                let mut diag = Diag::span_err(own_span, "attempted to expand recursive type alias");
+
+                if own_span != span {
+                    diag.push_child(LeafDiag::span_note(span, "reentered here"));
+                }
+
+                diag.emit();
+            }
+        }
+
+        body
     }
 }
 
@@ -703,17 +712,17 @@ impl ClauseTyWfVisitor<'_, '_> {
     }
 }
 
-impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
-    type Break = Infallible;
+impl<'tcx> TyFolder<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
+    type Error = Infallible;
 
     fn tcx(&self) -> &'tcx TyCtxt {
         self.ccx.tcx()
     }
 
-    fn visit_hrtb_binder<T: Copy + TyVisitable + TyFoldable>(
+    fn fold_hrtb_binder<T: Copy + TyVisitable + TyFoldable>(
         &mut self,
         binder: SpannedHrtbBinder<T>,
-    ) -> ControlFlow<Self::Break> {
+    ) -> Result<HrtbBinder<T>, Self::Error> {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -745,7 +754,7 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         {
             let bound = Spanned::new_raw(
                 self.ccx
-                    .instantiate_hrtb_universal(&self.universe, binder.value),
+                    .instantiate_hrtb_universal_without_normalization(&self.universe, binder.value),
                 inner_span_info,
             );
 
@@ -766,14 +775,17 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         ControlFlow::Continue(())
     }
 
-    fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
+    fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
         match ty.view(self.tcx()) {
             SpannedTyView::Trait(_, _, _) => {
                 let old_clause_applies_to = self.clause_applies_to.replace(ty.value);
-                self.walk_spanned(ty);
+                self.fold_spanned(ty);
                 self.clause_applies_to = old_clause_applies_to;
             }
             SpannedTyView::Reference(re, _muta, pointee) => {
+                let pointee_span = pointee.own_span();
+                let pointee = self.fold_spanned(pointee);
+
                 self.ccx.oblige_ty_outlives_re(
                     ClauseOrigin::root_report(ClauseOriginKind::WfForReference {
                         pointee: pointee.own_span(),
@@ -782,8 +794,6 @@ impl<'tcx> TyVisitor<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
                     re.value,
                     RelationDirection::LhsOntoRhs,
                 );
-
-                self.walk_spanned(ty);
             }
 
             SpannedTyView::Simple(_)
