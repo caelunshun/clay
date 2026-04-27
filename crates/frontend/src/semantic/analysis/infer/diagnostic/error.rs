@@ -136,6 +136,14 @@ pub enum ClauseOriginKind {
         binder_span: Span,
     },
 
+    WfTyAlias {
+        span: Span,
+    },
+
+    WfTyProjection {
+        span: Span,
+    },
+
     /// This obligation is required by a generic parameter's clause list.
     GenericRequirements {
         clause: Span,

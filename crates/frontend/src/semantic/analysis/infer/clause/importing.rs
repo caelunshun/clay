@@ -61,22 +61,21 @@ use crate::{
             ClauseCx, ClauseOrigin, ClauseOriginKind, HrtbUniverse, HrtbUniverseInfo, UnifyCxMode,
         },
         syntax::{
-            AnyGeneric, GenericBinder, GenericSubst, HrtbBinder, HrtbBinderKind, HrtbDebruijn,
-            HrtbDebruijnDef, HrtbDebruijnDefList, InferTyVarSourceInfo, Re, RelationDirection,
-            SpannedAdtInstance, SpannedFnInstance, SpannedFnInstanceView, SpannedHrtbBinder,
-            SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedHrtbDebruijnDefView,
-            SpannedRe, SpannedTraitInstance, SpannedTraitParamView, SpannedTraitSpec, SpannedTy,
-            SpannedTyOrRe, SpannedTyOrReList, SpannedTyView, TraitClause, TraitParam, TraitSpec,
-            Ty, TyCtxt, TyFoldable, TyFolder, TyFolderExt, TyFolderInfallibleExt,
-            TyFolderPreservesSpans, TyKind, TyOrRe, TyOrReKind, TyOrReList, TyProjection,
-            TyVisitable, TyVisitorInfallibleExt, TypeAliasItem, UniversalReVarSourceInfo,
+            AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, GenericBinder, GenericSubst,
+            HrtbBinder, HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef, HrtbDebruijnDefList,
+            InferTyVarSourceInfo, Re, RelationDirection, SpannedAdtInstance, SpannedFnInstance,
+            SpannedHrtbBinder, SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedRe,
+            SpannedTraitInstance, SpannedTraitSpec, SpannedTy, SpannedTyOrReList, SpannedTyView,
+            TraitClause, TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt, TyFoldable, TyFolder,
+            TyFolderExt, TyFolderInfallibleExt, TyFolderPreservesSpans, TyKind, TyOrRe, TyOrReKind,
+            TyOrReList, TyProjection, TyVisitable, TypeAliasItem, UniversalReVarSourceInfo,
             UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
 };
 use hashbrown::hash_map;
-use std::{convert::Infallible, ops::ControlFlow};
+use std::convert::Infallible;
 
 // === Driver === //
 
@@ -309,7 +308,7 @@ impl<'tcx> TyFolder<'tcx> for EnvSubstitutor<'_, 'tcx> {
 // === HRTB Instantiation === //
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn instantiate_hrtb_universal_without_normalization<'a, T: TyFoldable>(
+    pub fn instantiate_hrtb_universal_without_normalization<'a>(
         &'a mut self,
         universe: &'a HrtbUniverse,
         defs: HrtbDebruijnDefList,
@@ -723,14 +722,13 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         &mut self,
         binder: SpannedHrtbBinder<T>,
     ) -> Result<HrtbBinder<T>, Self::Error> {
-        let s = self.session();
         let tcx = self.tcx();
 
         let SpannedHrtbBinderView {
             kind,
             inner:
                 Spanned {
-                    value: _,
+                    value: bound,
                     span_info: inner_span_info,
                 },
         } = binder.view(tcx);
@@ -739,61 +737,130 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             unreachable!()
         };
 
+        // Check definitions and normalize them.
+        let defs = self.fold_spanned(defs);
+
+        // Universally instantiate the body and WF check it.
         let old_universe = self.universe.clone();
-        let new_universe = if defs.is_empty(s) {
-            self.universe.clone()
-        } else {
-            self.universe.clone().nest(HrtbUniverseInfo {
-                origin: ClauseOrigin::root_report(ClauseOriginKind::WfHrtb {
-                    binder_span: kind.own_span(),
-                }),
-            })
-        };
+        let new_universe = self.universe.clone().nest(HrtbUniverseInfo {
+            origin: ClauseOrigin::root_report(ClauseOriginKind::WfHrtb {
+                binder_span: kind.own_span(),
+            }),
+        });
 
         self.universe = new_universe;
         {
-            let bound = Spanned::new_raw(
-                self.ccx
-                    .instantiate_hrtb_universal_without_normalization(&self.universe, binder.value),
-                inner_span_info,
-            );
+            let bound = self
+                .ccx
+                .instantiate_hrtb_universal_without_normalization(&self.universe, defs)
+                .fold(bound);
 
-            self.visit_spanned(bound);
+            let bound = Spanned::new_raw(bound, inner_span_info);
 
-            for def in defs.iter(tcx) {
-                let SpannedHrtbDebruijnDefView {
-                    spawned_from: _,
-                    kind: _,
-                    clauses,
-                } = def.view(tcx);
-
-                self.visit_spanned(clauses);
-            }
+            self.fold_spanned(bound);
         }
         self.universe = old_universe;
 
-        ControlFlow::Continue(())
+        Ok(HrtbBinder {
+            kind: HrtbBinderKind::Imported(defs),
+            // We don't normalize this inner type because normalization doesn't follow HRTB binders.
+            inner: bound,
+        })
     }
 
     fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
-        match ty.view(self.tcx()) {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        match ty.view(tcx) {
             SpannedTyView::Trait(_, _, _) => {
                 let old_clause_applies_to = self.clause_applies_to.replace(ty.value);
-                self.fold_spanned(ty);
+                let normalized = self.fold_spanned(ty);
                 self.clause_applies_to = old_clause_applies_to;
+
+                Ok(normalized)
             }
-            SpannedTyView::Reference(re, _muta, pointee) => {
+            SpannedTyView::Reference(re, muta, pointee) => {
                 let pointee_span = pointee.own_span();
+                let re = self.fold_spanned(re);
                 let pointee = self.fold_spanned(pointee);
 
                 self.ccx.oblige_ty_outlives_re(
                     ClauseOrigin::root_report(ClauseOriginKind::WfForReference {
-                        pointee: pointee.own_span(),
+                        pointee: pointee_span,
                     }),
-                    pointee.value,
-                    re.value,
+                    pointee,
+                    re,
                     RelationDirection::LhsOntoRhs,
                 );
+
+                Ok(tcx.intern(TyKind::Reference(re, muta, pointee)))
+            }
+
+            SpannedTyView::SigProject(TyProjection {
+                target,
+                spec,
+                assoc,
+            }) => {
+                // TODO: Spans
+
+                // WF-check and normalize target type.
+                let target = self.fold(target);
+
+                // WF-check and normalize spec. This has the effect of checking arguments.
+                let old_clause_applies_to = self.clause_applies_to.replace(target);
+                let spec = self.fold(spec);
+                self.clause_applies_to = old_clause_applies_to;
+
+                // Normalize projection type.
+                let resolved = self
+                    .ccx
+                    .normalizer(
+                        &ClauseOrigin::root_report(ClauseOriginKind::WfTyProjection {
+                            span: ty.own_span(),
+                        }),
+                        self.universe.clone(),
+                    )
+                    .normalize_super_normalized_projection(
+                        ty.own_span(),
+                        TyProjection {
+                            target,
+                            spec,
+                            assoc,
+                        },
+                    );
+
+                Ok(resolved)
+            }
+            SpannedTyView::SigAlias(def, args) => {
+                // TODO: Spans
+
+                // WF-check arguments
+                let args = self.fold(args);
+
+                // TODO: Move to env utilities
+                self.check_generic_values_zip(
+                    // Cannot use `Self` in type alias.
+                    tcx.intern(TyKind::SigThis),
+                    def.r(s).generics,
+                    [],
+                    args,
+                    &args.r(s).iter().map(|_| ty.own_span()).collect::<Vec<_>>(),
+                    None,
+                );
+
+                // Normalize alias type.
+                let resolved = self
+                    .ccx
+                    .normalizer(
+                        &ClauseOrigin::root_report(ClauseOriginKind::WfTyAlias {
+                            span: ty.own_span(),
+                        }),
+                        self.universe.clone(),
+                    )
+                    .normalize_super_normalized_alias(ty.own_span(), def, args);
+
+                Ok(resolved)
             }
 
             SpannedTyView::Simple(_)
@@ -801,129 +868,154 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
             | SpannedTyView::FnDef(_)
             | SpannedTyView::Tuple(_)
             | SpannedTyView::UniversalVar(_)
-            | SpannedTyView::HrtbVar(_)
-            | SpannedTyView::Error(_) => {
-                self.walk_spanned(ty);
-            }
-            SpannedTyView::InferVar(_) => {
-                // It is assumed that inference variables are checked for well-formed'ness somewhere
-                // else.
-            }
+            | SpannedTyView::InferVar(_)
+            | SpannedTyView::Error(_) => Ok(self.super_spanned(ty)),
+
             SpannedTyView::SigThis
             | SpannedTyView::SigInfer
             | SpannedTyView::SigGeneric(_)
-            | SpannedTyView::SigProject(_)
-            | SpannedTyView::SigAlias(_, _) => {
+            | SpannedTyView::HrtbVar(_) => {
                 unreachable!()
             }
         }
-
-        ControlFlow::Continue(())
     }
 
-    fn visit_trait_spec(&mut self, spec: SpannedTraitSpec) -> ControlFlow<Self::Break> {
+    fn fold_trait_spec(&mut self, spec: SpannedTraitSpec) -> Result<TraitSpec, Self::Error> {
         let s = self.session();
         let tcx = self.tcx();
 
-        let params = spec
+        let param_spans = spec
             .view(tcx)
             .params
             .iter(tcx)
-            .map(|param| match param.view(tcx) {
-                SpannedTraitParamView::Equals(v) => v,
-                SpannedTraitParamView::Unspecified(_) => {
-                    SpannedTyOrRe::new_unspanned(TyOrRe::Ty(self.ccx.fresh_ty_infer(
-                        self.universe.clone(),
-                        InferTyVarSourceInfo::TraitAssocPlaceholderHelper,
-                    )))
-                }
+            .map(|v| v.own_span())
+            .collect::<Vec<_>>();
+
+        let spec = self.super_spanned(spec);
+
+        let params = spec
+            .params
+            .r(s)
+            .iter()
+            .map(|&param| match param {
+                TraitParam::Equals(v) => v,
+                TraitParam::Unspecified(_) => TyOrRe::Ty(self.ccx.fresh_ty_infer(
+                    self.universe.clone(),
+                    InferTyVarSourceInfo::TraitAssocPlaceholderHelper,
+                )),
             })
             .collect::<Vec<_>>();
 
-        let params = SpannedTyOrReList::alloc_list(spec.own_span(), &params, tcx);
+        let params = tcx.intern_list(&params);
 
         // Just like in `rustc`, we never produce obligations on the associated types since, if an
         // `impl` is found, we just rely on the fact that `impl` WF checks already validated the
         // type for its clauses and ensure that our `impl` matches what the trait spec said it would
         // contain.
-        self.check_generic_values(
+        self.check_generic_values_zip(
             self.clause_applies_to.unwrap(),
-            *spec.value.def.r(s).generics,
+            *spec.def.r(s).generics,
             [],
             params,
-            Some(*spec.value.def.r(s).regular_generic_count),
+            &param_spans,
+            Some(*spec.def.r(s).regular_generic_count),
         );
 
-        self.walk_spanned(spec);
-
-        ControlFlow::Continue(())
+        Ok(spec)
     }
 
-    fn visit_trait_instance(&mut self, instance: SpannedTraitInstance) -> ControlFlow<Self::Break> {
+    fn fold_trait_instance(
+        &mut self,
+        instance: SpannedTraitInstance,
+    ) -> Result<TraitInstance, Self::Error> {
         let s = self.session();
         let tcx = self.tcx();
 
-        self.check_generic_values(
+        let param_spans = instance
+            .view(tcx)
+            .params
+            .iter(tcx)
+            .map(|v| v.own_span())
+            .collect::<Vec<_>>();
+
+        let instance = self.super_spanned(instance);
+
+        self.check_generic_values_zip(
             self.clause_applies_to.unwrap(),
-            *instance.value.def.r(s).generics,
+            *instance.def.r(s).generics,
             [],
-            instance.view(tcx).params,
+            instance.params,
+            &param_spans,
             None,
         );
-        self.walk_spanned(instance);
 
-        ControlFlow::Continue(())
+        Ok(instance)
     }
 
-    fn visit_adt_instance(&mut self, instance: SpannedAdtInstance) -> ControlFlow<Self::Break> {
+    fn fold_adt_instance(
+        &mut self,
+        instance: SpannedAdtInstance,
+    ) -> Result<AdtInstance, Self::Error> {
         let s = self.session();
         let tcx = self.tcx();
+
+        let param_spans = instance
+            .view(tcx)
+            .params
+            .iter(tcx)
+            .map(|v| v.own_span())
+            .collect::<Vec<_>>();
+
+        let instance = self.super_spanned(instance);
 
         // Check generics
-        self.check_generic_values(
-            tcx.intern(TyKind::Adt(instance.value)),
-            instance.value.def.r(s).generics,
+        self.check_generic_values_zip(
+            tcx.intern(TyKind::Adt(instance)),
+            instance.def.r(s).generics,
             [],
-            instance.view(tcx).params,
+            instance.params,
+            &param_spans,
             None,
         );
 
-        // Ensure parameter types are also well-formed.
-        self.walk_spanned(instance);
-
-        ControlFlow::Continue(())
+        Ok(instance)
     }
 
-    fn visit_fn_instance(&mut self, instance: SpannedFnInstance) -> ControlFlow<Self::Break> {
+    fn fold_fn_instance(&mut self, instance: SpannedFnInstance) -> Result<FnInstance, Self::Error> {
         let s = self.session();
         let tcx = self.tcx();
 
-        let SpannedFnInstanceView { owner, early_args } = instance.view(tcx);
+        let own_span = instance.own_span();
+        let early_arg_spans = instance
+            .view(tcx)
+            .early_args
+            .map(|v| v.iter(tcx).map(|v| v.own_span()).collect::<Vec<_>>())
+            .unwrap_or_default();
+
+        // WF-check and normalize the interior types.
+        let instance = self.super_(instance.value);
+        let FnInstanceInner { owner, early_args } = *instance.r(s);
 
         // Construct an environment, validating the `owner` in the process.
         let env = self.ccx.instantiate_fn_owner_env_as_infer(
-            &ClauseOrigin::root_report(ClauseOriginKind::WfFnDef {
-                fn_ty: instance.own_span(),
-            }),
+            &ClauseOrigin::root_report(ClauseOriginKind::WfFnDef { fn_ty: own_span }),
             &self.universe,
-            owner.value,
+            owner,
         );
 
         // Validate the `early_args`.
         if let Some(early_args) = early_args {
-            self.check_generic_values(
+            self.check_generic_values_zip(
                 env.self_ty,
-                owner.value.def(s).r(s).generics,
+                owner.def(s).r(s).generics,
                 env.sig_generic_substs.iter().copied(),
                 early_args,
+                &early_arg_spans,
                 None,
             );
         }
 
-        // Ensure parameter types are also well-formed.
-        self.walk_spanned(instance);
-
-        ControlFlow::Continue(())
+        Ok(instance)
     }
 }
 
@@ -936,8 +1028,31 @@ impl ClauseTyWfVisitor<'_, '_> {
         all_params: SpannedTyOrReList,
         validate_count: Option<u32>,
     ) {
-        let s = self.session();
         let tcx = self.tcx();
+
+        self.check_generic_values_zip(
+            clause_applies_to,
+            binder,
+            extra_def_substs,
+            all_params.value,
+            &all_params
+                .iter(tcx)
+                .map(|v| v.own_span())
+                .collect::<Vec<_>>(),
+            validate_count,
+        );
+    }
+
+    fn check_generic_values_zip(
+        &mut self,
+        clause_applies_to: Ty,
+        binder: Obj<GenericBinder>,
+        extra_def_substs: impl IntoIterator<Item = GenericSubst>,
+        all_params: TyOrReList,
+        param_spans: &[Span],
+        validate_count: Option<u32>,
+    ) {
+        let s = self.session();
 
         let defs = &binder.r(s).defs[..];
         let defs = match validate_count {
@@ -945,7 +1060,7 @@ impl ClauseTyWfVisitor<'_, '_> {
             None => defs,
         };
 
-        let validated_params = all_params.value.r(s);
+        let validated_params = all_params.r(s);
         let validated_params = match validate_count {
             Some(limit) => &validated_params[..limit as usize],
             None => validated_params,
@@ -957,7 +1072,7 @@ impl ClauseTyWfVisitor<'_, '_> {
                 clause_applies_to,
                 &[GenericSubst {
                     binder,
-                    substs: all_params.value,
+                    substs: all_params,
                 }]
                 .into_iter()
                 .chain(extra_def_substs)
@@ -967,7 +1082,7 @@ impl ClauseTyWfVisitor<'_, '_> {
             validated_params,
             |_, param_idx, clause_span| {
                 ClauseOrigin::root_report(ClauseOriginKind::WfForGenericParam {
-                    use_span: all_params.nth(param_idx, tcx).own_span(),
+                    use_span: param_spans[param_idx],
                     clause_span,
                 })
             },
