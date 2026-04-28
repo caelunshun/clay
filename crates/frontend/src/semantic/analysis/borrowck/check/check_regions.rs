@@ -11,8 +11,8 @@ use crate::{
         syntax::{
             FnDef, IntKind, MirAssignRvalue, MirBody, MirLocalIdx, MirOperand, MirPlace,
             MirPlaceElem, MirStmt, MirStmtKind, MirTerminator, Re, RelationDirection, RelationMode,
-            SimpleTyKind, TraitParam, TraitSpec, Ty, TyCtxt, TyFolderInfallibleExt as _, TyKind,
-            TyOrRe, TyVisitorInfallibleExt as _, UniversalReVarSourceInfo,
+            SimpleTyKind, TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe,
+            UniversalReVarSourceInfo,
         },
     },
 };
@@ -26,11 +26,7 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
 
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
 
-        let env = ccx.import_fn_def_env_as_universal(
-            &ClauseOrigin::never_printed(),
-            HrtbUniverse::ROOT_REF,
-            def,
-        );
+        let env = ccx.import_fn_def_env_as_universal(HrtbUniverse::ROOT_REF, def);
 
         // Give each local a universal region representing its lifetime within the function body.
         // We permit a given local to outlive another if `live(rhs)` implies `occupied(lhs)`—in
@@ -55,15 +51,7 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
         // Import all types within the body and ensure that they're well-formed. Additionally, local
         // types must outlive the universal region associated with that local.
         for (local_idx, local) in body.locals.iter_mut_enumerated() {
-            local.ty = ccx
-                .importer(
-                    &ClauseOrigin::empty_report(),
-                    HrtbUniverse::ROOT,
-                    env.as_ref(),
-                )
-                .fold(local.ty);
-
-            ccx.wf_visitor(HrtbUniverse::ROOT).visit(local.ty);
+            local.ty = ccx.import_report_elsewhere(&HrtbUniverse::ROOT, env.as_ref(), local.ty);
 
             ccx.oblige_ty_outlives_re(
                 ClauseOrigin::empty_report(),

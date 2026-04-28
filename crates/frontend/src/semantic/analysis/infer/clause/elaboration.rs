@@ -169,20 +169,18 @@ impl<'tcx> ClauseCx<'tcx> {
                             unreachable!()
                         };
 
-                        let implicit_clauses = self
-                            .importer(
-                                &ClauseOrigin::empty_report(),
-                                // Associated types vary in the same way as their parent generic.
-                                self.lookup_universal_ty_hrtb_universe(var).clone(),
-                                ClauseImportEnvRef {
-                                    self_ty: tcx.intern(TyKind::UniversalVar(var)),
-                                    sig_generic_substs: &[GenericSubst {
-                                        binder: *spec.def.r(s).generics,
-                                        substs: new_param_equals,
-                                    }],
-                                },
-                            )
-                            .fold(base.r(s).clauses.value);
+                        let implicit_clauses = self.import_report_elsewhere(
+                            // Associated types vary in the same way as their parent generic.
+                            &self.lookup_universal_ty_hrtb_universe(var).clone(),
+                            ClauseImportEnvRef {
+                                self_ty: tcx.intern(TyKind::UniversalVar(var)),
+                                sig_generic_substs: &[GenericSubst {
+                                    binder: *spec.def.r(s).generics,
+                                    substs: new_param_equals,
+                                }],
+                            },
+                            base.r(s).clauses.value,
+                        );
 
                         let all_clauses = explicit_clauses
                             .r(s)
@@ -215,20 +213,18 @@ impl<'tcx> ClauseCx<'tcx> {
                     }));
 
                     // Explore and push on the elaborated super-trait constraints.
-                    let inherits = self
-                        .importer(
-                            &ClauseOrigin::empty_report(),
-                            // Associated types vary in the same way as their parent generic.
-                            self.lookup_universal_ty_hrtb_universe(var).clone(),
-                            ClauseImportEnvRef {
-                                self_ty: tcx.intern(TyKind::UniversalVar(var)),
-                                sig_generic_substs: &[GenericSubst {
-                                    binder: *spec.def.r(s).generics,
-                                    substs: new_param_equals,
-                                }],
-                            },
-                        )
-                        .fold_spanned(*spec.def.r(s).inherits);
+                    let inherits = self.import_report_elsewhere(
+                        // Associated types vary in the same way as their parent generic.
+                        &self.lookup_universal_ty_hrtb_universe(var).clone(),
+                        ClauseImportEnvRef {
+                            self_ty: tcx.intern(TyKind::UniversalVar(var)),
+                            sig_generic_substs: &[GenericSubst {
+                                binder: *spec.def.r(s).generics,
+                                substs: new_param_equals,
+                            }],
+                        },
+                        spec.def.r(s).inherits.value,
+                    );
 
                     elaborated.extend(inherits.r(s).iter().copied());
                 }

@@ -87,7 +87,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxExporter<'_, 'tcx> {
             let error_ty = tcx.intern(TyKind::Error(error));
 
             _ = self.ccx.ucx_mut().unify_ty_and_ty(
-                &ClauseOrigin::never_printed(),
+                &ClauseOrigin::delay_bug(),
                 var_ty,
                 error_ty,
                 RelationMode::Equate,

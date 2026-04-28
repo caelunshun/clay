@@ -9,15 +9,15 @@ use crate::{
     semantic::{
         analysis::{
             BodyCtxt, ClauseError, ClauseOrigin, ClauseOriginKind, EquateOrSet, HrtbUniverse,
-            OverloadResolution, peel_ref_for_prim_op, typeck::body::lookup::LookupMethodResult,
+            OverloadResolution, peel_ref_for_prim_op,
+            typeck::body::lookup::{LookupMethodResult, SpannedImportedAssocArgs},
         },
-        lower::generics::normalize_positional_generic_arity,
+        lower::generics::normalize_positional_generic_arity_zip,
         syntax::{
             AdtInstance, Divergence, FnInstanceInner, HirBlock, HirExpr, HirExprKind,
             HirLabelTargetKind, HirLabelledBlock, HirStmt, InferTyVarSourceInfo, Re, RelationMode,
             SimpleTyKind, SimpleTySet, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTyView,
-            TraitParam, TraitSpec, Ty, TyAndDivergence, TyFolderInfallibleExt as _, TyKind, TyOrRe,
-            TyVisitorInfallibleExt as _,
+            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -52,25 +52,17 @@ impl BodyCtxt<'_, '_> {
                     let ascription = if let Some(ascription) = stmt.r(s).ascription {
                         let import_env = self.import_env;
 
-                        let ascription = self
-                            .ccx_mut()
-                            .importer(
-                                &ClauseOrigin::empty_report(),
-                                HrtbUniverse::ROOT,
-                                import_env,
-                            )
-                            .fold_preserved(ascription);
-
-                        self.ccx_mut()
-                            .wf_visitor(HrtbUniverse::ROOT)
-                            .visit_spanned(ascription);
+                        let ascription = self.ccx_mut().import_report_here(
+                            &HrtbUniverse::ROOT,
+                            import_env,
+                            ascription,
+                        );
 
                         if let Some(init) = stmt.r(s).init {
-                            self.check_expr_demand(init, ascription.value)
-                                .and_do(divergence);
+                            self.check_expr_demand(init, ascription).and_do(divergence);
                         }
 
-                        ascription.value
+                        ascription
                     } else if let Some(init) = stmt.r(s).init {
                         self.check_expr(init, None).and_do(divergence)
                     } else {
@@ -197,17 +189,13 @@ impl BodyCtxt<'_, '_> {
                 let receiver = self.ccx_mut().peel_ty_infer_var_after_poll(receiver);
 
                 let env = self.import_env;
+                let generic_segment_span = generics.map(|v| v.own_span());
+                let generic_param_spans =
+                    generics.map(|v| v.iter(tcx).map(|v| v.own_span()).collect::<Vec<_>>());
+
                 let generics = generics.map(|generics| {
-                    let out = self
-                        .ccx_mut()
-                        .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
-                        .fold_preserved(generics);
-
                     self.ccx_mut()
-                        .wf_visitor(HrtbUniverse::ROOT)
-                        .visit_spanned(out);
-
-                    out
+                        .import_report_here(&HrtbUniverse::ROOT, env, generics)
                 });
 
                 match *receiver.r(s) {
@@ -248,14 +236,14 @@ impl BodyCtxt<'_, '_> {
                     .instantiate_fn_def_as_blank_owner_infer(resolution, self_ty);
 
                 let generics = generics.map(|generics| {
-                    normalize_positional_generic_arity(
+                    normalize_positional_generic_arity_zip(
                         tcx,
                         owner.def(s).r(s).generics,
                         None,
-                        generics.own_span(),
-                        &generics.iter(tcx).collect::<Vec<_>>(),
+                        generic_segment_span.unwrap(),
+                        generics.r(s),
+                        generic_param_spans.as_ref().unwrap(),
                     )
-                    .value
                 });
 
                 let instance = tcx.intern(FnInstanceInner {
@@ -272,7 +260,6 @@ impl BodyCtxt<'_, '_> {
                 );
 
                 let (expected_args, expected_output) = self.ccx_mut().import_fn_instance_sig(
-                    &ClauseOrigin::empty_report(),
                     HrtbUniverse::ROOT_REF,
                     instance_env.as_ref(),
                     resolution,
@@ -473,11 +460,6 @@ impl BodyCtxt<'_, '_> {
             },
             HirExprKind::FnItemLit(def, early_args) => {
                 let env = self.import_env;
-                let early_args = early_args.map(|early_args| {
-                    self.ccx_mut()
-                        .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
-                        .fold_preserved(early_args)
-                });
 
                 let fn_ty = SpannedTyView::FnDef(
                     SpannedFnInstanceView {
@@ -489,10 +471,7 @@ impl BodyCtxt<'_, '_> {
                 .encode(expr.r(s).span, tcx);
 
                 self.ccx_mut()
-                    .wf_visitor(HrtbUniverse::ROOT)
-                    .visit_spanned(fn_ty);
-
-                fn_ty.value
+                    .import_report_here(HrtbUniverse::ROOT_REF, env, fn_ty)
             }
             HirExprKind::TypeRelative {
                 self_ty,
@@ -502,44 +481,39 @@ impl BodyCtxt<'_, '_> {
             } => 'res: {
                 let env = self.import_env;
 
-                let self_ty = self
-                    .ccx_mut()
-                    .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
-                    .fold_preserved(self_ty);
-
-                self.ccx_mut()
-                    .wf_visitor(HrtbUniverse::ROOT)
-                    .visit_spanned(self_ty);
+                let self_ty =
+                    self.ccx_mut()
+                        .import_report_here(HrtbUniverse::ROOT_REF, env, self_ty);
 
                 let as_trait = as_trait.map(|as_trait| {
-                    let out = self
-                        .ccx_mut()
-                        .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
-                        .fold_preserved(as_trait);
-
                     self.ccx_mut()
-                        .wf_visitor(HrtbUniverse::ROOT)
-                        .with_clause_applies_to(self_ty.value)
-                        .visit_spanned(out);
-
-                    out.value
+                        .importer()
+                        .with_clause_applies_to(self_ty)
+                        .import_report_here(HrtbUniverse::ROOT_REF, env, as_trait)
                 });
 
+                let mut arg_spans = None;
                 let assoc_args = assoc_args.map(|assoc_args| {
-                    let out = self
-                        .ccx_mut()
-                        .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
-                        .fold_preserved(assoc_args);
+                    let arg_spans = arg_spans.insert(
+                        assoc_args
+                            .iter(tcx)
+                            .map(|v| v.own_span())
+                            .collect::<Vec<_>>(),
+                    );
 
-                    self.ccx_mut()
-                        .wf_visitor(HrtbUniverse::ROOT)
-                        .visit_spanned(out);
-
-                    out
+                    SpannedImportedAssocArgs {
+                        segment_span: assoc_args.own_span(),
+                        arg_spans: arg_spans,
+                        args: self.ccx_mut().import_report_here(
+                            HrtbUniverse::ROOT_REF,
+                            env,
+                            assoc_args,
+                        ),
+                    }
                 });
 
                 let Some(resolution) =
-                    self.lookup_type_relative(self_ty.value, as_trait, assoc_name, assoc_args)
+                    self.lookup_type_relative(self_ty, as_trait, assoc_name, assoc_args)
                 else {
                     break 'res tcx.intern(TyKind::Error(
                         Diag::span_err(assoc_name.span, "not found").emit(),
@@ -552,15 +526,9 @@ impl BodyCtxt<'_, '_> {
                 let env = self.import_env;
                 let as_ty = self
                     .ccx_mut()
-                    .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
-                    .fold_preserved(as_ty);
+                    .import_report_here(HrtbUniverse::ROOT_REF, env, as_ty);
 
-                self.ccx_mut()
-                    .wf_visitor(HrtbUniverse::ROOT)
-                    .visit_spanned(as_ty);
-
-                self.check_expr_demand(expr, as_ty.value)
-                    .and_do(&mut divergence)
+                self.check_expr_demand(expr, as_ty).and_do(&mut divergence)
             }
             HirExprKind::If {
                 cond,

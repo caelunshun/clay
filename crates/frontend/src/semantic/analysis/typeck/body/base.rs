@@ -2,13 +2,11 @@ use crate::{
     base::{ErrorGuaranteed, Session, arena::Obj},
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, ClauseOrigin, CrateTypeckVisitor, HrtbUniverse, UnifyCx,
-            UnifyCxMode,
+            ClauseCx, ClauseImportEnvRef, CrateTypeckVisitor, HrtbUniverse, UnifyCx, UnifyCxMode,
         },
         syntax::{
             Crate, FnDef, HirExpr, HirLabelledBlock, HirLocal, HirPat, InferTyVar,
-            InferTyVarSourceInfo, Item, ThirLocal, Ty, TyCtxt, TyFolderInfallibleExt,
-            TyVisitorInfallibleExt,
+            InferTyVarSourceInfo, Item, ThirLocal, Ty, TyCtxt,
         },
     },
     utils::hash::FxHashMap,
@@ -23,22 +21,14 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Setup a `ClauseCx` for signature validation.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionBlind);
-        let env_sig = ccx.import_fn_def_env_as_universal(
-            &ClauseOrigin::empty_report(),
-            HrtbUniverse::ROOT_REF,
-            def,
-        );
+        let env_sig = ccx.import_fn_def_env_as_universal(HrtbUniverse::ROOT_REF, def);
 
         // WF-check the signature.
         self.visit_generic_binder(&mut ccx, env_sig.as_ref(), def.r(s).generics);
 
         // Check the body
         if let Some(body) = *def.r(s).hir_body {
-            let env_body = ccx.import_fn_def_env_as_universal(
-                &ClauseOrigin::empty_report(),
-                HrtbUniverse::ROOT_REF,
-                def,
-            );
+            let env_body = ccx.import_fn_def_env_as_universal(HrtbUniverse::ROOT_REF, def);
 
             let mut bcx = BodyCtxt::new(&mut ccx, def, env_body.as_ref());
 
@@ -46,40 +36,19 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
                 let env = bcx.import_env;
                 let ascription = bcx
                     .ccx_mut()
-                    .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
-                    .fold_preserved(arg.ty);
+                    .import_report_here(&HrtbUniverse::ROOT, env, arg.ty);
 
-                bcx.ccx_mut()
-                    .wf_visitor(HrtbUniverse::ROOT)
-                    .visit_spanned(ascription);
-
-                bcx.check_pat_demand(arg.pat, ascription.value, None);
+                bcx.check_pat_demand(arg.pat, ascription, None);
             }
 
             bcx.check_expr_demand(body, bcx.return_ty).ignore();
             bcx.confirm(body);
         } else {
             for arg in def.r(s).args.r(s) {
-                let arg = ccx
-                    .importer(
-                        &ClauseOrigin::empty_report(),
-                        HrtbUniverse::ROOT,
-                        env_sig.as_ref(),
-                    )
-                    .fold_preserved(arg.ty);
-
-                ccx.wf_visitor(HrtbUniverse::ROOT).visit_spanned(arg);
+                ccx.import_report_here(&HrtbUniverse::ROOT, env_sig.as_ref(), arg.ty);
             }
 
-            let ret_ty = ccx
-                .importer(
-                    &ClauseOrigin::empty_report(),
-                    HrtbUniverse::ROOT,
-                    env_sig.as_ref(),
-                )
-                .fold_preserved(*def.r(s).ret_ty);
-
-            ccx.wf_visitor(HrtbUniverse::ROOT).visit_spanned(ret_ty);
+            ccx.import_report_here(&HrtbUniverse::ROOT, env_sig.as_ref(), *def.r(s).ret_ty);
         }
 
         ccx.verify();
@@ -117,13 +86,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
     ) -> Self {
         let s = ccx.session();
 
-        let return_ty = ccx
-            .importer(
-                &ClauseOrigin::empty_report(),
-                HrtbUniverse::ROOT,
-                import_env,
-            )
-            .fold_spanned(*def.r(s).ret_ty);
+        let return_ty = ccx.import_report_here(&HrtbUniverse::ROOT, import_env, *def.r(s).ret_ty);
 
         Self {
             ccx,

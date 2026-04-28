@@ -79,7 +79,134 @@ use std::convert::Infallible;
 
 // === Driver === //
 
-// TODO
+impl<'tcx> ClauseCx<'tcx> {
+    pub fn importer(&mut self) -> ClauseImporter<'_, 'tcx> {
+        ClauseImporter {
+            ccx: self,
+            clause_applies_to: None,
+        }
+    }
+
+    pub fn import_report_here<T>(
+        &mut self,
+        universe: &HrtbUniverse,
+        env: ClauseImportEnvRef<'_>,
+        value: Spanned<T>,
+    ) -> T
+    where
+        T: TyFoldable + TyVisitable,
+    {
+        self.importer().import_report_here(universe, env, value)
+    }
+
+    pub fn import_report_elsewhere<T>(
+        &mut self,
+        universe: &HrtbUniverse,
+        env: ClauseImportEnvRef<'_>,
+        value: T,
+    ) -> T
+    where
+        T: TyFoldable + TyVisitable,
+    {
+        self.importer()
+            .import_report_elsewhere(universe, env, value)
+    }
+
+    pub fn instantiate_hrtb_universal<T>(
+        &mut self,
+        universe: &HrtbUniverse,
+        value: HrtbBinder<T>,
+    ) -> T
+    where
+        T: TyFoldable + TyVisitable,
+    {
+        let HrtbBinder {
+            kind: HrtbBinderKind::Imported(defs),
+            inner: value,
+        } = value
+        else {
+            unreachable!()
+        };
+
+        let value = self
+            .instantiate_hrtb_universal_without_normalization(universe, defs)
+            .fold(value);
+
+        self.normalizer(universe.clone()).fold(value)
+    }
+
+    pub fn instantiate_hrtb_infer<T>(&mut self, universe: &HrtbUniverse, value: HrtbBinder<T>) -> T
+    where
+        T: TyFoldable + TyVisitable,
+    {
+        let HrtbBinder {
+            kind: HrtbBinderKind::Imported(defs),
+            inner: value,
+        } = value
+        else {
+            unreachable!()
+        };
+
+        let value = self
+            .instantiate_hrtb_infer_without_normalization(universe, defs)
+            .fold(value);
+
+        self.normalizer(universe.clone()).fold(value)
+    }
+}
+
+pub struct ClauseImporter<'a, 'tcx> {
+    ccx: &'a mut ClauseCx<'tcx>,
+    clause_applies_to: Option<Ty>,
+}
+
+impl ClauseImporter<'_, '_> {
+    pub fn with_clause_applies_to_opt(mut self, ty: Option<Ty>) -> Self {
+        self.clause_applies_to = ty;
+        self
+    }
+
+    pub fn with_clause_applies_to(self, ty: Ty) -> Self {
+        self.with_clause_applies_to_opt(Some(ty))
+    }
+
+    pub fn import_report_here<T>(
+        &mut self,
+        universe: &HrtbUniverse,
+        env: ClauseImportEnvRef<'_>,
+        value: Spanned<T>,
+    ) -> T
+    where
+        T: TyFoldable + TyVisitable,
+    {
+        let value = self
+            .ccx
+            .env_substitutor(universe.clone(), env)
+            .fold_preserved(value);
+
+        self.ccx
+            .wf_and_normalize_folder(universe.clone())
+            .with_clause_applies_to_opt(self.clause_applies_to)
+            .fold_spanned(value)
+    }
+
+    pub fn import_report_elsewhere<T>(
+        &mut self,
+        universe: &HrtbUniverse,
+        env: ClauseImportEnvRef<'_>,
+        value: T,
+    ) -> T
+    where
+        T: TyFoldable + TyVisitable,
+    {
+        let value = self.ccx.env_substitutor(universe.clone(), env).fold(value);
+
+        self.ccx
+            .wf_and_normalize_folder(universe.clone())
+            .with_clause_applies_to_opt(self.clause_applies_to)
+            .fold(value)
+    }
+}
 
 // === Environment substitution === //
 
@@ -130,13 +257,11 @@ impl<'a> ClauseImportEnvRef<'a> {
 impl<'tcx> ClauseCx<'tcx> {
     pub fn env_substitutor<'a>(
         &'a mut self,
-        origin: &'a ClauseOrigin,
         universe: HrtbUniverse,
         env: ClauseImportEnvRef<'a>,
     ) -> EnvSubstitutor<'a, 'tcx> {
         EnvSubstitutor {
             ccx: self,
-            origin,
             universe,
             env: env.to_owned(),
             hrtb_top: DebruijnTop::default(),
@@ -147,7 +272,6 @@ impl<'tcx> ClauseCx<'tcx> {
 
 pub struct EnvSubstitutor<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
-    origin: &'a ClauseOrigin,
     universe: HrtbUniverse,
     env: ClauseImportEnv,
     hrtb_top: DebruijnTop,
@@ -262,7 +386,6 @@ impl<'tcx> TyFolder<'tcx> for EnvSubstitutor<'_, 'tcx> {
             SpannedTyView::SigInfer => self.ccx.fresh_ty_infer(
                 self.universe.clone(),
                 InferTyVarSourceInfo::Imported {
-                    origin: self.origin.clone(),
                     span: ty.own_span(),
                 },
             ),
@@ -369,7 +492,6 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn instantiate_hrtb_infer_without_normalization<'a>(
         &'a mut self,
-        origin: &'a ClauseOrigin,
         universe: &'a HrtbUniverse,
         defs: HrtbDebruijnDefList,
     ) -> HrtbSubstitutionFolder<'a, 'tcx> {
@@ -399,21 +521,13 @@ impl<'tcx> ClauseCx<'tcx> {
                 TyOrRe::Re(var) => {
                     let clauses = HrtbSubstitutionFolder::new(self, vars, s).fold(def.clauses);
 
-                    self.oblige_re_meets_clauses(
-                        &origin.clone().child(ClauseOriginKind::HrtbSelection {
-                            def: def.spawned_from.span(s),
-                        }),
-                        var,
-                        clauses,
-                    );
+                    self.oblige_re_meets_clauses(&ClauseOrigin::delay_bug(), var, clauses);
                 }
                 TyOrRe::Ty(var) => {
                     let clauses = HrtbSubstitutionFolder::new(self, vars, s).fold(def.clauses);
 
                     self.oblige_ty_meets_clauses(
-                        &origin.clone().child(ClauseOriginKind::HrtbSelection {
-                            def: def.spawned_from.span(s),
-                        }),
+                        &ClauseOrigin::delay_bug(),
                         universe,
                         var,
                         clauses,
@@ -509,14 +623,9 @@ impl<'tcx> TyFolder<'tcx> for HrtbSubstitutionFolder<'_, 'tcx> {
 // === Normalization === //
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn normalizer<'a>(
-        &'a mut self,
-        origin: &'a ClauseOrigin,
-        universe: HrtbUniverse,
-    ) -> ClauseNormalizer<'a, 'tcx> {
+    pub fn normalizer<'a>(&'a mut self, universe: HrtbUniverse) -> ClauseNormalizer<'a, 'tcx> {
         ClauseNormalizer {
             ccx: self,
-            origin,
             universe,
             reentrant_aliases: FxHashMap::default(),
         }
@@ -525,7 +634,6 @@ impl<'tcx> ClauseCx<'tcx> {
 
 pub struct ClauseNormalizer<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
-    origin: &'a ClauseOrigin,
     universe: HrtbUniverse,
     reentrant_aliases: FxHashMap<Obj<TypeAliasItem>, ReentrantAliasState>,
 }
@@ -598,10 +706,7 @@ impl ClauseNormalizer<'_, '_> {
 
         let assoc_infer_ty = self.ccx.fresh_ty_infer(
             self.universe.clone(),
-            InferTyVarSourceInfo::ProjectionResult {
-                origin: self.origin.clone(),
-                span: own_span,
-            },
+            InferTyVarSourceInfo::ProjectionResult { span: own_span },
         );
         let spec = {
             let mut args = spec.params.r(s).to_vec();
@@ -614,9 +719,7 @@ impl ClauseNormalizer<'_, '_> {
         };
 
         self.ccx.oblige_ty_meets_trait_instantiated(
-            self.origin
-                .clone()
-                .child(ClauseOriginKind::InstantiatedProjection { span: own_span }),
+            ClauseOrigin::never_printed(),
             self.universe.clone(),
             target,
             spec,
@@ -645,7 +748,7 @@ impl ClauseNormalizer<'_, '_> {
 
         let body = self
             .ccx
-            .env_substitutor(self.origin, self.universe.clone(), env.as_ref())
+            .env_substitutor(self.universe.clone(), env.as_ref())
             .fold_preserved(*def.r(s).body);
 
         // Normalize the target, reporting errors on guaranteed reentrancy (that is,
@@ -689,8 +792,11 @@ impl ClauseNormalizer<'_, '_> {
 // === WF-Checking === //
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn wf_visitor(&mut self, universe: HrtbUniverse) -> ClauseTyWfVisitor<'_, 'tcx> {
-        ClauseTyWfVisitor {
+    pub fn wf_and_normalize_folder(
+        &mut self,
+        universe: HrtbUniverse,
+    ) -> ClauseTyWfFolder<'_, 'tcx> {
+        ClauseTyWfFolder {
             ccx: self,
             universe,
             clause_applies_to: None,
@@ -698,20 +804,20 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 }
 
-pub struct ClauseTyWfVisitor<'a, 'tcx> {
+pub struct ClauseTyWfFolder<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
     universe: HrtbUniverse,
     clause_applies_to: Option<Ty>,
 }
 
-impl ClauseTyWfVisitor<'_, '_> {
-    pub fn with_clause_applies_to(mut self, ty: Ty) -> Self {
-        self.clause_applies_to = Some(ty);
+impl ClauseTyWfFolder<'_, '_> {
+    pub fn with_clause_applies_to_opt(mut self, ty: Option<Ty>) -> Self {
+        self.clause_applies_to = ty;
         self
     }
 }
 
-impl<'tcx> TyFolder<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
+impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
     type Error = Infallible;
 
     fn tcx(&self) -> &'tcx TyCtxt {
@@ -775,7 +881,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
         match ty.view(tcx) {
             SpannedTyView::Trait(_, _, _) => {
                 let old_clause_applies_to = self.clause_applies_to.replace(ty.value);
-                let normalized = self.fold_spanned(ty);
+                let normalized = self.super_spanned(ty);
                 self.clause_applies_to = old_clause_applies_to;
 
                 Ok(normalized)
@@ -815,12 +921,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
                 // Normalize projection type.
                 let resolved = self
                     .ccx
-                    .normalizer(
-                        &ClauseOrigin::root_report(ClauseOriginKind::WfTyProjection {
-                            span: ty.own_span(),
-                        }),
-                        self.universe.clone(),
-                    )
+                    .normalizer(self.universe.clone())
                     .normalize_super_normalized_projection(
                         ty.own_span(),
                         TyProjection {
@@ -852,12 +953,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
                 // Normalize alias type.
                 let resolved = self
                     .ccx
-                    .normalizer(
-                        &ClauseOrigin::root_report(ClauseOriginKind::WfTyAlias {
-                            span: ty.own_span(),
-                        }),
-                        self.universe.clone(),
-                    )
+                    .normalizer(self.universe.clone())
                     .normalize_super_normalized_alias(ty.own_span(), def, args);
 
                 Ok(resolved)
@@ -1019,7 +1115,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfVisitor<'_, 'tcx> {
     }
 }
 
-impl ClauseTyWfVisitor<'_, '_> {
+impl ClauseTyWfFolder<'_, '_> {
     fn check_generic_values(
         &mut self,
         clause_applies_to: Ty,

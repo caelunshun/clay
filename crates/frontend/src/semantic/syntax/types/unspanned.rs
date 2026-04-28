@@ -5,12 +5,9 @@ use crate::{
         arena::{HasInterner, Intern, Obj},
         syntax::{Span, Symbol},
     },
-    semantic::{
-        analysis::ClauseOrigin,
-        syntax::{
-            AdtItem, AnyGeneric, FnDef, FnItem, GenericBinder, ImplItem, LocalNameIdent,
-            MirLocalIdx, RegionGeneric, TraitItem, TyCtxt, TypeAliasItem, TypeGeneric,
-        },
+    semantic::syntax::{
+        AdtItem, AnyGeneric, FnDef, FnItem, GenericBinder, ImplItem, LocalNameIdent, MirLocalIdx,
+        RegionGeneric, TraitItem, TyCtxt, TypeAliasItem, TypeGeneric,
     },
     symbol,
 };
@@ -477,8 +474,8 @@ pub enum InferTyVarSourceInfo {
     UniversalElabHelper,
     TraitAssocPlaceholderHelper,
     HrtbLhsInstantiation { span: Span },
-    ProjectionResult { origin: ClauseOrigin, span: Span },
-    Imported { origin: ClauseOrigin, span: Span },
+    ProjectionResult { span: Span },
+    Imported { span: Span },
     Local { name: LocalNameIdent },
     FunctionArgs { span: Span },
     FunctionRetVal { span: Span },

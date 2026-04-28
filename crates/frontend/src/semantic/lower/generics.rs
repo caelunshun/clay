@@ -1,7 +1,7 @@
 use crate::{
     base::{
         Diag, ErrorGuaranteed, LeafDiag, Level, Session,
-        analysis::SpannedViewEncode as _,
+        analysis::{Spanned, SpannedViewEncode as _},
         arena::{LateInit, Obj},
         syntax::{Span, Symbol},
     },
@@ -18,7 +18,7 @@ use crate::{
             AnyGeneric, GenericBinder, Item, Re, RegionGeneric, SpannedTraitClauseList,
             SpannedTraitInstance, SpannedTraitInstanceView, SpannedTraitParam,
             SpannedTraitParamList, SpannedTraitParamView, SpannedTyOrRe, SpannedTyOrReList,
-            SpannedTyOrReView, SpannedTyView, TraitItem, TyCtxt, TypeGeneric,
+            SpannedTyOrReView, SpannedTyView, TraitItem, TyCtxt, TyOrRe, TyOrReList, TypeGeneric,
         },
     },
     utils::{
@@ -718,4 +718,26 @@ pub fn normalize_positional_generic_arity(
     }
 
     SpannedTyOrReList::alloc_list(segment_span, &resolved_params, tcx)
+}
+
+pub fn normalize_positional_generic_arity_zip(
+    tcx: &TyCtxt,
+    binder: Obj<GenericBinder>,
+    binder_len_override: Option<u32>,
+    segment_span: Span,
+    orig_params: &[TyOrRe],
+    orig_param_spans: &[Span],
+) -> TyOrReList {
+    normalize_positional_generic_arity(
+        tcx,
+        binder,
+        binder_len_override,
+        segment_span,
+        &orig_params
+            .iter()
+            .zip(orig_param_spans)
+            .map(|(&para, &span)| Spanned::new_saturated(para, span, tcx))
+            .collect::<Vec<_>>(),
+    )
+    .value
 }

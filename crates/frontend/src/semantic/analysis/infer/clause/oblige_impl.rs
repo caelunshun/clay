@@ -230,7 +230,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
             // Instantiate the binder with inference variables so that we may select the correct
             // implementation of it.
-            let lhs = fork.instantiate_hrtb_infer(origin, universe, lhs);
+            let lhs = fork.instantiate_hrtb_infer(universe, lhs);
 
             // See whether we can select an inherent `impl`.
             let mut param_iter = lhs.params.r(s).iter().zip(rhs.params.r(s));
@@ -410,13 +410,14 @@ impl<'tcx> ClauseCx<'tcx> {
         // Import the target type and trait. WF obligations are not needed on these types because
         // the `impl` itself has been WF-checked for all types compatible with the generic
         // parameters.
-        let target_ty = self
-            .importer(origin, universe.clone(), trait_env.as_ref())
-            .fold_spanned(*rhs.r(s).target);
+        let target_ty =
+            self.import_report_elsewhere(universe, trait_env.as_ref(), rhs.r(s).target.value);
 
-        let target_trait = self
-            .importer(origin, universe.clone(), trait_env.as_ref())
-            .fold_spanned(rhs.r(s).trait_.unwrap());
+        let target_trait = self.import_report_elsewhere(
+            universe,
+            trait_env.as_ref(),
+            rhs.r(s).trait_.unwrap().value,
+        );
 
         // Does the `lhs` type match the `rhs`'s target type?
         if self
@@ -526,12 +527,8 @@ impl<'tcx> ClauseCx<'tcx> {
 
             let lhs_env = self.instantiate_fn_instance_env_as_infer(origin, universe, lhs);
 
-            let (lhs_input, lhs_output) = self.import_fn_instance_sig(
-                origin,
-                universe,
-                lhs_env.as_ref(),
-                lhs.r(s).owner.def(s),
-            );
+            let (lhs_input, lhs_output) =
+                self.import_fn_instance_sig(universe, lhs_env.as_ref(), lhs.r(s).owner.def(s));
 
             let lhs_input = tcx.intern(TyKind::Tuple(lhs_input));
 

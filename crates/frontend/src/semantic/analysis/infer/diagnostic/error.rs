@@ -19,6 +19,7 @@ pub enum ClauseErrorSink {
     #[default]
     Report,
     NeverReport(&'static Location<'static>),
+    DelayBug(&'static Location<'static>),
     Probe(ClauseErrorProbe),
 }
 
@@ -27,6 +28,10 @@ impl ClauseErrorSink {
         match self {
             ClauseErrorSink::Report => {
                 ccx.queue_loud_report(error);
+            }
+            ClauseErrorSink::DelayBug(loc) => {
+                // TODO
+                eprintln!("Delay bug: {loc}")
             }
             ClauseErrorSink::NeverReport(_) => {
                 unreachable!();
@@ -182,6 +187,11 @@ impl ClauseOrigin {
     #[track_caller]
     pub fn never_printed() -> Self {
         Self::empty(ClauseErrorSink::NeverReport(Location::caller()))
+    }
+
+    #[track_caller]
+    pub fn delay_bug() -> Self {
+        Self::empty(ClauseErrorSink::DelayBug(Location::caller()))
     }
 
     pub fn probe(probe: ClauseErrorProbe) -> Self {

@@ -7,8 +7,7 @@ use crate::{
         },
         syntax::{
             AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FnItem, GenericBinder, GenericSubst,
-            ImplItem, ItemKind, TraitItem, TyCtxt, TyFolderInfallibleExt, TyVisitorInfallibleExt,
-            TypeAliasItem,
+            ImplItem, ItemKind, TraitItem, TyCtxt, TypeAliasItem,
         },
     },
 };
@@ -75,26 +74,12 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Setup a `ClauseCx` with our environment in mind.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.import_trait_def_env_as_universal(
-            &ClauseOrigin::empty_report(),
-            HrtbUniverse::ROOT_REF,
-            def,
-        );
+        let env = ccx.import_trait_def_env_as_universal(HrtbUniverse::ROOT_REF, def);
 
         // First, let's ensure that the inherited trait list is well-formed.
-        {
-            let inherits = ccx
-                .importer(
-                    &ClauseOrigin::empty_report(),
-                    HrtbUniverse::ROOT,
-                    env.as_ref(),
-                )
-                .fold_preserved(**inherits);
-
-            ccx.wf_visitor(HrtbUniverse::ROOT)
-                .with_clause_applies_to(env.self_ty)
-                .visit_spanned(inherits);
-        }
+        ccx.importer()
+            .with_clause_applies_to(env.self_ty)
+            .import_report_here(&HrtbUniverse::ROOT, env.as_ref(), **inherits);
 
         // Now, let's ensure that each generic parameter's clauses are well-formed.
         self.visit_generic_binder(&mut ccx, env.as_ref(), **generics);
@@ -121,69 +106,46 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Setup a `ClauseCx` with our environment in mind.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.import_impl_block_env_as_universal(
-            &ClauseOrigin::empty_report(),
-            HrtbUniverse::ROOT_REF,
-            item,
-        );
+        let env = ccx.import_impl_block_env_as_universal(HrtbUniverse::ROOT_REF, item);
 
         // Let's ensure that the target trait instance is well formed. This includes trait-checking
         // regular generic parameters *and* associated types.
         if let Some(trait_) = **trait_ {
-            let trait_ = ccx
-                .importer(
-                    &ClauseOrigin::empty_report(),
-                    HrtbUniverse::ROOT,
-                    env.as_ref(),
-                )
-                .fold_preserved(trait_);
-
-            ccx.wf_visitor(HrtbUniverse::ROOT)
+            ccx.importer()
                 .with_clause_applies_to(env.self_ty)
-                .visit_spanned(trait_);
+                .import_report_here(&HrtbUniverse::ROOT, env.as_ref(), trait_);
 
             // Let's ensure that the type implements its super-traits as well.
             let trait_def = trait_.value.def;
 
             for super_clause in trait_def.r(s).inherits.iter(tcx) {
-                let super_clause = ccx
-                    .importer(
-                        &ClauseOrigin::empty_report(),
-                        HrtbUniverse::ROOT,
-                        ClauseImportEnvRef::new(
-                            env.self_ty,
-                            &[GenericSubst {
-                                binder: *trait_def.r(s).generics,
-                                substs: trait_.value.params,
-                            }],
-                        ),
-                    )
-                    .fold_preserved(super_clause);
+                let super_clause_span = super_clause.own_span();
+                let super_clause = ccx.import_report_here(
+                    &HrtbUniverse::ROOT,
+                    ClauseImportEnvRef::new(
+                        env.self_ty,
+                        &[GenericSubst {
+                            binder: *trait_def.r(s).generics,
+                            substs: trait_.value.params,
+                        }],
+                    ),
+                    super_clause,
+                );
 
                 ccx.oblige_ty_meets_clause(
                     ClauseOrigin::root_report(ClauseOriginKind::WfSuperTrait {
                         block: target.own_span(),
-                        clause: super_clause.own_span(),
+                        clause: super_clause_span,
                     }),
                     HrtbUniverse::ROOT_REF,
                     env.self_ty,
-                    super_clause.value,
+                    super_clause,
                 );
             }
         }
 
         // Let's also ensure that our target type is well-formed.
-        {
-            let target = ccx
-                .importer(
-                    &ClauseOrigin::empty_report(),
-                    HrtbUniverse::ROOT,
-                    env.as_ref(),
-                )
-                .fold_preserved(**target);
-
-            ccx.wf_visitor(HrtbUniverse::ROOT).visit_spanned(target);
-        }
+        ccx.import_report_here(HrtbUniverse::ROOT_REF, env.as_ref(), **target);
 
         // Let's ensure that `impl` generics all have well-formed clauses.
         self.visit_generic_binder(&mut ccx, env.as_ref(), *generics);
@@ -206,11 +168,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Setup a `ClauseCx` with our environment in mind.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.import_adt_def_env_as_universal(
-            &ClauseOrigin::empty_report(),
-            HrtbUniverse::ROOT_REF,
-            def,
-        );
+        let env = ccx.import_adt_def_env_as_universal(HrtbUniverse::ROOT_REF, def);
 
         // First, let's ensure that each generic parameter's clauses are well-formed.
         self.visit_generic_binder(&mut ccx, env.as_ref(), def.r(s).generics);
@@ -239,11 +197,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         let s = self.session();
 
         for field in ctor.r(s).fields.iter() {
-            let field_ty = ccx
-                .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
-                .fold_preserved(*field.ty);
-
-            ccx.wf_visitor(HrtbUniverse::ROOT).visit_spanned(field_ty);
+            ccx.import_report_here(HrtbUniverse::ROOT_REF, env, *field.ty);
         }
     }
 
@@ -259,25 +213,13 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Setup a `ClauseCx` with our environment in mind.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.import_type_alias_def_env_as_universal(
-            &ClauseOrigin::empty_report(),
-            HrtbUniverse::ROOT_REF,
-            def,
-        );
+        let env = ccx.import_type_alias_def_env_as_universal(HrtbUniverse::ROOT_REF, def);
 
         // First, let's ensure that each generic parameter's clauses are well-formed.
         self.visit_generic_binder(&mut ccx, env.as_ref(), def.r(s).generics);
 
         // Now, WF-check the definition.
-        let body = ccx
-            .importer(
-                &ClauseOrigin::empty_report(),
-                HrtbUniverse::ROOT,
-                env.as_ref(),
-            )
-            .fold_preserved(*def.r(s).body);
-
-        ccx.wf_visitor(HrtbUniverse::ROOT).visit_spanned(body);
+        ccx.import_report_here(HrtbUniverse::ROOT_REF, env.as_ref(), *def.r(s).body);
 
         ccx.verify();
     }
@@ -296,13 +238,9 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
                 AnyGeneric::Ty(generic) => *generic.r(s).clauses,
             };
 
-            let clauses = ccx
-                .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
-                .fold_preserved(clauses);
-
-            ccx.wf_visitor(HrtbUniverse::ROOT)
+            ccx.importer()
                 .with_clause_applies_to(env.self_ty)
-                .visit_spanned(clauses);
+                .import_report_here(HrtbUniverse::ROOT_REF, env, clauses);
         }
     }
 }

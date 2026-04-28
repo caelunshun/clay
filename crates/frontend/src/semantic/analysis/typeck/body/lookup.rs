@@ -1,7 +1,9 @@
 use crate::{
     base::{
         Diag, LeafDiag, Session,
+        analysis::Spanned,
         arena::{HasInterner as _, Obj},
+        syntax::Span,
     },
     parse::token::Ident,
     semantic::{
@@ -15,8 +17,8 @@ use crate::{
         },
         syntax::{
             AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, GenericSubst,
-            InferTyVarSourceInfo, Mutability, Re, RelationMode, SpannedTyOrReList, TraitClause,
-            TraitSpec, Ty, TyFolderInfallibleExt as _, TyKind,
+            InferTyVarSourceInfo, Mutability, Re, RelationMode, TraitClause, TraitSpec, Ty,
+            TyFolderInfallibleExt as _, TyKind, TyOrReList,
         },
     },
     utils::lang::IterEither,
@@ -71,10 +73,11 @@ impl BodyCtxt<'_, '_> {
 
                         let env = ClauseImportEnvRef::new(receiver, &env_args);
 
-                        let field = self
-                            .ccx_mut()
-                            .importer(&ClauseOrigin::empty_report(), HrtbUniverse::ROOT, env)
-                            .fold(field.ty.value);
+                        let field = self.ccx_mut().import_report_elsewhere(
+                            &HrtbUniverse::ROOT,
+                            env,
+                            field.ty.value,
+                        );
 
                         return Some(field);
                     }
@@ -186,7 +189,7 @@ impl BodyCtxt<'_, '_> {
         self_ty: Ty,
         as_trait: Option<TraitSpec>,
         assoc_name: Ident,
-        assoc_args: Option<SpannedTyOrReList>,
+        assoc_args: Option<SpannedImportedAssocArgs>,
     ) -> Option<Ty> {
         let s = self.session();
         let tcx = self.tcx();
@@ -219,21 +222,39 @@ impl BodyCtxt<'_, '_> {
 
         let early_binder = resolution.r(s).generics;
 
-        let early_args = assoc_args.map(|assoc_args| {
-            normalize_positional_generic_arity(
-                tcx,
-                early_binder,
-                None,
-                assoc_args.own_span(),
-                &assoc_args.iter(tcx).collect::<Vec<_>>(),
-            )
-            .value
-        });
+        let early_args = assoc_args.map(
+            |SpannedImportedAssocArgs {
+                 segment_span,
+                 arg_spans,
+                 args,
+             }| {
+                normalize_positional_generic_arity(
+                    tcx,
+                    early_binder,
+                    None,
+                    segment_span,
+                    &args
+                        .r(s)
+                        .iter()
+                        .zip(arg_spans)
+                        .map(|(&arg, &span)| Spanned::new_saturated(arg, span, tcx))
+                        .collect::<Vec<_>>(),
+                )
+                .value
+            },
+        );
 
         let instance = tcx.intern(FnInstanceInner { owner, early_args });
 
         Some(tcx.intern(TyKind::FnDef(instance)))
     }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct SpannedImportedAssocArgs<'a> {
+    pub segment_span: Span,
+    pub arg_spans: &'a [Span],
+    pub args: TyOrReList,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -463,7 +484,6 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                 );
 
                 let expected_receiver = fork.import_fn_instance_receiver_as_infer(
-                    &ClauseOrigin::empty_report(),
                     HrtbUniverse::ROOT_REF,
                     expected_env.as_ref(),
                     candidate,
