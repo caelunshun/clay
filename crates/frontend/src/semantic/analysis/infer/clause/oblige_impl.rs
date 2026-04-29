@@ -400,7 +400,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // Obtain inference variables for all generics in the `impl` and tentatively create
         // obligations for them.
-        let trait_env = self.instantiate_binder_list_as_infer(
+        let trait_env = self.create_infer_env_for_binder_list(
             origin,
             universe,
             ClauseImportEnv::new(lhs, Vec::new()),
@@ -525,7 +525,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 unreachable!()
             };
 
-            let lhs_env = self.instantiate_fn_instance_env_as_infer(origin, universe, lhs);
+            let lhs_env = self.create_infer_env_for_fn_instance(origin, universe, lhs);
 
             let (lhs_input, lhs_output) =
                 self.import_fn_instance_sig(universe, lhs_env.as_ref(), lhs.r(s).owner.def(s));

@@ -218,7 +218,7 @@ impl BodyCtxt<'_, '_> {
 
         let owner = self
             .ccx_mut()
-            .instantiate_fn_def_as_blank_owner_infer(resolution, self_ty);
+            .create_infer_env_for_fn_def_as_blank_owner(resolution, self_ty);
 
         let early_binder = resolution.r(s).generics;
 
@@ -470,14 +470,14 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                     .fresh_ty_infer(HrtbUniverse::ROOT, InferTyVarSourceInfo::MethodLookupHelper);
 
                 let expected_owner =
-                    fork.instantiate_fn_def_as_blank_owner_infer(candidate, self_ty);
+                    fork.create_infer_env_for_fn_def_as_blank_owner(candidate, self_ty);
 
                 let expected_instance = tcx.intern(FnInstanceInner {
                     owner: expected_owner,
                     early_args: None,
                 });
 
-                let expected_env = fork.instantiate_fn_instance_env_as_infer(
+                let expected_env = fork.create_infer_env_for_fn_instance(
                     &origin,
                     HrtbUniverse::ROOT_REF,
                     expected_instance,
@@ -498,14 +498,14 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
             }
             MethodQuery::AssocFn(self_ty) => {
                 let expected_owner =
-                    fork.instantiate_fn_def_as_blank_owner_infer(candidate, self_ty);
+                    fork.create_infer_env_for_fn_def_as_blank_owner(candidate, self_ty);
                 let expected_instance = tcx.intern(FnInstanceInner {
                     owner: expected_owner,
                     early_args: None,
                 });
 
                 // Call for validation side-effect.
-                _ = fork.instantiate_fn_instance_env_as_infer(
+                _ = fork.create_infer_env_for_fn_instance(
                     &origin,
                     HrtbUniverse::ROOT_REF,
                     expected_instance,

@@ -1093,7 +1093,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
         let FnInstanceInner { owner, early_args } = *instance.r(s);
 
         // Construct an environment, validating the `owner` in the process.
-        let env = self.ccx.instantiate_fn_owner_env_as_infer(
+        let env = self.ccx.create_infer_env_for_fn_owner(
             &ClauseOrigin::root_report(ClauseOriginKind::WfFnDef { fn_ty: own_span }),
             &self.universe,
             owner,

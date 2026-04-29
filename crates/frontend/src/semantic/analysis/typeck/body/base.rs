@@ -21,14 +21,14 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Setup a `ClauseCx` for signature validation.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionBlind);
-        let env_sig = ccx.import_fn_def_env_as_universal(HrtbUniverse::ROOT_REF, def);
+        let env_sig = ccx.create_universal_env_for_fn_def(HrtbUniverse::ROOT_REF, def);
 
         // WF-check the signature.
         self.visit_generic_binder(&mut ccx, env_sig.as_ref(), def.r(s).generics);
 
         // Check the body
         if let Some(body) = *def.r(s).hir_body {
-            let env_body = ccx.import_fn_def_env_as_universal(HrtbUniverse::ROOT_REF, def);
+            let env_body = ccx.create_universal_env_for_fn_def(HrtbUniverse::ROOT_REF, def);
 
             let mut bcx = BodyCtxt::new(&mut ccx, def, env_body.as_ref());
 

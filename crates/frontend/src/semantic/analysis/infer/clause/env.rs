@@ -21,7 +21,7 @@ use crate::{
 impl<'tcx> ClauseCx<'tcx> {
     // === Universal === //
 
-    pub fn import_binder_list_as_universal(
+    pub fn create_universal_env_for_binder_list(
         &mut self,
         universe: &HrtbUniverse,
         self_ty: Ty,
@@ -127,7 +127,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     // === Specialized universal imports === //
 
-    pub fn import_trait_def_env_as_universal(
+    pub fn create_universal_env_for_trait_def(
         &mut self,
         universe: &HrtbUniverse,
         def: Obj<TraitItem>,
@@ -143,7 +143,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // Create universal variables for each parameter.
         let sig_generic_substs =
-            self.import_binder_list_as_universal(universe, self_ty, &[*def.r(s).generics]);
+            self.create_universal_env_for_binder_list(universe, self_ty, &[*def.r(s).generics]);
 
         let generic_params = sig_generic_substs[0].substs;
 
@@ -168,7 +168,7 @@ impl<'tcx> ClauseCx<'tcx> {
         ClauseImportEnv::new(self_ty, sig_generic_substs)
     }
 
-    pub fn import_adt_def_env_as_universal(
+    pub fn create_universal_env_for_adt_def(
         &mut self,
         universe: &HrtbUniverse,
         def: Obj<AdtItem>,
@@ -198,7 +198,7 @@ impl<'tcx> ClauseCx<'tcx> {
         ClauseImportEnv::new(self_ty, sig_generic_substs)
     }
 
-    pub fn import_impl_block_env_as_universal(
+    pub fn create_universal_env_for_impl_block(
         &mut self,
         universe: &HrtbUniverse,
         def: Obj<ImplItem>,
@@ -226,16 +226,20 @@ impl<'tcx> ClauseCx<'tcx> {
         ClauseImportEnv::new(self_ty, sig_generic_substs)
     }
 
-    pub fn import_fn_item_generics_as_universal(
+    pub fn create_universal_env_for_fn_item(
         &mut self,
         universe: &HrtbUniverse,
         self_ty: Ty,
         def: Obj<FnDef>,
     ) -> Vec<GenericSubst> {
-        self.import_binder_list_as_universal(universe, self_ty, &[def.r(self.session()).generics])
+        self.create_universal_env_for_binder_list(
+            universe,
+            self_ty,
+            &[def.r(self.session()).generics],
+        )
     }
 
-    pub fn import_fn_def_env_as_universal(
+    pub fn create_universal_env_for_fn_def(
         &mut self,
         universe: &HrtbUniverse,
         def: Obj<FnDef>,
@@ -249,24 +253,20 @@ impl<'tcx> ClauseCx<'tcx> {
                 sig_generic_substs: Vec::new(),
             },
             FnDefOwner::TraitMethod(def, _idx) => {
-                self.import_trait_def_env_as_universal(universe, def)
+                self.create_universal_env_for_trait_def(universe, def)
             }
             FnDefOwner::ImplMethod(def, _idx) => {
-                self.import_impl_block_env_as_universal(universe, def)
+                self.create_universal_env_for_impl_block(universe, def)
             }
         };
 
         env.sig_generic_substs
-            .extend_from_slice(&self.import_fn_item_generics_as_universal(
-                universe,
-                env.self_ty,
-                def,
-            ));
+            .extend_from_slice(&self.create_universal_env_for_fn_item(universe, env.self_ty, def));
 
         env
     }
 
-    pub fn import_type_alias_def_env_as_universal(
+    pub fn create_universal_env_for_type_alias_def(
         &mut self,
         universe: &HrtbUniverse,
         def: Obj<TypeAliasItem>,
@@ -278,13 +278,13 @@ impl<'tcx> ClauseCx<'tcx> {
 
         ClauseImportEnv::new(
             this_ty,
-            self.import_binder_list_as_universal(universe, this_ty, &[def.r(s).generics]),
+            self.create_universal_env_for_binder_list(universe, this_ty, &[def.r(s).generics]),
         )
     }
 
     // === Existential === //
 
-    pub fn instantiate_binder_list_as_infer(
+    pub fn create_infer_env_for_binder_list(
         &mut self,
         origin: &ClauseOrigin,
         universe: &HrtbUniverse,
@@ -429,7 +429,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     // === Specialized existential imports === //
 
-    pub fn instantiate_fn_def_as_blank_owner_infer(
+    pub fn create_infer_env_for_fn_def_as_blank_owner(
         &mut self,
         def: Obj<FnDef>,
         self_ty: Ty,
@@ -473,7 +473,7 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    pub fn instantiate_fn_owner_env_as_infer(
+    pub fn create_infer_env_for_fn_owner(
         &mut self,
         origin: &ClauseOrigin,
         universe: &HrtbUniverse,
@@ -541,7 +541,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 block,
                 method_idx: _,
             } => {
-                let env = self.instantiate_binder_list_as_infer(
+                let env = self.create_infer_env_for_binder_list(
                     origin,
                     universe,
                     ClauseImportEnv::new(self_ty, Vec::new()),
@@ -563,7 +563,7 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    pub fn instantiate_fn_instance_env_as_infer(
+    pub fn create_infer_env_for_fn_instance(
         &mut self,
         origin: &ClauseOrigin,
         universe: &HrtbUniverse,
@@ -573,7 +573,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
         let FnInstanceInner { owner, early_args } = *instance.r(s);
 
-        let mut env = self.instantiate_fn_owner_env_as_infer(origin, universe, owner);
+        let mut env = self.create_infer_env_for_fn_owner(origin, universe, owner);
         let def = owner.def(s);
 
         if let Some(early_args) = early_args {
@@ -583,7 +583,7 @@ impl<'tcx> ClauseCx<'tcx> {
             });
         } else {
             env =
-                self.instantiate_binder_list_as_infer(origin, universe, env, &[def.r(s).generics]);
+                self.create_infer_env_for_binder_list(origin, universe, env, &[def.r(s).generics]);
         }
 
         env

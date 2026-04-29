@@ -233,7 +233,7 @@ impl BodyCtxt<'_, '_> {
 
                 let owner = self
                     .ccx_mut()
-                    .instantiate_fn_def_as_blank_owner_infer(resolution, self_ty);
+                    .create_infer_env_for_fn_def_as_blank_owner(resolution, self_ty);
 
                 let generics = generics.map(|generics| {
                     normalize_positional_generic_arity_zip(
@@ -251,7 +251,7 @@ impl BodyCtxt<'_, '_> {
                     early_args: generics,
                 });
 
-                let instance_env = self.ccx_mut().instantiate_fn_instance_env_as_infer(
+                let instance_env = self.ccx_mut().create_infer_env_for_fn_instance(
                     &ClauseOrigin::root_report(ClauseOriginKind::FunctionCall {
                         site_span: name.span,
                     }),

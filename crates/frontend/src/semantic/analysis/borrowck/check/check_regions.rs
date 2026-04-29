@@ -26,7 +26,7 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
 
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
 
-        let env = ccx.import_fn_def_env_as_universal(HrtbUniverse::ROOT_REF, def);
+        let env = ccx.create_universal_env_for_fn_def(HrtbUniverse::ROOT_REF, def);
 
         // Give each local a universal region representing its lifetime within the function body.
         // We permit a given local to outlive another if `live(rhs)` implies `occupied(lhs)`—in
