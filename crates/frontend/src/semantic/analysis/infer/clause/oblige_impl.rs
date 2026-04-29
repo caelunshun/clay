@@ -271,7 +271,7 @@ impl<'tcx> ClauseCx<'tcx> {
                                     // N.B. this is not the fork to ensure that we look for
                                     // still-inferred types before the potentially hazardous
                                     // unification.
-                                    ccx: &self,
+                                    ccx: &fork,
                                     reified_var_roots,
                                 }
                                 .visit_fallible(lhs)
