@@ -8,7 +8,7 @@ use crate::{
     parse::token::Ident,
     semantic::{
         analysis::{
-            BodyCtxt, ClauseErrorProbe, ClauseImportEnvRef, ClauseOrigin, HrtbUniverse,
+            BodyCtxt, ClauseImportEnvRef, HrtbUniverse, ObligeCause, ObligeCauseProbe,
             UnboundVarHandlingMode, attempt_deref,
         },
         lower::{
@@ -457,8 +457,8 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
 
         let mut fork = self.ccx().clone().with_silent();
 
-        let probe = ClauseErrorProbe::default();
-        let origin = ClauseOrigin::probe(probe.clone());
+        let probe = ObligeCauseProbe::default();
+        let cause = ObligeCause::new_probe(probe.clone());
 
         match query {
             MethodQuery::Method(receiver) => {
@@ -478,7 +478,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                 });
 
                 let expected_env = fork.create_infer_env_for_fn_instance(
-                    &origin,
+                    &cause,
                     HrtbUniverse::ROOT_REF,
                     expected_instance,
                 );
@@ -489,12 +489,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                     candidate,
                 );
 
-                fork.oblige_ty_unifies_ty(
-                    origin,
-                    receiver,
-                    expected_receiver,
-                    RelationMode::Equate,
-                );
+                fork.oblige_ty_unifies_ty(cause, receiver, expected_receiver, RelationMode::Equate);
             }
             MethodQuery::AssocFn(self_ty) => {
                 let expected_owner =
@@ -506,7 +501,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
 
                 // Call for validation side-effect.
                 _ = fork.create_infer_env_for_fn_instance(
-                    &origin,
+                    &cause,
                     HrtbUniverse::ROOT_REF,
                     expected_instance,
                 );

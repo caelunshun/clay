@@ -4,8 +4,8 @@ use crate::{
     base::arena::{HasInterner as _, Obj},
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnv, ClauseOrigin, HrtbUniverse, HrtbUniverseInfo,
-            NoTraitImplError, ObligationNotReady, ObligationResult, UnboundVarHandlingMode,
+            ClauseCx, ClauseImportEnv, HrtbUniverse, HrtbUniverseInfo, NoTraitImplError,
+            ObligationNotReady, ObligationResult, ObligeCause, UnboundVarHandlingMode,
             UniversalElaboration,
             infer::clause::{ClauseObligation, elaboration::FloatingInfVarVisitor},
         },
@@ -20,10 +20,11 @@ use crate::{
 #[derive(Debug, Clone)]
 struct SelectionRejected;
 
+// TODO: Give more information to causes
 impl<'tcx> ClauseCx<'tcx> {
     pub fn oblige_ty_meets_clauses(
         &mut self,
-        origin: &ClauseOrigin,
+        cause: &ObligeCause,
         universe: &HrtbUniverse,
         lhs: Ty,
         rhs: TraitClauseList,
@@ -31,30 +32,30 @@ impl<'tcx> ClauseCx<'tcx> {
         let s = self.session();
 
         for &clause in rhs.r(s) {
-            self.oblige_ty_meets_clause(origin.clone(), universe, lhs, clause);
+            self.oblige_ty_meets_clause(cause.clone(), universe, lhs, clause);
         }
     }
 
     pub fn oblige_ty_meets_clause(
         &mut self,
-        origin: ClauseOrigin,
+        cause: ObligeCause,
         universe: &HrtbUniverse,
         lhs: Ty,
         rhs: TraitClause,
     ) {
         match rhs {
             TraitClause::Outlives(rhs_dir, rhs) => {
-                self.oblige_general_outlives(origin, TyOrRe::Ty(lhs), rhs, rhs_dir);
+                self.oblige_general_outlives(cause, TyOrRe::Ty(lhs), rhs, rhs_dir);
             }
             TraitClause::Trait(rhs) => {
-                self.oblige_ty_meets_trait(origin, universe.clone(), lhs, rhs);
+                self.oblige_ty_meets_trait(cause, universe.clone(), lhs, rhs);
             }
         }
     }
 
     pub fn oblige_ty_meets_trait(
         &mut self,
-        origin: ClauseOrigin,
+        cause: ObligeCause,
         universe: HrtbUniverse,
         lhs: Ty,
         rhs: HrtbBinder<TraitSpec>,
@@ -70,28 +71,28 @@ impl<'tcx> ClauseCx<'tcx> {
                 universe
             } else {
                 universe.nest(HrtbUniverseInfo {
-                    origin: origin.clone(),
+                    cause: cause.clone(),
                 })
             }
         };
 
         let rhs = self.instantiate_hrtb_universal(&universe, rhs);
-        self.oblige_ty_meets_trait_instantiated(origin, universe, lhs, rhs)
+        self.oblige_ty_meets_trait_instantiated(cause, universe, lhs, rhs)
     }
 
     pub fn oblige_ty_meets_trait_instantiated(
         &mut self,
-        origin: ClauseOrigin,
+        cause: ObligeCause,
         universe: HrtbUniverse,
         lhs: Ty,
         rhs: TraitSpec,
     ) {
-        self.push_obligation(ClauseObligation::TyMeetsTrait(origin, universe, lhs, rhs));
+        self.push_obligation(ClauseObligation::TyMeetsTrait(cause, universe, lhs, rhs));
     }
 
     pub(super) fn run_oblige_ty_meets_trait_instantiated(
         &mut self,
-        origin: &ClauseOrigin,
+        cause: &ObligeCause,
         universe: HrtbUniverse,
         lhs: Ty,
         rhs: TraitSpec,
@@ -109,7 +110,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
                 match self
                     .clone()
-                    .try_select_inherent_impl(origin, &universe, universal_elab, rhs)?
+                    .try_select_inherent_impl(cause, &universe, universal_elab, rhs)?
                 {
                     Ok(res) => {
                         *self = res;
@@ -169,7 +170,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
         if let Ok(confirmation) = self
             .clone()
-            .try_select_special_impl(origin, &universe, lhs, rhs)
+            .try_select_special_impl(cause, &universe, lhs, rhs)
         {
             debug_assert!(prev_confirmation.is_none());
             prev_confirmation = Some(confirmation)
@@ -178,7 +179,7 @@ impl<'tcx> ClauseCx<'tcx> {
         for candidate in candidates {
             let Ok(confirmation) = self
                 .clone()
-                .try_select_block_impl(origin, &universe, lhs, candidate, rhs)
+                .try_select_block_impl(cause, &universe, lhs, candidate, rhs)
             else {
                 continue;
             };
@@ -192,7 +193,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
         let Some(confirmation) = prev_confirmation else {
             return Ok(Err(NoTraitImplError {
-                origin: origin.clone(),
+                cause: cause.clone(),
                 target: lhs,
                 spec: rhs,
             }));
@@ -205,7 +206,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     fn try_select_inherent_impl(
         self,
-        origin: &ClauseOrigin,
+        cause: &ObligeCause,
         universe: &HrtbUniverse,
         lhs: UniversalElaboration,
         rhs: TraitSpec,
@@ -247,7 +248,7 @@ impl<'tcx> ClauseCx<'tcx> {
                         (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
                             // This can be an obligation because selection shouldn't depend on regions.
                             fork.oblige_re_outlives_re(
-                                origin.clone(),
+                                cause.clone(),
                                 lhs,
                                 rhs,
                                 RelationMode::Equate,
@@ -256,7 +257,7 @@ impl<'tcx> ClauseCx<'tcx> {
                         (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
                             // See whether we can reject this parameter.
                             if let Err(_err) = fork.ucx_mut().unify_ty_and_ty(
-                                origin,
+                                &ObligeCause::new_never_report(),
                                 lhs,
                                 rhs,
                                 RelationMode::Equate,
@@ -355,7 +356,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     TraitParam::Equals(rhs) => match (lhs, rhs) {
                         (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
                             fork.oblige_re_outlives_re(
-                                origin.clone(),
+                                cause.clone(),
                                 lhs,
                                 rhs,
                                 RelationMode::Equate,
@@ -363,7 +364,7 @@ impl<'tcx> ClauseCx<'tcx> {
                         }
                         (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
                             fork.oblige_ty_unifies_ty(
-                                origin.clone(),
+                                cause.clone(),
                                 lhs,
                                 rhs,
                                 RelationMode::Equate,
@@ -373,10 +374,10 @@ impl<'tcx> ClauseCx<'tcx> {
                     },
                     TraitParam::Unspecified(rhs) => match lhs {
                         TyOrRe::Re(lhs) => {
-                            fork.oblige_re_meets_clauses(origin, lhs, rhs);
+                            fork.oblige_re_meets_clauses(cause, lhs, rhs);
                         }
                         TyOrRe::Ty(lhs) => {
-                            fork.oblige_ty_meets_clauses(origin, universe, lhs, rhs);
+                            fork.oblige_ty_meets_clauses(cause, universe, lhs, rhs);
                         }
                     },
                 }
@@ -390,7 +391,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     fn try_select_block_impl(
         mut self,
-        origin: &ClauseOrigin,
+        cause: &ObligeCause,
         universe: &HrtbUniverse,
         lhs: Ty,
         rhs: Obj<ImplItem>,
@@ -401,7 +402,7 @@ impl<'tcx> ClauseCx<'tcx> {
         // Obtain inference variables for all generics in the `impl` and tentatively create
         // obligations for them.
         let trait_env = self.create_infer_env_for_binder_list(
-            origin,
+            cause,
             universe,
             ClauseImportEnv::new(lhs, Vec::new()),
             &[rhs.r(s).generics],
@@ -422,7 +423,7 @@ impl<'tcx> ClauseCx<'tcx> {
         // Does the `lhs` type match the `rhs`'s target type?
         if self
             .ucx_mut()
-            .unify_ty_and_ty(origin, lhs, target_ty, RelationMode::Equate)
+            .unify_ty_and_ty(cause, lhs, target_ty, RelationMode::Equate)
             .is_err()
         {
             return Err(SelectionRejected);
@@ -442,7 +443,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 TraitParam::Equals(required) => match (instance, required) {
                     (TyOrRe::Re(instance), TyOrRe::Re(required)) => {
                         self.ucx_mut().unify_re_and_re(
-                            origin,
+                            cause,
                             instance,
                             required,
                             RelationMode::Equate,
@@ -451,7 +452,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     (TyOrRe::Ty(instance), TyOrRe::Ty(required)) => {
                         if self
                             .ucx_mut()
-                            .unify_ty_and_ty(origin, instance, required, RelationMode::Equate)
+                            .unify_ty_and_ty(cause, instance, required, RelationMode::Equate)
                             .is_err()
                         {
                             return Err(SelectionRejected);
@@ -483,14 +484,14 @@ impl<'tcx> ClauseCx<'tcx> {
                     };
 
                     self.oblige_ty_unifies_ty(
-                        origin.clone(),
+                        cause.clone(),
                         instance_ty,
                         required_ty,
                         RelationMode::Equate,
                     );
                 }
                 TraitParam::Unspecified(additional_clauses) => {
-                    self.oblige_ty_meets_clauses(origin, universe, instance_ty, additional_clauses);
+                    self.oblige_ty_meets_clauses(cause, universe, instance_ty, additional_clauses);
                 }
             }
         }
@@ -500,7 +501,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     fn try_select_special_impl(
         mut self,
-        origin: &ClauseOrigin,
+        cause: &ObligeCause,
         universe: &HrtbUniverse,
         lhs: Ty,
         rhs: TraitSpec,
@@ -525,7 +526,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 unreachable!()
             };
 
-            let lhs_env = self.create_infer_env_for_fn_instance(origin, universe, lhs);
+            let lhs_env = self.create_infer_env_for_fn_instance(cause, universe, lhs);
 
             let (lhs_input, lhs_output) =
                 self.import_fn_instance_sig(universe, lhs_env.as_ref(), lhs.r(s).owner.def(s));
@@ -534,7 +535,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
             if self
                 .ucx_mut()
-                .unify_ty_and_ty(origin, lhs_input, rhs_input, RelationMode::Equate)
+                .unify_ty_and_ty(cause, lhs_input, rhs_input, RelationMode::Equate)
                 .is_err()
             {
                 return Err(SelectionRejected);
@@ -542,7 +543,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
             if self
                 .ucx_mut()
-                .unify_ty_and_ty(origin, lhs_output, rhs_output, RelationMode::Equate)
+                .unify_ty_and_ty(cause, lhs_output, rhs_output, RelationMode::Equate)
                 .is_err()
             {
                 return Err(SelectionRejected);

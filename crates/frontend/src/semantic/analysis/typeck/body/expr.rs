@@ -8,7 +8,7 @@ use crate::{
     parse::ast::{AstLit, AstUnOpKind},
     semantic::{
         analysis::{
-            BodyCtxt, ClauseError, ClauseOrigin, ClauseOriginKind, EquateOrSet, HrtbUniverse,
+            BodyCtxt, ClauseError, EquateOrSet, HrtbUniverse, ObligeCause, ObligeCauseFrame,
             OverloadResolution, peel_ref_for_prim_op,
             typeck::body::lookup::{LookupMethodResult, SpannedImportedAssocArgs},
         },
@@ -145,7 +145,7 @@ impl BodyCtxt<'_, '_> {
                 );
 
                 self.ccx_mut().oblige_ty_meets_trait_instantiated(
-                    ClauseOrigin::root_report(ClauseOriginKind::FunctionCall { site_span }),
+                    ObligeCause::new_report(ObligeCauseFrame::FunctionCall { site_span }),
                     HrtbUniverse::ROOT,
                     callee,
                     TraitSpec {
@@ -252,7 +252,7 @@ impl BodyCtxt<'_, '_> {
                 });
 
                 let instance_env = self.ccx_mut().create_infer_env_for_fn_instance(
-                    &ClauseOrigin::root_report(ClauseOriginKind::FunctionCall {
+                    &ObligeCause::new_report(ObligeCauseFrame::FunctionCall {
                         site_span: name.span,
                     }),
                     HrtbUniverse::ROOT_REF,
@@ -268,7 +268,7 @@ impl BodyCtxt<'_, '_> {
                 let (self_ty, expected_args) = expected_args.r(s).split_first().unwrap();
 
                 self.ccx_mut().oblige_ty_unifies_ty(
-                    ClauseOrigin::root_report(ClauseOriginKind::FunctionCall {
+                    ObligeCause::new_report(ObligeCauseFrame::FunctionCall {
                         site_span: name.span,
                     }),
                     *self_ty,
@@ -303,8 +303,8 @@ impl BodyCtxt<'_, '_> {
                 let rhs = self.check_expr(rhs, None).and_do(&mut divergence);
 
                 let kind_info = self.decode_bin_op_kind(kind.kind);
-                let origin =
-                    ClauseOrigin::root_report(ClauseOriginKind::Arithmetic { op_span: kind.span });
+                let cause =
+                    ObligeCause::new_report(ObligeCauseFrame::Arithmetic { op_span: kind.span });
 
                 // Attempt a primitive operation.
                 let mut prim_fork = self.ccx().clone();
@@ -313,7 +313,7 @@ impl BodyCtxt<'_, '_> {
                     let lhs = peel_ref_for_prim_op(&mut prim_fork, lhs);
                     let rhs = peel_ref_for_prim_op(&mut prim_fork, rhs);
 
-                    if let Err(err) = prim_fork.unify_ty_and_simple_set(&origin, lhs, kind_info.lhs)
+                    if let Err(err) = prim_fork.unify_ty_and_simple_set(&cause, lhs, kind_info.lhs)
                     {
                         break 'try_prim ClauseError::TyAndSimpleTySetUnifyError(err);
                     }
@@ -321,14 +321,14 @@ impl BodyCtxt<'_, '_> {
                     match kind_info.rhs {
                         EquateOrSet::EqualsLhs => {
                             if let Err(err) =
-                                prim_fork.unify_ty_and_ty(&origin, lhs, rhs, RelationMode::Equate)
+                                prim_fork.unify_ty_and_ty(&cause, lhs, rhs, RelationMode::Equate)
                             {
                                 break 'try_prim ClauseError::TyAndTyUnifyError(*err);
                             }
                         }
                         EquateOrSet::Unrelated(rhs_set) => {
                             if let Err(err) =
-                                prim_fork.unify_ty_and_simple_set(&origin, lhs, rhs_set)
+                                prim_fork.unify_ty_and_simple_set(&cause, lhs, rhs_set)
                             {
                                 break 'try_prim ClauseError::TyAndSimpleTySetUnifyError(err);
                             }
@@ -350,7 +350,7 @@ impl BodyCtxt<'_, '_> {
                     );
 
                     self.ccx_mut().oblige_ty_meets_trait_instantiated(
-                        origin,
+                        cause,
                         HrtbUniverse::ROOT,
                         lhs,
                         TraitSpec {
@@ -368,7 +368,7 @@ impl BodyCtxt<'_, '_> {
                     break 'op result_ty;
                 }
 
-                let error = fallback_err.emit(&prim_fork);
+                let error = fallback_err.report(&prim_fork).unwrap();
 
                 self.overload_resolutions
                     .insert(expr, OverloadResolution::Error(error));
@@ -379,7 +379,7 @@ impl BodyCtxt<'_, '_> {
                 let lhs_ty = self.check_expr(lhs, None).and_do(&mut divergence);
 
                 let kind_info = self.decode_un_op_kind(kind);
-                let origin = ClauseOrigin::root_report(ClauseOriginKind::Arithmetic {
+                let cause = ObligeCause::new_report(ObligeCauseFrame::Arithmetic {
                     op_span: lhs.r(s).span,
                 });
 
@@ -389,7 +389,7 @@ impl BodyCtxt<'_, '_> {
 
                     match self
                         .ccx_mut()
-                        .unify_ty_and_simple_set(&origin, lhs_ty, kind_info.lhs)
+                        .unify_ty_and_simple_set(&cause, lhs_ty, kind_info.lhs)
                     {
                         Ok(()) => {
                             self.overload_resolutions
@@ -421,7 +421,7 @@ impl BodyCtxt<'_, '_> {
                     );
 
                     self.ccx_mut().oblige_ty_meets_trait_instantiated(
-                        origin,
+                        cause,
                         HrtbUniverse::ROOT,
                         lhs_ty,
                         TraitSpec {
@@ -436,7 +436,7 @@ impl BodyCtxt<'_, '_> {
                     break 'op result_ty;
                 }
 
-                let error = fallback_err.emit(self.ccx());
+                let error = fallback_err.report(self.ccx()).unwrap();
 
                 self.overload_resolutions
                     .insert(expr, OverloadResolution::Error(error));
@@ -566,7 +566,7 @@ impl BodyCtxt<'_, '_> {
                 let into_iter_trait = self.krate().r(s).lang_items.into_iterator_trait().unwrap();
 
                 self.ccx_mut().oblige_ty_meets_trait_instantiated(
-                    ClauseOrigin::root_report(ClauseOriginKind::ForLoopIter {
+                    ObligeCause::new_report(ObligeCauseFrame::ForLoopIter {
                         iter_span: iter.r(s).span,
                     }),
                     HrtbUniverse::ROOT,
@@ -641,7 +641,7 @@ impl BodyCtxt<'_, '_> {
                     let rhs = self.check_expr(rhs, None).and_do(&mut divergence);
 
                     let kind_info = self.decode_assign_op_kind(kind);
-                    let origin = ClauseOrigin::root_report(ClauseOriginKind::Arithmetic {
+                    let cause = ObligeCause::new_report(ObligeCauseFrame::Arithmetic {
                         op_span: expr.r(s).span,
                     });
 
@@ -653,7 +653,7 @@ impl BodyCtxt<'_, '_> {
                         let rhs = peel_ref_for_prim_op(&mut prim_fork, rhs);
 
                         if let Err(err) =
-                            prim_fork.unify_ty_and_simple_set(&origin, lhs, kind_info.lhs)
+                            prim_fork.unify_ty_and_simple_set(&cause, lhs, kind_info.lhs)
                         {
                             break 'try_prim ClauseError::TyAndSimpleTySetUnifyError(err);
                         }
@@ -661,7 +661,7 @@ impl BodyCtxt<'_, '_> {
                         match kind_info.rhs {
                             EquateOrSet::EqualsLhs => {
                                 if let Err(err) = prim_fork.unify_ty_and_ty(
-                                    &origin,
+                                    &cause,
                                     lhs,
                                     rhs,
                                     RelationMode::Equate,
@@ -671,7 +671,7 @@ impl BodyCtxt<'_, '_> {
                             }
                             EquateOrSet::Unrelated(rhs_set) => {
                                 if let Err(err) =
-                                    prim_fork.unify_ty_and_simple_set(&origin, lhs, rhs_set)
+                                    prim_fork.unify_ty_and_simple_set(&cause, lhs, rhs_set)
                                 {
                                     break 'try_prim ClauseError::TyAndSimpleTySetUnifyError(err);
                                 }
@@ -692,7 +692,7 @@ impl BodyCtxt<'_, '_> {
                         );
 
                         self.ccx_mut().oblige_ty_meets_trait_instantiated(
-                            origin,
+                            cause,
                             HrtbUniverse::ROOT,
                             lhs,
                             TraitSpec {
@@ -705,7 +705,7 @@ impl BodyCtxt<'_, '_> {
                         );
                     }
 
-                    fallback_err.emit(&prim_fork);
+                    fallback_err.report(&prim_fork);
                 }
 
                 tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
@@ -739,7 +739,7 @@ impl BodyCtxt<'_, '_> {
                 let index_trait = self.krate().r(s).lang_items.index_trait().unwrap();
 
                 self.ccx_mut().oblige_ty_meets_trait_instantiated(
-                    ClauseOrigin::root_report(ClauseOriginKind::Index {
+                    ObligeCause::new_report(ObligeCauseFrame::Index {
                         target_span: target.r(s).span,
                         index_span: index.r(s).span,
                     }),

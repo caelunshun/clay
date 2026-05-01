@@ -58,7 +58,8 @@ use crate::{
     },
     semantic::{
         analysis::{
-            ClauseCx, ClauseOrigin, ClauseOriginKind, HrtbUniverse, HrtbUniverseInfo, UnifyCxMode,
+            ClauseCx, HrtbUniverse, HrtbUniverseInfo, ObligeCause, ObligeCauseBehavior,
+            ObligeCauseFrame, UnifyCxMode,
         },
         syntax::{
             AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, FnOwner, GenericBinder,
@@ -185,7 +186,10 @@ impl ClauseImporter<'_, '_> {
             .fold_preserved(value);
 
         self.ccx
-            .wf_and_normalize_folder(universe.clone())
+            .wf_and_normalize_folder(
+                ObligeCause::new(ObligeCauseBehavior::Report),
+                universe.clone(),
+            )
             .with_clause_applies_to_opt(self.clause_applies_to)
             .fold_spanned(value)
     }
@@ -202,7 +206,10 @@ impl ClauseImporter<'_, '_> {
         let value = self.ccx.env_substitutor(universe.clone(), env).fold(value);
 
         self.ccx
-            .wf_and_normalize_folder(universe.clone())
+            .wf_and_normalize_folder(
+                ObligeCause::new(ObligeCauseBehavior::DelayBug),
+                universe.clone(),
+            )
             .with_clause_applies_to_opt(self.clause_applies_to)
             .fold(value)
     }
@@ -521,13 +528,13 @@ impl<'tcx> ClauseCx<'tcx> {
                 TyOrRe::Re(var) => {
                     let clauses = HrtbSubstitutionFolder::new(self, vars, s).fold(def.clauses);
 
-                    self.oblige_re_meets_clauses(&ClauseOrigin::delay_bug(), var, clauses);
+                    self.oblige_re_meets_clauses(&ObligeCause::new_delay_bug(), var, clauses);
                 }
                 TyOrRe::Ty(var) => {
                     let clauses = HrtbSubstitutionFolder::new(self, vars, s).fold(def.clauses);
 
                     self.oblige_ty_meets_clauses(
-                        &ClauseOrigin::delay_bug(),
+                        &ObligeCause::new_delay_bug(),
                         universe,
                         var,
                         clauses,
@@ -666,7 +673,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseNormalizer<'_, 'tcx> {
 
         Ok(match *ty.r(s) {
             TyKind::SigProject(projection) => self.normalize_super_normalized_projection(
-                ClauseOrigin::delay_bug(),
+                ObligeCause::new_delay_bug(),
                 own_span,
                 projection,
             ),
@@ -694,7 +701,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseNormalizer<'_, 'tcx> {
 impl ClauseNormalizer<'_, '_> {
     fn normalize_super_normalized_projection(
         &mut self,
-        origin: ClauseOrigin,
+        cause: ObligeCause,
         own_span: Span,
         projection: TyProjection,
     ) -> Ty {
@@ -722,7 +729,7 @@ impl ClauseNormalizer<'_, '_> {
         };
 
         self.ccx
-            .oblige_ty_meets_trait_instantiated(origin, self.universe.clone(), target, spec);
+            .oblige_ty_meets_trait_instantiated(cause, self.universe.clone(), target, spec);
 
         assoc_infer_ty
     }
@@ -793,10 +800,12 @@ impl ClauseNormalizer<'_, '_> {
 impl<'tcx> ClauseCx<'tcx> {
     pub fn wf_and_normalize_folder(
         &mut self,
+        cause: ObligeCause,
         universe: HrtbUniverse,
     ) -> ClauseTyWfFolder<'_, 'tcx> {
         ClauseTyWfFolder {
             ccx: self,
+            cause,
             universe,
             clause_applies_to: None,
         }
@@ -805,6 +814,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
 pub struct ClauseTyWfFolder<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
+    cause: ObligeCause,
     universe: HrtbUniverse,
     clause_applies_to: Option<Ty>,
 }
@@ -848,7 +858,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
         // Universally instantiate the body and WF check it.
         let old_universe = self.universe.clone();
         let new_universe = self.universe.clone().nest(HrtbUniverseInfo {
-            origin: ClauseOrigin::root_report(ClauseOriginKind::WfHrtb {
+            cause: self.cause.clone().child(ObligeCauseFrame::WfHrtb {
                 binder_span: kind.own_span(),
             }),
         });
@@ -891,7 +901,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
                 let pointee = self.fold_spanned(pointee);
 
                 self.ccx.oblige_ty_outlives_re(
-                    ClauseOrigin::root_report(ClauseOriginKind::WfForReference {
+                    self.cause.clone().child(ObligeCauseFrame::WfForReference {
                         pointee: pointee_span,
                     }),
                     pointee,
@@ -922,7 +932,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
                     .ccx
                     .normalizer(self.universe.clone())
                     .normalize_super_normalized_projection(
-                        ClauseOrigin::root_report(ClauseOriginKind::WfTyProjection {
+                        self.cause.clone().child(ObligeCauseFrame::WfTyProjection {
                             span: ty.own_span(),
                         }),
                         ty.own_span(),
@@ -1096,7 +1106,10 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
 
         // Construct an environment, validating the `owner` in the process.
         let env = self.ccx.create_infer_env_for_fn_owner(
-            &ClauseOrigin::root_report(ClauseOriginKind::WfFnDef { fn_ty: own_span }),
+            &self
+                .cause
+                .clone()
+                .child(ObligeCauseFrame::WfFnDef { fn_ty: own_span }),
             &self.universe,
             owner,
         );
@@ -1190,10 +1203,12 @@ impl ClauseTyWfFolder<'_, '_> {
             defs,
             validated_params,
             |_, param_idx, clause_span| {
-                ClauseOrigin::root_report(ClauseOriginKind::WfForGenericParam {
-                    use_span: param_spans[param_idx],
-                    clause_span,
-                })
+                self.cause
+                    .clone()
+                    .child(ObligeCauseFrame::WfForGenericParam {
+                        use_span: param_spans[param_idx],
+                        clause_span,
+                    })
             },
         );
     }

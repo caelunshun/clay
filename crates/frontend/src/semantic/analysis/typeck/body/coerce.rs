@@ -2,7 +2,7 @@ use crate::{
     base::arena::{HasInterner, HasListInterner, Obj},
     semantic::{
         analysis::{
-            BodyCtxt, ClauseCx, ClauseOrigin, ClauseOriginKind, HrtbUniverse,
+            BodyCtxt, ClauseCx, HrtbUniverse, ObligeCause, ObligeCauseFrame,
             attempt_deref_clobber_obligations,
         },
         syntax::{
@@ -67,7 +67,7 @@ impl BodyCtxt<'_, '_> {
         let out_ty = self.apply_coercions(&[(expr, actual)], target);
 
         self.ccx_mut().oblige_ty_unifies_ty(
-            ClauseOrigin::root_report(ClauseOriginKind::Coercion {
+            ObligeCause::new_report(ObligeCauseFrame::Coercion {
                 expr_span: expr.r(s).span,
             }),
             out_ty,
@@ -93,7 +93,7 @@ impl BodyCtxt<'_, '_> {
                     }
 
                     self.ccx_mut().oblige_ty_unifies_ty(
-                        ClauseOrigin::root_report(ClauseOriginKind::Coercion {
+                        ObligeCause::new_report(ObligeCauseFrame::Coercion {
                             expr_span: expr.r(s).span,
                         }),
                         actual,
@@ -146,7 +146,7 @@ impl BodyCtxt<'_, '_> {
                                 );
 
                                 self.ccx_mut().oblige_ty_meets_trait_instantiated(
-                                    ClauseOrigin::root_report(ClauseOriginKind::Coercion {
+                                    ObligeCause::new_report(ObligeCauseFrame::Coercion {
                                         expr_span: expr.r(s).span,
                                     }),
                                     HrtbUniverse::ROOT,
@@ -167,7 +167,7 @@ impl BodyCtxt<'_, '_> {
                     };
 
                     self.ccx_mut().oblige_ty_unifies_ty(
-                        ClauseOrigin::root_report(ClauseOriginKind::Coercion {
+                        ObligeCause::new_report(ObligeCauseFrame::Coercion {
                             expr_span: expr.r(s).span,
                         }),
                         output_ty,
@@ -190,7 +190,7 @@ impl BodyCtxt<'_, '_> {
                     }
 
                     self.ccx_mut().oblige_ty_meets_clauses(
-                        &ClauseOrigin::root_report(ClauseOriginKind::Coercion {
+                        &ObligeCause::new_report(ObligeCauseFrame::Coercion {
                             expr_span: expr.r(s).span,
                         }),
                         HrtbUniverse::ROOT_REF,
@@ -347,7 +347,7 @@ fn compute_deref_glb_clobber_obligations(ccx: &mut ClauseCx<'_>, pointees: &[Ty]
                 .ucx()
                 .clone()
                 .unify_ty_and_ty(
-                    &ClauseOrigin::never_printed(),
+                    &ObligeCause::new_never_report(),
                     first,
                     *other,
                     RelationMode::Equate,

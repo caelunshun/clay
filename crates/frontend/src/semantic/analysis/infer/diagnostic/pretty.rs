@@ -24,6 +24,15 @@ impl<'a, 'tcx> ClauseCxPrinter<'a, 'tcx> {
         }
     }
 
+    pub fn with_fn(
+        ccx: &'a ClauseCx<'tcx>,
+        f: impl FnOnce(&mut ClauseCxPrinter<'a, 'tcx>),
+    ) -> String {
+        let mut printer = ClauseCxPrinter::new(ccx);
+        f(&mut printer);
+        printer.finish()
+    }
+
     pub fn ccx(&self) -> &'a ClauseCx<'tcx> {
         self.ccx
     }

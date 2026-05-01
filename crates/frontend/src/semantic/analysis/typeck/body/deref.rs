@@ -1,7 +1,7 @@
 use crate::{
     base::arena::{HasInterner as _, HasListInterner as _},
     semantic::{
-        analysis::{ClauseCx, ClauseErrorProbe, ClauseOrigin, HrtbUniverse},
+        analysis::{ClauseCx, HrtbUniverse, ObligeCause, ObligeCauseProbe},
         syntax::{InferTyVarSourceInfo, TraitParam, TraitSpec, Ty, TyKind, TyOrRe},
     },
 };
@@ -74,10 +74,10 @@ pub fn attempt_deref_clobber_obligations(ccx: &mut ClauseCx<'_>, curr: Ty) -> Op
     //     bar.bind(Vec::new());
     // }
     // ```
-    let probe = ClauseErrorProbe::default();
+    let probe = ObligeCauseProbe::default();
 
     ccx.oblige_ty_meets_trait_instantiated(
-        ClauseOrigin::probe(probe.clone()),
+        ObligeCause::new_probe(probe.clone()),
         HrtbUniverse::ROOT,
         curr,
         TraitSpec {

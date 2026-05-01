@@ -5,8 +5,8 @@ use crate::{
     },
     semantic::{
         analysis::{
-            ClauseError, ClauseOrigin, CoherenceMap, FloatingInferVar, HrtbUniverse, ObligationCx,
-            ObligationNotReady, ObligationUnfulfilled, RecursionLimitReached,
+            ClauseError, CoherenceMap, FloatingInferVar, HrtbUniverse, ObligationCx,
+            ObligationNotReady, ObligationUnfulfilled, ObligeCause, RecursionLimitReached,
             TyAndSimpleTySetUnifyError, TyAndTyUnifyError, UnifyCx, UnifyCxMode,
             infer::clause::elaboration::WipReificationState,
         },
@@ -23,11 +23,11 @@ const MAX_OBLIGATION_DEPTH: u32 = 256;
 
 #[derive(Debug, Clone)]
 pub enum ClauseObligation {
-    TyUnifiesTy(ClauseOrigin, Ty, Ty, RelationMode),
-    TyMeetsTrait(ClauseOrigin, HrtbUniverse, Ty, TraitSpec),
-    TyOutlivesRe(ClauseOrigin, Ty, Re, RelationDirection),
+    TyUnifiesTy(ObligeCause, Ty, Ty, RelationMode),
+    TyMeetsTrait(ObligeCause, HrtbUniverse, Ty, TraitSpec),
+    TyOutlivesRe(ObligeCause, Ty, Re, RelationDirection),
     UnifyReifiedElaboratedClauses(
-        ClauseOrigin,
+        ObligeCause,
         UniversalTyVar,
         TraitClauseList,
         WipReificationState,
@@ -35,13 +35,13 @@ pub enum ClauseObligation {
 }
 
 impl ClauseObligation {
-    pub fn origin(&self) -> &ClauseOrigin {
-        let (Self::TyUnifiesTy(origin, ..)
-        | Self::TyMeetsTrait(origin, ..)
-        | Self::TyOutlivesRe(origin, ..)
-        | Self::UnifyReifiedElaboratedClauses(origin, ..)) = self;
+    pub fn cause(&self) -> &ObligeCause {
+        let (Self::TyUnifiesTy(cause, ..)
+        | Self::TyMeetsTrait(cause, ..)
+        | Self::TyOutlivesRe(cause, ..)
+        | Self::UnifyReifiedElaboratedClauses(cause, ..)) = self;
 
-        origin
+        cause
     }
 }
 
@@ -91,7 +91,7 @@ pub struct ClauseCx<'tcx> {
     ocx: ObligationCx<'tcx, ClauseObligation>,
     coherence: &'tcx CoherenceMap,
     krate: Obj<Crate>,
-    loud_errors: Option<Vec<ClauseError>>,
+    is_silent: bool,
     pub(super) universal_vars: IndexVec<UniversalTyVar, UniversalTyVarDescriptor>,
 }
 
@@ -119,7 +119,7 @@ impl<'tcx> ClauseCx<'tcx> {
             ocx: ObligationCx::new(tcx, mode),
             coherence,
             krate,
-            loud_errors: Some(Vec::new()),
+            is_silent: false,
             universal_vars: IndexVec::new(),
         }
     }
@@ -149,22 +149,16 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     pub fn is_silent(&self) -> bool {
-        self.loud_errors.is_some()
+        self.is_silent
     }
 
     pub fn make_silent(&mut self) {
-        self.loud_errors = None;
+        self.is_silent = true;
     }
 
     pub fn with_silent(mut self) -> Self {
         self.make_silent();
         self
-    }
-
-    pub fn queue_loud_report(&mut self, error: ClauseError) {
-        if let Some(queue) = &mut self.loud_errors {
-            queue.push(error);
-        }
     }
 
     pub fn mode(&self) -> UnifyCxMode {
@@ -181,33 +175,30 @@ impl<'tcx> ClauseCx<'tcx> {
             |this| &mut this.ocx,
             |this| this.clone(),
             |fork, kind| {
-                if kind.origin().depth() > MAX_OBLIGATION_DEPTH {
-                    kind.origin().report(
-                        RecursionLimitReached {
-                            origin: kind.origin().clone(),
-                        }
-                        .into(),
-                        fork,
-                    );
+                if kind.cause().depth() > MAX_OBLIGATION_DEPTH {
+                    RecursionLimitReached {
+                        cause: kind.cause().clone(),
+                    }
+                    .report(fork);
 
                     return Ok(());
                 }
 
                 match kind {
-                    ClauseObligation::TyUnifiesTy(origin, lhs, rhs, mode) => {
-                        if let Err(err) = fork.ucx_mut().unify_ty_and_ty(&origin, lhs, rhs, mode) {
-                            origin.report((*err).into(), fork);
+                    ClauseObligation::TyUnifiesTy(cause, lhs, rhs, mode) => {
+                        if let Err(err) = fork.ucx_mut().unify_ty_and_ty(&cause, lhs, rhs, mode) {
+                            ClauseError::from(*err).report(fork);
                         }
 
                         Ok(())
                     }
-                    ClauseObligation::TyMeetsTrait(origin, lhs, rhs, universe) => {
+                    ClauseObligation::TyMeetsTrait(cause, lhs, rhs, universe) => {
                         match fork
-                            .run_oblige_ty_meets_trait_instantiated(&origin, lhs, rhs, universe)
+                            .run_oblige_ty_meets_trait_instantiated(&cause, lhs, rhs, universe)
                         {
                             Ok(Ok(())) => Ok(()),
                             Ok(Err(err)) => {
-                                origin.report(err.into(), fork);
+                                err.report(fork);
                                 Ok(())
                             }
                             Err(ObligationNotReady) => Err(ObligationNotReady),
@@ -392,55 +383,50 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn oblige_re_outlives_re(
         &mut self,
-        origin: ClauseOrigin,
+        cause: ObligeCause,
         lhs: Re,
         rhs: Re,
         mode: RelationMode,
     ) {
-        self.ucx_mut().unify_re_and_re(&origin, lhs, rhs, mode);
+        self.ucx_mut().unify_re_and_re(&cause, lhs, rhs, mode);
     }
 
     pub fn oblige_ty_unifies_ty(
         &mut self,
-        origin: ClauseOrigin,
+        cause: ObligeCause,
         lhs: Ty,
         rhs: Ty,
         mode: RelationMode,
     ) {
-        self.push_obligation(ClauseObligation::TyUnifiesTy(origin, lhs, rhs, mode));
+        self.push_obligation(ClauseObligation::TyUnifiesTy(cause, lhs, rhs, mode));
     }
 
     pub fn unify_ty_and_ty(
         &mut self,
-        origin: &ClauseOrigin,
+        cause: &ObligeCause,
         lhs: Ty,
         rhs: Ty,
         mode: RelationMode,
     ) -> Result<(), Box<TyAndTyUnifyError>> {
-        self.ucx_mut().unify_ty_and_ty(origin, lhs, rhs, mode)
+        self.ucx_mut().unify_ty_and_ty(cause, lhs, rhs, mode)
     }
 
     pub fn unify_ty_and_simple_set(
         &mut self,
-        origin: &ClauseOrigin,
+        cause: &ObligeCause,
         lhs: Ty,
         rhs: SimpleTySet,
     ) -> Result<(), TyAndSimpleTySetUnifyError> {
-        self.ucx_mut().unify_ty_and_simple_set(origin, lhs, rhs)
+        self.ucx_mut().unify_ty_and_simple_set(cause, lhs, rhs)
     }
 
-    pub fn oblige_re_meets_clauses(
-        &mut self,
-        origin: &ClauseOrigin,
-        lhs: Re,
-        rhs: TraitClauseList,
-    ) {
+    pub fn oblige_re_meets_clauses(&mut self, cause: &ObligeCause, lhs: Re, rhs: TraitClauseList) {
         let s = self.session();
 
         for &clause in rhs.r(s) {
             match clause {
                 TraitClause::Outlives(dir, rhs) => {
-                    self.oblige_general_outlives(origin.clone(), TyOrRe::Re(lhs), rhs, dir);
+                    self.oblige_general_outlives(cause.clone(), TyOrRe::Re(lhs), rhs, dir);
                 }
                 TraitClause::Trait(_) => {
                     unreachable!()
@@ -453,20 +439,10 @@ impl<'tcx> ClauseCx<'tcx> {
         self.poll_obligations();
 
         for obligation in self.ocx.pending_obligations().to_vec() {
-            obligation.origin().report(
-                ClauseError::ObligationUnfulfilled(ObligationUnfulfilled {
-                    obligation: obligation.clone(),
-                }),
-                self,
-            );
-        }
-
-        let Some(errors) = &self.loud_errors else {
-            unreachable!()
-        };
-
-        for error in errors {
-            error.emit(self);
+            ObligationUnfulfilled {
+                obligation: obligation.clone(),
+            }
+            .report(self);
         }
 
         self.ucx().verify(self);

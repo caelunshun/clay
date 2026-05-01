@@ -5,8 +5,8 @@ use crate::{
     },
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnv, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind,
-            HrtbUniverse,
+            ClauseCx, ClauseImportEnv, ClauseImportEnvRef, HrtbUniverse, ObligeCause,
+            ObligeCauseFrame,
         },
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnInstanceInner,
@@ -286,7 +286,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn create_infer_env_for_binder_list(
         &mut self,
-        origin: &ClauseOrigin,
+        cause: &ObligeCause,
         universe: &HrtbUniverse,
         mut base_env: ClauseImportEnv,
         binders: &[Obj<GenericBinder>],
@@ -296,7 +296,7 @@ impl<'tcx> ClauseCx<'tcx> {
         base_env.sig_generic_substs.extend_from_slice(&substs);
 
         // Register clause obligations.
-        self.oblige_import_env_meets_own_binder_clauses(origin, universe, base_env.as_ref());
+        self.oblige_import_env_meets_own_binder_clauses(cause, universe, base_env.as_ref());
 
         base_env
     }
@@ -341,7 +341,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn oblige_import_env_meets_own_binder_clauses(
         &mut self,
-        origin: &ClauseOrigin,
+        cause: &ObligeCause,
         universe: &HrtbUniverse,
         env: ClauseImportEnvRef<'_>,
     ) {
@@ -354,9 +354,9 @@ impl<'tcx> ClauseCx<'tcx> {
                 &subst.binder.r(s).defs,
                 subst.substs.r(s),
                 |_this, _idx, clause| {
-                    origin
+                    cause
                         .clone()
-                        .child(ClauseOriginKind::GenericRequirements { clause })
+                        .child(ObligeCauseFrame::GenericRequirements { clause })
                 },
             );
         }
@@ -368,7 +368,7 @@ impl<'tcx> ClauseCx<'tcx> {
         def_env: ClauseImportEnvRef<'_>,
         defs: &[AnyGeneric],
         args: &[TyOrRe],
-        mut gen_origin: impl FnMut(&mut Self, usize, Span) -> ClauseOrigin,
+        mut gen_cause: impl FnMut(&mut Self, usize, Span) -> ObligeCause,
     ) {
         let s = self.session();
         let tcx = self.tcx();
@@ -385,13 +385,13 @@ impl<'tcx> ClauseCx<'tcx> {
                             unreachable!()
                         };
 
-                        let origin = gen_origin(self, i, clause_span);
+                        let cause = gen_cause(self, i, clause_span);
 
                         let must_outlive =
                             self.import_report_elsewhere(universe, def_env, must_outlive.value);
 
                         self.oblige_general_outlives(
-                            origin,
+                            cause,
                             TyOrRe::Re(target),
                             must_outlive,
                             must_outlive_dir,
@@ -400,7 +400,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 }
                 (AnyGeneric::Ty(generic), TyOrRe::Ty(target)) => {
                     for clause in generic.r(s).clauses.iter(tcx) {
-                        let origin = gen_origin(self, i, clause.own_span());
+                        let cause = gen_cause(self, i, clause.own_span());
 
                         let clause = self
                             .importer()
@@ -410,14 +410,14 @@ impl<'tcx> ClauseCx<'tcx> {
                         match clause {
                             TraitClause::Outlives(must_outlive_dir, must_outlive) => {
                                 self.oblige_general_outlives(
-                                    origin,
+                                    cause,
                                     TyOrRe::Ty(target),
                                     must_outlive,
                                     must_outlive_dir,
                                 );
                             }
                             TraitClause::Trait(rhs) => {
-                                self.oblige_ty_meets_trait(origin, universe.clone(), target, rhs);
+                                self.oblige_ty_meets_trait(cause, universe.clone(), target, rhs);
                             }
                         }
                     }
@@ -475,7 +475,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn create_infer_env_for_fn_owner(
         &mut self,
-        origin: &ClauseOrigin,
+        cause: &ObligeCause,
         universe: &HrtbUniverse,
         owner: FnOwner,
     ) -> ClauseImportEnv {
@@ -500,7 +500,7 @@ impl<'tcx> ClauseCx<'tcx> {
                                 universe.clone(),
                                 InferTyVarSourceInfo::TraitAssocPlaceholderHelper,
                             );
-                            self.oblige_ty_meets_clauses(origin, universe, ty, clauses);
+                            self.oblige_ty_meets_clauses(cause, universe, ty, clauses);
 
                             TyOrRe::Ty(ty)
                         }
@@ -519,7 +519,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 let params = tcx.intern_list(&params);
 
                 self.oblige_ty_meets_trait_instantiated(
-                    origin.clone(),
+                    cause.clone(),
                     universe.clone(),
                     self_ty,
                     TraitSpec {
@@ -542,7 +542,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 method_idx: _,
             } => {
                 let env = self.create_infer_env_for_binder_list(
-                    origin,
+                    cause,
                     universe,
                     ClauseImportEnv::new(self_ty, Vec::new()),
                     &[block.r(s).generics],
@@ -552,7 +552,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     self.import_report_elsewhere(&universe, env.as_ref(), block.r(s).target.value);
 
                 self.oblige_ty_unifies_ty(
-                    origin.clone(),
+                    cause.clone(),
                     self_ty,
                     expected_self_ty,
                     RelationMode::Equate,
@@ -565,7 +565,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn create_infer_env_for_fn_instance(
         &mut self,
-        origin: &ClauseOrigin,
+        cause: &ObligeCause,
         universe: &HrtbUniverse,
         instance: FnInstance,
     ) -> ClauseImportEnv {
@@ -573,7 +573,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
         let FnInstanceInner { owner, early_args } = *instance.r(s);
 
-        let mut env = self.create_infer_env_for_fn_owner(origin, universe, owner);
+        let mut env = self.create_infer_env_for_fn_owner(cause, universe, owner);
         let def = owner.def(s);
 
         if let Some(early_args) = early_args {
@@ -582,8 +582,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 substs: early_args,
             });
         } else {
-            env =
-                self.create_infer_env_for_binder_list(origin, universe, env, &[def.r(s).generics]);
+            env = self.create_infer_env_for_binder_list(cause, universe, env, &[def.r(s).generics]);
         }
 
         env

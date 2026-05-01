@@ -5,8 +5,8 @@ use crate::{
     },
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, ClauseOrigin, CrateBorrowCheckVisitor, HrtbUniverse,
-            MirDataflowFacts, UnifyCxMode,
+            ClauseCx, ClauseImportEnvRef, CrateBorrowCheckVisitor, HrtbUniverse, MirDataflowFacts,
+            ObligeCause, ObligeCauseBehavior, UnifyCxMode,
         },
         syntax::{
             FnDef, IntKind, MirAssignRvalue, MirBlock, MirBody, MirLocal, MirLocalIdx, MirOperand,
@@ -92,7 +92,8 @@ impl BodyInstantiateCx<'_, '_> {
             .import_report_elsewhere(&HrtbUniverse::ROOT, self.env, local.ty);
 
         self.ccx.oblige_ty_outlives_re(
-            ClauseOrigin::empty_report(),
+            // TODO
+            ObligeCause::new(ObligeCauseBehavior::Report),
             local.ty,
             self.local_universals[local_idx],
             RelationDirection::LhsOntoRhs,
@@ -200,7 +201,8 @@ impl<'tcx> RegionCheckCx<'_, 'tcx> {
                 let rhs_ty = self.check_rvalue(rhs);
 
                 self.ccx.oblige_ty_unifies_ty(
-                    ClauseOrigin::empty_report(),
+                    // TODO
+                    ObligeCause::new(ObligeCauseBehavior::Report),
                     rhs_ty,
                     lhs_ty,
                     RelationMode::LhsOntoRhs,
@@ -249,7 +251,8 @@ impl<'tcx> RegionCheckCx<'_, 'tcx> {
                 );
 
                 self.ccx.oblige_ty_meets_trait_instantiated(
-                    ClauseOrigin::empty_report(),
+                    // TODO
+                    ObligeCause::new(ObligeCauseBehavior::Report),
                     HrtbUniverse::ROOT,
                     callee,
                     TraitSpec {
@@ -324,7 +327,7 @@ impl<'tcx> RegionCheckCx<'_, 'tcx> {
                 let rhs = self.check_operand(*rhs);
 
                 self.ccx.oblige_ty_unifies_ty(
-                    ClauseOrigin::never_printed(),
+                    ObligeCause::new_never_report(),
                     lhs,
                     rhs,
                     RelationMode::Equate,

@@ -2,8 +2,8 @@ use crate::{
     base::{Session, arena::Obj},
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, ClauseOrigin, ClauseOriginKind, CoherenceMap,
-            HrtbUniverse, UnifyCxMode,
+            ClauseCx, ClauseImportEnvRef, CoherenceMap, HrtbUniverse, ObligeCause,
+            ObligeCauseFrame, UnifyCxMode,
         },
         syntax::{
             AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FnItem, GenericBinder, GenericSubst,
@@ -133,7 +133,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
                 );
 
                 ccx.oblige_ty_meets_clause(
-                    ClauseOrigin::root_report(ClauseOriginKind::WfSuperTrait {
+                    ObligeCause::new_report(ObligeCauseFrame::WfSuperTrait {
                         block: target.own_span(),
                         clause: super_clause_span,
                     }),

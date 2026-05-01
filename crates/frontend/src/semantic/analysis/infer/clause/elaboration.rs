@@ -44,8 +44,9 @@ use crate::{
     base::arena::{HasInterner, HasListInterner},
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, ClauseObligation, ClauseOrigin, FloatingInferVar,
-            HrtbUniverse, ObligationNotReady, ObligationResult, UniversalElaboration,
+            ClauseCx, ClauseImportEnvRef, ClauseObligation, FloatingInferVar, HrtbUniverse,
+            ObligationNotReady, ObligationResult, ObligeCause, ObligeCauseBehavior,
+            UniversalElaboration,
         },
         syntax::{
             AnyGeneric, GenericSubst, HrtbBinder, InferTyVar, InferTyVarSourceInfo, Mutability, Re,
@@ -245,7 +246,7 @@ impl<'tcx> ClauseCx<'tcx> {
         // Create an obligation to properly resolve reified associated type inference variables to
         // proper universals (see module comment).
         self.push_obligation(ClauseObligation::UnifyReifiedElaboratedClauses(
-            ClauseOrigin::empty_report(),
+            ObligeCause::new(ObligeCauseBehavior::Report),
             var,
             elaborated,
             reified_vars.clone(),
@@ -264,7 +265,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub(super) fn oblige_unify_reified_elaborated_clauses(
         &mut self,
-        origin: &ClauseOrigin,
+        cause: &ObligeCause,
         root: UniversalTyVar,
         clauses: TraitClauseList,
         reified_vars: WipReificationState,
@@ -469,7 +470,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     }
 
                     self.oblige_ty_unifies_ty(
-                        origin.clone(),
+                        cause.clone(),
                         resolved,
                         actual,
                         RelationMode::Equate,
@@ -484,7 +485,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 let fresh_re = self.fresh_re_infer();
 
                 self.oblige_ty_unifies_ty(
-                    origin.clone(),
+                    cause.clone(),
                     tcx.intern(TyKind::Trait(
                         fresh_re,
                         Mutability::Mut,

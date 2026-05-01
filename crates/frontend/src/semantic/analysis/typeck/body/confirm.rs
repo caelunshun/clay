@@ -1,7 +1,7 @@
 use crate::{
     base::arena::{HasInterner, HasListInterner, LateInit, Obj},
     semantic::{
-        analysis::{BodyCtxt, ClauseOrigin, FloatingInferVar, OverloadResolution},
+        analysis::{BodyCtxt, FloatingInferVar, ObligeCause, OverloadResolution},
         syntax::{
             FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirLocal, HirPat, HirPatKind,
             HirStmt, RelationMode, ThirBlock, ThirExpr, ThirExprKind, ThirLetStmt, ThirLocal,
@@ -35,7 +35,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             };
 
             _ = self.ucx_mut().unify_ty_and_ty(
-                &ClauseOrigin::never_printed(),
+                &ObligeCause::new_never_report(),
                 var_ty,
                 fallback,
                 RelationMode::Equate,

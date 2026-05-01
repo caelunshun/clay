@@ -1,7 +1,7 @@
 use crate::{
     base::ErrorGuaranteed,
     semantic::{
-        analysis::{ClauseCx, ClauseOrigin, ReAndReUnifyError},
+        analysis::{ClauseCx, ObligeCause, ReAndReUnifyError},
         syntax::{InferReVar, Re, RelationDirection, UniversalReVar, UniversalReVarSourceInfo},
     },
     utils::hash::FxHashSet,
@@ -43,7 +43,7 @@ struct ReUniversalState {
 struct ReConstraint {
     lhs: InferRe,
     rhs: InferRe,
-    origin: ClauseOrigin,
+    cause: ObligeCause,
 }
 
 impl Default for ReUnifyTracker {
@@ -75,12 +75,12 @@ impl ReUnifyTracker {
         var
     }
 
-    pub fn constrain(&mut self, origin: ClauseOrigin, lhs: Re, rhs: Re) {
+    pub fn constrain(&mut self, cause: ObligeCause, lhs: Re, rhs: Re) {
         let (Ok(lhs), Ok(rhs)) = (InferRe::from_re(lhs), InferRe::from_re(rhs)) else {
             return;
         };
 
-        self.constraints.push(ReConstraint { lhs, rhs, origin });
+        self.constraints.push(ReConstraint { lhs, rhs, cause });
     }
 
     pub fn permit(&mut self, universal: UniversalReVar, other: Re, dir: RelationDirection) {
@@ -108,14 +108,16 @@ impl ReUnifyTracker {
                     return Ok(());
                 }
 
-                Err(ReAndReUnifyError {
-                    origin: cst.origin.clone(),
+                ReAndReUnifyError {
+                    cause: cst.cause.clone(),
                     lhs: cst.lhs.to_re(),
                     rhs: cst.rhs.to_re(),
                     requires_var: var,
                     to_outlive: must_outlive.to_re(),
                 }
-                .emit(ccx))
+                .report(ccx);
+
+                Err(ErrorGuaranteed::new_unchecked())
             })
         }
     }
