@@ -5,18 +5,18 @@ use crate::{
     },
     semantic::{
         analysis::{
-            ClauseCx, ClauseOrigin, CrateBorrowCheckVisitor, HrtbUniverse, MirDataflowFacts,
-            UnifyCxMode,
+            ClauseCx, ClauseImportEnvRef, ClauseOrigin, CrateBorrowCheckVisitor, HrtbUniverse,
+            MirDataflowFacts, UnifyCxMode,
         },
         syntax::{
-            FnDef, IntKind, MirAssignRvalue, MirBody, MirLocalIdx, MirOperand, MirPlace,
-            MirPlaceElem, MirStmt, MirStmtKind, MirTerminator, Re, RelationDirection, RelationMode,
-            SimpleTyKind, TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe,
+            FnDef, IntKind, MirAssignRvalue, MirBlock, MirBody, MirLocal, MirLocalIdx, MirOperand,
+            MirPlace, MirPlaceElem, MirStmt, MirStmtKind, MirTerminator, Re, RelationDirection,
+            RelationMode, SimpleTyKind, TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe,
             UniversalReVarSourceInfo,
         },
     },
 };
-use index_vec::IndexVec;
+use index_vec::{IndexSlice, IndexVec};
 
 impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
     pub fn borrow_check(&self, def: Obj<FnDef>, body: &MirBody, df: &MirDataflowFacts) {
@@ -48,20 +48,12 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
             }
         }
 
-        // Import all types within the body and ensure that they're well-formed. Additionally, local
-        // types must outlive the universal region associated with that local.
-        for (local_idx, local) in body.locals.iter_mut_enumerated() {
-            local.ty = ccx.import_report_elsewhere(&HrtbUniverse::ROOT, env.as_ref(), local.ty);
-
-            ccx.oblige_ty_outlives_re(
-                ClauseOrigin::empty_report(),
-                local.ty,
-                local_universals[local_idx],
-                RelationDirection::LhsOntoRhs,
-            );
+        BodyInstantiateCx {
+            ccx: &mut ccx,
+            env: env.as_ref(),
+            local_universals: local_universals.as_slice(),
         }
-
-        // TODO: Import
+        .visit_body(&mut body);
 
         // Type-check the MIR body to create obligations between regions.
         RegionCheckCx {
@@ -75,10 +67,109 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
     }
 }
 
-pub struct RegionCheckCx<'a, 'tcx> {
-    pub ccx: &'a mut ClauseCx<'tcx>,
-    pub body: &'a MirBody,
-    pub local_universals: &'a IndexVec<MirLocalIdx, Re>,
+struct BodyInstantiateCx<'a, 'tcx> {
+    ccx: &'a mut ClauseCx<'tcx>,
+    env: ClauseImportEnvRef<'a>,
+    local_universals: &'a IndexSlice<MirLocalIdx, [Re]>,
+}
+
+impl BodyInstantiateCx<'_, '_> {
+    fn visit_body(&mut self, body: &mut MirBody) {
+        for (local_idx, local) in body.locals.iter_mut_enumerated() {
+            self.visit_local(local_idx, local);
+        }
+
+        for block in &mut body.blocks {
+            self.visit_block(block);
+        }
+    }
+
+    // Import all types within the body and ensure that they're well-formed. Additionally, local
+    // types must outlive the universal region associated with that local.
+    fn visit_local(&mut self, local_idx: MirLocalIdx, local: &mut MirLocal) {
+        local.ty = self
+            .ccx
+            .import_report_elsewhere(&HrtbUniverse::ROOT, self.env, local.ty);
+
+        self.ccx.oblige_ty_outlives_re(
+            ClauseOrigin::empty_report(),
+            local.ty,
+            self.local_universals[local_idx],
+            RelationDirection::LhsOntoRhs,
+        );
+    }
+
+    fn visit_block(&mut self, block: &mut MirBlock) {
+        for stmt in &mut block.stmts {
+            self.visit_statement(stmt);
+        }
+
+        self.visit_terminator(&mut block.terminator);
+    }
+
+    fn visit_statement(&mut self, stmt: &mut MirStmt) {
+        match &mut stmt.kind {
+            MirStmtKind::Assign(assign) => {
+                let (_lhs, rhs) = &mut **assign;
+                self.visit_rvalue(rhs);
+            }
+            MirStmtKind::Discard(_) => {
+                // (terminal)
+            }
+        }
+    }
+
+    fn visit_terminator(&mut self, terminator: &mut MirTerminator) {
+        match terminator {
+            MirTerminator::Goto(_)
+            | MirTerminator::Call {
+                callee: _,
+                args: _,
+                destination: _,
+                target: _,
+            }
+            | MirTerminator::Drop {
+                place: _,
+                target: _,
+            }
+            | MirTerminator::Switch {
+                scrutinee: _,
+                targets: _,
+            }
+            | MirTerminator::Return
+            | MirTerminator::Unreachable
+            | MirTerminator::Placeholder => {
+                // (terminal)
+            }
+        }
+    }
+
+    fn visit_rvalue(&mut self, rvalue: &mut MirAssignRvalue) {
+        match rvalue {
+            MirAssignRvalue::Tuple(_)
+            | MirAssignRvalue::Use(_)
+            | MirAssignRvalue::Ref(_, _)
+            | MirAssignRvalue::BinaryOp(_, _)
+            | MirAssignRvalue::UnaryOp(_, _)
+            | MirAssignRvalue::Discriminant(_) => {
+                // (no types)
+            }
+            MirAssignRvalue::Literal(_, _) => {
+                // (ty is uninteresting)
+            }
+            MirAssignRvalue::Zst(ty) => {
+                *ty = self
+                    .ccx
+                    .import_report_elsewhere(HrtbUniverse::ROOT_REF, self.env, *ty);
+            }
+        }
+    }
+}
+
+struct RegionCheckCx<'a, 'tcx> {
+    ccx: &'a mut ClauseCx<'tcx>,
+    body: &'a MirBody,
+    local_universals: &'a IndexVec<MirLocalIdx, Re>,
 }
 
 impl<'tcx> RegionCheckCx<'_, 'tcx> {

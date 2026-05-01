@@ -51,6 +51,10 @@ trait Projector {
     type Out;
 }
 
+impl Projector for () {
+    type Out = ();
+}
+
 trait Helper<T> {
     fn meow(me: Self);
 }
@@ -59,4 +63,5 @@ trait Helper<T> {
 // `HrtbSubstitutionFolder` is used.
 fn uh_oh<Q: for<T: Projector> Helper<<T as Projector>::Out>>(v: Q) {
     Helper::<_>::meow(v);
+    Helper::<()>::meow(v);
 }

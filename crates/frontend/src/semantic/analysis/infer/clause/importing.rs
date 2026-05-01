@@ -61,15 +61,15 @@ use crate::{
             ClauseCx, ClauseOrigin, ClauseOriginKind, HrtbUniverse, HrtbUniverseInfo, UnifyCxMode,
         },
         syntax::{
-            AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, GenericBinder, GenericSubst,
-            HrtbBinder, HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef, HrtbDebruijnDefList,
-            InferTyVarSourceInfo, Re, RelationDirection, SpannedAdtInstance, SpannedFnInstance,
-            SpannedHrtbBinder, SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedRe,
-            SpannedTraitInstance, SpannedTraitSpec, SpannedTy, SpannedTyOrReList, SpannedTyView,
-            TraitClause, TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt, TyFoldable, TyFolder,
-            TyFolderExt, TyFolderInfallibleExt, TyFolderPreservesSpans, TyKind, TyOrRe, TyOrReKind,
-            TyOrReList, TyProjection, TyVisitable, TypeAliasItem, UniversalReVarSourceInfo,
-            UniversalTyVarSourceInfo,
+            AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, FnOwner, GenericBinder,
+            GenericSubst, HrtbBinder, HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef,
+            HrtbDebruijnDefList, InferTyVarSourceInfo, Re, RelationDirection, SpannedAdtInstance,
+            SpannedFnInstance, SpannedFnOwner, SpannedFnOwnerView, SpannedHrtbBinder,
+            SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedRe, SpannedTraitInstance,
+            SpannedTraitSpec, SpannedTy, SpannedTyView, TraitClause, TraitInstance, TraitParam,
+            TraitSpec, Ty, TyCtxt, TyFoldable, TyFolder, TyFolderExt, TyFolderInfallibleExt,
+            TyFolderPreservesSpans, TyKind, TyOrRe, TyOrReKind, TyOrReList, TyProjection,
+            TyVisitable, TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
@@ -665,9 +665,11 @@ impl<'tcx> TyFolder<'tcx> for ClauseNormalizer<'_, 'tcx> {
         let ty = self.super_spanned(ty);
 
         Ok(match *ty.r(s) {
-            TyKind::SigProject(projection) => {
-                self.normalize_super_normalized_projection(own_span, projection)
-            }
+            TyKind::SigProject(projection) => self.normalize_super_normalized_projection(
+                ClauseOrigin::delay_bug(),
+                own_span,
+                projection,
+            ),
             TyKind::SigAlias(def, args) => {
                 self.normalize_super_normalized_alias(own_span, def, args)
             }
@@ -692,6 +694,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseNormalizer<'_, 'tcx> {
 impl ClauseNormalizer<'_, '_> {
     fn normalize_super_normalized_projection(
         &mut self,
+        origin: ClauseOrigin,
         own_span: Span,
         projection: TyProjection,
     ) -> Ty {
@@ -718,12 +721,8 @@ impl ClauseNormalizer<'_, '_> {
             }
         };
 
-        self.ccx.oblige_ty_meets_trait_instantiated(
-            ClauseOrigin::never_printed(),
-            self.universe.clone(),
-            target,
-            spec,
-        );
+        self.ccx
+            .oblige_ty_meets_trait_instantiated(origin, self.universe.clone(), target, spec);
 
         assoc_infer_ty
     }
@@ -923,6 +922,9 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
                     .ccx
                     .normalizer(self.universe.clone())
                     .normalize_super_normalized_projection(
+                        ClauseOrigin::root_report(ClauseOriginKind::WfTyProjection {
+                            span: ty.own_span(),
+                        }),
                         ty.own_span(),
                         TyProjection {
                             target,
@@ -940,7 +942,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
                 let args = self.fold(args);
 
                 // TODO: Move to env utilities
-                self.check_generic_values_zip(
+                self.check_generic_values(
                     // Cannot use `Self` in type alias.
                     tcx.intern(TyKind::SigThis),
                     def.r(s).generics,
@@ -1008,7 +1010,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
         // `impl` is found, we just rely on the fact that `impl` WF checks already validated the
         // type for its clauses and ensure that our `impl` matches what the trait spec said it would
         // contain.
-        self.check_generic_values_zip(
+        self.check_generic_values(
             self.clause_applies_to.unwrap(),
             *spec.def.r(s).generics,
             [],
@@ -1036,7 +1038,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
 
         let instance = self.super_spanned(instance);
 
-        self.check_generic_values_zip(
+        self.check_generic_values(
             self.clause_applies_to.unwrap(),
             *instance.def.r(s).generics,
             [],
@@ -1065,7 +1067,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
         let instance = self.super_spanned(instance);
 
         // Check generics
-        self.check_generic_values_zip(
+        self.check_generic_values(
             tcx.intern(TyKind::Adt(instance)),
             instance.def.r(s).generics,
             [],
@@ -1101,7 +1103,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
 
         // Validate the `early_args`.
         if let Some(early_args) = early_args {
-            self.check_generic_values_zip(
+            self.check_generic_values(
                 env.self_ty,
                 owner.def(s).r(s).generics,
                 env.sig_generic_substs.iter().copied(),
@@ -1113,33 +1115,44 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
 
         Ok(instance)
     }
+
+    fn fold_fn_owner(&mut self, owner: SpannedFnOwner) -> Result<FnOwner, Self::Error> {
+        let tcx = self.tcx();
+
+        match owner.view(tcx) {
+            SpannedFnOwnerView::Item(def) => Ok(FnOwner::Item(def)),
+            SpannedFnOwnerView::Trait {
+                instance,
+                self_ty,
+                method_idx,
+            } => {
+                let self_ty = self.fold_spanned(self_ty);
+
+                let old_clause_applies_to = self.clause_applies_to.replace(self_ty);
+                let instance = self.fold_spanned(instance);
+                self.clause_applies_to = old_clause_applies_to;
+
+                Ok(FnOwner::Trait {
+                    instance,
+                    self_ty,
+                    method_idx,
+                })
+            }
+            SpannedFnOwnerView::Inherent {
+                self_ty,
+                block,
+                method_idx,
+            } => Ok(FnOwner::Inherent {
+                self_ty: self.fold_spanned(self_ty),
+                block,
+                method_idx,
+            }),
+        }
+    }
 }
 
 impl ClauseTyWfFolder<'_, '_> {
     fn check_generic_values(
-        &mut self,
-        clause_applies_to: Ty,
-        binder: Obj<GenericBinder>,
-        extra_def_substs: impl IntoIterator<Item = GenericSubst>,
-        all_params: SpannedTyOrReList,
-        validate_count: Option<u32>,
-    ) {
-        let tcx = self.tcx();
-
-        self.check_generic_values_zip(
-            clause_applies_to,
-            binder,
-            extra_def_substs,
-            all_params.value,
-            &all_params
-                .iter(tcx)
-                .map(|v| v.own_span())
-                .collect::<Vec<_>>(),
-            validate_count,
-        );
-    }
-
-    fn check_generic_values_zip(
         &mut self,
         clause_applies_to: Ty,
         binder: Obj<GenericBinder>,

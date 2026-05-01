@@ -33,8 +33,10 @@ impl ClauseErrorSink {
                 // TODO
                 eprintln!("Delay bug: {loc}")
             }
-            ClauseErrorSink::NeverReport(_) => {
-                unreachable!();
+            ClauseErrorSink::NeverReport(loc) => {
+                unreachable!(
+                    "clause origin created at {loc} was never supposed to result in a diagnostic error"
+                );
             }
             ClauseErrorSink::Probe(probe) => {
                 probe.mark_error();

@@ -77,7 +77,10 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxExporter<'_, 'tcx> {
                 )
                 .emit(),
 
-                InferTyVarSourceInfo::UniversalElabHelper => todo!(),
+                // TODO
+                InferTyVarSourceInfo::UniversalElabHelper => {
+                    Diag::anon_err("universal elab helper went uninferred, good luck!").emit()
+                }
                 InferTyVarSourceInfo::TraitAssocPlaceholderHelper => todo!(),
                 InferTyVarSourceInfo::UnifyHelper => todo!(),
                 InferTyVarSourceInfo::DerefHelper => todo!(),

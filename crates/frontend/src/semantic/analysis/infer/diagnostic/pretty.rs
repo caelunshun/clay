@@ -3,9 +3,9 @@ use crate::{
     semantic::{
         analysis::ClauseCx,
         syntax::{
-            AdtInstance, AnyGeneric, FloatKind, HrtbBinderKind, IntKind, Re, SimpleTyKind,
-            SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyKind,
-            TyOrRe, UniversalTyVar, UniversalTyVarSourceInfo,
+            AdtInstance, AnyGeneric, FloatKind, FnInstanceInner, FnOwner, HrtbBinderKind, IntKind,
+            Re, SimpleTyKind, SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty,
+            TyCtxt, TyKind, TyOrRe, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -121,7 +121,64 @@ impl<'a, 'tcx> ClauseCxPrinter<'a, 'tcx> {
                     self.out.push(')');
                 }
             }
-            TyKind::FnDef(_def) => todo!(),
+            TyKind::FnDef(def) => {
+                let FnInstanceInner { owner, early_args } = *def.r(s);
+
+                self.out.push_str("fn @ ");
+
+                match owner {
+                    FnOwner::Item(def) => {
+                        write!(&mut self.out, "{}", def.r(s).item.r(s).display_path(s)).unwrap();
+                    }
+                    FnOwner::Trait {
+                        instance,
+                        self_ty,
+                        method_idx,
+                    } => {
+                        self.out.push_str("<");
+                        self.push_ty(self_ty);
+                        self.out.push_str(" as ");
+                        self.push_trait_spec(instance);
+                        self.out.push_str(">::");
+                        self.out.push_str(
+                            instance.def.r(s).methods[method_idx as usize]
+                                .r(s)
+                                .name
+                                .text
+                                .as_str(s),
+                        );
+                    }
+                    FnOwner::Inherent {
+                        self_ty,
+                        block,
+                        method_idx,
+                    } => {
+                        self.push_ty(self_ty);
+                        self.out.push_str("::");
+                        self.out.push_str(
+                            block.r(s).methods[method_idx as usize]
+                                .unwrap()
+                                .r(s)
+                                .name
+                                .text
+                                .as_str(s),
+                        );
+                    }
+                }
+
+                if let Some(early_args) = early_args {
+                    self.out.push('<');
+
+                    for (idx, &ty_or_re) in early_args.r(s).iter().enumerate() {
+                        if idx > 0 {
+                            self.out.push_str(", ");
+                        }
+                        self.push_ty_or_re(ty_or_re);
+                    }
+
+                    self.out.push('>');
+                }
+            }
             TyKind::HrtbVar(debruijn) => {
                 // TODO
                 write!(&mut self.out, "HrtbVar({:?})", debruijn.0).unwrap();
