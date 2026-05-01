@@ -9,6 +9,8 @@ use fir_frontend::{
 use std::{env, fs, path::Path, rc::Rc};
 
 fn main() {
+    color_eyre::install().unwrap();
+
     let args = env::args().collect::<Vec<String>>();
     let args = args.iter().map(|v| v.as_str()).collect::<Vec<&str>>();
     let args = &args[..];

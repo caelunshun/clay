@@ -40,65 +40,67 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxExporter<'_, 'tcx> {
         let s = self.session();
         let tcx = self.tcx();
 
-        let TyKind::InferVar(var) = *ty.value.r(s) else {
-            return Ok(self.super_(ty.value));
-        };
+        let resolved = if let TyKind::InferVar(var) = *ty.value.r(s) {
+            if let Ok(resolved) = self.ccx.lookup_ty_infer_var_without_poll(var) {
+                resolved
+            } else {
+                let var_ty = tcx.intern(TyKind::InferVar(var));
 
-        let Ok(resolved) = self.ccx.lookup_ty_infer_var_without_poll(var) else {
-            let var_ty = tcx.intern(TyKind::InferVar(var));
+                let error = match self.ccx.lookup_infer_ty_src_info(var) {
+                    InferTyVarSourceInfo::Local { name } => Diag::span_err(
+                        name.span(),
+                        format_args!("type annotations required for local `{name}`"),
+                    )
+                    .emit(),
+                    InferTyVarSourceInfo::HrtbLhsInstantiation { span }
+                    | InferTyVarSourceInfo::ProjectionResult { span, .. }
+                    | InferTyVarSourceInfo::Imported { span, .. }
+                    | InferTyVarSourceInfo::FunctionArgs { span }
+                    | InferTyVarSourceInfo::FunctionRetVal { span }
+                    | InferTyVarSourceInfo::MethodReceiver { span }
+                    | InferTyVarSourceInfo::OverloadedResult { span }
+                    | InferTyVarSourceInfo::Literal { span }
+                    | InferTyVarSourceInfo::ForLoopElem { span }
+                    | InferTyVarSourceInfo::IndexInput { span }
+                    | InferTyVarSourceInfo::IndexOutput { span }
+                    | InferTyVarSourceInfo::LoopDemand { span }
+                    | InferTyVarSourceInfo::HoleInfer { span }
+                    | InferTyVarSourceInfo::PatType { span }
+                    | InferTyVarSourceInfo::EmptyArrayElem { span } => Diag::span_err(
+                        span,
+                        format_args!("failed to infer a type of `{}`", {
+                            let mut printer = ClauseCxPrinter::new(self.ccx);
+                            printer.push_ty(var_ty);
+                            printer.finish()
+                        }),
+                    )
+                    .emit(),
 
-            let error = match self.ccx.lookup_infer_ty_src_info(var) {
-                InferTyVarSourceInfo::Local { name } => Diag::span_err(
-                    name.span(),
-                    format_args!("type annotations required for local `{name}`"),
-                )
-                .emit(),
-                InferTyVarSourceInfo::HrtbLhsInstantiation { span }
-                | InferTyVarSourceInfo::ProjectionResult { span, .. }
-                | InferTyVarSourceInfo::Imported { span, .. }
-                | InferTyVarSourceInfo::FunctionArgs { span }
-                | InferTyVarSourceInfo::FunctionRetVal { span }
-                | InferTyVarSourceInfo::MethodReceiver { span }
-                | InferTyVarSourceInfo::OverloadedResult { span }
-                | InferTyVarSourceInfo::Literal { span }
-                | InferTyVarSourceInfo::ForLoopElem { span }
-                | InferTyVarSourceInfo::IndexInput { span }
-                | InferTyVarSourceInfo::IndexOutput { span }
-                | InferTyVarSourceInfo::LoopDemand { span }
-                | InferTyVarSourceInfo::HoleInfer { span }
-                | InferTyVarSourceInfo::PatType { span }
-                | InferTyVarSourceInfo::EmptyArrayElem { span } => Diag::span_err(
-                    span,
-                    format_args!("failed to infer a type of `{}`", {
-                        let mut printer = ClauseCxPrinter::new(self.ccx);
-                        printer.push_ty(var_ty);
-                        printer.finish()
-                    }),
-                )
-                .emit(),
+                    // TODO
+                    InferTyVarSourceInfo::UniversalElabHelper => {
+                        Diag::anon_err("universal elab helper went uninferred, good luck!").emit()
+                    }
+                    InferTyVarSourceInfo::TraitAssocPlaceholderHelper => todo!(),
+                    InferTyVarSourceInfo::UnifyHelper => todo!(),
+                    InferTyVarSourceInfo::DerefHelper => todo!(),
+                    InferTyVarSourceInfo::MethodLookupHelper => todo!(),
+                };
 
-                // TODO
-                InferTyVarSourceInfo::UniversalElabHelper => {
-                    Diag::anon_err("universal elab helper went uninferred, good luck!").emit()
-                }
-                InferTyVarSourceInfo::TraitAssocPlaceholderHelper => todo!(),
-                InferTyVarSourceInfo::UnifyHelper => todo!(),
-                InferTyVarSourceInfo::DerefHelper => todo!(),
-                InferTyVarSourceInfo::MethodLookupHelper => todo!(),
-            };
+                let error_ty = tcx.intern(TyKind::Error(error));
 
-            let error_ty = tcx.intern(TyKind::Error(error));
+                _ = self.ccx.ucx_mut().unify_ty_and_ty(
+                    &ClauseOrigin::delay_bug(),
+                    var_ty,
+                    error_ty,
+                    RelationMode::Equate,
+                );
 
-            _ = self.ccx.ucx_mut().unify_ty_and_ty(
-                &ClauseOrigin::delay_bug(),
-                var_ty,
-                error_ty,
-                RelationMode::Equate,
-            );
+                self.ccx.poll_obligations();
 
-            self.ccx.poll_obligations();
-
-            return Ok(error_ty);
+                return Ok(error_ty);
+            }
+        } else {
+            ty.value
         };
 
         match *resolved.r(s) {

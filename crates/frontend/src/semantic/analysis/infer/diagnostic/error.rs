@@ -30,8 +30,10 @@ impl ClauseErrorSink {
                 ccx.queue_loud_report(error);
             }
             ClauseErrorSink::DelayBug(loc) => {
-                // TODO
-                eprintln!("Delay bug: {loc}")
+                if !ccx.is_silent() {
+                    // TODO
+                    eprintln!("Delay bug: {loc}");
+                }
             }
             ClauseErrorSink::NeverReport(loc) => {
                 unreachable!(
