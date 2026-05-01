@@ -15,7 +15,7 @@ use crate::{
         SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe,
         SpannedTyOrReList, SpannedTyOrReView, SpannedTyView, TraitClause, TraitClauseList,
         TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty, TyCtxt, TyKind, TyList, TyOrRe,
-        TyOrReList, TyProjection, TyVisitable,
+        TyOrReList, TyProjection,
     },
 };
 use std::{convert::Infallible, hash};
@@ -142,10 +142,7 @@ pub trait TyFolder<'tcx> {
 
     // === Binders === //
 
-    fn fold_hrtb_binder<T: Copy + TyVisitable + TyFoldable>(
-        &mut self,
-        binder: SpannedHrtbBinder<T>,
-    ) -> Result<HrtbBinder<T>, Self::Error> {
+    fn fold_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> Result<HrtbBinder, Self::Error> {
         self.super_spanned_fallible(binder)
     }
 
@@ -620,7 +617,7 @@ impl TyFoldable for Ty {
 
 // === Binders === //
 
-impl<T: TyVisitable + TyFoldable + Copy> TyFoldable for HrtbBinder<T> {
+impl TyFoldable for HrtbBinder {
     fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,

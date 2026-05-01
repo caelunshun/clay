@@ -10,8 +10,8 @@ use crate::{
         SpannedTraitInstanceView, SpannedTraitParam, SpannedTraitParamList, SpannedTraitParamView,
         SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe,
         SpannedTyOrReList, SpannedTyOrReView, SpannedTyView, TraitClause, TraitClauseList,
-        TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty, TyCtxt, TyFoldable, TyList,
-        TyOrRe, TyOrReList, TyProjection,
+        TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty, TyCtxt, TyList, TyOrRe,
+        TyOrReList, TyProjection,
     },
 };
 use std::{convert::Infallible, ops::ControlFlow};
@@ -101,10 +101,7 @@ pub trait TyVisitor<'tcx> {
 
     // === Binders === //
 
-    fn visit_hrtb_binder<T: Copy + TyVisitable + TyFoldable>(
-        &mut self,
-        binder: SpannedHrtbBinder<T>,
-    ) -> ControlFlow<Self::Break> {
+    fn visit_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> ControlFlow<Self::Break> {
         self.walk_spanned_fallible(binder)
     }
 
@@ -546,7 +543,7 @@ impl TyVisitable for Ty {
 
 // === Binders === //
 
-impl<T: TyVisitable + TyFoldable + Copy> TyVisitable for HrtbBinder<T> {
+impl TyVisitable for HrtbBinder {
     fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,

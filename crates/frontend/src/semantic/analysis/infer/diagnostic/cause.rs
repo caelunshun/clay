@@ -219,8 +219,8 @@ impl ObligeCause {
                     ),
                 ));
             } else {
-                diag.push_child(LeafDiag::new(
-                    Level::Note,
+                diag.push_child(LeafDiag::span_note(
+                    frame.frame.primary_span(),
                     format!(
                         "...which then required us to {}",
                         frame.frame.to_do_what(ccx)

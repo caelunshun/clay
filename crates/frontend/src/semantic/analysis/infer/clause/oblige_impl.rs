@@ -58,7 +58,7 @@ impl<'tcx> ClauseCx<'tcx> {
         cause: ObligeCause,
         universe: HrtbUniverse,
         lhs: Ty,
-        rhs: HrtbBinder<TraitSpec>,
+        rhs: HrtbBinder,
     ) {
         let s = self.session();
 
@@ -99,6 +99,12 @@ impl<'tcx> ClauseCx<'tcx> {
     ) -> ObligationResult<Result<(), NoTraitImplError>> {
         let tcx = self.tcx();
         let s = self.session();
+
+        eprintln!(
+            "{}: {}",
+            self.pretty_print(|p| p.push_ty(lhs)),
+            self.pretty_print(|p| p.push_trait_spec(rhs))
+        );
 
         // See whether the type itself can provide the implementation.
         match *self.ucx().peel_ty_infer_var(lhs).r(s) {
@@ -414,11 +420,10 @@ impl<'tcx> ClauseCx<'tcx> {
         let target_ty =
             self.import_report_elsewhere(universe, trait_env.as_ref(), rhs.r(s).target.value);
 
-        let target_trait = self.import_report_elsewhere(
-            universe,
-            trait_env.as_ref(),
-            rhs.r(s).trait_.unwrap().value,
-        );
+        let target_trait = self
+            .importer()
+            .with_clause_applies_to(target_ty)
+            .import_report_elsewhere(universe, trait_env.as_ref(), rhs.r(s).trait_.unwrap().value);
 
         // Does the `lhs` type match the `rhs`'s target type?
         if self

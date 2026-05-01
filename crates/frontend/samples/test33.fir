@@ -48,15 +48,15 @@ pub mod std {
 }
 
 trait Projector {
-    type Out;
+    type Out: Fuzzy;
 }
 
 trait Helper<T: Fuzzy> {}
 
 trait Fuzzy {}
 
-fn rejected<Q: for<T: Projector> Helper<<T as Projector>::Out>>() {
-    accepted::<Q>();
-}
+fn rejected<Q: for<T: Projector> Helper<<T as Projector>::Out>>() {}
 
-fn accepted<Q: for<T: Projector<Out: Fuzzy>> Helper<<T as Projector>::Out>>() {}
+fn accepted<Q: for<T: Projector> Helper<<T as Projector>::Out>>() {
+    rejected::<Q>;
+}

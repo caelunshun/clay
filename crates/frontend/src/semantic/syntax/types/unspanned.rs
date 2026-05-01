@@ -2,7 +2,7 @@ use crate::{
     base::{
         ErrorGuaranteed, Session,
         analysis::DebruijnRelative,
-        arena::{HasInterner, Intern, Obj},
+        arena::{HasInterner, Intern, LateInit, Obj},
         syntax::{Span, Symbol},
     },
     semantic::syntax::{
@@ -13,7 +13,7 @@ use crate::{
 };
 use index_vec::define_index_type;
 use smallvec::{SmallVec, smallvec};
-use std::fmt;
+use std::{fmt, rc::Rc};
 
 // === Type === //
 
@@ -187,7 +187,7 @@ pub type TraitClauseList = Intern<[TraitClause]>;
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TraitClause {
     Outlives(RelationDirection, TyOrRe),
-    Trait(HrtbBinder<TraitSpec>),
+    Trait(HrtbBinder),
 }
 
 pub type TraitParamList = Intern<[TraitParam]>;
@@ -473,22 +473,55 @@ pub enum UniversalReVarSourceInfo {
 pub enum InferTyVarSourceInfo {
     UniversalElabHelper,
     TraitAssocPlaceholderHelper,
-    HrtbLhsInstantiation { span: Span },
-    ProjectionResult { span: Span },
-    Imported { span: Span },
-    Local { name: LocalNameIdent },
-    FunctionArgs { span: Span },
-    FunctionRetVal { span: Span },
-    MethodReceiver { span: Span },
-    OverloadedResult { span: Span },
-    Literal { span: Span },
-    ForLoopElem { span: Span },
-    IndexInput { span: Span },
-    IndexOutput { span: Span },
-    LoopDemand { span: Span },
-    HoleInfer { span: Span },
-    PatType { span: Span },
-    EmptyArrayElem { span: Span },
+    HrtbLhsInstantiation {
+        span: Span,
+        clauses: Rc<LateInit<TraitClauseList>>,
+    },
+    ProjectionResult {
+        span: Span,
+    },
+    Imported {
+        span: Span,
+    },
+    Local {
+        name: LocalNameIdent,
+    },
+    FunctionArgs {
+        span: Span,
+    },
+    FunctionRetVal {
+        span: Span,
+    },
+    MethodReceiver {
+        span: Span,
+    },
+    OverloadedResult {
+        span: Span,
+    },
+    Literal {
+        span: Span,
+    },
+    ForLoopElem {
+        span: Span,
+    },
+    IndexInput {
+        span: Span,
+    },
+    IndexOutput {
+        span: Span,
+    },
+    LoopDemand {
+        span: Span,
+    },
+    HoleInfer {
+        span: Span,
+    },
+    PatType {
+        span: Span,
+    },
+    EmptyArrayElem {
+        span: Span,
+    },
     UnifyHelper,
     DerefHelper,
     MethodLookupHelper,
@@ -578,9 +611,9 @@ pub enum SolidTyShapeKind {
 // === Binders === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct HrtbBinder<T> {
+pub struct HrtbBinder {
     pub kind: HrtbBinderKind,
-    pub inner: T,
+    pub inner: TraitSpec,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

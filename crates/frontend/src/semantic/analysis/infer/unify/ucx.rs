@@ -11,9 +11,9 @@ use crate::{
             FnInstanceInner, FnOwner, HrtbBinderKind, InferTyVar, InferTyVarSourceInfo, Mutability,
             Re, ReVariance, RelationDirection, RelationMode, SimpleTySet, SpannedHrtbBinder,
             SpannedTy, SpannedTyView, TraitClause, TraitClauseList, TraitParam, TraitParamList, Ty,
-            TyCtxt, TyFoldable, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyKind, TyOrRe,
-            TyVisitable, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt, UniversalReVar,
-            UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
+            TyCtxt, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor,
+            TyVisitorExt, TyVisitorInfallibleExt, UniversalReVar, UniversalReVarSourceInfo,
+            UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -658,10 +658,7 @@ impl<'tcx> UnifyCx<'tcx> {
                 self.ucx.tcx()
             }
 
-            fn visit_hrtb_binder<T: Copy + TyVisitable + TyFoldable>(
-                &mut self,
-                binder: SpannedHrtbBinder<T>,
-            ) -> ControlFlow<Self::Break> {
+            fn visit_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> ControlFlow<Self::Break> {
                 let s = self.session();
 
                 let HrtbBinderKind::Imported(imported) = binder.value.kind else {

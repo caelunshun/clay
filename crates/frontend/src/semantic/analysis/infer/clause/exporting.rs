@@ -4,8 +4,8 @@ use crate::{
         analysis::{ClauseCx, ClauseCxPrinter, ObligeCause},
         syntax::{
             HrtbBinder, InferTyVarSourceInfo, Re, RelationMode, SpannedHrtbBinder, SpannedRe,
-            SpannedTy, Ty, TyCtxt, TyFoldable, TyFolder, TyFolderInfallibleExt as _, TyKind,
-            TyProjection, TyVisitable, UniversalTyVar, UniversalTyVarSourceInfo,
+            SpannedTy, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt as _, TyKind, TyProjection,
+            UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -28,10 +28,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxExporter<'_, 'tcx> {
         self.ccx.tcx()
     }
 
-    fn fold_hrtb_binder<T: Copy + TyVisitable + TyFoldable>(
-        &mut self,
-        binder: SpannedHrtbBinder<T>,
-    ) -> Result<HrtbBinder<T>, Self::Error> {
+    fn fold_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> Result<HrtbBinder, Self::Error> {
         // TODO: Fold whatever we need to.
         Ok(self.super_(binder.value))
     }
@@ -52,7 +49,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxExporter<'_, 'tcx> {
                         format_args!("type annotations required for local `{name}`"),
                     )
                     .emit(),
-                    InferTyVarSourceInfo::HrtbLhsInstantiation { span }
+                    InferTyVarSourceInfo::HrtbLhsInstantiation { span, .. }
                     | InferTyVarSourceInfo::ProjectionResult { span, .. }
                     | InferTyVarSourceInfo::Imported { span, .. }
                     | InferTyVarSourceInfo::FunctionArgs { span }

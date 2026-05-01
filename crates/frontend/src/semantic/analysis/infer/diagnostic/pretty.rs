@@ -3,9 +3,10 @@ use crate::{
     semantic::{
         analysis::ClauseCx,
         syntax::{
-            AdtInstance, AnyGeneric, FloatKind, FnInstanceInner, FnOwner, HrtbBinderKind, IntKind,
-            Re, SimpleTyKind, SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty,
-            TyCtxt, TyKind, TyOrRe, UniversalTyVar, UniversalTyVarSourceInfo,
+            AdtInstance, AnyGeneric, FloatKind, FnInstanceInner, FnOwner, HrtbBinderKind,
+            InferTyVarSourceInfo, IntKind, Re, SimpleTyKind, SimpleTySet, TraitClause,
+            TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe, UniversalTyVar,
+            UniversalTyVarSourceInfo,
         },
     },
 };
@@ -22,15 +23,6 @@ impl<'a, 'tcx> ClauseCxPrinter<'a, 'tcx> {
             ccx,
             out: String::new(),
         }
-    }
-
-    pub fn with_fn(
-        ccx: &'a ClauseCx<'tcx>,
-        f: impl FnOnce(&mut ClauseCxPrinter<'a, 'tcx>),
-    ) -> String {
-        let mut printer = ClauseCxPrinter::new(ccx);
-        f(&mut printer);
-        printer.finish()
     }
 
     pub fn ccx(&self) -> &'a ClauseCx<'tcx> {
@@ -212,13 +204,41 @@ impl<'a, 'tcx> ClauseCxPrinter<'a, 'tcx> {
                     )
                     .unwrap();
                 } else {
-                    write!(
-                        &mut self.out,
-                        "?{} {{{:?}}}",
-                        var.index(),
-                        self.ccx.lookup_infer_ty_src_info(var),
-                    )
-                    .unwrap();
+                    match self.ccx.lookup_infer_ty_src_info(var) {
+                        InferTyVarSourceInfo::HrtbLhsInstantiation { span: _, clauses } => {
+                            write!(
+                                &mut self.out,
+                                "{{HRTB existential capture #{}: ",
+                                var.index()
+                            )
+                            .unwrap();
+                            self.push_trait_clauses(**clauses);
+                            self.out.push_str("}");
+                        }
+
+                        src_info @ (InferTyVarSourceInfo::UniversalElabHelper
+                        | InferTyVarSourceInfo::TraitAssocPlaceholderHelper
+                        | InferTyVarSourceInfo::ProjectionResult { .. }
+                        | InferTyVarSourceInfo::Imported { .. }
+                        | InferTyVarSourceInfo::Local { .. }
+                        | InferTyVarSourceInfo::FunctionArgs { .. }
+                        | InferTyVarSourceInfo::FunctionRetVal { .. }
+                        | InferTyVarSourceInfo::MethodReceiver { .. }
+                        | InferTyVarSourceInfo::OverloadedResult { .. }
+                        | InferTyVarSourceInfo::Literal { .. }
+                        | InferTyVarSourceInfo::ForLoopElem { .. }
+                        | InferTyVarSourceInfo::IndexInput { .. }
+                        | InferTyVarSourceInfo::IndexOutput { .. }
+                        | InferTyVarSourceInfo::LoopDemand { .. }
+                        | InferTyVarSourceInfo::HoleInfer { .. }
+                        | InferTyVarSourceInfo::PatType { .. }
+                        | InferTyVarSourceInfo::EmptyArrayElem { .. }
+                        | InferTyVarSourceInfo::UnifyHelper
+                        | InferTyVarSourceInfo::DerefHelper
+                        | InferTyVarSourceInfo::MethodLookupHelper) => {
+                            write!(&mut self.out, "?{} {{{:?}}}", var.index(), src_info).unwrap();
+                        }
+                    }
                 }
             }
             TyKind::UniversalVar(var) => self.push_universal_ty(var),
@@ -232,7 +252,13 @@ impl<'a, 'tcx> ClauseCxPrinter<'a, 'tcx> {
 
         match self.ccx.lookup_universal_ty_src_info(var) {
             UniversalTyVarSourceInfo::TraitSelf => self.out.push_str("Self"),
-            UniversalTyVarSourceInfo::HrtbVar => self.out.push_str("{HRTB universal}"),
+            UniversalTyVarSourceInfo::HrtbVar => {
+                write!(&mut self.out, "{{HRTB universal capture #{}: ", var.index()).unwrap();
+                self.push_trait_clauses(
+                    self.ccx.direct_ty_universal_clauses_possibly_floating(var),
+                );
+                self.out.push_str("}");
+            }
             UniversalTyVarSourceInfo::Root(generic) => {
                 self.out.push_str(generic.r(s).ident.text.as_str(s))
             }

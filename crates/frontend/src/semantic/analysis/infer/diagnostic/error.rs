@@ -1,7 +1,7 @@
 use crate::{
     base::ErrorGuaranteed,
     semantic::{
-        analysis::{ClauseCx, ClauseCxPrinter, ClauseObligation, HrtbUniverse, ObligeCause},
+        analysis::{ClauseCx, ClauseObligation, HrtbUniverse, ObligeCause},
         syntax::{
             InferTyVar, Re, RelationDirection, SimpleTySet, TraitClauseList, TraitParam, TraitSpec,
             Ty, UniversalReVar, UniversalTyVar,
@@ -69,8 +69,8 @@ impl ObligationUnfulfilled {
             ClauseObligation::TyMeetsTrait(cause, _universe, lhs, rhs) => cause.report(ccx, || {
                 format!(
                     "could not make necessary inferences to show that `{}` implements `{}`",
-                    ClauseCxPrinter::with_fn(ccx, |p| p.push_ty(lhs)),
-                    ClauseCxPrinter::with_fn(ccx, |p| p.push_trait_spec(rhs)),
+                    ccx.pretty_print(|p| p.push_ty(lhs)),
+                    ccx.pretty_print(|p| p.push_trait_spec(rhs)),
                 )
             }),
             ClauseObligation::TyOutlivesRe(cause, lhs, rhs, dir) => {
@@ -78,15 +78,15 @@ impl ObligationUnfulfilled {
                     RelationDirection::LhsOntoRhs => {
                         format!(
                             "could not make necessary inferences to show that `{}` outlives `{}`",
-                            ClauseCxPrinter::with_fn(ccx, |p| p.push_ty(lhs)),
-                            ClauseCxPrinter::with_fn(ccx, |p| p.push_re(rhs)),
+                            ccx.pretty_print(|p| p.push_ty(lhs)),
+                            ccx.pretty_print(|p| p.push_re(rhs)),
                         )
                     }
                     RelationDirection::RhsOntoLhs => {
                         format!(
                             "could not make necessary inferences to show that `{}` outlives `{}`",
-                            ClauseCxPrinter::with_fn(ccx, |p| p.push_re(rhs)),
-                            ClauseCxPrinter::with_fn(ccx, |p| p.push_ty(lhs)),
+                            ccx.pretty_print(|p| p.push_re(rhs)),
+                            ccx.pretty_print(|p| p.push_ty(lhs)),
                         )
                     }
                 })
@@ -99,7 +99,7 @@ impl ObligationUnfulfilled {
             ) => cause.report(ccx, || {
                 format!(
                     "could not make necessary inferences to elaborate the generic clauses of {}",
-                    ClauseCxPrinter::with_fn(ccx, |p| p.push_universal_ty(univ)),
+                    ccx.pretty_print(|p| p.push_universal_ty(univ)),
                 )
             }),
         }
@@ -118,8 +118,8 @@ impl NoTraitImplError {
         self.cause.report(ccx, || {
             format!(
                 "type `{}` does not implement `{}`",
-                ClauseCxPrinter::with_fn(ccx, |p| p.push_ty(self.target)),
-                ClauseCxPrinter::with_fn(ccx, |p| p.push_trait_spec(self.spec)),
+                ccx.pretty_print(|p| p.push_ty(self.target)),
+                ccx.pretty_print(|p| p.push_trait_spec(self.spec)),
             )
         })
     }
@@ -139,10 +139,10 @@ impl ReAndReUnifyError {
         self.cause.report(ccx, || {
             format!(
                 "cannot force `{}` to outlive `{}` without requiring universal `{}` to outlive `{}`",
-                ClauseCxPrinter::with_fn(ccx, |p| p.push_re(self.lhs)),
-                ClauseCxPrinter::with_fn(ccx, |p| p.push_re(self.rhs)),
-                ClauseCxPrinter::with_fn(ccx, |p| p.push_re(Re::UniversalVar(self.requires_var))),
-                ClauseCxPrinter::with_fn(ccx, |p| p.push_re(self.to_outlive)),
+                ccx.pretty_print(|p| p.push_re(self.lhs)),
+                ccx.pretty_print(|p| p.push_re(self.rhs)),
+                ccx.pretty_print(|p| p.push_re(Re::UniversalVar(self.requires_var))),
+                ccx.pretty_print(|p| p.push_re(self.to_outlive)),
             )
         })
     }
@@ -161,8 +161,8 @@ impl TyAndTyUnifyError {
         self.cause.report(ccx, || {
             format!(
                 "cannot unify types `{}` and `{}`",
-                ClauseCxPrinter::with_fn(ccx, |p| p.push_ty(self.origin_lhs)),
-                ClauseCxPrinter::with_fn(ccx, |p| p.push_ty(self.origin_rhs)),
+                ccx.pretty_print(|p| p.push_ty(self.origin_lhs)),
+                ccx.pretty_print(|p| p.push_ty(self.origin_rhs)),
             )
         })
     }
@@ -211,7 +211,7 @@ impl TyAndSimpleTySetUnifyError {
         self.cause.report(ccx, || {
             format!(
                 "cannot unify types `{}` and `{:?}`",
-                ClauseCxPrinter::with_fn(ccx, |p| p.push_ty(self.lhs)),
+                ccx.pretty_print(|p| p.push_ty(self.lhs)),
                 self.rhs,
             )
         })

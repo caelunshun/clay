@@ -53,7 +53,7 @@ use crate::{
     base::{
         Diag, ErrorGuaranteed, LeafDiag, Session,
         analysis::{DebruijnAbsoluteRange, DebruijnTop, Spanned},
-        arena::{HasInterner, HasListInterner, Obj},
+        arena::{HasInterner, HasListInterner, LateInit, Obj},
         syntax::Span,
     },
     semantic::{
@@ -76,7 +76,7 @@ use crate::{
     utils::hash::FxHashMap,
 };
 use hashbrown::hash_map;
-use std::convert::Infallible;
+use std::{convert::Infallible, rc::Rc};
 
 // === Driver === //
 
@@ -113,14 +113,11 @@ impl<'tcx> ClauseCx<'tcx> {
             .import_report_elsewhere(universe, env, value)
     }
 
-    pub fn instantiate_hrtb_universal<T>(
+    pub fn instantiate_hrtb_universal(
         &mut self,
         universe: &HrtbUniverse,
-        value: HrtbBinder<T>,
-    ) -> T
-    where
-        T: TyFoldable + TyVisitable,
-    {
+        value: HrtbBinder,
+    ) -> TraitSpec {
         let HrtbBinder {
             kind: HrtbBinderKind::Imported(defs),
             inner: value,
@@ -136,10 +133,11 @@ impl<'tcx> ClauseCx<'tcx> {
         self.normalizer(universe.clone()).fold(value)
     }
 
-    pub fn instantiate_hrtb_infer<T>(&mut self, universe: &HrtbUniverse, value: HrtbBinder<T>) -> T
-    where
-        T: TyFoldable + TyVisitable,
-    {
+    pub fn instantiate_hrtb_infer(
+        &mut self,
+        universe: &HrtbUniverse,
+        value: HrtbBinder,
+    ) -> TraitSpec {
         let HrtbBinder {
             kind: HrtbBinderKind::Imported(defs),
             inner: value,
@@ -330,10 +328,7 @@ impl<'tcx> TyFolder<'tcx> for EnvSubstitutor<'_, 'tcx> {
         self.ccx.tcx()
     }
 
-    fn fold_hrtb_binder<T: Copy + TyFoldable>(
-        &mut self,
-        binder: SpannedHrtbBinder<T>,
-    ) -> Result<HrtbBinder<T>, Self::Error> {
+    fn fold_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> Result<HrtbBinder, Self::Error> {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -515,6 +510,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     universe.clone(),
                     InferTyVarSourceInfo::HrtbLhsInstantiation {
                         span: def.spawned_from.span(s),
+                        clauses: Rc::new(LateInit::uninit()),
                     },
                 )),
             })
@@ -539,6 +535,20 @@ impl<'tcx> ClauseCx<'tcx> {
                         var,
                         clauses,
                     );
+
+                    let TyKind::InferVar(var) = *var.r(s) else {
+                        unreachable!()
+                    };
+
+                    let InferTyVarSourceInfo::HrtbLhsInstantiation {
+                        clauses: clauses_late_init,
+                        ..
+                    } = self.lookup_infer_ty_src_info(var)
+                    else {
+                        unreachable!()
+                    };
+
+                    LateInit::init(&clauses_late_init, clauses);
                 }
             }
         }
@@ -573,10 +583,7 @@ impl<'tcx> TyFolder<'tcx> for HrtbSubstitutionFolder<'_, 'tcx> {
         self.ccx.tcx()
     }
 
-    fn fold_hrtb_binder<T: Copy + TyFoldable>(
-        &mut self,
-        binder: SpannedHrtbBinder<T>,
-    ) -> Result<HrtbBinder<T>, Self::Error> {
+    fn fold_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> Result<HrtbBinder, Self::Error> {
         let s = self.session();
         let binder = binder.value;
 
@@ -652,10 +659,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseNormalizer<'_, 'tcx> {
         self.ccx.tcx()
     }
 
-    fn fold_hrtb_binder<T: Copy + TyVisitable + TyFoldable>(
-        &mut self,
-        binder: SpannedHrtbBinder<T>,
-    ) -> Result<HrtbBinder<T>, Self::Error> {
+    fn fold_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> Result<HrtbBinder, Self::Error> {
         let HrtbBinder { kind, inner } = binder.value;
 
         // We intentionally do not `fold` over the contents of binders.
@@ -833,10 +837,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
         self.ccx.tcx()
     }
 
-    fn fold_hrtb_binder<T: Copy + TyVisitable + TyFoldable>(
-        &mut self,
-        binder: SpannedHrtbBinder<T>,
-    ) -> Result<HrtbBinder<T>, Self::Error> {
+    fn fold_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> Result<HrtbBinder, Self::Error> {
         let tcx = self.tcx();
 
         let SpannedHrtbBinderView {

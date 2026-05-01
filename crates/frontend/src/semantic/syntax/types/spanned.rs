@@ -223,7 +223,7 @@ pub type SpannedTraitClause = Spanned<TraitClause>;
 #[derive(Debug, Copy, Clone)]
 pub enum SpannedTraitClauseView {
     Outlives(RelationDirection, SpannedTyOrRe),
-    Trait(SpannedHrtbBinder<TraitSpec>),
+    Trait(SpannedHrtbBinder),
 }
 
 impl SpannedViewDecode<TyCtxt> for TraitClause {
@@ -546,16 +546,16 @@ impl SpannedViewEncode<TyCtxt> for SpannedFnOwnerView {
 
 // === HrtbBinder === //
 
-pub type SpannedHrtbBinder<T> = Spanned<HrtbBinder<T>>;
+pub type SpannedHrtbBinder = Spanned<HrtbBinder>;
 
 #[derive(Debug, Copy, Clone)]
-pub struct SpannedHrtbBinderView<T> {
+pub struct SpannedHrtbBinderView {
     pub kind: SpannedHrtbBinderKind,
-    pub inner: Spanned<T>,
+    pub inner: SpannedTraitSpec,
 }
 
-impl<T: Copy> SpannedViewDecode<TyCtxt> for HrtbBinder<T> {
-    type View = SpannedHrtbBinderView<T>;
+impl SpannedViewDecode<TyCtxt> for HrtbBinder {
+    type View = SpannedHrtbBinderView;
 
     fn decode(value: &Self, span_info: SpannedInfo, tcx: &TyCtxt) -> Self::View {
         let [kind_span, inner_span] = span_info.child_spans(tcx);
@@ -567,8 +567,8 @@ impl<T: Copy> SpannedViewDecode<TyCtxt> for HrtbBinder<T> {
     }
 }
 
-impl<T: Copy> SpannedViewEncode<TyCtxt> for SpannedHrtbBinderView<T> {
-    type Unspanned = HrtbBinder<T>;
+impl SpannedViewEncode<TyCtxt> for SpannedHrtbBinderView {
+    type Unspanned = HrtbBinder;
 
     fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
         Spanned::new_raw(

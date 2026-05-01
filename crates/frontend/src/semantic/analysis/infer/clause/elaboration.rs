@@ -312,8 +312,7 @@ impl<'tcx> ClauseCx<'tcx> {
         // their roots to obtain a representative type indicating whether two types could possibly
         // unify. We still have to perform actual unification after this phase to ensure regions are
         // properly constrained.
-        let mut merged_clauses =
-            FxHashMap::<HrtbBinder<TraitSpec>, SmallVec<[HrtbBinder<TraitSpec>; 1]>>::default();
+        let mut merged_clauses = FxHashMap::<HrtbBinder, SmallVec<[HrtbBinder; 1]>>::default();
 
         for &clause in clauses.r(s) {
             let TraitClause::Trait(
