@@ -135,6 +135,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn instantiate_hrtb_infer(
         &mut self,
+        cause: &ObligeCause,
         universe: &HrtbUniverse,
         value: HrtbBinder,
     ) -> TraitSpec {
@@ -147,7 +148,7 @@ impl<'tcx> ClauseCx<'tcx> {
         };
 
         let value = self
-            .instantiate_hrtb_infer_without_normalization(universe, defs)
+            .instantiate_hrtb_infer_without_normalization(cause, universe, defs)
             .fold(value);
 
         self.normalizer(universe.clone()).fold(value)
@@ -494,6 +495,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn instantiate_hrtb_infer_without_normalization<'a>(
         &'a mut self,
+        cause: &ObligeCause,
         universe: &'a HrtbUniverse,
         defs: HrtbDebruijnDefList,
     ) -> HrtbSubstitutionFolder<'a, 'tcx> {
@@ -524,17 +526,12 @@ impl<'tcx> ClauseCx<'tcx> {
                 TyOrRe::Re(var) => {
                     let clauses = HrtbSubstitutionFolder::new(self, vars, s).fold(def.clauses);
 
-                    self.oblige_re_meets_clauses(&ObligeCause::new_delay_bug(), var, clauses);
+                    self.oblige_re_meets_clauses(cause, var, clauses);
                 }
                 TyOrRe::Ty(var) => {
                     let clauses = HrtbSubstitutionFolder::new(self, vars, s).fold(def.clauses);
 
-                    self.oblige_ty_meets_clauses(
-                        &ObligeCause::new_delay_bug(),
-                        universe,
-                        var,
-                        clauses,
-                    );
+                    self.oblige_ty_meets_clauses(cause, universe, var, clauses);
 
                     let TyKind::InferVar(var) = *var.r(s) else {
                         unreachable!()

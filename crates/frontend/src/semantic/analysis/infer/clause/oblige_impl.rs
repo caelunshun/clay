@@ -233,7 +233,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
             // Instantiate the binder with inference variables so that we may select the correct
             // implementation of it.
-            let lhs = fork.instantiate_hrtb_infer(universe, lhs);
+            let lhs = fork.instantiate_hrtb_infer(cause, universe, lhs);
 
             // See whether we can select an inherent `impl`.
             let mut param_iter = lhs.params.r(s).iter().zip(rhs.params.r(s));
