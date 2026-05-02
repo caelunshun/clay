@@ -198,9 +198,9 @@ impl<'tcx> ClauseCx<'tcx> {
 
                         Ok(())
                     }
-                    ClauseObligation::TyMeetsTrait(cause, lhs, rhs, universe) => {
+                    ClauseObligation::TyMeetsTrait(cause, universe, lhs, rhs) => {
                         match fork
-                            .run_oblige_ty_meets_trait_instantiated(&cause, lhs, rhs, universe)
+                            .run_oblige_ty_meets_trait_instantiated(&cause, universe, lhs, rhs)
                         {
                             Ok(Ok(())) => Ok(()),
                             Ok(Err(err)) => {

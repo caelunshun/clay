@@ -100,12 +100,6 @@ impl<'tcx> ClauseCx<'tcx> {
         let tcx = self.tcx();
         let s = self.session();
 
-        eprintln!(
-            "{}: {}",
-            self.pretty_print(|p| p.push_ty(lhs)),
-            self.pretty_print(|p| p.push_trait_spec(rhs))
-        );
-
         // See whether the type itself can provide the implementation.
         match *self.ucx().peel_ty_infer_var(lhs).r(s) {
             TyKind::Trait(_re, _muta, clauses) => {

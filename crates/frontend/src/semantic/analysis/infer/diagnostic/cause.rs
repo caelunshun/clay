@@ -1,5 +1,5 @@
 use crate::{
-    base::{Diag, EmissionGuarantee, ErrorGuaranteed, HardDiag, LeafDiag, Level, syntax::Span},
+    base::{Diag, EmissionGuarantee, ErrorGuaranteed, LeafDiag, Level, syntax::Span},
     semantic::analysis::ClauseCx,
 };
 use std::{cell::Cell, fmt, panic::Location, rc::Rc};
@@ -166,7 +166,7 @@ impl ObligeCause {
         match self.behavior() {
             ObligeCauseBehavior::Report => {
                 if !ccx.is_silent() {
-                    Some(self.build_diag(ccx, msg()).emit())
+                    Some(self.build_diag(ccx, Level::Error, msg()).emit().unwrap())
                 } else {
                     None
                 }
@@ -177,9 +177,11 @@ impl ObligeCause {
             }
             ObligeCauseBehavior::DelayBug => {
                 if !ccx.is_silent() {
-                    eprintln!("Delay bug: {}", self.own_created_at());
-
-                    Some(ErrorGuaranteed::new_unchecked())
+                    Some(
+                        self.build_diag(ccx, Level::DelayedBug, msg())
+                            .emit()
+                            .unwrap(),
+                    )
                 } else {
                     None
                 }
@@ -190,7 +192,12 @@ impl ObligeCause {
         }
     }
 
-    fn build_diag(&self, ccx: &ClauseCx<'_>, msg: String) -> HardDiag {
+    fn build_diag(
+        &self,
+        ccx: &ClauseCx<'_>,
+        level: Level,
+        msg: String,
+    ) -> Diag<Option<ErrorGuaranteed>> {
         let frames = self.frames().collect::<Vec<_>>();
 
         // TODO: Fallback span?
@@ -198,8 +205,13 @@ impl ObligeCause {
             .last()
             .map_or(Span::DUMMY, |v| v.frame.primary_span());
 
-        let mut diag = HardDiag::span_err(main_span, msg);
+        let mut diag = Diag::new(level, msg).primary(main_span, "");
         Self::append_context(&frames, ccx, &mut diag);
+
+        diag.push_child(LeafDiag::new(
+            Level::Note,
+            format!("diagnostic origin spawned by {}", self.root_created_at()),
+        ));
 
         diag
     }

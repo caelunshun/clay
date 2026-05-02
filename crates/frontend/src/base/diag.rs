@@ -137,7 +137,10 @@ pub enum Level {
 
 impl Level {
     pub fn is_fatal(self) -> bool {
-        matches!(self, Level::Bug | Level::Fatal | Level::Error)
+        matches!(
+            self,
+            Level::Bug | Level::DelayedBug | Level::Fatal | Level::Error
+        )
     }
 }
 
