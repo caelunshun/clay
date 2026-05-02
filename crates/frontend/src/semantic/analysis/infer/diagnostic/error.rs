@@ -7,6 +7,7 @@ use crate::{
             Ty, UniversalReVar, UniversalTyVar,
         },
     },
+    utils::lang::{AND_LIST_GLUE, format_list},
 };
 
 // === Errors === //
@@ -40,6 +41,7 @@ clause_error! {
     RecursionLimitReached,
     ObligationUnfulfilled,
     NoTraitImplError,
+    NotCoveredError,
     ReAndReUnifyError,
     TyAndTyUnifyError,
     TyAndSimpleTySetUnifyError,
@@ -102,6 +104,9 @@ impl ObligationUnfulfilled {
                     ccx.pretty_print(|p| p.push_universal_ty(univ)),
                 )
             }),
+            ClauseObligation::Covered(oblige_cause, hash_map, intern, trait_spec) => {
+                todo!();
+            }
         }
     }
 }
@@ -121,6 +126,65 @@ impl NoTraitImplError {
                 ccx.pretty_print(|p| p.push_ty(self.target)),
                 ccx.pretty_print(|p| p.push_trait_spec(self.spec)),
             )
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct NotCoveredError {
+    pub cause: ObligeCause,
+    pub missing_mentions: Vec<UniversalTyVar>,
+    pub in_trait: Option<TraitSpec>,
+    pub in_type: Option<Ty>,
+}
+
+impl NotCoveredError {
+    pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
+        self.cause.report(ccx, || {
+            let covered = format_list(
+                self.missing_mentions.iter().map(|&mention| {
+                    format!("`{}`", ccx.pretty_print(|p| p.push_universal_ty(mention)))
+                }),
+                AND_LIST_GLUE,
+            );
+
+            match (self.in_trait, self.in_type) {
+                (None, None) => unreachable!(),
+                (None, Some(in_type)) => {
+                    format!(
+                        "universal type{} {covered} not covered by type `{}`",
+                        if self.missing_mentions.len() == 1 {
+                            ""
+                        } else {
+                            "s"
+                        },
+                        ccx.pretty_print(|p| p.push_ty(in_type)),
+                    )
+                }
+                (Some(in_trait), None) => {
+                    format!(
+                        "universal type{} {covered} not covered by trait `{}`",
+                        if self.missing_mentions.len() == 1 {
+                            ""
+                        } else {
+                            "s"
+                        },
+                        ccx.pretty_print(|p| p.push_trait_spec(in_trait)),
+                    )
+                }
+                (Some(in_trait), Some(in_type)) => {
+                    format!(
+                        "universal type{} {covered} not covered by trait `{}` and type `{}`",
+                        if self.missing_mentions.len() == 1 {
+                            ""
+                        } else {
+                            "s"
+                        },
+                        ccx.pretty_print(|p| p.push_trait_spec(in_trait)),
+                        ccx.pretty_print(|p| p.push_ty(in_type)),
+                    )
+                }
+            }
         })
     }
 }

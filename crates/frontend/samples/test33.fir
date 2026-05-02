@@ -57,8 +57,8 @@ trait Fuzzy {}
 
 impl Fuzzy for () {}
 
-fn rejected<Q: for<T: Projector<Out = ()>> Helper<<T as Projector>::Out>>() {}
+fn rejected<Q: for<T: Projector> Helper<<T as Projector>::Out>>() {}
 
-fn accepted<Q: for<T: Projector<Out = ()>> Helper<<T as Projector>::Out>>() {
+fn accepted<Q: for<T: Projector> Helper<<T as Projector>::Out>>() {
     rejected::<Q>;
 }

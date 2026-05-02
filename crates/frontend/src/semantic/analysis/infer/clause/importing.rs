@@ -572,6 +572,10 @@ impl<'a, 'tcx> HrtbSubstitutionFolder<'a, 'tcx> {
             top: DebruijnTop::new(replace_with.r(s).len()),
         }
     }
+
+    pub fn replace_with(&self) -> TyOrReList {
+        self.replace_with
+    }
 }
 
 impl<'tcx> TyFolderPreservesSpans<'tcx> for HrtbSubstitutionFolder<'_, 'tcx> {}
@@ -839,6 +843,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
 
     fn fold_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> Result<HrtbBinder, Self::Error> {
         let tcx = self.tcx();
+        let s = self.session();
 
         let SpannedHrtbBinderView {
             kind,
@@ -858,22 +863,41 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
 
         // Universally instantiate the body and WF check it.
         let old_universe = self.universe.clone();
+        let wf_cause = self.cause.clone().child(ObligeCauseFrame::WfHrtb {
+            binder_span: kind.own_span(),
+        });
         let new_universe = self.universe.clone().nest(HrtbUniverseInfo {
-            cause: self.cause.clone().child(ObligeCauseFrame::WfHrtb {
-                binder_span: kind.own_span(),
-            }),
+            cause: wf_cause.clone(),
         });
 
         self.universe = new_universe;
         {
-            let bound = self
+            let mut hrtb_instantiation_visitor = self
                 .ccx
-                .instantiate_hrtb_universal_without_normalization(&self.universe, defs)
-                .fold(bound);
+                .instantiate_hrtb_universal_without_normalization(&self.universe, defs);
 
+            let hrtb_universals = hrtb_instantiation_visitor.replace_with();
+            let bound = hrtb_instantiation_visitor.fold(bound);
             let bound = Spanned::new_raw(bound, inner_span_info);
 
-            self.fold_spanned(bound);
+            let bound = self.fold_spanned(bound);
+
+            self.ccx.oblige_covered(
+                wf_cause,
+                hrtb_universals
+                    .r(s)
+                    .iter()
+                    .filter_map(|ty_or_re| ty_or_re.as_ty())
+                    .map(|ty| {
+                        let TyKind::UniversalVar(var) = *ty.r(s) else {
+                            unreachable!()
+                        };
+
+                        var
+                    }),
+                None,
+                Some(bound),
+            );
         }
         self.universe = old_universe;
 

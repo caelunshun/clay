@@ -16,8 +16,10 @@ use crate::{
             UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
+    utils::hash::FxHashMap,
 };
 use index_vec::IndexVec;
+use std::rc::Rc;
 
 const MAX_OBLIGATION_DEPTH: u32 = 256;
 
@@ -32,6 +34,12 @@ pub enum ClauseObligation {
         TraitClauseList,
         WipReificationState,
     ),
+    Covered(
+        ObligeCause,
+        Rc<FxHashMap<UniversalTyVar, u32>>,
+        Option<Ty>,
+        Option<TraitSpec>,
+    ),
 }
 
 impl ClauseObligation {
@@ -39,7 +47,8 @@ impl ClauseObligation {
         let (Self::TyUnifiesTy(cause, ..)
         | Self::TyMeetsTrait(cause, ..)
         | Self::TyOutlivesRe(cause, ..)
-        | Self::UnifyReifiedElaboratedClauses(cause, ..)) = self;
+        | Self::UnifyReifiedElaboratedClauses(cause, ..)
+        | Self::Covered(cause, ..)) = self;
 
         cause
     }
@@ -210,20 +219,23 @@ impl<'tcx> ClauseCx<'tcx> {
                             Err(ObligationNotReady) => Err(ObligationNotReady),
                         }
                     }
-                    ClauseObligation::TyOutlivesRe(origin, lhs, rhs, dir) => {
-                        fork.run_oblige_ty_outlives_re(&origin, lhs, rhs, dir)
+                    ClauseObligation::TyOutlivesRe(cause, lhs, rhs, dir) => {
+                        fork.run_oblige_ty_outlives_re(&cause, lhs, rhs, dir)
                     }
                     ClauseObligation::UnifyReifiedElaboratedClauses(
-                        origin,
+                        cause,
                         root,
                         clauses,
                         reified_vars,
                     ) => fork.oblige_unify_reified_elaborated_clauses(
-                        &origin,
+                        &cause,
                         root,
                         clauses,
                         reified_vars,
                     ),
+                    ClauseObligation::Covered(cause, must_mention, in_type, in_trait) => {
+                        fork.run_oblige_covered(cause, must_mention, in_type, in_trait)
+                    }
                 }
             },
         );

@@ -39,7 +39,7 @@ pub enum ObligeCauseBehavior {
     Report,
 
     /// Errors created in response to this clause origin will mark that status in the supplied
-    /// [`ClauseOriginProbe`]. These origins can only be used on silent contexts.
+    /// [`ObligeCauseProbe`]. These origins can only be used on silent contexts.
     Probe(ObligeCauseProbe),
 
     /// Errors created in response to this clause origin will be emitted as delay-bug diagnostics.
@@ -207,11 +207,6 @@ impl ObligeCause {
 
         let mut diag = Diag::new(level, msg).primary(main_span, "");
         Self::append_context(&frames, ccx, &mut diag);
-
-        diag.push_child(LeafDiag::new(
-            Level::Note,
-            format!("diagnostic origin spawned by {}", self.root_created_at()),
-        ));
 
         diag
     }

@@ -5,17 +5,19 @@ use crate::{
     semantic::{
         analysis::{
             ClauseCx, ClauseImportEnv, HrtbUniverse, HrtbUniverseInfo, NoTraitImplError,
-            ObligationNotReady, ObligationResult, ObligeCause, UnboundVarHandlingMode,
-            UniversalElaboration,
+            NotCoveredError, ObligationNotReady, ObligationResult, ObligeCause,
+            UnboundVarHandlingMode, UniversalElaboration,
             infer::clause::{ClauseObligation, elaboration::FloatingInfVarVisitor},
         },
         syntax::{
-            HrtbBinder, HrtbBinderKind, ImplItem, RelationMode, SimpleTySet, TraitClause,
-            TraitClauseList, TraitParam, TraitSpec, Ty, TyFolderInfallibleExt, TyKind, TyOrRe,
-            TyVisitorExt,
+            HrtbBinder, HrtbBinderKind, ImplItem, RelationMode, SimpleTySet, SpannedTy,
+            TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyFolderInfallibleExt,
+            TyKind, TyOrRe, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt, UniversalTyVar,
         },
     },
+    utils::hash::FxHashMap,
 };
+use std::{convert::Infallible, ops::ControlFlow, rc::Rc};
 
 #[derive(Debug, Clone)]
 struct SelectionRejected;
@@ -552,5 +554,120 @@ impl<'tcx> ClauseCx<'tcx> {
         }
 
         Err(SelectionRejected)
+    }
+
+    pub fn oblige_covered(
+        &mut self,
+        cause: ObligeCause,
+        must_mention: impl IntoIterator<Item = UniversalTyVar>,
+        in_type: Option<Ty>,
+        in_trait: Option<TraitSpec>,
+    ) {
+        let mut counter = 0u32;
+        let must_mention = Rc::new(
+            must_mention
+                .into_iter()
+                .map(|k| {
+                    let id = counter;
+                    counter += 1;
+                    (k, id)
+                })
+                .collect::<FxHashMap<_, _>>(),
+        );
+
+        self.push_obligation(ClauseObligation::Covered(
+            cause,
+            must_mention,
+            in_type,
+            in_trait,
+        ));
+    }
+
+    pub(super) fn run_oblige_covered(
+        &mut self,
+        cause: ObligeCause,
+        must_mention: Rc<FxHashMap<UniversalTyVar, u32>>,
+        in_type: Option<Ty>,
+        in_trait: Option<TraitSpec>,
+    ) -> ObligationResult<()> {
+        struct CoverVisitor<'a, 'tcx> {
+            ccx: &'a ClauseCx<'tcx>,
+            must_mention: Rc<FxHashMap<UniversalTyVar, u32>>,
+            cover_set: Vec<bool>,
+            had_holes: bool,
+        }
+
+        impl<'tcx> TyVisitor<'tcx> for CoverVisitor<'_, 'tcx> {
+            type Break = Infallible;
+
+            fn tcx(&self) -> &'tcx TyCtxt {
+                self.ccx.tcx()
+            }
+
+            fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
+                let s = self.session();
+
+                match *ty.value.r(s) {
+                    TyKind::InferVar(var) => {
+                        if let Ok(peeled) = self.ccx.lookup_ty_infer_var_without_poll(var) {
+                            self.visit(peeled);
+                        } else {
+                            self.had_holes = true;
+                        }
+                    }
+                    TyKind::UniversalVar(var) => {
+                        if let Some(&must_mention) = self.must_mention.get(&var) {
+                            self.cover_set[must_mention as usize] = true;
+                        }
+                    }
+                    _ => {
+                        self.walk(ty.value);
+                    }
+                }
+
+                ControlFlow::Continue(())
+            }
+        }
+
+        let cover_set = must_mention.iter().map(|_| false).collect::<Vec<_>>();
+        let mut visitor = CoverVisitor {
+            ccx: self,
+            must_mention,
+            cover_set,
+            had_holes: false,
+        };
+
+        if let Some(ty_part) = in_type {
+            visitor.visit(ty_part);
+        }
+
+        if let Some(trait_part) = in_trait {
+            visitor.visit(trait_part);
+        }
+
+        let missing_mentions = visitor
+            .must_mention
+            .iter()
+            .filter(|(_var, idx)| !visitor.cover_set[**idx as usize])
+            .map(|(var, _idx)| *var)
+            .collect::<Vec<_>>();
+
+        if missing_mentions.is_empty() {
+            return Ok(());
+        }
+
+        if visitor.had_holes {
+            return Err(ObligationNotReady);
+        }
+
+        NotCoveredError {
+            cause,
+            missing_mentions,
+            in_trait,
+            in_type,
+        }
+        .report(self);
+
+        Ok(())
     }
 }
