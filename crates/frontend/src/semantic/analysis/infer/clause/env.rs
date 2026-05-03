@@ -6,7 +6,7 @@ use crate::{
     semantic::{
         analysis::{
             ClauseCx, ClauseImportEnv, ClauseImportEnvRef, HrtbUniverse, ObligeCause,
-            ObligeCauseFrame,
+            ObligeCauseStep,
         },
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnInstanceInner,
@@ -356,7 +356,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 |_this, _idx, clause| {
                     cause
                         .clone()
-                        .child(ObligeCauseFrame::GenericRequirements { clause })
+                        .child(ObligeCauseStep::ImportEnvMeetsRequirements { clause }.into())
                 },
             );
         }

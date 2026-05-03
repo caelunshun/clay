@@ -3,7 +3,7 @@ use crate::{
     semantic::{
         analysis::{
             ClauseCx, ClauseImportEnvRef, CoherenceMap, HrtbUniverse, ObligeCause,
-            ObligeCauseFrame, UnifyCxMode,
+            ObligeCauseOrigin, UnifyCxMode,
         },
         syntax::{
             AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FnItem, GenericBinder, GenericSubst,
@@ -133,7 +133,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
                 );
 
                 ccx.oblige_ty_meets_clause(
-                    ObligeCause::new_report(ObligeCauseFrame::WfSuperTrait {
+                    ObligeCause::new_report(ObligeCauseOrigin::HirCheckSuperTrait {
                         block: target.own_span(),
                         clause: super_clause_span,
                     }),

@@ -2,7 +2,7 @@ use crate::{
     base::arena::{HasInterner as _, Obj},
     parse::ast::AstMutability,
     semantic::{
-        analysis::{BodyCtxt, HrtbUniverse, ObligeCause, ObligeCauseFrame},
+        analysis::{BodyCtxt, HrtbUniverse, ObligeCause, ObligeCauseOrigin},
         syntax::{
             Divergence, HirPat, HirPatKind, InferTyVarSourceInfo, Mutability, Re, RelationMode, Ty,
             TyKind,
@@ -65,9 +65,12 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 };
 
                 self.ccx_mut().oblige_ty_unifies_ty(
-                    ObligeCause::new_report(ObligeCauseFrame::Pattern {
-                        pat_span: pat.r(s).span,
-                    }),
+                    ObligeCause::new_report(
+                        ObligeCauseOrigin::HirBodyCheckPattern {
+                            pat_span: pat.r(s).span,
+                        }
+                        .into(),
+                    ),
                     local_ty,
                     bound_ty,
                     RelationMode::Equate,

@@ -3,10 +3,10 @@ use crate::{
     semantic::{
         analysis::ClauseCx,
         syntax::{
-            AdtInstance, AnyGeneric, FloatKind, FnInstanceInner, FnOwner, HrtbBinderKind,
-            InferTyVarSourceInfo, IntKind, Re, SimpleTyKind, SimpleTySet, TraitClause,
-            TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe, UniversalTyVar,
-            UniversalTyVarSourceInfo,
+            AdtInstance, AnyGeneric, FloatKind, FnInstanceInner, FnOwner, HrtbBinder,
+            HrtbBinderKind, InferTyVarSourceInfo, IntKind, Re, SimpleTyKind, SimpleTySet,
+            TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe,
+            TyProjection, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -49,15 +49,80 @@ impl<'a, 'tcx> ClauseCxPrinter<'a, 'tcx> {
         self.out.push_str("'_");
     }
 
+    pub fn push_binder(&mut self, binder: HrtbBinder) {
+        let s = self.session();
+
+        let HrtbBinderKind::Imported(clauses) = binder.kind else {
+            unreachable!()
+        };
+
+        if !clauses.r(s).is_empty() {
+            self.out.push_str("for<");
+            for (i, clause) in clauses.r(s).iter().enumerate() {
+                if i > 0 {
+                    self.out.push_str(", ");
+                }
+                match clause.spawned_from {
+                    AnyGeneric::Re(generic) => {
+                        write!(&mut self.out, "'{}", generic.r(s).lifetime.name).unwrap();
+                    }
+                    AnyGeneric::Ty(generic) => {
+                        write!(&mut self.out, "{}", generic.r(s).ident.text).unwrap();
+                    }
+                }
+
+                if !clause.clauses.r(s).is_empty() {
+                    self.out.push_str(": ");
+                    self.push_trait_clauses(clause.clauses);
+                }
+            }
+            self.out.push_str("> ");
+        }
+
+        self.push_trait_spec(binder.inner);
+    }
+
     pub fn push_ty(&mut self, ty: Ty) {
         let s = self.session();
 
         match *self.ccx.peel_ty_infer_var_without_poll(ty).r(s) {
-            TyKind::SigThis
-            | TyKind::SigInfer
-            | TyKind::SigGeneric(_)
-            | TyKind::SigProject(_)
-            | TyKind::SigAlias(_, _) => unreachable!(),
+            TyKind::SigThis | TyKind::SigInfer | TyKind::SigGeneric(_) => unreachable!(),
+
+            TyKind::SigProject(TyProjection {
+                target,
+                spec,
+                assoc,
+            }) => {
+                self.out.push_str("<");
+                self.push_ty(target);
+                self.out.push_str(" as ");
+                self.push_trait_spec(spec);
+                self.out.push_str(">::");
+                self.out.push_str(
+                    spec.def.r(s).generics.r(s).defs[assoc as usize]
+                        .as_ty()
+                        .unwrap()
+                        .r(s)
+                        .ident
+                        .text
+                        .as_str(s),
+                );
+            }
+            TyKind::SigAlias(def, params) => {
+                write!(&mut self.out, "{}", def.r(s).item.r(s).display_path(s)).unwrap();
+
+                if !params.r(s).is_empty() {
+                    self.out.push('<');
+                    for (idx, &param) in params.r(s).iter().enumerate() {
+                        if idx > 0 {
+                            self.out.push_str(", ");
+                        }
+
+                        self.push_ty_or_re(param);
+                    }
+                    self.out.push('>');
+                }
+            }
 
             TyKind::Simple(kind) => self.out.push_str(match kind {
                 SimpleTyKind::Never => "Never",

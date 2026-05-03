@@ -59,7 +59,7 @@ use crate::{
     semantic::{
         analysis::{
             ClauseCx, HrtbUniverse, HrtbUniverseInfo, ObligeCause, ObligeCauseBehavior,
-            ObligeCauseFrame, UnifyCxMode,
+            ObligeCauseOrigin, UnifyCxMode,
         },
         syntax::{
             AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, FnOwner, GenericBinder,
@@ -185,10 +185,7 @@ impl ClauseImporter<'_, '_> {
             .fold_preserved(value);
 
         self.ccx
-            .wf_and_normalize_folder(
-                ObligeCause::new(ObligeCauseBehavior::Report),
-                universe.clone(),
-            )
+            .wf_and_normalize_folder(ObligeCause::new_empty_report(), universe.clone())
             .with_clause_applies_to_opt(self.clause_applies_to)
             .fold_spanned(value)
     }
@@ -860,9 +857,12 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
 
         // Universally instantiate the body and WF check it.
         let old_universe = self.universe.clone();
-        let wf_cause = self.cause.clone().child(ObligeCauseFrame::WfHrtb {
-            binder_span: kind.own_span(),
-        });
+        let wf_cause = self.cause.clone().child(
+            ObligeCauseOrigin::ImportWfHrtb {
+                binder_span: kind.own_span(),
+            }
+            .into(),
+        );
         let new_universe = self.universe.clone().nest(HrtbUniverseInfo {
             cause: wf_cause.clone(),
         });
@@ -923,9 +923,12 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
                 let pointee = self.fold_spanned(pointee);
 
                 self.ccx.oblige_ty_outlives_re(
-                    self.cause.clone().child(ObligeCauseFrame::WfForReference {
-                        pointee: pointee_span,
-                    }),
+                    self.cause.clone().child(
+                        ObligeCauseOrigin::ImportWfForReference {
+                            pointee: pointee_span,
+                        }
+                        .into(),
+                    ),
                     pointee,
                     re,
                     RelationDirection::LhsOntoRhs,
@@ -954,9 +957,12 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
                     .ccx
                     .normalizer(self.universe.clone())
                     .normalize_super_normalized_projection(
-                        self.cause.clone().child(ObligeCauseFrame::WfTyProjection {
-                            span: ty.own_span(),
-                        }),
+                        self.cause.clone().child(
+                            ObligeCauseOrigin::ImportWfTyProjection {
+                                span: ty.own_span(),
+                            }
+                            .into(),
+                        ),
                         ty.own_span(),
                         TyProjection {
                             target,
@@ -1131,7 +1137,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
             &self
                 .cause
                 .clone()
-                .child(ObligeCauseFrame::WfFnDef { fn_ty: own_span }),
+                .child(ObligeCauseOrigin::ImportWfFnDef { fn_ty: own_span }.into()),
             &self.universe,
             owner,
         );
@@ -1225,12 +1231,13 @@ impl ClauseTyWfFolder<'_, '_> {
             defs,
             validated_params,
             |_, param_idx, clause_span| {
-                self.cause
-                    .clone()
-                    .child(ObligeCauseFrame::WfForGenericParam {
+                self.cause.clone().child(
+                    ObligeCauseOrigin::ImportWfForGenericParam {
                         use_span: param_spans[param_idx],
                         clause_span,
-                    })
+                    }
+                    .into(),
+                )
             },
         );
     }

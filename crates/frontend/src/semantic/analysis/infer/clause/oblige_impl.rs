@@ -5,17 +5,17 @@ use crate::{
     semantic::{
         analysis::{
             ClauseCx, ClauseImportEnv, HrtbUniverse, HrtbUniverseInfo, NoTraitImplError,
-            NotCoveredError, ObligationNotReady, ObligationResult, ObligeCause,
+            NotCoveredError, ObligationNotReady, ObligationResult, ObligeCause, ObligeCauseStep,
             UnboundVarHandlingMode, UniversalElaboration,
             infer::clause::{ClauseObligation, elaboration::FloatingInfVarVisitor},
         },
         syntax::{
-            HrtbBinder, HrtbBinderKind, ImplItem, RelationMode, SimpleTySet, SpannedTy,
+            HrtbBinder, HrtbBinderKind, ImplItem, InferTyVar, RelationMode, SimpleTySet, SpannedTy,
             TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyFolderInfallibleExt,
             TyKind, TyOrRe, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt, UniversalTyVar,
         },
     },
-    utils::hash::FxHashMap,
+    utils::hash::{FxHashMap, FxHashSet},
 };
 use std::{convert::Infallible, ops::ControlFlow, rc::Rc};
 
@@ -89,7 +89,12 @@ impl<'tcx> ClauseCx<'tcx> {
         lhs: Ty,
         rhs: TraitSpec,
     ) {
-        self.push_obligation(ClauseObligation::TyMeetsTrait(cause, universe, lhs, rhs));
+        self.push_obligation(ClauseObligation::TyMeetsTrait(
+            cause.child(ObligeCauseStep::ImplInstantiatedClause { lhs, rhs }.into()),
+            universe,
+            lhs,
+            rhs,
+        ));
     }
 
     pub(super) fn run_oblige_ty_meets_trait_instantiated(
@@ -220,7 +225,7 @@ impl<'tcx> ClauseCx<'tcx> {
             .as_ref()
             .map(|v| v.collect_roots(&self));
 
-        'select: for &lhs in lhs.clauses.r(s) {
+        for &lhs in lhs.clauses.r(s) {
             let TraitClause::Trait(lhs) = lhs else {
                 continue;
             };
@@ -229,166 +234,178 @@ impl<'tcx> ClauseCx<'tcx> {
                 continue;
             }
 
-            let mut fork = self.clone();
-
-            // Instantiate the binder with inference variables so that we may select the correct
-            // implementation of it.
-            let lhs = fork.instantiate_hrtb_infer(cause, universe, lhs);
-
-            // See whether we can select an inherent `impl`.
-            let mut param_iter = lhs.params.r(s).iter().zip(rhs.params.r(s));
-
-            for (&lhs_param, &rhs_param) in
-                (&mut param_iter).take(*rhs.def.r(s).regular_generic_count as usize)
-            {
-                let TraitParam::Equals(lhs) = lhs_param else {
-                    unreachable!();
-                };
-
-                match rhs_param {
-                    TraitParam::Equals(rhs) => match (lhs, rhs) {
-                        (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                            // This can be an obligation because selection shouldn't depend on regions.
-                            fork.oblige_re_outlives_re(
-                                cause.clone(),
-                                lhs,
-                                rhs,
-                                RelationMode::Equate,
-                            );
-                        }
-                        (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
-                            // See whether we can reject this parameter.
-                            if let Err(_err) = fork.ucx_mut().unify_ty_and_ty(
-                                &ObligeCause::new_never_report(),
-                                lhs,
-                                rhs,
-                                RelationMode::Equate,
-                            ) {
-                                continue 'select;
-                            }
-
-                            // If we can't, ensure that we haven't just unified some still-inferred
-                            // generic definition parameters unexpectedly.
-                            if let Some(reified_var_roots) = &reified_var_roots {
-                                let is_resolved = FloatingInfVarVisitor {
-                                    // N.B. this is not the fork to ensure that we look for
-                                    // still-inferred types before the potentially hazardous
-                                    // unification.
-                                    ccx: &fork,
-                                    reified_var_roots,
-                                }
-                                .visit_fallible(lhs)
-                                .is_continue();
-
-                                if !is_resolved {
-                                    return Err(ObligationNotReady);
-                                }
-                            }
-                        }
-                        _ => unreachable!(),
-                    },
-                    TraitParam::Unspecified(_) => {
-                        unreachable!()
-                    }
-                }
+            if let Ok(fork) = self.clone().try_select_single_inherent_impl(
+                cause,
+                universe,
+                lhs,
+                rhs,
+                reified_var_roots.as_ref(),
+            )? {
+                return Ok(Ok(fork));
             }
-
-            // We need to be careful to ensure that we don't leak the inferred types inside an
-            // universal elaboration list. This is to prevent scenarios like these...
-            //
-            // ```
-            // pub trait Meow {
-            //     type Out;
-            // }
-            //
-            // fn hehe<T: Meow<Out = <T as Meow>::Out>>(v: <T as Meow>::Out) {
-            //     let u: i32 = v;
-            // }
-            // ```
-            //
-            // ...where `<T as Meow>::Out` is allowed to unify with itself, letting the universal
-            // be decided circumstance of the type-checking context.
-            //
-            // That being said, code like this...
-            //
-            // ```
-            // fn hello<
-            //     T: Projector<i32>
-            //      + Projector<u32, Out = <T as Projector<i32>>::Out>
-            //      + Meow<<T as Projector<i32>>::Out, Hey: Foo>
-            //      + Meow<<T as Projector<u32>>::Out, Hey: Bar>,
-            // >(
-            //     v: T,
-            // ) {
-            //    ...
-            // }
-            // ```
-            //
-            // ...*should* compile. Hence, we create an exception for universal elaboration helpers.
-            // This is okay because these types aren't allowed to be left floating without also
-            // causing issues with the elaboration obligation either never resolving or attempting
-            // to unify some disjoint variable. This corresponds to `FloatingInfVarVisitor`'s
-            // existing behavior so we use that.
-            if let Some(reified_var_roots) = &reified_var_roots {
-                for (&lhs, &_rhs) in param_iter.clone() {
-                    let TraitParam::Equals(TyOrRe::Ty(lhs)) = lhs else {
-                        unreachable!()
-                    };
-
-                    let is_resolved = FloatingInfVarVisitor {
-                        ccx: &self,
-                        reified_var_roots,
-                    }
-                    .visit_fallible(lhs)
-                    .is_continue();
-
-                    if !is_resolved {
-                        return Err(ObligationNotReady);
-                    }
-                }
-            }
-
-            // If we can, push its obligations.
-            for (&lhs_param, &rhs_param) in param_iter {
-                let TraitParam::Equals(lhs) = lhs_param else {
-                    unreachable!();
-                };
-
-                match rhs_param {
-                    TraitParam::Equals(rhs) => match (lhs, rhs) {
-                        (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                            fork.oblige_re_outlives_re(
-                                cause.clone(),
-                                lhs,
-                                rhs,
-                                RelationMode::Equate,
-                            );
-                        }
-                        (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
-                            fork.oblige_ty_unifies_ty(
-                                cause.clone(),
-                                lhs,
-                                rhs,
-                                RelationMode::Equate,
-                            );
-                        }
-                        _ => unreachable!(),
-                    },
-                    TraitParam::Unspecified(rhs) => match lhs {
-                        TyOrRe::Re(lhs) => {
-                            fork.oblige_re_meets_clauses(cause, lhs, rhs);
-                        }
-                        TyOrRe::Ty(lhs) => {
-                            fork.oblige_ty_meets_clauses(cause, universe, lhs, rhs);
-                        }
-                    },
-                }
-            }
-
-            return Ok(Ok(fork));
         }
 
         Ok(Err(SelectionRejected))
+    }
+
+    fn try_select_single_inherent_impl(
+        mut self,
+        cause: &ObligeCause,
+        universe: &HrtbUniverse,
+        lhs: HrtbBinder,
+        rhs: TraitSpec,
+        reified_var_roots: Option<&FxHashSet<InferTyVar>>,
+    ) -> ObligationResult<Result<Self, SelectionRejected>> {
+        let s = self.session();
+
+        assert_eq!(lhs.inner.def, rhs.def);
+
+        let cause = cause
+            .clone()
+            .child(ObligeCauseStep::ImplUsingInherent { lhs, rhs }.into());
+
+        // Instantiate the binder with inference variables so that we may select the correct
+        // implementation of it.
+        let lhs = self.instantiate_hrtb_infer(&cause, universe, lhs);
+
+        let pre_unify_fork = self.clone();
+
+        // See whether we can select an inherent `impl`.
+        let mut param_iter = lhs.params.r(s).iter().zip(rhs.params.r(s));
+
+        for (&lhs_param, &rhs_param) in
+            (&mut param_iter).take(*rhs.def.r(s).regular_generic_count as usize)
+        {
+            let TraitParam::Equals(lhs) = lhs_param else {
+                unreachable!();
+            };
+
+            match rhs_param {
+                TraitParam::Equals(rhs) => match (lhs, rhs) {
+                    (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
+                        // This can be an obligation because selection shouldn't depend on regions.
+                        self.oblige_re_outlives_re(cause.clone(), lhs, rhs, RelationMode::Equate);
+                    }
+                    (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
+                        // See whether we can reject this parameter.
+                        if let Err(_err) = self.ucx_mut().unify_ty_and_ty(
+                            &ObligeCause::new_never_report(),
+                            lhs,
+                            rhs,
+                            RelationMode::Equate,
+                        ) {
+                            return Ok(Err(SelectionRejected));
+                        }
+
+                        // If we can't, ensure that we haven't just unified some still-inferred
+                        // generic definition parameters unexpectedly.
+                        if let Some(reified_var_roots) = &reified_var_roots {
+                            let is_resolved = FloatingInfVarVisitor {
+                                // N.B. this is the `pre_unify_fork` to ensure that we look for
+                                // still-inferred types before the potentially hazardous
+                                // unification.
+                                ccx: &pre_unify_fork,
+                                reified_var_roots,
+                            }
+                            .visit_fallible(lhs)
+                            .is_continue();
+
+                            if !is_resolved {
+                                return Err(ObligationNotReady);
+                            }
+                        }
+                    }
+                    _ => unreachable!(),
+                },
+                TraitParam::Unspecified(_) => {
+                    unreachable!()
+                }
+            }
+        }
+
+        // We need to be careful to ensure that we don't leak the inferred types inside an
+        // universal elaboration list. This is to prevent scenarios like these...
+        //
+        // ```
+        // pub trait Meow {
+        //     type Out;
+        // }
+        //
+        // fn hehe<T: Meow<Out = <T as Meow>::Out>>(v: <T as Meow>::Out) {
+        //     let u: i32 = v;
+        // }
+        // ```
+        //
+        // ...where `<T as Meow>::Out` is allowed to unify with itself, letting the universal
+        // be decided circumstance of the type-checking context.
+        //
+        // That being said, code like this...
+        //
+        // ```
+        // fn hello<
+        //     T: Projector<i32>
+        //      + Projector<u32, Out = <T as Projector<i32>>::Out>
+        //      + Meow<<T as Projector<i32>>::Out, Hey: Foo>
+        //      + Meow<<T as Projector<u32>>::Out, Hey: Bar>,
+        // >(
+        //     v: T,
+        // ) {
+        //    ...
+        // }
+        // ```
+        //
+        // ...*should* compile. Hence, we create an exception for universal elaboration helpers.
+        // This is okay because these types aren't allowed to be left floating without also
+        // causing issues with the elaboration obligation either never resolving or attempting
+        // to unify some disjoint variable. This corresponds to `FloatingInfVarVisitor`'s
+        // existing behavior so we use that.
+        if let Some(reified_var_roots) = &reified_var_roots {
+            for (&lhs, &_rhs) in param_iter.clone() {
+                let TraitParam::Equals(TyOrRe::Ty(lhs)) = lhs else {
+                    unreachable!()
+                };
+
+                let is_resolved = FloatingInfVarVisitor {
+                    ccx: &self,
+                    reified_var_roots,
+                }
+                .visit_fallible(lhs)
+                .is_continue();
+
+                if !is_resolved {
+                    return Err(ObligationNotReady);
+                }
+            }
+        }
+
+        // If we can, push its obligations.
+        for (&lhs_param, &rhs_param) in param_iter {
+            let TraitParam::Equals(lhs) = lhs_param else {
+                unreachable!();
+            };
+
+            match rhs_param {
+                TraitParam::Equals(rhs) => match (lhs, rhs) {
+                    (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
+                        self.oblige_re_outlives_re(cause.clone(), lhs, rhs, RelationMode::Equate);
+                    }
+                    (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
+                        self.oblige_ty_unifies_ty(cause.clone(), lhs, rhs, RelationMode::Equate);
+                    }
+                    _ => unreachable!(),
+                },
+                TraitParam::Unspecified(rhs) => match lhs {
+                    TyOrRe::Re(lhs) => {
+                        self.oblige_re_meets_clauses(&cause, lhs, rhs);
+                    }
+                    TyOrRe::Ty(lhs) => {
+                        self.oblige_ty_meets_clauses(&cause, universe, lhs, rhs);
+                    }
+                },
+            }
+        }
+
+        Ok(Ok(self))
     }
 
     fn try_select_block_impl(

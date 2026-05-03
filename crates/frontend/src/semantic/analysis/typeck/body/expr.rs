@@ -8,7 +8,7 @@ use crate::{
     parse::ast::{AstLit, AstUnOpKind},
     semantic::{
         analysis::{
-            BodyCtxt, ClauseError, EquateOrSet, HrtbUniverse, ObligeCause, ObligeCauseFrame,
+            BodyCtxt, ClauseError, EquateOrSet, HrtbUniverse, ObligeCause, ObligeCauseOrigin,
             OverloadResolution, peel_ref_for_prim_op,
             typeck::body::lookup::{LookupMethodResult, SpannedImportedAssocArgs},
         },
@@ -145,7 +145,9 @@ impl BodyCtxt<'_, '_> {
                 );
 
                 self.ccx_mut().oblige_ty_meets_trait_instantiated(
-                    ObligeCause::new_report(ObligeCauseFrame::FunctionCall { site_span }),
+                    ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall {
+                        site_span,
+                    }),
                     HrtbUniverse::ROOT,
                     callee,
                     TraitSpec {
@@ -252,7 +254,7 @@ impl BodyCtxt<'_, '_> {
                 });
 
                 let instance_env = self.ccx_mut().create_infer_env_for_fn_instance(
-                    &ObligeCause::new_report(ObligeCauseFrame::FunctionCall {
+                    &ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall {
                         site_span: name.span,
                     }),
                     HrtbUniverse::ROOT_REF,
@@ -268,7 +270,7 @@ impl BodyCtxt<'_, '_> {
                 let (self_ty, expected_args) = expected_args.r(s).split_first().unwrap();
 
                 self.ccx_mut().oblige_ty_unifies_ty(
-                    ObligeCause::new_report(ObligeCauseFrame::FunctionCall {
+                    ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall {
                         site_span: name.span,
                     }),
                     *self_ty,
@@ -303,8 +305,9 @@ impl BodyCtxt<'_, '_> {
                 let rhs = self.check_expr(rhs, None).and_do(&mut divergence);
 
                 let kind_info = self.decode_bin_op_kind(kind.kind);
-                let cause =
-                    ObligeCause::new_report(ObligeCauseFrame::Arithmetic { op_span: kind.span });
+                let cause = ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckArithmetic {
+                    op_span: kind.span,
+                });
 
                 // Attempt a primitive operation.
                 let mut prim_fork = self.ccx().clone();
@@ -379,7 +382,7 @@ impl BodyCtxt<'_, '_> {
                 let lhs_ty = self.check_expr(lhs, None).and_do(&mut divergence);
 
                 let kind_info = self.decode_un_op_kind(kind);
-                let cause = ObligeCause::new_report(ObligeCauseFrame::Arithmetic {
+                let cause = ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckArithmetic {
                     op_span: lhs.r(s).span,
                 });
 
@@ -566,7 +569,7 @@ impl BodyCtxt<'_, '_> {
                 let into_iter_trait = self.krate().r(s).lang_items.into_iterator_trait().unwrap();
 
                 self.ccx_mut().oblige_ty_meets_trait_instantiated(
-                    ObligeCause::new_report(ObligeCauseFrame::ForLoopIter {
+                    ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckForLoopIter {
                         iter_span: iter.r(s).span,
                     }),
                     HrtbUniverse::ROOT,
@@ -641,9 +644,10 @@ impl BodyCtxt<'_, '_> {
                     let rhs = self.check_expr(rhs, None).and_do(&mut divergence);
 
                     let kind_info = self.decode_assign_op_kind(kind);
-                    let cause = ObligeCause::new_report(ObligeCauseFrame::Arithmetic {
-                        op_span: expr.r(s).span,
-                    });
+                    let cause =
+                        ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckArithmetic {
+                            op_span: expr.r(s).span,
+                        });
 
                     // Attempt a primitive operation.
                     let mut prim_fork = self.ccx().clone();
@@ -739,7 +743,7 @@ impl BodyCtxt<'_, '_> {
                 let index_trait = self.krate().r(s).lang_items.index_trait().unwrap();
 
                 self.ccx_mut().oblige_ty_meets_trait_instantiated(
-                    ObligeCause::new_report(ObligeCauseFrame::Index {
+                    ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckIndex {
                         target_span: target.r(s).span,
                         index_span: index.r(s).span,
                     }),

@@ -2,7 +2,7 @@ use crate::{
     base::arena::{HasInterner, HasListInterner, Obj},
     semantic::{
         analysis::{
-            BodyCtxt, ClauseCx, HrtbUniverse, ObligeCause, ObligeCauseFrame,
+            BodyCtxt, ClauseCx, HrtbUniverse, ObligeCause, ObligeCauseOrigin,
             attempt_deref_clobber_obligations,
         },
         syntax::{
@@ -67,9 +67,12 @@ impl BodyCtxt<'_, '_> {
         let out_ty = self.apply_coercions(&[(expr, actual)], target);
 
         self.ccx_mut().oblige_ty_unifies_ty(
-            ObligeCause::new_report(ObligeCauseFrame::Coercion {
-                expr_span: expr.r(s).span,
-            }),
+            ObligeCause::new_report(
+                ObligeCauseOrigin::HirBodyCheckCoercion {
+                    expr_span: expr.r(s).span,
+                }
+                .into(),
+            ),
             out_ty,
             demand,
             RelationMode::Equate,
@@ -93,9 +96,12 @@ impl BodyCtxt<'_, '_> {
                     }
 
                     self.ccx_mut().oblige_ty_unifies_ty(
-                        ObligeCause::new_report(ObligeCauseFrame::Coercion {
-                            expr_span: expr.r(s).span,
-                        }),
+                        ObligeCause::new_report(
+                            ObligeCauseOrigin::HirBodyCheckCoercion {
+                                expr_span: expr.r(s).span,
+                            }
+                            .into(),
+                        ),
                         actual,
                         solid,
                         RelationMode::Equate,
@@ -146,9 +152,12 @@ impl BodyCtxt<'_, '_> {
                                 );
 
                                 self.ccx_mut().oblige_ty_meets_trait_instantiated(
-                                    ObligeCause::new_report(ObligeCauseFrame::Coercion {
-                                        expr_span: expr.r(s).span,
-                                    }),
+                                    ObligeCause::new_report(
+                                        ObligeCauseOrigin::HirBodyCheckCoercion {
+                                            expr_span: expr.r(s).span,
+                                        }
+                                        .into(),
+                                    ),
                                     HrtbUniverse::ROOT,
                                     output_pointee,
                                     TraitSpec {
@@ -167,9 +176,12 @@ impl BodyCtxt<'_, '_> {
                     };
 
                     self.ccx_mut().oblige_ty_unifies_ty(
-                        ObligeCause::new_report(ObligeCauseFrame::Coercion {
-                            expr_span: expr.r(s).span,
-                        }),
+                        ObligeCause::new_report(
+                            ObligeCauseOrigin::HirBodyCheckCoercion {
+                                expr_span: expr.r(s).span,
+                            }
+                            .into(),
+                        ),
                         output_ty,
                         unify_ty,
                         RelationMode::Equate,
@@ -190,9 +202,12 @@ impl BodyCtxt<'_, '_> {
                     }
 
                     self.ccx_mut().oblige_ty_meets_clauses(
-                        &ObligeCause::new_report(ObligeCauseFrame::Coercion {
-                            expr_span: expr.r(s).span,
-                        }),
+                        &ObligeCause::new_report(
+                            ObligeCauseOrigin::HirBodyCheckCoercion {
+                                expr_span: expr.r(s).span,
+                            }
+                            .into(),
+                        ),
                         HrtbUniverse::ROOT_REF,
                         actual,
                         to_clauses,

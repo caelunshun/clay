@@ -1,6 +1,9 @@
 use crate::{
-    base::{Diag, EmissionGuarantee, ErrorGuaranteed, LeafDiag, Level, syntax::Span},
-    semantic::analysis::ClauseCx,
+    base::{Diag, ErrorGuaranteed, LeafDiag, Level, arena::Obj, syntax::Span},
+    semantic::{
+        analysis::ClauseCx,
+        syntax::{HrtbBinder, ImplItem, TraitSpec, Ty},
+    },
 };
 use std::{cell::Cell, fmt, panic::Location, rc::Rc};
 
@@ -74,8 +77,13 @@ impl ObligeCause {
     }
 
     #[track_caller]
-    pub fn new_report(frame: ObligeCauseFrame) -> Self {
-        Self::new(ObligeCauseBehavior::Report).child(frame)
+    pub fn new_empty_report() -> Self {
+        Self::new(ObligeCauseBehavior::Report)
+    }
+
+    #[track_caller]
+    pub fn new_report(frame: ObligeCauseOrigin) -> Self {
+        Self::new_empty_report().child(frame.into())
     }
 
     #[track_caller]
@@ -200,41 +208,18 @@ impl ObligeCause {
     ) -> Diag<Option<ErrorGuaranteed>> {
         let frames = self.frames().collect::<Vec<_>>();
 
-        // TODO: Fallback span?
         let main_span = frames
             .last()
-            .map_or(Span::DUMMY, |v| v.frame.primary_span());
+            // TODO: Fallback span?
+            .map_or(Span::DUMMY, |v| v.frame.unwrap_origin_ref().primary_span());
 
         let mut diag = Diag::new(level, msg).primary(main_span, "");
-        Self::append_context(&frames, ccx, &mut diag);
+
+        for frame in frames {
+            diag.push_child(LeafDiag::new(Level::Note, format!("{:#?}", frame.frame)));
+        }
 
         diag
-    }
-
-    fn append_context<E: EmissionGuarantee>(
-        frames: &[ObligeCauseFrameRef<'_>],
-        ccx: &ClauseCx<'_>,
-        diag: &mut Diag<E>,
-    ) {
-        for (idx, frame) in frames.iter().rev().enumerate() {
-            if idx == 0 {
-                diag.push_child(LeafDiag::new(
-                    Level::Note,
-                    format!(
-                        "this is necessary because we originally needed to {}",
-                        frame.frame.to_do_what(ccx)
-                    ),
-                ));
-            } else {
-                diag.push_child(LeafDiag::span_note(
-                    frame.frame.primary_span(),
-                    format!(
-                        "...which then required us to {}",
-                        frame.frame.to_do_what(ccx)
-                    ),
-                ));
-            }
-        }
     }
 }
 
@@ -287,126 +272,132 @@ impl ObligeCauseProbe {
 
 #[derive(Debug, Clone)]
 pub enum ObligeCauseFrame {
-    Arithmetic {
-        op_span: Span,
-    },
+    /// An oblige cause origin, which indicate root-level causes that started this obligation.
+    Origin(ObligeCauseOrigin),
 
-    Coercion {
-        expr_span: Span,
-    },
+    /// An internal step in fulfilling this obligation.
+    Step(ObligeCauseStep),
+}
 
-    Pattern {
-        pat_span: Span,
-    },
+impl From<ObligeCauseOrigin> for ObligeCauseFrame {
+    fn from(value: ObligeCauseOrigin) -> Self {
+        Self::Origin(value)
+    }
+}
 
-    Index {
-        target_span: Span,
-        index_span: Span,
-    },
-
-    ReturnUnit {
-        span: Span,
-    },
-
-    FunctionCall {
-        site_span: Span,
-    },
-
-    ForLoopIter {
-        iter_span: Span,
-    },
-
-    ForLoopPat {
-        iter_span: Span,
-        pat_span: Span,
-    },
-
-    /// This obligation is required to satisfy the requirements of a generic parameter for
-    /// well-formedness.
-    WfForGenericParam {
-        use_span: Span,
-        clause_span: Span,
-    },
-
-    /// This obligation is required to satisfy the well-formedness requirements of a reference.
-    WfForReference {
-        pointee: Span,
-    },
-
-    WfSuperTrait {
-        block: Span,
-        clause: Span,
-    },
-
-    WfFnDef {
-        fn_ty: Span,
-    },
-
-    WfHrtb {
-        binder_span: Span,
-    },
-
-    WfTyAlias {
-        span: Span,
-    },
-
-    WfTyProjection {
-        span: Span,
-    },
-
-    /// This obligation is required by a generic parameter's clause list.
-    GenericRequirements {
-        clause: Span,
-    },
-
-    /// This obligation is required to constrain inference variables in an instantiated projection.
-    InstantiatedProjection {
-        span: Span,
-    },
-
-    /// This obligation is required in order for the HRTB variable to meet its clauses.
-    HrtbSelection {
-        def: Span,
-    },
+impl From<ObligeCauseStep> for ObligeCauseFrame {
+    fn from(value: ObligeCauseStep) -> Self {
+        Self::Step(value)
+    }
 }
 
 impl ObligeCauseFrame {
+    pub fn into_origin(self) -> Result<ObligeCauseOrigin, Self> {
+        if let ObligeCauseFrame::Origin(v) = self {
+            Ok(v)
+        } else {
+            Err(self)
+        }
+    }
+
+    pub fn into_step(self) -> Result<ObligeCauseStep, Self> {
+        if let ObligeCauseFrame::Step(v) = self {
+            Ok(v)
+        } else {
+            Err(self)
+        }
+    }
+
+    pub fn as_origin(&self) -> Option<&ObligeCauseOrigin> {
+        if let ObligeCauseFrame::Origin(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_step(&self) -> Option<&ObligeCauseStep> {
+        if let ObligeCauseFrame::Step(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn unwrap_origin(self) -> ObligeCauseOrigin {
+        self.into_origin().ok().unwrap()
+    }
+
+    pub fn unwrap_step(self) -> ObligeCauseStep {
+        self.into_step().ok().unwrap()
+    }
+
+    pub fn unwrap_origin_ref(&self) -> &ObligeCauseOrigin {
+        self.as_origin().unwrap()
+    }
+
+    pub fn unwrap_step_ref(&self) -> &ObligeCauseStep {
+        self.as_step().unwrap()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ObligeCauseOrigin {
+    HirBodyCheckArithmetic { op_span: Span },
+    HirBodyCheckCoercion { expr_span: Span },
+    HirBodyCheckPattern { pat_span: Span },
+    HirBodyCheckIndex { target_span: Span, index_span: Span },
+    HirBodyCheckReturnUnit { span: Span },
+    HirBodyCheckFunctionCall { site_span: Span },
+    HirBodyCheckForLoopIter { iter_span: Span },
+    HirBodyCheckForLoopPat { iter_span: Span, pat_span: Span },
+    ImportWfForGenericParam { use_span: Span, clause_span: Span },
+    ImportWfForReference { pointee: Span },
+    ImportWfFnDef { fn_ty: Span },
+    ImportWfHrtb { binder_span: Span },
+    ImportWfTyProjection { span: Span },
+    HirCheckSuperTrait { block: Span, clause: Span },
+}
+
+impl ObligeCauseOrigin {
     pub fn primary_span(&self) -> Span {
-        let (ObligeCauseFrame::Arithmetic { op_span: span }
-        | ObligeCauseFrame::Coercion { expr_span: span }
-        | ObligeCauseFrame::Pattern { pat_span: span }
-        | ObligeCauseFrame::Index {
+        let (ObligeCauseOrigin::HirBodyCheckArithmetic { op_span: span }
+        | ObligeCauseOrigin::HirBodyCheckCoercion { expr_span: span }
+        | ObligeCauseOrigin::HirBodyCheckPattern { pat_span: span }
+        | ObligeCauseOrigin::HirBodyCheckIndex {
             target_span: _,
             index_span: span,
         }
-        | ObligeCauseFrame::ReturnUnit { span }
-        | ObligeCauseFrame::FunctionCall { site_span: span }
-        | ObligeCauseFrame::ForLoopIter { iter_span: span }
-        | ObligeCauseFrame::ForLoopPat {
+        | ObligeCauseOrigin::HirBodyCheckReturnUnit { span }
+        | ObligeCauseOrigin::HirBodyCheckFunctionCall { site_span: span }
+        | ObligeCauseOrigin::HirBodyCheckForLoopIter { iter_span: span }
+        | ObligeCauseOrigin::HirBodyCheckForLoopPat {
             iter_span: span,
             pat_span: _,
         }
-        | ObligeCauseFrame::WfForGenericParam {
+        | ObligeCauseOrigin::ImportWfForGenericParam {
             use_span: span,
             clause_span: _,
         }
-        | ObligeCauseFrame::WfForReference { pointee: span }
-        | ObligeCauseFrame::WfSuperTrait {
+        | ObligeCauseOrigin::ImportWfForReference { pointee: span }
+        | ObligeCauseOrigin::HirCheckSuperTrait {
             block: span,
             clause: _,
         }
-        | ObligeCauseFrame::WfFnDef { fn_ty: span }
-        | ObligeCauseFrame::WfHrtb { binder_span: span }
-        | ObligeCauseFrame::WfTyAlias { span }
-        | ObligeCauseFrame::WfTyProjection { span }
-        | ObligeCauseFrame::GenericRequirements { clause: span }
-        | ObligeCauseFrame::InstantiatedProjection { span }
-        | ObligeCauseFrame::HrtbSelection { def: span }) = *self;
+        | ObligeCauseOrigin::ImportWfFnDef { fn_ty: span }
+        | ObligeCauseOrigin::ImportWfHrtb { binder_span: span }
+        | ObligeCauseOrigin::ImportWfTyProjection { span }) = *self;
 
         span
     }
+}
 
-    pub fn to_do_what(&self, ccx: &ClauseCx<'_>) -> String {
-        format!("{self:?}")
-    }
+#[derive(Debug, Clone)]
+pub enum ObligeCauseStep {
+    ImplInstantiatedClause { lhs: Ty, rhs: TraitSpec },
+    ImplUsingInherent { lhs: HrtbBinder, rhs: TraitSpec },
+    ImplUsingBlock(Obj<ImplItem>),
+
+    // TODO
+    ImportEnvMeetsRequirements { clause: Span },
 }
