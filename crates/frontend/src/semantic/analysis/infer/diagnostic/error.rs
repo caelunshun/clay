@@ -3,8 +3,8 @@ use crate::{
     semantic::{
         analysis::{ClauseCx, ClauseObligation, HrtbUniverse, ObligeCause},
         syntax::{
-            InferTyVar, Re, RelationDirection, SimpleTySet, TraitClauseList, TraitParam, TraitSpec,
-            Ty, UniversalReVar, UniversalTyVar,
+            InferTyVar, PrettyUniversalTyVar, Re, RelationDirection, SimpleTySet, TraitClauseList,
+            TraitParam, TraitSpec, Ty, UniversalReVar, UniversalTyVar,
         },
     },
     utils::lang::{AND_LIST_GLUE, format_list},
@@ -70,25 +70,19 @@ impl ObligationUnfulfilled {
             ClauseObligation::TyUnifiesTy(_cause, _lhs, _rhs, _mode) => unreachable!(),
             ClauseObligation::TyMeetsTrait(cause, _universe, lhs, rhs) => cause.report(ccx, || {
                 format!(
-                    "could not make necessary inferences to show that `{}` implements `{}`",
-                    ccx.pretty_print(|p| p.push_ty(lhs)),
-                    ccx.pretty_print(|p| p.push_trait_spec(rhs)),
+                    "could not make necessary inferences to show that `{lhs}` implements `{rhs}`",
                 )
             }),
             ClauseObligation::TyOutlivesRe(cause, lhs, rhs, dir) => {
                 cause.report(ccx, || match dir {
                     RelationDirection::LhsOntoRhs => {
                         format!(
-                            "could not make necessary inferences to show that `{}` outlives `{}`",
-                            ccx.pretty_print(|p| p.push_ty(lhs)),
-                            ccx.pretty_print(|p| p.push_re(rhs)),
+                            "could not make necessary inferences to show that `{lhs}` outlives `{rhs}`",
                         )
                     }
                     RelationDirection::RhsOntoLhs => {
                         format!(
-                            "could not make necessary inferences to show that `{}` outlives `{}`",
-                            ccx.pretty_print(|p| p.push_re(rhs)),
-                            ccx.pretty_print(|p| p.push_ty(lhs)),
+                            "could not make necessary inferences to show that `{rhs}` outlives `{lhs}`",
                         )
                     }
                 })
@@ -100,8 +94,8 @@ impl ObligationUnfulfilled {
                 _reification_state,
             ) => cause.report(ccx, || {
                 format!(
-                    "could not make necessary inferences to elaborate the generic clauses of {}",
-                    ccx.pretty_print(|p| p.push_universal_ty(univ)),
+                    "could not make necessary inferences to elaborate the generic clauses of `{}`",
+                    PrettyUniversalTyVar(univ),
                 )
             }),
             ClauseObligation::Covered(oblige_cause, hash_map, intern, trait_spec) => {
@@ -121,11 +115,7 @@ pub struct NoTraitImplError {
 impl NoTraitImplError {
     pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
         self.cause.report(ccx, || {
-            format!(
-                "type `{}` does not implement `{}`",
-                ccx.pretty_print(|p| p.push_ty(self.target)),
-                ccx.pretty_print(|p| p.push_trait_spec(self.spec)),
-            )
+            format!("type `{}` does not implement `{}`", self.target, self.spec)
         })
     }
 }
@@ -142,9 +132,9 @@ impl NotCoveredError {
     pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
         self.cause.report(ccx, || {
             let covered = format_list(
-                self.missing_mentions.iter().map(|&mention| {
-                    format!("`{}`", ccx.pretty_print(|p| p.push_universal_ty(mention)))
-                }),
+                self.missing_mentions
+                    .iter()
+                    .map(|&mention| format!("`{}`", PrettyUniversalTyVar(mention))),
                 AND_LIST_GLUE,
             );
 
@@ -152,36 +142,32 @@ impl NotCoveredError {
                 (None, None) => unreachable!(),
                 (None, Some(in_type)) => {
                     format!(
-                        "universal type{} {covered} not covered by type `{}`",
+                        "universal type{} {covered} not covered by type `{in_type}`",
                         if self.missing_mentions.len() == 1 {
                             ""
                         } else {
                             "s"
                         },
-                        ccx.pretty_print(|p| p.push_ty(in_type)),
                     )
                 }
                 (Some(in_trait), None) => {
                     format!(
-                        "universal type{} {covered} not covered by trait `{}`",
+                        "universal type{} {covered} not covered by trait `{in_trait}`",
                         if self.missing_mentions.len() == 1 {
                             ""
                         } else {
                             "s"
                         },
-                        ccx.pretty_print(|p| p.push_trait_spec(in_trait)),
                     )
                 }
                 (Some(in_trait), Some(in_type)) => {
                     format!(
-                        "universal type{} {covered} not covered by trait `{}` and type `{}`",
+                        "universal type{} {covered} not covered by trait `{in_trait}` and type `{in_type}`",
                         if self.missing_mentions.len() == 1 {
                             ""
                         } else {
                             "s"
                         },
-                        ccx.pretty_print(|p| p.push_trait_spec(in_trait)),
-                        ccx.pretty_print(|p| p.push_ty(in_type)),
                     )
                 }
             }
@@ -203,10 +189,10 @@ impl ReAndReUnifyError {
         self.cause.report(ccx, || {
             format!(
                 "cannot force `{}` to outlive `{}` without requiring universal `{}` to outlive `{}`",
-                ccx.pretty_print(|p| p.push_re(self.lhs)),
-                ccx.pretty_print(|p| p.push_re(self.rhs)),
-                ccx.pretty_print(|p| p.push_re(Re::UniversalVar(self.requires_var))),
-                ccx.pretty_print(|p| p.push_re(self.to_outlive)),
+                self.lhs,
+                self.rhs,
+                Re::UniversalVar(self.requires_var),
+                self.to_outlive,
             )
         })
     }
@@ -225,8 +211,7 @@ impl TyAndTyUnifyError {
         self.cause.report(ccx, || {
             format!(
                 "cannot unify types `{}` and `{}`",
-                ccx.pretty_print(|p| p.push_ty(self.origin_lhs)),
-                ccx.pretty_print(|p| p.push_ty(self.origin_rhs)),
+                self.origin_lhs, self.origin_rhs,
             )
         })
     }
@@ -273,11 +258,7 @@ pub struct TyAndSimpleTySetUnifyError {
 impl TyAndSimpleTySetUnifyError {
     pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
         self.cause.report(ccx, || {
-            format!(
-                "cannot unify types `{}` and `{:?}`",
-                ccx.pretty_print(|p| p.push_ty(self.lhs)),
-                self.rhs,
-            )
+            format!("cannot unify types `{}` and `{:?}`", self.lhs, self.rhs)
         })
     }
 }

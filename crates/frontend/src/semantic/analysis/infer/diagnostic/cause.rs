@@ -2,7 +2,7 @@ use crate::{
     base::{Diag, ErrorGuaranteed, LeafDiag, Level, arena::Obj, syntax::Span},
     semantic::{
         analysis::ClauseCx,
-        syntax::{HrtbBinder, ImplItem, TraitSpec, Ty},
+        syntax::{HrtbBinder, ImplItem, PrettyPrinterOpts, TraitSpec, Ty},
     },
 };
 use std::{cell::Cell, fmt, panic::Location, rc::Rc};
@@ -174,7 +174,8 @@ impl ObligeCause {
         match self.behavior() {
             ObligeCauseBehavior::Report => {
                 if !ccx.is_silent() {
-                    Some(self.build_diag(ccx, Level::Error, msg()).emit().unwrap())
+                    PrettyPrinterOpts { ccx: Some(ccx) }
+                        .provide(|| Some(self.build_diag(ccx, Level::Error, msg()).emit().unwrap()))
                 } else {
                     None
                 }

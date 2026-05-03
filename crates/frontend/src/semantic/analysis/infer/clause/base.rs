@@ -5,10 +5,10 @@ use crate::{
     },
     semantic::{
         analysis::{
-            ClauseCxPrinter, ClauseError, CoherenceMap, FloatingInferVar, HrtbUniverse,
-            ObligationCx, ObligationNotReady, ObligationUnfulfilled, ObligeCause,
-            RecursionLimitReached, TyAndSimpleTySetUnifyError, TyAndTyUnifyError, UnifyCx,
-            UnifyCxMode, infer::clause::elaboration::WipReificationState,
+            ClauseError, CoherenceMap, FloatingInferVar, HrtbUniverse, ObligationCx,
+            ObligationNotReady, ObligationUnfulfilled, ObligeCause, RecursionLimitReached,
+            TyAndSimpleTySetUnifyError, TyAndTyUnifyError, UnifyCx, UnifyCxMode,
+            infer::clause::elaboration::WipReificationState,
         },
         syntax::{
             Crate, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection, RelationMode,
@@ -172,12 +172,6 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn mode(&self) -> UnifyCxMode {
         self.ucx().mode()
-    }
-
-    pub fn pretty_print<'a>(&'a self, f: impl FnOnce(&mut ClauseCxPrinter<'a, 'tcx>)) -> String {
-        let mut p = ClauseCxPrinter::new(self);
-        f(&mut p);
-        p.finish()
     }
 
     pub(super) fn push_obligation(&mut self, kind: ClauseObligation) {

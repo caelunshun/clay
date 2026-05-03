@@ -1,11 +1,12 @@
 use crate::{
     base::{Diag, arena::HasInterner as _, syntax::HasSpan as _},
     semantic::{
-        analysis::{ClauseCx, ClauseCxPrinter, ObligeCause},
+        analysis::{ClauseCx, ObligeCause},
         syntax::{
-            HrtbBinder, InferTyVarSourceInfo, Re, RelationMode, SpannedHrtbBinder, SpannedRe,
-            SpannedTy, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt as _, TyKind, TyProjection,
-            UniversalTyVar, UniversalTyVarSourceInfo,
+            HrtbBinder, InferTyVarSourceInfo, PrettyPrinterOpts, Re, RelationMode,
+            SpannedHrtbBinder, SpannedRe, SpannedTy, Ty, TyCtxt, TyFolder,
+            TyFolderInfallibleExt as _, TyKind, TyProjection, UniversalTyVar,
+            UniversalTyVarSourceInfo,
         },
     },
 };
@@ -63,15 +64,16 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxExporter<'_, 'tcx> {
                     | InferTyVarSourceInfo::LoopDemand { span }
                     | InferTyVarSourceInfo::HoleInfer { span }
                     | InferTyVarSourceInfo::PatType { span }
-                    | InferTyVarSourceInfo::EmptyArrayElem { span } => Diag::span_err(
-                        span,
-                        format_args!("failed to infer a type of `{}`", {
-                            let mut printer = ClauseCxPrinter::new(self.ccx);
-                            printer.push_ty(var_ty);
-                            printer.finish()
-                        }),
-                    )
-                    .emit(),
+                    | InferTyVarSourceInfo::EmptyArrayElem { span } => PrettyPrinterOpts {
+                        ccx: Some(self.ccx),
+                    }
+                    .provide(|| {
+                        Diag::span_err(
+                            span,
+                            format_args!("failed to infer a type of `{}`", ty.value),
+                        )
+                        .emit()
+                    }),
 
                     // TODO
                     InferTyVarSourceInfo::UniversalElabHelper => {

@@ -25,7 +25,7 @@ pub enum TyOrReKind {
     Ty,
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TyOrRe {
     Re(Re),
     Ty(Ty),
@@ -62,7 +62,7 @@ impl TyOrRe {
     }
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub enum Re {
     /// The top region type. Essentially, this pointer is either managed by the garbage collector or
     /// lives for the entire duration of the program.
@@ -105,7 +105,7 @@ pub enum Re {
 pub type Ty = Intern<TyKind>;
 pub type TyList = Intern<[Ty]>;
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TyKind {
     /// The `Self`-type.
     ///
@@ -184,7 +184,7 @@ pub type ListOfTraitClauseList = Intern<[TraitClauseList]>;
 pub type TraitClauseList = Intern<[TraitClause]>;
 
 /// A single trait clause (e.g. `'a` or `Trait<'re1, Ty1, Ty2, AssocA = Ty3, AssocC = Ty4>`).
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TraitClause {
     Outlives(RelationDirection, TyOrRe),
     Trait(HrtbBinder),
@@ -202,17 +202,6 @@ pub enum TraitParam {
 pub struct TraitSpec {
     pub def: Obj<TraitItem>,
     pub params: TraitParamList,
-}
-
-impl fmt::Debug for TraitSpec {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = &Session::fetch();
-
-        f.debug_struct("TraitSpec")
-            .field("def", &self.def.r(s).item.r(s).name.unwrap().text)
-            .field("params", &self.params)
-            .finish()
-    }
 }
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
@@ -610,7 +599,7 @@ pub enum SolidTyShapeKind {
 
 // === Binders === //
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct HrtbBinder {
     pub kind: HrtbBinderKind,
     pub inner: TraitSpec,
