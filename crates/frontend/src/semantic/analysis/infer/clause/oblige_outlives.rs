@@ -172,7 +172,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     }
                     Err(err) => {
                         if err.perm_set.intersects(SimpleTySet::MAYBE_UNIVERSAL) {
-                            return Err(ObligationNotReady);
+                            return Err(ObligationNotReady::UnresolvedInfer(inf_lhs));
                         }
 
                         // (trivially true of all remaining types)

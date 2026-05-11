@@ -2,7 +2,7 @@ use crate::{
     base::{Diag, ErrorGuaranteed, LeafDiag, Level, arena::Obj, syntax::Span},
     semantic::{
         analysis::ClauseCx,
-        syntax::{HrtbBinder, ImplItem, PrettyPrinterOpts, TraitSpec, Ty},
+        syntax::{HrtbBinder, ImplItem, PrettyPrinterOpts, TraitClauseList, TraitSpec, Ty, TyOrRe},
     },
 };
 use std::{cell::Cell, fmt, panic::Location, rc::Rc};
@@ -216,7 +216,7 @@ impl ObligeCause {
 
         let mut diag = Diag::new(level, msg).primary(main_span, "");
 
-        for frame in frames {
+        for frame in frames.iter().rev() {
             diag.push_child(LeafDiag::new(Level::Note, format!("{:#?}", frame.frame)));
         }
 
@@ -395,10 +395,30 @@ impl ObligeCauseOrigin {
 
 #[derive(Debug, Clone)]
 pub enum ObligeCauseStep {
-    ImplInstantiatedClause { lhs: Ty, rhs: TraitSpec },
-    ImplUsingInherent { lhs: HrtbBinder, rhs: TraitSpec },
+    /// Check whether `lhs` implements `rhs` after it has been instantiator for its universal types.
+    ImplInstantiatedClause {
+        lhs: Ty,
+        rhs: TraitSpec,
+    },
+
+    /// Attempt to satisfy an implementation clause using the implementations inherent to that type.
+    /// Specifically, this clause asks whether a type implementing `lhs` satisfies `rhs`.
+    ImplUsingInherent {
+        lhs: HrtbBinder,
+        rhs: TraitSpec,
+    },
+
+    /// Attempt to satisfy an implementation clause using inherent types.
     ImplUsingBlock(Obj<ImplItem>),
 
+    /// Ensure that the existential instantiation of an HRTB satisfies its constraints.
+    HrtbExistentialInferenceIsPossible {
+        lhs: TyOrRe,
+        rhs: TraitClauseList,
+    },
+
     // TODO
-    ImportEnvMeetsRequirements { clause: Span },
+    ImportEnvMeetsRequirements {
+        clause: Span,
+    },
 }

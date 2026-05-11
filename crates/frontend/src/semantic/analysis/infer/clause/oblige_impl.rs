@@ -137,7 +137,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 if is_possibly_universal {
                     // We can't yet rule out the possibility that this obligation is inherently
                     // fulfilled.
-                    return Err(ObligationNotReady);
+                    return Err(ObligationNotReady::UnresolvedInfer(var));
                 }
             }
             TyKind::Error(_) => {
@@ -192,7 +192,7 @@ impl<'tcx> ClauseCx<'tcx> {
             };
 
             if prev_confirmation.is_some() {
-                return Err(ObligationNotReady);
+                return Err(ObligationNotReady::MultipleApplicableImpls);
             }
 
             prev_confirmation = Some(confirmation)
@@ -311,7 +311,7 @@ impl<'tcx> ClauseCx<'tcx> {
                             .is_continue();
 
                             if !is_resolved {
-                                return Err(ObligationNotReady);
+                                return Err(ObligationNotReady::ElaborationHasInfer);
                             }
                         }
                     }
@@ -373,7 +373,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 .is_continue();
 
                 if !is_resolved {
-                    return Err(ObligationNotReady);
+                    return Err(ObligationNotReady::ElaborationHasInfer);
                 }
             }
         }
@@ -674,7 +674,7 @@ impl<'tcx> ClauseCx<'tcx> {
         }
 
         if visitor.had_holes {
-            return Err(ObligationNotReady);
+            return Err(ObligationNotReady::CoverMissingInfer);
         }
 
         NotCoveredError {

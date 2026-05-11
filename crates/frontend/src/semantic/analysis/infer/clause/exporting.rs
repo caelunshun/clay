@@ -3,7 +3,7 @@ use crate::{
     semantic::{
         analysis::{ClauseCx, ObligeCause},
         syntax::{
-            HrtbBinder, InferTyVarSourceInfo, PrettyPrinterOpts, Re, RelationMode,
+            HrtbBinder, InferTyVarSourceInfo, PrettyPrinterOpts, PrettyTy, Re, RelationMode,
             SpannedHrtbBinder, SpannedRe, SpannedTy, Ty, TyCtxt, TyFolder,
             TyFolderInfallibleExt as _, TyKind, TyProjection, UniversalTyVar,
             UniversalTyVarSourceInfo,
@@ -70,7 +70,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxExporter<'_, 'tcx> {
                     .provide(|| {
                         Diag::span_err(
                             span,
-                            format_args!("failed to infer a type of `{}`", ty.value),
+                            format_args!("failed to infer a type of `{}`", PrettyTy(ty.value)),
                         )
                         .emit()
                     }),

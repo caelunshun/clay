@@ -302,7 +302,7 @@ impl<'tcx> ClauseCx<'tcx> {
             .visit_fallible(clause)
             .is_break())
             {
-                return Err(ObligationNotReady);
+                return Err(ObligationNotReady::ElabStillResolving);
             }
         }
 

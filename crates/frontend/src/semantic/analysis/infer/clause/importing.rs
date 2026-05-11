@@ -59,7 +59,7 @@ use crate::{
     semantic::{
         analysis::{
             ClauseCx, HrtbUniverse, HrtbUniverseInfo, ObligeCause, ObligeCauseBehavior,
-            ObligeCauseOrigin, UnifyCxMode,
+            ObligeCauseOrigin, ObligeCauseStep, UnifyCxMode,
         },
         syntax::{
             AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, FnOwner, GenericBinder,
@@ -519,16 +519,22 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // Constrain the new inference variables with their obligations.
         for (&def, &var) in defs.r(s).iter().zip(vars.r(s)) {
+            let clauses = HrtbSubstitutionFolder::new(self, vars, s).fold(def.clauses);
+
+            let cause = cause.clone().child(
+                ObligeCauseStep::HrtbExistentialInferenceIsPossible {
+                    lhs: var,
+                    rhs: clauses,
+                }
+                .into(),
+            );
+
             match var {
                 TyOrRe::Re(var) => {
-                    let clauses = HrtbSubstitutionFolder::new(self, vars, s).fold(def.clauses);
-
-                    self.oblige_re_meets_clauses(cause, var, clauses);
+                    self.oblige_re_meets_clauses(&cause, var, clauses);
                 }
                 TyOrRe::Ty(var) => {
-                    let clauses = HrtbSubstitutionFolder::new(self, vars, s).fold(def.clauses);
-
-                    self.oblige_ty_meets_clauses(cause, universe, var, clauses);
+                    self.oblige_ty_meets_clauses(&cause, universe, var, clauses);
 
                     let TyKind::InferVar(var) = *var.r(s) else {
                         unreachable!()

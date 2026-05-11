@@ -7,15 +7,6 @@ use crate::{
 };
 use std::fmt;
 
-// === Results === //
-
-pub type ObligationResult<T = ()> = Result<T, ObligationNotReady>;
-
-#[derive(Debug, Clone)]
-pub struct ObligationNotReady;
-
-// === ObligationCx === //
-
 /// A [`UnifyCx`] extended with the ability to solve obligations out-of-order.
 ///
 /// An obligation is something that must unconditionally hold in order for a program to compile.
@@ -32,18 +23,28 @@ pub struct ObligationNotReady;
 /// [`push_obligation`]: ObligationCx::push_obligation
 /// [`poll_obligations`]: ObligationCx::poll_obligations
 #[derive(Clone)]
-pub struct ObligationCx<'tcx, K> {
+pub struct ObligationCx<'tcx, K, E> {
     ucx: UnifyCx<'tcx>,
-    pending_obligations: Vec<K>,
+    pending_obligations: Vec<ObligationState<K, E>>,
 }
 
-impl<'tcx, K> fmt::Debug for ObligationCx<'tcx, K> {
+#[derive(Clone)]
+pub struct ObligationState<K, E> {
+    pub kind: K,
+    pub not_ready: Option<E>,
+}
+
+impl<'tcx, K, E> fmt::Debug for ObligationCx<'tcx, K, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ObligationCx").finish_non_exhaustive()
     }
 }
 
-impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
+impl<'tcx, K, E> ObligationCx<'tcx, K, E>
+where
+    K: Clone,
+    E: Clone,
+{
     pub fn new(tcx: &'tcx TyCtxt, mode: UnifyCxMode) -> Self {
         Self {
             ucx: UnifyCx::new(tcx, mode),
@@ -68,14 +69,17 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
     }
 
     pub fn push_obligation(&mut self, kind: K) {
-        self.pending_obligations.push(kind);
+        self.pending_obligations.push(ObligationState {
+            kind,
+            not_ready: None,
+        });
     }
 
     pub fn poll_obligations<T>(
         target: &mut T,
         getter: impl Fn(&mut T) -> &mut Self,
         forker: impl Fn(&T) -> T,
-        mut run: impl FnMut(&mut T, K) -> ObligationResult,
+        mut run: impl FnMut(&mut T, K) -> Result<(), E>,
     ) {
         loop {
             let this = getter(target);
@@ -88,7 +92,7 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
                 curr_idx -= 1;
 
                 let this = getter(target);
-                let kind = this.pending_obligations[curr_idx].clone();
+                let kind = this.pending_obligations[curr_idx].kind.clone();
                 let mut fork = forker(target);
 
                 // Process the obligation.
@@ -96,12 +100,18 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
 
                 // If we finished processing the obligation, remove it from the queue and mark
                 // progress so we can continue processing.
-                if res.is_ok() {
-                    *target = fork;
+                match res {
+                    Ok(()) => {
+                        *target = fork;
 
-                    let this = getter(target);
-                    this.pending_obligations.swap_remove(curr_idx);
-                    made_progress = true;
+                        let this = getter(target);
+                        this.pending_obligations.swap_remove(curr_idx);
+                        made_progress = true;
+                    }
+                    Err(err) => {
+                        let this = getter(target);
+                        this.pending_obligations[curr_idx].not_ready = Some(err);
+                    }
                 }
             }
 
@@ -111,7 +121,7 @@ impl<'tcx, K: Clone> ObligationCx<'tcx, K> {
         }
     }
 
-    pub fn pending_obligations(&self) -> &[K] {
+    pub fn pending_obligations(&self) -> &[ObligationState<K, E>] {
         &self.pending_obligations
     }
 }

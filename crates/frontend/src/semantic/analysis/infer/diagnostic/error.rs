@@ -3,8 +3,8 @@ use crate::{
     semantic::{
         analysis::{ClauseCx, ClauseObligation, HrtbUniverse, ObligeCause},
         syntax::{
-            InferTyVar, PrettyUniversalTyVar, Re, RelationDirection, SimpleTySet, TraitClauseList,
-            TraitParam, TraitSpec, Ty, UniversalReVar, UniversalTyVar,
+            InferTyVar, PrettyTy, PrettyUniversalTyVar, Re, RelationDirection, SimpleTySet,
+            TraitClauseList, TraitParam, TraitSpec, Ty, UniversalReVar, UniversalTyVar,
         },
     },
     utils::lang::{AND_LIST_GLUE, format_list},
@@ -60,52 +60,6 @@ impl RecursionLimitReached {
 }
 
 #[derive(Debug, Clone)]
-pub struct ObligationUnfulfilled {
-    pub obligation: ClauseObligation,
-}
-
-impl ObligationUnfulfilled {
-    pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
-        match self.obligation.clone() {
-            ClauseObligation::TyUnifiesTy(_cause, _lhs, _rhs, _mode) => unreachable!(),
-            ClauseObligation::TyMeetsTrait(cause, _universe, lhs, rhs) => cause.report(ccx, || {
-                format!(
-                    "could not make necessary inferences to show that `{lhs}` implements `{rhs}`",
-                )
-            }),
-            ClauseObligation::TyOutlivesRe(cause, lhs, rhs, dir) => {
-                cause.report(ccx, || match dir {
-                    RelationDirection::LhsOntoRhs => {
-                        format!(
-                            "could not make necessary inferences to show that `{lhs}` outlives `{rhs}`",
-                        )
-                    }
-                    RelationDirection::RhsOntoLhs => {
-                        format!(
-                            "could not make necessary inferences to show that `{rhs}` outlives `{lhs}`",
-                        )
-                    }
-                })
-            }
-            ClauseObligation::UnifyReifiedElaboratedClauses(
-                cause,
-                univ,
-                _clauses,
-                _reification_state,
-            ) => cause.report(ccx, || {
-                format!(
-                    "could not make necessary inferences to elaborate the generic clauses of `{}`",
-                    PrettyUniversalTyVar(univ),
-                )
-            }),
-            ClauseObligation::Covered(oblige_cause, hash_map, intern, trait_spec) => {
-                todo!();
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct NoTraitImplError {
     pub cause: ObligeCause,
     pub target: Ty,
@@ -115,7 +69,11 @@ pub struct NoTraitImplError {
 impl NoTraitImplError {
     pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
         self.cause.report(ccx, || {
-            format!("type `{}` does not implement `{}`", self.target, self.spec)
+            format!(
+                "type `{}` does not implement `{}`",
+                PrettyTy(self.target),
+                self.spec
+            )
         })
     }
 }
@@ -142,12 +100,13 @@ impl NotCoveredError {
                 (None, None) => unreachable!(),
                 (None, Some(in_type)) => {
                     format!(
-                        "universal type{} {covered} not covered by type `{in_type}`",
+                        "universal type{} {covered} not covered by type `{}`",
                         if self.missing_mentions.len() == 1 {
                             ""
                         } else {
                             "s"
                         },
+                        PrettyTy(in_type),
                     )
                 }
                 (Some(in_trait), None) => {
@@ -162,12 +121,13 @@ impl NotCoveredError {
                 }
                 (Some(in_trait), Some(in_type)) => {
                     format!(
-                        "universal type{} {covered} not covered by trait `{in_trait}` and type `{in_type}`",
+                        "universal type{} {covered} not covered by trait `{in_trait}` and type `{}`",
                         if self.missing_mentions.len() == 1 {
                             ""
                         } else {
                             "s"
                         },
+                        PrettyTy(in_type),
                     )
                 }
             }
@@ -211,7 +171,8 @@ impl TyAndTyUnifyError {
         self.cause.report(ccx, || {
             format!(
                 "cannot unify types `{}` and `{}`",
-                self.origin_lhs, self.origin_rhs,
+                PrettyTy(self.origin_lhs),
+                PrettyTy(self.origin_rhs),
             )
         })
     }
@@ -258,7 +219,78 @@ pub struct TyAndSimpleTySetUnifyError {
 impl TyAndSimpleTySetUnifyError {
     pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
         self.cause.report(ccx, || {
-            format!("cannot unify types `{}` and `{:?}`", self.lhs, self.rhs)
+            format!(
+                "cannot unify types `{}` and `{:?}`",
+                PrettyTy(self.lhs),
+                self.rhs
+            )
         })
     }
+}
+
+// === ObligationUnfulfilled === //
+
+pub type ObligationResult<T = ()> = Result<T, ObligationNotReady>;
+
+#[derive(Debug, Clone)]
+pub struct ObligationUnfulfilled {
+    pub obligation: ClauseObligation,
+    pub reason: ObligationNotReady,
+}
+
+impl ObligationUnfulfilled {
+    pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
+        match self.obligation.clone() {
+            ClauseObligation::TyUnifiesTy(_cause, _lhs, _rhs, _mode) => unreachable!(),
+            ClauseObligation::TyMeetsTrait(cause, _universe, lhs, rhs) => cause.report(ccx, || {
+                format!(
+                    "could not make necessary inferences to show that `{}` implements `{rhs}`: {:#?}",
+                    PrettyTy(lhs),
+                    self.reason,
+                )
+            }),
+            ClauseObligation::TyOutlivesRe(cause, lhs, rhs, dir) => {
+                cause.report(ccx, || match dir {
+                    RelationDirection::LhsOntoRhs => {
+                        format!(
+                            "could not make necessary inferences to show that `{}` outlives `{rhs}`: {:#?}",
+                            PrettyTy(lhs),
+                            self.reason,
+                        )
+                    }
+                    RelationDirection::RhsOntoLhs => {
+                        format!(
+                            "could not make necessary inferences to show that `{rhs}` outlives `{}`: {:#?}",
+                            PrettyTy(lhs),
+                            self.reason,
+                        )
+                    }
+                })
+            }
+            ClauseObligation::UnifyReifiedElaboratedClauses(
+                cause,
+                univ,
+                _clauses,
+                _reification_state,
+            ) => cause.report(ccx, || {
+                format!(
+                    "could not make necessary inferences to elaborate the generic clauses of `{}`: {:#?}",
+                    PrettyUniversalTyVar(univ),
+                    self.reason,
+                )
+            }),
+            ClauseObligation::Covered(oblige_cause, hash_map, intern, trait_spec) => {
+                todo!();
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ObligationNotReady {
+    UnresolvedInfer(InferTyVar),
+    ElabStillResolving,
+    MultipleApplicableImpls,
+    ElaborationHasInfer,
+    CoverMissingInfer,
 }

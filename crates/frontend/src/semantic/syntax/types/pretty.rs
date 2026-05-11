@@ -64,7 +64,7 @@ forward_display! {
     TyOrRe,
     Re,
     HrtbBinder,
-    Ty,
+    PrettyTy,
     PrettyUniversalTyVar,
     PrettyTraitClauseList,
     TraitClause,
@@ -75,7 +75,7 @@ impl fmt::Debug for TyOrRe {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             TyOrRe::Re(v) => v.fmt(f),
-            TyOrRe::Ty(v) => v.fmt(f),
+            TyOrRe::Ty(v) => write!(f, "{}", PrettyTy(v)),
         }
     }
 }
@@ -126,6 +126,17 @@ impl fmt::Debug for HrtbBinder {
     }
 }
 
+#[derive(Copy, Clone)]
+pub struct PrettyTy(pub Ty);
+
+impl fmt::Debug for PrettyTy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = &Session::fetch();
+
+        self.0.r(s).fmt(f)
+    }
+}
+
 impl fmt::Debug for TyKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = &Session::fetch();
@@ -151,7 +162,8 @@ impl fmt::Debug for TyKind {
             }) => {
                 write!(
                     f,
-                    "<{target} as {spec}>::{}",
+                    "<{} as {spec}>::{}",
+                    PrettyTy(target),
                     spec.def.r(s).generics.r(s).defs[assoc as usize]
                         .as_ty()
                         .unwrap()
@@ -194,7 +206,7 @@ impl fmt::Debug for TyKind {
                 SimpleTyKind::Str => "str",
             })?,
             TyKind::Reference(re, muta, ty) => {
-                write!(f, "&{re} {} {ty}", muta.opt_space_qual())?;
+                write!(f, "&{re} {} {}", muta.opt_space_qual(), PrettyTy(ty))?;
             }
             TyKind::Adt(AdtInstance { def, params }) => {
                 write!(f, "{}", def.r(s).item.r(s).display_path(s))?;
@@ -221,7 +233,7 @@ impl fmt::Debug for TyKind {
             }
             TyKind::Tuple(types) => {
                 if let [ty] = *types.r(s) {
-                    write!(f, "({ty},)")?;
+                    write!(f, "({},)", PrettyTy(ty))?;
                 } else {
                     f.write_char('(')?;
 
@@ -230,7 +242,7 @@ impl fmt::Debug for TyKind {
                             f.write_str(", ")?;
                         }
 
-                        write!(f, "{ty}")?;
+                        write!(f, "{}", PrettyTy(ty))?;
                     }
 
                     f.write_char(')')?;
@@ -252,7 +264,8 @@ impl fmt::Debug for TyKind {
                     } => {
                         write!(
                             f,
-                            "<{self_ty} as {instance}>::{}",
+                            "<{} as {instance}>::{}",
+                            PrettyTy(self_ty),
                             instance.def.r(s).methods[method_idx as usize]
                                 .r(s)
                                 .name
@@ -266,7 +279,8 @@ impl fmt::Debug for TyKind {
                     } => {
                         write!(
                             f,
-                            "{self_ty}::{}",
+                            "{}::{}",
+                            PrettyTy(self_ty),
                             block.r(s).methods[method_idx as usize]
                                 .unwrap()
                                 .r(s)
@@ -518,7 +532,7 @@ impl fmt::Debug for TraitSpec {
                                 write!(f, "{} = ", definition.r(s).ident.text)?;
                             }
 
-                            write!(f, "{actual}")?;
+                            write!(f, "{}", PrettyTy(actual))?;
                             Ok(())
                         })?;
                     }

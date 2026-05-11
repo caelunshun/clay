@@ -97,7 +97,7 @@ impl ClauseObligation {
 /// WF-checking traits), you can immediately skip to region aware checking.
 #[derive(Clone)]
 pub struct ClauseCx<'tcx> {
-    ocx: ObligationCx<'tcx, ClauseObligation>,
+    ocx: ObligationCx<'tcx, ClauseObligation, ObligationNotReady>,
     coherence: &'tcx CoherenceMap,
     krate: Obj<Crate>,
     is_silent: bool,
@@ -210,7 +210,7 @@ impl<'tcx> ClauseCx<'tcx> {
                                 err.report(fork);
                                 Ok(())
                             }
-                            Err(ObligationNotReady) => Err(ObligationNotReady),
+                            Err(err) => Err(err),
                         }
                     }
                     ClauseObligation::TyOutlivesRe(cause, lhs, rhs, dir) => {
@@ -450,9 +450,10 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn verify(&mut self) {
         self.poll_obligations();
 
-        for obligation in self.ocx.pending_obligations().to_vec() {
+        for state in self.ocx.pending_obligations().to_vec() {
             ObligationUnfulfilled {
-                obligation: obligation.clone(),
+                obligation: state.kind.clone(),
+                reason: state.not_ready.clone().unwrap(),
             }
             .report(self);
         }
