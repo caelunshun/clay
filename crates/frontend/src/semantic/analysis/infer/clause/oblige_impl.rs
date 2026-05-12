@@ -6,16 +6,19 @@ use crate::{
         analysis::{
             ClauseCx, ClauseImportEnv, HrtbUniverse, HrtbUniverseInfo, NoTraitImplError,
             NotCoveredError, ObligationNotReady, ObligationResult, ObligeCause, ObligeCauseStep,
-            UnboundVarHandlingMode, UniversalElaboration,
-            infer::clause::{ClauseObligation, elaboration::FloatingInfVarVisitor},
+            UnboundVarHandlingMode,
+            infer::clause::{
+                ClauseObligation,
+                elaboration::{UniversalElaboration, WipReificationRootSet},
+            },
         },
         syntax::{
-            HrtbBinder, HrtbBinderKind, ImplItem, InferTyVar, RelationMode, SimpleTySet, SpannedTy,
+            HrtbBinder, HrtbBinderKind, ImplItem, RelationMode, SimpleTySet, SpannedTy,
             TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyFolderInfallibleExt,
-            TyKind, TyOrRe, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt, UniversalTyVar,
+            TyKind, TyOrRe, TyVisitor, TyVisitorInfallibleExt, UniversalTyVar,
         },
     },
-    utils::hash::{FxHashMap, FxHashSet},
+    utils::hash::FxHashMap,
 };
 use std::{convert::Infallible, ops::ControlFlow, rc::Rc};
 
@@ -220,10 +223,7 @@ impl<'tcx> ClauseCx<'tcx> {
     ) -> ObligationResult<Result<Self, SelectionRejected>> {
         let s = self.session();
 
-        let reified_var_roots = lhs
-            .wip_reification_state
-            .as_ref()
-            .map(|v| v.collect_roots(&self));
+        let reified_var_roots = lhs.collect_roots_if_floating(&self);
 
         for &lhs in lhs.clauses.r(s) {
             let TraitClause::Trait(lhs) = lhs else {
@@ -254,23 +254,22 @@ impl<'tcx> ClauseCx<'tcx> {
         universe: &HrtbUniverse,
         lhs: HrtbBinder,
         rhs: TraitSpec,
-        reified_var_roots: Option<&FxHashSet<InferTyVar>>,
+        reified_var_roots: Option<&WipReificationRootSet>,
     ) -> ObligationResult<Result<Self, SelectionRejected>> {
         let s = self.session();
 
         assert_eq!(lhs.inner.def, rhs.def);
 
+        let is_ready_if_selected =
+            self.is_elaborated_clause_ready_if_selected(reified_var_roots, lhs);
+
+        // See whether we can select this inherent `impl`.
         let cause = cause
             .clone()
             .child(ObligeCauseStep::ImplUsingInherent { lhs, rhs }.into());
 
-        // Instantiate the binder with inference variables so that we may select the correct
-        // implementation of it.
         let lhs = self.instantiate_hrtb_infer(&cause, universe, lhs);
 
-        let pre_unify_fork = self.clone();
-
-        // See whether we can select an inherent `impl`.
         let mut param_iter = lhs.params.r(s).iter().zip(rhs.params.r(s));
 
         for (&lhs_param, &rhs_param) in
@@ -296,24 +295,6 @@ impl<'tcx> ClauseCx<'tcx> {
                         ) {
                             return Ok(Err(SelectionRejected));
                         }
-
-                        // If we can't, ensure that we haven't just unified some still-inferred
-                        // generic definition parameters unexpectedly.
-                        if let Some(reified_var_roots) = &reified_var_roots {
-                            let is_resolved = FloatingInfVarVisitor {
-                                // N.B. this is the `pre_unify_fork` to ensure that we look for
-                                // still-inferred types before the potentially hazardous
-                                // unification.
-                                ccx: &pre_unify_fork,
-                                reified_var_roots,
-                            }
-                            .visit_fallible(lhs)
-                            .is_continue();
-
-                            if !is_resolved {
-                                return Err(ObligationNotReady::ElaborationHasInfer);
-                            }
-                        }
                     }
                     _ => unreachable!(),
                 },
@@ -323,59 +304,12 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         }
 
-        // We need to be careful to ensure that we don't leak the inferred types inside an
-        // universal elaboration list. This is to prevent scenarios like these...
-        //
-        // ```
-        // pub trait Meow {
-        //     type Out;
-        // }
-        //
-        // fn hehe<T: Meow<Out = <T as Meow>::Out>>(v: <T as Meow>::Out) {
-        //     let u: i32 = v;
-        // }
-        // ```
-        //
-        // ...where `<T as Meow>::Out` is allowed to unify with itself, letting the universal
-        // be decided circumstance of the type-checking context.
-        //
-        // That being said, code like this...
-        //
-        // ```
-        // fn hello<
-        //     T: Projector<i32>
-        //      + Projector<u32, Out = <T as Projector<i32>>::Out>
-        //      + Meow<<T as Projector<i32>>::Out, Hey: Foo>
-        //      + Meow<<T as Projector<u32>>::Out, Hey: Bar>,
-        // >(
-        //     v: T,
-        // ) {
-        //    ...
-        // }
-        // ```
-        //
-        // ...*should* compile. Hence, we create an exception for universal elaboration helpers.
-        // This is okay because these types aren't allowed to be left floating without also
-        // causing issues with the elaboration obligation either never resolving or attempting
-        // to unify some disjoint variable. This corresponds to `FloatingInfVarVisitor`'s
-        // existing behavior so we use that.
-        if let Some(reified_var_roots) = &reified_var_roots {
-            for (&lhs, &_rhs) in param_iter.clone() {
-                let TraitParam::Equals(TyOrRe::Ty(lhs)) = lhs else {
-                    unreachable!()
-                };
-
-                let is_resolved = FloatingInfVarVisitor {
-                    ccx: &self,
-                    reified_var_roots,
-                }
-                .visit_fallible(lhs)
-                .is_continue();
-
-                if !is_resolved {
-                    return Err(ObligationNotReady::ElaborationHasInfer);
-                }
-            }
+        // If we couldn't definitively reject this clause and it's unfinished, we need to wait for
+        // more inferences. This is important because, otherwise, we could either select the
+        // incorrect clause if the generic parameters contain unresolved projections or even
+        // possibly allow a recursive projection to compile.
+        if !is_ready_if_selected {
+            return Err(ObligationNotReady::ElaborationHasInferForInherentSelection);
         }
 
         // If we can, push its obligations.

@@ -291,6 +291,6 @@ pub enum ObligationNotReady {
     UnresolvedInfer(InferTyVar),
     ElabStillResolving,
     MultipleApplicableImpls,
-    ElaborationHasInfer,
+    ElaborationHasInferForInherentSelection,
     CoverMissingInfer,
 }

@@ -8,7 +8,7 @@ use crate::{
             ClauseError, CoherenceMap, FloatingInferVar, HrtbUniverse, ObligationCx,
             ObligationNotReady, ObligationUnfulfilled, ObligeCause, RecursionLimitReached,
             TyAndSimpleTySetUnifyError, TyAndTyUnifyError, UnifyCx, UnifyCxMode,
-            infer::clause::elaboration::WipReificationState,
+            infer::clause::elaboration::{UniversalElaboration, WipReificationState},
         },
         syntax::{
             Crate, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection, RelationMode,
@@ -108,13 +108,6 @@ pub struct ClauseCx<'tcx> {
 pub(super) struct UniversalTyVarDescriptor {
     direct_clauses: Option<TraitClauseList>,
     pub(super) elaboration: Option<UniversalElaboration>,
-}
-
-#[derive(Debug, Clone)]
-pub struct UniversalElaboration {
-    pub clauses: TraitClauseList,
-    pub lub_re: Re,
-    pub wip_reification_state: Option<WipReificationState>,
 }
 
 impl<'tcx> ClauseCx<'tcx> {

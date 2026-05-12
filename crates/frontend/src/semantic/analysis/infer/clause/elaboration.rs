@@ -46,7 +46,6 @@ use crate::{
         analysis::{
             ClauseCx, ClauseImportEnvRef, ClauseObligation, FloatingInferVar, HrtbUniverse,
             ObligationNotReady, ObligationResult, ObligeCause, ObligeCauseBehavior,
-            UniversalElaboration,
         },
         syntax::{
             AnyGeneric, GenericSubst, HrtbBinder, InferTyVar, InferTyVarSourceInfo, Mutability, Re,
@@ -61,17 +60,28 @@ use crate::{
 use smallvec::SmallVec;
 use std::{collections::VecDeque, convert::Infallible, ops::ControlFlow, rc::Rc};
 
+// === Public Interface === //
+
+#[derive(Debug, Clone)]
+pub struct UniversalElaboration {
+    pub clauses: TraitClauseList,
+    pub lub_re: Re,
+    pub wip_reification_state: Option<WipReificationState>,
+}
+
+impl UniversalElaboration {
+    pub fn collect_roots_if_floating(&self, ccx: &ClauseCx<'_>) -> Option<WipReificationRootSet> {
+        self.wip_reification_state
+            .as_ref()
+            .map(|v| v.collect_roots(ccx))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct WipReificationState(Rc<FxHashMap<InferTyVar, WipReifiedVar>>);
 
-impl WipReificationState {
-    pub fn collect_roots(&self, ccx: &ClauseCx<'_>) -> FxHashSet<InferTyVar> {
-        self.0
-            .keys()
-            .map(|&var| ccx.lookup_ty_infer_var_without_poll(var).unwrap_err().root)
-            .collect::<FxHashSet<_>>()
-    }
-}
+#[derive(Debug, Clone)]
+pub struct WipReificationRootSet(FxHashSet<InferTyVar>);
 
 #[derive(Debug, Clone)]
 struct WipReifiedVar {
@@ -79,6 +89,17 @@ struct WipReifiedVar {
     universal: HrtbUniverse,
     src_info_spec: TraitSpec,
     src_info_idx: u32,
+}
+
+impl WipReificationState {
+    pub fn collect_roots(&self, ccx: &ClauseCx<'_>) -> WipReificationRootSet {
+        WipReificationRootSet(
+            self.0
+                .keys()
+                .map(|&var| ccx.lookup_ty_infer_var_without_poll(var).unwrap_err().root)
+                .collect(),
+        )
+    }
 }
 
 impl<'tcx> ClauseCx<'tcx> {
@@ -263,6 +284,27 @@ impl<'tcx> ClauseCx<'tcx> {
         elaborated
     }
 
+    pub fn is_elaborated_clause_ready_if_selected(
+        &self,
+        reified_var_roots: Option<&WipReificationRootSet>,
+        clause: HrtbBinder,
+    ) -> bool {
+        let Some(reified_var_roots) = reified_var_roots else {
+            return true;
+        };
+
+        FloatingInfVarVisitor {
+            ccx: self,
+            reified_var_roots,
+        }
+        .visit_fallible(clause)
+        .is_continue()
+    }
+}
+
+// === Obligation === //
+
+impl ClauseCx<'_> {
     pub(super) fn oblige_unify_reified_elaborated_clauses(
         &mut self,
         cause: &ObligeCause,
@@ -510,9 +552,9 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 }
 
-pub(super) struct FloatingInfVarVisitor<'a, 'tcx> {
-    pub ccx: &'a ClauseCx<'tcx>,
-    pub reified_var_roots: &'a FxHashSet<InferTyVar>,
+struct FloatingInfVarVisitor<'a, 'tcx> {
+    ccx: &'a ClauseCx<'tcx>,
+    reified_var_roots: &'a WipReificationRootSet,
 }
 
 impl<'tcx> TyVisitor<'tcx> for FloatingInfVarVisitor<'_, 'tcx> {
@@ -530,7 +572,7 @@ impl<'tcx> TyVisitor<'tcx> for FloatingInfVarVisitor<'_, 'tcx> {
             TyKind::InferVar(var) => match self.ccx.lookup_ty_infer_var_without_poll(var) {
                 Ok(ty) => self.walk_fallible(ty),
                 Err(FloatingInferVar { root: var_root, .. }) => {
-                    if self.reified_var_roots.contains(&var_root) {
+                    if self.reified_var_roots.0.contains(&var_root) {
                         return ControlFlow::Continue(());
                     }
 
@@ -544,7 +586,7 @@ impl<'tcx> TyVisitor<'tcx> for FloatingInfVarVisitor<'_, 'tcx> {
 
 struct MergeRepresentativeFolder<'a, 'tcx> {
     ccx: &'a ClauseCx<'tcx>,
-    reified_var_roots: &'a FxHashSet<InferTyVar>,
+    reified_var_roots: &'a WipReificationRootSet,
 }
 
 impl<'tcx> TyFolder<'tcx> for MergeRepresentativeFolder<'_, 'tcx> {
@@ -564,7 +606,7 @@ impl<'tcx> TyFolder<'tcx> for MergeRepresentativeFolder<'_, 'tcx> {
             TyKind::InferVar(var) => match self.ccx.lookup_ty_infer_var_without_poll(var) {
                 Ok(ty) => self.fold(ty),
                 Err(FloatingInferVar { root: root_var, .. }) => {
-                    debug_assert!(self.reified_var_roots.contains(&root_var));
+                    debug_assert!(self.reified_var_roots.0.contains(&root_var));
                     tcx.intern(TyKind::InferVar(root_var))
                 }
             },
