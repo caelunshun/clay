@@ -262,6 +262,7 @@ impl BodyCtxt<'_, '_> {
                 );
 
                 let (expected_args, expected_output) = self.ccx_mut().import_fn_instance_sig(
+                    &ObligeCause::new_empty_report(),
                     HrtbUniverse::ROOT_REF,
                     instance_env.as_ref(),
                     resolution,

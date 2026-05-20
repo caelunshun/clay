@@ -11,14 +11,9 @@ use std::{cell::Cell, fmt, panic::Location, rc::Rc};
 
 #[derive(Clone)]
 pub struct ObligeCause {
-    kind: ObligeCauseInnerKind,
     created_at: &'static Location<'static>,
-}
-
-#[derive(Clone)]
-enum ObligeCauseInnerKind {
-    Root(ObligeCauseBehavior),
-    Nested(Rc<ObligeCauseInnerNested>),
+    behavior: ObligeCauseBehavior,
+    nested: Option<Rc<ObligeCauseInnerNested>>,
 }
 
 struct ObligeCauseInnerNested {
@@ -28,12 +23,9 @@ struct ObligeCauseInnerNested {
 }
 
 #[derive(Copy, Clone)]
-pub enum ObligeCauseKind<'a> {
-    Root(&'a ObligeCauseBehavior),
-    Nested {
-        parent: &'a ObligeCause,
-        frame: &'a ObligeCauseFrame,
-    },
+pub struct ObligeCauseNested<'a> {
+    pub parent: &'a ObligeCause,
+    pub frame: &'a ObligeCauseFrame,
 }
 
 #[derive(Debug, Clone)]
@@ -71,8 +63,9 @@ impl ObligeCause {
     #[track_caller]
     pub fn new(behavior: ObligeCauseBehavior) -> Self {
         Self {
-            kind: ObligeCauseInnerKind::Root(behavior),
             created_at: Location::caller(),
+            behavior,
+            nested: None,
         }
     }
 
@@ -106,23 +99,21 @@ impl ObligeCause {
         let depth = self.depth() + 1;
 
         Self {
-            kind: ObligeCauseInnerKind::Nested(Rc::new(ObligeCauseInnerNested {
+            created_at: Location::caller(),
+            behavior: self.behavior.clone(),
+            nested: Some(Rc::new(ObligeCauseInnerNested {
                 parent: self,
                 frame,
                 depth,
             })),
-            created_at: Location::caller(),
         }
     }
 
-    pub fn kind(&self) -> ObligeCauseKind<'_> {
-        match &self.kind {
-            ObligeCauseInnerKind::Root(behavior) => ObligeCauseKind::Root(behavior),
-            ObligeCauseInnerKind::Nested(nested) => ObligeCauseKind::Nested {
-                parent: &nested.parent,
-                frame: &nested.frame,
-            },
-        }
+    pub fn as_nested(&self) -> Option<ObligeCauseNested<'_>> {
+        self.nested.as_ref().map(|inner| ObligeCauseNested {
+            parent: &inner.parent,
+            frame: &inner.frame,
+        })
     }
 
     pub fn own_created_at(&self) -> &'static Location<'static> {
@@ -133,9 +124,9 @@ impl ObligeCause {
         let mut curr = self;
 
         loop {
-            match curr.kind() {
-                ObligeCauseKind::Root(_) => return curr.created_at,
-                ObligeCauseKind::Nested { parent, frame: _ } => {
+            match curr.as_nested() {
+                None => return curr.created_at,
+                Some(ObligeCauseNested { parent, frame: _ }) => {
                     curr = parent;
                 }
             }
@@ -143,21 +134,27 @@ impl ObligeCause {
     }
 
     pub fn depth(&self) -> u32 {
-        match &self.kind {
-            ObligeCauseInnerKind::Root(_) => 0,
-            ObligeCauseInnerKind::Nested(nested) => nested.depth,
-        }
+        self.nested.as_ref().map_or(0, |v| v.depth)
     }
 
     pub fn behavior(&self) -> &ObligeCauseBehavior {
-        let mut curr = self;
+        &self.behavior
+    }
 
-        loop {
-            match curr.kind() {
-                ObligeCauseKind::Root(behavior) => return behavior,
-                ObligeCauseKind::Nested { parent, frame: _ } => {
-                    curr = parent;
-                }
+    pub fn into_delay_bug(mut self) -> Self {
+        self.make_delay_bug();
+        self
+    }
+
+    pub fn make_delay_bug(&mut self) {
+        match &self.behavior {
+            ObligeCauseBehavior::Report => {
+                self.behavior = ObligeCauseBehavior::DelayBug;
+            }
+            ObligeCauseBehavior::Probe(..)
+            | ObligeCauseBehavior::DelayBug
+            | ObligeCauseBehavior::NeverReport => {
+                // (keep the same)
             }
         }
     }
@@ -216,8 +213,18 @@ impl ObligeCause {
 
         let mut diag = Diag::new(level, msg).primary(main_span, "");
 
+        eprintln!("root: {}", self.root_created_at());
+
         for frame in frames.iter().rev() {
-            diag.push_child(LeafDiag::new(Level::Note, format!("{:#?}", frame.frame)));
+            diag.push_child(LeafDiag::new(
+                Level::Note,
+                format!(
+                    "At {} ({:?})\n{:#?}",
+                    frame.full.own_created_at(),
+                    frame.full.behavior(),
+                    frame.frame
+                ),
+            ));
         }
 
         diag
@@ -241,12 +248,12 @@ impl<'a> Iterator for ObligeCauseFrames<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let curr = self.next?;
 
-        match curr.kind() {
-            ObligeCauseKind::Root(_) => {
+        match curr.as_nested() {
+            None => {
                 self.next = None;
                 None
             }
-            ObligeCauseKind::Nested { parent, frame } => {
+            Some(ObligeCauseNested { parent, frame }) => {
                 self.next = Some(parent);
                 Some(ObligeCauseFrameRef { full: curr, frame })
             }

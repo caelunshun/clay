@@ -484,6 +484,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                 );
 
                 let expected_receiver = fork.import_fn_instance_receiver_as_infer(
+                    &ObligeCause::new_empty_report(),
                     HrtbUniverse::ROOT_REF,
                     expected_env.as_ref(),
                     candidate,

@@ -74,7 +74,11 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Setup a `ClauseCx` with our environment in mind.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.create_universal_env_for_trait_def(HrtbUniverse::ROOT_REF, def);
+        let env = ccx.create_universal_env_for_trait_def(
+            &ObligeCause::new_empty_report(),
+            HrtbUniverse::ROOT_REF,
+            def,
+        );
 
         // First, let's ensure that the inherited trait list is well-formed.
         ccx.importer()
@@ -106,7 +110,11 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Setup a `ClauseCx` with our environment in mind.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.create_universal_env_for_impl_block(HrtbUniverse::ROOT_REF, item);
+        let env = ccx.create_universal_env_for_impl_block(
+            &ObligeCause::new_empty_report(),
+            HrtbUniverse::ROOT_REF,
+            item,
+        );
 
         // Let's ensure that the target trait instance is well formed. This includes trait-checking
         // regular generic parameters *and* associated types.
@@ -168,7 +176,11 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Setup a `ClauseCx` with our environment in mind.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.create_universal_env_for_adt_def(HrtbUniverse::ROOT_REF, def);
+        let env = ccx.create_universal_env_for_adt_def(
+            &ObligeCause::new_empty_report(),
+            HrtbUniverse::ROOT_REF,
+            def,
+        );
 
         // First, let's ensure that each generic parameter's clauses are well-formed.
         self.visit_generic_binder(&mut ccx, env.as_ref(), def.r(s).generics);
@@ -213,7 +225,11 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
         // Setup a `ClauseCx` with our environment in mind.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.create_universal_env_for_type_alias_def(HrtbUniverse::ROOT_REF, def);
+        let env = ccx.create_universal_env_for_type_alias_def(
+            &ObligeCause::new_empty_report(),
+            HrtbUniverse::ROOT_REF,
+            def,
+        );
 
         // First, let's ensure that each generic parameter's clauses are well-formed.
         self.visit_generic_binder(&mut ccx, env.as_ref(), def.r(s).generics);

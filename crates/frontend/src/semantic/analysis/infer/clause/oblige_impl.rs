@@ -364,11 +364,14 @@ impl<'tcx> ClauseCx<'tcx> {
         // Import the target type and trait. WF obligations are not needed on these types because
         // the `impl` itself has been WF-checked for all types compatible with the generic
         // parameters.
-        let target_ty =
-            self.import_report_elsewhere(universe, trait_env.as_ref(), rhs.r(s).target.value);
+        let target_ty = self
+            .importer()
+            .with_expansion_cause(cause.clone())
+            .import_report_elsewhere(universe, trait_env.as_ref(), rhs.r(s).target.value);
 
         let target_trait = self
             .importer()
+            .with_expansion_cause(cause.clone())
             .with_clause_applies_to(target_ty)
             .import_report_elsewhere(universe, trait_env.as_ref(), rhs.r(s).trait_.unwrap().value);
 
@@ -480,8 +483,12 @@ impl<'tcx> ClauseCx<'tcx> {
 
             let lhs_env = self.create_infer_env_for_fn_instance(cause, universe, lhs);
 
-            let (lhs_input, lhs_output) =
-                self.import_fn_instance_sig(universe, lhs_env.as_ref(), lhs.r(s).owner.def(s));
+            let (lhs_input, lhs_output) = self.import_fn_instance_sig(
+                cause,
+                universe,
+                lhs_env.as_ref(),
+                lhs.r(s).owner.def(s),
+            );
 
             let lhs_input = tcx.intern(TyKind::Tuple(lhs_input));
 

@@ -58,8 +58,8 @@ use crate::{
     },
     semantic::{
         analysis::{
-            ClauseCx, HrtbUniverse, HrtbUniverseInfo, ObligeCause, ObligeCauseBehavior,
-            ObligeCauseOrigin, ObligeCauseStep, UnifyCxMode,
+            ClauseCx, HrtbUniverse, HrtbUniverseInfo, ObligeCause, ObligeCauseOrigin,
+            ObligeCauseStep, UnifyCxMode,
         },
         syntax::{
             AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, FnOwner, GenericBinder,
@@ -81,13 +81,16 @@ use std::{convert::Infallible, rc::Rc};
 // === Driver === //
 
 impl<'tcx> ClauseCx<'tcx> {
+    #[track_caller]
     pub fn importer(&mut self) -> ClauseImporter<'_, 'tcx> {
         ClauseImporter {
             ccx: self,
             clause_applies_to: None,
+            expansion_cause: ObligeCause::new_empty_report(),
         }
     }
 
+    #[track_caller]
     pub fn import_report_here<T>(
         &mut self,
         universe: &HrtbUniverse,
@@ -100,6 +103,7 @@ impl<'tcx> ClauseCx<'tcx> {
         self.importer().import_report_here(universe, env, value)
     }
 
+    #[track_caller]
     pub fn import_report_elsewhere<T>(
         &mut self,
         universe: &HrtbUniverse,
@@ -158,6 +162,7 @@ impl<'tcx> ClauseCx<'tcx> {
 pub struct ClauseImporter<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
     clause_applies_to: Option<Ty>,
+    expansion_cause: ObligeCause,
 }
 
 impl ClauseImporter<'_, '_> {
@@ -168,6 +173,11 @@ impl ClauseImporter<'_, '_> {
 
     pub fn with_clause_applies_to(self, ty: Ty) -> Self {
         self.with_clause_applies_to_opt(Some(ty))
+    }
+
+    pub fn with_expansion_cause(mut self, cause: ObligeCause) -> Self {
+        self.expansion_cause = cause;
+        self
     }
 
     pub fn import_report_here<T>(
@@ -185,8 +195,11 @@ impl ClauseImporter<'_, '_> {
             .fold_preserved(value);
 
         self.ccx
-            .wf_and_normalize_folder(ObligeCause::new_empty_report(), universe.clone())
-            .with_clause_applies_to_opt(self.clause_applies_to)
+            .wf_and_normalize_folder(
+                self.expansion_cause.clone(),
+                universe.clone(),
+                self.clause_applies_to,
+            )
             .fold_spanned(value)
     }
 
@@ -203,10 +216,10 @@ impl ClauseImporter<'_, '_> {
 
         self.ccx
             .wf_and_normalize_folder(
-                ObligeCause::new(ObligeCauseBehavior::DelayBug),
+                self.expansion_cause.clone().into_delay_bug(),
                 universe.clone(),
+                self.clause_applies_to,
             )
-            .with_clause_applies_to_opt(self.clause_applies_to)
             .fold(value)
     }
 }
@@ -810,12 +823,13 @@ impl<'tcx> ClauseCx<'tcx> {
         &mut self,
         cause: ObligeCause,
         universe: HrtbUniverse,
+        clause_applies_to: Option<Ty>,
     ) -> ClauseTyWfFolder<'_, 'tcx> {
         ClauseTyWfFolder {
             ccx: self,
             cause,
             universe,
-            clause_applies_to: None,
+            clause_applies_to,
         }
     }
 }
@@ -825,13 +839,6 @@ pub struct ClauseTyWfFolder<'a, 'tcx> {
     cause: ObligeCause,
     universe: HrtbUniverse,
     clause_applies_to: Option<Ty>,
-}
-
-impl ClauseTyWfFolder<'_, '_> {
-    pub fn with_clause_applies_to_opt(mut self, ty: Option<Ty>) -> Self {
-        self.clause_applies_to = ty;
-        self
-    }
 }
 
 impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
