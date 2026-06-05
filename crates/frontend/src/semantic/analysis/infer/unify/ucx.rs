@@ -2,18 +2,17 @@ use crate::{
     base::{ErrorGuaranteed, Session, analysis::DebruijnTop, arena::HasInterner},
     semantic::{
         analysis::{
-            ClauseCx, HrtbUniverse, InferTyLeaksHrtbVarError, InferTyLeaksUniversalError,
-            InferTyOccursError, ObligeCause, TyAndSimpleTySetUnifyError, TyAndTyUnifyCulprit,
-            TyAndTyUnifyError,
+            ClauseCx, InferTyLeaksHrtbVarError, InferTyLeaksUniversalError, InferTyOccursError,
+            ObligeCause, TyAndSimpleTySetUnifyError, TyAndTyUnifyCulprit, TyAndTyUnifyError,
             infer::unify::{regions::ReUnifyTracker, types::TyUnifyTracker},
         },
         syntax::{
-            FnInstanceInner, FnOwner, HrtbBinderKind, InferTyVar, InferTyVarSourceInfo, Mutability,
-            Re, ReVariance, RelationDirection, RelationMode, SimpleTySet, SpannedHrtbBinder,
-            SpannedTy, SpannedTyView, TraitClause, TraitClauseList, TraitParam, TraitParamList, Ty,
-            TyCtxt, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor,
-            TyVisitorExt, TyVisitorInfallibleExt, UniversalReVar, UniversalReVarSourceInfo,
-            UniversalTyVar, UniversalTyVarSourceInfo,
+            FnInstanceInner, FnOwner, HrtbBinderKind, HrtbUniverse, InferTyVar,
+            InferTyVarSourceInfo, Mutability, Re, ReVariance, RelationDirection, RelationMode,
+            SimpleTySet, SpannedHrtbBinder, SpannedTy, SpannedTyView, TraitClause, TraitClauseList,
+            TraitParam, TraitParamList, Ty, TyCtxt, TyFolder, TyFolderExt, TyFolderInfallibleExt,
+            TyKind, TyOrRe, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt, UniversalReVar,
+            UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };

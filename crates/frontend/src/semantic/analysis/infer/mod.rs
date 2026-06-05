@@ -9,6 +9,3 @@ pub use diagnostic::*;
 
 mod unify;
 pub use unify::*;
-
-mod universe;
-pub use universe::*;

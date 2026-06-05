@@ -8,16 +8,16 @@ use crate::{
     parse::ast::{AstLit, AstUnOpKind},
     semantic::{
         analysis::{
-            BodyCtxt, ClauseError, EquateOrSet, HrtbUniverse, ObligeCause, ObligeCauseOrigin,
-            OverloadResolution, peel_ref_for_prim_op,
+            BodyCtxt, ClauseError, EquateOrSet, ObligeCause, ObligeCauseOrigin, OverloadResolution,
+            peel_ref_for_prim_op,
             typeck::body::lookup::{LookupMethodResult, SpannedImportedAssocArgs},
         },
         lower::generics::normalize_positional_generic_arity_zip,
         syntax::{
             AdtInstance, Divergence, FnInstanceInner, HirBlock, HirExpr, HirExprKind,
-            HirLabelTargetKind, HirLabelledBlock, HirStmt, InferTyVarSourceInfo, Re, RelationMode,
-            SimpleTyKind, SimpleTySet, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTyView,
-            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            HirLabelTargetKind, HirLabelledBlock, HirStmt, HrtbUniverse, InferTyVarSourceInfo, Re,
+            RelationMode, SimpleTyKind, SimpleTySet, SpannedFnInstanceView, SpannedFnOwnerView,
+            SpannedTyView, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };

@@ -2,10 +2,10 @@ use crate::{
     base::arena::{HasInterner as _, Obj},
     parse::ast::AstMutability,
     semantic::{
-        analysis::{BodyCtxt, HrtbUniverse, ObligeCause, ObligeCauseOrigin},
+        analysis::{BodyCtxt, ObligeCause, ObligeCauseOrigin},
         syntax::{
-            Divergence, HirPat, HirPatKind, InferTyVarSourceInfo, Mutability, Re, RelationMode, Ty,
-            TyKind,
+            Divergence, HirPat, HirPatKind, HrtbUniverse, InferTyVarSourceInfo, Mutability, Re,
+            RelationMode, Ty, TyKind,
         },
     },
 };

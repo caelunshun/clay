@@ -2,12 +2,11 @@ use crate::{
     base::{Session, arena::Obj},
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, CoherenceMap, HrtbUniverse, ObligeCause,
-            ObligeCauseOrigin, UnifyCxMode,
+            ClauseCx, ClauseImportEnvRef, CoherenceMap, ObligeCause, ObligeCauseOrigin, UnifyCxMode,
         },
         syntax::{
             AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FnItem, GenericBinder, GenericSubst,
-            ImplItem, ItemKind, TraitItem, TyCtxt, TypeAliasItem,
+            HrtbUniverse, ImplItem, ItemKind, TraitItem, TyCtxt, TypeAliasItem,
         },
     },
 };

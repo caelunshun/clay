@@ -4,15 +4,12 @@ use crate::{
         syntax::Span,
     },
     semantic::{
-        analysis::{
-            ClauseCx, ClauseImportEnv, ClauseImportEnvRef, HrtbUniverse, ObligeCause,
-            ObligeCauseStep,
-        },
+        analysis::{ClauseCx, ClauseImportEnv, ClauseImportEnvRef, ObligeCause, ObligeCauseStep},
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnInstanceInner,
-            FnOwner, GenericBinder, GenericSubst, HrtbBinder, HrtbBinderKind, ImplItem,
-            InferTyVarSourceInfo, RelationMode, SpannedTraitClauseView, TraitClause, TraitItem,
-            TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe, TypeAliasItem,
+            FnOwner, GenericBinder, GenericSubst, HrtbBinder, HrtbBinderKind, HrtbUniverse,
+            ImplItem, InferTyVarSourceInfo, RelationMode, SpannedTraitClauseView, TraitClause,
+            TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe, TypeAliasItem,
             UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },

@@ -5,14 +5,14 @@ use crate::{
     },
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, CrateBorrowCheckVisitor, HrtbUniverse, MirDataflowFacts,
-            ObligeCause, ObligeCauseBehavior, UnifyCxMode,
+            ClauseCx, ClauseImportEnvRef, CrateBorrowCheckVisitor, MirDataflowFacts, ObligeCause,
+            ObligeCauseBehavior, UnifyCxMode,
         },
         syntax::{
-            FnDef, IntKind, MirAssignRvalue, MirBlock, MirBody, MirLocal, MirLocalIdx, MirOperand,
-            MirPlace, MirPlaceElem, MirStmt, MirStmtKind, MirTerminator, Re, RelationDirection,
-            RelationMode, SimpleTyKind, TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe,
-            UniversalReVarSourceInfo,
+            FnDef, HrtbUniverse, IntKind, MirAssignRvalue, MirBlock, MirBody, MirLocal,
+            MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirStmt, MirStmtKind, MirTerminator,
+            Re, RelationDirection, RelationMode, SimpleTyKind, TraitParam, TraitSpec, Ty, TyCtxt,
+            TyKind, TyOrRe, UniversalReVarSourceInfo,
         },
     },
 };

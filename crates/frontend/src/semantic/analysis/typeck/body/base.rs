@@ -2,11 +2,10 @@ use crate::{
     base::{ErrorGuaranteed, Session, arena::Obj},
     semantic::{
         analysis::{
-            ClauseCx, ClauseImportEnvRef, CrateTypeckVisitor, HrtbUniverse, ObligeCause, UnifyCx,
-            UnifyCxMode,
+            ClauseCx, ClauseImportEnvRef, CrateTypeckVisitor, ObligeCause, UnifyCx, UnifyCxMode,
         },
         syntax::{
-            Crate, FnDef, HirExpr, HirLabelledBlock, HirLocal, HirPat, InferTyVar,
+            Crate, FnDef, HirExpr, HirLabelledBlock, HirLocal, HirPat, HrtbUniverse, InferTyVar,
             InferTyVarSourceInfo, Item, ThirLocal, Ty, TyCtxt,
         },
     },
