@@ -61,10 +61,11 @@ impl TyCtxt {
     pub fn check_crate(&self, krate: Obj<Crate>) {
         let s = &self.session;
 
+        // Compute coherence
         let mut coherence = CoherenceMap::default();
-
         coherence.populate(self, krate);
 
+        // Discover language items
         for &def in &**krate.r(s).items {
             for attr in &**def.r(s).attrs {
                 let AttributeKind::Lang(EarlyAttrLang { name }) = attr.r(s).kind else {
@@ -79,14 +80,7 @@ impl TyCtxt {
             }
         }
 
-        for &def in &**krate.r(s).items {
-            let Some(def) = def.r(s).kind.as_impl() else {
-                continue;
-            };
-
-            self.check_impl_generic_covering(def);
-        }
-
+        // Type-check crate
         CrateTypeckVisitor {
             tcx: self,
             coherence: &coherence,
@@ -94,6 +88,7 @@ impl TyCtxt {
         }
         .visit_crate();
 
+        // Borrow-check crate
         CrateBorrowCheckVisitor {
             tcx: self,
             krate,

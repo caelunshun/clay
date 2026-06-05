@@ -1,12 +1,10 @@
 use crate::{
-    base::{Diag, arena::Obj, syntax::Symbol},
+    base::{arena::Obj, syntax::Symbol},
     semantic::syntax::{
-        Crate, FnDef, GenericBinder, HrtbBinderKind, ImplItem, Re, SpannedTy, TraitClause,
-        TraitParam, TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt, TyKind, TyOrRe,
-        TyShapeMap,
+        Crate, FnDef, ImplItem, SpannedTy, TraitParam, TraitSpec, Ty, TyCtxt, TyFolder,
+        TyFolderInfallibleExt, TyKind, TyShapeMap,
     },
 };
-use index_vec::{IndexVec, define_index_type};
 use std::convert::Infallible;
 
 // === CoherenceMap === //
@@ -26,7 +24,6 @@ impl CoherenceMap {
     pub fn populate(&mut self, tcx: &TyCtxt, krate: Obj<Crate>) {
         let s = &tcx.session;
 
-        // Extend map with all `impl`s.
         for &item in &**krate.r(s).items {
             let Some(item) = item.r(s).kind.as_impl() else {
                 continue;
@@ -81,9 +78,6 @@ impl CoherenceMap {
                 }
             }
         }
-
-        // Perform coherence checks
-        // TODO
     }
 
     pub fn gather_inherent_impl_method_candidates<'a>(
@@ -154,241 +148,6 @@ impl CoherenceMap {
 
                 v
             })
-    }
-}
-
-// === Impl Generic Covering === //
-
-impl TyCtxt {
-    pub fn check_impl_generic_covering(&self, def: Obj<ImplItem>) {
-        let s = &self.session;
-
-        define_index_type! {
-            struct GenericIdx = u32;
-        }
-
-        define_index_type! {
-            struct ClauseIndex = u32;
-        }
-
-        struct GenericState {
-            covered: bool,
-            deps: Vec<ClauseIndex>,
-        }
-
-        struct ClauseState {
-            blockers: u32,
-            step_idx: GenericSolveStep,
-            spec: TraitSpec,
-        }
-
-        #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-        struct GenericSolveStep {
-            pub generic_idx: u32,
-            pub clause_idx: u32,
-        }
-
-        let generic_defs = &def.r(s).generics.r(s).defs;
-
-        // Populate clauses
-        let mut generic_states = generic_defs
-            .iter()
-            .map(|_| GenericState {
-                covered: false,
-                deps: Vec::new(),
-            })
-            .collect::<IndexVec<GenericIdx, _>>();
-
-        let mut clause_states = IndexVec::<ClauseIndex, ClauseState>::new();
-
-        for (step_generic_idx, main_generic_def) in generic_defs.iter().enumerate() {
-            for (step_clause_idx, clause_def) in
-                main_generic_def.clauses(s).value.r(s).iter().enumerate()
-            {
-                let TraitClause::Trait(spec) = *clause_def else {
-                    continue;
-                };
-
-                // Ignore clauses with bound values for the purposes of covering.
-                let HrtbBinderKind::Signature(binder) = spec.kind else {
-                    unreachable!()
-                };
-
-                if !binder.r(s).defs.is_empty() {
-                    continue;
-                }
-
-                let spec = spec.inner;
-
-                let clause_state_idx = clause_states.next_idx();
-                let mut blockers = 1;
-
-                generic_states[step_generic_idx].deps.push(clause_state_idx);
-
-                for &param in &spec.params.r(s)[..*spec.def.r(s).regular_generic_count as usize] {
-                    let TraitParam::Equals(ty) = param else {
-                        unreachable!()
-                    };
-
-                    cbit::cbit!(for generic in self.mentioned_sig_generics(ty) {
-                        debug_assert_eq!(generic.binder(s).def, def.r(s).generics);
-
-                        generic_states[generic.binder(s).idx as usize]
-                            .deps
-                            .push(clause_state_idx);
-
-                        blockers += 1;
-                    });
-                }
-
-                clause_states.push(ClauseState {
-                    step_idx: GenericSolveStep {
-                        generic_idx: step_generic_idx as u32,
-                        clause_idx: step_clause_idx as u32,
-                    },
-                    blockers,
-                    spec,
-                });
-            }
-        }
-
-        // Iteratively mark covered generics.
-        let mut solve_queue = Vec::new();
-        let mut solve_order = Vec::new();
-
-        fn cover_idx(
-            solve_queue: &mut Vec<TraitSpec>,
-            solve_order: &mut Vec<GenericSolveStep>,
-            generic_states: &mut IndexVec<GenericIdx, GenericState>,
-            clause_states: &mut IndexVec<ClauseIndex, ClauseState>,
-            idx: GenericIdx,
-        ) {
-            let generic = &mut generic_states[idx];
-
-            if generic.covered {
-                return;
-            }
-
-            generic.covered = true;
-
-            for &dep in &generic.deps {
-                let clause = &mut clause_states[dep];
-                clause.blockers -= 1;
-
-                if clause.blockers > 0 {
-                    continue;
-                }
-
-                solve_queue.push(clause.spec);
-                solve_order.push(clause.step_idx);
-            }
-        }
-
-        fn cover_ty(
-            tcx: &TyCtxt,
-            solve_queue: &mut Vec<TraitSpec>,
-            solve_order: &mut Vec<GenericSolveStep>,
-            generic_states: &mut IndexVec<GenericIdx, GenericState>,
-            clause_states: &mut IndexVec<ClauseIndex, ClauseState>,
-            binder: Obj<GenericBinder>,
-            ty: Ty,
-        ) {
-            let s = &tcx.session;
-
-            cbit::cbit!(for generic in tcx.mentioned_sig_generics(TyOrRe::Ty(ty)) {
-                debug_assert_eq!(generic.binder(s).def, binder);
-
-                cover_idx(
-                    solve_queue,
-                    solve_order,
-                    generic_states,
-                    clause_states,
-                    GenericIdx::from_raw(generic.binder(s).idx),
-                );
-            });
-        }
-
-        // Cover generics appearing in the target type and trait.
-        cover_ty(
-            self,
-            &mut solve_queue,
-            &mut solve_order,
-            &mut generic_states,
-            &mut clause_states,
-            def.r(s).generics,
-            def.r(s).target.value,
-        );
-
-        if let Some(trait_) = *def.r(s).trait_ {
-            for &param in trait_.value.params.r(s) {
-                match param {
-                    TyOrRe::Re(param) => {
-                        match param {
-                            Re::Gc | Re::Error(_) => {
-                                // (nothing mentioned)
-                            }
-                            Re::SigGeneric(param) => {
-                                cover_idx(
-                                    &mut solve_queue,
-                                    &mut solve_order,
-                                    &mut generic_states,
-                                    &mut clause_states,
-                                    GenericIdx::from_raw(param.r(s).binder.idx),
-                                );
-                            }
-                            Re::HrtbVar(_)
-                            | Re::InferVar(_)
-                            | Re::UniversalVar(_)
-                            | Re::SigInfer
-                            | Re::Erased => {
-                                unreachable!()
-                            }
-                        }
-                    }
-                    TyOrRe::Ty(param) => {
-                        cover_ty(
-                            self,
-                            &mut solve_queue,
-                            &mut solve_order,
-                            &mut generic_states,
-                            &mut clause_states,
-                            def.r(s).generics,
-                            param,
-                        );
-                    }
-                }
-            }
-        }
-
-        // Recursively uncover more generics.
-        while let Some(clause) = solve_queue.pop() {
-            for param in &clause.params.r(s)[(*clause.def.r(s).regular_generic_count as usize)..] {
-                match param {
-                    TraitParam::Equals(eq) => {
-                        // We can use this to reveal more equalities!
-                        cover_ty(
-                            self,
-                            &mut solve_queue,
-                            &mut solve_order,
-                            &mut generic_states,
-                            &mut clause_states,
-                            def.r(s).generics,
-                            eq.unwrap_ty(),
-                        );
-                    }
-                    TraitParam::Unspecified(_) => {
-                        // (does not contribute to solve order)
-                    }
-                }
-            }
-        }
-
-        // Ensure that all generics are covered.
-        for (state, def) in generic_states.iter().zip(generic_defs) {
-            if !state.covered {
-                Diag::span_err(def.span(s), "generic parameter not covered by `impl`").emit();
-            }
-        }
     }
 }
 
