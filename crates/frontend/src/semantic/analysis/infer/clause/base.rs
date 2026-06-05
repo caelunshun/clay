@@ -5,9 +5,9 @@ use crate::{
     },
     semantic::{
         analysis::{
-            ClauseError, CoherenceMap, FloatingInferVar, HrtbUniverse, ObligationCx,
-            ObligationNotReady, ObligationUnfulfilled, ObligeCause, RecursionLimitReached,
-            TyAndSimpleTySetUnifyError, TyAndTyUnifyError, UnifyCx, UnifyCxMode,
+            ClauseError, CoherenceMap, FloatingInferVar, HrtbUniverse, ObligationNotReady,
+            ObligationUnfulfilled, ObligeCause, RecursionLimitReached, TyAndSimpleTySetUnifyError,
+            TyAndTyUnifyError, UnifyCx, UnifyCxMode,
             infer::clause::elaboration::{UniversalElaboration, WipReificationState},
         },
         syntax::{
@@ -21,7 +21,9 @@ use crate::{
 use index_vec::IndexVec;
 use std::rc::Rc;
 
-const MAX_OBLIGATION_DEPTH: u32 = 256;
+pub const MAX_OBLIGATION_DEPTH: u32 = 256;
+
+// === Obligations === //
 
 #[derive(Debug, Clone)]
 pub enum ClauseObligation {
@@ -97,11 +99,18 @@ impl ClauseObligation {
 /// WF-checking traits), you can immediately skip to region aware checking.
 #[derive(Clone)]
 pub struct ClauseCx<'tcx> {
-    ocx: ObligationCx<'tcx, ClauseObligation, ObligationNotReady>,
+    ucx: UnifyCx<'tcx>,
+    pending_obligations: Vec<ClauseObligationState>,
     coherence: &'tcx CoherenceMap,
     krate: Obj<Crate>,
     is_silent: bool,
     pub(super) universal_vars: IndexVec<UniversalTyVar, UniversalTyVarDescriptor>,
+}
+
+#[derive(Clone)]
+struct ClauseObligationState {
+    kind: ClauseObligation,
+    not_ready: Option<ObligationNotReady>,
 }
 
 #[derive(Clone)]
@@ -118,7 +127,8 @@ impl<'tcx> ClauseCx<'tcx> {
         mode: UnifyCxMode,
     ) -> Self {
         Self {
-            ocx: ObligationCx::new(tcx, mode),
+            ucx: UnifyCx::new(tcx, mode),
+            pending_obligations: Vec::new(),
             coherence,
             krate,
             is_silent: false,
@@ -127,11 +137,11 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     pub fn tcx(&self) -> &'tcx TyCtxt {
-        self.ocx.tcx()
+        self.ucx.tcx()
     }
 
     pub fn session(&self) -> &'tcx Session {
-        self.ocx.session()
+        self.ucx.session()
     }
 
     pub fn coherence(&self) -> &'tcx CoherenceMap {
@@ -143,11 +153,11 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     pub fn ucx(&self) -> &UnifyCx<'tcx> {
-        self.ocx.ucx()
+        &self.ucx
     }
 
     pub fn ucx_mut(&mut self) -> &mut UnifyCx<'tcx> {
-        self.ocx.ucx_mut()
+        &mut self.ucx
     }
 
     pub fn is_silent(&self) -> bool {
@@ -168,28 +178,44 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     pub(super) fn push_obligation(&mut self, kind: ClauseObligation) {
-        self.ocx.push_obligation(kind);
+        self.pending_obligations.push(ClauseObligationState {
+            kind,
+            not_ready: None,
+        });
     }
 
     pub fn poll_obligations(&mut self) {
-        ObligationCx::poll_obligations(
-            self,
-            |this| &mut this.ocx,
-            |this| this.clone(),
-            |fork, kind| {
+        loop {
+            let mut made_progress = false;
+
+            // Process all obligations back to front.
+            let mut curr_idx = self.pending_obligations.len();
+
+            while curr_idx > 0 {
+                curr_idx -= 1;
+
+                let kind = self.pending_obligations[curr_idx].kind.clone();
+
+                // Process the obligation.
                 if kind.cause().depth() > MAX_OBLIGATION_DEPTH {
                     RecursionLimitReached {
                         cause: kind.cause().clone(),
                     }
-                    .report(fork);
+                    .report(&self);
 
-                    return Ok(());
+                    self.pending_obligations
+                        .retain(|other| kind.cause().identity() != other.kind.cause().identity());
+
+                    made_progress = true;
+                    break;
                 }
 
-                match kind {
+                let mut fork = self.clone();
+
+                let res = match kind {
                     ClauseObligation::TyUnifiesTy(cause, lhs, rhs, mode) => {
                         if let Err(err) = fork.ucx_mut().unify_ty_and_ty(&cause, lhs, rhs, mode) {
-                            ClauseError::from(*err).report(fork);
+                            ClauseError::from(*err).report(&fork);
                         }
 
                         Ok(())
@@ -200,7 +226,7 @@ impl<'tcx> ClauseCx<'tcx> {
                         {
                             Ok(Ok(())) => Ok(()),
                             Ok(Err(err)) => {
-                                err.report(fork);
+                                err.report(&fork);
                                 Ok(())
                             }
                             Err(err) => Err(err),
@@ -223,9 +249,28 @@ impl<'tcx> ClauseCx<'tcx> {
                     ClauseObligation::Covered(cause, must_mention, in_type, in_trait) => {
                         fork.run_oblige_covered(cause, must_mention, in_type, in_trait)
                     }
+                };
+
+                // If we finished processing the obligation, remove it from the queue and mark
+                // progress so we can continue processing.
+                match res {
+                    Ok(()) => {
+                        *self = fork;
+                        self.pending_obligations.swap_remove(curr_idx);
+                        made_progress = true;
+                        // (forces depth-first expansion)
+                        break;
+                    }
+                    Err(err) => {
+                        self.pending_obligations[curr_idx].not_ready = Some(err);
+                    }
                 }
-            },
-        );
+            }
+
+            if !made_progress {
+                break;
+            }
+        }
     }
 }
 
@@ -443,7 +488,7 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn verify(&mut self) {
         self.poll_obligations();
 
-        for state in self.ocx.pending_obligations().to_vec() {
+        for state in &self.pending_obligations {
             ObligationUnfulfilled {
                 obligation: state.kind.clone(),
                 reason: state.not_ready.clone().unwrap(),

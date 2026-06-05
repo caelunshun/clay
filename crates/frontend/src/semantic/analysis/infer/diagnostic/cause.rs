@@ -5,7 +5,13 @@ use crate::{
         syntax::{HrtbBinder, ImplItem, PrettyPrinterOpts, TraitClauseList, TraitSpec, Ty, TyOrRe},
     },
 };
-use std::{cell::Cell, fmt, panic::Location, rc::Rc};
+use std::{
+    cell::Cell,
+    fmt,
+    panic::Location,
+    rc::Rc,
+    sync::atomic::{AtomicU32, Ordering::*},
+};
 
 // === ObligeClause === //
 
@@ -13,8 +19,12 @@ use std::{cell::Cell, fmt, panic::Location, rc::Rc};
 pub struct ObligeCause {
     created_at: &'static Location<'static>,
     behavior: ObligeCauseBehavior,
+    identity: ObligeCauseIdentity,
     nested: Option<Rc<ObligeCauseInnerNested>>,
 }
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct ObligeCauseIdentity(u32);
 
 struct ObligeCauseInnerNested {
     parent: ObligeCause,
@@ -62,9 +72,12 @@ impl fmt::Debug for ObligeCause {
 impl ObligeCause {
     #[track_caller]
     pub fn new(behavior: ObligeCauseBehavior) -> Self {
+        static ID_GEN: AtomicU32 = AtomicU32::new(0);
+
         Self {
             created_at: Location::caller(),
             behavior,
+            identity: ObligeCauseIdentity(ID_GEN.fetch_add(1, Relaxed)),
             nested: None,
         }
     }
@@ -101,12 +114,17 @@ impl ObligeCause {
         Self {
             created_at: Location::caller(),
             behavior: self.behavior.clone(),
+            identity: self.identity,
             nested: Some(Rc::new(ObligeCauseInnerNested {
                 parent: self,
                 frame,
                 depth,
             })),
         }
+    }
+
+    pub fn identity(&self) -> ObligeCauseIdentity {
+        self.identity
     }
 
     pub fn as_nested(&self) -> Option<ObligeCauseNested<'_>> {
@@ -213,18 +231,8 @@ impl ObligeCause {
 
         let mut diag = Diag::new(level, msg).primary(main_span, "");
 
-        eprintln!("root: {}", self.root_created_at());
-
         for frame in frames.iter().rev() {
-            diag.push_child(LeafDiag::new(
-                Level::Note,
-                format!(
-                    "At {} ({:?})\n{:#?}",
-                    frame.full.own_created_at(),
-                    frame.full.behavior(),
-                    frame.frame
-                ),
-            ));
+            diag.push_child(LeafDiag::new(Level::Note, format!("{:#?}", frame.frame)));
         }
 
         diag
