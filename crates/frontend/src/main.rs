@@ -33,7 +33,9 @@ fn main() {
     let tokens = tokenize(span);
     let ast = parse_file(&tokens);
 
-    let tcx = TyCtxt::new(session);
+    let tcx = TyCtxt::new(session.clone());
     let krate = tcx.lower_full_ast(&ast);
     tcx.check_crate(krate);
+
+    _ = session.diag.finish();
 }

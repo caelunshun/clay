@@ -50,9 +50,10 @@ impl EmissionGuarantee for ErrorGuaranteed {
 
 #[derive(Debug, Default)]
 pub struct DiagCtxt {
-    error_guaranteed: Cell<bool>,
+    true_error_emitted: Cell<bool>,
     delay_and_sort_accum: RefCell<Vec<SoftDiag>>,
     delay_and_sort_guards: Cell<u32>,
+    delay_bug_accum: RefCell<Vec<HardDiag>>,
 }
 
 impl DiagCtxt {
@@ -96,26 +97,42 @@ impl DiagCtxt {
         }
 
         let is_fatal = diag.is_fatal();
+        let is_delay_bug = diag.is_delay_bug();
 
-        if self.delay_and_sort_guards.get() == 0 {
-            emit_pretty(
-                &Session::fetch().source_map,
-                &mut termcolor::StandardStream::stdout(termcolor::ColorChoice::Auto),
-                diag.cast_ref(),
-            );
+        if !is_delay_bug {
+            if self.delay_and_sort_guards.get() == 0 {
+                diag.emit_to_console();
+            } else {
+                self.delay_and_sort_accum.borrow_mut().push(diag.cast());
+            }
+
+            if is_fatal {
+                self.true_error_emitted.set(true);
+            }
         } else {
-            self.delay_and_sort_accum.borrow_mut().push(diag.cast());
-        }
-
-        if is_fatal {
-            self.error_guaranteed.set(true);
+            self.delay_bug_accum.borrow_mut().push(diag.cast());
         }
 
         E::new_result(is_fatal.then(ErrorGuaranteed::new_unchecked))
     }
 
-    pub fn had_error(&self) -> bool {
-        self.error_guaranteed.get()
+    #[must_use]
+    pub fn finish(&self) -> Option<ErrorGuaranteed> {
+        if self.true_error_emitted.get() {
+            return Some(ErrorGuaranteed::new_unchecked());
+        }
+
+        let delay_bugs = mem::take(&mut *self.delay_bug_accum.borrow_mut());
+
+        if delay_bugs.is_empty() {
+            return None;
+        }
+
+        for diag in delay_bugs {
+            diag.emit_to_console();
+        }
+
+        panic!("delay bugs encountered without any other hard errors");
     }
 }
 
@@ -141,6 +158,10 @@ impl Level {
             self,
             Level::Bug | Level::DelayedBug | Level::Fatal | Level::Error
         )
+    }
+
+    pub fn is_delay_bug(self) -> bool {
+        matches!(self, Level::DelayedBug)
     }
 }
 
@@ -181,6 +202,14 @@ impl<E: EmissionGuarantee> Diag<E> {
     #[track_caller]
     pub fn emit(self) -> E {
         Session::fetch().diag.emit(self)
+    }
+
+    fn emit_to_console(&self) {
+        emit_pretty(
+            &Session::fetch().source_map,
+            &mut termcolor::StandardStream::stdout(termcolor::ColorChoice::Auto),
+            self.cast_ref(),
+        );
     }
 }
 
@@ -245,6 +274,10 @@ impl<E: EmissionGuarantee> Diag<E> {
 
     pub fn is_fatal(&self) -> bool {
         self.me.is_fatal() || self.children.iter().any(|v| v.is_fatal())
+    }
+
+    pub fn is_delay_bug(&self) -> bool {
+        self.me.is_delay_bug() || self.children.iter().any(|v| v.is_delay_bug())
     }
 }
 
@@ -316,6 +349,10 @@ impl LeafDiag {
 
     pub fn is_fatal(&self) -> bool {
         self.level.is_fatal()
+    }
+
+    pub fn is_delay_bug(&self) -> bool {
+        self.level.is_delay_bug()
     }
 }
 
