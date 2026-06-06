@@ -6,3 +6,5 @@ pub use self::infer::*;
 
 mod typeck;
 pub use self::typeck::*;
+
+mod driver;

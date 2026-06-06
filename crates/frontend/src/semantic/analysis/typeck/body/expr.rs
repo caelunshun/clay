@@ -625,6 +625,19 @@ impl BodyCtxt<'_, '_> {
                     }
                 } else {
                     if let Some(demand) = self.block_break_demands[&label] {
+                        if !divergence.must_diverge() {
+                            self.ccx_mut().oblige_ty_unifies_ty(
+                                ObligeCause::new_report(
+                                    ObligeCauseOrigin::HirBodyCheckReturnUnit {
+                                        span: block.r(s).span,
+                                    },
+                                ),
+                                demand,
+                                tcx.intern(TyKind::Tuple(tcx.intern_list(&[]))),
+                                RelationMode::Equate,
+                            );
+                        }
+
                         demand
                     } else if divergence.must_diverge() {
                         tcx.intern(TyKind::Simple(SimpleTyKind::Never))
