@@ -15,7 +15,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x12c80e470: ?0 {Imported { span: test6.fir:12:14-15 }},
+        lhs: 0: ?0 {Imported { span: test6.fir:12:14-15 }},
         rhs: crate::Whee,
     },
 )

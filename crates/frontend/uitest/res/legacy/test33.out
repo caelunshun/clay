@@ -13,7 +13,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x11f8288b8: Q,
+        lhs: 0: Q,
         rhs: crate::Helper<?12 {ProjectionResult { span: <dummy> }}, {HRTB universal capture #6: crate::Projector}>,
     },
 )
@@ -28,7 +28,7 @@ note: Step(
 note: Step(
     HrtbExistentialInferenceIsPossible {
         lhs: {HRTB universal capture #6: crate::Projector},
-        rhs: 0x11f828218: [
+        rhs: 0: [
             crate::Projector<Out: crate::Fuzzy>,
         ],
     },
@@ -36,7 +36,7 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x11f827d30: {HRTB universal capture #6: crate::Projector},
+        lhs: 0: {HRTB universal capture #6: crate::Projector},
         rhs: crate::Projector<Out: crate::Fuzzy>,
     },
 )
@@ -50,7 +50,7 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x11f827ba0: <{HRTB universal capture #6: crate::Projector} as crate::Projector>::Out,
+        lhs: 0: <{HRTB universal capture #6: crate::Projector} as crate::Projector>::Out,
         rhs: crate::Fuzzy,
     },
 )

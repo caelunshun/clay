@@ -26,7 +26,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x11f016598: (&'_  (), &'_  ()),
+        lhs: 0: (&'_  (), &'_  ()),
         rhs: crate::demo2::Whee,
     },
 )
@@ -46,7 +46,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x11f016598: (&'_  (), &'_  ()),
+        lhs: 0: (&'_  (), &'_  ()),
         rhs: crate::demo2::Whee,
     },
 )
@@ -66,7 +66,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x11f016598: (&'_  (), &'_  ()),
+        lhs: 0: (&'_  (), &'_  ()),
         rhs: crate::demo2::Whee,
     },
 )

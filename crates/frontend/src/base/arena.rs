@@ -83,15 +83,24 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         thread_local! {
-            static REENTRANT_FMT: RefCell<FxHashSet<(TypeId, NonNull<()>)>> =
-                const { RefCell::new(FxHashSet::with_hasher(BuildHasherDefault::new())) };
+            static REENTRANT_FMT: RefCell<FxHashMap<(TypeId, NonNull<()>), u32>> =
+                const { RefCell::new(FxHashMap::with_hasher(BuildHasherDefault::new())) };
         }
 
         let key = (TypeId::of::<T>(), self.ptr.cast());
 
-        write!(f, "{:?}", self.ptr.as_ptr().cast::<()>())?;
+        let (reentrant_depth, was_non_reentrant) = REENTRANT_FMT.with_borrow_mut(|map| {
+            let len = map.len();
 
-        if REENTRANT_FMT.with_borrow_mut(|v| v.insert(key)) {
+            match map.entry(key) {
+                hash_map::Entry::Occupied(entry) => (*entry.get(), false),
+                hash_map::Entry::Vacant(entry) => (*entry.insert(len as u32), true),
+            }
+        });
+
+        write!(f, "{reentrant_depth}")?;
+
+        if was_non_reentrant {
             let _guard = scopeguard::guard((), |()| {
                 REENTRANT_FMT.with_borrow_mut(|v| v.remove(&key));
             });

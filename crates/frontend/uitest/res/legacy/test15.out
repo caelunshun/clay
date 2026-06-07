@@ -13,7 +13,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x13e80dd58: ((),),
+        lhs: 0: ((),),
         rhs: crate::Meow,
     },
 )

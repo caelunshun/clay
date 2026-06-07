@@ -13,7 +13,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x14c828ae0: crate::LivesForSome1<'_>,
+        lhs: 0: crate::LivesForSome1<'_>,
         rhs: crate::Meow<'_>,
     },
 )
@@ -33,7 +33,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x14c828a98: crate::LivesForSome2<'_>,
+        lhs: 0: crate::LivesForSome2<'_>,
         rhs: crate::Meow<'_>,
     },
 )
@@ -53,7 +53,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x14c828c30: T,
+        lhs: 0: T,
         rhs: crate::Meow<'_>,
     },
 )
@@ -80,7 +80,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x14c828c30: T,
+        lhs: 0: T,
         rhs: crate::Meow<'_>,
     },
 )
@@ -107,7 +107,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x14c828c30: T,
+        lhs: 0: T,
         rhs: crate::Meow<'_>,
     },
 )
@@ -158,7 +158,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x14c829298: crate::MyFunc,
+        lhs: 0: crate::MyFunc,
         rhs: crate::Fn<&'_  {HRTB universal capture #1: }, &'_  {HRTB universal capture #1: }>,
     },
 )

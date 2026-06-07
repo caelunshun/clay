@@ -13,7 +13,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x13c012030: ((), (((),),), ((),)),
+        lhs: 0: ((), (((),),), ((),)),
         rhs: crate::MyTrait,
     },
 )
@@ -26,7 +26,7 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x13c010680: (((),),),
+        lhs: 0: (((),),),
         rhs: crate::Generic<?5 {UniversalElabHelper}>,
     },
 )
@@ -46,7 +46,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x13c012030: ((), (((),),), ((),)),
+        lhs: 0: ((), (((),),), ((),)),
         rhs: crate::MyTrait,
     },
 )
@@ -59,7 +59,7 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x13c010758: (((),),),
+        lhs: 0: (((),),),
         rhs: crate::Generic<?3 {UniversalElabHelper}>,
     },
 )
@@ -79,7 +79,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x13c012030: ((), (((),),), ((),)),
+        lhs: 0: ((), (((),),), ((),)),
         rhs: crate::MyTrait,
     },
 )
@@ -92,7 +92,7 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x13c010758: (((),),),
+        lhs: 0: (((),),),
         rhs: crate::Generic<?3 {UniversalElabHelper}>,
     },
 )
@@ -112,7 +112,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x13c012030: ((), (((),),), ((),)),
+        lhs: 0: ((), (((),),), ((),)),
         rhs: crate::MyTrait,
     },
 )
@@ -125,7 +125,7 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x13c010758: (((),),),
+        lhs: 0: (((),),),
         rhs: crate::Generic<?3 {UniversalElabHelper}>,
     },
 )

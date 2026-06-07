@@ -12,7 +12,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x14081fbd0: fn @ crate::meow<?30 {Imported { span: test21.fir:69:30-31 }}>,
+        lhs: 0: fn @ crate::meow<?30 {Imported { span: test21.fir:69:30-31 }}>,
         rhs: crate::std::FnOnce<({HRTB universal capture #15: crate::Meow},), {HRTB universal capture #15: crate::Meow}>,
     },
 )

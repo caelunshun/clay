@@ -12,7 +12,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x15d826400: fn @ crate::demo,
+        lhs: 0: fn @ crate::demo,
         rhs: crate::std::FnOnce<(<T as crate::Meow<<T as crate::Projector<primitives::i32>>::Out, Hey: crate::Foo>>::Hey,), ()>,
     },
 )
@@ -25,7 +25,7 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x15d825570: <T as crate::Meow<<T as crate::Projector<primitives::i32>>::Out, Hey: crate::Foo>>::Hey,
+        lhs: 0: <T as crate::Meow<<T as crate::Projector<primitives::i32>>::Out, Hey: crate::Foo>>::Hey,
         rhs: crate::Bar,
     },
 )

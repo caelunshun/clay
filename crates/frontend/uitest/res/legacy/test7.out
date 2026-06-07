@@ -13,7 +13,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x122811c30: Foo,
+        lhs: 0: Foo,
         rhs: crate::Meow,
     },
 )
@@ -33,7 +33,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x122812468: Foo,
+        lhs: 0: Foo,
         rhs: crate::Meow,
     },
 )
@@ -53,7 +53,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x122812578: (),
+        lhs: 0: (),
         rhs: crate::Meow,
     },
 )

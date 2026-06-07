@@ -13,7 +13,7 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x14000eb00: ((D, D), V, T),
+        lhs: 0: ((D, D), V, T),
         rhs: crate::MyTrait,
     },
 )
@@ -26,7 +26,7 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0x14000e998: V,
+        lhs: 0: V,
         rhs: crate::Generic<?3 {UniversalElabHelper}>,
     },
 )
