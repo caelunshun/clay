@@ -1,0 +1,1683 @@
+bug: recursion limit reached
+   ┌─ test34.fir:27:12
+   │
+27 │ fn meow(v: <() as Forever<()>>::Out) {}
+   │            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+note: Origin(
+    ImportWfTyProjection {
+        span: test34.fir:27:12-36,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b017958: (),
+        rhs: crate::Forever<(), Out = ?1>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b016be0: ?3,
+        rhs: crate::Forever<?3, Out = ?6>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b0166c8: ?7,
+        rhs: crate::Forever<?7, Out = ?10>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b016408: ?11,
+        rhs: crate::Forever<?11, Out = ?14>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b016148: ?15,
+        rhs: crate::Forever<?15, Out = ?18>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b015e88: ?19,
+        rhs: crate::Forever<?19, Out = ?22>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b015bc8: ?23,
+        rhs: crate::Forever<?23, Out = ?26>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b015908: ?27,
+        rhs: crate::Forever<?27, Out = ?30>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b015648: ?31,
+        rhs: crate::Forever<?31, Out = ?34>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b015388: ?35,
+        rhs: crate::Forever<?35, Out = ?38>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b0150c8: ?39,
+        rhs: crate::Forever<?39, Out = ?42>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b014e08: ?43,
+        rhs: crate::Forever<?43, Out = ?46>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b014b48: ?47,
+        rhs: crate::Forever<?47, Out = ?50>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b014888: ?51,
+        rhs: crate::Forever<?51, Out = ?54>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b0145c8: ?55,
+        rhs: crate::Forever<?55, Out = ?58>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b014308: ?59,
+        rhs: crate::Forever<?59, Out = ?62>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b014048: ?63,
+        rhs: crate::Forever<?63, Out = ?66>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b013d88: ?67,
+        rhs: crate::Forever<?67, Out = ?70>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b034a48: ?71,
+        rhs: crate::Forever<?71, Out = ?74>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b034788: ?75,
+        rhs: crate::Forever<?75, Out = ?78>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b0344c8: ?79,
+        rhs: crate::Forever<?79, Out = ?82>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b034208: ?83,
+        rhs: crate::Forever<?83, Out = ?86>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b033f48: ?87,
+        rhs: crate::Forever<?87, Out = ?90>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b033c88: ?91,
+        rhs: crate::Forever<?91, Out = ?94>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b0339c8: ?95,
+        rhs: crate::Forever<?95, Out = ?98>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b033708: ?99,
+        rhs: crate::Forever<?99, Out = ?102>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b033448: ?103,
+        rhs: crate::Forever<?103, Out = ?106>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b033188: ?107,
+        rhs: crate::Forever<?107, Out = ?110>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b032ec8: ?111,
+        rhs: crate::Forever<?111, Out = ?114>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b032c08: ?115,
+        rhs: crate::Forever<?115, Out = ?118>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b032948: ?119,
+        rhs: crate::Forever<?119, Out = ?122>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b032688: ?123,
+        rhs: crate::Forever<?123, Out = ?126>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b0323c8: ?127,
+        rhs: crate::Forever<?127, Out = ?130>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b032108: ?131,
+        rhs: crate::Forever<?131, Out = ?134>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b031e48: ?135,
+        rhs: crate::Forever<?135, Out = ?138>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b031b88: ?139,
+        rhs: crate::Forever<?139, Out = ?142>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b0318c8: ?143,
+        rhs: crate::Forever<?143, Out = ?146>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b031608: ?147,
+        rhs: crate::Forever<?147, Out = ?150>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b031348: ?151,
+        rhs: crate::Forever<?151, Out = ?154>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b031088: ?155,
+        rhs: crate::Forever<?155, Out = ?158>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b030dc8: ?159,
+        rhs: crate::Forever<?159, Out = ?162>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b030b08: ?163,
+        rhs: crate::Forever<?163, Out = ?166>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b030848: ?167,
+        rhs: crate::Forever<?167, Out = ?170>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b030588: ?171,
+        rhs: crate::Forever<?171, Out = ?174>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b0302c8: ?175,
+        rhs: crate::Forever<?175, Out = ?178>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b030008: ?179,
+        rhs: crate::Forever<?179, Out = ?182>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b02fd48: ?183,
+        rhs: crate::Forever<?183, Out = ?186>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b02fa88: ?187,
+        rhs: crate::Forever<?187, Out = ?190>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b02f7c8: ?191,
+        rhs: crate::Forever<?191, Out = ?194>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b02f508: ?195,
+        rhs: crate::Forever<?195, Out = ?198>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b02f248: ?199,
+        rhs: crate::Forever<?199, Out = ?202>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b02ef88: ?203,
+        rhs: crate::Forever<?203, Out = ?206>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b02ecc8: ?207,
+        rhs: crate::Forever<?207, Out = ?210>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b02ea08: ?211,
+        rhs: crate::Forever<?211, Out = ?214>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b02e748: ?215,
+        rhs: crate::Forever<?215, Out = ?218>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b02e488: ?219,
+        rhs: crate::Forever<?219, Out = ?222>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b02e1c8: ?223,
+        rhs: crate::Forever<?223, Out = ?226>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b02df08: ?227,
+        rhs: crate::Forever<?227, Out = ?230>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b02dc48: ?231,
+        rhs: crate::Forever<?231, Out = ?234>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b02d988: ?235,
+        rhs: crate::Forever<?235, Out = ?238>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b02d6c8: ?239,
+        rhs: crate::Forever<?239, Out = ?242>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b02d408: ?243,
+        rhs: crate::Forever<?243, Out = ?246>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b02d148: ?247,
+        rhs: crate::Forever<?247, Out = ?250>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14b02ce88: ?251,
+        rhs: crate::Forever<?251, Out = ?254>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150027f78: ?255,
+        rhs: crate::Forever<?255, Out = ?258>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150027cb8: ?259,
+        rhs: crate::Forever<?259, Out = ?262>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1500279f8: ?263,
+        rhs: crate::Forever<?263, Out = ?266>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150027738: ?267,
+        rhs: crate::Forever<?267, Out = ?270>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150027478: ?271,
+        rhs: crate::Forever<?271, Out = ?274>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1500271b8: ?275,
+        rhs: crate::Forever<?275, Out = ?278>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150026ef8: ?279,
+        rhs: crate::Forever<?279, Out = ?282>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150026c38: ?283,
+        rhs: crate::Forever<?283, Out = ?286>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150026978: ?287,
+        rhs: crate::Forever<?287, Out = ?290>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1500266b8: ?291,
+        rhs: crate::Forever<?291, Out = ?294>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1500263f8: ?295,
+        rhs: crate::Forever<?295, Out = ?298>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150026138: ?299,
+        rhs: crate::Forever<?299, Out = ?302>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150025e78: ?303,
+        rhs: crate::Forever<?303, Out = ?306>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150025bb8: ?307,
+        rhs: crate::Forever<?307, Out = ?310>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1500258f8: ?311,
+        rhs: crate::Forever<?311, Out = ?314>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150025638: ?315,
+        rhs: crate::Forever<?315, Out = ?318>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150025378: ?319,
+        rhs: crate::Forever<?319, Out = ?322>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1500250b8: ?323,
+        rhs: crate::Forever<?323, Out = ?326>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150024df8: ?327,
+        rhs: crate::Forever<?327, Out = ?330>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150024b38: ?331,
+        rhs: crate::Forever<?331, Out = ?334>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150024878: ?335,
+        rhs: crate::Forever<?335, Out = ?338>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1500245b8: ?339,
+        rhs: crate::Forever<?339, Out = ?342>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1500242f8: ?343,
+        rhs: crate::Forever<?343, Out = ?346>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150024038: ?347,
+        rhs: crate::Forever<?347, Out = ?350>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150023d78: ?351,
+        rhs: crate::Forever<?351, Out = ?354>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150023ab8: ?355,
+        rhs: crate::Forever<?355, Out = ?358>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1500237f8: ?359,
+        rhs: crate::Forever<?359, Out = ?362>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150023538: ?363,
+        rhs: crate::Forever<?363, Out = ?366>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150023278: ?367,
+        rhs: crate::Forever<?367, Out = ?370>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150022fb8: ?371,
+        rhs: crate::Forever<?371, Out = ?374>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150022cf8: ?375,
+        rhs: crate::Forever<?375, Out = ?378>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150022a38: ?379,
+        rhs: crate::Forever<?379, Out = ?382>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150022778: ?383,
+        rhs: crate::Forever<?383, Out = ?386>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1500224b8: ?387,
+        rhs: crate::Forever<?387, Out = ?390>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1500221f8: ?391,
+        rhs: crate::Forever<?391, Out = ?394>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150021f38: ?395,
+        rhs: crate::Forever<?395, Out = ?398>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150021c78: ?399,
+        rhs: crate::Forever<?399, Out = ?402>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1500219b8: ?403,
+        rhs: crate::Forever<?403, Out = ?406>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1500216f8: ?407,
+        rhs: crate::Forever<?407, Out = ?410>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150021438: ?411,
+        rhs: crate::Forever<?411, Out = ?414>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150021178: ?415,
+        rhs: crate::Forever<?415, Out = ?418>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150020eb8: ?419,
+        rhs: crate::Forever<?419, Out = ?422>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150020bf8: ?423,
+        rhs: crate::Forever<?423, Out = ?426>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150020938: ?427,
+        rhs: crate::Forever<?427, Out = ?430>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x150020678: ?431,
+        rhs: crate::Forever<?431, Out = ?434>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1500203b8: ?435,
+        rhs: crate::Forever<?435, Out = ?438>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1500200f8: ?439,
+        rhs: crate::Forever<?439, Out = ?442>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15001fe38: ?443,
+        rhs: crate::Forever<?443, Out = ?446>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15001fb78: ?447,
+        rhs: crate::Forever<?447, Out = ?450>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15001f8b8: ?451,
+        rhs: crate::Forever<?451, Out = ?454>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15001f5f8: ?455,
+        rhs: crate::Forever<?455, Out = ?458>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15001f338: ?459,
+        rhs: crate::Forever<?459, Out = ?462>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15001f078: ?463,
+        rhs: crate::Forever<?463, Out = ?466>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15001edb8: ?467,
+        rhs: crate::Forever<?467, Out = ?470>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15001eaf8: ?471,
+        rhs: crate::Forever<?471, Out = ?474>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15001e838: ?475,
+        rhs: crate::Forever<?475, Out = ?478>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15001e578: ?479,
+        rhs: crate::Forever<?479, Out = ?482>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15001e2b8: ?483,
+        rhs: crate::Forever<?483, Out = ?486>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15001dff8: ?487,
+        rhs: crate::Forever<?487, Out = ?490>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15001dd38: ?491,
+        rhs: crate::Forever<?491, Out = ?494>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15001da78: ?495,
+        rhs: crate::Forever<?495, Out = ?498>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15001d7b8: ?499,
+        rhs: crate::Forever<?499, Out = ?502>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15001d4f8: ?503,
+        rhs: crate::Forever<?503, Out = ?506>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15001d238: ?507,
+        rhs: crate::Forever<?507, Out = ?510>,
+    },
+)
+
+note: Origin(
+    ImportWfTyProjection {
+        span: <dummy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15001cf78: ?511,
+        rhs: crate::Forever<?511, Out = ?514>,
+    },
+)
+

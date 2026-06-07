@@ -1,0 +1,171 @@
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+   ┌─ test16.fir:14:22
+   │
+14 │ struct Test2<'b>(Foo<LivesForSome1<'b>>);
+   │                      ^^^^^^^^^^^^^^^^^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test16.fir:14:22-39,
+        clause_span: test16.fir:11:15-31,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14c828ae0: crate::LivesForSome1<'_>,
+        rhs: crate::Meow<'_>,
+    },
+)
+
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+   ┌─ test16.fir:15:22
+   │
+15 │ struct Test3<'b>(Foo<LivesForSome2<'b>>);
+   │                      ^^^^^^^^^^^^^^^^^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test16.fir:15:22-39,
+        clause_span: test16.fir:11:15-31,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14c828a98: crate::LivesForSome2<'_>,
+        rhs: crate::Meow<'_>,
+    },
+)
+
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+   ┌─ test16.fir:17:35
+   │
+17 │ struct Test5<'a, T: Meow<'a>>(Foo<T>);
+   │                                   ^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test16.fir:17:35-36,
+        clause_span: test16.fir:11:15-31,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14c828c30: T,
+        rhs: crate::Meow<'_>,
+    },
+)
+
+note: Step(
+    ImplUsingInherent {
+        lhs: crate::Meow<'_>,
+        rhs: crate::Meow<'_>,
+    },
+)
+
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+   ┌─ test16.fir:17:35
+   │
+17 │ struct Test5<'a, T: Meow<'a>>(Foo<T>);
+   │                                   ^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test16.fir:17:35-36,
+        clause_span: test16.fir:11:15-31,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14c828c30: T,
+        rhs: crate::Meow<'_>,
+    },
+)
+
+note: Step(
+    ImplUsingInherent {
+        lhs: crate::Meow<'_>,
+        rhs: crate::Meow<'_>,
+    },
+)
+
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+   ┌─ test16.fir:19:55
+   │
+19 │ struct Test7<'i, T: for<'h: &longer 'i> Meow<'h>>(Foo<T>);
+   │                                                       ^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test16.fir:19:55-56,
+        clause_span: test16.fir:11:15-31,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14c828c30: T,
+        rhs: crate::Meow<'_>,
+    },
+)
+
+note: Step(
+    ImplUsingInherent {
+        lhs: for<'h: &shorter '_> crate::Meow<'_>,
+        rhs: crate::Meow<'_>,
+    },
+)
+
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+   ┌─ test16.fir:22:42
+   │
+22 │ struct Test8<T: for<'a, V> Fn<&'a V, &'a V>>;
+   │                                          ^
+
+note: Origin(
+    ImportWfForReference {
+        pointee: test16.fir:22:42-43,
+    },
+)
+
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+   ┌─ test16.fir:22:35
+   │
+22 │ struct Test8<T: for<'a, V> Fn<&'a V, &'a V>>;
+   │                                   ^
+
+note: Origin(
+    ImportWfForReference {
+        pointee: test16.fir:22:35-36,
+    },
+)
+
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+   ┌─ test16.fir:24:21
+   │
+24 │ struct Test10(Test8<MyFunc>, Test9<MyFunc>);
+   │                     ^^^^^^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test16.fir:24:21-27,
+        clause_span: test16.fir:22:17-44,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14c829298: crate::MyFunc,
+        rhs: crate::Fn<&'_  {HRTB universal capture #1: }, &'_  {HRTB universal capture #1: }>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test16.fir:28:13-23,
+    },
+)
+

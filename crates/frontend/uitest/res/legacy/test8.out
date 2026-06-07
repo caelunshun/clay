@@ -1,0 +1,73 @@
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+   ┌─ test8.fir:23:20
+   │
+23 │         type Foo = &'b ();
+   │                    ^^^^^^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test8.fir:23:20-26,
+        clause_span: test8.fir:3:19-29,
+    },
+)
+
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+   ┌─ test8.fir:43:20
+   │
+43 │         type Huh = (&'b (), &'c ());
+   │                    ^^^^^^^^^^^^^^^^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test8.fir:43:20-36,
+        clause_span: test8.fir:33:19-23,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x11f016598: (&'_  (), &'_  ()),
+        rhs: crate::demo2::Whee,
+    },
+)
+
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+   ┌─ test8.fir:48:20
+   │
+48 │         type Huh = (&'b (), &'c ());
+   │                    ^^^^^^^^^^^^^^^^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test8.fir:48:20-36,
+        clause_span: test8.fir:33:19-23,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x11f016598: (&'_  (), &'_  ()),
+        rhs: crate::demo2::Whee,
+    },
+)
+
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+   ┌─ test8.fir:48:20
+   │
+48 │         type Huh = (&'b (), &'c ());
+   │                    ^^^^^^^^^^^^^^^^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test8.fir:48:20-36,
+        clause_span: test8.fir:33:19-23,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x11f016598: (&'_  (), &'_  ()),
+        rhs: crate::demo2::Whee,
+    },
+)
+

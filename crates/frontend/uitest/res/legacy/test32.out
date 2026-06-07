@@ -1,0 +1,16 @@
+error: universal type `{HRTB universal capture #2: crate::Projector}` not covered by trait `crate::Helper<<{HRTB universal capture #2: crate::Projector} as crate::Projector>::Out>`
+   ┌─ test32.fir:64:13
+   │
+64 │ fn uh_oh<Q: for<T: Projector> Helper<<T as Projector>::Out>>(v: Q) {
+   │             ^^^^^^^^^^^^^^^^^
+
+note: Origin(
+    ImportWfHrtb {
+        binder_span: test32.fir:64:13-30,
+    },
+)
+
+error: universal elab helper went uninferred, good luck!
+
+error: universal elab helper went uninferred, good luck!
+

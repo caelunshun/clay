@@ -1,0 +1,30 @@
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+  ┌─ test30.fir:1:1
+  │
+1 │ pub mod std {
+  │ ^
+
+error: local used before initialized
+   ┌─ test30.fir:31:5
+   │
+31 │     a
+   │     ^
+
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+  ┌─ test30.fir:1:1
+  │
+1 │ pub mod std {
+  │ ^
+
+error: local used before initialized
+   ┌─ test30.fir:35:5
+   │
+35 │     a
+   │     ^
+
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+  ┌─ test30.fir:1:1
+  │
+1 │ pub mod std {
+  │ ^
+

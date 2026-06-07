@@ -1,0 +1,1683 @@
+bug: recursion limit reached
+   ┌─ test2.fir:14:16
+   │
+14 │     type Bar = B;
+   │                ^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test2.fir:14:16-17,
+        clause_span: test2.fir:9:15-27,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14380e6d0: u1,
+        rhs: crate::Generic<u0>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14380e400: ?0,
+        rhs: crate::Generic<?1>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14380e308: ?2,
+        rhs: crate::Generic<?3>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14380e210: ?4,
+        rhs: crate::Generic<?5>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400d4c8: ?6,
+        rhs: crate::Generic<?7>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400d3d0: ?8,
+        rhs: crate::Generic<?9>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400d2d8: ?10,
+        rhs: crate::Generic<?11>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400d1e0: ?12,
+        rhs: crate::Generic<?13>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400d0e8: ?14,
+        rhs: crate::Generic<?15>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400cff0: ?16,
+        rhs: crate::Generic<?17>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400cef8: ?18,
+        rhs: crate::Generic<?19>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400ce00: ?20,
+        rhs: crate::Generic<?21>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400cd08: ?22,
+        rhs: crate::Generic<?23>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400cc10: ?24,
+        rhs: crate::Generic<?25>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400cb18: ?26,
+        rhs: crate::Generic<?27>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400ca20: ?28,
+        rhs: crate::Generic<?29>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400c928: ?30,
+        rhs: crate::Generic<?31>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400c830: ?32,
+        rhs: crate::Generic<?33>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400c738: ?34,
+        rhs: crate::Generic<?35>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400c640: ?36,
+        rhs: crate::Generic<?37>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400c548: ?38,
+        rhs: crate::Generic<?39>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400c450: ?40,
+        rhs: crate::Generic<?41>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400c358: ?42,
+        rhs: crate::Generic<?43>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400c260: ?44,
+        rhs: crate::Generic<?45>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400c168: ?46,
+        rhs: crate::Generic<?47>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400c070: ?48,
+        rhs: crate::Generic<?49>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400bf78: ?50,
+        rhs: crate::Generic<?51>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400be80: ?52,
+        rhs: crate::Generic<?53>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400bd88: ?54,
+        rhs: crate::Generic<?55>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400bc90: ?56,
+        rhs: crate::Generic<?57>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400bb98: ?58,
+        rhs: crate::Generic<?59>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400baa0: ?60,
+        rhs: crate::Generic<?61>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400b9a8: ?62,
+        rhs: crate::Generic<?63>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400b8b0: ?64,
+        rhs: crate::Generic<?65>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400b7b8: ?66,
+        rhs: crate::Generic<?67>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400b6c0: ?68,
+        rhs: crate::Generic<?69>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400b5c8: ?70,
+        rhs: crate::Generic<?71>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400b4d0: ?72,
+        rhs: crate::Generic<?73>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400b3d8: ?74,
+        rhs: crate::Generic<?75>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400b2e0: ?76,
+        rhs: crate::Generic<?77>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400b1e8: ?78,
+        rhs: crate::Generic<?79>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400b0f0: ?80,
+        rhs: crate::Generic<?81>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400aff8: ?82,
+        rhs: crate::Generic<?83>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400af00: ?84,
+        rhs: crate::Generic<?85>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400ae08: ?86,
+        rhs: crate::Generic<?87>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400ad10: ?88,
+        rhs: crate::Generic<?89>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400ac18: ?90,
+        rhs: crate::Generic<?91>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400ab20: ?92,
+        rhs: crate::Generic<?93>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400aa28: ?94,
+        rhs: crate::Generic<?95>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400a930: ?96,
+        rhs: crate::Generic<?97>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400a838: ?98,
+        rhs: crate::Generic<?99>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400a740: ?100,
+        rhs: crate::Generic<?101>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400a648: ?102,
+        rhs: crate::Generic<?103>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400a550: ?104,
+        rhs: crate::Generic<?105>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400a458: ?106,
+        rhs: crate::Generic<?107>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400a360: ?108,
+        rhs: crate::Generic<?109>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400a268: ?110,
+        rhs: crate::Generic<?111>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400a170: ?112,
+        rhs: crate::Generic<?113>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14400a078: ?114,
+        rhs: crate::Generic<?115>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x144009f80: ?116,
+        rhs: crate::Generic<?117>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x144009e88: ?118,
+        rhs: crate::Generic<?119>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x144009d90: ?120,
+        rhs: crate::Generic<?121>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x144009c98: ?122,
+        rhs: crate::Generic<?123>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x144009ba0: ?124,
+        rhs: crate::Generic<?125>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x144009aa8: ?126,
+        rhs: crate::Generic<?127>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1440099b0: ?128,
+        rhs: crate::Generic<?129>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1440098b8: ?130,
+        rhs: crate::Generic<?131>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1440097c0: ?132,
+        rhs: crate::Generic<?133>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1440096c8: ?134,
+        rhs: crate::Generic<?135>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14281a978: ?136,
+        rhs: crate::Generic<?137>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14281a880: ?138,
+        rhs: crate::Generic<?139>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14281a788: ?140,
+        rhs: crate::Generic<?141>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14281a690: ?142,
+        rhs: crate::Generic<?143>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14281a598: ?144,
+        rhs: crate::Generic<?145>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14281a4a0: ?146,
+        rhs: crate::Generic<?147>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14281a3a8: ?148,
+        rhs: crate::Generic<?149>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14281a2b0: ?150,
+        rhs: crate::Generic<?151>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14281a1b8: ?152,
+        rhs: crate::Generic<?153>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14281a0c0: ?154,
+        rhs: crate::Generic<?155>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142819fc8: ?156,
+        rhs: crate::Generic<?157>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142819ed0: ?158,
+        rhs: crate::Generic<?159>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142819dd8: ?160,
+        rhs: crate::Generic<?161>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142819ce0: ?162,
+        rhs: crate::Generic<?163>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142819be8: ?164,
+        rhs: crate::Generic<?165>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142819af0: ?166,
+        rhs: crate::Generic<?167>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1428199f8: ?168,
+        rhs: crate::Generic<?169>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142819900: ?170,
+        rhs: crate::Generic<?171>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142819808: ?172,
+        rhs: crate::Generic<?173>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142819710: ?174,
+        rhs: crate::Generic<?175>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142819618: ?176,
+        rhs: crate::Generic<?177>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142819520: ?178,
+        rhs: crate::Generic<?179>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142819428: ?180,
+        rhs: crate::Generic<?181>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142819330: ?182,
+        rhs: crate::Generic<?183>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142819238: ?184,
+        rhs: crate::Generic<?185>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142819140: ?186,
+        rhs: crate::Generic<?187>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142819048: ?188,
+        rhs: crate::Generic<?189>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142818f50: ?190,
+        rhs: crate::Generic<?191>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142818e58: ?192,
+        rhs: crate::Generic<?193>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142818d60: ?194,
+        rhs: crate::Generic<?195>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142818c68: ?196,
+        rhs: crate::Generic<?197>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142818b70: ?198,
+        rhs: crate::Generic<?199>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142818a78: ?200,
+        rhs: crate::Generic<?201>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142818980: ?202,
+        rhs: crate::Generic<?203>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142818888: ?204,
+        rhs: crate::Generic<?205>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142818790: ?206,
+        rhs: crate::Generic<?207>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142818698: ?208,
+        rhs: crate::Generic<?209>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1428185a0: ?210,
+        rhs: crate::Generic<?211>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1428184a8: ?212,
+        rhs: crate::Generic<?213>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1428183b0: ?214,
+        rhs: crate::Generic<?215>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1428182b8: ?216,
+        rhs: crate::Generic<?217>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1428181c0: ?218,
+        rhs: crate::Generic<?219>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x1428180c8: ?220,
+        rhs: crate::Generic<?221>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142817fd0: ?222,
+        rhs: crate::Generic<?223>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142817ed8: ?224,
+        rhs: crate::Generic<?225>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142817de0: ?226,
+        rhs: crate::Generic<?227>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142817ce8: ?228,
+        rhs: crate::Generic<?229>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142817bf0: ?230,
+        rhs: crate::Generic<?231>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142817af8: ?232,
+        rhs: crate::Generic<?233>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142817a00: ?234,
+        rhs: crate::Generic<?235>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142817908: ?236,
+        rhs: crate::Generic<?237>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142817810: ?238,
+        rhs: crate::Generic<?239>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142817718: ?240,
+        rhs: crate::Generic<?241>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142817620: ?242,
+        rhs: crate::Generic<?243>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142817528: ?244,
+        rhs: crate::Generic<?245>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142817430: ?246,
+        rhs: crate::Generic<?247>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142817338: ?248,
+        rhs: crate::Generic<?249>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142817240: ?250,
+        rhs: crate::Generic<?251>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x142817148: ?252,
+        rhs: crate::Generic<?253>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test2.fir:4:9-19,
+    },
+)
+
+note: Origin(
+    ImportWfHrtb {
+        binder_span: <dummy>,
+    },
+)
+

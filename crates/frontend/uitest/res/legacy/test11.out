@@ -1,0 +1,86 @@
+error: expected byte order mark, end-of-file, `{`, `[`, `(`, `//`, `/*`, identifier, `"`, digit, `'`, punctuation, or whitespace
+  ┌─ test11.fir:1:1
+  │
+1 │ `
+  │ ^
+
+error: expected attribute (`#`), visibility (`pub(crate)`, `pub(super)`, `pub(in <...>)`, `pub`, or `priv`), item (`mod`, `type`, `trait`, `impl`, `use`, `struct`, `enum`, or `fn`), or `}`
+  ┌─ test11.fir:4:5
+  │
+4 │     whee
+  │     ^^^^
+
+error: expected item (`mod`, `type`, `trait`, `impl`, `use`, `struct`, `enum`, or `fn`)
+  ┌─ test11.fir:8:8
+  │
+8 │     pub
+  │        ^
+
+error: expected path part (identifier, `super`, `crate`, or `self`), type (`Self`, `&`, `@`, `(`, `_`, or `<`), `>`, or lifetime
+   ┌─ test11.fir:12:13
+   │
+12 │     fn whee<
+   │             ^
+   │
+   ┌─ test11.fir:14:5
+   │
+14 │     ;
+   │     - unexpected syntax
+
+error: expected `<`, `:`, or `{`
+   ┌─ test11.fir:18:19
+   │
+18 │     pub trait Whee
+   │                   ^
+
+error: expected `:`
+   ┌─ test11.fir:23:13
+   │
+23 │         foo { pub foo: u32, bar },
+   │             ^^^^^^^^^^^^^^^^^^^^^
+
+error: expected item (`mod`, `type`, `trait`, `impl`, `use`, `struct`, `enum`, or `fn`)
+   ┌─ test11.fir:28:9
+   │
+28 │     pub whee
+   │         ^^^^
+
+error: expected `->`, `=>`, `{`, or `;`
+   ┌─ test11.fir:30:18
+   │
+30 │     pub fn whee()
+   │                  ^
+
+error: expected path part (identifier, `super`, `crate`, or `self`), `&`, or `for`
+   ┌─ test11.fir:34:17
+   │
+34 │     fn whee<Foo:
+   │                 ^
+   │
+   ┌─ test11.fir:36:5
+   │
+36 │     ;
+   │     - unexpected syntax
+
+error: expected visibility (`pub(crate)`, `pub(super)`, `pub(in <...>)`, `pub`, or `priv`), item (`mod`, `type`, `trait`, `impl`, `use`, `struct`, `enum`, or `fn`), expression (`_`, `[`, `(`, `{`, `if`, `while`, `for`, `loop`, `match`, `return`, `continue`, `break`, `..=`, `..`, `-`, `!`, `*`, or `&`), path (`Self` or `<`), path part (identifier, `super`, `crate`, or `self`), literal expression (`true`, `false`, string literal, character literal, or numeric literal), block label (lifetime), `}`, `;`, or `let`
+   ┌─ test11.fir:41:21
+   │
+41 │         let foo = 1;
+   │                     ^
+   │
+   ┌─ test11.fir:43:9
+   │
+43 │         $
+   │         - unexpected syntax
+
+error: expected operator (`&&`, `||`, `==`, `!=`, `<=`, `>`, `<<`, `>>`, `+=`, `-=`, `*=`, `/=`, `%=`, `^=`, `&=`, `|=`, `<<=`, `>>=`, `+`, `-`, `*`, `/`, `%`, `^`, `&`, `|`, `<`, `>=`, or `=`), `..=`, `..`, `[`, `(`, `.`, `else`, or `;`
+   ┌─ test11.fir:47:20
+   │
+47 │         let foo = 1
+   │                    ^
+   │
+   ┌─ test11.fir:49:9
+   │
+49 │         $
+   │         - unexpected syntax
+

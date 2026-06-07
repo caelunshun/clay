@@ -1,0 +1,13 @@
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+  ┌─ test14.fir:1:64
+  │
+1 │ struct Meow1<'a, 'b, 'c, T: &longer 'a + &longer 'b>(Thump<'c, T>);
+  │                                                                ^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test14.fir:1:64-65,
+        clause_span: test14.fir:9:21-31,
+    },
+)
+

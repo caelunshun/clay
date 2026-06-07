@@ -1,0 +1,19 @@
+error: type `fn @ crate::meow<?30 {Imported { span: test21.fir:69:30-31 }}>` does not implement `crate::std::FnOnce<({HRTB universal capture #15: crate::Meow},), {HRTB universal capture #15: crate::Meow}>`
+   ┌─ test21.fir:70:17
+   │
+70 │     let funky = early_bound.as::<&'gc dyn for<T: Meow> FnOnce<(T,), T>>;
+   │                 ^^^^^^^^^^^
+
+note: Origin(
+    HirBodyCheckCoercion {
+        expr_span: test21.fir:70:17-28,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14081fbd0: fn @ crate::meow<?30 {Imported { span: test21.fir:69:30-31 }}>,
+        rhs: crate::std::FnOnce<({HRTB universal capture #15: crate::Meow},), {HRTB universal capture #15: crate::Meow}>,
+    },
+)
+

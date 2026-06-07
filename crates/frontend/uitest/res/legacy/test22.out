@@ -1,0 +1,42 @@
+error: attempted to expand recursive type alias
+  ┌─ test22.fir:3:22
+  │
+3 │ pub type Recursive = Recursive;
+  │                      ^^^^^^^^^
+
+error: attempted to expand recursive type alias
+  ┌─ test22.fir:5:31
+  │
+5 │ pub type MutuallyRecursive2 = MutuallyRecursive1;
+  │                               ^^^^^^^^^^^^^^^^^^
+
+error: attempted to expand recursive type alias
+  ┌─ test22.fir:6:31
+  │
+6 │ pub type MutuallyRecursive1 = MutuallyRecursive2;
+  │                               ^^^^^^^^^^^^^^^^^^
+
+error: attempted to expand recursive type alias
+   ┌─ test22.fir:10:10
+   │
+10 │     bar: Recursive,
+   │          ^^^^^^^^^
+
+note: reentered here
+  ┌─ test22.fir:3:22
+  │
+3 │ pub type Recursive = Recursive;
+  │                      ^^^^^^^^^
+
+error: attempted to expand recursive type alias
+   ┌─ test22.fir:11:10
+   │
+11 │     baz: MutuallyRecursive1,
+   │          ^^^^^^^^^^^^^^^^^^
+
+note: reentered here
+  ┌─ test22.fir:5:31
+  │
+5 │ pub type MutuallyRecursive2 = MutuallyRecursive1;
+  │                               ^^^^^^^^^^^^^^^^^^
+

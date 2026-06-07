@@ -1,0 +1,60 @@
+error: type `Foo` does not implement `crate::Meow`
+   ┌─ test7.fir:23:32
+   │
+23 │     type Bar: NeedsMeowGeneric<<Self as Demo3<T>>::Foo>;
+   │                                ^^^^^^^^^^^^^^^^^^^^^^^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test7.fir:23:32-55,
+        clause_span: test7.fir:7:31-35,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x122811c30: Foo,
+        rhs: crate::Meow,
+    },
+)
+
+error: type `Foo` does not implement `crate::Meow`
+   ┌─ test7.fir:27:45
+   │
+27 │ pub struct Demo4<Foo, Bar: NeedsMeowGeneric<Foo>>(Foo, Bar);
+   │                                             ^^^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test7.fir:27:45-48,
+        clause_span: test7.fir:7:31-35,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x122812468: Foo,
+        rhs: crate::Meow,
+    },
+)
+
+error: type `()` does not implement `crate::Meow`
+   ┌─ test7.fir:32:14
+   │
+32 │     type T = ();
+   │              ^^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test7.fir:32:14-16,
+        clause_span: test7.fir:4:13-17,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x122812578: (),
+        rhs: crate::Meow,
+    },
+)
+

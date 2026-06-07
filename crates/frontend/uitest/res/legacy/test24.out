@@ -1,0 +1,32 @@
+error: type `<T as crate::Meow<<T as crate::Projector<primitives::i32>>::Out, Hey: crate::Foo>>::Hey` does not implement `crate::Bar`
+   ┌─ test24.fir:43:9
+   │
+43 │     demo(T::obtain(v));
+   │         ^^^^^^^^^^^^^^
+
+note: Origin(
+    HirBodyCheckFunctionCall {
+        site_span: test24.fir:43:9-23,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15d826400: fn @ crate::demo,
+        rhs: crate::std::FnOnce<(<T as crate::Meow<<T as crate::Projector<primitives::i32>>::Out, Hey: crate::Foo>>::Hey,), ()>,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test24.fir:46:18-21,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x15d825570: <T as crate::Meow<<T as crate::Projector<primitives::i32>>::Out, Hey: crate::Foo>>::Hey,
+        rhs: crate::Bar,
+    },
+)
+

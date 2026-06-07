@@ -1,0 +1,57 @@
+error: type `<{HRTB universal capture #6: crate::Projector} as crate::Projector>::Out` does not implement `crate::Fuzzy`
+   ┌─ test33.fir:61:16
+   │
+61 │     rejected::<Q>;
+   │                ^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test33.fir:61:16-17,
+        clause_span: test33.fir:58:16-66,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x11f8288b8: Q,
+        rhs: crate::Helper<?12 {ProjectionResult { span: <dummy> }}, {HRTB universal capture #6: crate::Projector}>,
+    },
+)
+
+note: Step(
+    ImplUsingInherent {
+        lhs: for<T: crate::Projector<Out: crate::Fuzzy>> crate::Helper<<HrtbVar(DebruijnRelative { raw: 1 }) as crate::Projector>::Out, HrtbVar(DebruijnRelative { raw: 1 })>,
+        rhs: crate::Helper<?12 {ProjectionResult { span: <dummy> }}, {HRTB universal capture #6: crate::Projector}>,
+    },
+)
+
+note: Step(
+    HrtbExistentialInferenceIsPossible {
+        lhs: {HRTB universal capture #6: crate::Projector},
+        rhs: 0x11f828218: [
+            crate::Projector<Out: crate::Fuzzy>,
+        ],
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x11f827d30: {HRTB universal capture #6: crate::Projector},
+        rhs: crate::Projector<Out: crate::Fuzzy>,
+    },
+)
+
+note: Step(
+    ImplUsingInherent {
+        lhs: crate::Projector<Out = <{HRTB universal capture #6: crate::Projector} as crate::Projector>::Out>,
+        rhs: crate::Projector<Out: crate::Fuzzy>,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x11f827ba0: <{HRTB universal capture #6: crate::Projector} as crate::Projector>::Out,
+        rhs: crate::Fuzzy,
+    },
+)
+

@@ -1,0 +1,33 @@
+error: type `V` does not implement `crate::Generic<?3 {UniversalElabHelper}>`
+   ┌─ test3.fir:28:16
+   │
+28 │     type Woo = ((D, D), V, T);
+   │                ^^^^^^^^^^^^^^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test3.fir:28:16-30,
+        clause_span: test3.fir:24:15-22,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14000eb00: ((D, D), V, T),
+        rhs: crate::MyTrait,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test3.fir:21:24-34,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x14000e998: V,
+        rhs: crate::Generic<?3 {UniversalElabHelper}>,
+    },
+)
+

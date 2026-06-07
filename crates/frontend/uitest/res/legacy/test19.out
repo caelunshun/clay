@@ -1,0 +1,52 @@
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+   ┌─ test19.fir:29:43
+   │
+29 │         struct Foo<'a, T: &longer 'a>(Bar<'a, T>);
+   │                                           ^^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test19.fir:29:43-45,
+        clause_span: test19.fir:31:24-33,
+    },
+)
+
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+   ┌─ test19.fir:35:47
+   │
+35 │         struct Foo<'a: &shorter T, T>(Bar<'a, T>);
+   │                                               ^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test19.fir:35:47-48,
+        clause_span: test19.fir:37:27-38,
+    },
+)
+
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+   ┌─ test19.fir:41:44
+   │
+41 │         struct Foo<'a, T: &shorter 'a>(Bar<'a, T>);
+   │                                            ^^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test19.fir:41:44-46,
+        clause_span: test19.fir:43:24-34,
+    },
+)
+
+error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
+   ┌─ test19.fir:47:46
+   │
+47 │         struct Foo<'a: &longer T, T>(Bar<'a, T>);
+   │                                              ^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test19.fir:47:46-47,
+        clause_span: test19.fir:49:27-37,
+    },
+)
+

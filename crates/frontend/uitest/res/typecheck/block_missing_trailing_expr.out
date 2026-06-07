@@ -16,4 +16,3 @@ error: cannot unify types `()` and `u32`
 1 │ fn foo() -> u32 {}
   │ ^
 
-dsglkgj

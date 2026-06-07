@@ -1,0 +1,132 @@
+error: type `(((),),)` does not implement `crate::Generic<?5 {UniversalElabHelper}>`
+   ┌─ test1.fir:23:28
+   │
+23 │ impl<T: Associated<T: Demo<((), (((),),), ((),))>>> Dummy for T {}
+   │                            ^^^^^^^^^^^^^^^^^^^^^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test1.fir:23:28-49,
+        clause_span: test1.fir:19:19-26,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x13c012030: ((), (((),),), ((),)),
+        rhs: crate::MyTrait,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test1.fir:17:24-34,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x13c010680: (((),),),
+        rhs: crate::Generic<?5 {UniversalElabHelper}>,
+    },
+)
+
+error: type `(((),),)` does not implement `crate::Generic<?3 {UniversalElabHelper}>`
+   ┌─ test1.fir:25:11
+   │
+25 │ impl Demo<((), (((),),), ((),))> for () {}
+   │           ^^^^^^^^^^^^^^^^^^^^^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test1.fir:25:11-32,
+        clause_span: test1.fir:19:19-26,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x13c012030: ((), (((),),), ((),)),
+        rhs: crate::MyTrait,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test1.fir:17:24-34,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x13c010758: (((),),),
+        rhs: crate::Generic<?3 {UniversalElabHelper}>,
+    },
+)
+
+error: type `(((),),)` does not implement `crate::Generic<?3 {UniversalElabHelper}>`
+   ┌─ test1.fir:28:24
+   │
+28 │     type IHahThe: Demo<((), (((),),), ((),))>;
+   │                        ^^^^^^^^^^^^^^^^^^^^^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test1.fir:28:24-45,
+        clause_span: test1.fir:19:19-26,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x13c012030: ((), (((),),), ((),)),
+        rhs: crate::MyTrait,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test1.fir:17:24-34,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x13c010758: (((),),),
+        rhs: crate::Generic<?3 {UniversalElabHelper}>,
+    },
+)
+
+error: type `(((),),)` does not implement `crate::Generic<?3 {UniversalElabHelper}>`
+   ┌─ test1.fir:36:16
+   │
+36 │     type Woo = ((), (((),),), ((),));
+   │                ^^^^^^^^^^^^^^^^^^^^^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test1.fir:36:16-37,
+        clause_span: test1.fir:32:15-22,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x13c012030: ((), (((),),), ((),)),
+        rhs: crate::MyTrait,
+    },
+)
+
+note: Step(
+    ImportEnvMeetsRequirements {
+        clause: test1.fir:17:24-34,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x13c010758: (((),),),
+        rhs: crate::Generic<?3 {UniversalElabHelper}>,
+    },
+)
+

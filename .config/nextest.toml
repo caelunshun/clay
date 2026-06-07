@@ -10,8 +10,3 @@ setup = "setup-frontend-uitest"
 [profile.frontend-uitest]
 default-filter = "deps(fir-frontend-uitest)"
 fail-fast = false
-
-[profile.frontend-uitest-bless]
-inherits = "frontend-uitest"
-# FIXME
-env = { FIR_FRONTEND_UI_TEST_BLESS = "1" }

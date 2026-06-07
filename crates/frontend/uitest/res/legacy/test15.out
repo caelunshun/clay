@@ -1,0 +1,20 @@
+error: type `((),)` does not implement `crate::Meow`
+   ┌─ test15.fir:11:50
+   │
+11 │ pub struct Miau2<T: Assoc<Holder = ((),)>>(Thump<<T as Assoc>::Holder>);
+   │                                                  ^^^^^^^^^^^^^^^^^^^^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test15.fir:11:50-70,
+        clause_span: test15.fir:13:21-25,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x13e80dd58: ((),),
+        rhs: crate::Meow,
+    },
+)
+

@@ -1,0 +1,22 @@
+error: could not make necessary inferences to show that `?0 {Imported { span: test6.fir:12:14-15 }}` implements `crate::Whee`: UnresolvedInfer(
+    0,
+)
+   ┌─ test6.fir:12:14
+   │
+12 │     type T = _;
+   │              ^
+
+note: Origin(
+    ImportWfForGenericParam {
+        use_span: test6.fir:12:14-15,
+        clause_span: test6.fir:8:13-17,
+    },
+)
+
+note: Step(
+    ImplInstantiatedClause {
+        lhs: 0x12c80e470: ?0 {Imported { span: test6.fir:12:14-15 }},
+        rhs: crate::Whee,
+    },
+)
+

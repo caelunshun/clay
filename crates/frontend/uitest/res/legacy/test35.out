@@ -1,0 +1,21 @@
+error: cannot unify types `u32` and `()`
+  ┌─ test35.fir:1:19
+  │  
+1 │   fn main() -> u32 {
+  │ ╭──────────────────^
+2 │ │     // meow
+3 │ │ }
+  │ ╰^
+
+note: Origin(
+    HirBodyCheckReturnUnit {
+        span: test35.fir:1:19-3:1,
+    },
+)
+
+error: cannot unify types `()` and `u32`
+  ┌─ test35.fir:1:1
+  │
+1 │ fn main() -> u32 {
+  │ ^
+
