@@ -1,0 +1,19 @@
+error: cannot unify types `u32` and `()`
+  ┌─ block_missing_trailing_expr.fir:1:18
+  │
+1 │ fn foo() -> u32 {}
+  │                  ^
+
+note: Origin(
+    HirBodyCheckReturnUnit {
+        span: block_missing_trailing_expr.fir:1:18-18,
+    },
+)
+
+error: cannot unify types `()` and `u32`
+  ┌─ block_missing_trailing_expr.fir:1:1
+  │
+1 │ fn foo() -> u32 {}
+  │ ^
+
+dsglkgj

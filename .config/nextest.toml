@@ -1,8 +1,17 @@
 experimental = ["setup-scripts"]
 
-[scripts.setup.setup-frontend-uitests]
-command = 'cargo run -p fir-frontend-uitests --bin setup_harness'
+[scripts.setup.setup-frontend-uitest]
+command = "cargo run -p fir-frontend-uitest --bin setup_harness"
 
 [[profile.default.scripts]]
-filter = 'deps(fir-frontend-uitests)'
-setup = 'setup-frontend-uitests'
+filter = "deps(fir-frontend-uitest)"
+setup = "setup-frontend-uitest"
+
+[profile.frontend-uitest]
+default-filter = "deps(fir-frontend-uitest)"
+fail-fast = false
+
+[profile.frontend-uitest-bless]
+inherits = "frontend-uitest"
+# FIXME
+env = { FIR_FRONTEND_UI_TEST_BLESS = "1" }

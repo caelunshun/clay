@@ -3,12 +3,10 @@ use similar::TextDiff;
 use std::{
     env,
     ffi::OsStr,
-    fs,
-    io::{self, Write as _},
+    fs, io,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
-use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
 fn main() {
     let mut trials = Vec::new();
@@ -52,16 +50,9 @@ fn collect_trials(name: &mut String, path: &mut PathBuf, trials: &mut Vec<Trial>
 
 fn run_trial_with_paths(
     input_path: &Path,
-    expected_output: &Path,
+    expected_output_path: &Path,
 ) -> Result<(), libtest_mimic::Failed> {
     let compiler_path = PathBuf::from(expect_env("FIR_FRONTEND_UI_TEST_BIN"));
-
-    let expected_output = fs::read_to_string(expected_output).unwrap_or_else(|err| {
-        panic!(
-            "failed to read expected stdout file at {}:\n{err:?}",
-            expected_output.display()
-        )
-    });
 
     let mut child = Command::new(&compiler_path)
         .current_dir(input_path.parent().unwrap())
@@ -78,53 +69,66 @@ fn run_trial_with_paths(
             )
         });
 
-    let output = capture_and_pipe(child.stdout.as_mut().unwrap(), io::stdout().lock()).unwrap();
+    let actual_output =
+        capture_and_pipe(child.stdout.as_mut().unwrap(), io::stdout().lock()).unwrap();
 
     child.wait().unwrap();
 
-    let actual_output = String::from_utf8(output).unwrap();
+    let actual_output = String::from_utf8(actual_output).unwrap();
 
-    if expected_output == actual_output {
-        return Ok(());
-    }
+    let expected_output = match fs::read_to_string(expected_output_path) {
+        Ok(output) => Some(output),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => None,
+        Err(err) => {
+            panic!(
+                "failed to read expected stdout file at {}:\n{err:?}",
+                expected_output_path.display()
+            )
+        }
+    };
 
-    println!("Differences found in standard output!");
+    if let Some(expected_output) = expected_output {
+        if expected_output == actual_output {
+            return Ok(());
+        }
 
-    let mut stdout = StandardStream::stdout(ColorChoice::Auto);
+        bunt::println!("{$yellow}Differences found in standard output!{/$}");
 
-    for change in TextDiff::from_lines(expected_output, actual_output).iter_all_changes() {
-        match change.tag() {
-            similar::ChangeTag::Equal => {
-                stdout
-                    .set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))
-                    .unwrap();
-
-                write!(&mut stdout, "{}", change.value_ref()).unwrap();
-
-                stdout.reset().unwrap();
-            }
-            similar::ChangeTag::Delete => {
-                stdout
-                    .set_color(ColorSpec::new().set_fg(Some(Color::Red)))
-                    .unwrap();
-
-                write!(&mut stdout, "{}", change.value_ref()).unwrap();
-
-                stdout.reset().unwrap();
-            }
-            similar::ChangeTag::Insert => {
-                stdout
-                    .set_color(ColorSpec::new().set_fg(Some(Color::Green)))
-                    .unwrap();
-
-                write!(&mut stdout, "{}", change.value_ref()).unwrap();
-
-                stdout.reset().unwrap();
+        for change in TextDiff::from_lines(&expected_output, &actual_output).iter_all_changes() {
+            match change.tag() {
+                similar::ChangeTag::Equal => {
+                    bunt::print!("{[cyan]}", change.value_ref());
+                }
+                similar::ChangeTag::Delete => {
+                    bunt::print!("{[red]}", change.value_ref());
+                }
+                similar::ChangeTag::Insert => {
+                    bunt::print!("{[green]}", change.value_ref());
+                }
             }
         }
+    } else {
+        bunt::println!(
+            "{$yellow}Expected output not found at {}!{/$}",
+            expected_output_path.display()
+        );
     }
 
-    stdout.set_color(&ColorSpec::new()).unwrap();
+    if env::var("FIR_FRONTEND_UI_TEST_BLESS").is_ok() {
+        fs::write(expected_output_path, &actual_output).unwrap_or_else(|err| {
+            panic!(
+                "failed to bless expected stdout file at {}:\n{err:?}",
+                expected_output_path.display()
+            )
+        });
+
+        bunt::println!(
+            "{$yellow}Blessed output at {}!{/$}",
+            expected_output_path.display()
+        );
+
+        return Ok(());
+    }
 
     Err(libtest_mimic::Failed::without_message())
 }
@@ -148,6 +152,8 @@ fn capture_and_pipe(mut source: impl io::Read, mut target: impl io::Write) -> io
 
         read_position += read_count;
     }
+
+    output.truncate(read_position);
 
     Ok(output)
 }

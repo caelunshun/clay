@@ -165,6 +165,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "bunt"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c3171e12b002eb3963e75c88d5c9ba52f45699e4aedd9f33e627586c908fc01"
+dependencies = [
+ "bunt-macros",
+ "termcolor",
+]
+
+[[package]]
+name = "bunt-macros"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f69bc20c56936bb9729a6f405dd893c75963efdfc8e3c4e3ae581bba09075c4"
+dependencies = [
+ "litrs",
+ "proc-macro2",
+ "quote",
+ "unicode-xid",
+]
+
+[[package]]
 name = "bytemuck"
 version = "1.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -464,12 +486,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "fir-frontend-uitests"
+name = "fir-frontend-uitest"
 version = "0.1.0"
 dependencies = [
+ "bunt",
  "libtest-mimic",
  "similar",
- "termcolor",
 ]
 
 [[package]]
@@ -648,6 +670,15 @@ dependencies = [
  "anstyle",
  "clap",
  "escape8259",
+]
+
+[[package]]
+name = "litrs"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
+dependencies = [
+ "proc-macro2",
 ]
 
 [[package]]

@@ -1,2 +1,5 @@
-test:
-    cargo nextest run --no-fail-fast
+uitest:
+    cargo nextest run --profile frontend-uitest
+
+uitest-bless:
+    cargo nextest run --profile frontend-uitest-bless
