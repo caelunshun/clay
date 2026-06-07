@@ -72,7 +72,10 @@ fn run_trial_with_paths(
     let actual_output =
         capture_and_pipe(child.stdout.as_mut().unwrap(), io::stdout().lock()).unwrap();
 
-    child.wait().unwrap();
+    if !child.wait().unwrap().success() {
+        bunt::println!("{$yellow}Compiler ICEd!{/$}");
+        return Err(libtest_mimic::Failed::without_message());
+    }
 
     let actual_output = String::from_utf8(actual_output).unwrap();
 
