@@ -1,0 +1,67 @@
+error: block label not found
+  ┌─ unsupported_labels.fir:2:11
+  │
+2 │     break 'clay;
+  │           ^^^^^
+
+error: no parent block
+  ┌─ unsupported_labels.fir:3:5
+  │
+3 │     continue;
+  │     ^^^^^^^^
+
+error: block label not found
+  ┌─ unsupported_labels.fir:6:15
+  │
+6 │         break 'clay;
+  │               ^^^^^
+
+error: cannot `break` with a value from a `while` loop
+   ┌─ unsupported_labels.fir:10:15
+   │
+10 │         break ();
+   │               ^^
+
+note: `while` loop the `break` points to
+   ┌─ unsupported_labels.fir:9:5
+   │  
+ 9 │ ╭     while true {
+10 │ │         break ();
+11 │ │     }
+   │ ╰─────^
+
+error: no parent block
+   ┌─ unsupported_labels.fir:14:9
+   │
+14 │         break;
+   │         ^^^^^
+
+error: block label not found
+   ┌─ unsupported_labels.fir:15:15
+   │
+15 │         break 'clay;
+   │               ^^^^^
+
+error: no parent block
+   ┌─ unsupported_labels.fir:16:9
+   │
+16 │         continue;
+   │         ^^^^^^^^
+
+error: cannot `continue` inside a named block
+   ┌─ unsupported_labels.fir:17:9
+   │
+17 │         continue 'hehe;
+   │         ^^^^^^^^^^^^^^
+
+note: named block the `continue` points to
+   ┌─ unsupported_labels.fir:13:5
+   │  
+13 │ ╭     'hehe: {
+14 │ │         break;
+15 │ │         break 'clay;
+16 │ │         continue;
+17 │ │         continue 'hehe;
+18 │ │     }
+   │ ╰─────^
+

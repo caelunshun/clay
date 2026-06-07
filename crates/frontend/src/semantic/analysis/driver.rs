@@ -37,12 +37,12 @@ impl TyCtxt {
         }
         .visit_crate();
 
-        // Borrow-check crate
-        CrateBorrowCheckVisitor {
-            tcx: self,
-            krate,
-            coherence: &coherence,
-        }
-        .visit_crate();
+        // // Borrow-check crate
+        // CrateBorrowCheckVisitor {
+        //     tcx: self,
+        //     krate,
+        //     coherence: &coherence,
+        // }
+        // .visit_crate();
     }
 }

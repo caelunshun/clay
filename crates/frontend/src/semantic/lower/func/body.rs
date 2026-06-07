@@ -379,11 +379,11 @@ impl IntraItemLowerCtxt<'_> {
                 HirExprKind::AddrOf(muta.as_muta(), self.lower_expr(expr))
             }
             AstExprKind::Break(label, value) => match self.lookup_label(ast.span, *label) {
-                Ok(label) => {
+                Ok(label) => 'lower: {
                     if let Some(value) = &value
                         && !label.kind.can_break_with_value()
                     {
-                        Diag::span_err(
+                        let err = Diag::span_err(
                             value.span,
                             format_args!(
                                 "cannot `break` with a value from {}",
@@ -395,6 +395,8 @@ impl IntraItemLowerCtxt<'_> {
                             format_args!("{} the `break` points to", label.kind.what()),
                         ))
                         .emit();
+
+                        break 'lower HirExprKind::Error(err);
                     }
 
                     HirExprKind::Break {
@@ -418,7 +420,7 @@ impl IntraItemLowerCtxt<'_> {
                 };
 
                 if !label.kind.can_continue() {
-                    Diag::span_err(
+                    let err = Diag::span_err(
                         ast.span,
                         format_args!("cannot `continue` inside {}", label.kind.a_what()),
                     )
@@ -427,6 +429,8 @@ impl IntraItemLowerCtxt<'_> {
                         format_args!("{} the `continue` points to", label.kind.what()),
                     ))
                     .emit();
+
+                    break 'lower HirExprKind::Error(err);
                 }
 
                 HirExprKind::Continue(label)
