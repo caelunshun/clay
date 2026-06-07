@@ -4,6 +4,7 @@ members = [
     "crates/codegen",
     "crates/core",
     "crates/frontend",
+    "crates/frontend/uitests",
     "crates/mir",
     "crates/mir/filetests",
     "crates/runtime",

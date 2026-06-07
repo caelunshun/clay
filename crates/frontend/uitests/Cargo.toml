@@ -1,0 +1,13 @@
+[package]
+name = "fir-frontend-uitests"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+libtest-mimic = "0.8.2"
+similar = "3.1.1"
+termcolor = "1.4.1"
+
+[[test]]
+name = "uitest"
+harness = false
