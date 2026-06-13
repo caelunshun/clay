@@ -1,11 +1,10 @@
 use crate::{
     base::ErrorGuaranteed,
     semantic::{
-        infer::{ClauseCx, ClauseObligation, ObligeCause},
+        infer::{ClauseCx, ClauseObligation, HrtbUniverse, ObligeCause},
         syntax::{
-            HrtbUniverse, InferTyVar, PrettyTy, PrettyUniversalTyVar, Re, RelationDirection,
-            SimpleTySet, TraitClauseList, TraitParam, TraitSpec, Ty, UniversalReVar,
-            UniversalTyVar,
+            InferTyVar, PrettyTy, PrettyUniversalTyVar, Re, RelationDirection, SimpleTySet,
+            TraitClauseList, TraitParam, TraitSpec, Ty, UniversalReVar, UniversalTyVar,
         },
     },
     utils::lang::{AND_LIST_GLUE, format_list},

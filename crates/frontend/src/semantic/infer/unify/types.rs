@@ -1,7 +1,7 @@
 use crate::semantic::{
-    infer::FloatingInferVar,
+    infer::{FloatingInferVar, HrtbUniverse},
     syntax::{
-        HrtbUniverse, InferTyVar, InferTyVarSourceInfo, SimpleTySet, Ty, TyCtxt, UniversalTyVar,
+        InferTyVar, InferTyVarSourceInfo, SimpleTySet, Ty, TyCtxt, UniversalTyVar,
         UniversalTyVarSourceInfo,
     },
 };

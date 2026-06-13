@@ -90,6 +90,7 @@ impl IntraItemLowerCtxt<'_> {
         &mut self,
         ast: Option<&AstGenericParamList>,
     ) -> Obj<GenericBinder> {
+        let s = &self.tcx.session;
         let mut binder = GenericBinder::default();
         let mut generic_clause_lists = Vec::new();
 
@@ -102,7 +103,7 @@ impl IntraItemLowerCtxt<'_> {
             );
         }
 
-        let binder = self.tcx.seal_generic_binder(binder);
+        let binder = binder.seal(s);
 
         self.scoped(|this| {
             this.define_generics_in_binder(binder);

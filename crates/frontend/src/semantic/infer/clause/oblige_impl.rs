@@ -5,15 +5,14 @@ use crate::{
     base::arena::{HasInterner as _, Obj},
     semantic::{
         infer::{
-            ClauseCx, ClauseImportEnv, ClauseObligation, NoTraitImplError, NotCoveredError,
-            ObligationNotReady, ObligationResult, ObligeCause, ObligeCauseStep,
-            UnboundVarHandlingMode,
+            ClauseCx, ClauseImportEnv, ClauseObligation, HrtbUniverse, HrtbUniverseInfo,
+            NoTraitImplError, NotCoveredError, ObligationNotReady, ObligationResult, ObligeCause,
+            ObligeCauseStep, UnboundVarHandlingMode,
         },
         syntax::{
-            HrtbBinder, HrtbBinderKind, HrtbUniverse, HrtbUniverseInfo, ImplItem, RelationMode,
-            SimpleTySet, SpannedTy, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty,
-            TyCtxt, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorInfallibleExt,
-            UniversalTyVar,
+            HrtbBinder, HrtbBinderKind, ImplItem, RelationMode, SimpleTySet, SpannedTy,
+            TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyFolderInfallibleExt,
+            TyKind, TyOrRe, TyVisitor, TyVisitorInfallibleExt, UniversalTyVar,
         },
     },
     utils::hash::FxHashMap,

@@ -1,16 +1,12 @@
 use crate::{
     base::{
-        ErrorGuaranteed, HasSession, Session,
+        HasSession, Session,
         analysis::SpannedInfo,
-        arena::{HasInterner, HasListInterner, Interner, ListInterner, Obj},
+        arena::{HasInterner, HasListInterner, Interner, ListInterner},
     },
-    semantic::{
-        analysis::{CrateBorrowCheckVisitor, CrateTypeckVisitor},
-        infer::CoherenceMap,
-        syntax::{
-            AttributeKind, Crate, EarlyAttrLang, FnInstanceInner, HrtbDebruijnDef, MirPlaceElem,
-            TraitClause, TraitClauseList, TraitParam, Ty, TyKind, TyOrRe, TyShape,
-        },
+    semantic::syntax::{
+        FnInstanceInner, HrtbDebruijnDef, MirPlaceElem, TraitClause, TraitClauseList, TraitParam,
+        Ty, TyKind, TyOrRe, TyShape,
     },
 };
 use std::{ops::Deref, rc::Rc};

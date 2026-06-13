@@ -2,11 +2,12 @@ use crate::{
     base::{Session, arena::Obj},
     semantic::{
         infer::{
-            ClauseCx, ClauseImportEnvRef, CoherenceMap, ObligeCause, ObligeCauseOrigin, UnifyCxMode,
+            ClauseCx, ClauseImportEnvRef, CoherenceMap, HrtbUniverse, ObligeCause,
+            ObligeCauseOrigin, UnifyCxMode,
         },
         syntax::{
             AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FnItem, GenericBinder, GenericSubst,
-            HrtbUniverse, ImplItem, ItemKind, TraitItem, TyCtxt, TypeAliasItem,
+            ImplItem, ItemKind, TraitItem, TyCtxt, TypeAliasItem,
         },
     },
 };

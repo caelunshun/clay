@@ -10,8 +10,5 @@ pub use self::pretty::*;
 mod spanned;
 pub use self::spanned::*;
 
-mod universe;
-pub use self::universe::*;
-
 mod unspanned;
 pub use self::unspanned::*;

@@ -5,16 +5,15 @@ use crate::{
     },
     semantic::{
         infer::{
-            ClauseError, CoherenceMap, FloatingInferVar, ObligationNotReady, ObligationUnfulfilled,
-            ObligeCause, RecursionLimitReached, TyAndSimpleTySetUnifyError, TyAndTyUnifyError,
-            UnifyCx, UnifyCxMode,
+            ClauseError, CoherenceMap, FloatingInferVar, HrtbUniverse, ObligationNotReady,
+            ObligationUnfulfilled, ObligeCause, RecursionLimitReached, TyAndSimpleTySetUnifyError,
+            TyAndTyUnifyError, UnifyCx, UnifyCxMode,
             clause::elaboration::{UniversalElaboration, WipReificationState},
         },
         syntax::{
-            Crate, HrtbUniverse, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection,
-            RelationMode, SimpleTySet, TraitClause, TraitClauseList, TraitSpec, Ty, TyCtxt, TyKind,
-            TyOrRe, UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar,
-            UniversalTyVarSourceInfo,
+            Crate, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection, RelationMode,
+            SimpleTySet, TraitClause, TraitClauseList, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe,
+            UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,

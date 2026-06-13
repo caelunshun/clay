@@ -749,10 +749,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
             }
         }
 
-        LateInit::init(
-            &trait_target.r(s).generics,
-            self.tcx.seal_generic_binder(binder),
-        );
+        LateInit::init(&trait_target.r(s).generics, binder.seal(s));
 
         LateInit::init(
             &trait_target.r(s).regular_generic_count,
@@ -792,7 +789,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let target_adt = Obj::new(
             AdtItem {
                 item: self.target,
-                generics: self.tcx.seal_generic_binder(generics),
+                generics: generics.seal(s),
                 kind: LateInit::uninit(),
             },
             s,
@@ -840,7 +837,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let target_adt = Obj::new(
             AdtItem {
                 item: self.target,
-                generics: self.tcx.seal_generic_binder(generics),
+                generics: generics.seal(s),
                 kind: LateInit::uninit(),
             },
             s,
@@ -1063,7 +1060,6 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
     }
 
     pub fn lower_impl(&mut self, ast: &'ast AstItemImpl) {
-        let tcx = self.tcx;
         let s = &self.tcx.session;
 
         let mut generics = GenericBinder::default();
@@ -1076,7 +1072,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let target_impl = Obj::new(
             ImplItem {
                 item: self.target,
-                generics: tcx.seal_generic_binder(generics),
+                generics: generics.seal(s),
                 trait_: LateInit::uninit(),
                 target: LateInit::uninit(),
                 methods: LateInit::uninit(),
@@ -1146,7 +1142,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                 owner: LateInit::uninit(),
                 name: ast.name,
                 impl_vis,
-                generics: self.tcx.seal_generic_binder(generics),
+                generics: generics.seal(s),
                 has_self_param: LateInit::uninit(),
                 args: LateInit::uninit(),
                 ret_ty: LateInit::uninit(),
@@ -1175,7 +1171,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let def = Obj::new(
             TypeAliasItem {
                 item: self.target,
-                generics: self.tcx.seal_generic_binder(generics),
+                generics: generics.seal(s),
                 body: LateInit::uninit(),
             },
             s,

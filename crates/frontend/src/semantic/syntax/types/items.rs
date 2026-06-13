@@ -244,6 +244,27 @@ pub struct GenericBinder {
     pub defs: Vec<AnyGeneric>,
 }
 
+impl GenericBinder {
+    pub fn seal(self, s: &Session) -> Obj<GenericBinder> {
+        let binder = Obj::new(self, s);
+
+        for (i, generic) in binder.r(s).defs.iter().enumerate() {
+            LateInit::init(
+                match generic {
+                    AnyGeneric::Re(generic) => &generic.r(s).binder,
+                    AnyGeneric::Ty(generic) => &generic.r(s).binder,
+                },
+                PosInBinder {
+                    def: binder,
+                    idx: i as u32,
+                },
+            );
+        }
+
+        binder
+    }
+}
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum AnyGeneric {
     Re(Obj<RegionGeneric>),

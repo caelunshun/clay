@@ -128,7 +128,7 @@ pub fn synthesize_bootstrap_prelude(tcx: &TyCtxt) -> Obj<Crate> {
             ItemKind::TypeAlias(Obj::new(
                 TypeAliasItem {
                     item,
-                    generics: tcx.seal_generic_binder(GenericBinder::default()),
+                    generics: GenericBinder::default().seal(s),
                     body: LateInit::new(Spanned::new_unspanned(resolves_to)),
                 },
                 s,

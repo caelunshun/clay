@@ -8,13 +8,15 @@ use crate::{
     parse::token::Ident,
     semantic::{
         analysis::{BodyCtxt, attempt_deref},
-        infer::{ClauseImportEnvRef, ObligeCause, ObligeCauseProbe, UnboundVarHandlingMode},
+        infer::{
+            ClauseImportEnvRef, HrtbUniverse, ObligeCause, ObligeCauseProbe, UnboundVarHandlingMode,
+        },
         lower::{
             generics::normalize_positional_generic_arity,
             modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},
         },
         syntax::{
-            AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, GenericSubst, HrtbUniverse,
+            AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, GenericSubst,
             InferTyVarSourceInfo, Mutability, Re, RelationMode, TraitClause, TraitSpec, Ty,
             TyFolderInfallibleExt as _, TyKind, TyOrReList,
         },

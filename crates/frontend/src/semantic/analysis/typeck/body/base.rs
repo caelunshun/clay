@@ -2,9 +2,9 @@ use crate::{
     base::{ErrorGuaranteed, Session, arena::Obj},
     semantic::{
         analysis::CrateTypeckVisitor,
-        infer::{ClauseCx, ClauseImportEnvRef, ObligeCause, UnifyCx, UnifyCxMode},
+        infer::{ClauseCx, ClauseImportEnvRef, HrtbUniverse, ObligeCause, UnifyCx, UnifyCxMode},
         syntax::{
-            Crate, FnDef, HirExpr, HirLabelledBlock, HirLocal, HirPat, HrtbUniverse, InferTyVar,
+            Crate, FnDef, HirExpr, HirLabelledBlock, HirLocal, HirPat, InferTyVar,
             InferTyVarSourceInfo, Item, ThirLocal, Ty, TyCtxt,
         },
     },

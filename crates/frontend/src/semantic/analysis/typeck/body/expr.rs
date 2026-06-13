@@ -11,13 +11,13 @@ use crate::{
             BodyCtxt, EquateOrSet, OverloadResolution, peel_ref_for_prim_op,
             typeck::body::lookup::{LookupMethodResult, SpannedImportedAssocArgs},
         },
-        infer::{ClauseError, ObligeCause, ObligeCauseOrigin},
+        infer::{ClauseError, HrtbUniverse, ObligeCause, ObligeCauseOrigin},
         lower::generics::normalize_positional_generic_arity_zip,
         syntax::{
             AdtInstance, Divergence, FnInstanceInner, HirBlock, HirExpr, HirExprKind,
-            HirLabelTargetKind, HirLabelledBlock, HirStmt, HrtbUniverse, InferTyVarSourceInfo, Re,
-            RelationMode, SimpleTyKind, SimpleTySet, SpannedFnInstanceView, SpannedFnOwnerView,
-            SpannedTyView, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            HirLabelTargetKind, HirLabelledBlock, HirStmt, InferTyVarSourceInfo, Re, RelationMode,
+            SimpleTyKind, SimpleTySet, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTyView,
+            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };

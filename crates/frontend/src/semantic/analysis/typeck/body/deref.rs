@@ -1,8 +1,8 @@
 use crate::{
     base::arena::{HasInterner as _, HasListInterner as _},
     semantic::{
-        infer::{ClauseCx, ObligeCause, ObligeCauseProbe},
-        syntax::{HrtbUniverse, InferTyVarSourceInfo, TraitParam, TraitSpec, Ty, TyKind, TyOrRe},
+        infer::{ClauseCx, HrtbUniverse, ObligeCause, ObligeCauseProbe},
+        syntax::{InferTyVarSourceInfo, TraitParam, TraitSpec, Ty, TyKind, TyOrRe},
     },
 };
 

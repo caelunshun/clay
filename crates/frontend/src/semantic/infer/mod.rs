@@ -9,3 +9,6 @@ pub use self::diagnostic::*;
 
 mod unify;
 pub use self::unify::*;
+
+mod universe;
+pub use self::universe::*;

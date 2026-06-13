@@ -5,12 +5,15 @@ use crate::{
     },
     semantic::{
         analysis::{CrateBorrowCheckVisitor, MirDataflowFacts},
-        infer::{ClauseCx, ClauseImportEnvRef, ObligeCause, ObligeCauseBehavior, UnifyCxMode},
+        infer::{
+            ClauseCx, ClauseImportEnvRef, HrtbUniverse, ObligeCause, ObligeCauseBehavior,
+            UnifyCxMode,
+        },
         syntax::{
-            FnDef, HrtbUniverse, IntKind, MirAssignRvalue, MirBlock, MirBody, MirLocal,
-            MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirStmt, MirStmtKind, MirTerminator,
-            Re, RelationDirection, RelationMode, SimpleTyKind, TraitParam, TraitSpec, Ty, TyCtxt,
-            TyKind, TyOrRe, UniversalReVarSourceInfo,
+            FnDef, IntKind, MirAssignRvalue, MirBlock, MirBody, MirLocal, MirLocalIdx, MirOperand,
+            MirPlace, MirPlaceElem, MirStmt, MirStmtKind, MirTerminator, Re, RelationDirection,
+            RelationMode, SimpleTyKind, TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe,
+            UniversalReVarSourceInfo,
         },
     },
 };

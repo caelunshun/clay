@@ -44,14 +44,14 @@ use crate::{
     base::arena::{HasInterner, HasListInterner},
     semantic::{
         infer::{
-            ClauseCx, ClauseImportEnvRef, ClauseObligation, FloatingInferVar, ObligationNotReady,
-            ObligationResult, ObligeCause, ObligeCauseBehavior,
+            ClauseCx, ClauseImportEnvRef, ClauseObligation, FloatingInferVar, HrtbUniverse,
+            ObligationNotReady, ObligationResult, ObligeCause, ObligeCauseBehavior,
         },
         syntax::{
-            AnyGeneric, GenericSubst, HrtbBinder, HrtbUniverse, InferTyVar, InferTyVarSourceInfo,
-            Mutability, Re, RelationMode, SimpleTySet, SpannedRe, SpannedTy, TraitClause,
-            TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt,
-            TyKind, TyOrRe, TyVisitor, TyVisitorExt, UniversalReVarSourceInfo, UniversalTyVar,
+            AnyGeneric, GenericSubst, HrtbBinder, InferTyVar, InferTyVarSourceInfo, Mutability, Re,
+            RelationMode, SimpleTySet, SpannedRe, SpannedTy, TraitClause, TraitClauseList,
+            TraitParam, TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt, TyKind, TyOrRe,
+            TyVisitor, TyVisitorExt, UniversalReVarSourceInfo, UniversalTyVar,
             UniversalTyVarSourceInfo,
         },
     },
