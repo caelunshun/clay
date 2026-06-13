@@ -1,7 +1,7 @@
 use crate::{
     base::{Session, arena::HasInterner},
     semantic::{
-        analysis::ClauseCx,
+        infer::ClauseCx,
         syntax::{
             AdtInstance, AnyGeneric, FloatKind, FnInstanceInner, FnOwner, HrtbBinder,
             HrtbBinderKind, InferTyVarSourceInfo, IntKind, Re, SimpleTyKind, SimpleTySet,

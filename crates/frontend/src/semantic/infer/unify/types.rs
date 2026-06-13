@@ -1,5 +1,5 @@
 use crate::semantic::{
-    analysis::FloatingInferVar,
+    infer::FloatingInferVar,
     syntax::{
         HrtbUniverse, InferTyVar, InferTyVarSourceInfo, SimpleTySet, Ty, TyCtxt, UniversalTyVar,
         UniversalTyVarSourceInfo,

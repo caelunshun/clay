@@ -1,4 +1,4 @@
-use crate::{semantic::analysis::ObligeCause, utils::hash::FxHashSet};
+use crate::{semantic::infer::ObligeCause, utils::hash::FxHashSet};
 use std::{fmt, hash, rc::Rc};
 
 /// HRTBs in the RHS position of a type-implements-clause obligation work by instantiating each HRTB

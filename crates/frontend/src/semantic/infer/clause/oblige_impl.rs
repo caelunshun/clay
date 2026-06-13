@@ -1,15 +1,13 @@
 //! Logic to implement the type-implements-trait obligation.
 
+use super::elaboration::{UniversalElaboration, WipReificationRootSet};
 use crate::{
     base::arena::{HasInterner as _, Obj},
     semantic::{
-        analysis::{
-            ClauseCx, ClauseImportEnv, NoTraitImplError, NotCoveredError, ObligationNotReady,
-            ObligationResult, ObligeCause, ObligeCauseStep, UnboundVarHandlingMode,
-            infer::clause::{
-                ClauseObligation,
-                elaboration::{UniversalElaboration, WipReificationRootSet},
-            },
+        infer::{
+            ClauseCx, ClauseImportEnv, ClauseObligation, NoTraitImplError, NotCoveredError,
+            ObligationNotReady, ObligationResult, ObligeCause, ObligeCauseStep,
+            UnboundVarHandlingMode,
         },
         syntax::{
             HrtbBinder, HrtbBinderKind, HrtbUniverse, HrtbUniverseInfo, ImplItem, RelationMode,

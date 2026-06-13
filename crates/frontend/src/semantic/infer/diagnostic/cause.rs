@@ -1,7 +1,7 @@
 use crate::{
     base::{Diag, ErrorGuaranteed, LeafDiag, Level, arena::Obj, syntax::Span},
     semantic::{
-        analysis::ClauseCx,
+        infer::ClauseCx,
         syntax::{HrtbBinder, ImplItem, PrettyPrinterOpts, TraitClauseList, TraitSpec, Ty, TyOrRe},
     },
 };

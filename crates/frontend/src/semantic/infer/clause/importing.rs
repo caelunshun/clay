@@ -57,7 +57,7 @@ use crate::{
         syntax::Span,
     },
     semantic::{
-        analysis::{ClauseCx, ObligeCause, ObligeCauseOrigin, ObligeCauseStep, UnifyCxMode},
+        infer::{ClauseCx, ObligeCause, ObligeCauseOrigin, ObligeCauseStep, UnifyCxMode},
         syntax::{
             AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, FnOwner, GenericBinder,
             GenericSubst, HrtbBinder, HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef,

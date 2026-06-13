@@ -4,7 +4,7 @@ use crate::{
         syntax::Span,
     },
     semantic::{
-        analysis::{ClauseCx, ClauseImportEnv, ClauseImportEnvRef, ObligeCause, ObligeCauseStep},
+        infer::{ClauseCx, ClauseImportEnv, ClauseImportEnvRef, ObligeCause, ObligeCauseStep},
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnInstanceInner,
             FnOwner, GenericBinder, GenericSubst, HrtbBinder, HrtbBinderKind, HrtbUniverse,

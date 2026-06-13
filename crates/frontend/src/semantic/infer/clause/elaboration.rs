@@ -43,7 +43,7 @@
 use crate::{
     base::arena::{HasInterner, HasListInterner},
     semantic::{
-        analysis::{
+        infer::{
             ClauseCx, ClauseImportEnvRef, ClauseObligation, FloatingInferVar, ObligationNotReady,
             ObligationResult, ObligeCause, ObligeCauseBehavior,
         },

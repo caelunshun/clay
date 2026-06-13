@@ -1,9 +1,8 @@
 use crate::{
     base::{Diag, LeafDiag, Session, arena::Obj},
     semantic::{
-        analysis::{
-            CoherenceMap, MirBbOperationKind, MirBbOperationVisitor, MirBuildCtxt, MirDataflowFacts,
-        },
+        analysis::{MirBbOperationKind, MirBbOperationVisitor, MirBuildCtxt, MirDataflowFacts},
+        infer::CoherenceMap,
         syntax::{Crate, FnDef, ItemKind, MirInstructionLoc, TyCtxt},
     },
 };

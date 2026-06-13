@@ -5,7 +5,8 @@ use crate::{
         arena::{HasInterner, HasListInterner, Interner, ListInterner, Obj},
     },
     semantic::{
-        analysis::{CoherenceMap, CrateBorrowCheckVisitor, CrateTypeckVisitor},
+        analysis::{CrateBorrowCheckVisitor, CrateTypeckVisitor},
+        infer::CoherenceMap,
         syntax::{
             AttributeKind, Crate, EarlyAttrLang, FnInstanceInner, HrtbDebruijnDef, MirPlaceElem,
             TraitClause, TraitClauseList, TraitParam, Ty, TyKind, TyOrRe, TyShape,

@@ -1,7 +1,7 @@
 use crate::{
     base::arena::{HasInterner as _, HasListInterner as _},
     semantic::{
-        analysis::{ClauseCx, ObligeCause, ObligeCauseProbe},
+        infer::{ClauseCx, ObligeCause, ObligeCauseProbe},
         syntax::{HrtbUniverse, InferTyVarSourceInfo, TraitParam, TraitSpec, Ty, TyKind, TyOrRe},
     },
 };

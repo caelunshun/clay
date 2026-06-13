@@ -1,7 +1,7 @@
 use crate::{
     base::{Session, arena::Obj},
     semantic::{
-        analysis::{
+        infer::{
             ClauseCx, ClauseImportEnvRef, CoherenceMap, ObligeCause, ObligeCauseOrigin, UnifyCxMode,
         },
         syntax::{

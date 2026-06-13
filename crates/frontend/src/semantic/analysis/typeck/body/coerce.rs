@@ -1,9 +1,8 @@
 use crate::{
     base::arena::{HasInterner, HasListInterner, Obj},
     semantic::{
-        analysis::{
-            BodyCtxt, ClauseCx, ObligeCause, ObligeCauseOrigin, attempt_deref_clobber_obligations,
-        },
+        analysis::{BodyCtxt, attempt_deref_clobber_obligations},
+        infer::{ClauseCx, ObligeCause, ObligeCauseOrigin},
         syntax::{
             Divergence, HirExpr, HrtbUniverse, InferTyVarSourceInfo, Mutability, Re, RelationMode,
             SimpleTyKind, TraitClauseList, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind,

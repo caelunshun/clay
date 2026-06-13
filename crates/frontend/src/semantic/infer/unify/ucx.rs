@@ -1,10 +1,10 @@
+use super::{regions::ReUnifyTracker, types::TyUnifyTracker};
 use crate::{
     base::{ErrorGuaranteed, Session, analysis::DebruijnTop, arena::HasInterner},
     semantic::{
-        analysis::{
+        infer::{
             ClauseCx, InferTyLeaksHrtbVarError, InferTyLeaksUniversalError, InferTyOccursError,
             ObligeCause, TyAndSimpleTySetUnifyError, TyAndTyUnifyCulprit, TyAndTyUnifyError,
-            infer::unify::{regions::ReUnifyTracker, types::TyUnifyTracker},
         },
         syntax::{
             FnInstanceInner, FnOwner, HrtbBinderKind, HrtbUniverse, InferTyVar,

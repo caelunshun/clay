@@ -1,7 +1,7 @@
 use crate::{
     base::{Diag, arena::HasInterner as _, syntax::HasSpan as _},
     semantic::{
-        analysis::{ClauseCx, ObligeCause},
+        infer::{ClauseCx, ObligeCause},
         syntax::{
             HrtbBinder, InferTyVarSourceInfo, PrettyPrinterOpts, PrettyTy, Re, RelationMode,
             SpannedHrtbBinder, SpannedRe, SpannedTy, Ty, TyCtxt, TyFolder,

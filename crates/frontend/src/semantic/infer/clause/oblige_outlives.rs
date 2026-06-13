@@ -1,10 +1,7 @@
 //! Logic to implement the outlives obligation.
 
 use crate::semantic::{
-    analysis::{
-        ClauseCx, ObligationNotReady, ObligationResult, ObligeCause,
-        infer::clause::ClauseObligation,
-    },
+    infer::{ClauseCx, ClauseObligation, ObligationNotReady, ObligationResult, ObligeCause},
     syntax::{Re, RelationDirection, RelationMode, SimpleTySet, Ty, TyKind, TyOrRe},
 };
 

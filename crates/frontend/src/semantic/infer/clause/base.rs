@@ -4,11 +4,11 @@ use crate::{
         arena::{HasInterner, Obj},
     },
     semantic::{
-        analysis::{
+        infer::{
             ClauseError, CoherenceMap, FloatingInferVar, ObligationNotReady, ObligationUnfulfilled,
             ObligeCause, RecursionLimitReached, TyAndSimpleTySetUnifyError, TyAndTyUnifyError,
             UnifyCx, UnifyCxMode,
-            infer::clause::elaboration::{UniversalElaboration, WipReificationState},
+            clause::elaboration::{UniversalElaboration, WipReificationState},
         },
         syntax::{
             Crate, HrtbUniverse, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection,

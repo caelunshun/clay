@@ -8,10 +8,10 @@ use crate::{
     parse::ast::{AstLit, AstUnOpKind},
     semantic::{
         analysis::{
-            BodyCtxt, ClauseError, EquateOrSet, ObligeCause, ObligeCauseOrigin, OverloadResolution,
-            peel_ref_for_prim_op,
+            BodyCtxt, EquateOrSet, OverloadResolution, peel_ref_for_prim_op,
             typeck::body::lookup::{LookupMethodResult, SpannedImportedAssocArgs},
         },
+        infer::{ClauseError, ObligeCause, ObligeCauseOrigin},
         lower::generics::normalize_positional_generic_arity_zip,
         syntax::{
             AdtInstance, Divergence, FnInstanceInner, HirBlock, HirExpr, HirExprKind,

@@ -1,7 +1,7 @@
 use crate::{
     base::ErrorGuaranteed,
     semantic::{
-        analysis::{ClauseCx, ClauseObligation, ObligeCause},
+        infer::{ClauseCx, ClauseObligation, ObligeCause},
         syntax::{
             HrtbUniverse, InferTyVar, PrettyTy, PrettyUniversalTyVar, Re, RelationDirection,
             SimpleTySet, TraitClauseList, TraitParam, TraitSpec, Ty, UniversalReVar,

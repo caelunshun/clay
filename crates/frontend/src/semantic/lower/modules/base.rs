@@ -13,16 +13,16 @@ use std::fmt;
 // === ItemCategory === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum ItemCategoryUse {
+pub enum ItemCategoryAsA {
     VisibilityTarget,
     GlobUseTarget,
 }
 
-impl ItemCategoryUse {
+impl ItemCategoryAsA {
     pub fn as_a_what(self) -> Symbol {
         match self {
-            ItemCategoryUse::VisibilityTarget => symbol!("visibility target"),
-            ItemCategoryUse::GlobUseTarget => symbol!("glob-use target"),
+            ItemCategoryAsA::VisibilityTarget => symbol!("a visibility target"),
+            ItemCategoryAsA::GlobUseTarget => symbol!("a glob-use target"),
         }
     }
 }
@@ -66,9 +66,9 @@ impl ItemCategory {
         }
     }
 
-    pub fn is_valid_for_use(self, for_use: ItemCategoryUse) -> bool {
+    pub fn is_valid_as_a(self, for_use: ItemCategoryAsA) -> bool {
         match for_use {
-            ItemCategoryUse::VisibilityTarget => match self {
+            ItemCategoryAsA::VisibilityTarget => match self {
                 ItemCategory::Module => true,
                 ItemCategory::Impl
                 | ItemCategory::Trait
@@ -78,7 +78,7 @@ impl ItemCategory {
                 | ItemCategory::Fn
                 | ItemCategory::TypeAlias => false,
             },
-            ItemCategoryUse::GlobUseTarget => match self {
+            ItemCategoryAsA::GlobUseTarget => match self {
                 ItemCategory::Module | ItemCategory::Enum => true,
                 ItemCategory::Impl
                 | ItemCategory::Trait
@@ -90,7 +90,7 @@ impl ItemCategory {
         }
     }
 
-    pub fn is_valid_for_special(self) -> bool {
+    pub fn is_valid_for_kw_traversal(self) -> bool {
         match self {
             ItemCategory::Module => true,
             ItemCategory::Impl
@@ -103,7 +103,7 @@ impl ItemCategory {
         }
     }
 
-    pub fn looks_up_parent(self) -> bool {
+    pub fn implicitly_includes_parent(self) -> bool {
         match self {
             ItemCategory::Module => false,
             ItemCategory::Impl
@@ -256,7 +256,7 @@ pub trait ParentResolver {
 
     fn module_root(&self, mut def: Self::Item) -> Self::Item {
         loop {
-            if !self.categorize(def).looks_up_parent() {
+            if !self.categorize(def).implicitly_includes_parent() {
                 break;
             }
 
@@ -281,7 +281,7 @@ pub trait ParentResolver {
         loop {
             collector.push(def);
 
-            if !self.categorize(def).looks_up_parent() {
+            if !self.categorize(def).implicitly_includes_parent() {
                 break;
             }
 
@@ -390,13 +390,13 @@ pub trait PathResolver: ParentResolver {
         local_crate_root: Self::Item,
         origin: Self::Item,
         path: &AstBarePath,
-        for_use: Option<ItemCategoryUse>,
+        for_use: Option<ItemCategoryAsA>,
     ) -> Result<Self::Item, ErrorGuaranteed> {
         let target = self.resolve_bare_path(local_crate_root, origin, path)?;
         let category = self.categorize(target);
 
         if let Some(for_use) = for_use
-            && !category.is_valid_for_use(for_use)
+            && !category.is_valid_as_a(for_use)
         {
             return Err(Diag::span_err(
                 path.span,
@@ -424,7 +424,7 @@ pub trait VisibilityResolver: PathResolver {
             local_crate_root,
             origin,
             path,
-            Some(ItemCategoryUse::VisibilityTarget),
+            Some(ItemCategoryAsA::VisibilityTarget),
         )?;
 
         if !self.is_descendant(origin, target) {
@@ -457,7 +457,7 @@ where
     // Handle special path parts.
     let part = match part.kind() {
         AstPathPartKind::Keyword(_, kw) => {
-            if !resolver.categorize(finger).is_valid_for_special() {
+            if !resolver.categorize(finger).is_valid_for_kw_traversal() {
                 return Err(StepResolveError::CannotKeywordOnNonModule(kw));
             }
 

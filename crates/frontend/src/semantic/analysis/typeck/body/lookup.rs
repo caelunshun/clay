@@ -7,10 +7,8 @@ use crate::{
     },
     parse::token::Ident,
     semantic::{
-        analysis::{
-            BodyCtxt, ClauseImportEnvRef, ObligeCause, ObligeCauseProbe, UnboundVarHandlingMode,
-            attempt_deref,
-        },
+        analysis::{BodyCtxt, attempt_deref},
+        infer::{ClauseImportEnvRef, ObligeCause, ObligeCauseProbe, UnboundVarHandlingMode},
         lower::{
             generics::normalize_positional_generic_arity,
             modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},

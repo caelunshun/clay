@@ -4,10 +4,8 @@ use crate::{
         arena::{HasInterner, HasListInterner, Obj},
     },
     semantic::{
-        analysis::{
-            ClauseCx, ClauseImportEnvRef, CrateBorrowCheckVisitor, MirDataflowFacts, ObligeCause,
-            ObligeCauseBehavior, UnifyCxMode,
-        },
+        analysis::{CrateBorrowCheckVisitor, MirDataflowFacts},
+        infer::{ClauseCx, ClauseImportEnvRef, ObligeCause, ObligeCauseBehavior, UnifyCxMode},
         syntax::{
             FnDef, HrtbUniverse, IntKind, MirAssignRvalue, MirBlock, MirBody, MirLocal,
             MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirStmt, MirStmtKind, MirTerminator,

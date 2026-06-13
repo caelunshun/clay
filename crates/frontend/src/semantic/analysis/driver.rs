@@ -1,7 +1,8 @@
 use crate::{
     base::{ErrorGuaranteed, arena::Obj},
     semantic::{
-        analysis::{CoherenceMap, CrateBorrowCheckVisitor, CrateTypeckVisitor},
+        analysis::{CrateBorrowCheckVisitor, CrateTypeckVisitor},
+        infer::CoherenceMap,
         syntax::{AttributeKind, Crate, EarlyAttrLang, TyCtxt},
     },
 };
