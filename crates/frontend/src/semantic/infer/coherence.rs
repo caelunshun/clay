@@ -2,7 +2,8 @@ use crate::{
     base::{arena::Obj, syntax::Symbol},
     semantic::syntax::{
         Crate, FnDef, ImplItem, SpannedTy, TraitParam, TraitSpec, Ty, TyCtxt, TyFolder,
-        TyFolderInfallibleExt, TyKind, TyShapeMap,
+        TyFolderInfallibleExt, TyKind, TyShapeMap, shape_of_inherent_function,
+        shape_of_inherent_method, shape_of_trait_def,
     },
 };
 use std::convert::Infallible;
@@ -33,7 +34,8 @@ impl CoherenceMap {
                 Some(trait_) => {
                     let arg_count = *trait_.value.def.r(s).regular_generic_count as usize;
                     self.by_shape.insert(
-                        tcx.shape_of_trait_def(
+                        shape_of_trait_def(
+                            tcx,
                             trait_.value.def,
                             &trait_.value.params.r(s)[..arg_count],
                             item.r(s).target.value,
@@ -47,7 +49,8 @@ impl CoherenceMap {
                         let method = method.unwrap();
 
                         self.by_shape.insert(
-                            tcx.shape_of_inherent_function(
+                            shape_of_inherent_function(
+                                tcx,
                                 item.r(s).target.value,
                                 method.r(s).name.text,
                             ),
@@ -70,7 +73,7 @@ impl CoherenceMap {
                         .fold(receiver);
 
                         self.by_shape.insert(
-                            tcx.shape_of_inherent_method(receiver, method.r(s).name.text),
+                            shape_of_inherent_method(tcx, receiver, method.r(s).name.text),
                             CoherenceMapEntry::InherentMethod(method),
                             s,
                         );
@@ -89,7 +92,7 @@ impl CoherenceMap {
         let s = &tcx.session;
 
         self.by_shape
-            .lookup(tcx.shape_of_inherent_method(receiver, name), s)
+            .lookup(shape_of_inherent_method(tcx, receiver, name), s)
             .map(|v| {
                 let CoherenceMapEntry::InherentMethod(v) = *v else {
                     unreachable!()
@@ -108,7 +111,7 @@ impl CoherenceMap {
         let s = &tcx.session;
 
         self.by_shape
-            .lookup(tcx.shape_of_inherent_function(self_ty, name), s)
+            .lookup(shape_of_inherent_function(tcx, self_ty, name), s)
             .map(|v| {
                 let CoherenceMapEntry::InherentMethod(v) = *v else {
                     unreachable!()
@@ -128,7 +131,8 @@ impl CoherenceMap {
 
         self.by_shape
             .lookup(
-                tcx.shape_of_trait_def(
+                shape_of_trait_def(
+                    tcx,
                     rhs.def,
                     &rhs.params.r(s)[..*rhs.def.r(s).regular_generic_count as usize]
                         .iter()

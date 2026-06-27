@@ -18,91 +18,94 @@ use std::slice;
 
 // === Erasure === //
 
-impl TyCtxt {
-    pub fn shape_of_trait_def(&self, def: Obj<TraitItem>, args: &[TyOrRe], target: Ty) -> TyShape {
-        let s = &self.session;
+pub fn shape_of_trait_def(
+    tcx: &TyCtxt,
+    def: Obj<TraitItem>,
+    args: &[TyOrRe],
+    target: Ty,
+) -> TyShape {
+    let s = &tcx.session;
 
-        debug_assert_eq!(args.len(), *def.r(s).regular_generic_count as usize);
+    debug_assert_eq!(args.len(), *def.r(s).regular_generic_count as usize);
 
-        TyShape::Solid(SolidTyShape {
-            kind: SolidTyShapeKind::TraitImpl(def),
-            children: self.intern_list(
-                &([self.erase_ty_to_shape(target)]
-                    .into_iter()
-                    .chain(
-                        args.iter()
-                            .filter_map(|ty| ty.as_ty())
-                            .map(|ty| self.erase_ty_to_shape(ty)),
-                    )
-                    .collect::<Vec<_>>()),
-            ),
-        })
-    }
-
-    pub fn shape_of_inherent_method(&self, receiver: Ty, name: Symbol) -> TyShape {
-        TyShape::Solid(SolidTyShape {
-            kind: SolidTyShapeKind::InherentMethodImpl(name),
-            children: self.intern_list(&[self.erase_ty_to_shape(receiver)]),
-        })
-    }
-
-    pub fn shape_of_inherent_function(&self, self_ty: Ty, name: Symbol) -> TyShape {
-        TyShape::Solid(SolidTyShape {
-            kind: SolidTyShapeKind::InherentFunctionImpl(name),
-            children: self.intern_list(&[self.erase_ty_to_shape(self_ty)]),
-        })
-    }
-
-    pub fn erase_ty_to_shape(&self, ty: Ty) -> TyShape {
-        let s = &self.session;
-
-        match *ty.r(s) {
-            // It's always safe to be conservative with these types.
-            TyKind::SigThis
-            | TyKind::HrtbVar(_)
-            | TyKind::InferVar(_)
-            | TyKind::UniversalVar(_)
-            | TyKind::SigInfer
-            | TyKind::SigGeneric(_)
-            | TyKind::SigProject(_)
-            | TyKind::SigAlias(_, _)
-            | TyKind::Error(_) => TyShape::Hole,
-
-            TyKind::Simple(kind) => TyShape::Solid(SolidTyShape {
-                kind: SolidTyShapeKind::Simple(kind),
-                children: self.intern_list(&[]),
-            }),
-            TyKind::Reference(_re, mutability, pointee) => TyShape::Solid(SolidTyShape {
-                kind: SolidTyShapeKind::Re(mutability),
-                children: self.intern_list(&[self.erase_ty_to_shape(pointee)]),
-            }),
-            TyKind::Adt(AdtInstance { def, params }) => TyShape::Solid(SolidTyShape {
-                kind: SolidTyShapeKind::Adt(def),
-                children: self.intern_list(
-                    &params
-                        .r(s)
-                        .iter()
+    TyShape::Solid(SolidTyShape {
+        kind: SolidTyShapeKind::TraitImpl(def),
+        children: tcx.intern_list(
+            &([erase_ty_to_shape(tcx, target)]
+                .into_iter()
+                .chain(
+                    args.iter()
                         .filter_map(|ty| ty.as_ty())
-                        .map(|ty| self.erase_ty_to_shape(ty))
-                        .collect::<Vec<_>>(),
-                ),
-            }),
-            TyKind::Trait(_re, _muta, _intern) => todo!(),
-            TyKind::Tuple(children) => TyShape::Solid(SolidTyShape {
-                kind: SolidTyShapeKind::Tuple(children.r(s).len() as u32),
-                children: self.intern_list(
-                    &children
-                        .r(s)
-                        .iter()
-                        .map(|&ty| self.erase_ty_to_shape(ty))
-                        .collect::<Vec<_>>(),
-                ),
-            }),
-            TyKind::FnDef(_instance) => TyShape::Solid(SolidTyShape {
-                kind: SolidTyShapeKind::FnDef,
-                children: self.intern_list(&[]),
-            }),
-        }
+                        .map(|ty| erase_ty_to_shape(tcx, ty)),
+                )
+                .collect::<Vec<_>>()),
+        ),
+    })
+}
+
+pub fn shape_of_inherent_method(tcx: &TyCtxt, receiver: Ty, name: Symbol) -> TyShape {
+    TyShape::Solid(SolidTyShape {
+        kind: SolidTyShapeKind::InherentMethodImpl(name),
+        children: tcx.intern_list(&[erase_ty_to_shape(tcx, receiver)]),
+    })
+}
+
+pub fn shape_of_inherent_function(tcx: &TyCtxt, self_ty: Ty, name: Symbol) -> TyShape {
+    TyShape::Solid(SolidTyShape {
+        kind: SolidTyShapeKind::InherentFunctionImpl(name),
+        children: tcx.intern_list(&[erase_ty_to_shape(tcx, self_ty)]),
+    })
+}
+
+pub fn erase_ty_to_shape(tcx: &TyCtxt, ty: Ty) -> TyShape {
+    let s = &tcx.session;
+
+    match *ty.r(s) {
+        // It's always safe to be conservative with these types.
+        TyKind::SigThis
+        | TyKind::HrtbVar(_)
+        | TyKind::InferVar(_)
+        | TyKind::UniversalVar(_)
+        | TyKind::SigInfer
+        | TyKind::SigGeneric(_)
+        | TyKind::SigProject(_)
+        | TyKind::SigAlias(_, _)
+        | TyKind::Error(_) => TyShape::Hole,
+
+        TyKind::Simple(kind) => TyShape::Solid(SolidTyShape {
+            kind: SolidTyShapeKind::Simple(kind),
+            children: tcx.intern_list(&[]),
+        }),
+        TyKind::Reference(_re, mutability, pointee) => TyShape::Solid(SolidTyShape {
+            kind: SolidTyShapeKind::Re(mutability),
+            children: tcx.intern_list(&[erase_ty_to_shape(tcx, pointee)]),
+        }),
+        TyKind::Adt(AdtInstance { def, params }) => TyShape::Solid(SolidTyShape {
+            kind: SolidTyShapeKind::Adt(def),
+            children: tcx.intern_list(
+                &params
+                    .r(s)
+                    .iter()
+                    .filter_map(|ty| ty.as_ty())
+                    .map(|ty| erase_ty_to_shape(tcx, ty))
+                    .collect::<Vec<_>>(),
+            ),
+        }),
+        TyKind::Trait(_re, _muta, _intern) => todo!(),
+        TyKind::Tuple(children) => TyShape::Solid(SolidTyShape {
+            kind: SolidTyShapeKind::Tuple(children.r(s).len() as u32),
+            children: tcx.intern_list(
+                &children
+                    .r(s)
+                    .iter()
+                    .map(|&ty| erase_ty_to_shape(tcx, ty))
+                    .collect::<Vec<_>>(),
+            ),
+        }),
+        TyKind::FnDef(_instance) => TyShape::Solid(SolidTyShape {
+            kind: SolidTyShapeKind::FnDef,
+            children: tcx.intern_list(&[]),
+        }),
     }
 }
 

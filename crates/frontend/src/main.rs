@@ -4,7 +4,7 @@ use fir_frontend::{
         syntax::{NaiveSegmenter, SourceFileOrigin},
     },
     parse::{ast::parse_file, token::tokenize},
-    semantic::syntax::TyCtxt,
+    semantic::{analysis::check_crate, lower::entry::lower_full_ast, syntax::TyCtxt},
 };
 use std::{env, fs, path::Path, rc::Rc};
 
@@ -34,8 +34,8 @@ fn main() {
     let ast = parse_file(&tokens);
 
     let tcx = TyCtxt::new(session.clone());
-    let krate = tcx.lower_full_ast(&ast);
-    tcx.check_crate(krate);
+    let krate = lower_full_ast(&tcx, &ast);
+    check_crate(&tcx, krate);
 
     _ = session.diag.finish();
 }

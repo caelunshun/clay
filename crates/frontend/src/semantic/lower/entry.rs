@@ -46,96 +46,94 @@ use std::{cell::Cell, rc::Rc};
 
 // === Driver === //
 
-impl TyCtxt {
-    pub fn lower_full_ast(&self, ast: &AstItemModuleContents) -> Obj<Crate> {
-        let s = &self.session;
+pub fn lower_full_ast(tcx: &TyCtxt, ast: &AstItemModuleContents) -> Obj<Crate> {
+    let s = &tcx.session;
 
-        let _delay_and_sort_guard = s.diag.delay_and_sort(s.clone());
+    let _delay_and_sort_guard = s.diag.delay_and_sort(s.clone());
 
-        // Build the module tree.
-        let mut ctxt = UseLowerCtxt {
-            tree: BuilderModuleTree::new(self.session.clone()),
-            inter_tasks: Vec::new(),
-        };
+    // Build the module tree.
+    let mut ctxt = UseLowerCtxt {
+        tree: BuilderModuleTree::new(tcx.session.clone()),
+        inter_tasks: Vec::new(),
+    };
 
-        ctxt.lower_module(BuilderItemId::ROOT, ast);
-        ctxt.push_prelude_glob(*synthesize_bootstrap_prelude(self).r(s).root);
+    ctxt.lower_module(BuilderItemId::ROOT, ast);
+    ctxt.push_prelude_glob(*synthesize_bootstrap_prelude(tcx).r(s).root);
 
-        let krate = Obj::new(
-            Crate {
-                name: symbol!("demo"),
-                is_local: true,
-                root: LateInit::uninit(),
-                prelude: LateInit::uninit(),
-                items: LateInit::uninit(),
-                lang_items: LangItems::default(),
-            },
-            s,
-        );
-        let index_to_item = ctxt.tree.freeze_and_check(krate, s);
-        let root = index_to_item[BuilderItemId::ROOT];
-        let prelude = index_to_item[BuilderItemId::PRELUDE];
+    let krate = Obj::new(
+        Crate {
+            name: symbol!("demo"),
+            is_local: true,
+            root: LateInit::uninit(),
+            prelude: LateInit::uninit(),
+            items: LateInit::uninit(),
+            lang_items: LangItems::default(),
+        },
+        s,
+    );
+    let index_to_item = ctxt.tree.freeze_and_check(krate, s);
+    let root = index_to_item[BuilderItemId::ROOT];
+    let prelude = index_to_item[BuilderItemId::PRELUDE];
 
-        let UseLowerCtxt {
-            tree: _,
-            inter_tasks,
-        } = ctxt;
+    let UseLowerCtxt {
+        tree: _,
+        inter_tasks,
+    } = ctxt;
 
-        // Lower inter-item properties.
-        let mut intra_tasks = Vec::new();
+    // Lower inter-item properties.
+    let mut intra_tasks = Vec::new();
 
-        InterItemLowerCtxt {
-            tcx: self,
+    InterItemLowerCtxt {
+        tcx,
+        root,
+        scope: root,
+        target: root,
+        intra_tasks: &mut intra_tasks,
+        index_to_item: &index_to_item,
+    }
+    .lower_module(ast, None);
+
+    lower_synthetic_module(prelude, s);
+
+    for InterTask {
+        target,
+        scope,
+        mut handler,
+    } in inter_tasks
+    {
+        handler(&mut InterItemLowerCtxt {
+            tcx,
             root,
-            scope: root,
-            target: root,
+            scope: index_to_item[scope],
+            target: index_to_item[target],
             intra_tasks: &mut intra_tasks,
             index_to_item: &index_to_item,
-        }
-        .lower_module(ast, None);
-
-        lower_synthetic_module(prelude, s);
-
-        for InterTask {
-            target,
-            scope,
-            mut handler,
-        } in inter_tasks
-        {
-            handler(&mut InterItemLowerCtxt {
-                tcx: self,
-                root,
-                scope: index_to_item[scope],
-                target: index_to_item[target],
-                intra_tasks: &mut intra_tasks,
-                index_to_item: &index_to_item,
-            });
-        }
-
-        // Lower intra-item properties.
-        for IntraLowerTask {
-            scope,
-            target,
-            mut handler,
-        } in intra_tasks
-        {
-            handler(IntraItemLowerCtxt {
-                tcx: self,
-                root,
-                scope,
-                target,
-                generic_ty_names: NameResolver::new(),
-                generic_re_names: NameResolver::new(),
-                func_local_names: NameResolver::new(),
-                block_label_names: NameResolver::new(),
-                innermost_block: None,
-            });
-        }
-
-        LateInit::init(&krate.r(s).items, index_to_item.raw);
-
-        krate
+        });
     }
+
+    // Lower intra-item properties.
+    for IntraLowerTask {
+        scope,
+        target,
+        mut handler,
+    } in intra_tasks
+    {
+        handler(IntraItemLowerCtxt {
+            tcx,
+            root,
+            scope,
+            target,
+            generic_ty_names: NameResolver::new(),
+            generic_re_names: NameResolver::new(),
+            func_local_names: NameResolver::new(),
+            block_label_names: NameResolver::new(),
+            innermost_block: None,
+        });
+    }
+
+    LateInit::init(&krate.r(s).items, index_to_item.raw);
+
+    krate
 }
 
 // === First Phase === //

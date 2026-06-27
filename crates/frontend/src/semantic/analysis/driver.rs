@@ -7,43 +7,38 @@ use crate::{
     },
 };
 
-impl TyCtxt {
-    pub fn check_crate(&self, krate: Obj<Crate>) {
-        let s = &self.session;
+pub fn check_crate(tcx: &TyCtxt, krate: Obj<Crate>) {
+    let s = &tcx.session;
 
-        // Compute coherence
-        let mut coherence = CoherenceMap::default();
-        coherence.populate(self, krate);
+    // Compute coherence
+    let mut coherence = CoherenceMap::default();
+    coherence.populate(tcx, krate);
 
-        // Discover language items
-        for &def in &**krate.r(s).items {
-            for attr in &**def.r(s).attrs {
-                let AttributeKind::Lang(EarlyAttrLang { name }) = attr.r(s).kind else {
-                    continue;
-                };
+    // Discover language items
+    for &def in &**krate.r(s).items {
+        for attr in &**def.r(s).attrs {
+            let AttributeKind::Lang(EarlyAttrLang { name }) = attr.r(s).kind else {
+                continue;
+            };
 
-                let (Ok(()) | Err(ErrorGuaranteed)) =
-                    krate
-                        .r(s)
-                        .lang_items
-                        .define(self, name, attr.r(s).span, def);
-            }
+            let (Ok(()) | Err(ErrorGuaranteed)) =
+                krate.r(s).lang_items.define(tcx, name, attr.r(s).span, def);
         }
-
-        // Signature-check crate
-        CrateSigckVisitor {
-            tcx: self,
-            coherence: &coherence,
-            krate,
-        }
-        .visit_crate();
-
-        // // Borrow-check crate
-        // CrateBorrowCheckVisitor {
-        //     tcx: self,
-        //     krate,
-        //     coherence: &coherence,
-        // }
-        // .visit_crate();
     }
+
+    // Signature-check crate
+    CrateSigckVisitor {
+        tcx,
+        coherence: &coherence,
+        krate,
+    }
+    .visit_crate();
+
+    // // Borrow-check crate
+    // CrateBorrowCheckVisitor {
+    //     tcx: self,
+    //     krate,
+    //     coherence: &coherence,
+    // }
+    // .visit_crate();
 }
