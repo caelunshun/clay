@@ -7,9 +7,10 @@ use crate::{
     },
     parse::ast::{AstLit, AstUnOpKind},
     semantic::{
-        analysis::{
-            BodyCtxt, EquateOrSet, OverloadResolution, peel_ref_for_prim_op,
-            typeck::body::lookup::{LookupMethodResult, SpannedImportedAssocArgs},
+        analysis::typeck::{
+            BodyCtxt, EquateOrSet, OverloadResolution,
+            lookup::{LookupMethodResult, SpannedImportedAssocArgs},
+            peel_ref_for_prim_op,
         },
         infer::{ClauseError, HrtbUniverse, ObligeCause, ObligeCauseOrigin},
         lower::generics::normalize_positional_generic_arity_zip,
@@ -53,7 +54,7 @@ impl BodyCtxt<'_, '_> {
                         let import_env = self.import_env;
 
                         let ascription = self.ccx_mut().import_report_here(
-                            &HrtbUniverse::ROOT,
+                            HrtbUniverse::ROOT_REF,
                             import_env,
                             ascription,
                         );
@@ -197,7 +198,7 @@ impl BodyCtxt<'_, '_> {
 
                 let generics = generics.map(|generics| {
                     self.ccx_mut()
-                        .import_report_here(&HrtbUniverse::ROOT, env, generics)
+                        .import_report_here(HrtbUniverse::ROOT_REF, env, generics)
                 });
 
                 match *receiver.r(s) {

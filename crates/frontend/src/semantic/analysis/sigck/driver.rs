@@ -13,13 +13,13 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct CrateTypeckVisitor<'tcx> {
+pub struct CrateSigckVisitor<'tcx> {
     pub tcx: &'tcx TyCtxt,
     pub coherence: &'tcx CoherenceMap,
     pub krate: Obj<Crate>,
 }
 
-impl<'tcx> CrateTypeckVisitor<'tcx> {
+impl<'tcx> CrateSigckVisitor<'tcx> {
     pub fn tcx(&self) -> &'tcx TyCtxt {
         self.tcx
     }
@@ -83,7 +83,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         // First, let's ensure that the inherited trait list is well-formed.
         ccx.importer()
             .with_clause_applies_to(env.self_ty)
-            .import_report_here(&HrtbUniverse::ROOT, env.as_ref(), **inherits);
+            .import_report_here(HrtbUniverse::ROOT_REF, env.as_ref(), **inherits);
 
         // Now, let's ensure that each generic parameter's clauses are well-formed.
         self.visit_generic_binder(&mut ccx, env.as_ref(), **generics);
@@ -121,7 +121,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
         if let Some(trait_) = **trait_ {
             ccx.importer()
                 .with_clause_applies_to(env.self_ty)
-                .import_report_here(&HrtbUniverse::ROOT, env.as_ref(), trait_);
+                .import_report_here(HrtbUniverse::ROOT_REF, env.as_ref(), trait_);
 
             // Let's ensure that the type implements its super-traits as well.
             let trait_def = trait_.value.def;
@@ -129,7 +129,7 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
             for super_clause in trait_def.r(s).inherits.iter(tcx) {
                 let super_clause_span = super_clause.own_span();
                 let super_clause = ccx.import_report_here(
-                    &HrtbUniverse::ROOT,
+                    HrtbUniverse::ROOT_REF,
                     ClauseImportEnvRef::new(
                         env.self_ty,
                         &[GenericSubst {

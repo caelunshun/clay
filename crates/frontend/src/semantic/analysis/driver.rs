@@ -1,7 +1,7 @@
 use crate::{
     base::{ErrorGuaranteed, arena::Obj},
     semantic::{
-        analysis::{CrateBorrowCheckVisitor, CrateTypeckVisitor},
+        analysis::sigck::CrateSigckVisitor,
         infer::CoherenceMap,
         syntax::{AttributeKind, Crate, EarlyAttrLang, TyCtxt},
     },
@@ -30,8 +30,8 @@ impl TyCtxt {
             }
         }
 
-        // Type-check crate
-        CrateTypeckVisitor {
+        // Signature-check crate
+        CrateSigckVisitor {
             tcx: self,
             coherence: &coherence,
             krate,

@@ -2,7 +2,7 @@ use crate::{
     base::{Diag, ErrorGuaranteed, arena::Obj, syntax::Span},
     parse::token::Ident,
     semantic::{
-        analysis::BodyCtxt,
+        analysis::typeck::BodyCtxt,
         syntax::{
             AdtCtor, AdtCtorFieldIdx, AdtCtorInstance, AdtCtorUnresolved, HirPatListFrontAndTail,
             HirPatListFrontAndTailLen,

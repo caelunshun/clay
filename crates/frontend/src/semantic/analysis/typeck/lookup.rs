@@ -7,7 +7,7 @@ use crate::{
     },
     parse::token::Ident,
     semantic::{
-        analysis::{BodyCtxt, attempt_deref},
+        analysis::typeck::{BodyCtxt, attempt_deref},
         infer::{
             ClauseImportEnvRef, HrtbUniverse, ObligeCause, ObligeCauseProbe, UnboundVarHandlingMode,
         },
@@ -74,7 +74,7 @@ impl BodyCtxt<'_, '_> {
                         let env = ClauseImportEnvRef::new(receiver, &env_args);
 
                         let field = self.ccx_mut().import_report_elsewhere(
-                            &HrtbUniverse::ROOT,
+                            HrtbUniverse::ROOT_REF,
                             env,
                             field.ty.value,
                         );

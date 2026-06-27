@@ -2,7 +2,7 @@ use crate::{
     base::arena::{HasInterner, Obj},
     parse::ast::{AstAssignOpKind, AstBinOpKind, AstUnOpKind},
     semantic::{
-        analysis::BodyCtxt,
+        analysis::typeck::BodyCtxt,
         infer::ClauseCx,
         syntax::{SimpleTyKind, SimpleTySet, TraitItem, Ty, TyKind},
     },

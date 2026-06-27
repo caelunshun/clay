@@ -2,7 +2,7 @@ use crate::{
     base::arena::{HasInterner as _, Obj},
     parse::ast::AstMutability,
     semantic::{
-        analysis::BodyCtxt,
+        analysis::typeck::BodyCtxt,
         infer::{HrtbUniverse, ObligeCause, ObligeCauseOrigin},
         syntax::{
             Divergence, HirPat, HirPatKind, InferTyVarSourceInfo, Mutability, Re, RelationMode, Ty,

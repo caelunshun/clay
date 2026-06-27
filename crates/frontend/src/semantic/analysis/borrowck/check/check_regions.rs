@@ -4,7 +4,7 @@ use crate::{
         arena::{HasInterner, HasListInterner, Obj},
     },
     semantic::{
-        analysis::{CrateBorrowCheckVisitor, MirDataflowFacts},
+        analysis::borrowck::{CrateBorrowCheckVisitor, MirDataflowFacts},
         infer::{
             ClauseCx, ClauseImportEnvRef, HrtbUniverse, ObligeCause, ObligeCauseBehavior,
             UnifyCxMode,
@@ -94,7 +94,7 @@ impl BodyInstantiateCx<'_, '_> {
     fn visit_local(&mut self, local_idx: MirLocalIdx, local: &mut MirLocal) {
         local.ty = self
             .ccx
-            .import_report_elsewhere(&HrtbUniverse::ROOT, self.env, local.ty);
+            .import_report_elsewhere(HrtbUniverse::ROOT_REF, self.env, local.ty);
 
         self.ccx.oblige_ty_outlives_re(
             // TODO

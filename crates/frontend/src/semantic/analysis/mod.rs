@@ -1,7 +1,6 @@
-mod borrowck;
-pub use self::borrowck::*;
-
-mod typeck;
-pub use self::typeck::*;
+pub mod borrowck;
+pub mod sigck;
+pub mod typeck;
 
 mod driver;
+pub use self::driver::*;

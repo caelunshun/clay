@@ -1,7 +1,7 @@
 use crate::{
     base::arena::{HasInterner, HasListInterner, LateInit, Obj},
     semantic::{
-        analysis::{BodyCtxt, OverloadResolution},
+        analysis::typeck::{BodyCtxt, OverloadResolution},
         infer::{FloatingInferVar, ObligeCause},
         syntax::{
             FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirLocal, HirPat, HirPatKind,

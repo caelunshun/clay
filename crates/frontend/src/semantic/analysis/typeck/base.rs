@@ -1,7 +1,7 @@
 use crate::{
     base::{ErrorGuaranteed, Session, arena::Obj},
     semantic::{
-        analysis::CrateTypeckVisitor,
+        analysis::sigck::CrateSigckVisitor,
         infer::{ClauseCx, ClauseImportEnvRef, HrtbUniverse, ObligeCause, UnifyCx, UnifyCxMode},
         syntax::{
             Crate, FnDef, HirExpr, HirLabelledBlock, HirLocal, HirPat, InferTyVar,
@@ -13,7 +13,7 @@ use crate::{
 
 // === Driver === //
 
-impl<'tcx> CrateTypeckVisitor<'tcx> {
+impl<'tcx> CrateSigckVisitor<'tcx> {
     pub fn visit_fn_def(&mut self, def: Obj<FnDef>) {
         let s = self.session();
         let tcx = self.tcx();
@@ -41,9 +41,9 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
 
             for arg in def.r(s).args.r(s) {
                 let env = bcx.import_env;
-                let ascription = bcx
-                    .ccx_mut()
-                    .import_report_here(&HrtbUniverse::ROOT, env, arg.ty);
+                let ascription =
+                    bcx.ccx_mut()
+                        .import_report_here(HrtbUniverse::ROOT_REF, env, arg.ty);
 
                 bcx.check_pat_demand(arg.pat, ascription, None);
             }
@@ -52,10 +52,10 @@ impl<'tcx> CrateTypeckVisitor<'tcx> {
             bcx.confirm(body);
         } else {
             for arg in def.r(s).args.r(s) {
-                ccx.import_report_here(&HrtbUniverse::ROOT, env_sig.as_ref(), arg.ty);
+                ccx.import_report_here(HrtbUniverse::ROOT_REF, env_sig.as_ref(), arg.ty);
             }
 
-            ccx.import_report_here(&HrtbUniverse::ROOT, env_sig.as_ref(), *def.r(s).ret_ty);
+            ccx.import_report_here(HrtbUniverse::ROOT_REF, env_sig.as_ref(), *def.r(s).ret_ty);
         }
 
         ccx.verify();
@@ -93,7 +93,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
     ) -> Self {
         let s = ccx.session();
 
-        let return_ty = ccx.import_report_here(&HrtbUniverse::ROOT, import_env, *def.r(s).ret_ty);
+        let return_ty =
+            ccx.import_report_here(HrtbUniverse::ROOT_REF, import_env, *def.r(s).ret_ty);
 
         Self {
             ccx,
