@@ -1,7 +1,7 @@
 use crate::{
     base::arena::{HasInterner, HasListInterner, Obj},
     semantic::{
-        analysis::typeck::{BodyCtxt, attempt_deref_clobber_obligations},
+        analysis::typeck::{BodyCtxt, infra::deref::attempt_deref_clobber_obligations},
         infer::{ClauseCx, HrtbUniverse, ObligeCause, ObligeCauseOrigin},
         syntax::{
             Divergence, HirExpr, InferTyVarSourceInfo, Mutability, Re, RelationMode, SimpleTyKind,

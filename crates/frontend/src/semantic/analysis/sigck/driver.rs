@@ -1,6 +1,7 @@
 use crate::{
     base::{Session, arena::Obj},
     semantic::{
+        analysis::typeck::type_check_function,
         infer::{
             ClauseCx, ClauseImportEnvRef, CoherenceMap, HrtbUniverse, ObligeCause,
             ObligeCauseOrigin, UnifyCxMode,
@@ -90,7 +91,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
 
         // Finally, let's check method signatures and, if a default one is provided, bodies.
         for &method in methods.iter() {
-            self.visit_fn_def(method);
+            type_check_function(self, method);
         }
 
         ccx.verify();
@@ -164,7 +165,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
                 continue;
             };
 
-            self.visit_fn_def(*method);
+            type_check_function(self, *method);
         }
 
         ccx.verify();
@@ -216,7 +217,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
     pub fn visit_fn_item(&mut self, def: Obj<FnItem>) {
         let s = self.session();
 
-        self.visit_fn_def(*def.r(s).def);
+        type_check_function(self, *def.r(s).def);
     }
 
     pub fn visit_type_alias_item(&mut self, def: Obj<TypeAliasItem>) {

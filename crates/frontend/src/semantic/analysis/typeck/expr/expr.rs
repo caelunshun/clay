@@ -8,9 +8,9 @@ use crate::{
     parse::ast::{AstLit, AstUnOpKind},
     semantic::{
         analysis::typeck::{
-            BodyCtxt, EquateOrSet, OverloadResolution,
-            lookup::{LookupMethodResult, SpannedImportedAssocArgs},
-            peel_ref_for_prim_op,
+            BodyCtxt, OverloadResolution,
+            expr::ops::{EquateOrSet, peel_ref_for_prim_op},
+            infra::lookup::{LookupMethodResult, SpannedImportedAssocArgs},
         },
         infer::{ClauseError, HrtbUniverse, ObligeCause, ObligeCauseOrigin},
         lower::generics::normalize_positional_generic_arity_zip,

@@ -13,58 +13,56 @@ use crate::{
 
 // === Driver === //
 
-impl<'tcx> CrateSigckVisitor<'tcx> {
-    pub fn visit_fn_def(&mut self, def: Obj<FnDef>) {
-        let s = self.session();
-        let tcx = self.tcx();
+pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
+    let s = cx.session();
+    let tcx = cx.tcx();
 
-        // Setup a `ClauseCx` for signature validation.
-        let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionBlind);
-        let env_sig = ccx.create_universal_env_for_fn_def(
+    // Setup a `ClauseCx` for signature validation.
+    let mut ccx = ClauseCx::new(tcx, cx.coherence, cx.krate, UnifyCxMode::RegionBlind);
+    let env_sig = ccx.create_universal_env_for_fn_def(
+        &ObligeCause::new_empty_report(),
+        HrtbUniverse::ROOT_REF,
+        def,
+    );
+
+    // WF-check the signature.
+    cx.visit_generic_binder(&mut ccx, env_sig.as_ref(), def.r(s).generics);
+
+    // Check the body
+    if let Some(body) = *def.r(s).hir_body {
+        let env_body = ccx.create_universal_env_for_fn_def(
             &ObligeCause::new_empty_report(),
             HrtbUniverse::ROOT_REF,
             def,
         );
 
-        // WF-check the signature.
-        self.visit_generic_binder(&mut ccx, env_sig.as_ref(), def.r(s).generics);
+        let mut bcx = BodyCtxt::new(&mut ccx, def, env_body.as_ref());
 
-        // Check the body
-        if let Some(body) = *def.r(s).hir_body {
-            let env_body = ccx.create_universal_env_for_fn_def(
-                &ObligeCause::new_empty_report(),
-                HrtbUniverse::ROOT_REF,
-                def,
-            );
+        for arg in def.r(s).args.r(s) {
+            let env = bcx.import_env;
+            let ascription = bcx
+                .ccx_mut()
+                .import_report_here(HrtbUniverse::ROOT_REF, env, arg.ty);
 
-            let mut bcx = BodyCtxt::new(&mut ccx, def, env_body.as_ref());
-
-            for arg in def.r(s).args.r(s) {
-                let env = bcx.import_env;
-                let ascription =
-                    bcx.ccx_mut()
-                        .import_report_here(HrtbUniverse::ROOT_REF, env, arg.ty);
-
-                bcx.check_pat_demand(arg.pat, ascription, None);
-            }
-
-            bcx.check_expr_demand(body, bcx.return_ty).ignore();
-            bcx.confirm(body);
-        } else {
-            for arg in def.r(s).args.r(s) {
-                ccx.import_report_here(HrtbUniverse::ROOT_REF, env_sig.as_ref(), arg.ty);
-            }
-
-            ccx.import_report_here(HrtbUniverse::ROOT_REF, env_sig.as_ref(), *def.r(s).ret_ty);
+            bcx.check_pat_demand(arg.pat, ascription, None);
         }
 
-        ccx.verify();
+        bcx.check_expr_demand(body, bcx.return_ty).ignore();
+        bcx.confirm(body);
+    } else {
+        for arg in def.r(s).args.r(s) {
+            ccx.import_report_here(HrtbUniverse::ROOT_REF, env_sig.as_ref(), arg.ty);
+        }
+
+        ccx.import_report_here(HrtbUniverse::ROOT_REF, env_sig.as_ref(), *def.r(s).ret_ty);
     }
+
+    ccx.verify();
 }
 
 // === BodyCtxt === //
 
-pub struct BodyCtxt<'a, 'tcx> {
+pub(super) struct BodyCtxt<'a, 'tcx> {
     pub ccx: &'a mut ClauseCx<'tcx>,
     pub def: Obj<FnDef>,
     pub import_env: ClauseImportEnvRef<'a>,

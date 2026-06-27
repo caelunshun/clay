@@ -7,7 +7,7 @@ use crate::{
     },
     parse::token::Ident,
     semantic::{
-        analysis::typeck::{BodyCtxt, attempt_deref},
+        analysis::typeck::{BodyCtxt, infra::deref::attempt_deref},
         infer::{
             ClauseImportEnvRef, HrtbUniverse, ObligeCause, ObligeCauseProbe, UnboundVarHandlingMode,
         },
