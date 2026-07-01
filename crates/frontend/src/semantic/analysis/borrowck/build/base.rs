@@ -112,7 +112,7 @@ impl<'tcx> MirBuildCtxt<'tcx> {
         let tcx = self.tcx();
         let s = self.session();
 
-        match expr.r(s).kind {
+        match *expr.r(s).kind {
             ThirExprKind::Local(local) => MirRvalueOrPlace::Place(self.lower_local(local)),
             ThirExprKind::CreatePathZst => {
                 MirRvalueOrPlace::Rvalue(MirAssignRvalue::Zst(expr.r(s).ty))
@@ -271,6 +271,7 @@ impl<'tcx> MirBuildCtxt<'tcx> {
                 MirRvalueOrPlace::Place(destination)
             }
             ThirExprKind::While(cond, block) => todo!(),
+            ThirExprKind::Break(label, value) => todo!(),
             ThirExprKind::Let(obj, obj1) => todo!(),
             ThirExprKind::Error(_) => unreachable!(),
         }

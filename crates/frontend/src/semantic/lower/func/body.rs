@@ -18,9 +18,9 @@ use crate::{
             func::{pat::PatOrRest, path::PathResolvedValue},
         },
         syntax::{
-            HirBlock, HirExpr, HirExprKind, HirLabelTargetKind, HirLabelledBlock, HirLetStmt,
-            HirMatchArm, HirPat, HirPatKind, HirPatListFrontAndTail, HirRangeExpr, HirStmt,
-            HirStructExpr, HirStructNamedField, LocalNameSymbol, SpannedTyOrReList,
+            HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirLetStmt, HirMatchArm, HirPat,
+            HirPatKind, HirPatListFrontAndTail, HirRangeExpr, HirStmt, HirStructExpr,
+            HirStructNamedField, LabelTargetKind, LocalNameSymbol, SpannedTyOrReList,
         },
     },
 };
@@ -247,7 +247,7 @@ impl IntraItemLowerCtxt<'_> {
                     this.lower_block_with_label(
                         HirLabelledBlock {
                             target: expr,
-                            kind: HirLabelTargetKind::While,
+                            kind: LabelTargetKind::While,
                         },
                         *label,
                         block,
@@ -265,7 +265,7 @@ impl IntraItemLowerCtxt<'_> {
                 let body = self.lower_block_with_label(
                     HirLabelledBlock {
                         target: expr,
-                        kind: HirLabelTargetKind::For,
+                        kind: LabelTargetKind::For,
                     },
                     *label,
                     body,
@@ -276,7 +276,7 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::Loop(block, label) => HirExprKind::Loop(self.lower_block_with_label(
                 HirLabelledBlock {
                     target: expr,
-                    kind: HirLabelTargetKind::Loop,
+                    kind: LabelTargetKind::Loop,
                 },
                 *label,
                 block,
@@ -288,7 +288,7 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::Block(block, label) => HirExprKind::Block(self.lower_block_with_label(
                 HirLabelledBlock {
                     target: expr,
-                    kind: HirLabelTargetKind::Block,
+                    kind: LabelTargetKind::Block,
                 },
                 *label,
                 block,

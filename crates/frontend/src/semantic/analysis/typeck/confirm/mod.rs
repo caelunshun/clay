@@ -1,18 +1,56 @@
 use crate::{
-    base::arena::{HasInterner, HasListInterner, LateInit, Obj},
+    base::{
+        Session,
+        arena::{HasInterner, HasListInterner, LateInit, Obj},
+    },
     semantic::{
         analysis::typeck::{BodyCtxt, OverloadResolution},
-        infer::{FloatingInferVar, ObligeCause},
+        infer::{ClauseCx, FloatingInferVar, ObligeCause, UnifyCx},
         syntax::{
-            FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirLocal, HirPat, HirPatKind,
-            HirStmt, RelationMode, ThirBlock, ThirExpr, ThirExprKind, ThirLetStmt, ThirLocal,
-            ThirPat, ThirPatKind, ThirStmt, TraitParam, TraitSpec, Ty, TyFoldable,
-            TyFolderInfallibleExt, TyKind, TyOrRe,
+            FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirLocal,
+            HirPat, HirPatKind, HirStmt, RelationMode, ThirBlock, ThirExpr, ThirExprKind,
+            ThirLabelledBlock, ThirLetStmt, ThirLocal, ThirPat, ThirPatKind, ThirStmt, TraitParam,
+            TraitSpec, Ty, TyCtxt, TyFoldable, TyFolderInfallibleExt, TyKind, TyOrRe,
         },
     },
+    utils::hash::FxHashMap,
 };
 
-impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
+pub struct ConfirmCtxt<'a, 'b, 'tcx> {
+    pub bcx: &'a mut BodyCtxt<'b, 'tcx>,
+    pub local_confirmations: FxHashMap<Obj<HirLocal>, Obj<ThirLocal>>,
+    pub expr_confirmations: FxHashMap<Obj<HirExpr>, Obj<ThirExpr>>,
+}
+
+impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
+    pub fn new(bcx: &'a mut BodyCtxt<'b, 'tcx>) -> Self {
+        Self {
+            bcx,
+            local_confirmations: FxHashMap::default(),
+            expr_confirmations: FxHashMap::default(),
+        }
+    }
+
+    pub fn session(&self) -> &'tcx Session {
+        self.bcx.session()
+    }
+
+    pub fn tcx(&self) -> &'tcx TyCtxt {
+        self.bcx.tcx()
+    }
+
+    pub fn ccx(&self) -> &ClauseCx<'tcx> {
+        self.bcx.ccx()
+    }
+
+    pub fn ccx_mut(&mut self) -> &mut ClauseCx<'tcx> {
+        self.bcx.ccx_mut()
+    }
+
+    pub fn ucx_mut(&mut self) -> &mut UnifyCx<'tcx> {
+        self.bcx.ucx_mut()
+    }
+
     pub fn confirm(&mut self, body: Obj<HirExpr>) {
         let tcx = self.tcx();
         let s = self.session();
@@ -20,8 +58,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         // Assign fallbacks to integer literal inference holes.
         self.ccx_mut().poll_obligations();
 
-        for idx in 0..self.int_infers.len() {
-            let var = self.int_infers[idx];
+        for idx in 0..self.bcx.int_infers.len() {
+            let var = self.bcx.int_infers[idx];
 
             let Err(FloatingInferVar { perm_set, .. }) =
                 self.ccx().lookup_ty_infer_var_without_poll(var)
@@ -46,7 +84,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         }
 
         // Lower the function to its THIR representation.
-        LateInit::init(&self.def.r(s).thir_body, Some(self.confirm_expr(body)));
+        LateInit::init(&self.bcx.def.r(s).thir_body, Some(self.confirm_expr(body)));
     }
 
     fn confirm_expr(&mut self, expr: Obj<HirExpr>) -> Obj<ThirExpr> {
@@ -68,7 +106,18 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         let s = self.session();
         let tcx = self.tcx();
 
-        let ty = self.confirm_ty(self.expr_types_pre_coerce[&expr]);
+        let ty = self.confirm_ty(self.bcx.expr_types_pre_coerce[&expr]);
+
+        let expr_thir = Obj::new(
+            ThirExpr {
+                span: expr.r(s).span,
+                ty,
+                kind: LateInit::uninit(),
+            },
+            s,
+        );
+
+        self.expr_confirmations.insert(expr, expr_thir);
 
         let kind = match *expr.r(s).kind {
             HirExprKind::Array(obj) => todo!(),
@@ -80,12 +129,12 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let lhs = self.confirm_expr(lhs);
                 let rhs = self.confirm_expr(rhs);
 
-                match self.overload_resolutions[&expr] {
+                match self.bcx.overload_resolutions[&expr] {
                     OverloadResolution::Primitive => {
                         ThirExprKind::PrimitiveBinOp(op.kind, lhs, rhs)
                     }
                     OverloadResolution::Call => {
-                        let overload = self.decode_bin_op_kind(op.kind).overload.unwrap();
+                        let overload = self.bcx.decode_bin_op_kind(op.kind).overload.unwrap();
 
                         ThirExprKind::Call(
                             Obj::new(
@@ -105,7 +154,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                                         },
                                         early_args: None,
                                     }))),
-                                    kind: ThirExprKind::CreatePathZst,
+                                    kind: LateInit::new(ThirExprKind::CreatePathZst),
                                 },
                                 s,
                             ),
@@ -118,10 +167,10 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             HirExprKind::Unary(op, lhs) => {
                 let lhs = self.confirm_expr(lhs);
 
-                match self.overload_resolutions[&expr] {
+                match self.bcx.overload_resolutions[&expr] {
                     OverloadResolution::Primitive => ThirExprKind::PrimitiveUnOp(op, lhs),
                     OverloadResolution::Call => {
-                        let overload = self.decode_un_op_kind(op).overload.unwrap();
+                        let overload = self.bcx.decode_un_op_kind(op).overload.unwrap();
 
                         ThirExprKind::Call(
                             Obj::new(
@@ -140,7 +189,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                                         },
                                         early_args: None,
                                     }))),
-                                    kind: ThirExprKind::CreatePathZst,
+                                    kind: LateInit::new(ThirExprKind::CreatePathZst),
                                 },
                                 s,
                             ),
@@ -196,7 +245,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             HirExprKind::Range(hir_range_expr) => todo!(),
             HirExprKind::Local(local) => ThirExprKind::Local(self.confirm_local(local)),
             HirExprKind::AddrOf(muta, expr) => ThirExprKind::AddrOf(muta, self.confirm_expr(expr)),
-            HirExprKind::Break { label, value } => todo!(),
+            HirExprKind::Break { label, value } => {
+                ThirExprKind::Break(self.confirm_label(label), self.confirm_opt_expr(value))
+            }
             HirExprKind::Continue(hir_labelled_block) => todo!(),
             HirExprKind::Return(expr) => ThirExprKind::Return(self.confirm_expr(expr)),
             HirExprKind::AdtCtorTy(_) => ThirExprKind::CreatePathZst,
@@ -205,14 +256,12 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             HirExprKind::Error(error) => ThirExprKind::Error(error),
         };
 
-        Obj::new(
-            ThirExpr {
-                span: expr.r(s).span,
-                ty,
-                kind,
-            },
-            s,
-        )
+        LateInit::init(&expr_thir.r(s).kind, kind);
+        expr_thir
+    }
+
+    fn confirm_label(&mut self, label: HirLabelledBlock) -> ThirLabelledBlock {
+        label.map(|expr| self.expr_confirmations[&expr])
     }
 
     fn confirm_block(&mut self, block: Obj<HirBlock>, ty: Ty) -> Obj<ThirBlock> {
@@ -308,7 +357,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         Obj::new(
             ThirPat {
                 span: pat.r(s).span,
-                ty: self.pat_types_pre_adjust[&pat],
+                ty: self.bcx.pat_types_pre_adjust[&pat],
                 kind,
             },
             s,
@@ -322,7 +371,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             return confirmation;
         }
 
-        let ty = self.type_of_local(local);
+        let ty = self.bcx.type_of_local(local);
         let ty = self.confirm_ty(ty);
         let thir = Obj::new(
             ThirLocal {

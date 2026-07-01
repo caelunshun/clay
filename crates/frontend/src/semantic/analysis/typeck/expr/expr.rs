@@ -15,7 +15,7 @@ use crate::{
         lower::generics::normalize_positional_generic_arity_zip,
         syntax::{
             AdtInstance, Divergence, FnInstanceInner, HirBlock, HirExpr, HirExprKind,
-            HirLabelTargetKind, HirLabelledBlock, HirStmt, InferTyVarSourceInfo, Re, RelationMode,
+            HirLabelledBlock, HirStmt, InferTyVarSourceInfo, LabelTargetKind, Re, RelationMode,
             SimpleTyKind, SimpleTySet, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTyView,
             TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
@@ -289,7 +289,7 @@ impl BodyCtxt<'_, '_> {
             HirExprKind::Loop(block) => {
                 let label = HirLabelledBlock {
                     target: expr,
-                    kind: HirLabelTargetKind::Loop,
+                    kind: LabelTargetKind::Loop,
                 };
 
                 self.block_break_demands.insert(label, None);
@@ -305,7 +305,7 @@ impl BodyCtxt<'_, '_> {
             HirExprKind::Block(block) => {
                 let label = HirLabelledBlock {
                     target: expr,
-                    kind: HirLabelTargetKind::Block,
+                    kind: LabelTargetKind::Block,
                 };
 
                 self.block_break_demands.insert(label, demand_hint);

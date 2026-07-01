@@ -1,7 +1,11 @@
 use crate::{
-    base::{ErrorGuaranteed, arena::Obj, syntax::Span},
+    base::{
+        ErrorGuaranteed,
+        arena::{LateInit, Obj},
+        syntax::Span,
+    },
     parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
-    semantic::syntax::{LocalNameIdent, Mutability, Ty},
+    semantic::syntax::{LocalNameIdent, Mutability, ThirLabelledBlock, Ty},
 };
 
 // === Pattern === //
@@ -40,7 +44,7 @@ pub enum ThirPatKind {
 pub struct ThirExpr {
     pub span: Span,
     pub ty: Ty,
-    pub kind: ThirExprKind,
+    pub kind: LateInit<ThirExprKind>,
 }
 
 #[derive(Debug, Clone)]
@@ -50,6 +54,7 @@ pub enum ThirExprKind {
     CreateTuple(Obj<[Obj<ThirExpr>]>),
     PrimitiveBinOp(AstBinOpKind, Obj<ThirExpr>, Obj<ThirExpr>),
     PrimitiveUnOp(AstUnOpKind, Obj<ThirExpr>),
+    Break(ThirLabelledBlock, Option<Obj<ThirExpr>>),
     Return(Obj<ThirExpr>),
     Assign(Obj<ThirPat>, Obj<ThirExpr>),
     Block(Obj<ThirBlock>),

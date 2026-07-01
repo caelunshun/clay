@@ -10,9 +10,3 @@ note: Origin(
     },
 )
 
-error: cannot unify types `()` and `u32`
-  ┌─ block_missing_trailing_expr.fir:1:1
-  │
-1 │ fn foo() -> u32 {}
-  │ ^
-

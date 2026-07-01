@@ -1,7 +1,7 @@
 use crate::{
     base::{ErrorGuaranteed, Session, arena::Obj},
     semantic::{
-        analysis::sigck::CrateSigckVisitor,
+        analysis::{sigck::CrateSigckVisitor, typeck::confirm::ConfirmCtxt},
         infer::{ClauseCx, ClauseImportEnvRef, HrtbUniverse, ObligeCause, UnifyCx, UnifyCxMode},
         syntax::{
             Crate, FnDef, HirExpr, HirLabelledBlock, HirLocal, HirPat, InferTyVar,
@@ -48,7 +48,8 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
         }
 
         bcx.check_expr_demand(body, bcx.return_ty).ignore();
-        bcx.confirm(body);
+
+        ConfirmCtxt::new(&mut bcx).confirm(body);
     } else {
         for arg in def.r(s).args.r(s) {
             ccx.import_report_here(HrtbUniverse::ROOT_REF, env_sig.as_ref(), arg.ty);
@@ -67,7 +68,6 @@ pub(super) struct BodyCtxt<'a, 'tcx> {
     pub def: Obj<FnDef>,
     pub import_env: ClauseImportEnvRef<'a>,
     pub local_types: FxHashMap<Obj<HirLocal>, Ty>,
-    pub local_confirmations: FxHashMap<Obj<HirLocal>, Obj<ThirLocal>>,
     pub block_break_demands: FxHashMap<HirLabelledBlock, Option<Ty>>,
     pub int_infers: Vec<InferTyVar>,
     pub expr_types_pre_coerce: FxHashMap<Obj<HirExpr>, Ty>,
@@ -99,7 +99,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             def,
             import_env,
             local_types: FxHashMap::default(),
-            local_confirmations: FxHashMap::default(),
             block_break_demands: FxHashMap::default(),
             int_infers: Vec::new(),
             expr_types_pre_coerce: FxHashMap::default(),

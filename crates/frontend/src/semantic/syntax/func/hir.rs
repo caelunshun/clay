@@ -11,10 +11,9 @@ use crate::{
         token::Ident,
     },
     semantic::syntax::{
-        AdtCtorUnresolved, EnumVariantItem, FnItem, Mutability, SpannedTraitSpec, SpannedTy,
-        SpannedTyOrReList,
+        AdtCtorUnresolved, EnumVariantItem, FnItem, HirLabelledBlock, Mutability, SpannedTraitSpec,
+        SpannedTy, SpannedTyOrReList,
     },
-    symbol,
 };
 use std::fmt;
 
@@ -240,61 +239,6 @@ pub enum HirExprKind {
     Return(Obj<HirExpr>),
     Struct(HirStructExpr),
     Error(ErrorGuaranteed),
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct HirLabelledBlock {
-    pub target: Obj<HirExpr>,
-    pub kind: HirLabelTargetKind,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum HirLabelTargetKind {
-    Loop,
-    While,
-    For,
-    Block,
-}
-
-impl HirLabelTargetKind {
-    pub fn implicit_innermost(self) -> bool {
-        match self {
-            HirLabelTargetKind::Loop | HirLabelTargetKind::While | HirLabelTargetKind::For => true,
-            HirLabelTargetKind::Block => false,
-        }
-    }
-
-    pub fn can_break_with_value(self) -> bool {
-        match self {
-            HirLabelTargetKind::Loop | HirLabelTargetKind::Block => true,
-            HirLabelTargetKind::While | HirLabelTargetKind::For => false,
-        }
-    }
-
-    pub fn can_continue(self) -> bool {
-        match self {
-            HirLabelTargetKind::Loop | HirLabelTargetKind::While | HirLabelTargetKind::For => true,
-            HirLabelTargetKind::Block => false,
-        }
-    }
-
-    pub fn what(self) -> Symbol {
-        match self {
-            HirLabelTargetKind::Loop => symbol!("`loop`"),
-            HirLabelTargetKind::While => symbol!("`while` loop"),
-            HirLabelTargetKind::For => symbol!("`for` loop"),
-            HirLabelTargetKind::Block => symbol!("named block"),
-        }
-    }
-
-    pub fn a_what(self) -> Symbol {
-        match self {
-            HirLabelTargetKind::Loop => symbol!("a `loop`"),
-            HirLabelTargetKind::While => symbol!("a `while` loop"),
-            HirLabelTargetKind::For => symbol!("a `for` loop"),
-            HirLabelTargetKind::Block => symbol!("a named block"),
-        }
-    }
 }
 
 #[derive(Debug, Copy, Clone)]
