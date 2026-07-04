@@ -1,5 +1,10 @@
 use crate::{
-    base::{Diag, ErrorGuaranteed, analysis::SpannedViewEncode, arena::Obj, syntax::Span},
+    base::{
+        Diag, ErrorGuaranteed,
+        analysis::SpannedViewEncode,
+        arena::{HasInterner, Obj},
+        syntax::Span,
+    },
     parse::token::Ident,
     semantic::{
         analysis::typeck::BodyCtxt,
@@ -95,6 +100,16 @@ impl BodyCtxt<'_, '_> {
                 })
             }
         }
+    }
+
+    pub fn adt_ctor_to_instance_ty(&self, ctor: AdtCtorInstance) -> Ty {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        tcx.intern(TyKind::Adt(AdtInstance {
+            def: ctor.def.r(s).owner.item(s),
+            params: ctor.params,
+        }))
     }
 
     pub fn resolve_ty_as_adt_instance(

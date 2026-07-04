@@ -10,5 +10,5 @@ mod pip {
 use pip::*;
 
 fn main() {
-    Mew {}
+    Meow { a: "meow", b: 2 }
 }

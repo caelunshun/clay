@@ -8,12 +8,12 @@ use crate::{
     parse::ast::AstLit,
     semantic::{
         analysis::typeck::{BodyCtxt, infra::lookup::SpannedImportedAssocArgs},
-        infer::{HrtbUniverse, ObligeCause, ObligeCauseOrigin},
+        infer::{ClauseImportEnvRef, HrtbUniverse, ObligeCause, ObligeCauseOrigin},
         syntax::{
-            AdtInstance, Divergence, HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirStmt,
-            HirStructExpr, InferTyVarSourceInfo, LabelTargetKind, Re, RelationMode, SimpleTyKind,
-            SimpleTySet, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTyView, TraitParam,
-            TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            AdtCtorSyntax, AdtInstance, Divergence, GenericSubst, HirBlock, HirExpr, HirExprKind,
+            HirLabelledBlock, HirStmt, HirStructExpr, InferTyVarSourceInfo, LabelTargetKind, Re,
+            RelationMode, SimpleTyKind, SimpleTySet, SpannedFnInstanceView, SpannedFnOwnerView,
+            SpannedTyView, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -399,7 +399,63 @@ impl BodyCtxt<'_, '_> {
                     Err(err) => break 'check tcx.intern(TyKind::Error(err)),
                 };
 
-                todo!()
+                match &ctor.def.r(s).syntax {
+                    AdtCtorSyntax::Unit | AdtCtorSyntax::Tuple => {
+                        break 'check tcx.intern(TyKind::Error(
+                            Diag::span_err(
+                                ctor_span,
+                                "cannot use braced initializer for non-braced ADT constructor",
+                            )
+                            .emit(),
+                        ));
+                    }
+                    AdtCtorSyntax::Named(_) => {
+                        // (fallthrough)
+                    }
+                };
+
+                let instance_owner = ctor.def.r(s).owner.item(s);
+                let instance_ty = self.adt_ctor_to_instance_ty(ctor);
+
+                let mapping = self.match_up_ctor_members(
+                    ctor.def,
+                    fields
+                        .r(s)
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, field)| (field.name, idx))
+                        .collect::<Vec<_>>(),
+                    /* deny_missing */ rest.is_none().then_some(ctor_span),
+                );
+
+                for (adt_ctor_field, idx_in_expr) in mapping {
+                    let init_expr = fields.r(s)[idx_in_expr].init;
+
+                    let init_ty_orig = ctor.def.r(s).fields[adt_ctor_field].ty.value;
+                    let init_ty_env_args = [GenericSubst {
+                        binder: instance_owner.r(s).generics,
+                        substs: ctor.params,
+                    }];
+
+                    let init_ty_env = ClauseImportEnvRef::new(instance_ty, &init_ty_env_args);
+
+                    let init_ty = self.ccx_mut().import_report_elsewhere(
+                        HrtbUniverse::ROOT_REF,
+                        init_ty_env,
+                        init_ty_orig,
+                    );
+
+                    // Mapping follows evaluation order with some filtering for unmatched fields.
+                    self.check_expr_demand(init_expr, init_ty)
+                        .and_do(&mut divergence);
+                }
+
+                if let Some(rest) = rest {
+                    self.check_expr_demand(rest, instance_ty)
+                        .and_do(&mut divergence);
+                }
+
+                instance_ty
             }
             HirExprKind::Error(err) => tcx.intern(TyKind::Error(err)),
         };

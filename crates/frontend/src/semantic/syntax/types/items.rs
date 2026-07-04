@@ -115,6 +115,13 @@ impl AdtCtorOwner {
             AdtCtorOwner::EnumVariant(..) => symbol!("`enum` variants"),
         }
     }
+
+    pub fn item(self, s: &Session) -> Obj<AdtItem> {
+        match self {
+            AdtCtorOwner::Struct(def) => def.r(s).adt,
+            AdtCtorOwner::EnumVariant(def) => def.r(s).owner.r(s).adt,
+        }
+    }
 }
 
 define_index_type! {
