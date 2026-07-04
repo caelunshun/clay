@@ -450,7 +450,7 @@ impl IntraItemLowerCtxt<'_> {
                             path.span,
                             format_args!(
                                 "expected named struct or enum variant, got {}",
-                                res.bare_what(s)
+                                res.bare_what(s),
                             ),
                         )
                         .emit(),

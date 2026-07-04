@@ -1,11 +1,13 @@
 use crate::{
-    base::{Diag, ErrorGuaranteed, arena::Obj, syntax::Span},
+    base::{Diag, ErrorGuaranteed, analysis::SpannedViewEncode, arena::Obj, syntax::Span},
     parse::token::Ident,
     semantic::{
         analysis::typeck::BodyCtxt,
+        infer::HrtbUniverse,
         syntax::{
-            AdtCtor, AdtCtorFieldIdx, AdtCtorInstance, AdtCtorUnresolved, HirPatListFrontAndTail,
-            HirPatListFrontAndTailLen,
+            AdtCtor, AdtCtorFieldIdx, AdtCtorInstance, AdtCtorUnresolved, AdtInstance, AdtKind,
+            HirPatListFrontAndTail, HirPatListFrontAndTailLen, PrettyPrinterOpts, PrettyTy,
+            SpannedAdtInstanceView, Ty, TyKind,
         },
     },
     utils::{
@@ -18,9 +20,121 @@ use hashbrown::hash_map;
 impl BodyCtxt<'_, '_> {
     pub fn resolve_adt_ctor(
         &mut self,
+        span: Span,
         ctor: AdtCtorUnresolved,
     ) -> Result<AdtCtorInstance, ErrorGuaranteed> {
-        todo!()
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let import_env = self.import_env;
+
+        match ctor {
+            AdtCtorUnresolved::ResolvedTy(ty) => {
+                let ty = self
+                    .ccx_mut()
+                    .import_report_here(HrtbUniverse::ROOT_REF, import_env, ty);
+
+                let instance = self.resolve_ty_as_adt_instance(span, ty)?;
+
+                let def = match *instance.def.r(s).kind {
+                    AdtKind::Struct(def) => *def.r(s).ctor,
+                    AdtKind::Enum(_) => {
+                        return Err(
+                            Diag::span_err(span, "expected enum variant, got bare enum").emit()
+                        );
+                    }
+                };
+
+                Ok(AdtCtorInstance {
+                    def,
+                    params: instance.params,
+                })
+            }
+            AdtCtorUnresolved::ResolvedEnumVariant(def, args) => Ok(AdtCtorInstance {
+                def: *def.r(s).adt_variant(s).r(s).ctor,
+                params: self
+                    .ccx_mut()
+                    .import_report_here(
+                        HrtbUniverse::ROOT_REF,
+                        import_env,
+                        SpannedAdtInstanceView {
+                            def: def.r(s).adt(s),
+                            params: args,
+                        }
+                        .encode(span, tcx),
+                    )
+                    .params,
+            }),
+            AdtCtorUnresolved::UnresolvedEnumVariant(enum_ty, variant_name) => {
+                let enum_ty =
+                    self.ccx_mut()
+                        .import_report_here(HrtbUniverse::ROOT_REF, import_env, enum_ty);
+
+                let enum_instance = self.resolve_ty_as_adt_instance(span, enum_ty)?;
+
+                let def = match *enum_instance.def.r(s).kind {
+                    AdtKind::Enum(def) => def,
+                    AdtKind::Struct(_) => {
+                        return Err(Diag::span_err(
+                            variant_name.span,
+                            "unexpected path segment after struct",
+                        )
+                        .emit());
+                    }
+                };
+
+                let Some(&def_idx) = def.r(s).by_name.get(&variant_name.text) else {
+                    return Err(Diag::span_err(variant_name.span, "unknown enum variant").emit());
+                };
+
+                let def = (*def.r(s).variants)[def_idx];
+
+                Ok(AdtCtorInstance {
+                    def: *def.r(s).ctor,
+                    params: enum_instance.params,
+                })
+            }
+        }
+    }
+
+    pub fn resolve_ty_as_adt_instance(
+        &mut self,
+        span: Span,
+        ty: Ty,
+    ) -> Result<AdtInstance, ErrorGuaranteed> {
+        let s = self.session();
+
+        match *self.ccx_mut().peel_ty_infer_var_after_poll(ty).r(s) {
+            TyKind::Adt(instance) => Ok(instance),
+
+            TyKind::Simple(..)
+            | TyKind::Reference(..)
+            | TyKind::Trait(..)
+            | TyKind::Tuple(..)
+            | TyKind::FnDef(..)
+            | TyKind::InferVar(..)
+            | TyKind::UniversalVar(..) => {
+                return Err(PrettyPrinterOpts {
+                    ccx: Some(self.ccx),
+                }
+                .provide(|| {
+                    Diag::span_err(
+                        span,
+                        format_args!("expected ADT constructor; got `{}`", PrettyTy(ty)),
+                    )
+                    .emit()
+                }));
+            }
+
+            TyKind::SigThis
+            | TyKind::SigInfer
+            | TyKind::SigGeneric(..)
+            | TyKind::SigProject(..)
+            | TyKind::SigAlias(..)
+            | TyKind::HrtbVar(..) => unreachable!(),
+
+            TyKind::Error(err) => return Err(err),
+        }
     }
 
     pub fn check_tuple_ctor_visibilities(

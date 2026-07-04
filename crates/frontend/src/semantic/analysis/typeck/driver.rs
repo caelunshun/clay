@@ -5,7 +5,7 @@ use crate::{
         infer::{ClauseCx, ClauseImportEnvRef, HrtbUniverse, ObligeCause, UnifyCx, UnifyCxMode},
         syntax::{
             Crate, FnDef, HirExpr, HirLabelledBlock, HirLocal, HirPat, InferTyVar,
-            InferTyVarSourceInfo, Item, ThirLocal, Ty, TyCtxt,
+            InferTyVarSourceInfo, Item, Ty, TyCtxt,
         },
     },
     utils::hash::FxHashMap,

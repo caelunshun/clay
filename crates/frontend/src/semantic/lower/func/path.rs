@@ -230,13 +230,9 @@ impl ExprPathResolution {
             }
             ExprPathResolution::TypeRelative {
                 self_ty,
-                as_trait,
-                assoc,
-            } => Some(AdtCtorUnresolved::TypeRelative {
-                self_ty,
-                as_trait,
-                assoc,
-            }),
+                as_trait: None,
+                assoc: TypeRelativeAssoc { name, args: None },
+            } => Some(AdtCtorUnresolved::UnresolvedEnumVariant(self_ty, name)),
             _ => None,
         }
     }

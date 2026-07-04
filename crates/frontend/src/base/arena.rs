@@ -1,6 +1,6 @@
 use crate::{
     base::{HasSession, Session},
-    utils::hash::{FxBuildHasher, FxHashMap, FxHashSet, hash_map},
+    utils::hash::{FxBuildHasher, FxHashMap, hash_map},
 };
 use bumpalo::Bump;
 use derive_where::derive_where;

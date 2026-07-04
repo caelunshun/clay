@@ -172,18 +172,13 @@ pub struct AdtCtorField {
 pub enum AdtCtorUnresolved {
     ResolvedTy(SpannedTy),
     ResolvedEnumVariant(Obj<EnumVariantItem>, SpannedTyOrReList),
-    TypeRelative {
-        self_ty: SpannedTy,
-        as_trait: Option<SpannedTraitSpec>,
-        assoc: TypeRelativeAssoc,
-    },
+    UnresolvedEnumVariant(SpannedTy, Ident),
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct AdtCtorInstance {
-    pub span: Span,
     pub def: Obj<AdtCtor>,
-    pub params: SpannedTyOrReList,
+    pub params: TyOrReList,
 }
 
 // === Type Aliases === //

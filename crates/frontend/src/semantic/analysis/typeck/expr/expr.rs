@@ -7,17 +7,13 @@ use crate::{
     },
     parse::ast::AstLit,
     semantic::{
-        analysis::typeck::{
-            BodyCtxt,
-            infra::lookup::{LookupMethodResult, SpannedImportedAssocArgs},
-        },
+        analysis::typeck::{BodyCtxt, infra::lookup::SpannedImportedAssocArgs},
         infer::{HrtbUniverse, ObligeCause, ObligeCauseOrigin},
-        lower::generics::normalize_positional_generic_arity_zip,
         syntax::{
-            AdtInstance, Divergence, FnInstanceInner, HirBlock, HirExpr, HirExprKind,
-            HirLabelledBlock, HirStmt, InferTyVarSourceInfo, LabelTargetKind, Re, RelationMode,
-            SimpleTyKind, SimpleTySet, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTyView,
-            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            AdtInstance, Divergence, HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirStmt,
+            HirStructExpr, InferTyVarSourceInfo, LabelTargetKind, Re, RelationMode, SimpleTyKind,
+            SimpleTySet, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTyView, TraitParam,
+            TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -392,7 +388,19 @@ impl BodyCtxt<'_, '_> {
             }
             HirExprKind::AdtCtorTy(spanned) => todo!(),
             HirExprKind::AdtCtorEnumVariant(obj, spanned) => todo!(),
-            HirExprKind::Struct(hir_struct_expr) => todo!(),
+            HirExprKind::Struct(HirStructExpr {
+                ctor_span,
+                ctor,
+                fields,
+                rest,
+            }) => 'check: {
+                let ctor = match self.resolve_adt_ctor(ctor_span, ctor) {
+                    Ok(v) => v,
+                    Err(err) => break 'check tcx.intern(TyKind::Error(err)),
+                };
+
+                todo!()
+            }
             HirExprKind::Error(err) => tcx.intern(TyKind::Error(err)),
         };
 
