@@ -5,12 +5,9 @@ use crate::{
         syntax::{Span, Symbol},
     },
     parse::token::{Ident, Lifetime},
-    semantic::{
-        lower::func::path::TypeRelativeAssoc,
-        syntax::{
-            EnumVariantItem, FnDef, Item, SpannedTraitClauseList, SpannedTraitInstance,
-            SpannedTraitSpec, SpannedTy, SpannedTyOrReList, TyOrReKind, TyOrReList, Visibility,
-        },
+    semantic::syntax::{
+        EnumVariantItem, FnDef, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy,
+        SpannedTyOrReList, TyOrReKind, TyOrReList, Visibility,
     },
     symbol,
     utils::hash::FxHashMap,
@@ -351,10 +348,4 @@ pub struct TypeGeneric {
 pub struct PosInBinder {
     pub def: Obj<GenericBinder>,
     pub idx: u32,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct GenericSubst {
-    pub binder: Obj<GenericBinder>,
-    pub substs: TyOrReList,
 }

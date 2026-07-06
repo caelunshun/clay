@@ -8,9 +8,9 @@ use crate::{
     parse::ast::AstLit,
     semantic::{
         analysis::typeck::{BodyCtxt, infra::lookup::SpannedImportedAssocArgs},
-        infer::{ClauseImportEnvRef, HrtbUniverse, ObligeCause, ObligeCauseOrigin},
+        infer::{ClauseImportEnv, GenericSubst, HrtbUniverse, ObligeCause, ObligeCauseOrigin},
         syntax::{
-            AdtCtorSyntax, AdtInstance, Divergence, GenericSubst, HirBlock, HirExpr, HirExprKind,
+            AdtCtorSyntax, AdtInstance, Divergence, HirBlock, HirExpr, HirExprKind,
             HirLabelledBlock, HirStmt, HirStructExpr, InferTyVarSourceInfo, LabelTargetKind, Re,
             RelationMode, SimpleTyKind, SimpleTySet, SpannedFnInstanceView, SpannedFnOwnerView,
             SpannedTyView, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
@@ -432,16 +432,14 @@ impl BodyCtxt<'_, '_> {
                     let init_expr = fields.r(s)[idx_in_expr].init;
 
                     let init_ty_orig = ctor.def.r(s).fields[adt_ctor_field].ty.value;
-                    let init_ty_env_args = [GenericSubst {
-                        binder: instance_owner.r(s).generics,
-                        substs: ctor.params,
-                    }];
-
-                    let init_ty_env = ClauseImportEnvRef::new(instance_ty, &init_ty_env_args);
+                    let init_ty_env = ClauseImportEnv::new(
+                        instance_ty,
+                        [GenericSubst::new(instance_owner.r(s).generics, ctor.params)],
+                    );
 
                     let init_ty = self.ccx_mut().import_report_elsewhere(
                         HrtbUniverse::ROOT_REF,
-                        init_ty_env,
+                        &init_ty_env,
                         init_ty_orig,
                     );
 

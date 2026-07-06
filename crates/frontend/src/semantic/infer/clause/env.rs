@@ -5,161 +5,157 @@ use crate::{
     },
     semantic::{
         infer::{
-            ClauseCx, ClauseImportEnv, ClauseImportEnvRef, HrtbUniverse, ObligeCause,
-            ObligeCauseStep,
+            ClauseCx, ClauseImportEnv, GenericSubst, HrtbUniverse, ObligeCause, ObligeCauseStep,
         },
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnInstanceInner,
-            FnOwner, GenericBinder, GenericSubst, HrtbBinder, HrtbBinderKind, ImplItem,
-            InferTyVarSourceInfo, RelationMode, SpannedTraitClauseView, TraitClause, TraitItem,
-            TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe, TypeAliasItem,
+            FnOwner, GenericBinder, HrtbBinder, HrtbBinderKind, ImplItem, InferTyVarSourceInfo,
+            RelationMode, SpannedTraitClauseView, TraitClause, TraitInstance, TraitItem,
+            TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReList, TypeAliasItem,
             UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
 };
 
-impl<'tcx> ClauseCx<'tcx> {
-    // === Universal === //
+// === Universal === //
 
-    pub fn create_universal_env_for_binder_list(
+impl<'tcx> ClauseCx<'tcx> {
+    pub fn universal_env(&mut self) -> ClauseCxUniversalEnvBuilder<'_, 'tcx> {
+        ClauseCxUniversalEnvBuilder { ccx: self }
+    }
+}
+
+pub struct ClauseCxUniversalEnvBuilder<'a, 'tcx> {
+    ccx: &'a mut ClauseCx<'tcx>,
+}
+
+// Machinery
+impl ClauseCxUniversalEnvBuilder<'_, '_> {
+    pub fn binder_to_init_vars(
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,
-        self_ty: Ty,
-        binders: &[Obj<GenericBinder>],
-    ) -> Vec<GenericSubst> {
-        let substs = self.create_blank_universal_vars_from_binder_list(universe, binders);
-
-        self.init_universal_var_clauses_from_binder(
-            cause,
-            universe,
-            ClauseImportEnvRef {
-                self_ty,
-                sig_generic_substs: &substs,
-            },
-        );
-
+        binder_parent_env: &ClauseImportEnv,
+        binder: Obj<GenericBinder>,
+    ) -> TyOrReList {
+        let substs = self.binder_to_uninit_vars(universe, binder);
+        self.init_vars_for_binder(cause, universe, binder_parent_env, binder, substs);
         substs
     }
 
-    pub fn create_blank_universal_vars_from_binder_list(
-        &mut self,
-        universe: &HrtbUniverse,
-        binders: &[Obj<GenericBinder>],
-    ) -> Vec<GenericSubst> {
-        binders
-            .iter()
-            .map(|&binder| self.create_blank_universal_vars_from_binder(universe, binder))
-            .collect()
-    }
-
-    pub fn create_blank_universal_vars_from_binder(
+    pub fn binder_to_uninit_vars(
         &mut self,
         universe: &HrtbUniverse,
         binder: Obj<GenericBinder>,
-    ) -> GenericSubst {
-        let s = self.session();
-        let tcx = self.tcx();
+    ) -> TyOrReList {
+        let s = self.ccx.session();
+        let tcx = self.ccx.tcx();
 
-        let substs =
+        let vars =
             binder
                 .r(s)
                 .defs
                 .iter()
                 .map(|&generic| match generic {
-                    AnyGeneric::Re(generic) => {
-                        TyOrRe::Re(self.fresh_re_universal(UniversalReVarSourceInfo::Root(generic)))
-                    }
-                    AnyGeneric::Ty(generic) => TyOrRe::Ty(self.fresh_ty_universal(
+                    AnyGeneric::Re(generic) => TyOrRe::Re(
+                        self.ccx
+                            .fresh_re_universal(UniversalReVarSourceInfo::Root(generic)),
+                    ),
+                    AnyGeneric::Ty(generic) => TyOrRe::Ty(self.ccx.fresh_ty_universal(
                         universe.clone(),
                         UniversalTyVarSourceInfo::Root(generic),
                     )),
                 })
                 .collect::<Vec<_>>();
 
-        let substs = tcx.intern_list(&substs);
-
-        GenericSubst { binder, substs }
+        tcx.intern_list(&vars)
     }
 
-    pub fn init_universal_var_clauses_from_binder(
+    pub fn init_vars_for_binder(
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,
-        env: ClauseImportEnvRef<'_>,
+        binder_parent_env: &ClauseImportEnv,
+        target_binder: Obj<GenericBinder>,
+        target_vars: TyOrReList,
     ) {
-        let s = self.session();
+        let s = self.ccx.session();
 
-        for &subst in env.sig_generic_substs {
-            for (&generic, &subst) in subst.binder.r(s).defs.iter().zip(subst.substs.r(s)) {
-                match (generic, subst) {
-                    (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
-                        for &clause in generic.r(s).clauses.value.r(s) {
-                            let clause = self
-                                .importer()
-                                .with_expansion_cause(cause.clone())
-                                .import_report_elsewhere(universe, env, clause);
+        let binder_env = binder_parent_env
+            .clone()
+            .with_subst(GenericSubst::new(target_binder, target_vars));
 
-                            let TraitClause::Outlives(allowed_to_outlive_dir, allowed_to_outlive) =
-                                clause
-                            else {
-                                unreachable!()
-                            };
+        for (&generic, &subst) in target_binder.r(s).defs.iter().zip(target_vars.r(s)) {
+            match (generic, subst) {
+                (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
+                    for &clause in generic.r(s).clauses.value.r(s) {
+                        let clause = self
+                            .ccx
+                            .importer()
+                            .with_expansion_cause(cause.clone())
+                            .import_report_elsewhere(universe, &binder_env, clause);
 
-                            self.permit_universe_re_outlives_general(
-                                target,
-                                allowed_to_outlive,
-                                allowed_to_outlive_dir,
-                            );
-                        }
-                    }
-                    (AnyGeneric::Ty(generic), TyOrRe::Ty(target_ty)) => {
-                        let TyKind::UniversalVar(target) = *target_ty.r(s) else {
+                        let TraitClause::Outlives(allowed_to_outlive_dir, allowed_to_outlive) =
+                            clause
+                        else {
                             unreachable!()
                         };
 
-                        let clauses = self
-                            .importer()
-                            .with_clause_applies_to(target_ty)
-                            .import_report_elsewhere(universe, env, generic.r(s).clauses.value);
-
-                        self.init_ty_universal_var_direct_clauses(target, clauses);
+                        self.ccx.permit_universe_re_outlives_general(
+                            target,
+                            allowed_to_outlive,
+                            allowed_to_outlive_dir,
+                        );
                     }
-                    _ => unreachable!(),
                 }
+                (AnyGeneric::Ty(generic), TyOrRe::Ty(target_ty)) => {
+                    let TyKind::UniversalVar(target) = *target_ty.r(s) else {
+                        unreachable!()
+                    };
+
+                    let clauses = self
+                        .ccx
+                        .importer()
+                        .with_clause_applies_to(target_ty)
+                        .import_report_elsewhere(universe, &binder_env, generic.r(s).clauses.value);
+
+                    self.ccx
+                        .init_ty_universal_var_direct_clauses(target, clauses);
+                }
+                _ => unreachable!(),
             }
         }
     }
+}
 
-    // === Specialized universal imports === //
-
-    pub fn create_universal_env_for_trait_def(
+// Specialized
+impl ClauseCxUniversalEnvBuilder<'_, '_> {
+    pub fn env_for_trait_def(
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,
         def: Obj<TraitItem>,
     ) -> ClauseImportEnv {
-        let s = self.session();
-        let tcx = self.tcx();
+        let s = self.ccx.session();
+        let tcx = self.ccx.tcx();
 
         // Create a universal variable representing `Self`
-        let self_var =
-            self.fresh_ty_universal_var(universe.clone(), UniversalTyVarSourceInfo::TraitSelf);
+        let self_var = self
+            .ccx
+            .fresh_ty_universal_var(universe.clone(), UniversalTyVarSourceInfo::TraitSelf);
 
         let self_ty = tcx.intern(TyKind::UniversalVar(self_var));
 
         // Create universal variables for each parameter.
-        let sig_generic_substs = self.create_universal_env_for_binder_list(
+        let generic_params = self.binder_to_init_vars(
             cause,
             universe,
-            self_ty,
-            &[*def.r(s).generics],
+            &ClauseImportEnv::new(self_ty, []),
+            *def.r(s).generics,
         );
 
-        let generic_params = sig_generic_substs[0].substs;
-
         // Make `Self` implement the trait with these synthesized parameters.
-        self.init_ty_universal_var_direct_clauses(
+        self.ccx.init_ty_universal_var_direct_clauses(
             self_var,
             tcx.intern_list(&[TraitClause::Trait(HrtbBinder {
                 kind: HrtbBinderKind::Imported(tcx.intern_list(&[])),
@@ -176,181 +172,172 @@ impl<'tcx> ClauseCx<'tcx> {
             })]),
         );
 
-        ClauseImportEnv::new(self_ty, sig_generic_substs)
+        ClauseImportEnv::new(
+            self_ty,
+            [GenericSubst::new(*def.r(s).generics, generic_params)],
+        )
     }
 
-    pub fn create_universal_env_for_adt_def(
+    pub fn env_for_adt_def(
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,
         def: Obj<AdtItem>,
     ) -> ClauseImportEnv {
-        let s = self.session();
-        let tcx = self.tcx();
+        let s = self.ccx.session();
+        let tcx = self.ccx.tcx();
 
         // Create universal parameters.
-        let sig_generic_substs =
-            self.create_blank_universal_vars_from_binder_list(universe, &[def.r(s).generics]);
+        let sig_generic_substs = self.binder_to_uninit_vars(universe, def.r(s).generics);
 
         // Create the `Self` type.
         let self_ty = tcx.intern(TyKind::Adt(AdtInstance {
             def,
-            params: sig_generic_substs[0].substs,
+            params: sig_generic_substs,
         }));
 
         // Initialize the clauses.
-        self.init_universal_var_clauses_from_binder(
+        self.init_vars_for_binder(
             cause,
             universe,
-            ClauseImportEnvRef {
-                self_ty,
-                sig_generic_substs: &sig_generic_substs,
-            },
+            &ClauseImportEnv::new(self_ty, []),
+            def.r(s).generics,
+            sig_generic_substs,
         );
 
-        ClauseImportEnv::new(self_ty, sig_generic_substs)
+        ClauseImportEnv::new(
+            self_ty,
+            [GenericSubst::new(def.r(s).generics, sig_generic_substs)],
+        )
     }
 
-    pub fn create_universal_env_for_impl_block(
+    pub fn env_for_impl_block(
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,
         def: Obj<ImplItem>,
     ) -> ClauseImportEnv {
-        let s = self.session();
-        let tcx = self.tcx();
+        let s = self.ccx.session();
+        let tcx = self.ccx.tcx();
 
         // Create universal parameters.
-        let sig_generic_substs =
-            self.create_blank_universal_vars_from_binder_list(universe, &[def.r(s).generics]);
+        let sig_generic_substs = self.binder_to_uninit_vars(universe, def.r(s).generics);
 
-        // Create the `Self` type. This type cannot contain `Self` so we give a dummy self type.
+        // Create the `Self` type.
         let self_ty = self
+            .ccx
             .importer()
             .with_expansion_cause(cause.clone())
             .import_report_elsewhere(
                 universe,
-                ClauseImportEnvRef::new(tcx.intern(TyKind::SigThis), &sig_generic_substs),
+                &ClauseImportEnv::new(
+                    // This type cannot contain `Self` so we give a dummy self type.
+                    tcx.intern(TyKind::SigThis),
+                    [GenericSubst::new(def.r(s).generics, sig_generic_substs)],
+                ),
                 def.r(s).target.value,
             );
 
         // Initialize the clauses.
-        self.init_universal_var_clauses_from_binder(
+        self.init_vars_for_binder(
             cause,
             universe,
-            ClauseImportEnvRef::new(self_ty, &sig_generic_substs),
+            &ClauseImportEnv::new(self_ty, []),
+            def.r(s).generics,
+            sig_generic_substs,
         );
 
-        ClauseImportEnv::new(self_ty, sig_generic_substs)
-    }
-
-    pub fn create_universal_env_for_fn_item(
-        &mut self,
-        cause: &ObligeCause,
-        universe: &HrtbUniverse,
-        self_ty: Ty,
-        def: Obj<FnDef>,
-    ) -> Vec<GenericSubst> {
-        self.create_universal_env_for_binder_list(
-            cause,
-            universe,
+        ClauseImportEnv::new(
             self_ty,
-            &[def.r(self.session()).generics],
+            [GenericSubst::new(def.r(s).generics, sig_generic_substs)],
         )
     }
 
-    pub fn create_universal_env_for_fn_def(
+    pub fn env_for_fn_def(
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,
         def: Obj<FnDef>,
     ) -> ClauseImportEnv {
-        let s = self.session();
-        let tcx = self.tcx();
+        let s = self.ccx.session();
+        let tcx = self.ccx.tcx();
 
+        // Get parent environment
         let mut env = match *def.r(s).owner {
-            FnDefOwner::Item(_item) => ClauseImportEnv {
-                self_ty: tcx.intern(TyKind::SigThis),
-                sig_generic_substs: Vec::new(),
-            },
-            FnDefOwner::TraitMethod(def, _idx) => {
-                self.create_universal_env_for_trait_def(cause, universe, def)
-            }
-            FnDefOwner::ImplMethod(def, _idx) => {
-                self.create_universal_env_for_impl_block(cause, universe, def)
-            }
+            FnDefOwner::Item(_item) => ClauseImportEnv::new(tcx.intern(TyKind::SigThis), []),
+            FnDefOwner::TraitMethod(def, _idx) => self.env_for_trait_def(cause, universe, def),
+            FnDefOwner::ImplMethod(def, _idx) => self.env_for_impl_block(cause, universe, def),
         };
 
-        env.sig_generic_substs
-            .extend_from_slice(&self.create_universal_env_for_fn_item(
-                cause,
-                universe,
-                env.self_ty,
-                def,
-            ));
+        // Extend with function environment
+        let substs = self.binder_to_init_vars(cause, universe, &env, def.r(s).generics);
+
+        env.push_subst(GenericSubst::new(def.r(s).generics, substs));
 
         env
     }
 
-    pub fn create_universal_env_for_type_alias_def(
+    pub fn env_for_type_alias_def(
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,
         def: Obj<TypeAliasItem>,
     ) -> ClauseImportEnv {
-        let s = self.session();
-        let tcx = self.tcx();
+        let s = self.ccx.session();
+        let tcx = self.ccx.tcx();
 
-        let this_ty = tcx.intern(TyKind::SigThis);
+        let self_ty = tcx.intern(TyKind::SigThis);
+
+        let substs = self.binder_to_init_vars(
+            cause,
+            universe,
+            &ClauseImportEnv::new(self_ty, []),
+            def.r(s).generics,
+        );
 
         ClauseImportEnv::new(
-            this_ty,
-            self.create_universal_env_for_binder_list(
-                cause,
-                universe,
-                this_ty,
-                &[def.r(s).generics],
-            ),
+            self_ty,
+            [GenericSubst {
+                binder: def.r(s).generics,
+                substs,
+            }],
         )
     }
+}
 
-    // === Existential === //
+// === Existential === //
 
-    pub fn create_infer_env_for_binder_list(
+impl<'tcx> ClauseCx<'tcx> {
+    pub fn existential_env(&mut self) -> ClauseCxExistentialEnvBuilder<'_, 'tcx> {
+        ClauseCxExistentialEnvBuilder { ccx: self }
+    }
+}
+
+pub struct ClauseCxExistentialEnvBuilder<'a, 'tcx> {
+    ccx: &'a mut ClauseCx<'tcx>,
+}
+
+// Machinery
+impl<'tcx> ClauseCxExistentialEnvBuilder<'_, 'tcx> {
+    pub fn binder_to_constrained_vars(
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,
-        mut base_env: ClauseImportEnv,
-        binders: &[Obj<GenericBinder>],
-    ) -> ClauseImportEnv {
-        // Produce a substitution for each binder.
-        let substs = self.instantiate_blank_infer_vars_from_binder_list(universe, binders);
-        base_env.sig_generic_substs.extend_from_slice(&substs);
-
-        // Register clause obligations.
-        self.oblige_import_env_meets_own_binder_clauses(cause, universe, base_env.as_ref());
-
-        base_env
+        binder_parent_env: &ClauseImportEnv,
+        binder: Obj<GenericBinder>,
+    ) -> TyOrReList {
+        let substs = self.binder_to_unconstrained_vars(universe, binder);
+        self.init_constraints_for_binder(cause, universe, binder_parent_env, binder, substs);
+        substs
     }
 
-    pub fn instantiate_blank_infer_vars_from_binder_list(
-        &mut self,
-        universe: &HrtbUniverse,
-        binders: &[Obj<GenericBinder>],
-    ) -> Vec<GenericSubst> {
-        binders
-            .iter()
-            .map(|&binder| self.instantiate_blank_infer_vars_from_binder(universe, binder))
-            .collect()
-    }
-
-    pub fn instantiate_blank_infer_vars_from_binder(
+    pub fn binder_to_unconstrained_vars(
         &mut self,
         universe: &HrtbUniverse,
         binder: Obj<GenericBinder>,
-    ) -> GenericSubst {
-        let s = self.session();
-        let tcx = self.tcx();
+    ) -> TyOrReList {
+        let s = self.ccx.session();
+        let tcx = self.ccx.tcx();
 
         let substs =
             binder
@@ -358,56 +345,58 @@ impl<'tcx> ClauseCx<'tcx> {
                 .defs
                 .iter()
                 .map(|&generic| match generic {
-                    AnyGeneric::Re(_) => TyOrRe::Re(self.fresh_re_infer()),
-                    AnyGeneric::Ty(_) => TyOrRe::Ty(self.fresh_ty_infer(
+                    AnyGeneric::Re(_) => TyOrRe::Re(self.ccx.fresh_re_infer()),
+                    AnyGeneric::Ty(_) => TyOrRe::Ty(self.ccx.fresh_ty_infer(
                         universe.clone(),
                         InferTyVarSourceInfo::UniversalElabHelper,
                     )),
                 })
                 .collect::<Vec<_>>();
 
-        let substs = tcx.intern_list(&substs);
-
-        GenericSubst { binder, substs }
+        tcx.intern_list(&substs)
     }
 
-    pub fn oblige_import_env_meets_own_binder_clauses(
+    pub fn init_constraints_for_binder(
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,
-        env: ClauseImportEnvRef<'_>,
+        binder_parent_env: &ClauseImportEnv,
+        target_binder: Obj<GenericBinder>,
+        target_vars: TyOrReList,
     ) {
-        let s = self.session();
+        let s = self.ccx.session();
 
-        for &subst in env.sig_generic_substs {
-            self.oblige_args_meet_binder_clauses(
-                universe,
-                env,
-                &subst.binder.r(s).defs,
-                subst.substs.r(s),
-                |_this, _idx, clause| {
-                    cause
-                        .clone()
-                        .child(ObligeCauseStep::ImportEnvMeetsRequirements { clause }.into())
-                },
-            );
-        }
+        let binder_own_env = binder_parent_env
+            .clone()
+            .with_subst(GenericSubst::new(target_binder, target_vars));
+
+        self.init_constraints_for_binder_raw(
+            universe,
+            &binder_own_env,
+            &target_binder.r(s).defs,
+            target_vars.r(s),
+            |_ccx, _idx, clause| {
+                cause
+                    .clone()
+                    .child(ObligeCauseStep::ImportEnvMeetsRequirements { clause }.into())
+            },
+        )
     }
 
-    pub fn oblige_args_meet_binder_clauses(
+    pub fn init_constraints_for_binder_raw(
         &mut self,
         universe: &HrtbUniverse,
-        def_env: ClauseImportEnvRef<'_>,
-        defs: &[AnyGeneric],
-        args: &[TyOrRe],
-        mut gen_cause: impl FnMut(&mut Self, usize, Span) -> ObligeCause,
+        binder_own_env: &ClauseImportEnv,
+        target_binder: &[AnyGeneric],
+        target_vars: &[TyOrRe],
+        mut gen_cause: impl FnMut(&mut ClauseCx<'tcx>, usize, Span) -> ObligeCause,
     ) {
-        let s = self.session();
-        let tcx = self.tcx();
+        let s = self.ccx.session();
+        let tcx = self.ccx.tcx();
 
-        for (i, (&generic, &subst)) in defs.iter().zip(args).enumerate() {
-            match (generic, subst) {
-                (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
+        for (i, (&generic, &var)) in target_binder.iter().zip(target_vars).enumerate() {
+            match (generic, var) {
+                (AnyGeneric::Re(generic), TyOrRe::Re(var)) => {
                     for clause in generic.r(s).clauses.iter(tcx) {
                         let clause_span = clause.own_span();
 
@@ -417,42 +406,45 @@ impl<'tcx> ClauseCx<'tcx> {
                             unreachable!()
                         };
 
-                        let cause = gen_cause(self, i, clause_span);
+                        let cause = gen_cause(&mut self.ccx, i, clause_span);
 
                         let must_outlive = self
+                            .ccx
                             .importer()
                             .with_expansion_cause(cause.clone())
-                            .import_report_elsewhere(universe, def_env, must_outlive.value);
+                            .import_report_elsewhere(universe, binder_own_env, must_outlive.value);
 
-                        self.oblige_general_outlives(
+                        self.ccx.oblige_general_outlives(
                             cause,
-                            TyOrRe::Re(target),
+                            TyOrRe::Re(var),
                             must_outlive,
                             must_outlive_dir,
                         );
                     }
                 }
-                (AnyGeneric::Ty(generic), TyOrRe::Ty(target)) => {
+                (AnyGeneric::Ty(generic), TyOrRe::Ty(var)) => {
                     for clause in generic.r(s).clauses.iter(tcx) {
-                        let cause = gen_cause(self, i, clause.own_span());
+                        let cause = gen_cause(&mut self.ccx, i, clause.own_span());
 
                         let clause = self
+                            .ccx
                             .importer()
                             .with_expansion_cause(cause.clone())
-                            .with_clause_applies_to(target)
-                            .import_report_elsewhere(&universe, def_env, clause.value);
+                            .with_clause_applies_to(var)
+                            .import_report_elsewhere(&universe, binder_own_env, clause.value);
 
                         match clause {
                             TraitClause::Outlives(must_outlive_dir, must_outlive) => {
-                                self.oblige_general_outlives(
+                                self.ccx.oblige_general_outlives(
                                     cause,
-                                    TyOrRe::Ty(target),
+                                    TyOrRe::Ty(var),
                                     must_outlive,
                                     must_outlive_dir,
                                 );
                             }
                             TraitClause::Trait(rhs) => {
-                                self.oblige_ty_meets_trait(cause, universe.clone(), target, rhs);
+                                self.ccx
+                                    .oblige_ty_meets_trait(cause, universe.clone(), var, rhs);
                             }
                         }
                     }
@@ -461,31 +453,33 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         }
     }
+}
 
-    // === Specialized existential imports === //
-
-    pub fn create_infer_env_for_fn_def_as_blank_owner(
+// Specialized
+impl ClauseCxExistentialEnvBuilder<'_, '_> {
+    pub fn instantiate_method_fn_owner(
         &mut self,
+        cause: &ObligeCause,
         def: Obj<FnDef>,
         self_ty: Ty,
     ) -> FnOwner {
-        let s = self.session();
-        let tcx = self.tcx();
+        let s = self.ccx.session();
+        let tcx = self.ccx.tcx();
 
         match *def.r(s).owner {
-            FnDefOwner::Item(_) => unreachable!(),
+            FnDefOwner::Item(_) => unreachable!("not a method"),
             FnDefOwner::ImplMethod(block, method_idx) => FnOwner::Inherent {
                 self_ty,
                 block,
                 method_idx,
             },
             FnDefOwner::TraitMethod(trait_item, method_idx) => {
-                let params = self
-                    .instantiate_blank_infer_vars_from_binder(
-                        HrtbUniverse::ROOT_REF,
-                        *trait_item.r(s).generics,
-                    )
-                    .substs;
+                let params = self.binder_to_constrained_vars(
+                    cause,
+                    HrtbUniverse::ROOT_REF,
+                    &ClauseImportEnv::new(self_ty, []),
+                    *trait_item.r(s).generics,
+                );
 
                 let params = tcx.intern_list(
                     &params
@@ -508,14 +502,61 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    pub fn create_infer_env_for_fn_owner(
+    pub fn instantiate_trait_spec(
+        &mut self,
+        cause: &ObligeCause,
+        universe: &HrtbUniverse,
+        self_ty: Ty,
+        spec: TraitSpec,
+    ) -> TraitInstance {
+        let s = self.ccx.session();
+        let tcx = self.ccx.tcx();
+
+        let params = spec
+            .params
+            .r(s)
+            .iter()
+            .map(|&param| match param {
+                TraitParam::Equals(value) => value,
+                TraitParam::Unspecified(clauses) => {
+                    let ty = self.ccx.fresh_ty_infer(
+                        universe.clone(),
+                        InferTyVarSourceInfo::TraitAssocPlaceholderHelper,
+                    );
+                    self.ccx
+                        .oblige_ty_meets_clauses(cause, universe, ty, clauses);
+
+                    TyOrRe::Ty(ty)
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let params = tcx.intern_list(&params);
+
+        let instance = TraitInstance {
+            def: spec.def,
+            params,
+        };
+
+        self.ccx.oblige_ty_meets_trait_instantiated(
+            cause.clone(),
+            universe.clone(),
+            self_ty,
+            // Force the fresh variables to be properly constrained.
+            instance.to_spec(tcx),
+        );
+
+        instance
+    }
+
+    pub fn env_of_fn_def_for_owner(
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,
         owner: FnOwner,
     ) -> ClauseImportEnv {
-        let s = self.session();
-        let tcx = self.tcx();
+        let s = self.ccx.session();
+        let tcx = self.ccx.tcx();
 
         match owner {
             FnOwner::Item(_) => ClauseImportEnv::new(tcx.intern(TyKind::SigThis), Vec::new()),
@@ -524,51 +565,14 @@ impl<'tcx> ClauseCx<'tcx> {
                 self_ty,
                 method_idx: _,
             } => {
-                let substs = instance
-                    .params
-                    .r(s)
-                    .iter()
-                    .map(|&param| match param {
-                        TraitParam::Equals(value) => value,
-                        TraitParam::Unspecified(clauses) => {
-                            let ty = self.fresh_ty_infer(
-                                universe.clone(),
-                                InferTyVarSourceInfo::TraitAssocPlaceholderHelper,
-                            );
-                            self.oblige_ty_meets_clauses(cause, universe, ty, clauses);
-
-                            TyOrRe::Ty(ty)
-                        }
-                    })
-                    .collect::<Vec<_>>();
-
-                let substs = tcx.intern_list(&substs);
-
-                let params = substs
-                    .r(s)
-                    .iter()
-                    .copied()
-                    .map(TraitParam::Equals)
-                    .collect::<Vec<_>>();
-
-                let params = tcx.intern_list(&params);
-
-                self.oblige_ty_meets_trait_instantiated(
-                    cause.clone(),
-                    universe.clone(),
-                    self_ty,
-                    TraitSpec {
-                        def: instance.def,
-                        params,
-                    },
-                );
+                let instance = self.instantiate_trait_spec(cause, universe, self_ty, instance);
 
                 ClauseImportEnv::new(
                     self_ty,
-                    vec![GenericSubst {
-                        binder: *instance.def.r(s).generics,
-                        substs,
-                    }],
+                    [GenericSubst::new(
+                        *instance.def.r(s).generics,
+                        instance.params,
+                    )],
                 )
             }
             FnOwner::Inherent {
@@ -576,60 +580,70 @@ impl<'tcx> ClauseCx<'tcx> {
                 block,
                 method_idx: _,
             } => {
-                let env = self.create_infer_env_for_binder_list(
+                let block_params = self.binder_to_constrained_vars(
                     cause,
                     universe,
-                    ClauseImportEnv::new(self_ty, Vec::new()),
-                    &[block.r(s).generics],
+                    &ClauseImportEnv::new(self_ty, Vec::new()),
+                    block.r(s).generics,
+                );
+
+                let block_env = ClauseImportEnv::new(
+                    self_ty,
+                    [GenericSubst::new(block.r(s).generics, block_params)],
                 );
 
                 let expected_self_ty = self
+                    .ccx
                     .importer()
                     .with_expansion_cause(cause.clone())
-                    .import_report_elsewhere(&universe, env.as_ref(), block.r(s).target.value);
+                    .import_report_elsewhere(&universe, &block_env, block.r(s).target.value);
 
-                self.oblige_ty_unifies_ty(
+                self.ccx.oblige_ty_unifies_ty(
                     cause.clone(),
                     self_ty,
                     expected_self_ty,
                     RelationMode::Equate,
                 );
 
-                env
+                block_env
             }
         }
     }
 
-    pub fn create_infer_env_for_fn_instance(
+    pub fn env_of_fn_def_for_instance(
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,
         instance: FnInstance,
     ) -> ClauseImportEnv {
-        let s = self.session();
+        let s = self.ccx.session();
 
         let FnInstanceInner { owner, early_args } = *instance.r(s);
 
-        let mut env = self.create_infer_env_for_fn_owner(cause, universe, owner);
+        let mut env = self.env_of_fn_def_for_owner(cause, universe, owner);
         let def = owner.def(s);
 
-        if let Some(early_args) = early_args {
-            env.sig_generic_substs.push(GenericSubst {
-                binder: def.r(s).generics,
-                substs: early_args,
-            });
-        } else {
-            env = self.create_infer_env_for_binder_list(cause, universe, env, &[def.r(s).generics]);
-        }
+        env.sig_generic_substs.push(GenericSubst::new(
+            def.r(s).generics,
+            if let Some(early_args) = early_args {
+                early_args
+            } else {
+                self.binder_to_constrained_vars(cause, universe, &env, def.r(s).generics)
+            },
+        ));
 
         env
     }
+}
 
+// === Misc Helpers === //
+
+impl ClauseCx<'_> {
     pub fn import_fn_instance_receiver_as_infer(
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,
-        env: ClauseImportEnvRef<'_>,
+        env: &ClauseImportEnv,
         def: Obj<FnDef>,
     ) -> Ty {
         let s = self.session();
@@ -645,7 +659,7 @@ impl<'tcx> ClauseCx<'tcx> {
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,
-        env: ClauseImportEnvRef<'_>,
+        env: &ClauseImportEnv,
         def: Obj<FnDef>,
     ) -> (TyList, Ty) {
         let s = self.session();

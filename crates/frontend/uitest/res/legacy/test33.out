@@ -1,4 +1,4 @@
-error: type `<{HRTB universal capture #6: crate::Projector} as crate::Projector>::Out` does not implement `crate::Fuzzy`
+error: type `<{HRTB universal capture #4: crate::Projector} as crate::Projector>::Out` does not implement `crate::Fuzzy`
    ┌─ test33.fir:61:16
    │
 61 │     rejected::<Q>;
@@ -14,20 +14,20 @@ note: Origin(
 note: Step(
     ImplInstantiatedClause {
         lhs: 0: Q,
-        rhs: crate::Helper<?12 {ProjectionResult { span: <dummy> }}, {HRTB universal capture #6: crate::Projector}>,
+        rhs: crate::Helper<?9 {ProjectionResult { span: <dummy> }}, {HRTB universal capture #4: crate::Projector}>,
     },
 )
 
 note: Step(
     ImplUsingInherent {
         lhs: for<T: crate::Projector<Out: crate::Fuzzy>> crate::Helper<<HrtbVar(DebruijnRelative { raw: 1 }) as crate::Projector>::Out, HrtbVar(DebruijnRelative { raw: 1 })>,
-        rhs: crate::Helper<?12 {ProjectionResult { span: <dummy> }}, {HRTB universal capture #6: crate::Projector}>,
+        rhs: crate::Helper<?9 {ProjectionResult { span: <dummy> }}, {HRTB universal capture #4: crate::Projector}>,
     },
 )
 
 note: Step(
     HrtbExistentialInferenceIsPossible {
-        lhs: {HRTB universal capture #6: crate::Projector},
+        lhs: {HRTB universal capture #4: crate::Projector},
         rhs: 0: [
             crate::Projector<Out: crate::Fuzzy>,
         ],
@@ -36,21 +36,21 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: {HRTB universal capture #6: crate::Projector},
+        lhs: 0: {HRTB universal capture #4: crate::Projector},
         rhs: crate::Projector<Out: crate::Fuzzy>,
     },
 )
 
 note: Step(
     ImplUsingInherent {
-        lhs: crate::Projector<Out = <{HRTB universal capture #6: crate::Projector} as crate::Projector>::Out>,
+        lhs: crate::Projector<Out = <{HRTB universal capture #4: crate::Projector} as crate::Projector>::Out>,
         rhs: crate::Projector<Out: crate::Fuzzy>,
     },
 )
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: <{HRTB universal capture #6: crate::Projector} as crate::Projector>::Out,
+        lhs: 0: <{HRTB universal capture #4: crate::Projector} as crate::Projector>::Out,
         rhs: crate::Fuzzy,
     },
 )

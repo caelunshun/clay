@@ -63,19 +63,20 @@ use crate::{
         },
         syntax::{
             AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, FnOwner, GenericBinder,
-            GenericSubst, HrtbBinder, HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef,
-            HrtbDebruijnDefList, InferTyVarSourceInfo, Re, RelationDirection, SpannedAdtInstance,
-            SpannedFnInstance, SpannedFnOwner, SpannedFnOwnerView, SpannedHrtbBinder,
-            SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedRe, SpannedTraitInstance,
-            SpannedTraitSpec, SpannedTy, SpannedTyView, TraitClause, TraitInstance, TraitParam,
-            TraitSpec, Ty, TyCtxt, TyFoldable, TyFolder, TyFolderExt, TyFolderInfallibleExt,
-            TyFolderPreservesSpans, TyKind, TyOrRe, TyOrReKind, TyOrReList, TyProjection,
-            TyVisitable, TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
+            HrtbBinder, HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef, HrtbDebruijnDefList,
+            InferTyVarSourceInfo, Re, RelationDirection, SpannedAdtInstance, SpannedFnInstance,
+            SpannedFnOwner, SpannedFnOwnerView, SpannedHrtbBinder, SpannedHrtbBinderKindView,
+            SpannedHrtbBinderView, SpannedRe, SpannedTraitInstance, SpannedTraitSpec, SpannedTy,
+            SpannedTyView, TraitClause, TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt,
+            TyFoldable, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyFolderPreservesSpans,
+            TyKind, TyOrRe, TyOrReKind, TyOrReList, TyProjection, TyVisitable, TypeAliasItem,
+            UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
 };
 use hashbrown::hash_map;
+use smallvec::SmallVec;
 use std::{convert::Infallible, rc::Rc};
 
 // === Driver === //
@@ -94,7 +95,7 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn import_report_here<T>(
         &mut self,
         universe: &HrtbUniverse,
-        env: ClauseImportEnvRef<'_>,
+        env: &ClauseImportEnv,
         value: Spanned<T>,
     ) -> T
     where
@@ -107,7 +108,7 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn import_report_elsewhere<T>(
         &mut self,
         universe: &HrtbUniverse,
-        env: ClauseImportEnvRef<'_>,
+        env: &ClauseImportEnv,
         value: T,
     ) -> T
     where
@@ -183,7 +184,7 @@ impl ClauseImporter<'_, '_> {
     pub fn import_report_here<T>(
         &mut self,
         universe: &HrtbUniverse,
-        env: ClauseImportEnvRef<'_>,
+        env: &ClauseImportEnv,
         value: Spanned<T>,
     ) -> T
     where
@@ -206,7 +207,7 @@ impl ClauseImporter<'_, '_> {
     pub fn import_report_elsewhere<T>(
         &mut self,
         universe: &HrtbUniverse,
-        env: ClauseImportEnvRef<'_>,
+        env: &ClauseImportEnv,
         value: T,
     ) -> T
     where
@@ -224,57 +225,53 @@ impl ClauseImporter<'_, '_> {
     }
 }
 
-// === Environment substitution === //
+// === Environment definition === //
 
 #[derive(Debug, Clone)]
 pub struct ClauseImportEnv {
     pub self_ty: Ty,
-    pub sig_generic_substs: Vec<GenericSubst>,
+    pub sig_generic_substs: SmallVec<[GenericSubst; Self::SMALL_CAP]>,
 }
 
 impl ClauseImportEnv {
-    pub fn new(self_ty: Ty, sig_generic_substs: Vec<GenericSubst>) -> Self {
+    pub const SMALL_CAP: usize = 2;
+
+    pub fn new(self_ty: Ty, sig_generic_substs: impl IntoIterator<Item = GenericSubst>) -> Self {
         Self {
             self_ty,
-            sig_generic_substs,
+            sig_generic_substs: sig_generic_substs.into_iter().collect(),
         }
     }
 
-    pub fn as_ref(&self) -> ClauseImportEnvRef<'_> {
-        ClauseImportEnvRef {
-            self_ty: self.self_ty,
-            sig_generic_substs: &self.sig_generic_substs,
-        }
+    pub fn push_subst(&mut self, subst: GenericSubst) {
+        self.sig_generic_substs.push(subst);
+    }
+
+    pub fn with_subst(mut self, subst: GenericSubst) -> Self {
+        self.push_subst(subst);
+        self
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct GenericSubst {
+    pub binder: Obj<GenericBinder>,
+    pub substs: TyOrReList,
+}
+
+impl GenericSubst {
+    pub fn new(binder: Obj<GenericBinder>, substs: TyOrReList) -> Self {
+        Self { binder, substs }
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct ClauseImportEnvRef<'a> {
-    pub self_ty: Ty,
-    pub sig_generic_substs: &'a [GenericSubst],
-}
-
-impl<'a> ClauseImportEnvRef<'a> {
-    pub fn new(self_ty: Ty, sig_generic_substs: &'a [GenericSubst]) -> Self {
-        Self {
-            self_ty,
-            sig_generic_substs,
-        }
-    }
-
-    pub fn to_owned(self) -> ClauseImportEnv {
-        ClauseImportEnv {
-            self_ty: self.self_ty,
-            sig_generic_substs: self.sig_generic_substs.to_vec(),
-        }
-    }
-}
+// === Environment substitution === //
 
 impl<'tcx> ClauseCx<'tcx> {
     pub fn env_substitutor<'a>(
         &'a mut self,
         universe: HrtbUniverse,
-        env: ClauseImportEnvRef<'a>,
+        env: &'a ClauseImportEnv,
     ) -> EnvSubstitutor<'a, 'tcx> {
         EnvSubstitutor {
             ccx: self,
@@ -767,7 +764,7 @@ impl ClauseNormalizer<'_, '_> {
         // Substitute in the alias's environment.
         let env = ClauseImportEnv::new(
             tcx.intern(TyKind::SigThis),
-            vec![GenericSubst {
+            [GenericSubst {
                 binder: def.r(s).generics,
                 substs: args,
             }],
@@ -775,7 +772,7 @@ impl ClauseNormalizer<'_, '_> {
 
         let body = self
             .ccx
-            .env_substitutor(self.universe.clone(), env.as_ref())
+            .env_substitutor(self.universe.clone(), &env)
             .fold_preserved(*def.r(s).body);
 
         // Normalize the target, reporting errors on guaranteed reentrancy (that is,
@@ -1146,7 +1143,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
         let FnInstanceInner { owner, early_args } = *instance.r(s);
 
         // Construct an environment, validating the `owner` in the process.
-        let env = self.ccx.create_infer_env_for_fn_owner(
+        let env = self.ccx.existential_env().env_of_fn_def_for_owner(
             &self
                 .cause
                 .clone()
@@ -1229,17 +1226,17 @@ impl ClauseTyWfFolder<'_, '_> {
             None => validated_params,
         };
 
-        self.ccx.oblige_args_meet_binder_clauses(
+        // TODO: Check this, this is mega sketchy.
+        self.ccx.existential_env().init_constraints_for_binder_raw(
             &self.universe,
-            ClauseImportEnvRef::new(
+            &ClauseImportEnv::new(
                 clause_applies_to,
-                &[GenericSubst {
+                [GenericSubst {
                     binder,
                     substs: all_params,
                 }]
                 .into_iter()
-                .chain(extra_def_substs)
-                .collect::<Vec<_>>(),
+                .chain(extra_def_substs),
             ),
             defs,
             validated_params,

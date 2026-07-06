@@ -3,12 +3,12 @@ use crate::{
     semantic::{
         analysis::typeck::type_check_function,
         infer::{
-            ClauseCx, ClauseImportEnvRef, CoherenceMap, HrtbUniverse, ObligeCause,
+            ClauseCx, ClauseImportEnv, CoherenceMap, GenericSubst, HrtbUniverse, ObligeCause,
             ObligeCauseOrigin, UnifyCxMode,
         },
         syntax::{
-            AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FnItem, GenericBinder, GenericSubst,
-            ImplItem, ItemKind, TraitItem, TyCtxt, TypeAliasItem,
+            AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FnItem, GenericBinder, ImplItem,
+            ItemKind, TraitItem, TyCtxt, TypeAliasItem,
         },
     },
 };
@@ -75,7 +75,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
 
         // Setup a `ClauseCx` with our environment in mind.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.create_universal_env_for_trait_def(
+        let env = ccx.universal_env().env_for_trait_def(
             &ObligeCause::new_empty_report(),
             HrtbUniverse::ROOT_REF,
             def,
@@ -84,10 +84,10 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
         // First, let's ensure that the inherited trait list is well-formed.
         ccx.importer()
             .with_clause_applies_to(env.self_ty)
-            .import_report_here(HrtbUniverse::ROOT_REF, env.as_ref(), **inherits);
+            .import_report_here(HrtbUniverse::ROOT_REF, &env, **inherits);
 
         // Now, let's ensure that each generic parameter's clauses are well-formed.
-        self.visit_generic_binder(&mut ccx, env.as_ref(), **generics);
+        self.visit_generic_binder(&mut ccx, &env, **generics);
 
         // Finally, let's check method signatures and, if a default one is provided, bodies.
         for &method in methods.iter() {
@@ -111,7 +111,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
 
         // Setup a `ClauseCx` with our environment in mind.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.create_universal_env_for_impl_block(
+        let env = ccx.universal_env().env_for_impl_block(
             &ObligeCause::new_empty_report(),
             HrtbUniverse::ROOT_REF,
             item,
@@ -122,7 +122,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
         if let Some(trait_) = **trait_ {
             ccx.importer()
                 .with_clause_applies_to(env.self_ty)
-                .import_report_here(HrtbUniverse::ROOT_REF, env.as_ref(), trait_);
+                .import_report_here(HrtbUniverse::ROOT_REF, &env, trait_);
 
             // Let's ensure that the type implements its super-traits as well.
             let trait_def = trait_.value.def;
@@ -131,12 +131,12 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
                 let super_clause_span = super_clause.own_span();
                 let super_clause = ccx.import_report_here(
                     HrtbUniverse::ROOT_REF,
-                    ClauseImportEnvRef::new(
+                    &ClauseImportEnv::new(
                         env.self_ty,
-                        &[GenericSubst {
-                            binder: *trait_def.r(s).generics,
-                            substs: trait_.value.params,
-                        }],
+                        [GenericSubst::new(
+                            *trait_def.r(s).generics,
+                            trait_.value.params,
+                        )],
                     ),
                     super_clause,
                 );
@@ -154,10 +154,10 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
         }
 
         // Let's also ensure that our target type is well-formed.
-        ccx.import_report_here(HrtbUniverse::ROOT_REF, env.as_ref(), **target);
+        ccx.import_report_here(HrtbUniverse::ROOT_REF, &env, **target);
 
         // Let's ensure that `impl` generics all have well-formed clauses.
-        self.visit_generic_binder(&mut ccx, env.as_ref(), *generics);
+        self.visit_generic_binder(&mut ccx, &env, *generics);
 
         // Finally, let's check method signatures and bodies.
         for method in methods.iter() {
@@ -177,23 +177,23 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
 
         // Setup a `ClauseCx` with our environment in mind.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.create_universal_env_for_adt_def(
+        let env = ccx.universal_env().env_for_adt_def(
             &ObligeCause::new_empty_report(),
             HrtbUniverse::ROOT_REF,
             def,
         );
 
         // First, let's ensure that each generic parameter's clauses are well-formed.
-        self.visit_generic_binder(&mut ccx, env.as_ref(), def.r(s).generics);
+        self.visit_generic_binder(&mut ccx, &env, def.r(s).generics);
 
         // Now, WF-check the definition.
         match *def.r(s).kind {
             AdtKind::Struct(kind) => {
-                self.visit_adt_ctor(&mut ccx, env.as_ref(), *kind.r(s).ctor);
+                self.visit_adt_ctor(&mut ccx, &env, *kind.r(s).ctor);
             }
             AdtKind::Enum(kind) => {
                 for variant in kind.r(s).variants.iter() {
-                    self.visit_adt_ctor(&mut ccx, env.as_ref(), *variant.r(s).ctor);
+                    self.visit_adt_ctor(&mut ccx, &env, *variant.r(s).ctor);
                 }
             }
         }
@@ -201,12 +201,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
         ccx.verify();
     }
 
-    fn visit_adt_ctor(
-        &mut self,
-        ccx: &mut ClauseCx,
-        env: ClauseImportEnvRef<'_>,
-        ctor: Obj<AdtCtor>,
-    ) {
+    fn visit_adt_ctor(&mut self, ccx: &mut ClauseCx, env: &ClauseImportEnv, ctor: Obj<AdtCtor>) {
         let s = self.session();
 
         for field in ctor.r(s).fields.iter() {
@@ -226,17 +221,17 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
 
         // Setup a `ClauseCx` with our environment in mind.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.create_universal_env_for_type_alias_def(
+        let env = ccx.universal_env().env_for_type_alias_def(
             &ObligeCause::new_empty_report(),
             HrtbUniverse::ROOT_REF,
             def,
         );
 
         // First, let's ensure that each generic parameter's clauses are well-formed.
-        self.visit_generic_binder(&mut ccx, env.as_ref(), def.r(s).generics);
+        self.visit_generic_binder(&mut ccx, &env, def.r(s).generics);
 
         // Now, WF-check the definition.
-        ccx.import_report_here(HrtbUniverse::ROOT_REF, env.as_ref(), *def.r(s).body);
+        ccx.import_report_here(HrtbUniverse::ROOT_REF, &env, *def.r(s).body);
 
         ccx.verify();
     }
@@ -244,7 +239,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
     pub fn visit_generic_binder(
         &mut self,
         ccx: &mut ClauseCx,
-        env: ClauseImportEnvRef<'_>,
+        env: &ClauseImportEnv,
         generics: Obj<GenericBinder>,
     ) {
         let s = self.session();

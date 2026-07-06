@@ -2,7 +2,7 @@ use crate::{
     base::{ErrorGuaranteed, Session, arena::Obj},
     semantic::{
         analysis::{sigck::CrateSigckVisitor, typeck::confirm::ConfirmCtxt},
-        infer::{ClauseCx, ClauseImportEnvRef, HrtbUniverse, ObligeCause, UnifyCx, UnifyCxMode},
+        infer::{ClauseCx, ClauseImportEnv, HrtbUniverse, ObligeCause, UnifyCx, UnifyCxMode},
         syntax::{
             Crate, FnDef, HirExpr, HirLabelledBlock, HirLocal, HirPat, InferTyVar,
             InferTyVarSourceInfo, Item, Ty, TyCtxt,
@@ -19,24 +19,18 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
 
     // Setup a `ClauseCx` for signature validation.
     let mut ccx = ClauseCx::new(tcx, cx.coherence, cx.krate, UnifyCxMode::RegionBlind);
-    let env_sig = ccx.create_universal_env_for_fn_def(
+    let env_sig = ccx.universal_env().env_for_fn_def(
         &ObligeCause::new_empty_report(),
         HrtbUniverse::ROOT_REF,
         def,
     );
 
     // WF-check the signature.
-    cx.visit_generic_binder(&mut ccx, env_sig.as_ref(), def.r(s).generics);
+    cx.visit_generic_binder(&mut ccx, &env_sig, def.r(s).generics);
 
     // Check the body
     if let Some(body) = *def.r(s).hir_body {
-        let env_body = ccx.create_universal_env_for_fn_def(
-            &ObligeCause::new_empty_report(),
-            HrtbUniverse::ROOT_REF,
-            def,
-        );
-
-        let mut bcx = BodyCtxt::new(&mut ccx, def, env_body.as_ref());
+        let mut bcx = BodyCtxt::new(&mut ccx, def, &env_sig);
 
         for arg in def.r(s).args.r(s) {
             let env = bcx.import_env;
@@ -52,10 +46,10 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
         ConfirmCtxt::new(&mut bcx).confirm(body);
     } else {
         for arg in def.r(s).args.r(s) {
-            ccx.import_report_here(HrtbUniverse::ROOT_REF, env_sig.as_ref(), arg.ty);
+            ccx.import_report_here(HrtbUniverse::ROOT_REF, &env_sig, arg.ty);
         }
 
-        ccx.import_report_here(HrtbUniverse::ROOT_REF, env_sig.as_ref(), *def.r(s).ret_ty);
+        ccx.import_report_here(HrtbUniverse::ROOT_REF, &env_sig, *def.r(s).ret_ty);
     }
 
     ccx.verify();
@@ -66,7 +60,7 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
 pub(super) struct BodyCtxt<'a, 'tcx> {
     pub ccx: &'a mut ClauseCx<'tcx>,
     pub def: Obj<FnDef>,
-    pub import_env: ClauseImportEnvRef<'a>,
+    pub import_env: &'a ClauseImportEnv,
     pub local_types: FxHashMap<Obj<HirLocal>, Ty>,
     pub block_break_demands: FxHashMap<HirLabelledBlock, Option<Ty>>,
     pub int_infers: Vec<InferTyVar>,
@@ -87,7 +81,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
     pub fn new(
         ccx: &'a mut ClauseCx<'tcx>,
         def: Obj<FnDef>,
-        import_env: ClauseImportEnvRef<'a>,
+        import_env: &'a ClauseImportEnv,
     ) -> Self {
         let s = ccx.session();
 

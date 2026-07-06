@@ -6,8 +6,7 @@ use crate::{
     semantic::{
         analysis::borrowck::{CrateBorrowCheckVisitor, MirDataflowFacts},
         infer::{
-            ClauseCx, ClauseImportEnvRef, HrtbUniverse, ObligeCause, ObligeCauseBehavior,
-            UnifyCxMode,
+            ClauseCx, ClauseImportEnv, HrtbUniverse, ObligeCause, ObligeCauseBehavior, UnifyCxMode,
         },
         syntax::{
             FnDef, IntKind, MirAssignRvalue, MirBlock, MirBody, MirLocal, MirLocalIdx, MirOperand,
@@ -27,7 +26,7 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
 
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
 
-        let env = ccx.create_universal_env_for_fn_def(
+        let env = ccx.universal_env().env_for_fn_def(
             &ObligeCause::new_empty_report(),
             HrtbUniverse::ROOT_REF,
             def,
@@ -55,7 +54,7 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
 
         BodyInstantiateCx {
             ccx: &mut ccx,
-            env: env.as_ref(),
+            env: &env,
             local_universals: local_universals.as_slice(),
         }
         .visit_body(&mut body);
@@ -74,7 +73,7 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
 
 struct BodyInstantiateCx<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
-    env: ClauseImportEnvRef<'a>,
+    env: &'a ClauseImportEnv,
     local_universals: &'a IndexSlice<MirLocalIdx, [Re]>,
 }
 

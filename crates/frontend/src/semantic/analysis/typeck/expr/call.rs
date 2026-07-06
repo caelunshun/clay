@@ -142,7 +142,14 @@ impl BodyCtxt<'_, '_> {
 
         let owner = self
             .ccx_mut()
-            .create_infer_env_for_fn_def_as_blank_owner(resolution, self_ty);
+            .existential_env()
+            .instantiate_method_fn_owner(
+                &ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall {
+                    site_span: name.span,
+                }),
+                resolution,
+                self_ty,
+            );
 
         let generics = generics.map(|generics| {
             normalize_positional_generic_arity_zip(
@@ -160,7 +167,7 @@ impl BodyCtxt<'_, '_> {
             early_args: generics,
         });
 
-        let instance_env = self.ccx_mut().create_infer_env_for_fn_instance(
+        let instance_env = self.ccx_mut().existential_env().env_of_fn_def_for_instance(
             &ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall {
                 site_span: name.span,
             }),
@@ -171,7 +178,7 @@ impl BodyCtxt<'_, '_> {
         let (expected_args, expected_output) = self.ccx_mut().import_fn_instance_sig(
             &ObligeCause::new_empty_report(),
             HrtbUniverse::ROOT_REF,
-            instance_env.as_ref(),
+            &instance_env,
             resolution,
         );
 

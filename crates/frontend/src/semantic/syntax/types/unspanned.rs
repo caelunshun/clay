@@ -2,7 +2,7 @@ use crate::{
     base::{
         ErrorGuaranteed, Session,
         analysis::DebruijnRelative,
-        arena::{HasInterner, Intern, LateInit, Obj},
+        arena::{HasInterner, HasListInterner, Intern, LateInit, Obj},
         syntax::{Span, Symbol},
     },
     semantic::syntax::{
@@ -218,6 +218,24 @@ impl fmt::Debug for TraitInstance {
             .field("def", &self.def.r(s).item.r(s).name.unwrap().text)
             .field("params", &self.params)
             .finish()
+    }
+}
+
+impl TraitInstance {
+    pub fn to_spec(self, tcx: &TyCtxt) -> TraitSpec {
+        let s = &tcx.session;
+
+        TraitSpec {
+            def: self.def,
+            params: tcx.intern_list(
+                &self
+                    .params
+                    .r(s)
+                    .iter()
+                    .map(|&para| TraitParam::Equals(para))
+                    .collect::<Vec<_>>(),
+            ),
+        }
     }
 }
 

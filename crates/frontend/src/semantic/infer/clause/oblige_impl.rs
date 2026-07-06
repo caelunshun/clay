@@ -5,9 +5,9 @@ use crate::{
     base::arena::{HasInterner as _, Obj},
     semantic::{
         infer::{
-            ClauseCx, ClauseImportEnv, ClauseObligation, HrtbUniverse, HrtbUniverseInfo,
-            NoTraitImplError, NotCoveredError, ObligationNotReady, ObligationResult, ObligeCause,
-            ObligeCauseStep, UnboundVarHandlingMode,
+            ClauseCx, ClauseImportEnv, ClauseObligation, GenericSubst, HrtbUniverse,
+            HrtbUniverseInfo, NoTraitImplError, NotCoveredError, ObligationNotReady,
+            ObligationResult, ObligeCause, ObligeCauseStep, UnboundVarHandlingMode,
         },
         syntax::{
             HrtbBinder, HrtbBinderKind, ImplItem, RelationMode, SimpleTySet, SpannedTy,
@@ -351,11 +351,16 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // Obtain inference variables for all generics in the `impl` and tentatively create
         // obligations for them.
-        let trait_env = self.create_infer_env_for_binder_list(
+        let trait_env_params = self.existential_env().binder_to_constrained_vars(
             cause,
             universe,
-            ClauseImportEnv::new(lhs, Vec::new()),
-            &[rhs.r(s).generics],
+            &ClauseImportEnv::new(lhs, []),
+            rhs.r(s).generics,
+        );
+
+        let trait_env = ClauseImportEnv::new(
+            lhs,
+            [GenericSubst::new(rhs.r(s).generics, trait_env_params)],
         );
 
         // Import the target type and trait. WF obligations are not needed on these types because
@@ -364,13 +369,13 @@ impl<'tcx> ClauseCx<'tcx> {
         let target_ty = self
             .importer()
             .with_expansion_cause(cause.clone())
-            .import_report_elsewhere(universe, trait_env.as_ref(), rhs.r(s).target.value);
+            .import_report_elsewhere(universe, &trait_env, rhs.r(s).target.value);
 
         let target_trait = self
             .importer()
             .with_expansion_cause(cause.clone())
             .with_clause_applies_to(target_ty)
-            .import_report_elsewhere(universe, trait_env.as_ref(), rhs.r(s).trait_.unwrap().value);
+            .import_report_elsewhere(universe, &trait_env, rhs.r(s).trait_.unwrap().value);
 
         // Does the `lhs` type match the `rhs`'s target type?
         if self
@@ -478,14 +483,12 @@ impl<'tcx> ClauseCx<'tcx> {
                 unreachable!()
             };
 
-            let lhs_env = self.create_infer_env_for_fn_instance(cause, universe, lhs);
+            let lhs_env = self
+                .existential_env()
+                .env_of_fn_def_for_instance(cause, universe, lhs);
 
-            let (lhs_input, lhs_output) = self.import_fn_instance_sig(
-                cause,
-                universe,
-                lhs_env.as_ref(),
-                lhs.r(s).owner.def(s),
-            );
+            let (lhs_input, lhs_output) =
+                self.import_fn_instance_sig(cause, universe, &lhs_env, lhs.r(s).owner.def(s));
 
             let lhs_input = tcx.intern(TyKind::Tuple(lhs_input));
 

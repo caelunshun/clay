@@ -9,16 +9,17 @@ use crate::{
     semantic::{
         analysis::typeck::{BodyCtxt, infra::deref::attempt_deref},
         infer::{
-            ClauseImportEnvRef, HrtbUniverse, ObligeCause, ObligeCauseProbe, UnboundVarHandlingMode,
+            ClauseImportEnv, GenericSubst, HrtbUniverse, ObligeCause, ObligeCauseOrigin,
+            ObligeCauseProbe, UnboundVarHandlingMode,
         },
         lower::{
             generics::normalize_positional_generic_arity,
             modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},
         },
         syntax::{
-            AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, GenericSubst,
-            InferTyVarSourceInfo, Mutability, Re, RelationMode, TraitClause, TraitSpec, Ty,
-            TyFolderInfallibleExt as _, TyKind, TyOrReList,
+            AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, InferTyVarSourceInfo,
+            Mutability, Re, RelationMode, TraitClause, TraitSpec, Ty, TyFolderInfallibleExt as _,
+            TyKind, TyOrReList,
         },
     },
     utils::lang::IterEither,
@@ -66,16 +67,17 @@ impl BodyCtxt<'_, '_> {
                             break 'search;
                         }
 
-                        let env_args = [GenericSubst {
-                            binder: instance.def.r(s).generics,
-                            substs: instance.params,
-                        }];
-
-                        let env = ClauseImportEnvRef::new(receiver, &env_args);
+                        let env = ClauseImportEnv::new(
+                            receiver,
+                            [GenericSubst::new(
+                                instance.def.r(s).generics,
+                                instance.params,
+                            )],
+                        );
 
                         let field = self.ccx_mut().import_report_elsewhere(
                             HrtbUniverse::ROOT_REF,
-                            env,
+                            &env,
                             field.ty.value,
                         );
 
@@ -218,7 +220,14 @@ impl BodyCtxt<'_, '_> {
 
         let owner = self
             .ccx_mut()
-            .create_infer_env_for_fn_def_as_blank_owner(resolution, self_ty);
+            .existential_env()
+            .instantiate_method_fn_owner(
+                &ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall {
+                    site_span: assoc_name.span,
+                }),
+                resolution,
+                self_ty,
+            );
 
         let early_binder = resolution.r(s).generics;
 
@@ -469,15 +478,16 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                 let self_ty = fork
                     .fresh_ty_infer(HrtbUniverse::ROOT, InferTyVarSourceInfo::MethodLookupHelper);
 
-                let expected_owner =
-                    fork.create_infer_env_for_fn_def_as_blank_owner(candidate, self_ty);
+                let expected_owner = fork
+                    .existential_env()
+                    .instantiate_method_fn_owner(&cause, candidate, self_ty);
 
                 let expected_instance = tcx.intern(FnInstanceInner {
                     owner: expected_owner,
                     early_args: None,
                 });
 
-                let expected_env = fork.create_infer_env_for_fn_instance(
+                let expected_env = fork.existential_env().env_of_fn_def_for_instance(
                     &cause,
                     HrtbUniverse::ROOT_REF,
                     expected_instance,
@@ -486,22 +496,24 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                 let expected_receiver = fork.import_fn_instance_receiver_as_infer(
                     &ObligeCause::new_empty_report(),
                     HrtbUniverse::ROOT_REF,
-                    expected_env.as_ref(),
+                    &expected_env,
                     candidate,
                 );
 
                 fork.oblige_ty_unifies_ty(cause, receiver, expected_receiver, RelationMode::Equate);
             }
             MethodQuery::AssocFn(self_ty) => {
-                let expected_owner =
-                    fork.create_infer_env_for_fn_def_as_blank_owner(candidate, self_ty);
+                let expected_owner = fork
+                    .existential_env()
+                    .instantiate_method_fn_owner(&cause, candidate, self_ty);
+
                 let expected_instance = tcx.intern(FnInstanceInner {
                     owner: expected_owner,
                     early_args: None,
                 });
 
                 // Call for validation side-effect.
-                _ = fork.create_infer_env_for_fn_instance(
+                _ = fork.existential_env().env_of_fn_def_for_instance(
                     &cause,
                     HrtbUniverse::ROOT_REF,
                     expected_instance,

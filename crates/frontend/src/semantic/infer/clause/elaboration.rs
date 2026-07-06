@@ -44,15 +44,14 @@ use crate::{
     base::arena::{HasInterner, HasListInterner},
     semantic::{
         infer::{
-            ClauseCx, ClauseImportEnvRef, ClauseObligation, FloatingInferVar, HrtbUniverse,
-            ObligationNotReady, ObligationResult, ObligeCause, ObligeCauseBehavior,
+            ClauseCx, ClauseImportEnv, ClauseObligation, FloatingInferVar, GenericSubst,
+            HrtbUniverse, ObligationNotReady, ObligationResult, ObligeCause, ObligeCauseBehavior,
         },
         syntax::{
-            AnyGeneric, GenericSubst, HrtbBinder, InferTyVar, InferTyVarSourceInfo, Mutability, Re,
-            RelationMode, SimpleTySet, SpannedRe, SpannedTy, TraitClause, TraitClauseList,
-            TraitParam, TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt, TyKind, TyOrRe,
-            TyVisitor, TyVisitorExt, UniversalReVarSourceInfo, UniversalTyVar,
-            UniversalTyVarSourceInfo,
+            AnyGeneric, HrtbBinder, InferTyVar, InferTyVarSourceInfo, Mutability, Re, RelationMode,
+            SimpleTySet, SpannedRe, SpannedTy, TraitClause, TraitClauseList, TraitParam, TraitSpec,
+            Ty, TyCtxt, TyFolder, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorExt,
+            UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::{FxHashMap, FxHashSet},
@@ -201,13 +200,10 @@ impl<'tcx> ClauseCx<'tcx> {
                             .import_report_elsewhere(
                                 // Associated types vary in the same way as their parent generic.
                                 &implicit_clauses_universe,
-                                ClauseImportEnvRef {
-                                    self_ty: tcx.intern(TyKind::UniversalVar(var)),
-                                    sig_generic_substs: &[GenericSubst {
-                                        binder: *spec.def.r(s).generics,
-                                        substs: new_param_equals,
-                                    }],
-                                },
+                                &ClauseImportEnv::new(
+                                    tcx.intern(TyKind::UniversalVar(var)),
+                                    [GenericSubst::new(*spec.def.r(s).generics, new_param_equals)],
+                                ),
                                 base.r(s).clauses.value,
                             );
 
@@ -245,13 +241,10 @@ impl<'tcx> ClauseCx<'tcx> {
                     let inherits = self.import_report_elsewhere(
                         // Associated types vary in the same way as their parent generic.
                         &self.lookup_universal_ty_hrtb_universe(var).clone(),
-                        ClauseImportEnvRef {
-                            self_ty: tcx.intern(TyKind::UniversalVar(var)),
-                            sig_generic_substs: &[GenericSubst {
-                                binder: *spec.def.r(s).generics,
-                                substs: new_param_equals,
-                            }],
-                        },
+                        &ClauseImportEnv::new(
+                            tcx.intern(TyKind::UniversalVar(var)),
+                            [GenericSubst::new(*spec.def.r(s).generics, new_param_equals)],
+                        ),
                         spec.def.r(s).inherits.value,
                     );
 
