@@ -129,17 +129,20 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
 
             for super_clause in trait_def.r(s).inherits.iter(tcx) {
                 let super_clause_span = super_clause.own_span();
-                let super_clause = ccx.import_report_here(
-                    HrtbUniverse::ROOT_REF,
-                    &ClauseImportEnv::new(
-                        env.self_ty,
-                        [GenericSubst::new(
-                            *trait_def.r(s).generics,
-                            trait_.value.params,
-                        )],
-                    ),
-                    super_clause,
-                );
+                let super_clause = ccx
+                    .importer()
+                    .with_clause_applies_to(env.self_ty)
+                    .import_report_here(
+                        HrtbUniverse::ROOT_REF,
+                        &ClauseImportEnv::new(
+                            env.self_ty,
+                            [GenericSubst::new(
+                                *trait_def.r(s).generics,
+                                trait_.value.params,
+                            )],
+                        ),
+                        super_clause,
+                    );
 
                 ccx.oblige_ty_meets_clause(
                     ObligeCause::new_report(ObligeCauseOrigin::HirCheckSuperTrait {
