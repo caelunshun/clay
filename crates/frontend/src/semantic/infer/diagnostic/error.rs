@@ -1,7 +1,7 @@
 use crate::{
     base::ErrorGuaranteed,
     semantic::{
-        infer::{ClauseCx, ClauseObligation, HrtbUniverse, ObligeCause},
+        infer::{ClauseCx, ClauseObligation, HrtbUniverse, ObligeCause, ObligeCauseReportMode},
         syntax::{
             InferTyVar, PrettyTy, PrettyUniversalTyVar, Re, RelationDirection, SimpleTySet,
             TraitClauseList, TraitParam, TraitSpec, Ty, UniversalReVar, UniversalTyVar,
@@ -55,7 +55,9 @@ pub struct RecursionLimitReached {
 impl RecursionLimitReached {
     pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
         self.cause
-            .report(ccx, || "recursion limit reached".to_string())
+            .report(ccx, ObligeCauseReportMode::PromoteDelayBugs, || {
+                "recursion limit reached".to_string()
+            })
     }
 }
 
@@ -68,13 +70,14 @@ pub struct NoTraitImplError {
 
 impl NoTraitImplError {
     pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
-        self.cause.report(ccx, || {
-            format!(
-                "type `{}` does not implement `{}`",
-                PrettyTy(self.target),
-                self.spec
-            )
-        })
+        self.cause
+            .report(ccx, ObligeCauseReportMode::KeepDelayBugs, || {
+                format!(
+                    "type `{}` does not implement `{}`",
+                    PrettyTy(self.target),
+                    self.spec
+                )
+            })
     }
 }
 
@@ -88,7 +91,7 @@ pub struct NotCoveredError {
 
 impl NotCoveredError {
     pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
-        self.cause.report(ccx, || {
+        self.cause.report(ccx, ObligeCauseReportMode::KeepDelayBugs, || {
             let covered = format_list(
                 self.missing_mentions
                     .iter()
@@ -146,7 +149,7 @@ pub struct ReAndReUnifyError {
 
 impl ReAndReUnifyError {
     pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
-        self.cause.report(ccx, || {
+        self.cause.report(ccx, ObligeCauseReportMode::KeepDelayBugs, || {
             format!(
                 "cannot force `{}` to outlive `{}` without requiring universal `{}` to outlive `{}`",
                 self.lhs,
@@ -168,13 +171,14 @@ pub struct TyAndTyUnifyError {
 
 impl TyAndTyUnifyError {
     pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
-        self.cause.report(ccx, || {
-            format!(
-                "cannot unify types `{}` and `{}`",
-                PrettyTy(self.origin_lhs),
-                PrettyTy(self.origin_rhs),
-            )
-        })
+        self.cause
+            .report(ccx, ObligeCauseReportMode::KeepDelayBugs, || {
+                format!(
+                    "cannot unify types `{}` and `{}`",
+                    PrettyTy(self.origin_lhs),
+                    PrettyTy(self.origin_rhs),
+                )
+            })
     }
 }
 
@@ -218,13 +222,14 @@ pub struct TyAndSimpleTySetUnifyError {
 
 impl TyAndSimpleTySetUnifyError {
     pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
-        self.cause.report(ccx, || {
-            format!(
-                "cannot unify types `{}` and `{:?}`",
-                PrettyTy(self.lhs),
-                self.rhs
-            )
-        })
+        self.cause
+            .report(ccx, ObligeCauseReportMode::KeepDelayBugs, || {
+                format!(
+                    "cannot unify types `{}` and `{:?}`",
+                    PrettyTy(self.lhs),
+                    self.rhs
+                )
+            })
     }
 }
 
@@ -242,15 +247,17 @@ impl ObligationUnfulfilled {
     pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
         match self.obligation.clone() {
             ClauseObligation::TyUnifiesTy(_cause, _lhs, _rhs, _mode) => unreachable!(),
-            ClauseObligation::TyMeetsTrait(cause, _universe, lhs, rhs) => cause.report(ccx, || {
-                format!(
-                    "could not make necessary inferences to show that `{}` implements `{rhs}`: {:#?}",
-                    PrettyTy(lhs),
-                    self.reason,
-                )
-            }),
+            ClauseObligation::TyMeetsTrait(cause, _universe, lhs, rhs) => {
+                cause.report(ccx, ObligeCauseReportMode::KeepDelayBugs, || {
+                    format!(
+                        "could not make necessary inferences to show that `{}` implements `{rhs}`: {:#?}",
+                        PrettyTy(lhs),
+                        self.reason,
+                    )
+                })
+            },
             ClauseObligation::TyOutlivesRe(cause, lhs, rhs, dir) => {
-                cause.report(ccx, || match dir {
+                cause.report(ccx, ObligeCauseReportMode::KeepDelayBugs, || match dir {
                     RelationDirection::LhsOntoRhs => {
                         format!(
                             "could not make necessary inferences to show that `{}` outlives `{rhs}`: {:#?}",
@@ -272,7 +279,7 @@ impl ObligationUnfulfilled {
                 univ,
                 _clauses,
                 _reification_state,
-            ) => cause.report(ccx, || {
+            ) => cause.report(ccx, ObligeCauseReportMode::KeepDelayBugs, || {
                 format!(
                     "could not make necessary inferences to elaborate the generic clauses of `{}`: {:#?}",
                     PrettyUniversalTyVar(univ),

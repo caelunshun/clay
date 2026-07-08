@@ -180,10 +180,31 @@ impl ObligeCause {
     pub fn frames(&self) -> ObligeCauseFrames<'_> {
         ObligeCauseFrames { next: Some(self) }
     }
+}
 
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum ObligeCauseReportMode {
+    /// Promote delay bugs into loud reports. This is necessary for recursion limit errors since
+    /// delay-bug demotion assumes that quiet imports which fail will also fail for their unique WF
+    /// validation import but, when recursion is involved, WF could pass but the quiet import could
+    /// fail because of its longer obligation cause chain.
+    PromoteDelayBugs,
+
+    /// Keep delay bugs as delay bugs.
+    KeepDelayBugs,
+}
+
+impl ObligeCauseReportMode {
+    pub fn should_promote_delay_bugs(self) -> bool {
+        matches!(self, ObligeCauseReportMode::PromoteDelayBugs)
+    }
+}
+
+impl ObligeCause {
     pub fn report<'tcx>(
         &self,
         ccx: &ClauseCx<'tcx>,
+        mode: ObligeCauseReportMode,
         msg: impl FnOnce() -> String,
     ) -> Option<ErrorGuaranteed> {
         match self.behavior() {
@@ -202,9 +223,17 @@ impl ObligeCause {
             ObligeCauseBehavior::DelayBug => {
                 if !ccx.is_silent() {
                     Some(
-                        self.build_diag(ccx, Level::DelayedBug, msg())
-                            .emit()
-                            .unwrap(),
+                        self.build_diag(
+                            ccx,
+                            if mode.should_promote_delay_bugs() {
+                                Level::Error
+                            } else {
+                                Level::DelayedBug
+                            },
+                            msg(),
+                        )
+                        .emit()
+                        .unwrap(),
                     )
                 } else {
                     None
