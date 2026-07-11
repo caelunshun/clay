@@ -3,10 +3,10 @@ use crate::{
     semantic::{
         infer::ClauseCx,
         syntax::{
-            AdtInstance, AnyGeneric, FloatKind, FnInstanceInner, FnOwner, HrtbBinder,
-            HrtbBinderKind, InferTyVarSourceInfo, IntKind, Re, SimpleTyKind, SimpleTySet,
-            TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyProjection,
-            UniversalTyVar, UniversalTyVarSourceInfo,
+            AdtInstance, AnyGeneric, FloatKind, FnInstanceInner, FnOwner, FnOwnerAdtCtor,
+            FnOwnerInherent, FnOwnerTrait, HrtbBinder, HrtbBinderKind, InferTyVarSourceInfo,
+            IntKind, Re, SimpleTyKind, SimpleTySet, TraitClause, TraitClauseList, TraitParam,
+            TraitSpec, Ty, TyKind, TyOrRe, TyProjection, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -257,11 +257,11 @@ impl fmt::Debug for TyKind {
                     FnOwner::Item(def) => {
                         write!(f, "{}", def.r(s).item.r(s).display_path(s))?;
                     }
-                    FnOwner::Trait {
+                    FnOwner::Trait(FnOwnerTrait {
                         instance,
                         self_ty,
                         method_idx,
-                    } => {
+                    }) => {
                         write!(
                             f,
                             "<{} as {instance}>::{}",
@@ -272,11 +272,11 @@ impl fmt::Debug for TyKind {
                                 .text
                         )?;
                     }
-                    FnOwner::Inherent {
+                    FnOwner::Inherent(FnOwnerInherent {
                         self_ty,
                         block,
                         method_idx,
-                    } => {
+                    }) => {
                         write!(
                             f,
                             "{}::{}",
@@ -287,6 +287,10 @@ impl fmt::Debug for TyKind {
                                 .name
                                 .text
                         )?;
+                    }
+                    FnOwner::AdtCtor(FnOwnerAdtCtor { ctor }) => {
+                        // TODO
+                        write!(f, "ADT")?;
                     }
                 }
 

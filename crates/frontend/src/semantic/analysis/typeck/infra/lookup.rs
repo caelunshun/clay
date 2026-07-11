@@ -493,11 +493,11 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                     expected_instance,
                 );
 
-                let expected_receiver = fork.import_fn_instance_receiver_as_infer(
+                let expected_receiver = fork.import_fn_owner_receiver_as_infer(
                     &ObligeCause::new_empty_report(),
                     HrtbUniverse::ROOT_REF,
                     &expected_env,
-                    candidate,
+                    expected_owner,
                 );
 
                 fork.oblige_ty_unifies_ty(cause, receiver, expected_receiver, RelationMode::Equate);

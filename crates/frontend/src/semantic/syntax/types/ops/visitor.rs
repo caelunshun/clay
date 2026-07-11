@@ -362,7 +362,7 @@ impl TyVisitable for FnOwner {
         let tcx = visitor.tcx();
 
         match me.view(tcx) {
-            SpannedFnOwnerView::Item(_) => {
+            SpannedFnOwnerView::Item(_) | SpannedFnOwnerView::AdtCtor { ctor: _ } => {
                 // (dead end)
             }
             SpannedFnOwnerView::Trait {

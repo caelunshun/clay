@@ -488,7 +488,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 .env_of_fn_def_for_instance(cause, universe, lhs);
 
             let (lhs_input, lhs_output) =
-                self.import_fn_instance_sig(cause, universe, &lhs_env, lhs.r(s).owner.def(s));
+                self.import_fn_owner_sig(cause, universe, &lhs_env, lhs.r(s).owner);
 
             let lhs_input = tcx.intern(TyKind::Tuple(lhs_input));
 

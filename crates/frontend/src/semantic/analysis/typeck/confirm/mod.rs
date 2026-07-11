@@ -7,10 +7,11 @@ use crate::{
         analysis::typeck::{BodyCtxt, OverloadResolution},
         infer::{ClauseCx, FloatingInferVar, ObligeCause, UnifyCx},
         syntax::{
-            FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirLocal,
-            HirPat, HirPatKind, HirStmt, RelationMode, ThirBlock, ThirExpr, ThirExprKind,
-            ThirLabelledBlock, ThirLetStmt, ThirLocal, ThirPat, ThirPatKind, ThirStmt, TraitParam,
-            TraitSpec, Ty, TyCtxt, TyFoldable, TyFolderInfallibleExt, TyKind, TyOrRe,
+            FnInstanceInner, FnOwner, FnOwnerTrait, HirBlock, HirExpr, HirExprKind,
+            HirLabelledBlock, HirLocal, HirPat, HirPatKind, HirStmt, RelationMode, ThirBlock,
+            ThirExpr, ThirExprKind, ThirLabelledBlock, ThirLetStmt, ThirLocal, ThirPat,
+            ThirPatKind, ThirStmt, TraitParam, TraitSpec, Ty, TyCtxt, TyFoldable,
+            TyFolderInfallibleExt, TyKind, TyOrRe,
         },
     },
     utils::hash::FxHashMap,
@@ -141,7 +142,7 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
                                 ThirExpr {
                                     span: expr.r(s).span,
                                     ty: tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
-                                        owner: FnOwner::Trait {
+                                        owner: FnOwner::Trait(FnOwnerTrait {
                                             instance: TraitSpec {
                                                 def: overload,
                                                 params: tcx.intern_list(&[
@@ -151,7 +152,7 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
                                             },
                                             self_ty: lhs.r(s).ty,
                                             method_idx: 0,
-                                        },
+                                        }),
                                         early_args: None,
                                     }))),
                                     kind: LateInit::new(ThirExprKind::CreatePathZst),
@@ -177,7 +178,7 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
                                 ThirExpr {
                                     span: expr.r(s).span,
                                     ty: tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
-                                        owner: FnOwner::Trait {
+                                        owner: FnOwner::Trait(FnOwnerTrait {
                                             instance: TraitSpec {
                                                 def: overload,
                                                 params: tcx.intern_list(&[TraitParam::Equals(
@@ -186,7 +187,7 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
                                             },
                                             self_ty: lhs.r(s).ty,
                                             method_idx: 0,
-                                        },
+                                        }),
                                         early_args: None,
                                     }))),
                                     kind: LateInit::new(ThirExprKind::CreatePathZst),

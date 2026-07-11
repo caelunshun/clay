@@ -62,7 +62,10 @@ impl BodyCtxt<'_, '_> {
             self.overload_resolutions
                 .insert(expr, OverloadResolution::Primitive);
 
-            return lhs;
+            return match kind_info.out {
+                EquateOrTy::EqualsLhs => lhs,
+                EquateOrTy::Unrelated(ty) => ty,
+            };
         };
 
         // Otherwise, attempt to perform an overloaded operation.

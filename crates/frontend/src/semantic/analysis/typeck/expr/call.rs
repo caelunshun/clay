@@ -154,7 +154,7 @@ impl BodyCtxt<'_, '_> {
         let generics = generics.map(|generics| {
             normalize_positional_generic_arity_zip(
                 tcx,
-                owner.def(s).r(s).generics,
+                owner.early_generics(s),
                 None,
                 generic_segment_span.unwrap(),
                 generics.r(s),
@@ -175,11 +175,11 @@ impl BodyCtxt<'_, '_> {
             instance,
         );
 
-        let (expected_args, expected_output) = self.ccx_mut().import_fn_instance_sig(
+        let (expected_args, expected_output) = self.ccx_mut().import_fn_owner_sig(
             &ObligeCause::new_empty_report(),
             HrtbUniverse::ROOT_REF,
             &instance_env,
-            resolution,
+            owner,
         );
 
         let (self_ty, expected_args) = expected_args.r(s).split_first().unwrap();

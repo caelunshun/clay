@@ -62,15 +62,16 @@ use crate::{
             ObligeCauseStep, UnifyCxMode,
         },
         syntax::{
-            AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, FnOwner, GenericBinder,
-            HrtbBinder, HrtbBinderKind, HrtbDebruijn, HrtbDebruijnDef, HrtbDebruijnDefList,
-            InferTyVarSourceInfo, Re, RelationDirection, SpannedAdtInstance, SpannedFnInstance,
-            SpannedFnOwner, SpannedFnOwnerView, SpannedHrtbBinder, SpannedHrtbBinderKindView,
-            SpannedHrtbBinderView, SpannedRe, SpannedTraitInstance, SpannedTraitSpec, SpannedTy,
-            SpannedTyView, TraitClause, TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt,
-            TyFoldable, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyFolderPreservesSpans,
-            TyKind, TyOrRe, TyOrReKind, TyOrReList, TyProjection, TyVisitable, TypeAliasItem,
-            UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
+            AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, FnOwner, FnOwnerAdtCtor,
+            FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, HrtbBinderKind, HrtbDebruijn,
+            HrtbDebruijnDef, HrtbDebruijnDefList, InferTyVarSourceInfo, Re, RelationDirection,
+            SpannedAdtInstance, SpannedFnInstance, SpannedFnOwner, SpannedFnOwnerView,
+            SpannedHrtbBinder, SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedRe,
+            SpannedTraitInstance, SpannedTraitSpec, SpannedTy, SpannedTyView, TraitClause,
+            TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt, TyFoldable, TyFolder, TyFolderExt,
+            TyFolderInfallibleExt, TyFolderPreservesSpans, TyKind, TyOrRe, TyOrReKind, TyOrReList,
+            TyProjection, TyVisitable, TypeAliasItem, UniversalReVarSourceInfo,
+            UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
@@ -78,6 +79,53 @@ use crate::{
 use hashbrown::hash_map;
 use smallvec::SmallVec;
 use std::{convert::Infallible, rc::Rc};
+
+// === Environment === //
+
+#[derive(Debug, Clone)]
+pub struct ClauseImportEnv {
+    _private: (),
+    pub self_ty: Ty,
+    pub substs: SmallVec<[GenericSubst; Self::SMALL_CAP]>,
+}
+
+impl ClauseImportEnv {
+    pub const SMALL_CAP: usize = 2;
+
+    pub fn new(self_ty: Ty, substs: impl IntoIterator<Item = GenericSubst>) -> Self {
+        Self {
+            _private: (),
+            self_ty,
+            substs: substs.into_iter().collect(),
+        }
+    }
+
+    pub fn push_subst(&mut self, subst: GenericSubst) {
+        self.substs.push(subst);
+    }
+
+    pub fn with_subst(mut self, subst: GenericSubst) -> Self {
+        self.push_subst(subst);
+        self
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct GenericSubst {
+    _private: (),
+    pub binder: Obj<GenericBinder>,
+    pub substs: TyOrReList,
+}
+
+impl GenericSubst {
+    pub fn new(binder: Obj<GenericBinder>, substs: TyOrReList) -> Self {
+        Self {
+            _private: (),
+            binder,
+            substs,
+        }
+    }
+}
 
 // === Driver === //
 
@@ -225,46 +273,6 @@ impl ClauseImporter<'_, '_> {
     }
 }
 
-// === Environment definition === //
-
-#[derive(Debug, Clone)]
-pub struct ClauseImportEnv {
-    pub self_ty: Ty,
-    pub sig_generic_substs: SmallVec<[GenericSubst; Self::SMALL_CAP]>,
-}
-
-impl ClauseImportEnv {
-    pub const SMALL_CAP: usize = 2;
-
-    pub fn new(self_ty: Ty, sig_generic_substs: impl IntoIterator<Item = GenericSubst>) -> Self {
-        Self {
-            self_ty,
-            sig_generic_substs: sig_generic_substs.into_iter().collect(),
-        }
-    }
-
-    pub fn push_subst(&mut self, subst: GenericSubst) {
-        self.sig_generic_substs.push(subst);
-    }
-
-    pub fn with_subst(mut self, subst: GenericSubst) -> Self {
-        self.push_subst(subst);
-        self
-    }
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct GenericSubst {
-    pub binder: Obj<GenericBinder>,
-    pub substs: TyOrReList,
-}
-
-impl GenericSubst {
-    pub fn new(binder: Obj<GenericBinder>, substs: TyOrReList) -> Self {
-        Self { binder, substs }
-    }
-}
-
 // === Environment substitution === //
 
 impl<'tcx> ClauseCx<'tcx> {
@@ -307,12 +315,7 @@ impl<'tcx> EnvSubstitutor<'_, 'tcx> {
         let kind = generic.kind();
         let pos = generic.binder(s);
 
-        if let Some(binder) = self
-            .env
-            .sig_generic_substs
-            .iter()
-            .find(|v| v.binder == pos.def)
-        {
+        if let Some(binder) = self.env.substs.iter().find(|v| v.binder == pos.def) {
             return binder.substs.r(s)[pos.idx as usize];
         }
 
@@ -764,10 +767,7 @@ impl ClauseNormalizer<'_, '_> {
         // Substitute in the alias's environment.
         let env = ClauseImportEnv::new(
             tcx.intern(TyKind::SigThis),
-            [GenericSubst {
-                binder: def.r(s).generics,
-                substs: args,
-            }],
+            [GenericSubst::new(def.r(s).generics, args)],
         );
 
         let body = self
@@ -1156,8 +1156,8 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
         if let Some(early_args) = early_args {
             self.check_generic_values(
                 env.self_ty,
-                owner.def(s).r(s).generics,
-                env.sig_generic_substs.iter().copied(),
+                owner.early_generics(s),
+                env.substs.iter().copied(),
                 early_args,
                 &early_arg_spans,
                 None,
@@ -1183,21 +1183,23 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
                 let instance = self.fold_spanned(instance);
                 self.clause_applies_to = old_clause_applies_to;
 
-                Ok(FnOwner::Trait {
+                Ok(FnOwner::Trait(FnOwnerTrait {
                     instance,
                     self_ty,
                     method_idx,
-                })
+                }))
             }
+            // WF assumes that the owner associated with a self-type is valid by construction.
             SpannedFnOwnerView::Inherent {
                 self_ty,
                 block,
                 method_idx,
-            } => Ok(FnOwner::Inherent {
+            } => Ok(FnOwner::Inherent(FnOwnerInherent {
                 self_ty: self.fold_spanned(self_ty),
                 block,
                 method_idx,
-            }),
+            })),
+            SpannedFnOwnerView::AdtCtor { ctor } => Ok(FnOwner::AdtCtor(FnOwnerAdtCtor { ctor })),
         }
     }
 }
@@ -1231,12 +1233,9 @@ impl ClauseTyWfFolder<'_, '_> {
             &self.universe,
             &ClauseImportEnv::new(
                 clause_applies_to,
-                [GenericSubst {
-                    binder,
-                    substs: all_params,
-                }]
-                .into_iter()
-                .chain(extra_def_substs),
+                [GenericSubst::new(binder, all_params)]
+                    .into_iter()
+                    .chain(extra_def_substs),
             ),
             defs,
             validated_params,

@@ -2,8 +2,10 @@ mod base;
 pub use self::base::*;
 
 mod elaboration;
-mod env;
 mod exporting;
+
+mod env;
+pub use self::env::*;
 
 mod importing;
 pub use self::importing::*;

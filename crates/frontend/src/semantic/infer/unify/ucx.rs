@@ -8,12 +8,12 @@ use crate::{
             TyAndTyUnifyError,
         },
         syntax::{
-            FnInstanceInner, FnOwner, HrtbBinderKind, InferTyVar, InferTyVarSourceInfo, Mutability,
-            Re, ReVariance, RelationDirection, RelationMode, SimpleTySet, SpannedHrtbBinder,
-            SpannedTy, SpannedTyView, TraitClause, TraitClauseList, TraitParam, TraitParamList, Ty,
-            TyCtxt, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor,
-            TyVisitorExt, TyVisitorInfallibleExt, UniversalReVar, UniversalReVarSourceInfo,
-            UniversalTyVar, UniversalTyVarSourceInfo,
+            FnInstanceInner, FnOwner, FnOwnerInherent, FnOwnerTrait, HrtbBinderKind, InferTyVar,
+            InferTyVarSourceInfo, Mutability, Re, ReVariance, RelationDirection, RelationMode,
+            SimpleTySet, SpannedHrtbBinder, SpannedTy, SpannedTyView, TraitClause, TraitClauseList,
+            TraitParam, TraitParamList, Ty, TyCtxt, TyFolder, TyFolderExt, TyFolderInfallibleExt,
+            TyKind, TyOrRe, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt, UniversalReVar,
+            UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -344,16 +344,16 @@ impl<'tcx> UnifyCx<'tcx> {
                         }
                     }
                     (
-                        FnOwner::Trait {
+                        FnOwner::Trait(FnOwnerTrait {
                             instance: lhs_instance,
                             self_ty: lhs_self_ty,
                             method_idx: lhs_method_idx,
-                        },
-                        FnOwner::Trait {
+                        }),
+                        FnOwner::Trait(FnOwnerTrait {
                             instance: rhs_instance,
                             self_ty: rhs_self_ty,
                             method_idx: rhs_method_idx,
-                        },
+                        }),
                     ) => {
                         if lhs_instance.def != rhs_instance.def || lhs_method_idx != rhs_method_idx
                         {
@@ -377,16 +377,16 @@ impl<'tcx> UnifyCx<'tcx> {
                         );
                     }
                     (
-                        FnOwner::Inherent {
+                        FnOwner::Inherent(FnOwnerInherent {
                             self_ty: lhs_self_ty,
                             block: lhs_block,
                             method_idx: lhs_method_idx,
-                        },
-                        FnOwner::Inherent {
+                        }),
+                        FnOwner::Inherent(FnOwnerInherent {
                             self_ty: rhs_self_ty,
                             block: rhs_block,
                             method_idx: rhs_method_idx,
-                        },
+                        }),
                     ) => {
                         if lhs_block != rhs_block || lhs_method_idx != rhs_method_idx {
                             culprits.push(TyAndTyUnifyCulprit::Types(lhs, rhs));
@@ -505,6 +505,7 @@ impl<'tcx> UnifyCx<'tcx> {
             // - `(Simple, Simple)`
             // - `(UniversalVar, UniversalVar)`
             // - `(HrtbVar, HrtbVar)`
+            // - `(FnDef(FnDefAdtCtor), FnDef(FnDefAdtCtor))`
             //
             // TODO: Check exhaustiveness automatically.
             _ => {

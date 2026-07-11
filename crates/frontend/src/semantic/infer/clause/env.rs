@@ -9,10 +9,10 @@ use crate::{
         },
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnInstanceInner,
-            FnOwner, GenericBinder, HrtbBinder, HrtbBinderKind, ImplItem, InferTyVarSourceInfo,
-            RelationMode, SpannedTraitClauseView, TraitClause, TraitInstance, TraitItem,
-            TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReList, TypeAliasItem,
-            UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
+            FnOwner, FnOwnerAdtCtor, FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder,
+            HrtbBinderKind, ImplItem, InferTyVarSourceInfo, RelationMode, SpannedTraitClauseView,
+            TraitClause, TraitInstance, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyList,
+            TyOrRe, TyOrReList, TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -295,13 +295,7 @@ impl ClauseCxUniversalEnvBuilder<'_, '_> {
             def.r(s).generics,
         );
 
-        ClauseImportEnv::new(
-            self_ty,
-            [GenericSubst {
-                binder: def.r(s).generics,
-                substs,
-            }],
-        )
+        ClauseImportEnv::new(self_ty, [GenericSubst::new(def.r(s).generics, substs)])
     }
 }
 
@@ -468,11 +462,11 @@ impl ClauseCxExistentialEnvBuilder<'_, '_> {
 
         match *def.r(s).owner {
             FnDefOwner::Item(_) => unreachable!("not a method"),
-            FnDefOwner::ImplMethod(block, method_idx) => FnOwner::Inherent {
+            FnDefOwner::ImplMethod(block, method_idx) => FnOwner::Inherent(FnOwnerInherent {
                 self_ty,
                 block,
                 method_idx,
-            },
+            }),
             FnDefOwner::TraitMethod(trait_item, method_idx) => {
                 let params = self.binder_to_constrained_vars(
                     cause,
@@ -490,14 +484,14 @@ impl ClauseCxExistentialEnvBuilder<'_, '_> {
                         .collect::<Vec<_>>(),
                 );
 
-                FnOwner::Trait {
+                FnOwner::Trait(FnOwnerTrait {
                     instance: TraitSpec {
                         def: trait_item,
                         params,
                     },
                     self_ty,
                     method_idx,
-                }
+                })
             }
         }
     }
@@ -560,11 +554,11 @@ impl ClauseCxExistentialEnvBuilder<'_, '_> {
 
         match owner {
             FnOwner::Item(_) => ClauseImportEnv::new(tcx.intern(TyKind::SigThis), Vec::new()),
-            FnOwner::Trait {
+            FnOwner::Trait(FnOwnerTrait {
                 instance,
                 self_ty,
                 method_idx: _,
-            } => {
+            }) => {
                 let instance = self.instantiate_trait_spec(cause, universe, self_ty, instance);
 
                 ClauseImportEnv::new(
@@ -575,11 +569,11 @@ impl ClauseCxExistentialEnvBuilder<'_, '_> {
                     )],
                 )
             }
-            FnOwner::Inherent {
+            FnOwner::Inherent(FnOwnerInherent {
                 self_ty,
                 block,
                 method_idx: _,
-            } => {
+            }) => {
                 let block_params = self.binder_to_constrained_vars(
                     cause,
                     universe,
@@ -607,6 +601,22 @@ impl ClauseCxExistentialEnvBuilder<'_, '_> {
 
                 block_env
             }
+            FnOwner::AdtCtor(owner @ FnOwnerAdtCtor { ctor }) => {
+                let args = self.binder_to_constrained_vars(
+                    cause,
+                    universe,
+                    // No parent environment exists for these generics.
+                    &ClauseImportEnv::new(tcx.intern(TyKind::SigThis), []),
+                    owner.early_generics(s),
+                );
+
+                let self_ty = tcx.intern(TyKind::Adt(AdtInstance {
+                    def: ctor.r(s).owner.item(s),
+                    params: args,
+                }));
+
+                ClauseImportEnv::new(self_ty, [GenericSubst::new(owner.early_generics(s), args)])
+            }
         }
     }
 
@@ -621,14 +631,14 @@ impl ClauseCxExistentialEnvBuilder<'_, '_> {
         let FnInstanceInner { owner, early_args } = *instance.r(s);
 
         let mut env = self.env_of_fn_def_for_owner(cause, universe, owner);
-        let def = owner.def(s);
+        let early_generics = owner.early_generics(s);
 
-        env.sig_generic_substs.push(GenericSubst::new(
-            def.r(s).generics,
+        env.substs.push(GenericSubst::new(
+            early_generics,
             if let Some(early_args) = early_args {
                 early_args
             } else {
-                self.binder_to_constrained_vars(cause, universe, &env, def.r(s).generics)
+                self.binder_to_constrained_vars(cause, universe, &env, early_generics)
             },
         ));
 
@@ -639,51 +649,41 @@ impl ClauseCxExistentialEnvBuilder<'_, '_> {
 // === Misc Helpers === //
 
 impl ClauseCx<'_> {
-    pub fn import_fn_instance_receiver_as_infer(
+    pub fn import_fn_owner_receiver_as_infer(
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,
         env: &ClauseImportEnv,
-        def: Obj<FnDef>,
+        def: FnOwner,
     ) -> Ty {
-        let s = self.session();
-
-        debug_assert!(*def.r(s).has_self_param);
-
-        self.importer()
-            .with_expansion_cause(cause.clone())
-            .import_report_elsewhere(universe, env, def.r(s).args.r(s)[0].ty.value)
-    }
-
-    pub fn import_fn_instance_sig(
-        &mut self,
-        cause: &ObligeCause,
-        universe: &HrtbUniverse,
-        env: &ClauseImportEnv,
-        def: Obj<FnDef>,
-    ) -> (TyList, Ty) {
         let s = self.session();
         let tcx = self.tcx();
 
-        let args = def
-            .r(s)
-            .args
-            .r(s)
-            .iter()
-            .map(|v| v.ty.value)
-            .collect::<Vec<_>>();
+        debug_assert!(def.has_self_parameter(s));
 
-        let args = tcx.intern_list(&args);
+        self.importer()
+            .with_expansion_cause(cause.clone())
+            .import_report_elsewhere(universe, env, def.unimported_sig_args(tcx).r(s)[0])
+    }
+
+    pub fn import_fn_owner_sig(
+        &mut self,
+        cause: &ObligeCause,
+        universe: &HrtbUniverse,
+        env: &ClauseImportEnv,
+        def: FnOwner,
+    ) -> (TyList, Ty) {
+        let tcx = self.tcx();
 
         let args = self
             .importer()
             .with_expansion_cause(cause.clone())
-            .import_report_elsewhere(universe, env, args);
+            .import_report_elsewhere(universe, env, def.unimported_sig_args(tcx));
 
         let ret_ty = self
             .importer()
             .with_expansion_cause(cause.clone())
-            .import_report_elsewhere(universe, env, def.r(s).ret_ty.value);
+            .import_report_elsewhere(universe, env, def.unimported_sig_ret_ty(tcx));
 
         (args, ret_ty)
     }

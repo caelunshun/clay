@@ -5,12 +5,13 @@ use crate::{
         arena::{HasInterner, HasListInterner, Intern},
     },
     semantic::syntax::{
-        AdtInstance, FnInstance, FnInstanceInner, FnOwner, HrtbBinder, HrtbBinderKind,
-        HrtbDebruijnDef, HrtbDebruijnDefList, Re, SpannedAdtInstance, SpannedAdtInstanceView,
-        SpannedFnInstance, SpannedFnInstanceView, SpannedFnOwner, SpannedFnOwnerView,
-        SpannedHrtbBinder, SpannedHrtbBinderKind, SpannedHrtbBinderKindView, SpannedHrtbBinderView,
-        SpannedHrtbDebruijnDef, SpannedHrtbDebruijnDefList, SpannedHrtbDebruijnDefView, SpannedRe,
-        SpannedTraitClause, SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitInstance,
+        AdtInstance, FnInstance, FnInstanceInner, FnOwner, FnOwnerAdtCtor, FnOwnerInherent,
+        FnOwnerTrait, HrtbBinder, HrtbBinderKind, HrtbDebruijnDef, HrtbDebruijnDefList, Re,
+        SpannedAdtInstance, SpannedAdtInstanceView, SpannedFnInstance, SpannedFnInstanceView,
+        SpannedFnOwner, SpannedFnOwnerView, SpannedHrtbBinder, SpannedHrtbBinderKind,
+        SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedHrtbDebruijnDef,
+        SpannedHrtbDebruijnDefList, SpannedHrtbDebruijnDefView, SpannedRe, SpannedTraitClause,
+        SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitInstance,
         SpannedTraitInstanceView, SpannedTraitParam, SpannedTraitParamList, SpannedTraitParamView,
         SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe,
         SpannedTyOrReList, SpannedTyOrReView, SpannedTyView, TraitClause, TraitClauseList,
@@ -448,20 +449,21 @@ impl TyFoldable for FnOwner {
                 instance,
                 self_ty,
                 method_idx,
-            } => Ok(FnOwner::Trait {
+            } => Ok(FnOwner::Trait(FnOwnerTrait {
                 instance: folder.fold_spanned_fallible(instance)?,
                 self_ty: folder.fold_spanned_fallible(self_ty)?,
                 method_idx,
-            }),
+            })),
             SpannedFnOwnerView::Inherent {
                 self_ty,
                 block,
                 method_idx,
-            } => Ok(FnOwner::Inherent {
+            } => Ok(FnOwner::Inherent(FnOwnerInherent {
                 self_ty: folder.fold_spanned_fallible(self_ty)?,
                 block,
                 method_idx,
-            }),
+            })),
+            SpannedFnOwnerView::AdtCtor { ctor } => Ok(FnOwner::AdtCtor(FnOwnerAdtCtor { ctor })),
         }
     }
 }
