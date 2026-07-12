@@ -378,7 +378,7 @@ impl<'db> Formatter<'db> {
             InstrData::Constant(ins) => {
                 let constant = match ins.constant.value(self.db) {
                     ConstantValue::Int(x) => int(*x),
-                    ConstantValue::Real(x) => float(*x),
+                    ConstantValue::Float(x) => float(*x),
                     ConstantValue::Bool(x) => symbol(x.to_string()),
                     ConstantValue::Str(x) => string(x.clone()),
                 };

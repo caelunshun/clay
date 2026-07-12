@@ -11,20 +11,20 @@ pub struct Type<'db> {
 }
 
 impl<'db> Type<'db> {
-    pub fn int(db: &'db dyn Database) -> Self {
-        Type::new(db, TypeKind::int())
+    pub fn sint(db: &'db dyn Database, bitness: IntBitness) -> Self {
+        Type::new(db, TypeKind::sint(bitness))
     }
 
-    pub fn real(db: &'db dyn Database) -> Self {
-        Type::new(db, TypeKind::real())
+    pub fn uint(db: &'db dyn Database, bitness: IntBitness) -> Self {
+        Type::new(db, TypeKind::uint(bitness))
+    }
+
+    pub fn float(db: &'db dyn Database, bitness: FloatBitness) -> Self {
+        Type::new(db, TypeKind::float(bitness))
     }
 
     pub fn bool(db: &'db dyn Database) -> Self {
         Type::new(db, TypeKind::bool())
-    }
-
-    pub fn byte(db: &'db dyn Database) -> Self {
-        Type::new(db, TypeKind::byte())
     }
 
     pub fn unit(db: &'db dyn Database) -> Self {
@@ -65,16 +65,16 @@ impl<'db> TypeKind<'db> {
         Self::Prim(PrimType::Bool)
     }
 
-    pub fn int() -> Self {
-        Self::Prim(PrimType::Int)
+    pub fn sint(bitness: IntBitness) -> Self {
+        Self::Prim(PrimType::SInt(bitness))
     }
 
-    pub fn real() -> Self {
-        Self::Prim(PrimType::Real)
+    pub fn uint(bitness: IntBitness) -> Self {
+        Self::Prim(PrimType::UInt(bitness))
     }
 
-    pub fn byte() -> Self {
-        Self::Prim(PrimType::Byte)
+    pub fn float(bitness: FloatBitness) -> Self {
+        Self::Prim(PrimType::Float(bitness))
     }
 
     pub fn str() -> Self {
@@ -143,18 +143,29 @@ impl<'db> Type<'db> {
 /// Type built in to the engine.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub enum PrimType {
-    /// 64-bit signed integer.
-    Int,
-    /// 64-bit float.
-    Real,
-    /// 8-bit unsigned value.
-    Byte,
+    SInt(IntBitness),
+    UInt(IntBitness),
+    Float(FloatBitness),
     /// Boolean.
     Bool,
     /// Immutable UTF-8 string.
     Str,
     /// The empty type, having only one value.
     Unit,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
+pub enum IntBitness {
+    B8,
+    B16,
+    B32,
+    B64,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
+pub enum FloatBitness {
+    F32,
+    F64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]

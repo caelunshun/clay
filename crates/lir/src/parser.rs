@@ -752,7 +752,7 @@ impl<'a, 'db> Parser<'a, 'db> {
                 let dst = state.get_or_create_val(dst);
                 let constant = match constant {
                     Int(x) => ConstantValue::Int(*x),
-                    Float(x) => ConstantValue::Real(*x),
+                    Float(x) => ConstantValue::Float(*x),
                     String(s) => ConstantValue::Str(s.to_compact_string()),
                     Symbol("true") => ConstantValue::Bool(true),
                     Symbol("false") => ConstantValue::Bool(false),

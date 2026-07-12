@@ -1,4 +1,7 @@
-use crate::ir::typ::{PrimType, TypeKind};
+use crate::{
+    FloatBitness, IntBitness,
+    ir::typ::{PrimType, TypeKind},
+};
 use compact_str::CompactString;
 use std::{
     hash::{Hash, Hasher},
@@ -13,8 +16,9 @@ pub struct Constant<'db> {
 
 #[derive(Clone, Debug)]
 pub enum ConstantValue {
-    Int(i64),
-    Real(f64),
+    SInt(i64, IntBitness),
+    UInt(u64, IntBitness),
+    Float(f64, FloatBitness),
     Bool(bool),
     Str(CompactString),
 }
@@ -24,8 +28,15 @@ pub enum ConstantValue {
 impl PartialEq for ConstantValue {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (ConstantValue::Int(a), ConstantValue::Int(b)) => a == b,
-            (ConstantValue::Real(a), ConstantValue::Real(b)) => a.to_bits() == b.to_bits(),
+            (ConstantValue::SInt(a, a_bitness), ConstantValue::SInt(b, b_bitness)) => {
+                a == b && a_bitness == b_bitness
+            }
+            (ConstantValue::UInt(a, a_bitness), ConstantValue::UInt(b, b_bitness)) => {
+                a == b && a_bitness == b_bitness
+            }
+            (ConstantValue::Float(a, a_bitness), ConstantValue::Float(b, b_bitness)) => {
+                a.to_bits() == b.to_bits() && a_bitness == b_bitness
+            }
             (ConstantValue::Bool(a), ConstantValue::Bool(b)) => a == b,
             (ConstantValue::Str(a), ConstantValue::Str(b)) => a == b,
             _ => false,
@@ -39,8 +50,9 @@ impl Hash for ConstantValue {
     fn hash<H: Hasher>(&self, state: &mut H) {
         mem::discriminant(self).hash(state);
         match self {
-            ConstantValue::Int(x) => x.hash(state),
-            ConstantValue::Real(x) => x.to_bits().hash(state),
+            ConstantValue::UInt(x, bitness) => (x, bitness).hash(state),
+            ConstantValue::SInt(x, bitness) => (x, bitness).hash(state),
+            ConstantValue::Float(x, bitness) => (x.to_bits(), bitness).hash(state),
             ConstantValue::Bool(x) => x.hash(state),
             ConstantValue::Str(x) => x.hash(state),
         }
@@ -50,8 +62,9 @@ impl Hash for ConstantValue {
 impl ConstantValue {
     pub fn typ(&self) -> TypeKind<'static> {
         match self {
-            ConstantValue::Int(_) => TypeKind::Prim(PrimType::Int),
-            ConstantValue::Real(_) => TypeKind::Prim(PrimType::Real),
+            ConstantValue::SInt(_, bitness) => TypeKind::Prim(PrimType::SInt(*bitness)),
+            ConstantValue::UInt(_, bitness) => TypeKind::Prim(PrimType::UInt(*bitness)),
+            ConstantValue::Float(_, bitness) => TypeKind::Prim(PrimType::Float(*bitness)),
             ConstantValue::Bool(_) => TypeKind::Prim(PrimType::Bool),
             ConstantValue::Str(_) => TypeKind::Prim(PrimType::Str),
         }
