@@ -248,6 +248,7 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
                 }
 
                 if match_punct(punct!(':')).expect(p2).is_none() {
+                    fields.push(AstExprField { name, expr: None });
                     break;
                 }
 
