@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 fir-core.workspace = true
-fir-mir.workspace = true
+fir-lir.workspace = true
 salsa.workspace = true
 cranelift-entity.workspace = true
 bumpalo.workspace = true

@@ -1,12 +1,12 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/codegen",
+    #"crates/codegen",
     "crates/core",
     "crates/frontend",
     "crates/frontend/uitest",
-    "crates/mir",
-    "crates/mir/filetests",
+    "crates/lir",
+    "crates/lir/filetests",
     "crates/runtime",
 ]
 
@@ -20,7 +20,7 @@ cranelift-entity = "0.125"
 crossbeam-utils = "0.8"
 derive-where = "1.6.0"
 fir-core = { path = "crates/core" }
-fir-mir = { path = "crates/mir" }
+fir-lir = { path = "crates/lir" }
 hashbrown = "0.16"
 indexmap = "2"
 indoc = "2"

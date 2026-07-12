@@ -1,4 +1,3 @@
-#![feature(if_let_guard)]
 // We plan to expand various enums
 // to have more variants
 #![allow(irrefutable_let_patterns)]

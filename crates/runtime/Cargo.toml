@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 fir-core.workspace = true
-fir-mir.workspace = true
+fir-lir.workspace = true
 tracing.workspace = true
 salsa.workspace = true
 

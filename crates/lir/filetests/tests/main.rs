@@ -1,6 +1,6 @@
 mod harnesses {
     use fir_core::sexpr::SExpr;
-    use fir_mir::{
+    use fir_lir::{
         Func,
         formatter::format_context,
         ir::Context,
