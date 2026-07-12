@@ -14,27 +14,26 @@ pub enum InstrData<'db> {
 
     Constant(ConstantInstr<'db>),
 
+    // Integer instructions require both operands to have
+    // the same bitness and signedness.
     IntAdd(Binary),
     IntSub(Binary),
     IntMul(Binary),
     IntDiv(Binary),
     IntCmp(Cmp),
 
-    RealAdd(Binary),
-    RealSub(Binary),
-    RealMul(Binary),
-    RealDiv(Binary),
-    RealCmp(Cmp),
+    // Float instructions require both operands to have the same
+    // bitness.
+    FloatAdd(Binary),
+    FloatSub(Binary),
+    FloatMul(Binary),
+    FloatDiv(Binary),
+    FloatCmp(Cmp),
 
-    /// Float to signed integer conversion with saturation.
-    /// NaN maps to 0.
-    RealToInt(Unary),
-    /// Signed integer to float conversion, rounding to nearest.
-    IntToReal(Unary),
-
-    ByteToInt(Unary),
-    /// Truncating conversion from 64-bit integer to byte.
-    IntToByte(Unary),
+    IntToInt(IntToInt),
+    FloatToFloat(FloatToFloat),
+    IntToFloat(IntToFloat),
+    FloatToInt(FloatToInt),
 
     BoolAnd(Binary),
     BoolOr(Binary),
@@ -111,7 +110,7 @@ impl InstrData<'_> {
                 ins.return_value = map(ins.return_value);
             }
             InstrData::Copy(ins)
-            | InstrData::RealToInt(ins)
+            | InstrData::FloatToInt(ins)
             | InstrData::IntToReal(ins)
             | InstrData::ByteToInt(ins)
             | InstrData::IntToByte(ins)
@@ -123,17 +122,17 @@ impl InstrData<'_> {
             | InstrData::IntSub(ins)
             | InstrData::IntMul(ins)
             | InstrData::IntDiv(ins)
-            | InstrData::RealAdd(ins)
-            | InstrData::RealSub(ins)
-            | InstrData::RealMul(ins)
-            | InstrData::RealDiv(ins)
+            | InstrData::FloatAdd(ins)
+            | InstrData::FloatSub(ins)
+            | InstrData::FloatMul(ins)
+            | InstrData::FloatDiv(ins)
             | InstrData::BoolAnd(ins)
             | InstrData::BoolOr(ins)
             | InstrData::BoolXor(ins) => {
                 ins.src1 = map(ins.src1);
                 ins.src2 = map(ins.src2);
             }
-            InstrData::IntCmp(ins) | InstrData::RealCmp(ins) => {
+            InstrData::IntCmp(ins) | InstrData::FloatCmp(ins) => {
                 ins.src1 = map(ins.src1);
                 ins.src2 = map(ins.src2);
             }
@@ -205,7 +204,7 @@ impl InstrData<'_> {
             }
             InstrData::Return(_) => {}
             InstrData::Copy(ins)
-            | InstrData::RealToInt(ins)
+            | InstrData::FloatToInt(ins)
             | InstrData::IntToReal(ins)
             | InstrData::ByteToInt(ins)
             | InstrData::IntToByte(ins)
@@ -219,16 +218,16 @@ impl InstrData<'_> {
             | InstrData::IntSub(ins)
             | InstrData::IntMul(ins)
             | InstrData::IntDiv(ins)
-            | InstrData::RealAdd(ins)
-            | InstrData::RealSub(ins)
-            | InstrData::RealMul(ins)
-            | InstrData::RealDiv(ins)
+            | InstrData::FloatAdd(ins)
+            | InstrData::FloatSub(ins)
+            | InstrData::FloatMul(ins)
+            | InstrData::FloatDiv(ins)
             | InstrData::BoolAnd(ins)
             | InstrData::BoolOr(ins)
             | InstrData::BoolXor(ins) => {
                 ins.dst = map(ins.dst);
             }
-            InstrData::IntCmp(ins) | InstrData::RealCmp(ins) => {
+            InstrData::IntCmp(ins) | InstrData::FloatCmp(ins) => {
                 ins.dst = map(ins.dst);
             }
             InstrData::InitStruct(ins) => {

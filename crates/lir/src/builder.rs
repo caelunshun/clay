@@ -274,27 +274,27 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
     }
 
     pub fn real_add(mut self, dst: ValId, src1: ValId, src2: ValId) {
-        self.instr(InstrData::RealAdd(instr::Binary { dst, src1, src2 }));
+        self.instr(InstrData::FloatAdd(instr::Binary { dst, src1, src2 }));
         self.set_val_type(dst, Type::real(self.db));
     }
 
     pub fn real_sub(mut self, dst: ValId, src1: ValId, src2: ValId) {
-        self.instr(InstrData::RealSub(instr::Binary { dst, src1, src2 }));
+        self.instr(InstrData::FloatSub(instr::Binary { dst, src1, src2 }));
         self.set_val_type(dst, Type::real(self.db));
     }
 
     pub fn real_mul(mut self, dst: ValId, src1: ValId, src2: ValId) {
-        self.instr(InstrData::RealMul(instr::Binary { dst, src1, src2 }));
+        self.instr(InstrData::FloatMul(instr::Binary { dst, src1, src2 }));
         self.set_val_type(dst, Type::real(self.db));
     }
 
     pub fn real_div(mut self, dst: ValId, src1: ValId, src2: ValId) {
-        self.instr(InstrData::RealDiv(instr::Binary { dst, src1, src2 }));
+        self.instr(InstrData::FloatDiv(instr::Binary { dst, src1, src2 }));
         self.set_val_type(dst, Type::real(self.db));
     }
 
     pub fn real_cmp(mut self, dst: ValId, src1: ValId, src2: ValId, mode: CompareMode) {
-        self.instr(InstrData::RealCmp(instr::Cmp {
+        self.instr(InstrData::FloatCmp(instr::Cmp {
             dst,
             src1,
             src2,
@@ -304,7 +304,7 @@ impl<'a, 'db> FuncInstrBuilder<'a, 'db> {
     }
 
     pub fn real_to_int(mut self, dst: ValId, src: ValId) {
-        self.instr(InstrData::RealToInt(instr::Unary { dst, src }));
+        self.instr(InstrData::FloatToInt(instr::Unary { dst, src }));
         self.set_val_type(dst, Type::int(self.db));
     }
 

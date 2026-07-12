@@ -87,20 +87,20 @@ impl<'a, 'db> InstrTypeVerifier<'a, 'db> {
                 self.verify_type_data_matches(ins.src2, &[TypeKind::Prim(PrimType::Int)])?;
                 self.verify_type_data_matches(ins.dst, &[TypeKind::Prim(PrimType::Bool)])?;
             }
-            InstrData::RealAdd(ins)
-            | InstrData::RealSub(ins)
-            | InstrData::RealMul(ins)
-            | InstrData::RealDiv(ins) => {
+            InstrData::FloatAdd(ins)
+            | InstrData::FloatSub(ins)
+            | InstrData::FloatMul(ins)
+            | InstrData::FloatDiv(ins) => {
                 self.verify_type_data_matches(ins.src1, &[TypeKind::Prim(PrimType::Real)])?;
                 self.verify_type_data_matches(ins.src2, &[TypeKind::Prim(PrimType::Real)])?;
                 self.verify_type_data_matches(ins.dst, &[TypeKind::Prim(PrimType::Real)])?;
             }
-            InstrData::RealCmp(ins) => {
+            InstrData::FloatCmp(ins) => {
                 self.verify_type_data_matches(ins.src1, &[TypeKind::Prim(PrimType::Real)])?;
                 self.verify_type_data_matches(ins.src2, &[TypeKind::Prim(PrimType::Real)])?;
                 self.verify_type_data_matches(ins.dst, &[TypeKind::Prim(PrimType::Bool)])?;
             }
-            InstrData::RealToInt(ins) => {
+            InstrData::FloatToInt(ins) => {
                 self.verify_type_data_matches(ins.src, &[TypeKind::Prim(PrimType::Real)])?;
                 self.verify_type_data_matches(ins.dst, &[TypeKind::Prim(PrimType::Int)])?;
             }
