@@ -1,4 +1,4 @@
-bug: recursion limit reached
+error: recursion limit reached
    ┌─ test2.fir:14:16
    │
 14 │     type Bar = B;

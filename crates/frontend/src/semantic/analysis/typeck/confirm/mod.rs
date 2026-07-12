@@ -84,8 +84,9 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
             self.ccx_mut().poll_obligations();
         }
 
-        // Lower the function to its THIR representation.
-        LateInit::init(&self.bcx.def.r(s).thir_body, Some(self.confirm_expr(body)));
+        // FIXME: Re-enable
+        // // Lower the function to its THIR representation.
+        // LateInit::init(&self.bcx.def.r(s).thir_body, Some(self.confirm_expr(body)));
     }
 
     fn confirm_expr(&mut self, expr: Obj<HirExpr>) -> Obj<ThirExpr> {

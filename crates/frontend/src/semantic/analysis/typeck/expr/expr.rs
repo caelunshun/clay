@@ -10,10 +10,11 @@ use crate::{
         analysis::typeck::{BodyCtxt, infra::lookup::SpannedImportedAssocArgs},
         infer::{ClauseImportEnv, GenericSubst, HrtbUniverse, ObligeCause, ObligeCauseOrigin},
         syntax::{
-            AdtCtorSyntax, AdtInstance, Divergence, HirBlock, HirExpr, HirExprKind,
-            HirLabelledBlock, HirStmt, HirStructExpr, InferTyVarSourceInfo, LabelTargetKind, Re,
-            RelationMode, SimpleTyKind, SimpleTySet, SpannedFnInstanceView, SpannedFnOwnerView,
-            SpannedTyView, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            AdtCtorSyntax, AdtInstance, Divergence, FnInstanceInner, FnOwner, FnOwnerAdtCtor,
+            HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirStmt, HirStructExpr,
+            InferTyVarSourceInfo, LabelTargetKind, Re, RelationMode, SimpleTyKind, SimpleTySet,
+            SpannedFnInstanceView, SpannedFnOwnerView, SpannedTyView, TraitParam, TraitSpec, Ty,
+            TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -92,6 +93,7 @@ impl BodyCtxt<'_, '_> {
     ) -> TyAndDivergence {
         let s = self.session();
         let tcx = self.tcx();
+        let import_env = self.import_env;
 
         let mut divergence = Divergence::MayDiverge;
         let ty = match *expr.r(s).kind {
@@ -386,7 +388,40 @@ impl BodyCtxt<'_, '_> {
                 self.check_expr_demand(rv, self.return_ty).ignore();
                 tcx.intern(TyKind::Simple(SimpleTyKind::Never))
             }
-            HirExprKind::AdtCtorTy(spanned) => todo!(),
+            HirExprKind::AdtCtorTy(ty) => 'check: {
+                let ty_span = ty.own_span();
+                let ty = self
+                    .ccx_mut()
+                    .import_report_here(HrtbUniverse::ROOT_REF, import_env, ty);
+
+                let ctor = match self.resolve_ty_as_adt_ctor_instance(ty_span, ty) {
+                    Ok(v) => v,
+                    Err(err) => {
+                        break 'check tcx.intern(TyKind::Error(err));
+                    }
+                };
+
+                match &ctor.def.r(s).syntax {
+                    AdtCtorSyntax::Unit | AdtCtorSyntax::Tuple => {
+                        // (fallthrough)
+                    }
+                    AdtCtorSyntax::Named(_) => {
+                        break 'check tcx.intern(TyKind::Error(
+                            Diag::span_err(
+                                ty_span,
+                                "cannot create functions out of braced constructors",
+                            )
+                            .emit(),
+                        ));
+                    }
+                }
+
+                // TODO: Can we make late-bound ctors too?
+                tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
+                    owner: FnOwner::AdtCtor(FnOwnerAdtCtor { ctor: ctor.def }),
+                    early_args: Some(ctor.params),
+                })))
+            }
             HirExprKind::AdtCtorEnumVariant(obj, spanned) => todo!(),
             HirExprKind::Struct(HirStructExpr {
                 ctor_span,
@@ -412,7 +447,7 @@ impl BodyCtxt<'_, '_> {
                     AdtCtorSyntax::Named(_) => {
                         // (fallthrough)
                     }
-                };
+                }
 
                 let instance_owner = ctor.def.r(s).owner.item(s);
                 let instance_ty = self.adt_ctor_to_instance_ty(ctor);

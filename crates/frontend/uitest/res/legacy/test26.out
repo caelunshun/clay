@@ -1,4 +1,4 @@
-bug: recursion limit reached
+error: recursion limit reached
    ┌─ test26.fir:24:16
    │
 24 │     type Out = <() as Forever>::Out;
@@ -1681,7 +1681,7 @@ note: Step(
     },
 )
 
-bug: recursion limit reached
+error: recursion limit reached
    ┌─ test26.fir:27:12
    │
 27 │ fn meow(v: <() as Forever>::Out) {}

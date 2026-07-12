@@ -1,0 +1,30 @@
+error: field `b` is not visible to function `crate::main`
+   ┌─ struct.fir:13:23
+   │
+13 │     Meow { a: "meow", b: 2 }
+   │                       ^
+
+error: cannot unify types `str` and `u32`
+   ┌─ struct.fir:13:15
+   │
+13 │     Meow { a: "meow", b: 2 }
+   │               ^^^^^^
+
+note: Origin(
+    HirBodyCheckCoercion {
+        expr_span: struct.fir:13:15-21,
+    },
+)
+
+error: cannot unify types `crate::pip::Meow` and `()`
+   ┌─ struct.fir:13:5
+   │
+13 │     Meow { a: "meow", b: 2 }
+   │     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+note: Origin(
+    HirBodyCheckCoercion {
+        expr_span: struct.fir:13:5-29,
+    },
+)
+

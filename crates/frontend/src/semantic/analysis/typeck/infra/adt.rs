@@ -39,21 +39,7 @@ impl BodyCtxt<'_, '_> {
                     .ccx_mut()
                     .import_report_here(HrtbUniverse::ROOT_REF, import_env, ty);
 
-                let instance = self.resolve_ty_as_adt_instance(span, ty)?;
-
-                let def = match *instance.def.r(s).kind {
-                    AdtKind::Struct(def) => *def.r(s).ctor,
-                    AdtKind::Enum(_) => {
-                        return Err(
-                            Diag::span_err(span, "expected enum variant, got bare enum").emit()
-                        );
-                    }
-                };
-
-                Ok(AdtCtorInstance {
-                    def,
-                    params: instance.params,
-                })
+                self.resolve_ty_as_adt_ctor_instance(span, ty)
             }
             AdtCtorUnresolved::ResolvedEnumVariant(def, args) => Ok(AdtCtorInstance {
                 def: *def.r(s).adt_variant(s).r(s).ctor,
@@ -110,6 +96,27 @@ impl BodyCtxt<'_, '_> {
             def: ctor.def.r(s).owner.item(s),
             params: ctor.params,
         }))
+    }
+
+    pub fn resolve_ty_as_adt_ctor_instance(
+        &mut self,
+        span: Span,
+        ty: Ty,
+    ) -> Result<AdtCtorInstance, ErrorGuaranteed> {
+        let s = self.session();
+
+        let instance = self.resolve_ty_as_adt_instance(span, ty)?;
+        let def = match *instance.def.r(s).kind {
+            AdtKind::Struct(def) => *def.r(s).ctor,
+            AdtKind::Enum(_) => {
+                return Err(Diag::span_err(span, "expected enum variant, got bare enum").emit());
+            }
+        };
+
+        Ok(AdtCtorInstance {
+            def,
+            params: instance.params,
+        })
     }
 
     pub fn resolve_ty_as_adt_instance(
