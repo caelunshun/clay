@@ -13,8 +13,8 @@ use crate::{
             AdtCtorSyntax, AdtInstance, Divergence, FnInstanceInner, FnOwner, FnOwnerAdtCtor,
             HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirStmt, HirStructExpr,
             InferTyVarSourceInfo, LabelTargetKind, Re, RelationMode, SimpleTyKind, SimpleTySet,
-            SpannedFnInstanceView, SpannedFnOwnerView, SpannedTyView, TraitParam, TraitSpec, Ty,
-            TyAndDivergence, TyKind, TyOrRe,
+            SpannedAdtInstanceView, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTyView,
+            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -416,13 +416,53 @@ impl BodyCtxt<'_, '_> {
                     }
                 }
 
-                // TODO: Can we make late-bound ctors too?
                 tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
                     owner: FnOwner::AdtCtor(FnOwnerAdtCtor { ctor: ctor.def }),
                     early_args: Some(ctor.params),
                 })))
             }
-            HirExprKind::AdtCtorEnumVariant(obj, spanned) => todo!(),
+            HirExprKind::AdtCtorEnumVariant(item, params) => 'check: {
+                let ctor = *item.r(s).adt_variant(s).r(s).ctor;
+
+                match &ctor.r(s).syntax {
+                    AdtCtorSyntax::Unit | AdtCtorSyntax::Tuple => {
+                        // (fallthrough)
+                    }
+                    AdtCtorSyntax::Named(_) => {
+                        break 'check tcx.intern(TyKind::Error(
+                            Diag::span_err(
+                                expr.r(s).span,
+                                "cannot create functions out of braced constructors",
+                            )
+                            .emit(),
+                        ));
+                    }
+                }
+
+                let TyKind::Adt(AdtInstance { def: _, params }) = *self
+                    .ccx_mut()
+                    .import_report_here(
+                        HrtbUniverse::ROOT_REF,
+                        import_env,
+                        SpannedTyView::Adt(
+                            SpannedAdtInstanceView {
+                                def: item.r(s).adt(s),
+                                params,
+                            }
+                            .encode(expr.r(s).span, tcx),
+                        )
+                        .encode(expr.r(s).span, tcx),
+                    )
+                    .r(s)
+                else {
+                    unreachable!()
+                };
+
+                tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
+                    owner: FnOwner::AdtCtor(FnOwnerAdtCtor { ctor }),
+                    early_args: Some(params),
+                })))
+            }
             HirExprKind::Struct(HirStructExpr {
                 ctor_span,
                 ctor,

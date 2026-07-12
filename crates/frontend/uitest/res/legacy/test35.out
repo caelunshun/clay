@@ -13,9 +13,3 @@ note: Origin(
     },
 )
 
-error: cannot unify types `()` and `u32`
-  ┌─ test35.fir:1:1
-  │
-1 │ fn main() -> u32 {
-  │ ^
-

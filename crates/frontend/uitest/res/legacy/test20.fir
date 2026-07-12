@@ -30,7 +30,7 @@ pub use Option::*;
 pub trait Iterator {
     type Item: for<'a: &shorter Self> IteratorItem<'a>;
 
-    fn next<'a: &shorter Self>(this: &'a mut Self)
+    fn next<'a: &shorter Self>(&'a mut self)
         -> Option<<<Self as Iterator>::Item as IteratorItem<'a>>::Out>;
 }
 

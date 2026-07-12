@@ -22,6 +22,8 @@ use crate::{
 };
 use hashbrown::hash_map;
 
+// TODO: Can we support late-bound ctors too?
+
 impl BodyCtxt<'_, '_> {
     pub fn resolve_adt_ctor(
         &mut self,
