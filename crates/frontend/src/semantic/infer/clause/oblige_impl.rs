@@ -351,7 +351,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // Obtain inference variables for all generics in the `impl` and tentatively create
         // obligations for them.
-        let trait_env_params = self.existential_env().binder_to_constrained_vars(
+        let trait_env_params = self.instantiate_infer().binder_to_constrained_vars(
             cause,
             universe,
             &ClauseImportEnv::new(lhs, []),
@@ -484,7 +484,7 @@ impl<'tcx> ClauseCx<'tcx> {
             };
 
             let lhs_env = self
-                .existential_env()
+                .instantiate_infer()
                 .env_of_fn_def_for_instance(cause, universe, lhs);
 
             let (lhs_input, lhs_output) =

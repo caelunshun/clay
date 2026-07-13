@@ -220,7 +220,7 @@ impl BodyCtxt<'_, '_> {
 
         let owner = self
             .ccx_mut()
-            .existential_env()
+            .instantiate_infer()
             .instantiate_method_fn_owner(
                 &ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall {
                     site_span: assoc_name.span,
@@ -479,7 +479,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                     .fresh_ty_infer(HrtbUniverse::ROOT, InferTyVarSourceInfo::MethodLookupHelper);
 
                 let expected_owner = fork
-                    .existential_env()
+                    .instantiate_infer()
                     .instantiate_method_fn_owner(&cause, candidate, self_ty);
 
                 let expected_instance = tcx.intern(FnInstanceInner {
@@ -487,7 +487,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                     early_args: None,
                 });
 
-                let expected_env = fork.existential_env().env_of_fn_def_for_instance(
+                let expected_env = fork.instantiate_infer().env_of_fn_def_for_instance(
                     &cause,
                     HrtbUniverse::ROOT_REF,
                     expected_instance,
@@ -504,7 +504,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
             }
             MethodQuery::AssocFn(self_ty) => {
                 let expected_owner = fork
-                    .existential_env()
+                    .instantiate_infer()
                     .instantiate_method_fn_owner(&cause, candidate, self_ty);
 
                 let expected_instance = tcx.intern(FnInstanceInner {
@@ -513,7 +513,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                 });
 
                 // Call for validation side-effect.
-                _ = fork.existential_env().env_of_fn_def_for_instance(
+                _ = fork.instantiate_infer().env_of_fn_def_for_instance(
                     &cause,
                     HrtbUniverse::ROOT_REF,
                     expected_instance,

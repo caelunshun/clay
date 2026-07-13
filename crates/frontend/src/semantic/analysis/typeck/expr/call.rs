@@ -142,7 +142,7 @@ impl BodyCtxt<'_, '_> {
 
         let owner = self
             .ccx_mut()
-            .existential_env()
+            .instantiate_infer()
             .instantiate_method_fn_owner(
                 &ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall {
                     site_span: name.span,
@@ -167,13 +167,16 @@ impl BodyCtxt<'_, '_> {
             early_args: generics,
         });
 
-        let instance_env = self.ccx_mut().existential_env().env_of_fn_def_for_instance(
-            &ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall {
-                site_span: name.span,
-            }),
-            HrtbUniverse::ROOT_REF,
-            instance,
-        );
+        let instance_env = self
+            .ccx_mut()
+            .instantiate_infer()
+            .env_of_fn_def_for_instance(
+                &ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall {
+                    site_span: name.span,
+                }),
+                HrtbUniverse::ROOT_REF,
+                instance,
+            );
 
         let (expected_args, expected_output) = self.ccx_mut().import_fn_owner_sig(
             &ObligeCause::new_empty_report(),

@@ -19,7 +19,7 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
 
     // Setup a `ClauseCx` for signature validation.
     let mut ccx = ClauseCx::new(tcx, cx.coherence, cx.krate, UnifyCxMode::RegionBlind);
-    let env_sig = ccx.universal_env().env_for_fn_def(
+    let env_sig = ccx.instantiate_universal().env_for_fn_def(
         &ObligeCause::new_empty_report(),
         HrtbUniverse::ROOT_REF,
         def,

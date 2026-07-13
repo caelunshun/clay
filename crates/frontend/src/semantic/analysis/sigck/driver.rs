@@ -75,7 +75,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
 
         // Setup a `ClauseCx` with our environment in mind.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.universal_env().env_for_trait_def(
+        let env = ccx.instantiate_universal().env_for_trait_def(
             &ObligeCause::new_empty_report(),
             HrtbUniverse::ROOT_REF,
             def,
@@ -111,7 +111,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
 
         // Setup a `ClauseCx` with our environment in mind.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.universal_env().env_for_impl_block(
+        let env = ccx.instantiate_universal().env_for_impl_block(
             &ObligeCause::new_empty_report(),
             HrtbUniverse::ROOT_REF,
             item,
@@ -180,7 +180,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
 
         // Setup a `ClauseCx` with our environment in mind.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.universal_env().env_for_adt_def(
+        let env = ccx.instantiate_universal().env_for_adt_def(
             &ObligeCause::new_empty_report(),
             HrtbUniverse::ROOT_REF,
             def,
@@ -224,7 +224,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
 
         // Setup a `ClauseCx` with our environment in mind.
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.universal_env().env_for_type_alias_def(
+        let env = ccx.instantiate_universal().env_for_type_alias_def(
             &ObligeCause::new_empty_report(),
             HrtbUniverse::ROOT_REF,
             def,

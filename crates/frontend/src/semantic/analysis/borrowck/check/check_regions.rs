@@ -26,7 +26,7 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
 
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
 
-        let env = ccx.universal_env().env_for_fn_def(
+        let env = ccx.instantiate_universal().env_for_fn_def(
             &ObligeCause::new_empty_report(),
             HrtbUniverse::ROOT_REF,
             def,

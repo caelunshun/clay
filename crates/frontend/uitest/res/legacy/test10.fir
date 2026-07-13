@@ -1,3 +1,11 @@
+#[lang("vec")]
+pub struct Vec<T> {
+    my_field: (),
+}
+
+#[lang("fn_once_trait")]
+pub trait FnOnce<I, O> {}
+
 mod meow {
     pub struct u32 {
         _private: (),

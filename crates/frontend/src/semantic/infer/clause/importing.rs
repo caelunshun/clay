@@ -67,11 +67,11 @@ use crate::{
             HrtbDebruijnDef, HrtbDebruijnDefList, InferTyVarSourceInfo, Re, RelationDirection,
             SpannedAdtInstance, SpannedFnInstance, SpannedFnOwner, SpannedFnOwnerView,
             SpannedHrtbBinder, SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedRe,
-            SpannedTraitInstance, SpannedTraitSpec, SpannedTy, SpannedTyView, TraitClause,
-            TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt, TyFoldable, TyFolder, TyFolderExt,
-            TyFolderInfallibleExt, TyFolderPreservesSpans, TyKind, TyOrRe, TyOrReKind, TyOrReList,
-            TyProjection, TyVisitable, TypeAliasItem, UniversalReVarSourceInfo,
-            UniversalTyVarSourceInfo,
+            SpannedTraitClauseView, SpannedTraitInstance, SpannedTraitSpec, SpannedTy,
+            SpannedTyView, TraitClause, TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt,
+            TyFoldable, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyFolderPreservesSpans,
+            TyKind, TyOrRe, TyOrReKind, TyOrReList, TyProjection, TyVisitable, TypeAliasItem,
+            UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
@@ -1143,7 +1143,8 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
         let FnInstanceInner { owner, early_args } = *instance.r(s);
 
         // Construct an environment, validating the `owner` in the process.
-        let env = self.ccx.existential_env().env_of_fn_def_for_owner(
+        // FIXME: Should not instantiate anything.
+        let env = self.ccx.instantiate_infer().env_of_fn_def_for_owner(
             &self
                 .cause
                 .clone()
@@ -1229,7 +1230,7 @@ impl ClauseTyWfFolder<'_, '_> {
         };
 
         // TODO: Check this, this is mega sketchy.
-        self.ccx.existential_env().init_constraints_for_binder_raw(
+        self.ccx.init_constraints_for_binder_raw(
             &self.universe,
             &ClauseImportEnv::new(
                 clause_applies_to,
@@ -1249,5 +1250,105 @@ impl ClauseTyWfFolder<'_, '_> {
                 )
             },
         );
+    }
+}
+
+// === Binder Checking === //
+
+impl<'tcx> ClauseCx<'tcx> {
+    pub fn init_constraints_for_binder(
+        &mut self,
+        cause: &ObligeCause,
+        universe: &HrtbUniverse,
+        binder_parent_env: &ClauseImportEnv,
+        target_binder: Obj<GenericBinder>,
+        target_vars: TyOrReList,
+    ) {
+        let s = self.session();
+
+        let binder_own_env = binder_parent_env
+            .clone()
+            .with_subst(GenericSubst::new(target_binder, target_vars));
+
+        self.init_constraints_for_binder_raw(
+            universe,
+            &binder_own_env,
+            &target_binder.r(s).defs,
+            target_vars.r(s),
+            |_ccx, _idx, clause| {
+                cause
+                    .clone()
+                    .child(ObligeCauseStep::ImportEnvMeetsRequirements { clause }.into())
+            },
+        )
+    }
+
+    pub fn init_constraints_for_binder_raw(
+        &mut self,
+        universe: &HrtbUniverse,
+        binder_own_env: &ClauseImportEnv,
+        target_binder: &[AnyGeneric],
+        target_vars: &[TyOrRe],
+        mut gen_cause: impl FnMut(&mut ClauseCx<'tcx>, usize, Span) -> ObligeCause,
+    ) {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        for (i, (&generic, &var)) in target_binder.iter().zip(target_vars).enumerate() {
+            match (generic, var) {
+                (AnyGeneric::Re(generic), TyOrRe::Re(var)) => {
+                    for clause in generic.r(s).clauses.iter(tcx) {
+                        let clause_span = clause.own_span();
+
+                        let SpannedTraitClauseView::Outlives(must_outlive_dir, must_outlive) =
+                            clause.view(tcx)
+                        else {
+                            unreachable!()
+                        };
+
+                        let cause = gen_cause(self, i, clause_span);
+
+                        let must_outlive = self
+                            .importer()
+                            .with_expansion_cause(cause.clone())
+                            // FIXME: Since this is called by well-formedness, we must not.
+                            .import_report_elsewhere(universe, binder_own_env, must_outlive.value);
+
+                        self.oblige_general_outlives(
+                            cause,
+                            TyOrRe::Re(var),
+                            must_outlive,
+                            must_outlive_dir,
+                        );
+                    }
+                }
+                (AnyGeneric::Ty(generic), TyOrRe::Ty(var)) => {
+                    for clause in generic.r(s).clauses.iter(tcx) {
+                        let cause = gen_cause(self, i, clause.own_span());
+
+                        let clause = self
+                            .importer()
+                            .with_expansion_cause(cause.clone())
+                            .with_clause_applies_to(var)
+                            .import_report_elsewhere(&universe, binder_own_env, clause.value);
+
+                        match clause {
+                            TraitClause::Outlives(must_outlive_dir, must_outlive) => {
+                                self.oblige_general_outlives(
+                                    cause,
+                                    TyOrRe::Ty(var),
+                                    must_outlive,
+                                    must_outlive_dir,
+                                );
+                            }
+                            TraitClause::Trait(rhs) => {
+                                self.oblige_ty_meets_trait(cause, universe.clone(), var, rhs);
+                            }
+                        }
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
     }
 }

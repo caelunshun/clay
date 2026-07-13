@@ -1,18 +1,15 @@
+//! Utilities for instantiating fresh universal or existential type objects.
+
 use crate::{
-    base::{
-        arena::{HasInterner as _, HasListInterner as _, Obj},
-        syntax::Span,
-    },
+    base::arena::{HasInterner as _, HasListInterner as _, Obj},
     semantic::{
-        infer::{
-            ClauseCx, ClauseImportEnv, GenericSubst, HrtbUniverse, ObligeCause, ObligeCauseStep,
-        },
+        infer::{ClauseCx, ClauseImportEnv, GenericSubst, HrtbUniverse, ObligeCause},
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnInstanceInner,
             FnOwner, FnOwnerAdtCtor, FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder,
-            HrtbBinderKind, ImplItem, InferTyVarSourceInfo, RelationMode, SpannedTraitClauseView,
-            TraitClause, TraitInstance, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyList,
-            TyOrRe, TyOrReList, TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
+            HrtbBinderKind, ImplItem, InferTyVarSourceInfo, RelationMode, TraitClause,
+            TraitInstance, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe,
+            TyOrReList, TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -20,17 +17,18 @@ use crate::{
 // === Universal === //
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn universal_env(&mut self) -> ClauseCxUniversalEnvBuilder<'_, 'tcx> {
-        ClauseCxUniversalEnvBuilder { ccx: self }
+    pub fn instantiate_universal(&mut self) -> ClauseCxUniversalInstantiation<'_, 'tcx> {
+        ClauseCxUniversalInstantiation { ccx: self }
     }
 }
 
-pub struct ClauseCxUniversalEnvBuilder<'a, 'tcx> {
+/// Utilities for instantiating various type system objects universally.
+pub struct ClauseCxUniversalInstantiation<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
 }
 
 // Machinery
-impl ClauseCxUniversalEnvBuilder<'_, '_> {
+impl ClauseCxUniversalInstantiation<'_, '_> {
     pub fn binder_to_init_vars(
         &mut self,
         cause: &ObligeCause,
@@ -129,7 +127,7 @@ impl ClauseCxUniversalEnvBuilder<'_, '_> {
 }
 
 // Specialized
-impl ClauseCxUniversalEnvBuilder<'_, '_> {
+impl ClauseCxUniversalInstantiation<'_, '_> {
     pub fn env_for_trait_def(
         &mut self,
         cause: &ObligeCause,
@@ -299,20 +297,27 @@ impl ClauseCxUniversalEnvBuilder<'_, '_> {
     }
 }
 
-// === Existential === //
+// === Inference === //
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn existential_env(&mut self) -> ClauseCxExistentialEnvBuilder<'_, 'tcx> {
-        ClauseCxExistentialEnvBuilder { ccx: self }
+    pub fn instantiate_infer(&mut self) -> ClauseCxInferInstantiation<'_, 'tcx> {
+        ClauseCxInferInstantiation { ccx: self }
     }
 }
 
-pub struct ClauseCxExistentialEnvBuilder<'a, 'tcx> {
+/// Utilities for instantiating various type system objects with placeholder inference variables.
+///
+/// Do not use these methods unless you intend to instantiate and later constrain an inference
+/// variable. For example, it would be wrong to attempt to WF-check a function instance without any
+/// early-bound parameters by importing it here because, although the inference variables would be
+/// properly constrained as to ensure well-formedness, those variables would never be constrained
+/// during WF checking, leading to unsatisfied obligation errors. Ask me how I know.
+pub struct ClauseCxInferInstantiation<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
 }
 
 // Machinery
-impl<'tcx> ClauseCxExistentialEnvBuilder<'_, 'tcx> {
+impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
     pub fn binder_to_constrained_vars(
         &mut self,
         cause: &ObligeCause,
@@ -321,7 +326,8 @@ impl<'tcx> ClauseCxExistentialEnvBuilder<'_, 'tcx> {
         binder: Obj<GenericBinder>,
     ) -> TyOrReList {
         let substs = self.binder_to_unconstrained_vars(universe, binder);
-        self.init_constraints_for_binder(cause, universe, binder_parent_env, binder, substs);
+        self.ccx
+            .init_constraints_for_binder(cause, universe, binder_parent_env, binder, substs);
         substs
     }
 
@@ -349,108 +355,10 @@ impl<'tcx> ClauseCxExistentialEnvBuilder<'_, 'tcx> {
 
         tcx.intern_list(&substs)
     }
-
-    pub fn init_constraints_for_binder(
-        &mut self,
-        cause: &ObligeCause,
-        universe: &HrtbUniverse,
-        binder_parent_env: &ClauseImportEnv,
-        target_binder: Obj<GenericBinder>,
-        target_vars: TyOrReList,
-    ) {
-        let s = self.ccx.session();
-
-        let binder_own_env = binder_parent_env
-            .clone()
-            .with_subst(GenericSubst::new(target_binder, target_vars));
-
-        self.init_constraints_for_binder_raw(
-            universe,
-            &binder_own_env,
-            &target_binder.r(s).defs,
-            target_vars.r(s),
-            |_ccx, _idx, clause| {
-                cause
-                    .clone()
-                    .child(ObligeCauseStep::ImportEnvMeetsRequirements { clause }.into())
-            },
-        )
-    }
-
-    pub fn init_constraints_for_binder_raw(
-        &mut self,
-        universe: &HrtbUniverse,
-        binder_own_env: &ClauseImportEnv,
-        target_binder: &[AnyGeneric],
-        target_vars: &[TyOrRe],
-        mut gen_cause: impl FnMut(&mut ClauseCx<'tcx>, usize, Span) -> ObligeCause,
-    ) {
-        let s = self.ccx.session();
-        let tcx = self.ccx.tcx();
-
-        for (i, (&generic, &var)) in target_binder.iter().zip(target_vars).enumerate() {
-            match (generic, var) {
-                (AnyGeneric::Re(generic), TyOrRe::Re(var)) => {
-                    for clause in generic.r(s).clauses.iter(tcx) {
-                        let clause_span = clause.own_span();
-
-                        let SpannedTraitClauseView::Outlives(must_outlive_dir, must_outlive) =
-                            clause.view(tcx)
-                        else {
-                            unreachable!()
-                        };
-
-                        let cause = gen_cause(&mut self.ccx, i, clause_span);
-
-                        let must_outlive = self
-                            .ccx
-                            .importer()
-                            .with_expansion_cause(cause.clone())
-                            .import_report_elsewhere(universe, binder_own_env, must_outlive.value);
-
-                        self.ccx.oblige_general_outlives(
-                            cause,
-                            TyOrRe::Re(var),
-                            must_outlive,
-                            must_outlive_dir,
-                        );
-                    }
-                }
-                (AnyGeneric::Ty(generic), TyOrRe::Ty(var)) => {
-                    for clause in generic.r(s).clauses.iter(tcx) {
-                        let cause = gen_cause(&mut self.ccx, i, clause.own_span());
-
-                        let clause = self
-                            .ccx
-                            .importer()
-                            .with_expansion_cause(cause.clone())
-                            .with_clause_applies_to(var)
-                            .import_report_elsewhere(&universe, binder_own_env, clause.value);
-
-                        match clause {
-                            TraitClause::Outlives(must_outlive_dir, must_outlive) => {
-                                self.ccx.oblige_general_outlives(
-                                    cause,
-                                    TyOrRe::Ty(var),
-                                    must_outlive,
-                                    must_outlive_dir,
-                                );
-                            }
-                            TraitClause::Trait(rhs) => {
-                                self.ccx
-                                    .oblige_ty_meets_trait(cause, universe.clone(), var, rhs);
-                            }
-                        }
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
-    }
 }
 
 // Specialized
-impl ClauseCxExistentialEnvBuilder<'_, '_> {
+impl ClauseCxInferInstantiation<'_, '_> {
     pub fn instantiate_method_fn_owner(
         &mut self,
         cause: &ObligeCause,
@@ -601,6 +509,8 @@ impl ClauseCxExistentialEnvBuilder<'_, '_> {
 
                 block_env
             }
+            // FIXME: this is not how one instantiates this environment—we should instantiate
+            // anything because that's the instance's job.
             FnOwner::AdtCtor(owner @ FnOwnerAdtCtor { ctor }) => {
                 let args = self.binder_to_constrained_vars(
                     cause,
