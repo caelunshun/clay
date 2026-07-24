@@ -74,6 +74,36 @@ fn lower_generic_defs<'ast>(
     }
 }
 
+fn check_generic_defs_for_duplicates(s: &Session, binder: &GenericBinder) {
+    let mut bound_re_names = FxHashMap::default();
+    let mut bound_ty_names = FxHashMap::default();
+
+    for &def in &binder.defs {
+        match def {
+            AnyGeneric::Re(def) => {
+                if let Some(replaced) = bound_re_names.insert(def.r(s).lifetime.name, def) {
+                    Diag::span_err(def.r(s).span, "generic name used more than once")
+                        .child(LeafDiag::span_note(
+                            replaced.r(s).span,
+                            "name previously used here",
+                        ))
+                        .emit();
+                }
+            }
+            AnyGeneric::Ty(def) => {
+                if let Some(replaced) = bound_ty_names.insert(def.r(s).ident.text, def) {
+                    Diag::span_err(def.r(s).span, "generic name used more than once")
+                        .child(LeafDiag::span_note(
+                            replaced.r(s).span,
+                            "name previously used here",
+                        ))
+                        .emit();
+                }
+            }
+        }
+    }
+}
+
 impl<'ast> InterItemLowerCtxt<'_, 'ast> {
     pub fn lower_generic_defs(
         &mut self,
@@ -82,6 +112,13 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         generic_clause_lists: &mut Vec<Option<&'ast AstTraitClauseList>>,
     ) {
         lower_generic_defs(binder, ast, generic_clause_lists, &self.tcx.session);
+    }
+
+    pub fn seal_generic_binder_with_checks(&mut self, binder: GenericBinder) -> Obj<GenericBinder> {
+        let s = &self.tcx.session;
+
+        check_generic_defs_for_duplicates(s, &binder);
+        binder.seal(s)
     }
 }
 
@@ -103,6 +140,8 @@ impl IntraItemLowerCtxt<'_> {
             );
         }
 
+        check_generic_defs_for_duplicates(s, &binder);
+
         let binder = binder.seal(s);
 
         self.scoped(|this| {
@@ -120,25 +159,11 @@ impl IntraItemLowerCtxt<'_> {
             match generic {
                 AnyGeneric::Re(generic) => {
                     self.generic_re_names
-                        .define(generic.r(s).lifetime.name, *generic, |other| {
-                            Diag::span_err(generic.r(s).span, "generic name used more than once")
-                                .child(LeafDiag::span_note(
-                                    other.r(s).span,
-                                    "name previously used here",
-                                ))
-                                .emit()
-                        });
+                        .define(generic.r(s).lifetime.name, *generic);
                 }
                 AnyGeneric::Ty(generic) => {
                     self.generic_ty_names
-                        .define(generic.r(s).ident.text, *generic, |other| {
-                            Diag::span_err(generic.r(s).span, "generic name used more than once")
-                                .child(LeafDiag::span_note(
-                                    other.r(s).span,
-                                    "name previously used here",
-                                ))
-                                .emit()
-                        });
+                        .define(generic.r(s).ident.text, *generic);
                 }
             }
         }

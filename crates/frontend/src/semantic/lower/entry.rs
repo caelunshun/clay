@@ -747,7 +747,10 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
             }
         }
 
-        LateInit::init(&trait_target.r(s).generics, binder.seal(s));
+        LateInit::init(
+            &trait_target.r(s).generics,
+            self.seal_generic_binder_with_checks(binder),
+        );
 
         LateInit::init(
             &trait_target.r(s).regular_generic_count,
@@ -787,7 +790,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let target_adt = Obj::new(
             AdtItem {
                 item: self.target,
-                generics: generics.seal(s),
+                generics: self.seal_generic_binder_with_checks(generics),
                 kind: LateInit::uninit(),
             },
             s,
@@ -835,7 +838,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let target_adt = Obj::new(
             AdtItem {
                 item: self.target,
-                generics: generics.seal(s),
+                generics: self.seal_generic_binder_with_checks(generics),
                 kind: LateInit::uninit(),
             },
             s,
@@ -1070,7 +1073,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let target_impl = Obj::new(
             ImplItem {
                 item: self.target,
-                generics: generics.seal(s),
+                generics: self.seal_generic_binder_with_checks(generics),
                 trait_: LateInit::uninit(),
                 target: LateInit::uninit(),
                 methods: LateInit::uninit(),
@@ -1140,7 +1143,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                 owner: LateInit::uninit(),
                 name: ast.name,
                 impl_vis,
-                generics: generics.seal(s),
+                generics: self.seal_generic_binder_with_checks(generics),
                 has_self_param: LateInit::uninit(),
                 args: LateInit::uninit(),
                 ret_ty: LateInit::uninit(),
@@ -1169,7 +1172,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let def = Obj::new(
             TypeAliasItem {
                 item: self.target,
-                generics: generics.seal(s),
+                generics: self.seal_generic_binder_with_checks(generics),
                 body: LateInit::uninit(),
             },
             s,

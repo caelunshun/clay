@@ -302,8 +302,7 @@ impl IntraItemLowerCtxt<'_> {
 
                         match locals.resolve(name, binding_mode.local_muta.as_muta(), s) {
                             Ok(local) => {
-                                self.func_local_names
-                                    .define_force_shadow(name.as_symbol(), local);
+                                self.func_local_names.define(name.as_symbol(), local);
 
                                 HirPatKind::Binding(
                                     binding_mode.by_ref,

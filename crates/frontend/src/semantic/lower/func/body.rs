@@ -58,8 +58,7 @@ impl IntraItemLowerCtxt<'_> {
     ) -> Obj<HirBlock> {
         self.scoped(|this| {
             if let Some(label) = label {
-                this.block_label_names
-                    .define(label.name, owner, |_| unreachable!());
+                this.block_label_names.define(label.name, owner);
             }
 
             let prev_block = {
