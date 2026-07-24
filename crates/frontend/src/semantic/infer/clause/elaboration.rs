@@ -133,7 +133,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     self.permit_universe_re_outlives_general(lub_re, outlive, outlive_dir);
                     elaborated.push(TraitClause::Outlives(outlive_dir, outlive));
                 }
-                TraitClause::Trait(HrtbBinder { kind, inner: spec }) => {
+                TraitClause::Trait(HrtbBinder { defs, inner: spec }) => {
                     // Replace unspecified parameters with fresh universals.
                     let new_param_equals = spec
                         .params
@@ -230,7 +230,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     let new_params = tcx.intern_list(&new_params);
 
                     elaborated.push(TraitClause::Trait(HrtbBinder {
-                        kind,
+                        defs,
                         inner: TraitSpec {
                             def: spec.def,
                             params: new_params,
@@ -318,7 +318,7 @@ impl ClauseCx<'_> {
             };
 
             let clause = HrtbBinder {
-                kind: clause.kind,
+                defs: clause.defs,
                 inner: TraitSpec {
                     def: clause.inner.def,
                     // No need to replace the associated parameters because this is just used for
@@ -352,7 +352,7 @@ impl ClauseCx<'_> {
         for &clause in clauses.r(s) {
             let TraitClause::Trait(
                 clause @ HrtbBinder {
-                    kind,
+                    defs,
                     inner: TraitSpec { def, params },
                 },
             ) = clause
@@ -361,7 +361,7 @@ impl ClauseCx<'_> {
             };
 
             let key = HrtbBinder {
-                kind,
+                defs,
                 inner: TraitSpec {
                     def,
                     // No need to replace the associated parameters because this is just a key.
@@ -403,7 +403,7 @@ impl ClauseCx<'_> {
                 .collect::<Vec<_>>();
 
             for &HrtbBinder {
-                kind: _,
+                defs: _,
                 inner: spec,
             } in &clauses
             {
@@ -483,7 +483,7 @@ impl ClauseCx<'_> {
 
             // Unify all the associated parameters with the target.
             for &HrtbBinder {
-                kind: _,
+                defs: _,
                 inner: spec,
             } in &clauses
             {

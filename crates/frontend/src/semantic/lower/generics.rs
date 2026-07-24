@@ -13,14 +13,19 @@ use crate::{
         token::Ident,
     },
     semantic::{
-        lower::entry::{InterItemLowerCtxt, IntraItemLowerCtxt},
+        lower::entry::{
+            DefinedGenericRe, DefinedGenericTy, InterItemLowerCtxt, IntraItemLowerCtxt,
+        },
         syntax::{
-            AnyGeneric, GenericBinder, Item, Re, RegionGeneric, SpannedTraitClauseList,
+            AnyGeneric, AnyGenericIdent, GenericBinder, HrtbDebruijnDefList, Item, Re,
+            RegionGeneric, SpannedHrtbDebruijnDefView, SpannedTraitClauseList,
             SpannedTraitInstance, SpannedTraitInstanceView, SpannedTraitParam,
             SpannedTraitParamList, SpannedTraitParamView, SpannedTyOrRe, SpannedTyOrReList,
-            SpannedTyOrReView, SpannedTyView, TraitItem, TyCtxt, TyOrRe, TyOrReList, TypeGeneric,
+            SpannedTyOrReView, SpannedTyView, TraitItem, TyCtxt, TyOrRe, TyOrReKind, TyOrReList,
+            TypeGeneric,
         },
     },
+    symbol,
     utils::{
         hash::FxHashMap,
         lang::{AND_LIST_GLUE, format_list},
@@ -74,27 +79,27 @@ fn lower_generic_defs<'ast>(
     }
 }
 
-fn check_generic_defs_for_duplicates(s: &Session, binder: &GenericBinder) {
+fn check_generic_defs_for_duplicates(defs: impl IntoIterator<Item = AnyGenericIdent>) {
     let mut bound_re_names = FxHashMap::default();
     let mut bound_ty_names = FxHashMap::default();
 
-    for &def in &binder.defs {
+    for def in defs {
         match def {
-            AnyGeneric::Re(def) => {
-                if let Some(replaced) = bound_re_names.insert(def.r(s).lifetime.name, def) {
-                    Diag::span_err(def.r(s).span, "generic name used more than once")
+            AnyGenericIdent::Re(def) => {
+                if let Some(replaced) = bound_re_names.insert(def.name, def) {
+                    Diag::span_err(def.span, "generic name used more than once")
                         .child(LeafDiag::span_note(
-                            replaced.r(s).span,
+                            replaced.span,
                             "name previously used here",
                         ))
                         .emit();
                 }
             }
-            AnyGeneric::Ty(def) => {
-                if let Some(replaced) = bound_ty_names.insert(def.r(s).ident.text, def) {
-                    Diag::span_err(def.r(s).span, "generic name used more than once")
+            AnyGenericIdent::Ty(def) => {
+                if let Some(replaced) = bound_ty_names.insert(def.text, def) {
+                    Diag::span_err(def.span, "generic name used more than once")
                         .child(LeafDiag::span_note(
-                            replaced.r(s).span,
+                            replaced.span,
                             "name previously used here",
                         ))
                         .emit();
@@ -117,13 +122,14 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
     pub fn seal_generic_binder_with_checks(&mut self, binder: GenericBinder) -> Obj<GenericBinder> {
         let s = &self.tcx.session;
 
-        check_generic_defs_for_duplicates(s, &binder);
+        check_generic_defs_for_duplicates(binder.defs.iter().map(|def| def.ident(s)));
+
         binder.seal(s)
     }
 }
 
 impl IntraItemLowerCtxt<'_> {
-    pub fn lower_complete_param_list(
+    pub fn lower_simple_generic_defs(
         &mut self,
         ast: Option<&AstGenericParamList>,
     ) -> Obj<GenericBinder> {
@@ -140,7 +146,7 @@ impl IntraItemLowerCtxt<'_> {
             );
         }
 
-        check_generic_defs_for_duplicates(s, &binder);
+        check_generic_defs_for_duplicates(binder.defs.iter().map(|def| def.ident(s)));
 
         let binder = binder.seal(s);
 
@@ -159,11 +165,11 @@ impl IntraItemLowerCtxt<'_> {
             match generic {
                 AnyGeneric::Re(generic) => {
                     self.generic_re_names
-                        .define(generic.r(s).lifetime.name, *generic);
+                        .define(generic.r(s).lifetime.name, DefinedGenericRe::Sig(*generic));
                 }
                 AnyGeneric::Ty(generic) => {
                     self.generic_ty_names
-                        .define(generic.r(s).ident.text, *generic);
+                        .define(generic.r(s).ident.text, DefinedGenericTy::Sig(*generic));
                 }
             }
         }
@@ -186,6 +192,90 @@ impl IntraItemLowerCtxt<'_> {
                 }
             }
         }
+    }
+
+    pub fn define_hrtb_defs_for_ast(&mut self, ast: Option<&AstGenericParamList>) {
+        let Some(ast) = ast else {
+            return;
+        };
+
+        let range = self.generic_debruijn.move_inwards_by(ast.list.len());
+
+        for (idx, def) in ast.list.iter().enumerate() {
+            let Some(def_kind) = def.kind.as_generic_def() else {
+                Diag::span_err(def.span, "expected generic parameter definition").emit();
+                continue;
+            };
+
+            match def_kind {
+                AstGenericDef::Re(lifetime, _clauses) => {
+                    self.generic_re_names.define(
+                        lifetime.name,
+                        DefinedGenericRe::Hrtb(lifetime.span, range.at(idx)),
+                    );
+                }
+                AstGenericDef::Ty(ident, _clauses) => {
+                    self.generic_ty_names.define(
+                        ident.text,
+                        DefinedGenericTy::Hrtb(ident.span, range.at(idx)),
+                    );
+                }
+            }
+        }
+    }
+
+    pub fn check_hrtb_def_ast_for_duplicates(&mut self, ast: Option<&AstGenericParamList>) {
+        let Some(ast) = ast else {
+            return;
+        };
+
+        check_generic_defs_for_duplicates(ast.list.iter().filter_map(|ast| {
+            Some(match ast.kind.as_generic_def()? {
+                AstGenericDef::Re(lifetime, _clauses) => AnyGenericIdent::Re(lifetime),
+                AstGenericDef::Ty(ident, _clauses) => AnyGenericIdent::Ty(ident),
+            })
+        }));
+    }
+
+    pub fn lower_hrtb_def_clauses(
+        &mut self,
+        ast: Option<&AstGenericParamList>,
+    ) -> Spanned<HrtbDebruijnDefList> {
+        let tcx = self.tcx;
+
+        let Some(ast) = ast else {
+            return Spanned::alloc_list(Span::DUMMY, &[], tcx);
+        };
+
+        let defs = ast
+            .list
+            .iter()
+            .map(|ast| match ast.kind.as_generic_def() {
+                Some(AstGenericDef::Re(lifetime, clauses)) => SpannedHrtbDebruijnDefView {
+                    span: lifetime.span,
+                    name: lifetime.name,
+                    kind: TyOrReKind::Re,
+                    clauses: self.lower_clauses(clauses),
+                }
+                .encode(ast.span, tcx),
+                Some(AstGenericDef::Ty(ident, clauses)) => SpannedHrtbDebruijnDefView {
+                    span: ident.span,
+                    name: ident.text,
+                    kind: TyOrReKind::Ty,
+                    clauses: self.lower_clauses(clauses),
+                }
+                .encode(ast.span, tcx),
+                None => SpannedHrtbDebruijnDefView {
+                    span: Span::DUMMY,
+                    name: symbol!("error"),
+                    kind: TyOrReKind::Ty,
+                    clauses: Spanned::alloc_list(ast.span, &[], tcx),
+                }
+                .encode(ast.span, tcx),
+            })
+            .collect::<Vec<_>>();
+
+        Spanned::alloc_list(ast.span, &defs, tcx)
     }
 }
 

@@ -2,7 +2,7 @@ use crate::{
     base::{
         Session,
         arena::{LateInit, Obj},
-        syntax::{Span, Symbol},
+        syntax::{HasSpan, Span, Symbol},
     },
     parse::token::{Ident, Lifetime},
     semantic::syntax::{
@@ -278,6 +278,13 @@ impl AnyGeneric {
         }
     }
 
+    pub fn ident(self, s: &Session) -> AnyGenericIdent {
+        match self {
+            AnyGeneric::Re(def) => AnyGenericIdent::Re(def.r(s).lifetime),
+            AnyGeneric::Ty(def) => AnyGenericIdent::Ty(def.r(s).ident),
+        }
+    }
+
     pub fn as_re(self) -> Option<Obj<RegionGeneric>> {
         match self {
             AnyGeneric::Re(v) => Some(v),
@@ -348,4 +355,19 @@ pub struct TypeGeneric {
 pub struct PosInBinder {
     pub def: Obj<GenericBinder>,
     pub idx: u32,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum AnyGenericIdent {
+    Re(Lifetime),
+    Ty(Ident),
+}
+
+impl HasSpan for AnyGenericIdent {
+    fn span(&self) -> Span {
+        match self {
+            AnyGenericIdent::Re(v) => v.span,
+            AnyGenericIdent::Ty(v) => v.span,
+        }
+    }
 }

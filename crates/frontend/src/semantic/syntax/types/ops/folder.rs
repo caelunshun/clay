@@ -6,10 +6,9 @@ use crate::{
     },
     semantic::syntax::{
         AdtInstance, FnInstance, FnInstanceInner, FnOwner, FnOwnerAdtCtor, FnOwnerInherent,
-        FnOwnerTrait, HrtbBinder, HrtbBinderKind, HrtbDebruijnDef, HrtbDebruijnDefList, Re,
-        SpannedAdtInstance, SpannedAdtInstanceView, SpannedFnInstance, SpannedFnInstanceView,
-        SpannedFnOwner, SpannedFnOwnerView, SpannedHrtbBinder, SpannedHrtbBinderKind,
-        SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedHrtbDebruijnDef,
+        FnOwnerTrait, HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, Re, SpannedAdtInstance,
+        SpannedAdtInstanceView, SpannedFnInstance, SpannedFnInstanceView, SpannedFnOwner,
+        SpannedFnOwnerView, SpannedHrtbBinder, SpannedHrtbBinderView, SpannedHrtbDebruijnDef,
         SpannedHrtbDebruijnDefList, SpannedHrtbDebruijnDefView, SpannedRe, SpannedTraitClause,
         SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitInstance,
         SpannedTraitInstanceView, SpannedTraitParam, SpannedTraitParamList, SpannedTraitParamView,
@@ -145,13 +144,6 @@ pub trait TyFolder<'tcx> {
 
     fn fold_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> Result<HrtbBinder, Self::Error> {
         self.super_spanned_fallible(binder)
-    }
-
-    fn fold_hrtb_binder_kind(
-        &mut self,
-        kind: SpannedHrtbBinderKind,
-    ) -> Result<HrtbBinderKind, Self::Error> {
-        self.super_spanned_fallible(kind)
     }
 
     fn fold_hrtb_debruijn_def_list(
@@ -631,32 +623,11 @@ impl TyFoldable for HrtbBinder {
     where
         F: ?Sized + TyFolder<'tcx>,
     {
-        let SpannedHrtbBinderView { kind, inner } = me.view(folder.tcx());
+        let SpannedHrtbBinderView { defs, inner } = me.view(folder.tcx());
 
         Ok(HrtbBinder {
-            kind: folder.fold_spanned_fallible(kind)?,
+            defs: folder.fold_spanned_fallible(defs)?,
             inner: folder.fold_spanned_fallible(inner)?,
-        })
-    }
-}
-
-impl TyFoldable for HrtbBinderKind {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
-    where
-        F: ?Sized + TyFolder<'tcx>,
-    {
-        folder.fold_hrtb_binder_kind(me)
-    }
-
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
-    where
-        F: ?Sized + TyFolder<'tcx>,
-    {
-        Ok(match me.view(folder.tcx()) {
-            SpannedHrtbBinderKindView::Signature(binder) => HrtbBinderKind::Signature(binder),
-            SpannedHrtbBinderKindView::Imported(clauses) => {
-                HrtbBinderKind::Imported(folder.fold_spanned_fallible(clauses)?)
-            }
         })
     }
 }
@@ -690,13 +661,15 @@ impl TyFoldable for HrtbDebruijnDef {
         F: ?Sized + TyFolder<'tcx>,
     {
         let SpannedHrtbDebruijnDefView {
-            spawned_from,
+            span,
+            name,
             kind,
             clauses,
         } = me.view(folder.tcx());
 
         Ok(HrtbDebruijnDef {
-            spawned_from,
+            span,
+            name,
             kind,
             clauses: folder.fold_spanned_fallible(clauses)?,
         })

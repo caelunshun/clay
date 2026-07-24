@@ -14,15 +14,15 @@ use crate::{
     },
     semantic::{
         lower::{
-            entry::IntraItemLowerCtxt,
+            entry::{DefinedGenericRe, DefinedGenericTy, IntraItemLowerCtxt},
             modules::{FrozenModuleResolver, PathResolver as _},
         },
         syntax::{
-            AdtItem, Item, ItemKind, Re, RelationDirection, SpannedAdtInstanceView,
-            SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedRe, SpannedTraitClause,
-            SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitParamList,
-            SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe,
-            SpannedTyOrReView, SpannedTyView, TraitItem, TyProjection, TypeAliasItem, TypeGeneric,
+            AdtItem, HrtbDebruijn, Item, ItemKind, Re, RelationDirection, SpannedAdtInstanceView,
+            SpannedHrtbBinderView, SpannedRe, SpannedTraitClause, SpannedTraitClauseList,
+            SpannedTraitClauseView, SpannedTraitParamList, SpannedTraitSpec, SpannedTraitSpecView,
+            SpannedTy, SpannedTyList, SpannedTyOrRe, SpannedTyOrReView, SpannedTyView, TraitItem,
+            TyProjection, TypeAliasItem, TypeGeneric,
         },
     },
     symbol,
@@ -32,7 +32,8 @@ use crate::{
 
 #[derive(Debug, Copy, Clone)]
 pub enum TyPathResolution {
-    Generic(Obj<TypeGeneric>),
+    GenericSig(Obj<TypeGeneric>),
+    GenericHrtb(HrtbDebruijn),
     Adt(Obj<AdtItem>),
     Trait(Obj<TraitItem>),
     TypeAlias(Obj<TypeAliasItem>),
@@ -59,7 +60,12 @@ impl IntraItemLowerCtxt<'_> {
                 .emit();
             }
 
-            return Ok(TyPathResolution::Generic(*generic));
+            return Ok(match *generic {
+                DefinedGenericTy::Sig(generic) => TyPathResolution::GenericSig(generic),
+                DefinedGenericTy::Hrtb(_span, pos) => TyPathResolution::GenericHrtb(HrtbDebruijn(
+                    self.generic_debruijn.make_relative(pos),
+                )),
+            });
         }
 
         let target = resolver.resolve_bare_path(self.root, self.scope, path)?;
@@ -83,7 +89,7 @@ impl IntraItemLowerCtxt<'_> {
 
         let offending_item = match self.resolve_ty_item_path(path)? {
             TyPathResolution::Trait(def) => return Ok(def),
-            TyPathResolution::Generic(_) => {
+            TyPathResolution::GenericSig(_) | TyPathResolution::GenericHrtb(_) => {
                 return Err(
                     Diag::span_err(path.span, "expected type, found generic parameter").emit(),
                 );
@@ -120,7 +126,15 @@ impl IntraItemLowerCtxt<'_> {
 
     pub fn lower_re(&mut self, ast: &Lifetime) -> SpannedRe {
         if let Some(generic) = self.generic_re_names.lookup(ast.name) {
-            return Re::SigGeneric(*generic).encode(ast.span, self.tcx);
+            return match *generic {
+                DefinedGenericRe::Sig(generic) => {
+                    Re::SigGeneric(generic).encode(ast.span, self.tcx)
+                }
+                DefinedGenericRe::Hrtb(_span, pos) => {
+                    Re::HrtbVar(HrtbDebruijn(self.generic_debruijn.make_relative(pos)))
+                        .encode(ast.span, self.tcx)
+                }
+            };
         }
 
         // TODO: Use actual keyword lifetimes
@@ -157,8 +171,11 @@ impl IntraItemLowerCtxt<'_> {
                         )
                         .encode(ast.span, self.tcx)
                     }
-                    Ok(TyPathResolution::Generic(def)) => {
+                    Ok(TyPathResolution::GenericSig(def)) => {
                         SpannedTyView::SigGeneric(def).encode(ast.span, self.tcx)
+                    }
+                    Ok(TyPathResolution::GenericHrtb(rel)) => {
+                        SpannedTyView::HrtbVar(rel).encode(ast.span, self.tcx)
                     }
                     Ok(TyPathResolution::TypeAlias(def)) => {
                         let params = self.lower_generics_of_entirely_positional(
@@ -299,22 +316,22 @@ impl IntraItemLowerCtxt<'_> {
                 .encode(*span, self.tcx))
             }
             AstTraitClause::Trait(spec) => {
-                let binder =
-                    self.lower_complete_param_list(spec.binder.as_ref().map(|v| &v.params));
+                let binder_params = spec.binder.as_ref().map(|v| &v.params);
 
-                let binder_span = spec.binder.as_ref().map_or(spec.span, |v| v.span);
+                self.check_hrtb_def_ast_for_duplicates(binder_params);
 
-                let inner = self.scoped(|this| {
-                    this.define_generics_in_binder(binder);
-                    this.lower_trait_spec(&spec.spec)
-                })?;
+                let (defs, inner) = self.scoped(|this| {
+                    this.define_hrtb_defs_for_ast(binder_params);
+
+                    (
+                        this.lower_hrtb_def_clauses(binder_params),
+                        this.lower_trait_spec(&spec.spec),
+                    )
+                });
+                let inner = inner?;
 
                 Ok(SpannedTraitClauseView::Trait(
-                    SpannedHrtbBinderView {
-                        kind: SpannedHrtbBinderKindView::Signature(binder).encode(binder_span, tcx),
-                        inner,
-                    }
-                    .encode(spec.span, tcx),
+                    SpannedHrtbBinderView { defs, inner }.encode(spec.span, tcx),
                 )
                 .encode(spec.span, self.tcx))
             }

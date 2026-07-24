@@ -10,9 +10,9 @@ use crate::{
             ObligationResult, ObligeCause, ObligeCauseStep, UnboundVarHandlingMode,
         },
         syntax::{
-            HrtbBinder, HrtbBinderKind, ImplItem, RelationMode, SimpleTySet, SpannedTy,
-            TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyFolderInfallibleExt,
-            TyKind, TyOrRe, TyVisitor, TyVisitorInfallibleExt, UniversalTyVar,
+            HrtbBinder, ImplItem, RelationMode, SimpleTySet, SpannedTy, TraitClause,
+            TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyFolderInfallibleExt, TyKind,
+            TyOrRe, TyVisitor, TyVisitorInfallibleExt, UniversalTyVar,
         },
     },
     utils::hash::FxHashMap,
@@ -65,11 +65,7 @@ impl<'tcx> ClauseCx<'tcx> {
         let s = self.session();
 
         let universe = {
-            let HrtbBinderKind::Imported(defs) = rhs.kind else {
-                unreachable!();
-            };
-
-            if defs.r(s).is_empty() {
+            if rhs.defs.r(s).is_empty() {
                 universe
             } else {
                 universe.nest(HrtbUniverseInfo {

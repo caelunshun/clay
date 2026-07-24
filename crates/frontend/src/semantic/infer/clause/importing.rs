@@ -52,7 +52,7 @@
 use crate::{
     base::{
         Diag, ErrorGuaranteed, LeafDiag, Session,
-        analysis::{DebruijnAbsoluteRange, DebruijnTop, Spanned},
+        analysis::{DebruijnTop, Spanned},
         arena::{HasInterner, HasListInterner, LateInit, Obj},
         syntax::Span,
     },
@@ -63,11 +63,10 @@ use crate::{
         },
         syntax::{
             AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, FnOwner, FnOwnerAdtCtor,
-            FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, HrtbBinderKind, HrtbDebruijn,
-            HrtbDebruijnDef, HrtbDebruijnDefList, InferTyVarSourceInfo, Re, RelationDirection,
-            SpannedAdtInstance, SpannedFnInstance, SpannedFnOwner, SpannedFnOwnerView,
-            SpannedHrtbBinder, SpannedHrtbBinderKindView, SpannedHrtbBinderView, SpannedRe,
-            SpannedTraitClauseView, SpannedTraitInstance, SpannedTraitSpec, SpannedTy,
+            FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, HrtbDebruijnDefList,
+            InferTyVarSourceInfo, Re, RelationDirection, SpannedAdtInstance, SpannedFnInstance,
+            SpannedFnOwner, SpannedFnOwnerView, SpannedHrtbBinder, SpannedHrtbBinderView,
+            SpannedRe, SpannedTraitClauseView, SpannedTraitInstance, SpannedTraitSpec, SpannedTy,
             SpannedTyView, TraitClause, TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt,
             TyFoldable, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyFolderPreservesSpans,
             TyKind, TyOrRe, TyOrReKind, TyOrReList, TyProjection, TyVisitable, TypeAliasItem,
@@ -171,13 +170,7 @@ impl<'tcx> ClauseCx<'tcx> {
         universe: &HrtbUniverse,
         value: HrtbBinder,
     ) -> TraitSpec {
-        let HrtbBinder {
-            kind: HrtbBinderKind::Imported(defs),
-            inner: value,
-        } = value
-        else {
-            unreachable!()
-        };
+        let HrtbBinder { defs, inner: value } = value;
 
         let value = self
             .instantiate_hrtb_universal_without_normalization(universe, defs)
@@ -192,13 +185,7 @@ impl<'tcx> ClauseCx<'tcx> {
         universe: &HrtbUniverse,
         value: HrtbBinder,
     ) -> TraitSpec {
-        let HrtbBinder {
-            kind: HrtbBinderKind::Imported(defs),
-            inner: value,
-        } = value
-        else {
-            unreachable!()
-        };
+        let HrtbBinder { defs, inner: value } = value;
 
         let value = self
             .instantiate_hrtb_infer_without_normalization(cause, universe, defs)
@@ -285,8 +272,6 @@ impl<'tcx> ClauseCx<'tcx> {
             ccx: self,
             universe,
             env: env.to_owned(),
-            hrtb_top: DebruijnTop::default(),
-            hrtb_binder_ranges: FxHashMap::default(),
         }
     }
 }
@@ -295,8 +280,6 @@ pub struct EnvSubstitutor<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
     universe: HrtbUniverse,
     env: ClauseImportEnv,
-    hrtb_top: DebruijnTop,
-    hrtb_binder_ranges: FxHashMap<Obj<GenericBinder>, DebruijnAbsoluteRange>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -310,25 +293,18 @@ impl<'tcx> TyFolderPreservesSpans<'tcx> for EnvSubstitutor<'_, 'tcx> {}
 impl<'tcx> EnvSubstitutor<'_, 'tcx> {
     fn lookup_generic(&self, generic: AnyGeneric) -> TyOrRe {
         let s = self.session();
-        let tcx = self.tcx();
-
-        let kind = generic.kind();
         let pos = generic.binder(s);
 
-        if let Some(binder) = self.env.substs.iter().find(|v| v.binder == pos.def) {
-            return binder.substs.r(s)[pos.idx as usize];
-        }
+        let binder = self
+            .env
+            .substs
+            .iter()
+            .find(|v| v.binder == pos.def)
+            .unwrap_or_else(|| {
+                panic!("no substitutions provided for signature generic {generic:?}")
+            });
 
-        if let Some(range) = self.hrtb_binder_ranges.get(&pos.def) {
-            let var = HrtbDebruijn(self.hrtb_top.make_relative(range.at(pos.idx as usize)));
-
-            return match kind {
-                TyOrReKind::Re => TyOrRe::Re(Re::HrtbVar(var)),
-                TyOrReKind::Ty => TyOrRe::Ty(tcx.intern(TyKind::HrtbVar(var))),
-            };
-        }
-
-        panic!("no substitutions provided for signature generic {generic:?}");
+        binder.substs.r(s)[pos.idx as usize]
     }
 }
 
@@ -337,58 +313,6 @@ impl<'tcx> TyFolder<'tcx> for EnvSubstitutor<'_, 'tcx> {
 
     fn tcx(&self) -> &'tcx TyCtxt {
         self.ccx.tcx()
-    }
-
-    fn fold_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> Result<HrtbBinder, Self::Error> {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        let SpannedHrtbBinderView { kind, inner } = binder.view(tcx);
-
-        let HrtbBinderKind::Signature(binder) = kind.value else {
-            unreachable!()
-        };
-
-        let binder_count = binder.r(s).defs.len();
-
-        // Bring the binder into scope.
-        let new_range = self.hrtb_top.move_inwards_by(binder_count);
-        let old_range = self.hrtb_binder_ranges.insert(binder, new_range);
-
-        // Fold the inner value and definitions list with a new generic binder available as an HRTB
-        // binder.
-        let inner = self.fold_spanned(inner);
-        let defs = binder
-            .r(s)
-            .defs
-            .iter()
-            .map(|def| HrtbDebruijnDef {
-                spawned_from: *def,
-                kind: def.kind(),
-                clauses: self.fold_spanned(def.clauses(s)),
-            })
-            .collect::<Vec<_>>();
-
-        let defs = tcx.intern_list(&defs);
-
-        // Update the `binder_count` only after we've imported the `defs` since the definition
-        // indexing scheme is relative to `binder.inner` to allow mutual recursion among generic
-        // definitions.
-        match old_range {
-            Some(old_range) => {
-                *self.hrtb_binder_ranges.get_mut(&binder).unwrap() = old_range;
-            }
-            None => {
-                self.hrtb_binder_ranges.remove(&binder);
-            }
-        }
-
-        self.hrtb_top.move_outwards_by(binder_count);
-
-        Ok(HrtbBinder {
-            kind: HrtbBinderKind::Imported(defs),
-            inner,
-        })
     }
 
     fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
@@ -413,12 +337,11 @@ impl<'tcx> TyFolder<'tcx> for EnvSubstitutor<'_, 'tcx> {
             | SpannedTyView::FnDef(_)
             | SpannedTyView::SigProject(_)
             | SpannedTyView::SigAlias(_, _)
+            | SpannedTyView::HrtbVar(_)
             | SpannedTyView::Error(_) => return self.super_spanned_fallible(ty),
 
             // These should not appear in an unimported type.
-            SpannedTyView::HrtbVar(_)
-            | SpannedTyView::InferVar(_)
-            | SpannedTyView::UniversalVar(_) => {
+            SpannedTyView::InferVar(_) | SpannedTyView::UniversalVar(_) => {
                 unreachable!()
             }
         })
@@ -432,11 +355,11 @@ impl<'tcx> TyFolder<'tcx> for EnvSubstitutor<'_, 'tcx> {
         Ok(match re.value {
             Re::SigInfer => self.ccx.fresh_re_infer(),
             Re::SigGeneric(generic) => self.lookup_generic(AnyGeneric::Re(generic)).unwrap_re(),
-            Re::Gc | Re::Error(_) => {
+            Re::Gc | Re::Error(_) | Re::HrtbVar(_) => {
                 return self.super_spanned_fallible(re);
             }
             // These should not appear in an imported type.
-            Re::HrtbVar(_) | Re::InferVar(_) | Re::UniversalVar(_) | Re::Erased => unreachable!(),
+            Re::InferVar(_) | Re::UniversalVar(_) | Re::Erased => unreachable!(),
         })
     }
 }
@@ -521,7 +444,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 TyOrReKind::Ty => TyOrRe::Ty(self.fresh_ty_infer(
                     universe.clone(),
                     InferTyVarSourceInfo::HrtbLhsInstantiation {
-                        span: def.spawned_from.span(s),
+                        span: def.span,
                         clauses: Rc::new(LateInit::uninit()),
                     },
                 )),
@@ -604,18 +527,14 @@ impl<'tcx> TyFolder<'tcx> for HrtbSubstitutionFolder<'_, 'tcx> {
         let s = self.session();
         let binder = binder.value;
 
-        let HrtbBinderKind::Imported(defs) = binder.kind else {
-            unreachable!();
-        };
-
-        let bind_count = defs.r(s).len();
+        let bind_count = binder.defs.r(s).len();
 
         self.top.move_inwards_by(bind_count);
         let inner = self.super_(binder.inner);
         self.top.move_outwards_by(bind_count);
 
         Ok(HrtbBinder {
-            kind: binder.kind,
+            defs: binder.defs,
             inner,
         })
     }
@@ -677,11 +596,11 @@ impl<'tcx> TyFolder<'tcx> for ClauseNormalizer<'_, 'tcx> {
     }
 
     fn fold_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> Result<HrtbBinder, Self::Error> {
-        let HrtbBinder { kind, inner } = binder.value;
+        let HrtbBinder { defs: kind, inner } = binder.value;
 
         // We intentionally do not `fold` over the contents of binders.
         return Ok(HrtbBinder {
-            kind: self.fold(kind),
+            defs: self.fold(kind),
             inner,
         });
     }
@@ -710,9 +629,10 @@ impl<'tcx> TyFolder<'tcx> for ClauseNormalizer<'_, 'tcx> {
             | TyKind::FnDef(_)
             | TyKind::InferVar(_)
             | TyKind::UniversalVar(_)
+            | TyKind::HrtbVar(_)
             | TyKind::Error(_) => ty,
 
-            TyKind::SigThis | TyKind::SigInfer | TyKind::SigGeneric(_) | TyKind::HrtbVar(_) => {
+            TyKind::SigThis | TyKind::SigInfer | TyKind::SigGeneric(_) => {
                 unreachable!()
             }
         })
@@ -850,7 +770,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
         let s = self.session();
 
         let SpannedHrtbBinderView {
-            kind,
+            defs,
             inner:
                 Spanned {
                     value: bound,
@@ -858,18 +778,15 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
                 },
         } = binder.view(tcx);
 
-        let SpannedHrtbBinderKindView::Imported(defs) = kind.view(tcx) else {
-            unreachable!()
-        };
-
         // Check definitions and normalize them.
+        let defs_span = defs.own_span();
         let defs = self.fold_spanned(defs);
 
         // Universally instantiate the body and WF check it.
         let old_universe = self.universe.clone();
         let wf_cause = self.cause.clone().child(
             ObligeCauseOrigin::ImportWfHrtb {
-                binder_span: kind.own_span(),
+                binder_span: defs_span,
             }
             .into(),
         );
@@ -909,7 +826,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
         self.universe = old_universe;
 
         Ok(HrtbBinder {
-            kind: HrtbBinderKind::Imported(defs),
+            defs,
             // We don't normalize this inner type because normalization doesn't follow HRTB binders.
             inner: bound,
         })
@@ -1015,12 +932,10 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
             | SpannedTyView::Tuple(_)
             | SpannedTyView::UniversalVar(_)
             | SpannedTyView::InferVar(_)
+            | SpannedTyView::HrtbVar(_)
             | SpannedTyView::Error(_) => Ok(self.super_spanned(ty)),
 
-            SpannedTyView::SigThis
-            | SpannedTyView::SigInfer
-            | SpannedTyView::SigGeneric(_)
-            | SpannedTyView::HrtbVar(_) => {
+            SpannedTyView::SigThis | SpannedTyView::SigInfer | SpannedTyView::SigGeneric(_) => {
                 unreachable!()
             }
         }

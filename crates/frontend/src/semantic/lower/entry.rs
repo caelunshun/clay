@@ -1,7 +1,7 @@
 use crate::{
     base::{
-        Diag, LeafDiag,
-        analysis::NameResolver,
+        Diag, LeafDiag, Session,
+        analysis::{DebruijnAbsolute, DebruijnTop, NameResolver},
         arena::{HasInterner, HasListInterner, LateInit, Obj},
         syntax::{HasSpan as _, Span, Symbol},
     },
@@ -123,6 +123,7 @@ pub fn lower_full_ast(tcx: &TyCtxt, ast: &AstItemModuleContents) -> Obj<Crate> {
             root,
             scope,
             target,
+            generic_debruijn: DebruijnTop::ZERO,
             generic_ty_names: NameResolver::new(),
             generic_re_names: NameResolver::new(),
             func_local_names: NameResolver::new(),
@@ -1195,24 +1196,59 @@ pub struct IntraItemLowerCtxt<'tcx> {
     pub root: Obj<Item>,
     pub scope: Obj<Item>,
     pub target: Obj<Item>,
-    pub generic_ty_names: NameResolver<Symbol, Obj<TypeGeneric>>,
-    pub generic_re_names: NameResolver<Symbol, Obj<RegionGeneric>>,
+    pub generic_debruijn: DebruijnTop,
+    pub generic_ty_names: NameResolver<Symbol, DefinedGenericTy>,
+    pub generic_re_names: NameResolver<Symbol, DefinedGenericRe>,
     pub func_local_names: NameResolver<LocalNameSymbol, Obj<HirLocal>>,
     pub block_label_names: NameResolver<Symbol, HirLabelledBlock>,
     pub innermost_block: Option<HirLabelledBlock>,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum DefinedGenericTy {
+    Sig(Obj<TypeGeneric>),
+    Hrtb(Span, DebruijnAbsolute),
+}
+
+impl DefinedGenericTy {
+    pub fn span(self, s: &Session) -> Span {
+        match self {
+            DefinedGenericTy::Sig(def) => def.r(s).span,
+            DefinedGenericTy::Hrtb(span, _) => span,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum DefinedGenericRe {
+    Sig(Obj<RegionGeneric>),
+    Hrtb(Span, DebruijnAbsolute),
+}
+
+impl DefinedGenericRe {
+    pub fn span(self, s: &Session) -> Span {
+        match self {
+            DefinedGenericRe::Sig(def) => def.r(s).span,
+            DefinedGenericRe::Hrtb(span, _) => span,
+        }
+    }
+}
+
 impl IntraItemLowerCtxt<'_> {
     pub fn scoped<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        let old_top = self.generic_debruijn.clone();
         self.generic_ty_names.push_rib();
         self.generic_re_names.push_rib();
         self.block_label_names.push_rib();
         self.func_local_names.push_rib();
+
         let ret = f(self);
+
         self.generic_ty_names.pop_rib();
         self.generic_re_names.pop_rib();
         self.block_label_names.pop_rib();
         self.func_local_names.pop_rib();
+        self.generic_debruijn = old_top;
 
         ret
     }

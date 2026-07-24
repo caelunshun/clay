@@ -4,9 +4,9 @@ use crate::{
         infer::ClauseCx,
         syntax::{
             AdtInstance, AnyGeneric, FloatKind, FnInstanceInner, FnOwner, FnOwnerAdtCtor,
-            FnOwnerInherent, FnOwnerTrait, HrtbBinder, HrtbBinderKind, InferTyVarSourceInfo,
-            IntKind, Re, SimpleTyKind, SimpleTySet, TraitClause, TraitClauseList, TraitParam,
-            TraitSpec, Ty, TyKind, TyOrRe, TyProjection, UniversalTyVar, UniversalTyVarSourceInfo,
+            FnOwnerInherent, FnOwnerTrait, HrtbBinder, InferTyVarSourceInfo, IntKind, Re,
+            SimpleTyKind, SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty,
+            TyKind, TyOrRe, TyOrReKind, TyProjection, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -91,33 +91,26 @@ impl fmt::Debug for HrtbBinder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = &Session::fetch();
 
-        match self.kind {
-            HrtbBinderKind::Signature(_) => {
-                f.write_str("for<SIGNATURE:...>")?;
-            }
-            HrtbBinderKind::Imported(clauses) => {
-                if !clauses.r(s).is_empty() {
-                    f.write_str("for<")?;
-                    for (i, clause) in clauses.r(s).iter().enumerate() {
-                        if i > 0 {
-                            f.write_str(", ")?;
-                        }
-                        match clause.spawned_from {
-                            AnyGeneric::Re(generic) => {
-                                write!(f, "'{}", generic.r(s).lifetime.name)?;
-                            }
-                            AnyGeneric::Ty(generic) => {
-                                write!(f, "{}", generic.r(s).ident.text)?;
-                            }
-                        }
-
-                        if !clause.clauses.r(s).is_empty() {
-                            write!(f, ": {}", PrettyTraitClauseList(clause.clauses))?;
-                        }
+        if !self.defs.r(s).is_empty() {
+            f.write_str("for<")?;
+            for (i, clause) in self.defs.r(s).iter().enumerate() {
+                if i > 0 {
+                    f.write_str(", ")?;
+                }
+                match clause.kind {
+                    TyOrReKind::Re => {
+                        write!(f, "'{}", clause.name)?;
                     }
-                    f.write_str("> ")?;
+                    TyOrReKind::Ty => {
+                        write!(f, "{}", clause.name)?;
+                    }
+                }
+
+                if !clause.clauses.r(s).is_empty() {
+                    write!(f, ": {}", PrettyTraitClauseList(clause.clauses))?;
                 }
             }
+            f.write_str("> ")?;
         }
 
         write!(f, "{}", self.inner)?;
@@ -459,32 +452,25 @@ impl fmt::Debug for TraitClause {
                 write!(f, "{} {other}", direction.kw())?;
             }
             TraitClause::Trait(binder) => {
-                match binder.kind {
-                    HrtbBinderKind::Signature(_) => {
-                        f.write_str("for<SIGNATURE:...>")?;
-                    }
-                    HrtbBinderKind::Imported(defs) => {
-                        if !defs.r(s).is_empty() {
-                            f.write_str("for<")?;
+                if !binder.defs.r(s).is_empty() {
+                    f.write_str("for<")?;
 
-                            for (idx, def) in defs.r(s).iter().enumerate() {
-                                if idx > 0 {
-                                    f.write_str(", ")?;
-                                }
+                    for (idx, def) in binder.defs.r(s).iter().enumerate() {
+                        if idx > 0 {
+                            f.write_str(", ")?;
+                        }
 
-                                match def.spawned_from {
-                                    AnyGeneric::Re(re) => {
-                                        write!(f, "'{}", re.r(s).lifetime.name)?;
-                                    }
-                                    AnyGeneric::Ty(ty) => {
-                                        write!(f, "{}", ty.r(s).ident.text)?;
-                                    }
-                                }
+                        match def.kind {
+                            TyOrReKind::Re => {
+                                write!(f, "'{}", def.name)?;
                             }
-
-                            f.write_str("> ")?;
+                            TyOrReKind::Ty => {
+                                write!(f, "{}", def.name)?;
+                            }
                         }
                     }
+
+                    f.write_str("> ")?;
                 }
 
                 write!(f, "{}", binder.inner)?;

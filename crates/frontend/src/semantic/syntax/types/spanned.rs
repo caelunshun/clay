@@ -3,15 +3,16 @@ use crate::{
         ErrorGuaranteed,
         analysis::{Spanned, SpannedInfo, SpannedViewDecode, SpannedViewEncode},
         arena::{HasInterner, Obj},
-        syntax::Span,
+        syntax::{Span, Symbol},
     },
+    parse::token::Ident,
     semantic::syntax::{
-        AdtCtor, AdtInstance, AdtItem, AnyGeneric, FnInstance, FnInstanceInner, FnItem, FnOwner,
-        FnOwnerAdtCtor, FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, HrtbBinderKind,
-        HrtbDebruijn, HrtbDebruijnDef, HrtbDebruijnDefList, ImplItem, InferTyVar, Mutability, Re,
-        RelationDirection, SimpleTyKind, TraitClause, TraitClauseList, TraitInstance, TraitItem,
-        TraitParam, TraitParamList, TraitSpec, Ty, TyCtxt, TyKind, TyList, TyOrRe, TyOrReKind,
-        TyOrReList, TyProjection, TypeAliasItem, TypeGeneric, UniversalTyVar,
+        AdtCtor, AdtInstance, AdtItem, FnInstance, FnInstanceInner, FnItem, FnOwner,
+        FnOwnerAdtCtor, FnOwnerInherent, FnOwnerTrait, HrtbBinder, HrtbDebruijn, HrtbDebruijnDef,
+        HrtbDebruijnDefList, ImplItem, InferTyVar, Mutability, Re, RelationDirection, SimpleTyKind,
+        TraitClause, TraitClauseList, TraitInstance, TraitItem, TraitParam, TraitParamList,
+        TraitSpec, Ty, TyCtxt, TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList, TyProjection,
+        TypeAliasItem, TypeGeneric, UniversalTyVar,
     },
 };
 
@@ -557,7 +558,7 @@ pub type SpannedHrtbBinder = Spanned<HrtbBinder>;
 
 #[derive(Debug, Copy, Clone)]
 pub struct SpannedHrtbBinderView {
-    pub kind: SpannedHrtbBinderKind,
+    pub defs: SpannedHrtbDebruijnDefList,
     pub inner: SpannedTraitSpec,
 }
 
@@ -565,10 +566,10 @@ impl SpannedViewDecode<TyCtxt> for HrtbBinder {
     type View = SpannedHrtbBinderView;
 
     fn decode(value: &Self, span_info: SpannedInfo, tcx: &TyCtxt) -> Self::View {
-        let [kind_span, inner_span] = span_info.child_spans(tcx);
+        let [defs_span, inner_span] = span_info.child_spans(tcx);
 
         SpannedHrtbBinderView {
-            kind: Spanned::new_raw(value.kind, kind_span),
+            defs: Spanned::new_raw(value.defs, defs_span),
             inner: Spanned::new_raw(value.inner, inner_span),
         }
     }
@@ -580,51 +581,11 @@ impl SpannedViewEncode<TyCtxt> for SpannedHrtbBinderView {
     fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
         Spanned::new_raw(
             HrtbBinder {
-                kind: self.kind.value,
+                defs: self.defs.value,
                 inner: self.inner.value,
             },
-            SpannedInfo::new_list(own_span, &[self.kind.span_info, self.inner.span_info], tcx),
+            SpannedInfo::new_list(own_span, &[self.defs.span_info, self.inner.span_info], tcx),
         )
-    }
-}
-
-// === HrtbBinderKind === //
-
-pub type SpannedHrtbBinderKind = Spanned<HrtbBinderKind>;
-
-#[derive(Debug, Copy, Clone)]
-pub enum SpannedHrtbBinderKindView {
-    Signature(Obj<GenericBinder>),
-    Imported(SpannedHrtbDebruijnDefList),
-}
-
-impl SpannedViewDecode<TyCtxt> for HrtbBinderKind {
-    type View = SpannedHrtbBinderKindView;
-
-    fn decode(value: &Self, span_info: SpannedInfo, tcx: &TyCtxt) -> Self::View {
-        match *value {
-            HrtbBinderKind::Signature(def) => SpannedHrtbBinderKindView::Signature(def),
-            HrtbBinderKind::Imported(list) => {
-                SpannedHrtbBinderKindView::Imported(Spanned::new_raw(list, span_info.unwrap(tcx)))
-            }
-        }
-    }
-}
-
-impl SpannedViewEncode<TyCtxt> for SpannedHrtbBinderKindView {
-    type Unspanned = HrtbBinderKind;
-
-    fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
-        match self {
-            SpannedHrtbBinderKindView::Signature(def) => Spanned::new_raw(
-                HrtbBinderKind::Signature(def),
-                SpannedInfo::new_terminal(own_span, tcx),
-            ),
-            SpannedHrtbBinderKindView::Imported(list) => Spanned::new_raw(
-                HrtbBinderKind::Imported(list.value),
-                list.span_info.wrap(own_span, tcx),
-            ),
-        }
     }
 }
 
@@ -635,7 +596,8 @@ pub type SpannedHrtbDebruijnDef = Spanned<HrtbDebruijnDef>;
 
 #[derive(Debug, Copy, Clone)]
 pub struct SpannedHrtbDebruijnDefView {
-    pub spawned_from: AnyGeneric,
+    pub span: Span,
+    pub name: Symbol,
     pub kind: TyOrReKind,
     pub clauses: SpannedTraitClauseList,
 }
@@ -645,7 +607,8 @@ impl SpannedViewDecode<TyCtxt> for HrtbDebruijnDef {
 
     fn decode(value: &Self, span_info: SpannedInfo, tcx: &TyCtxt) -> Self::View {
         SpannedHrtbDebruijnDefView {
-            spawned_from: value.spawned_from,
+            span: value.span,
+            name: value.name,
             kind: value.kind,
             clauses: Spanned::new_raw(value.clauses, span_info.unwrap(tcx)),
         }
@@ -658,7 +621,8 @@ impl SpannedViewEncode<TyCtxt> for SpannedHrtbDebruijnDefView {
     fn encode(self, own_span: Span, tcx: &TyCtxt) -> Spanned<Self::Unspanned> {
         Spanned::new_raw(
             HrtbDebruijnDef {
-                spawned_from: self.spawned_from,
+                span: self.span,
+                name: self.name,
                 kind: self.kind,
                 clauses: self.clauses.value,
             },

@@ -12,7 +12,7 @@ use crate::{
     },
     semantic::{
         lower::{
-            entry::IntraItemLowerCtxt,
+            entry::{DefinedGenericTy, IntraItemLowerCtxt},
             modules::{FrozenModuleResolver, PathResolver, StepResolveError},
         },
         syntax::{
@@ -370,6 +370,10 @@ impl IntraItemLowerCtxt<'_> {
                 )
                 .emit();
             }
+
+            let DefinedGenericTy::Sig(generic) = generic else {
+                unreachable!();
+            };
 
             return match self.lower_rest_as_type_relative_assoc(subsequent) {
                 Ok(Some(assoc)) => {

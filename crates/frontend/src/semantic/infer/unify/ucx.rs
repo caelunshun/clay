@@ -8,7 +8,7 @@ use crate::{
             TyAndTyUnifyError,
         },
         syntax::{
-            FnInstanceInner, FnOwner, FnOwnerInherent, FnOwnerTrait, HrtbBinderKind, InferTyVar,
+            FnInstanceInner, FnOwner, FnOwnerInherent, FnOwnerTrait, InferTyVar,
             InferTyVarSourceInfo, Mutability, Re, ReVariance, RelationDirection, RelationMode,
             SimpleTySet, SpannedHrtbBinder, SpannedTy, SpannedTyView, TraitClause, TraitClauseList,
             TraitParam, TraitParamList, Ty, TyCtxt, TyFolder, TyFolderExt, TyFolderInfallibleExt,
@@ -662,13 +662,9 @@ impl<'tcx> UnifyCx<'tcx> {
             fn visit_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> ControlFlow<Self::Break> {
                 let s = self.session();
 
-                let HrtbBinderKind::Imported(imported) = binder.value.kind else {
-                    unreachable!()
-                };
-
-                self.debruijn.move_inwards_by(imported.r(s).len());
+                self.debruijn.move_inwards_by(binder.value.defs.r(s).len());
                 self.visit_fallible(binder.value.inner)?;
-                self.debruijn.move_outwards_by(imported.r(s).len());
+                self.debruijn.move_outwards_by(binder.value.defs.r(s).len());
                 ControlFlow::Continue(())
             }
 
@@ -780,21 +776,12 @@ impl<'tcx> UnifyCx<'tcx> {
                 (TraitClause::Trait(lhs), TraitClause::Trait(rhs))
                     if lhs.inner.def == rhs.inner.def =>
                 {
-                    // Ensure that the binders are compatible.
-                    let (
-                        HrtbBinderKind::Imported(lhs_binder),
-                        HrtbBinderKind::Imported(rhs_binder),
-                    ) = (lhs.kind, rhs.kind)
-                    else {
-                        unreachable!()
-                    };
-
-                    if lhs_binder.r(s).len() != rhs_binder.r(s).len() {
+                    if lhs.defs.r(s).len() != rhs.defs.r(s).len() {
                         culprits.push(TyAndTyUnifyCulprit::ClauseLists(lhs_root, rhs_root));
                         return;
                     }
 
-                    for (&lhs, &rhs) in lhs_binder.r(s).iter().zip(rhs_binder.r(s)) {
+                    for (&lhs, &rhs) in lhs.defs.r(s).iter().zip(rhs.defs.r(s)) {
                         if lhs.kind != rhs.kind {
                             culprits.push(TyAndTyUnifyCulprit::ClauseLists(lhs_root, rhs_root));
                             return;

@@ -121,8 +121,8 @@ pub enum TyKind {
 
     /// An uninstantiated generic type parameter.
     ///
-    /// Used in user annotations and instantiated into either a `UniversalVar`, an `InferVar`, or if
-    /// bound within an HRTB binder, a `HrtbVar` during `ClauseCx` import.
+    /// Used in user annotations and instantiated into either a `UniversalVar` or a concrete
+    /// substitution type during `ClauseCx` import.
     SigGeneric(Obj<TypeGeneric>),
 
     /// An uninstantiated type projection, which fetches an associated type from a `trait` impl for
@@ -156,9 +156,9 @@ pub enum TyKind {
     /// An instantiated generic region variable within an HRTB binder (e.g. the `T` in the type
     /// `Foo<T>` in the clause `for<T> Foo<T>`).
     ///
-    /// This is first instantiated from a `SigGeneric within an HRTB binder. Similar to a
-    /// `SigGeneric`, it is later instantiated into a `UniversalVar` or an `InferVar` during trait
-    /// obligation checking depending on how the HRTB is being used.
+    /// These types always show up under a binder. To liberate a binder, these types are
+    /// instantiated into a `UniversalVar` or an `InferVar` during trait obligation checking
+    /// depending on how the HRTB is being used.
     ///
     /// These are indexed using debruijn indices.
     HrtbVar(HrtbDebruijn),
@@ -751,21 +751,16 @@ pub enum SolidTyShapeKind {
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct HrtbBinder {
-    pub kind: HrtbBinderKind,
+    pub defs: HrtbDebruijnDefList,
     pub inner: TraitSpec,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum HrtbBinderKind {
-    Signature(Obj<GenericBinder>),
-    Imported(HrtbDebruijnDefList),
 }
 
 pub type HrtbDebruijnDefList = Intern<[HrtbDebruijnDef]>;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct HrtbDebruijnDef {
-    pub spawned_from: AnyGeneric,
+    pub span: Span,
+    pub name: Symbol,
     pub kind: TyOrReKind,
     pub clauses: TraitClauseList,
 }

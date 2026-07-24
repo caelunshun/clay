@@ -7,9 +7,9 @@ use crate::{
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnInstanceInner,
             FnOwner, FnOwnerAdtCtor, FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder,
-            HrtbBinderKind, ImplItem, InferTyVarSourceInfo, RelationMode, TraitClause,
-            TraitInstance, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe,
-            TyOrReList, TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
+            ImplItem, InferTyVarSourceInfo, RelationMode, TraitClause, TraitInstance, TraitItem,
+            TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReList, TypeAliasItem,
+            UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -156,7 +156,7 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
         self.ccx.init_ty_universal_var_direct_clauses(
             self_var,
             tcx.intern_list(&[TraitClause::Trait(HrtbBinder {
-                kind: HrtbBinderKind::Imported(tcx.intern_list(&[])),
+                defs: tcx.intern_list(&[]),
                 inner: TraitSpec {
                     def,
                     params: tcx.intern_list(

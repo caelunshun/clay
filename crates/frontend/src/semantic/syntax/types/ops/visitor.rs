@@ -1,10 +1,9 @@
 use crate::{
     base::{Session, analysis::Spanned},
     semantic::syntax::{
-        AdtInstance, FnInstance, FnOwner, HrtbBinder, HrtbBinderKind, HrtbDebruijnDef,
-        HrtbDebruijnDefList, Re, SpannedAdtInstance, SpannedAdtInstanceView, SpannedFnInstance,
-        SpannedFnInstanceView, SpannedFnOwner, SpannedFnOwnerView, SpannedHrtbBinder,
-        SpannedHrtbBinderKind, SpannedHrtbBinderKindView, SpannedHrtbBinderView,
+        AdtInstance, FnInstance, FnOwner, HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, Re,
+        SpannedAdtInstance, SpannedAdtInstanceView, SpannedFnInstance, SpannedFnInstanceView,
+        SpannedFnOwner, SpannedFnOwnerView, SpannedHrtbBinder, SpannedHrtbBinderView,
         SpannedHrtbDebruijnDef, SpannedHrtbDebruijnDefList, SpannedHrtbDebruijnDefView, SpannedRe,
         SpannedTraitClause, SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitInstance,
         SpannedTraitInstanceView, SpannedTraitParam, SpannedTraitParamList, SpannedTraitParamView,
@@ -103,10 +102,6 @@ pub trait TyVisitor<'tcx> {
 
     fn visit_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> ControlFlow<Self::Break> {
         self.walk_spanned_fallible(binder)
-    }
-
-    fn visit_hrtb_binder_kind(&mut self, kind: SpannedHrtbBinderKind) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(kind)
     }
 
     fn visit_hrtb_debruijn_def_list(
@@ -555,35 +550,10 @@ impl TyVisitable for HrtbBinder {
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        let SpannedHrtbBinderView { kind, inner } = me.view(visitor.tcx());
+        let SpannedHrtbBinderView { defs: kind, inner } = me.view(visitor.tcx());
 
         visitor.visit_spanned_fallible(kind)?;
         visitor.visit_spanned_fallible(inner)?;
-
-        ControlFlow::Continue(())
-    }
-}
-
-impl TyVisitable for HrtbBinderKind {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
-    where
-        V: ?Sized + TyVisitor<'tcx>,
-    {
-        visitor.visit_hrtb_binder_kind(me)
-    }
-
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
-    where
-        V: ?Sized + TyVisitor<'tcx>,
-    {
-        match me.view(visitor.tcx()) {
-            SpannedHrtbBinderKindView::Signature(_) => {
-                // (terminal)
-            }
-            SpannedHrtbBinderKindView::Imported(clauses) => {
-                visitor.visit_spanned_fallible(clauses)?;
-            }
-        }
 
         ControlFlow::Continue(())
     }
@@ -622,7 +592,8 @@ impl TyVisitable for HrtbDebruijnDef {
         V: ?Sized + TyVisitor<'tcx>,
     {
         let SpannedHrtbDebruijnDefView {
-            spawned_from: _,
+            span: _,
+            name: _,
             kind: _,
             clauses,
         } = me.view(visitor.tcx());
