@@ -3,10 +3,9 @@ use crate::{
     semantic::{
         infer::{ClauseCx, ObligeCause},
         syntax::{
-            HrtbBinder, InferTyVarSourceInfo, PrettyPrinterOpts, PrettyTy, Re, RelationMode,
-            SpannedHrtbBinder, SpannedRe, SpannedTy, Ty, TyCtxt, TyFolder,
-            TyFolderInfallibleExt as _, TyKind, TyProjection, UniversalTyVar,
-            UniversalTyVarSourceInfo,
+            InferTyVarSourceInfo, PrettyPrinterOpts, PrettyTy, Re, RelationMode, SpannedRe,
+            SpannedTy, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt as _, TyKind, TyProjection,
+            UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -27,11 +26,6 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxExporter<'_, 'tcx> {
 
     fn tcx(&self) -> &'tcx TyCtxt {
         self.ccx.tcx()
-    }
-
-    fn fold_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> Result<HrtbBinder, Self::Error> {
-        // TODO: Fold whatever we need to.
-        Ok(self.super_(binder.value))
     }
 
     fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
@@ -116,11 +110,10 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxExporter<'_, 'tcx> {
             | TyKind::Trait(_, _, _)
             | TyKind::Tuple(_)
             | TyKind::FnDef(_)
+            | TyKind::HrtbVar(_)
             | TyKind::Error(_) => Ok(self.super_(resolved)),
 
             TyKind::UniversalVar(var) => Ok(self.fold_universal_var(var)),
-
-            TyKind::HrtbVar(hrtb_debruijn) => todo!(),
         }
     }
 

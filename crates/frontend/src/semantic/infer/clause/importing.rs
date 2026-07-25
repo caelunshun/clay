@@ -1,53 +1,5 @@
 //! Logic to import a user-written type in a signature or function body into a form the inference
 //! context can understand.
-//!
-//! There are four visitors used in this process:
-//!
-//! 1. **Environment substitution:** Before doing anything with a signature type, we substitute in a
-//!    given `ClauseImportEnv` to a signature type. This creates a type which is no longer sensitive
-//!    to its environment. This means that we get rid of `SigThis`, `SigInfer`, and `SigGeneric`. We
-//!    maintain `SigProject` and `SigAlias` for WF checking but perform environment substitution on
-//!    their arguments.
-//!
-//!    This folder does not call into other folders—it simply performs a substitution.
-//!
-//! 2. **HRTB instantiation:** We also provide a collection of visitors to instantiate the
-//!    top-most layer of a given HRTB binder body as either existential or universal. This
-//!    maintains `SigProject` and `SigAlias` types to allow WF-checking of binders to check the
-//!    pre-normalized types. Most users, however, will also perform normalizing instantiations of
-//!    the binder contents after performing HRTB instantiation.
-//!
-//!    This folder does not call into other folders—it simply performs a substitution.
-//!
-//! 3. **Normalize instantiation:** This visitor instantiates `SigProject` and `SigAlias` types at
-//!    the top unbound level of that type. We do not instantiate `SigProject` and `SigAlias` types
-//!    within binders because `HrtbVar` is not allowed to be mentioned within a projection.
-//!
-//!    Obligations are only capable of working with normalized types.
-//!
-//!    Normalizing type aliases requires us to substitute in the type aliases' environment and
-//!    then transitively normalize the contents of that alias.
-//!
-//!    In order to instantiate projection types, we spawn nested obligation queries which resolve
-//!    the requested associated type as an inference type. These queries operate on a fully
-//!    normalized body.
-//!
-//! 4. **WF-Checking:** WF-checking folds over HRTB-instantiated types and folds them to their
-//!    normalized form. Then, in post-order, it takes the HRTB-instantiated type and its normalized
-//!    form and performs WF-checking on that pair. Knowing the normalized form is necessary because
-//!    WF-checking requires spawning obligations to e.g. ensure that generic parameters meet the
-//!    correct traits and obligations must always run on normalized types.
-//!
-//!    If there are binders in the type, we instantiate the binder as universal using the
-//!    HRTB instantiation folder and WF check that produced type alongside its normalized
-//!    counterpart.
-//!
-//! None of these visitors should be used by the outside world. Instead, they should use drivers
-//! which either...
-//!
-//! 1. Convert the top level of a signature type into a normalized type with WF-checking.
-//! 2. Instantiate HRTBs as either existential or universal and normalize that top level.
-//!
 
 use crate::{
     base::{
@@ -64,13 +16,14 @@ use crate::{
         syntax::{
             AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, FnOwner, FnOwnerAdtCtor,
             FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, HrtbDebruijnDefList,
-            InferTyVarSourceInfo, Re, RelationDirection, SpannedAdtInstance, SpannedFnInstance,
-            SpannedFnOwner, SpannedFnOwnerView, SpannedHrtbBinder, SpannedHrtbBinderView,
-            SpannedRe, SpannedTraitClauseView, SpannedTraitInstance, SpannedTraitSpec, SpannedTy,
-            SpannedTyView, TraitClause, TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt,
-            TyFoldable, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyFolderPreservesSpans,
-            TyKind, TyOrRe, TyOrReKind, TyOrReList, TyProjection, TyVisitable, TypeAliasItem,
-            UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
+            InferTyVarSourceInfo, Re, RegionGeneric, RelationDirection, SpannedAdtInstance,
+            SpannedFnInstance, SpannedFnOwner, SpannedFnOwnerView, SpannedHrtbBinder,
+            SpannedHrtbBinderView, SpannedRe, SpannedTraitClauseView, SpannedTraitInstance,
+            SpannedTraitSpec, SpannedTy, SpannedTyView, TraitClause, TraitInstance, TraitParam,
+            TraitSpec, Ty, TyCtxt, TyFoldable, TyFolder, TyFolderExt, TyFolderInfallibleExt,
+            TyFolderPreservesSpans, TyKind, TyOrRe, TyOrReKind, TyOrReList, TyProjection,
+            TyVisitable, TypeAliasItem, TypeGeneric, UniversalReVarSourceInfo,
+            UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
@@ -106,6 +59,28 @@ impl ClauseImportEnv {
     pub fn with_subst(mut self, subst: GenericSubst) -> Self {
         self.push_subst(subst);
         self
+    }
+
+    pub fn lookup_generic(&self, s: &Session, generic: AnyGeneric) -> TyOrRe {
+        let pos = generic.binder(s);
+
+        let binder = self
+            .substs
+            .iter()
+            .find(|v| v.binder == pos.def)
+            .unwrap_or_else(|| {
+                panic!("no substitutions provided for signature generic {generic:?}")
+            });
+
+        binder.substs.r(s)[pos.idx as usize]
+    }
+
+    pub fn lookup_re(&self, s: &Session, generic: Obj<RegionGeneric>) -> Re {
+        self.lookup_generic(s, AnyGeneric::Re(generic)).unwrap_re()
+    }
+
+    pub fn lookup_ty(&self, s: &Session, generic: Obj<TypeGeneric>) -> Ty {
+        self.lookup_generic(s, AnyGeneric::Ty(generic)).unwrap_ty()
     }
 }
 
@@ -290,24 +265,6 @@ enum ReentrantAliasState {
 
 impl<'tcx> TyFolderPreservesSpans<'tcx> for EnvSubstitutor<'_, 'tcx> {}
 
-impl<'tcx> EnvSubstitutor<'_, 'tcx> {
-    fn lookup_generic(&self, generic: AnyGeneric) -> TyOrRe {
-        let s = self.session();
-        let pos = generic.binder(s);
-
-        let binder = self
-            .env
-            .substs
-            .iter()
-            .find(|v| v.binder == pos.def)
-            .unwrap_or_else(|| {
-                panic!("no substitutions provided for signature generic {generic:?}")
-            });
-
-        binder.substs.r(s)[pos.idx as usize]
-    }
-}
-
 impl<'tcx> TyFolder<'tcx> for EnvSubstitutor<'_, 'tcx> {
     type Error = Infallible;
 
@@ -316,6 +273,7 @@ impl<'tcx> TyFolder<'tcx> for EnvSubstitutor<'_, 'tcx> {
     }
 
     fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
+        let s = self.session();
         let tcx = self.tcx();
 
         Ok(match ty.view(tcx) {
@@ -326,9 +284,7 @@ impl<'tcx> TyFolder<'tcx> for EnvSubstitutor<'_, 'tcx> {
                     span: ty.own_span(),
                 },
             ),
-            SpannedTyView::SigGeneric(generic) => {
-                self.lookup_generic(AnyGeneric::Ty(generic)).unwrap_ty()
-            }
+            SpannedTyView::SigGeneric(generic) => self.env.lookup_ty(s, generic),
             SpannedTyView::Simple(_)
             | SpannedTyView::Reference(_, _, _)
             | SpannedTyView::Adt(_)
@@ -348,13 +304,15 @@ impl<'tcx> TyFolder<'tcx> for EnvSubstitutor<'_, 'tcx> {
     }
 
     fn fold_re(&mut self, re: SpannedRe) -> Result<Re, Self::Error> {
+        let s = self.session();
+
         if self.ccx.mode() == UnifyCxMode::RegionBlind {
             return Ok(Re::Erased);
         }
 
         Ok(match re.value {
             Re::SigInfer => self.ccx.fresh_re_infer(),
-            Re::SigGeneric(generic) => self.lookup_generic(AnyGeneric::Re(generic)).unwrap_re(),
+            Re::SigGeneric(generic) => self.env.lookup_re(s, generic),
             Re::Gc | Re::Error(_) | Re::HrtbVar(_) => {
                 return self.super_spanned_fallible(re);
             }
