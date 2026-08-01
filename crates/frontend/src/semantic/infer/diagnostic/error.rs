@@ -3,11 +3,11 @@ use crate::{
     semantic::{
         infer::{ClauseCx, ClauseObligation, HrtbUniverse, ObligeCause, ObligeCauseReportMode},
         syntax::{
-            InferTyVar, PrettyTy, PrettyUniversalTyVar, Re, RelationDirection, SimpleTySet,
-            TraitClauseList, TraitParam, TraitSpec, Ty, UniversalReVar, UniversalTyVar,
+            InferTyVar, Re, RelationDirection, SimpleTySet, TraitClauseList, TraitParam, TraitSpec,
+            Ty, UniversalReVar, UniversalTyVar,
         },
     },
-    utils::lang::{AND_LIST_GLUE, format_list},
+    utils::lang::{SimpleListFormatGlue, format_list},
 };
 
 // === Errors === //
@@ -55,7 +55,7 @@ pub struct RecursionLimitReached {
 impl RecursionLimitReached {
     pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
         self.cause
-            .report(ccx, ObligeCauseReportMode::PromoteDelayBugs, || {
+            .report(ccx, ObligeCauseReportMode::PromoteDelayBugs, |_fmt_cx| {
                 "recursion limit reached".to_string()
             })
     }
@@ -71,11 +71,11 @@ pub struct NoTraitImplError {
 impl NoTraitImplError {
     pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
         self.cause
-            .report(ccx, ObligeCauseReportMode::KeepDelayBugs, || {
+            .report(ccx, ObligeCauseReportMode::KeepDelayBugs, |fmt_cx| {
                 format!(
                     "type `{}` does not implement `{}`",
-                    PrettyTy(self.target),
-                    self.spec
+                    fmt_cx.wrap(self.target),
+                    fmt_cx.wrap(self.spec),
                 )
             })
     }
@@ -91,50 +91,53 @@ pub struct NotCoveredError {
 
 impl NotCoveredError {
     pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
-        self.cause.report(ccx, ObligeCauseReportMode::KeepDelayBugs, || {
-            let covered = format_list(
-                self.missing_mentions
-                    .iter()
-                    .map(|&mention| format!("`{}`", PrettyUniversalTyVar(mention))),
-                AND_LIST_GLUE,
-            );
+        self.cause
+            .report(ccx, ObligeCauseReportMode::KeepDelayBugs, |fmt_cx| {
+                let covered = format_list(
+                    self.missing_mentions
+                        .iter()
+                        .map(|&mention| format!("`{}`", fmt_cx.wrap(mention))),
+                    SimpleListFormatGlue::AND_LIST,
+                );
 
-            match (self.in_trait, self.in_type) {
-                (None, None) => unreachable!(),
-                (None, Some(in_type)) => {
-                    format!(
-                        "universal type{} {covered} not covered by type `{}`",
-                        if self.missing_mentions.len() == 1 {
-                            ""
-                        } else {
-                            "s"
-                        },
-                        PrettyTy(in_type),
-                    )
+                match (self.in_trait, self.in_type) {
+                    (None, None) => unreachable!(),
+                    (None, Some(in_type)) => {
+                        format!(
+                            "universal type{} {covered} not covered by type `{}`",
+                            if self.missing_mentions.len() == 1 {
+                                ""
+                            } else {
+                                "s"
+                            },
+                            fmt_cx.wrap(in_type),
+                        )
+                    }
+                    (Some(in_trait), None) => {
+                        format!(
+                            "universal type{} {covered} not covered by trait `{}`",
+                            if self.missing_mentions.len() == 1 {
+                                ""
+                            } else {
+                                "s"
+                            },
+                            fmt_cx.wrap(in_trait),
+                        )
+                    }
+                    (Some(in_trait), Some(in_type)) => {
+                        format!(
+                            "universal type{} {covered} not covered by trait `{}` and type `{}`",
+                            if self.missing_mentions.len() == 1 {
+                                ""
+                            } else {
+                                "s"
+                            },
+                            fmt_cx.wrap(in_trait),
+                            fmt_cx.wrap(in_type),
+                        )
+                    }
                 }
-                (Some(in_trait), None) => {
-                    format!(
-                        "universal type{} {covered} not covered by trait `{in_trait}`",
-                        if self.missing_mentions.len() == 1 {
-                            ""
-                        } else {
-                            "s"
-                        },
-                    )
-                }
-                (Some(in_trait), Some(in_type)) => {
-                    format!(
-                        "universal type{} {covered} not covered by trait `{in_trait}` and type `{}`",
-                        if self.missing_mentions.len() == 1 {
-                            ""
-                        } else {
-                            "s"
-                        },
-                        PrettyTy(in_type),
-                    )
-                }
-            }
-        })
+            })
     }
 }
 
@@ -149,13 +152,13 @@ pub struct ReAndReUnifyError {
 
 impl ReAndReUnifyError {
     pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
-        self.cause.report(ccx, ObligeCauseReportMode::KeepDelayBugs, || {
+        self.cause.report(ccx, ObligeCauseReportMode::KeepDelayBugs, |fmt_cx| {
             format!(
                 "cannot force `{}` to outlive `{}` without requiring universal `{}` to outlive `{}`",
-                self.lhs,
-                self.rhs,
-                Re::UniversalVar(self.requires_var),
-                self.to_outlive,
+                fmt_cx.wrap(self.lhs),
+                fmt_cx.wrap(self.rhs),
+                fmt_cx.wrap(Re::UniversalVar(self.requires_var)),
+                fmt_cx.wrap(self.to_outlive),
             )
         })
     }
@@ -172,11 +175,11 @@ pub struct TyAndTyUnifyError {
 impl TyAndTyUnifyError {
     pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
         self.cause
-            .report(ccx, ObligeCauseReportMode::KeepDelayBugs, || {
+            .report(ccx, ObligeCauseReportMode::KeepDelayBugs, |fmt_cx| {
                 format!(
                     "cannot unify types `{}` and `{}`",
-                    PrettyTy(self.origin_lhs),
-                    PrettyTy(self.origin_rhs),
+                    fmt_cx.wrap(self.origin_lhs),
+                    fmt_cx.wrap(self.origin_rhs),
                 )
             })
     }
@@ -223,10 +226,10 @@ pub struct TyAndSimpleTySetUnifyError {
 impl TyAndSimpleTySetUnifyError {
     pub fn report(&self, ccx: &ClauseCx<'_>) -> Option<ErrorGuaranteed> {
         self.cause
-            .report(ccx, ObligeCauseReportMode::KeepDelayBugs, || {
+            .report(ccx, ObligeCauseReportMode::KeepDelayBugs, |fmt_cx| {
                 format!(
                     "cannot unify types `{}` and `{:?}`",
-                    PrettyTy(self.lhs),
+                    fmt_cx.wrap(self.lhs),
                     self.rhs
                 )
             })
@@ -248,27 +251,30 @@ impl ObligationUnfulfilled {
         match self.obligation.clone() {
             ClauseObligation::TyUnifiesTy(_cause, _lhs, _rhs, _mode) => unreachable!(),
             ClauseObligation::TyMeetsTrait(cause, _universe, lhs, rhs) => {
-                cause.report(ccx, ObligeCauseReportMode::KeepDelayBugs, || {
+                cause.report(ccx, ObligeCauseReportMode::KeepDelayBugs, |fmt_cx| {
                     format!(
-                        "could not make necessary inferences to show that `{}` implements `{rhs}`: {:#?}",
-                        PrettyTy(lhs),
+                        "could not make necessary inferences to show that `{}` implements `{}`: {:#?}",
+                        fmt_cx.wrap(lhs),
+                        fmt_cx.wrap(rhs),
                         self.reason,
                     )
                 })
             },
             ClauseObligation::TyOutlivesRe(cause, lhs, rhs, dir) => {
-                cause.report(ccx, ObligeCauseReportMode::KeepDelayBugs, || match dir {
+                cause.report(ccx, ObligeCauseReportMode::KeepDelayBugs, |fmt_cx| match dir {
                     RelationDirection::LhsOntoRhs => {
                         format!(
-                            "could not make necessary inferences to show that `{}` outlives `{rhs}`: {:#?}",
-                            PrettyTy(lhs),
+                            "could not make necessary inferences to show that `{}` outlives `{}`: {:#?}",
+                            fmt_cx.wrap(lhs),
+                            fmt_cx.wrap(rhs),
                             self.reason,
                         )
                     }
                     RelationDirection::RhsOntoLhs => {
                         format!(
-                            "could not make necessary inferences to show that `{rhs}` outlives `{}`: {:#?}",
-                            PrettyTy(lhs),
+                            "could not make necessary inferences to show that `{}` outlives `{}`: {:#?}",
+                            fmt_cx.wrap(rhs),
+                            fmt_cx.wrap(lhs),
                             self.reason,
                         )
                     }
@@ -279,10 +285,10 @@ impl ObligationUnfulfilled {
                 univ,
                 _clauses,
                 _reification_state,
-            ) => cause.report(ccx, ObligeCauseReportMode::KeepDelayBugs, || {
+            ) => cause.report(ccx, ObligeCauseReportMode::KeepDelayBugs, |fmt_cx| {
                 format!(
                     "could not make necessary inferences to elaborate the generic clauses of `{}`: {:#?}",
-                    PrettyUniversalTyVar(univ),
+                    fmt_cx.wrap(univ),
                     self.reason,
                 )
             }),

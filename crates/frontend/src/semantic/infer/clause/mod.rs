@@ -12,3 +12,6 @@ pub use self::instantiation::*;
 
 mod oblige_impl;
 mod oblige_outlives;
+
+mod pretty;
+pub use pretty::*;

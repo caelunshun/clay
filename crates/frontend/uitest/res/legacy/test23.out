@@ -1,4 +1,4 @@
-error: cannot unify types `&'_  ()` and `&'_ mut  ()`
+error: cannot unify types `&'_ 0` and `11`
     ┌─ test23.fir:157:22
     │
 157 │             break 'b &v;
@@ -10,7 +10,7 @@ note: Origin(
     },
 )
 
-error: cannot unify types `?27 {i8 | i16 | i32 | i64}` and `()`
+error: cannot unify types `27` and `()`
     ┌─ test23.fir:179:5
     │
 179 │     *&1 + -1

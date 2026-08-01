@@ -12,8 +12,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: (),
-        rhs: crate::Forever<(), Out = ?1>,
+        lhs: 0: Tuple(
+            1: [],
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: Tuple(
+                        2: [],
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        1,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -25,8 +41,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?3,
-        rhs: crate::Forever<?3, Out = ?6>,
+        lhs: 0: InferVar(
+            3,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        3,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        6,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -38,8 +70,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?7,
-        rhs: crate::Forever<?7, Out = ?10>,
+        lhs: 0: InferVar(
+            7,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        7,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        10,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -51,8 +99,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?11,
-        rhs: crate::Forever<?11, Out = ?14>,
+        lhs: 0: InferVar(
+            11,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        11,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        14,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -64,8 +128,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?15,
-        rhs: crate::Forever<?15, Out = ?18>,
+        lhs: 0: InferVar(
+            15,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        15,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        18,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -77,8 +157,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?19,
-        rhs: crate::Forever<?19, Out = ?22>,
+        lhs: 0: InferVar(
+            19,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        19,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        22,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -90,8 +186,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?23,
-        rhs: crate::Forever<?23, Out = ?26>,
+        lhs: 0: InferVar(
+            23,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        23,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        26,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -103,8 +215,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?27,
-        rhs: crate::Forever<?27, Out = ?30>,
+        lhs: 0: InferVar(
+            27,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        27,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        30,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -116,8 +244,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?31,
-        rhs: crate::Forever<?31, Out = ?34>,
+        lhs: 0: InferVar(
+            31,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        31,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        34,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -129,8 +273,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?35,
-        rhs: crate::Forever<?35, Out = ?38>,
+        lhs: 0: InferVar(
+            35,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        35,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        38,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -142,8 +302,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?39,
-        rhs: crate::Forever<?39, Out = ?42>,
+        lhs: 0: InferVar(
+            39,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        39,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        42,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -155,8 +331,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?43,
-        rhs: crate::Forever<?43, Out = ?46>,
+        lhs: 0: InferVar(
+            43,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        43,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        46,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -168,8 +360,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?47,
-        rhs: crate::Forever<?47, Out = ?50>,
+        lhs: 0: InferVar(
+            47,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        47,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        50,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -181,8 +389,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?51,
-        rhs: crate::Forever<?51, Out = ?54>,
+        lhs: 0: InferVar(
+            51,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        51,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        54,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -194,8 +418,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?55,
-        rhs: crate::Forever<?55, Out = ?58>,
+        lhs: 0: InferVar(
+            55,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        55,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        58,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -207,8 +447,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?59,
-        rhs: crate::Forever<?59, Out = ?62>,
+        lhs: 0: InferVar(
+            59,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        59,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        62,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -220,8 +476,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?63,
-        rhs: crate::Forever<?63, Out = ?66>,
+        lhs: 0: InferVar(
+            63,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        63,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        66,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -233,8 +505,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?67,
-        rhs: crate::Forever<?67, Out = ?70>,
+        lhs: 0: InferVar(
+            67,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        67,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        70,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -246,8 +534,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?71,
-        rhs: crate::Forever<?71, Out = ?74>,
+        lhs: 0: InferVar(
+            71,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        71,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        74,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -259,8 +563,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?75,
-        rhs: crate::Forever<?75, Out = ?78>,
+        lhs: 0: InferVar(
+            75,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        75,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        78,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -272,8 +592,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?79,
-        rhs: crate::Forever<?79, Out = ?82>,
+        lhs: 0: InferVar(
+            79,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        79,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        82,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -285,8 +621,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?83,
-        rhs: crate::Forever<?83, Out = ?86>,
+        lhs: 0: InferVar(
+            83,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        83,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        86,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -298,8 +650,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?87,
-        rhs: crate::Forever<?87, Out = ?90>,
+        lhs: 0: InferVar(
+            87,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        87,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        90,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -311,8 +679,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?91,
-        rhs: crate::Forever<?91, Out = ?94>,
+        lhs: 0: InferVar(
+            91,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        91,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        94,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -324,8 +708,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?95,
-        rhs: crate::Forever<?95, Out = ?98>,
+        lhs: 0: InferVar(
+            95,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        95,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        98,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -337,8 +737,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?99,
-        rhs: crate::Forever<?99, Out = ?102>,
+        lhs: 0: InferVar(
+            99,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        99,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        102,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -350,8 +766,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?103,
-        rhs: crate::Forever<?103, Out = ?106>,
+        lhs: 0: InferVar(
+            103,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        103,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        106,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -363,8 +795,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?107,
-        rhs: crate::Forever<?107, Out = ?110>,
+        lhs: 0: InferVar(
+            107,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        107,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        110,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -376,8 +824,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?111,
-        rhs: crate::Forever<?111, Out = ?114>,
+        lhs: 0: InferVar(
+            111,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        111,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        114,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -389,8 +853,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?115,
-        rhs: crate::Forever<?115, Out = ?118>,
+        lhs: 0: InferVar(
+            115,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        115,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        118,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -402,8 +882,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?119,
-        rhs: crate::Forever<?119, Out = ?122>,
+        lhs: 0: InferVar(
+            119,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        119,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        122,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -415,8 +911,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?123,
-        rhs: crate::Forever<?123, Out = ?126>,
+        lhs: 0: InferVar(
+            123,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        123,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        126,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -428,8 +940,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?127,
-        rhs: crate::Forever<?127, Out = ?130>,
+        lhs: 0: InferVar(
+            127,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        127,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        130,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -441,8 +969,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?131,
-        rhs: crate::Forever<?131, Out = ?134>,
+        lhs: 0: InferVar(
+            131,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        131,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        134,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -454,8 +998,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?135,
-        rhs: crate::Forever<?135, Out = ?138>,
+        lhs: 0: InferVar(
+            135,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        135,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        138,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -467,8 +1027,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?139,
-        rhs: crate::Forever<?139, Out = ?142>,
+        lhs: 0: InferVar(
+            139,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        139,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        142,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -480,8 +1056,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?143,
-        rhs: crate::Forever<?143, Out = ?146>,
+        lhs: 0: InferVar(
+            143,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        143,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        146,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -493,8 +1085,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?147,
-        rhs: crate::Forever<?147, Out = ?150>,
+        lhs: 0: InferVar(
+            147,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        147,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        150,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -506,8 +1114,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?151,
-        rhs: crate::Forever<?151, Out = ?154>,
+        lhs: 0: InferVar(
+            151,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        151,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        154,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -519,8 +1143,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?155,
-        rhs: crate::Forever<?155, Out = ?158>,
+        lhs: 0: InferVar(
+            155,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        155,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        158,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -532,8 +1172,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?159,
-        rhs: crate::Forever<?159, Out = ?162>,
+        lhs: 0: InferVar(
+            159,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        159,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        162,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -545,8 +1201,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?163,
-        rhs: crate::Forever<?163, Out = ?166>,
+        lhs: 0: InferVar(
+            163,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        163,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        166,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -558,8 +1230,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?167,
-        rhs: crate::Forever<?167, Out = ?170>,
+        lhs: 0: InferVar(
+            167,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        167,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        170,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -571,8 +1259,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?171,
-        rhs: crate::Forever<?171, Out = ?174>,
+        lhs: 0: InferVar(
+            171,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        171,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        174,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -584,8 +1288,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?175,
-        rhs: crate::Forever<?175, Out = ?178>,
+        lhs: 0: InferVar(
+            175,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        175,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        178,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -597,8 +1317,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?179,
-        rhs: crate::Forever<?179, Out = ?182>,
+        lhs: 0: InferVar(
+            179,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        179,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        182,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -610,8 +1346,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?183,
-        rhs: crate::Forever<?183, Out = ?186>,
+        lhs: 0: InferVar(
+            183,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        183,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        186,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -623,8 +1375,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?187,
-        rhs: crate::Forever<?187, Out = ?190>,
+        lhs: 0: InferVar(
+            187,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        187,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        190,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -636,8 +1404,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?191,
-        rhs: crate::Forever<?191, Out = ?194>,
+        lhs: 0: InferVar(
+            191,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        191,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        194,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -649,8 +1433,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?195,
-        rhs: crate::Forever<?195, Out = ?198>,
+        lhs: 0: InferVar(
+            195,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        195,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        198,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -662,8 +1462,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?199,
-        rhs: crate::Forever<?199, Out = ?202>,
+        lhs: 0: InferVar(
+            199,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        199,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        202,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -675,8 +1491,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?203,
-        rhs: crate::Forever<?203, Out = ?206>,
+        lhs: 0: InferVar(
+            203,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        203,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        206,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -688,8 +1520,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?207,
-        rhs: crate::Forever<?207, Out = ?210>,
+        lhs: 0: InferVar(
+            207,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        207,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        210,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -701,8 +1549,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?211,
-        rhs: crate::Forever<?211, Out = ?214>,
+        lhs: 0: InferVar(
+            211,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        211,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        214,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -714,8 +1578,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?215,
-        rhs: crate::Forever<?215, Out = ?218>,
+        lhs: 0: InferVar(
+            215,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        215,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        218,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -727,8 +1607,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?219,
-        rhs: crate::Forever<?219, Out = ?222>,
+        lhs: 0: InferVar(
+            219,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        219,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        222,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -740,8 +1636,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?223,
-        rhs: crate::Forever<?223, Out = ?226>,
+        lhs: 0: InferVar(
+            223,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        223,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        226,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -753,8 +1665,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?227,
-        rhs: crate::Forever<?227, Out = ?230>,
+        lhs: 0: InferVar(
+            227,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        227,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        230,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -766,8 +1694,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?231,
-        rhs: crate::Forever<?231, Out = ?234>,
+        lhs: 0: InferVar(
+            231,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        231,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        234,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -779,8 +1723,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?235,
-        rhs: crate::Forever<?235, Out = ?238>,
+        lhs: 0: InferVar(
+            235,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        235,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        238,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -792,8 +1752,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?239,
-        rhs: crate::Forever<?239, Out = ?242>,
+        lhs: 0: InferVar(
+            239,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        239,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        242,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -805,8 +1781,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?243,
-        rhs: crate::Forever<?243, Out = ?246>,
+        lhs: 0: InferVar(
+            243,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        243,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        246,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -818,8 +1810,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?247,
-        rhs: crate::Forever<?247, Out = ?250>,
+        lhs: 0: InferVar(
+            247,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        247,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        250,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -831,8 +1839,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?251,
-        rhs: crate::Forever<?251, Out = ?254>,
+        lhs: 0: InferVar(
+            251,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        251,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        254,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -844,8 +1868,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?255,
-        rhs: crate::Forever<?255, Out = ?258>,
+        lhs: 0: InferVar(
+            255,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        255,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        258,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -857,8 +1897,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?259,
-        rhs: crate::Forever<?259, Out = ?262>,
+        lhs: 0: InferVar(
+            259,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        259,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        262,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -870,8 +1926,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?263,
-        rhs: crate::Forever<?263, Out = ?266>,
+        lhs: 0: InferVar(
+            263,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        263,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        266,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -883,8 +1955,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?267,
-        rhs: crate::Forever<?267, Out = ?270>,
+        lhs: 0: InferVar(
+            267,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        267,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        270,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -896,8 +1984,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?271,
-        rhs: crate::Forever<?271, Out = ?274>,
+        lhs: 0: InferVar(
+            271,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        271,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        274,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -909,8 +2013,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?275,
-        rhs: crate::Forever<?275, Out = ?278>,
+        lhs: 0: InferVar(
+            275,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        275,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        278,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -922,8 +2042,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?279,
-        rhs: crate::Forever<?279, Out = ?282>,
+        lhs: 0: InferVar(
+            279,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        279,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        282,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -935,8 +2071,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?283,
-        rhs: crate::Forever<?283, Out = ?286>,
+        lhs: 0: InferVar(
+            283,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        283,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        286,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -948,8 +2100,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?287,
-        rhs: crate::Forever<?287, Out = ?290>,
+        lhs: 0: InferVar(
+            287,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        287,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        290,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -961,8 +2129,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?291,
-        rhs: crate::Forever<?291, Out = ?294>,
+        lhs: 0: InferVar(
+            291,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        291,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        294,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -974,8 +2158,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?295,
-        rhs: crate::Forever<?295, Out = ?298>,
+        lhs: 0: InferVar(
+            295,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        295,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        298,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -987,8 +2187,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?299,
-        rhs: crate::Forever<?299, Out = ?302>,
+        lhs: 0: InferVar(
+            299,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        299,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        302,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1000,8 +2216,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?303,
-        rhs: crate::Forever<?303, Out = ?306>,
+        lhs: 0: InferVar(
+            303,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        303,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        306,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1013,8 +2245,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?307,
-        rhs: crate::Forever<?307, Out = ?310>,
+        lhs: 0: InferVar(
+            307,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        307,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        310,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1026,8 +2274,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?311,
-        rhs: crate::Forever<?311, Out = ?314>,
+        lhs: 0: InferVar(
+            311,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        311,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        314,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1039,8 +2303,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?315,
-        rhs: crate::Forever<?315, Out = ?318>,
+        lhs: 0: InferVar(
+            315,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        315,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        318,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1052,8 +2332,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?319,
-        rhs: crate::Forever<?319, Out = ?322>,
+        lhs: 0: InferVar(
+            319,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        319,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        322,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1065,8 +2361,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?323,
-        rhs: crate::Forever<?323, Out = ?326>,
+        lhs: 0: InferVar(
+            323,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        323,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        326,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1078,8 +2390,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?327,
-        rhs: crate::Forever<?327, Out = ?330>,
+        lhs: 0: InferVar(
+            327,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        327,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        330,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1091,8 +2419,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?331,
-        rhs: crate::Forever<?331, Out = ?334>,
+        lhs: 0: InferVar(
+            331,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        331,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        334,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1104,8 +2448,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?335,
-        rhs: crate::Forever<?335, Out = ?338>,
+        lhs: 0: InferVar(
+            335,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        335,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        338,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1117,8 +2477,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?339,
-        rhs: crate::Forever<?339, Out = ?342>,
+        lhs: 0: InferVar(
+            339,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        339,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        342,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1130,8 +2506,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?343,
-        rhs: crate::Forever<?343, Out = ?346>,
+        lhs: 0: InferVar(
+            343,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        343,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        346,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1143,8 +2535,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?347,
-        rhs: crate::Forever<?347, Out = ?350>,
+        lhs: 0: InferVar(
+            347,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        347,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        350,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1156,8 +2564,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?351,
-        rhs: crate::Forever<?351, Out = ?354>,
+        lhs: 0: InferVar(
+            351,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        351,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        354,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1169,8 +2593,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?355,
-        rhs: crate::Forever<?355, Out = ?358>,
+        lhs: 0: InferVar(
+            355,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        355,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        358,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1182,8 +2622,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?359,
-        rhs: crate::Forever<?359, Out = ?362>,
+        lhs: 0: InferVar(
+            359,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        359,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        362,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1195,8 +2651,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?363,
-        rhs: crate::Forever<?363, Out = ?366>,
+        lhs: 0: InferVar(
+            363,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        363,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        366,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1208,8 +2680,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?367,
-        rhs: crate::Forever<?367, Out = ?370>,
+        lhs: 0: InferVar(
+            367,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        367,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        370,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1221,8 +2709,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?371,
-        rhs: crate::Forever<?371, Out = ?374>,
+        lhs: 0: InferVar(
+            371,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        371,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        374,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1234,8 +2738,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?375,
-        rhs: crate::Forever<?375, Out = ?378>,
+        lhs: 0: InferVar(
+            375,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        375,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        378,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1247,8 +2767,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?379,
-        rhs: crate::Forever<?379, Out = ?382>,
+        lhs: 0: InferVar(
+            379,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        379,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        382,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1260,8 +2796,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?383,
-        rhs: crate::Forever<?383, Out = ?386>,
+        lhs: 0: InferVar(
+            383,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        383,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        386,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1273,8 +2825,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?387,
-        rhs: crate::Forever<?387, Out = ?390>,
+        lhs: 0: InferVar(
+            387,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        387,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        390,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1286,8 +2854,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?391,
-        rhs: crate::Forever<?391, Out = ?394>,
+        lhs: 0: InferVar(
+            391,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        391,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        394,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1299,8 +2883,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?395,
-        rhs: crate::Forever<?395, Out = ?398>,
+        lhs: 0: InferVar(
+            395,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        395,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        398,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1312,8 +2912,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?399,
-        rhs: crate::Forever<?399, Out = ?402>,
+        lhs: 0: InferVar(
+            399,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        399,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        402,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1325,8 +2941,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?403,
-        rhs: crate::Forever<?403, Out = ?406>,
+        lhs: 0: InferVar(
+            403,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        403,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        406,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1338,8 +2970,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?407,
-        rhs: crate::Forever<?407, Out = ?410>,
+        lhs: 0: InferVar(
+            407,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        407,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        410,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1351,8 +2999,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?411,
-        rhs: crate::Forever<?411, Out = ?414>,
+        lhs: 0: InferVar(
+            411,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        411,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        414,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1364,8 +3028,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?415,
-        rhs: crate::Forever<?415, Out = ?418>,
+        lhs: 0: InferVar(
+            415,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        415,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        418,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1377,8 +3057,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?419,
-        rhs: crate::Forever<?419, Out = ?422>,
+        lhs: 0: InferVar(
+            419,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        419,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        422,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1390,8 +3086,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?423,
-        rhs: crate::Forever<?423, Out = ?426>,
+        lhs: 0: InferVar(
+            423,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        423,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        426,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1403,8 +3115,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?427,
-        rhs: crate::Forever<?427, Out = ?430>,
+        lhs: 0: InferVar(
+            427,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        427,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        430,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1416,8 +3144,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?431,
-        rhs: crate::Forever<?431, Out = ?434>,
+        lhs: 0: InferVar(
+            431,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        431,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        434,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1429,8 +3173,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?435,
-        rhs: crate::Forever<?435, Out = ?438>,
+        lhs: 0: InferVar(
+            435,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        435,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        438,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1442,8 +3202,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?439,
-        rhs: crate::Forever<?439, Out = ?442>,
+        lhs: 0: InferVar(
+            439,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        439,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        442,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1455,8 +3231,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?443,
-        rhs: crate::Forever<?443, Out = ?446>,
+        lhs: 0: InferVar(
+            443,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        443,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        446,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1468,8 +3260,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?447,
-        rhs: crate::Forever<?447, Out = ?450>,
+        lhs: 0: InferVar(
+            447,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        447,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        450,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1481,8 +3289,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?451,
-        rhs: crate::Forever<?451, Out = ?454>,
+        lhs: 0: InferVar(
+            451,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        451,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        454,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1494,8 +3318,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?455,
-        rhs: crate::Forever<?455, Out = ?458>,
+        lhs: 0: InferVar(
+            455,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        455,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        458,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1507,8 +3347,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?459,
-        rhs: crate::Forever<?459, Out = ?462>,
+        lhs: 0: InferVar(
+            459,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        459,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        462,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1520,8 +3376,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?463,
-        rhs: crate::Forever<?463, Out = ?466>,
+        lhs: 0: InferVar(
+            463,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        463,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        466,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1533,8 +3405,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?467,
-        rhs: crate::Forever<?467, Out = ?470>,
+        lhs: 0: InferVar(
+            467,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        467,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        470,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1546,8 +3434,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?471,
-        rhs: crate::Forever<?471, Out = ?474>,
+        lhs: 0: InferVar(
+            471,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        471,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        474,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1559,8 +3463,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?475,
-        rhs: crate::Forever<?475, Out = ?478>,
+        lhs: 0: InferVar(
+            475,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        475,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        478,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1572,8 +3492,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?479,
-        rhs: crate::Forever<?479, Out = ?482>,
+        lhs: 0: InferVar(
+            479,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        479,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        482,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1585,8 +3521,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?483,
-        rhs: crate::Forever<?483, Out = ?486>,
+        lhs: 0: InferVar(
+            483,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        483,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        486,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1598,8 +3550,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?487,
-        rhs: crate::Forever<?487, Out = ?490>,
+        lhs: 0: InferVar(
+            487,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        487,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        490,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1611,8 +3579,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?491,
-        rhs: crate::Forever<?491, Out = ?494>,
+        lhs: 0: InferVar(
+            491,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        491,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        494,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1624,8 +3608,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?495,
-        rhs: crate::Forever<?495, Out = ?498>,
+        lhs: 0: InferVar(
+            495,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        495,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        498,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1637,8 +3637,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?499,
-        rhs: crate::Forever<?499, Out = ?502>,
+        lhs: 0: InferVar(
+            499,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        499,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        502,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1650,8 +3666,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?503,
-        rhs: crate::Forever<?503, Out = ?506>,
+        lhs: 0: InferVar(
+            503,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        503,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        506,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1663,8 +3695,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?507,
-        rhs: crate::Forever<?507, Out = ?510>,
+        lhs: 0: InferVar(
+            507,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        507,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        510,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1676,8 +3724,24 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?511,
-        rhs: crate::Forever<?511, Out = ?514>,
+        lhs: 0: InferVar(
+            511,
+        ),
+        rhs: TraitSpec {
+            def: "Forever"#41,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        511,
+                    ),
+                ),
+                Equals(
+                    1: InferVar(
+                        514,
+                    ),
+                ),
+            ],
+        },
     },
 )
 

@@ -28,7 +28,7 @@ use crate::{
     symbol,
     utils::{
         hash::FxHashMap,
-        lang::{AND_LIST_GLUE, format_list},
+        lang::{SimpleListFormatGlue, format_list},
     },
 };
 use hashbrown::hash_map;
@@ -501,7 +501,7 @@ impl IntraItemLowerCtxt<'_> {
                     if missing_mentions.len() == 1 { "" } else { "s" },
                     format_list(
                         missing_mentions.iter().map(|v| format!("`{v}`")),
-                        AND_LIST_GLUE
+                        SimpleListFormatGlue::AND_LIST,
                     )
                 ),
             )

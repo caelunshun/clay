@@ -13,8 +13,28 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: crate::LivesForSome1<'_>,
-        rhs: crate::Meow<'_>,
+        lhs: 0: Adt(
+            AdtInstance {
+                def: 1: AdtItem(
+                    "LivesForSome1"#28,
+                ),
+                params: 1: [
+                    UniversalVar(
+                        0,
+                    ),
+                ],
+            },
+        ),
+        rhs: TraitSpec {
+            def: "Meow"#18,
+            params: 0: [
+                Equals(
+                    UniversalVar(
+                        2,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -33,8 +53,28 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: crate::LivesForSome2<'_>,
-        rhs: crate::Meow<'_>,
+        lhs: 0: Adt(
+            AdtInstance {
+                def: 1: AdtItem(
+                    "LivesForSome2"#29,
+                ),
+                params: 1: [
+                    UniversalVar(
+                        0,
+                    ),
+                ],
+            },
+        ),
+        rhs: TraitSpec {
+            def: "Meow"#18,
+            params: 0: [
+                Equals(
+                    UniversalVar(
+                        2,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -53,15 +93,47 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: T,
-        rhs: crate::Meow<'_>,
+        lhs: 0: UniversalVar(
+            0,
+        ),
+        rhs: TraitSpec {
+            def: "Meow"#18,
+            params: 0: [
+                Equals(
+                    UniversalVar(
+                        2,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
 note: Step(
     ImplUsingInherent {
-        lhs: crate::Meow<'_>,
-        rhs: crate::Meow<'_>,
+        lhs: HrtbBinder {
+            defs: 0: [],
+            inner: TraitSpec {
+                def: "Meow"#18,
+                params: 0: [
+                    Equals(
+                        UniversalVar(
+                            0,
+                        ),
+                    ),
+                ],
+            },
+        },
+        rhs: TraitSpec {
+            def: "Meow"#18,
+            params: 0: [
+                Equals(
+                    UniversalVar(
+                        2,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -80,15 +152,47 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: T,
-        rhs: crate::Meow<'_>,
+        lhs: 0: UniversalVar(
+            0,
+        ),
+        rhs: TraitSpec {
+            def: "Meow"#18,
+            params: 0: [
+                Equals(
+                    UniversalVar(
+                        2,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
 note: Step(
     ImplUsingInherent {
-        lhs: crate::Meow<'_>,
-        rhs: crate::Meow<'_>,
+        lhs: HrtbBinder {
+            defs: 0: [],
+            inner: TraitSpec {
+                def: "Meow"#18,
+                params: 0: [
+                    Equals(
+                        UniversalVar(
+                            0,
+                        ),
+                    ),
+                ],
+            },
+        },
+        rhs: TraitSpec {
+            def: "Meow"#18,
+            params: 0: [
+                Equals(
+                    UniversalVar(
+                        2,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -107,15 +211,65 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: T,
-        rhs: crate::Meow<'_>,
+        lhs: 0: UniversalVar(
+            0,
+        ),
+        rhs: TraitSpec {
+            def: "Meow"#18,
+            params: 0: [
+                Equals(
+                    UniversalVar(
+                        4,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
 note: Step(
     ImplUsingInherent {
-        lhs: for<'h: &shorter '_> crate::Meow<'_>,
-        rhs: crate::Meow<'_>,
+        lhs: HrtbBinder {
+            defs: 0: [
+                HrtbDebruijnDef {
+                    span: test16.fir:19:25-27,
+                    name: "h"#42,
+                    kind: Re,
+                    clauses: 1: [
+                        Outlives(
+                            LhsOntoRhs,
+                            UniversalVar(
+                                0,
+                            ),
+                        ),
+                    ],
+                },
+            ],
+            inner: TraitSpec {
+                def: "Meow"#18,
+                params: 0: [
+                    Equals(
+                        HrtbVar(
+                            HrtbDebruijn(
+                                DebruijnRelative {
+                                    raw: 1,
+                                },
+                            ),
+                        ),
+                    ),
+                ],
+            },
+        },
+        rhs: TraitSpec {
+            def: "Meow"#18,
+            params: 0: [
+                Equals(
+                    UniversalVar(
+                        4,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -158,8 +312,41 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: crate::MyFunc,
-        rhs: crate::Fn<&'_  {HRTB universal capture #1: }, &'_  {HRTB universal capture #1: }>,
+        lhs: 0: Adt(
+            AdtInstance {
+                def: 1: AdtItem(
+                    "MyFunc"#52,
+                ),
+                params: 1: [],
+            },
+        ),
+        rhs: TraitSpec {
+            def: "Fn"#45,
+            params: 0: [
+                Equals(
+                    1: Reference(
+                        UniversalVar(
+                            1,
+                        ),
+                        Not,
+                        2: UniversalVar(
+                            1,
+                        ),
+                    ),
+                ),
+                Equals(
+                    1: Reference(
+                        UniversalVar(
+                            1,
+                        ),
+                        Not,
+                        2: UniversalVar(
+                            1,
+                        ),
+                    ),
+                ),
+            ],
+        },
     },
 )
 

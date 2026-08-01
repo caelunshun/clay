@@ -11,13 +11,12 @@ use crate::{
         infer::HrtbUniverse,
         syntax::{
             AdtCtor, AdtCtorFieldIdx, AdtCtorInstance, AdtCtorUnresolved, AdtInstance, AdtKind,
-            HirPatListFrontAndTail, HirPatListFrontAndTailLen, PrettyPrinterOpts, PrettyTy,
-            SpannedAdtInstanceView, Ty, TyKind,
+            HirPatListFrontAndTail, HirPatListFrontAndTailLen, SpannedAdtInstanceView, Ty, TyKind,
         },
     },
     utils::{
         hash::FxHashMap,
-        lang::{AND_LIST_GLUE, format_list},
+        lang::{SimpleListFormatGlue, format_list},
     },
 };
 use hashbrown::hash_map;
@@ -138,16 +137,14 @@ impl BodyCtxt<'_, '_> {
             | TyKind::FnDef(..)
             | TyKind::InferVar(..)
             | TyKind::UniversalVar(..) => {
-                return Err(PrettyPrinterOpts {
-                    ccx: Some(self.ccx),
-                }
-                .provide(|| {
-                    Diag::span_err(
-                        span,
-                        format_args!("expected ADT constructor; got `{}`", PrettyTy(ty)),
-                    )
-                    .emit()
-                }));
+                return Err(Diag::span_err(
+                    span,
+                    format_args!(
+                        "expected ADT constructor; got `{}`",
+                        self.ccx.pretty().wrap(ty),
+                    ),
+                )
+                .emit());
             }
 
             TyKind::SigThis
@@ -191,7 +188,7 @@ impl BodyCtxt<'_, '_> {
                         offending_fields
                             .iter()
                             .map(|v| format!("`{}`", v.idx.raw())),
-                        AND_LIST_GLUE,
+                        SimpleListFormatGlue::AND_LIST,
                     ),
                     if offending_fields.len() == 1 {
                         "is"
@@ -344,7 +341,7 @@ impl BodyCtxt<'_, '_> {
                     } else {
                         "s"
                     },
-                    format_list(missing_field_list, AND_LIST_GLUE),
+                    format_list(missing_field_list, SimpleListFormatGlue::AND_LIST,),
                 ),
             )
             .emit();

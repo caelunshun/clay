@@ -3,9 +3,9 @@ use crate::{
     semantic::{
         infer::{ClauseCx, ObligeCause},
         syntax::{
-            InferTyVarSourceInfo, PrettyPrinterOpts, PrettyTy, Re, RelationMode, SpannedRe,
-            SpannedTy, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt as _, TyKind, TyProjection,
-            UniversalTyVar, UniversalTyVarSourceInfo,
+            InferTyVarSourceInfo, Re, RelationMode, SpannedRe, SpannedTy, Ty, TyCtxt, TyFolder,
+            TyFolderInfallibleExt as _, TyKind, TyProjection, UniversalTyVar,
+            UniversalTyVarSourceInfo,
         },
     },
 };
@@ -58,16 +58,14 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxExporter<'_, 'tcx> {
                     | InferTyVarSourceInfo::LoopDemand { span }
                     | InferTyVarSourceInfo::HoleInfer { span }
                     | InferTyVarSourceInfo::PatType { span }
-                    | InferTyVarSourceInfo::EmptyArrayElem { span } => PrettyPrinterOpts {
-                        ccx: Some(self.ccx),
-                    }
-                    .provide(|| {
-                        Diag::span_err(
-                            span,
-                            format_args!("failed to infer a type of `{}`", PrettyTy(ty.value)),
-                        )
-                        .emit()
-                    }),
+                    | InferTyVarSourceInfo::EmptyArrayElem { span } => Diag::span_err(
+                        span,
+                        format_args!(
+                            "failed to infer a type of `{}`",
+                            self.ccx.pretty().wrap(ty.value),
+                        ),
+                    )
+                    .emit(),
 
                     // TODO
                     InferTyVarSourceInfo::UniversalElabHelper => {

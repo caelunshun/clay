@@ -13,8 +13,19 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: u1,
-        rhs: crate::Generic<u0>,
+        lhs: 0: UniversalVar(
+            1,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: UniversalVar(
+                        0,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -26,8 +37,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?0,
-        rhs: crate::Generic<?1>,
+        lhs: 0: InferVar(
+            0,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        1,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -39,8 +61,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?2,
-        rhs: crate::Generic<?3>,
+        lhs: 0: InferVar(
+            2,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        3,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -52,8 +85,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?4,
-        rhs: crate::Generic<?5>,
+        lhs: 0: InferVar(
+            4,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        5,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -65,8 +109,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?6,
-        rhs: crate::Generic<?7>,
+        lhs: 0: InferVar(
+            6,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        7,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -78,8 +133,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?8,
-        rhs: crate::Generic<?9>,
+        lhs: 0: InferVar(
+            8,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        9,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -91,8 +157,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?10,
-        rhs: crate::Generic<?11>,
+        lhs: 0: InferVar(
+            10,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        11,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -104,8 +181,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?12,
-        rhs: crate::Generic<?13>,
+        lhs: 0: InferVar(
+            12,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        13,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -117,8 +205,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?14,
-        rhs: crate::Generic<?15>,
+        lhs: 0: InferVar(
+            14,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        15,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -130,8 +229,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?16,
-        rhs: crate::Generic<?17>,
+        lhs: 0: InferVar(
+            16,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        17,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -143,8 +253,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?18,
-        rhs: crate::Generic<?19>,
+        lhs: 0: InferVar(
+            18,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        19,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -156,8 +277,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?20,
-        rhs: crate::Generic<?21>,
+        lhs: 0: InferVar(
+            20,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        21,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -169,8 +301,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?22,
-        rhs: crate::Generic<?23>,
+        lhs: 0: InferVar(
+            22,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        23,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -182,8 +325,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?24,
-        rhs: crate::Generic<?25>,
+        lhs: 0: InferVar(
+            24,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        25,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -195,8 +349,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?26,
-        rhs: crate::Generic<?27>,
+        lhs: 0: InferVar(
+            26,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        27,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -208,8 +373,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?28,
-        rhs: crate::Generic<?29>,
+        lhs: 0: InferVar(
+            28,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        29,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -221,8 +397,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?30,
-        rhs: crate::Generic<?31>,
+        lhs: 0: InferVar(
+            30,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        31,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -234,8 +421,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?32,
-        rhs: crate::Generic<?33>,
+        lhs: 0: InferVar(
+            32,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        33,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -247,8 +445,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?34,
-        rhs: crate::Generic<?35>,
+        lhs: 0: InferVar(
+            34,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        35,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -260,8 +469,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?36,
-        rhs: crate::Generic<?37>,
+        lhs: 0: InferVar(
+            36,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        37,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -273,8 +493,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?38,
-        rhs: crate::Generic<?39>,
+        lhs: 0: InferVar(
+            38,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        39,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -286,8 +517,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?40,
-        rhs: crate::Generic<?41>,
+        lhs: 0: InferVar(
+            40,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        41,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -299,8 +541,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?42,
-        rhs: crate::Generic<?43>,
+        lhs: 0: InferVar(
+            42,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        43,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -312,8 +565,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?44,
-        rhs: crate::Generic<?45>,
+        lhs: 0: InferVar(
+            44,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        45,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -325,8 +589,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?46,
-        rhs: crate::Generic<?47>,
+        lhs: 0: InferVar(
+            46,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        47,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -338,8 +613,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?48,
-        rhs: crate::Generic<?49>,
+        lhs: 0: InferVar(
+            48,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        49,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -351,8 +637,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?50,
-        rhs: crate::Generic<?51>,
+        lhs: 0: InferVar(
+            50,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        51,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -364,8 +661,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?52,
-        rhs: crate::Generic<?53>,
+        lhs: 0: InferVar(
+            52,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        53,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -377,8 +685,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?54,
-        rhs: crate::Generic<?55>,
+        lhs: 0: InferVar(
+            54,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        55,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -390,8 +709,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?56,
-        rhs: crate::Generic<?57>,
+        lhs: 0: InferVar(
+            56,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        57,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -403,8 +733,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?58,
-        rhs: crate::Generic<?59>,
+        lhs: 0: InferVar(
+            58,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        59,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -416,8 +757,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?60,
-        rhs: crate::Generic<?61>,
+        lhs: 0: InferVar(
+            60,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        61,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -429,8 +781,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?62,
-        rhs: crate::Generic<?63>,
+        lhs: 0: InferVar(
+            62,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        63,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -442,8 +805,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?64,
-        rhs: crate::Generic<?65>,
+        lhs: 0: InferVar(
+            64,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        65,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -455,8 +829,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?66,
-        rhs: crate::Generic<?67>,
+        lhs: 0: InferVar(
+            66,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        67,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -468,8 +853,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?68,
-        rhs: crate::Generic<?69>,
+        lhs: 0: InferVar(
+            68,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        69,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -481,8 +877,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?70,
-        rhs: crate::Generic<?71>,
+        lhs: 0: InferVar(
+            70,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        71,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -494,8 +901,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?72,
-        rhs: crate::Generic<?73>,
+        lhs: 0: InferVar(
+            72,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        73,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -507,8 +925,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?74,
-        rhs: crate::Generic<?75>,
+        lhs: 0: InferVar(
+            74,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        75,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -520,8 +949,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?76,
-        rhs: crate::Generic<?77>,
+        lhs: 0: InferVar(
+            76,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        77,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -533,8 +973,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?78,
-        rhs: crate::Generic<?79>,
+        lhs: 0: InferVar(
+            78,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        79,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -546,8 +997,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?80,
-        rhs: crate::Generic<?81>,
+        lhs: 0: InferVar(
+            80,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        81,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -559,8 +1021,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?82,
-        rhs: crate::Generic<?83>,
+        lhs: 0: InferVar(
+            82,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        83,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -572,8 +1045,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?84,
-        rhs: crate::Generic<?85>,
+        lhs: 0: InferVar(
+            84,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        85,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -585,8 +1069,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?86,
-        rhs: crate::Generic<?87>,
+        lhs: 0: InferVar(
+            86,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        87,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -598,8 +1093,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?88,
-        rhs: crate::Generic<?89>,
+        lhs: 0: InferVar(
+            88,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        89,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -611,8 +1117,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?90,
-        rhs: crate::Generic<?91>,
+        lhs: 0: InferVar(
+            90,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        91,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -624,8 +1141,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?92,
-        rhs: crate::Generic<?93>,
+        lhs: 0: InferVar(
+            92,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        93,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -637,8 +1165,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?94,
-        rhs: crate::Generic<?95>,
+        lhs: 0: InferVar(
+            94,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        95,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -650,8 +1189,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?96,
-        rhs: crate::Generic<?97>,
+        lhs: 0: InferVar(
+            96,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        97,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -663,8 +1213,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?98,
-        rhs: crate::Generic<?99>,
+        lhs: 0: InferVar(
+            98,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        99,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -676,8 +1237,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?100,
-        rhs: crate::Generic<?101>,
+        lhs: 0: InferVar(
+            100,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        101,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -689,8 +1261,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?102,
-        rhs: crate::Generic<?103>,
+        lhs: 0: InferVar(
+            102,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        103,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -702,8 +1285,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?104,
-        rhs: crate::Generic<?105>,
+        lhs: 0: InferVar(
+            104,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        105,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -715,8 +1309,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?106,
-        rhs: crate::Generic<?107>,
+        lhs: 0: InferVar(
+            106,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        107,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -728,8 +1333,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?108,
-        rhs: crate::Generic<?109>,
+        lhs: 0: InferVar(
+            108,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        109,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -741,8 +1357,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?110,
-        rhs: crate::Generic<?111>,
+        lhs: 0: InferVar(
+            110,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        111,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -754,8 +1381,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?112,
-        rhs: crate::Generic<?113>,
+        lhs: 0: InferVar(
+            112,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        113,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -767,8 +1405,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?114,
-        rhs: crate::Generic<?115>,
+        lhs: 0: InferVar(
+            114,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        115,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -780,8 +1429,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?116,
-        rhs: crate::Generic<?117>,
+        lhs: 0: InferVar(
+            116,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        117,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -793,8 +1453,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?118,
-        rhs: crate::Generic<?119>,
+        lhs: 0: InferVar(
+            118,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        119,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -806,8 +1477,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?120,
-        rhs: crate::Generic<?121>,
+        lhs: 0: InferVar(
+            120,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        121,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -819,8 +1501,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?122,
-        rhs: crate::Generic<?123>,
+        lhs: 0: InferVar(
+            122,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        123,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -832,8 +1525,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?124,
-        rhs: crate::Generic<?125>,
+        lhs: 0: InferVar(
+            124,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        125,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -845,8 +1549,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?126,
-        rhs: crate::Generic<?127>,
+        lhs: 0: InferVar(
+            126,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        127,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -858,8 +1573,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?128,
-        rhs: crate::Generic<?129>,
+        lhs: 0: InferVar(
+            128,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        129,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -871,8 +1597,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?130,
-        rhs: crate::Generic<?131>,
+        lhs: 0: InferVar(
+            130,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        131,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -884,8 +1621,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?132,
-        rhs: crate::Generic<?133>,
+        lhs: 0: InferVar(
+            132,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        133,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -897,8 +1645,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?134,
-        rhs: crate::Generic<?135>,
+        lhs: 0: InferVar(
+            134,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        135,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -910,8 +1669,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?136,
-        rhs: crate::Generic<?137>,
+        lhs: 0: InferVar(
+            136,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        137,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -923,8 +1693,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?138,
-        rhs: crate::Generic<?139>,
+        lhs: 0: InferVar(
+            138,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        139,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -936,8 +1717,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?140,
-        rhs: crate::Generic<?141>,
+        lhs: 0: InferVar(
+            140,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        141,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -949,8 +1741,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?142,
-        rhs: crate::Generic<?143>,
+        lhs: 0: InferVar(
+            142,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        143,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -962,8 +1765,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?144,
-        rhs: crate::Generic<?145>,
+        lhs: 0: InferVar(
+            144,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        145,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -975,8 +1789,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?146,
-        rhs: crate::Generic<?147>,
+        lhs: 0: InferVar(
+            146,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        147,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -988,8 +1813,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?148,
-        rhs: crate::Generic<?149>,
+        lhs: 0: InferVar(
+            148,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        149,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1001,8 +1837,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?150,
-        rhs: crate::Generic<?151>,
+        lhs: 0: InferVar(
+            150,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        151,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1014,8 +1861,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?152,
-        rhs: crate::Generic<?153>,
+        lhs: 0: InferVar(
+            152,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        153,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1027,8 +1885,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?154,
-        rhs: crate::Generic<?155>,
+        lhs: 0: InferVar(
+            154,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        155,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1040,8 +1909,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?156,
-        rhs: crate::Generic<?157>,
+        lhs: 0: InferVar(
+            156,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        157,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1053,8 +1933,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?158,
-        rhs: crate::Generic<?159>,
+        lhs: 0: InferVar(
+            158,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        159,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1066,8 +1957,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?160,
-        rhs: crate::Generic<?161>,
+        lhs: 0: InferVar(
+            160,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        161,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1079,8 +1981,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?162,
-        rhs: crate::Generic<?163>,
+        lhs: 0: InferVar(
+            162,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        163,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1092,8 +2005,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?164,
-        rhs: crate::Generic<?165>,
+        lhs: 0: InferVar(
+            164,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        165,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1105,8 +2029,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?166,
-        rhs: crate::Generic<?167>,
+        lhs: 0: InferVar(
+            166,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        167,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1118,8 +2053,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?168,
-        rhs: crate::Generic<?169>,
+        lhs: 0: InferVar(
+            168,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        169,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1131,8 +2077,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?170,
-        rhs: crate::Generic<?171>,
+        lhs: 0: InferVar(
+            170,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        171,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1144,8 +2101,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?172,
-        rhs: crate::Generic<?173>,
+        lhs: 0: InferVar(
+            172,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        173,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1157,8 +2125,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?174,
-        rhs: crate::Generic<?175>,
+        lhs: 0: InferVar(
+            174,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        175,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1170,8 +2149,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?176,
-        rhs: crate::Generic<?177>,
+        lhs: 0: InferVar(
+            176,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        177,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1183,8 +2173,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?178,
-        rhs: crate::Generic<?179>,
+        lhs: 0: InferVar(
+            178,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        179,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1196,8 +2197,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?180,
-        rhs: crate::Generic<?181>,
+        lhs: 0: InferVar(
+            180,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        181,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1209,8 +2221,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?182,
-        rhs: crate::Generic<?183>,
+        lhs: 0: InferVar(
+            182,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        183,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1222,8 +2245,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?184,
-        rhs: crate::Generic<?185>,
+        lhs: 0: InferVar(
+            184,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        185,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1235,8 +2269,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?186,
-        rhs: crate::Generic<?187>,
+        lhs: 0: InferVar(
+            186,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        187,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1248,8 +2293,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?188,
-        rhs: crate::Generic<?189>,
+        lhs: 0: InferVar(
+            188,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        189,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1261,8 +2317,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?190,
-        rhs: crate::Generic<?191>,
+        lhs: 0: InferVar(
+            190,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        191,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1274,8 +2341,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?192,
-        rhs: crate::Generic<?193>,
+        lhs: 0: InferVar(
+            192,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        193,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1287,8 +2365,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?194,
-        rhs: crate::Generic<?195>,
+        lhs: 0: InferVar(
+            194,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        195,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1300,8 +2389,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?196,
-        rhs: crate::Generic<?197>,
+        lhs: 0: InferVar(
+            196,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        197,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1313,8 +2413,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?198,
-        rhs: crate::Generic<?199>,
+        lhs: 0: InferVar(
+            198,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        199,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1326,8 +2437,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?200,
-        rhs: crate::Generic<?201>,
+        lhs: 0: InferVar(
+            200,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        201,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1339,8 +2461,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?202,
-        rhs: crate::Generic<?203>,
+        lhs: 0: InferVar(
+            202,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        203,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1352,8 +2485,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?204,
-        rhs: crate::Generic<?205>,
+        lhs: 0: InferVar(
+            204,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        205,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1365,8 +2509,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?206,
-        rhs: crate::Generic<?207>,
+        lhs: 0: InferVar(
+            206,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        207,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1378,8 +2533,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?208,
-        rhs: crate::Generic<?209>,
+        lhs: 0: InferVar(
+            208,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        209,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1391,8 +2557,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?210,
-        rhs: crate::Generic<?211>,
+        lhs: 0: InferVar(
+            210,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        211,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1404,8 +2581,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?212,
-        rhs: crate::Generic<?213>,
+        lhs: 0: InferVar(
+            212,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        213,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1417,8 +2605,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?214,
-        rhs: crate::Generic<?215>,
+        lhs: 0: InferVar(
+            214,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        215,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1430,8 +2629,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?216,
-        rhs: crate::Generic<?217>,
+        lhs: 0: InferVar(
+            216,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        217,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1443,8 +2653,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?218,
-        rhs: crate::Generic<?219>,
+        lhs: 0: InferVar(
+            218,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        219,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1456,8 +2677,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?220,
-        rhs: crate::Generic<?221>,
+        lhs: 0: InferVar(
+            220,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        221,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1469,8 +2701,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?222,
-        rhs: crate::Generic<?223>,
+        lhs: 0: InferVar(
+            222,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        223,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1482,8 +2725,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?224,
-        rhs: crate::Generic<?225>,
+        lhs: 0: InferVar(
+            224,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        225,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1495,8 +2749,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?226,
-        rhs: crate::Generic<?227>,
+        lhs: 0: InferVar(
+            226,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        227,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1508,8 +2773,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?228,
-        rhs: crate::Generic<?229>,
+        lhs: 0: InferVar(
+            228,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        229,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1521,8 +2797,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?230,
-        rhs: crate::Generic<?231>,
+        lhs: 0: InferVar(
+            230,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        231,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1534,8 +2821,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?232,
-        rhs: crate::Generic<?233>,
+        lhs: 0: InferVar(
+            232,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        233,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1547,8 +2845,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?234,
-        rhs: crate::Generic<?235>,
+        lhs: 0: InferVar(
+            234,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        235,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1560,8 +2869,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?236,
-        rhs: crate::Generic<?237>,
+        lhs: 0: InferVar(
+            236,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        237,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1573,8 +2893,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?238,
-        rhs: crate::Generic<?239>,
+        lhs: 0: InferVar(
+            238,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        239,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1586,8 +2917,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?240,
-        rhs: crate::Generic<?241>,
+        lhs: 0: InferVar(
+            240,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        241,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1599,8 +2941,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?242,
-        rhs: crate::Generic<?243>,
+        lhs: 0: InferVar(
+            242,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        243,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1612,8 +2965,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?244,
-        rhs: crate::Generic<?245>,
+        lhs: 0: InferVar(
+            244,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        245,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1625,8 +2989,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?246,
-        rhs: crate::Generic<?247>,
+        lhs: 0: InferVar(
+            246,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        247,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1638,8 +3013,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?248,
-        rhs: crate::Generic<?249>,
+        lhs: 0: InferVar(
+            248,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        249,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1651,8 +3037,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?250,
-        rhs: crate::Generic<?251>,
+        lhs: 0: InferVar(
+            250,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        251,
+                    ),
+                ),
+            ],
+        },
     },
 )
 
@@ -1664,8 +3061,19 @@ note: Step(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: ?252,
-        rhs: crate::Generic<?253>,
+        lhs: 0: InferVar(
+            252,
+        ),
+        rhs: TraitSpec {
+            def: "Generic"#18,
+            params: 0: [
+                Equals(
+                    1: InferVar(
+                        253,
+                    ),
+                ),
+            ],
+        },
     },
 )
 

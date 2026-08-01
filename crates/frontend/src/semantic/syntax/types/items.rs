@@ -371,3 +371,12 @@ impl HasSpan for AnyGenericIdent {
         }
     }
 }
+
+impl AnyGenericIdent {
+    pub fn text(self) -> Symbol {
+        match self {
+            AnyGenericIdent::Re(lifetime) => lifetime.name,
+            AnyGenericIdent::Ty(ident) => ident.text,
+        }
+    }
+}

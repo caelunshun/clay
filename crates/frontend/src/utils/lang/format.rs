@@ -37,9 +37,6 @@ where
 
 // === ListFormatter === //
 
-pub const OR_LIST_GLUE: (&str, &str, &str) = (" ", ",", "or");
-pub const AND_LIST_GLUE: (&str, &str, &str) = (" ", ",", "and");
-
 pub trait ListFormatGlue: Sized {
     fn space(&self) -> impl fmt::Display;
 
@@ -70,22 +67,58 @@ impl<T: ListFormatGlue> ListFormatGlue for &'_ T {
     }
 }
 
-impl<A, B, C> ListFormatGlue for (A, B, C)
-where
-    A: fmt::Display,
-    B: fmt::Display,
-    C: fmt::Display,
-{
+#[derive(Debug, Copy, Clone)]
+pub struct SimpleListFormatGlue<'a> {
+    pub space: &'a str,
+    pub comma: &'a str,
+    pub conjunction: &'a str,
+    pub oxford_comma: bool,
+}
+
+impl<'a> SimpleListFormatGlue<'a> {
+    pub const OR_LIST: SimpleListFormatGlue<'static> = SimpleListFormatGlue {
+        space: " ",
+        comma: ", ",
+        conjunction: "or",
+        oxford_comma: true,
+    };
+
+    pub const AND_LIST: SimpleListFormatGlue<'static> = SimpleListFormatGlue {
+        space: " ",
+        comma: ", ",
+        conjunction: "and",
+        oxford_comma: true,
+    };
+
+    pub const COMMA_LIST: SimpleListFormatGlue<'static> = SimpleListFormatGlue::new_delimited(", ");
+
+    pub const PLUS_LIST: SimpleListFormatGlue<'static> = SimpleListFormatGlue::new_delimited(" + ");
+
+    pub const fn new_delimited(delimiter: &'a str) -> Self {
+        Self {
+            comma: "",
+            conjunction: "",
+            space: delimiter,
+            oxford_comma: false,
+        }
+    }
+}
+
+impl ListFormatGlue for SimpleListFormatGlue<'_> {
     fn space(&self) -> impl fmt::Display {
-        &self.0
+        self.space
     }
 
     fn comma(&self) -> impl fmt::Display {
-        &self.1
+        self.comma
     }
 
     fn conjunction(&self) -> impl fmt::Display {
-        &self.2
+        self.comma
+    }
+
+    fn oxford_comma(&self) -> bool {
+        self.oxford_comma
     }
 }
 
@@ -209,21 +242,30 @@ mod test {
 
     #[test]
     fn list_formatter_cases() {
-        assert_eq!(format_list([] as [&str; 0], OR_LIST_GLUE), "");
+        assert_eq!(
+            format_list([] as [&str; 0], SimpleListFormatGlue::OR_LIST),
+            ""
+        );
 
-        assert_eq!(format_list(["a"], OR_LIST_GLUE), "a");
-
-        assert_eq!(format_list(["a", "b"], OR_LIST_GLUE), "a or b");
-
-        assert_eq!(format_list(["a", "b", "c"], OR_LIST_GLUE), "a, b, or c");
+        assert_eq!(format_list(["a"], SimpleListFormatGlue::OR_LIST), "a");
 
         assert_eq!(
-            format_list(["a", "b", "c", "d"], OR_LIST_GLUE),
+            format_list(["a", "b"], SimpleListFormatGlue::OR_LIST),
+            "a or b"
+        );
+
+        assert_eq!(
+            format_list(["a", "b", "c"], SimpleListFormatGlue::OR_LIST),
+            "a, b, or c"
+        );
+
+        assert_eq!(
+            format_list(["a", "b", "c", "d"], SimpleListFormatGlue::OR_LIST),
             "a, b, c, or d"
         );
 
         assert_eq!(
-            format_list(["a", "b", "c", "d", "e"], OR_LIST_GLUE),
+            format_list(["a", "b", "c", "d", "e"], SimpleListFormatGlue::OR_LIST),
             "a, b, c, d, or e"
         );
     }

@@ -1,8 +1,8 @@
 use crate::{
     base::{Diag, ErrorGuaranteed, LeafDiag, Level, arena::Obj, syntax::Span},
     semantic::{
-        infer::ClauseCx,
-        syntax::{HrtbBinder, ImplItem, PrettyPrinterOpts, TraitClauseList, TraitSpec, Ty, TyOrRe},
+        infer::{ClauseCx, PrettyFmtCx},
+        syntax::{HrtbBinder, ImplItem, TraitClauseList, TraitSpec, Ty, TyOrRe},
     },
 };
 use std::{
@@ -205,13 +205,12 @@ impl ObligeCause {
         &self,
         ccx: &ClauseCx<'tcx>,
         mode: ObligeCauseReportMode,
-        msg: impl FnOnce() -> String,
+        msg: impl FnOnce(&PrettyFmtCx<'_, 'tcx>) -> String,
     ) -> Option<ErrorGuaranteed> {
         match self.behavior() {
             ObligeCauseBehavior::Report => {
                 if !ccx.is_silent() {
-                    PrettyPrinterOpts { ccx: Some(ccx) }
-                        .provide(|| Some(self.build_diag(ccx, Level::Error, msg()).emit().unwrap()))
+                    Some(self.build_diag(ccx, Level::Error, msg).emit().unwrap())
                 } else {
                     None
                 }
@@ -230,7 +229,7 @@ impl ObligeCause {
                             } else {
                                 Level::DelayedBug
                             },
-                            msg(),
+                            msg,
                         )
                         .emit()
                         .unwrap(),
@@ -245,12 +244,13 @@ impl ObligeCause {
         }
     }
 
-    fn build_diag(
+    fn build_diag<'tcx>(
         &self,
-        ccx: &ClauseCx<'_>,
+        ccx: &ClauseCx<'tcx>,
         level: Level,
-        msg: String,
+        msg: impl FnOnce(&PrettyFmtCx<'_, 'tcx>) -> String,
     ) -> Diag<Option<ErrorGuaranteed>> {
+        let fmt_cx = ccx.pretty();
         let frames = self.frames().collect::<Vec<_>>();
 
         let main_span = frames
@@ -258,7 +258,7 @@ impl ObligeCause {
             // TODO: Fallback span?
             .map_or(Span::DUMMY, |v| v.frame.unwrap_origin_ref().primary_span());
 
-        let mut diag = Diag::new(level, msg).primary(main_span, "");
+        let mut diag = Diag::new(level, msg(&fmt_cx)).primary(main_span, "");
 
         for frame in frames.iter().rev() {
             diag.push_child(LeafDiag::new(Level::Note, format!("{:#?}", frame.frame)));

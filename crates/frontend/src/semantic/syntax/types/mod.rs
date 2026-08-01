@@ -4,9 +4,6 @@ pub use self::ops::*;
 mod items;
 pub use self::items::*;
 
-mod pretty;
-pub use self::pretty::*;
-
 mod spanned;
 pub use self::spanned::*;
 

@@ -26,8 +26,32 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: (&'_  (), &'_  ()),
-        rhs: crate::demo2::Whee,
+        lhs: 0: Tuple(
+            1: [
+                2: Reference(
+                    UniversalVar(
+                        0,
+                    ),
+                    Not,
+                    3: Tuple(
+                        4: [],
+                    ),
+                ),
+                2: Reference(
+                    UniversalVar(
+                        1,
+                    ),
+                    Not,
+                    3: Tuple(
+                        4: [],
+                    ),
+                ),
+            ],
+        ),
+        rhs: TraitSpec {
+            def: "Whee"#36,
+            params: 0: [],
+        },
     },
 )
 
@@ -46,8 +70,32 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: (&'_  (), &'_  ()),
-        rhs: crate::demo2::Whee,
+        lhs: 0: Tuple(
+            1: [
+                2: Reference(
+                    UniversalVar(
+                        0,
+                    ),
+                    Not,
+                    3: Tuple(
+                        4: [],
+                    ),
+                ),
+                2: Reference(
+                    UniversalVar(
+                        1,
+                    ),
+                    Not,
+                    3: Tuple(
+                        4: [],
+                    ),
+                ),
+            ],
+        ),
+        rhs: TraitSpec {
+            def: "Whee"#36,
+            params: 0: [],
+        },
     },
 )
 
@@ -66,8 +114,32 @@ note: Origin(
 
 note: Step(
     ImplInstantiatedClause {
-        lhs: 0: (&'_  (), &'_  ()),
-        rhs: crate::demo2::Whee,
+        lhs: 0: Tuple(
+            1: [
+                2: Reference(
+                    UniversalVar(
+                        0,
+                    ),
+                    Not,
+                    3: Tuple(
+                        4: [],
+                    ),
+                ),
+                2: Reference(
+                    UniversalVar(
+                        1,
+                    ),
+                    Not,
+                    3: Tuple(
+                        4: [],
+                    ),
+                ),
+            ],
+        ),
+        rhs: TraitSpec {
+            def: "Whee"#36,
+            params: 0: [],
+        },
     },
 )
 
