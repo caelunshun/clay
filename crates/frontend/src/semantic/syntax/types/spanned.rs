@@ -5,7 +5,6 @@ use crate::{
         arena::{HasInterner, Obj},
         syntax::{Span, Symbol},
     },
-    parse::token::Ident,
     semantic::syntax::{
         AdtCtor, AdtInstance, AdtItem, FnInstance, FnInstanceInner, FnItem, FnOwner,
         FnOwnerAdtCtor, FnOwnerInherent, FnOwnerTrait, HrtbBinder, HrtbDebruijn, HrtbDebruijnDef,
