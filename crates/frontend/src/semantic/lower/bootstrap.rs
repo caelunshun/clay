@@ -1,8 +1,7 @@
 use crate::{
     base::{
         Session,
-        analysis::Spanned,
-        arena::{HasInterner, LateInit, Obj},
+        arena::{LateInit, Obj},
         syntax::Span,
     },
     parse::{
@@ -13,7 +12,7 @@ use crate::{
         lower::modules::{BuilderItemId, BuilderModuleTree, ItemCategory},
         syntax::{
             Crate, FloatKind, GenericBinder, IntKind, Item, ItemKind, LangItems, ModuleItem,
-            SimpleTyKind, TyCtxt, TyKind, TypeAliasItem,
+            SigTyKind, SimpleTyKind, TyCtxt, TypeAliasItem,
         },
     },
     symbol,
@@ -27,59 +26,59 @@ pub fn synthesize_bootstrap_prelude(tcx: &TyCtxt) -> Obj<Crate> {
     let types = [
         (
             symbol!("u8"),
-            tcx.intern(TyKind::Simple(SimpleTyKind::Uint(IntKind::S8))),
+            SigTyKind::Simple(SimpleTyKind::Uint(IntKind::S8)).wrap(Span::DUMMY, s),
         ),
         (
             symbol!("u16"),
-            tcx.intern(TyKind::Simple(SimpleTyKind::Uint(IntKind::S16))),
+            SigTyKind::Simple(SimpleTyKind::Uint(IntKind::S16)).wrap(Span::DUMMY, s),
         ),
         (
             symbol!("u32"),
-            tcx.intern(TyKind::Simple(SimpleTyKind::Uint(IntKind::S32))),
+            SigTyKind::Simple(SimpleTyKind::Uint(IntKind::S32)).wrap(Span::DUMMY, s),
         ),
         (
             symbol!("u64"),
-            tcx.intern(TyKind::Simple(SimpleTyKind::Uint(IntKind::S64))),
+            SigTyKind::Simple(SimpleTyKind::Uint(IntKind::S64)).wrap(Span::DUMMY, s),
         ),
         (
             symbol!("i8"),
-            tcx.intern(TyKind::Simple(SimpleTyKind::Int(IntKind::S8))),
+            SigTyKind::Simple(SimpleTyKind::Int(IntKind::S8)).wrap(Span::DUMMY, s),
         ),
         (
             symbol!("i16"),
-            tcx.intern(TyKind::Simple(SimpleTyKind::Int(IntKind::S16))),
+            SigTyKind::Simple(SimpleTyKind::Int(IntKind::S16)).wrap(Span::DUMMY, s),
         ),
         (
             symbol!("i32"),
-            tcx.intern(TyKind::Simple(SimpleTyKind::Int(IntKind::S32))),
+            SigTyKind::Simple(SimpleTyKind::Int(IntKind::S32)).wrap(Span::DUMMY, s),
         ),
         (
             symbol!("i64"),
-            tcx.intern(TyKind::Simple(SimpleTyKind::Int(IntKind::S64))),
+            SigTyKind::Simple(SimpleTyKind::Int(IntKind::S64)).wrap(Span::DUMMY, s),
         ),
         (
             symbol!("f32"),
-            tcx.intern(TyKind::Simple(SimpleTyKind::Float(FloatKind::S32))),
+            SigTyKind::Simple(SimpleTyKind::Float(FloatKind::S32)).wrap(Span::DUMMY, s),
         ),
         (
             symbol!("f64"),
-            tcx.intern(TyKind::Simple(SimpleTyKind::Float(FloatKind::S64))),
+            SigTyKind::Simple(SimpleTyKind::Float(FloatKind::S64)).wrap(Span::DUMMY, s),
         ),
         (
             symbol!("bool"),
-            tcx.intern(TyKind::Simple(SimpleTyKind::Bool)),
+            SigTyKind::Simple(SimpleTyKind::Bool).wrap(Span::DUMMY, s),
         ),
         (
             symbol!("char"),
-            tcx.intern(TyKind::Simple(SimpleTyKind::Char)),
+            SigTyKind::Simple(SimpleTyKind::Char).wrap(Span::DUMMY, s),
         ),
         (
             symbol!("str"),
-            tcx.intern(TyKind::Simple(SimpleTyKind::Str)),
+            SigTyKind::Simple(SimpleTyKind::Str).wrap(Span::DUMMY, s),
         ),
         (
             symbol!("Never"),
-            tcx.intern(TyKind::Simple(SimpleTyKind::Never)),
+            SigTyKind::Simple(SimpleTyKind::Never).wrap(Span::DUMMY, s),
         ),
     ];
 
@@ -129,7 +128,7 @@ pub fn synthesize_bootstrap_prelude(tcx: &TyCtxt) -> Obj<Crate> {
                 TypeAliasItem {
                     item,
                     generics: GenericBinder::default().seal(s),
-                    body: LateInit::new(Spanned::new_unspanned(resolves_to)),
+                    body: LateInit::new(resolves_to),
                 },
                 s,
             )),

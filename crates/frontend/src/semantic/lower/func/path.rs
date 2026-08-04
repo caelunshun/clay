@@ -1,8 +1,5 @@
 use crate::{
-    base::{
-        Diag, ErrorGuaranteed, LeafDiag, Session, analysis::SpannedViewEncode as _, arena::Obj,
-        syntax::HasSpan as _,
-    },
+    base::{Diag, ErrorGuaranteed, LeafDiag, Session, arena::Obj, syntax::HasSpan as _},
     parse::{
         ast::{
             AstExprPath, AstExprPathKind, AstParamedPath, AstParamedPathSegment, AstPathPartKind,
@@ -17,9 +14,9 @@ use crate::{
         },
         syntax::{
             AdtCtorUnresolved, AdtItem, EnumVariantItem, FnItem, HirLocal, Item, ItemKind,
-            LocalNameIdent, LocalNameSymbol, SpannedAdtInstanceView, SpannedTraitParamList,
-            SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyOrReList, SpannedTyView,
-            TraitItem, TyCtxt, TypeAliasItem, TypeGeneric,
+            LocalNameIdent, LocalNameSymbol, SigAdtInstance, SigTraitParamList, SigTraitSpec,
+            SigTy, SigTyInner, SigTyKind, SigTyOrReList, TraitItem, TyCtxt, TypeAliasItem,
+            TypeGeneric,
         },
     },
 };
@@ -76,19 +73,19 @@ pub enum ExprPathResolution {
     ResolvedModule(Obj<Item>),
 
     /// A reference to some resolved ADT with some optional generic parameters.
-    ResolvedAdt(Obj<AdtItem>, SpannedTyOrReList),
+    ResolvedAdt(Obj<AdtItem>, SigTyOrReList),
 
     /// A reference to some resolved enum variant with some optional generic parameters.
-    ResolvedEnumVariant(Obj<EnumVariantItem>, SpannedTyOrReList),
+    ResolvedEnumVariant(Obj<EnumVariantItem>, SigTyOrReList),
 
     /// A reference to a function item with some optional generic parameters.
-    ResolvedFn(Obj<FnItem>, Option<SpannedTyOrReList>),
+    ResolvedFn(Obj<FnItem>, Option<SigTyOrReList>),
 
     /// A reference to a trait.
-    ResolvedTrait(Obj<TraitItem>, SpannedTraitParamList),
+    ResolvedTrait(Obj<TraitItem>, SigTraitParamList),
 
     /// A reference to a type alias.
-    ResolvedTypeAlias(Obj<TypeAliasItem>, SpannedTyOrReList),
+    ResolvedTypeAlias(Obj<TypeAliasItem>, SigTyOrReList),
 
     /// A reference to a generic type.
     ResolvedGeneric(Obj<TypeGeneric>),
@@ -132,8 +129,8 @@ pub enum ExprPathResolution {
     ///     - `assoc_args = None`
     ///
     TypeRelative {
-        self_ty: SpannedTy,
-        as_trait: Option<SpannedTraitSpec>,
+        self_ty: SigTy,
+        as_trait: Option<SigTraitSpec>,
         assoc: TypeRelativeAssoc,
     },
 
@@ -144,7 +141,7 @@ pub enum ExprPathResolution {
 #[derive(Debug, Copy, Clone)]
 pub struct TypeRelativeAssoc {
     pub name: Ident,
-    pub args: Option<SpannedTyOrReList>,
+    pub args: Option<SigTyOrReList>,
 }
 
 impl ExprPathResolution {
@@ -182,14 +179,14 @@ pub enum ExprPathIdentOrResolution {
 #[derive(Debug, Copy, Clone)]
 pub enum PathResolvedValue {
     Local(Obj<HirLocal>),
-    FnItem(Obj<FnItem>, Option<SpannedTyOrReList>),
+    FnItem(Obj<FnItem>, Option<SigTyOrReList>),
     TypeRelative {
-        self_ty: SpannedTy,
-        as_trait: Option<SpannedTraitSpec>,
+        self_ty: SigTy,
+        as_trait: Option<SigTraitSpec>,
         assoc: TypeRelativeAssoc,
     },
-    AdtCtorTy(SpannedTy),
-    AdtCtorEnumVariant(Obj<EnumVariantItem>, SpannedTyOrReList),
+    AdtCtorTy(SigTy),
+    AdtCtorEnumVariant(Obj<EnumVariantItem>, SigTyOrReList),
 }
 
 impl ExprPathResolution {
@@ -237,21 +234,38 @@ impl ExprPathResolution {
         }
     }
 
-    pub fn as_resolved_ty(self, path: &AstExprPath, tcx: &TyCtxt) -> Option<SpannedTy> {
+    pub fn as_resolved_ty(self, path: &AstExprPath, tcx: &TyCtxt) -> Option<SigTy> {
+        let s = &tcx.session;
+
         match self {
-            ExprPathResolution::ResolvedSelfTy => {
-                Some(SpannedTyView::SigThis.encode(path.span, tcx))
-            }
-            ExprPathResolution::ResolvedAdt(def, params) => Some(
-                SpannedTyView::Adt(SpannedAdtInstanceView { def, params }.encode(path.span, tcx))
-                    .encode(path.span, tcx),
-            ),
-            ExprPathResolution::ResolvedTypeAlias(def, params) => {
-                Some(SpannedTyView::SigAlias(def, params.value).encode(path.span, tcx))
-            }
-            ExprPathResolution::ResolvedGeneric(generic) => {
-                Some(SpannedTyView::SigGeneric(generic).encode(path.span, tcx))
-            }
+            ExprPathResolution::ResolvedSelfTy => Some(Obj::new(
+                SigTyInner {
+                    span: path.span,
+                    kind: SigTyKind::SelfTy,
+                },
+                s,
+            )),
+            ExprPathResolution::ResolvedAdt(def, params) => Some(Obj::new(
+                SigTyInner {
+                    span: path.span,
+                    kind: SigTyKind::Adt(SigAdtInstance { def, params }),
+                },
+                s,
+            )),
+            ExprPathResolution::ResolvedTypeAlias(def, params) => Some(Obj::new(
+                SigTyInner {
+                    span: path.span,
+                    kind: SigTyKind::Alias(def, params),
+                },
+                s,
+            )),
+            ExprPathResolution::ResolvedGeneric(generic) => Some(Obj::new(
+                SigTyInner {
+                    span: path.span,
+                    kind: SigTyKind::Generic(generic),
+                },
+                s,
+            )),
             ExprPathResolution::ResolvedModule(_)
             | ExprPathResolution::ResolvedEnumVariant(_, _)
             | ExprPathResolution::ResolvedFn(_, _)
@@ -266,6 +280,8 @@ impl ExprPathResolution {
 
 impl IntraItemLowerCtxt<'_> {
     pub fn resolve_expr_path(&mut self, path: &AstExprPath) -> ExprPathResult {
+        let s = &self.tcx.session;
+
         match &path.kind {
             AstExprPathKind::Bare(path) => self.resolve_bare_expr_path(path),
             AstExprPathKind::SelfTy(_self_kw, None) => {
@@ -278,7 +294,7 @@ impl IntraItemLowerCtxt<'_> {
                 };
 
                 ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
-                    self_ty: SpannedTyView::SigThis.encode(*self_kw, self.tcx),
+                    self_ty: SigTyKind::SelfTy.wrap(*self_kw, s),
                     as_trait: None,
                     assoc,
                 })
@@ -303,7 +319,11 @@ impl IntraItemLowerCtxt<'_> {
                         params.as_ref(),
                     );
 
-                    Some(SpannedTraitSpecView { def, params }.encode(for_trait.span, self.tcx))
+                    Some(SigTraitSpec {
+                        span: for_trait.span,
+                        def,
+                        params,
+                    })
                 });
 
                 let assoc = match self.lower_rest_as_type_relative_assoc(&rest.segments) {
@@ -377,7 +397,7 @@ impl IntraItemLowerCtxt<'_> {
 
             return match self.lower_rest_as_type_relative_assoc(subsequent) {
                 Ok(Some(assoc)) => {
-                    let self_ty = SpannedTyView::SigGeneric(generic).encode(ident.span, self.tcx);
+                    let self_ty = SigTyKind::Generic(generic).wrap(ident.span, s);
 
                     ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
                         self_ty,
@@ -507,20 +527,17 @@ impl IntraItemLowerCtxt<'_> {
                     ))
                 }
                 Err(StepResolveError::NotFound) => {
-                    let self_ty = SpannedTyView::Adt(
-                        SpannedAdtInstanceView {
-                            def: adt,
-                            params: first_generics.unwrap_or_else(|| {
-                                self.synthesize_inferred_generics_for_elision(
-                                    adt.r(s).generics,
-                                    None,
-                                    first_additional.part.span(),
-                                )
-                            }),
-                        }
-                        .encode(adt_segment.part.span(), self.tcx),
-                    )
-                    .encode(adt_segment.part.span(), self.tcx);
+                    let self_ty = SigTyKind::Adt(SigAdtInstance {
+                        def: adt,
+                        params: first_generics.unwrap_or_else(|| {
+                            self.synthesize_inferred_generics_for_elision(
+                                adt.r(s).generics,
+                                None,
+                                first_additional.part.span(),
+                            )
+                        }),
+                    })
+                    .wrap(adt_segment.part.span(), s);
 
                     let assoc = match self.lower_rest_as_type_relative_assoc(additional_segments) {
                         // Unwrap OK: `additional_segments` is non-empty.
@@ -554,7 +571,7 @@ impl IntraItemLowerCtxt<'_> {
     pub fn resolve_bare_expr_path_from_enum_variant(
         &mut self,
         variant: Obj<EnumVariantItem>,
-        first_generics: Option<SpannedTyOrReList>,
+        first_generics: Option<SigTyOrReList>,
         variant_segment: &AstParamedPathSegment,
         additional_segments: &[AstParamedPathSegment],
     ) -> ExprPathResolution {
@@ -605,6 +622,8 @@ impl IntraItemLowerCtxt<'_> {
         def_segment: &AstParamedPathSegment,
         segments: &[AstParamedPathSegment],
     ) -> ExprPathResult {
+        let s = &self.tcx.session;
+
         let as_trait_generics = self.lower_generics_of_trait_spec_in_fn(
             def,
             def_segment.part.span(),
@@ -618,17 +637,15 @@ impl IntraItemLowerCtxt<'_> {
             ));
         };
 
-        let self_ty = SpannedTyView::SigInfer.encode(def_segment.part.span(), self.tcx);
+        let self_ty = SigTyKind::Infer.wrap(def_segment.part.span(), s);
 
         ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
             self_ty,
-            as_trait: Some(
-                SpannedTraitSpecView {
-                    def,
-                    params: as_trait_generics,
-                }
-                .encode(def_segment.part.span(), self.tcx),
-            ),
+            as_trait: Some(SigTraitSpec {
+                span: def_segment.part.span(),
+                def,
+                params: as_trait_generics,
+            }),
             assoc,
         })
     }
@@ -653,8 +670,7 @@ impl IntraItemLowerCtxt<'_> {
         };
 
         ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
-            self_ty: SpannedTyView::SigAlias(def, params.value)
-                .encode(def_segment.part.span(), self.tcx),
+            self_ty: SigTyKind::Alias(def, params).wrap(def_segment.part.span(), s),
             as_trait: None,
             assoc,
         })

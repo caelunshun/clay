@@ -1,16 +1,10 @@
 use crate::{
-    base::{Session, analysis::Spanned},
+    base::Session,
     semantic::syntax::{
-        AdtInstance, FnInstance, FnOwner, HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, Re,
-        SpannedAdtInstance, SpannedAdtInstanceView, SpannedFnInstance, SpannedFnInstanceView,
-        SpannedFnOwner, SpannedFnOwnerView, SpannedHrtbBinder, SpannedHrtbBinderView,
-        SpannedHrtbDebruijnDef, SpannedHrtbDebruijnDefList, SpannedHrtbDebruijnDefView, SpannedRe,
-        SpannedTraitClause, SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitInstance,
-        SpannedTraitInstanceView, SpannedTraitParam, SpannedTraitParamList, SpannedTraitParamView,
-        SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe,
-        SpannedTyOrReList, SpannedTyOrReView, SpannedTyView, TraitClause, TraitClauseList,
-        TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty, TyCtxt, TyList, TyOrRe,
-        TyOrReList, TyProjection,
+        AdtInstance, FnInstance, FnInstanceInner, FnOwner, FnOwnerAdtCtor, FnOwnerInherent,
+        FnOwnerTrait, HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, Re, TraitClause,
+        TraitClauseList, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty, TyCtxt, TyKind,
+        TyList, TyOrRe, TyOrReList,
     },
 };
 use std::{convert::Infallible, ops::ControlFlow};
@@ -18,11 +12,11 @@ use std::{convert::Infallible, ops::ControlFlow};
 // === Core traits === //
 
 pub trait TyVisitable: Sized {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>;
 
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>;
 }
@@ -38,126 +32,101 @@ pub trait TyVisitor<'tcx> {
 
     // === Clauses === //
 
-    fn visit_clause_list(&mut self, clauses: SpannedTraitClauseList) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(clauses)
+    fn visit_clause_list(&mut self, clauses: TraitClauseList) -> ControlFlow<Self::Break> {
+        self.walk_fallible(clauses)
     }
 
-    fn visit_clause(&mut self, clause: SpannedTraitClause) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(clause)
+    fn visit_clause(&mut self, clause: TraitClause) -> ControlFlow<Self::Break> {
+        self.walk_fallible(clause)
     }
 
-    fn visit_param_list(&mut self, params: SpannedTraitParamList) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(params)
+    fn visit_param_list(&mut self, params: TraitParamList) -> ControlFlow<Self::Break> {
+        self.walk_fallible(params)
     }
 
-    fn visit_param(&mut self, param: SpannedTraitParam) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(param)
+    fn visit_param(&mut self, param: TraitParam) -> ControlFlow<Self::Break> {
+        self.walk_fallible(param)
     }
 
     // === Instances === //
 
-    fn visit_trait_spec(&mut self, spec: SpannedTraitSpec) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(spec)
+    fn visit_trait_spec(&mut self, spec: TraitSpec) -> ControlFlow<Self::Break> {
+        self.walk_fallible(spec)
     }
 
-    fn visit_trait_instance(&mut self, instance: SpannedTraitInstance) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(instance)
+    fn visit_trait_instance(&mut self, instance: TraitInstance) -> ControlFlow<Self::Break> {
+        self.walk_fallible(instance)
     }
 
-    fn visit_adt_instance(&mut self, instance: SpannedAdtInstance) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(instance)
+    fn visit_adt_instance(&mut self, instance: AdtInstance) -> ControlFlow<Self::Break> {
+        self.walk_fallible(instance)
     }
 
-    fn visit_fn_instance(&mut self, instance: SpannedFnInstance) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(instance)
+    fn visit_fn_instance(&mut self, instance: FnInstance) -> ControlFlow<Self::Break> {
+        self.walk_fallible(instance)
     }
 
-    fn visit_fn_owner(&mut self, owner: SpannedFnOwner) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(owner)
+    fn visit_fn_owner(&mut self, owner: FnOwner) -> ControlFlow<Self::Break> {
+        self.walk_fallible(owner)
     }
 
     // === Types === //
 
-    fn visit_ty_or_re(&mut self, ty_or_re: SpannedTyOrRe) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(ty_or_re)
+    fn visit_ty_or_re(&mut self, ty_or_re: TyOrRe) -> ControlFlow<Self::Break> {
+        self.walk_fallible(ty_or_re)
     }
 
-    fn visit_ty_or_re_list(&mut self, list: SpannedTyOrReList) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(list)
+    fn visit_ty_or_re_list(&mut self, list: TyOrReList) -> ControlFlow<Self::Break> {
+        self.walk_fallible(list)
     }
 
-    fn visit_ty_list(&mut self, list: SpannedTyList) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(list)
+    fn visit_ty_list(&mut self, list: TyList) -> ControlFlow<Self::Break> {
+        self.walk_fallible(list)
     }
 
-    fn visit_re(&mut self, re: SpannedRe) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(re)
+    fn visit_re(&mut self, re: Re) -> ControlFlow<Self::Break> {
+        self.walk_fallible(re)
     }
 
-    fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(ty)
+    fn visit_ty(&mut self, ty: Ty) -> ControlFlow<Self::Break> {
+        self.walk_fallible(ty)
     }
 
     // === Binders === //
 
-    fn visit_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(binder)
+    fn visit_hrtb_binder(&mut self, binder: HrtbBinder) -> ControlFlow<Self::Break> {
+        self.walk_fallible(binder)
     }
 
     fn visit_hrtb_debruijn_def_list(
         &mut self,
-        defs: SpannedHrtbDebruijnDefList,
+        defs: HrtbDebruijnDefList,
     ) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(defs)
+        self.walk_fallible(defs)
     }
 
-    fn visit_hrtb_debruijn_def(
-        &mut self,
-        defs: SpannedHrtbDebruijnDef,
-    ) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(defs)
+    fn visit_hrtb_debruijn_def(&mut self, defs: HrtbDebruijnDef) -> ControlFlow<Self::Break> {
+        self.walk_fallible(defs)
     }
 }
 
 // === Extensions === //
 
 pub trait TyVisitorExt<'tcx>: TyVisitor<'tcx> {
-    fn visit_spanned_fallible<T: TyVisitable>(
-        &mut self,
-        value: Spanned<T>,
-    ) -> ControlFlow<Self::Break> {
+    fn visit_fallible<T: TyVisitable>(&mut self, value: T) -> ControlFlow<Self::Break> {
         T::visit_raw(value, self)
     }
 
-    fn visit_fallible<T: TyVisitable>(&mut self, value: T) -> ControlFlow<Self::Break> {
-        self.visit_spanned_fallible(Spanned::new_unspanned(value))
-    }
-
-    fn walk_spanned_fallible<T: TyVisitable>(
-        &mut self,
-        value: Spanned<T>,
-    ) -> ControlFlow<Self::Break> {
-        T::walk_raw(value, self)
-    }
-
     fn walk_fallible<T: TyVisitable>(&mut self, value: T) -> ControlFlow<Self::Break> {
-        self.walk_spanned_fallible(Spanned::new_unspanned(value))
+        T::walk_raw(value, self)
     }
 }
 
 impl<'tcx, T: ?Sized + TyVisitor<'tcx>> TyVisitorExt<'tcx> for T {}
 
 pub trait TyVisitorInfallibleExt<'tcx>: TyVisitor<'tcx, Break = Infallible> {
-    fn visit_spanned<T: TyVisitable>(&mut self, value: Spanned<T>) {
-        ControlFlow::Continue(()) = self.visit_spanned_fallible(value)
-    }
-
     fn visit<T: TyVisitable>(&mut self, value: T) {
         ControlFlow::Continue(()) = self.visit_fallible(value)
-    }
-
-    fn walk_spanned<T: TyVisitable>(&mut self, value: Spanned<T>) {
-        ControlFlow::Continue(()) = self.walk_spanned_fallible(value)
     }
 
     fn walk<T: TyVisitable>(&mut self, value: T) {
@@ -170,19 +139,21 @@ impl<'tcx, T: ?Sized + TyVisitor<'tcx, Break = Infallible>> TyVisitorInfallibleE
 // === Clauses === //
 
 impl TyVisitable for TraitClauseList {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
         visitor.visit_clause_list(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        for clause in me.iter(visitor.tcx()) {
-            visitor.visit_spanned_fallible(clause)?;
+        let s = visitor.session();
+
+        for &clause in me.r(s) {
+            visitor.visit_fallible(clause)?;
         }
 
         ControlFlow::Continue(())
@@ -190,23 +161,23 @@ impl TyVisitable for TraitClauseList {
 }
 
 impl TyVisitable for TraitClause {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
         visitor.visit_clause(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        match me.view(visitor.tcx()) {
-            SpannedTraitClauseView::Outlives(_dir, ty_or_re) => {
-                visitor.visit_spanned_fallible(ty_or_re)?;
+        match me {
+            TraitClause::Outlives(_dir, ty_or_re) => {
+                visitor.visit_fallible(ty_or_re)?;
             }
-            SpannedTraitClauseView::Trait(spec) => {
-                visitor.visit_spanned_fallible(spec)?;
+            TraitClause::Trait(spec) => {
+                visitor.visit_fallible(spec)?;
             }
         }
 
@@ -215,19 +186,21 @@ impl TyVisitable for TraitClause {
 }
 
 impl TyVisitable for TraitParamList {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
         visitor.visit_param_list(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        for param in me.iter(visitor.tcx()) {
-            visitor.visit_spanned_fallible(param)?;
+        let s = visitor.session();
+
+        for &param in me.r(s) {
+            visitor.visit_fallible(param)?;
         }
 
         ControlFlow::Continue(())
@@ -235,23 +208,23 @@ impl TyVisitable for TraitParamList {
 }
 
 impl TyVisitable for TraitParam {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
         visitor.visit_param(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        match me.view(visitor.tcx()) {
-            SpannedTraitParamView::Equals(ty_or_re) => {
-                visitor.visit_spanned_fallible(ty_or_re)?;
+        match me {
+            TraitParam::Equals(ty_or_re) => {
+                visitor.visit_fallible(ty_or_re)?;
             }
-            SpannedTraitParamView::Unspecified(clauses) => {
-                visitor.visit_spanned_fallible(clauses)?;
+            TraitParam::Unspecified(clauses) => {
+                visitor.visit_fallible(clauses)?;
             }
         }
 
@@ -262,80 +235,81 @@ impl TyVisitable for TraitParam {
 // === Instances === //
 
 impl TyVisitable for TraitSpec {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
         visitor.visit_trait_spec(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        let SpannedTraitSpecView { def: _, params } = me.view(visitor.tcx());
-        visitor.visit_spanned_fallible(params)?;
+        let TraitSpec { def: _, params } = me;
+        visitor.visit_fallible(params)?;
 
         ControlFlow::Continue(())
     }
 }
 
 impl TyVisitable for TraitInstance {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
         visitor.visit_trait_instance(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        let SpannedTraitInstanceView { def: _, params } = me.view(visitor.tcx());
-        visitor.visit_spanned_fallible(params)?;
+        let TraitInstance { def: _, params } = me;
+        visitor.visit_fallible(params)?;
 
         ControlFlow::Continue(())
     }
 }
 
 impl TyVisitable for AdtInstance {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
         visitor.visit_adt_instance(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        let SpannedAdtInstanceView { def: _, params } = me.view(visitor.tcx());
-        visitor.visit_spanned_fallible(params)?;
+        let AdtInstance { def: _, params } = me;
+        visitor.visit_fallible(params)?;
 
         ControlFlow::Continue(())
     }
 }
 
 impl TyVisitable for FnInstance {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
         visitor.visit_fn_instance(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        let SpannedFnInstanceView { owner, early_args } = me.view(visitor.tcx());
+        let s = visitor.session();
+        let FnInstanceInner { owner, early_args } = *me.r(s);
 
-        visitor.visit_spanned_fallible(owner)?;
+        visitor.visit_fallible(owner)?;
 
         if let Some(early_args) = early_args {
-            visitor.visit_spanned_fallible(early_args)?;
+            visitor.visit_fallible(early_args)?;
         }
 
         ControlFlow::Continue(())
@@ -343,37 +317,35 @@ impl TyVisitable for FnInstance {
 }
 
 impl TyVisitable for FnOwner {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
         visitor.visit_fn_owner(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        let tcx = visitor.tcx();
-
-        match me.view(tcx) {
-            SpannedFnOwnerView::Item(_) | SpannedFnOwnerView::AdtCtor { ctor: _ } => {
+        match me {
+            FnOwner::Item(_) | FnOwner::AdtCtor(FnOwnerAdtCtor { ctor: _ }) => {
                 // (dead end)
             }
-            SpannedFnOwnerView::Trait {
+            FnOwner::Trait(FnOwnerTrait {
                 instance,
                 self_ty,
                 method_idx: _,
-            } => {
-                visitor.visit_spanned_fallible(instance)?;
-                visitor.visit_spanned_fallible(self_ty)?;
+            }) => {
+                visitor.visit_fallible(instance)?;
+                visitor.visit_fallible(self_ty)?;
             }
-            SpannedFnOwnerView::Inherent {
+            FnOwner::Inherent(FnOwnerInherent {
                 self_ty,
                 block: _,
                 method_idx: _,
-            } => {
-                visitor.visit_spanned_fallible(self_ty)?;
+            }) => {
+                visitor.visit_fallible(self_ty)?;
             }
         }
 
@@ -384,38 +356,40 @@ impl TyVisitable for FnOwner {
 // === Types === //
 
 impl TyVisitable for TyOrRe {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
         visitor.visit_ty_or_re(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        match me.view(visitor.tcx()) {
-            SpannedTyOrReView::Re(re) => visitor.visit_spanned_fallible(re),
-            SpannedTyOrReView::Ty(ty) => visitor.visit_spanned_fallible(ty),
+        match me {
+            TyOrRe::Re(re) => visitor.visit_fallible(re),
+            TyOrRe::Ty(ty) => visitor.visit_fallible(ty),
         }
     }
 }
 
 impl TyVisitable for TyOrReList {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
         visitor.visit_ty_or_re_list(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        for ty_or_re in me.iter(visitor.tcx()) {
-            visitor.visit_spanned_fallible(ty_or_re)?;
+        let s = visitor.session();
+
+        for &ty_or_re in me.r(s) {
+            visitor.visit_fallible(ty_or_re)?;
         }
 
         ControlFlow::Continue(())
@@ -423,19 +397,21 @@ impl TyVisitable for TyOrReList {
 }
 
 impl TyVisitable for TyList {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
         visitor.visit_ty_list(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        for ty in me.iter(visitor.tcx()) {
-            visitor.visit_spanned_fallible(ty)?;
+        let s = visitor.session();
+
+        for &ty in me.r(s) {
+            visitor.visit_fallible(ty)?;
         }
 
         ControlFlow::Continue(())
@@ -443,23 +419,21 @@ impl TyVisitable for TyList {
 }
 
 impl TyVisitable for Re {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
         visitor.visit_re(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        match me.value {
+        match me {
             Re::Gc
-            | Re::SigInfer
             | Re::Erased
             | Re::Error(_)
-            | Re::SigGeneric(_)
             | Re::HrtbVar(_)
             | Re::InferVar(_)
             | Re::UniversalVar(_) => {
@@ -473,62 +447,43 @@ impl TyVisitable for Re {
 }
 
 impl TyVisitable for Ty {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
         visitor.visit_ty(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        let tcx = visitor.tcx();
+        let s = visitor.session();
 
-        match me.view(tcx) {
-            SpannedTyView::Simple(_)
-            | SpannedTyView::SigInfer
-            | SpannedTyView::Error(_)
-            | SpannedTyView::SigThis
-            | SpannedTyView::SigGeneric(_)
-            | SpannedTyView::HrtbVar(_)
-            | SpannedTyView::InferVar(_)
-            | SpannedTyView::UniversalVar(_) => {
+        match *me.r(s) {
+            TyKind::Simple(_)
+            | TyKind::Error(_)
+            | TyKind::HrtbVar(_)
+            | TyKind::InferVar(_)
+            | TyKind::UniversalVar(_) => {
                 // (dead end)
             }
-            SpannedTyView::SigProject(TyProjection {
-                target,
-                spec,
-                assoc: _,
-            }) => {
-                visitor.visit_spanned_fallible(Spanned::new_saturated(
-                    target,
-                    me.own_span(),
-                    tcx,
-                ))?;
-
-                visitor.visit_spanned_fallible(Spanned::new_saturated(spec, me.own_span(), tcx))?;
+            TyKind::Reference(re, _muta, pointee) => {
+                visitor.visit_fallible(re)?;
+                visitor.visit_fallible(pointee)?;
             }
-            SpannedTyView::SigAlias(_def, args) => {
-                visitor.visit_spanned_fallible(Spanned::new_saturated(args, me.own_span(), tcx))?;
+            TyKind::FnDef(instance) => {
+                visitor.visit_fallible(instance)?;
             }
-            SpannedTyView::Reference(re, _muta, pointee) => {
-                visitor.visit_spanned_fallible(re)?;
-                visitor.visit_spanned_fallible(pointee)?;
+            TyKind::Adt(instance) => {
+                visitor.visit_fallible(instance)?;
             }
-            SpannedTyView::FnDef(instance) => {
-                visitor.visit_spanned_fallible(instance)?;
+            TyKind::Trait(re, _muta, clause_list) => {
+                visitor.visit_fallible(re)?;
+                visitor.visit_fallible(clause_list)?;
             }
-            SpannedTyView::Adt(instance) => {
-                visitor.visit_spanned_fallible(instance)?;
-            }
-            SpannedTyView::Trait(re, _muta, clause_list) => {
-                visitor.visit_spanned_fallible(re)?;
-                visitor.visit_spanned_fallible(clause_list)?;
-            }
-            SpannedTyView::Tuple(tys) => {
-                visitor.visit_spanned_fallible(tys)?;
+            TyKind::Tuple(tys) => {
+                visitor.visit_fallible(tys)?;
             }
         }
 
@@ -539,40 +494,42 @@ impl TyVisitable for Ty {
 // === Binders === //
 
 impl TyVisitable for HrtbBinder {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
         visitor.visit_hrtb_binder(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        let SpannedHrtbBinderView { defs: kind, inner } = me.view(visitor.tcx());
+        let HrtbBinder { defs: kind, inner } = me;
 
-        visitor.visit_spanned_fallible(kind)?;
-        visitor.visit_spanned_fallible(inner)?;
+        visitor.visit_fallible(kind)?;
+        visitor.visit_fallible(inner)?;
 
         ControlFlow::Continue(())
     }
 }
 
 impl TyVisitable for HrtbDebruijnDefList {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
         visitor.visit_hrtb_debruijn_def_list(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        for elem in me.iter(visitor.tcx()) {
-            visitor.visit_spanned_fallible(elem)?;
+        let s = visitor.session();
+
+        for &elem in me.r(s) {
+            visitor.visit_fallible(elem)?;
         }
 
         ControlFlow::Continue(())
@@ -580,25 +537,25 @@ impl TyVisitable for HrtbDebruijnDefList {
 }
 
 impl TyVisitable for HrtbDebruijnDef {
-    fn visit_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
         visitor.visit_hrtb_debruijn_def(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Spanned<Self>, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
         V: ?Sized + TyVisitor<'tcx>,
     {
-        let SpannedHrtbDebruijnDefView {
+        let HrtbDebruijnDef {
             span: _,
             name: _,
             kind: _,
             clauses,
-        } = me.view(visitor.tcx());
+        } = me;
 
-        visitor.visit_spanned_fallible(clauses)?;
+        visitor.visit_fallible(clauses)?;
 
         ControlFlow::Continue(())
     }

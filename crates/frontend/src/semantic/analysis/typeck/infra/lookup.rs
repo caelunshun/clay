@@ -1,7 +1,6 @@
 use crate::{
     base::{
         Diag, LeafDiag, Session,
-        analysis::Spanned,
         arena::{HasInterner as _, Obj},
         syntax::Span,
     },

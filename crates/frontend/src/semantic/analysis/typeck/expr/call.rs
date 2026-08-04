@@ -10,7 +10,7 @@ use crate::{
         lower::generics::normalize_positional_generic_arity_zip,
         syntax::{
             Divergence, FnInstanceInner, HirExpr, InferTyVarSourceInfo, RelationMode,
-            SpannedTyOrReList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            SigTyOrReList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
         },
     },
 };
@@ -86,7 +86,7 @@ impl BodyCtxt<'_, '_> {
         &mut self,
         receiver: Obj<HirExpr>,
         name: Ident,
-        generics: Option<SpannedTyOrReList>,
+        generics: Option<SigTyOrReList>,
         args: Obj<[Obj<HirExpr>]>,
         divergence: &mut Divergence,
     ) -> Ty {

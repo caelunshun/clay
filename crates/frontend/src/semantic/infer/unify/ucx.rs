@@ -565,7 +565,7 @@ impl<'tcx> UnifyCx<'tcx> {
                         }
                     }
                 } else {
-                    self.walk_spanned_fallible(ty)
+                    self.walk_fallible(ty)
                 }
             }
         }
@@ -619,7 +619,7 @@ impl<'tcx> UnifyCx<'tcx> {
                             return ControlFlow::Break(var);
                         }
                     }
-                    _ => self.walk_spanned_fallible(ty)?,
+                    _ => self.walk_fallible(ty)?,
                 }
 
                 ControlFlow::Continue(())
@@ -679,7 +679,7 @@ impl<'tcx> UnifyCx<'tcx> {
                             return ControlFlow::Break(());
                         }
                     }
-                    _ => self.walk_spanned_fallible(ty)?,
+                    _ => self.walk_fallible(ty)?,
                 }
 
                 ControlFlow::Continue(())
@@ -727,7 +727,7 @@ impl<'tcx> UnifyCx<'tcx> {
                                 .restrict_floating_infer_max_universe(var, self.max_universe);
                         }
                     },
-                    _ => self.walk_spanned_fallible(ty)?,
+                    _ => self.walk_fallible(ty)?,
                 }
 
                 ControlFlow::Continue(())
@@ -918,7 +918,7 @@ impl<'tcx> TyFolder<'tcx> for InferTySubstitutor<'_, 'tcx> {
 
     fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
         let TyKind::InferVar(var) = *ty.value.r(self.session()) else {
-            return self.super_spanned_fallible(ty);
+            return self.super_fallible(ty);
         };
 
         match self.ucx.lookup_ty_infer_var(var) {

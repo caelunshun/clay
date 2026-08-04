@@ -2,7 +2,7 @@ use crate::{
     base::{
         Diag, LeafDiag, Session,
         analysis::{DebruijnAbsolute, DebruijnTop, NameResolver},
-        arena::{HasInterner, HasListInterner, LateInit, Obj},
+        arena::{LateInit, Obj},
         syntax::{HasSpan as _, Span, Symbol},
     },
     parse::{
@@ -30,7 +30,7 @@ use crate::{
             AdtEnumVariantIdx, AdtItem, AdtKind, AdtKindEnum, AdtKindStruct, AnyGeneric, Crate,
             EnumVariantItem, FnArg, FnDef, FnDefOwner, FnItem, GenericBinder, HirLabelledBlock,
             HirLocal, ImplItem, Item, ItemKind, LangItems, LocalNameSymbol, ModuleItem,
-            RegionGeneric, SpannedTy, TraitItem, TyCtxt, TyKind, TypeAliasItem, TypeGeneric,
+            RegionGeneric, SigTy, SigTyKind, TraitItem, TyCtxt, TypeAliasItem, TypeGeneric,
             Visibility,
         },
     },
@@ -956,7 +956,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         &mut self,
         owner: AdtCtorOwner,
         ast: &'ast AstStructKind,
-        field_tys_to_extend: &mut Vec<(&'ast AstTy, Obj<LateInit<SpannedTy>>)>,
+        field_tys_to_extend: &mut Vec<(&'ast AstTy, Obj<LateInit<SigTy>>)>,
         allow_visibilities: bool,
     ) -> Obj<AdtCtor> {
         let s = &self.tcx.session;
@@ -1369,7 +1369,7 @@ impl IntraItemLowerCtxt<'_> {
 
         // Establish a method order.
         let method_defs = if let Some(for_trait) = for_trait {
-            let for_trait = for_trait.value.def;
+            let for_trait = for_trait.def;
             let mut new_method_defs = (0..for_trait.r(s).methods.len())
                 .map(|_| None::<Obj<FnDef>>)
                 .collect::<Vec<_>>();
@@ -1462,7 +1462,7 @@ impl IntraItemLowerCtxt<'_> {
         mut self,
         item: Obj<AdtItem>,
         generic_clause_lists: Vec<Option<&AstTraitClauseList>>,
-        field_tys_to_extend: Vec<(&AstTy, Obj<LateInit<SpannedTy>>)>,
+        field_tys_to_extend: Vec<(&AstTy, Obj<LateInit<SigTy>>)>,
     ) {
         let s = &self.tcx.session;
 
@@ -1519,9 +1519,7 @@ impl IntraItemLowerCtxt<'_> {
         LateInit::init(
             &def.r(s).ret_ty,
             match &ast.ret_ty {
-                AstReturnTy::Omitted => SpannedTy::new_unspanned(
-                    self.tcx.intern(TyKind::Tuple(self.tcx.intern_list(&[]))),
-                ),
+                AstReturnTy::Omitted => SigTyKind::Tuple(Obj::new_iter([], s)).wrap(Span::DUMMY, s),
                 AstReturnTy::Present(ty) => self.lower_ty(ty),
             },
         );

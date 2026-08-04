@@ -1,5 +1,14 @@
-use crate::{base::syntax::Symbol, symbol};
+use crate::{
+    base::{analysis::DebruijnRelative, syntax::Symbol},
+    symbol,
+};
 use smallvec::{SmallVec, smallvec};
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum TyOrReKind {
+    Re,
+    Ty,
+}
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum ReVariance {
@@ -113,7 +122,8 @@ impl Mutability {
     }
 }
 
-// === SimpleTy === //
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct HrtbDebruijn(pub DebruijnRelative);
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum SimpleTyKind {

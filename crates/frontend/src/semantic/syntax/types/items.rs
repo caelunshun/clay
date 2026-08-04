@@ -6,8 +6,8 @@ use crate::{
     },
     parse::token::{Ident, Lifetime},
     semantic::syntax::{
-        EnumVariantItem, FnDef, Item, SpannedTraitClauseList, SpannedTraitInstance, SpannedTy,
-        SpannedTyOrReList, TyOrReKind, TyOrReList, Visibility,
+        FnDef, Item, TyOrReKind, TyOrReList, Visibility,
+        types::signature::{SigTraitClauseList, SigTraitInstance, SigTy},
     },
     symbol,
     utils::hash::FxHashMap,
@@ -169,14 +169,7 @@ pub struct AdtCtorField {
     pub idx: AdtCtorFieldIdx,
     pub vis: Visibility,
     pub ident: Option<Ident>,
-    pub ty: LateInit<SpannedTy>,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum AdtCtorUnresolved {
-    ResolvedTy(SpannedTy),
-    ResolvedEnumVariant(Obj<EnumVariantItem>, SpannedTyOrReList),
-    UnresolvedEnumVariant(SpannedTy, Ident),
+    pub ty: LateInit<SigTy>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -196,7 +189,7 @@ pub struct TypeAliasItem {
     pub generics: Obj<GenericBinder>,
 
     /// The body to which the type is expanded.
-    pub body: LateInit<SpannedTy>,
+    pub body: LateInit<SigTy>,
 }
 
 // === Traits === //
@@ -211,7 +204,7 @@ pub struct TraitItem {
     pub generics: LateInit<Obj<GenericBinder>>,
 
     /// The set of traits inherited by the current trait.
-    pub inherits: LateInit<SpannedTraitClauseList>,
+    pub inherits: LateInit<SigTraitClauseList>,
 
     /// The number of generic parameters taken by this trait.
     pub regular_generic_count: LateInit<u32>,
@@ -230,8 +223,8 @@ pub struct TraitItem {
 pub struct ImplItem {
     pub item: Obj<Item>,
     pub generics: Obj<GenericBinder>,
-    pub trait_: LateInit<Option<SpannedTraitInstance>>,
-    pub target: LateInit<SpannedTy>,
+    pub trait_: LateInit<Option<SigTraitInstance>>,
+    pub target: LateInit<SigTy>,
     pub methods: LateInit<Vec<Option<Obj<FnDef>>>>,
 }
 
@@ -314,7 +307,7 @@ impl AnyGeneric {
         }
     }
 
-    pub fn clauses(self, s: &Session) -> SpannedTraitClauseList {
+    pub fn clauses(self, s: &Session) -> SigTraitClauseList {
         match self {
             AnyGeneric::Re(re) => *re.r(s).clauses,
             AnyGeneric::Ty(ty) => *ty.r(s).clauses,
@@ -337,7 +330,7 @@ pub struct RegionGeneric {
     pub lifetime: Lifetime,
     #[derive_where(skip)]
     pub binder: LateInit<PosInBinder>,
-    pub clauses: LateInit<SpannedTraitClauseList>,
+    pub clauses: LateInit<SigTraitClauseList>,
 }
 
 #[derive_where(Debug)]
@@ -348,7 +341,7 @@ pub struct TypeGeneric {
     pub ident: Ident,
     #[derive_where(skip)]
     pub binder: LateInit<PosInBinder>,
-    pub clauses: LateInit<SpannedTraitClauseList>,
+    pub clauses: LateInit<SigTraitClauseList>,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

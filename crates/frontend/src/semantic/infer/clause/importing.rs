@@ -211,7 +211,7 @@ impl ClauseImporter<'_, '_> {
                 universe.clone(),
                 self.clause_applies_to,
             )
-            .fold_spanned(value)
+            .fold(value)
     }
 
     pub fn import_report_elsewhere<T>(
@@ -294,7 +294,7 @@ impl<'tcx> TyFolder<'tcx> for EnvSubstitutor<'_, 'tcx> {
             | SpannedTyView::SigProject(_)
             | SpannedTyView::SigAlias(_, _)
             | SpannedTyView::HrtbVar(_)
-            | SpannedTyView::Error(_) => return self.super_spanned_fallible(ty),
+            | SpannedTyView::Error(_) => return self.super_fallible(ty),
 
             // These should not appear in an unimported type.
             SpannedTyView::InferVar(_) | SpannedTyView::UniversalVar(_) => {
@@ -314,7 +314,7 @@ impl<'tcx> TyFolder<'tcx> for EnvSubstitutor<'_, 'tcx> {
             Re::SigInfer => self.ccx.fresh_re_infer(),
             Re::SigGeneric(generic) => self.env.lookup_re(s, generic),
             Re::Gc | Re::Error(_) | Re::HrtbVar(_) => {
-                return self.super_spanned_fallible(re);
+                return self.super_fallible(re);
             }
             // These should not appear in an imported type.
             Re::InferVar(_) | Re::UniversalVar(_) | Re::Erased => unreachable!(),
@@ -567,7 +567,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseNormalizer<'_, 'tcx> {
         let s = self.session();
 
         let own_span = ty.own_span();
-        let ty = self.super_spanned(ty);
+        let ty = self.super_(ty);
 
         Ok(match *ty.r(s) {
             TyKind::SigProject(projection) => self.normalize_super_normalized_projection(
@@ -670,7 +670,7 @@ impl ClauseNormalizer<'_, '_> {
             }
         }
 
-        let body = self.fold_spanned(body);
+        let body = self.fold(body);
 
         match self.reentrant_aliases.remove(&def).unwrap() {
             ReentrantAliasState::WaitingForViolation => {
@@ -738,7 +738,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
 
         // Check definitions and normalize them.
         let defs_span = defs.own_span();
-        let defs = self.fold_spanned(defs);
+        let defs = self.fold(defs);
 
         // Universally instantiate the body and WF check it.
         let old_universe = self.universe.clone();
@@ -762,7 +762,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
             let bound = hrtb_instantiation_visitor.fold(bound);
             let bound = Spanned::new_raw(bound, inner_span_info);
 
-            let bound = self.fold_spanned(bound);
+            let bound = self.fold(bound);
 
             self.ccx.oblige_covered(
                 wf_cause,
@@ -797,15 +797,15 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
         match ty.view(tcx) {
             SpannedTyView::Trait(_, _, _) => {
                 let old_clause_applies_to = self.clause_applies_to.replace(ty.value);
-                let normalized = self.super_spanned(ty);
+                let normalized = self.super_(ty);
                 self.clause_applies_to = old_clause_applies_to;
 
                 Ok(normalized)
             }
             SpannedTyView::Reference(re, muta, pointee) => {
                 let pointee_span = pointee.own_span();
-                let re = self.fold_spanned(re);
-                let pointee = self.fold_spanned(pointee);
+                let re = self.fold(re);
+                let pointee = self.fold(pointee);
 
                 self.ccx.oblige_ty_outlives_re(
                     self.cause.clone().child(
@@ -891,7 +891,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
             | SpannedTyView::UniversalVar(_)
             | SpannedTyView::InferVar(_)
             | SpannedTyView::HrtbVar(_)
-            | SpannedTyView::Error(_) => Ok(self.super_spanned(ty)),
+            | SpannedTyView::Error(_) => Ok(self.super_(ty)),
 
             SpannedTyView::SigThis | SpannedTyView::SigInfer | SpannedTyView::SigGeneric(_) => {
                 unreachable!()
@@ -910,7 +910,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
             .map(|v| v.own_span())
             .collect::<Vec<_>>();
 
-        let spec = self.super_spanned(spec);
+        let spec = self.super_(spec);
 
         let params = spec
             .params
@@ -957,7 +957,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
             .map(|v| v.own_span())
             .collect::<Vec<_>>();
 
-        let instance = self.super_spanned(instance);
+        let instance = self.super_(instance);
 
         self.check_generic_values(
             self.clause_applies_to.unwrap(),
@@ -985,7 +985,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
             .map(|v| v.own_span())
             .collect::<Vec<_>>();
 
-        let instance = self.super_spanned(instance);
+        let instance = self.super_(instance);
 
         // Check generics
         self.check_generic_values(
@@ -1051,10 +1051,10 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
                 self_ty,
                 method_idx,
             } => {
-                let self_ty = self.fold_spanned(self_ty);
+                let self_ty = self.fold(self_ty);
 
                 let old_clause_applies_to = self.clause_applies_to.replace(self_ty);
-                let instance = self.fold_spanned(instance);
+                let instance = self.fold(instance);
                 self.clause_applies_to = old_clause_applies_to;
 
                 Ok(FnOwner::Trait(FnOwnerTrait {
@@ -1069,7 +1069,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
                 block,
                 method_idx,
             } => Ok(FnOwner::Inherent(FnOwnerInherent {
-                self_ty: self.fold_spanned(self_ty),
+                self_ty: self.fold(self_ty),
                 block,
                 method_idx,
             })),

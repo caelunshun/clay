@@ -11,8 +11,7 @@ use crate::{
         token::Ident,
     },
     semantic::syntax::{
-        AdtCtorUnresolved, EnumVariantItem, FnItem, HirLabelledBlock, Mutability, SpannedTraitSpec,
-        SpannedTy, SpannedTyOrReList,
+        EnumVariantItem, FnItem, HirLabelledBlock, Mutability, SigTraitSpec, SigTy, SigTyOrReList,
     },
 };
 use std::fmt;
@@ -126,6 +125,13 @@ pub enum HirPatKind {
 }
 
 #[derive(Debug, Copy, Clone)]
+pub enum AdtCtorUnresolved {
+    ResolvedTy(SigTy),
+    ResolvedEnumVariant(Obj<EnumVariantItem>, SigTyOrReList),
+    UnresolvedEnumVariant(SigTy, Ident),
+}
+
+#[derive(Debug, Copy, Clone)]
 pub struct HirPatNamedField {
     pub name: Ident,
     pub pat: Obj<HirPat>,
@@ -174,7 +180,7 @@ pub enum HirStmt {
 pub struct HirLetStmt {
     pub span: Span,
     pub pat: Obj<HirPat>,
-    pub ascription: Option<SpannedTy>,
+    pub ascription: Option<SigTy>,
     pub init: Option<Obj<HirExpr>>,
     pub else_clause: Option<Obj<HirBlock>>,
 }
@@ -193,16 +199,16 @@ pub enum HirExprKind {
     Binary(AstBinOpSpanned, Obj<HirExpr>, Obj<HirExpr>),
     Unary(AstUnOpKind, Obj<HirExpr>),
     Literal(AstLit),
-    AdtCtorTy(SpannedTy),
-    AdtCtorEnumVariant(Obj<EnumVariantItem>, SpannedTyOrReList),
-    FnItemLit(Obj<FnItem>, Option<SpannedTyOrReList>),
+    AdtCtorTy(SigTy),
+    AdtCtorEnumVariant(Obj<EnumVariantItem>, SigTyOrReList),
+    FnItemLit(Obj<FnItem>, Option<SigTyOrReList>),
     TypeRelative {
-        self_ty: SpannedTy,
-        as_trait: Option<SpannedTraitSpec>,
+        self_ty: SigTy,
+        as_trait: Option<SigTraitSpec>,
         assoc_name: Ident,
-        assoc_args: Option<SpannedTyOrReList>,
+        assoc_args: Option<SigTyOrReList>,
     },
-    Cast(Obj<HirExpr>, SpannedTy),
+    Cast(Obj<HirExpr>, SigTy),
     If {
         cond: Obj<HirExpr>,
         truthy: Obj<HirExpr>,
@@ -224,7 +230,7 @@ pub enum HirExprKind {
     MethodCall {
         receiver: Obj<HirExpr>,
         name: Ident,
-        generics: Option<SpannedTyOrReList>,
+        generics: Option<SigTyOrReList>,
         args: Obj<[Obj<HirExpr>]>,
     },
     Index(Obj<HirExpr>, Obj<HirExpr>),

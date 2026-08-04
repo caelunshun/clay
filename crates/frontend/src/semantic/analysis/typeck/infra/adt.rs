@@ -1,7 +1,6 @@
 use crate::{
     base::{
         Diag, ErrorGuaranteed,
-        analysis::SpannedViewEncode,
         arena::{HasInterner, Obj},
         syntax::Span,
     },
@@ -11,7 +10,7 @@ use crate::{
         infer::HrtbUniverse,
         syntax::{
             AdtCtor, AdtCtorFieldIdx, AdtCtorInstance, AdtCtorUnresolved, AdtInstance, AdtKind,
-            HirPatListFrontAndTail, HirPatListFrontAndTailLen, SpannedAdtInstanceView, Ty, TyKind,
+            HirPatListFrontAndTail, HirPatListFrontAndTailLen, Ty, TyKind,
         },
     },
     utils::{

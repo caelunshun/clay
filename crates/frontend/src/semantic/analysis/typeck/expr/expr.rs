@@ -1,7 +1,6 @@
 use crate::{
     base::{
         Diag,
-        analysis::SpannedViewEncode as _,
         arena::{HasInterner as _, HasListInterner as _, Obj},
         syntax::HasSpan as _,
     },
@@ -13,7 +12,6 @@ use crate::{
             AdtCtorSyntax, AdtInstance, Divergence, FnInstanceInner, FnOwner, FnOwnerAdtCtor,
             HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirStmt, HirStructExpr,
             InferTyVarSourceInfo, LabelTargetKind, Re, RelationMode, SimpleTyKind, SimpleTySet,
-            SpannedAdtInstanceView, SpannedFnInstanceView, SpannedFnOwnerView, SpannedTyView,
             TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },

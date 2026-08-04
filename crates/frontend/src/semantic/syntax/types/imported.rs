@@ -1,14 +1,13 @@
 use crate::{
     base::{
         ErrorGuaranteed, Session,
-        analysis::DebruijnRelative,
         arena::{HasInterner, HasListInterner, Intern, LateInit, Obj},
         syntax::{Span, Symbol},
     },
     semantic::syntax::{
-        AdtCtor, AdtItem, AnyGeneric, FloatKind, FnDef, FnItem, GenericBinder, ImplItem, IntKind,
-        LocalNameIdent, MirLocalIdx, Mutability, RegionGeneric, RelationDirection, SimpleTyKind,
-        TraitItem, TyCtxt, TypeAliasItem, TypeGeneric,
+        AdtCtor, AdtItem, AnyGeneric, FloatKind, FnDef, FnItem, GenericBinder, HrtbDebruijn,
+        ImplItem, IntKind, LocalNameIdent, MirLocalIdx, Mutability, RegionGeneric,
+        RelationDirection, SimpleTyKind, TraitItem, TyCtxt, TyOrReKind, TypeGeneric,
     },
     symbol,
 };
@@ -18,12 +17,6 @@ use std::{fmt, rc::Rc};
 // === Type === //
 
 pub type TyOrReList = Intern<[TyOrRe]>;
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum TyOrReKind {
-    Re,
-    Ty,
-}
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TyOrRe {
@@ -77,24 +70,12 @@ pub enum Re {
     /// lives for the entire duration of the program.
     Gc,
 
-    /// An uninstantiated request to infer the lifetime (e.g. `'_`).
-    ///
-    /// Used in user annotations and instantiated into an `InferVar` region during `ClauseCx`
-    /// import.
-    SigInfer,
-
-    /// An uninstantiated generic lifetime parameter.
-    ///
-    /// Used in user annotations and instantiated into either a `UniversalVar`, an `InferVar`, or if
-    /// bound within an HRTB binder, a `HrtbVar` during `ClauseCx` import.
-    SigGeneric(Obj<RegionGeneric>),
-
-    /// An instantiated generic region variable within an HRTB binder (e.g. the `'a` in the type
+    /// An generic region variable within an HRTB binder (e.g. the `'a` in the type
     /// `Foo<'a>` in the clause `for<'a> Foo<'a>`).
     ///
-    /// This is first instantiated from a `SigGeneric within an HRTB binder. Similar to a
-    /// `SigGeneric`, it is later instantiated into a `UniversalVar` or an `InferVar` during trait
-    /// obligation checking depending on how the HRTB is being used.
+    /// These regions always show up under a binder. To liberate a binder, these regions are
+    /// instantiated into a `UniversalVar` or an `InferVar` during trait obligation checking
+    /// depending on how the HRTB is being used.
     ///
     /// These are indexed using debruijn indices.
     HrtbVar(HrtbDebruijn),
@@ -102,7 +83,7 @@ pub enum Re {
     /// An internal lifetime parameter within the body.
     InferVar(InferReVar),
 
-    /// An instantiated generic lifetime parameter.
+    /// A universally-quantified lifetime parameter.
     UniversalVar(UniversalReVar),
 
     /// The lifetime used when we don't want to worry about lifetimes.
@@ -116,34 +97,6 @@ pub type TyList = Intern<[Ty]>;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TyKind {
-    /// The `Self`-type.
-    ///
-    /// Used in user annotations and instantiated into the actual `Self` type during `ClauseCx`
-    /// import.
-    SigThis,
-
-    /// An uninstantiated request to infer a type (e.g. `_`).
-    ///
-    /// Used in user annotations and instantiated into an `InferVar` type during `ClauseCx`
-    /// import.
-    SigInfer,
-
-    /// An uninstantiated generic type parameter.
-    ///
-    /// Used in user annotations and instantiated into either a `UniversalVar` or a concrete
-    /// substitution type during `ClauseCx` import.
-    SigGeneric(Obj<TypeGeneric>),
-
-    /// An uninstantiated type projection, which fetches an associated type from a `trait` impl for
-    /// the given type.
-    ///
-    /// Used in user annotations and instantiated into an `InferVar` which is used in a trait
-    /// obligation to constrain the inference variable to its target associated type.
-    SigProject(TyProjection),
-
-    /// An uninstantiated type alias. Resolved at import time.
-    SigAlias(Obj<TypeAliasItem>, TyOrReList),
-
     /// A simple primitive non-composite type living for `'gc`.
     Simple(SimpleTyKind),
 
@@ -162,7 +115,7 @@ pub enum TyKind {
     /// A statically-known function type. This can be coerced into a functional interface.
     FnDef(FnInstance),
 
-    /// An instantiated generic region variable within an HRTB binder (e.g. the `T` in the type
+    /// An generic type variable within an HRTB binder (e.g. the `T` in the type
     /// `Foo<T>` in the clause `for<T> Foo<T>`).
     ///
     /// These types always show up under a binder. To liberate a binder, these types are
@@ -185,13 +138,6 @@ pub enum TyKind {
 pub struct AdtInstance {
     pub def: Obj<AdtItem>,
     pub params: TyOrReList,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct TyProjection {
-    pub target: Ty,
-    pub spec: TraitSpec,
-    pub assoc: u32,
 }
 
 // === Trait === //
@@ -223,9 +169,6 @@ pub struct HrtbDebruijnDef {
     pub kind: TyOrReKind,
     pub clauses: TraitClauseList,
 }
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct HrtbDebruijn(pub DebruijnRelative);
 
 pub type TraitParamList = Intern<[TraitParam]>;
 
@@ -633,12 +576,6 @@ impl SimpleTySet {
 
     pub fn can_accept_type(self, ty: Ty, s: &Session) -> bool {
         match *ty.r(s) {
-            TyKind::SigThis
-            | TyKind::SigInfer
-            | TyKind::SigGeneric(_)
-            | TyKind::SigProject(_)
-            | TyKind::SigAlias(_, _) => unreachable!(),
-
             TyKind::Simple(SimpleTyKind::Uint(IntKind::S8)) => self.contains(SimpleTySet::U8),
             TyKind::Simple(SimpleTyKind::Uint(IntKind::S16)) => self.contains(SimpleTySet::U16),
             TyKind::Simple(SimpleTyKind::Uint(IntKind::S32)) => self.contains(SimpleTySet::U32),

@@ -13,5 +13,5 @@ pub use self::items::*;
 mod shared;
 pub use self::shared::*;
 
-mod spanned;
-pub use self::spanned::*;
+mod signature;
+pub use self::signature::*;

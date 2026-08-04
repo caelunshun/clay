@@ -110,15 +110,9 @@ pub fn erase_ty_to_shape(tcx: &TyCtxt, ty: Ty) -> TyShape {
 
     match *ty.r(s) {
         // It's always safe to be conservative with these types.
-        TyKind::SigThis
-        | TyKind::HrtbVar(_)
-        | TyKind::InferVar(_)
-        | TyKind::UniversalVar(_)
-        | TyKind::SigInfer
-        | TyKind::SigGeneric(_)
-        | TyKind::SigProject(_)
-        | TyKind::SigAlias(_, _)
-        | TyKind::Error(_) => TyShape::Hole,
+        TyKind::HrtbVar(_) | TyKind::InferVar(_) | TyKind::UniversalVar(_) | TyKind::Error(_) => {
+            TyShape::Hole
+        }
 
         TyKind::Simple(kind) => TyShape::Solid(SolidTyShape {
             kind: SolidTyShapeKind::Simple(kind),

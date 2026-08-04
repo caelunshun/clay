@@ -1,7 +1,6 @@
 use crate::{
     base::{
         HasSession, Session,
-        analysis::SpannedInfo,
         arena::{HasInterner, HasListInterner, Interner, ListInterner},
     },
     semantic::syntax::{
@@ -31,7 +30,6 @@ pub struct Interners {
     pub trait_param_list: ListInterner<TraitParam>,
     pub trait_clause_list: ListInterner<TraitClause>,
     pub list_of_trait_clause_list: ListInterner<TraitClauseList>,
-    pub spanned_info_list: ListInterner<SpannedInfo>,
     pub coherence_ty_list: ListInterner<TyShape>,
     pub hrtb_debruijn_list: ListInterner<HrtbDebruijnDef>,
     pub mir_place_elem_list: ListInterner<MirPlaceElem>,
@@ -101,12 +99,6 @@ impl HasListInterner<TraitClause> for TyCtxt {
 impl HasListInterner<TraitClauseList> for TyCtxt {
     fn interner(&self) -> &ListInterner<TraitClauseList> {
         &self.interners.list_of_trait_clause_list
-    }
-}
-
-impl HasListInterner<SpannedInfo> for TyCtxt {
-    fn interner(&self) -> &ListInterner<SpannedInfo> {
-        &self.interners.spanned_info_list
     }
 }
 

@@ -6,8 +6,7 @@ use crate::{
     },
     parse::token::Ident,
     semantic::syntax::{
-        GenericBinder, HirExpr, HirPat, ImplItem, Item, SpannedTy, ThirExpr, TraitItem, Ty,
-        Visibility,
+        GenericBinder, HirExpr, HirPat, ImplItem, Item, SigTy, ThirExpr, TraitItem, Ty, Visibility,
     },
     symbol,
 };
@@ -30,7 +29,7 @@ pub struct FnDef {
     pub generics: Obj<GenericBinder>,
     pub has_self_param: LateInit<bool>,
     pub args: LateInit<Obj<[FnArg]>>,
-    pub ret_ty: LateInit<SpannedTy>,
+    pub ret_ty: LateInit<SigTy>,
     pub hir_body: LateInit<Option<Obj<HirExpr>>>,
     pub thir_body: LateInit<Option<Obj<ThirExpr>>>,
 }
@@ -56,7 +55,7 @@ impl FnDefOwner {
 pub struct FnArg {
     pub span: Span,
     pub pat: Obj<HirPat>,
-    pub ty: SpannedTy,
+    pub ty: SigTy,
 }
 
 // === Divergence === //

@@ -176,6 +176,6 @@ impl<'tcx> TyFolder<'tcx> for SigSelfTypeFolder<'tcx> {
             return Ok(self.self_ty);
         }
 
-        Ok(self.super_spanned(ty))
+        Ok(self.super_(ty))
     }
 }

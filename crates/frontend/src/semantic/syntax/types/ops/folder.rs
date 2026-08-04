@@ -1,21 +1,13 @@
 use crate::{
     base::{
         Session,
-        analysis::Spanned,
         arena::{HasInterner, HasListInterner, Intern},
     },
     semantic::syntax::{
         AdtInstance, FnInstance, FnInstanceInner, FnOwner, FnOwnerAdtCtor, FnOwnerInherent,
-        FnOwnerTrait, HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, Re, SpannedAdtInstance,
-        SpannedAdtInstanceView, SpannedFnInstance, SpannedFnInstanceView, SpannedFnOwner,
-        SpannedFnOwnerView, SpannedHrtbBinder, SpannedHrtbBinderView, SpannedHrtbDebruijnDef,
-        SpannedHrtbDebruijnDefList, SpannedHrtbDebruijnDefView, SpannedRe, SpannedTraitClause,
-        SpannedTraitClauseList, SpannedTraitClauseView, SpannedTraitInstance,
-        SpannedTraitInstanceView, SpannedTraitParam, SpannedTraitParamList, SpannedTraitParamView,
-        SpannedTraitSpec, SpannedTraitSpecView, SpannedTy, SpannedTyList, SpannedTyOrRe,
-        SpannedTyOrReList, SpannedTyOrReView, SpannedTyView, TraitClause, TraitClauseList,
-        TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty, TyCtxt, TyKind, TyList, TyOrRe,
-        TyOrReList, TyProjection,
+        FnOwnerTrait, HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, Re, TraitClause,
+        TraitClauseList, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty, TyCtxt, TyKind,
+        TyList, TyOrRe, TyOrReList,
     },
 };
 use std::{convert::Infallible, hash};
@@ -24,20 +16,20 @@ use std::{convert::Infallible, hash};
 
 fn super_interned_list<'tcx, T, V>(
     folder: &mut T,
-    values: Spanned<Intern<[V]>>,
+    values: Intern<[V]>,
 ) -> Result<Intern<[V]>, T::Error>
 where
     T: ?Sized + TyFolder<'tcx>,
-    V: Clone + hash::Hash + Eq + TyFoldable,
+    V: Copy + hash::Hash + Eq + TyFoldable,
     TyCtxt: HasListInterner<V>,
 {
     let tcx = folder.tcx();
     let s = folder.session();
 
-    let mut out = Vec::with_capacity(values.len(s));
+    let mut out = Vec::with_capacity(values.r(s).len());
 
-    for value in values.iter(tcx) {
-        out.push(folder.fold_spanned_fallible(value)?);
+    for &value in values.r(s) {
+        out.push(folder.fold_fallible(value)?);
     }
 
     Ok(tcx.intern_list(&out))
@@ -46,16 +38,14 @@ where
 // === Core traits === //
 
 pub trait TyFoldable: Sized {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>;
 
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>;
 }
-
-pub trait TyFolderPreservesSpans<'tcx>: TyFolder<'tcx> {}
 
 pub trait TyFolder<'tcx> {
     type Error;
@@ -70,160 +60,106 @@ pub trait TyFolder<'tcx> {
 
     fn fold_clause_list(
         &mut self,
-        clauses: SpannedTraitClauseList,
+        clauses: TraitClauseList,
     ) -> Result<TraitClauseList, Self::Error> {
-        self.super_spanned_fallible(clauses)
+        self.super_fallible(clauses)
     }
 
-    fn fold_clause(&mut self, clause: SpannedTraitClause) -> Result<TraitClause, Self::Error> {
-        self.super_spanned_fallible(clause)
+    fn fold_clause(&mut self, clause: TraitClause) -> Result<TraitClause, Self::Error> {
+        self.super_fallible(clause)
     }
 
-    fn fold_param_list(
-        &mut self,
-        params: SpannedTraitParamList,
-    ) -> Result<TraitParamList, Self::Error> {
-        self.super_spanned_fallible(params)
+    fn fold_param_list(&mut self, params: TraitParamList) -> Result<TraitParamList, Self::Error> {
+        self.super_fallible(params)
     }
 
-    fn fold_param(&mut self, param: SpannedTraitParam) -> Result<TraitParam, Self::Error> {
-        self.super_spanned_fallible(param)
+    fn fold_param(&mut self, param: TraitParam) -> Result<TraitParam, Self::Error> {
+        self.super_fallible(param)
     }
 
     // === Instances === //
 
-    fn fold_trait_spec(&mut self, spec: SpannedTraitSpec) -> Result<TraitSpec, Self::Error> {
-        self.super_spanned_fallible(spec)
+    fn fold_trait_spec(&mut self, spec: TraitSpec) -> Result<TraitSpec, Self::Error> {
+        self.super_fallible(spec)
     }
 
     fn fold_trait_instance(
         &mut self,
-        instance: SpannedTraitInstance,
+        instance: TraitInstance,
     ) -> Result<TraitInstance, Self::Error> {
-        self.super_spanned_fallible(instance)
+        self.super_fallible(instance)
     }
 
-    fn fold_adt_instance(
-        &mut self,
-        instance: SpannedAdtInstance,
-    ) -> Result<AdtInstance, Self::Error> {
-        self.super_spanned_fallible(instance)
+    fn fold_adt_instance(&mut self, instance: AdtInstance) -> Result<AdtInstance, Self::Error> {
+        self.super_fallible(instance)
     }
 
-    fn fold_fn_instance(&mut self, instance: SpannedFnInstance) -> Result<FnInstance, Self::Error> {
-        self.super_spanned_fallible(instance)
+    fn fold_fn_instance(&mut self, instance: FnInstance) -> Result<FnInstance, Self::Error> {
+        self.super_fallible(instance)
     }
 
-    fn fold_fn_owner(&mut self, owner: SpannedFnOwner) -> Result<FnOwner, Self::Error> {
-        self.super_spanned_fallible(owner)
+    fn fold_fn_owner(&mut self, owner: FnOwner) -> Result<FnOwner, Self::Error> {
+        self.super_fallible(owner)
     }
 
     // === Types === //
 
-    fn fold_ty_or_re(&mut self, ty_or_re: SpannedTyOrRe) -> Result<TyOrRe, Self::Error> {
-        self.super_spanned_fallible(ty_or_re)
+    fn fold_ty_or_re(&mut self, ty_or_re: TyOrRe) -> Result<TyOrRe, Self::Error> {
+        self.super_fallible(ty_or_re)
     }
 
-    fn fold_ty_or_re_list(&mut self, list: SpannedTyOrReList) -> Result<TyOrReList, Self::Error> {
-        self.super_spanned_fallible(list)
+    fn fold_ty_or_re_list(&mut self, list: TyOrReList) -> Result<TyOrReList, Self::Error> {
+        self.super_fallible(list)
     }
 
-    fn fold_ty_list(&mut self, list: SpannedTyList) -> Result<TyList, Self::Error> {
-        self.super_spanned_fallible(list)
+    fn fold_ty_list(&mut self, list: TyList) -> Result<TyList, Self::Error> {
+        self.super_fallible(list)
     }
 
-    fn fold_re(&mut self, re: SpannedRe) -> Result<Re, Self::Error> {
-        self.super_spanned_fallible(re)
+    fn fold_re(&mut self, re: Re) -> Result<Re, Self::Error> {
+        self.super_fallible(re)
     }
 
-    fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
-        self.super_spanned_fallible(ty)
+    fn fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
+        self.super_fallible(ty)
     }
 
     // === Binders === //
 
-    fn fold_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> Result<HrtbBinder, Self::Error> {
-        self.super_spanned_fallible(binder)
+    fn fold_hrtb_binder(&mut self, binder: HrtbBinder) -> Result<HrtbBinder, Self::Error> {
+        self.super_fallible(binder)
     }
 
     fn fold_hrtb_debruijn_def_list(
         &mut self,
-        defs: SpannedHrtbDebruijnDefList,
+        defs: HrtbDebruijnDefList,
     ) -> Result<HrtbDebruijnDefList, Self::Error> {
-        self.super_spanned_fallible(defs)
+        self.super_fallible(defs)
     }
 
     fn fold_hrtb_debruijn_def(
         &mut self,
-        defs: SpannedHrtbDebruijnDef,
+        defs: HrtbDebruijnDef,
     ) -> Result<HrtbDebruijnDef, Self::Error> {
-        self.super_spanned_fallible(defs)
+        self.super_fallible(defs)
     }
 }
 
 // === Extensions === //
 
 pub trait TyFolderExt<'tcx>: TyFolder<'tcx> {
-    fn fold_spanned_fallible<T: TyFoldable>(
-        &mut self,
-        value: Spanned<T>,
-    ) -> Result<T, Self::Error> {
+    fn fold_fallible<T: TyFoldable>(&mut self, value: T) -> Result<T, Self::Error> {
         T::fold_raw(value, self)
     }
 
-    fn super_spanned_fallible<T: TyFoldable>(
-        &mut self,
-        value: Spanned<T>,
-    ) -> Result<T, Self::Error> {
-        T::super_raw(value, self)
-    }
-
-    fn fold_fallible<T: TyFoldable>(&mut self, value: T) -> Result<T, Self::Error> {
-        self.fold_spanned_fallible(Spanned::new_unspanned(value))
-    }
-
     fn super_fallible<T: TyFoldable>(&mut self, value: T) -> Result<T, Self::Error> {
-        self.super_spanned_fallible(Spanned::new_unspanned(value))
-    }
-
-    fn fold_preserved_fallible<T: TyFoldable>(
-        &mut self,
-        value: Spanned<T>,
-    ) -> Result<Spanned<T>, Self::Error>
-    where
-        Self: TyFolderPreservesSpans<'tcx>,
-    {
-        let old_span_info = value.span_info;
-
-        T::fold_raw(value, self).map(|new_value| Spanned::new_raw(new_value, old_span_info))
-    }
-
-    fn super_preserved_fallible<T: TyFoldable>(
-        &mut self,
-        value: Spanned<T>,
-    ) -> Result<Spanned<T>, Self::Error>
-    where
-        Self: TyFolderPreservesSpans<'tcx>,
-    {
-        let old_span_info = value.span_info;
-
-        T::super_raw(value, self).map(|new_value| Spanned::new_raw(new_value, old_span_info))
+        T::super_raw(value, self)
     }
 }
 
 impl<'tcx, T: ?Sized + TyFolder<'tcx>> TyFolderExt<'tcx> for T {}
 
 pub trait TyFolderInfallibleExt<'tcx>: TyFolder<'tcx, Error = Infallible> {
-    fn fold_spanned<T: TyFoldable>(&mut self, value: Spanned<T>) -> T {
-        let Ok(v) = self.fold_spanned_fallible(value);
-        v
-    }
-
-    fn super_spanned<T: TyFoldable>(&mut self, value: Spanned<T>) -> T {
-        let Ok(v) = self.super_spanned_fallible(value);
-        v
-    }
-
     fn fold<T: TyFoldable>(&mut self, value: T) -> T {
         let Ok(v) = self.fold_fallible(value);
         v
@@ -233,22 +169,6 @@ pub trait TyFolderInfallibleExt<'tcx>: TyFolder<'tcx, Error = Infallible> {
         let Ok(v) = self.super_fallible(value);
         v
     }
-
-    fn fold_preserved<T: TyFoldable>(&mut self, value: Spanned<T>) -> Spanned<T>
-    where
-        Self: TyFolderPreservesSpans<'tcx>,
-    {
-        let Ok(v) = self.fold_preserved_fallible(value);
-        v
-    }
-
-    fn super_preserved<T: TyFoldable>(&mut self, value: Spanned<T>) -> Spanned<T>
-    where
-        Self: TyFolderPreservesSpans<'tcx>,
-    {
-        let Ok(v) = self.super_preserved_fallible(value);
-        v
-    }
 }
 
 impl<'tcx, T: ?Sized + TyFolder<'tcx, Error = Infallible>> TyFolderInfallibleExt<'tcx> for T {}
@@ -256,14 +176,14 @@ impl<'tcx, T: ?Sized + TyFolder<'tcx, Error = Infallible>> TyFolderInfallibleExt
 // === Clauses === //
 
 impl TyFoldable for TraitClauseList {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
         folder.fold_clause_list(me)
     }
 
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
@@ -272,37 +192,35 @@ impl TyFoldable for TraitClauseList {
 }
 
 impl TyFoldable for TraitClause {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
         folder.fold_clause(me)
     }
 
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
-        Ok(match me.view(folder.tcx()) {
-            SpannedTraitClauseView::Outlives(dir, ty_or_re) => {
-                TraitClause::Outlives(dir, folder.fold_spanned_fallible(ty_or_re)?)
+        Ok(match me {
+            TraitClause::Outlives(dir, ty_or_re) => {
+                TraitClause::Outlives(dir, folder.fold_fallible(ty_or_re)?)
             }
-            SpannedTraitClauseView::Trait(spec) => {
-                TraitClause::Trait(folder.fold_spanned_fallible(spec)?)
-            }
+            TraitClause::Trait(spec) => TraitClause::Trait(folder.fold_fallible(spec)?),
         })
     }
 }
 
 impl TyFoldable for TraitParamList {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
         folder.fold_param_list(me)
     }
 
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
@@ -311,23 +229,21 @@ impl TyFoldable for TraitParamList {
 }
 
 impl TyFoldable for TraitParam {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
         folder.fold_param(me)
     }
 
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
-        Ok(match me.view(folder.tcx()) {
-            SpannedTraitParamView::Equals(ty_or_re) => {
-                TraitParam::Equals(folder.fold_spanned_fallible(ty_or_re)?)
-            }
-            SpannedTraitParamView::Unspecified(clauses) => {
-                TraitParam::Unspecified(folder.fold_spanned_fallible(clauses)?)
+        Ok(match me {
+            TraitParam::Equals(ty_or_re) => TraitParam::Equals(folder.fold_fallible(ty_or_re)?),
+            TraitParam::Unspecified(clauses) => {
+                TraitParam::Unspecified(folder.fold_fallible(clauses)?)
             }
         })
     }
@@ -336,87 +252,89 @@ impl TyFoldable for TraitParam {
 // === Instances === //
 
 impl TyFoldable for TraitSpec {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
         folder.fold_trait_spec(me)
     }
 
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
-        let SpannedTraitSpecView { def, params } = me.view(folder.tcx());
+        let TraitSpec { def, params } = me;
 
         Ok(TraitSpec {
             def,
-            params: folder.fold_spanned_fallible(params)?,
+            params: folder.fold_fallible(params)?,
         })
     }
 }
 
 impl TyFoldable for TraitInstance {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
         folder.fold_trait_instance(me)
     }
 
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
-        let SpannedTraitInstanceView { def, params } = me.view(folder.tcx());
+        let TraitInstance { def, params } = me;
 
         Ok(TraitInstance {
             def,
-            params: folder.fold_spanned_fallible(params)?,
+            params: folder.fold_fallible(params)?,
         })
     }
 }
 
 impl TyFoldable for AdtInstance {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
         folder.fold_adt_instance(me)
     }
 
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
-        let SpannedAdtInstanceView { def, params } = me.view(folder.tcx());
+        let AdtInstance { def, params } = me;
 
         Ok(AdtInstance {
             def,
-            params: folder.fold_spanned_fallible(params)?,
+            params: folder.fold_fallible(params)?,
         })
     }
 }
 
 impl TyFoldable for FnInstance {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
         folder.fold_fn_instance(me)
     }
 
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
         let tcx = folder.tcx();
-        let SpannedFnInstanceView { owner, early_args } = me.view(tcx);
+        let s = folder.session();
+
+        let FnInstanceInner { owner, early_args } = *me.r(s);
 
         Ok(tcx.intern(FnInstanceInner {
-            owner: folder.fold_spanned_fallible(owner)?,
+            owner: folder.fold_fallible(owner)?,
             early_args: match early_args {
-                Some(early_args) => Some(folder.fold_spanned_fallible(early_args)?),
+                Some(early_args) => Some(folder.fold_fallible(early_args)?),
                 None => None,
             },
         }))
@@ -424,38 +342,40 @@ impl TyFoldable for FnInstance {
 }
 
 impl TyFoldable for FnOwner {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
         folder.fold_fn_owner(me)
     }
 
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
-        match me.view(folder.tcx()) {
-            SpannedFnOwnerView::Item(def) => Ok(FnOwner::Item(def)),
-            SpannedFnOwnerView::Trait {
+        match me {
+            FnOwner::Item(def) => Ok(FnOwner::Item(def)),
+            FnOwner::Trait(FnOwnerTrait {
                 instance,
                 self_ty,
                 method_idx,
-            } => Ok(FnOwner::Trait(FnOwnerTrait {
-                instance: folder.fold_spanned_fallible(instance)?,
-                self_ty: folder.fold_spanned_fallible(self_ty)?,
+            }) => Ok(FnOwner::Trait(FnOwnerTrait {
+                instance: folder.fold_fallible(instance)?,
+                self_ty: folder.fold_fallible(self_ty)?,
                 method_idx,
             })),
-            SpannedFnOwnerView::Inherent {
+            FnOwner::Inherent(FnOwnerInherent {
                 self_ty,
                 block,
                 method_idx,
-            } => Ok(FnOwner::Inherent(FnOwnerInherent {
-                self_ty: folder.fold_spanned_fallible(self_ty)?,
+            }) => Ok(FnOwner::Inherent(FnOwnerInherent {
+                self_ty: folder.fold_fallible(self_ty)?,
                 block,
                 method_idx,
             })),
-            SpannedFnOwnerView::AdtCtor { ctor } => Ok(FnOwner::AdtCtor(FnOwnerAdtCtor { ctor })),
+            FnOwner::AdtCtor(FnOwnerAdtCtor { ctor }) => {
+                Ok(FnOwner::AdtCtor(FnOwnerAdtCtor { ctor }))
+            }
         }
     }
 }
@@ -463,33 +383,33 @@ impl TyFoldable for FnOwner {
 // === Types === //
 
 impl TyFoldable for TyOrRe {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
         folder.fold_ty_or_re(me)
     }
 
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
-        Ok(match me.view(folder.tcx()) {
-            SpannedTyOrReView::Re(re) => TyOrRe::Re(folder.fold_spanned_fallible(re)?),
-            SpannedTyOrReView::Ty(ty) => TyOrRe::Ty(folder.fold_spanned_fallible(ty)?),
+        Ok(match me {
+            TyOrRe::Re(re) => TyOrRe::Re(folder.fold_fallible(re)?),
+            TyOrRe::Ty(ty) => TyOrRe::Ty(folder.fold_fallible(ty)?),
         })
     }
 }
 
 impl TyFoldable for TyOrReList {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
         folder.fold_ty_or_re_list(me)
     }
 
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
@@ -498,14 +418,14 @@ impl TyFoldable for TyOrReList {
 }
 
 impl TyFoldable for TyList {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
         folder.fold_ty_list(me)
     }
 
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
@@ -514,95 +434,69 @@ impl TyFoldable for TyList {
 }
 
 impl TyFoldable for Re {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
         folder.fold_re(me)
     }
 
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
-        match me.value {
+        match me {
             Re::Gc
-            | Re::SigInfer
             | Re::Erased
             | Re::Error(_)
-            | Re::SigGeneric(_)
             | Re::HrtbVar(_)
             | Re::InferVar(_)
             | Re::UniversalVar(_) => {
                 // (dead end)
                 _ = folder;
-                Ok(me.value)
+                Ok(me)
             }
         }
     }
 }
 
 impl TyFoldable for Ty {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
         folder.fold_ty(me)
     }
 
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
         let tcx = folder.tcx();
         let s = folder.session();
 
-        let kind = match me.view(tcx) {
-            SpannedTyView::Simple(_)
-            | SpannedTyView::SigInfer
-            | SpannedTyView::Error(_)
-            | SpannedTyView::SigThis
-            | SpannedTyView::SigGeneric(_)
-            | SpannedTyView::HrtbVar(_)
-            | SpannedTyView::InferVar(_)
-            | SpannedTyView::UniversalVar(_) => {
+        let kind = match *me.r(s) {
+            TyKind::Simple(_)
+            | TyKind::Error(_)
+            | TyKind::HrtbVar(_)
+            | TyKind::InferVar(_)
+            | TyKind::UniversalVar(_) => {
                 // (dead end)
-                *me.value.r(s)
+                *me.r(s)
             }
-            SpannedTyView::SigProject(TyProjection {
-                target,
-                spec,
-                assoc,
-            }) => TyKind::SigProject(TyProjection {
-                target: folder.fold_spanned_fallible(Spanned::new_saturated(
-                    target,
-                    me.own_span(),
-                    tcx,
-                ))?,
-                spec: folder.fold_spanned_fallible(Spanned::new_saturated(
-                    spec,
-                    me.own_span(),
-                    tcx,
-                ))?,
-                assoc,
-            }),
-            SpannedTyView::SigAlias(def, args) => TyKind::SigAlias(
-                def,
-                folder.fold_spanned_fallible(Spanned::new_saturated(args, me.own_span(), tcx))?,
-            ),
-            SpannedTyView::Reference(re, muta, pointee) => TyKind::Reference(
-                folder.fold_spanned_fallible(re)?,
+            TyKind::Reference(re, muta, pointee) => TyKind::Reference(
+                folder.fold_fallible(re)?,
                 muta,
-                folder.fold_spanned_fallible(pointee)?,
+                folder.fold_fallible(pointee)?,
             ),
-            SpannedTyView::FnDef(def) => TyKind::FnDef(folder.fold_spanned_fallible(def)?),
-            SpannedTyView::Adt(instance) => TyKind::Adt(folder.fold_spanned_fallible(instance)?),
-            SpannedTyView::Trait(re, muta, clause_list) => TyKind::Trait(
-                folder.fold_spanned_fallible(re)?,
+            TyKind::FnDef(def) => TyKind::FnDef(folder.fold_fallible(def)?),
+            TyKind::Adt(instance) => TyKind::Adt(folder.fold_fallible(instance)?),
+            TyKind::Trait(re, muta, clause_list) => TyKind::Trait(
+                folder.fold_fallible(re)?,
                 muta,
-                folder.fold_spanned_fallible(clause_list)?,
+                folder.fold_fallible(clause_list)?,
             ),
-            SpannedTyView::Tuple(tys) => TyKind::Tuple(folder.fold_spanned_fallible(tys)?),
+            TyKind::Tuple(tys) => TyKind::Tuple(folder.fold_fallible(tys)?),
         };
 
         Ok(tcx.intern(kind))
@@ -612,35 +506,35 @@ impl TyFoldable for Ty {
 // === Binders === //
 
 impl TyFoldable for HrtbBinder {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
         folder.fold_hrtb_binder(me)
     }
 
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
-        let SpannedHrtbBinderView { defs, inner } = me.view(folder.tcx());
+        let HrtbBinder { defs, inner } = me;
 
         Ok(HrtbBinder {
-            defs: folder.fold_spanned_fallible(defs)?,
-            inner: folder.fold_spanned_fallible(inner)?,
+            defs: folder.fold_fallible(defs)?,
+            inner: folder.fold_fallible(inner)?,
         })
     }
 }
 
 impl TyFoldable for HrtbDebruijnDefList {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
         folder.fold_hrtb_debruijn_def_list(me)
     }
 
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
@@ -649,29 +543,29 @@ impl TyFoldable for HrtbDebruijnDefList {
 }
 
 impl TyFoldable for HrtbDebruijnDef {
-    fn fold_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
         folder.fold_hrtb_debruijn_def(me)
     }
 
-    fn super_raw<'tcx, F>(me: Spanned<Self>, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
         F: ?Sized + TyFolder<'tcx>,
     {
-        let SpannedHrtbDebruijnDefView {
+        let HrtbDebruijnDef {
             span,
             name,
             kind,
             clauses,
-        } = me.view(folder.tcx());
+        } = me;
 
         Ok(HrtbDebruijnDef {
             span,
             name,
             kind,
-            clauses: folder.fold_spanned_fallible(clauses)?,
+            clauses: folder.fold_fallible(clauses)?,
         })
     }
 }
