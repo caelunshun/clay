@@ -395,7 +395,7 @@ impl InferRe {
             Re::UniversalVar(var) => Ok(InferRe::Universal(var)),
             Re::InferVar(var) => Ok(InferRe::Infer(var)),
             Re::Error(err) => Err(err),
-            Re::SigInfer | Re::SigGeneric(_) | Re::HrtbVar(_) | Re::Erased => unreachable!(),
+            Re::HrtbVar(_) | Re::Erased => unreachable!(),
         }
     }
 

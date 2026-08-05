@@ -1,12 +1,17 @@
 use crate::{
-    base::{arena::Obj, syntax::Symbol},
-    semantic::syntax::{
-        Crate, FnDef, ImplItem, SpannedTy, TraitParam, TraitSpec, Ty, TyCtxt, TyFolder,
-        TyFolderInfallibleExt, TyKind, TyShapeMap, shape_of_inherent_function,
-        shape_of_inherent_method, shape_of_trait_def,
+    base::{
+        arena::{HasListInterner as _, Obj},
+        syntax::Symbol,
+    },
+    semantic::{
+        infer::ClauseCx,
+        syntax::{
+            AdtInstance, Crate, FnDef, ImplItem, SigAdtInstance, SigTy, SigTyKind, SigTyOrRe,
+            SolidTyShape, SolidTyShapeKind, TraitItem, TraitParam, TraitSpec, Ty, TyCtxt, TyKind,
+            TyOrRe, TyShape, TyShapeMap,
+        },
     },
 };
-use std::convert::Infallible;
 
 // === CoherenceMap === //
 
@@ -30,15 +35,23 @@ impl CoherenceMap {
                 continue;
             };
 
+            let self_ty_shape =
+                SigShapeEraser { tcx, self_ty: None }.shape_of_ty(*item.r(s).target);
+
+            let trait_eraser = SigShapeEraser {
+                tcx,
+                self_ty: Some(self_ty_shape),
+            };
+
             match *item.r(s).trait_ {
                 Some(trait_) => {
-                    let arg_count = *trait_.value.def.r(s).regular_generic_count as usize;
+                    let arg_count = *trait_.def.r(s).regular_generic_count as usize;
+
                     self.by_shape.insert(
-                        shape_of_trait_def(
-                            tcx,
-                            trait_.value.def,
-                            &trait_.value.params.r(s)[..arg_count],
-                            item.r(s).target.value,
+                        trait_eraser.shape_of_trait_impl(
+                            trait_.def,
+                            &trait_.params.r(s)[..arg_count],
+                            *item.r(s).target,
                         ),
                         CoherenceMapEntry::TraitImpl(item),
                         s,
@@ -49,11 +62,7 @@ impl CoherenceMap {
                         let method = method.unwrap();
 
                         self.by_shape.insert(
-                            shape_of_inherent_function(
-                                tcx,
-                                item.r(s).target.value,
-                                method.r(s).name.text,
-                            ),
+                            trait_eraser.shape_of_inherent_function(method.r(s).name.text),
                             CoherenceMapEntry::InherentMethod(method),
                             s,
                         );
@@ -65,15 +74,10 @@ impl CoherenceMap {
                         // We perform an ad-hoc self-type substitution on the receiver to tighten
                         // its bounds. We don't need to bring in a full `ClauseCx` to do this
                         // because entries in the `CoherenceMap` are only approximations.
-                        let receiver = method.r(s).args.r(s)[0].ty.value;
-                        let receiver = SigSelfTypeFolder {
-                            tcx,
-                            self_ty: item.r(s).target.value,
-                        }
-                        .fold(receiver);
+                        let receiver = method.r(s).args.r(s)[0].ty;
 
                         self.by_shape.insert(
-                            shape_of_inherent_method(tcx, receiver, method.r(s).name.text),
+                            trait_eraser.shape_of_inherent_method(receiver, method.r(s).name.text),
                             CoherenceMapEntry::InherentMethod(method),
                             s,
                         );
@@ -85,14 +89,15 @@ impl CoherenceMap {
 
     pub fn gather_inherent_impl_method_candidates<'a>(
         &'a self,
-        tcx: &'a TyCtxt,
+        ccx: &'a ClauseCx<'a>,
         receiver: Ty,
         name: Symbol,
     ) -> impl Iterator<Item = Obj<FnDef>> + 'a {
-        let s = &tcx.session;
+        let s = ccx.session();
+        let eraser = ImportedShapeEraser { ccx };
 
         self.by_shape
-            .lookup(shape_of_inherent_method(tcx, receiver, name), s)
+            .lookup(eraser.shape_of_inherent_method(receiver, name), s)
             .map(|v| {
                 let CoherenceMapEntry::InherentMethod(v) = *v else {
                     unreachable!()
@@ -104,14 +109,15 @@ impl CoherenceMap {
 
     pub fn gather_inherent_impl_function_candidates<'a>(
         &'a self,
-        tcx: &'a TyCtxt,
+        ccx: &'a ClauseCx<'a>,
         self_ty: Ty,
         name: Symbol,
     ) -> impl Iterator<Item = Obj<FnDef>> + 'a {
-        let s = &tcx.session;
+        let s = ccx.session();
+        let eraser = ImportedShapeEraser { ccx };
 
         self.by_shape
-            .lookup(shape_of_inherent_function(tcx, self_ty, name), s)
+            .lookup(eraser.shape_of_inherent_function(self_ty, name), s)
             .map(|v| {
                 let CoherenceMapEntry::InherentMethod(v) = *v else {
                     unreachable!()
@@ -123,16 +129,16 @@ impl CoherenceMap {
 
     pub fn gather_trait_impl_candidates<'a>(
         &'a self,
-        tcx: &'a TyCtxt,
+        ccx: &'a ClauseCx<'a>,
         lhs: Ty,
         rhs: TraitSpec,
     ) -> impl Iterator<Item = Obj<ImplItem>> + 'a {
-        let s = &tcx.session;
+        let s = ccx.session();
+        let eraser = ImportedShapeEraser { ccx };
 
         self.by_shape
             .lookup(
-                shape_of_trait_def(
-                    tcx,
+                eraser.shape_of_trait_impl(
                     rhs.def,
                     &rhs.params.r(s)[..*rhs.def.r(s).regular_generic_count as usize]
                         .iter()
@@ -155,27 +161,187 @@ impl CoherenceMap {
     }
 }
 
-// === Helpers === //
+// === Type Erasure === //
 
-struct SigSelfTypeFolder<'tcx> {
-    tcx: &'tcx TyCtxt,
-    self_ty: Ty,
+pub struct SigShapeEraser<'a> {
+    pub tcx: &'a TyCtxt,
+    pub self_ty: Option<TyShape>,
 }
 
-impl<'tcx> TyFolder<'tcx> for SigSelfTypeFolder<'tcx> {
-    type Error = Infallible;
+impl SigShapeEraser<'_> {
+    pub fn shape_of_trait_impl(
+        &self,
+        def: Obj<TraitItem>,
+        args: &[SigTyOrRe],
+        target: SigTy,
+    ) -> TyShape {
+        let s = &self.tcx.session;
 
-    fn tcx(&self) -> &'tcx TyCtxt {
-        self.tcx
+        debug_assert_eq!(args.len(), *def.r(s).regular_generic_count as usize);
+
+        TyShape::Solid(SolidTyShape {
+            kind: SolidTyShapeKind::TraitImpl(def),
+            children: self.tcx.intern_list(
+                &([self.shape_of_ty(target)]
+                    .into_iter()
+                    .chain(
+                        args.iter()
+                            .filter_map(|ty| ty.as_ty())
+                            .map(|ty| self.shape_of_ty(ty)),
+                    )
+                    .collect::<Vec<_>>()),
+            ),
+        })
     }
 
-    fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
-        let s = self.session();
+    pub fn shape_of_inherent_method(&self, receiver: SigTy, name: Symbol) -> TyShape {
+        TyShape::Solid(SolidTyShape {
+            kind: SolidTyShapeKind::InherentMethodImpl(name),
+            children: self.tcx.intern_list(&[self.shape_of_ty(receiver)]),
+        })
+    }
 
-        if matches!(ty.value.r(s), TyKind::SigThis) {
-            return Ok(self.self_ty);
+    pub fn shape_of_inherent_function(&self, name: Symbol) -> TyShape {
+        TyShape::Solid(SolidTyShape {
+            kind: SolidTyShapeKind::InherentFunctionImpl(name),
+            children: self.tcx.intern_list(&[self.self_ty.unwrap()]),
+        })
+    }
+
+    pub fn shape_of_ty(&self, ty: SigTy) -> TyShape {
+        let s = &self.tcx.session;
+
+        match ty.r(s).kind {
+            SigTyKind::SelfTy => self.self_ty.expect("no self type provided"),
+
+            // It's always safe to be conservative with these types.
+            SigTyKind::HrtbVar(_)
+            | SigTyKind::Infer
+            | SigTyKind::Generic(_)
+            | SigTyKind::Alias(_, _)
+            | SigTyKind::Project(_)
+            | SigTyKind::Error(_) => TyShape::Hole,
+
+            SigTyKind::Simple(kind) => TyShape::Solid(SolidTyShape {
+                kind: SolidTyShapeKind::Simple(kind),
+                children: self.tcx.intern_list(&[]),
+            }),
+            SigTyKind::Reference(_re, mutability, pointee) => TyShape::Solid(SolidTyShape {
+                kind: SolidTyShapeKind::Reference(mutability),
+                children: self.tcx.intern_list(&[self.shape_of_ty(pointee)]),
+            }),
+            SigTyKind::Adt(SigAdtInstance { def, params }) => TyShape::Solid(SolidTyShape {
+                kind: SolidTyShapeKind::Adt(def),
+                children: self.tcx.intern_list(
+                    &params
+                        .r(s)
+                        .iter()
+                        .filter_map(|ty| ty.as_ty())
+                        .map(|ty| self.shape_of_ty(ty))
+                        .collect::<Vec<_>>(),
+                ),
+            }),
+            SigTyKind::Trait(_re, _muta, _intern) => todo!(),
+            SigTyKind::Tuple(children) => TyShape::Solid(SolidTyShape {
+                kind: SolidTyShapeKind::Tuple(children.r(s).len() as u32),
+                children: self.tcx.intern_list(
+                    &children
+                        .r(s)
+                        .iter()
+                        .map(|&ty| self.shape_of_ty(ty))
+                        .collect::<Vec<_>>(),
+                ),
+            }),
         }
+    }
+}
 
-        Ok(self.super_(ty))
+pub struct ImportedShapeEraser<'a, 'tcx> {
+    pub ccx: &'a ClauseCx<'tcx>,
+}
+
+impl ImportedShapeEraser<'_, '_> {
+    pub fn shape_of_trait_impl(&self, def: Obj<TraitItem>, args: &[TyOrRe], target: Ty) -> TyShape {
+        let tcx = self.ccx.tcx();
+        let s = self.ccx.session();
+
+        debug_assert_eq!(args.len(), *def.r(s).regular_generic_count as usize);
+
+        TyShape::Solid(SolidTyShape {
+            kind: SolidTyShapeKind::TraitImpl(def),
+            children: tcx.intern_list(
+                &([self.shape_of_ty(target)]
+                    .into_iter()
+                    .chain(
+                        args.iter()
+                            .filter_map(|ty| ty.as_ty())
+                            .map(|ty| self.shape_of_ty(ty)),
+                    )
+                    .collect::<Vec<_>>()),
+            ),
+        })
+    }
+
+    pub fn shape_of_inherent_method(&self, receiver: Ty, name: Symbol) -> TyShape {
+        let tcx = self.ccx.tcx();
+
+        TyShape::Solid(SolidTyShape {
+            kind: SolidTyShapeKind::InherentMethodImpl(name),
+            children: tcx.intern_list(&[self.shape_of_ty(receiver)]),
+        })
+    }
+
+    pub fn shape_of_inherent_function(&self, self_ty: Ty, name: Symbol) -> TyShape {
+        let tcx = self.ccx.tcx();
+
+        TyShape::Solid(SolidTyShape {
+            kind: SolidTyShapeKind::InherentFunctionImpl(name),
+            children: tcx.intern_list(&[self.shape_of_ty(self_ty)]),
+        })
+    }
+
+    pub fn shape_of_ty(&self, ty: Ty) -> TyShape {
+        let s = self.ccx.session();
+        let tcx = self.ccx.tcx();
+
+        match *self.ccx.peel_ty_infer_var_without_poll(ty).r(s) {
+            // It's always safe to be conservative with these types.
+            TyKind::HrtbVar(_)
+            | TyKind::InferVar(_)
+            | TyKind::UniversalVar(_)
+            | TyKind::FnDef(_)
+            | TyKind::Error(_) => TyShape::Hole,
+
+            TyKind::Simple(kind) => TyShape::Solid(SolidTyShape {
+                kind: SolidTyShapeKind::Simple(kind),
+                children: tcx.intern_list(&[]),
+            }),
+            TyKind::Reference(_re, mutability, pointee) => TyShape::Solid(SolidTyShape {
+                kind: SolidTyShapeKind::Reference(mutability),
+                children: tcx.intern_list(&[self.shape_of_ty(pointee)]),
+            }),
+            TyKind::Adt(AdtInstance { def, params }) => TyShape::Solid(SolidTyShape {
+                kind: SolidTyShapeKind::Adt(def),
+                children: tcx.intern_list(
+                    &params
+                        .r(s)
+                        .iter()
+                        .filter_map(|ty| ty.as_ty())
+                        .map(|ty| self.shape_of_ty(ty))
+                        .collect::<Vec<_>>(),
+                ),
+            }),
+            TyKind::Trait(_re, _muta, _intern) => todo!(),
+            TyKind::Tuple(children) => TyShape::Solid(SolidTyShape {
+                kind: SolidTyShapeKind::Tuple(children.r(s).len() as u32),
+                children: tcx.intern_list(
+                    &children
+                        .r(s)
+                        .iter()
+                        .map(|&ty| self.shape_of_ty(ty))
+                        .collect::<Vec<_>>(),
+                ),
+            }),
+        }
     }
 }

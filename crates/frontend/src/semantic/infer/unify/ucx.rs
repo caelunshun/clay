@@ -8,12 +8,12 @@ use crate::{
             TyAndTyUnifyError,
         },
         syntax::{
-            FnInstanceInner, FnOwner, FnOwnerInherent, FnOwnerTrait, InferTyVar,
+            FnInstanceInner, FnOwner, FnOwnerInherent, FnOwnerTrait, HrtbBinder, InferTyVar,
             InferTyVarSourceInfo, Mutability, Re, ReVariance, RelationDirection, RelationMode,
-            SimpleTySet, SpannedHrtbBinder, SpannedTy, SpannedTyView, TraitClause, TraitClauseList,
-            TraitParam, TraitParamList, Ty, TyCtxt, TyFolder, TyFolderExt, TyFolderInfallibleExt,
-            TyKind, TyOrRe, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt, UniversalReVar,
-            UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
+            SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitParamList, Ty, TyCtxt,
+            TyFolder, TyFolderExt, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorExt,
+            TyVisitorInfallibleExt, UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar,
+            UniversalTyVarSourceInfo,
         },
     },
 };
@@ -248,18 +248,6 @@ impl<'tcx> UnifyCx<'tcx> {
         }
 
         match (*lhs.r(s), *rhs.r(s)) {
-            (TyKind::SigThis, _)
-            | (_, TyKind::SigThis)
-            | (TyKind::SigInfer, _)
-            | (_, TyKind::SigInfer)
-            | (TyKind::SigGeneric(_), _)
-            | (_, TyKind::SigGeneric(_))
-            | (TyKind::SigProject(_), _)
-            | (_, TyKind::SigProject(_))
-            | (TyKind::SigAlias(_, _), _)
-            | (_, TyKind::SigAlias(_, _)) => {
-                unreachable!()
-            }
             (TyKind::Error(error), _) | (_, TyKind::Error(error)) => {
                 // This is accepted regardless of the other side.
 
@@ -552,8 +540,8 @@ impl<'tcx> UnifyCx<'tcx> {
                 self.ucx.tcx()
             }
 
-            fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
-                if let SpannedTyView::InferVar(var) = ty.view(self.tcx()) {
+            fn visit_ty(&mut self, ty: Ty) -> ControlFlow<Self::Break> {
+                if let TyKind::InferVar(var) = *ty.r(self.session()) {
                     match self.ucx.types.lookup_infer(var) {
                         Ok(resolved) => self.visit_fallible(resolved),
                         Err(other_floating) => {
@@ -602,15 +590,15 @@ impl<'tcx> UnifyCx<'tcx> {
                 self.ucx.tcx()
             }
 
-            fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
-                match ty.view(self.tcx()) {
-                    SpannedTyView::InferVar(var) => match self.ucx.types.lookup_infer(var) {
+            fn visit_ty(&mut self, ty: Ty) -> ControlFlow<Self::Break> {
+                match *ty.r(self.session()) {
+                    TyKind::InferVar(var) => match self.ucx.types.lookup_infer(var) {
                         Ok(resolved) => self.visit_fallible(resolved)?,
                         Err(_) => {
                             // (don't constrain yet)
                         }
                     },
-                    SpannedTyView::UniversalVar(var) => {
+                    TyKind::UniversalVar(var) => {
                         if !self
                             .ucx
                             .lookup_universal_ty_hrtb_universe(var)
@@ -659,22 +647,22 @@ impl<'tcx> UnifyCx<'tcx> {
                 self.ucx.tcx()
             }
 
-            fn visit_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> ControlFlow<Self::Break> {
+            fn visit_hrtb_binder(&mut self, binder: HrtbBinder) -> ControlFlow<Self::Break> {
                 let s = self.session();
 
-                self.debruijn.move_inwards_by(binder.value.defs.r(s).len());
-                self.visit_fallible(binder.value.inner)?;
-                self.debruijn.move_outwards_by(binder.value.defs.r(s).len());
+                self.debruijn.move_inwards_by(binder.defs.r(s).len());
+                self.visit_fallible(binder.inner)?;
+                self.debruijn.move_outwards_by(binder.defs.r(s).len());
                 ControlFlow::Continue(())
             }
 
-            fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
-                match ty.view(self.tcx()) {
-                    SpannedTyView::InferVar(_) => {
+            fn visit_ty(&mut self, ty: Ty) -> ControlFlow<Self::Break> {
+                match *ty.r(self.session()) {
+                    TyKind::InferVar(_) => {
                         // We can skip this because, by invariant, inference variables will never
                         // contain these types of variables.
                     }
-                    SpannedTyView::HrtbVar(var) => {
+                    TyKind::HrtbVar(var) => {
                         if self.debruijn.try_lookup_relative(var.0).is_none() {
                             return ControlFlow::Break(());
                         }
@@ -717,9 +705,9 @@ impl<'tcx> UnifyCx<'tcx> {
                 self.ucx.tcx()
             }
 
-            fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
-                match ty.view(self.tcx()) {
-                    SpannedTyView::InferVar(var) => match self.ucx.types.lookup_infer(var) {
+            fn visit_ty(&mut self, ty: Ty) -> ControlFlow<Self::Break> {
+                match *ty.r(self.session()) {
+                    TyKind::InferVar(var) => match self.ucx.types.lookup_infer(var) {
                         Ok(resolved) => self.visit_fallible(resolved)?,
                         Err(_) => {
                             self.ucx
@@ -902,9 +890,6 @@ pub enum UnboundVarHandlingMode {
     /// All unbound type variables are turned into their unique root representation.
     NormalizeToRoot,
 
-    /// All unbound type variables are turned into `Ty::SigInfer`.
-    EraseToSigInfer,
-
     /// Panic on encountering an unbound type variable.
     Panic,
 }
@@ -916,8 +901,8 @@ impl<'tcx> TyFolder<'tcx> for InferTySubstitutor<'_, 'tcx> {
         self.ucx.tcx()
     }
 
-    fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
-        let TyKind::InferVar(var) = *ty.value.r(self.session()) else {
+    fn fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
+        let TyKind::InferVar(var) = *ty.r(self.session()) else {
             return self.super_fallible(ty);
         };
 
@@ -928,7 +913,6 @@ impl<'tcx> TyFolder<'tcx> for InferTySubstitutor<'_, 'tcx> {
                 UnboundVarHandlingMode::NormalizeToRoot => {
                     self.tcx().intern(TyKind::InferVar(floating.root))
                 }
-                UnboundVarHandlingMode::EraseToSigInfer => self.tcx().intern(TyKind::SigInfer),
                 UnboundVarHandlingMode::Panic => {
                     unreachable!("unexpected ambiguous inference variable")
                 }

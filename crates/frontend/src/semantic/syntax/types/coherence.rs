@@ -1,12 +1,10 @@
 use crate::{
     base::{
         Session,
-        arena::{HasListInterner as _, Intern, Obj},
+        arena::{Intern, Obj},
         syntax::Symbol,
     },
-    semantic::syntax::{
-        AdtInstance, AdtItem, Mutability, SimpleTyKind, TraitItem, Ty, TyCtxt, TyKind, TyOrRe,
-    },
+    semantic::syntax::{AdtItem, Mutability, SimpleTyKind, TraitItem},
     utils::{
         hash::FxHashMap,
         lang::{UnionIsectBuilder, UnionIsectIter, UnionIsectOp},
@@ -54,7 +52,7 @@ pub enum SolidTyShapeKind {
     InherentFunctionImpl(Symbol),
 
     Simple(SimpleTyKind),
-    Re(Mutability),
+    Reference(Mutability),
     Adt(Obj<AdtItem>),
     Trait,
     Tuple(u32),
@@ -62,93 +60,6 @@ pub enum SolidTyShapeKind {
     /// No need to specialize in an efficient manner because `impl`s naming these types are not
     /// possible.
     FnDef,
-}
-
-// === Erasure === //
-
-pub fn shape_of_trait_def(
-    tcx: &TyCtxt,
-    def: Obj<TraitItem>,
-    args: &[TyOrRe],
-    target: Ty,
-) -> TyShape {
-    let s = &tcx.session;
-
-    debug_assert_eq!(args.len(), *def.r(s).regular_generic_count as usize);
-
-    TyShape::Solid(SolidTyShape {
-        kind: SolidTyShapeKind::TraitImpl(def),
-        children: tcx.intern_list(
-            &([erase_ty_to_shape(tcx, target)]
-                .into_iter()
-                .chain(
-                    args.iter()
-                        .filter_map(|ty| ty.as_ty())
-                        .map(|ty| erase_ty_to_shape(tcx, ty)),
-                )
-                .collect::<Vec<_>>()),
-        ),
-    })
-}
-
-pub fn shape_of_inherent_method(tcx: &TyCtxt, receiver: Ty, name: Symbol) -> TyShape {
-    TyShape::Solid(SolidTyShape {
-        kind: SolidTyShapeKind::InherentMethodImpl(name),
-        children: tcx.intern_list(&[erase_ty_to_shape(tcx, receiver)]),
-    })
-}
-
-pub fn shape_of_inherent_function(tcx: &TyCtxt, self_ty: Ty, name: Symbol) -> TyShape {
-    TyShape::Solid(SolidTyShape {
-        kind: SolidTyShapeKind::InherentFunctionImpl(name),
-        children: tcx.intern_list(&[erase_ty_to_shape(tcx, self_ty)]),
-    })
-}
-
-pub fn erase_ty_to_shape(tcx: &TyCtxt, ty: Ty) -> TyShape {
-    let s = &tcx.session;
-
-    match *ty.r(s) {
-        // It's always safe to be conservative with these types.
-        TyKind::HrtbVar(_) | TyKind::InferVar(_) | TyKind::UniversalVar(_) | TyKind::Error(_) => {
-            TyShape::Hole
-        }
-
-        TyKind::Simple(kind) => TyShape::Solid(SolidTyShape {
-            kind: SolidTyShapeKind::Simple(kind),
-            children: tcx.intern_list(&[]),
-        }),
-        TyKind::Reference(_re, mutability, pointee) => TyShape::Solid(SolidTyShape {
-            kind: SolidTyShapeKind::Re(mutability),
-            children: tcx.intern_list(&[erase_ty_to_shape(tcx, pointee)]),
-        }),
-        TyKind::Adt(AdtInstance { def, params }) => TyShape::Solid(SolidTyShape {
-            kind: SolidTyShapeKind::Adt(def),
-            children: tcx.intern_list(
-                &params
-                    .r(s)
-                    .iter()
-                    .filter_map(|ty| ty.as_ty())
-                    .map(|ty| erase_ty_to_shape(tcx, ty))
-                    .collect::<Vec<_>>(),
-            ),
-        }),
-        TyKind::Trait(_re, _muta, _intern) => todo!(),
-        TyKind::Tuple(children) => TyShape::Solid(SolidTyShape {
-            kind: SolidTyShapeKind::Tuple(children.r(s).len() as u32),
-            children: tcx.intern_list(
-                &children
-                    .r(s)
-                    .iter()
-                    .map(|&ty| erase_ty_to_shape(tcx, ty))
-                    .collect::<Vec<_>>(),
-            ),
-        }),
-        TyKind::FnDef(_instance) => TyShape::Solid(SolidTyShape {
-            kind: SolidTyShapeKind::FnDef,
-            children: tcx.intern_list(&[]),
-        }),
-    }
 }
 
 // === TyShapeMap === //
@@ -305,6 +216,7 @@ impl MapLayer {
 mod tests {
     use super::*;
     use crate::{
+        base::arena::HasListInterner as _,
         semantic::syntax::{SimpleTyKind, TyCtxt},
         utils::hash::FxHashSet,
     };

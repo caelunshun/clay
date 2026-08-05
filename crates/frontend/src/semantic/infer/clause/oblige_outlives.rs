@@ -116,12 +116,7 @@ impl<'tcx> ClauseCx<'tcx> {
         let s = self.session();
 
         match *lhs.r(s) {
-            TyKind::SigThis
-            | TyKind::SigInfer
-            | TyKind::SigGeneric(_)
-            | TyKind::SigProject(_)
-            | TyKind::SigAlias(_, _)
-            | TyKind::HrtbVar(_) => {
+            TyKind::HrtbVar(_) => {
                 unreachable!()
             }
             TyKind::Simple(_) | TyKind::Error(_) | TyKind::FnDef(_) => {

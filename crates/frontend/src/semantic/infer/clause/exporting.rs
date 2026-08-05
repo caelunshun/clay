@@ -3,9 +3,8 @@ use crate::{
     semantic::{
         infer::{ClauseCx, ObligeCause},
         syntax::{
-            InferTyVarSourceInfo, Re, RelationMode, SpannedRe, SpannedTy, Ty, TyCtxt, TyFolder,
-            TyFolderInfallibleExt as _, TyKind, TyProjection, UniversalTyVar,
-            UniversalTyVarSourceInfo,
+            InferTyVarSourceInfo, Re, RelationMode, Ty, TyCtxt, TyFolder,
+            TyFolderInfallibleExt as _, TyKind, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };

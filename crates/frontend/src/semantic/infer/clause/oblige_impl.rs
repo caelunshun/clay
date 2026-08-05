@@ -7,12 +7,12 @@ use crate::{
         infer::{
             ClauseCx, ClauseImportEnv, ClauseObligation, GenericSubst, HrtbUniverse,
             HrtbUniverseInfo, NoTraitImplError, NotCoveredError, ObligationNotReady,
-            ObligationResult, ObligeCause, ObligeCauseStep, UnboundVarHandlingMode,
+            ObligationResult, ObligeCause, ObligeCauseStep, SigImporterWfMode,
         },
         syntax::{
-            HrtbBinder, ImplItem, RelationMode, SimpleTySet, SpannedTy, TraitClause,
-            TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyFolderInfallibleExt, TyKind,
-            TyOrRe, TyVisitor, TyVisitorInfallibleExt, UniversalTyVar,
+            HrtbBinder, ImplItem, RelationMode, SimpleTySet, TraitClause, TraitClauseList,
+            TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe, TyVisitor, TyVisitorInfallibleExt,
+            UniversalTyVar,
         },
     },
     utils::hash::FxHashMap,
@@ -74,7 +74,7 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         };
 
-        let rhs = self.instantiate_hrtb_universal(&universe, rhs);
+        let rhs = self.instantiate_hrtb_universal(cause.clone(), universe.clone(), rhs);
         self.oblige_ty_meets_trait_instantiated(cause, universe, lhs, rhs)
     }
 
@@ -100,7 +100,6 @@ impl<'tcx> ClauseCx<'tcx> {
         lhs: Ty,
         rhs: TraitSpec,
     ) -> ObligationResult<Result<(), NoTraitImplError>> {
-        let tcx = self.tcx();
         let s = self.session();
 
         // See whether the type itself can provide the implementation.
@@ -109,12 +108,15 @@ impl<'tcx> ClauseCx<'tcx> {
                 todo!()
             }
             TyKind::UniversalVar(universal) => {
-                let universal_elab = self.elaborate_ty_universal_clauses_possibly_floating(universal);
+                let universal_elab =
+                    self.elaborate_ty_universal_clauses_possibly_floating(universal);
 
-                match self
-                    .clone()
-                    .try_select_inherent_impl(cause, &universe, universal_elab, rhs)?
-                {
+                match self.clone().try_select_inherent_impl(
+                    cause,
+                    &universe,
+                    universal_elab,
+                    rhs,
+                )? {
                     Ok(res) => {
                         *self = res;
                         return Ok(Ok(()));
@@ -125,7 +127,8 @@ impl<'tcx> ClauseCx<'tcx> {
                 }
             }
             TyKind::InferVar(var) => {
-                let is_possibly_universal = self.lookup_ty_infer_var_without_poll(var)
+                let is_possibly_universal = self
+                    .lookup_ty_infer_var_without_poll(var)
                     .unwrap_err()
                     .perm_set
                     .intersects(SimpleTySet::MAYBE_UNIVERSAL);
@@ -140,13 +143,9 @@ impl<'tcx> ClauseCx<'tcx> {
                 // Error types can do anything.
                 return Ok(Ok(()));
             }
-            TyKind::SigThis
-            | TyKind::SigInfer
-            | TyKind::SigGeneric(_)
-            | TyKind::SigProject(_)
-            | TyKind::SigAlias(_, _)
+
             // LHS HRTBs should have been instantiated right before the obligation.
-            | TyKind::HrtbVar(_) => {
+            TyKind::HrtbVar(_) => {
                 unreachable!()
             }
             TyKind::Simple(_)
@@ -161,15 +160,9 @@ impl<'tcx> ClauseCx<'tcx> {
         // Otherwise, scan for a suitable `impl`.
         let mut prev_confirmation = None;
 
-        let candidates = self.coherence().gather_trait_impl_candidates(
-            tcx,
-            self.ucx()
-                .substitutor(UnboundVarHandlingMode::EraseToSigInfer)
-                .fold(lhs),
-            self.ucx()
-                .substitutor(UnboundVarHandlingMode::EraseToSigInfer)
-                .fold(rhs),
-        );
+        let candidates = self
+            .coherence()
+            .gather_trait_impl_candidates(self, lhs, rhs);
 
         if let Ok(confirmation) = self
             .clone()
@@ -261,7 +254,7 @@ impl<'tcx> ClauseCx<'tcx> {
             .clone()
             .child(ObligeCauseStep::ImplUsingInherent { lhs, rhs }.into());
 
-        let lhs = self.instantiate_hrtb_infer(&cause, universe, lhs);
+        let lhs = self.instantiate_hrtb_infer(cause.clone(), universe.clone(), lhs);
 
         let mut param_iter = lhs.params.r(s).iter().zip(rhs.params.r(s));
 
@@ -350,12 +343,12 @@ impl<'tcx> ClauseCx<'tcx> {
         let trait_env_params = self.instantiate_infer().binder_to_constrained_vars(
             cause,
             universe,
-            &ClauseImportEnv::new(lhs, []),
+            &ClauseImportEnv::new(Some(lhs), []),
             rhs.r(s).generics,
         );
 
         let trait_env = ClauseImportEnv::new(
-            lhs,
+            Some(lhs),
             [GenericSubst::new(rhs.r(s).generics, trait_env_params)],
         );
 
@@ -363,15 +356,22 @@ impl<'tcx> ClauseCx<'tcx> {
         // the `impl` itself has been WF-checked for all types compatible with the generic
         // parameters.
         let target_ty = self
-            .importer()
-            .with_expansion_cause(cause.clone())
-            .import_report_elsewhere(universe, &trait_env, rhs.r(s).target.value);
+            .importer(
+                cause.clone(),
+                universe.clone(),
+                trait_env.clone(),
+                SigImporterWfMode::DelayBug,
+            )
+            .import_ty(*rhs.r(s).target);
 
         let target_trait = self
-            .importer()
-            .with_expansion_cause(cause.clone())
-            .with_clause_applies_to(target_ty)
-            .import_report_elsewhere(universe, &trait_env, rhs.r(s).trait_.unwrap().value);
+            .importer(
+                cause.clone(),
+                universe.clone(),
+                trait_env.clone(),
+                SigImporterWfMode::DelayBug,
+            )
+            .import_trait_instance(target_ty, rhs.r(s).trait_.unwrap());
 
         // Does the `lhs` type match the `rhs`'s target type?
         if self
@@ -558,10 +558,10 @@ impl<'tcx> ClauseCx<'tcx> {
                 self.ccx.tcx()
             }
 
-            fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
+            fn visit_ty(&mut self, ty: Ty) -> ControlFlow<Self::Break> {
                 let s = self.session();
 
-                match *ty.value.r(s) {
+                match *ty.r(s) {
                     TyKind::InferVar(var) => {
                         if let Ok(peeled) = self.ccx.lookup_ty_infer_var_without_poll(var) {
                             self.visit(peeled);
@@ -575,7 +575,7 @@ impl<'tcx> ClauseCx<'tcx> {
                         }
                     }
                     _ => {
-                        self.walk(ty.value);
+                        self.walk(ty);
                     }
                 }
 

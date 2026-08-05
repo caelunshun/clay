@@ -5,7 +5,7 @@ use crate::{
         syntax::{
             AdtInstance, FloatKind, HrtbBinder, HrtbDebruijnDef, InferTyVar, IntKind, Item, Re,
             SimpleTyKind, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyKind,
-            TyOrRe, TyOrReList, TyProjection, UniversalTyVar,
+            TyOrRe, TyOrReList, UniversalTyVar,
         },
     },
     utils::lang::{SimpleListFormatGlue, format_list, format_list_into},
@@ -98,19 +98,12 @@ impl_pretty! {
         let s = cx.session();
 
         match *value.r(s) {
-            TyKind::SigThis => f.write_str("Self"),
-            TyKind::SigInfer => f.write_str("_"),
-            TyKind::SigGeneric(def) => f.write_str(def.r(s).ident.text.as_str(s)),
-            TyKind::SigProject(projection) => cx.wrap(projection).fmt(f),
-            TyKind::SigAlias(def, args) => {
-                f.write_str(&fmt_simple_ctor(cx, def.r(s).item, args))
-            },
             TyKind::Simple(kind) => cx.wrap(kind).fmt(f),
             TyKind::Reference(lt, muta, pointee) => {
                 write!(f, "&{} {}{}", cx.wrap(lt), muta.opt_space_qual(), cx.wrap(pointee))
             },
             TyKind::Adt(instance) => cx.wrap(instance).fmt(f),
-            TyKind::Trait(re, mutability, intern) => todo!(),
+            TyKind::Trait(re, muta, clauses) => todo!(),
             TyKind::Tuple(types) => {
                 if let [unique] = types.r(s) {
                     write!(f, "({},)", cx.wrap(unique))
@@ -149,18 +142,6 @@ impl_pretty! {
             SimpleTyKind::Float(FloatKind::S64) => "f64",
             SimpleTyKind::Str => "str",
         })
-    }
-    TyProjection => |cx, value, f| {
-        let s = cx.session();
-        let TyProjection { target, spec, assoc } = value;
-
-        write!(
-            f,
-            "<{} as {}>::{}",
-            cx.wrap(target),
-            cx.wrap(spec),
-            spec.def.r(s).generics.r(s).defs[assoc as usize].ident(s).text(),
-        )
     }
     AdtInstance => |cx, value, f| {
         let s = cx.session();

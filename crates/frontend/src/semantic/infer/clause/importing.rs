@@ -1,50 +1,39 @@
-//! Logic to import a user-written type in a signature or function body into a form the inference
-//! context can understand.
-
 use crate::{
     base::{
         Diag, ErrorGuaranteed, LeafDiag, Session,
-        analysis::{DebruijnTop, Spanned},
-        arena::{HasInterner, HasListInterner, LateInit, Obj},
+        arena::{HasInterner, HasListInterner, Obj},
         syntax::Span,
     },
     semantic::{
-        infer::{
-            ClauseCx, HrtbUniverse, HrtbUniverseInfo, ObligeCause, ObligeCauseOrigin,
-            ObligeCauseStep, UnifyCxMode,
-        },
+        infer::{ClauseCx, HrtbUniverse, ObligeCause, UnifyCxMode},
         syntax::{
-            AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, FnOwner, FnOwnerAdtCtor,
-            FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, HrtbDebruijnDefList,
-            InferTyVarSourceInfo, Re, RegionGeneric, RelationDirection, SpannedAdtInstance,
-            SpannedFnInstance, SpannedFnOwner, SpannedFnOwnerView, SpannedHrtbBinder,
-            SpannedHrtbBinderView, SpannedRe, SpannedTraitClauseView, SpannedTraitInstance,
-            SpannedTraitSpec, SpannedTy, SpannedTyView, TraitClause, TraitInstance, TraitParam,
-            TraitSpec, Ty, TyCtxt, TyFoldable, TyFolder, TyFolderExt, TyFolderInfallibleExt,
-            TyFolderPreservesSpans, TyKind, TyOrRe, TyOrReKind, TyOrReList, TyProjection,
-            TyVisitable, TypeAliasItem, TypeGeneric, UniversalReVarSourceInfo,
-            UniversalTyVarSourceInfo,
+            AdtInstance, AnyGeneric, GenericBinder, HrtbBinder, InferTyVarSourceInfo, Re,
+            RegionGeneric, SigAdtInstance, SigHrtbBinder, SigProjectType, SigRe, SigReKind,
+            SigTraitClause, SigTraitClauseKind, SigTraitClauseList, SigTraitInstance, SigTraitSpec,
+            SigTy, SigTyKind, SigTyList, SigTyOrRe, SigTyOrReList, TraitClause, TraitClauseList,
+            TraitInstance, TraitSpec, Ty, TyCtxt, TyKind, TyList, TyOrRe, TyOrReList,
+            TypeAliasItem, TypeGeneric,
         },
     },
     utils::hash::FxHashMap,
 };
 use hashbrown::hash_map;
 use smallvec::SmallVec;
-use std::{convert::Infallible, rc::Rc};
+use std::mem;
 
 // === Environment === //
 
 #[derive(Debug, Clone)]
 pub struct ClauseImportEnv {
     _private: (),
-    pub self_ty: Ty,
+    pub self_ty: Option<Ty>,
     pub substs: SmallVec<[GenericSubst; Self::SMALL_CAP]>,
 }
 
 impl ClauseImportEnv {
     pub const SMALL_CAP: usize = 2;
 
-    pub fn new(self_ty: Ty, substs: impl IntoIterator<Item = GenericSubst>) -> Self {
+    pub fn new(self_ty: Option<Ty>, substs: impl IntoIterator<Item = GenericSubst>) -> Self {
         Self {
             _private: (),
             self_ty,
@@ -104,157 +93,57 @@ impl GenericSubst {
 // === Driver === //
 
 impl<'tcx> ClauseCx<'tcx> {
-    #[track_caller]
-    pub fn importer(&mut self) -> ClauseImporter<'_, 'tcx> {
-        ClauseImporter {
+    pub fn importer(
+        &mut self,
+        cause: ObligeCause,
+        universe: HrtbUniverse,
+        env: ClauseImportEnv,
+        wf_mode: SigImporterWfMode,
+    ) -> SigImporter<'_, 'tcx> {
+        SigImporter {
             ccx: self,
-            clause_applies_to: None,
-            expansion_cause: ObligeCause::new_empty_report(),
+            cause,
+            opts: SigImporterOpts {
+                universe,
+                env,
+                wf_mode,
+            },
+            reentrant_aliases: FxHashMap::default(),
         }
-    }
-
-    #[track_caller]
-    pub fn import_report_here<T>(
-        &mut self,
-        universe: &HrtbUniverse,
-        env: &ClauseImportEnv,
-        value: Spanned<T>,
-    ) -> T
-    where
-        T: TyFoldable + TyVisitable,
-    {
-        self.importer().import_report_here(universe, env, value)
-    }
-
-    #[track_caller]
-    pub fn import_report_elsewhere<T>(
-        &mut self,
-        universe: &HrtbUniverse,
-        env: &ClauseImportEnv,
-        value: T,
-    ) -> T
-    where
-        T: TyFoldable + TyVisitable,
-    {
-        self.importer()
-            .import_report_elsewhere(universe, env, value)
     }
 
     pub fn instantiate_hrtb_universal(
         &mut self,
-        universe: &HrtbUniverse,
+        cause: ObligeCause,
+        universe: HrtbUniverse,
         value: HrtbBinder,
     ) -> TraitSpec {
-        let HrtbBinder { defs, inner: value } = value;
-
-        let value = self
-            .instantiate_hrtb_universal_without_normalization(universe, defs)
-            .fold(value);
-
-        self.normalizer(universe.clone()).fold(value)
+        todo!()
     }
 
     pub fn instantiate_hrtb_infer(
         &mut self,
-        cause: &ObligeCause,
-        universe: &HrtbUniverse,
+        cause: ObligeCause,
+        universe: HrtbUniverse,
         value: HrtbBinder,
     ) -> TraitSpec {
-        let HrtbBinder { defs, inner: value } = value;
-
-        let value = self
-            .instantiate_hrtb_infer_without_normalization(cause, universe, defs)
-            .fold(value);
-
-        self.normalizer(universe.clone()).fold(value)
+        todo!()
     }
 }
 
-pub struct ClauseImporter<'a, 'tcx> {
+// === SigImporter === //
+
+pub struct SigImporter<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
-    clause_applies_to: Option<Ty>,
-    expansion_cause: ObligeCause,
+    cause: ObligeCause,
+    opts: SigImporterOpts,
+    reentrant_aliases: FxHashMap<Obj<TypeAliasItem>, ReentrantAliasState>,
 }
 
-impl ClauseImporter<'_, '_> {
-    pub fn with_clause_applies_to_opt(mut self, ty: Option<Ty>) -> Self {
-        self.clause_applies_to = ty;
-        self
-    }
-
-    pub fn with_clause_applies_to(self, ty: Ty) -> Self {
-        self.with_clause_applies_to_opt(Some(ty))
-    }
-
-    pub fn with_expansion_cause(mut self, cause: ObligeCause) -> Self {
-        self.expansion_cause = cause;
-        self
-    }
-
-    pub fn import_report_here<T>(
-        &mut self,
-        universe: &HrtbUniverse,
-        env: &ClauseImportEnv,
-        value: Spanned<T>,
-    ) -> T
-    where
-        T: TyFoldable + TyVisitable,
-    {
-        let value = self
-            .ccx
-            .env_substitutor(universe.clone(), env)
-            .fold_preserved(value);
-
-        self.ccx
-            .wf_and_normalize_folder(
-                self.expansion_cause.clone(),
-                universe.clone(),
-                self.clause_applies_to,
-            )
-            .fold(value)
-    }
-
-    pub fn import_report_elsewhere<T>(
-        &mut self,
-        universe: &HrtbUniverse,
-        env: &ClauseImportEnv,
-        value: T,
-    ) -> T
-    where
-        T: TyFoldable + TyVisitable,
-    {
-        let value = self.ccx.env_substitutor(universe.clone(), env).fold(value);
-
-        self.ccx
-            .wf_and_normalize_folder(
-                self.expansion_cause.clone().into_delay_bug(),
-                universe.clone(),
-                self.clause_applies_to,
-            )
-            .fold(value)
-    }
-}
-
-// === Environment substitution === //
-
-impl<'tcx> ClauseCx<'tcx> {
-    pub fn env_substitutor<'a>(
-        &'a mut self,
-        universe: HrtbUniverse,
-        env: &'a ClauseImportEnv,
-    ) -> EnvSubstitutor<'a, 'tcx> {
-        EnvSubstitutor {
-            ccx: self,
-            universe,
-            env: env.to_owned(),
-        }
-    }
-}
-
-pub struct EnvSubstitutor<'a, 'tcx> {
-    ccx: &'a mut ClauseCx<'tcx>,
+struct SigImporterOpts {
     universe: HrtbUniverse,
     env: ClauseImportEnv,
+    wf_mode: SigImporterWfMode,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -263,965 +152,287 @@ enum ReentrantAliasState {
     Violated(Span),
 }
 
-impl<'tcx> TyFolderPreservesSpans<'tcx> for EnvSubstitutor<'_, 'tcx> {}
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum SigImporterWfMode {
+    Skip,
+    DelayBug,
+    ReportHere,
+}
 
-impl<'tcx> TyFolder<'tcx> for EnvSubstitutor<'_, 'tcx> {
-    type Error = Infallible;
+impl SigImporterWfMode {
+    pub fn should_perform(self) -> bool {
+        matches!(self, Self::DelayBug | Self::ReportHere)
+    }
+}
 
+impl<'a, 'tcx> SigImporter<'a, 'tcx> {
     fn tcx(&self) -> &'tcx TyCtxt {
         self.ccx.tcx()
     }
 
-    fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
+    fn session(&self) -> &'tcx Session {
+        self.ccx.session()
+    }
+
+    pub fn import_ty_list(&mut self, tys: SigTyList) -> TyList {
         let s = self.session();
         let tcx = self.tcx();
 
-        Ok(match ty.view(tcx) {
-            SpannedTyView::SigThis => self.env.self_ty,
-            SpannedTyView::SigInfer => self.ccx.fresh_ty_infer(
-                self.universe.clone(),
-                InferTyVarSourceInfo::Imported {
-                    span: ty.own_span(),
-                },
-            ),
-            SpannedTyView::SigGeneric(generic) => self.env.lookup_ty(s, generic),
-            SpannedTyView::Simple(_)
-            | SpannedTyView::Reference(_, _, _)
-            | SpannedTyView::Adt(_)
-            | SpannedTyView::Trait(_, _, _)
-            | SpannedTyView::Tuple(_)
-            | SpannedTyView::FnDef(_)
-            | SpannedTyView::SigProject(_)
-            | SpannedTyView::SigAlias(_, _)
-            | SpannedTyView::HrtbVar(_)
-            | SpannedTyView::Error(_) => return self.super_fallible(ty),
-
-            // These should not appear in an unimported type.
-            SpannedTyView::InferVar(_) | SpannedTyView::UniversalVar(_) => {
-                unreachable!()
-            }
-        })
-    }
-
-    fn fold_re(&mut self, re: SpannedRe) -> Result<Re, Self::Error> {
-        let s = self.session();
-
-        if self.ccx.mode() == UnifyCxMode::RegionBlind {
-            return Ok(Re::Erased);
-        }
-
-        Ok(match re.value {
-            Re::SigInfer => self.ccx.fresh_re_infer(),
-            Re::SigGeneric(generic) => self.env.lookup_re(s, generic),
-            Re::Gc | Re::Error(_) | Re::HrtbVar(_) => {
-                return self.super_fallible(re);
-            }
-            // These should not appear in an imported type.
-            Re::InferVar(_) | Re::UniversalVar(_) | Re::Erased => unreachable!(),
-        })
-    }
-}
-
-// === HRTB Instantiation === //
-
-impl<'tcx> ClauseCx<'tcx> {
-    pub fn instantiate_hrtb_universal_without_normalization<'a>(
-        &'a mut self,
-        universe: &'a HrtbUniverse,
-        defs: HrtbDebruijnDefList,
-    ) -> HrtbSubstitutionFolder<'a, 'tcx> {
-        let tcx = self.tcx();
-        let s = self.session();
-
-        // Make up new universal variables for our binder.
-        let vars = defs
-            .r(s)
-            .iter()
-            .map(|def| match def.kind {
-                TyOrReKind::Re => {
-                    TyOrRe::Re(self.fresh_re_universal(UniversalReVarSourceInfo::HrtbVar))
-                }
-                TyOrReKind::Ty => TyOrRe::Ty(
-                    self.fresh_ty_universal(universe.clone(), UniversalTyVarSourceInfo::HrtbVar),
-                ),
-            })
-            .collect::<Vec<_>>();
-
-        let vars = tcx.intern_list(&vars);
-
-        // Initialize their clauses.
-        for (&def, &var) in defs.r(s).iter().zip(vars.r(s)) {
-            match var {
-                TyOrRe::Re(var) => {
-                    let clauses = HrtbSubstitutionFolder::new(self, vars, s).fold(def.clauses);
-
-                    for clause in clauses.r(s) {
-                        let TraitClause::Outlives(permitted_outlive_dir, permitted_outlive) =
-                            *clause
-                        else {
-                            unreachable!();
-                        };
-
-                        self.permit_universe_re_outlives_general(
-                            var,
-                            permitted_outlive,
-                            permitted_outlive_dir,
-                        );
-                    }
-                }
-                TyOrRe::Ty(var) => {
-                    let TyKind::UniversalVar(var) = *var.r(s) else {
-                        unreachable!()
-                    };
-
-                    let clauses = HrtbSubstitutionFolder::new(self, vars, s).fold(def.clauses);
-
-                    self.init_ty_universal_var_direct_clauses(var, clauses);
-                }
-            }
-        }
-
-        HrtbSubstitutionFolder::new(self, vars, s)
-    }
-
-    pub fn instantiate_hrtb_infer_without_normalization<'a>(
-        &'a mut self,
-        cause: &ObligeCause,
-        universe: &'a HrtbUniverse,
-        defs: HrtbDebruijnDefList,
-    ) -> HrtbSubstitutionFolder<'a, 'tcx> {
-        let tcx = self.tcx();
-        let s = self.session();
-
-        // Make up new inference variables for our binder.
-        let vars = defs
-            .r(s)
-            .iter()
-            .map(|def| match def.kind {
-                TyOrReKind::Re => TyOrRe::Re(self.fresh_re_infer()),
-                TyOrReKind::Ty => TyOrRe::Ty(self.fresh_ty_infer(
-                    universe.clone(),
-                    InferTyVarSourceInfo::HrtbLhsInstantiation {
-                        span: def.span,
-                        clauses: Rc::new(LateInit::uninit()),
-                    },
-                )),
-            })
-            .collect::<Vec<_>>();
-
-        let vars = tcx.intern_list(&vars);
-
-        // Constrain the new inference variables with their obligations.
-        for (&def, &var) in defs.r(s).iter().zip(vars.r(s)) {
-            let clauses = HrtbSubstitutionFolder::new(self, vars, s).fold(def.clauses);
-
-            let cause = cause.clone().child(
-                ObligeCauseStep::HrtbExistentialInferenceIsPossible {
-                    lhs: var,
-                    rhs: clauses,
-                }
-                .into(),
-            );
-
-            match var {
-                TyOrRe::Re(var) => {
-                    self.oblige_re_meets_clauses(&cause, var, clauses);
-                }
-                TyOrRe::Ty(var) => {
-                    self.oblige_ty_meets_clauses(&cause, universe, var, clauses);
-
-                    let TyKind::InferVar(var) = *var.r(s) else {
-                        unreachable!()
-                    };
-
-                    let InferTyVarSourceInfo::HrtbLhsInstantiation {
-                        clauses: clauses_late_init,
-                        ..
-                    } = self.lookup_infer_ty_src_info(var)
-                    else {
-                        unreachable!()
-                    };
-
-                    LateInit::init(&clauses_late_init, clauses);
-                }
-            }
-        }
-
-        // Fold the inner type
-        HrtbSubstitutionFolder::new(self, vars, s)
-    }
-}
-
-pub struct HrtbSubstitutionFolder<'a, 'tcx> {
-    ccx: &'a mut ClauseCx<'tcx>,
-    replace_with: TyOrReList,
-    top: DebruijnTop,
-}
-
-impl<'a, 'tcx> HrtbSubstitutionFolder<'a, 'tcx> {
-    pub fn new(ccx: &'a mut ClauseCx<'tcx>, replace_with: TyOrReList, s: &Session) -> Self {
-        Self {
-            ccx,
-            replace_with,
-            top: DebruijnTop::new(replace_with.r(s).len()),
-        }
-    }
-
-    pub fn replace_with(&self) -> TyOrReList {
-        self.replace_with
-    }
-}
-
-impl<'tcx> TyFolderPreservesSpans<'tcx> for HrtbSubstitutionFolder<'_, 'tcx> {}
-
-impl<'tcx> TyFolder<'tcx> for HrtbSubstitutionFolder<'_, 'tcx> {
-    type Error = Infallible;
-
-    fn tcx(&self) -> &'tcx TyCtxt {
-        self.ccx.tcx()
-    }
-
-    fn fold_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> Result<HrtbBinder, Self::Error> {
-        let s = self.session();
-        let binder = binder.value;
-
-        let bind_count = binder.defs.r(s).len();
-
-        self.top.move_inwards_by(bind_count);
-        let inner = self.super_(binder.inner);
-        self.top.move_outwards_by(bind_count);
-
-        Ok(HrtbBinder {
-            defs: binder.defs,
-            inner,
-        })
-    }
-
-    fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
-        let s = self.session();
-        let ty = ty.value;
-
-        if let TyKind::HrtbVar(var) = *ty.r(s) {
-            let abs = self.top.lookup_relative(var.0).index();
-
-            if abs < self.replace_with.r(s).len() {
-                return Ok(self.replace_with.r(s)[abs].unwrap_ty());
-            }
-        }
-
-        Ok(self.super_(ty))
-    }
-
-    fn fold_re(&mut self, re: SpannedRe) -> Result<Re, Self::Error> {
-        let s = self.session();
-        let re = re.value;
-
-        if let Re::HrtbVar(var) = re {
-            let abs = self.top.lookup_relative(var.0).index();
-
-            if abs < self.replace_with.r(s).len() {
-                return Ok(self.replace_with.r(s)[abs].unwrap_re());
-            }
-        }
-
-        Ok(self.super_(re))
-    }
-}
-
-// === Normalization === //
-
-impl<'tcx> ClauseCx<'tcx> {
-    pub fn normalizer<'a>(&'a mut self, universe: HrtbUniverse) -> ClauseNormalizer<'a, 'tcx> {
-        ClauseNormalizer {
-            ccx: self,
-            universe,
-            reentrant_aliases: FxHashMap::default(),
-        }
-    }
-}
-
-pub struct ClauseNormalizer<'a, 'tcx> {
-    ccx: &'a mut ClauseCx<'tcx>,
-    universe: HrtbUniverse,
-    reentrant_aliases: FxHashMap<Obj<TypeAliasItem>, ReentrantAliasState>,
-}
-
-impl<'tcx> TyFolder<'tcx> for ClauseNormalizer<'_, 'tcx> {
-    type Error = Infallible;
-
-    fn tcx(&self) -> &'tcx TyCtxt {
-        self.ccx.tcx()
-    }
-
-    fn fold_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> Result<HrtbBinder, Self::Error> {
-        let HrtbBinder { defs: kind, inner } = binder.value;
-
-        // We intentionally do not `fold` over the contents of binders.
-        return Ok(HrtbBinder {
-            defs: self.fold(kind),
-            inner,
-        });
-    }
-
-    fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
-        let s = self.session();
-
-        let own_span = ty.own_span();
-        let ty = self.super_(ty);
-
-        Ok(match *ty.r(s) {
-            TyKind::SigProject(projection) => self.normalize_super_normalized_projection(
-                ObligeCause::new_delay_bug(),
-                own_span,
-                projection,
-            ),
-            TyKind::SigAlias(def, args) => {
-                self.normalize_super_normalized_alias(own_span, def, args)
-            }
-
-            TyKind::Simple(_)
-            | TyKind::Reference(_, _, _)
-            | TyKind::Adt(_)
-            | TyKind::Trait(_, _, _)
-            | TyKind::Tuple(_)
-            | TyKind::FnDef(_)
-            | TyKind::InferVar(_)
-            | TyKind::UniversalVar(_)
-            | TyKind::HrtbVar(_)
-            | TyKind::Error(_) => ty,
-
-            TyKind::SigThis | TyKind::SigInfer | TyKind::SigGeneric(_) => {
-                unreachable!()
-            }
-        })
-    }
-}
-
-impl ClauseNormalizer<'_, '_> {
-    fn normalize_super_normalized_projection(
-        &mut self,
-        cause: ObligeCause,
-        own_span: Span,
-        projection: TyProjection,
-    ) -> Ty {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        let TyProjection {
-            target,
-            spec,
-            assoc,
-        } = projection;
-
-        let assoc_infer_ty = self.ccx.fresh_ty_infer(
-            self.universe.clone(),
-            InferTyVarSourceInfo::ProjectionResult { span: own_span },
-        );
-        let spec = {
-            let mut args = spec.params.r(s).to_vec();
-            args[assoc as usize] = TraitParam::Equals(TyOrRe::Ty(assoc_infer_ty));
-
-            TraitSpec {
-                def: spec.def,
-                params: tcx.intern_list(&args),
-            }
-        };
-
-        self.ccx
-            .oblige_ty_meets_trait_instantiated(cause, self.universe.clone(), target, spec);
-
-        assoc_infer_ty
-    }
-
-    fn normalize_super_normalized_alias(
-        &mut self,
-        own_span: Span,
-        def: Obj<TypeAliasItem>,
-        args: TyOrReList,
-    ) -> Ty {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        // Substitute in the alias's environment.
-        let env = ClauseImportEnv::new(
-            tcx.intern(TyKind::SigThis),
-            [GenericSubst::new(def.r(s).generics, args)],
-        );
-
-        let body = self
-            .ccx
-            .env_substitutor(self.universe.clone(), &env)
-            .fold_preserved(*def.r(s).body);
-
-        // Normalize the target, reporting errors on guaranteed reentrancy (that is,
-        // reentrancy for a given alias not involving projections).
-        match self.reentrant_aliases.entry(def) {
-            hash_map::Entry::Occupied(entry) => {
-                let entry = entry.into_mut();
-
-                if matches!(entry, ReentrantAliasState::WaitingForViolation) {
-                    *entry = ReentrantAliasState::Violated(own_span);
-                }
-
-                return tcx.intern(TyKind::Error(ErrorGuaranteed::new_unchecked()));
-            }
-            hash_map::Entry::Vacant(entry) => {
-                entry.insert(ReentrantAliasState::WaitingForViolation);
-            }
-        }
-
-        let body = self.fold(body);
-
-        match self.reentrant_aliases.remove(&def).unwrap() {
-            ReentrantAliasState::WaitingForViolation => {
-                // (no violation occurred)
-            }
-            ReentrantAliasState::Violated(span) => {
-                let mut diag = Diag::span_err(own_span, "attempted to expand recursive type alias");
-
-                if own_span != span {
-                    diag.push_child(LeafDiag::span_note(span, "reentered here"));
-                }
-
-                diag.emit();
-            }
-        }
-
-        body
-    }
-}
-
-// === WF-Checking === //
-
-impl<'tcx> ClauseCx<'tcx> {
-    pub fn wf_and_normalize_folder(
-        &mut self,
-        cause: ObligeCause,
-        universe: HrtbUniverse,
-        clause_applies_to: Option<Ty>,
-    ) -> ClauseTyWfFolder<'_, 'tcx> {
-        ClauseTyWfFolder {
-            ccx: self,
-            cause,
-            universe,
-            clause_applies_to,
-        }
-    }
-}
-
-pub struct ClauseTyWfFolder<'a, 'tcx> {
-    ccx: &'a mut ClauseCx<'tcx>,
-    cause: ObligeCause,
-    universe: HrtbUniverse,
-    clause_applies_to: Option<Ty>,
-}
-
-impl<'tcx> TyFolder<'tcx> for ClauseTyWfFolder<'_, 'tcx> {
-    type Error = Infallible;
-
-    fn tcx(&self) -> &'tcx TyCtxt {
-        self.ccx.tcx()
-    }
-
-    fn fold_hrtb_binder(&mut self, binder: SpannedHrtbBinder) -> Result<HrtbBinder, Self::Error> {
-        let tcx = self.tcx();
-        let s = self.session();
-
-        let SpannedHrtbBinderView {
-            defs,
-            inner:
-                Spanned {
-                    value: bound,
-                    span_info: inner_span_info,
-                },
-        } = binder.view(tcx);
-
-        // Check definitions and normalize them.
-        let defs_span = defs.own_span();
-        let defs = self.fold(defs);
-
-        // Universally instantiate the body and WF check it.
-        let old_universe = self.universe.clone();
-        let wf_cause = self.cause.clone().child(
-            ObligeCauseOrigin::ImportWfHrtb {
-                binder_span: defs_span,
-            }
-            .into(),
-        );
-        let new_universe = self.universe.clone().nest(HrtbUniverseInfo {
-            cause: wf_cause.clone(),
-        });
-
-        self.universe = new_universe;
-        {
-            let mut hrtb_instantiation_visitor = self
-                .ccx
-                .instantiate_hrtb_universal_without_normalization(&self.universe, defs);
-
-            let hrtb_universals = hrtb_instantiation_visitor.replace_with();
-            let bound = hrtb_instantiation_visitor.fold(bound);
-            let bound = Spanned::new_raw(bound, inner_span_info);
-
-            let bound = self.fold(bound);
-
-            self.ccx.oblige_covered(
-                wf_cause,
-                hrtb_universals
-                    .r(s)
-                    .iter()
-                    .filter_map(|ty_or_re| ty_or_re.as_ty())
-                    .map(|ty| {
-                        let TyKind::UniversalVar(var) = *ty.r(s) else {
-                            unreachable!()
-                        };
-
-                        var
-                    }),
-                None,
-                Some(bound),
-            );
-        }
-        self.universe = old_universe;
-
-        Ok(HrtbBinder {
-            defs,
-            // We don't normalize this inner type because normalization doesn't follow HRTB binders.
-            inner: bound,
-        })
-    }
-
-    fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        match ty.view(tcx) {
-            SpannedTyView::Trait(_, _, _) => {
-                let old_clause_applies_to = self.clause_applies_to.replace(ty.value);
-                let normalized = self.super_(ty);
-                self.clause_applies_to = old_clause_applies_to;
-
-                Ok(normalized)
-            }
-            SpannedTyView::Reference(re, muta, pointee) => {
-                let pointee_span = pointee.own_span();
-                let re = self.fold(re);
-                let pointee = self.fold(pointee);
-
-                self.ccx.oblige_ty_outlives_re(
-                    self.cause.clone().child(
-                        ObligeCauseOrigin::ImportWfForReference {
-                            pointee: pointee_span,
-                        }
-                        .into(),
-                    ),
-                    pointee,
-                    re,
-                    RelationDirection::LhsOntoRhs,
-                );
-
-                Ok(tcx.intern(TyKind::Reference(re, muta, pointee)))
-            }
-
-            SpannedTyView::SigProject(TyProjection {
-                target,
-                spec,
-                assoc,
-            }) => {
-                // TODO: Spans
-
-                // WF-check and normalize target type.
-                let target = self.fold(target);
-
-                // WF-check and normalize spec. This has the effect of checking arguments.
-                let old_clause_applies_to = self.clause_applies_to.replace(target);
-                let spec = self.fold(spec);
-                self.clause_applies_to = old_clause_applies_to;
-
-                // Normalize projection type.
-                let resolved = self
-                    .ccx
-                    .normalizer(self.universe.clone())
-                    .normalize_super_normalized_projection(
-                        self.cause.clone().child(
-                            ObligeCauseOrigin::ImportWfTyProjection {
-                                span: ty.own_span(),
-                            }
-                            .into(),
-                        ),
-                        ty.own_span(),
-                        TyProjection {
-                            target,
-                            spec,
-                            assoc,
-                        },
-                    );
-
-                Ok(resolved)
-            }
-            SpannedTyView::SigAlias(def, args) => {
-                // TODO: Spans
-
-                // WF-check arguments
-                let args = self.fold(args);
-
-                // TODO: Move to env utilities
-                self.check_generic_values(
-                    // Cannot use `Self` in type alias.
-                    tcx.intern(TyKind::SigThis),
-                    def.r(s).generics,
-                    [],
-                    args,
-                    &args.r(s).iter().map(|_| ty.own_span()).collect::<Vec<_>>(),
-                    None,
-                );
-
-                // Normalize alias type.
-                let resolved = self
-                    .ccx
-                    .normalizer(self.universe.clone())
-                    .normalize_super_normalized_alias(ty.own_span(), def, args);
-
-                Ok(resolved)
-            }
-
-            SpannedTyView::Simple(_)
-            | SpannedTyView::Adt(_)
-            | SpannedTyView::FnDef(_)
-            | SpannedTyView::Tuple(_)
-            | SpannedTyView::UniversalVar(_)
-            | SpannedTyView::InferVar(_)
-            | SpannedTyView::HrtbVar(_)
-            | SpannedTyView::Error(_) => Ok(self.super_(ty)),
-
-            SpannedTyView::SigThis | SpannedTyView::SigInfer | SpannedTyView::SigGeneric(_) => {
-                unreachable!()
-            }
-        }
-    }
-
-    fn fold_trait_spec(&mut self, spec: SpannedTraitSpec) -> Result<TraitSpec, Self::Error> {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        let param_spans = spec
-            .view(tcx)
-            .params
-            .iter(tcx)
-            .map(|v| v.own_span())
-            .collect::<Vec<_>>();
-
-        let spec = self.super_(spec);
-
-        let params = spec
-            .params
-            .r(s)
-            .iter()
-            .map(|&param| match param {
-                TraitParam::Equals(v) => v,
-                TraitParam::Unspecified(_) => TyOrRe::Ty(self.ccx.fresh_ty_infer(
-                    self.universe.clone(),
-                    InferTyVarSourceInfo::TraitAssocPlaceholderHelper,
-                )),
-            })
-            .collect::<Vec<_>>();
-
-        let params = tcx.intern_list(&params);
-
-        // Just like in `rustc`, we never produce obligations on the associated types since, if an
-        // `impl` is found, we just rely on the fact that `impl` WF checks already validated the
-        // type for its clauses and ensure that our `impl` matches what the trait spec said it would
-        // contain.
-        self.check_generic_values(
-            self.clause_applies_to.unwrap(),
-            *spec.def.r(s).generics,
-            [],
-            params,
-            &param_spans,
-            Some(*spec.def.r(s).regular_generic_count),
-        );
-
-        Ok(spec)
-    }
-
-    fn fold_trait_instance(
-        &mut self,
-        instance: SpannedTraitInstance,
-    ) -> Result<TraitInstance, Self::Error> {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        let param_spans = instance
-            .view(tcx)
-            .params
-            .iter(tcx)
-            .map(|v| v.own_span())
-            .collect::<Vec<_>>();
-
-        let instance = self.super_(instance);
-
-        self.check_generic_values(
-            self.clause_applies_to.unwrap(),
-            *instance.def.r(s).generics,
-            [],
-            instance.params,
-            &param_spans,
-            None,
-        );
-
-        Ok(instance)
-    }
-
-    fn fold_adt_instance(
-        &mut self,
-        instance: SpannedAdtInstance,
-    ) -> Result<AdtInstance, Self::Error> {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        let param_spans = instance
-            .view(tcx)
-            .params
-            .iter(tcx)
-            .map(|v| v.own_span())
-            .collect::<Vec<_>>();
-
-        let instance = self.super_(instance);
-
-        // Check generics
-        self.check_generic_values(
-            tcx.intern(TyKind::Adt(instance)),
-            instance.def.r(s).generics,
-            [],
-            instance.params,
-            &param_spans,
-            None,
-        );
-
-        Ok(instance)
-    }
-
-    fn fold_fn_instance(&mut self, instance: SpannedFnInstance) -> Result<FnInstance, Self::Error> {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        let own_span = instance.own_span();
-        let early_arg_spans = instance
-            .view(tcx)
-            .early_args
-            .map(|v| v.iter(tcx).map(|v| v.own_span()).collect::<Vec<_>>())
-            .unwrap_or_default();
-
-        // WF-check and normalize the interior types.
-        let instance = self.super_(instance.value);
-        let FnInstanceInner { owner, early_args } = *instance.r(s);
-
-        // Construct an environment, validating the `owner` in the process.
-        // FIXME: Should not instantiate anything.
-        let env = self.ccx.instantiate_infer().env_of_fn_def_for_owner(
-            &self
-                .cause
-                .clone()
-                .child(ObligeCauseOrigin::ImportWfFnDef { fn_ty: own_span }.into()),
-            &self.universe,
-            owner,
-        );
-
-        // Validate the `early_args`.
-        if let Some(early_args) = early_args {
-            self.check_generic_values(
-                env.self_ty,
-                owner.early_generics(s),
-                env.substs.iter().copied(),
-                early_args,
-                &early_arg_spans,
-                None,
-            );
-        }
-
-        Ok(instance)
-    }
-
-    fn fold_fn_owner(&mut self, owner: SpannedFnOwner) -> Result<FnOwner, Self::Error> {
-        let tcx = self.tcx();
-
-        match owner.view(tcx) {
-            SpannedFnOwnerView::Item(def) => Ok(FnOwner::Item(def)),
-            SpannedFnOwnerView::Trait {
-                instance,
-                self_ty,
-                method_idx,
-            } => {
-                let self_ty = self.fold(self_ty);
-
-                let old_clause_applies_to = self.clause_applies_to.replace(self_ty);
-                let instance = self.fold(instance);
-                self.clause_applies_to = old_clause_applies_to;
-
-                Ok(FnOwner::Trait(FnOwnerTrait {
-                    instance,
-                    self_ty,
-                    method_idx,
-                }))
-            }
-            // WF assumes that the owner associated with a self-type is valid by construction.
-            SpannedFnOwnerView::Inherent {
-                self_ty,
-                block,
-                method_idx,
-            } => Ok(FnOwner::Inherent(FnOwnerInherent {
-                self_ty: self.fold(self_ty),
-                block,
-                method_idx,
-            })),
-            SpannedFnOwnerView::AdtCtor { ctor } => Ok(FnOwner::AdtCtor(FnOwnerAdtCtor { ctor })),
-        }
-    }
-}
-
-impl ClauseTyWfFolder<'_, '_> {
-    fn check_generic_values(
-        &mut self,
-        clause_applies_to: Ty,
-        binder: Obj<GenericBinder>,
-        extra_def_substs: impl IntoIterator<Item = GenericSubst>,
-        all_params: TyOrReList,
-        param_spans: &[Span],
-        validate_count: Option<u32>,
-    ) {
-        let s = self.session();
-
-        let defs = &binder.r(s).defs[..];
-        let defs = match validate_count {
-            Some(limit) => &defs[..limit as usize],
-            None => defs,
-        };
-
-        let validated_params = all_params.r(s);
-        let validated_params = match validate_count {
-            Some(limit) => &validated_params[..limit as usize],
-            None => validated_params,
-        };
-
-        // TODO: Check this, this is mega sketchy.
-        self.ccx.init_constraints_for_binder_raw(
-            &self.universe,
-            &ClauseImportEnv::new(
-                clause_applies_to,
-                [GenericSubst::new(binder, all_params)]
-                    .into_iter()
-                    .chain(extra_def_substs),
-            ),
-            defs,
-            validated_params,
-            |_, param_idx, clause_span| {
-                self.cause.clone().child(
-                    ObligeCauseOrigin::ImportWfForGenericParam {
-                        use_span: param_spans[param_idx],
-                        clause_span,
-                    }
-                    .into(),
-                )
-            },
-        );
-    }
-}
-
-// === Binder Checking === //
-
-impl<'tcx> ClauseCx<'tcx> {
-    pub fn init_constraints_for_binder(
-        &mut self,
-        cause: &ObligeCause,
-        universe: &HrtbUniverse,
-        binder_parent_env: &ClauseImportEnv,
-        target_binder: Obj<GenericBinder>,
-        target_vars: TyOrReList,
-    ) {
-        let s = self.session();
-
-        let binder_own_env = binder_parent_env
-            .clone()
-            .with_subst(GenericSubst::new(target_binder, target_vars));
-
-        self.init_constraints_for_binder_raw(
-            universe,
-            &binder_own_env,
-            &target_binder.r(s).defs,
-            target_vars.r(s),
-            |_ccx, _idx, clause| {
-                cause
-                    .clone()
-                    .child(ObligeCauseStep::ImportEnvMeetsRequirements { clause }.into())
-            },
+        tcx.intern_list(
+            &tys.r(s)
+                .iter()
+                .map(|ty| self.import_ty(*ty))
+                .collect::<Vec<_>>(),
         )
     }
 
-    pub fn init_constraints_for_binder_raw(
-        &mut self,
-        universe: &HrtbUniverse,
-        binder_own_env: &ClauseImportEnv,
-        target_binder: &[AnyGeneric],
-        target_vars: &[TyOrRe],
-        mut gen_cause: impl FnMut(&mut ClauseCx<'tcx>, usize, Span) -> ObligeCause,
-    ) {
+    pub fn import_ty_or_re_list(&mut self, ty_or_res: SigTyOrReList) -> TyOrReList {
         let s = self.session();
         let tcx = self.tcx();
 
-        for (i, (&generic, &var)) in target_binder.iter().zip(target_vars).enumerate() {
-            match (generic, var) {
-                (AnyGeneric::Re(generic), TyOrRe::Re(var)) => {
-                    for clause in generic.r(s).clauses.iter(tcx) {
-                        let clause_span = clause.own_span();
+        tcx.intern_list(
+            &ty_or_res
+                .r(s)
+                .iter()
+                .map(|ty| self.import_ty_or_re(*ty))
+                .collect::<Vec<_>>(),
+        )
+    }
 
-                        let SpannedTraitClauseView::Outlives(must_outlive_dir, must_outlive) =
-                            clause.view(tcx)
-                        else {
-                            unreachable!()
-                        };
+    pub fn import_ty_or_re(&mut self, ty_or_re: SigTyOrRe) -> TyOrRe {
+        match ty_or_re {
+            SigTyOrRe::Re(re) => TyOrRe::Re(self.import_re(re)),
+            SigTyOrRe::Ty(ty) => TyOrRe::Ty(self.import_ty(ty)),
+        }
+    }
 
-                        let cause = gen_cause(self, i, clause_span);
+    pub fn import_ty(&mut self, ty: SigTy) -> Ty {
+        let s = self.session();
+        let tcx = self.tcx();
 
-                        let must_outlive = self
-                            .importer()
-                            .with_expansion_cause(cause.clone())
-                            // FIXME: Since this is called by well-formedness, we must not.
-                            .import_report_elsewhere(universe, binder_own_env, must_outlive.value);
+        match ty.r(s).kind {
+            // Parameterized (may require WF)
+            SigTyKind::Alias(def, args) => {
+                let s = self.session();
+                let tcx = self.tcx();
 
-                        self.oblige_general_outlives(
-                            cause,
-                            TyOrRe::Re(var),
-                            must_outlive,
-                            must_outlive_dir,
-                        );
-                    }
+                // Import the type alias's arguments.
+                let args = self.import_ty_or_re_list(args);
+
+                if self.opts.wf_mode.should_perform() {
+                    todo!()
                 }
-                (AnyGeneric::Ty(generic), TyOrRe::Ty(var)) => {
-                    for clause in generic.r(s).clauses.iter(tcx) {
-                        let cause = gen_cause(self, i, clause.own_span());
 
-                        let clause = self
-                            .importer()
-                            .with_expansion_cause(cause.clone())
-                            .with_clause_applies_to(var)
-                            .import_report_elsewhere(&universe, binder_own_env, clause.value);
+                // Prevent reentrant alias resolution (preorder).
+                match self.reentrant_aliases.entry(def) {
+                    hash_map::Entry::Occupied(entry) => {
+                        let entry = entry.into_mut();
 
-                        match clause {
-                            TraitClause::Outlives(must_outlive_dir, must_outlive) => {
-                                self.oblige_general_outlives(
-                                    cause,
-                                    TyOrRe::Ty(var),
-                                    must_outlive,
-                                    must_outlive_dir,
-                                );
-                            }
-                            TraitClause::Trait(rhs) => {
-                                self.oblige_ty_meets_trait(cause, universe.clone(), var, rhs);
-                            }
+                        if matches!(entry, ReentrantAliasState::WaitingForViolation) {
+                            *entry = ReentrantAliasState::Violated(ty.r(s).span);
                         }
+
+                        return tcx.intern(TyKind::Error(ErrorGuaranteed::new_unchecked()));
+                    }
+                    hash_map::Entry::Vacant(entry) => {
+                        entry.insert(ReentrantAliasState::WaitingForViolation);
                     }
                 }
-                _ => unreachable!(),
+
+                // Import the alias's inner contents.
+                let env = ClauseImportEnv::new(None, [GenericSubst::new(def.r(s).generics, args)]);
+
+                let old_universe = self.opts.universe.clone();
+                let old_opts = mem::replace(
+                    &mut self.opts,
+                    SigImporterOpts {
+                        universe: old_universe,
+                        env,
+                        // Parameters already constrained by parent WF checks.
+                        wf_mode: SigImporterWfMode::Skip,
+                    },
+                );
+
+                let body = self.import_ty(*def.r(s).body);
+
+                self.opts = old_opts;
+
+                // Prevent reentrant alias resolution (postorder).
+                match self.reentrant_aliases.remove(&def).unwrap() {
+                    ReentrantAliasState::WaitingForViolation => {
+                        // (no violation occurred)
+                    }
+                    ReentrantAliasState::Violated(span) => {
+                        let mut diag = Diag::span_err(
+                            ty.r(s).span,
+                            "attempted to expand recursive type alias",
+                        );
+
+                        if ty.r(s).span != span {
+                            diag.push_child(LeafDiag::span_note(span, "reentered here"));
+                        }
+
+                        diag.emit();
+                    }
+                }
+
+                body
+            }
+            SigTyKind::Reference(re, muta, pointee) => {
+                let re = self.import_re(re);
+                let pointee = self.import_ty(pointee);
+
+                if self.opts.wf_mode.should_perform() {
+                    todo!()
+                }
+
+                tcx.intern(TyKind::Reference(re, muta, pointee))
+            }
+            SigTyKind::Adt(SigAdtInstance { def, params }) => {
+                let params = self.import_ty_or_re_list(params);
+
+                if self.opts.wf_mode.should_perform() {
+                    todo!();
+                }
+
+                tcx.intern(TyKind::Adt(AdtInstance { def, params }))
+            }
+            SigTyKind::Trait(re, muta, clauses) => {
+                let re = self.import_re(re);
+                let clauses = self.import_clause_list_no_spec_wf(clauses);
+
+                if self.opts.wf_mode.should_perform() {
+                    todo!()
+                }
+
+                tcx.intern(TyKind::Trait(re, muta, clauses))
+            }
+            SigTyKind::Tuple(tys) => {
+                let tys = self.import_ty_list(tys);
+
+                if self.opts.wf_mode.should_perform() {
+                    todo!()
+                }
+
+                tcx.intern(TyKind::Tuple(tys))
+            }
+
+            // Unparameterized
+            SigTyKind::SelfTy => self
+                .opts
+                .env
+                .self_ty
+                .expect("self type not defined for environment"),
+
+            SigTyKind::Generic(generic) => self.opts.env.lookup_ty(s, generic),
+
+            SigTyKind::Infer => self.ccx.fresh_ty_infer(
+                self.opts.universe.clone(),
+                InferTyVarSourceInfo::Imported { span: ty.r(s).span },
+            ),
+
+            SigTyKind::Simple(kind) => tcx.intern(TyKind::Simple(kind)),
+
+            SigTyKind::HrtbVar(idx) => tcx.intern(TyKind::HrtbVar(idx)),
+
+            SigTyKind::Project(SigProjectType {
+                target,
+                spec,
+                assoc_span,
+                assoc_idx,
+            }) => todo!(),
+
+            SigTyKind::Error(err) => tcx.intern(TyKind::Error(err)),
+        }
+    }
+
+    pub fn import_re(&mut self, re: SigRe) -> Re {
+        let s = self.session();
+
+        if self.ccx.mode() == UnifyCxMode::RegionBlind {
+            return Re::Erased;
+        }
+
+        match re.kind {
+            SigReKind::Gc => Re::Gc,
+            SigReKind::HrtbVar(idx) => Re::HrtbVar(idx),
+            SigReKind::Infer => self.ccx.fresh_re_infer(),
+            SigReKind::Generic(generic) => self.opts.env.lookup_re(s, generic),
+            SigReKind::Error(err) => Re::Error(err),
+        }
+    }
+
+    pub fn import_clause_list(
+        &mut self,
+        clause_self_ty_for_wfo_for_wf: Ty,
+        clauses: SigTraitClauseList,
+    ) -> TraitClauseList {
+        todo!()
+    }
+
+    pub fn import_clause_list_no_spec_wf(
+        &mut self,
+        clauses: SigTraitClauseList,
+    ) -> TraitClauseList {
+        todo!()
+    }
+
+    pub fn import_clause(
+        &mut self,
+        clause_self_ty_for_wf: Ty,
+        clause: SigTraitClause,
+    ) -> TraitClause {
+        todo!()
+    }
+
+    pub fn import_clause_no_spec_wf(&mut self, clause: SigTraitClause) -> TraitClause {
+        match clause.kind {
+            SigTraitClauseKind::Outlives(dir, ty_or_re) => {
+                todo!()
+            }
+            SigTraitClauseKind::Trait(binder) => {
+                todo!()
             }
         }
     }
+
+    pub fn import_binder(
+        &mut self,
+        clause_self_ty_for_wf: Ty,
+        binder: SigHrtbBinder,
+    ) -> HrtbBinder {
+        todo!()
+    }
+
+    pub fn import_binder_no_spec_wf(&mut self, binder: SigHrtbBinder) -> HrtbBinder {
+        todo!()
+    }
+
+    pub fn import_trait_spec(
+        &mut self,
+        clause_self_ty_for_wf: Ty,
+        spec: SigTraitSpec,
+    ) -> TraitSpec {
+        todo!()
+    }
+
+    pub fn import_trait_spec_no_spec_wf(&mut self, spec: SigTraitSpec) -> TraitSpec {
+        todo!()
+    }
+
+    pub fn import_trait_instance(
+        &mut self,
+        clause_self_ty_for_wf: Ty,
+        spec: SigTraitInstance,
+    ) -> TraitInstance {
+        todo!()
+    }
+
+    pub fn import_trait_instance_no_spec_wf(&mut self, spec: SigTraitInstance) -> TraitInstance {
+        todo!()
+    }
 }
+
+// === HrtbInstantiator === //
+
+// TODO

@@ -46,11 +46,12 @@ use crate::{
         infer::{
             ClauseCx, ClauseImportEnv, ClauseObligation, FloatingInferVar, GenericSubst,
             HrtbUniverse, ObligationNotReady, ObligationResult, ObligeCause, ObligeCauseBehavior,
+            SigImporterWfMode,
         },
         syntax::{
             AnyGeneric, HrtbBinder, InferTyVar, InferTyVarSourceInfo, Mutability, Re, RelationMode,
-            SimpleTySet, SpannedRe, SpannedTy, TraitClause, TraitClauseList, TraitParam, TraitSpec,
-            Ty, TyCtxt, TyFolder, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorExt,
+            SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyFolder,
+            TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorExt,
             UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
@@ -113,6 +114,11 @@ impl<'tcx> ClauseCx<'tcx> {
         if let Some(elaborated) = self.universal_vars[var].elaboration.clone() {
             return elaborated;
         }
+
+        // TODO
+        let cause = ObligeCause::new_empty_report();
+        let var_universal = tcx.intern(TyKind::UniversalVar(var));
+        let var_universe = self.lookup_universal_ty_hrtb_universe(var).clone();
 
         // If not, elaborate the clause list.
         let lub_re = self.fresh_re_universal(UniversalReVarSourceInfo::ElaboratedLub);
@@ -190,22 +196,19 @@ impl<'tcx> ClauseCx<'tcx> {
                             unreachable!()
                         };
 
-                        let implicit_clauses_self = tcx.intern(TyKind::UniversalVar(var));
-                        let implicit_clauses_universe =
-                            self.lookup_universal_ty_hrtb_universe(var).clone();
-
                         let implicit_clauses = self
-                            .importer()
-                            .with_clause_applies_to(implicit_clauses_self)
-                            .import_report_elsewhere(
+                            .importer(
+                                cause.clone(),
                                 // Associated types vary in the same way as their parent generic.
-                                &implicit_clauses_universe,
-                                &ClauseImportEnv::new(
-                                    tcx.intern(TyKind::UniversalVar(var)),
+                                var_universe.clone(),
+                                ClauseImportEnv::new(
+                                    Some(tcx.intern(TyKind::UniversalVar(var))),
                                     [GenericSubst::new(*spec.def.r(s).generics, new_param_equals)],
                                 ),
-                                base.r(s).clauses.value,
-                            );
+                                // TODO: Consider no WF here.
+                                SigImporterWfMode::DelayBug,
+                            )
+                            .import_clause_list(var_universal, *base.r(s).clauses);
 
                         let all_clauses = explicit_clauses
                             .r(s)
@@ -238,15 +241,19 @@ impl<'tcx> ClauseCx<'tcx> {
                     }));
 
                     // Explore and push on the elaborated super-trait constraints.
-                    let inherits = self.import_report_elsewhere(
-                        // Associated types vary in the same way as their parent generic.
-                        &self.lookup_universal_ty_hrtb_universe(var).clone(),
-                        &ClauseImportEnv::new(
-                            tcx.intern(TyKind::UniversalVar(var)),
-                            [GenericSubst::new(*spec.def.r(s).generics, new_param_equals)],
-                        ),
-                        spec.def.r(s).inherits.value,
-                    );
+                    let inherits = self
+                        .importer(
+                            cause.clone(),
+                            // Associated types vary in the same way as their parent generic.
+                            var_universe.clone(),
+                            ClauseImportEnv::new(
+                                Some(tcx.intern(TyKind::UniversalVar(var))),
+                                [GenericSubst::new(*spec.def.r(s).generics, new_param_equals)],
+                            ),
+                            // TODO: Consider no WF here.
+                            SigImporterWfMode::DelayBug,
+                        )
+                        .import_clause_list(var_universal, *spec.def.r(s).inherits);
 
                     elaborated.extend(inherits.r(s).iter().copied());
                 }
@@ -557,9 +564,8 @@ impl<'tcx> TyVisitor<'tcx> for FloatingInfVarVisitor<'_, 'tcx> {
         self.ccx.tcx()
     }
 
-    fn visit_ty(&mut self, ty: SpannedTy) -> ControlFlow<Self::Break> {
+    fn visit_ty(&mut self, ty: Ty) -> ControlFlow<Self::Break> {
         let s = self.session();
-        let ty = ty.value;
 
         match *ty.r(s) {
             TyKind::InferVar(var) => match self.ccx.lookup_ty_infer_var_without_poll(var) {
@@ -589,11 +595,9 @@ impl<'tcx> TyFolder<'tcx> for MergeRepresentativeFolder<'_, 'tcx> {
         self.ccx.tcx()
     }
 
-    fn fold_ty(&mut self, ty: SpannedTy) -> Result<Ty, Self::Error> {
+    fn fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
         let s = self.session();
         let tcx = self.tcx();
-
-        let ty = ty.value;
 
         Ok(match *ty.r(s) {
             TyKind::InferVar(var) => match self.ccx.lookup_ty_infer_var_without_poll(var) {
@@ -607,7 +611,7 @@ impl<'tcx> TyFolder<'tcx> for MergeRepresentativeFolder<'_, 'tcx> {
         })
     }
 
-    fn fold_re(&mut self, _re: SpannedRe) -> Result<Re, Self::Error> {
+    fn fold_re(&mut self, _re: Re) -> Result<Re, Self::Error> {
         Ok(Re::Erased)
     }
 }

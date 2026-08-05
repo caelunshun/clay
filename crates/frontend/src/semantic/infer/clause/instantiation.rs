@@ -3,7 +3,9 @@
 use crate::{
     base::arena::{HasInterner as _, HasListInterner as _, Obj},
     semantic::{
-        infer::{ClauseCx, ClauseImportEnv, GenericSubst, HrtbUniverse, ObligeCause},
+        infer::{
+            ClauseCx, ClauseImportEnv, GenericSubst, HrtbUniverse, ObligeCause, SigImporterWfMode,
+        },
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnInstanceInner,
             FnOwner, FnOwnerAdtCtor, FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder,
@@ -86,12 +88,17 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
         for (&generic, &subst) in target_binder.r(s).defs.iter().zip(target_vars.r(s)) {
             match (generic, subst) {
                 (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
-                    for &clause in generic.r(s).clauses.value.r(s) {
+                    for &clause in generic.r(s).clauses.elems.r(s) {
                         let clause = self
                             .ccx
-                            .importer()
-                            .with_expansion_cause(cause.clone())
-                            .import_report_elsewhere(universe, &binder_env, clause);
+                            .importer(
+                                cause.clone(),
+                                universe.clone(),
+                                binder_env.clone(),
+                                SigImporterWfMode::Skip,
+                            )
+                            // TODO: Can we really skip WF here?
+                            .import_clause_no_spec_wf(clause);
 
                         let TraitClause::Outlives(allowed_to_outlive_dir, allowed_to_outlive) =
                             clause
@@ -113,9 +120,14 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
 
                     let clauses = self
                         .ccx
-                        .importer()
-                        .with_clause_applies_to(target_ty)
-                        .import_report_elsewhere(universe, &binder_env, generic.r(s).clauses.value);
+                        .importer(
+                            cause.clone(),
+                            universe.clone(),
+                            binder_env.clone(),
+                            SigImporterWfMode::Skip,
+                        )
+                        // TODO: Can we really skip WF here?
+                        .import_clause_list_no_spec_wf(*generic.r(s).clauses);
 
                     self.ccx
                         .init_ty_universal_var_direct_clauses(target, clauses);
@@ -148,7 +160,7 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
         let generic_params = self.binder_to_init_vars(
             cause,
             universe,
-            &ClauseImportEnv::new(self_ty, []),
+            &ClauseImportEnv::new(Some(self_ty), []),
             *def.r(s).generics,
         );
 
@@ -171,7 +183,7 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
         );
 
         ClauseImportEnv::new(
-            self_ty,
+            Some(self_ty),
             [GenericSubst::new(*def.r(s).generics, generic_params)],
         )
     }
@@ -198,13 +210,13 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
         self.init_vars_for_binder(
             cause,
             universe,
-            &ClauseImportEnv::new(self_ty, []),
+            &ClauseImportEnv::new(Some(self_ty), []),
             def.r(s).generics,
             sig_generic_substs,
         );
 
         ClauseImportEnv::new(
-            self_ty,
+            Some(self_ty),
             [GenericSubst::new(def.r(s).generics, sig_generic_substs)],
         )
     }
@@ -216,7 +228,6 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
         def: Obj<ImplItem>,
     ) -> ClauseImportEnv {
         let s = self.ccx.session();
-        let tcx = self.ccx.tcx();
 
         // Create universal parameters.
         let sig_generic_substs = self.binder_to_uninit_vars(universe, def.r(s).generics);
@@ -224,29 +235,28 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
         // Create the `Self` type.
         let self_ty = self
             .ccx
-            .importer()
-            .with_expansion_cause(cause.clone())
-            .import_report_elsewhere(
-                universe,
-                &ClauseImportEnv::new(
-                    // This type cannot contain `Self` so we give a dummy self type.
-                    tcx.intern(TyKind::SigThis),
+            .importer(
+                cause.clone(),
+                universe.clone(),
+                ClauseImportEnv::new(
+                    None,
                     [GenericSubst::new(def.r(s).generics, sig_generic_substs)],
                 ),
-                def.r(s).target.value,
-            );
+                SigImporterWfMode::DelayBug,
+            )
+            .import_ty(*def.r(s).target);
 
         // Initialize the clauses.
         self.init_vars_for_binder(
             cause,
             universe,
-            &ClauseImportEnv::new(self_ty, []),
+            &ClauseImportEnv::new(Some(self_ty), []),
             def.r(s).generics,
             sig_generic_substs,
         );
 
         ClauseImportEnv::new(
-            self_ty,
+            Some(self_ty),
             [GenericSubst::new(def.r(s).generics, sig_generic_substs)],
         )
     }
@@ -258,11 +268,10 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
         def: Obj<FnDef>,
     ) -> ClauseImportEnv {
         let s = self.ccx.session();
-        let tcx = self.ccx.tcx();
 
         // Get parent environment
         let mut env = match *def.r(s).owner {
-            FnDefOwner::Item(_item) => ClauseImportEnv::new(tcx.intern(TyKind::SigThis), []),
+            FnDefOwner::Item(_item) => ClauseImportEnv::new(None, []),
             FnDefOwner::TraitMethod(def, _idx) => self.env_for_trait_def(cause, universe, def),
             FnDefOwner::ImplMethod(def, _idx) => self.env_for_impl_block(cause, universe, def),
         };
@@ -282,18 +291,15 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
         def: Obj<TypeAliasItem>,
     ) -> ClauseImportEnv {
         let s = self.ccx.session();
-        let tcx = self.ccx.tcx();
-
-        let self_ty = tcx.intern(TyKind::SigThis);
 
         let substs = self.binder_to_init_vars(
             cause,
             universe,
-            &ClauseImportEnv::new(self_ty, []),
+            &ClauseImportEnv::new(None, []),
             def.r(s).generics,
         );
 
-        ClauseImportEnv::new(self_ty, [GenericSubst::new(def.r(s).generics, substs)])
+        ClauseImportEnv::new(None, [GenericSubst::new(def.r(s).generics, substs)])
     }
 }
 
@@ -379,7 +385,7 @@ impl ClauseCxInferInstantiation<'_, '_> {
                 let params = self.binder_to_constrained_vars(
                     cause,
                     HrtbUniverse::ROOT_REF,
-                    &ClauseImportEnv::new(self_ty, []),
+                    &ClauseImportEnv::new(Some(self_ty), []),
                     *trait_item.r(s).generics,
                 );
 
@@ -461,7 +467,7 @@ impl ClauseCxInferInstantiation<'_, '_> {
         let tcx = self.ccx.tcx();
 
         match owner {
-            FnOwner::Item(_) => ClauseImportEnv::new(tcx.intern(TyKind::SigThis), Vec::new()),
+            FnOwner::Item(_) => ClauseImportEnv::new(None, []),
             FnOwner::Trait(FnOwnerTrait {
                 instance,
                 self_ty,
@@ -470,7 +476,7 @@ impl ClauseCxInferInstantiation<'_, '_> {
                 let instance = self.instantiate_trait_spec(cause, universe, self_ty, instance);
 
                 ClauseImportEnv::new(
-                    self_ty,
+                    Some(self_ty),
                     [GenericSubst::new(
                         *instance.def.r(s).generics,
                         instance.params,
@@ -485,20 +491,24 @@ impl ClauseCxInferInstantiation<'_, '_> {
                 let block_params = self.binder_to_constrained_vars(
                     cause,
                     universe,
-                    &ClauseImportEnv::new(self_ty, Vec::new()),
+                    &ClauseImportEnv::new(Some(self_ty), []),
                     block.r(s).generics,
                 );
 
                 let block_env = ClauseImportEnv::new(
-                    self_ty,
+                    Some(self_ty),
                     [GenericSubst::new(block.r(s).generics, block_params)],
                 );
 
                 let expected_self_ty = self
                     .ccx
-                    .importer()
-                    .with_expansion_cause(cause.clone())
-                    .import_report_elsewhere(&universe, &block_env, block.r(s).target.value);
+                    .importer(
+                        cause.clone(),
+                        universe.clone(),
+                        block_env.clone(),
+                        SigImporterWfMode::DelayBug,
+                    )
+                    .import_ty(*block.r(s).target);
 
                 self.ccx.oblige_ty_unifies_ty(
                     cause.clone(),
@@ -516,7 +526,7 @@ impl ClauseCxInferInstantiation<'_, '_> {
                     cause,
                     universe,
                     // No parent environment exists for these generics.
-                    &ClauseImportEnv::new(tcx.intern(TyKind::SigThis), []),
+                    &ClauseImportEnv::new(None, []),
                     owner.early_generics(s),
                 );
 
@@ -525,7 +535,10 @@ impl ClauseCxInferInstantiation<'_, '_> {
                     params: args,
                 }));
 
-                ClauseImportEnv::new(self_ty, [GenericSubst::new(owner.early_generics(s), args)])
+                ClauseImportEnv::new(
+                    Some(self_ty),
+                    [GenericSubst::new(owner.early_generics(s), args)],
+                )
             }
         }
     }
@@ -571,9 +584,15 @@ impl ClauseCx<'_> {
 
         debug_assert!(def.has_self_parameter(s));
 
-        self.importer()
-            .with_expansion_cause(cause.clone())
-            .import_report_elsewhere(universe, env, def.unimported_sig_args(tcx).r(s)[0])
+        // self.importer(
+        //     cause.clone(),
+        //     universe.clone(),
+        //     env.clone(),
+        //     SigImporterWfMode::DelayBug,
+        // )
+        // .import_ty(def.unimported_sig_args(tcx).r(s)[0])
+
+        todo!()
     }
 
     pub fn import_fn_owner_sig(
@@ -585,16 +604,18 @@ impl ClauseCx<'_> {
     ) -> (TyList, Ty) {
         let tcx = self.tcx();
 
-        let args = self
-            .importer()
-            .with_expansion_cause(cause.clone())
-            .import_report_elsewhere(universe, env, def.unimported_sig_args(tcx));
+        // let args = self
+        //     .importer()
+        //     .with_expansion_cause(cause.clone())
+        //     .import_report_elsewhere(universe, env, def.unimported_sig_args(tcx));
+        //
+        // let ret_ty = self
+        //     .importer()
+        //     .with_expansion_cause(cause.clone())
+        //     .import_report_elsewhere(universe, env, def.unimported_sig_ret_ty(tcx));
+        //
+        // (args, ret_ty)
 
-        let ret_ty = self
-            .importer()
-            .with_expansion_cause(cause.clone())
-            .import_report_elsewhere(universe, env, def.unimported_sig_ret_ty(tcx));
-
-        (args, ret_ty)
+        todo!()
     }
 }
