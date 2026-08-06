@@ -448,13 +448,14 @@ define_index_type! {
 #[derive(Debug, Clone)]
 pub enum InferTyVarSourceInfo {
     UniversalElabHelper,
-    TraitAssocPlaceholderHelper,
     HrtbLhsInstantiation {
         span: Span,
         clauses: Rc<LateInit<TraitClauseList>>,
     },
-    ProjectionResult {
-        span: Span,
+    Projection {
+        self_ty: Ty,
+        spec: TraitSpec,
+        idx: u32,
     },
     Imported {
         span: Span,

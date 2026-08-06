@@ -50,6 +50,10 @@ impl ClauseImportEnv {
         self
     }
 
+    pub fn unwrap_self_ty(&self) -> Ty {
+        self.self_ty.expect("no self type specified")
+    }
+
     pub fn lookup_generic(&self, s: &Session, generic: AnyGeneric) -> TyOrRe {
         let pos = generic.binder(s);
 
@@ -318,11 +322,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             }
 
             // Unparameterized
-            SigTyKind::SelfTy => self
-                .opts
-                .env
-                .self_ty
-                .expect("self type not defined for environment"),
+            SigTyKind::SelfTy => self.opts.env.unwrap_self_ty(),
 
             SigTyKind::Generic(generic) => self.opts.env.lookup_ty(s, generic),
 
@@ -364,7 +364,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
     pub fn import_clause_list(
         &mut self,
-        clause_self_ty_for_wfo_for_wf: Ty,
+        clause_applies_to_for_wf: Ty,
         clauses: SigTraitClauseList,
     ) -> TraitClauseList {
         todo!()
@@ -379,7 +379,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
     pub fn import_clause(
         &mut self,
-        clause_self_ty_for_wf: Ty,
+        clause_applies_to_for_wf: Ty,
         clause: SigTraitClause,
     ) -> TraitClause {
         todo!()
@@ -398,7 +398,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
     pub fn import_binder(
         &mut self,
-        clause_self_ty_for_wf: Ty,
+        clause_applies_to_for_wf: Ty,
         binder: SigHrtbBinder,
     ) -> HrtbBinder {
         todo!()
@@ -410,7 +410,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
     pub fn import_trait_spec(
         &mut self,
-        clause_self_ty_for_wf: Ty,
+        clause_applies_to_for_wf: Ty,
         spec: SigTraitSpec,
     ) -> TraitSpec {
         todo!()

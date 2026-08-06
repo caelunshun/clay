@@ -44,7 +44,7 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxExporter<'_, 'tcx> {
                     )
                     .emit(),
                     InferTyVarSourceInfo::HrtbLhsInstantiation { span, .. }
-                    | InferTyVarSourceInfo::ProjectionResult { span, .. }
+                    | InferTyVarSourceInfo::Projection { span, .. }
                     | InferTyVarSourceInfo::Imported { span, .. }
                     | InferTyVarSourceInfo::FunctionArgs { span }
                     | InferTyVarSourceInfo::FunctionRetVal { span }
@@ -70,7 +70,6 @@ impl<'tcx> TyFolder<'tcx> for ClauseCxExporter<'_, 'tcx> {
                     InferTyVarSourceInfo::UniversalElabHelper => {
                         Diag::anon_err("universal elab helper went uninferred, good luck!").emit()
                     }
-                    InferTyVarSourceInfo::TraitAssocPlaceholderHelper => todo!(),
                     InferTyVarSourceInfo::UnifyHelper => todo!(),
                     InferTyVarSourceInfo::DerefHelper => todo!(),
                     InferTyVarSourceInfo::MethodLookupHelper => todo!(),

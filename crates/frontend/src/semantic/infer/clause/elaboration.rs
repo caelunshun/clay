@@ -115,12 +115,12 @@ impl<'tcx> ClauseCx<'tcx> {
             return elaborated;
         }
 
-        // TODO
+        // TODO: create an actual clause
         let cause = ObligeCause::new_empty_report();
-        let var_universal = tcx.intern(TyKind::UniversalVar(var));
+        let var_ty = tcx.intern(TyKind::UniversalVar(var));
         let var_universe = self.lookup_universal_ty_hrtb_universe(var).clone();
 
-        // If not, elaborate the clause list.
+        // If not, elaborate the clause list without merging projections.
         let lub_re = self.fresh_re_universal(UniversalReVarSourceInfo::ElaboratedLub);
 
         let mut elaborated = Vec::new();
@@ -187,12 +187,12 @@ impl<'tcx> ClauseCx<'tcx> {
                             continue;
                         };
 
-                        let (TyOrRe::Ty(new_param), AnyGeneric::Ty(base)) = (new_param, base)
+                        let (&TyOrRe::Ty(new_param_ty), AnyGeneric::Ty(base)) = (new_param, base)
                         else {
                             unreachable!()
                         };
 
-                        let TyKind::InferVar(new_param) = *new_param.r(s) else {
+                        let TyKind::InferVar(new_param) = *new_param_ty.r(s) else {
                             unreachable!()
                         };
 
@@ -205,10 +205,9 @@ impl<'tcx> ClauseCx<'tcx> {
                                     Some(tcx.intern(TyKind::UniversalVar(var))),
                                     [GenericSubst::new(*spec.def.r(s).generics, new_param_equals)],
                                 ),
-                                // TODO: Consider no WF here.
                                 SigImporterWfMode::DelayBug,
                             )
-                            .import_clause_list(var_universal, *base.r(s).clauses);
+                            .import_clause_list(new_param_ty, *base.r(s).clauses);
 
                         let all_clauses = explicit_clauses
                             .r(s)
@@ -250,10 +249,9 @@ impl<'tcx> ClauseCx<'tcx> {
                                 Some(tcx.intern(TyKind::UniversalVar(var))),
                                 [GenericSubst::new(*spec.def.r(s).generics, new_param_equals)],
                             ),
-                            // TODO: Consider no WF here.
                             SigImporterWfMode::DelayBug,
                         )
-                        .import_clause_list(var_universal, *spec.def.r(s).inherits);
+                        .import_clause_list(var_ty, *spec.def.r(s).inherits);
 
                     elaborated.extend(inherits.r(s).iter().copied());
                 }

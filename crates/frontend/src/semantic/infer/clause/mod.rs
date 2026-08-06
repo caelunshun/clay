@@ -2,6 +2,7 @@ mod base;
 pub use self::base::*;
 
 mod elaboration;
+
 mod exporting;
 
 mod importing;
@@ -15,5 +16,3 @@ mod oblige_outlives;
 
 mod pretty;
 pub use pretty::*;
-
-mod wf;
