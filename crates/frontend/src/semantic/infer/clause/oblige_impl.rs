@@ -2,7 +2,7 @@
 
 use super::elaboration::{UniversalElaboration, WipReificationRootSet};
 use crate::{
-    base::arena::{HasInterner as _, Obj},
+    base::arena::Obj,
     semantic::{
         infer::{
             ClauseCx, ClauseImportEnv, ClauseObligation, GenericSubst, HrtbUniverse,
@@ -340,12 +340,9 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // Obtain inference variables for all generics in the `impl` and tentatively create
         // obligations for them.
-        let trait_env_params = self.instantiate_infer().binder_to_constrained_vars(
-            cause,
-            universe,
-            &ClauseImportEnv::new(Some(lhs), []),
-            rhs.r(s).generics,
-        );
+        let trait_env_params = self
+            .instantiate_infer()
+            .env_of_impl_block(cause, universe, lhs, rhs);
 
         let trait_env = ClauseImportEnv::new(
             Some(lhs),
@@ -371,7 +368,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 trait_env.clone(),
                 SigImporterWfMode::DelayBug,
             )
-            .import_trait_instance(target_ty, rhs.r(s).trait_.unwrap());
+            .import_trait_instance(rhs.r(s).trait_.unwrap());
 
         // Does the `lhs` type match the `rhs`'s target type?
         if self
@@ -479,32 +476,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 unreachable!()
             };
 
-            let lhs_env = self
-                .instantiate_infer()
-                .env_of_fn_def_for_instance(cause, universe, lhs);
-
-            let (lhs_input, lhs_output) =
-                self.import_fn_owner_sig(cause, universe, &lhs_env, lhs.r(s).owner);
-
-            let lhs_input = tcx.intern(TyKind::Tuple(lhs_input));
-
-            if self
-                .ucx_mut()
-                .unify_ty_and_ty(cause, lhs_input, rhs_input, RelationMode::Equate)
-                .is_err()
-            {
-                return Err(SelectionRejected);
-            }
-
-            if self
-                .ucx_mut()
-                .unify_ty_and_ty(cause, lhs_output, rhs_output, RelationMode::Equate)
-                .is_err()
-            {
-                return Err(SelectionRejected);
-            }
-
-            return Ok(self);
+            todo!()
         }
 
         Err(SelectionRejected)

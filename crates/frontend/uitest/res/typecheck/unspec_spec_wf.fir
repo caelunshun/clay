@@ -1,5 +1,5 @@
 mod case1 {
-    trait Meow<T: Thump<Self::Other>> {
+    trait Meow<T: Thump<Other>> {
         type Other;
     }
 
@@ -15,7 +15,7 @@ mod case1 {
 }
 
 mod case2 {
-    trait Meow<T: Thump<Self::Other>> {
+    trait Meow<T: Thump<Other>> {
         type Other;
     }
 
@@ -30,7 +30,7 @@ mod case2 {
 }
 
 mod case3 {
-    trait Meow<T: Thump<Self::Other>> {
+    trait Meow<T: Thump<Other>> {
         type Other;
     }
 
@@ -42,5 +42,21 @@ mod case3 {
     trait Funny {
         // OK
         type Hehe: Meow<u32> + Meow<u32, Other = u32>;
+    }
+}
+
+mod case4 {
+    trait Meow<T: Thump<Other>> {
+        type Other;
+    }
+
+    trait Thump<T> {}
+
+    impl<T> Thump<(T,)> for T {}
+    impl<T> Thump<T> for T {}
+
+    trait Funny {
+        // OK
+        type Hehe: for<T> Meow<T> + for<T> Meow<T, Other = T>;
     }
 }

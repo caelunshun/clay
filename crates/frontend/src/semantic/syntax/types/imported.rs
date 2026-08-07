@@ -5,9 +5,9 @@ use crate::{
         syntax::{Span, Symbol},
     },
     semantic::syntax::{
-        AdtCtor, AdtItem, AnyGeneric, FloatKind, FnDef, FnItem, GenericBinder, HrtbDebruijn,
-        ImplItem, IntKind, LocalNameIdent, MirLocalIdx, Mutability, RegionGeneric,
-        RelationDirection, SimpleTyKind, TraitItem, TyCtxt, TyOrReKind, TypeGeneric,
+        AdtCtor, AdtItem, FloatKind, FnItem, HrtbDebruijn, ImplItem, IntKind, LocalNameIdent,
+        MirLocalIdx, Mutability, RegionGeneric, RelationDirection, SimpleTyKind, TraitItem, TyCtxt,
+        TyOrReKind, TypeGeneric,
     },
     symbol,
 };
@@ -252,94 +252,11 @@ pub enum FnOwner {
     AdtCtor(FnOwnerAdtCtor),
 }
 
-impl FnOwner {
-    pub fn early_generics(self, s: &Session) -> Obj<GenericBinder> {
-        match self {
-            FnOwner::Item(owner) => owner.early_generics(s),
-            FnOwner::Trait(owner) => owner.early_generics(s),
-            FnOwner::Inherent(owner) => owner.early_generics(s),
-            FnOwner::AdtCtor(owner) => owner.early_generics(s),
-        }
-    }
-
-    pub fn has_self_parameter(self, s: &Session) -> bool {
-        match self {
-            FnOwner::Item(owner) => owner.has_self_parameter(s),
-            FnOwner::Trait(owner) => owner.has_self_parameter(s),
-            FnOwner::Inherent(owner) => owner.has_self_parameter(s),
-            FnOwner::AdtCtor(owner) => owner.has_self_parameter(s),
-        }
-    }
-
-    pub fn unimported_sig_args(self, tcx: &TyCtxt) -> TyList {
-        match self {
-            FnOwner::Item(owner) => owner.unimported_sig_args(tcx),
-            FnOwner::Trait(owner) => owner.unimported_sig_args(tcx),
-            FnOwner::Inherent(owner) => owner.unimported_sig_args(tcx),
-            FnOwner::AdtCtor(owner) => owner.unimported_sig_args(tcx),
-        }
-    }
-
-    pub fn unimported_sig_ret_ty(self, tcx: &TyCtxt) -> Ty {
-        match self {
-            FnOwner::Item(owner) => owner.unimported_sig_ret_ty(tcx),
-            FnOwner::Trait(owner) => owner.unimported_sig_ret_ty(tcx),
-            FnOwner::Inherent(owner) => owner.unimported_sig_ret_ty(tcx),
-            FnOwner::AdtCtor(owner) => owner.unimported_sig_ret_ty(tcx),
-        }
-    }
-}
-
-pub trait FnOwnerBackedByDef: Copy {
-    fn def(self, s: &Session) -> Obj<FnDef>;
-
-    fn early_generics(self, s: &Session) -> Obj<GenericBinder> {
-        self.def(s).r(s).generics
-    }
-
-    fn has_self_parameter(self, s: &Session) -> bool {
-        *self.def(s).r(s).has_self_param
-    }
-
-    fn unimported_sig_args(self, tcx: &TyCtxt) -> TyList {
-        let s = &tcx.session;
-
-        tcx.intern_list(
-            &self
-                .def(s)
-                .r(s)
-                .args
-                .r(s)
-                .iter()
-                .map(|arg| arg.ty.value)
-                .collect::<Vec<_>>(),
-        )
-    }
-
-    fn unimported_sig_ret_ty(self, tcx: &TyCtxt) -> Ty {
-        let s = &tcx.session;
-
-        self.def(s).r(s).ret_ty.value
-    }
-}
-
-impl FnOwnerBackedByDef for Obj<FnItem> {
-    fn def(self, s: &Session) -> Obj<FnDef> {
-        *self.r(s).def
-    }
-}
-
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct FnOwnerTrait {
     pub instance: TraitSpec,
     pub self_ty: Ty,
     pub method_idx: u32,
-}
-
-impl FnOwnerBackedByDef for FnOwnerTrait {
-    fn def(self, s: &Session) -> Obj<FnDef> {
-        self.instance.def.r(s).methods[self.method_idx as usize]
-    }
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -349,64 +266,9 @@ pub struct FnOwnerInherent {
     pub method_idx: u32,
 }
 
-impl FnOwnerBackedByDef for FnOwnerInherent {
-    fn def(self, s: &Session) -> Obj<FnDef> {
-        self.block.r(s).methods[self.method_idx as usize].unwrap()
-    }
-}
-
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct FnOwnerAdtCtor {
     pub ctor: Obj<AdtCtor>,
-}
-
-impl FnOwnerAdtCtor {
-    pub fn early_generics(self, s: &Session) -> Obj<GenericBinder> {
-        self.ctor.r(s).owner.item(s).r(s).generics
-    }
-
-    pub fn has_self_parameter(self, _s: &Session) -> bool {
-        false
-    }
-
-    pub fn unimported_sig_args(self, tcx: &TyCtxt) -> TyList {
-        let s = &tcx.session;
-
-        assert!(self.ctor.r(s).syntax.is_tuple());
-
-        tcx.intern_list(
-            &self
-                .ctor
-                .r(s)
-                .fields
-                .iter()
-                .map(|field| field.ty.value)
-                .collect::<Vec<_>>(),
-        )
-    }
-
-    pub fn unimported_sig_ret_ty(self, tcx: &TyCtxt) -> Ty {
-        let s = &tcx.session;
-        let def = self.ctor.r(s).owner.item(s);
-
-        tcx.intern(TyKind::Adt(AdtInstance {
-            def: def,
-            params: tcx.intern_list(
-                &def.r(s)
-                    .generics
-                    .r(s)
-                    .defs
-                    .iter()
-                    .map(|&para| match para {
-                        AnyGeneric::Re(generic) => TyOrRe::Re(Re::SigGeneric(generic)),
-                        AnyGeneric::Ty(generic) => {
-                            TyOrRe::Ty(tcx.intern(TyKind::SigGeneric(generic)))
-                        }
-                    })
-                    .collect::<Vec<_>>(),
-            ),
-        }))
-    }
 }
 
 // === Universal Var === //

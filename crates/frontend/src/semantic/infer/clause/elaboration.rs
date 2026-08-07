@@ -117,7 +117,6 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // TODO: create an actual clause
         let cause = ObligeCause::new_empty_report();
-        let var_ty = tcx.intern(TyKind::UniversalVar(var));
         let var_universe = self.lookup_universal_ty_hrtb_universe(var).clone();
 
         // If not, elaborate the clause list without merging projections.
@@ -140,6 +139,8 @@ impl<'tcx> ClauseCx<'tcx> {
                     elaborated.push(TraitClause::Outlives(outlive_dir, outlive));
                 }
                 TraitClause::Trait(HrtbBinder { defs, inner: spec }) => {
+                    // TODO: Handle binders correctly.
+
                     // Replace unspecified parameters with fresh universals.
                     let new_param_equals = spec
                         .params
@@ -207,7 +208,7 @@ impl<'tcx> ClauseCx<'tcx> {
                                 ),
                                 SigImporterWfMode::DelayBug,
                             )
-                            .import_clause_list(new_param_ty, *base.r(s).clauses);
+                            .import_clause_list(*base.r(s).clauses);
 
                         let all_clauses = explicit_clauses
                             .r(s)
@@ -251,7 +252,7 @@ impl<'tcx> ClauseCx<'tcx> {
                             ),
                             SigImporterWfMode::DelayBug,
                         )
-                        .import_clause_list(var_ty, *spec.def.r(s).inherits);
+                        .import_clause_list(*spec.def.r(s).inherits);
 
                     elaborated.extend(inherits.r(s).iter().copied());
                 }

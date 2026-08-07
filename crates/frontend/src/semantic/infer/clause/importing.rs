@@ -8,11 +8,10 @@ use crate::{
         infer::{ClauseCx, HrtbUniverse, ObligeCause, UnifyCxMode},
         syntax::{
             AdtInstance, AnyGeneric, GenericBinder, HrtbBinder, InferTyVarSourceInfo, Re,
-            RegionGeneric, SigAdtInstance, SigHrtbBinder, SigProjectType, SigRe, SigReKind,
-            SigTraitClause, SigTraitClauseKind, SigTraitClauseList, SigTraitInstance, SigTraitSpec,
-            SigTy, SigTyKind, SigTyList, SigTyOrRe, SigTyOrReList, TraitClause, TraitClauseList,
-            TraitInstance, TraitSpec, Ty, TyCtxt, TyKind, TyList, TyOrRe, TyOrReList,
-            TypeAliasItem, TypeGeneric,
+            RegionGeneric, SigAdtInstance, SigProjectType, SigRe, SigReKind, SigTraitClause,
+            SigTraitClauseList, SigTraitInstance, SigTraitSpec, SigTy, SigTyKind, SigTyList,
+            SigTyOrRe, SigTyOrReList, TraitClause, TraitClauseList, TraitInstance, TraitSpec, Ty,
+            TyCtxt, TyKind, TyList, TyOrRe, TyOrReList, TypeAliasItem, TypeGeneric, UniversalTyVar,
         },
     },
     utils::hash::FxHashMap,
@@ -169,6 +168,7 @@ enum ReentrantAliasState {
     Violated(Span),
 }
 
+/// Types
 impl<'a, 'tcx> SigImporter<'a, 'tcx> {
     fn tcx(&self) -> &'tcx TyCtxt {
         self.ccx.tcx()
@@ -305,13 +305,8 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             }
             SigTyKind::Trait(re, muta, clauses) => {
                 let re = self.import_re(re);
-                let clauses = self.import_clause_list_no_spec_wf(clauses);
-
+                let clauses = self.import_clause_list(clauses);
                 let object_ty = tcx.intern(TyKind::Trait(re, muta, clauses));
-
-                if self.opts.create_wf_obligations {
-                    // TODO
-                }
 
                 object_ty
             }
@@ -346,7 +341,8 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 assoc_idx,
             }) => {
                 let target = self.import_ty(target);
-                let spec_imported = self.import_trait_spec_no_spec_wf(spec);
+
+                let spec_imported = self.import_trait_spec(spec);
 
                 let instance = self.ccx.instantiate_infer().instantiate_trait_spec(
                     &self.opts.cause,
@@ -380,74 +376,47 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             SigReKind::Error(err) => Re::Error(err),
         }
     }
+}
 
-    pub fn import_clause_list(
-        &mut self,
-        clause_applies_to_for_wf: Ty,
-        clauses: SigTraitClauseList,
-    ) -> TraitClauseList {
+/// Traits
+impl<'a, 'tcx> SigImporter<'a, 'tcx> {
+    pub fn import_clause_list(&mut self, clauses: SigTraitClauseList) -> TraitClauseList {
         todo!()
     }
 
-    pub fn import_clause_list_no_spec_wf(
-        &mut self,
-        clauses: SigTraitClauseList,
-    ) -> TraitClauseList {
+    pub fn import_trait_clause(&mut self, clause: SigTraitClause) -> TraitClause {
         todo!()
     }
 
-    pub fn import_clause(
+    pub fn import_trait_spec(&mut self, clause: SigTraitSpec) -> TraitSpec {
+        todo!()
+    }
+
+    pub fn import_trait_instance(&mut self, instance: SigTraitInstance) -> TraitInstance {
+        todo!()
+    }
+
+    fn import_trait_clause_inner(
         &mut self,
-        clause_applies_to_for_wf: Ty,
+        wf_self_ty: Option<UniversalTyVar>,
         clause: SigTraitClause,
     ) -> TraitClause {
         todo!()
     }
 
-    pub fn import_clause_no_spec_wf(&mut self, clause: SigTraitClause) -> TraitClause {
-        match clause.kind {
-            SigTraitClauseKind::Outlives(dir, ty_or_re) => {
-                todo!()
-            }
-            SigTraitClauseKind::Trait(binder) => {
-                todo!()
-            }
-        }
-    }
-
-    pub fn import_binder(
+    fn import_trait_spec_inner(
         &mut self,
-        clause_applies_to_for_wf: Ty,
-        binder: SigHrtbBinder,
-    ) -> HrtbBinder {
-        todo!()
-    }
-
-    pub fn import_binder_no_spec_wf(&mut self, binder: SigHrtbBinder) -> HrtbBinder {
-        todo!()
-    }
-
-    pub fn import_trait_spec(
-        &mut self,
-        clause_applies_to_for_wf: Ty,
-        spec: SigTraitSpec,
+        wf_self_ty: Option<UniversalTyVar>,
+        clause: SigTraitSpec,
     ) -> TraitSpec {
         todo!()
     }
 
-    pub fn import_trait_spec_no_spec_wf(&mut self, spec: SigTraitSpec) -> TraitSpec {
-        todo!()
-    }
-
-    pub fn import_trait_instance(
+    fn import_trait_instance_inner(
         &mut self,
-        clause_self_ty_for_wf: Ty,
-        spec: SigTraitInstance,
+        wf_self_ty: Option<UniversalTyVar>,
+        instance: SigTraitInstance,
     ) -> TraitInstance {
-        todo!()
-    }
-
-    pub fn import_trait_instance_no_spec_wf(&mut self, spec: SigTraitInstance) -> TraitInstance {
         todo!()
     }
 }

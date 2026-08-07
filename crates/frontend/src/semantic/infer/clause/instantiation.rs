@@ -1,19 +1,14 @@
 use crate::{
-    base::{
-        arena::{HasInterner as _, HasListInterner as _, Obj},
-        syntax::Span,
-    },
+    base::arena::{HasInterner as _, HasListInterner as _, Obj},
     semantic::{
         infer::{
-            ClauseCx, ClauseImportEnv, GenericSubst, HrtbUniverse, ObligeCause, ObligeCauseFrame,
-            ObligeCauseOrigin, SigImporterWfMode,
+            ClauseCx, ClauseImportEnv, GenericSubst, HrtbUniverse, ObligeCause, SigImporterWfMode,
         },
         syntax::{
-            AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnInstanceInner,
-            FnOwner, FnOwnerAdtCtor, FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder,
-            ImplItem, InferTyVarSourceInfo, RelationMode, SigTraitClauseKind, TraitClause,
-            TraitInstance, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReList,
-            TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
+            AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, GenericBinder, HrtbBinder,
+            ImplItem, InferTyVarSourceInfo, SigTraitClauseKind, TraitClause, TraitInstance,
+            TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReList, TypeAliasItem,
+            UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -99,8 +94,7 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
                                 binder_env.clone(),
                                 SigImporterWfMode::Skip,
                             )
-                            // TODO: Can we really skip WF here?
-                            .import_clause_no_spec_wf(clause);
+                            .import_trait_clause(clause);
 
                         let TraitClause::Outlives(allowed_to_outlive_dir, allowed_to_outlive) =
                             clause
@@ -128,8 +122,7 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
                             binder_env.clone(),
                             SigImporterWfMode::Skip,
                         )
-                        // TODO: Can we really skip WF here?
-                        .import_clause_list_no_spec_wf(*generic.r(s).clauses);
+                        .import_clause_list(*generic.r(s).clauses);
 
                     self.ccx
                         .init_ty_universal_var_direct_clauses(target, clauses);
@@ -325,232 +318,6 @@ pub struct ClauseCxInferInstantiation<'a, 'tcx> {
 }
 
 impl ClauseCxInferInstantiation<'_, '_> {
-    /// Resolves all the projected types of a `TraitSpec` applying to a specified `self_ty`,
-    /// returning a complete `TraitInstance`.
-    pub fn instantiate_trait_spec(
-        &mut self,
-        cause: &ObligeCause,
-        universe: &HrtbUniverse,
-        self_ty: Ty,
-        spec: TraitSpec,
-    ) -> TraitInstance {
-        let s = self.ccx.session();
-        let tcx = self.ccx.tcx();
-
-        let params = spec
-            .params
-            .r(s)
-            .iter()
-            .enumerate()
-            .map(|(idx, &param)| match param {
-                TraitParam::Equals(value) => value,
-                TraitParam::Unspecified(clauses) => {
-                    let projection = self.ccx.fresh_ty_infer(
-                        universe.clone(),
-                        InferTyVarSourceInfo::Projection {
-                            self_ty,
-                            spec,
-                            idx: idx as u32,
-                        },
-                    );
-
-                    self.ccx
-                        .oblige_ty_meets_clauses(cause, universe, projection, clauses);
-
-                    TyOrRe::Ty(projection)
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let instance = TraitInstance {
-            def: spec.def,
-            params: tcx.intern_list(&params),
-        };
-
-        self.ccx.oblige_ty_meets_trait_instantiated(
-            cause.clone(),
-            universe.clone(),
-            self_ty,
-            // Force the fresh variables to be properly constrained.
-            instance.to_spec(tcx),
-        );
-
-        instance
-    }
-
-    pub fn instantiate_method_fn_owner(
-        &mut self,
-        cause: &ObligeCause,
-        def: Obj<FnDef>,
-        self_ty: Ty,
-    ) -> FnOwner {
-        let s = self.ccx.session();
-        let tcx = self.ccx.tcx();
-
-        match *def.r(s).owner {
-            FnDefOwner::Item(_) => unreachable!("not a method"),
-            FnDefOwner::ImplMethod(block, method_idx) => FnOwner::Inherent(FnOwnerInherent {
-                self_ty,
-                block,
-                method_idx,
-            }),
-            FnDefOwner::TraitMethod(trait_item, method_idx) => {
-                let params = self.binder_to_constrained_vars(
-                    cause,
-                    HrtbUniverse::ROOT_REF,
-                    &ClauseImportEnv::new(Some(self_ty), []),
-                    *trait_item.r(s).generics,
-                );
-
-                let params = tcx.intern_list(
-                    &params
-                        .r(s)
-                        .iter()
-                        .copied()
-                        .map(TraitParam::Equals)
-                        .collect::<Vec<_>>(),
-                );
-
-                FnOwner::Trait(FnOwnerTrait {
-                    instance: TraitSpec {
-                        def: trait_item,
-                        params,
-                    },
-                    self_ty,
-                    method_idx,
-                })
-            }
-        }
-    }
-
-    pub fn env_of_fn_def_for_owner(
-        &mut self,
-        cause: &ObligeCause,
-        universe: &HrtbUniverse,
-        owner: FnOwner,
-    ) -> ClauseImportEnv {
-        let s = self.ccx.session();
-        let tcx = self.ccx.tcx();
-
-        match owner {
-            FnOwner::Item(_) => ClauseImportEnv::new(None, []),
-            FnOwner::Trait(FnOwnerTrait {
-                instance,
-                self_ty,
-                method_idx: _,
-            }) => {
-                let instance = self.instantiate_trait_spec(cause, universe, self_ty, instance);
-
-                ClauseImportEnv::new(
-                    Some(self_ty),
-                    [GenericSubst::new(
-                        *instance.def.r(s).generics,
-                        instance.params,
-                    )],
-                )
-            }
-            FnOwner::Inherent(FnOwnerInherent {
-                self_ty,
-                block,
-                method_idx: _,
-            }) => {
-                let block_params = self.binder_to_constrained_vars(
-                    cause,
-                    universe,
-                    &ClauseImportEnv::new(Some(self_ty), []),
-                    block.r(s).generics,
-                );
-
-                let block_env = ClauseImportEnv::new(
-                    Some(self_ty),
-                    [GenericSubst::new(block.r(s).generics, block_params)],
-                );
-
-                let expected_self_ty = self
-                    .ccx
-                    .importer(
-                        cause.clone(),
-                        universe.clone(),
-                        block_env.clone(),
-                        SigImporterWfMode::DelayBug,
-                    )
-                    .import_ty(*block.r(s).target);
-
-                self.ccx.oblige_ty_unifies_ty(
-                    cause.clone(),
-                    self_ty,
-                    expected_self_ty,
-                    RelationMode::Equate,
-                );
-
-                block_env
-            }
-            // FIXME: this is not how one instantiates this environment—we should instantiate
-            // anything because that's the instance's job.
-            FnOwner::AdtCtor(owner @ FnOwnerAdtCtor { ctor }) => {
-                let args = self.binder_to_constrained_vars(
-                    cause,
-                    universe,
-                    // No parent environment exists for these generics.
-                    &ClauseImportEnv::new(None, []),
-                    owner.early_generics(s),
-                );
-
-                let self_ty = tcx.intern(TyKind::Adt(AdtInstance {
-                    def: ctor.r(s).owner.item(s),
-                    params: args,
-                }));
-
-                ClauseImportEnv::new(
-                    Some(self_ty),
-                    [GenericSubst::new(owner.early_generics(s), args)],
-                )
-            }
-        }
-    }
-
-    pub fn env_of_fn_def_for_instance(
-        &mut self,
-        cause: &ObligeCause,
-        universe: &HrtbUniverse,
-        instance: FnInstance,
-    ) -> ClauseImportEnv {
-        let s = self.ccx.session();
-
-        let FnInstanceInner { owner, early_args } = *instance.r(s);
-
-        let mut env = self.env_of_fn_def_for_owner(cause, universe, owner);
-        let early_generics = owner.early_generics(s);
-
-        env.substs.push(GenericSubst::new(
-            early_generics,
-            if let Some(early_args) = early_args {
-                early_args
-            } else {
-                self.binder_to_constrained_vars(cause, universe, &env, early_generics)
-            },
-        ));
-
-        env
-    }
-}
-
-// === Well-Formedness === //
-
-impl<'tcx> ClauseCx<'tcx> {
-    pub fn wf(&mut self) -> ClauseCxWfChecking<'_, 'tcx> {
-        ClauseCxWfChecking { ccx: self }
-    }
-}
-
-/// Utilities for [`ClauseCx`] which assert that a type is well-formed.
-pub struct ClauseCxWfChecking<'a, 'tcx> {
-    ccx: &'a mut ClauseCx<'tcx>,
-}
-
-/// Machinery
-impl<'a, 'tcx> ClauseCxWfChecking<'a, 'tcx> {
-    /// Asserts the all the concrete parameters to a binder meet the binder's clauses.
     pub fn ensure_binder_params_wf(
         &mut self,
         universe: &HrtbUniverse,
@@ -609,7 +376,7 @@ impl<'a, 'tcx> ClauseCxWfChecking<'a, 'tcx> {
                                 // See above.
                                 SigImporterWfMode::Skip,
                             )
-                            .import_clause_no_spec_wf(clause);
+                            .import_trait_clause(clause);
 
                         match clause {
                             TraitClause::Outlives(must_outlive_dir, must_outlive) => {
@@ -635,134 +402,57 @@ impl<'a, 'tcx> ClauseCxWfChecking<'a, 'tcx> {
             }
         }
     }
-}
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum AssocParamWfMode {
-    Check,
-    Ignore,
-}
-
-/// Traits
-impl<'a, 'tcx> ClauseCxWfChecking<'a, 'tcx> {
-    /// Ensures that a `TraitSpec` applying inherently to some type has well-formed parameters.
-    ///
-    /// The "applying inherently to some type" bit is important since it allows us to oblige that
-    /// `spec` implements `inherently_applies_to` under a delay bug to reveal all the associated
-    /// types. Generally, `inherently_applies_to` is a universal variable or a `dyn Trait` object.
-    pub fn ensure_trait_spec_wf_with_inherent_self_obligation(
+    /// Resolves all the projected types of a `TraitSpec` applying to a specified `self_ty`,
+    /// returning a complete `TraitInstance`.
+    pub fn instantiate_trait_spec(
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,
-        inherently_applies_to: Ty,
-        spans: impl IntoIterator<Item = Span>,
+        self_ty: Ty,
         spec: TraitSpec,
     ) -> TraitInstance {
-        // We instantiate the `spec` as an instance to ensure that each associated type inference
-        // variable is bound such that it projects to `applies_to`'s substitution.
-        //
-        // Consider the following program...
-        //
-        // ```
-        // trait Meow<T: Thump<Self::Other>> {
-        //     type Other;
-        // }
-        //
-        // trait Thump<T> {}
-        //
-        // impl Thump<i32> for u32 {}
-        // impl Thump<u32> for u32 {}
-        //
-        // trait Funny {
-        //     type Hehe: Meow<u32>;
-        // }
-        // ```
-        //
-        // It should be rejected because an implementation of `Funny` could set `Hehe` to a type
-        // that implements `Meow` with an `Other` which is neither `i32` nor `u32`.
-        //
-        // Meanwhile, a program like this should pass...
-        //
-        // ```
-        // // --- snip ---
-        //
-        // trait Funny {
-        //     type Hehe: Meow<u32> + Meow<u32, Other = u32>;
-        // }
-        // ```
-        //
-        // If we didn't bind the inference variable in the first `Meow<u32, Other: <unspec>>` spec,
-        // we would fail to prove that `u32: Thump<?infer helper>` with an ambiguity error. However,
-        // by binding the projection, we gain knowledge of `Other`'s binding within another clause.
-        //
-        // Note that obligation alone is not sufficient for well-formedness because the universal
-        // type we synthesize for WF-checking the `Funny` trait has the universal specification
-        // `Self: Funny<u32, Other: <unspec>>`, which would allow this `impl` to trivially pass
-        // using inherent type impl rules.
-        let instance = self.ccx.instantiate_infer().instantiate_trait_spec(
-            &cause.clone().into_delay_bug(),
-            universe,
-            inherently_applies_to,
-            spec,
-        );
-
-        // Check the parameters.
-        self.ensure_trait_instance_args_wf_no_self_obligation(
-            cause,
-            universe,
-            inherently_applies_to,
-            spans,
-            instance,
-            // We don't verify the well-formedness of the associated types within a spec to be
-            // consistent with rustc's behavior, which seems to exist to make a few common patterns
-            // work. This is fine because, if the associated type is not WF, no impl for it will
-            // exist.
-            AssocParamWfMode::Ignore,
-        );
-
-        instance
-    }
-
-    pub fn ensure_trait_instance_args_wf_no_self_obligation(
-        &mut self,
-        cause: &ObligeCause,
-        universe: &HrtbUniverse,
-        applies_to: Ty,
-        spans: impl IntoIterator<Item = Span>,
-        instance: TraitInstance,
-        assoc_wf_mode: AssocParamWfMode,
-    ) {
         let s = self.ccx.session();
+        let tcx = self.ccx.tcx();
 
-        let binder = *instance.def.r(s).generics;
-
-        let binder_env = ClauseImportEnv::new(
-            Some(applies_to),
-            [GenericSubst::new(binder, instance.params)],
-        );
-
-        let params_wf = instance
+        let params = spec
             .params
             .r(s)
             .iter()
-            .zip(spans)
-            .zip(&binder.r(s).defs)
-            .map(|((&para, span), generic)| {
-                let cause = cause.clone().child(ObligeCauseFrame::Origin(
-                    ObligeCauseOrigin::ImportWfForGenericParam {
-                        use_span: span,
-                        clause_span: generic.span(s),
-                    },
-                ));
+            .enumerate()
+            .map(|(idx, &param)| match param {
+                TraitParam::Equals(value) => value,
+                TraitParam::Unspecified(clauses) => {
+                    let projection = self.ccx.fresh_ty_infer(
+                        universe.clone(),
+                        InferTyVarSourceInfo::Projection {
+                            self_ty,
+                            spec,
+                            idx: idx as u32,
+                        },
+                    );
 
-                (cause, para)
-            });
+                    self.ccx
+                        .oblige_ty_meets_clauses(cause, universe, projection, clauses);
 
-        let param_truncation = match assoc_wf_mode {
-            AssocParamWfMode::Check => None,
-            AssocParamWfMode::Ignore => Some(*instance.def.r(s).regular_generic_count),
+                    TyOrRe::Ty(projection)
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let instance = TraitInstance {
+            def: spec.def,
+            params: tcx.intern_list(&params),
         };
 
-        self.ensure_binder_params_wf(universe, binder, binder_env, param_truncation, params_wf);
+        self.ccx.oblige_ty_meets_trait_instantiated(
+            cause.clone(),
+            universe.clone(),
+            self_ty,
+            // Force the fresh variables to be properly constrained.
+            instance.to_spec(tcx),
+        );
+
+        instance
     }
 }
