@@ -12,8 +12,8 @@ use crate::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnInstanceInner,
             FnOwner, FnOwnerAdtCtor, FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder,
             ImplItem, InferTyVarSourceInfo, RelationMode, SigTraitClauseKind, TraitClause,
-            TraitInstance, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyList, TyOrRe,
-            TyOrReList, TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
+            TraitInstance, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReList,
+            TypeAliasItem, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -325,6 +325,8 @@ pub struct ClauseCxInferInstantiation<'a, 'tcx> {
 }
 
 impl ClauseCxInferInstantiation<'_, '_> {
+    /// Resolves all the projected types of a `TraitSpec` applying to a specified `self_ty`,
+    /// returning a complete `TraitInstance`.
     pub fn instantiate_trait_spec(
         &mut self,
         cause: &ObligeCause,
@@ -533,57 +535,6 @@ impl ClauseCxInferInstantiation<'_, '_> {
     }
 }
 
-// === Misc Helpers === //
-
-impl ClauseCx<'_> {
-    pub fn import_fn_owner_receiver_as_infer(
-        &mut self,
-        cause: &ObligeCause,
-        universe: &HrtbUniverse,
-        env: &ClauseImportEnv,
-        def: FnOwner,
-    ) -> Ty {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        debug_assert!(def.has_self_parameter(s));
-
-        // self.importer(
-        //     cause.clone(),
-        //     universe.clone(),
-        //     env.clone(),
-        //     SigImporterWfMode::DelayBug,
-        // )
-        // .import_ty(def.unimported_sig_args(tcx).r(s)[0])
-
-        todo!()
-    }
-
-    pub fn import_fn_owner_sig(
-        &mut self,
-        cause: &ObligeCause,
-        universe: &HrtbUniverse,
-        env: &ClauseImportEnv,
-        def: FnOwner,
-    ) -> (TyList, Ty) {
-        let tcx = self.tcx();
-
-        // let args = self
-        //     .importer()
-        //     .with_expansion_cause(cause.clone())
-        //     .import_report_elsewhere(universe, env, def.unimported_sig_args(tcx));
-        //
-        // let ret_ty = self
-        //     .importer()
-        //     .with_expansion_cause(cause.clone())
-        //     .import_report_elsewhere(universe, env, def.unimported_sig_ret_ty(tcx));
-        //
-        // (args, ret_ty)
-
-        todo!()
-    }
-}
-
 // === Well-Formedness === //
 
 impl<'tcx> ClauseCx<'tcx> {
@@ -599,6 +550,7 @@ pub struct ClauseCxWfChecking<'a, 'tcx> {
 
 /// Machinery
 impl<'a, 'tcx> ClauseCxWfChecking<'a, 'tcx> {
+    /// Asserts the all the concrete parameters to a binder meet the binder's clauses.
     pub fn ensure_binder_params_wf(
         &mut self,
         universe: &HrtbUniverse,
@@ -693,12 +645,17 @@ pub enum AssocParamWfMode {
 
 /// Traits
 impl<'a, 'tcx> ClauseCxWfChecking<'a, 'tcx> {
-    pub fn ensure_trait_spec_wf(
+    /// Ensures that a `TraitSpec` applying inherently to some type has well-formed parameters.
+    ///
+    /// The "applying inherently to some type" bit is important since it allows us to oblige that
+    /// `spec` implements `inherently_applies_to` under a delay bug to reveal all the associated
+    /// types. Generally, `inherently_applies_to` is a universal variable or a `dyn Trait` object.
+    pub fn ensure_trait_spec_wf_with_inherent_self_obligation(
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,
-        applies_to: Ty,
-        spans: &[Span],
+        inherently_applies_to: Ty,
+        spans: impl IntoIterator<Item = Span>,
         spec: TraitSpec,
     ) -> TraitInstance {
         // We instantiate the `spec` as an instance to ensure that each associated type inference
@@ -742,17 +699,19 @@ impl<'a, 'tcx> ClauseCxWfChecking<'a, 'tcx> {
         // type we synthesize for WF-checking the `Funny` trait has the universal specification
         // `Self: Funny<u32, Other: <unspec>>`, which would allow this `impl` to trivially pass
         // using inherent type impl rules.
-        let instance = self
-            .ccx
-            .instantiate_infer()
-            .instantiate_trait_spec(cause, universe, applies_to, spec);
+        let instance = self.ccx.instantiate_infer().instantiate_trait_spec(
+            &cause.clone().into_delay_bug(),
+            universe,
+            inherently_applies_to,
+            spec,
+        );
 
         // Check the parameters.
         self.ensure_trait_instance_args_wf_no_self_obligation(
             cause,
             universe,
-            applies_to,
-            &spans,
+            inherently_applies_to,
+            spans,
             instance,
             // We don't verify the well-formedness of the associated types within a spec to be
             // consistent with rustc's behavior, which seems to exist to make a few common patterns
@@ -769,7 +728,7 @@ impl<'a, 'tcx> ClauseCxWfChecking<'a, 'tcx> {
         cause: &ObligeCause,
         universe: &HrtbUniverse,
         applies_to: Ty,
-        spans: &[Span],
+        spans: impl IntoIterator<Item = Span>,
         instance: TraitInstance,
         assoc_wf_mode: AssocParamWfMode,
     ) {
@@ -788,7 +747,7 @@ impl<'a, 'tcx> ClauseCxWfChecking<'a, 'tcx> {
             .iter()
             .zip(spans)
             .zip(&binder.r(s).defs)
-            .map(|((&para, &span), generic)| {
+            .map(|((&para, span), generic)| {
                 let cause = cause.clone().child(ObligeCauseFrame::Origin(
                     ObligeCauseOrigin::ImportWfForGenericParam {
                         use_span: span,

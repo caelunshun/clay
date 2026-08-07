@@ -96,6 +96,13 @@ impl GenericSubst {
 
 // === Driver === //
 
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum SigImporterWfMode {
+    Skip,
+    DelayBug,
+    ReportHere,
+}
+
 impl<'tcx> ClauseCx<'tcx> {
     pub fn importer(
         &mut self,
@@ -106,11 +113,17 @@ impl<'tcx> ClauseCx<'tcx> {
     ) -> SigImporter<'_, 'tcx> {
         SigImporter {
             ccx: self,
-            cause,
             opts: SigImporterOpts {
+                cause: match wf_mode {
+                    SigImporterWfMode::Skip | SigImporterWfMode::ReportHere => cause,
+                    SigImporterWfMode::DelayBug => cause.into_delay_bug(),
+                },
                 universe,
                 env,
-                wf_mode,
+                create_wf_obligations: match wf_mode {
+                    SigImporterWfMode::Skip => false,
+                    SigImporterWfMode::DelayBug | SigImporterWfMode::ReportHere => true,
+                },
             },
             reentrant_aliases: FxHashMap::default(),
         }
@@ -139,34 +152,21 @@ impl<'tcx> ClauseCx<'tcx> {
 
 pub struct SigImporter<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
-    cause: ObligeCause,
     opts: SigImporterOpts,
     reentrant_aliases: FxHashMap<Obj<TypeAliasItem>, ReentrantAliasState>,
 }
 
 struct SigImporterOpts {
+    cause: ObligeCause,
     universe: HrtbUniverse,
     env: ClauseImportEnv,
-    wf_mode: SigImporterWfMode,
+    create_wf_obligations: bool,
 }
 
 #[derive(Debug, Copy, Clone)]
 enum ReentrantAliasState {
     WaitingForViolation,
     Violated(Span),
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum SigImporterWfMode {
-    Skip,
-    DelayBug,
-    ReportHere,
-}
-
-impl SigImporterWfMode {
-    pub fn should_perform(self) -> bool {
-        matches!(self, Self::DelayBug | Self::ReportHere)
-    }
 }
 
 impl<'a, 'tcx> SigImporter<'a, 'tcx> {
@@ -223,7 +223,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 // Import the type alias's arguments.
                 let args = self.import_ty_or_re_list(args);
 
-                if self.opts.wf_mode.should_perform() {
+                if self.opts.create_wf_obligations {
                     todo!()
                 }
 
@@ -246,14 +246,16 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 // Import the alias's inner contents.
                 let env = ClauseImportEnv::new(None, [GenericSubst::new(def.r(s).generics, args)]);
 
-                let old_universe = self.opts.universe.clone();
+                let parent_cause = self.opts.cause.clone();
+                let parent_universe = self.opts.universe.clone();
                 let old_opts = mem::replace(
                     &mut self.opts,
                     SigImporterOpts {
-                        universe: old_universe,
+                        cause: parent_cause,
+                        universe: parent_universe,
                         env,
                         // Parameters already constrained by parent WF checks.
-                        wf_mode: SigImporterWfMode::Skip,
+                        create_wf_obligations: false,
                     },
                 );
 
@@ -286,7 +288,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 let re = self.import_re(re);
                 let pointee = self.import_ty(pointee);
 
-                if self.opts.wf_mode.should_perform() {
+                if self.opts.create_wf_obligations {
                     todo!()
                 }
 
@@ -295,7 +297,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             SigTyKind::Adt(SigAdtInstance { def, params }) => {
                 let params = self.import_ty_or_re_list(params);
 
-                if self.opts.wf_mode.should_perform() {
+                if self.opts.create_wf_obligations {
                     todo!();
                 }
 
@@ -305,17 +307,19 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 let re = self.import_re(re);
                 let clauses = self.import_clause_list_no_spec_wf(clauses);
 
-                if self.opts.wf_mode.should_perform() {
-                    todo!()
+                let object_ty = tcx.intern(TyKind::Trait(re, muta, clauses));
+
+                if self.opts.create_wf_obligations {
+                    // TODO
                 }
 
-                tcx.intern(TyKind::Trait(re, muta, clauses))
+                object_ty
             }
             SigTyKind::Tuple(tys) => {
                 let tys = self.import_ty_list(tys);
 
-                if self.opts.wf_mode.should_perform() {
-                    todo!()
+                if self.opts.create_wf_obligations {
+                    // TODO: sizedness checks
                 }
 
                 tcx.intern(TyKind::Tuple(tys))
@@ -338,9 +342,24 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             SigTyKind::Project(SigProjectType {
                 target,
                 spec,
-                assoc_span,
+                assoc_span: _,
                 assoc_idx,
-            }) => todo!(),
+            }) => {
+                let target = self.import_ty(target);
+                let spec_imported = self.import_trait_spec_no_spec_wf(spec);
+
+                let instance = self.ccx.instantiate_infer().instantiate_trait_spec(
+                    &self.opts.cause,
+                    &self.opts.universe,
+                    target,
+                    spec_imported,
+                );
+
+                // We don't do a `ensure_trait_instance_args_wf_no_self_obligation` here because the
+                // diagnostic produced by `instantiate_trait_spec` should be enough to warn users.
+
+                instance.params.r(s)[assoc_idx as usize].unwrap_ty()
+            }
 
             SigTyKind::Error(err) => tcx.intern(TyKind::Error(err)),
         }
