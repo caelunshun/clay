@@ -154,7 +154,7 @@ impl<'tcx> ClauseCx<'tcx> {
                                 let var = self.fresh_ty_infer_var_restricted(
                                     // Associated types vary in the same way as their parent generic.
                                     universal.clone(),
-                                    InferTyVarSourceInfo::UniversalElabHelper,
+                                    InferTyVarSourceInfo::ElaborationUnifyHelper,
                                     // Prevent this type from unifying with other concrete types
                                     // until elaboration is finished.
                                     SimpleTySet::ELAB_UNIVERSAL_VAR,

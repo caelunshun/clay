@@ -2,7 +2,8 @@ use crate::{
     base::arena::{HasInterner as _, HasListInterner as _, Obj},
     semantic::{
         infer::{
-            ClauseCx, ClauseImportEnv, GenericSubst, HrtbUniverse, ObligeCause, SigImporterWfMode,
+            ClauseCx, ClauseImportEnv, GenericSubst, HrtbUniverse, ObligeCause, ObligeCauseFrame,
+            ObligeCauseStep, SigImporterWfMode,
         },
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, GenericBinder, HrtbBinder,
@@ -307,12 +308,6 @@ impl<'tcx> ClauseCx<'tcx> {
 }
 
 /// Utilities for instantiating various type system objects with placeholder inference variables.
-///
-/// Do not use these methods unless you intend to instantiate and later constrain an inference
-/// variable. For example, it would be wrong to attempt to WF-check a function instance without any
-/// early-bound parameters by importing it here because, although the inference variables would be
-/// properly constrained as to ensure well-formedness, those variables would never be constrained
-/// during WF checking, leading to unsatisfied obligation errors. Ask me how I know.
 pub struct ClauseCxInferInstantiation<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
 }
@@ -460,9 +455,62 @@ impl ClauseCxInferInstantiation<'_, '_> {
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,
-        lhs: Ty,
-        rhs: Obj<ImplItem>,
+        target: Ty,
+        block: Obj<ImplItem>,
     ) -> ClauseImportEnv {
-        todo!()
+        let s = self.ccx.session();
+        let tcx = self.ccx.tcx();
+
+        // Instantiate fresh variables for each `impl` block generic.
+        let params = tcx.intern_list(
+            &block
+                .r(s)
+                .generics
+                .r(s)
+                .defs
+                .iter()
+                .enumerate()
+                .map(|(idx, def)| match def {
+                    AnyGeneric::Re(_) => TyOrRe::Re(self.ccx.fresh_re_infer()),
+                    AnyGeneric::Ty(_) => TyOrRe::Ty(self.ccx.fresh_ty_infer(
+                        universe.clone(),
+                        InferTyVarSourceInfo::ImplBlockParam {
+                            block,
+                            idx: idx as u32,
+                        },
+                    )),
+                })
+                .collect::<Vec<_>>(),
+        );
+
+        let env = ClauseImportEnv::new(
+            Some(target),
+            [GenericSubst::new(block.r(s).generics, params)],
+        );
+
+        let spanned_params =
+            params
+                .r(s)
+                .iter()
+                .zip(&block.r(s).generics.r(s).defs)
+                .map(|(&para, generic)| {
+                    let cause = cause.clone().child(ObligeCauseFrame::Step(
+                        ObligeCauseStep::ImportEnvMeetsRequirements {
+                            clause: generic.span(s),
+                        },
+                    ));
+
+                    (cause, para)
+                });
+
+        self.ensure_binder_params_wf(
+            universe,
+            block.r(s).generics,
+            env.clone(),
+            None,
+            spanned_params,
+        );
+
+        env
     }
 }

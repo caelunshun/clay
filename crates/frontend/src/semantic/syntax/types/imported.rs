@@ -322,7 +322,7 @@ define_index_type! {
 
 #[derive(Debug, Clone)]
 pub enum InferTyVarSourceInfo {
-    UniversalElabHelper,
+    ElaborationUnifyHelper,
     HrtbLhsInstantiation {
         span: Span,
         clauses: Rc<LateInit<TraitClauseList>>,
@@ -332,8 +332,12 @@ pub enum InferTyVarSourceInfo {
         spec: TraitSpec,
         idx: u32,
     },
-    Imported {
+    DirectlyImported {
         span: Span,
+    },
+    ImplBlockParam {
+        block: Obj<ImplItem>,
+        idx: u32,
     },
     Local {
         name: LocalNameIdent,

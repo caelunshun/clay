@@ -431,7 +431,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
             SigTyKind::Infer => self.ccx.fresh_ty_infer(
                 self.opts.universe.clone(),
-                InferTyVarSourceInfo::Imported { span: ty.r(s).span },
+                InferTyVarSourceInfo::DirectlyImported { span: ty.r(s).span },
             ),
 
             SigTyKind::Simple(kind) => tcx.intern(TyKind::Simple(kind)),
