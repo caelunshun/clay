@@ -74,7 +74,7 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         };
 
-        let rhs = self.instantiate_hrtb_universal(cause.clone(), universe.clone(), rhs);
+        let rhs = self.instantiate_hrtb_universal(&cause, universe.clone(), rhs);
         self.oblige_ty_meets_trait_instantiated(cause, universe, lhs, rhs)
     }
 
@@ -145,7 +145,7 @@ impl<'tcx> ClauseCx<'tcx> {
             }
 
             // LHS HRTBs should have been instantiated right before the obligation.
-            TyKind::HrtbVar(_) => {
+            TyKind::HrtbVar(_) | TyKind::HrtbProjection(_) => {
                 unreachable!()
             }
             TyKind::Simple(_)

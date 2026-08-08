@@ -294,6 +294,24 @@ impl<'tcx> UnifyCx<'tcx> {
                     }
                 }
             }
+            (TyKind::HrtbProjection(lhs), TyKind::HrtbProjection(rhs))
+                if lhs.spec.def == rhs.spec.def && lhs.assoc_idx == rhs.assoc_idx =>
+            {
+                self.unify_ty_and_ty_inner(
+                    cause,
+                    lhs.target,
+                    rhs.target,
+                    culprits,
+                    RelationMode::Equate,
+                );
+
+                self.unify_trait_spec_params_inner(
+                    cause,
+                    lhs.spec.params,
+                    rhs.spec.params,
+                    culprits,
+                );
+            }
             (TyKind::Trait(lhs_re, lhs_muta, lhs), TyKind::Trait(rhs_re, rhs_muta, rhs))
                 if lhs_muta == rhs_muta =>
             {

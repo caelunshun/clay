@@ -1,7 +1,7 @@
 use crate::{
     base::{
         Diag, ErrorGuaranteed, LeafDiag, Session,
-        analysis::DebruijnMap,
+        analysis::{DebruijnMap, DebruijnTop},
         arena::{HasInterner, HasListInterner, Obj},
         syntax::Span,
     },
@@ -11,20 +11,21 @@ use crate::{
             ObligeCauseOrigin, UnifyCxMode,
         },
         syntax::{
-            AdtInstance, AnyGeneric, GenericBinder, HrtbBinder, HrtbDebruijnDef,
+            AdtInstance, AnyGeneric, GenericBinder, HrtbBinder, HrtbDebruijnDef, HrtbProjection,
             InferTyVarSourceInfo, Re, RegionGeneric, SigAdtInstance, SigHrtbBinder, SigProjectType,
             SigRe, SigReKind, SigTraitClause, SigTraitClauseKind, SigTraitClauseList,
             SigTraitInstance, SigTraitParamKind, SigTraitSpec, SigTy, SigTyKind, SigTyList,
             SigTyOrRe, SigTyOrReList, TraitClause, TraitClauseList, TraitInstance, TraitParam,
-            TraitSpec, Ty, TyCtxt, TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList, TypeAliasItem,
-            TypeGeneric, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
+            TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt, TyKind, TyList, TyOrRe,
+            TyOrReKind, TyOrReList, TypeAliasItem, TypeGeneric, UniversalReVarSourceInfo,
+            UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
 };
 use hashbrown::hash_map;
 use smallvec::SmallVec;
-use std::mem;
+use std::{convert::Infallible, mem};
 
 // === Environment === //
 
@@ -129,6 +130,8 @@ impl<'tcx> ClauseCx<'tcx> {
                     SigImporterWfMode::Skip => false,
                     SigImporterWfMode::DelayBug | SigImporterWfMode::ReportHere => true,
                 },
+                // We're not in a binder.
+                defer_project_in_binder: false,
             },
             reentrant_aliases: FxHashMap::default(),
             hrtb_substs: DebruijnMap::default(),
@@ -137,11 +140,39 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn instantiate_hrtb_universal(
         &mut self,
-        cause: ObligeCause,
+        cause: &ObligeCause,
         universe: HrtbUniverse,
         value: HrtbBinder,
     ) -> TraitSpec {
-        todo!()
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let HrtbBinder { defs, inner } = value;
+
+        // Make up new universal variables for our binder.
+        let vars = defs
+            .r(s)
+            .iter()
+            .map(|def| match def.kind {
+                TyOrReKind::Re => {
+                    TyOrRe::Re(self.fresh_re_universal(UniversalReVarSourceInfo::HrtbVar))
+                }
+                TyOrReKind::Ty => TyOrRe::Ty(
+                    self.fresh_ty_universal(universe.clone(), UniversalTyVarSourceInfo::HrtbVar),
+                ),
+            })
+            .collect::<Vec<_>>();
+
+        let vars = tcx.intern_list(&vars);
+
+        // Initialize their clauses.
+        for (&def, &var) in defs.r(s).iter().zip(vars.r(s)) {
+            let clauses = HrtbInstantiator::new(self, cause, vars).fold(def.clauses);
+
+            self.init_any_universal_var_direct_clauses(var, clauses);
+        }
+
+        HrtbInstantiator::new(self, cause, vars).fold(inner)
     }
 
     pub fn instantiate_hrtb_infer(
@@ -168,6 +199,7 @@ struct SigImporterOpts {
     universe: HrtbUniverse,
     env: ClauseImportEnv,
     create_wf_obligations: bool,
+    defer_project_in_binder: bool,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -255,6 +287,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 let env = ClauseImportEnv::new(None, [GenericSubst::new(def.r(s).generics, args)]);
 
                 let parent_universe = self.opts.universe.clone();
+                let parent_defer_project_in_binder = self.opts.defer_project_in_binder;
                 let old_opts = mem::replace(
                     &mut self.opts,
                     SigImporterOpts {
@@ -262,6 +295,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                         env,
                         // Parameters already constrained by parent WF checks.
                         create_wf_obligations: false,
+                        defer_project_in_binder: parent_defer_project_in_binder,
                     },
                 );
 
@@ -352,6 +386,14 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 let target = self.import_ty(target);
 
                 let spec_imported = self.import_trait_spec(spec);
+
+                if self.opts.defer_project_in_binder {
+                    return tcx.intern(TyKind::HrtbProjection(HrtbProjection {
+                        target: target,
+                        spec: spec_imported,
+                        assoc_idx,
+                    }));
+                }
 
                 let instance = self.ccx.instantiate_infer().instantiate_trait_spec(
                     &self.cause,
@@ -600,6 +642,8 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 env: parent_env,
                 // Can't push WF obligations for types involving unsubstituted HRTB variables.
                 create_wf_obligations: false,
+                // Can't project until this HRTB binder is alleviated.
+                defer_project_in_binder: true,
             },
         );
 
@@ -667,7 +711,10 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             SigImporterOpts {
                 universe: nested_universe.clone(),
                 env: parent_env,
+                // We went through all this effort to spawn WF obligations, after all.
                 create_wf_obligations: true,
+                // We want to reveal projection errors.
+                defer_project_in_binder: false,
             },
         );
 
@@ -815,4 +862,100 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
 // === HrtbInstantiator === //
 
-// TODO
+struct HrtbInstantiator<'a, 'tcx> {
+    ccx: &'a mut ClauseCx<'tcx>,
+    cause: &'a ObligeCause,
+    replace_with: TyOrReList,
+    top: DebruijnTop,
+}
+
+impl<'a, 'tcx> HrtbInstantiator<'a, 'tcx> {
+    pub fn new(
+        ccx: &'a mut ClauseCx<'tcx>,
+        cause: &'a ObligeCause,
+        replace_with: TyOrReList,
+    ) -> Self {
+        let s = ccx.session();
+
+        Self {
+            ccx,
+            cause,
+            replace_with,
+            top: DebruijnTop::new(replace_with.r(s).len()),
+        }
+    }
+
+    pub fn replace_with(&self) -> TyOrReList {
+        self.replace_with
+    }
+}
+
+impl<'tcx> TyFolder<'tcx> for HrtbInstantiator<'_, 'tcx> {
+    type Error = Infallible;
+
+    fn tcx(&self) -> &'tcx TyCtxt {
+        self.ccx.tcx()
+    }
+
+    fn fold_hrtb_binder(&mut self, binder: HrtbBinder) -> Result<HrtbBinder, Self::Error> {
+        let s = self.session();
+
+        let bind_count = binder.defs.r(s).len();
+
+        self.top.move_inwards_by(bind_count);
+        let inner = self.super_(binder.inner);
+        self.top.move_outwards_by(bind_count);
+
+        Ok(HrtbBinder {
+            defs: binder.defs,
+            inner,
+        })
+    }
+
+    fn fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
+        let s = self.session();
+
+        match *ty.r(s) {
+            TyKind::HrtbVar(var) => {
+                let abs = self.top.lookup_relative(var.0).index();
+
+                if abs < self.replace_with.r(s).len() {
+                    return Ok(self.replace_with.r(s)[abs].unwrap_ty());
+                }
+            }
+            TyKind::HrtbProjection(HrtbProjection {
+                target,
+                spec,
+                assoc_idx,
+            }) => {
+                let instance = self.ccx.instantiate_infer().instantiate_trait_spec(
+                    &self.cause.clone().into_delay_bug(),
+                    HrtbUniverse::ROOT_REF,
+                    target,
+                    spec,
+                );
+
+                return Ok(instance.params.r(s)[assoc_idx as usize].unwrap_ty());
+            }
+            _ => {
+                // (fallthrough)
+            }
+        }
+
+        Ok(self.super_(ty))
+    }
+
+    fn fold_re(&mut self, re: Re) -> Result<Re, Self::Error> {
+        let s = self.session();
+
+        if let Re::HrtbVar(var) = re {
+            let abs = self.top.lookup_relative(var.0).index();
+
+            if abs < self.replace_with.r(s).len() {
+                return Ok(self.replace_with.r(s)[abs].unwrap_re());
+            }
+        }
+
+        Ok(self.super_(re))
+    }
+}

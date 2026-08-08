@@ -202,7 +202,6 @@ impl<T> DebruijnMap<T> {
     pub fn push(&mut self, elems: impl IntoIterator<Item = T>) -> usize {
         let old_len = self.elems.len();
         self.elems.extend(elems);
-        self.elems[old_len..].reverse();
         self.elems.len() - old_len
     }
 

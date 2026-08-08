@@ -2,9 +2,9 @@ use crate::{
     base::Session,
     semantic::syntax::{
         AdtInstance, FnInstance, FnInstanceInner, FnOwner, FnOwnerAdtCtor, FnOwnerInherent,
-        FnOwnerTrait, HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, Re, TraitClause,
-        TraitClauseList, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty, TyCtxt, TyKind,
-        TyList, TyOrRe, TyOrReList,
+        FnOwnerTrait, HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, HrtbProjection, Re,
+        TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty,
+        TyCtxt, TyKind, TyList, TyOrRe, TyOrReList,
     },
 };
 use std::{convert::Infallible, ops::ControlFlow};
@@ -60,6 +60,10 @@ pub trait TyVisitor<'tcx> {
 
     fn visit_adt_instance(&mut self, instance: AdtInstance) -> ControlFlow<Self::Break> {
         self.walk_fallible(instance)
+    }
+
+    fn visit_hrtb_projection(&mut self, projection: HrtbProjection) -> ControlFlow<Self::Break> {
+        self.walk_fallible(projection)
     }
 
     fn visit_fn_instance(&mut self, instance: FnInstance) -> ControlFlow<Self::Break> {
@@ -291,6 +295,31 @@ impl TyVisitable for AdtInstance {
     }
 }
 
+impl TyVisitable for HrtbProjection {
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + TyVisitor<'tcx>,
+    {
+        visitor.visit_hrtb_projection(me)
+    }
+
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + TyVisitor<'tcx>,
+    {
+        let HrtbProjection {
+            target,
+            spec,
+            assoc_idx: _,
+        } = me;
+
+        visitor.visit_fallible(target)?;
+        visitor.visit_fallible(spec)?;
+
+        ControlFlow::Continue(())
+    }
+}
+
 impl TyVisitable for FnInstance {
     fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
@@ -477,6 +506,9 @@ impl TyVisitable for Ty {
             }
             TyKind::Adt(instance) => {
                 visitor.visit_fallible(instance)?;
+            }
+            TyKind::HrtbProjection(projection) => {
+                visitor.visit_fallible(projection)?;
             }
             TyKind::Trait(re, _muta, clause_list) => {
                 visitor.visit_fallible(re)?;

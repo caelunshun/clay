@@ -401,6 +401,21 @@ impl<'tcx> ClauseCx<'tcx> {
         ))
     }
 
+    pub fn init_any_universal_var_direct_clauses(&mut self, var: TyOrRe, clauses: TraitClauseList) {
+        let s = self.session();
+
+        match var {
+            TyOrRe::Re(var) => self.init_re_universal_var_direct_clauses(var, clauses),
+            TyOrRe::Ty(var) => {
+                let TyKind::UniversalVar(var) = *var.r(s) else {
+                    unreachable!()
+                };
+
+                self.init_ty_universal_var_direct_clauses(var, clauses);
+            }
+        }
+    }
+
     pub fn init_ty_universal_var_direct_clauses(
         &mut self,
         var: UniversalTyVar,
@@ -410,6 +425,18 @@ impl<'tcx> ClauseCx<'tcx> {
 
         assert!(descriptor.direct_clauses.is_none());
         descriptor.direct_clauses = Some(clauses);
+    }
+
+    pub fn init_re_universal_var_direct_clauses(&mut self, var: Re, clauses: TraitClauseList) {
+        let s = self.session();
+
+        for clause in clauses.r(s) {
+            let TraitClause::Outlives(permitted_outlive_dir, permitted_outlive) = *clause else {
+                unreachable!();
+            };
+
+            self.permit_universe_re_outlives_general(var, permitted_outlive, permitted_outlive_dir);
+        }
     }
 
     pub fn direct_ty_universal_clauses_possibly_floating(

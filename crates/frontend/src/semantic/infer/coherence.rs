@@ -307,6 +307,7 @@ impl ImportedShapeEraser<'_, '_> {
         match *self.ccx.peel_ty_infer_var_without_poll(ty).r(s) {
             // It's always safe to be conservative with these types.
             TyKind::HrtbVar(_)
+            | TyKind::HrtbProjection(_)
             | TyKind::InferVar(_)
             | TyKind::UniversalVar(_)
             | TyKind::FnDef(_)

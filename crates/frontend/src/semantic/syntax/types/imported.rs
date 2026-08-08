@@ -125,6 +125,9 @@ pub enum TyKind {
     /// These are indexed using debruijn indices.
     HrtbVar(HrtbDebruijn),
 
+    /// An unresolved projection within an HRTB binder.
+    HrtbProjection(HrtbProjection),
+
     /// An inference variable.
     InferVar(InferTyVar),
 
@@ -138,6 +141,13 @@ pub enum TyKind {
 pub struct AdtInstance {
     pub def: Obj<AdtItem>,
     pub params: TyOrReList,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct HrtbProjection {
+    pub target: Ty,
+    pub spec: TraitSpec,
+    pub assoc_idx: u32,
 }
 
 // === Trait === //
@@ -459,6 +469,7 @@ impl SimpleTySet {
             | TyKind::Tuple(_)
             | TyKind::FnDef(_)
             | TyKind::HrtbVar(_)
+            | TyKind::HrtbProjection(_)
             | TyKind::UniversalVar(_)
             | TyKind::Simple(
                 SimpleTyKind::Bool | SimpleTyKind::Char | SimpleTyKind::Str | SimpleTyKind::Never,

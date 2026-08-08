@@ -5,9 +5,9 @@ use crate::{
     },
     semantic::syntax::{
         AdtInstance, FnInstance, FnInstanceInner, FnOwner, FnOwnerAdtCtor, FnOwnerInherent,
-        FnOwnerTrait, HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, Re, TraitClause,
-        TraitClauseList, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty, TyCtxt, TyKind,
-        TyList, TyOrRe, TyOrReList,
+        FnOwnerTrait, HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, HrtbProjection, Re,
+        TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty,
+        TyCtxt, TyKind, TyList, TyOrRe, TyOrReList,
     },
 };
 use std::{convert::Infallible, hash};
@@ -92,6 +92,13 @@ pub trait TyFolder<'tcx> {
 
     fn fold_adt_instance(&mut self, instance: AdtInstance) -> Result<AdtInstance, Self::Error> {
         self.super_fallible(instance)
+    }
+
+    fn fold_hrtb_projection(
+        &mut self,
+        projection: HrtbProjection,
+    ) -> Result<HrtbProjection, Self::Error> {
+        self.super_fallible(projection)
     }
 
     fn fold_fn_instance(&mut self, instance: FnInstance) -> Result<FnInstance, Self::Error> {
@@ -314,6 +321,32 @@ impl TyFoldable for AdtInstance {
     }
 }
 
+impl TyFoldable for HrtbProjection {
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    where
+        F: ?Sized + TyFolder<'tcx>,
+    {
+        folder.fold_hrtb_projection(me)
+    }
+
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    where
+        F: ?Sized + TyFolder<'tcx>,
+    {
+        let HrtbProjection {
+            target,
+            spec,
+            assoc_idx,
+        } = me;
+
+        Ok(HrtbProjection {
+            target: folder.fold_fallible(target)?,
+            spec: folder.fold_fallible(spec)?,
+            assoc_idx,
+        })
+    }
+}
+
 impl TyFoldable for FnInstance {
     fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
@@ -491,6 +524,9 @@ impl TyFoldable for Ty {
             ),
             TyKind::FnDef(def) => TyKind::FnDef(folder.fold_fallible(def)?),
             TyKind::Adt(instance) => TyKind::Adt(folder.fold_fallible(instance)?),
+            TyKind::HrtbProjection(projection) => {
+                TyKind::HrtbProjection(folder.fold_fallible(projection)?)
+            }
             TyKind::Trait(re, muta, clause_list) => TyKind::Trait(
                 folder.fold_fallible(re)?,
                 muta,

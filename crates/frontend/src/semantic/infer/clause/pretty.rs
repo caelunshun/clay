@@ -120,6 +120,7 @@ impl_pretty! {
             },
             TyKind::FnDef(intern) => todo!(),
             TyKind::HrtbVar(var) => todo!(),
+            TyKind::HrtbProjection(projection) => todo!(),
             TyKind::InferVar(var) => cx.wrap(var).fmt(f),
             TyKind::UniversalVar(var) => cx.wrap(var).fmt(f),
             TyKind::Error(_) => f.write_str("<error>"),
