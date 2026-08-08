@@ -2,30 +2,30 @@ use crate::{
     base::{
         Diag, ErrorGuaranteed, LeafDiag, Session,
         analysis::{DebruijnMap, DebruijnTop},
-        arena::{HasInterner, HasListInterner, Obj},
+        arena::{HasInterner, HasListInterner, LateInit, Obj},
         syntax::Span,
     },
     semantic::{
         infer::{
             ClauseCx, HrtbUniverse, HrtbUniverseInfo, ObligeCause, ObligeCauseFrame,
-            ObligeCauseOrigin, UnifyCxMode,
+            ObligeCauseOrigin, ObligeCauseStep, UnifyCxMode,
         },
         syntax::{
             AdtInstance, AnyGeneric, GenericBinder, HrtbBinder, HrtbDebruijnDef, HrtbProjection,
-            InferTyVarSourceInfo, Re, RegionGeneric, SigAdtInstance, SigHrtbBinder, SigProjectType,
-            SigRe, SigReKind, SigTraitClause, SigTraitClauseKind, SigTraitClauseList,
-            SigTraitInstance, SigTraitParamKind, SigTraitSpec, SigTy, SigTyKind, SigTyList,
-            SigTyOrRe, SigTyOrReList, TraitClause, TraitClauseList, TraitInstance, TraitParam,
-            TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt, TyKind, TyList, TyOrRe,
-            TyOrReKind, TyOrReList, TypeAliasItem, TypeGeneric, UniversalReVarSourceInfo,
-            UniversalTyVarSourceInfo,
+            InferTyVarSourceInfo, Re, RegionGeneric, RelationDirection, SigAdtInstance,
+            SigHrtbBinder, SigProjectType, SigRe, SigReKind, SigTraitClause, SigTraitClauseKind,
+            SigTraitClauseList, SigTraitInstance, SigTraitParamKind, SigTraitSpec, SigTy,
+            SigTyKind, SigTyList, SigTyOrRe, SigTyOrReList, TraitClause, TraitClauseList,
+            TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt,
+            TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList, TypeAliasItem, TypeGeneric,
+            UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
 };
 use hashbrown::hash_map;
 use smallvec::SmallVec;
-use std::{convert::Infallible, mem};
+use std::{convert::Infallible, mem, rc::Rc};
 
 // === Environment === //
 
@@ -181,7 +181,67 @@ impl<'tcx> ClauseCx<'tcx> {
         universe: HrtbUniverse,
         value: HrtbBinder,
     ) -> TraitSpec {
-        todo!()
+        let tcx = self.tcx();
+        let s = self.session();
+
+        let HrtbBinder { defs, inner } = value;
+
+        // Make up new inference variables for our binder.
+        let vars = defs
+            .r(s)
+            .iter()
+            .map(|def| match def.kind {
+                TyOrReKind::Re => TyOrRe::Re(self.fresh_re_infer()),
+                TyOrReKind::Ty => TyOrRe::Ty(self.fresh_ty_infer(
+                    universe.clone(),
+                    InferTyVarSourceInfo::HrtbLhsInstantiation {
+                        span: def.span,
+                        clauses: Rc::new(LateInit::uninit()),
+                    },
+                )),
+            })
+            .collect::<Vec<_>>();
+
+        let vars = tcx.intern_list(&vars);
+
+        // Constrain the new inference variables with their obligations.
+        for (&def, &var) in defs.r(s).iter().zip(vars.r(s)) {
+            let clauses = HrtbInstantiator::new(self, &cause, vars).fold(def.clauses);
+
+            let cause = cause.clone().child(
+                ObligeCauseStep::HrtbExistentialInferenceIsPossible {
+                    lhs: var,
+                    rhs: clauses,
+                }
+                .into(),
+            );
+
+            match var {
+                TyOrRe::Re(var) => {
+                    self.oblige_re_meets_clauses(&cause, var, clauses);
+                }
+                TyOrRe::Ty(var) => {
+                    self.oblige_ty_meets_clauses(&cause, &universe, var, clauses);
+
+                    let TyKind::InferVar(var) = *var.r(s) else {
+                        unreachable!()
+                    };
+
+                    let InferTyVarSourceInfo::HrtbLhsInstantiation {
+                        clauses: clauses_late_init,
+                        ..
+                    } = self.lookup_infer_ty_src_info(var)
+                    else {
+                        unreachable!()
+                    };
+
+                    LateInit::init(&clauses_late_init, clauses);
+                }
+            }
+        }
+
+        // Fold the inner type
+        HrtbInstantiator::new(self, &cause, vars).fold(inner)
     }
 }
 
@@ -261,11 +321,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 let tcx = self.tcx();
 
                 // Import the type alias's arguments.
-                let args = self.import_ty_or_re_list(args);
-
-                if self.opts.create_wf_obligations {
-                    todo!()
-                }
+                let args = self.import_simple_generic_args(def.r(s).generics, args);
 
                 // Prevent reentrant alias resolution (preorder).
                 match self.reentrant_aliases.entry(def) {
@@ -325,23 +381,31 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 body
             }
             SigTyKind::Reference(re, muta, pointee) => {
+                let pointee_span = pointee.r(s).span;
+
                 let re = self.import_re(re);
                 let pointee = self.import_ty(pointee);
 
                 if self.opts.create_wf_obligations {
-                    todo!()
+                    self.ccx.oblige_ty_outlives_re(
+                        self.cause.clone().child(ObligeCauseFrame::Origin(
+                            ObligeCauseOrigin::ImportWfForReference {
+                                pointee: pointee_span,
+                            },
+                        )),
+                        pointee,
+                        re,
+                        RelationDirection::LhsOntoRhs,
+                    );
                 }
 
                 tcx.intern(TyKind::Reference(re, muta, pointee))
             }
             SigTyKind::Adt(SigAdtInstance { def, params }) => {
-                let params = self.import_ty_or_re_list(params);
-
-                if self.opts.create_wf_obligations {
-                    todo!();
-                }
-
-                tcx.intern(TyKind::Adt(AdtInstance { def, params }))
+                tcx.intern(TyKind::Adt(AdtInstance {
+                    def,
+                    params: self.import_simple_generic_args(def.r(s).generics, params),
+                }))
             }
             SigTyKind::Trait(re, muta, clauses) => {
                 let re = self.import_re(re);
@@ -426,6 +490,45 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             SigReKind::Generic(generic) => self.opts.env.lookup_re(s, generic),
             SigReKind::Error(err) => Re::Error(err),
         }
+    }
+
+    fn import_simple_generic_args(
+        &mut self,
+        generics: Obj<GenericBinder>,
+        args: SigTyOrReList,
+    ) -> TyOrReList {
+        let s = self.session();
+        let args_imported = self.import_ty_or_re_list(args);
+
+        if self.opts.create_wf_obligations {
+            let env = ClauseImportEnv::new(None, [GenericSubst::new(generics, args_imported)]);
+
+            let args_spanned = args_imported
+                .r(s)
+                .iter()
+                .zip(args.r(s))
+                .zip(&generics.r(s).defs)
+                .map(|((&ty_or_re, sig), generic)| {
+                    let cause = self.cause.clone().child(ObligeCauseFrame::Origin(
+                        ObligeCauseOrigin::ImportWfForGenericParam {
+                            use_span: sig.span(s),
+                            clause_span: generic.span(s),
+                        },
+                    ));
+
+                    (cause, ty_or_re)
+                });
+
+            self.ccx.instantiate_infer().ensure_binder_params_wf(
+                &self.opts.universe,
+                generics,
+                env.clone(),
+                None,
+                args_spanned,
+            );
+        }
+
+        args_imported
     }
 }
 
@@ -723,14 +826,16 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             .push(hrtb_universals.iter().map(|&v| Some(v)));
 
         // WF-check each bound variable, initializing their corresponding universal.
-        for (def, &universal) in binder.defs.r(s).iter().zip(&hrtb_universals) {
-            // N.B. if we're working with a region, it is safe not to pass an `wf_self_ty` because
-            // it will never be used because we'll never try to expand an HRTB binder. It also just
-            // wouldn't make any sense to pass.
-            let clauses_with_universals = self
-                .import_trait_clause_list_with_self_ty(universal.as_ty(), def.clauses.elems.r(s));
+        for (def, &var) in binder.defs.r(s).iter().zip(&hrtb_universals) {
+            let clauses = self.import_trait_clause_list_with_self_ty(
+                // N.B. if we're working with a region, it is safe not to pass an `wf_self_ty` because
+                // it will never be used because we'll never try to expand an HRTB binder. It also just
+                // wouldn't make any sense to pass.
+                var.as_ty(),
+                def.clauses.elems.r(s),
+            );
 
-            todo!();
+            self.ccx.init_any_universal_var_direct_clauses(var, clauses);
         }
 
         // WF-check the main body.
@@ -927,7 +1032,7 @@ impl<'tcx> TyFolder<'tcx> for HrtbInstantiator<'_, 'tcx> {
                 target,
                 spec,
                 assoc_idx,
-            }) => {
+            }) if self.top.len() == self.replace_with.r(s).len() => {
                 let instance = self.ccx.instantiate_infer().instantiate_trait_spec(
                     &self.cause.clone().into_delay_bug(),
                     HrtbUniverse::ROOT_REF,
