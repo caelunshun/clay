@@ -6,8 +6,8 @@ use crate::{
     },
     semantic::syntax::{
         AdtCtor, AdtItem, FloatKind, FnItem, HrtbDebruijn, ImplItem, IntKind, LocalNameIdent,
-        MirLocalIdx, Mutability, RegionGeneric, RelationDirection, SimpleTyKind, TraitItem, TyCtxt,
-        TyOrReKind, TypeGeneric,
+        MirLocalIdx, Mutability, RegionGeneric, RelationDirection, SigHrtbBinder, SigTraitClause,
+        SimpleTyKind, TraitItem, TyCtxt, TyOrReKind, TypeGeneric,
     },
     symbol,
 };
@@ -286,6 +286,7 @@ pub enum UniversalReVarSourceInfo {
     Root(Obj<RegionGeneric>),
     ElaboratedLub,
     HrtbVar,
+    HrtbWf { binder: SigHrtbBinder, idx: u32 },
     MirLocal(MirLocalIdx),
 }
 
@@ -293,6 +294,8 @@ pub enum UniversalReVarSourceInfo {
 pub enum UniversalTyVarSourceInfo {
     TraitSelf,
     HrtbVar,
+    ClauseWfHelper { clauses: Obj<[SigTraitClause]> },
+    HrtbWf { binder: SigHrtbBinder, idx: u32 },
     Root(Obj<TypeGeneric>),
     Projection(UniversalTyVar, TraitSpec, u32),
 }

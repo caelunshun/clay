@@ -1,3 +1,4 @@
+use derive_where::derive_where;
 use std::{num::NonZeroU32, ops::Range};
 
 const OVERFLOW_ERR: &str = "overflowed debruijn index";
@@ -189,4 +190,40 @@ impl DebruijnAbsolute {
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct DebruijnRelative {
     raw: NonZeroU32,
+}
+
+#[derive(Debug, Clone)]
+#[derive_where(Default)]
+pub struct DebruijnMap<T> {
+    pub elems: Vec<T>,
+}
+
+impl<T> DebruijnMap<T> {
+    pub fn push(&mut self, elems: impl IntoIterator<Item = T>) -> usize {
+        let old_len = self.elems.len();
+        self.elems.extend(elems);
+        self.elems[old_len..].reverse();
+        self.elems.len() - old_len
+    }
+
+    pub fn top(&self) -> DebruijnTop {
+        DebruijnTop::new(self.elems.len())
+    }
+
+    pub fn rel_to_abs(&self, rel: DebruijnRelative) -> DebruijnAbsolute {
+        self.top().lookup_relative(rel)
+    }
+
+    pub fn lookup(&self, rel: DebruijnRelative) -> &T {
+        &self.elems[self.rel_to_abs(rel).index()]
+    }
+
+    pub fn lookup_mut(&mut self, rel: DebruijnRelative) -> &mut T {
+        let idx = self.rel_to_abs(rel).index();
+        &mut self.elems[idx]
+    }
+
+    pub fn pop(&mut self, count: usize) {
+        self.elems.truncate(self.elems.len() - count);
+    }
 }

@@ -5,9 +5,9 @@ use crate::{
     base::arena::Obj,
     semantic::{
         infer::{
-            ClauseCx, ClauseImportEnv, ClauseObligation, GenericSubst, HrtbUniverse,
-            HrtbUniverseInfo, NoTraitImplError, NotCoveredError, ObligationNotReady,
-            ObligationResult, ObligeCause, ObligeCauseStep, SigImporterWfMode,
+            ClauseCx, ClauseObligation, HrtbUniverse, HrtbUniverseInfo, NoTraitImplError,
+            NotCoveredError, ObligationNotReady, ObligationResult, ObligeCause, ObligeCauseStep,
+            SigImporterWfMode,
         },
         syntax::{
             HrtbBinder, ImplItem, RelationMode, SimpleTySet, TraitClause, TraitClauseList,
@@ -340,14 +340,9 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // Obtain inference variables for all generics in the `impl` and tentatively create
         // obligations for them.
-        let trait_env_params = self
+        let trait_env = self
             .instantiate_infer()
-            .env_of_impl_block(cause, universe, lhs, rhs);
-
-        let trait_env = ClauseImportEnv::new(
-            Some(lhs),
-            [GenericSubst::new(rhs.r(s).generics, trait_env_params)],
-        );
+            .env_for_impl_block(cause, universe, lhs, rhs);
 
         // Import the target type and trait. WF obligations are not needed on these types because
         // the `impl` itself has been WF-checked for all types compatible with the generic
@@ -368,7 +363,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 trait_env.clone(),
                 SigImporterWfMode::DelayBug,
             )
-            .import_trait_instance(rhs.r(s).trait_.unwrap());
+            .import_trait_instance(target_ty, rhs.r(s).trait_.unwrap());
 
         // Does the `lhs` type match the `rhs`'s target type?
         if self

@@ -122,7 +122,7 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
                             binder_env.clone(),
                             SigImporterWfMode::Skip,
                         )
-                        .import_clause_list(*generic.r(s).clauses);
+                        .import_trait_clause_list(*generic.r(s).clauses);
 
                     self.ccx
                         .init_ty_universal_var_direct_clauses(target, clauses);
@@ -454,5 +454,15 @@ impl ClauseCxInferInstantiation<'_, '_> {
         );
 
         instance
+    }
+
+    pub fn env_for_impl_block(
+        &mut self,
+        cause: &ObligeCause,
+        universe: &HrtbUniverse,
+        lhs: Ty,
+        rhs: Obj<ImplItem>,
+    ) -> ClauseImportEnv {
+        todo!()
     }
 }

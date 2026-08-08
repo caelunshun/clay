@@ -208,7 +208,7 @@ impl<'tcx> ClauseCx<'tcx> {
                                 ),
                                 SigImporterWfMode::DelayBug,
                             )
-                            .import_clause_list(*base.r(s).clauses);
+                            .import_trait_clause_list(*base.r(s).clauses);
 
                         let all_clauses = explicit_clauses
                             .r(s)
@@ -252,7 +252,7 @@ impl<'tcx> ClauseCx<'tcx> {
                             ),
                             SigImporterWfMode::DelayBug,
                         )
-                        .import_clause_list(*spec.def.r(s).inherits);
+                        .import_trait_clause_list(*spec.def.r(s).inherits);
 
                     elaborated.extend(inherits.r(s).iter().copied());
                 }
