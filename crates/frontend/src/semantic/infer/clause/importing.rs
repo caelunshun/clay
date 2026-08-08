@@ -13,12 +13,12 @@ use crate::{
         syntax::{
             AdtInstance, AnyGeneric, GenericBinder, HrtbBinder, HrtbDebruijnDef, HrtbProjection,
             InferTyVarSourceInfo, Re, RegionGeneric, RelationDirection, SigAdtInstance,
-            SigHrtbBinder, SigProjectType, SigRe, SigReKind, SigTraitClause, SigTraitClauseKind,
-            SigTraitClauseList, SigTraitInstance, SigTraitParamKind, SigTraitSpec, SigTy,
-            SigTyKind, SigTyList, SigTyOrRe, SigTyOrReList, TraitClause, TraitClauseList,
-            TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt,
-            TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList, TypeAliasItem, TypeGeneric,
-            UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
+            SigGenericList, SigHrtbBinder, SigProjectType, SigRe, SigReKind, SigTraitClause,
+            SigTraitClauseKind, SigTraitClauseList, SigTraitInstance, SigTraitParamKind,
+            SigTraitSpec, SigTy, SigTyKind, SigTyList, SigTyOrRe, SigTyOrReList, TraitClause,
+            TraitClauseList, TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt, TyFolder,
+            TyFolderInfallibleExt, TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList, TypeAliasItem,
+            TypeGeneric, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
@@ -495,10 +495,10 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
     fn import_simple_generic_args(
         &mut self,
         generics: Obj<GenericBinder>,
-        args: SigTyOrReList,
+        args: SigGenericList,
     ) -> TyOrReList {
         let s = self.session();
-        let args_imported = self.import_ty_or_re_list(args);
+        let args_imported = self.import_ty_or_re_list(args.elems);
 
         if self.opts.create_wf_obligations {
             let env = ClauseImportEnv::new(None, [GenericSubst::new(generics, args_imported)]);
@@ -506,7 +506,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             let args_spanned = args_imported
                 .r(s)
                 .iter()
-                .zip(args.r(s))
+                .zip(args.elems.r(s))
                 .zip(&generics.r(s).defs)
                 .map(|((&ty_or_re, sig), generic)| {
                     let cause = self.cause.clone().child(ObligeCauseFrame::Origin(

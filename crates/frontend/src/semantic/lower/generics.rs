@@ -16,10 +16,10 @@ use crate::{
             DefinedGenericRe, DefinedGenericTy, InterItemLowerCtxt, IntraItemLowerCtxt,
         },
         syntax::{
-            AnyGeneric, AnyGenericIdent, GenericBinder, Item, RegionGeneric, SigHrtbDebruijnDef,
-            SigHrtbDebruijnDefList, SigReKind, SigTraitClauseList, SigTraitInstance, SigTraitParam,
-            SigTraitParamKind, SigTraitParamList, SigTyKind, SigTyOrRe, SigTyOrReList, TraitItem,
-            TyCtxt, TyOrReKind, TypeGeneric,
+            AnyGeneric, AnyGenericIdent, GenericBinder, Item, RegionGeneric, SigGenericList,
+            SigHrtbDebruijnDef, SigHrtbDebruijnDefList, SigReKind, SigTraitClauseList,
+            SigTraitInstance, SigTraitParam, SigTraitParamKind, SigTraitParamList, SigTyKind,
+            SigTyOrRe, SigTyOrReList, TraitItem, TyCtxt, TyOrReKind, TypeGeneric,
         },
     },
     symbol,
@@ -282,7 +282,7 @@ impl IntraItemLowerCtxt<'_> {
     pub fn lower_type_relative_generics(
         &mut self,
         args: Option<&AstGenericParamList>,
-    ) -> Option<SigTyOrReList> {
+    ) -> Option<SigGenericList> {
         let s = &self.tcx.session;
 
         args.as_ref().map(|args| {
@@ -296,7 +296,10 @@ impl IntraItemLowerCtxt<'_> {
                 .emit();
             }
 
-            SigTyOrReList::new_slice(&positional, s)
+            SigGenericList {
+                segment_span: args.span,
+                elems: SigTyOrReList::new_slice(&positional, s),
+            }
         })
     }
 
@@ -306,7 +309,7 @@ impl IntraItemLowerCtxt<'_> {
         binder: Obj<GenericBinder>,
         segment_span: Span,
         generics: &[AstGenericParam],
-    ) -> SigTyOrReList {
+    ) -> SigGenericList {
         let s = &self.tcx.session;
 
         let (positional, associated) = self.lower_generic_params_syntactic(generics);
@@ -333,7 +336,7 @@ impl IntraItemLowerCtxt<'_> {
         def: Obj<TraitItem>,
         segment_span: Span,
         generics: Option<&AstGenericParamList>,
-    ) -> SigTyOrReList {
+    ) -> SigGenericList {
         let s = &self.tcx.session;
 
         let Some(generics) = generics else {
@@ -344,7 +347,6 @@ impl IntraItemLowerCtxt<'_> {
                     Some(*def.r(s).regular_generic_count),
                     segment_span,
                 ),
-                segment_span,
             );
         };
 
@@ -361,7 +363,7 @@ impl IntraItemLowerCtxt<'_> {
             Diag::span_err(associated.span, "associated types cannot be specified here").emit();
         }
 
-        self.construct_trait_instance_from_positionals(def, params, segment_span)
+        self.construct_trait_instance_from_positionals(def, params)
     }
 
     pub fn lower_generics_of_trait_spec_in_fn(
@@ -381,7 +383,6 @@ impl IntraItemLowerCtxt<'_> {
                         Some(*def.r(s).regular_generic_count),
                         segment_span,
                     ),
-                    segment_span,
                 ),
                 s,
             );
@@ -396,7 +397,7 @@ impl IntraItemLowerCtxt<'_> {
             segment_span,
             &positional,
         );
-        let mut params = self.construct_trait_spec_from_positionals(def, params, segment_span);
+        let mut params = self.construct_trait_spec_from_positionals(def, params);
 
         self.lower_associated_type_generic_params(def, &mut params, &associated);
 
@@ -439,6 +440,7 @@ impl IntraItemLowerCtxt<'_> {
 
         // Lower trait members
         let mut params = params
+            .elems
             .r(s)
             .iter()
             .copied()
@@ -623,7 +625,7 @@ impl IntraItemLowerCtxt<'_> {
         binder_len_override: Option<u32>,
         segment_span: Span,
         orig_params: &[SigTyOrRe],
-    ) -> SigTyOrReList {
+    ) -> SigGenericList {
         normalize_positional_generic_arity(
             self.tcx,
             binder,
@@ -638,7 +640,7 @@ impl IntraItemLowerCtxt<'_> {
         binder: Obj<GenericBinder>,
         binder_len_override: Option<u32>,
         segment_span: Span,
-    ) -> SigTyOrReList {
+    ) -> SigGenericList {
         let s = &self.tcx.session;
 
         let binder_len = binder_len_override.map_or(binder.r(s).defs.len(), |v| v as usize);
@@ -650,20 +652,26 @@ impl IntraItemLowerCtxt<'_> {
                 AnyGeneric::Ty(_) => SigTyOrRe::Ty(SigTyKind::Infer.wrap(segment_span, s)),
             });
 
-        SigTyOrReList::new_iter(params, s)
+        SigGenericList {
+            segment_span,
+            elems: SigTyOrReList::new_iter(params, s),
+        }
     }
 
     pub fn construct_trait_spec_from_positionals(
         &mut self,
         def: Obj<TraitItem>,
-        params: SigTyOrReList,
-        outer_span: Span,
+        params: SigGenericList,
     ) -> Vec<SigTraitParam> {
         let s = &self.tcx.session;
 
-        debug_assert_eq!(*def.r(s).regular_generic_count as usize, params.r(s).len());
+        debug_assert_eq!(
+            *def.r(s).regular_generic_count as usize,
+            params.elems.r(s).len()
+        );
 
         params
+            .elems
             .r(s)
             .iter()
             .map(|&ty_or_re| SigTraitParamKind::Equals(ty_or_re).wrap(ty_or_re.span(s)))
@@ -672,7 +680,7 @@ impl IntraItemLowerCtxt<'_> {
                     span: Span::DUMMY,
                     elems: Obj::new_slice(&[], s),
                 })
-                .wrap(outer_span),
+                .wrap(params.segment_span),
             ))
             .take(def.r(s).generics.r(s).defs.len())
             .collect::<Vec<_>>()
@@ -681,24 +689,30 @@ impl IntraItemLowerCtxt<'_> {
     pub fn construct_trait_instance_from_positionals(
         &mut self,
         def: Obj<TraitItem>,
-        params: SigTyOrReList,
-        outer_span: Span,
-    ) -> SigTyOrReList {
+        params: SigGenericList,
+    ) -> SigGenericList {
         let s = &self.tcx.session;
 
-        debug_assert_eq!(*def.r(s).regular_generic_count as usize, params.r(s).len());
+        debug_assert_eq!(
+            *def.r(s).regular_generic_count as usize,
+            params.elems.r(s).len()
+        );
 
         let elaborated_params = params
+            .elems
             .r(s)
             .iter()
             .copied()
             .chain(iter::repeat(SigTyOrRe::Ty(
-                SigTyKind::Infer.wrap(outer_span, s),
+                SigTyKind::Infer.wrap(params.segment_span, s),
             )))
             .take(def.r(s).generics.r(s).defs.len())
             .collect::<Vec<_>>();
 
-        SigTyOrReList::new_slice(&elaborated_params, s)
+        SigGenericList {
+            segment_span: params.segment_span,
+            elems: SigTyOrReList::new_slice(&elaborated_params, s),
+        }
     }
 
     pub fn lower_associated_type_generic_params(
@@ -739,7 +753,7 @@ pub fn normalize_positional_generic_arity(
     binder_len_override: Option<u32>,
     segment_span: Span,
     orig_params: &[SigTyOrRe],
-) -> SigTyOrReList {
+) -> SigGenericList {
     let s = &tcx.session;
 
     let binder_len = binder_len_override.map_or(binder.r(s).defs.len(), |v| v as usize);
@@ -811,5 +825,8 @@ pub fn normalize_positional_generic_arity(
         .emit();
     }
 
-    SigTyOrReList::new_slice(&resolved_params, s)
+    SigGenericList {
+        segment_span,
+        elems: SigTyOrReList::new_slice(&resolved_params, s),
+    }
 }

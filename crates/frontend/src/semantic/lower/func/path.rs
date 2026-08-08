@@ -14,9 +14,9 @@ use crate::{
         },
         syntax::{
             AdtCtorUnresolved, AdtItem, EnumVariantItem, FnItem, HirLocal, Item, ItemKind,
-            LocalNameIdent, LocalNameSymbol, SigAdtInstance, SigTraitParamList, SigTraitSpec,
-            SigTy, SigTyInner, SigTyKind, SigTyOrReList, TraitItem, TyCtxt, TypeAliasItem,
-            TypeGeneric,
+            LocalNameIdent, LocalNameSymbol, SigAdtInstance, SigGenericList, SigTraitParamList,
+            SigTraitSpec, SigTy, SigTyInner, SigTyKind, SigTyOrReList, TraitItem, TyCtxt,
+            TypeAliasItem, TypeGeneric,
         },
     },
 };
@@ -73,19 +73,19 @@ pub enum ExprPathResolution {
     ResolvedModule(Obj<Item>),
 
     /// A reference to some resolved ADT with some optional generic parameters.
-    ResolvedAdt(Obj<AdtItem>, SigTyOrReList),
+    ResolvedAdt(Obj<AdtItem>, SigGenericList),
 
     /// A reference to some resolved enum variant with some optional generic parameters.
-    ResolvedEnumVariant(Obj<EnumVariantItem>, SigTyOrReList),
+    ResolvedEnumVariant(Obj<EnumVariantItem>, SigGenericList),
 
     /// A reference to a function item with some optional generic parameters.
-    ResolvedFn(Obj<FnItem>, Option<SigTyOrReList>),
+    ResolvedFn(Obj<FnItem>, Option<SigGenericList>),
 
     /// A reference to a trait.
     ResolvedTrait(Obj<TraitItem>, SigTraitParamList),
 
     /// A reference to a type alias.
-    ResolvedTypeAlias(Obj<TypeAliasItem>, SigTyOrReList),
+    ResolvedTypeAlias(Obj<TypeAliasItem>, SigGenericList),
 
     /// A reference to a generic type.
     ResolvedGeneric(Obj<TypeGeneric>),
@@ -141,7 +141,7 @@ pub enum ExprPathResolution {
 #[derive(Debug, Copy, Clone)]
 pub struct TypeRelativeAssoc {
     pub name: Ident,
-    pub args: Option<SigTyOrReList>,
+    pub args: Option<SigGenericList>,
 }
 
 impl ExprPathResolution {
@@ -179,14 +179,14 @@ pub enum ExprPathIdentOrResolution {
 #[derive(Debug, Copy, Clone)]
 pub enum PathResolvedValue {
     Local(Obj<HirLocal>),
-    FnItem(Obj<FnItem>, Option<SigTyOrReList>),
+    FnItem(Obj<FnItem>, Option<SigGenericList>),
     TypeRelative {
         self_ty: SigTy,
         as_trait: Option<SigTraitSpec>,
         assoc: TypeRelativeAssoc,
     },
     AdtCtorTy(SigTy),
-    AdtCtorEnumVariant(Obj<EnumVariantItem>, SigTyOrReList),
+    AdtCtorEnumVariant(Obj<EnumVariantItem>, SigGenericList),
 }
 
 impl ExprPathResolution {
@@ -571,7 +571,7 @@ impl IntraItemLowerCtxt<'_> {
     pub fn resolve_bare_expr_path_from_enum_variant(
         &mut self,
         variant: Obj<EnumVariantItem>,
-        first_generics: Option<SigTyOrReList>,
+        first_generics: Option<SigGenericList>,
         variant_segment: &AstParamedPathSegment,
         additional_segments: &[AstParamedPathSegment],
     ) -> ExprPathResolution {
@@ -595,11 +595,11 @@ impl IntraItemLowerCtxt<'_> {
 
         if let (Some(first_generics), Some(second_generics)) = (first_generics, second_generics) {
             Diag::span_err(
-                second_generics.own_span(),
+                second_generics.segment_span,
                 "generic parameters for `enum` specified more than once",
             )
             .child(LeafDiag::span_note(
-                first_generics.own_span(),
+                first_generics.segment_span,
                 "generics first specified here",
             ))
             .emit();

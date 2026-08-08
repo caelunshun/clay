@@ -355,7 +355,7 @@ impl IntraItemLowerCtxt<'_> {
             ast.span,
             &positional,
         );
-        let mut params = self.construct_trait_spec_from_positionals(def, params, ast.span);
+        let mut params = self.construct_trait_spec_from_positionals(def, params);
 
         self.lower_associated_type_generic_params(def, &mut params, &associated);
 

@@ -11,7 +11,8 @@ use crate::{
         token::Ident,
     },
     semantic::syntax::{
-        EnumVariantItem, FnItem, HirLabelledBlock, Mutability, SigTraitSpec, SigTy, SigTyOrReList,
+        EnumVariantItem, FnItem, HirLabelledBlock, Mutability, SigGenericList, SigTraitSpec, SigTy,
+        SigTyOrReList,
     },
 };
 use std::fmt;
@@ -127,7 +128,7 @@ pub enum HirPatKind {
 #[derive(Debug, Copy, Clone)]
 pub enum AdtCtorUnresolved {
     ResolvedTy(SigTy),
-    ResolvedEnumVariant(Obj<EnumVariantItem>, SigTyOrReList),
+    ResolvedEnumVariant(Obj<EnumVariantItem>, SigGenericList),
     UnresolvedEnumVariant(SigTy, Ident),
 }
 
@@ -200,13 +201,13 @@ pub enum HirExprKind {
     Unary(AstUnOpKind, Obj<HirExpr>),
     Literal(AstLit),
     AdtCtorTy(SigTy),
-    AdtCtorEnumVariant(Obj<EnumVariantItem>, SigTyOrReList),
-    FnItemLit(Obj<FnItem>, Option<SigTyOrReList>),
+    AdtCtorEnumVariant(Obj<EnumVariantItem>, SigGenericList),
+    FnItemLit(Obj<FnItem>, Option<SigGenericList>),
     TypeRelative {
         self_ty: SigTy,
         as_trait: Option<SigTraitSpec>,
         assoc_name: Ident,
-        assoc_args: Option<SigTyOrReList>,
+        assoc_args: Option<SigGenericList>,
     },
     Cast(Obj<HirExpr>, SigTy),
     If {

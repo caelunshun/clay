@@ -234,6 +234,7 @@ impl SigShapeEraser<'_> {
                 kind: SolidTyShapeKind::Adt(def),
                 children: self.tcx.intern_list(
                     &params
+                        .elems
                         .r(s)
                         .iter()
                         .filter_map(|ty| ty.as_ty())

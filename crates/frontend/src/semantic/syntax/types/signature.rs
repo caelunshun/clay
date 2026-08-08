@@ -13,6 +13,12 @@ use std::fmt;
 
 // === Type === //
 
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct SigGenericList {
+    pub segment_span: Span,
+    pub elems: SigTyOrReList,
+}
+
 pub type SigTyOrReList = Obj<[SigTyOrRe]>;
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
@@ -122,7 +128,7 @@ pub enum SigTyKind {
     Infer,
 
     /// A request to expand a type alias.
-    Alias(Obj<TypeAliasItem>, SigTyOrReList),
+    Alias(Obj<TypeAliasItem>, SigGenericList),
 
     /// A request to expand a projection of a trait.
     Project(SigProjectType),
@@ -158,7 +164,7 @@ impl SigTyKind {
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct SigAdtInstance {
     pub def: Obj<AdtItem>,
-    pub params: SigTyOrReList,
+    pub params: SigGenericList,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
