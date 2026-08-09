@@ -17,8 +17,8 @@ use crate::{
         },
         syntax::{
             AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, InferTyVarSourceInfo,
-            Mutability, Re, RelationMode, TraitClause, TraitSpec, Ty, TyFolderInfallibleExt as _,
-            TyKind, TyOrReList,
+            Mutability, Re, RelationMode, SigGenericList, TraitClause, TraitSpec, Ty,
+            TyFolderInfallibleExt as _, TyKind, TyOrReList,
         },
     },
     utils::lang::IterEither,
@@ -181,7 +181,7 @@ impl BodyCtxt<'_, '_> {
         self_ty: Ty,
         as_trait: Option<TraitSpec>,
         assoc_name: Ident,
-        assoc_args: Option<SpannedImportedAssocArgs>,
+        assoc_args: Option<SigGenericList>,
     ) -> Option<Ty> {
         let s = self.session();
         let tcx = self.tcx();
@@ -221,27 +221,17 @@ impl BodyCtxt<'_, '_> {
 
         let early_binder = resolution.r(s).generics;
 
-        let early_args = assoc_args.map(
-            |SpannedImportedAssocArgs {
-                 segment_span,
-                 arg_spans,
-                 args,
-             }| {
-                normalize_positional_generic_arity(
-                    tcx,
-                    early_binder,
-                    None,
-                    segment_span,
-                    &args
-                        .r(s)
-                        .iter()
-                        .zip(arg_spans)
-                        .map(|(&arg, &span)| Spanned::new_saturated(arg, span, tcx))
-                        .collect::<Vec<_>>(),
-                )
-                .value
-            },
-        );
+        let early_args = assoc_args.map(|args| {
+            normalize_positional_generic_arity(
+                tcx,
+                early_binder,
+                None,
+                args.segment_span,
+                args.elems.r(s),
+            )
+        });
+
+        // TODO: Import with WF
 
         let instance = tcx.intern(FnInstanceInner { owner, early_args });
 
@@ -267,8 +257,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
         &mut self,
         query: MethodQuery,
         name: Ident,
-    ) -> impl Iterator<Item = Obj<FnDef>> + use<'tcx> {
-        let tcx = self.tcx();
+    ) -> SmallVec<[Obj<FnDef>; 2]> {
         let s = self.session();
         let item = self.item();
 
@@ -292,7 +281,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                 let receiver = self.ccx_mut().peel_ty_infer_var_after_poll(receiver);
 
                 if is_too_general(receiver, s) {
-                    return IterEither::Left([].into_iter());
+                    return SmallVec::new();
                 }
 
                 IterEither::Left(
@@ -305,7 +294,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                 let self_ty = self.ccx_mut().peel_ty_infer_var_after_poll(self_ty);
 
                 if is_too_general(self_ty, s) {
-                    return IterEither::Left([].into_iter());
+                    return SmallVec::new();
                 }
 
                 IterEither::Right(
@@ -316,10 +305,9 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
             }
         };
 
-        let candidates = candidates
-            .filter(move |candidate| candidate.r(s).impl_vis.unwrap().is_visible_to(item, s));
-
-        IterEither::Right(candidates)
+        candidates
+            .filter(move |candidate| candidate.r(s).impl_vis.unwrap().is_visible_to(item, s))
+            .collect()
     }
 
     fn collect_scope_trait_candidates(&mut self, name: Ident) -> Vec<Obj<FnDef>> {
@@ -398,6 +386,8 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
         let scope_trait_candidates = scope_trait_candidates.iter().copied();
 
         let candidates = inherent_candidates
+            .iter()
+            .copied()
             .chain(generic_clause_candidates)
             .chain(scope_trait_candidates);
 

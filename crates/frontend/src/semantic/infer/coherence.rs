@@ -112,7 +112,7 @@ impl CoherenceMap {
         ccx: &'_ ClauseCx<'a>,
         self_ty: Ty,
         name: Symbol,
-    ) -> impl Iterator<Item = Obj<FnDef>> + 'a {
+    ) -> impl Iterator<Item = Obj<FnDef>> + use<'a> {
         let s = ccx.session();
         let eraser = ImportedShapeEraser { ccx };
 

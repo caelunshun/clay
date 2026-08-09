@@ -20,7 +20,7 @@ use crate::{
         syntax::{
             HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirLetStmt, HirMatchArm, HirPat,
             HirPatKind, HirPatListFrontAndTail, HirRangeExpr, HirStmt, HirStructExpr,
-            HirStructNamedField, LabelTargetKind, LocalNameSymbol, SigTyOrReList,
+            HirStructNamedField, LabelTargetKind, LocalNameSymbol, SigGenericList, SigTyOrReList,
         },
     },
 };
@@ -318,7 +318,10 @@ impl IntraItemLowerCtxt<'_> {
                 HirExprKind::MethodCall {
                     receiver: self.lower_expr(target),
                     name: *method,
-                    generics: Some(SigTyOrReList::new_slice(&positional, s)),
+                    generics: Some(SigGenericList {
+                        segment_span: generics.span,
+                        elems: SigTyOrReList::new_slice(&positional, s),
+                    }),
                     args: self.lower_exprs(args),
                 }
             }

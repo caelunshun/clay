@@ -7,10 +7,9 @@ use crate::{
     semantic::{
         analysis::typeck::{BodyCtxt, infra::lookup::LookupMethodResult},
         infer::{HrtbUniverse, ObligeCause, ObligeCauseOrigin},
-        lower::generics::normalize_positional_generic_arity_zip,
         syntax::{
             Divergence, FnInstanceInner, HirExpr, InferTyVarSourceInfo, RelationMode,
-            SigTyOrReList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            SigGenericList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
         },
     },
 };
@@ -86,7 +85,7 @@ impl BodyCtxt<'_, '_> {
         &mut self,
         receiver: Obj<HirExpr>,
         name: Ident,
-        generics: Option<SigTyOrReList>,
+        generics: Option<SigGenericList>,
         args: Obj<[Obj<HirExpr>]>,
         divergence: &mut Divergence,
     ) -> Ty {
@@ -98,14 +97,18 @@ impl BodyCtxt<'_, '_> {
         let receiver = self.ccx_mut().peel_ty_infer_var_after_poll(receiver);
 
         let env = self.import_env;
-        let generic_segment_span = generics.map(|v| v.own_span());
-        let generic_param_spans =
-            generics.map(|v| v.iter(tcx).map(|v| v.own_span()).collect::<Vec<_>>());
-
-        let generics = generics.map(|generics| {
-            self.ccx_mut()
-                .import_report_here(HrtbUniverse::ROOT_REF, env, generics)
+        let generic_segment_span = generics.map(|generics| generics.segment_span);
+        let generic_param_spans = generics.map(|generics| {
+            generics
+                .elems
+                .r(s)
+                .iter()
+                .map(|v| v.span(s))
+                .collect::<Vec<_>>()
         });
+
+        let generics =
+            generics.map(|generics| self.ccx_mut().import_report_here(env, generics.elems));
 
         match *receiver.r(s) {
             TyKind::InferVar(_) => {

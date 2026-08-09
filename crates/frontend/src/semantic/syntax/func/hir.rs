@@ -12,7 +12,6 @@ use crate::{
     },
     semantic::syntax::{
         EnumVariantItem, FnItem, HirLabelledBlock, Mutability, SigGenericList, SigTraitSpec, SigTy,
-        SigTyOrReList,
     },
 };
 use std::fmt;
@@ -231,7 +230,7 @@ pub enum HirExprKind {
     MethodCall {
         receiver: Obj<HirExpr>,
         name: Ident,
-        generics: Option<SigTyOrReList>,
+        generics: Option<SigGenericList>,
         args: Obj<[Obj<HirExpr>]>,
     },
     Index(Obj<HirExpr>, Obj<HirExpr>),

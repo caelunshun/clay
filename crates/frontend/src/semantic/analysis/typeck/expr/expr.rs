@@ -6,7 +6,7 @@ use crate::{
     },
     parse::ast::AstLit,
     semantic::{
-        analysis::typeck::{BodyCtxt, infra::lookup::SpannedImportedAssocArgs},
+        analysis::typeck::BodyCtxt,
         infer::{ClauseImportEnv, GenericSubst, HrtbUniverse, ObligeCause, ObligeCauseOrigin},
         syntax::{
             AdtCtorSyntax, AdtInstance, Divergence, FnInstanceInner, FnOwner, FnOwnerAdtCtor,
@@ -153,16 +153,11 @@ impl BodyCtxt<'_, '_> {
             HirExprKind::FnItemLit(def, early_args) => {
                 let env = self.import_env;
 
-                let fn_ty = SpannedTyView::FnDef(
-                    SpannedFnInstanceView {
-                        owner: SpannedFnOwnerView::Item(def).encode(expr.r(s).span, tcx),
-                        early_args,
-                    }
-                    .encode(expr.r(s).span, tcx),
-                )
-                .encode(expr.r(s).span, tcx);
-
-                self.ccx_mut().import_report_here(env, fn_ty)
+                tcx.intern(TyKind::FnDef(
+                    self.ccx_mut()
+                        .importer_here(env)
+                        .import_item_fn(def, early_args),
+                ))
             }
             HirExprKind::TypeRelative {
                 self_ty,
@@ -176,22 +171,6 @@ impl BodyCtxt<'_, '_> {
 
                 let as_trait =
                     as_trait.map(|as_trait| self.ccx_mut().import_report_here(env, as_trait));
-
-                let mut arg_spans = None;
-                let assoc_args = assoc_args.map(|assoc_args| {
-                    let arg_spans = arg_spans.insert(
-                        assoc_args
-                            .iter(tcx)
-                            .map(|v| v.own_span())
-                            .collect::<Vec<_>>(),
-                    );
-
-                    SpannedImportedAssocArgs {
-                        segment_span: assoc_args.segment_span,
-                        arg_spans: arg_spans,
-                        args: self.ccx_mut().import_report_here(env, assoc_args),
-                    }
-                });
 
                 let Some(resolution) =
                     self.lookup_type_relative(self_ty, as_trait, assoc_name, assoc_args)
