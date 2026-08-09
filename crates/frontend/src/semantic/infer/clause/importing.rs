@@ -11,15 +11,15 @@ use crate::{
             ObligeCauseOrigin, ObligeCauseStep, UnifyCxMode,
         },
         syntax::{
-            AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, FnItem, FnOwner, GenericBinder,
-            HrtbBinder, HrtbDebruijnDef, HrtbProjection, InferTyVarSourceInfo, Re, RegionGeneric,
-            RelationDirection, SigAdtInstance, SigGenericList, SigHrtbBinder, SigProjectType,
-            SigRe, SigReKind, SigTraitClause, SigTraitClauseKind, SigTraitClauseList,
-            SigTraitInstance, SigTraitParamKind, SigTraitSpec, SigTy, SigTyKind, SigTyList,
-            SigTyOrRe, SigTyOrReList, TraitClause, TraitClauseList, TraitInstance, TraitParam,
-            TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt, TyKind, TyList, TyOrRe,
-            TyOrReKind, TyOrReList, TypeAliasItem, TypeGeneric, UniversalReVarSourceInfo,
-            UniversalTyVarSourceInfo,
+            AdtInstance, AnyGeneric, FnDef, FnInstance, FnInstanceInner, FnItem, FnOwner,
+            GenericBinder, HrtbBinder, HrtbDebruijnDef, HrtbProjection, InferTyVarSourceInfo, Re,
+            RegionGeneric, RelationDirection, SigAdtInstance, SigGenericList, SigHrtbBinder,
+            SigProjectType, SigRe, SigReKind, SigTraitClause, SigTraitClauseKind,
+            SigTraitClauseList, SigTraitInstance, SigTraitParamKind, SigTraitSpec, SigTy,
+            SigTyKind, SigTyList, SigTyOrRe, SigTyOrReList, TraitClause, TraitClauseList,
+            TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt,
+            TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList, TypeAliasItem, TypeGeneric,
+            UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
@@ -458,14 +458,19 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         }
     }
 
+    pub fn import_fn_def_generics(&mut self, def: Obj<FnDef>, args: SigGenericList) -> TyOrReList {
+        let s = self.session();
+
+        self.import_simple_generic_args(def.r(s).generics, args)
+    }
+
     pub fn import_item_fn(&mut self, def: Obj<FnItem>, args: Option<SigGenericList>) -> FnInstance {
         let s = self.session();
         let tcx = self.tcx();
 
         tcx.intern(FnInstanceInner {
             owner: FnOwner::Item(def),
-            early_args: args
-                .map(|args| self.import_simple_generic_args(def.r(s).def.r(s).generics, args)),
+            early_args: args.map(|args| self.import_fn_def_generics(*def.r(s).def, args)),
         })
     }
 

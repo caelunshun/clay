@@ -208,16 +208,14 @@ impl BodyCtxt<'_, '_> {
             )?
         };
 
-        let owner = self
-            .ccx_mut()
-            .instantiate_infer()
-            .instantiate_method_fn_owner(
-                &ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall {
-                    site_span: assoc_name.span,
-                }),
-                resolution,
-                self_ty,
-            );
+        let owner = self.ccx_mut().instantiate_infer().fresh_fn_def_to_fn_owner(
+            &ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall {
+                site_span: assoc_name.span,
+            }),
+            HrtbUniverse::ROOT_REF,
+            Some(self_ty),
+            resolution,
+        );
 
         let early_binder = resolution.r(s).generics;
 
@@ -231,7 +229,11 @@ impl BodyCtxt<'_, '_> {
             )
         });
 
-        // TODO: Import with WF
+        let early_args = early_args.map(|early_args| {
+            self.ccx
+                .importer_here(self.import_env)
+                .import_fn_def_generics(resolution, early_args)
+        });
 
         let instance = tcx.intern(FnInstanceInner { owner, early_args });
 

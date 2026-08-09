@@ -6,9 +6,10 @@ use crate::{
             ObligeCauseStep, SigImporterWfMode,
         },
         syntax::{
-            AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, GenericBinder, HrtbBinder,
-            ImplItem, InferTyVarSourceInfo, SigTraitClauseKind, TraitClause, TraitInstance,
-            TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReList, TypeAliasItem,
+            AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnOwner, FnOwnerInherent,
+            FnOwnerTrait, GenericBinder, HrtbBinder, ImplItem, InferTyVarSourceInfo,
+            SigTraitClauseKind, TraitClause, TraitInstance, TraitItem, TraitParam, TraitSpec, Ty,
+            TyKind, TyOrRe, TyOrReKind, TyOrReList, TypeAliasItem, TypeGeneric,
             UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
@@ -312,7 +313,38 @@ pub struct ClauseCxInferInstantiation<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
 }
 
-impl ClauseCxInferInstantiation<'_, '_> {
+impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
+    pub fn fresh_binder_to_unconstrained_params(
+        &mut self,
+        universe: &HrtbUniverse,
+        binder: Obj<GenericBinder>,
+        mut create_info: impl FnMut(
+            &mut ClauseCx<'tcx>,
+            usize,
+            Obj<TypeGeneric>,
+        ) -> InferTyVarSourceInfo,
+    ) -> TyOrReList {
+        let s = self.ccx.session();
+        let tcx = self.ccx.tcx();
+
+        tcx.intern_list(
+            &binder
+                .r(s)
+                .defs
+                .iter()
+                .enumerate()
+                .map(|(idx, &def)| match def {
+                    AnyGeneric::Re(_) => TyOrRe::Re(self.ccx.fresh_re_infer()),
+                    AnyGeneric::Ty(def) => {
+                        let info = create_info(self.ccx, idx, def);
+
+                        TyOrRe::Ty(self.ccx.fresh_ty_infer(universe.clone(), info))
+                    }
+                })
+                .collect::<Vec<_>>(),
+        )
+    }
+
     pub fn ensure_binder_params_wf(
         &mut self,
         universe: &HrtbUniverse,
@@ -450,6 +482,88 @@ impl ClauseCxInferInstantiation<'_, '_> {
 
         instance
     }
+
+    pub fn fresh_trait_item_to_trait_spec(
+        &mut self,
+        universe: &HrtbUniverse,
+        item: Obj<TraitItem>,
+    ) -> TraitSpec {
+        let s = self.ccx.session();
+        let tcx = self.ccx.tcx();
+
+        let params = tcx.intern_list(
+            &item
+                .r(s)
+                .generics
+                .r(s)
+                .defs
+                .iter()
+                .enumerate()
+                .map(|(idx, def)| {
+                    if idx >= *item.r(s).regular_generic_count as usize {
+                        debug_assert_eq!(def.kind(), TyOrReKind::Ty);
+
+                        return TraitParam::Unspecified(tcx.intern_list(&[]));
+                    }
+
+                    match def.kind() {
+                        TyOrReKind::Re => TraitParam::Equals(TyOrRe::Re(self.ccx.fresh_re_infer())),
+                        TyOrReKind::Ty => TraitParam::Equals(TyOrRe::Ty(self.ccx.fresh_ty_infer(
+                            universe.clone(),
+                            InferTyVarSourceInfo::TraitParam {
+                                trait_: item,
+                                idx: idx as u32,
+                            },
+                        ))),
+                    }
+                })
+                .collect::<Vec<_>>(),
+        );
+
+        TraitSpec { def: item, params }
+    }
+
+    pub fn fresh_fn_def_to_fn_owner(
+        &mut self,
+        origin: &ObligeCause,
+        universe: &HrtbUniverse,
+        mut self_ty: Option<Ty>,
+        def: Obj<FnDef>,
+    ) -> FnOwner {
+        let s = self.ccx.session();
+
+        let mut make_self_ty = |ccx: &mut ClauseCx<'_>| -> Ty {
+            *self_ty.get_or_insert_with(|| {
+                ccx.fresh_ty_infer(universe.clone(), InferTyVarSourceInfo::MethodLookupHelper)
+            })
+        };
+
+        match *def.r(s).owner {
+            FnDefOwner::Item(item) => FnOwner::Item(item),
+            FnDefOwner::TraitMethod(item, method_idx) => {
+                let instance = self.fresh_trait_item_to_trait_spec(universe, item);
+                let self_ty = make_self_ty(self.ccx);
+
+                self.ccx.oblige_ty_meets_trait_instantiated(
+                    origin.clone(),
+                    universe.clone(),
+                    self_ty,
+                    instance,
+                );
+
+                FnOwner::Trait(FnOwnerTrait {
+                    instance,
+                    self_ty,
+                    method_idx,
+                })
+            }
+            FnDefOwner::ImplMethod(block, method_idx) => FnOwner::Inherent(FnOwnerInherent {
+                self_ty: make_self_ty(self.ccx),
+                block,
+                method_idx,
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -468,28 +582,15 @@ impl ClauseCxInferInstantiation<'_, '_> {
         block: Obj<ImplItem>,
     ) -> InstantiatedImplBlock {
         let s = self.ccx.session();
-        let tcx = self.ccx.tcx();
 
         // Instantiate fresh variables for each `impl` block generic.
-        let params = tcx.intern_list(
-            &block
-                .r(s)
-                .generics
-                .r(s)
-                .defs
-                .iter()
-                .enumerate()
-                .map(|(idx, def)| match def {
-                    AnyGeneric::Re(_) => TyOrRe::Re(self.ccx.fresh_re_infer()),
-                    AnyGeneric::Ty(_) => TyOrRe::Ty(self.ccx.fresh_ty_infer(
-                        universe.clone(),
-                        InferTyVarSourceInfo::ImplBlockParam {
-                            block,
-                            idx: idx as u32,
-                        },
-                    )),
-                })
-                .collect::<Vec<_>>(),
+        let params = self.fresh_binder_to_unconstrained_params(
+            universe,
+            block.r(s).generics,
+            |_ccx, idx, _def| InferTyVarSourceInfo::ImplBlockParam {
+                block,
+                idx: idx as u32,
+            },
         );
 
         // Import the target type and trait.

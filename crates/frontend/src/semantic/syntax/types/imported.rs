@@ -335,6 +335,10 @@ pub enum InferTyVarSourceInfo {
     DirectlyImported {
         span: Span,
     },
+    TraitParam {
+        trait_: Obj<TraitItem>,
+        idx: u32,
+    },
     ImplBlockParam {
         block: Obj<ImplItem>,
         idx: u32,
