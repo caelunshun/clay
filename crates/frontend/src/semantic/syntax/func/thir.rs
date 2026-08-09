@@ -5,7 +5,7 @@ use crate::{
         syntax::Span,
     },
     parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
-    semantic::syntax::{LocalNameIdent, Mutability, ThirLabelledBlock, Ty},
+    semantic::syntax::{LocalNameIdent, Mutability, SigTy, ThirLabelledBlock},
 };
 
 // === Pattern === //
@@ -14,13 +14,13 @@ use crate::{
 pub struct ThirLocal {
     pub mutability: Mutability,
     pub name: LocalNameIdent,
-    pub ty: Ty,
+    pub ty: SigTy,
 }
 
 #[derive(Debug, Clone)]
 pub struct ThirPat {
     pub span: Span,
-    pub ty: Ty,
+    pub ty: SigTy,
     pub kind: ThirPatKind,
 }
 
@@ -43,7 +43,7 @@ pub enum ThirPatKind {
 #[derive(Debug, Clone)]
 pub struct ThirExpr {
     pub span: Span,
-    pub ty: Ty,
+    pub ty: SigTy,
     pub kind: LateInit<ThirExprKind>,
 }
 
@@ -75,7 +75,7 @@ pub enum ThirExprKind {
 #[derive(Debug, Clone)]
 pub struct ThirBlock {
     pub span: Span,
-    pub ty: Ty,
+    pub ty: SigTy,
     pub stmts: Vec<ThirStmt>,
     pub last_expr: Option<Obj<ThirExpr>>,
 }

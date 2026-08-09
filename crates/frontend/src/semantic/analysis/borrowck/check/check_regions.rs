@@ -91,9 +91,7 @@ impl BodyInstantiateCx<'_, '_> {
     // Import all types within the body and ensure that they're well-formed. Additionally, local
     // types must outlive the universal region associated with that local.
     fn visit_local(&mut self, local_idx: MirLocalIdx, local: &mut MirLocal) {
-        local.ty = self
-            .ccx
-            .import_report_elsewhere(HrtbUniverse::ROOT_REF, self.env, local.ty);
+        local.ty = self.ccx.import_report_elsewhere(self.env, local.ty);
 
         self.ccx.oblige_ty_outlives_re(
             // TODO
@@ -163,9 +161,7 @@ impl BodyInstantiateCx<'_, '_> {
                 // (ty is uninteresting)
             }
             MirAssignRvalue::Zst(ty) => {
-                *ty = self
-                    .ccx
-                    .import_report_elsewhere(HrtbUniverse::ROOT_REF, self.env, *ty);
+                *ty = self.ccx.import_report_elsewhere(self.env, *ty);
             }
         }
     }

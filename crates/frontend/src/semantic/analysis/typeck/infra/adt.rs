@@ -7,10 +7,9 @@ use crate::{
     parse::token::Ident,
     semantic::{
         analysis::typeck::BodyCtxt,
-        infer::HrtbUniverse,
         syntax::{
             AdtCtor, AdtCtorFieldIdx, AdtCtorInstance, AdtCtorUnresolved, AdtInstance, AdtKind,
-            HirPatListFrontAndTail, HirPatListFrontAndTailLen, Ty, TyKind,
+            HirPatListFrontAndTail, HirPatListFrontAndTailLen, SigAdtInstance, Ty, TyKind,
         },
     },
     utils::{
@@ -29,15 +28,12 @@ impl BodyCtxt<'_, '_> {
         ctor: AdtCtorUnresolved,
     ) -> Result<AdtCtorInstance, ErrorGuaranteed> {
         let s = self.session();
-        let tcx = self.tcx();
 
         let import_env = self.import_env;
 
         match ctor {
             AdtCtorUnresolved::ResolvedTy(ty) => {
-                let ty = self
-                    .ccx_mut()
-                    .import_report_here(HrtbUniverse::ROOT_REF, import_env, ty);
+                let ty = self.ccx_mut().import_report_here(import_env, ty);
 
                 self.resolve_ty_as_adt_ctor_instance(span, ty)
             }
@@ -45,21 +41,15 @@ impl BodyCtxt<'_, '_> {
                 def: *def.r(s).adt_variant(s).r(s).ctor,
                 params: self
                     .ccx_mut()
-                    .import_report_here(
-                        HrtbUniverse::ROOT_REF,
-                        import_env,
-                        SpannedAdtInstanceView {
-                            def: def.r(s).adt(s),
-                            params: args,
-                        }
-                        .encode(span, tcx),
-                    )
+                    .importer_here(import_env)
+                    .import_adt(SigAdtInstance {
+                        def: def.r(s).adt(s),
+                        params: args,
+                    })
                     .params,
             }),
             AdtCtorUnresolved::UnresolvedEnumVariant(enum_ty, variant_name) => {
-                let enum_ty =
-                    self.ccx_mut()
-                        .import_report_here(HrtbUniverse::ROOT_REF, import_env, enum_ty);
+                let enum_ty = self.ccx_mut().import_report_here(import_env, enum_ty);
 
                 let enum_instance = self.resolve_ty_as_adt_instance(span, enum_ty)?;
 
@@ -146,12 +136,7 @@ impl BodyCtxt<'_, '_> {
                 .emit());
             }
 
-            TyKind::SigThis
-            | TyKind::SigInfer
-            | TyKind::SigGeneric(..)
-            | TyKind::SigProject(..)
-            | TyKind::SigAlias(..)
-            | TyKind::HrtbVar(..) => unreachable!(),
+            TyKind::HrtbVar(..) | TyKind::HrtbProjection(..) => unreachable!(),
 
             TyKind::Error(err) => return Err(err),
         }

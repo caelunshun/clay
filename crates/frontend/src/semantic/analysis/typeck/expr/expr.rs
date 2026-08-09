@@ -11,8 +11,8 @@ use crate::{
         syntax::{
             AdtCtorSyntax, AdtInstance, Divergence, FnInstanceInner, FnOwner, FnOwnerAdtCtor,
             HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirStmt, HirStructExpr,
-            InferTyVarSourceInfo, LabelTargetKind, Re, RelationMode, SimpleTyKind, SimpleTySet,
-            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            InferTyVarSourceInfo, LabelTargetKind, Re, RelationMode, SigAdtInstance, SimpleTyKind,
+            SimpleTySet, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -47,11 +47,7 @@ impl BodyCtxt<'_, '_> {
                     let ascription = if let Some(ascription) = stmt.r(s).ascription {
                         let import_env = self.import_env;
 
-                        let ascription = self.ccx_mut().import_report_here(
-                            HrtbUniverse::ROOT_REF,
-                            import_env,
-                            ascription,
-                        );
+                        let ascription = self.ccx_mut().import_report_here(import_env, ascription);
 
                         if let Some(init) = stmt.r(s).init {
                             self.check_expr_demand(init, ascription).and_do(divergence);
@@ -166,8 +162,7 @@ impl BodyCtxt<'_, '_> {
                 )
                 .encode(expr.r(s).span, tcx);
 
-                self.ccx_mut()
-                    .import_report_here(HrtbUniverse::ROOT_REF, env, fn_ty)
+                self.ccx_mut().import_report_here(env, fn_ty)
             }
             HirExprKind::TypeRelative {
                 self_ty,
@@ -177,16 +172,10 @@ impl BodyCtxt<'_, '_> {
             } => 'res: {
                 let env = self.import_env;
 
-                let self_ty =
-                    self.ccx_mut()
-                        .import_report_here(HrtbUniverse::ROOT_REF, env, self_ty);
+                let self_ty = self.ccx_mut().import_report_here(env, self_ty);
 
-                let as_trait = as_trait.map(|as_trait| {
-                    self.ccx_mut()
-                        .importer()
-                        .with_clause_applies_to(self_ty)
-                        .import_report_here(HrtbUniverse::ROOT_REF, env, as_trait)
-                });
+                let as_trait =
+                    as_trait.map(|as_trait| self.ccx_mut().import_report_here(env, as_trait));
 
                 let mut arg_spans = None;
                 let assoc_args = assoc_args.map(|assoc_args| {
@@ -198,13 +187,9 @@ impl BodyCtxt<'_, '_> {
                     );
 
                     SpannedImportedAssocArgs {
-                        segment_span: assoc_args.own_span(),
+                        segment_span: assoc_args.segment_span,
                         arg_spans: arg_spans,
-                        args: self.ccx_mut().import_report_here(
-                            HrtbUniverse::ROOT_REF,
-                            env,
-                            assoc_args,
-                        ),
+                        args: self.ccx_mut().import_report_here(env, assoc_args),
                     }
                 });
 
@@ -220,9 +205,7 @@ impl BodyCtxt<'_, '_> {
             }
             HirExprKind::Cast(expr, as_ty) => {
                 let env = self.import_env;
-                let as_ty = self
-                    .ccx_mut()
-                    .import_report_here(HrtbUniverse::ROOT_REF, env, as_ty);
+                let as_ty = self.ccx_mut().import_report_here(env, as_ty);
 
                 self.check_expr_demand(expr, as_ty).and_do(&mut divergence)
             }
@@ -387,10 +370,8 @@ impl BodyCtxt<'_, '_> {
                 tcx.intern(TyKind::Simple(SimpleTyKind::Never))
             }
             HirExprKind::AdtCtorTy(ty) => 'check: {
-                let ty_span = ty.own_span();
-                let ty = self
-                    .ccx_mut()
-                    .import_report_here(HrtbUniverse::ROOT_REF, import_env, ty);
+                let ty_span = ty.r(s).span;
+                let ty = self.ccx_mut().import_report_here(import_env, ty);
 
                 let ctor = match self.resolve_ty_as_adt_ctor_instance(ty_span, ty) {
                     Ok(v) => v,
@@ -437,24 +418,13 @@ impl BodyCtxt<'_, '_> {
                     }
                 }
 
-                let TyKind::Adt(AdtInstance { def: _, params }) = *self
-                    .ccx_mut()
-                    .import_report_here(
-                        HrtbUniverse::ROOT_REF,
-                        import_env,
-                        SpannedTyView::Adt(
-                            SpannedAdtInstanceView {
-                                def: item.r(s).adt(s),
-                                params,
-                            }
-                            .encode(expr.r(s).span, tcx),
-                        )
-                        .encode(expr.r(s).span, tcx),
-                    )
-                    .r(s)
-                else {
-                    unreachable!()
-                };
+                let AdtInstance { def: _, params } = self.ccx_mut().import_report_here(
+                    import_env,
+                    SigAdtInstance {
+                        def: item.r(s).adt(s),
+                        params,
+                    },
+                );
 
                 tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
                     owner: FnOwner::AdtCtor(FnOwnerAdtCtor { ctor }),
@@ -504,17 +474,15 @@ impl BodyCtxt<'_, '_> {
                 for (adt_ctor_field, idx_in_expr) in mapping {
                     let init_expr = fields.r(s)[idx_in_expr].init;
 
-                    let init_ty_orig = ctor.def.r(s).fields[adt_ctor_field].ty.value;
+                    let init_ty_orig = *ctor.def.r(s).fields[adt_ctor_field].ty;
                     let init_ty_env = ClauseImportEnv::new(
-                        instance_ty,
+                        Some(instance_ty),
                         [GenericSubst::new(instance_owner.r(s).generics, ctor.params)],
                     );
 
-                    let init_ty = self.ccx_mut().import_report_elsewhere(
-                        HrtbUniverse::ROOT_REF,
-                        &init_ty_env,
-                        init_ty_orig,
-                    );
+                    let init_ty = self
+                        .ccx_mut()
+                        .import_report_elsewhere(&init_ty_env, init_ty_orig);
 
                     // Mapping follows evaluation order with some filtering for unmatched fields.
                     self.check_expr_demand(init_expr, init_ty)

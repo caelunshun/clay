@@ -346,7 +346,7 @@ impl<'tcx> ClauseCx<'tcx> {
             ..
         } = self
             .instantiate_infer()
-            .instantiate_impl_block(cause, universe, rhs);
+            .fresh_impl_block(cause, universe, rhs);
 
         // Does the `lhs` type match the `rhs`'s target type?
         if self

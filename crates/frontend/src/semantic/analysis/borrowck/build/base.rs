@@ -40,7 +40,7 @@ impl<'tcx> MirBuildCtxt<'tcx> {
 
         // Define return value
         body.locals.push(MirLocal {
-            ty: def.r(s).ret_ty.value,
+            ty: *def.r(s).ret_ty,
         });
 
         // Define arguments

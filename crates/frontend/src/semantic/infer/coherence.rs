@@ -109,7 +109,7 @@ impl CoherenceMap {
 
     pub fn gather_inherent_impl_function_candidates<'a>(
         &'a self,
-        ccx: &'a ClauseCx<'a>,
+        ccx: &'_ ClauseCx<'a>,
         self_ty: Ty,
         name: Symbol,
     ) -> impl Iterator<Item = Obj<FnDef>> + 'a {

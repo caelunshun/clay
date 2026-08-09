@@ -138,18 +138,30 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    pub fn import_report_here<I: SigImportable>(
-        &mut self,
-        env: &ClauseImportEnv,
-        target: I,
-    ) -> I::Output {
+    pub fn importer_here(&mut self, env: &ClauseImportEnv) -> SigImporter<'_, 'tcx> {
         self.importer(
             ObligeCause::new_empty_report(),
             HrtbUniverse::ROOT,
             env.clone(),
             SigImporterWfMode::ReportHere,
         )
-        .import(target)
+    }
+
+    pub fn importer_elsewhere(&mut self, env: &ClauseImportEnv) -> SigImporter<'_, 'tcx> {
+        self.importer(
+            ObligeCause::new_empty_report(),
+            HrtbUniverse::ROOT,
+            env.clone(),
+            SigImporterWfMode::DelayBug,
+        )
+    }
+
+    pub fn import_report_here<I: SigImportable>(
+        &mut self,
+        env: &ClauseImportEnv,
+        target: I,
+    ) -> I::Output {
+        self.importer_here(env).import(target)
     }
 
     pub fn import_report_elsewhere<I: SigImportable>(
@@ -157,13 +169,7 @@ impl<'tcx> ClauseCx<'tcx> {
         env: &ClauseImportEnv,
         target: I,
     ) -> I::Output {
-        self.importer(
-            ObligeCause::new_empty_report(),
-            HrtbUniverse::ROOT,
-            env.clone(),
-            SigImporterWfMode::ReportHere,
-        )
-        .import(target)
+        self.importer_elsewhere(env).import(target)
     }
 }
 
@@ -191,6 +197,7 @@ impl_sig_importable! {
     import_ty_or_re: SigTyOrRe => TyOrRe;
     import_ty: SigTy => Ty;
     import_re: SigRe => Re;
+    import_adt: SigAdtInstance => AdtInstance;
     import_trait_clause_list: SigTraitClauseList => TraitClauseList;
     import_trait_clause: SigTraitClause => TraitClause;
     import_hrtb_binder: SigHrtbBinder => HrtbBinder;
@@ -355,12 +362,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
                 tcx.intern(TyKind::Reference(re, muta, pointee))
             }
-            SigTyKind::Adt(SigAdtInstance { def, params }) => {
-                tcx.intern(TyKind::Adt(AdtInstance {
-                    def,
-                    params: self.import_simple_generic_args(def.r(s).generics, params),
-                }))
-            }
+            SigTyKind::Adt(adt) => tcx.intern(TyKind::Adt(self.import_adt(adt))),
             SigTyKind::Trait(re, muta, clauses) => {
                 let re = self.import_re(re);
                 let clauses = self.import_trait_clause_list(clauses);
@@ -413,7 +415,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                     }));
                 }
 
-                let instance = self.ccx.instantiate_infer().instantiate_trait_spec(
+                let instance = self.ccx.instantiate_infer().resolve_trait_spec(
                     &self.cause,
                     &self.opts.universe,
                     target,
@@ -443,6 +445,15 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             SigReKind::Infer => self.ccx.fresh_re_infer(),
             SigReKind::Generic(generic) => self.opts.env.lookup_re(s, generic),
             SigReKind::Error(err) => Re::Error(err),
+        }
+    }
+
+    pub fn import_adt(&mut self, adt: SigAdtInstance) -> AdtInstance {
+        let s = self.session();
+
+        AdtInstance {
+            def: adt.def,
+            params: self.import_simple_generic_args(adt.def.r(s).generics, adt.params),
         }
     }
 
@@ -904,7 +915,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         //
         // ...where the last clause fails to pass its self obligation because the earlier clause
         // takes priority.
-        let instance = self.ccx.instantiate_infer().instantiate_trait_spec(
+        let instance = self.ccx.instantiate_infer().resolve_trait_spec(
             &self.cause,
             &self.opts.universe,
             wf_self_ty,
@@ -1112,7 +1123,7 @@ impl<'tcx> TyFolder<'tcx> for HrtbInstantiator<'_, 'tcx> {
                 spec,
                 assoc_idx,
             }) if self.top.len() == self.replace_with.r(s).len() => {
-                let instance = self.ccx.instantiate_infer().instantiate_trait_spec(
+                let instance = self.ccx.instantiate_infer().resolve_trait_spec(
                     &self.cause.clone().into_delay_bug(),
                     HrtbUniverse::ROOT_REF,
                     target,

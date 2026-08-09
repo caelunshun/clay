@@ -34,9 +34,7 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
 
         for arg in def.r(s).args.r(s) {
             let env = bcx.import_env;
-            let ascription = bcx
-                .ccx_mut()
-                .import_report_here(HrtbUniverse::ROOT_REF, env, arg.ty);
+            let ascription = bcx.ccx_mut().import_report_here(env, arg.ty);
 
             bcx.check_pat_demand(arg.pat, ascription, None);
         }
@@ -46,10 +44,10 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
         ConfirmCtxt::new(&mut bcx).confirm(body);
     } else {
         for arg in def.r(s).args.r(s) {
-            ccx.import_report_here(HrtbUniverse::ROOT_REF, &env_sig, arg.ty);
+            ccx.import_report_here(&env_sig, arg.ty);
         }
 
-        ccx.import_report_here(HrtbUniverse::ROOT_REF, &env_sig, *def.r(s).ret_ty);
+        ccx.import_report_here(&env_sig, *def.r(s).ret_ty);
     }
 
     ccx.verify();
@@ -85,8 +83,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
     ) -> Self {
         let s = ccx.session();
 
-        let return_ty =
-            ccx.import_report_here(HrtbUniverse::ROOT_REF, import_env, *def.r(s).ret_ty);
+        let return_ty = ccx.import_report_here(import_env, *def.r(s).ret_ty);
 
         Self {
             ccx,

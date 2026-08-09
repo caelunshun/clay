@@ -400,7 +400,7 @@ impl ClauseCxInferInstantiation<'_, '_> {
 
     /// Resolves all the projected types of a `TraitSpec` applying to a specified `self_ty`,
     /// returning a complete `TraitInstance`.
-    pub fn instantiate_trait_spec(
+    pub fn resolve_trait_spec(
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,
@@ -461,7 +461,7 @@ pub struct InstantiatedImplBlock {
 }
 
 impl ClauseCxInferInstantiation<'_, '_> {
-    pub fn instantiate_impl_block(
+    pub fn fresh_impl_block(
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,

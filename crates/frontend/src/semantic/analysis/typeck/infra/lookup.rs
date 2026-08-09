@@ -67,18 +67,14 @@ impl BodyCtxt<'_, '_> {
                         }
 
                         let env = ClauseImportEnv::new(
-                            receiver,
+                            Some(receiver),
                             [GenericSubst::new(
                                 instance.def.r(s).generics,
                                 instance.params,
                             )],
                         );
 
-                        let field = self.ccx_mut().import_report_elsewhere(
-                            HrtbUniverse::ROOT_REF,
-                            &env,
-                            field.ty.value,
-                        );
+                        let field = self.ccx_mut().import_report_elsewhere(&env, *field.ty);
 
                         return Some(field);
                     }
@@ -101,12 +97,7 @@ impl BodyCtxt<'_, '_> {
                 | TyKind::UniversalVar(_) => {
                     // (fallthrough, no special handling)
                 }
-                TyKind::SigThis
-                | TyKind::SigInfer
-                | TyKind::SigGeneric(_)
-                | TyKind::SigProject(_)
-                | TyKind::SigAlias(_, _)
-                | TyKind::HrtbVar(_) => unreachable!(),
+                TyKind::HrtbVar(_) | TyKind::HrtbProjection(_) => unreachable!(),
                 TyKind::InferVar(_) => {
                     return Some(tcx.intern(TyKind::Error(
                         Diag::span_err(name.span, "type must be known by this point").emit(),
@@ -283,12 +274,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
 
         fn is_too_general(ty: Ty, s: &Session) -> bool {
             match ty.r(s) {
-                TyKind::SigThis
-                | TyKind::SigInfer
-                | TyKind::SigGeneric(_)
-                | TyKind::SigProject(_)
-                | TyKind::SigAlias(_, _)
-                | TyKind::HrtbVar(_) => unreachable!(),
+                TyKind::HrtbVar(_) | TyKind::HrtbProjection(_) => unreachable!(),
 
                 TyKind::Simple(_)
                 | TyKind::Reference(_, _, _)
@@ -312,7 +298,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                 IterEither::Left(
                     self.ccx()
                         .coherence()
-                        .gather_inherent_impl_method_candidates(tcx, receiver, name.text),
+                        .gather_inherent_impl_method_candidates(self.ccx(), receiver, name.text),
                 )
             }
             MethodQuery::AssocFn(self_ty) => {
@@ -325,7 +311,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                 IterEither::Right(
                     self.ccx()
                         .coherence()
-                        .gather_inherent_impl_function_candidates(tcx, self_ty, name.text),
+                        .gather_inherent_impl_function_candidates(self.ccx(), self_ty, name.text),
                 )
             }
         };
