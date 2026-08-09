@@ -100,7 +100,7 @@ impl GenericSubst {
     }
 }
 
-// === Driver === //
+// === SigImporter === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum SigImporterWfMode {
@@ -110,24 +110,6 @@ pub enum SigImporterWfMode {
 }
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn importer_report(&mut self, env: &ClauseImportEnv) -> SigImporter<'_, 'tcx> {
-        self.importer(
-            ObligeCause::new_empty_report(),
-            HrtbUniverse::ROOT,
-            env.clone(),
-            SigImporterWfMode::ReportHere,
-        )
-    }
-
-    pub fn importer_delay(&mut self, env: &ClauseImportEnv) -> SigImporter<'_, 'tcx> {
-        self.importer(
-            ObligeCause::new_empty_report(),
-            HrtbUniverse::ROOT,
-            env.clone(),
-            SigImporterWfMode::ReportHere,
-        )
-    }
-
     pub fn importer(
         &mut self,
         cause: ObligeCause,
@@ -156,114 +138,64 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    pub fn instantiate_hrtb_universal(
+    pub fn import_report_here<I: SigImportable>(
         &mut self,
-        cause: &ObligeCause,
-        universe: HrtbUniverse,
-        value: HrtbBinder,
-    ) -> TraitSpec {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        let HrtbBinder { defs, inner } = value;
-
-        // Make up new universal variables for our binder.
-        let vars = defs
-            .r(s)
-            .iter()
-            .map(|def| match def.kind {
-                TyOrReKind::Re => {
-                    TyOrRe::Re(self.fresh_re_universal(UniversalReVarSourceInfo::HrtbVar))
-                }
-                TyOrReKind::Ty => TyOrRe::Ty(
-                    self.fresh_ty_universal(universe.clone(), UniversalTyVarSourceInfo::HrtbVar),
-                ),
-            })
-            .collect::<Vec<_>>();
-
-        let vars = tcx.intern_list(&vars);
-
-        // Initialize their clauses.
-        for (&def, &var) in defs.r(s).iter().zip(vars.r(s)) {
-            let clauses = HrtbInstantiator::new(self, cause, vars).fold(def.clauses);
-
-            self.init_any_universal_var_direct_clauses(var, clauses);
-        }
-
-        HrtbInstantiator::new(self, cause, vars).fold(inner)
+        env: &ClauseImportEnv,
+        target: I,
+    ) -> I::Output {
+        self.importer(
+            ObligeCause::new_empty_report(),
+            HrtbUniverse::ROOT,
+            env.clone(),
+            SigImporterWfMode::ReportHere,
+        )
+        .import(target)
     }
 
-    pub fn instantiate_hrtb_infer(
+    pub fn import_report_elsewhere<I: SigImportable>(
         &mut self,
-        cause: ObligeCause,
-        universe: HrtbUniverse,
-        value: HrtbBinder,
-    ) -> TraitSpec {
-        let tcx = self.tcx();
-        let s = self.session();
-
-        let HrtbBinder { defs, inner } = value;
-
-        // Make up new inference variables for our binder.
-        let vars = defs
-            .r(s)
-            .iter()
-            .map(|def| match def.kind {
-                TyOrReKind::Re => TyOrRe::Re(self.fresh_re_infer()),
-                TyOrReKind::Ty => TyOrRe::Ty(self.fresh_ty_infer(
-                    universe.clone(),
-                    InferTyVarSourceInfo::HrtbLhsInstantiation {
-                        span: def.span,
-                        clauses: Rc::new(LateInit::uninit()),
-                    },
-                )),
-            })
-            .collect::<Vec<_>>();
-
-        let vars = tcx.intern_list(&vars);
-
-        // Constrain the new inference variables with their obligations.
-        for (&def, &var) in defs.r(s).iter().zip(vars.r(s)) {
-            let clauses = HrtbInstantiator::new(self, &cause, vars).fold(def.clauses);
-
-            let cause = cause.clone().child(
-                ObligeCauseStep::HrtbExistentialInferenceIsPossible {
-                    lhs: var,
-                    rhs: clauses,
-                }
-                .into(),
-            );
-
-            match var {
-                TyOrRe::Re(var) => {
-                    self.oblige_re_meets_clauses(&cause, var, clauses);
-                }
-                TyOrRe::Ty(var) => {
-                    self.oblige_ty_meets_clauses(&cause, &universe, var, clauses);
-
-                    let TyKind::InferVar(var) = *var.r(s) else {
-                        unreachable!()
-                    };
-
-                    let InferTyVarSourceInfo::HrtbLhsInstantiation {
-                        clauses: clauses_late_init,
-                        ..
-                    } = self.lookup_infer_ty_src_info(var)
-                    else {
-                        unreachable!()
-                    };
-
-                    LateInit::init(&clauses_late_init, clauses);
-                }
-            }
-        }
-
-        // Fold the inner type
-        HrtbInstantiator::new(self, &cause, vars).fold(inner)
+        env: &ClauseImportEnv,
+        target: I,
+    ) -> I::Output {
+        self.importer(
+            ObligeCause::new_empty_report(),
+            HrtbUniverse::ROOT,
+            env.clone(),
+            SigImporterWfMode::ReportHere,
+        )
+        .import(target)
     }
 }
 
-// === SigImporter === //
+pub trait SigImportable {
+    type Output;
+
+    fn import(me: Self, importer: &mut SigImporter<'_, '_>) -> Self::Output;
+}
+
+macro_rules! impl_sig_importable {
+    ( $( $method:ident: $src:ty => $dest:ty; )* ) => {$(
+        impl SigImportable for $src {
+            type Output = $dest;
+
+            fn import(me: Self, importer: &mut SigImporter<'_, '_>) -> Self::Output {
+                importer.$method(me)
+            }
+        }
+    )*};
+}
+
+impl_sig_importable! {
+    import_ty_list: SigTyList => TyList;
+    import_ty_or_re_list: SigTyOrReList => TyOrReList;
+    import_ty_or_re: SigTyOrRe => TyOrRe;
+    import_ty: SigTy => Ty;
+    import_re: SigRe => Re;
+    import_trait_clause_list: SigTraitClauseList => TraitClauseList;
+    import_trait_clause: SigTraitClause => TraitClause;
+    import_hrtb_binder: SigHrtbBinder => HrtbBinder;
+    import_trait_spec: SigTraitSpec => TraitSpec;
+}
 
 pub struct SigImporter<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
@@ -294,6 +226,10 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
     fn session(&self) -> &'tcx Session {
         self.ccx.session()
+    }
+
+    pub fn import<I: SigImportable>(&mut self, item: I) -> I::Output {
+        I::import(item, self)
     }
 
     pub fn import_ty_list(&mut self, tys: SigTyList) -> TyList {
@@ -1001,6 +937,114 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 }
 
 // === HrtbInstantiator === //
+
+impl ClauseCx<'_> {
+    pub fn instantiate_hrtb_universal(
+        &mut self,
+        cause: &ObligeCause,
+        universe: HrtbUniverse,
+        value: HrtbBinder,
+    ) -> TraitSpec {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let HrtbBinder { defs, inner } = value;
+
+        // Make up new universal variables for our binder.
+        let vars = defs
+            .r(s)
+            .iter()
+            .map(|def| match def.kind {
+                TyOrReKind::Re => {
+                    TyOrRe::Re(self.fresh_re_universal(UniversalReVarSourceInfo::HrtbVar))
+                }
+                TyOrReKind::Ty => TyOrRe::Ty(
+                    self.fresh_ty_universal(universe.clone(), UniversalTyVarSourceInfo::HrtbVar),
+                ),
+            })
+            .collect::<Vec<_>>();
+
+        let vars = tcx.intern_list(&vars);
+
+        // Initialize their clauses.
+        for (&def, &var) in defs.r(s).iter().zip(vars.r(s)) {
+            let clauses = HrtbInstantiator::new(self, cause, vars).fold(def.clauses);
+
+            self.init_any_universal_var_direct_clauses(var, clauses);
+        }
+
+        HrtbInstantiator::new(self, cause, vars).fold(inner)
+    }
+
+    pub fn instantiate_hrtb_infer(
+        &mut self,
+        cause: ObligeCause,
+        universe: HrtbUniverse,
+        value: HrtbBinder,
+    ) -> TraitSpec {
+        let tcx = self.tcx();
+        let s = self.session();
+
+        let HrtbBinder { defs, inner } = value;
+
+        // Make up new inference variables for our binder.
+        let vars = defs
+            .r(s)
+            .iter()
+            .map(|def| match def.kind {
+                TyOrReKind::Re => TyOrRe::Re(self.fresh_re_infer()),
+                TyOrReKind::Ty => TyOrRe::Ty(self.fresh_ty_infer(
+                    universe.clone(),
+                    InferTyVarSourceInfo::HrtbLhsInstantiation {
+                        span: def.span,
+                        clauses: Rc::new(LateInit::uninit()),
+                    },
+                )),
+            })
+            .collect::<Vec<_>>();
+
+        let vars = tcx.intern_list(&vars);
+
+        // Constrain the new inference variables with their obligations.
+        for (&def, &var) in defs.r(s).iter().zip(vars.r(s)) {
+            let clauses = HrtbInstantiator::new(self, &cause, vars).fold(def.clauses);
+
+            let cause = cause.clone().child(
+                ObligeCauseStep::HrtbExistentialInferenceIsPossible {
+                    lhs: var,
+                    rhs: clauses,
+                }
+                .into(),
+            );
+
+            match var {
+                TyOrRe::Re(var) => {
+                    self.oblige_re_meets_clauses(&cause, var, clauses);
+                }
+                TyOrRe::Ty(var) => {
+                    self.oblige_ty_meets_clauses(&cause, &universe, var, clauses);
+
+                    let TyKind::InferVar(var) = *var.r(s) else {
+                        unreachable!()
+                    };
+
+                    let InferTyVarSourceInfo::HrtbLhsInstantiation {
+                        clauses: clauses_late_init,
+                        ..
+                    } = self.lookup_infer_ty_src_info(var)
+                    else {
+                        unreachable!()
+                    };
+
+                    LateInit::init(&clauses_late_init, clauses);
+                }
+            }
+        }
+
+        // Fold the inner type
+        HrtbInstantiator::new(self, &cause, vars).fold(inner)
+    }
+}
 
 struct HrtbInstantiator<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
