@@ -450,14 +450,23 @@ impl ClauseCxInferInstantiation<'_, '_> {
 
         instance
     }
+}
 
-    pub fn env_for_impl_block(
+#[derive(Debug, Clone)]
+pub struct InstantiatedImplBlock {
+    pub env: ClauseImportEnv,
+    pub params: TyOrReList,
+    pub target_ty: Ty,
+    pub target_trait: TraitInstance,
+}
+
+impl ClauseCxInferInstantiation<'_, '_> {
+    pub fn instantiate_impl_block(
         &mut self,
         cause: &ObligeCause,
         universe: &HrtbUniverse,
-        target: Ty,
         block: Obj<ImplItem>,
-    ) -> ClauseImportEnv {
+    ) -> InstantiatedImplBlock {
         let s = self.ccx.session();
         let tcx = self.ccx.tcx();
 
@@ -483,10 +492,30 @@ impl ClauseCxInferInstantiation<'_, '_> {
                 .collect::<Vec<_>>(),
         );
 
-        let env = ClauseImportEnv::new(
-            Some(target),
-            [GenericSubst::new(block.r(s).generics, params)],
-        );
+        // Import the target type and trait.
+        let mut env = ClauseImportEnv::new(None, [GenericSubst::new(block.r(s).generics, params)]);
+
+        let target_ty = self
+            .ccx
+            .importer(
+                cause.clone(),
+                universe.clone(),
+                env.clone(),
+                SigImporterWfMode::DelayBug,
+            )
+            .import_ty(*block.r(s).target);
+
+        env.self_ty = Some(target_ty);
+
+        let target_trait = self
+            .ccx
+            .importer(
+                cause.clone(),
+                universe.clone(),
+                env.clone(),
+                SigImporterWfMode::DelayBug,
+            )
+            .import_trait_instance(target_ty, block.r(s).trait_.unwrap());
 
         let spanned_params =
             params
@@ -511,6 +540,11 @@ impl ClauseCxInferInstantiation<'_, '_> {
             spanned_params,
         );
 
-        env
+        InstantiatedImplBlock {
+            env,
+            params,
+            target_ty,
+            target_trait,
+        }
     }
 }
