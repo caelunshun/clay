@@ -110,6 +110,24 @@ pub enum SigImporterWfMode {
 }
 
 impl<'tcx> ClauseCx<'tcx> {
+    pub fn importer_report(&mut self, env: &ClauseImportEnv) -> SigImporter<'_, 'tcx> {
+        self.importer(
+            ObligeCause::new_empty_report(),
+            HrtbUniverse::ROOT,
+            env.clone(),
+            SigImporterWfMode::ReportHere,
+        )
+    }
+
+    pub fn importer_delay(&mut self, env: &ClauseImportEnv) -> SigImporter<'_, 'tcx> {
+        self.importer(
+            ObligeCause::new_empty_report(),
+            HrtbUniverse::ROOT,
+            env.clone(),
+            SigImporterWfMode::ReportHere,
+        )
+    }
+
     pub fn importer(
         &mut self,
         cause: ObligeCause,
@@ -839,7 +857,24 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         }
 
         // WF-check the main body.
-        self.import_trait_spec_with_self_ty(Some(wf_self_ty), binder.inner);
+        let bound = self.import_trait_spec_with_self_ty(Some(wf_self_ty), binder.inner);
+
+        self.ccx.oblige_covered(
+            self.cause.clone(),
+            /* must_mention */
+            hrtb_universals
+                .iter()
+                .filter_map(|ty_or_re| ty_or_re.as_ty())
+                .map(|ty| {
+                    let TyKind::UniversalVar(var) = *ty.r(s) else {
+                        unreachable!()
+                    };
+
+                    var
+                }),
+            /* in_type */ None,
+            /* in_trait */ Some(bound),
+        );
 
         // Exit nested universe
         self.opts = old_opts;
