@@ -2,7 +2,7 @@
 
 use super::elaboration::{UniversalElaboration, WipReificationRootSet};
 use crate::{
-    base::arena::Obj,
+    base::arena::{HasInterner as _, Obj},
     semantic::{
         infer::{
             ClauseCx, ClauseObligation, HrtbUniverse, HrtbUniverseInfo, InstantiatedImplBlock,
@@ -446,7 +446,7 @@ impl<'tcx> ClauseCx<'tcx> {
         if (Some(rhs.def) == lang_items.fn_once_trait()
             || Some(rhs.def) == lang_items.fn_mut_trait()
             || Some(rhs.def) == lang_items.fn_trait())
-            && let TyKind::FnDef(lhs) = *lhs.r(s)
+            && let TyKind::FnDef(instance) = *lhs.r(s)
         {
             let &[
                 TraitParam::Equals(TyOrRe::Ty(rhs_input)),
@@ -456,7 +456,36 @@ impl<'tcx> ClauseCx<'tcx> {
                 unreachable!()
             };
 
-            todo!()
+            let instance = self
+                .instantiate_infer()
+                .fresh_fn_instance_to_full(cause, universe, instance);
+
+            let sig = self
+                .instantiate_infer()
+                .resolve_full_fn_instance_sig(cause, universe, instance);
+
+            if self
+                .ucx_mut()
+                .unify_ty_and_ty(
+                    cause,
+                    rhs_input,
+                    tcx.intern(TyKind::Tuple(sig.args)),
+                    RelationMode::Equate,
+                )
+                .is_err()
+            {
+                return Err(SelectionRejected);
+            }
+
+            if self
+                .ucx_mut()
+                .unify_ty_and_ty(cause, rhs_output, sig.ret_ty, RelationMode::Equate)
+                .is_err()
+            {
+                return Err(SelectionRejected);
+            }
+
+            return Ok(self);
         }
 
         Err(SelectionRejected)

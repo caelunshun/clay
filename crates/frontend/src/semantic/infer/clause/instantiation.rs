@@ -494,20 +494,19 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
         universe: &HrtbUniverse,
         block: Obj<ImplItem>,
         self_ty: Ty,
-    ) -> ClauseImportEnv {
-        let InstantiatedImplBlock {
-            env,
-            params: _,
-            target_ty,
-            target_trait,
-        } = self.fresh_impl_block(cause, universe, block);
+    ) -> InstantiatedImplBlock {
+        let instantiation = self.fresh_impl_block(cause, universe, block);
 
-        debug_assert!(target_trait.is_none());
+        debug_assert!(instantiation.target_trait.is_none());
 
-        self.ccx
-            .oblige_ty_unifies_ty(cause.clone(), target_ty, self_ty, RelationMode::Equate);
+        self.ccx.oblige_ty_unifies_ty(
+            cause.clone(),
+            instantiation.target_ty,
+            self_ty,
+            RelationMode::Equate,
+        );
 
-        env
+        instantiation
     }
 
     pub fn resolve_full_fn_instance_sig(
@@ -562,6 +561,7 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
 
                 let env = self
                     .resolve_inherent_impl_block_env(cause, universe, block, self_ty)
+                    .env
                     .with_subst(GenericSubst::new(def.r(s).generics, early_args));
 
                 self.resolve_fn_def_sig(cause, universe, def, env)
