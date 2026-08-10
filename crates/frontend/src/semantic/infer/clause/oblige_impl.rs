@@ -456,13 +456,9 @@ impl<'tcx> ClauseCx<'tcx> {
                 unreachable!()
             };
 
-            let instance = self
-                .instantiate_infer()
-                .fresh_fn_instance_to_full(cause, universe, instance);
-
             let sig = self
                 .instantiate_infer()
-                .resolve_full_fn_instance_sig(cause, universe, instance);
+                .resolve_fn_instance_sig(cause, universe, instance);
 
             if self
                 .ucx_mut()

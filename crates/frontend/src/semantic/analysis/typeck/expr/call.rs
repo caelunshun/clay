@@ -146,26 +146,14 @@ impl BodyCtxt<'_, '_> {
             .importer_here(self.import_env)
             .import_fn_instance_from_owner(owner, generics, FixArity::Normalize);
 
-        let instance = self
-            .ccx_mut()
-            .instantiate_infer()
-            .fresh_fn_instance_to_full(
-                &ObligeCause::new_empty_report(),
-                HrtbUniverse::ROOT_REF,
-                instance,
-            );
-
         let InstantiatedFnSig {
             args: expected_args,
             ret_ty: expected_output,
-        } = self
-            .ccx_mut()
-            .instantiate_infer()
-            .resolve_full_fn_instance_sig(
-                &ObligeCause::new_empty_report(),
-                HrtbUniverse::ROOT_REF,
-                instance,
-            );
+        } = self.ccx_mut().instantiate_infer().resolve_fn_instance_sig(
+            &ObligeCause::new_empty_report(),
+            HrtbUniverse::ROOT_REF,
+            instance,
+        );
 
         let (self_ty, expected_args) = expected_args.r(s).split_first().unwrap();
 

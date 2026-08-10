@@ -454,16 +454,10 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                     early_args: None,
                 });
 
-                let expected_instance = fork.instantiate_infer().fresh_fn_instance_to_full(
-                    &cause,
-                    HrtbUniverse::ROOT_REF,
-                    expected_instance,
-                );
-
                 let InstantiatedFnSig {
                     args: expected_args,
                     ret_ty: _,
-                } = fork.instantiate_infer().resolve_full_fn_instance_sig(
+                } = fork.instantiate_infer().resolve_fn_instance_sig(
                     &cause,
                     HrtbUniverse::ROOT_REF,
                     expected_instance,
@@ -490,8 +484,8 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                     early_args: None,
                 });
 
-                // Call for validation side-effect.
-                fork.instantiate_infer().fresh_fn_instance_to_full(
+                // Call for validation side-effect of non-early-bound functions.
+                fork.instantiate_infer().resolve_fn_instance_sig(
                     &cause,
                     HrtbUniverse::ROOT_REF,
                     expected_instance,

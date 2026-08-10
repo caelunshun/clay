@@ -255,12 +255,6 @@ pub struct FnInstanceInner {
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct FullFnInstance {
-    pub owner: FnOwner,
-    pub early_args: TyOrReList,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum FnOwner {
     Item(Obj<FnItem>),
     Trait(FnOwnerTrait),
@@ -353,6 +347,10 @@ pub enum InferTyVarSourceInfo {
     },
     ImplBlockParam {
         block: Obj<ImplItem>,
+        idx: u32,
+    },
+    LateBoundFnGeneric {
+        instance: FnInstance,
         idx: u32,
     },
     Local {
