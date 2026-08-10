@@ -7,7 +7,9 @@ use crate::{
     parse::ast::AstLit,
     semantic::{
         analysis::typeck::BodyCtxt,
-        infer::{ClauseImportEnv, GenericSubst, HrtbUniverse, ObligeCause, ObligeCauseOrigin},
+        infer::{
+            ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse, ObligeCause, ObligeCauseOrigin,
+        },
         syntax::{
             AdtCtorSyntax, AdtInstance, Divergence, FnInstanceInner, FnOwner, FnOwnerAdtCtor,
             HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirStmt, HirStructExpr,
@@ -156,7 +158,11 @@ impl BodyCtxt<'_, '_> {
                 tcx.intern(TyKind::FnDef(
                     self.ccx_mut()
                         .importer_here(env)
-                        .import_item_fn(def, early_args),
+                        .import_fn_instance_from_owner(
+                            FnOwner::Item(def),
+                            early_args,
+                            FixArity::AssumeCorrect,
+                        ),
                 ))
             }
             HirExprKind::TypeRelative {

@@ -10,16 +10,17 @@ use crate::{
             ClauseCx, HrtbUniverse, HrtbUniverseInfo, ObligeCause, ObligeCauseFrame,
             ObligeCauseOrigin, ObligeCauseStep, UnifyCxMode,
         },
+        lower::generics::normalize_positional_generic_arity,
         syntax::{
-            AdtInstance, AnyGeneric, FnDef, FnInstance, FnInstanceInner, FnItem, FnOwner,
-            GenericBinder, HrtbBinder, HrtbDebruijnDef, HrtbProjection, InferTyVarSourceInfo, Re,
-            RegionGeneric, RelationDirection, SigAdtInstance, SigGenericList, SigHrtbBinder,
-            SigProjectType, SigRe, SigReKind, SigTraitClause, SigTraitClauseKind,
-            SigTraitClauseList, SigTraitInstance, SigTraitParamKind, SigTraitSpec, SigTy,
-            SigTyKind, SigTyList, SigTyOrRe, SigTyOrReList, TraitClause, TraitClauseList,
-            TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt,
-            TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList, TypeAliasItem, TypeGeneric,
-            UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
+            AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, FnOwner, FnOwnerAdtCtor,
+            FnOwnerTrait, GenericBinder, HrtbBinder, HrtbDebruijnDef, HrtbProjection,
+            InferTyVarSourceInfo, Re, RegionGeneric, RelationDirection, SigAdtInstance,
+            SigGenericList, SigHrtbBinder, SigProjectType, SigRe, SigReKind, SigTraitClause,
+            SigTraitClauseKind, SigTraitClauseList, SigTraitInstance, SigTraitParamKind,
+            SigTraitSpec, SigTy, SigTyKind, SigTyList, SigTyOrRe, SigTyOrReList, TraitClause,
+            TraitClauseList, TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt, TyFolder,
+            TyFolderInfallibleExt, TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList, TypeAliasItem,
+            TypeGeneric, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
@@ -193,8 +194,9 @@ macro_rules! impl_sig_importable {
 }
 
 impl_sig_importable! {
-    import_ty_list: SigTyList => TyList;
-    import_ty_or_re_list: SigTyOrReList => TyOrReList;
+    // TODO
+    // import_ty_list: SigTyList => TyList;
+    // import_ty_or_re_list: SigTyOrReList => TyOrReList;
     import_ty_or_re: SigTyOrRe => TyOrRe;
     import_ty: SigTy => Ty;
     import_re: SigRe => Re;
@@ -224,6 +226,18 @@ struct SigImporterOpts {
 enum ReentrantAliasState {
     WaitingForViolation,
     Violated(Span),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum FixArity {
+    Normalize,
+    AssumeCorrect,
+}
+
+impl FixArity {
+    pub fn should_fix(self) -> bool {
+        matches!(self, Self::Normalize)
+    }
 }
 
 /// Types
@@ -283,7 +297,11 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 let tcx = self.tcx();
 
                 // Import the type alias's arguments.
-                let args = self.import_simple_generic_args(def.r(s).generics, args);
+                let args = self.import_simple_generic_args(
+                    def.r(s).generics,
+                    args,
+                    FixArity::AssumeCorrect,
+                );
 
                 // Prevent reentrant alias resolution (preorder).
                 match self.reentrant_aliases.entry(def) {
@@ -454,42 +472,76 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
         AdtInstance {
             def: adt.def,
-            params: self.import_simple_generic_args(adt.def.r(s).generics, adt.params),
+            params: self.import_simple_generic_args(
+                adt.def.r(s).generics,
+                adt.params,
+                FixArity::AssumeCorrect,
+            ),
         }
     }
 
-    pub fn import_fn_def_generics(&mut self, def: Obj<FnDef>, args: SigGenericList) -> TyOrReList {
-        let s = self.session();
-
-        self.import_simple_generic_args(def.r(s).generics, args)
-    }
-
-    pub fn import_item_fn(&mut self, def: Obj<FnItem>, args: Option<SigGenericList>) -> FnInstance {
+    pub fn import_fn_instance_from_owner(
+        &mut self,
+        owner: FnOwner,
+        args: Option<SigGenericList>,
+        fix_arity: FixArity,
+    ) -> FnInstance {
         let s = self.session();
         let tcx = self.tcx();
 
-        tcx.intern(FnInstanceInner {
-            owner: FnOwner::Item(def),
-            early_args: args.map(|args| self.import_fn_def_generics(*def.r(s).def, args)),
-        })
+        let early_args = args.map(|args| match owner {
+            FnOwner::Item(def) => {
+                self.import_simple_generic_args(def.r(s).def.r(s).generics, args, fix_arity)
+            }
+            FnOwner::Trait(FnOwnerTrait {
+                instance,
+                self_ty,
+                method_idx,
+            }) => todo!(),
+            FnOwner::Inherent(fn_owner_inherent) => todo!(),
+            FnOwner::AdtCtor(FnOwnerAdtCtor { ctor }) => self.import_simple_generic_args(
+                ctor.r(s).owner.item(s).r(s).generics,
+                args,
+                fix_arity,
+            ),
+        });
+
+        tcx.intern(FnInstanceInner { owner, early_args })
     }
 
     fn import_simple_generic_args(
         &mut self,
-        generics: Obj<GenericBinder>,
+        binder: Obj<GenericBinder>,
         args: SigGenericList,
+        fix_arity: FixArity,
     ) -> TyOrReList {
+        let tcx = self.tcx();
         let s = self.session();
+
+        let args = if fix_arity.should_fix() {
+            normalize_positional_generic_arity(
+                tcx,
+                binder,
+                None,
+                args.segment_span,
+                args.elems.r(s),
+            )
+        } else {
+            debug_assert_eq!(binder.r(s).defs.len(), args.elems.r(s).len());
+
+            args
+        };
+
         let args_imported = self.import_ty_or_re_list(args.elems);
 
         if self.opts.create_wf_obligations {
-            let env = ClauseImportEnv::new(None, [GenericSubst::new(generics, args_imported)]);
+            let env = ClauseImportEnv::new(None, [GenericSubst::new(binder, args_imported)]);
 
             let args_spanned = args_imported
                 .r(s)
                 .iter()
                 .zip(args.elems.r(s))
-                .zip(&generics.r(s).defs)
+                .zip(&binder.r(s).defs)
                 .map(|((&ty_or_re, sig), generic)| {
                     let cause = self.cause.clone().child(ObligeCauseFrame::Origin(
                         ObligeCauseOrigin::ImportWfForGenericParam {
@@ -503,7 +555,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
             self.ccx.instantiate_infer().ensure_binder_params_wf(
                 &self.opts.universe,
-                generics,
+                binder,
                 env.clone(),
                 None,
                 args_spanned,

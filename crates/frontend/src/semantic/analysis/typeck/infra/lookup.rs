@@ -8,17 +8,14 @@ use crate::{
     semantic::{
         analysis::typeck::{BodyCtxt, infra::deref::attempt_deref},
         infer::{
-            ClauseImportEnv, GenericSubst, HrtbUniverse, ObligeCause, ObligeCauseOrigin,
+            ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse, ObligeCause, ObligeCauseOrigin,
             ObligeCauseProbe, UnboundVarHandlingMode,
         },
-        lower::{
-            generics::normalize_positional_generic_arity,
-            modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},
-        },
+        lower::modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},
         syntax::{
             AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, InferTyVarSourceInfo,
-            Mutability, Re, RelationMode, SigGenericList, TraitClause, TraitSpec, Ty,
-            TyFolderInfallibleExt as _, TyKind, TyOrReList,
+            InstantiatedFnSig, Mutability, Re, RelationMode, SigGenericList, TraitClause,
+            TraitSpec, Ty, TyFolderInfallibleExt as _, TyKind, TyOrReList,
         },
     },
     utils::lang::IterEither,
@@ -220,25 +217,10 @@ impl BodyCtxt<'_, '_> {
                 resolution,
             );
 
-        let early_binder = resolution.r(s).generics;
-
-        let early_args = assoc_args.map(|args| {
-            normalize_positional_generic_arity(
-                tcx,
-                early_binder,
-                None,
-                args.segment_span,
-                args.elems.r(s),
-            )
-        });
-
-        let early_args = early_args.map(|early_args| {
-            self.ccx
-                .importer_here(self.import_env)
-                .import_fn_def_generics(resolution, early_args)
-        });
-
-        let instance = tcx.intern(FnInstanceInner { owner, early_args });
+        let instance = self
+            .ccx
+            .importer_here(self.import_env)
+            .import_fn_instance_from_owner(owner, assoc_args, FixArity::Normalize);
 
         Some(tcx.intern(TyKind::FnDef(instance)))
     }
@@ -472,18 +454,24 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                     early_args: None,
                 });
 
-                let expected_env = fork.instantiate_infer().env_of_fn_def_for_instance(
+                let expected_instance = fork.instantiate_infer().fresh_fn_instance_to_full(
                     &cause,
                     HrtbUniverse::ROOT_REF,
                     expected_instance,
                 );
 
-                let expected_receiver = fork.import_fn_owner_receiver_as_infer(
-                    &ObligeCause::new_empty_report(),
+                let InstantiatedFnSig {
+                    args: expected_args,
+                    ret_ty: _,
+                } = fork.instantiate_infer().resolve_full_fn_instance_sig(
+                    &cause,
                     HrtbUniverse::ROOT_REF,
-                    &expected_env,
-                    expected_owner,
+                    expected_instance,
                 );
+
+                let [expected_receiver, ..] = *expected_args.r(s) else {
+                    unreachable!()
+                };
 
                 fork.oblige_ty_unifies_ty(cause, receiver, expected_receiver, RelationMode::Equate);
             }
@@ -503,7 +491,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                 });
 
                 // Call for validation side-effect.
-                _ = fork.instantiate_infer().env_of_fn_def_for_instance(
+                fork.instantiate_infer().fresh_fn_instance_to_full(
                     &cause,
                     HrtbUniverse::ROOT_REF,
                     expected_instance,

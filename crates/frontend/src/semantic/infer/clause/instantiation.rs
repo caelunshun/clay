@@ -700,7 +700,7 @@ impl ClauseCxInferInstantiation<'_, '_> {
 
     pub fn fresh_type_relative_fn_def_to_fn_owner(
         &mut self,
-        origin: &ObligeCause,
+        cause: &ObligeCause,
         universe: &HrtbUniverse,
         self_ty: Ty,
         def: Obj<FnDef>,
@@ -713,7 +713,7 @@ impl ClauseCxInferInstantiation<'_, '_> {
                 let instance = self.fresh_trait_item_to_trait_spec(universe, item);
 
                 self.ccx.oblige_ty_meets_trait_instantiated(
-                    origin.clone(),
+                    cause.clone(),
                     universe.clone(),
                     self_ty,
                     instance,
@@ -808,7 +808,12 @@ impl ClauseCxInferInstantiation<'_, '_> {
         }
     }
 
-    pub fn fresh_fn_instance_to_full(&mut self, fn_instance: FnInstance) -> FullFnInstance {
+    pub fn fresh_fn_instance_to_full(
+        &mut self,
+        cause: &ObligeCause,
+        universe: &HrtbUniverse,
+        fn_instance: FnInstance,
+    ) -> FullFnInstance {
         todo!()
     }
 }

@@ -6,9 +6,9 @@ use crate::{
     parse::token::Ident,
     semantic::{
         analysis::typeck::{BodyCtxt, infra::lookup::LookupMethodResult},
-        infer::{HrtbUniverse, ObligeCause, ObligeCauseOrigin},
+        infer::{FixArity, HrtbUniverse, ObligeCause, ObligeCauseOrigin},
         syntax::{
-            Divergence, FnInstanceInner, HirExpr, InferTyVarSourceInfo, RelationMode,
+            Divergence, HirExpr, InferTyVarSourceInfo, InstantiatedFnSig, RelationMode,
             SigGenericList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
         },
     },
@@ -96,20 +96,6 @@ impl BodyCtxt<'_, '_> {
         let receiver = self.check_expr(receiver, None).and_do(divergence);
         let receiver = self.ccx_mut().peel_ty_infer_var_after_poll(receiver);
 
-        let env = self.import_env;
-        let generic_segment_span = generics.map(|generics| generics.segment_span);
-        let generic_param_spans = generics.map(|generics| {
-            generics
-                .elems
-                .r(s)
-                .iter()
-                .map(|v| v.span(s))
-                .collect::<Vec<_>>()
-        });
-
-        let generics =
-            generics.map(|generics| self.ccx_mut().import_report_here(env, generics.elems));
-
         match *receiver.r(s) {
             TyKind::InferVar(_) => {
                 return tcx.intern(TyKind::Error(
@@ -155,39 +141,31 @@ impl BodyCtxt<'_, '_> {
                 resolution,
             );
 
-        let generics = generics.map(|generics| {
-            normalize_positional_generic_arity_zip(
-                tcx,
-                owner.early_generics(s),
-                None,
-                generic_segment_span.unwrap(),
-                generics.r(s),
-                generic_param_spans.as_ref().unwrap(),
-            )
-        });
+        let instance = self
+            .ccx
+            .importer_here(self.import_env)
+            .import_fn_instance_from_owner(owner, generics, FixArity::Normalize);
 
-        let instance = tcx.intern(FnInstanceInner {
-            owner,
-            early_args: generics,
-        });
-
-        let instance_env = self
+        let instance = self
             .ccx_mut()
             .instantiate_infer()
-            .env_of_fn_def_for_instance(
-                &ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall {
-                    site_span: name.span,
-                }),
+            .fresh_fn_instance_to_full(
+                &ObligeCause::new_empty_report(),
                 HrtbUniverse::ROOT_REF,
                 instance,
             );
 
-        let (expected_args, expected_output) = self.ccx_mut().import_fn_owner_sig(
-            &ObligeCause::new_empty_report(),
-            HrtbUniverse::ROOT_REF,
-            &instance_env,
-            owner,
-        );
+        let InstantiatedFnSig {
+            args: expected_args,
+            ret_ty: expected_output,
+        } = self
+            .ccx_mut()
+            .instantiate_infer()
+            .resolve_full_fn_instance_sig(
+                &ObligeCause::new_empty_report(),
+                HrtbUniverse::ROOT_REF,
+                instance,
+            );
 
         let (self_ty, expected_args) = expected_args.r(s).split_first().unwrap();
 
