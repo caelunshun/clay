@@ -208,14 +208,17 @@ impl BodyCtxt<'_, '_> {
             )?
         };
 
-        let owner = self.ccx_mut().instantiate_infer().fresh_fn_def_to_fn_owner(
-            &ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall {
-                site_span: assoc_name.span,
-            }),
-            HrtbUniverse::ROOT_REF,
-            Some(self_ty),
-            resolution,
-        );
+        let owner = self
+            .ccx_mut()
+            .instantiate_infer()
+            .fresh_type_relative_fn_def_to_fn_owner(
+                &ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall {
+                    site_span: assoc_name.span,
+                }),
+                HrtbUniverse::ROOT_REF,
+                self_ty,
+                resolution,
+            );
 
         let early_binder = resolution.r(s).generics;
 
@@ -457,7 +460,12 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
 
                 let expected_owner = fork
                     .instantiate_infer()
-                    .instantiate_method_fn_owner(&cause, candidate, self_ty);
+                    .fresh_type_relative_fn_def_to_fn_owner(
+                        &cause,
+                        HrtbUniverse::ROOT_REF,
+                        self_ty,
+                        candidate,
+                    );
 
                 let expected_instance = tcx.intern(FnInstanceInner {
                     owner: expected_owner,
@@ -482,7 +490,12 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
             MethodQuery::AssocFn(self_ty) => {
                 let expected_owner = fork
                     .instantiate_infer()
-                    .instantiate_method_fn_owner(&cause, candidate, self_ty);
+                    .fresh_type_relative_fn_def_to_fn_owner(
+                        &cause,
+                        HrtbUniverse::ROOT_REF,
+                        self_ty,
+                        candidate,
+                    );
 
                 let expected_instance = tcx.intern(FnInstanceInner {
                     owner: expected_owner,

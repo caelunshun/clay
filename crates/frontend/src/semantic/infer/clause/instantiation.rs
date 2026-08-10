@@ -6,8 +6,9 @@ use crate::{
             ObligeCauseStep, SigImporterWfMode,
         },
         syntax::{
-            AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnOwner, FnOwnerInherent,
-            FnOwnerTrait, GenericBinder, HrtbBinder, ImplItem, InferTyVarSourceInfo,
+            AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnOwner,
+            FnOwnerAdtCtor, FnOwnerInherent, FnOwnerTrait, FullFnInstance, GenericBinder,
+            HrtbBinder, ImplItem, InferTyVarSourceInfo, InstantiatedFnSig, RelationMode,
             SigTraitClauseKind, TraitClause, TraitInstance, TraitItem, TraitParam, TraitSpec, Ty,
             TyKind, TyOrRe, TyOrReKind, TyOrReList, TypeAliasItem, TypeGeneric,
             UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
@@ -313,6 +314,7 @@ pub struct ClauseCxInferInstantiation<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
 }
 
+/// Machinery
 impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
     pub fn fresh_binder_to_unconstrained_params(
         &mut self,
@@ -429,7 +431,10 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
             }
         }
     }
+}
 
+/// Full resolution
+impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
     /// Resolves all the projected types of a `TraitSpec` applying to a specified `self_ty`,
     /// returning a complete `TraitInstance`.
     pub fn resolve_trait_spec(
@@ -483,6 +488,176 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
         instance
     }
 
+    pub fn resolve_inherent_impl_block_env(
+        &mut self,
+        cause: &ObligeCause,
+        universe: &HrtbUniverse,
+        block: Obj<ImplItem>,
+        self_ty: Ty,
+    ) -> ClauseImportEnv {
+        let InstantiatedImplBlock {
+            env,
+            params: _,
+            target_ty,
+            target_trait,
+        } = self.fresh_impl_block(cause, universe, block);
+
+        debug_assert!(target_trait.is_none());
+
+        self.ccx
+            .oblige_ty_unifies_ty(cause.clone(), target_ty, self_ty, RelationMode::Equate);
+
+        env
+    }
+
+    pub fn resolve_full_fn_instance_sig(
+        &mut self,
+        cause: &ObligeCause,
+        universe: &HrtbUniverse,
+        instance: FullFnInstance,
+    ) -> InstantiatedFnSig {
+        let tcx = self.ccx.tcx();
+        let s = self.ccx.session();
+
+        let FullFnInstance { owner, early_args } = instance;
+
+        match owner {
+            FnOwner::Item(def) => {
+                let def = *def.r(s).def;
+
+                self.resolve_fn_def_sig(
+                    cause,
+                    universe,
+                    def,
+                    ClauseImportEnv::new(None, [GenericSubst::new(def.r(s).generics, early_args)]),
+                )
+            }
+            FnOwner::Trait(FnOwnerTrait {
+                instance,
+                self_ty,
+                method_idx,
+            }) => {
+                let def = instance.def.r(s).methods[method_idx as usize];
+                let instance = self.resolve_trait_spec(cause, universe, self_ty, instance);
+
+                self.resolve_fn_def_sig(
+                    cause,
+                    universe,
+                    def,
+                    ClauseImportEnv::new(
+                        Some(self_ty),
+                        [
+                            GenericSubst::new(*instance.def.r(s).generics, instance.params),
+                            GenericSubst::new(def.r(s).generics, early_args),
+                        ],
+                    ),
+                )
+            }
+            FnOwner::Inherent(FnOwnerInherent {
+                self_ty,
+                block,
+                method_idx,
+            }) => {
+                let def = block.r(s).methods[method_idx as usize].unwrap();
+
+                let env = self
+                    .resolve_inherent_impl_block_env(cause, universe, block, self_ty)
+                    .with_subst(GenericSubst::new(def.r(s).generics, early_args));
+
+                self.resolve_fn_def_sig(cause, universe, def, env)
+            }
+            FnOwner::AdtCtor(FnOwnerAdtCtor { ctor }) => {
+                let item = ctor.r(s).owner.item(s);
+                let self_ty = tcx.intern(TyKind::Adt(AdtInstance {
+                    def: item,
+                    params: early_args,
+                }));
+
+                let env = ClauseImportEnv::new(
+                    Some(self_ty),
+                    [GenericSubst::new(item.r(s).generics, early_args)],
+                );
+
+                let args = tcx.intern_list(
+                    &ctor
+                        .r(s)
+                        .fields
+                        .iter()
+                        .map(|field| {
+                            self.ccx
+                                .importer(
+                                    cause.clone(),
+                                    universe.clone(),
+                                    env.clone(),
+                                    SigImporterWfMode::DelayBug,
+                                )
+                                .import_ty(*field.ty)
+                        })
+                        .collect::<Vec<_>>(),
+                );
+
+                InstantiatedFnSig {
+                    args,
+                    ret_ty: self_ty,
+                }
+            }
+        }
+    }
+
+    pub fn resolve_fn_def_sig(
+        &mut self,
+        cause: &ObligeCause,
+        universe: &HrtbUniverse,
+        def: Obj<FnDef>,
+        env: ClauseImportEnv,
+    ) -> InstantiatedFnSig {
+        let s = self.ccx.session();
+        let tcx = self.ccx.tcx();
+
+        InstantiatedFnSig {
+            args: tcx.intern_list(
+                &def.r(s)
+                    .args
+                    .r(s)
+                    .iter()
+                    .map(|arg| {
+                        self.ccx
+                            .importer(
+                                cause.clone(),
+                                universe.clone(),
+                                env.clone(),
+                                SigImporterWfMode::DelayBug,
+                            )
+                            .import_ty(arg.ty)
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            ret_ty: self
+                .ccx
+                .importer(
+                    cause.clone(),
+                    universe.clone(),
+                    env.clone(),
+                    SigImporterWfMode::DelayBug,
+                )
+                .import_ty(*def.r(s).ret_ty),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct InstantiatedImplBlock {
+    pub env: ClauseImportEnv,
+    pub params: TyOrReList,
+    pub target_ty: Ty,
+    pub target_trait: Option<TraitInstance>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SignatureMismatchError;
+
+/// Instantiation.
+impl ClauseCxInferInstantiation<'_, '_> {
     pub fn fresh_trait_item_to_trait_spec(
         &mut self,
         universe: &HrtbUniverse,
@@ -523,26 +698,19 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
         TraitSpec { def: item, params }
     }
 
-    pub fn fresh_fn_def_to_fn_owner(
+    pub fn fresh_type_relative_fn_def_to_fn_owner(
         &mut self,
         origin: &ObligeCause,
         universe: &HrtbUniverse,
-        mut self_ty: Option<Ty>,
+        self_ty: Ty,
         def: Obj<FnDef>,
     ) -> FnOwner {
         let s = self.ccx.session();
 
-        let mut make_self_ty = |ccx: &mut ClauseCx<'_>| -> Ty {
-            *self_ty.get_or_insert_with(|| {
-                ccx.fresh_ty_infer(universe.clone(), InferTyVarSourceInfo::MethodLookupHelper)
-            })
-        };
-
         match *def.r(s).owner {
-            FnDefOwner::Item(item) => FnOwner::Item(item),
+            FnDefOwner::Item(_) => unreachable!(),
             FnDefOwner::TraitMethod(item, method_idx) => {
                 let instance = self.fresh_trait_item_to_trait_spec(universe, item);
-                let self_ty = make_self_ty(self.ccx);
 
                 self.ccx.oblige_ty_meets_trait_instantiated(
                     origin.clone(),
@@ -558,23 +726,13 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                 })
             }
             FnDefOwner::ImplMethod(block, method_idx) => FnOwner::Inherent(FnOwnerInherent {
-                self_ty: make_self_ty(self.ccx),
+                self_ty,
                 block,
                 method_idx,
             }),
         }
     }
-}
 
-#[derive(Debug, Clone)]
-pub struct InstantiatedImplBlock {
-    pub env: ClauseImportEnv,
-    pub params: TyOrReList,
-    pub target_ty: Ty,
-    pub target_trait: TraitInstance,
-}
-
-impl ClauseCxInferInstantiation<'_, '_> {
     pub fn fresh_impl_block(
         &mut self,
         cause: &ObligeCause,
@@ -608,15 +766,16 @@ impl ClauseCxInferInstantiation<'_, '_> {
 
         env.self_ty = Some(target_ty);
 
-        let target_trait = self
-            .ccx
-            .importer(
-                cause.clone(),
-                universe.clone(),
-                env.clone(),
-                SigImporterWfMode::DelayBug,
-            )
-            .import_trait_instance(target_ty, block.r(s).trait_.unwrap());
+        let target_trait = block.r(s).trait_.map(|trait_| {
+            self.ccx
+                .importer(
+                    cause.clone(),
+                    universe.clone(),
+                    env.clone(),
+                    SigImporterWfMode::DelayBug,
+                )
+                .import_trait_instance(target_ty, trait_)
+        });
 
         let spanned_params =
             params
@@ -647,5 +806,9 @@ impl ClauseCxInferInstantiation<'_, '_> {
             target_ty,
             target_trait,
         }
+    }
+
+    pub fn fresh_fn_instance_to_full(&mut self, fn_instance: FnInstance) -> FullFnInstance {
+        todo!()
     }
 }

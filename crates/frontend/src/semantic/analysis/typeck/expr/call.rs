@@ -146,12 +146,13 @@ impl BodyCtxt<'_, '_> {
         let owner = self
             .ccx_mut()
             .instantiate_infer()
-            .instantiate_method_fn_owner(
+            .fresh_type_relative_fn_def_to_fn_owner(
                 &ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall {
                     site_span: name.span,
                 }),
-                resolution,
+                HrtbUniverse::ROOT_REF,
                 self_ty,
+                resolution,
             );
 
         let generics = generics.map(|generics| {

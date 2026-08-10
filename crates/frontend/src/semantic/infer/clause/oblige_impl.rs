@@ -348,6 +348,8 @@ impl<'tcx> ClauseCx<'tcx> {
             .instantiate_infer()
             .fresh_impl_block(cause, universe, rhs);
 
+        let target_trait = target_trait.unwrap();
+
         // Does the `lhs` type match the `rhs`'s target type?
         if self
             .ucx_mut()

@@ -255,6 +255,12 @@ pub struct FnInstanceInner {
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct FullFnInstance {
+    pub owner: FnOwner,
+    pub early_args: TyOrReList,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum FnOwner {
     Item(Obj<FnItem>),
     Trait(FnOwnerTrait),
@@ -279,6 +285,12 @@ pub struct FnOwnerInherent {
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct FnOwnerAdtCtor {
     pub ctor: Obj<AdtCtor>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct InstantiatedFnSig {
+    pub args: TyList,
+    pub ret_ty: Ty,
 }
 
 // === Universal Var === //
