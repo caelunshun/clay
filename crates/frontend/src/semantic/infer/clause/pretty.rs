@@ -246,7 +246,8 @@ impl_pretty! {
         Ok(())
     }
     Obj<Item> => |cx, value, f| {
-        todo!()
+        let s = cx.session();
+        f.write_str(value.r(s).path.as_str(s))
     }
     InferTyVar => |cx, value, f| {
         write!(f, "{value:?}")

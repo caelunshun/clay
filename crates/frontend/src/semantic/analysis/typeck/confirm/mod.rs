@@ -89,6 +89,7 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
         // LateInit::init(&self.bcx.def.r(s).thir_body, Some(self.confirm_expr(body)));
     }
 
+    /*
     fn confirm_expr(&mut self, expr: Obj<HirExpr>) -> Obj<ThirExpr> {
         // TODO: Apply coercions
         self.confirm_expr_without_adjustments(expr)
@@ -392,4 +393,5 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
     fn confirm_ty<T: TyFoldable>(&mut self, ty: T) -> T {
         self.ccx_mut().exporter().fold(ty)
     }
+    */
 }

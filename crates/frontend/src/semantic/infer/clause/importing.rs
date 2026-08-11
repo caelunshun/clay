@@ -826,6 +826,13 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         let s = self.session();
         let tcx = self.tcx();
 
+        if binder.defs.r(s).is_empty() {
+            return HrtbBinder {
+                defs: tcx.intern_list(&[]),
+                inner: self.import_trait_spec_with_self_ty(wf_self_ty, binder.inner),
+            };
+        }
+
         if let Some(wf_self_ty) = wf_self_ty {
             self.check_hrtb_binder_wf(wf_self_ty, binder);
         }

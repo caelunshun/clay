@@ -255,8 +255,8 @@ impl ObligeCause {
 
         let main_span = frames
             .last()
-            // TODO: Fallback span?
-            .map_or(Span::DUMMY, |v| v.frame.unwrap_origin_ref().primary_span());
+            .and_then(|v| Some(v.frame.as_origin()?.primary_span()))
+            .unwrap_or(Span::DUMMY);
 
         let mut diag = Diag::new(level, msg(&fmt_cx)).primary(main_span, "");
 
