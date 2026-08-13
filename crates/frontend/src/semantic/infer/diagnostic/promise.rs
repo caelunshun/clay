@@ -1,5 +1,6 @@
 use crate::{base::ErrorGuaranteed, semantic::infer::ClauseCx};
 use derive_where::derive_where;
+use smallvec::SmallVec;
 use std::{
     cell::{Cell, OnceCell},
     fmt,
@@ -101,12 +102,12 @@ pub struct Promise<'tcx, T: 'tcx> {
 
 impl<'tcx, T: 'tcx> Promise<'tcx, T> {
     pub fn new_root() -> (Self, PromiseHandle<'tcx, T>) {
-        let promise = Rc::new(PromiseBindSlot::default());
+        let promise = Rc::new(PromiseOrigin::default());
 
         let builder = Promise {
             builder: promise.clone(),
         };
-        let handle = PromiseHandle { target: promise };
+        let handle = PromiseHandle { promise };
 
         (builder, handle)
     }
@@ -132,7 +133,8 @@ impl<'tcx, T: 'tcx> Promise<'tcx, T> {
             mapper: Cell::new(Some(f)),
         });
 
-        self.builder.bind_target(ccx, promise.clone());
+        self.builder
+            .bind_target(ccx, BoundAnyPromiseTarget::new(promise.clone(), 0));
 
         Promise { builder: promise }
     }
@@ -154,32 +156,65 @@ impl<'tcx, T: 'tcx> Promise<'tcx, T> {
 }
 
 pub struct PromiseHandle<'tcx, T: 'tcx> {
-    target: RcAnyPromiseTarget<'tcx, T>,
+    promise: Rc<PromiseOrigin<'tcx, T>>,
 }
 
-// === Promise Machinery === //
+// === Promise Traits === //
 
 trait AnyPromiseBuilder<'tcx> {
     type Error: Sized;
 
-    fn bind_target(&self, ccx: &mut ClauseCx<'tcx>, target: RcAnyPromiseTarget<'tcx, Self::Error>);
+    fn bind_target(
+        &self,
+        ccx: &mut ClauseCx<'tcx>,
+        target: BoundAnyPromiseTarget<'tcx, Self::Error>,
+    );
 }
-
-type RcAnyPromiseTarget<'tcx, T> = Rc<dyn 'tcx + AnyPromiseTarget<'tcx, Error = T>>;
 
 trait AnyPromiseTarget<'tcx> {
     type Error: Sized;
 
-    fn accept_once_if_sink_is_report(&self);
+    fn accept_once_if_sink_is_report(&self, userdata: u32);
 
-    fn reject_once_if_sink_is_report(&self, ccx: &mut ClauseCx<'tcx>, error: Self::Error);
+    fn reject_once_if_sink_is_report(
+        &self,
+        ccx: &mut ClauseCx<'tcx>,
+        error: Self::Error,
+        userdata: u32,
+    );
 
-    fn reject_if_sink_is_probe(&self);
+    fn reject_if_sink_is_probe(&self, userdata: u32);
 }
 
+struct BoundAnyPromiseTarget<'tcx, T> {
+    receiver: Rc<dyn 'tcx + AnyPromiseTarget<'tcx, Error = T>>,
+    userdata: u32,
+}
+
+impl<'tcx, T> BoundAnyPromiseTarget<'tcx, T> {
+    pub fn new(receiver: Rc<dyn 'tcx + AnyPromiseTarget<'tcx, Error = T>>, userdata: u32) -> Self {
+        Self { receiver, userdata }
+    }
+
+    pub fn accept_once_if_sink_is_report(&self) {
+        self.receiver.accept_once_if_sink_is_report(self.userdata);
+    }
+
+    pub fn reject_once_if_sink_is_report(&self, ccx: &mut ClauseCx<'tcx>, error: T) {
+        self.receiver
+            .reject_once_if_sink_is_report(ccx, error, self.userdata);
+    }
+
+    pub fn reject_if_sink_is_probe(&self) {
+        self.receiver.reject_if_sink_is_probe(self.userdata);
+    }
+}
+
+// === Promise Bind Slot === //
+
 struct PromiseBindSlot<'tcx, T> {
+    target: OnceCell<BoundAnyPromiseTarget<'tcx, T>>,
     state: Cell<PromiseBindSlotState<T>>,
-    target: OnceCell<Rc<dyn 'tcx + AnyPromiseTarget<'tcx, Error = T>>>,
     rejected_if_probe: Cell<RejectedIfProbeState>,
 }
 
@@ -202,17 +237,15 @@ enum RejectedIfProbeState {
 impl<T> Default for PromiseBindSlot<'_, T> {
     fn default() -> Self {
         Self {
-            state: Cell::new(PromiseBindSlotState::UnboundAndUnsignalled),
             target: OnceCell::new(),
+            state: Cell::new(PromiseBindSlotState::UnboundAndUnsignalled),
             rejected_if_probe: Cell::new(RejectedIfProbeState::NotRejected),
         }
     }
 }
 
-impl<'tcx, T> AnyPromiseBuilder<'tcx> for PromiseBindSlot<'tcx, T> {
-    type Error = T;
-
-    fn bind_target(&self, ccx: &mut ClauseCx<'tcx>, target: RcAnyPromiseTarget<'tcx, Self::Error>) {
+impl<'tcx, T> PromiseBindSlot<'tcx, T> {
+    fn bind_target(&self, ccx: &mut ClauseCx<'tcx>, target: BoundAnyPromiseTarget<'tcx, T>) {
         use PromiseBindSlotState::*;
         use RejectedIfProbeState::*;
 
@@ -249,10 +282,6 @@ impl<'tcx, T> AnyPromiseBuilder<'tcx> for PromiseBindSlot<'tcx, T> {
             }
         }
     }
-}
-
-impl<'tcx, T> AnyPromiseTarget<'tcx> for PromiseBindSlot<'tcx, T> {
-    type Error = T;
 
     fn accept_once_if_sink_is_report(&self) {
         use PromiseBindSlotState::*;
@@ -278,7 +307,7 @@ impl<'tcx, T> AnyPromiseTarget<'tcx> for PromiseBindSlot<'tcx, T> {
         }
     }
 
-    fn reject_once_if_sink_is_report(&self, ccx: &mut ClauseCx<'tcx>, error: Self::Error) {
+    fn reject_once_if_sink_is_report(&self, ccx: &mut ClauseCx<'tcx>, error: T) {
         use PromiseBindSlotState::*;
 
         match self.state.replace(Meaningless) {
@@ -330,6 +359,64 @@ impl<'tcx, T> AnyPromiseTarget<'tcx> for PromiseBindSlot<'tcx, T> {
     }
 }
 
+// === Promise types === //
+
+#[derive_where(Default)]
+struct PromiseOrigin<'tcx, T> {
+    target: PromiseBindSlot<'tcx, T>,
+}
+
+impl<'tcx, T> AnyPromiseBuilder<'tcx> for PromiseOrigin<'tcx, T> {
+    type Error = T;
+
+    fn bind_target(
+        &self,
+        ccx: &mut ClauseCx<'tcx>,
+        target: BoundAnyPromiseTarget<'tcx, Self::Error>,
+    ) {
+        self.target.bind_target(ccx, target);
+    }
+}
+
+struct PromiseJoiner<'tcx, T> {
+    target: PromiseBindSlot<'tcx, Vec<T>>,
+    err_resolutions: Vec<Option<T>>,
+    all_resolutions_remaining: u32,
+}
+
+impl<'tcx, T> AnyPromiseBuilder<'tcx> for PromiseJoiner<'tcx, T> {
+    type Error = Vec<T>;
+
+    fn bind_target(
+        &self,
+        ccx: &mut ClauseCx<'tcx>,
+        target: BoundAnyPromiseTarget<'tcx, Self::Error>,
+    ) {
+        self.target.bind_target(ccx, target);
+    }
+}
+
+impl<'tcx, T> AnyPromiseTarget<'tcx> for PromiseJoiner<'tcx, T> {
+    type Error = T;
+
+    fn accept_once_if_sink_is_report(&self, _userdata: u32) {
+        todo!()
+    }
+
+    fn reject_once_if_sink_is_report(
+        &self,
+        ccx: &mut ClauseCx<'tcx>,
+        error: Self::Error,
+        userdata: u32,
+    ) {
+        todo!()
+    }
+
+    fn reject_if_sink_is_probe(&self, userdata: u32) {
+        todo!()
+    }
+}
+
 struct PromiseMapper<'tcx, T, V, F>
 where
     F: FnOnce(&mut ClauseCx<'tcx>, T) -> V,
@@ -345,7 +432,11 @@ where
 {
     type Error = V;
 
-    fn bind_target(&self, ccx: &mut ClauseCx<'tcx>, target: RcAnyPromiseTarget<'tcx, Self::Error>) {
+    fn bind_target(
+        &self,
+        ccx: &mut ClauseCx<'tcx>,
+        target: BoundAnyPromiseTarget<'tcx, Self::Error>,
+    ) {
         self.target.bind_target(ccx, target);
     }
 }
@@ -356,17 +447,22 @@ where
 {
     type Error = T;
 
-    fn accept_once_if_sink_is_report(&self) {
+    fn accept_once_if_sink_is_report(&self, _userdata: u32) {
         self.target.accept_once_if_sink_is_report();
     }
 
-    fn reject_once_if_sink_is_report(&self, ccx: &mut ClauseCx<'tcx>, error: Self::Error) {
+    fn reject_once_if_sink_is_report(
+        &self,
+        ccx: &mut ClauseCx<'tcx>,
+        error: Self::Error,
+        _userdata: u32,
+    ) {
         let error = self.mapper.take().unwrap()(ccx, error);
 
         self.target.reject_once_if_sink_is_report(ccx, error);
     }
 
-    fn reject_if_sink_is_probe(&self) {
+    fn reject_if_sink_is_probe(&self, _userdata: u32) {
         self.target.reject_if_sink_is_probe();
     }
 }
