@@ -11,19 +11,19 @@ use std::{
 // === PromiseSink === //
 
 #[derive_where(Debug)]
-pub enum PromiseSink<'tcx, T> {
+pub enum PromiseSink<'tcx, E> {
     Probe(PromiseProbe),
-    Report(PromiseReporter<'tcx, T>),
+    Report(PromiseReporter<'tcx, E>),
 }
 
-impl<T> From<PromiseProbe> for PromiseSink<'_, T> {
+impl<E> From<PromiseProbe> for PromiseSink<'_, E> {
     fn from(probe: PromiseProbe) -> Self {
         PromiseSink::Probe(probe)
     }
 }
 
-impl<'tcx, T> From<PromiseReporter<'tcx, T>> for PromiseSink<'tcx, T> {
-    fn from(reporter: PromiseReporter<'tcx, T>) -> Self {
+impl<'tcx, E> From<PromiseReporter<'tcx, E>> for PromiseSink<'tcx, E> {
+    fn from(reporter: PromiseReporter<'tcx, E>) -> Self {
         PromiseSink::Report(reporter)
     }
 }
@@ -43,20 +43,20 @@ impl PromiseProbe {
     }
 }
 
-pub struct PromiseReporter<'tcx, T> {
+pub struct PromiseReporter<'tcx, E> {
     created_at: &'static Location<'static>,
-    handler: Box<dyn 'tcx + Fn(&mut ClauseCx<'tcx>, T) -> ErrorGuaranteed>,
+    handler: Box<dyn 'tcx + Fn(&mut ClauseCx<'tcx>, E) -> ErrorGuaranteed>,
 }
 
-impl<T> fmt::Debug for PromiseReporter<'_, T> {
+impl<E> fmt::Debug for PromiseReporter<'_, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "PromiseReporter @ {}", self.created_at)
     }
 }
 
-impl<'tcx, T> PromiseReporter<'tcx, T> {
+impl<'tcx, E> PromiseReporter<'tcx, E> {
     #[track_caller]
-    pub fn new(f: impl 'tcx + FnOnce(&mut ClauseCx<'tcx>, T) -> ErrorGuaranteed) -> Self {
+    pub fn new(f: impl 'tcx + FnOnce(&mut ClauseCx<'tcx>, E) -> ErrorGuaranteed) -> Self {
         let f = Cell::new(Some(f));
 
         Self {
@@ -67,7 +67,7 @@ impl<'tcx, T> PromiseReporter<'tcx, T> {
         }
     }
 
-    pub fn report(&self, ccx: &mut ClauseCx<'tcx>, error: T) -> ErrorGuaranteed {
+    pub fn report(&self, ccx: &mut ClauseCx<'tcx>, error: E) -> ErrorGuaranteed {
         (self.handler)(ccx, error)
     }
 }
@@ -79,12 +79,12 @@ pub trait ReportableError<'tcx>: Sized {
 // === Promise === //
 
 #[must_use]
-pub struct Promise<'tcx, T: 'tcx> {
-    builder: Rc<dyn 'tcx + PromiseNodeBuilder<'tcx, Error = T>>,
+pub struct Promise<'tcx, E: 'tcx> {
+    builder: Rc<dyn 'tcx + PromiseNodeBuilder<'tcx, Error = E>>,
 }
 
-impl<'tcx, T: 'tcx> Promise<'tcx, T> {
-    pub fn new_root() -> (Self, PromiseHandle<'tcx, T>) {
+impl<'tcx, E: 'tcx> Promise<'tcx, E> {
+    pub fn new_root() -> (Self, PromiseHandle<'tcx, E>) {
         let promise = Rc::new(PromiseNodeOrigin::default());
 
         let builder = Promise {
@@ -96,8 +96,8 @@ impl<'tcx, T: 'tcx> Promise<'tcx, T> {
     }
 
     pub fn new_join(
-        sources: impl IntoIterator<Item = Promise<'tcx, T>>,
-    ) -> Promise<'tcx, Vec<Option<T>>> {
+        sources: impl IntoIterator<Item = Promise<'tcx, E>>,
+    ) -> Promise<'tcx, Vec<Option<E>>> {
         let sources = sources.into_iter().collect::<Vec<_>>();
 
         let trivially_accepted = sources
@@ -107,7 +107,7 @@ impl<'tcx, T: 'tcx> Promise<'tcx, T> {
 
         let promise = Rc::new(PromiseNodeJoiner {
             target: LateBoundPromiseNodeTarget::default(),
-            err_resolutions: Cell::new((0..sources.len()).map(|_| None::<T>).collect::<Vec<_>>()),
+            err_resolutions: Cell::new((0..sources.len()).map(|_| None::<E>).collect::<Vec<_>>()),
             all_resolutions_remaining: Cell::new((sources.len() - trivially_accepted) as u32),
             poisoned_with_err: Cell::new(false),
         });
@@ -121,9 +121,9 @@ impl<'tcx, T: 'tcx> Promise<'tcx, T> {
         Promise { builder: promise }
     }
 
-    pub fn map<V>(self, f: impl 'tcx + FnOnce(&mut ClauseCx<'tcx>, T) -> V) -> Promise<'tcx, V>
+    pub fn map<E2>(self, f: impl 'tcx + FnOnce(&mut ClauseCx<'tcx>, E) -> E2) -> Promise<'tcx, E2>
     where
-        T: 'tcx,
+        E: 'tcx,
     {
         let promise = Rc::new(PromiseNodeMapper {
             _ty: PhantomData,
@@ -138,14 +138,14 @@ impl<'tcx, T: 'tcx> Promise<'tcx, T> {
         Promise { builder: promise }
     }
 
-    pub fn remediator(self, f: impl 'tcx + FnOnce(&mut ClauseCx<'tcx>, &mut T)) -> Self {
+    pub fn remediator(self, f: impl 'tcx + FnOnce(&mut ClauseCx<'tcx>, &mut E)) -> Self {
         self.map(move |ccx, mut error| {
             f(ccx, &mut error);
             error
         })
     }
 
-    pub fn sink(self, sink: impl Into<PromiseSink<'tcx, T>>) {
+    pub fn sink(self, sink: impl Into<PromiseSink<'tcx, E>>) {
         self.builder.set_target(BoundPromiseNodeTarget::new(
             Rc::new(PromiseNodeSink { sink: sink.into() }),
             0,
@@ -154,19 +154,19 @@ impl<'tcx, T: 'tcx> Promise<'tcx, T> {
 
     pub fn sink_auto_report(self)
     where
-        T: ReportableError<'tcx>,
+        E: ReportableError<'tcx>,
     {
-        self.sink(PromiseReporter::new(|ccx, err: T| err.report(ccx)));
+        self.sink(PromiseReporter::new(|ccx, err: E| err.report(ccx)));
     }
 }
 
 // === PromiseHandle === //
 
-pub struct PromiseHandle<'tcx, T: 'tcx> {
-    promise: Rc<PromiseNodeOrigin<'tcx, T>>,
+pub struct PromiseHandle<'tcx, E: 'tcx> {
+    promise: Rc<PromiseNodeOrigin<'tcx, E>>,
 }
 
-impl<'tcx, T: 'tcx> PromiseHandle<'tcx, T> {
+impl<'tcx, E: 'tcx> PromiseHandle<'tcx, E> {
     pub fn accept(self, ccx: &mut ClauseCx<'tcx>, mode: PromiseMode) {
         match mode {
             PromiseMode::RootContext => self.promise.target.get().accept_on_root(ccx),
@@ -176,7 +176,7 @@ impl<'tcx, T: 'tcx> PromiseHandle<'tcx, T> {
         }
     }
 
-    pub fn reject(self, ccx: &mut ClauseCx<'tcx>, mode: PromiseMode, error: T) {
+    pub fn reject(self, ccx: &mut ClauseCx<'tcx>, mode: PromiseMode, error: E) {
         match mode {
             PromiseMode::RootContext => self.promise.target.get().reject_on_root(ccx, error),
             PromiseMode::ProbeContext => {
@@ -238,27 +238,27 @@ trait PromiseNodeTarget<'tcx> {
 }
 
 #[derive_where(Default)]
-struct LateBoundPromiseNodeTarget<'tcx, T> {
-    target: OnceCell<BoundPromiseNodeTarget<'tcx, T>>,
+struct LateBoundPromiseNodeTarget<'tcx, E> {
+    target: OnceCell<BoundPromiseNodeTarget<'tcx, E>>,
 }
 
-impl<'tcx, T> LateBoundPromiseNodeTarget<'tcx, T> {
-    fn bind(&self, target: BoundPromiseNodeTarget<'tcx, T>) {
+impl<'tcx, E> LateBoundPromiseNodeTarget<'tcx, E> {
+    fn bind(&self, target: BoundPromiseNodeTarget<'tcx, E>) {
         self.target.set(target).ok().expect("bound more than once")
     }
 
-    fn get(&self) -> &BoundPromiseNodeTarget<'tcx, T> {
+    fn get(&self) -> &BoundPromiseNodeTarget<'tcx, E> {
         self.target.get().expect("incomplete promise")
     }
 }
 
-struct BoundPromiseNodeTarget<'tcx, T> {
-    receiver: Rc<dyn 'tcx + PromiseNodeTarget<'tcx, Error = T>>,
+struct BoundPromiseNodeTarget<'tcx, E> {
+    receiver: Rc<dyn 'tcx + PromiseNodeTarget<'tcx, Error = E>>,
     userdata: u32,
 }
 
-impl<'tcx, T> BoundPromiseNodeTarget<'tcx, T> {
-    pub fn new(receiver: Rc<dyn 'tcx + PromiseNodeTarget<'tcx, Error = T>>, userdata: u32) -> Self {
+impl<'tcx, E> BoundPromiseNodeTarget<'tcx, E> {
+    pub fn new(receiver: Rc<dyn 'tcx + PromiseNodeTarget<'tcx, Error = E>>, userdata: u32) -> Self {
         Self { receiver, userdata }
     }
 
@@ -266,7 +266,7 @@ impl<'tcx, T> BoundPromiseNodeTarget<'tcx, T> {
         self.receiver.accept_on_root(ccx, self.userdata);
     }
 
-    pub fn reject_on_root(&self, ccx: &mut ClauseCx<'tcx>, error: T) {
+    pub fn reject_on_root(&self, ccx: &mut ClauseCx<'tcx>, error: E) {
         self.receiver.reject_on_root(ccx, error, self.userdata);
     }
 
@@ -278,13 +278,13 @@ impl<'tcx, T> BoundPromiseNodeTarget<'tcx, T> {
 // === Promise Nodes === //
 
 #[derive_where(Default)]
-struct PromiseNodeOrigin<'tcx, T> {
-    target: LateBoundPromiseNodeTarget<'tcx, T>,
+struct PromiseNodeOrigin<'tcx, E> {
+    target: LateBoundPromiseNodeTarget<'tcx, E>,
     probe_rejected_somewhere: Cell<bool>,
 }
 
-impl<'tcx, T> PromiseNodeBuilder<'tcx> for PromiseNodeOrigin<'tcx, T> {
-    type Error = T;
+impl<'tcx, E> PromiseNodeBuilder<'tcx> for PromiseNodeOrigin<'tcx, E> {
+    type Error = E;
 
     fn set_target(&self, target: BoundPromiseNodeTarget<'tcx, Self::Error>) {
         self.target.bind(target);
@@ -295,15 +295,15 @@ impl<'tcx, T> PromiseNodeBuilder<'tcx> for PromiseNodeOrigin<'tcx, T> {
     }
 }
 
-struct PromiseNodeJoiner<'tcx, T> {
-    target: LateBoundPromiseNodeTarget<'tcx, Vec<Option<T>>>,
-    err_resolutions: Cell<Vec<Option<T>>>,
+struct PromiseNodeJoiner<'tcx, E> {
+    target: LateBoundPromiseNodeTarget<'tcx, Vec<Option<E>>>,
+    err_resolutions: Cell<Vec<Option<E>>>,
     all_resolutions_remaining: Cell<u32>,
     poisoned_with_err: Cell<bool>,
 }
 
-impl<'tcx, T> PromiseNodeBuilder<'tcx> for PromiseNodeJoiner<'tcx, T> {
-    type Error = Vec<Option<T>>;
+impl<'tcx, E> PromiseNodeBuilder<'tcx> for PromiseNodeJoiner<'tcx, E> {
+    type Error = Vec<Option<E>>;
 
     fn set_target(&self, target: BoundPromiseNodeTarget<'tcx, Self::Error>) {
         self.target.bind(target);
@@ -317,8 +317,8 @@ impl<'tcx, T> PromiseNodeBuilder<'tcx> for PromiseNodeJoiner<'tcx, T> {
     }
 }
 
-impl<'tcx, T> PromiseNodeTarget<'tcx> for PromiseNodeJoiner<'tcx, T> {
-    type Error = T;
+impl<'tcx, E> PromiseNodeTarget<'tcx> for PromiseNodeJoiner<'tcx, E> {
+    type Error = E;
 
     fn accept_on_root(&self, ccx: &mut ClauseCx<'tcx>, userdata: u32) {
         self.resolve_child(ccx, userdata, None);
@@ -333,8 +333,8 @@ impl<'tcx, T> PromiseNodeTarget<'tcx> for PromiseNodeJoiner<'tcx, T> {
     }
 }
 
-impl<'tcx, T> PromiseNodeJoiner<'tcx, T> {
-    fn resolve_child(&self, ccx: &mut ClauseCx<'tcx>, idx: u32, resolution: Option<T>) {
+impl<'tcx, E> PromiseNodeJoiner<'tcx, E> {
+    fn resolve_child(&self, ccx: &mut ClauseCx<'tcx>, idx: u32, resolution: Option<E>) {
         if resolution.is_some() {
             self.poisoned_with_err.set(true);
         }
@@ -357,21 +357,21 @@ impl<'tcx, T> PromiseNodeJoiner<'tcx, T> {
     }
 }
 
-struct PromiseNodeMapper<'tcx, T, V, F>
+struct PromiseNodeMapper<'tcx, E1, E2, F>
 where
-    F: FnOnce(&mut ClauseCx<'tcx>, T) -> V,
+    F: FnOnce(&mut ClauseCx<'tcx>, E1) -> E2,
 {
-    _ty: PhantomData<fn(T) -> T>,
-    target: LateBoundPromiseNodeTarget<'tcx, V>,
+    _ty: PhantomData<fn(E1) -> E1>,
+    target: LateBoundPromiseNodeTarget<'tcx, E2>,
     mapper: Cell<Option<F>>,
     already_accepted_during_build: bool,
 }
 
-impl<'tcx, T, V, F> PromiseNodeBuilder<'tcx> for PromiseNodeMapper<'tcx, T, V, F>
+impl<'tcx, E1, E2, F> PromiseNodeBuilder<'tcx> for PromiseNodeMapper<'tcx, E1, E2, F>
 where
-    F: FnOnce(&mut ClauseCx<'tcx>, T) -> V,
+    F: FnOnce(&mut ClauseCx<'tcx>, E1) -> E2,
 {
-    type Error = V;
+    type Error = E2;
 
     fn set_target(&self, target: BoundPromiseNodeTarget<'tcx, Self::Error>) {
         self.target.bind(target);
@@ -382,11 +382,11 @@ where
     }
 }
 
-impl<'tcx, T, V, F> PromiseNodeTarget<'tcx> for PromiseNodeMapper<'tcx, T, V, F>
+impl<'tcx, E1, E2, F> PromiseNodeTarget<'tcx> for PromiseNodeMapper<'tcx, E1, E2, F>
 where
-    F: FnOnce(&mut ClauseCx<'tcx>, T) -> V,
+    F: FnOnce(&mut ClauseCx<'tcx>, E1) -> E2,
 {
-    type Error = T;
+    type Error = E1;
 
     fn accept_on_root(&self, ccx: &mut ClauseCx<'tcx>, _userdata: u32) {
         self.target.get().accept_on_root(ccx);
@@ -403,12 +403,12 @@ where
     }
 }
 
-struct PromiseNodeSink<'tcx, T> {
-    sink: PromiseSink<'tcx, T>,
+struct PromiseNodeSink<'tcx, E> {
+    sink: PromiseSink<'tcx, E>,
 }
 
-impl<'tcx, T> PromiseNodeTarget<'tcx> for PromiseNodeSink<'tcx, T> {
-    type Error = T;
+impl<'tcx, E> PromiseNodeTarget<'tcx> for PromiseNodeSink<'tcx, E> {
+    type Error = E;
 
     fn accept_on_root(&self, _ccx: &mut ClauseCx<'tcx>, _userdata: u32) {
         // (no-op)
