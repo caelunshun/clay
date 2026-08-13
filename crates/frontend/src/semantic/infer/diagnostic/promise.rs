@@ -72,11 +72,15 @@ impl<'tcx, T> PromiseReporter<'tcx, T> {
     }
 }
 
-// === Promise Public Interface === //
+pub trait ReportableError<'tcx>: Sized {
+    fn report(self, ccx: &mut ClauseCx<'tcx>) -> ErrorGuaranteed;
+}
+
+// === Promise === //
 
 #[must_use]
 pub struct Promise<'tcx, T: 'tcx> {
-    builder: Rc<dyn 'tcx + AnyPromiseBuilder<'tcx, Error = T>>,
+    builder: Rc<dyn 'tcx + PromiseNodeBuilder<'tcx, Error = T>>,
 }
 
 impl<'tcx, T: 'tcx> Promise<'tcx, T> {
@@ -98,16 +102,17 @@ impl<'tcx, T: 'tcx> Promise<'tcx, T> {
         let sources = sources.into_iter().collect::<Vec<_>>();
 
         let promise = Rc::new(PromiseNodeJoiner {
-            target: PromiseBindSlot::default(),
+            target: PromiseNodeBindSlot::default(),
             err_resolutions: Cell::new((0..sources.len()).map(|_| None::<T>).collect::<Vec<_>>()),
             all_resolutions_remaining: Cell::new(sources.len() as u32),
             poisoned_with_err: Cell::new(false),
         });
 
         for (idx, source) in sources.iter().enumerate() {
-            source
-                .builder
-                .bind_target(ccx, BoundAnyPromiseTarget::new(promise.clone(), idx as u32));
+            source.builder.bind_target(
+                ccx,
+                BoundPromiseNodeTarget::new(promise.clone(), idx as u32),
+            );
         }
 
         Promise { builder: promise }
@@ -123,12 +128,12 @@ impl<'tcx, T: 'tcx> Promise<'tcx, T> {
     {
         let promise = Rc::new(PromiseNodeMapper {
             _ty: PhantomData,
-            target: PromiseBindSlot::default(),
+            target: PromiseNodeBindSlot::default(),
             mapper: Cell::new(Some(f)),
         });
 
         self.builder
-            .bind_target(ccx, BoundAnyPromiseTarget::new(promise.clone(), 0));
+            .bind_target(ccx, BoundPromiseNodeTarget::new(promise.clone(), 0));
 
         Promise { builder: promise }
     }
@@ -147,10 +152,19 @@ impl<'tcx, T: 'tcx> Promise<'tcx, T> {
     pub fn sink(self, ccx: &mut ClauseCx<'tcx>, sink: impl Into<PromiseSink<'tcx, T>>) {
         self.builder.bind_target(
             ccx,
-            BoundAnyPromiseTarget::new(Rc::new(PromiseNodeSink { sink: sink.into() }), 0),
+            BoundPromiseNodeTarget::new(Rc::new(PromiseNodeSink { sink: sink.into() }), 0),
         );
     }
+
+    pub fn sink_auto_report(self, ccx: &mut ClauseCx<'tcx>)
+    where
+        T: ReportableError<'tcx>,
+    {
+        self.sink(ccx, PromiseReporter::new(|ccx, err: T| err.report(ccx)));
+    }
 }
+
+// === PromiseHandle === //
 
 pub struct PromiseHandle<'tcx, T: 'tcx> {
     promise: Rc<PromiseNodeOrigin<'tcx, T>>,
@@ -194,19 +208,19 @@ impl PromiseMode {
     }
 }
 
-// === Promise Traits === //
+// === Promise Node Traits === //
 
-trait AnyPromiseBuilder<'tcx> {
+trait PromiseNodeBuilder<'tcx> {
     type Error: Sized;
 
     fn bind_target(
         &self,
         ccx: &mut ClauseCx<'tcx>,
-        target: BoundAnyPromiseTarget<'tcx, Self::Error>,
+        target: BoundPromiseNodeTarget<'tcx, Self::Error>,
     );
 }
 
-trait AnyPromiseTarget<'tcx> {
+trait PromiseNodeTarget<'tcx> {
     type Error: Sized;
 
     fn accept_once_for_report(&self, ccx: &mut ClauseCx<'tcx>, userdata: u32);
@@ -216,13 +230,13 @@ trait AnyPromiseTarget<'tcx> {
     fn reject_probe_sink(&self, userdata: u32);
 }
 
-struct BoundAnyPromiseTarget<'tcx, T> {
-    receiver: Rc<dyn 'tcx + AnyPromiseTarget<'tcx, Error = T>>,
+struct BoundPromiseNodeTarget<'tcx, T> {
+    receiver: Rc<dyn 'tcx + PromiseNodeTarget<'tcx, Error = T>>,
     userdata: u32,
 }
 
-impl<'tcx, T> BoundAnyPromiseTarget<'tcx, T> {
-    pub fn new(receiver: Rc<dyn 'tcx + AnyPromiseTarget<'tcx, Error = T>>, userdata: u32) -> Self {
+impl<'tcx, T> BoundPromiseNodeTarget<'tcx, T> {
+    pub fn new(receiver: Rc<dyn 'tcx + PromiseNodeTarget<'tcx, Error = T>>, userdata: u32) -> Self {
         Self { receiver, userdata }
     }
 
@@ -240,10 +254,10 @@ impl<'tcx, T> BoundAnyPromiseTarget<'tcx, T> {
     }
 }
 
-// === Promise Bind Slot === //
+// === Promise Node Bind Slot === //
 
-struct PromiseBindSlot<'tcx, T> {
-    target: OnceCell<BoundAnyPromiseTarget<'tcx, T>>,
+struct PromiseNodeBindSlot<'tcx, T> {
+    target: OnceCell<BoundPromiseNodeTarget<'tcx, T>>,
     state: Cell<PromiseBindSlotState<T>>,
     rejected_if_probe: Cell<RejectedIfProbeState>,
 }
@@ -264,7 +278,7 @@ enum RejectedIfProbeState {
     RejectedAfterBound,
 }
 
-impl<T> Default for PromiseBindSlot<'_, T> {
+impl<T> Default for PromiseNodeBindSlot<'_, T> {
     fn default() -> Self {
         Self {
             target: OnceCell::new(),
@@ -274,8 +288,8 @@ impl<T> Default for PromiseBindSlot<'_, T> {
     }
 }
 
-impl<'tcx, T> PromiseBindSlot<'tcx, T> {
-    fn bind_target(&self, ccx: &mut ClauseCx<'tcx>, target: BoundAnyPromiseTarget<'tcx, T>) {
+impl<'tcx, T> PromiseNodeBindSlot<'tcx, T> {
+    fn bind_target(&self, ccx: &mut ClauseCx<'tcx>, target: BoundPromiseNodeTarget<'tcx, T>) {
         use PromiseBindSlotState::*;
         use RejectedIfProbeState::*;
 
@@ -389,45 +403,45 @@ impl<'tcx, T> PromiseBindSlot<'tcx, T> {
     }
 }
 
-// === Promise types === //
+// === Promise Nodes === //
 
 #[derive_where(Default)]
 struct PromiseNodeOrigin<'tcx, T> {
-    target: PromiseBindSlot<'tcx, T>,
+    target: PromiseNodeBindSlot<'tcx, T>,
 }
 
-impl<'tcx, T> AnyPromiseBuilder<'tcx> for PromiseNodeOrigin<'tcx, T> {
+impl<'tcx, T> PromiseNodeBuilder<'tcx> for PromiseNodeOrigin<'tcx, T> {
     type Error = T;
 
     fn bind_target(
         &self,
         ccx: &mut ClauseCx<'tcx>,
-        target: BoundAnyPromiseTarget<'tcx, Self::Error>,
+        target: BoundPromiseNodeTarget<'tcx, Self::Error>,
     ) {
         self.target.bind_target(ccx, target);
     }
 }
 
 struct PromiseNodeJoiner<'tcx, T> {
-    target: PromiseBindSlot<'tcx, Vec<Option<T>>>,
+    target: PromiseNodeBindSlot<'tcx, Vec<Option<T>>>,
     err_resolutions: Cell<Vec<Option<T>>>,
     all_resolutions_remaining: Cell<u32>,
     poisoned_with_err: Cell<bool>,
 }
 
-impl<'tcx, T> AnyPromiseBuilder<'tcx> for PromiseNodeJoiner<'tcx, T> {
+impl<'tcx, T> PromiseNodeBuilder<'tcx> for PromiseNodeJoiner<'tcx, T> {
     type Error = Vec<Option<T>>;
 
     fn bind_target(
         &self,
         ccx: &mut ClauseCx<'tcx>,
-        target: BoundAnyPromiseTarget<'tcx, Self::Error>,
+        target: BoundPromiseNodeTarget<'tcx, Self::Error>,
     ) {
         self.target.bind_target(ccx, target);
     }
 }
 
-impl<'tcx, T> AnyPromiseTarget<'tcx> for PromiseNodeJoiner<'tcx, T> {
+impl<'tcx, T> PromiseNodeTarget<'tcx> for PromiseNodeJoiner<'tcx, T> {
     type Error = T;
 
     fn accept_once_for_report(&self, ccx: &mut ClauseCx<'tcx>, userdata: u32) {
@@ -472,11 +486,11 @@ where
     F: FnOnce(&mut ClauseCx<'tcx>, T) -> V,
 {
     _ty: PhantomData<fn(T) -> T>,
-    target: PromiseBindSlot<'tcx, V>,
+    target: PromiseNodeBindSlot<'tcx, V>,
     mapper: Cell<Option<F>>,
 }
 
-impl<'tcx, T, V, F> AnyPromiseBuilder<'tcx> for PromiseNodeMapper<'tcx, T, V, F>
+impl<'tcx, T, V, F> PromiseNodeBuilder<'tcx> for PromiseNodeMapper<'tcx, T, V, F>
 where
     F: FnOnce(&mut ClauseCx<'tcx>, T) -> V,
 {
@@ -485,13 +499,13 @@ where
     fn bind_target(
         &self,
         ccx: &mut ClauseCx<'tcx>,
-        target: BoundAnyPromiseTarget<'tcx, Self::Error>,
+        target: BoundPromiseNodeTarget<'tcx, Self::Error>,
     ) {
         self.target.bind_target(ccx, target);
     }
 }
 
-impl<'tcx, T, V, F> AnyPromiseTarget<'tcx> for PromiseNodeMapper<'tcx, T, V, F>
+impl<'tcx, T, V, F> PromiseNodeTarget<'tcx> for PromiseNodeMapper<'tcx, T, V, F>
 where
     F: FnOnce(&mut ClauseCx<'tcx>, T) -> V,
 {
@@ -516,7 +530,7 @@ struct PromiseNodeSink<'tcx, T> {
     sink: PromiseSink<'tcx, T>,
 }
 
-impl<'tcx, T> AnyPromiseTarget<'tcx> for PromiseNodeSink<'tcx, T> {
+impl<'tcx, T> PromiseNodeTarget<'tcx> for PromiseNodeSink<'tcx, T> {
     type Error = T;
 
     fn accept_once_for_report(&self, _ccx: &mut ClauseCx<'tcx>, _userdata: u32) {
