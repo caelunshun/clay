@@ -5,3 +5,4 @@ mod error;
 pub use self::error::*;
 
 mod promise;
+pub use self::promise::*;
