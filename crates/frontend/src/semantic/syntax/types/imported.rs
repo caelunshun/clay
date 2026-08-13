@@ -331,7 +331,7 @@ pub enum InferTyVarSourceInfo {
     ElaborationUnifyHelper,
     HrtbLhsInstantiation {
         span: Span,
-        clauses: Rc<LateInit<TraitClauseList>>,
+        clauses: LateInit<TraitClauseList>,
     },
     Projection {
         self_ty: Ty,

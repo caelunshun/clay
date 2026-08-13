@@ -1148,7 +1148,7 @@ impl ClauseCx<'_> {
                     universe.clone(),
                     InferTyVarSourceInfo::HrtbLhsInstantiation {
                         span: def.span,
-                        clauses: Rc::new(LateInit::uninit()),
+                        clauses: LateInit::uninit(),
                     },
                 )),
             })
