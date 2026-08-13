@@ -460,7 +460,10 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
         match re.kind {
             SigReKind::Gc => Re::Gc,
-            SigReKind::HrtbVar(idx) => Re::HrtbVar(idx),
+            SigReKind::HrtbVar(idx) => match self.hrtb_substs.lookup(idx.0) {
+                Some(real_subst) => real_subst.unwrap_re(),
+                None => Re::HrtbVar(idx),
+            },
             SigReKind::Infer => self.ccx.fresh_re_infer(),
             SigReKind::Generic(generic) => self.opts.env.lookup_re(s, generic),
             SigReKind::Error(err) => Re::Error(err),
@@ -1246,6 +1249,8 @@ impl<'tcx> TyFolder<'tcx> for HrtbInstantiator<'_, 'tcx> {
 
     fn fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
         let s = self.session();
+
+        let ty = self.super_(ty);
 
         match *ty.r(s) {
             TyKind::HrtbVar(var) => {

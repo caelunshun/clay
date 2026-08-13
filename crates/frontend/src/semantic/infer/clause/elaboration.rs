@@ -206,7 +206,9 @@ impl<'tcx> ClauseCx<'tcx> {
                                     Some(tcx.intern(TyKind::UniversalVar(var))),
                                     [GenericSubst::new(*spec.def.r(s).generics, new_param_equals)],
                                 ),
-                                SigImporterWfMode::DelayBug,
+                                // We must skip WF for these clauses because, otherwise, we'd have
+                                // to expand any infinite loops of projection universals.
+                                SigImporterWfMode::Skip,
                             )
                             .import_trait_clause_list(*base.r(s).clauses);
 
