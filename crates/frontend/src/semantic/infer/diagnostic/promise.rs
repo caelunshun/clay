@@ -263,31 +263,25 @@ impl<'tcx, E: 'tcx> MultiPromiseBuilder<'tcx, E> {
 
 // === PromiseHandle === //
 
+#[derive_where(Clone)]
 pub struct PromiseHandle<'tcx, E: 'tcx> {
     promise: Rc<PromiseNodeOrigin<'tcx, E>>,
 }
 
 impl<'tcx, E: 'tcx> PromiseHandle<'tcx, E> {
-    pub fn accept(self, ccx: &mut ClauseCx<'tcx>, mode: PromiseMode) {
+    pub fn accept(&self, ccx: &mut ClauseCx<'tcx>, mode: PromiseMode) {
         match mode {
-            PromiseMode::RootContext => self.promise.target.get().accept_on_root(ccx),
+            PromiseMode::RootContext => self.promise.accept_on_root(ccx),
             PromiseMode::ProbeContext => {
                 // (probes don't care)
             }
         }
     }
 
-    pub fn reject(self, ccx: &mut ClauseCx<'tcx>, mode: PromiseMode, error: E) {
+    pub fn reject(&self, ccx: &mut ClauseCx<'tcx>, mode: PromiseMode, error: E) {
         match mode {
-            PromiseMode::RootContext => self.promise.target.get().reject_on_root(ccx, error),
-            PromiseMode::ProbeContext => {
-                if self.promise.probe_rejected_somewhere.replace(true) {
-                    // (already saturated as rejected)
-                    return;
-                }
-
-                self.promise.target.get().reject_on_fork();
-            }
+            PromiseMode::RootContext => self.promise.reject_on_root(ccx, error),
+            PromiseMode::ProbeContext => self.promise.reject_on_fork(),
         }
     }
 }
@@ -381,7 +375,8 @@ impl<'tcx, E> BoundPromiseNodeTarget<'tcx, E> {
 #[derive_where(Default)]
 struct PromiseNodeOrigin<'tcx, E> {
     target: LateBoundPromiseNodeTarget<'tcx, E>,
-    probe_rejected_somewhere: Cell<bool>,
+    already_report_resolved: Cell<bool>,
+    already_probe_resolved: Cell<bool>,
 }
 
 impl<'tcx, E> PromiseNodeBuilder<'tcx> for PromiseNodeOrigin<'tcx, E> {
@@ -393,6 +388,34 @@ impl<'tcx, E> PromiseNodeBuilder<'tcx> for PromiseNodeOrigin<'tcx, E> {
 
     fn already_accepted_during_build(&self) -> bool {
         false
+    }
+}
+
+impl<'tcx, E> PromiseNodeOrigin<'tcx, E> {
+    fn accept_on_root(&self, ccx: &mut ClauseCx<'tcx>) {
+        assert!(
+            !self.already_report_resolved.replace(true),
+            "cannot report-resolve promise more than once"
+        );
+
+        self.target.get().accept_on_root(ccx)
+    }
+
+    fn reject_on_root(&self, ccx: &mut ClauseCx<'tcx>, error: E) {
+        assert!(
+            !self.already_report_resolved.replace(true),
+            "cannot report-resolve promise more than once"
+        );
+
+        self.target.get().reject_on_root(ccx, error)
+    }
+
+    fn reject_on_fork(&self) {
+        if self.already_probe_resolved.replace(true) {
+            return;
+        }
+
+        self.target.get().reject_on_fork();
     }
 }
 

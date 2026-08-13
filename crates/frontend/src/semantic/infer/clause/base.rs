@@ -25,6 +25,35 @@ pub const MAX_OBLIGATION_DEPTH: u32 = 256;
 
 // === Obligations === //
 
+#[derive(Debug, Hash, Eq, PartialEq)]
+pub struct ClauseFuel {
+    remaining: u32,
+}
+
+impl ClauseFuel {
+    pub const DEFAULT: Self = Self::new(128);
+
+    pub const fn new(remaining: u32) -> Self {
+        Self { remaining }
+    }
+
+    pub const fn keep(&self) -> Self {
+        Self::new(self.remaining)
+    }
+
+    pub const fn consume(&self) -> Self {
+        Self::new(self.remaining.saturating_sub(1))
+    }
+
+    pub const fn is_exhausted(&self) -> bool {
+        self.remaining == 0
+    }
+
+    pub const fn remaining(&self) -> u32 {
+        self.remaining
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ClauseObligation {
     TyUnifiesTy(ObligeCause, Ty, Ty, RelationMode),
