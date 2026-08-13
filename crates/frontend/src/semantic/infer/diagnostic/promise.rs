@@ -138,11 +138,15 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
         Promise { builder: promise }
     }
 
-    pub fn remediator(self, f: impl 'tcx + FnOnce(&mut ClauseCx<'tcx>, &mut E)) -> Self {
+    pub fn remediate(self, f: impl 'tcx + FnOnce(&mut ClauseCx<'tcx>, &mut E)) -> Self {
         self.map(move |ccx, mut error| {
             f(ccx, &mut error);
             error
         })
+    }
+
+    pub fn join(self, builder: &mut MultiPromiseBuilder<'tcx, E>) {
+        builder.push(self);
     }
 
     pub fn sink(self, sink: impl Into<PromiseSink<'tcx, E>>) {
@@ -157,6 +161,103 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
         E: ReportableError<'tcx>,
     {
         self.sink(PromiseReporter::new(|ccx, err: E| err.report(ccx)));
+    }
+
+    pub fn and_value<T>(self, value: T) -> PromiseValue<'tcx, T, E> {
+        PromiseValue::new(value, self)
+    }
+}
+
+#[must_use]
+pub struct PromiseValue<'tcx, T, E: 'tcx> {
+    pub value: T,
+    pub promise: Promise<'tcx, E>,
+}
+
+impl<'tcx, T, E: 'tcx> PromiseValue<'tcx, T, E> {
+    pub fn new(value: T, promise: Promise<'tcx, E>) -> Self {
+        Self { value, promise }
+    }
+
+    pub fn map<V>(self, f: impl FnOnce(T) -> V) -> PromiseValue<'tcx, V, E> {
+        PromiseValue {
+            value: f(self.value),
+            promise: self.promise,
+        }
+    }
+
+    pub fn map_promise<E2: 'tcx>(
+        self,
+        f: impl FnOnce(Promise<'tcx, E>) -> Promise<'tcx, E2>,
+    ) -> PromiseValue<'tcx, T, E2> {
+        PromiseValue {
+            value: self.value,
+            promise: f(self.promise),
+        }
+    }
+
+    pub fn finish_promise(self, f: impl FnOnce(Promise<'tcx, E>)) -> T {
+        f(self.promise);
+        self.value
+    }
+
+    pub fn map_err<E2>(
+        self,
+        f: impl 'tcx + FnOnce(&mut ClauseCx<'tcx>, E) -> E2,
+    ) -> PromiseValue<'tcx, T, E2> {
+        self.map_promise(|p| p.map(f))
+    }
+
+    pub fn remediate(self, f: impl 'tcx + FnOnce(&mut ClauseCx<'tcx>, &mut E)) -> Self {
+        self.map_promise(|p| p.remediate(f))
+    }
+
+    pub fn join(self, builder: &mut MultiPromiseBuilder<'tcx, E>) -> T {
+        self.finish_promise(|p| p.join(builder))
+    }
+
+    pub fn sink(self, sink: impl Into<PromiseSink<'tcx, E>>) -> T {
+        self.finish_promise(|p| p.sink(sink))
+    }
+
+    pub fn sink_auto_report(self) -> T
+    where
+        E: ReportableError<'tcx>,
+    {
+        self.finish_promise(|p| p.sink_auto_report())
+    }
+}
+
+#[derive_where(Default)]
+pub struct MultiPromiseBuilder<'tcx, E: 'tcx> {
+    sources: Vec<Promise<'tcx, E>>,
+}
+
+impl<'tcx, E: 'tcx> MultiPromiseBuilder<'tcx, E> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push(&mut self, promise: Promise<'tcx, E>) {
+        self.sources.push(promise)
+    }
+
+    pub fn with(mut self, promise: Promise<'tcx, E>) -> Self {
+        self.push(promise);
+        self
+    }
+
+    pub fn extend(&mut self, promises: impl IntoIterator<Item = Promise<'tcx, E>>) {
+        self.sources.extend(promises);
+    }
+
+    pub fn with_many(mut self, promises: impl IntoIterator<Item = Promise<'tcx, E>>) -> Self {
+        self.extend(promises);
+        self
+    }
+
+    pub fn finish(self) -> Promise<'tcx, Vec<Option<E>>> {
+        Promise::new_join(self.sources)
     }
 }
 
