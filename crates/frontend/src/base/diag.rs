@@ -143,7 +143,7 @@ pub enum Level {
     Bug,
     Fatal,
     Error,
-    DelayedBug,
+    DelayBug,
     Warning,
     Note,
     OnceNote,
@@ -156,12 +156,12 @@ impl Level {
     pub fn is_fatal(self) -> bool {
         matches!(
             self,
-            Level::Bug | Level::DelayedBug | Level::Fatal | Level::Error
+            Level::Bug | Level::DelayBug | Level::Fatal | Level::Error
         )
     }
 
     pub fn is_delay_bug(self) -> bool {
-        matches!(self, Level::DelayedBug)
+        matches!(self, Level::DelayBug)
     }
 }
 
@@ -278,6 +278,11 @@ impl<E: EmissionGuarantee> Diag<E> {
 
     pub fn is_delay_bug(&self) -> bool {
         self.me.is_delay_bug() || self.children.iter().any(|v| v.is_delay_bug())
+    }
+
+    pub fn to_delay_bug(mut self) -> HardDiag {
+        self.me.level = Level::DelayBug;
+        self.cast()
     }
 }
 
@@ -420,7 +425,7 @@ fn emit_pretty(source_map: &SourceMap, writer: &mut dyn termcolor::WriteColor, d
             Level::Bug => Severity::Bug,
             Level::Fatal => Severity::Error,
             Level::Error => Severity::Error,
-            Level::DelayedBug => Severity::Bug,
+            Level::DelayBug => Severity::Bug,
             Level::Warning => Severity::Warning,
             Level::Note => Severity::Note,
             Level::OnceNote => Severity::Note,

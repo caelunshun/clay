@@ -1,32 +1,15 @@
-use crate::{base::ErrorGuaranteed, semantic::infer::ClauseCx};
+use crate::{
+    base::{ErrorGuaranteed, HardDiag},
+    semantic::infer::ClauseCx,
+};
 use derive_where::derive_where;
 use std::{
     cell::{Cell, OnceCell},
-    fmt,
     marker::PhantomData,
-    panic::Location,
     rc::Rc,
 };
 
 // === PromiseSink === //
-
-#[derive_where(Debug)]
-pub enum PromiseSink<'tcx, E> {
-    Probe(PromiseProbe),
-    Report(PromiseReporter<'tcx, E>),
-}
-
-impl<E> From<PromiseProbe> for PromiseSink<'_, E> {
-    fn from(probe: PromiseProbe) -> Self {
-        PromiseSink::Probe(probe)
-    }
-}
-
-impl<'tcx, E> From<PromiseReporter<'tcx, E>> for PromiseSink<'tcx, E> {
-    fn from(reporter: PromiseReporter<'tcx, E>) -> Self {
-        PromiseSink::Report(reporter)
-    }
-}
 
 #[derive(Debug, Clone, Default)]
 pub struct PromiseProbe {
@@ -43,37 +26,8 @@ impl PromiseProbe {
     }
 }
 
-pub struct PromiseReporter<'tcx, E> {
-    created_at: &'static Location<'static>,
-    handler: Box<dyn 'tcx + Fn(&mut ClauseCx<'tcx>, E) -> ErrorGuaranteed>,
-}
-
-impl<E> fmt::Debug for PromiseReporter<'_, E> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "PromiseReporter @ {}", self.created_at)
-    }
-}
-
-impl<'tcx, E> PromiseReporter<'tcx, E> {
-    #[track_caller]
-    pub fn new(f: impl 'tcx + FnOnce(&mut ClauseCx<'tcx>, E) -> ErrorGuaranteed) -> Self {
-        let f = Cell::new(Some(f));
-
-        Self {
-            created_at: Location::caller(),
-            handler: Box::new(move |ccx, error| {
-                f.take().expect("reporter called more than once")(ccx, error)
-            }),
-        }
-    }
-
-    pub fn report(&self, ccx: &mut ClauseCx<'tcx>, error: E) -> ErrorGuaranteed {
-        (self.handler)(ccx, error)
-    }
-}
-
-pub trait ReportableError<'tcx>: Sized {
-    fn report(self, ccx: &mut ClauseCx<'tcx>) -> ErrorGuaranteed;
+pub trait ErrorToDiag<'tcx>: Sized {
+    fn to_diag(self, ccx: &mut ClauseCx<'tcx>) -> HardDiag;
 }
 
 // === Promise === //
@@ -85,14 +39,14 @@ pub struct Promise<'tcx, E: 'tcx> {
 
 impl<'tcx, E: 'tcx> Promise<'tcx, E> {
     pub fn new_root() -> (Self, PromiseHandle<'tcx, E>) {
-        let promise = Rc::new(PromiseNodeOrigin::default());
+        let node = Rc::new(PromiseNodeOrigin::default());
 
-        let builder = Promise {
-            builder: promise.clone(),
+        let promise = Promise {
+            builder: node.clone(),
         };
-        let handle = PromiseHandle { promise };
+        let handle = PromiseHandle { promise: node };
 
-        (builder, handle)
+        (promise, handle)
     }
 
     pub fn new_join(
@@ -105,7 +59,7 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
             .filter(|v| v.builder.already_accepted_during_build())
             .count();
 
-        let promise = Rc::new(PromiseNodeJoiner {
+        let node = Rc::new(PromiseNodeJoiner {
             target: LateBoundPromiseNodeTarget::default(),
             err_resolutions: Cell::new((0..sources.len()).map(|_| None::<E>).collect::<Vec<_>>()),
             all_resolutions_remaining: Cell::new((sources.len() - trivially_accepted) as u32),
@@ -115,17 +69,18 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
         for (idx, source) in sources.iter().enumerate() {
             source
                 .builder
-                .set_target(BoundPromiseNodeTarget::new(promise.clone(), idx as u32));
+                .set_target(BoundPromiseNodeTarget::new(node.clone(), idx as u32));
         }
 
-        Promise { builder: promise }
+        Promise { builder: node }
     }
 
-    pub fn map<E2>(self, f: impl 'tcx + FnOnce(&mut ClauseCx<'tcx>, E) -> E2) -> Promise<'tcx, E2>
+    pub fn filter_map<E2, F>(self, f: F) -> Promise<'tcx, E2>
     where
-        E: 'tcx,
+        E2: 'tcx,
+        F: 'tcx + FnOnce(&mut ClauseCx<'tcx>, E) -> Result<E2, ErrorGuaranteed>,
     {
-        let promise = Rc::new(PromiseNodeMapper {
+        let node = Rc::new(PromiseNodeFilterMapper::<E, E2, F> {
             _ty: PhantomData,
             target: LateBoundPromiseNodeTarget::default(),
             mapper: Cell::new(Some(f)),
@@ -133,12 +88,35 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
         });
 
         self.builder
-            .set_target(BoundPromiseNodeTarget::new(promise.clone(), 0));
+            .set_target(BoundPromiseNodeTarget::new(node.clone(), 0));
 
-        Promise { builder: promise }
+        Promise { builder: node }
     }
 
-    pub fn remediate(self, f: impl 'tcx + FnOnce(&mut ClauseCx<'tcx>, &mut E)) -> Self {
+    pub fn filter_delay_bug<E2, F>(self, f: F) -> Promise<'tcx, E2>
+    where
+        E: ErrorToDiag<'tcx>,
+        E2: 'tcx,
+        F: 'tcx + FnOnce(&mut ClauseCx<'tcx>, E) -> Result<E2, E>,
+    {
+        self.filter_map(move |ccx, err| match f(ccx, err) {
+            Ok(mapped) => Ok(mapped),
+            Err(orig) => Err(orig.to_diag(ccx).to_delay_bug().emit()),
+        })
+    }
+
+    pub fn map<E2, F>(self, f: F) -> Promise<'tcx, E2>
+    where
+        E2: 'tcx,
+        F: 'tcx + FnOnce(&mut ClauseCx<'tcx>, E) -> E2,
+    {
+        self.filter_map(move |ccx, err| Ok(f(ccx, err)))
+    }
+
+    pub fn remediate<F>(self, f: F) -> Self
+    where
+        F: 'tcx + FnOnce(&mut ClauseCx<'tcx>, &mut E),
+    {
         self.map(move |ccx, mut error| {
             f(ccx, &mut error);
             error
@@ -149,18 +127,41 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
         builder.push(self);
     }
 
-    pub fn sink(self, sink: impl Into<PromiseSink<'tcx, E>>) {
-        self.builder.set_target(BoundPromiseNodeTarget::new(
-            Rc::new(PromiseNodeSink { sink: sink.into() }),
-            0,
-        ));
+    pub fn report_with<F>(self, f: F)
+    where
+        F: 'tcx + FnOnce(&mut ClauseCx<'tcx>, E) -> ErrorGuaranteed,
+    {
+        let node = Rc::new(PromiseNodeReportSink::<E, F> {
+            _ty: PhantomData,
+            reporter: Cell::new(Some(f)),
+        });
+
+        self.builder
+            .set_target(BoundPromiseNodeTarget::new(node, 0));
     }
 
-    pub fn sink_auto_report(self)
+    pub fn report_loud(self)
     where
-        E: ReportableError<'tcx>,
+        E: ErrorToDiag<'tcx>,
     {
-        self.sink(PromiseReporter::new(|ccx, err: E| err.report(ccx)));
+        self.report_with(|ccx, err| err.to_diag(ccx).emit());
+    }
+
+    pub fn report_delay_bug(self)
+    where
+        E: ErrorToDiag<'tcx>,
+    {
+        self.report_with(|ccx, err| err.to_diag(ccx).to_delay_bug().emit());
+    }
+
+    pub fn probe(self, probe: PromiseProbe) {
+        let node = Rc::new(PromiseNodeProbeSink::<E> {
+            _ty: PhantomData,
+            probe,
+        });
+
+        self.builder
+            .set_target(BoundPromiseNodeTarget::new(node, 0));
     }
 
     pub fn and_value<T>(self, value: T) -> PromiseValue<'tcx, T, E> {
@@ -179,7 +180,7 @@ impl<'tcx, T, E: 'tcx> PromiseValue<'tcx, T, E> {
         Self { value, promise }
     }
 
-    pub fn map<V>(self, f: impl FnOnce(T) -> V) -> PromiseValue<'tcx, V, E> {
+    pub fn map_value<V>(self, f: impl FnOnce(T) -> V) -> PromiseValue<'tcx, V, E> {
         PromiseValue {
             value: f(self.value),
             promise: self.promise,
@@ -201,14 +202,36 @@ impl<'tcx, T, E: 'tcx> PromiseValue<'tcx, T, E> {
         self.value
     }
 
-    pub fn map_err<E2>(
-        self,
-        f: impl 'tcx + FnOnce(&mut ClauseCx<'tcx>, E) -> E2,
-    ) -> PromiseValue<'tcx, T, E2> {
+    // Forwards
+    pub fn filter_map<E2, F>(self, f: F) -> PromiseValue<'tcx, T, E2>
+    where
+        E2: 'tcx,
+        F: 'tcx + FnOnce(&mut ClauseCx<'tcx>, E) -> Result<E2, ErrorGuaranteed>,
+    {
+        self.map_promise(|p| p.filter_map(f))
+    }
+
+    pub fn filter_delay_bug<E2, F>(self, f: F) -> PromiseValue<'tcx, T, E2>
+    where
+        E: ErrorToDiag<'tcx>,
+        E2: 'tcx,
+        F: 'tcx + FnOnce(&mut ClauseCx<'tcx>, E) -> Result<E2, E>,
+    {
+        self.map_promise(|p| p.filter_delay_bug(f))
+    }
+
+    pub fn map<E2, F>(self, f: F) -> PromiseValue<'tcx, T, E2>
+    where
+        E2: 'tcx,
+        F: 'tcx + FnOnce(&mut ClauseCx<'tcx>, E) -> E2,
+    {
         self.map_promise(|p| p.map(f))
     }
 
-    pub fn remediate(self, f: impl 'tcx + FnOnce(&mut ClauseCx<'tcx>, &mut E)) -> Self {
+    pub fn remediate<F>(self, f: F) -> Self
+    where
+        F: 'tcx + FnOnce(&mut ClauseCx<'tcx>, &mut E),
+    {
         self.map_promise(|p| p.remediate(f))
     }
 
@@ -216,15 +239,29 @@ impl<'tcx, T, E: 'tcx> PromiseValue<'tcx, T, E> {
         self.finish_promise(|p| p.join(builder))
     }
 
-    pub fn sink(self, sink: impl Into<PromiseSink<'tcx, E>>) -> T {
-        self.finish_promise(|p| p.sink(sink))
+    pub fn report_with<F>(self, f: F) -> T
+    where
+        F: 'tcx + FnOnce(&mut ClauseCx<'tcx>, E) -> ErrorGuaranteed,
+    {
+        self.finish_promise(|p| p.report_with(f))
     }
 
-    pub fn sink_auto_report(self) -> T
+    pub fn report_loud(self) -> T
     where
-        E: ReportableError<'tcx>,
+        E: ErrorToDiag<'tcx>,
     {
-        self.finish_promise(|p| p.sink_auto_report())
+        self.finish_promise(|p| p.report_loud())
+    }
+
+    pub fn report_delay_bug(self) -> T
+    where
+        E: ErrorToDiag<'tcx>,
+    {
+        self.finish_promise(|p| p.report_delay_bug())
+    }
+
+    pub fn probe(self, probe: PromiseProbe) -> T {
+        self.finish_promise(|p| p.probe(probe))
     }
 }
 
@@ -481,9 +518,9 @@ impl<'tcx, E> PromiseNodeJoiner<'tcx, E> {
     }
 }
 
-struct PromiseNodeMapper<'tcx, E1, E2, F>
+struct PromiseNodeFilterMapper<'tcx, E1, E2, F>
 where
-    F: FnOnce(&mut ClauseCx<'tcx>, E1) -> E2,
+    F: FnOnce(&mut ClauseCx<'tcx>, E1) -> Result<E2, ErrorGuaranteed>,
 {
     _ty: PhantomData<fn(E1) -> E1>,
     target: LateBoundPromiseNodeTarget<'tcx, E2>,
@@ -491,9 +528,9 @@ where
     already_accepted_during_build: bool,
 }
 
-impl<'tcx, E1, E2, F> PromiseNodeBuilder<'tcx> for PromiseNodeMapper<'tcx, E1, E2, F>
+impl<'tcx, E1, E2, F> PromiseNodeBuilder<'tcx> for PromiseNodeFilterMapper<'tcx, E1, E2, F>
 where
-    F: FnOnce(&mut ClauseCx<'tcx>, E1) -> E2,
+    F: FnOnce(&mut ClauseCx<'tcx>, E1) -> Result<E2, ErrorGuaranteed>,
 {
     type Error = E2;
 
@@ -506,9 +543,9 @@ where
     }
 }
 
-impl<'tcx, E1, E2, F> PromiseNodeTarget<'tcx> for PromiseNodeMapper<'tcx, E1, E2, F>
+impl<'tcx, E1, E2, F> PromiseNodeTarget<'tcx> for PromiseNodeFilterMapper<'tcx, E1, E2, F>
 where
-    F: FnOnce(&mut ClauseCx<'tcx>, E1) -> E2,
+    F: FnOnce(&mut ClauseCx<'tcx>, E1) -> Result<E2, ErrorGuaranteed>,
 {
     type Error = E1;
 
@@ -517,9 +554,10 @@ where
     }
 
     fn reject_on_root(&self, ccx: &mut ClauseCx<'tcx>, error: Self::Error, _userdata: u32) {
-        let error = self.mapper.take().unwrap()(ccx, error);
-
-        self.target.get().reject_on_root(ccx, error);
+        match self.mapper.take().unwrap()(ccx, error) {
+            Ok(error) => self.target.get().reject_on_root(ccx, error),
+            Err(ErrorGuaranteed) => self.target.get().accept_on_root(ccx),
+        }
     }
 
     fn reject_on_fork(&self) {
@@ -527,11 +565,18 @@ where
     }
 }
 
-struct PromiseNodeSink<'tcx, E> {
-    sink: PromiseSink<'tcx, E>,
+struct PromiseNodeReportSink<'tcx, E, F>
+where
+    F: FnOnce(&mut ClauseCx<'tcx>, E) -> ErrorGuaranteed,
+{
+    _ty: PhantomData<fn(&'tcx (), E) -> (&'tcx (), E)>,
+    reporter: Cell<Option<F>>,
 }
 
-impl<'tcx, E> PromiseNodeTarget<'tcx> for PromiseNodeSink<'tcx, E> {
+impl<'tcx, E, F> PromiseNodeTarget<'tcx> for PromiseNodeReportSink<'tcx, E, F>
+where
+    F: FnOnce(&mut ClauseCx<'tcx>, E) -> ErrorGuaranteed,
+{
     type Error = E;
 
     fn accept_on_root(&self, _ccx: &mut ClauseCx<'tcx>, _userdata: u32) {
@@ -539,20 +584,31 @@ impl<'tcx, E> PromiseNodeTarget<'tcx> for PromiseNodeSink<'tcx, E> {
     }
 
     fn reject_on_root(&self, ccx: &mut ClauseCx<'tcx>, error: Self::Error, _userdata: u32) {
-        match &self.sink {
-            PromiseSink::Probe(probe) => probe.signal_error(),
-            PromiseSink::Report(reporter) => {
-                reporter.report(ccx, error);
-            }
-        }
+        self.reporter.take().expect("already rejected")(ccx, error);
     }
 
     fn reject_on_fork(&self) {
-        match &self.sink {
-            PromiseSink::Probe(probe) => probe.signal_error(),
-            PromiseSink::Report(_reporter) => {
-                // (no-op)
-            }
-        }
+        // (no-op)
+    }
+}
+
+struct PromiseNodeProbeSink<E> {
+    _ty: PhantomData<fn(E) -> E>,
+    probe: PromiseProbe,
+}
+
+impl<'tcx, E> PromiseNodeTarget<'tcx> for PromiseNodeProbeSink<E> {
+    type Error = E;
+
+    fn accept_on_root(&self, _ccx: &mut ClauseCx<'tcx>, _userdata: u32) {
+        // (no-op)
+    }
+
+    fn reject_on_root(&self, _ccx: &mut ClauseCx<'tcx>, _error: Self::Error, _userdata: u32) {
+        // (no-op)
+    }
+
+    fn reject_on_fork(&self) {
+        self.probe.signal_error();
     }
 }

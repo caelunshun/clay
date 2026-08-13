@@ -227,7 +227,7 @@ impl ObligeCause {
                             if mode.should_promote_delay_bugs() {
                                 Level::Error
                             } else {
-                                Level::DelayedBug
+                                Level::DelayBug
                             },
                             msg,
                         )
