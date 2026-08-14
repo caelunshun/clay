@@ -23,5 +23,9 @@ termcolor = "1.4.1"
 thiserror = "2.0.12"
 unicode-xid = "0.2.6"
 
+[dependencies.bytemuck]
+version = "1.25.2"
+features = ["extern_crate_alloc", "derive"]
+
 [dev-dependencies]
 fastrand = "2.3.0"

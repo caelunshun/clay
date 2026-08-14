@@ -2,10 +2,12 @@ use crate::{
     base::{ErrorGuaranteed, HardDiag},
     semantic::infer::ClauseCx,
 };
+use bytemuck::{TransparentWrapper, TransparentWrapperAlloc as _};
 use derive_where::derive_where;
 use std::{
     cell::{Cell, OnceCell},
     marker::PhantomData,
+    mem,
     rc::Rc,
 };
 
@@ -60,15 +62,20 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
 
         let node = Rc::new(PromiseNodeJoiner {
             target: LateBoundPromiseNodeTarget::default(),
-            err_resolutions: Cell::new((0..sources.len()).map(|_| None::<E>).collect::<Vec<_>>()),
+            err_resolutions: Cell::new(Some(
+                (0..sources.len()).map(|_| None::<E>).collect::<Vec<_>>(),
+            )),
             all_resolutions_remaining: Cell::new((sources.len() - trivially_accepted) as u32),
             poisoned_with_err: Cell::new(false),
         });
 
         for (idx, source) in sources.iter().enumerate() {
-            source
-                .builder
-                .set_target(BoundPromiseNodeTarget::new(node.clone(), idx as u32));
+            source.builder.set_target(BoundPromiseNodeTarget::new(
+                node.clone().target(|error_list, error, idx| {
+                    error_list[idx as usize] = Some(error);
+                }),
+                idx as u32,
+            ));
         }
 
         Promise { builder: node }
@@ -467,65 +474,106 @@ impl<'tcx, E> PromiseNodeOrigin<'tcx, E> {
     }
 }
 
-struct PromiseNodeJoiner<'tcx, E> {
-    target: LateBoundPromiseNodeTarget<'tcx, Vec<Option<E>>>,
-    err_resolutions: Cell<Vec<Option<E>>>,
+struct PromiseNodeJoiner<'tcx, A> {
+    target: LateBoundPromiseNodeTarget<'tcx, A>,
+    err_resolutions: Cell<Option<A>>,
     all_resolutions_remaining: Cell<u32>,
     poisoned_with_err: Cell<bool>,
 }
 
-impl<'tcx, E> PromiseNodeBuilder<'tcx> for PromiseNodeJoiner<'tcx, E> {
-    type Error = Vec<Option<E>>;
+impl<'tcx, A> PromiseNodeBuilder<'tcx> for PromiseNodeJoiner<'tcx, A> {
+    type Error = A;
 
     fn set_target(&self, target: BoundPromiseNodeTarget<'tcx, Self::Error>) {
         self.target.bind(target);
     }
 
     fn already_accepted_during_build(&self) -> bool {
-        let err_resolutions = self.err_resolutions.take();
-        let already_accepted = err_resolutions.is_empty();
-        self.err_resolutions.set(err_resolutions);
-        already_accepted
+        self.all_resolutions_remaining.get() == 0
     }
 }
 
-impl<'tcx, E> PromiseNodeTarget<'tcx> for PromiseNodeJoiner<'tcx, E> {
-    type Error = E;
-
-    fn accept_on_root(&self, ccx: &mut ClauseCx<'tcx>, userdata: u32) {
-        self.resolve_child(ccx, userdata, None);
-    }
-
-    fn reject_on_root(&self, ccx: &mut ClauseCx<'tcx>, error: Self::Error, userdata: u32) {
-        self.resolve_child(ccx, userdata, Some(error));
-    }
-
-    fn reject_on_fork(&self) {
-        self.target.get().reject_on_fork();
-    }
-}
-
-impl<'tcx, E> PromiseNodeJoiner<'tcx, E> {
-    fn resolve_child(&self, ccx: &mut ClauseCx<'tcx>, idx: u32, resolution: Option<E>) {
-        if resolution.is_some() {
-            self.poisoned_with_err.set(true);
+impl<'tcx, A> PromiseNodeJoiner<'tcx, A> {
+    fn target<E, F>(
+        self: Rc<Self>,
+        initializer: F,
+    ) -> Rc<dyn 'tcx + PromiseNodeTarget<'tcx, Error = E>>
+    where
+        A: 'tcx,
+        E: 'tcx,
+        F: 'static + Copy + Fn(&mut A, E, u32),
+    {
+        #[derive(TransparentWrapper)]
+        #[repr(transparent)]
+        #[transparent(PromiseNodeJoiner<'tcx, A>)]
+        struct NodeTarget<'tcx, A, E, F> {
+            _ty: PhantomData<fn(E, F) -> (E, F)>,
+            inner: PromiseNodeJoiner<'tcx, A>,
         }
 
-        let mut resolutions = self.err_resolutions.take();
-        resolutions[idx as usize] = resolution;
+        impl<'tcx, A, E, F> PromiseNodeTarget<'tcx> for NodeTarget<'tcx, A, E, F>
+        where
+            F: 'static + Copy + Fn(&mut A, E, u32),
+        {
+            type Error = E;
 
-        self.all_resolutions_remaining.update(|v| v - 1);
+            fn accept_on_root(&self, ccx: &mut ClauseCx<'tcx>, userdata: u32) {
+                self.resolve_child(ccx, userdata, None);
+            }
 
-        if self.all_resolutions_remaining.get() > 0 {
-            self.err_resolutions.set(resolutions);
-            return;
+            fn reject_on_root(&self, ccx: &mut ClauseCx<'tcx>, error: Self::Error, userdata: u32) {
+                self.resolve_child(ccx, userdata, Some(error));
+            }
+
+            fn reject_on_fork(&self) {
+                self.inner.target.get().reject_on_fork();
+            }
         }
 
-        if self.poisoned_with_err.get() {
-            self.target.get().reject_on_root(ccx, resolutions);
-        } else {
-            self.target.get().accept_on_root(ccx);
+        impl<'tcx, A, E, F> NodeTarget<'tcx, A, E, F>
+        where
+            F: 'static + Copy + Fn(&mut A, E, u32),
+        {
+            fn resolve_child(&self, ccx: &mut ClauseCx<'tcx>, idx: u32, resolution: Option<E>) {
+                if resolution.is_some() {
+                    self.inner.poisoned_with_err.set(true);
+                }
+
+                let mut resolutions = self.inner.err_resolutions.take().unwrap();
+
+                let initializer = unsafe {
+                    // `mem::conjure_zst` at home
+                    #[allow(clippy::uninit_assumed_init)]
+                    mem::MaybeUninit::<F>::uninit().assume_init()
+                };
+
+                if let Some(resolution) = resolution {
+                    initializer(&mut resolutions, resolution, idx);
+                }
+
+                self.inner.all_resolutions_remaining.update(|v| v - 1);
+
+                if self.inner.all_resolutions_remaining.get() > 0 {
+                    self.inner.err_resolutions.set(Some(resolutions));
+                    return;
+                }
+
+                if self.inner.poisoned_with_err.get() {
+                    self.inner.target.get().reject_on_root(ccx, resolutions);
+                } else {
+                    self.inner.target.get().accept_on_root(ccx);
+                }
+            }
         }
+
+        const {
+            assert!(mem::size_of::<F>() == 0, "`initializer` must be a ZST");
+        }
+
+        // `initializer` served its purpose of acting as a proof of safe inhabitance of `F`.
+        _ = initializer;
+
+        NodeTarget::<A, E, F>::wrap_rc(self)
     }
 }
 
