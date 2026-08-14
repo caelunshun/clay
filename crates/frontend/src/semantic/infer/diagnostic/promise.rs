@@ -9,7 +9,7 @@ use std::{
     rc::Rc,
 };
 
-// === PromiseSink === //
+// === Public API === //
 
 #[derive(Debug, Clone, Default)]
 pub struct PromiseProbe {
@@ -30,8 +30,6 @@ pub trait ErrorToDiag<'tcx>: Sized {
     fn to_diag(self, ccx: &mut ClauseCx<'tcx>) -> HardDiag;
 }
 
-// === Promise === //
-
 #[must_use]
 pub struct Promise<'tcx, E: 'tcx> {
     builder: Rc<dyn 'tcx + PromiseNodeBuilder<'tcx, Error = E>>,
@@ -49,9 +47,10 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
         (promise, handle)
     }
 
-    pub fn new_join(
-        sources: impl IntoIterator<Item = Promise<'tcx, E>>,
-    ) -> Promise<'tcx, Vec<Option<E>>> {
+    pub fn new_join<I>(sources: I) -> Promise<'tcx, Vec<Option<E>>>
+    where
+        I: IntoIterator<Item = Promise<'tcx, E>>,
+    {
         let sources = sources.into_iter().collect::<Vec<_>>();
 
         let trivially_accepted = sources
@@ -131,13 +130,13 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
     where
         F: 'tcx + FnOnce(&mut ClauseCx<'tcx>, E) -> ErrorGuaranteed,
     {
-        let node = Rc::new(PromiseNodeReportSink::<E, F> {
-            _ty: PhantomData,
-            reporter: Cell::new(Some(f)),
-        });
-
-        self.builder
-            .set_target(BoundPromiseNodeTarget::new(node, 0));
+        self.builder.set_target(BoundPromiseNodeTarget::new(
+            Rc::new(PromiseNodeReportSink::<E, F> {
+                _ty: PhantomData,
+                reporter: Cell::new(Some(f)),
+            }),
+            0,
+        ));
     }
 
     pub fn report_loud(self)
@@ -155,13 +154,25 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
     }
 
     pub fn probe(self, probe: PromiseProbe) {
-        let node = Rc::new(PromiseNodeProbeSink::<E> {
-            _ty: PhantomData,
-            probe,
-        });
+        self.builder.set_target(BoundPromiseNodeTarget::new(
+            Rc::new(PromiseNodeProbeSink::<E> {
+                _ty: PhantomData,
+                probe,
+            }),
+            0,
+        ));
+    }
 
-        self.builder
-            .set_target(BoundPromiseNodeTarget::new(node, 0));
+    pub fn forward(self, ccx: &mut ClauseCx<'tcx>, handle: PromiseHandle<'tcx, E>) {
+        if self.builder.already_accepted_during_build() {
+            handle.accept(ccx);
+            return;
+        }
+
+        self.builder.set_target(BoundPromiseNodeTarget::new(
+            Rc::new(PromiseNodeForwardSink::<'tcx, E> { handle }),
+            0,
+        ));
     }
 
     pub fn and_value<T>(self, value: T) -> PromiseValue<'tcx, T, E> {
@@ -263,6 +274,10 @@ impl<'tcx, T, E: 'tcx> PromiseValue<'tcx, T, E> {
     pub fn probe(self, probe: PromiseProbe) -> T {
         self.finish_promise(|p| p.probe(probe))
     }
+
+    pub fn forward(self, ccx: &mut ClauseCx<'tcx>, handle: PromiseHandle<'tcx, E>) -> T {
+        self.finish_promise(|p| p.forward(ccx, handle))
+    }
 }
 
 #[derive_where(Default)]
@@ -298,16 +313,14 @@ impl<'tcx, E: 'tcx> MultiPromiseBuilder<'tcx, E> {
     }
 }
 
-// === PromiseHandle === //
-
 #[derive_where(Clone)]
 pub struct PromiseHandle<'tcx, E: 'tcx> {
     promise: Rc<PromiseNodeOrigin<'tcx, E>>,
 }
 
 impl<'tcx, E: 'tcx> PromiseHandle<'tcx, E> {
-    pub fn accept(&self, ccx: &mut ClauseCx<'tcx>, mode: PromiseMode) {
-        match mode {
+    pub fn accept(&self, ccx: &mut ClauseCx<'tcx>) {
+        match ccx.promise_mode() {
             PromiseMode::RootContext => self.promise.accept_on_root(ccx),
             PromiseMode::ProbeContext => {
                 // (probes don't care)
@@ -315,8 +328,8 @@ impl<'tcx, E: 'tcx> PromiseHandle<'tcx, E> {
         }
     }
 
-    pub fn reject(&self, ccx: &mut ClauseCx<'tcx>, mode: PromiseMode, error: E) {
-        match mode {
+    pub fn reject(&self, ccx: &mut ClauseCx<'tcx>, error: E) {
+        match ccx.promise_mode() {
             PromiseMode::RootContext => self.promise.reject_on_root(ccx, error),
             PromiseMode::ProbeContext => self.promise.reject_on_fork(),
         }
@@ -336,12 +349,12 @@ pub enum PromiseMode {
 }
 
 impl PromiseMode {
-    pub fn should_resolve(self) -> bool {
+    pub fn is_root(self) -> bool {
         matches!(self, Self::RootContext)
     }
 }
 
-// === Promise Node Traits === //
+// === Promise Nodes === //
 
 trait PromiseNodeBuilder<'tcx> {
     type Error: Sized;
@@ -406,8 +419,6 @@ impl<'tcx, E> BoundPromiseNodeTarget<'tcx, E> {
         self.receiver.reject_on_fork();
     }
 }
-
-// === Promise Nodes === //
 
 #[derive_where(Default)]
 struct PromiseNodeOrigin<'tcx, E> {
@@ -610,5 +621,25 @@ impl<'tcx, E> PromiseNodeTarget<'tcx> for PromiseNodeProbeSink<E> {
 
     fn reject_on_fork(&self) {
         self.probe.signal_error();
+    }
+}
+
+struct PromiseNodeForwardSink<'tcx, E> {
+    handle: PromiseHandle<'tcx, E>,
+}
+
+impl<'tcx, E> PromiseNodeTarget<'tcx> for PromiseNodeForwardSink<'tcx, E> {
+    type Error = E;
+
+    fn accept_on_root(&self, ccx: &mut ClauseCx<'tcx>, _userdata: u32) {
+        self.handle.promise.accept_on_root(ccx);
+    }
+
+    fn reject_on_root(&self, ccx: &mut ClauseCx<'tcx>, error: Self::Error, _userdata: u32) {
+        self.handle.promise.reject_on_root(ccx, error);
+    }
+
+    fn reject_on_fork(&self) {
+        self.handle.promise.reject_on_fork();
     }
 }

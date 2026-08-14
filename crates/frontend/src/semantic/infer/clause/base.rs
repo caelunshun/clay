@@ -6,8 +6,8 @@ use crate::{
     semantic::{
         infer::{
             ClauseError, CoherenceMap, FloatingInferVar, HrtbUniverse, ObligationNotReady,
-            ObligationUnfulfilled, ObligeCause, RecursionLimitReached, TyAndSimpleTySetUnifyError,
-            TyAndTyUnifyError, UnifyCx, UnifyCxMode,
+            ObligationUnfulfilled, ObligeCause, PromiseMode, RecursionLimitReached,
+            TyAndSimpleTySetUnifyError, TyAndTyUnifyError, UnifyCx, UnifyCxMode,
             clause::elaboration::{UniversalElaboration, WipReificationState},
         },
         syntax::{
@@ -132,7 +132,7 @@ pub struct ClauseCx<'tcx> {
     pending_obligations: Vec<ClauseObligationState>,
     coherence: &'tcx CoherenceMap,
     krate: Obj<Crate>,
-    is_silent: bool,
+    promise_mode: PromiseMode,
     pub(super) universal_vars: IndexVec<UniversalTyVar, UniversalTyVarDescriptor>,
 }
 
@@ -160,7 +160,7 @@ impl<'tcx> ClauseCx<'tcx> {
             pending_obligations: Vec::new(),
             coherence,
             krate,
-            is_silent: false,
+            promise_mode: PromiseMode::RootContext,
             universal_vars: IndexVec::new(),
         }
     }
@@ -189,12 +189,16 @@ impl<'tcx> ClauseCx<'tcx> {
         &mut self.ucx
     }
 
+    pub fn promise_mode(&self) -> PromiseMode {
+        self.promise_mode
+    }
+
     pub fn is_silent(&self) -> bool {
-        self.is_silent
+        !self.promise_mode.is_root()
     }
 
     pub fn make_silent(&mut self) {
-        self.is_silent = true;
+        self.promise_mode = PromiseMode::ProbeContext;
     }
 
     pub fn with_silent(mut self) -> Self {
