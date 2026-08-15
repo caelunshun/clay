@@ -1,6 +1,6 @@
 use crate::{
     base::{ErrorGuaranteed, HardDiag},
-    semantic::infer::ClauseCx,
+    semantic::infer::{ClauseCx, diagnostic::promise::raw_builder::RawMultiPromiseBuilder},
 };
 use bytemuck::{TransparentWrapper, TransparentWrapperAlloc as _};
 use derive_where::derive_where;
@@ -53,32 +53,7 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
     where
         I: IntoIterator<Item = Promise<'tcx, E>>,
     {
-        let sources = sources.into_iter().collect::<Vec<_>>();
-
-        let trivially_accepted = sources
-            .iter()
-            .filter(|v| v.builder.already_accepted_during_build())
-            .count();
-
-        let node = Rc::new(PromiseNodeJoiner {
-            target: LateBoundPromiseNodeTarget::default(),
-            err_resolutions: Cell::new(Some(
-                (0..sources.len()).map(|_| None::<E>).collect::<Vec<_>>(),
-            )),
-            all_resolutions_remaining: Cell::new((sources.len() - trivially_accepted) as u32),
-            poisoned_with_err: Cell::new(false),
-        });
-
-        for (idx, source) in sources.iter().enumerate() {
-            source.builder.set_target(BoundPromiseNodeTarget::new(
-                node.clone().target(|error_list, error, idx| {
-                    error_list[idx as usize] = Some(error);
-                }),
-                idx as u32,
-            ));
-        }
-
-        Promise { builder: node }
+        MultiPromiseBuilder::new().with_many(sources).finish()
     }
 
     pub fn filter_map<E2, F>(self, f: F) -> Promise<'tcx, E2>
@@ -287,39 +262,6 @@ impl<'tcx, T, E: 'tcx> PromiseValue<'tcx, T, E> {
     }
 }
 
-#[derive_where(Default)]
-pub struct MultiPromiseBuilder<'tcx, E: 'tcx> {
-    sources: Vec<Promise<'tcx, E>>,
-}
-
-impl<'tcx, E: 'tcx> MultiPromiseBuilder<'tcx, E> {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn push(&mut self, promise: Promise<'tcx, E>) {
-        self.sources.push(promise)
-    }
-
-    pub fn with(mut self, promise: Promise<'tcx, E>) -> Self {
-        self.push(promise);
-        self
-    }
-
-    pub fn extend(&mut self, promises: impl IntoIterator<Item = Promise<'tcx, E>>) {
-        self.sources.extend(promises);
-    }
-
-    pub fn with_many(mut self, promises: impl IntoIterator<Item = Promise<'tcx, E>>) -> Self {
-        self.extend(promises);
-        self
-    }
-
-    pub fn finish(self) -> Promise<'tcx, Vec<Option<E>>> {
-        Promise::new_join(self.sources)
-    }
-}
-
 #[derive_where(Clone)]
 pub struct PromiseHandle<'tcx, E: 'tcx> {
     promise: Rc<PromiseNodeOrigin<'tcx, E>>,
@@ -359,6 +301,149 @@ impl PromiseMode {
     pub fn is_root(self) -> bool {
         matches!(self, Self::RootContext)
     }
+}
+
+// === Promise Joiners === //
+
+mod raw_builder {
+    use super::*;
+
+    pub struct RawMultiPromiseBuilder<'tcx, A: 'tcx> {
+        node: Rc<PromiseNodeJoiner<'tcx, A>>,
+    }
+
+    impl<'tcx, A: 'tcx> Default for RawMultiPromiseBuilder<'tcx, A> {
+        fn default() -> Self {
+            let node = Rc::new(PromiseNodeJoiner {
+                target: LateBoundPromiseNodeTarget::default(),
+                // Initialized during `finish`.
+                err_resolutions: Cell::new(None),
+                all_resolutions_remaining: Cell::new(0),
+                poisoned_with_err: Cell::new(false),
+            });
+
+            Self { node }
+        }
+    }
+
+    impl<'tcx, A: 'tcx> RawMultiPromiseBuilder<'tcx, A> {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        pub fn push<E, F>(&mut self, target: Promise<'tcx, E>, userdata: u32, initializer: F)
+        where
+            E: 'tcx,
+            F: 'static + Copy + Fn(&mut A, E, u32),
+        {
+            if !target.builder.already_accepted_during_build() {
+                self.node.all_resolutions_remaining.update(|v| v + 1);
+            }
+
+            target.builder.set_target(BoundPromiseNodeTarget::new(
+                self.node.clone().target(initializer),
+                userdata,
+            ));
+        }
+
+        pub fn with<E, F>(mut self, target: Promise<'tcx, E>, userdata: u32, initializer: F) -> Self
+        where
+            E: 'tcx,
+            F: 'static + Copy + Fn(&mut A, E, u32),
+        {
+            self.push(target, userdata, initializer);
+            self
+        }
+
+        pub fn finish(self, err_resolutions: A) -> Promise<'tcx, A> {
+            self.node.err_resolutions.set(Some(err_resolutions));
+
+            Promise { builder: self.node }
+        }
+    }
+}
+
+#[derive_where(Default)]
+pub struct MultiPromiseBuilder<'tcx, E: 'tcx> {
+    builder: RawMultiPromiseBuilder<'tcx, Vec<Option<E>>>,
+    real_len: u32,
+}
+
+impl<'tcx, E: 'tcx> MultiPromiseBuilder<'tcx, E> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push(&mut self, promise: Promise<'tcx, E>) {
+        self.builder
+            .push(promise, self.real_len, |aggregate, error, idx| {
+                aggregate[idx as usize] = Some(error);
+            });
+
+        self.real_len += 1;
+    }
+
+    pub fn with(mut self, promise: Promise<'tcx, E>) -> Self {
+        self.push(promise);
+        self
+    }
+
+    pub fn extend(&mut self, promises: impl IntoIterator<Item = Promise<'tcx, E>>) {
+        for promise in promises {
+            self.push(promise);
+        }
+    }
+
+    pub fn with_many(mut self, promises: impl IntoIterator<Item = Promise<'tcx, E>>) -> Self {
+        self.extend(promises);
+        self
+    }
+
+    pub fn finish(self) -> Promise<'tcx, Vec<Option<E>>> {
+        self.builder
+            .finish((0..self.real_len).map(|_| None::<E>).collect())
+    }
+}
+
+#[doc(hidden)]
+pub mod typed_joiner_internals {
+    use super::raw_builder::RawMultiPromiseBuilder;
+    pub use std::option::Option;
+
+    pub fn new_raw_builder_with_hint<'tcx, A: 'tcx>(
+        _f: fn() -> A,
+    ) -> RawMultiPromiseBuilder<'tcx, A> {
+        RawMultiPromiseBuilder::new()
+    }
+}
+
+#[macro_export]
+macro_rules! typed_joiner {
+    (
+        $( let $dep_name:ident = $dep:expr; )*
+        |$ccx:ident|
+        $($body:tt)*
+    ) => {{
+        #[allow(non_camel_case_types)]
+        struct ErrAggregate<$($dep_name),*> {
+            $($dep_name: $crate::semantic::infer::typed_joiner_internals::Option<$dep_name>,)*
+        }
+
+        $crate::semantic::infer::typed_joiner_internals::new_raw_builder_with_hint(|| ErrAggregate {
+                $($dep_name: $crate::semantic::infer::typed_joiner_internals::Option::None,)*
+            })
+            $(.with($dep, 0u32, |aggregate, value, _idx| {
+                aggregate.$dep_name = $crate::semantic::infer::typed_joiner_internals::Option::Some(
+                    value
+                );
+            }))*
+            .finish(ErrAggregate {
+                $($dep_name: $crate::semantic::infer::typed_joiner_internals::Option::None,)*
+            })
+            .map(#[allow(unused)] |$ccx, ErrAggregate { $($dep_name),* }| {
+                $($body)*
+            })
+    }};
 }
 
 // === Promise Nodes === //
