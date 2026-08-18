@@ -68,9 +68,7 @@ impl<'tcx> ClauseCx<'tcx> {
             if rhs.defs.r(s).is_empty() {
                 universe
             } else {
-                universe.nest(HrtbUniverseInfo {
-                    cause: cause.clone(),
-                })
+                universe.nest(HrtbUniverseInfo {})
             }
         };
 
@@ -273,13 +271,16 @@ impl<'tcx> ClauseCx<'tcx> {
                     }
                     (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
                         // See whether we can reject this parameter.
-                        if let Err(_err) = self.ucx_mut().unify_ty_and_ty(
-                            &ObligeCause::new_never_report(),
-                            lhs,
-                            rhs,
-                            RelationMode::Equate,
-                        ) {
-                            return Ok(Err(SelectionRejected));
+                        match self
+                            .ucx_mut()
+                            .unify_ty_and_ty(lhs, rhs, RelationMode::Equate)
+                        {
+                            Ok(promise) => {
+                                // TODO: Handle promise!!!
+                            }
+                            Err(_err) => {
+                                return Ok(Err(SelectionRejected));
+                            }
                         }
                     }
                     _ => unreachable!(),
@@ -351,12 +352,14 @@ impl<'tcx> ClauseCx<'tcx> {
         let target_trait = target_trait.unwrap();
 
         // Does the `lhs` type match the `rhs`'s target type?
-        if self
+        match self
             .ucx_mut()
-            .unify_ty_and_ty(cause, lhs, target_ty, RelationMode::Equate)
-            .is_err()
+            .unify_ty_and_ty(lhs, target_ty, RelationMode::Equate)
         {
-            return Err(SelectionRejected);
+            Ok(promise) => {
+                // TODO: Handle promise!!!
+            }
+            Err(_err) => return Err(SelectionRejected),
         }
 
         // See whether our RHS trait's generic parameters can be satisfied by this `impl`.
@@ -372,20 +375,20 @@ impl<'tcx> ClauseCx<'tcx> {
             match required_param {
                 TraitParam::Equals(required) => match (instance, required) {
                     (TyOrRe::Re(instance), TyOrRe::Re(required)) => {
-                        self.ucx_mut().unify_re_and_re(
-                            cause,
+                        // TODO: Handle promise!!!
+                        self.ucx_mut()
+                            .unify_re_and_re(instance, required, RelationMode::Equate);
+                    }
+                    (TyOrRe::Ty(instance), TyOrRe::Ty(required)) => {
+                        match self.ucx_mut().unify_ty_and_ty(
                             instance,
                             required,
                             RelationMode::Equate,
-                        );
-                    }
-                    (TyOrRe::Ty(instance), TyOrRe::Ty(required)) => {
-                        if self
-                            .ucx_mut()
-                            .unify_ty_and_ty(cause, instance, required, RelationMode::Equate)
-                            .is_err()
-                        {
-                            return Err(SelectionRejected);
+                        ) {
+                            Ok(promise) => {
+                                // TODO: Handle promise
+                            }
+                            Err(_) => return Err(SelectionRejected),
                         }
                     }
                     _ => unreachable!(),
@@ -460,25 +463,27 @@ impl<'tcx> ClauseCx<'tcx> {
                 .instantiate_infer()
                 .resolve_fn_instance_sig(cause, universe, instance);
 
-            if self
-                .ucx_mut()
-                .unify_ty_and_ty(
-                    cause,
-                    rhs_input,
-                    tcx.intern(TyKind::Tuple(sig.args)),
-                    RelationMode::Equate,
-                )
-                .is_err()
-            {
-                return Err(SelectionRejected);
+            match self.ucx_mut().unify_ty_and_ty(
+                rhs_input,
+                tcx.intern(TyKind::Tuple(sig.args)),
+                RelationMode::Equate,
+            ) {
+                Ok(promise) => {
+                    // TODO: Handle promise!!!
+                }
+                Err(_) => return Err(SelectionRejected),
             }
 
-            if self
+            match self
                 .ucx_mut()
-                .unify_ty_and_ty(cause, rhs_output, sig.ret_ty, RelationMode::Equate)
-                .is_err()
+                .unify_ty_and_ty(rhs_output, sig.ret_ty, RelationMode::Equate)
             {
-                return Err(SelectionRejected);
+                Ok(promise) => {
+                    // TODO: Handle promise!!!
+                }
+                Err(_) => {
+                    return Err(SelectionRejected);
+                }
             }
 
             return Ok(self);

@@ -5,9 +5,9 @@ use crate::{
     },
     semantic::{
         infer::{
-            ClauseError, CoherenceMap, FloatingInferVar, HrtbUniverse, ObligationNotReady,
-            ObligationUnfulfilled, ObligeCause, PromiseMode, RecursionLimitReached,
-            TyAndSimpleTySetUnifyError, TyAndTyUnifyError, UnifyCx, UnifyCxMode,
+            CoherenceMap, FloatingInferVar, HrtbUniverse, ObligationNotReady, ObligeCause,
+            PromiseMode, RecursionLimitReached, TyAndSimpleTySetUnifyError, TyAndTyUnifyError,
+            UnifyCx, UnifyCxMode,
             clause::elaboration::{UniversalElaboration, WipReificationState},
         },
         syntax::{
@@ -231,10 +231,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
                 // Process the obligation.
                 if kind.cause().depth() > MAX_OBLIGATION_DEPTH {
-                    RecursionLimitReached {
-                        cause: kind.cause().clone(),
-                    }
-                    .report(&self);
+                    RecursionLimitReached {}.report(&self);
 
                     self.pending_obligations
                         .retain(|other| kind.cause().identity() != other.kind.cause().identity());

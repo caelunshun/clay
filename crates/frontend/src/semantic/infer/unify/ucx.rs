@@ -4,7 +4,8 @@ use crate::{
     semantic::{
         infer::{
             ClauseCx, HrtbUniverse, InferTyLeaksHrtbVarError, InferTyLeaksUniversalError,
-            InferTyOccursError, ObligeCause, TyAndSimpleTySetUnifyError, TyAndTyUnifyCulprit,
+            InferTyOccursError, MultiPromiseBuilder, Promise, ReAndReUnifyError,
+            TyAndSimpleTySetUnifyError, TyAndTyReUnifyError, TyAndTyUnifyCulprit,
             TyAndTyUnifyError,
         },
         syntax::{
@@ -42,7 +43,7 @@ pub enum UnifyCxMode {
 pub struct UnifyCx<'tcx> {
     tcx: &'tcx TyCtxt,
     types: TyUnifyTracker,
-    regions: Option<ReUnifyTracker>,
+    regions: Option<ReUnifyTracker<'tcx>>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -80,7 +81,7 @@ impl<'tcx> UnifyCx<'tcx> {
         }
     }
 
-    pub fn verify(&self, ccx: &ClauseCx<'_>) {
+    pub fn verify(&self, ccx: &ClauseCx<'tcx>) {
         if let Some(re) = &self.regions {
             re.verify(ccx);
         }
@@ -189,7 +190,26 @@ impl<'tcx> UnifyCx<'tcx> {
         }
     }
 
-    pub fn unify_re_and_re(&mut self, cause: &ObligeCause, lhs: Re, rhs: Re, mode: RelationMode) {
+    pub fn unify_re_and_re(
+        &mut self,
+        lhs: Re,
+        rhs: Re,
+        mode: RelationMode,
+    ) -> Promise<'tcx, Vec<ReAndReUnifyError>> {
+        let mut builder = MultiPromiseBuilder::new();
+
+        self.unify_re_and_re_inner(&mut builder, lhs, rhs, mode);
+
+        builder.finish()
+    }
+
+    fn unify_re_and_re_inner(
+        &mut self,
+        re_collector: &mut MultiPromiseBuilder<'tcx, ReAndReUnifyError>,
+        lhs: Re,
+        rhs: Re,
+        mode: RelationMode,
+    ) {
         let Some(regions) = &mut self.regions else {
             debug_assert!(matches!(lhs, Re::Erased));
             debug_assert!(matches!(rhs, Re::Erased));
@@ -198,7 +218,7 @@ impl<'tcx> UnifyCx<'tcx> {
         };
 
         for (lhs, rhs) in mode.enumerate(lhs, rhs) {
-            regions.constrain(cause.clone(), lhs, rhs);
+            regions.constrain(lhs, rhs).join(re_collector);
         }
     }
 
@@ -207,36 +227,43 @@ impl<'tcx> UnifyCx<'tcx> {
     /// `&'0 u32` and `&'1 u32` will result in the region relation `'0: '1`.
     pub fn unify_ty_and_ty(
         &mut self,
-        cause: &ObligeCause,
         lhs: Ty,
         rhs: Ty,
         mode: RelationMode,
-    ) -> Result<(), Box<TyAndTyUnifyError>> {
+    ) -> Result<Promise<'tcx, TyAndTyReUnifyError>, Box<TyAndTyUnifyError>> {
+        let mut re_collector = MultiPromiseBuilder::new();
+
         let mut fork = self.clone();
-        let mut culprits = Vec::new();
+        let mut ty_culprits = Vec::new();
 
-        fork.unify_ty_and_ty_inner(cause, lhs, rhs, &mut culprits, mode);
+        fork.unify_ty_and_ty_inner(lhs, rhs, &mut ty_culprits, &mut re_collector, mode);
 
-        if !culprits.is_empty() {
+        if !ty_culprits.is_empty() {
             return Err(Box::new(TyAndTyUnifyError {
-                cause: cause.clone(),
                 origin_lhs: lhs,
                 origin_rhs: rhs,
-                culprits,
+                culprits: ty_culprits,
             }));
         }
 
         *self = fork;
 
-        Ok(())
+        Ok(re_collector
+            .finish()
+            .map(move |_ccx, regions| TyAndTyReUnifyError {
+                lhs,
+                rhs,
+                mode,
+                regions,
+            }))
     }
 
     fn unify_ty_and_ty_inner(
         &mut self,
-        cause: &ObligeCause,
         lhs: Ty,
         rhs: Ty,
-        culprits: &mut Vec<TyAndTyUnifyCulprit>,
+        ty_culprits: &mut Vec<TyAndTyUnifyCulprit>,
+        re_collector: &mut MultiPromiseBuilder<'tcx, ReAndReUnifyError>,
         mode: RelationMode,
     ) {
         let tcx = self.tcx();
@@ -264,7 +291,7 @@ impl<'tcx> UnifyCx<'tcx> {
                 TyKind::Reference(lhs_re, lhs_muta, lhs_pointee),
                 TyKind::Reference(rhs_re, rhs_muta, rhs_pointee),
             ) if lhs_muta == rhs_muta => {
-                self.unify_re_and_re(cause, lhs_re, rhs_re, mode);
+                self.unify_re_and_re_inner(re_collector, lhs_re, rhs_re, mode);
 
                 let variance = match lhs_muta {
                     Mutability::Mut => ReVariance::Invariant,
@@ -272,10 +299,10 @@ impl<'tcx> UnifyCx<'tcx> {
                 };
 
                 self.unify_ty_and_ty_inner(
-                    cause,
                     lhs_pointee,
                     rhs_pointee,
-                    culprits,
+                    ty_culprits,
+                    re_collector,
                     mode.with_variance(variance),
                 );
             }
@@ -285,10 +312,10 @@ impl<'tcx> UnifyCx<'tcx> {
                 for (&lhs, &rhs) in lhs.params.r(s).iter().zip(rhs.params.r(s)) {
                     match (lhs, rhs) {
                         (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                            self.unify_re_and_re(cause, lhs, rhs, mode);
+                            self.unify_re_and_re_inner(re_collector, lhs, rhs, mode);
                         }
                         (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
-                            self.unify_ty_and_ty_inner(cause, lhs, rhs, culprits, mode);
+                            self.unify_ty_and_ty_inner(lhs, rhs, ty_culprits, re_collector, mode);
                         }
                         _ => unreachable!(),
                     }
@@ -298,24 +325,24 @@ impl<'tcx> UnifyCx<'tcx> {
                 if lhs.spec.def == rhs.spec.def && lhs.assoc_idx == rhs.assoc_idx =>
             {
                 self.unify_ty_and_ty_inner(
-                    cause,
                     lhs.target,
                     rhs.target,
-                    culprits,
+                    ty_culprits,
+                    re_collector,
                     RelationMode::Equate,
                 );
 
                 self.unify_trait_spec_params_inner(
-                    cause,
                     lhs.spec.params,
                     rhs.spec.params,
-                    culprits,
+                    ty_culprits,
+                    re_collector,
                 );
             }
             (TyKind::Trait(lhs_re, lhs_muta, lhs), TyKind::Trait(rhs_re, rhs_muta, rhs))
                 if lhs_muta == rhs_muta =>
             {
-                self.unify_re_and_re(cause, lhs_re, rhs_re, mode);
+                self.unify_re_and_re_inner(re_collector, lhs_re, rhs_re, mode);
 
                 let variance = match lhs_muta {
                     Mutability::Mut => ReVariance::Invariant,
@@ -323,10 +350,10 @@ impl<'tcx> UnifyCx<'tcx> {
                 };
 
                 self.unify_dyn_trait_clauses_inner(
-                    cause,
                     lhs,
                     rhs,
-                    culprits,
+                    ty_culprits,
+                    re_collector,
                     mode.with_variance(variance),
                 );
             }
@@ -345,7 +372,7 @@ impl<'tcx> UnifyCx<'tcx> {
                 match (lhs_owner, rhs_owner) {
                     (FnOwner::Item(lhs_def), FnOwner::Item(rhs_def)) => {
                         if lhs_def != rhs_def {
-                            culprits.push(TyAndTyUnifyCulprit::Types(lhs, rhs));
+                            ty_culprits.push(TyAndTyUnifyCulprit::Types(lhs, rhs));
                             break 'func;
                         }
                     }
@@ -363,22 +390,22 @@ impl<'tcx> UnifyCx<'tcx> {
                     ) => {
                         if lhs_instance.def != rhs_instance.def || lhs_method_idx != rhs_method_idx
                         {
-                            culprits.push(TyAndTyUnifyCulprit::Types(lhs, rhs));
+                            ty_culprits.push(TyAndTyUnifyCulprit::Types(lhs, rhs));
                             break 'func;
                         }
 
                         self.unify_trait_spec_params_inner(
-                            cause,
                             lhs_instance.params,
                             rhs_instance.params,
-                            culprits,
+                            ty_culprits,
+                            re_collector,
                         );
 
                         self.unify_ty_and_ty_inner(
-                            cause,
                             lhs_self_ty,
                             rhs_self_ty,
-                            culprits,
+                            ty_culprits,
+                            re_collector,
                             RelationMode::Equate,
                         );
                     }
@@ -395,15 +422,15 @@ impl<'tcx> UnifyCx<'tcx> {
                         }),
                     ) => {
                         if lhs_block != rhs_block || lhs_method_idx != rhs_method_idx {
-                            culprits.push(TyAndTyUnifyCulprit::Types(lhs, rhs));
+                            ty_culprits.push(TyAndTyUnifyCulprit::Types(lhs, rhs));
                             break 'func;
                         }
 
                         self.unify_ty_and_ty_inner(
-                            cause,
                             lhs_self_ty,
                             rhs_self_ty,
-                            culprits,
+                            ty_culprits,
+                            re_collector,
                             RelationMode::Equate,
                         );
                     }
@@ -415,14 +442,19 @@ impl<'tcx> UnifyCx<'tcx> {
                         for (&lhs, &rhs) in lhs_generics.r(s).iter().zip(rhs_generics.r(s)) {
                             match (lhs, rhs) {
                                 (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                                    self.unify_re_and_re(cause, lhs, rhs, RelationMode::Equate);
+                                    self.unify_re_and_re_inner(
+                                        re_collector,
+                                        lhs,
+                                        rhs,
+                                        RelationMode::Equate,
+                                    );
                                 }
                                 (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
                                     self.unify_ty_and_ty_inner(
-                                        cause,
                                         lhs,
                                         rhs,
-                                        culprits,
+                                        ty_culprits,
+                                        re_collector,
                                         RelationMode::Equate,
                                     );
                                 }
@@ -434,14 +466,14 @@ impl<'tcx> UnifyCx<'tcx> {
                         // (trivially compatible)
                     }
                     _ => {
-                        culprits.push(TyAndTyUnifyCulprit::Types(lhs, rhs));
+                        ty_culprits.push(TyAndTyUnifyCulprit::Types(lhs, rhs));
                         break 'func;
                     }
                 }
             }
             (TyKind::Tuple(lhs), TyKind::Tuple(rhs)) if lhs.r(s).len() == rhs.r(s).len() => {
                 for (&lhs, &rhs) in lhs.r(s).iter().zip(rhs.r(s)) {
-                    self.unify_ty_and_ty_inner(cause, lhs, rhs, culprits, mode);
+                    self.unify_ty_and_ty_inner(lhs, rhs, ty_culprits, re_collector, mode);
                 }
             }
             (TyKind::InferVar(lhs_var), TyKind::InferVar(rhs_var)) => {
@@ -450,16 +482,16 @@ impl<'tcx> UnifyCx<'tcx> {
                     self.types.lookup_infer(rhs_var),
                 ) {
                     (Ok(lhs_ty), Ok(rhs_ty)) => {
-                        self.unify_ty_and_ty_inner(cause, lhs_ty, rhs_ty, culprits, mode);
+                        self.unify_ty_and_ty_inner(lhs_ty, rhs_ty, ty_culprits, re_collector, mode);
                     }
                     (Ok(lhs_ty), Err(rhs_floating)) => {
                         if let Err(err) = self.unify_var_and_non_var_ty(rhs_floating.root, lhs_ty) {
-                            culprits.push(err);
+                            ty_culprits.push(err);
                         }
                     }
                     (Err(lhs_floating), Ok(rhs_ty)) => {
                         if let Err(err) = self.unify_var_and_non_var_ty(lhs_floating.root, rhs_ty) {
-                            culprits.push(err);
+                            ty_culprits.push(err);
                         }
                     }
                     (
@@ -478,7 +510,7 @@ impl<'tcx> UnifyCx<'tcx> {
                             self.types
                                 .union_unrelated_infer_floating(self.tcx, lhs_var, rhs_var);
                         } else {
-                            culprits.push(TyAndTyUnifyCulprit::NotPermittedFloating(
+                            ty_culprits.push(TyAndTyUnifyCulprit::NotPermittedFloating(
                                 lhs_perm_set,
                                 rhs_perm_set,
                             ));
@@ -488,21 +520,21 @@ impl<'tcx> UnifyCx<'tcx> {
             }
             (TyKind::InferVar(lhs_var), _) => match self.types.lookup_infer(lhs_var) {
                 Ok(known_lhs) => {
-                    self.unify_ty_and_ty_inner(cause, known_lhs, rhs, culprits, mode);
+                    self.unify_ty_and_ty_inner(known_lhs, rhs, ty_culprits, re_collector, mode);
                 }
                 Err(lhs_var) => {
                     if let Err(err) = self.unify_var_and_non_var_ty(lhs_var.root, rhs) {
-                        culprits.push(err);
+                        ty_culprits.push(err);
                     }
                 }
             },
             (_, TyKind::InferVar(rhs_var)) => match self.types.lookup_infer(rhs_var) {
                 Ok(known_rhs) => {
-                    self.unify_ty_and_ty_inner(cause, lhs, known_rhs, culprits, mode);
+                    self.unify_ty_and_ty_inner(lhs, known_rhs, ty_culprits, re_collector, mode);
                 }
                 Err(rhs_var) => {
                     if let Err(err) = self.unify_var_and_non_var_ty(rhs_var.root, lhs) {
-                        culprits.push(err);
+                        ty_culprits.push(err);
                     }
                 }
             },
@@ -515,7 +547,7 @@ impl<'tcx> UnifyCx<'tcx> {
             //
             // TODO: Check exhaustiveness automatically.
             _ => {
-                culprits.push(TyAndTyUnifyCulprit::Types(lhs, rhs));
+                ty_culprits.push(TyAndTyUnifyCulprit::Types(lhs, rhs));
             }
         }
     }
@@ -751,16 +783,16 @@ impl<'tcx> UnifyCx<'tcx> {
 
     fn unify_dyn_trait_clauses_inner(
         &mut self,
-        cause: &ObligeCause,
         lhs_root: TraitClauseList,
         rhs_root: TraitClauseList,
-        culprits: &mut Vec<TyAndTyUnifyCulprit>,
+        ty_culprits: &mut Vec<TyAndTyUnifyCulprit>,
+        re_collector: &mut MultiPromiseBuilder<'tcx, ReAndReUnifyError>,
         mode: RelationMode,
     ) {
         let s = self.session();
 
         if lhs_root.r(s).len() != rhs_root.r(s).len() {
-            culprits.push(TyAndTyUnifyCulprit::ClauseLists(lhs_root, rhs_root));
+            ty_culprits.push(TyAndTyUnifyCulprit::ClauseLists(lhs_root, rhs_root));
             return;
         }
 
@@ -771,10 +803,10 @@ impl<'tcx> UnifyCx<'tcx> {
                 {
                     match (lhs, rhs) {
                         (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                            self.unify_re_and_re(cause, lhs, rhs, mode);
+                            self.unify_re_and_re_inner(re_collector, lhs, rhs, mode);
                         }
                         (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
-                            self.unify_ty_and_ty_inner(cause, lhs, rhs, culprits, mode);
+                            self.unify_ty_and_ty_inner(lhs, rhs, ty_culprits, re_collector, mode);
                         }
                         _ => unreachable!(),
                     }
@@ -783,21 +815,21 @@ impl<'tcx> UnifyCx<'tcx> {
                     if lhs.inner.def == rhs.inner.def =>
                 {
                     if lhs.defs.r(s).len() != rhs.defs.r(s).len() {
-                        culprits.push(TyAndTyUnifyCulprit::ClauseLists(lhs_root, rhs_root));
+                        ty_culprits.push(TyAndTyUnifyCulprit::ClauseLists(lhs_root, rhs_root));
                         return;
                     }
 
                     for (&lhs, &rhs) in lhs.defs.r(s).iter().zip(rhs.defs.r(s)) {
                         if lhs.kind != rhs.kind {
-                            culprits.push(TyAndTyUnifyCulprit::ClauseLists(lhs_root, rhs_root));
+                            ty_culprits.push(TyAndTyUnifyCulprit::ClauseLists(lhs_root, rhs_root));
                             return;
                         }
 
                         self.unify_dyn_trait_clauses_inner(
-                            cause,
                             lhs.clauses,
                             rhs.clauses,
-                            culprits,
+                            ty_culprits,
+                            re_collector,
                             RelationMode::Equate,
                         );
                     }
@@ -805,14 +837,14 @@ impl<'tcx> UnifyCx<'tcx> {
                     // Ensure that the inner values are compatible. HRTBs are debruijn indexed so
                     // this properly checks for alpha-equivalence w.r.t the binders.
                     self.unify_trait_spec_params_inner(
-                        cause,
                         lhs.inner.params,
                         rhs.inner.params,
-                        culprits,
+                        ty_culprits,
+                        re_collector,
                     );
                 }
                 _ => {
-                    culprits.push(TyAndTyUnifyCulprit::ClauseLists(lhs_root, rhs_root));
+                    ty_culprits.push(TyAndTyUnifyCulprit::ClauseLists(lhs_root, rhs_root));
                     return;
                 }
             }
@@ -821,10 +853,10 @@ impl<'tcx> UnifyCx<'tcx> {
 
     fn unify_trait_spec_params_inner(
         &mut self,
-        cause: &ObligeCause,
         lhs: TraitParamList,
         rhs: TraitParamList,
-        culprits: &mut Vec<TyAndTyUnifyCulprit>,
+        ty_culprits: &mut Vec<TyAndTyUnifyCulprit>,
+        re_collector: &mut MultiPromiseBuilder<'tcx, ReAndReUnifyError>,
     ) {
         let s = self.session();
 
@@ -832,24 +864,30 @@ impl<'tcx> UnifyCx<'tcx> {
             match (lhs, rhs) {
                 (TraitParam::Equals(lhs), TraitParam::Equals(rhs)) => match (lhs, rhs) {
                     (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                        self.unify_re_and_re(cause, lhs, rhs, RelationMode::Equate);
+                        self.unify_re_and_re_inner(re_collector, lhs, rhs, RelationMode::Equate);
                     }
                     (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
-                        self.unify_ty_and_ty_inner(cause, lhs, rhs, culprits, RelationMode::Equate);
+                        self.unify_ty_and_ty_inner(
+                            lhs,
+                            rhs,
+                            ty_culprits,
+                            re_collector,
+                            RelationMode::Equate,
+                        );
                     }
                     _ => unreachable!(),
                 },
                 (TraitParam::Unspecified(lhs), TraitParam::Unspecified(rhs)) => {
                     self.unify_dyn_trait_clauses_inner(
-                        cause,
                         lhs,
                         rhs,
-                        culprits,
+                        ty_culprits,
+                        re_collector,
                         RelationMode::Equate,
                     );
                 }
                 _ => {
-                    culprits.push(TyAndTyUnifyCulprit::Params(lhs, rhs));
+                    ty_culprits.push(TyAndTyUnifyCulprit::Params(lhs, rhs));
                 }
             }
         }
@@ -857,7 +895,6 @@ impl<'tcx> UnifyCx<'tcx> {
 
     pub fn unify_ty_and_simple_set(
         &mut self,
-        cause: &ObligeCause,
         lhs: Ty,
         rhs: SimpleTySet,
     ) -> Result<(), TyAndSimpleTySetUnifyError> {
@@ -883,11 +920,7 @@ impl<'tcx> UnifyCx<'tcx> {
         if success {
             Ok(())
         } else {
-            Err(TyAndSimpleTySetUnifyError {
-                cause: cause.clone(),
-                lhs,
-                rhs,
-            })
+            Err(TyAndSimpleTySetUnifyError { lhs, rhs })
         }
     }
 }

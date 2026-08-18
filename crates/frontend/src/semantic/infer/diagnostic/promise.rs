@@ -1,17 +1,18 @@
 use crate::{
     base::{ErrorGuaranteed, HardDiag},
-    semantic::infer::{ClauseCx, diagnostic::promise::raw_builder::RawMultiPromiseBuilder},
+    semantic::infer::ClauseCx,
 };
 use bytemuck::{TransparentWrapper, TransparentWrapperAlloc as _};
 use derive_where::derive_where;
 use std::{
     cell::{Cell, OnceCell},
+    fmt,
     marker::PhantomData,
     mem,
     rc::Rc,
 };
 
-// === Public API === //
+// === Promise === //
 
 #[derive(Debug, Clone, Default)]
 pub struct PromiseProbe {
@@ -38,7 +39,7 @@ pub struct Promise<'tcx, E: 'tcx> {
 }
 
 impl<'tcx, E: 'tcx> Promise<'tcx, E> {
-    pub fn new_root() -> (Self, PromiseHandle<'tcx, E>) {
+    pub fn new() -> (Self, PromiseHandle<'tcx, E>) {
         let node = Rc::new(PromiseNodeOrigin::default());
 
         let promise = Promise {
@@ -49,11 +50,10 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
         (promise, handle)
     }
 
-    pub fn new_join<I>(sources: I) -> Promise<'tcx, Vec<Option<E>>>
-    where
-        I: IntoIterator<Item = Promise<'tcx, E>>,
-    {
-        MultiPromiseBuilder::new().with_many(sources).finish()
+    pub fn trivial() -> Self {
+        Promise {
+            builder: Rc::new(PromiseNodeTrivial::default()),
+        }
     }
 
     pub fn filter_map<E2, F>(self, f: F) -> Promise<'tcx, E2>
@@ -262,28 +262,7 @@ impl<'tcx, T, E: 'tcx> PromiseValue<'tcx, T, E> {
     }
 }
 
-#[derive_where(Clone)]
-pub struct PromiseHandle<'tcx, E: 'tcx> {
-    promise: Rc<PromiseNodeOrigin<'tcx, E>>,
-}
-
-impl<'tcx, E: 'tcx> PromiseHandle<'tcx, E> {
-    pub fn accept(&self, ccx: &mut ClauseCx<'tcx>) {
-        match ccx.promise_mode() {
-            PromiseMode::RootContext => self.promise.accept_on_root(ccx),
-            PromiseMode::ProbeContext => {
-                // (probes don't care)
-            }
-        }
-    }
-
-    pub fn reject(&self, ccx: &mut ClauseCx<'tcx>, error: E) {
-        match ccx.promise_mode() {
-            PromiseMode::RootContext => self.promise.reject_on_root(ccx, error),
-            PromiseMode::ProbeContext => self.promise.reject_on_fork(),
-        }
-    }
-}
+// === PromiseHandle === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum PromiseMode {
@@ -303,70 +282,107 @@ impl PromiseMode {
     }
 }
 
+#[derive_where(Clone)]
+pub struct PromiseHandle<'tcx, E: 'tcx> {
+    promise: Rc<PromiseNodeOrigin<'tcx, E>>,
+}
+
+impl<'tcx, E: 'tcx> fmt::Debug for PromiseHandle<'tcx, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PromiseHandle").finish_non_exhaustive()
+    }
+}
+
+impl<'tcx, E: 'tcx> PromiseHandle<'tcx, E> {
+    pub fn accept(&self, ccx: &mut ClauseCx<'tcx>) {
+        match ccx.promise_mode() {
+            PromiseMode::RootContext => self.promise.accept_on_root(ccx),
+            PromiseMode::ProbeContext => {
+                // (probes don't care)
+            }
+        }
+    }
+
+    pub fn reject(&self, ccx: &mut ClauseCx<'tcx>, error: E) {
+        match ccx.promise_mode() {
+            PromiseMode::RootContext => self.promise.reject_on_root(ccx, error),
+            PromiseMode::ProbeContext => self.promise.reject_on_fork(),
+        }
+    }
+
+    pub fn accept_if_not_rejected(&self, ccx: &mut ClauseCx<'tcx>) {
+        match ccx.promise_mode() {
+            PromiseMode::RootContext => {
+                if !self.promise.already_report_resolved.get() {
+                    self.promise.accept_on_root(ccx);
+                }
+            }
+            PromiseMode::ProbeContext => {
+                // (accept has no effect here)
+            }
+        }
+    }
+}
+
 // === Promise Joiners === //
 
-mod raw_builder {
-    use super::*;
+pub struct RawMultiPromiseBuilder<'tcx, A: 'tcx> {
+    node: Rc<PromiseNodeJoiner<'tcx, A>>,
+}
 
-    pub struct RawMultiPromiseBuilder<'tcx, A: 'tcx> {
-        node: Rc<PromiseNodeJoiner<'tcx, A>>,
+impl<'tcx, A: 'tcx> Default for RawMultiPromiseBuilder<'tcx, A> {
+    fn default() -> Self {
+        let node = Rc::new(PromiseNodeJoiner {
+            target: LateBoundPromiseNodeTarget::default(),
+            // Initialized during `finish`.
+            err_resolutions: Cell::new(None),
+            all_resolutions_remaining: Cell::new(0),
+            poisoned_with_err: Cell::new(false),
+        });
+
+        Self { node }
+    }
+}
+
+impl<'tcx, A: 'tcx> RawMultiPromiseBuilder<'tcx, A> {
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    impl<'tcx, A: 'tcx> Default for RawMultiPromiseBuilder<'tcx, A> {
-        fn default() -> Self {
-            let node = Rc::new(PromiseNodeJoiner {
-                target: LateBoundPromiseNodeTarget::default(),
-                // Initialized during `finish`.
-                err_resolutions: Cell::new(None),
-                all_resolutions_remaining: Cell::new(0),
-                poisoned_with_err: Cell::new(false),
-            });
-
-            Self { node }
+    pub fn push<E, F>(&mut self, target: Promise<'tcx, E>, userdata: u32, initializer: F)
+    where
+        E: 'tcx,
+        F: 'static + Copy + Fn(&mut A, E, u32),
+    {
+        if !target.builder.already_accepted_during_build() {
+            self.node.all_resolutions_remaining.update(|v| v + 1);
         }
+
+        target.builder.set_target(BoundPromiseNodeTarget::new(
+            self.node.clone().target(initializer),
+            userdata,
+        ));
     }
 
-    impl<'tcx, A: 'tcx> RawMultiPromiseBuilder<'tcx, A> {
-        pub fn new() -> Self {
-            Self::default()
-        }
+    pub fn with<E, F>(mut self, target: Promise<'tcx, E>, userdata: u32, initializer: F) -> Self
+    where
+        E: 'tcx,
+        F: 'static + Copy + Fn(&mut A, E, u32),
+    {
+        self.push(target, userdata, initializer);
+        self
+    }
 
-        pub fn push<E, F>(&mut self, target: Promise<'tcx, E>, userdata: u32, initializer: F)
-        where
-            E: 'tcx,
-            F: 'static + Copy + Fn(&mut A, E, u32),
-        {
-            if !target.builder.already_accepted_during_build() {
-                self.node.all_resolutions_remaining.update(|v| v + 1);
-            }
+    pub fn finish(self, err_resolutions: A) -> Promise<'tcx, A> {
+        self.node.err_resolutions.set(Some(err_resolutions));
 
-            target.builder.set_target(BoundPromiseNodeTarget::new(
-                self.node.clone().target(initializer),
-                userdata,
-            ));
-        }
-
-        pub fn with<E, F>(mut self, target: Promise<'tcx, E>, userdata: u32, initializer: F) -> Self
-        where
-            E: 'tcx,
-            F: 'static + Copy + Fn(&mut A, E, u32),
-        {
-            self.push(target, userdata, initializer);
-            self
-        }
-
-        pub fn finish(self, err_resolutions: A) -> Promise<'tcx, A> {
-            self.node.err_resolutions.set(Some(err_resolutions));
-
-            Promise { builder: self.node }
-        }
+        Promise { builder: self.node }
     }
 }
 
 #[derive_where(Default)]
 pub struct MultiPromiseBuilder<'tcx, E: 'tcx> {
-    builder: RawMultiPromiseBuilder<'tcx, Vec<Option<E>>>,
-    real_len: u32,
+    builder: RawMultiPromiseBuilder<'tcx, Vec<E>>,
 }
 
 impl<'tcx, E: 'tcx> MultiPromiseBuilder<'tcx, E> {
@@ -375,12 +391,15 @@ impl<'tcx, E: 'tcx> MultiPromiseBuilder<'tcx, E> {
     }
 
     pub fn push(&mut self, promise: Promise<'tcx, E>) {
-        self.builder
-            .push(promise, self.real_len, |aggregate, error, idx| {
-                aggregate[idx as usize] = Some(error);
-            });
+        self.builder.push(promise, 0, |aggregate, error, _idx| {
+            aggregate.push(error);
+        });
+    }
 
-        self.real_len += 1;
+    pub fn push_handle(&mut self) -> PromiseHandle<'tcx, E> {
+        let (promise, handle) = Promise::new();
+        self.push(promise);
+        handle
     }
 
     pub fn with(mut self, promise: Promise<'tcx, E>) -> Self {
@@ -399,15 +418,14 @@ impl<'tcx, E: 'tcx> MultiPromiseBuilder<'tcx, E> {
         self
     }
 
-    pub fn finish(self) -> Promise<'tcx, Vec<Option<E>>> {
-        self.builder
-            .finish((0..self.real_len).map(|_| None::<E>).collect())
+    pub fn finish(self) -> Promise<'tcx, Vec<E>> {
+        self.builder.finish(Vec::new())
     }
 }
 
 #[doc(hidden)]
 pub mod typed_joiner_internals {
-    use super::raw_builder::RawMultiPromiseBuilder;
+    use super::RawMultiPromiseBuilder;
     pub use std::option::Option;
 
     pub fn new_raw_builder_with_hint<'tcx, A: 'tcx>(
@@ -556,6 +574,23 @@ impl<'tcx, E> PromiseNodeOrigin<'tcx, E> {
         }
 
         self.target.get().reject_on_fork();
+    }
+}
+
+#[derive_where(Default)]
+struct PromiseNodeTrivial<'tcx, E> {
+    _ty: PhantomData<fn(&'tcx (), E) -> (&'tcx (), E)>,
+}
+
+impl<'tcx, E> PromiseNodeBuilder<'tcx> for PromiseNodeTrivial<'tcx, E> {
+    type Error = E;
+
+    fn set_target(&self, _target: BoundPromiseNodeTarget<'tcx, Self::Error>) {
+        // (no-op)
+    }
+
+    fn already_accepted_during_build(&self) -> bool {
+        true
     }
 }
 

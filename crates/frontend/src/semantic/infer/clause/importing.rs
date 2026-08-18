@@ -27,7 +27,7 @@ use crate::{
 };
 use hashbrown::hash_map;
 use smallvec::SmallVec;
-use std::{convert::Infallible, mem, rc::Rc};
+use std::{convert::Infallible, mem};
 
 // === Environment === //
 
@@ -885,9 +885,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
     fn check_hrtb_binder_wf(&mut self, wf_self_ty: Ty, binder: SigHrtbBinder) {
         let s = self.session();
 
-        let nested_universe = self.opts.universe.clone().nest(HrtbUniverseInfo {
-            cause: self.cause.clone(),
-        });
+        let nested_universe = self.opts.universe.clone().nest(HrtbUniverseInfo {});
 
         // Spawn universals for each bound variable
         let hrtb_universals = binder

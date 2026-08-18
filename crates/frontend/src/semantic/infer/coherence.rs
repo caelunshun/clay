@@ -127,9 +127,9 @@ impl CoherenceMap {
             })
     }
 
-    pub fn gather_trait_impl_candidates<'a>(
+    pub fn gather_trait_impl_candidates<'a, 'tcx>(
         &'a self,
-        ccx: &'a ClauseCx<'a>,
+        ccx: &'a ClauseCx<'tcx>,
         lhs: Ty,
         rhs: TraitSpec,
     ) -> impl Iterator<Item = Obj<ImplItem>> + 'a {

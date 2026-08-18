@@ -1,4 +1,4 @@
-use crate::{semantic::infer::ObligeCause, utils::hash::FxHashSet};
+use crate::utils::hash::FxHashSet;
 use std::{fmt, hash, rc::Rc};
 
 /// HRTBs in the RHS position of a type-implements-clause obligation work by instantiating each HRTB
@@ -47,7 +47,7 @@ struct HrtbUniverseChild {
 
 #[derive(Debug, Clone)]
 pub struct HrtbUniverseInfo {
-    pub cause: ObligeCause,
+    // (empty for now?)
 }
 
 impl fmt::Debug for HrtbUniverse {

@@ -1,7 +1,7 @@
 use crate::{
     base::ErrorGuaranteed,
     semantic::{
-        infer::{ClauseCx, ObligeCause, ReAndReUnifyError},
+        infer::{ClauseCx, Promise, PromiseHandle, ReAndReUnifyError},
         syntax::{InferReVar, Re, RelationDirection, UniversalReVar, UniversalReVarSourceInfo},
     },
     utils::hash::FxHashSet,
@@ -13,7 +13,7 @@ use std::ops::ControlFlow;
 // === ReUnifyTracker === //
 
 #[derive(Debug, Clone)]
-pub struct ReUnifyTracker {
+pub struct ReUnifyTracker<'tcx> {
     /// The next fresh inference variable to yield to the user.
     next_infer: InferReVar,
 
@@ -23,7 +23,7 @@ pub struct ReUnifyTracker {
 
     /// The set of user-generated constraints between regions. May contain duplicate constraints and
     /// redundant constraints like `'gc: 'other` or `'other: 'other`.
-    constraints: Vec<ReConstraint>,
+    constraints: Vec<ReConstraint<'tcx>>,
 }
 
 #[derive(Debug, Clone)]
@@ -40,13 +40,13 @@ struct ReUniversalState {
 }
 
 #[derive(Debug, Clone)]
-struct ReConstraint {
+struct ReConstraint<'tcx> {
+    handle: PromiseHandle<'tcx, ReAndReUnifyError>,
     lhs: InferRe,
     rhs: InferRe,
-    cause: ObligeCause,
 }
 
-impl Default for ReUnifyTracker {
+impl<'tcx> Default for ReUnifyTracker<'tcx> {
     fn default() -> Self {
         Self {
             next_infer: InferReVar::from_raw(0),
@@ -56,7 +56,7 @@ impl Default for ReUnifyTracker {
     }
 }
 
-impl ReUnifyTracker {
+impl<'tcx> ReUnifyTracker<'tcx> {
     pub fn fresh_universal(&mut self, src_info: UniversalReVarSourceInfo) -> UniversalReVar {
         self.universals.push(ReUniversalState {
             src_info,
@@ -75,12 +75,16 @@ impl ReUnifyTracker {
         var
     }
 
-    pub fn constrain(&mut self, cause: ObligeCause, lhs: Re, rhs: Re) {
+    pub fn constrain(&mut self, lhs: Re, rhs: Re) -> Promise<'tcx, ReAndReUnifyError> {
         let (Ok(lhs), Ok(rhs)) = (InferRe::from_re(lhs), InferRe::from_re(rhs)) else {
-            return;
+            return Promise::trivial();
         };
 
-        self.constraints.push(ReConstraint { lhs, rhs, cause });
+        let (promise, handle) = Promise::new();
+
+        self.constraints.push(ReConstraint { handle, lhs, rhs });
+
+        promise
     }
 
     pub fn permit(&mut self, universal: UniversalReVar, other: Re, dir: RelationDirection) {
@@ -98,7 +102,7 @@ impl ReUnifyTracker {
         }
     }
 
-    pub fn verify(&self, ccx: &ClauseCx<'_>) {
+    pub fn verify(&self, ccx: &ClauseCx<'tcx>) {
         let permissions = ReElaboratedPermissions::new(self);
         let mut outlives = ReIncrementalConstraints::new(self);
 
@@ -108,18 +112,21 @@ impl ReUnifyTracker {
                     return Ok(());
                 }
 
-                ReAndReUnifyError {
-                    cause: cst.cause.clone(),
-                    lhs: cst.lhs.to_re(),
-                    rhs: cst.rhs.to_re(),
-                    requires_var: var,
-                    to_outlive: must_outlive.to_re(),
-                }
-                .report(ccx);
+                cst.handle.reject(
+                    ccx,
+                    ReAndReUnifyError {
+                        lhs: cst.lhs.to_re(),
+                        rhs: cst.rhs.to_re(),
+                        requires_var: var,
+                        to_outlive: must_outlive.to_re(),
+                    },
+                );
 
                 Err(ErrorGuaranteed::new_unchecked())
             })
         }
+
+        // TODO: Accept remaining handles
     }
 }
 

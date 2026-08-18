@@ -123,16 +123,16 @@ impl<'tcx> ClauseCx<'tcx> {
                 // (trivial)
             }
             TyKind::Reference(lhs, _muta, _pointee) => {
-                self.ucx_mut()
-                    .unify_re_and_re(cause, lhs, rhs, dir.to_mode());
+                // TODO: Handle promise!!!
+                self.ucx_mut().unify_re_and_re(lhs, rhs, dir.to_mode());
             }
             TyKind::Adt(lhs) => {
                 // ADTs are bounded by which regions they mention.
                 for &lhs in lhs.params.r(s) {
                     match lhs {
                         TyOrRe::Re(lhs) => {
-                            self.ucx_mut()
-                                .unify_re_and_re(cause, lhs, rhs, dir.to_mode());
+                            // TODO: Handle promise!!!
+                            self.ucx_mut().unify_re_and_re(lhs, rhs, dir.to_mode());
                         }
                         TyOrRe::Ty(lhs) => {
                             self.oblige_ty_outlives_re(cause.clone(), lhs, rhs, dir);
@@ -142,8 +142,8 @@ impl<'tcx> ClauseCx<'tcx> {
             }
 
             TyKind::Trait(lhs_re, _muta, _lhs_spec) => {
-                self.ucx_mut()
-                    .unify_re_and_re(cause, lhs_re, rhs, dir.to_mode());
+                // TODO: Handle promise!!!
+                self.ucx_mut().unify_re_and_re(lhs_re, rhs, dir.to_mode());
             }
             TyKind::Tuple(lhs) => {
                 for &lhs in lhs.r(s) {
