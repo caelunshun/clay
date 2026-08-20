@@ -1,10 +1,7 @@
 use crate::{
     base::arena::{HasInterner as _, HasListInterner as _, Obj},
     semantic::{
-        infer::{
-            ClauseCx, ClauseImportEnv, GenericSubst, HrtbUniverse, ObligeCause, ObligeCauseFrame,
-            ObligeCauseStep, SigImporterWfMode,
-        },
+        infer::{ClauseCx, ClauseImportEnv, GenericSubst, HrtbUniverse, SigImporterWfMode},
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnOwner,
             FnOwnerAdtCtor, FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, ImplItem,

@@ -5,8 +5,8 @@ use crate::{
         infer::{
             ClauseCx, HrtbUniverse, InferTyLeaksHrtbVarError, InferTyLeaksUniversalError,
             InferTyOccursError, MultiPromiseBuilder, Promise, ReAndReUnifyError,
-            TyAndSimpleTySetUnifyError, TyAndTyReUnifyError, TyAndTyUnifyCulprit,
-            TyAndTyUnifyError,
+            TyAndSimpleTySetUnifyError, TyAndTyRegionUnifyError, TyAndTyStructuralUnifyError,
+            TyAndTyUnifyCulprit,
         },
         syntax::{
             FnInstanceInner, FnOwner, FnOwnerInherent, FnOwnerTrait, HrtbBinder, InferTyVar,
@@ -195,31 +195,28 @@ impl<'tcx> UnifyCx<'tcx> {
         lhs: Re,
         rhs: Re,
         mode: RelationMode,
-    ) -> Promise<'tcx, Vec<ReAndReUnifyError>> {
-        let mut builder = MultiPromiseBuilder::new();
-
-        self.unify_re_and_re_inner(&mut builder, lhs, rhs, mode);
-
-        builder.finish()
-    }
-
-    fn unify_re_and_re_inner(
-        &mut self,
-        re_collector: &mut MultiPromiseBuilder<'tcx, ReAndReUnifyError>,
-        lhs: Re,
-        rhs: Re,
-        mode: RelationMode,
-    ) {
+    ) -> Promise<'tcx, ReAndReUnifyError> {
         let Some(regions) = &mut self.regions else {
             debug_assert!(matches!(lhs, Re::Erased));
             debug_assert!(matches!(rhs, Re::Erased));
 
-            return;
+            return Promise::trivial();
         };
 
+        let mut collector = MultiPromiseBuilder::default();
+
         for (lhs, rhs) in mode.enumerate(lhs, rhs) {
-            regions.constrain(lhs, rhs).join(re_collector);
+            regions.constrain(lhs, rhs).join(&mut collector);
         }
+
+        collector
+            .finish()
+            .map(move |_ccx, causes| ReAndReUnifyError {
+                lhs,
+                rhs,
+                mode,
+                causes,
+            })
     }
 
     /// Unifies two types such that they match. The `mode` specifies how the regions inside the
@@ -230,7 +227,7 @@ impl<'tcx> UnifyCx<'tcx> {
         lhs: Ty,
         rhs: Ty,
         mode: RelationMode,
-    ) -> Result<Promise<'tcx, TyAndTyReUnifyError>, Box<TyAndTyUnifyError>> {
+    ) -> Result<Promise<'tcx, TyAndTyRegionUnifyError>, Box<TyAndTyStructuralUnifyError>> {
         let mut re_collector = MultiPromiseBuilder::new();
 
         let mut fork = self.clone();
@@ -239,7 +236,7 @@ impl<'tcx> UnifyCx<'tcx> {
         fork.unify_ty_and_ty_inner(lhs, rhs, &mut ty_culprits, &mut re_collector, mode);
 
         if !ty_culprits.is_empty() {
-            return Err(Box::new(TyAndTyUnifyError {
+            return Err(Box::new(TyAndTyStructuralUnifyError {
                 origin_lhs: lhs,
                 origin_rhs: rhs,
                 culprits: ty_culprits,
@@ -250,7 +247,7 @@ impl<'tcx> UnifyCx<'tcx> {
 
         Ok(re_collector
             .finish()
-            .map(move |_ccx, regions| TyAndTyReUnifyError {
+            .map(move |_ccx, regions| TyAndTyRegionUnifyError {
                 lhs,
                 rhs,
                 mode,
@@ -291,7 +288,8 @@ impl<'tcx> UnifyCx<'tcx> {
                 TyKind::Reference(lhs_re, lhs_muta, lhs_pointee),
                 TyKind::Reference(rhs_re, rhs_muta, rhs_pointee),
             ) if lhs_muta == rhs_muta => {
-                self.unify_re_and_re_inner(re_collector, lhs_re, rhs_re, mode);
+                self.unify_re_and_re(lhs_re, rhs_re, mode)
+                    .join(re_collector);
 
                 let variance = match lhs_muta {
                     Mutability::Mut => ReVariance::Invariant,
@@ -312,7 +310,7 @@ impl<'tcx> UnifyCx<'tcx> {
                 for (&lhs, &rhs) in lhs.params.r(s).iter().zip(rhs.params.r(s)) {
                     match (lhs, rhs) {
                         (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                            self.unify_re_and_re_inner(re_collector, lhs, rhs, mode);
+                            self.unify_re_and_re(lhs, rhs, mode).join(re_collector);
                         }
                         (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
                             self.unify_ty_and_ty_inner(lhs, rhs, ty_culprits, re_collector, mode);
@@ -342,7 +340,8 @@ impl<'tcx> UnifyCx<'tcx> {
             (TyKind::Trait(lhs_re, lhs_muta, lhs), TyKind::Trait(rhs_re, rhs_muta, rhs))
                 if lhs_muta == rhs_muta =>
             {
-                self.unify_re_and_re_inner(re_collector, lhs_re, rhs_re, mode);
+                self.unify_re_and_re(lhs_re, rhs_re, mode)
+                    .join(re_collector);
 
                 let variance = match lhs_muta {
                     Mutability::Mut => ReVariance::Invariant,
@@ -442,12 +441,8 @@ impl<'tcx> UnifyCx<'tcx> {
                         for (&lhs, &rhs) in lhs_generics.r(s).iter().zip(rhs_generics.r(s)) {
                             match (lhs, rhs) {
                                 (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                                    self.unify_re_and_re_inner(
-                                        re_collector,
-                                        lhs,
-                                        rhs,
-                                        RelationMode::Equate,
-                                    );
+                                    self.unify_re_and_re(lhs, rhs, RelationMode::Equate)
+                                        .join(re_collector);
                                 }
                                 (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
                                     self.unify_ty_and_ty_inner(
@@ -803,7 +798,7 @@ impl<'tcx> UnifyCx<'tcx> {
                 {
                     match (lhs, rhs) {
                         (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                            self.unify_re_and_re_inner(re_collector, lhs, rhs, mode);
+                            self.unify_re_and_re(lhs, rhs, mode).join(re_collector);
                         }
                         (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
                             self.unify_ty_and_ty_inner(lhs, rhs, ty_culprits, re_collector, mode);
@@ -864,7 +859,8 @@ impl<'tcx> UnifyCx<'tcx> {
             match (lhs, rhs) {
                 (TraitParam::Equals(lhs), TraitParam::Equals(rhs)) => match (lhs, rhs) {
                     (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                        self.unify_re_and_re_inner(re_collector, lhs, rhs, RelationMode::Equate);
+                        self.unify_re_and_re(lhs, rhs, RelationMode::Equate)
+                            .join(re_collector);
                     }
                     (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
                         self.unify_ty_and_ty_inner(

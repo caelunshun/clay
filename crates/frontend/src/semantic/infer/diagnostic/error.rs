@@ -9,11 +9,7 @@ use crate::semantic::{
 #[derive(Debug, Clone)]
 pub struct RecursionLimitReached;
 
-#[derive(Debug, Clone)]
-pub struct NoTraitImplError {
-    pub target: Ty,
-    pub spec: TraitSpec,
-}
+// === NotCoveredError === //
 
 #[derive(Debug, Clone)]
 pub struct NotCoveredError {
@@ -22,10 +18,90 @@ pub struct NotCoveredError {
     pub in_type: Option<Ty>,
 }
 
-// === Re Unification Errors === //
+// === TraitImplError === //
 
 #[derive(Debug, Clone)]
-pub struct TyAndTyReUnifyError {
+pub struct InstantiatedTraitImplError {
+    pub lhs: Ty,
+    pub rhs: TraitSpec,
+    pub kind: InstantiatedTraitImplErrorKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum InstantiatedTraitImplErrorKind {
+    RecursionLimit(RecursionLimitReached),
+    NoSuitableImpl,
+    InherentUnsatisfied {},
+    ImplBlockUnsatisfied {
+        culprits: Vec<InstantiatedTraitImplErrorImplCulprit>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum InstantiatedTraitImplErrorImplCulprit {
+    Unify,
+}
+
+// === Outlives Error === //
+
+#[derive(Debug, Clone)]
+pub enum GeneralOutlivesError {
+    TyAndTy(TyOutlivesTyError),
+    TyAndRe(TyOutlivesReError),
+    ReAndRe(ReAndReUnifyError),
+}
+
+impl From<TyOutlivesTyError> for GeneralOutlivesError {
+    fn from(error: TyOutlivesTyError) -> Self {
+        GeneralOutlivesError::TyAndTy(error)
+    }
+}
+
+impl From<TyOutlivesReError> for GeneralOutlivesError {
+    fn from(error: TyOutlivesReError) -> Self {
+        GeneralOutlivesError::TyAndRe(error)
+    }
+}
+
+impl From<ReAndReUnifyError> for GeneralOutlivesError {
+    fn from(error: ReAndReUnifyError) -> Self {
+        GeneralOutlivesError::ReAndRe(error)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TyOutlivesTyError {
+    pub lhs: Ty,
+    pub rhs: Ty,
+    pub joiner: Re,
+    pub errors: Vec<ReAndReUnifyError>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TyOutlivesReError {
+    pub lhs: Ty,
+    pub rhs: Re,
+    pub errors: Vec<ReAndReUnifyError>,
+}
+
+// === Unification Promises === //
+
+#[derive(Debug, Clone)]
+pub struct TyAndTyUnifyError {
+    pub lhs: Ty,
+    pub rhs: Ty,
+    pub mode: RelationMode,
+    pub kind: TyAndTyUnifyErrorKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum TyAndTyUnifyErrorKind {
+    Structural(Vec<TyAndTyUnifyCulprit>),
+    Region(Vec<ReAndReUnifyError>),
+}
+
+#[derive(Debug, Clone)]
+pub struct TyAndTyRegionUnifyError {
     pub lhs: Ty,
     pub rhs: Ty,
     pub mode: RelationMode,
@@ -36,14 +112,20 @@ pub struct TyAndTyReUnifyError {
 pub struct ReAndReUnifyError {
     pub lhs: Re,
     pub rhs: Re,
+    pub mode: RelationMode,
+    pub causes: Vec<ReAndReUnifyErrorCause>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReAndReUnifyErrorCause {
     pub requires_var: UniversalReVar,
     pub to_outlive: Re,
 }
 
-// === TyAndTyUnifyError === //
+// === Unification structural errors === //
 
 #[derive(Debug, Clone)]
-pub struct TyAndTyUnifyError {
+pub struct TyAndTyStructuralUnifyError {
     pub origin_lhs: Ty,
     pub origin_rhs: Ty,
     pub culprits: Vec<TyAndTyUnifyCulprit>,

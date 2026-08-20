@@ -45,8 +45,7 @@ use crate::{
     semantic::{
         infer::{
             ClauseCx, ClauseImportEnv, ClauseObligation, FloatingInferVar, GenericSubst,
-            HrtbUniverse, ObligationNotReady, ObligationResult, ObligeCause, ObligeCauseBehavior,
-            SigImporterWfMode,
+            HrtbUniverse, ObligationNotReady, ObligationResult, SigImporterWfMode,
         },
         syntax::{
             AnyGeneric, HrtbBinder, InferTyVar, InferTyVarSourceInfo, Mutability, Re, RelationMode,
@@ -308,7 +307,6 @@ impl<'tcx> ClauseCx<'tcx> {
 impl ClauseCx<'_> {
     pub(super) fn oblige_unify_reified_elaborated_clauses(
         &mut self,
-        cause: &ObligeCause,
         root: UniversalTyVar,
         clauses: TraitClauseList,
         reified_vars: WipReificationState,

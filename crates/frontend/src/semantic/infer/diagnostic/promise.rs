@@ -33,6 +33,8 @@ pub trait ErrorToDiag<'tcx>: Sized {
     fn to_diag(self, ccx: &mut ClauseCx<'tcx>) -> HardDiag;
 }
 
+pub type MultiPromise<'tcx, E> = Promise<'tcx, Vec<E>>;
+
 #[must_use]
 pub struct Promise<'tcx, E: 'tcx> {
     builder: Rc<dyn 'tcx + PromiseNodeBuilder<'tcx, Error = E>>,
@@ -135,6 +137,11 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
         self.report_with(|ccx, err| err.to_diag(ccx).to_delay_bug().emit());
     }
 
+    // TODO: Use bug machinery
+    pub fn report_never(self) {
+        self.report_with(|_ccx, _err| unreachable!());
+    }
+
     pub fn probe(self, probe: PromiseProbe) {
         self.builder.set_target(BoundPromiseNodeTarget::new(
             Rc::new(PromiseNodeProbeSink::<E> {
@@ -161,6 +168,14 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
         PromiseValue::new(value, self)
     }
 }
+
+impl<'tcx, E: 'tcx> MultiPromise<'tcx, E> {
+    pub fn flat_join(self, builder: &mut MultiPromiseBuilder<'tcx, E>) {
+        builder.push_flat(self);
+    }
+}
+
+pub type MultiPromiseValue<'tcx, T, E> = PromiseValue<'tcx, T, Vec<E>>;
 
 #[must_use]
 pub struct PromiseValue<'tcx, T, E: 'tcx> {
@@ -253,12 +268,22 @@ impl<'tcx, T, E: 'tcx> PromiseValue<'tcx, T, E> {
         self.finish_promise(|p| p.report_delay_bug())
     }
 
+    pub fn report_never(self) -> T {
+        self.finish_promise(|p| p.report_never())
+    }
+
     pub fn probe(self, probe: PromiseProbe) -> T {
         self.finish_promise(|p| p.probe(probe))
     }
 
     pub fn forward(self, ccx: &mut ClauseCx<'tcx>, handle: PromiseHandle<'tcx, E>) -> T {
         self.finish_promise(|p| p.forward(ccx, handle))
+    }
+}
+
+impl<'tcx, T, E: 'tcx> MultiPromiseValue<'tcx, T, E> {
+    pub fn flat_join(self, builder: &mut MultiPromiseBuilder<'tcx, E>) -> T {
+        self.finish_promise(|p| p.flat_join(builder))
     }
 }
 
@@ -396,6 +421,12 @@ impl<'tcx, E: 'tcx> MultiPromiseBuilder<'tcx, E> {
         });
     }
 
+    pub fn push_flat(&mut self, promise: MultiPromise<'tcx, E>) {
+        self.builder.push(promise, 0, |aggregate, errors, _idx| {
+            aggregate.extend(errors);
+        });
+    }
+
     pub fn push_handle(&mut self) -> PromiseHandle<'tcx, E> {
         let (promise, handle) = Promise::new();
         self.push(promise);
@@ -418,7 +449,7 @@ impl<'tcx, E: 'tcx> MultiPromiseBuilder<'tcx, E> {
         self
     }
 
-    pub fn finish(self) -> Promise<'tcx, Vec<E>> {
+    pub fn finish(self) -> MultiPromise<'tcx, E> {
         self.builder.finish(Vec::new())
     }
 }

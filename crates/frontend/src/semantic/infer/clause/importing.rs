@@ -6,10 +6,7 @@ use crate::{
         syntax::Span,
     },
     semantic::{
-        infer::{
-            ClauseCx, HrtbUniverse, HrtbUniverseInfo, ObligeCause, ObligeCauseFrame,
-            ObligeCauseOrigin, ObligeCauseStep, UnifyCxMode,
-        },
+        infer::{ClauseCx, HrtbUniverse, HrtbUniverseInfo, UnifyCxMode},
         lower::generics::normalize_positional_generic_arity,
         syntax::{
             AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, FnOwner, FnOwnerAdtCtor,

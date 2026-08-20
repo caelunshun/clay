@@ -5,9 +5,11 @@ use crate::{
     },
     semantic::{
         infer::{
-            CoherenceMap, FloatingInferVar, HrtbUniverse, ObligationNotReady, ObligeCause,
-            PromiseMode, RecursionLimitReached, TyAndSimpleTySetUnifyError, TyAndTyUnifyError,
-            UnifyCx, UnifyCxMode,
+            CoherenceMap, FloatingInferVar, HrtbUniverse, InstantiatedTraitImplError,
+            NotCoveredError, ObligationNotReady, ObligationResult, Promise, PromiseHandle,
+            PromiseMode, ReAndReUnifyError, TyAndSimpleTySetUnifyError, TyAndTyRegionUnifyError,
+            TyAndTyStructuralUnifyError, TyAndTyUnifyError, TyAndTyUnifyErrorKind,
+            TyOutlivesReError, UnifyCx, UnifyCxMode,
             clause::elaboration::{UniversalElaboration, WipReificationState},
         },
         syntax::{
@@ -21,11 +23,44 @@ use crate::{
 use index_vec::IndexVec;
 use std::rc::Rc;
 
-pub const MAX_OBLIGATION_DEPTH: u32 = 256;
+// === Obligation Definitions === //
 
-// === Obligations === //
+#[derive(Debug, Clone)]
+pub enum ClauseObligation<'tcx> {
+    TyUnifiesTy {
+        handle: PromiseHandle<'tcx, TyAndTyUnifyError>,
+        lhs: Ty,
+        rhs: Ty,
+        mode: RelationMode,
+    },
+    TyMeetsTrait {
+        handle: PromiseHandle<'tcx, InstantiatedTraitImplError>,
+        fuel: ClauseFuel,
+        fuel_kill_id: FuelKillId,
+        universe: HrtbUniverse,
+        lhs: Ty,
+        rhs: TraitSpec,
+    },
+    TyOutlivesRe {
+        handle: PromiseHandle<'tcx, TyOutlivesReError>,
+        lhs: Ty,
+        rhs: Re,
+        dir: RelationDirection,
+    },
+    UnifyReifiedElaboratedClauses {
+        root: UniversalTyVar,
+        clauses: TraitClauseList,
+        reified_vars: WipReificationState,
+    },
+    Covered {
+        handle: PromiseHandle<'tcx, NotCoveredError>,
+        must_mention: Rc<FxHashMap<UniversalTyVar, u32>>,
+        in_type: Option<Ty>,
+        in_trait: Option<TraitSpec>,
+    },
+}
 
-#[derive(Debug, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct ClauseFuel {
     remaining: u32,
 }
@@ -54,38 +89,10 @@ impl ClauseFuel {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum ClauseObligation {
-    TyUnifiesTy(ObligeCause, Ty, Ty, RelationMode),
-    TyMeetsTrait(ObligeCause, HrtbUniverse, Ty, TraitSpec),
-    TyOutlivesRe(ObligeCause, Ty, Re, RelationDirection),
-    UnifyReifiedElaboratedClauses(
-        ObligeCause,
-        UniversalTyVar,
-        TraitClauseList,
-        WipReificationState,
-    ),
-    Covered(
-        ObligeCause,
-        Rc<FxHashMap<UniversalTyVar, u32>>,
-        Option<Ty>,
-        Option<TraitSpec>,
-    ),
-}
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct FuelKillId(u64);
 
-impl ClauseObligation {
-    pub fn cause(&self) -> &ObligeCause {
-        let (Self::TyUnifiesTy(cause, ..)
-        | Self::TyMeetsTrait(cause, ..)
-        | Self::TyOutlivesRe(cause, ..)
-        | Self::UnifyReifiedElaboratedClauses(cause, ..)
-        | Self::Covered(cause, ..)) = self;
-
-        cause
-    }
-}
-
-// === ClauseCx Core === //
+// === ClauseCx Definition === //
 
 /// A type inference context for solving type obligations of the form...
 ///
@@ -129,7 +136,7 @@ impl ClauseObligation {
 #[derive(Clone)]
 pub struct ClauseCx<'tcx> {
     ucx: UnifyCx<'tcx>,
-    pending_obligations: Vec<ClauseObligationState>,
+    pending_obligations: Vec<ClauseObligationState<'tcx>>,
     coherence: &'tcx CoherenceMap,
     krate: Obj<Crate>,
     promise_mode: PromiseMode,
@@ -137,8 +144,8 @@ pub struct ClauseCx<'tcx> {
 }
 
 #[derive(Clone)]
-struct ClauseObligationState {
-    kind: ClauseObligation,
+struct ClauseObligationState<'tcx> {
+    kind: ClauseObligation<'tcx>,
     not_ready: Option<ObligationNotReady>,
 }
 
@@ -209,8 +216,12 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn mode(&self) -> UnifyCxMode {
         self.ucx().mode()
     }
+}
 
-    pub(super) fn push_obligation(&mut self, kind: ClauseObligation) {
+// === Obligation Runner === //
+
+impl<'tcx> ClauseCx<'tcx> {
+    pub(super) fn push_obligation(&mut self, kind: ClauseObligation<'tcx>) {
         self.pending_obligations.push(ClauseObligationState {
             kind,
             not_ready: None,
@@ -229,56 +240,47 @@ impl<'tcx> ClauseCx<'tcx> {
 
                 let kind = self.pending_obligations[curr_idx].kind.clone();
 
-                // Process the obligation.
-                if kind.cause().depth() > MAX_OBLIGATION_DEPTH {
-                    RecursionLimitReached {}.report(&self);
-
-                    self.pending_obligations
-                        .retain(|other| kind.cause().identity() != other.kind.cause().identity());
-
-                    made_progress = true;
-                    break;
-                }
-
                 let mut fork = self.clone();
 
                 let res = match kind {
-                    ClauseObligation::TyUnifiesTy(cause, lhs, rhs, mode) => {
-                        if let Err(err) = fork.ucx_mut().unify_ty_and_ty(&cause, lhs, rhs, mode) {
-                            ClauseError::from(*err).report(&fork);
-                        }
-
-                        Ok(())
-                    }
-                    ClauseObligation::TyMeetsTrait(cause, universe, lhs, rhs) => {
-                        match fork
-                            .run_oblige_ty_meets_trait_instantiated(&cause, universe, lhs, rhs)
-                        {
-                            Ok(Ok(())) => Ok(()),
-                            Ok(Err(err)) => {
-                                err.report(&fork);
-                                Ok(())
-                            }
-                            Err(err) => Err(err),
-                        }
-                    }
-                    ClauseObligation::TyOutlivesRe(cause, lhs, rhs, dir) => {
-                        fork.run_oblige_ty_outlives_re(&cause, lhs, rhs, dir)
-                    }
-                    ClauseObligation::UnifyReifiedElaboratedClauses(
-                        cause,
-                        root,
-                        clauses,
-                        reified_vars,
-                    ) => fork.oblige_unify_reified_elaborated_clauses(
-                        &cause,
-                        root,
-                        clauses,
-                        reified_vars,
+                    ClauseObligation::TyUnifiesTy {
+                        handle,
+                        lhs,
+                        rhs,
+                        mode,
+                    } => self.run_oblige_ty_unifies_ty(handle, lhs, rhs, mode),
+                    ClauseObligation::TyMeetsTrait {
+                        handle,
+                        fuel,
+                        fuel_kill_id,
+                        universe,
+                        lhs,
+                        rhs,
+                    } => fork.run_oblige_ty_meets_trait_instantiated(
+                        handle,
+                        fuel,
+                        fuel_kill_id,
+                        universe,
+                        lhs,
+                        rhs,
                     ),
-                    ClauseObligation::Covered(cause, must_mention, in_type, in_trait) => {
-                        fork.run_oblige_covered(cause, must_mention, in_type, in_trait)
-                    }
+                    ClauseObligation::TyOutlivesRe {
+                        handle,
+                        lhs,
+                        rhs,
+                        dir: direction,
+                    } => fork.run_oblige_ty_outlives_re(handle, lhs, rhs, direction),
+                    ClauseObligation::UnifyReifiedElaboratedClauses {
+                        root,
+                        clauses,
+                        reified_vars,
+                    } => fork.oblige_unify_reified_elaborated_clauses(root, clauses, reified_vars),
+                    ClauseObligation::Covered {
+                        handle,
+                        must_mention,
+                        in_type,
+                        in_trait,
+                    } => fork.run_oblige_covered(handle, must_mention, in_type, in_trait),
                 };
 
                 // If we finished processing the obligation, remove it from the queue and mark
@@ -304,7 +306,8 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 }
 
-// Basic operations
+// === Basic operations === //
+
 impl<'tcx> ClauseCx<'tcx> {
     pub fn fresh_ty_infer_var_restricted(
         &mut self,
@@ -490,41 +493,82 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn oblige_re_outlives_re(
         &mut self,
-        cause: ObligeCause,
         lhs: Re,
         rhs: Re,
         mode: RelationMode,
-    ) {
-        self.ucx_mut().unify_re_and_re(&cause, lhs, rhs, mode);
+    ) -> Promise<'tcx, ReAndReUnifyError> {
+        self.ucx_mut().unify_re_and_re(lhs, rhs, mode)
     }
 
     pub fn oblige_ty_unifies_ty(
         &mut self,
-        cause: ObligeCause,
         lhs: Ty,
         rhs: Ty,
         mode: RelationMode,
-    ) {
-        self.push_obligation(ClauseObligation::TyUnifiesTy(cause, lhs, rhs, mode));
+    ) -> Promise<'tcx, TyAndTyUnifyError> {
+        let (promise, handle) = Promise::new();
+
+        self.push_obligation(ClauseObligation::TyUnifiesTy {
+            handle,
+            lhs,
+            rhs,
+            mode,
+        });
+
+        promise
+    }
+
+    fn run_oblige_ty_unifies_ty(
+        &mut self,
+        handle: PromiseHandle<'tcx, TyAndTyUnifyError>,
+        lhs: Ty,
+        rhs: Ty,
+        mode: RelationMode,
+    ) -> ObligationResult {
+        match self.ucx_mut().unify_ty_and_ty(lhs, rhs, mode) {
+            Ok(promise) => {
+                promise
+                    .map(
+                        move |_ccx, TyAndTyRegionUnifyError { regions, .. }| TyAndTyUnifyError {
+                            lhs,
+                            rhs,
+                            mode,
+                            kind: TyAndTyUnifyErrorKind::Region(regions),
+                        },
+                    )
+                    .forward(self, handle);
+            }
+            Err(error) => {
+                handle.reject(
+                    self,
+                    TyAndTyUnifyError {
+                        lhs,
+                        rhs,
+                        mode,
+                        kind: TyAndTyUnifyErrorKind::Structural(error.culprits),
+                    },
+                );
+            }
+        }
+
+        Ok(())
     }
 
     pub fn unify_ty_and_ty(
         &mut self,
-        cause: &ObligeCause,
         lhs: Ty,
         rhs: Ty,
         mode: RelationMode,
-    ) -> Result<(), Box<TyAndTyUnifyError>> {
-        self.ucx_mut().unify_ty_and_ty(cause, lhs, rhs, mode)
+    ) -> Result<Promise<'tcx, TyAndTyRegionUnifyError>, Box<TyAndTyStructuralUnifyError>> {
+        self.ucx_mut().unify_ty_and_ty(lhs, rhs, mode)
     }
 
     pub fn unify_ty_and_simple_set(
         &mut self,
-        cause: &ObligeCause,
         lhs: Ty,
         rhs: SimpleTySet,
     ) -> Result<(), TyAndSimpleTySetUnifyError> {
-        self.ucx_mut().unify_ty_and_simple_set(cause, lhs, rhs)
+        self.ucx_mut().unify_ty_and_simple_set(lhs, rhs)
     }
 
     pub fn oblige_re_meets_clauses(&mut self, cause: &ObligeCause, lhs: Re, rhs: TraitClauseList) {

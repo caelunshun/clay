@@ -1,7 +1,7 @@
 use crate::{
     base::ErrorGuaranteed,
     semantic::{
-        infer::{ClauseCx, Promise, PromiseHandle, ReAndReUnifyError},
+        infer::{ClauseCx, Promise, PromiseHandle, ReAndReUnifyErrorCause},
         syntax::{InferReVar, Re, RelationDirection, UniversalReVar, UniversalReVarSourceInfo},
     },
     utils::hash::FxHashSet,
@@ -41,7 +41,7 @@ struct ReUniversalState {
 
 #[derive(Debug, Clone)]
 struct ReConstraint<'tcx> {
-    handle: PromiseHandle<'tcx, ReAndReUnifyError>,
+    handle: PromiseHandle<'tcx, ReAndReUnifyErrorCause>,
     lhs: InferRe,
     rhs: InferRe,
 }
@@ -75,7 +75,7 @@ impl<'tcx> ReUnifyTracker<'tcx> {
         var
     }
 
-    pub fn constrain(&mut self, lhs: Re, rhs: Re) -> Promise<'tcx, ReAndReUnifyError> {
+    pub fn constrain(&mut self, lhs: Re, rhs: Re) -> Promise<'tcx, ReAndReUnifyErrorCause> {
         let (Ok(lhs), Ok(rhs)) = (InferRe::from_re(lhs), InferRe::from_re(rhs)) else {
             return Promise::trivial();
         };
@@ -114,9 +114,7 @@ impl<'tcx> ReUnifyTracker<'tcx> {
 
                 cst.handle.reject(
                     ccx,
-                    ReAndReUnifyError {
-                        lhs: cst.lhs.to_re(),
-                        rhs: cst.rhs.to_re(),
+                    ReAndReUnifyErrorCause {
                         requires_var: var,
                         to_outlive: must_outlive.to_re(),
                     },

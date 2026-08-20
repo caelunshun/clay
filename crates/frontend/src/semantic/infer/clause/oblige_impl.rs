@@ -5,9 +5,9 @@ use crate::{
     base::arena::{HasInterner as _, Obj},
     semantic::{
         infer::{
-            ClauseCx, ClauseObligation, HrtbUniverse, HrtbUniverseInfo, InstantiatedImplBlock,
-            NoTraitImplError, NotCoveredError, ObligationNotReady, ObligationResult, ObligeCause,
-            ObligeCauseStep,
+            ClauseCx, ClauseFuel, ClauseObligation, FuelKillId, HrtbUniverse, HrtbUniverseInfo,
+            InstantiatedImplBlock, InstantiatedTraitImplError, NotCoveredError, ObligationNotReady,
+            ObligationResult, PromiseHandle,
         },
         syntax::{
             HrtbBinder, ImplItem, RelationMode, SimpleTySet, TraitClause, TraitClauseList,
@@ -93,11 +93,13 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub(super) fn run_oblige_ty_meets_trait_instantiated(
         &mut self,
-        cause: &ObligeCause,
+        handle: PromiseHandle<'tcx, InstantiatedTraitImplError>,
+        fuel: ClauseFuel,
+        fuel_kill_id: FuelKillId,
         universe: HrtbUniverse,
         lhs: Ty,
         rhs: TraitSpec,
-    ) -> ObligationResult<Result<(), NoTraitImplError>> {
+    ) -> ObligationResult {
         let s = self.session();
 
         // See whether the type itself can provide the implementation.
@@ -521,7 +523,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub(super) fn run_oblige_covered(
         &mut self,
-        cause: ObligeCause,
+        handle: PromiseHandle<'tcx, NotCoveredError>,
         must_mention: Rc<FxHashMap<UniversalTyVar, u32>>,
         in_type: Option<Ty>,
         in_trait: Option<TraitSpec>,
