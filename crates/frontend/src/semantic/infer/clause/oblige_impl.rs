@@ -5,9 +5,11 @@ use crate::{
     base::arena::{HasInterner as _, Obj},
     semantic::{
         infer::{
-            ClauseCx, ClauseFuel, ClauseObligation, FuelKillId, HrtbUniverse, HrtbUniverseInfo,
-            InstantiatedImplBlock, InstantiatedTraitImplError, NotCoveredError, ObligationNotReady,
-            ObligationResult, PromiseHandle,
+            ClauseCx, ClauseFuel, ClauseObligation, HrtbUniverse, HrtbUniverseInfo,
+            InherentImplErrorImplCulprit, InherentImplUnsatisfiedError, InstantiatedImplBlock,
+            InstantiatedTraitImplError, InstantiatedTraitImplErrorKind, MultiPromise,
+            MultiPromiseBuilder, NotCoveredError, ObligationNotReady, ObligationResult, Promise,
+            PromiseHandle, PromiseValue, TraitClauseError, UninstantiatedTraitImplError,
         },
         syntax::{
             HrtbBinder, ImplItem, RelationMode, SimpleTySet, TraitClause, TraitClauseList,
@@ -15,53 +17,60 @@ use crate::{
             UniversalTyVar,
         },
     },
+    typed_joiner,
     utils::hash::FxHashMap,
 };
 use std::{convert::Infallible, ops::ControlFlow, rc::Rc};
 
+// === Impl Obligation === //
+
 #[derive(Debug, Clone)]
 struct SelectionRejected;
 
-// TODO: Give more information to causes
 impl<'tcx> ClauseCx<'tcx> {
     pub fn oblige_ty_meets_clauses(
         &mut self,
-        cause: &ObligeCause,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         lhs: Ty,
         rhs: TraitClauseList,
-    ) {
+    ) -> MultiPromise<'tcx, TraitClauseError> {
         let s = self.session();
 
+        let mut collector = MultiPromiseBuilder::new();
+
         for &clause in rhs.r(s) {
-            self.oblige_ty_meets_clause(cause.clone(), universe, lhs, clause);
+            self.oblige_ty_meets_clause(fuel, universe, lhs, clause)
+                .join(&mut collector);
         }
+
+        collector.finish()
     }
 
     pub fn oblige_ty_meets_clause(
         &mut self,
-        cause: ObligeCause,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         lhs: Ty,
         rhs: TraitClause,
-    ) {
+    ) -> Promise<'tcx, TraitClauseError> {
         match rhs {
-            TraitClause::Outlives(rhs_dir, rhs) => {
-                self.oblige_general_outlives(cause, TyOrRe::Ty(lhs), rhs, rhs_dir);
-            }
-            TraitClause::Trait(rhs) => {
-                self.oblige_ty_meets_trait(cause, universe.clone(), lhs, rhs);
-            }
+            TraitClause::Outlives(rhs_dir, rhs) => self
+                .oblige_general_outlives(TyOrRe::Ty(lhs), rhs, rhs_dir)
+                .map(|_ccx, error| TraitClauseError::Outlives(error)),
+            TraitClause::Trait(rhs) => self
+                .oblige_ty_meets_trait(fuel, universe.clone(), lhs, rhs)
+                .map(|_ccx, error| TraitClauseError::Trait(error)),
         }
     }
 
     pub fn oblige_ty_meets_trait(
         &mut self,
-        cause: ObligeCause,
+        fuel: ClauseFuel,
         universe: HrtbUniverse,
         lhs: Ty,
         rhs: HrtbBinder,
-    ) {
+    ) -> Promise<'tcx, UninstantiatedTraitImplError> {
         let s = self.session();
 
         let universe = {
@@ -72,35 +81,70 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         };
 
-        let rhs = self.instantiate_hrtb_universal(&cause, universe.clone(), rhs);
-        self.oblige_ty_meets_trait_instantiated(cause, universe, lhs, rhs)
+        let rhs_instantiated = self.instantiate_hrtb_universal(&cause, universe.clone(), rhs);
+
+        let spec_not_met =
+            self.oblige_ty_meets_trait_instantiated(fuel, universe, lhs, rhs_instantiated);
+
+        typed_joiner! {
+            let spec_not_met = spec_not_met;
+
+            |ccx| {
+                UninstantiatedTraitImplError {
+                    lhs,
+                    rhs,
+                    rhs_instantiated,
+                    spec_not_met: spec_not_met.map(|v| v.kind),
+                }
+            }
+        }
     }
 
     pub fn oblige_ty_meets_trait_instantiated(
         &mut self,
-        cause: ObligeCause,
+        fuel: ClauseFuel,
         universe: HrtbUniverse,
         lhs: Ty,
         rhs: TraitSpec,
-    ) {
-        self.push_obligation(ClauseObligation::TyMeetsTrait(
-            cause.child(ObligeCauseStep::ImplInstantiatedClause { lhs, rhs }.into()),
+    ) -> Promise<'tcx, InstantiatedTraitImplError> {
+        let (promise, handle) = Promise::new();
+
+        self.push_obligation(ClauseObligation::TyMeetsTrait {
+            handle,
+            fuel: fuel.consume(),
             universe,
             lhs,
             rhs,
-        ));
+        });
+
+        promise
     }
 
     pub(super) fn run_oblige_ty_meets_trait_instantiated(
         &mut self,
         handle: PromiseHandle<'tcx, InstantiatedTraitImplError>,
         fuel: ClauseFuel,
-        fuel_kill_id: FuelKillId,
         universe: HrtbUniverse,
         lhs: Ty,
         rhs: TraitSpec,
     ) -> ObligationResult {
         let s = self.session();
+
+        // Enforce fuel limit.
+        if fuel.is_exhausted() {
+            self.kill_obligations_with_id(fuel.kill_id());
+
+            handle.reject(
+                self,
+                InstantiatedTraitImplError {
+                    lhs,
+                    rhs,
+                    kind: InstantiatedTraitImplErrorKind::RecursionLimit,
+                },
+            );
+
+            return Ok(());
+        }
 
         // See whether the type itself can provide the implementation.
         match *self.ucx().peel_ty_infer_var(lhs).r(s) {
@@ -111,15 +155,25 @@ impl<'tcx> ClauseCx<'tcx> {
                 let universal_elab =
                     self.elaborate_ty_universal_clauses_possibly_floating(universal);
 
-                match self.clone().try_select_inherent_impl(
-                    cause,
-                    &universe,
-                    universal_elab,
-                    rhs,
-                )? {
-                    Ok(res) => {
-                        *self = res;
-                        return Ok(Ok(()));
+                match self
+                    .clone()
+                    .try_select_inherent_impl(fuel, &universe, universal_elab, rhs)?
+                {
+                    Ok(PromiseValue {
+                        value: fork,
+                        promise,
+                    }) => {
+                        *self = fork;
+
+                        promise
+                            .map(move |_ccx, error| InstantiatedTraitImplError {
+                                lhs,
+                                rhs,
+                                kind: InstantiatedTraitImplErrorKind::InherentUnsatisfied(error),
+                            })
+                            .forward(self, handle);
+
+                        return Ok(());
                     }
                     Err(SelectionRejected) => {
                         // (fallthrough)
@@ -141,7 +195,9 @@ impl<'tcx> ClauseCx<'tcx> {
             }
             TyKind::Error(_) => {
                 // Error types can do anything.
-                return Ok(Ok(()));
+                handle.accept(self);
+
+                return Ok(());
             }
 
             // LHS HRTBs should have been instantiated right before the obligation.
@@ -188,25 +244,32 @@ impl<'tcx> ClauseCx<'tcx> {
         }
 
         let Some(confirmation) = prev_confirmation else {
-            return Ok(Err(NoTraitImplError {
-                cause: cause.clone(),
-                target: lhs,
-                spec: rhs,
-            }));
+            handle.reject(
+                self,
+                InstantiatedTraitImplError {
+                    lhs,
+                    rhs,
+                    kind: InstantiatedTraitImplErrorKind::NoSuitableImpl,
+                },
+            );
+
+            return Ok(());
         };
 
         *self = confirmation;
 
-        Ok(Ok(()))
+        Ok(())
     }
 
     fn try_select_inherent_impl(
         self,
-        cause: &ObligeCause,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         lhs: UniversalElaboration,
         rhs: TraitSpec,
-    ) -> ObligationResult<Result<Self, SelectionRejected>> {
+    ) -> ObligationResult<
+        Result<PromiseValue<'tcx, Self, InherentImplUnsatisfiedError>, SelectionRejected>,
+    > {
         let s = self.session();
 
         let reified_var_roots = lhs.collect_roots_if_floating(&self);
@@ -220,14 +283,14 @@ impl<'tcx> ClauseCx<'tcx> {
                 continue;
             }
 
-            if let Ok(fork) = self.clone().try_select_single_inherent_impl(
-                cause,
+            if let Ok(promise) = self.clone().try_select_single_inherent_impl(
+                fuel,
                 universe,
                 lhs,
                 rhs,
                 reified_var_roots.as_ref(),
             )? {
-                return Ok(Ok(fork));
+                return Ok(Ok(promise));
             }
         }
 
@@ -236,12 +299,14 @@ impl<'tcx> ClauseCx<'tcx> {
 
     fn try_select_single_inherent_impl(
         mut self,
-        cause: &ObligeCause,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         lhs: HrtbBinder,
         rhs: TraitSpec,
         reified_var_roots: Option<&WipReificationRootSet>,
-    ) -> ObligationResult<Result<Self, SelectionRejected>> {
+    ) -> ObligationResult<
+        Result<PromiseValue<'tcx, Self, InherentImplUnsatisfiedError>, SelectionRejected>,
+    > {
         let s = self.session();
 
         assert_eq!(lhs.inner.def, rhs.def);
@@ -249,16 +314,16 @@ impl<'tcx> ClauseCx<'tcx> {
         let is_ready_if_selected =
             self.is_elaborated_clause_ready_if_selected(reified_var_roots, lhs);
 
-        // See whether we can select this inherent `impl`.
-        let cause = cause
-            .clone()
-            .child(ObligeCauseStep::ImplUsingInherent { lhs, rhs }.into());
+        let mut culprits = MultiPromiseBuilder::new();
 
+        // Instantiate the current clause existentially and match its elaborated parameters against
+        // our specification.
+        let lhs_orig = lhs;
         let lhs = self.instantiate_hrtb_infer(cause.clone(), universe.clone(), lhs);
 
-        let mut param_iter = lhs.params.r(s).iter().zip(rhs.params.r(s));
+        let mut param_iter = lhs.params.r(s).iter().zip(rhs.params.r(s)).enumerate();
 
-        for (&lhs_param, &rhs_param) in
+        for (idx, (&lhs_param, &rhs_param)) in
             (&mut param_iter).take(*rhs.def.r(s).regular_generic_count as usize)
         {
             let TraitParam::Equals(lhs) = lhs_param else {
@@ -269,7 +334,11 @@ impl<'tcx> ClauseCx<'tcx> {
                 TraitParam::Equals(rhs) => match (lhs, rhs) {
                     (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
                         // This can be an obligation because selection shouldn't depend on regions.
-                        self.oblige_re_outlives_re(cause.clone(), lhs, rhs, RelationMode::Equate);
+                        self.oblige_re_outlives_re(lhs, rhs, RelationMode::Equate)
+                            .map(move |_ccx, error| {
+                                InherentImplErrorImplCulprit::RegionEquate(idx as u32, error)
+                            })
+                            .join(&mut culprits);
                     }
                     (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
                         // See whether we can reject this parameter.
@@ -277,9 +346,11 @@ impl<'tcx> ClauseCx<'tcx> {
                             .ucx_mut()
                             .unify_ty_and_ty(lhs, rhs, RelationMode::Equate)
                         {
-                            Ok(promise) => {
-                                // TODO: Handle promise!!!
-                            }
+                            Ok(promise) => promise
+                                .map(move |_ccx, error| {
+                                    InherentImplErrorImplCulprit::TyEquateRegion(idx as u32, error)
+                                })
+                                .join(&mut culprits),
                             Err(_err) => {
                                 return Ok(Err(SelectionRejected));
                             }
@@ -302,7 +373,7 @@ impl<'tcx> ClauseCx<'tcx> {
         }
 
         // If we can, push its obligations.
-        for (&lhs_param, &rhs_param) in param_iter {
+        for (idx, (&lhs_param, &rhs_param)) in param_iter {
             let TraitParam::Equals(lhs) = lhs_param else {
                 unreachable!();
             };
@@ -310,30 +381,50 @@ impl<'tcx> ClauseCx<'tcx> {
             match rhs_param {
                 TraitParam::Equals(rhs) => match (lhs, rhs) {
                     (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                        self.oblige_re_outlives_re(cause.clone(), lhs, rhs, RelationMode::Equate);
+                        self.oblige_re_outlives_re(lhs, rhs, RelationMode::Equate)
+                            .map(move |_ccx, error| {
+                                InherentImplErrorImplCulprit::RegionEquate(idx as u32, error)
+                            })
+                            .join(&mut culprits);
                     }
                     (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
-                        self.oblige_ty_unifies_ty(cause.clone(), lhs, rhs, RelationMode::Equate);
+                        self.oblige_ty_unifies_ty(lhs, rhs, RelationMode::Equate)
+                            .map(move |_ccx, error| {
+                                InherentImplErrorImplCulprit::TyEquate(idx as u32, error)
+                            })
+                            .join(&mut culprits);
                     }
                     _ => unreachable!(),
                 },
                 TraitParam::Unspecified(rhs) => match lhs {
                     TyOrRe::Re(lhs) => {
-                        self.oblige_re_meets_clauses(&cause, lhs, rhs);
+                        self.oblige_re_meets_clauses(lhs, rhs)
+                            .map(move |_ccx, error| {
+                                InherentImplErrorImplCulprit::TyEquate(idx as u32, error)
+                            })
+                            .join(&mut culprits);
                     }
                     TyOrRe::Ty(lhs) => {
-                        self.oblige_ty_meets_clauses(&cause, universe, lhs, rhs);
+                        // TODO
+                        self.oblige_ty_meets_clauses(fuel, universe, lhs, rhs);
                     }
                 },
             }
         }
 
-        Ok(Ok(self))
+        let promise = culprits
+            .finish()
+            .map(|_ccx, culprits| InherentImplUnsatisfiedError {
+                lhs: lhs_orig,
+                rhs,
+                culprits,
+            });
+
+        Ok(Ok(promise.and_value(self)))
     }
 
     fn try_select_block_impl(
         mut self,
-        cause: &ObligeCause,
         universe: &HrtbUniverse,
         lhs: Ty,
         rhs: Obj<ImplItem>,
@@ -493,7 +584,11 @@ impl<'tcx> ClauseCx<'tcx> {
 
         Err(SelectionRejected)
     }
+}
 
+// === Cover Obligation === //
+
+impl<'tcx> ClauseCx<'tcx> {
     pub fn oblige_covered(
         &mut self,
         cause: ObligeCause,

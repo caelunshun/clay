@@ -1,13 +1,10 @@
 use crate::semantic::{
     infer::HrtbUniverse,
     syntax::{
-        InferTyVar, Re, RelationMode, SimpleTySet, TraitClauseList, TraitParam, TraitSpec, Ty,
-        UniversalReVar, UniversalTyVar,
+        HrtbBinder, InferTyVar, Re, RelationMode, SimpleTySet, TraitClauseList, TraitParam,
+        TraitSpec, Ty, UniversalReVar, UniversalTyVar,
     },
 };
-
-#[derive(Debug, Clone)]
-pub struct RecursionLimitReached;
 
 // === NotCoveredError === //
 
@@ -21,6 +18,20 @@ pub struct NotCoveredError {
 // === TraitImplError === //
 
 #[derive(Debug, Clone)]
+pub enum TraitClauseError {
+    Outlives(GeneralOutlivesError),
+    Trait(UninstantiatedTraitImplError),
+}
+
+#[derive(Debug, Clone)]
+pub struct UninstantiatedTraitImplError {
+    pub lhs: Ty,
+    pub rhs: HrtbBinder,
+    pub rhs_instantiated: TraitSpec,
+    pub spec_not_met: Option<InstantiatedTraitImplErrorKind>,
+}
+
+#[derive(Debug, Clone)]
 pub struct InstantiatedTraitImplError {
     pub lhs: Ty,
     pub rhs: TraitSpec,
@@ -29,12 +40,26 @@ pub struct InstantiatedTraitImplError {
 
 #[derive(Debug, Clone)]
 pub enum InstantiatedTraitImplErrorKind {
-    RecursionLimit(RecursionLimitReached),
+    RecursionLimit,
     NoSuitableImpl,
-    InherentUnsatisfied {},
+    InherentUnsatisfied(InherentImplUnsatisfiedError),
     ImplBlockUnsatisfied {
         culprits: Vec<InstantiatedTraitImplErrorImplCulprit>,
     },
+}
+
+#[derive(Debug, Clone)]
+pub struct InherentImplUnsatisfiedError {
+    pub lhs: HrtbBinder,
+    pub rhs: TraitSpec,
+    pub culprits: Vec<InherentImplErrorImplCulprit>,
+}
+
+#[derive(Debug, Clone)]
+pub enum InherentImplErrorImplCulprit {
+    RegionEquate(u32, ReAndReUnifyError),
+    TyEquateRegion(u32, TyAndTyRegionUnifyError),
+    TyEquate(u32, TyAndTyUnifyError),
 }
 
 #[derive(Debug, Clone)]

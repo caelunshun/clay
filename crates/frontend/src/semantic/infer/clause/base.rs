@@ -5,9 +5,10 @@ use crate::{
     },
     semantic::{
         infer::{
-            CoherenceMap, FloatingInferVar, HrtbUniverse, InstantiatedTraitImplError,
-            NotCoveredError, ObligationNotReady, ObligationResult, Promise, PromiseHandle,
-            PromiseMode, ReAndReUnifyError, TyAndSimpleTySetUnifyError, TyAndTyRegionUnifyError,
+            CoherenceMap, FloatingInferVar, GeneralOutlivesError, HrtbUniverse,
+            InstantiatedTraitImplError, MultiPromise, MultiPromiseBuilder, NotCoveredError,
+            ObligationNotReady, ObligationResult, Promise, PromiseHandle, PromiseMode,
+            ReAndReUnifyError, TyAndSimpleTySetUnifyError, TyAndTyRegionUnifyError,
             TyAndTyStructuralUnifyError, TyAndTyUnifyError, TyAndTyUnifyErrorKind,
             TyOutlivesReError, UnifyCx, UnifyCxMode,
             clause::elaboration::{UniversalElaboration, WipReificationState},
@@ -36,7 +37,6 @@ pub enum ClauseObligation<'tcx> {
     TyMeetsTrait {
         handle: PromiseHandle<'tcx, InstantiatedTraitImplError>,
         fuel: ClauseFuel,
-        fuel_kill_id: FuelKillId,
         universe: HrtbUniverse,
         lhs: Ty,
         rhs: TraitSpec,
@@ -60,37 +60,39 @@ pub enum ClauseObligation<'tcx> {
     },
 }
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct ClauseFuelKillId(u64);
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct ClauseFuel {
     remaining: u32,
+    kill_id: ClauseFuelKillId,
 }
 
 impl ClauseFuel {
-    pub const DEFAULT: Self = Self::new(128);
-
-    pub const fn new(remaining: u32) -> Self {
-        Self { remaining }
+    pub fn new(remaining: u32, kill_id: ClauseFuelKillId) -> Self {
+        Self { remaining, kill_id }
     }
 
-    pub const fn keep(&self) -> Self {
-        Self::new(self.remaining)
+    pub fn consume(self) -> Self {
+        Self {
+            remaining: self.remaining.saturating_sub(1),
+            kill_id: self.kill_id,
+        }
     }
 
-    pub const fn consume(&self) -> Self {
-        Self::new(self.remaining.saturating_sub(1))
-    }
-
-    pub const fn is_exhausted(&self) -> bool {
+    pub fn is_exhausted(self) -> bool {
         self.remaining == 0
     }
 
-    pub const fn remaining(&self) -> u32 {
+    pub fn remaining(self) -> u32 {
         self.remaining
     }
-}
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct FuelKillId(u64);
+    pub fn kill_id(self) -> ClauseFuelKillId {
+        self.kill_id
+    }
+}
 
 // === ClauseCx Definition === //
 
@@ -248,22 +250,15 @@ impl<'tcx> ClauseCx<'tcx> {
                         lhs,
                         rhs,
                         mode,
-                    } => self.run_oblige_ty_unifies_ty(handle, lhs, rhs, mode),
+                    } => fork.run_oblige_ty_unifies_ty(handle, lhs, rhs, mode),
                     ClauseObligation::TyMeetsTrait {
                         handle,
                         fuel,
-                        fuel_kill_id,
                         universe,
                         lhs,
                         rhs,
-                    } => fork.run_oblige_ty_meets_trait_instantiated(
-                        handle,
-                        fuel,
-                        fuel_kill_id,
-                        universe,
-                        lhs,
-                        rhs,
-                    ),
+                    } => fork
+                        .run_oblige_ty_meets_trait_instantiated(handle, fuel, universe, lhs, rhs),
                     ClauseObligation::TyOutlivesRe {
                         handle,
                         lhs,
@@ -303,6 +298,20 @@ impl<'tcx> ClauseCx<'tcx> {
                 break;
             }
         }
+    }
+
+    pub(super) fn kill_obligations_with_id(&mut self, kill_id: ClauseFuelKillId) {
+        self.pending_obligations.retain(|obligation| {
+            let other_kill_id = match obligation.kind {
+                ClauseObligation::TyUnifiesTy { .. }
+                | ClauseObligation::TyOutlivesRe { .. }
+                | ClauseObligation::UnifyReifiedElaboratedClauses { .. }
+                | ClauseObligation::Covered { .. } => None,
+                ClauseObligation::TyMeetsTrait { fuel, .. } => Some(fuel.kill_id()),
+            };
+
+            Some(kill_id) != other_kill_id
+        });
     }
 }
 
@@ -571,19 +580,28 @@ impl<'tcx> ClauseCx<'tcx> {
         self.ucx_mut().unify_ty_and_simple_set(lhs, rhs)
     }
 
-    pub fn oblige_re_meets_clauses(&mut self, cause: &ObligeCause, lhs: Re, rhs: TraitClauseList) {
+    pub fn oblige_re_meets_clauses(
+        &mut self,
+        lhs: Re,
+        rhs: TraitClauseList,
+    ) -> MultiPromise<'tcx, GeneralOutlivesError> {
         let s = self.session();
+
+        let mut collector = MultiPromiseBuilder::new();
 
         for &clause in rhs.r(s) {
             match clause {
                 TraitClause::Outlives(dir, rhs) => {
-                    self.oblige_general_outlives(cause.clone(), TyOrRe::Re(lhs), rhs, dir);
+                    self.oblige_general_outlives(TyOrRe::Re(lhs), rhs, dir)
+                        .join(&mut collector);
                 }
                 TraitClause::Trait(_) => {
                     unreachable!()
                 }
             }
         }
+
+        collector.finish()
     }
 
     pub fn verify(&mut self) {

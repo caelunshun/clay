@@ -191,9 +191,6 @@ macro_rules! impl_sig_importable {
 }
 
 impl_sig_importable! {
-    // TODO
-    // import_ty_list: SigTyList => TyList;
-    // import_ty_or_re_list: SigTyOrReList => TyOrReList;
     import_ty_or_re: SigTyOrRe => TyOrRe;
     import_ty: SigTy => Ty;
     import_re: SigRe => Re;

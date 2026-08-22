@@ -489,7 +489,7 @@ macro_rules! typed_joiner {
             .finish(ErrAggregate {
                 $($dep_name: $crate::semantic::infer::typed_joiner_internals::Option::None,)*
             })
-            .map(#[allow(unused)] |$ccx, ErrAggregate { $($dep_name),* }| {
+            .map(#[allow(unused)] move |$ccx, ErrAggregate { $($dep_name),* }| {
                 $($body)*
             })
     }};
