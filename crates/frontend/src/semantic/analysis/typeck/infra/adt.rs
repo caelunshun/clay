@@ -33,7 +33,7 @@ impl BodyCtxt<'_, '_> {
 
         match ctor {
             AdtCtorUnresolved::ResolvedTy(ty) => {
-                let ty = self.ccx_mut().import_report_here(import_env, ty);
+                let ty = self.ccx_mut().import(import_env, ty);
 
                 self.resolve_ty_as_adt_ctor_instance(span, ty)
             }
@@ -49,7 +49,7 @@ impl BodyCtxt<'_, '_> {
                     .params,
             }),
             AdtCtorUnresolved::UnresolvedEnumVariant(enum_ty, variant_name) => {
-                let enum_ty = self.ccx_mut().import_report_here(import_env, enum_ty);
+                let enum_ty = self.ccx_mut().import(import_env, enum_ty);
 
                 let enum_instance = self.resolve_ty_as_adt_instance(span, enum_ty)?;
 

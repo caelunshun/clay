@@ -82,7 +82,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
         );
 
         // First, let's ensure that the inherited trait list is well-formed.
-        ccx.import_report_here(&env, **inherits);
+        ccx.import(&env, **inherits);
 
         // Now, let's ensure that each generic parameter's clauses are well-formed.
         self.visit_generic_binder(&mut ccx, &env, **generics);
@@ -150,7 +150,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
         }
 
         // Let's also ensure that our target type is well-formed.
-        ccx.import_report_here(&env, **target);
+        ccx.import(&env, **target);
 
         // Let's ensure that `impl` generics all have well-formed clauses.
         self.visit_generic_binder(&mut ccx, &env, *generics);
@@ -201,7 +201,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
         let s = self.session();
 
         for field in ctor.r(s).fields.iter() {
-            ccx.import_report_here(env, *field.ty);
+            ccx.import(env, *field.ty);
         }
     }
 
@@ -227,7 +227,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
         self.visit_generic_binder(&mut ccx, &env, def.r(s).generics);
 
         // Now, WF-check the definition.
-        ccx.import_report_here(&env, *def.r(s).body);
+        ccx.import(&env, *def.r(s).body);
 
         ccx.verify();
     }
@@ -246,7 +246,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
                 AnyGeneric::Ty(generic) => *generic.r(s).clauses,
             };
 
-            ccx.import_report_here(env, clauses);
+            ccx.import(env, clauses);
         }
     }
 }

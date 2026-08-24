@@ -5,11 +5,12 @@ use crate::{
     base::arena::{HasInterner as _, Obj},
     semantic::{
         infer::{
-            ClauseCx, ClauseFuel, ClauseObligation, HrtbUniverse, HrtbUniverseInfo,
-            InherentImplErrorImplCulprit, InherentImplUnsatisfiedError, InstantiatedImplBlock,
-            InstantiatedTraitImplError, InstantiatedTraitImplErrorKind, MultiPromise,
-            MultiPromiseBuilder, NotCoveredError, ObligationNotReady, ObligationResult, Promise,
-            PromiseHandle, PromiseValue, TraitClauseError, UninstantiatedTraitImplError,
+            BlockImplUnsatisfiedError, ClauseCx, ClauseFuel, ClauseObligation, HrtbUniverse,
+            HrtbUniverseInfo, InherentImplErrorImplCulprit, InherentImplUnsatisfiedError,
+            InstantiatedImplBlock, InstantiatedTraitImplError, InstantiatedTraitImplErrorKind,
+            MultiPromise, MultiPromiseBuilder, NotCoveredError, ObligationNotReady,
+            ObligationResult, Promise, PromiseHandle, PromiseValue, TraitClauseError,
+            UninstantiatedTraitImplError,
         },
         syntax::{
             HrtbBinder, ImplItem, RelationMode, SimpleTySet, TraitClause, TraitClauseList,
@@ -398,6 +399,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 },
                 TraitParam::Unspecified(rhs) => match lhs {
                     TyOrRe::Re(lhs) => {
+                        // TODO
                         self.oblige_re_meets_clauses(lhs, rhs)
                             .map(move |_ccx, error| {
                                 InherentImplErrorImplCulprit::TyEquate(idx as u32, error)
@@ -429,8 +431,10 @@ impl<'tcx> ClauseCx<'tcx> {
         lhs: Ty,
         rhs: Obj<ImplItem>,
         spec: TraitSpec,
-    ) -> Result<Self, SelectionRejected> {
+    ) -> Result<PromiseValue<'tcx, Self, BlockImplUnsatisfiedError>, SelectionRejected> {
         let s = self.session();
+
+        let mut collector = MultiPromiseBuilder::new();
 
         // Obtain inference variables for all generics in the `impl` and tentatively create
         // obligations for them.
@@ -522,7 +526,14 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         }
 
-        Ok(self)
+        let promise = collector
+            .finish()
+            .map(move |_ccx, culprits| BlockImplUnsatisfiedError {
+                block: rhs,
+                culprits,
+            });
+
+        Ok(promise.and_value(self))
     }
 
     fn try_select_special_impl(

@@ -1,8 +1,12 @@
-use crate::semantic::{
-    infer::HrtbUniverse,
-    syntax::{
-        HrtbBinder, InferTyVar, Re, RelationMode, SimpleTySet, TraitClauseList, TraitParam,
-        TraitSpec, Ty, UniversalReVar, UniversalTyVar,
+use crate::{
+    base::{arena::Obj, syntax::Span},
+    semantic::{
+        infer::HrtbUniverse,
+        syntax::{
+            HrtbBinder, ImplItem, InferTyVar, Re, RelationMode, SigTy, SigTyList, SigTyOrReList,
+            SimpleTySet, TraitClauseList, TraitParam, TraitSpec, Ty, UniversalReVar,
+            UniversalTyVar,
+        },
     },
 };
 
@@ -43,9 +47,7 @@ pub enum InstantiatedTraitImplErrorKind {
     RecursionLimit,
     NoSuitableImpl,
     InherentUnsatisfied(InherentImplUnsatisfiedError),
-    ImplBlockUnsatisfied {
-        culprits: Vec<InstantiatedTraitImplErrorImplCulprit>,
-    },
+    ImplBlockUnsatisfied(BlockImplUnsatisfiedError),
 }
 
 #[derive(Debug, Clone)]
@@ -63,8 +65,15 @@ pub enum InherentImplErrorImplCulprit {
 }
 
 #[derive(Debug, Clone)]
-pub enum InstantiatedTraitImplErrorImplCulprit {
-    Unify,
+pub struct BlockImplUnsatisfiedError {
+    pub block: Obj<ImplItem>,
+    pub culprits: Vec<BlockImplUnsatisfiedErrorCulprit>,
+}
+
+#[derive(Debug, Clone)]
+pub enum BlockImplUnsatisfiedErrorCulprit {
+    AssocMismatch,
+    AssocNotSatisfied,
 }
 
 // === Outlives Error === //
@@ -192,6 +201,42 @@ pub struct TyAndSimpleTySetUnifyError {
     pub lhs: Ty,
     pub rhs: SimpleTySet,
 }
+
+// === Import errors === //
+
+#[derive(Debug, Clone)]
+pub struct ImportTyOrReListError {
+    pub input: SigTyOrReList,
+    pub errors: Vec<Option<ImportTyOrReError>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportTyListError {
+    pub input: SigTyList,
+    pub errors: Vec<Option<ImportTyError>>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ImportTyOrReError {
+    Ty(ImportTyError),
+    Re(ImportReError),
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportTyError {
+    pub input: SigTy,
+    pub culprits: Vec<ImportTyErrorCulprit>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ImportTyErrorCulprit {
+    InAliasBody(Box<ImportTyError>),
+    InRefLt(Box<ImportReError>),
+    InRefPointee(Box<ImportTyError>),
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportReError {}
 
 // === Obligation Errors === //
 

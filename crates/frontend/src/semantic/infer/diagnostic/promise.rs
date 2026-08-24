@@ -106,7 +106,7 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
         })
     }
 
-    pub fn join(self, builder: &mut MultiPromiseBuilder<'tcx, E>) {
+    pub fn join(self, builder: &mut impl JoinablePromise<'tcx, E>) {
         builder.push(self);
     }
 
@@ -188,6 +188,13 @@ impl<'tcx, T, E: 'tcx> PromiseValue<'tcx, T, E> {
         Self { value, promise }
     }
 
+    pub fn trivial(value: T) -> Self {
+        Self {
+            value,
+            promise: Promise::trivial(),
+        }
+    }
+
     pub fn map_value<V>(self, f: impl FnOnce(T) -> V) -> PromiseValue<'tcx, V, E> {
         PromiseValue {
             value: f(self.value),
@@ -243,7 +250,7 @@ impl<'tcx, T, E: 'tcx> PromiseValue<'tcx, T, E> {
         self.map_promise(|p| p.remediate(f))
     }
 
-    pub fn join(self, builder: &mut MultiPromiseBuilder<'tcx, E>) -> T {
+    pub fn join(self, builder: &mut impl JoinablePromise<'tcx, E>) -> T {
         self.finish_promise(|p| p.join(builder))
     }
 
@@ -351,6 +358,10 @@ impl<'tcx, E: 'tcx> PromiseHandle<'tcx, E> {
 
 // === Promise Joiners === //
 
+pub trait JoinablePromise<'tcx, E: 'tcx> {
+    fn push(&mut self, promise: Promise<'tcx, E>);
+}
+
 pub struct RawMultiPromiseBuilder<'tcx, A: 'tcx> {
     node: Rc<PromiseNodeJoiner<'tcx, A>>,
 }
@@ -451,6 +462,65 @@ impl<'tcx, E: 'tcx> MultiPromiseBuilder<'tcx, E> {
 
     pub fn finish(self) -> MultiPromise<'tcx, E> {
         self.builder.finish(Vec::new())
+    }
+}
+
+impl<'tcx, E: 'tcx> JoinablePromise<'tcx, E> for MultiPromiseBuilder<'tcx, E> {
+    fn push(&mut self, promise: Promise<'tcx, E>) {
+        self.push(promise);
+    }
+}
+
+#[derive_where(Default)]
+pub struct FixedMultiPromiseBuilder<'tcx, E: 'tcx> {
+    builder: RawMultiPromiseBuilder<'tcx, Vec<Option<E>>>,
+    len: u32,
+}
+
+impl<'tcx, E: 'tcx> FixedMultiPromiseBuilder<'tcx, E> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push(&mut self, promise: Promise<'tcx, E>) {
+        let idx = self.len;
+        self.len += 1;
+
+        self.builder.push(promise, idx, |aggregate, error, idx| {
+            aggregate[idx as usize] = Some(error);
+        });
+    }
+
+    pub fn push_handle(&mut self) -> PromiseHandle<'tcx, E> {
+        let (promise, handle) = Promise::new();
+        self.push(promise);
+        handle
+    }
+
+    pub fn with(mut self, promise: Promise<'tcx, E>) -> Self {
+        self.push(promise);
+        self
+    }
+
+    pub fn extend(&mut self, promises: impl IntoIterator<Item = Promise<'tcx, E>>) {
+        for promise in promises {
+            self.push(promise);
+        }
+    }
+
+    pub fn with_many(mut self, promises: impl IntoIterator<Item = Promise<'tcx, E>>) -> Self {
+        self.extend(promises);
+        self
+    }
+
+    pub fn finish(self) -> Promise<'tcx, Vec<Option<E>>> {
+        self.builder.finish((0..self.len).map(|_| None).collect())
+    }
+}
+
+impl<'tcx, E: 'tcx> JoinablePromise<'tcx, E> for FixedMultiPromiseBuilder<'tcx, E> {
+    fn push(&mut self, promise: Promise<'tcx, E>) {
+        self.push(promise);
     }
 }
 
