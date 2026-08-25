@@ -358,8 +358,30 @@ impl<'tcx, E: 'tcx> PromiseHandle<'tcx, E> {
 
 // === Promise Joiners === //
 
-pub trait JoinablePromise<'tcx, E: 'tcx> {
+pub trait JoinablePromise<'tcx, E: 'tcx>: Sized {
     fn push(&mut self, promise: Promise<'tcx, E>);
+
+    fn push_handle(&mut self) -> PromiseHandle<'tcx, E> {
+        let (promise, handle) = Promise::new();
+        self.push(promise);
+        handle
+    }
+
+    fn with(mut self, promise: Promise<'tcx, E>) -> Self {
+        self.push(promise);
+        self
+    }
+
+    fn extend(&mut self, promises: impl IntoIterator<Item = Promise<'tcx, E>>) {
+        for promise in promises {
+            self.push(promise);
+        }
+    }
+
+    fn with_many(mut self, promises: impl IntoIterator<Item = Promise<'tcx, E>>) -> Self {
+        self.extend(promises);
+        self
+    }
 }
 
 pub struct RawMultiPromiseBuilder<'tcx, A: 'tcx> {
@@ -426,38 +448,10 @@ impl<'tcx, E: 'tcx> MultiPromiseBuilder<'tcx, E> {
         Self::default()
     }
 
-    pub fn push(&mut self, promise: Promise<'tcx, E>) {
-        self.builder.push(promise, 0, |aggregate, error, _idx| {
-            aggregate.push(error);
-        });
-    }
-
     pub fn push_flat(&mut self, promise: MultiPromise<'tcx, E>) {
         self.builder.push(promise, 0, |aggregate, errors, _idx| {
             aggregate.extend(errors);
         });
-    }
-
-    pub fn push_handle(&mut self) -> PromiseHandle<'tcx, E> {
-        let (promise, handle) = Promise::new();
-        self.push(promise);
-        handle
-    }
-
-    pub fn with(mut self, promise: Promise<'tcx, E>) -> Self {
-        self.push(promise);
-        self
-    }
-
-    pub fn extend(&mut self, promises: impl IntoIterator<Item = Promise<'tcx, E>>) {
-        for promise in promises {
-            self.push(promise);
-        }
-    }
-
-    pub fn with_many(mut self, promises: impl IntoIterator<Item = Promise<'tcx, E>>) -> Self {
-        self.extend(promises);
-        self
     }
 
     pub fn finish(self) -> MultiPromise<'tcx, E> {
@@ -467,7 +461,9 @@ impl<'tcx, E: 'tcx> MultiPromiseBuilder<'tcx, E> {
 
 impl<'tcx, E: 'tcx> JoinablePromise<'tcx, E> for MultiPromiseBuilder<'tcx, E> {
     fn push(&mut self, promise: Promise<'tcx, E>) {
-        self.push(promise);
+        self.builder.push(promise, 0, |aggregate, error, _idx| {
+            aggregate.push(error);
+        });
     }
 }
 
@@ -482,37 +478,6 @@ impl<'tcx, E: 'tcx> FixedMultiPromiseBuilder<'tcx, E> {
         Self::default()
     }
 
-    pub fn push(&mut self, promise: Promise<'tcx, E>) {
-        let idx = self.len;
-        self.len += 1;
-
-        self.builder.push(promise, idx, |aggregate, error, idx| {
-            aggregate[idx as usize] = Some(error);
-        });
-    }
-
-    pub fn push_handle(&mut self) -> PromiseHandle<'tcx, E> {
-        let (promise, handle) = Promise::new();
-        self.push(promise);
-        handle
-    }
-
-    pub fn with(mut self, promise: Promise<'tcx, E>) -> Self {
-        self.push(promise);
-        self
-    }
-
-    pub fn extend(&mut self, promises: impl IntoIterator<Item = Promise<'tcx, E>>) {
-        for promise in promises {
-            self.push(promise);
-        }
-    }
-
-    pub fn with_many(mut self, promises: impl IntoIterator<Item = Promise<'tcx, E>>) -> Self {
-        self.extend(promises);
-        self
-    }
-
     pub fn finish(self) -> Promise<'tcx, Vec<Option<E>>> {
         self.builder.finish((0..self.len).map(|_| None).collect())
     }
@@ -520,7 +485,12 @@ impl<'tcx, E: 'tcx> FixedMultiPromiseBuilder<'tcx, E> {
 
 impl<'tcx, E: 'tcx> JoinablePromise<'tcx, E> for FixedMultiPromiseBuilder<'tcx, E> {
     fn push(&mut self, promise: Promise<'tcx, E>) {
-        self.push(promise);
+        let idx = self.len;
+        self.len += 1;
+
+        self.builder.push(promise, idx, |aggregate, error, idx| {
+            aggregate[idx as usize] = Some(error);
+        });
     }
 }
 

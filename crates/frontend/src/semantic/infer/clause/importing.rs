@@ -7,9 +7,9 @@ use crate::{
     },
     semantic::{
         infer::{
-            ClauseCx, FixedMultiPromiseBuilder, HrtbUniverse, HrtbUniverseInfo, ImportReError,
-            ImportTyError, ImportTyErrorCulprit, ImportTyListError, ImportTyOrReError,
-            ImportTyOrReListError, MultiPromiseBuilder, PromiseValue, UnifyCxMode,
+            ClauseCx, ClauseFuel, HrtbUniverse, HrtbUniverseInfo, ImportNormalizeError,
+            ImportWfError, ImportWfReportElsewhereExt, JoinablePromise, MultiPromiseBuilder,
+            Promise, PromiseValue, UnifyCxMode,
         },
         lower::generics::normalize_positional_generic_arity,
         syntax::{
@@ -103,6 +103,53 @@ impl GenericSubst {
     }
 }
 
+// === SigImporter Errors === //
+
+pub type ImportPromise<'tcx, T> = PromiseValue<'tcx, T, ImportWfError>;
+
+#[derive(Default)]
+pub struct ImportPromiseBuilder<'tcx> {
+    parts: MultiPromiseBuilder<'tcx, ImportWfError>,
+}
+
+impl<'tcx> ImportPromiseBuilder<'tcx> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn finish(self) -> Promise<'tcx, ImportWfError> {
+        self.parts.finish().map(|_ccx, errors| {
+            let mut wf_culprits = Vec::new();
+            let mut normalize_culprits = Vec::new();
+
+            for error in errors {
+                wf_culprits.extend(error.wf_culprits);
+                normalize_culprits.extend(error.normalize_culprits);
+            }
+
+            ImportWfError {
+                wf_culprits,
+                normalize_culprits,
+            }
+        })
+    }
+}
+
+impl<'tcx> JoinablePromise<'tcx, ImportWfError> for ImportPromiseBuilder<'tcx> {
+    fn push(&mut self, promise: Promise<'tcx, ImportWfError>) {
+        self.parts.push(promise);
+    }
+}
+
+impl<'tcx> JoinablePromise<'tcx, ImportNormalizeError> for ImportPromiseBuilder<'tcx> {
+    fn push(&mut self, promise: Promise<'tcx, ImportNormalizeError>) {
+        self.push(promise.map(|_ccx, error| ImportWfError {
+            wf_culprits: Vec::new(),
+            normalize_culprits: error.normalize_culprits,
+        }));
+    }
+}
+
 // === SigImporter === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -114,12 +161,14 @@ pub enum CreateWfObligations {
 impl<'tcx> ClauseCx<'tcx> {
     pub fn importer(
         &mut self,
+        fuel: ClauseFuel,
         universe: HrtbUniverse,
         env: ClauseImportEnv,
         create_wf_obligations: CreateWfObligations,
     ) -> SigImporter<'_, 'tcx> {
         SigImporter {
             ccx: self,
+            fuel,
             opts: SigImporterOpts {
                 universe,
                 env,
@@ -139,32 +188,32 @@ impl<'tcx> ClauseCx<'tcx> {
         &mut self,
         env: &ClauseImportEnv,
         target: I,
-    ) -> PromiseValue<'tcx, I::Output, I::Error> {
-        self.importer(HrtbUniverse::ROOT, env.clone(), CreateWfObligations::Yes)
-            .import(target)
+    ) -> ImportPromise<'tcx, I::Output> {
+        self.importer(
+            self.fresh_clause_fuel(),
+            HrtbUniverse::ROOT,
+            env.clone(),
+            CreateWfObligations::Yes,
+        )
+        .import(target)
     }
 }
 
-pub trait SigImportable<'tcx> {
+pub trait SigImportable<'tcx>: Sized {
     type Output;
-    type Error: 'tcx;
 
-    fn import(
-        me: Self,
-        importer: &mut SigImporter<'_, 'tcx>,
-    ) -> PromiseValue<'tcx, Self::Output, Self::Error>;
+    fn import(me: Self, importer: &mut SigImporter<'_, 'tcx>) -> ImportPromise<'tcx, Self::Output>;
 }
 
 macro_rules! impl_sig_importable {
-    ( $( $method:ident: $src:ty => [$dest:ty, $error:ty]; )* ) => {$(
+    ( $( $method:ident: $src:ty => $dest:ty; )* ) => {$(
         impl<'tcx> SigImportable<'tcx> for $src {
             type Output = $dest;
-            type Error = $error;
 
             fn import(
                 me: Self,
                 importer: &mut SigImporter<'_, 'tcx>,
-            ) -> PromiseValue<'tcx, Self::Output, Self::Error> {
+            ) -> ImportPromise<'tcx, Self::Output> {
                 importer.$method(me)
             }
         }
@@ -172,18 +221,19 @@ macro_rules! impl_sig_importable {
 }
 
 impl_sig_importable! {
-    import_ty_or_re: SigTyOrRe => [TyOrRe, ImportTyOrReError];
-    import_ty: SigTy => [Ty, ImportTyError];
-    import_re: SigRe => [Re, ImportReError];
-    import_adt: SigAdtInstance => [AdtInstance, ()];
-    import_trait_clause_list: SigTraitClauseList => [TraitClauseList, ()];
-    import_trait_clause: SigTraitClause => [TraitClause, ()];
-    import_hrtb_binder: SigHrtbBinder => [HrtbBinder, ()];
-    import_trait_spec: SigTraitSpec => [TraitSpec, ()];
+    import_ty_or_re: SigTyOrRe => TyOrRe;
+    import_ty: SigTy => Ty;
+    import_re: SigRe => Re;
+    import_adt: SigAdtInstance => AdtInstance;
+    import_trait_clause_list: SigTraitClauseList => TraitClauseList;
+    import_trait_clause: SigTraitClause => TraitClause;
+    import_hrtb_binder: SigHrtbBinder => HrtbBinder;
+    import_trait_spec: SigTraitSpec => TraitSpec;
 }
 
 pub struct SigImporter<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
+    fuel: ClauseFuel,
     opts: SigImporterOpts,
     reentrant_aliases: FxHashMap<Obj<TypeAliasItem>, ReentrantAliasState>,
     hrtb_substs: DebruijnMap<Option<TyOrRe>>,
@@ -224,84 +274,58 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         self.ccx.session()
     }
 
-    pub fn import<I: SigImportable<'tcx>>(
-        &mut self,
-        item: I,
-    ) -> PromiseValue<'tcx, I::Output, I::Error> {
+    pub fn import<I: SigImportable<'tcx>>(&mut self, item: I) -> ImportPromise<'tcx, I::Output> {
         I::import(item, self)
     }
 
-    pub fn import_ty_list(
-        &mut self,
-        tys: SigTyList,
-    ) -> PromiseValue<'tcx, TyList, ImportTyListError> {
+    pub fn import_ty_list(&mut self, tys: SigTyList) -> ImportPromise<'tcx, TyList> {
         let s = self.session();
         let tcx = self.tcx();
 
-        let mut errors = FixedMultiPromiseBuilder::new();
+        let mut collector = ImportPromiseBuilder::new();
 
         let output = tcx.intern_list(
             &tys.r(s)
                 .iter()
-                .map(|ty| self.import_ty(*ty).join(&mut errors))
+                .map(|ty| self.import_ty(*ty).join(&mut collector))
                 .collect::<Vec<_>>(),
         );
 
-        let promise = errors
-            .finish()
-            .map(move |_ccx, errors| ImportTyListError { input: tys, errors });
-
-        promise.and_value(output)
+        collector.finish().and_value(output)
     }
 
     pub fn import_ty_or_re_list(
         &mut self,
         ty_or_res: SigTyOrReList,
-    ) -> PromiseValue<'tcx, TyOrReList, ImportTyOrReListError> {
+    ) -> ImportPromise<'tcx, TyOrReList> {
         let s = self.session();
         let tcx = self.tcx();
 
-        let mut errors = FixedMultiPromiseBuilder::new();
+        let mut collector = ImportPromiseBuilder::new();
 
         let output = tcx.intern_list(
             &ty_or_res
                 .r(s)
                 .iter()
-                .map(|ty| self.import_ty_or_re(*ty).join(&mut errors))
+                .map(|ty| self.import_ty_or_re(*ty).join(&mut collector))
                 .collect::<Vec<_>>(),
         );
 
-        let promise = errors
-            .finish()
-            .map(move |_ccx, errors| ImportTyOrReListError {
-                input: ty_or_res,
-                errors,
-            });
-
-        promise.and_value(output)
+        collector.finish().and_value(output)
     }
 
-    pub fn import_ty_or_re(
-        &mut self,
-        ty_or_re: SigTyOrRe,
-    ) -> PromiseValue<'tcx, TyOrRe, ImportTyOrReError> {
+    pub fn import_ty_or_re(&mut self, ty_or_re: SigTyOrRe) -> ImportPromise<'tcx, TyOrRe> {
         match ty_or_re {
-            SigTyOrRe::Re(re) => self
-                .import_re(re)
-                .map_value(TyOrRe::Re)
-                .map(|_ccx, error| ImportTyOrReError::Re(error)),
-            SigTyOrRe::Ty(ty) => self
-                .import_ty(ty)
-                .map_value(TyOrRe::Ty)
-                .map(|_ccx, error| ImportTyOrReError::Ty(error)),
+            SigTyOrRe::Re(re) => self.import_re(re).map_value(TyOrRe::Re),
+            SigTyOrRe::Ty(ty) => self.import_ty(ty).map_value(TyOrRe::Ty),
         }
     }
 
-    pub fn import_ty(&mut self, ty: SigTy) -> PromiseValue<'tcx, Ty, ImportTyError> {
+    pub fn import_ty(&mut self, ty: SigTy) -> ImportPromise<'tcx, Ty> {
         let s = self.session();
         let tcx = self.tcx();
 
-        let mut collector = MultiPromiseBuilder::new();
+        let mut collector = ImportPromiseBuilder::new();
 
         let output = match ty.r(s).kind {
             // Parameterized (may require WF)
@@ -310,11 +334,9 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 let tcx = self.tcx();
 
                 // Import the type alias's arguments.
-                let args = self.import_simple_generic_args(
-                    def.r(s).generics,
-                    args,
-                    FixArity::AssumeCorrect,
-                );
+                let args = self
+                    .import_simple_generic_args(def.r(s).generics, args, FixArity::AssumeCorrect)
+                    .join(&mut collector);
 
                 // Prevent reentrant alias resolution (preorder).
                 match self.reentrant_aliases.entry(def) {
@@ -348,9 +370,11 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                     },
                 );
 
+                // Subtle: we defer emission of reentrancy errors into the root context to ensure
+                // that they're aren't accidentally suppressed by the delay bug.
                 let body = self
                     .import_ty(*def.r(s).body)
-                    .map(|_ccx, error| ImportTyErrorCulprit::InAliasBody(Box::new(error)))
+                    .report_elsewhere()
                     .join(&mut collector);
 
                 self.opts = old_opts;
@@ -380,15 +404,8 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             SigTyKind::Reference(re, muta, pointee) => {
                 let pointee_span = pointee.r(s).span;
 
-                let re = self
-                    .import_re(re)
-                    .map(|_ccx, error| ImportTyErrorCulprit::InRefLt(Box::new(error)))
-                    .join(&mut collector);
-
-                let pointee = self
-                    .import_ty(pointee)
-                    .map(|_ccx, error| ImportTyErrorCulprit::InRefPointee(Box::new(error)))
-                    .join(&mut collector);
+                let re = self.import_re(re).join(&mut collector);
+                let pointee = self.import_ty(pointee).join(&mut collector);
 
                 if self.opts.create_wf_obligations {
                     self.ccx
@@ -397,16 +414,19 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
                 tcx.intern(TyKind::Reference(re, muta, pointee))
             }
-            SigTyKind::Adt(adt) => tcx.intern(TyKind::Adt(self.import_adt(adt))),
+            SigTyKind::Adt(adt) => {
+                tcx.intern(TyKind::Adt(self.import_adt(adt).join(&mut collector)))
+            }
             SigTyKind::Trait(re, muta, clauses) => {
-                let re = self.import_re(re);
-                let clauses = self.import_trait_clause_list(clauses);
+                let re = self.import_re(re).join(&mut collector);
+
+                let clauses = self.import_trait_clause_list(clauses).join(&mut collector);
                 let object_ty = tcx.intern(TyKind::Trait(re, muta, clauses));
 
                 object_ty
             }
             SigTyKind::Tuple(tys) => {
-                let tys = self.import_ty_list(tys);
+                let tys = self.import_ty_list(tys).join(&mut collector);
 
                 if self.opts.create_wf_obligations {
                     // TODO: sizedness checks
@@ -437,13 +457,13 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 spec,
                 assoc_span: _,
                 assoc_idx,
-            }) => {
-                let target = self.import_ty(target);
+            }) => 'output: {
+                let target = self.import_ty(target).join(&mut collector);
 
                 let spec_imported = self.import_trait_spec(spec);
 
                 if self.opts.defer_project_in_binder {
-                    return tcx.intern(TyKind::HrtbProjection(HrtbProjection {
+                    break 'output tcx.intern(TyKind::HrtbProjection(HrtbProjection {
                         target: target,
                         spec: spec_imported,
                         assoc_idx,
@@ -451,7 +471,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 }
 
                 let instance = self.ccx.instantiate_infer().resolve_trait_spec(
-                    &self.cause,
+                    self.fuel,
                     &self.opts.universe,
                     target,
                     spec_imported,
@@ -466,22 +486,17 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             SigTyKind::Error(err) => tcx.intern(TyKind::Error(err)),
         };
 
-        let promise = collector.finish().map(move |_ccx, culprits| ImportTyError {
-            input: ty,
-            culprits,
-        });
-
-        promise.and_value(output)
+        collector.finish().and_value(output)
     }
 
-    pub fn import_re(&mut self, re: SigRe) -> PromiseValue<'tcx, Re, ImportReError> {
+    pub fn import_re(&mut self, re: SigRe) -> ImportPromise<'tcx, Re> {
         let s = self.session();
 
         if self.ccx.mode() == UnifyCxMode::RegionBlind {
-            return Re::Erased;
+            return PromiseValue::trivial(Re::Erased);
         }
 
-        match re.kind {
+        let output = match re.kind {
             SigReKind::Gc => Re::Gc,
             SigReKind::HrtbVar(idx) => match self.hrtb_substs.lookup(idx.0) {
                 Some(real_subst) => real_subst.unwrap_re(),
@@ -490,20 +505,28 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             SigReKind::Infer => self.ccx.fresh_re_infer(),
             SigReKind::Generic(generic) => self.opts.env.lookup_re(s, generic),
             SigReKind::Error(err) => Re::Error(err),
-        }
+        };
+
+        PromiseValue::trivial(output)
     }
 
-    pub fn import_adt(&mut self, adt: SigAdtInstance) -> AdtInstance {
+    pub fn import_adt(&mut self, adt: SigAdtInstance) -> ImportPromise<'tcx, AdtInstance> {
         let s = self.session();
 
-        AdtInstance {
+        let mut collector = ImportPromiseBuilder::new();
+
+        let output = AdtInstance {
             def: adt.def,
-            params: self.import_simple_generic_args(
-                adt.def.r(s).generics,
-                adt.params,
-                FixArity::AssumeCorrect,
-            ),
-        }
+            params: self
+                .import_simple_generic_args(
+                    adt.def.r(s).generics,
+                    adt.params,
+                    FixArity::AssumeCorrect,
+                )
+                .join(&mut collector),
+        };
+
+        collector.finish().and_value(output)
     }
 
     pub fn import_fn_instance_from_owner(
@@ -511,7 +534,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         owner: FnOwner,
         args: Option<SigGenericList>,
         fix_arity: FixArity,
-    ) -> FnInstance {
+    ) -> ImportPromise<'tcx, FnInstance> {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -525,7 +548,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 method_idx,
             }) => {
                 let instance = self.ccx.instantiate_infer().resolve_trait_spec(
-                    &self.cause,
+                    self.fuel,
                     &self.opts.universe,
                     self_ty,
                     instance,
@@ -553,12 +576,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 let block_args = self
                     .ccx
                     .instantiate_infer()
-                    .resolve_inherent_impl_block_env(
-                        &self.cause,
-                        &self.opts.universe,
-                        block,
-                        self_ty,
-                    )
+                    .resolve_inherent_impl_block_env(self.fuel, &self.opts.universe, block, self_ty)
                     .params;
 
                 let method_def = block.r(s).methods[method_idx as usize].unwrap();
@@ -589,7 +607,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         binder: Obj<GenericBinder>,
         args: SigGenericList,
         fix_arity: FixArity,
-    ) -> TyOrReList {
+    ) -> ImportPromise<'tcx, TyOrReList> {
         self.import_generic_args(binder, args, fix_arity, |args_imported| {
             ClauseImportEnv::new(None, [GenericSubst::new(binder, args_imported)])
         })
@@ -601,9 +619,11 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         args: SigGenericList,
         fix_arity: FixArity,
         make_env: impl FnOnce(TyOrReList) -> ClauseImportEnv,
-    ) -> TyOrReList {
+    ) -> ImportPromise<'tcx, TyOrReList> {
         let tcx = self.tcx();
         let s = self.session();
+
+        let mut collector = ImportPromiseBuilder::new();
 
         let args = if fix_arity.should_fix() {
             normalize_positional_generic_arity(
@@ -619,7 +639,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             args
         };
 
-        let args_imported = self.import_ty_or_re_list(args.elems);
+        let args_imported = self.import_ty_or_re_list(args.elems).join(&mut collector);
 
         if self.opts.create_wf_obligations {
             let env = make_env(args_imported);
@@ -641,6 +661,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 });
 
             self.ccx.instantiate_infer().ensure_binder_params_wf(
+                self.fuel,
                 &self.opts.universe,
                 binder,
                 env.clone(),
@@ -1113,7 +1134,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 impl ClauseCx<'_> {
     pub fn instantiate_hrtb_universal(
         &mut self,
-        cause: &ObligeCause,
+        fuel: ClauseFuel,
         universe: HrtbUniverse,
         value: HrtbBinder,
     ) -> TraitSpec {

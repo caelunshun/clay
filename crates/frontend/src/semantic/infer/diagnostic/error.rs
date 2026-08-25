@@ -1,11 +1,10 @@
 use crate::{
-    base::{arena::Obj, syntax::Span},
+    base::arena::Obj,
     semantic::{
-        infer::HrtbUniverse,
+        infer::{HrtbUniverse, Promise, PromiseValue},
         syntax::{
-            HrtbBinder, ImplItem, InferTyVar, Re, RelationMode, SigTy, SigTyList, SigTyOrReList,
-            SimpleTySet, TraitClauseList, TraitParam, TraitSpec, Ty, UniversalReVar,
-            UniversalTyVar,
+            HrtbBinder, ImplItem, InferTyVar, Re, RelationMode, SimpleTySet, TraitClauseList,
+            TraitParam, TraitSpec, Ty, UniversalReVar, UniversalTyVar,
         },
     },
 };
@@ -205,38 +204,43 @@ pub struct TyAndSimpleTySetUnifyError {
 // === Import errors === //
 
 #[derive(Debug, Clone)]
-pub struct ImportTyOrReListError {
-    pub input: SigTyOrReList,
-    pub errors: Vec<Option<ImportTyOrReError>>,
+pub struct ImportWfError {
+    pub wf_culprits: Vec<ImportWfCulprit>,
+    pub normalize_culprits: Vec<ImportNormalizeCulprit>,
 }
 
 #[derive(Debug, Clone)]
-pub struct ImportTyListError {
-    pub input: SigTyList,
-    pub errors: Vec<Option<ImportTyError>>,
+pub struct ImportNormalizeError {
+    pub normalize_culprits: Vec<ImportNormalizeCulprit>,
 }
 
 #[derive(Debug, Clone)]
-pub enum ImportTyOrReError {
-    Ty(ImportTyError),
-    Re(ImportReError),
-}
+pub enum ImportWfCulprit {}
 
 #[derive(Debug, Clone)]
-pub struct ImportTyError {
-    pub input: SigTy,
-    pub culprits: Vec<ImportTyErrorCulprit>,
+pub struct ImportNormalizeCulprit {}
+
+pub trait ImportWfReportElsewhereExt: Sized {
+    type Mapped;
+
+    fn report_elsewhere(self) -> Self::Mapped;
 }
 
-#[derive(Debug, Clone)]
-pub enum ImportTyErrorCulprit {
-    InAliasBody(Box<ImportTyError>),
-    InRefLt(Box<ImportReError>),
-    InRefPointee(Box<ImportTyError>),
+impl<'tcx> ImportWfReportElsewhereExt for Promise<'tcx, ImportWfError> {
+    type Mapped = Promise<'tcx, ImportNormalizeError>;
+
+    fn report_elsewhere(self) -> Self::Mapped {
+        todo!()
+    }
 }
 
-#[derive(Debug, Clone)]
-pub struct ImportReError {}
+impl<'tcx, T> ImportWfReportElsewhereExt for PromiseValue<'tcx, T, ImportWfError> {
+    type Mapped = PromiseValue<'tcx, T, ImportNormalizeError>;
+
+    fn report_elsewhere(self) -> Self::Mapped {
+        self.map_promise(|p| p.report_elsewhere())
+    }
+}
 
 // === Obligation Errors === //
 
