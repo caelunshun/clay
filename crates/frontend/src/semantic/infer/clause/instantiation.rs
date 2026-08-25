@@ -3,9 +3,10 @@ use crate::{
     semantic::{
         infer::{
             BinderParamWfBinderError, BinderParamWfParamError, BinderParamWfParamErrorKind,
-            ClauseCx, ClauseFuel, ClauseImportEnv, GenericSubst, HrtbUniverse,
-            ImportWfReportElsewhereExt, MultiPromiseBuilder, Promise, PromiseValue,
-            SigImporterWfMode, TraitSpecResolutionError, TraitSpecResolutionErrorCulprit,
+            ClauseCx, ClauseFuel, ClauseImportEnv, CreateWfObligations, GenericSubst, HrtbUniverse,
+            ImplBlockSatisfyError, ImplBlockSatisfyErrorCulprit, ImportWfReportElsewhereExt,
+            MultiPromiseBuilder, Promise, PromiseValue, TraitSpecResolutionError,
+            TraitSpecResolutionErrorCulprit,
         },
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnOwner,
@@ -543,7 +544,6 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
 
     pub fn resolve_inherent_impl_block_env(
         &mut self,
-        cause: &ObligeCause,
         universe: &HrtbUniverse,
         block: Obj<ImplItem>,
         self_ty: Ty,
@@ -792,8 +792,8 @@ pub struct InstantiatedImplBlock {
 pub struct SignatureMismatchError;
 
 /// Instantiation.
-impl ClauseCxInferInstantiation<'_, '_> {
-    pub fn fresh_trait_item_to_trait_spec(
+impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
+    fn fresh_trait_item_to_unconstrained_trait_spec(
         &mut self,
         universe: &HrtbUniverse,
         item: Obj<TraitItem>,
@@ -845,7 +845,7 @@ impl ClauseCxInferInstantiation<'_, '_> {
         match *def.r(s).owner {
             FnDefOwner::Item(_) => unreachable!(),
             FnDefOwner::TraitMethod(item, method_idx) => {
-                let instance = self.fresh_trait_item_to_trait_spec(universe, item);
+                let instance = self.fresh_trait_item_to_unconstrained_trait_spec(universe, item);
 
                 self.ccx.oblige_ty_meets_trait_instantiated(
                     cause.clone(),
@@ -870,11 +870,13 @@ impl ClauseCxInferInstantiation<'_, '_> {
 
     pub fn fresh_impl_block(
         &mut self,
-        cause: &ObligeCause,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         block: Obj<ImplItem>,
-    ) -> InstantiatedImplBlock {
+    ) -> PromiseValue<'tcx, InstantiatedImplBlock, ImplBlockSatisfyError> {
         let s = self.ccx.session();
+
+        let mut collector = MultiPromiseBuilder::new();
 
         // Instantiate fresh variables for each `impl` block generic.
         let params = self.fresh_binder_to_unconstrained_params(
@@ -892,54 +894,52 @@ impl ClauseCxInferInstantiation<'_, '_> {
         let target_ty = self
             .ccx
             .importer(
-                cause.clone(),
+                fuel,
                 universe.clone(),
                 env.clone(),
-                SigImporterWfMode::DelayBug,
+                CreateWfObligations::Yes,
             )
-            .import_ty(*block.r(s).target);
+            .import_ty(*block.r(s).target)
+            .report_wf_elsewhere()
+            .map(move |_ccx, error| ImplBlockSatisfyErrorCulprit::SelfTyFuelError(error))
+            .join(&mut collector);
 
         env.self_ty = Some(target_ty);
 
         let target_trait = block.r(s).trait_.map(|trait_| {
             self.ccx
                 .importer(
-                    cause.clone(),
+                    fuel,
                     universe.clone(),
                     env.clone(),
-                    SigImporterWfMode::DelayBug,
+                    CreateWfObligations::Yes,
                 )
                 .import_trait_instance(target_ty, trait_)
+                .report_wf_elsewhere()
+                .map(move |_ccx, error| ImplBlockSatisfyErrorCulprit::TargetTraitFuelError(error))
+                .join(&mut collector)
         });
 
-        let spanned_params =
-            params
-                .r(s)
-                .iter()
-                .zip(&block.r(s).generics.r(s).defs)
-                .map(|(&para, generic)| {
-                    let cause = cause.clone().child(ObligeCauseFrame::Step(
-                        ObligeCauseStep::ImportEnvMeetsRequirements {
-                            clause: generic.span(s),
-                        },
-                    ));
-
-                    (cause, para)
-                });
-
         self.ensure_binder_params_wf(
+            fuel,
             universe,
             block.r(s).generics,
             env.clone(),
             None,
-            spanned_params,
-        );
+            params.r(s).iter().copied(),
+        )
+        .map(move |_ccx, error| ImplBlockSatisfyErrorCulprit::GenericsUnsatisfied(error))
+        .join(&mut collector);
 
-        InstantiatedImplBlock {
+        let promise = collector
+            .finish()
+            .map(move |_ccx, culprits| ImplBlockSatisfyError { block, culprits });
+
+        promise.and_value(InstantiatedImplBlock {
             env,
             params,
             target_ty,
             target_trait,
-        }
+        })
     }
 }

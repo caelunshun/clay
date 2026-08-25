@@ -61,7 +61,7 @@ pub enum ClauseObligation<'tcx> {
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct ClauseFuelKillId(u64);
+pub struct ClauseFuelKillId(u32);
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct ClauseFuel {
@@ -142,6 +142,7 @@ pub struct ClauseCx<'tcx> {
     coherence: &'tcx CoherenceMap,
     krate: Obj<Crate>,
     promise_mode: PromiseMode,
+    fuel_kill_gen: ClauseFuelKillId,
     pub(super) universal_vars: IndexVec<UniversalTyVar, UniversalTyVarDescriptor>,
 }
 
@@ -170,6 +171,7 @@ impl<'tcx> ClauseCx<'tcx> {
             coherence,
             krate,
             promise_mode: PromiseMode::RootContext,
+            fuel_kill_gen: ClauseFuelKillId(0),
             universal_vars: IndexVec::new(),
         }
     }
@@ -318,6 +320,22 @@ impl<'tcx> ClauseCx<'tcx> {
 // === Basic operations === //
 
 impl<'tcx> ClauseCx<'tcx> {
+    pub fn fresh_clause_fuel(&mut self) -> ClauseFuel {
+        let kill_id = self.fuel_kill_gen;
+
+        self.fuel_kill_gen = ClauseFuelKillId(
+            self.fuel_kill_gen
+                .0
+                .checked_add(1)
+                .expect("too many clause fuel generations created"),
+        );
+
+        ClauseFuel {
+            remaining: 64,
+            kill_id,
+        }
+    }
+
     pub fn fresh_ty_infer_var_restricted(
         &mut self,
         max_universe: HrtbUniverse,

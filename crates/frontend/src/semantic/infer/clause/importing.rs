@@ -189,8 +189,10 @@ impl<'tcx> ClauseCx<'tcx> {
         env: &ClauseImportEnv,
         target: I,
     ) -> ImportPromise<'tcx, I::Output> {
+        let fuel = self.fresh_clause_fuel();
+
         self.importer(
-            self.fresh_clause_fuel(),
+            fuel,
             HrtbUniverse::ROOT,
             env.clone(),
             CreateWfObligations::Yes,

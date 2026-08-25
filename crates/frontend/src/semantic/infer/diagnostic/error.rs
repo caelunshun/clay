@@ -279,6 +279,19 @@ pub enum TraitSpecResolutionErrorCulprit {
     ImplRejected(InstantiatedTraitImplError),
 }
 
+#[derive(Debug, Clone)]
+pub struct ImplBlockSatisfyError {
+    pub block: Obj<ImplItem>,
+    pub culprits: Vec<ImplBlockSatisfyErrorCulprit>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ImplBlockSatisfyErrorCulprit {
+    SelfTyFuelError(ImportFuelError),
+    TargetTraitFuelError(ImportFuelError),
+    GenericsUnsatisfied(BinderParamWfBinderError),
+}
+
 // === Obligation errors === //
 
 pub type ObligationResult<T = ()> = Result<T, ObligationNotReady>;

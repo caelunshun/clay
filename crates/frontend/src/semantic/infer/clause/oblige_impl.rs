@@ -82,7 +82,7 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         };
 
-        let rhs_instantiated = self.instantiate_hrtb_universal(&cause, universe.clone(), rhs);
+        let rhs_instantiated = self.instantiate_hrtb_universal(fuel, universe.clone(), rhs);
 
         let spec_not_met =
             self.oblige_ty_meets_trait_instantiated(fuel, universe, lhs, rhs_instantiated);
