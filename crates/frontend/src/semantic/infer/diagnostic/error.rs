@@ -3,8 +3,8 @@ use crate::{
     semantic::{
         infer::{HrtbUniverse, Promise, PromiseValue},
         syntax::{
-            HrtbBinder, ImplItem, InferTyVar, Re, RelationMode, SimpleTySet, TraitClauseList,
-            TraitParam, TraitSpec, Ty, UniversalReVar, UniversalTyVar,
+            GenericBinder, HrtbBinder, ImplItem, InferTyVar, Re, RelationMode, SimpleTySet,
+            TraitClauseList, TraitParam, TraitSpec, Ty, UniversalReVar, UniversalTyVar,
         },
     },
 };
@@ -206,43 +206,80 @@ pub struct TyAndSimpleTySetUnifyError {
 #[derive(Debug, Clone)]
 pub struct ImportWfError {
     pub wf_culprits: Vec<ImportWfCulprit>,
-    pub normalize_culprits: Vec<ImportNormalizeCulprit>,
+    pub fuel_culprits: Vec<ImportFuelCulprit>,
 }
 
 #[derive(Debug, Clone)]
-pub struct ImportNormalizeError {
-    pub normalize_culprits: Vec<ImportNormalizeCulprit>,
+pub struct ImportFuelError {
+    pub fuel_culprits: Vec<ImportFuelCulprit>,
 }
 
 #[derive(Debug, Clone)]
 pub enum ImportWfCulprit {}
 
 #[derive(Debug, Clone)]
-pub struct ImportNormalizeCulprit {}
+pub struct ImportFuelCulprit {}
 
 pub trait ImportWfReportElsewhereExt: Sized {
     type Mapped;
 
-    fn report_elsewhere(self) -> Self::Mapped;
+    fn report_wf_elsewhere(self) -> Self::Mapped;
 }
 
 impl<'tcx> ImportWfReportElsewhereExt for Promise<'tcx, ImportWfError> {
-    type Mapped = Promise<'tcx, ImportNormalizeError>;
+    type Mapped = Promise<'tcx, ImportFuelError>;
 
-    fn report_elsewhere(self) -> Self::Mapped {
+    fn report_wf_elsewhere(self) -> Self::Mapped {
         todo!()
     }
 }
 
 impl<'tcx, T> ImportWfReportElsewhereExt for PromiseValue<'tcx, T, ImportWfError> {
-    type Mapped = PromiseValue<'tcx, T, ImportNormalizeError>;
+    type Mapped = PromiseValue<'tcx, T, ImportFuelError>;
 
-    fn report_elsewhere(self) -> Self::Mapped {
-        self.map_promise(|p| p.report_elsewhere())
+    fn report_wf_elsewhere(self) -> Self::Mapped {
+        self.map_promise(|p| p.report_wf_elsewhere())
     }
 }
 
-// === Obligation Errors === //
+// === Instantiation errors === //
+
+#[derive(Debug, Clone)]
+pub struct BinderParamWfBinderError {
+    pub binder: Obj<GenericBinder>,
+    pub errors: Vec<BinderParamWfParamError>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BinderParamWfParamError {
+    pub idx: u32,
+    pub kind: BinderParamWfParamErrorKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum BinderParamWfParamErrorKind {
+    ClauseFuelError(ImportFuelError),
+    OutlivesNotMet(GeneralOutlivesError),
+    ImplNotMet(UninstantiatedTraitImplError),
+}
+
+#[derive(Debug, Clone)]
+pub struct TraitSpecResolutionError {
+    pub self_ty: Ty,
+    pub spec: TraitSpec,
+    pub culprits: Vec<TraitSpecResolutionErrorCulprit>,
+}
+
+#[derive(Debug, Clone)]
+pub enum TraitSpecResolutionErrorCulprit {
+    AssocParaNotMet {
+        idx: u32,
+        error: Vec<TraitClauseError>,
+    },
+    ImplRejected(InstantiatedTraitImplError),
+}
+
+// === Obligation errors === //
 
 pub type ObligationResult<T = ()> = Result<T, ObligationNotReady>;
 

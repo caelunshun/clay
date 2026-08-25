@@ -1,7 +1,12 @@
 use crate::{
     base::arena::{HasInterner as _, HasListInterner as _, Obj},
     semantic::{
-        infer::{ClauseCx, ClauseImportEnv, GenericSubst, HrtbUniverse, SigImporterWfMode},
+        infer::{
+            BinderParamWfBinderError, BinderParamWfParamError, BinderParamWfParamErrorKind,
+            ClauseCx, ClauseFuel, ClauseImportEnv, GenericSubst, HrtbUniverse,
+            ImportWfReportElsewhereExt, MultiPromiseBuilder, Promise, PromiseValue,
+            SigImporterWfMode, TraitSpecResolutionError, TraitSpecResolutionErrorCulprit,
+        },
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnOwner,
             FnOwnerAdtCtor, FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, ImplItem,
@@ -346,20 +351,24 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
 
     pub fn ensure_binder_params_wf(
         &mut self,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         binder: Obj<GenericBinder>,
         binder_env: ClauseImportEnv,
         verify_first_n: Option<u32>,
-        params: impl IntoIterator<Item = (ObligeCause, TyOrRe)>,
-    ) {
+        params: impl IntoIterator<Item = TyOrRe>,
+    ) -> Promise<'tcx, BinderParamWfBinderError> {
         let s = self.ccx.session();
 
-        for (&generic, (var_cause, var)) in binder
+        let mut collector = MultiPromiseBuilder::new();
+
+        for (idx, (&generic, var)) in binder
             .r(s)
             .defs
             .iter()
             .zip(params)
             .take(verify_first_n.map_or(usize::MAX, |v| v as usize))
+            .enumerate()
         {
             match (generic, var) {
                 (AnyGeneric::Re(generic), TyOrRe::Re(var)) => {
@@ -373,7 +382,7 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                         let must_outlive = self
                             .ccx
                             .importer(
-                                var_cause.clone(),
+                                fuel,
                                 universe.clone(),
                                 binder_env.clone(),
                                 // We skip WF for the *condition itself* since generic binders are
@@ -381,14 +390,25 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                                 // requiring a re-issuing of the WF obligations.
                                 SigImporterWfMode::Skip,
                             )
-                            .import_ty_or_re(must_outlive);
+                            .import_ty_or_re(must_outlive)
+                            .report_wf_elsewhere()
+                            .map(move |_ccx, error| BinderParamWfParamError {
+                                idx: idx as u32,
+                                kind: BinderParamWfParamErrorKind::ClauseFuelError(error),
+                            })
+                            .join(&mut collector);
 
-                        self.ccx.oblige_general_outlives(
-                            var_cause.clone(),
-                            TyOrRe::Re(var),
-                            must_outlive,
-                            must_outlive_dir,
-                        );
+                        self.ccx
+                            .oblige_general_outlives(
+                                TyOrRe::Re(var),
+                                must_outlive,
+                                must_outlive_dir,
+                            )
+                            .map(move |_ccx, error| BinderParamWfParamError {
+                                idx: idx as u32,
+                                kind: BinderParamWfParamErrorKind::OutlivesNotMet(error),
+                            })
+                            .join(&mut collector);
                     }
                 }
                 (AnyGeneric::Ty(generic), TyOrRe::Ty(var)) => {
@@ -396,30 +416,42 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                         let clause = self
                             .ccx
                             .importer(
-                                var_cause.clone(),
+                                fuel,
                                 universe.clone(),
                                 binder_env.clone(),
                                 // See above.
                                 SigImporterWfMode::Skip,
                             )
-                            .import_trait_clause(clause);
+                            .import_trait_clause(clause)
+                            .report_wf_elsewhere()
+                            .map(move |_ccx, error| BinderParamWfParamError {
+                                idx: idx as u32,
+                                kind: BinderParamWfParamErrorKind::ClauseFuelError(error),
+                            })
+                            .join(&mut collector);
 
                         match clause {
                             TraitClause::Outlives(must_outlive_dir, must_outlive) => {
-                                self.ccx.oblige_general_outlives(
-                                    var_cause.clone(),
-                                    TyOrRe::Ty(var),
-                                    must_outlive,
-                                    must_outlive_dir,
-                                );
+                                self.ccx
+                                    .oblige_general_outlives(
+                                        TyOrRe::Ty(var),
+                                        must_outlive,
+                                        must_outlive_dir,
+                                    )
+                                    .map(move |_ccx, error| BinderParamWfParamError {
+                                        idx: idx as u32,
+                                        kind: BinderParamWfParamErrorKind::OutlivesNotMet(error),
+                                    })
+                                    .join(&mut collector);
                             }
                             TraitClause::Trait(rhs) => {
-                                self.ccx.oblige_ty_meets_trait(
-                                    var_cause.clone(),
-                                    universe.clone(),
-                                    var,
-                                    rhs,
-                                );
+                                self.ccx
+                                    .oblige_ty_meets_trait(fuel, universe.clone(), var, rhs)
+                                    .map(move |_ccx, error| BinderParamWfParamError {
+                                        idx: idx as u32,
+                                        kind: BinderParamWfParamErrorKind::ImplNotMet(error),
+                                    })
+                                    .join(&mut collector);
                             }
                         }
                     }
@@ -427,6 +459,10 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                 _ => unreachable!(),
             }
         }
+
+        collector
+            .finish()
+            .map(move |_ccx, errors| BinderParamWfBinderError { binder, errors })
     }
 }
 
@@ -436,13 +472,15 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
     /// returning a complete `TraitInstance`.
     pub fn resolve_trait_spec(
         &mut self,
-        cause: &ObligeCause,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         self_ty: Ty,
         spec: TraitSpec,
-    ) -> TraitInstance {
+    ) -> PromiseValue<'tcx, TraitInstance, TraitSpecResolutionError> {
         let s = self.ccx.session();
         let tcx = self.ccx.tcx();
+
+        let mut collector = MultiPromiseBuilder::new();
 
         let params = spec
             .params
@@ -462,7 +500,14 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                     );
 
                     self.ccx
-                        .oblige_ty_meets_clauses(cause, universe, projection, clauses);
+                        .oblige_ty_meets_clauses(fuel, universe, projection, clauses)
+                        .map(
+                            move |_ccx, error| TraitSpecResolutionErrorCulprit::AssocParaNotMet {
+                                idx: idx as u32,
+                                error,
+                            },
+                        )
+                        .join(&mut collector);
 
                     TyOrRe::Ty(projection)
                 }
@@ -474,15 +519,26 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
             params: tcx.intern_list(&params),
         };
 
-        self.ccx.oblige_ty_meets_trait_instantiated(
-            cause.clone(),
-            universe.clone(),
-            self_ty,
-            // Force the fresh variables to be properly constrained.
-            instance.to_spec(tcx),
-        );
+        self.ccx
+            .oblige_ty_meets_trait_instantiated(
+                fuel,
+                universe.clone(),
+                self_ty,
+                // Force the fresh variables to be properly constrained.
+                instance.to_spec(tcx),
+            )
+            .map(move |_ccx, error| TraitSpecResolutionErrorCulprit::ImplRejected(error))
+            .join(&mut collector);
 
-        instance
+        let promise = collector
+            .finish()
+            .map(move |_ccx, culprits| TraitSpecResolutionError {
+                self_ty,
+                spec,
+                culprits,
+            });
+
+        promise.and_value(instance)
     }
 
     pub fn resolve_inherent_impl_block_env(

@@ -7,9 +7,9 @@ use crate::{
     },
     semantic::{
         infer::{
-            ClauseCx, ClauseFuel, HrtbUniverse, HrtbUniverseInfo, ImportNormalizeError,
-            ImportWfError, ImportWfReportElsewhereExt, JoinablePromise, MultiPromiseBuilder,
-            Promise, PromiseValue, UnifyCxMode,
+            ClauseCx, ClauseFuel, HrtbUniverse, HrtbUniverseInfo, ImportFuelError, ImportWfError,
+            ImportWfReportElsewhereExt, JoinablePromise, MultiPromiseBuilder, Promise,
+            PromiseValue, UnifyCxMode,
         },
         lower::generics::normalize_positional_generic_arity,
         syntax::{
@@ -120,16 +120,16 @@ impl<'tcx> ImportPromiseBuilder<'tcx> {
     pub fn finish(self) -> Promise<'tcx, ImportWfError> {
         self.parts.finish().map(|_ccx, errors| {
             let mut wf_culprits = Vec::new();
-            let mut normalize_culprits = Vec::new();
+            let mut fuel_culprits = Vec::new();
 
             for error in errors {
                 wf_culprits.extend(error.wf_culprits);
-                normalize_culprits.extend(error.normalize_culprits);
+                fuel_culprits.extend(error.fuel_culprits);
             }
 
             ImportWfError {
                 wf_culprits,
-                normalize_culprits,
+                fuel_culprits,
             }
         })
     }
@@ -141,11 +141,11 @@ impl<'tcx> JoinablePromise<'tcx, ImportWfError> for ImportPromiseBuilder<'tcx> {
     }
 }
 
-impl<'tcx> JoinablePromise<'tcx, ImportNormalizeError> for ImportPromiseBuilder<'tcx> {
-    fn push(&mut self, promise: Promise<'tcx, ImportNormalizeError>) {
+impl<'tcx> JoinablePromise<'tcx, ImportFuelError> for ImportPromiseBuilder<'tcx> {
+    fn push(&mut self, promise: Promise<'tcx, ImportFuelError>) {
         self.push(promise.map(|_ccx, error| ImportWfError {
             wf_culprits: Vec::new(),
-            normalize_culprits: error.normalize_culprits,
+            fuel_culprits: error.fuel_culprits,
         }));
     }
 }
@@ -374,7 +374,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 // that they're aren't accidentally suppressed by the delay bug.
                 let body = self
                     .import_ty(*def.r(s).body)
-                    .report_elsewhere()
+                    .report_wf_elsewhere()
                     .join(&mut collector);
 
                 self.opts = old_opts;
@@ -460,7 +460,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             }) => 'output: {
                 let target = self.import_ty(target).join(&mut collector);
 
-                let spec_imported = self.import_trait_spec(spec);
+                let spec_imported = self.import_trait_spec(spec).join(&mut collector);
 
                 if self.opts.defer_project_in_binder {
                     break 'output tcx.intern(TyKind::HrtbProjection(HrtbProjection {
@@ -688,7 +688,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         &mut self,
         instance_applies_to: Ty,
         instance: SigTraitInstance,
-    ) -> TraitInstance {
+    ) -> ImportPromise<'tcx, TraitInstance> {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -769,19 +769,25 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
     // === Spec drivers === //
 
-    pub fn import_trait_clause_list(&mut self, clauses: SigTraitClauseList) -> TraitClauseList {
+    pub fn import_trait_clause_list(
+        &mut self,
+        clauses: SigTraitClauseList,
+    ) -> ImportPromise<'tcx, TraitClauseList> {
         let s = self.session();
 
         self.import_trait_clause_list_inner(clauses.elems.r(s))
     }
 
-    pub fn import_trait_clause(&mut self, clause: SigTraitClause) -> TraitClause {
+    pub fn import_trait_clause(
+        &mut self,
+        clause: SigTraitClause,
+    ) -> ImportPromise<'tcx, TraitClause> {
         let s = self.session();
 
         self.import_trait_clause_list_inner(&[clause]).r(s)[0]
     }
 
-    pub fn import_hrtb_binder(&mut self, clause: SigHrtbBinder) -> HrtbBinder {
+    pub fn import_hrtb_binder(&mut self, clause: SigHrtbBinder) -> ImportPromise<'tcx, HrtbBinder> {
         let TraitClause::Trait(clause) = self.import_trait_clause(SigTraitClause {
             span: clause.defs_span,
             kind: SigTraitClauseKind::Trait(clause),
@@ -792,7 +798,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         clause
     }
 
-    pub fn import_trait_spec(&mut self, clause: SigTraitSpec) -> TraitSpec {
+    pub fn import_trait_spec(&mut self, clause: SigTraitSpec) -> ImportPromise<'tcx, TraitSpec> {
         let s = self.session();
 
         self.import_hrtb_binder(SigHrtbBinder {
