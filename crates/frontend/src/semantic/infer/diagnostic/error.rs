@@ -1,10 +1,11 @@
 use crate::{
     base::arena::Obj,
     semantic::{
-        infer::{HrtbUniverse, Promise, PromiseValue},
+        infer::HrtbUniverse,
         syntax::{
-            GenericBinder, HrtbBinder, ImplItem, InferTyVar, Re, RelationMode, SimpleTySet,
-            TraitClauseList, TraitParam, TraitSpec, Ty, UniversalReVar, UniversalTyVar,
+            FnOwnerTrait, GenericBinder, HrtbBinder, ImplItem, InferTyVar, Re, RelationMode,
+            SigProjectType, SimpleTySet, TraitClauseList, TraitParam, TraitSpec, Ty,
+            UniversalReVar, UniversalTyVar,
         },
     },
 };
@@ -117,6 +118,90 @@ pub struct TyOutlivesReError {
     pub errors: Vec<ReAndReUnifyError>,
 }
 
+// === Import errors === //
+
+#[derive(Debug, Clone)]
+pub enum ImportError {
+    Projection {
+        ty: SigProjectType,
+        error: Box<TraitSpecResolutionError>,
+    },
+    TraitFnOwner {
+        owner: FnOwnerTrait,
+        error: Box<TraitSpecResolutionError>,
+    },
+}
+
+// === HRTB errors === //
+
+#[derive(Debug, Clone)]
+pub struct InstantiateHrtbUniversalError {
+    pub value: HrtbBinder,
+    pub culprits: Vec<InstantiateHrtbUniversalErrorCulprit>,
+}
+
+#[derive(Debug, Clone)]
+pub enum InstantiateHrtbUniversalErrorCulprit {}
+
+#[derive(Debug, Clone)]
+pub struct InstantiateHrtbInferError {
+    pub value: HrtbBinder,
+    pub culprits: Vec<InstantiateHrtbInferErrorCulprit>,
+}
+
+#[derive(Debug, Clone)]
+pub enum InstantiateHrtbInferErrorCulprit {}
+
+// === Infer instantiation errors === //
+
+#[derive(Debug, Clone)]
+pub struct BinderParamWfBinderError {
+    pub binder: Obj<GenericBinder>,
+    pub errors: Vec<BinderParamWfParamError>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BinderParamWfParamError {
+    pub idx: u32,
+    pub kind: BinderParamWfParamErrorKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum BinderParamWfParamErrorKind {
+    ClauseCannotImport(Vec<ImportError>),
+    OutlivesNotMet(GeneralOutlivesError),
+    ImplNotMet(UninstantiatedTraitImplError),
+}
+
+#[derive(Debug, Clone)]
+pub struct TraitSpecResolutionError {
+    pub self_ty: Ty,
+    pub spec: TraitSpec,
+    pub culprits: Vec<TraitSpecResolutionErrorCulprit>,
+}
+
+#[derive(Debug, Clone)]
+pub enum TraitSpecResolutionErrorCulprit {
+    AssocParaNotMet {
+        idx: u32,
+        error: Vec<TraitClauseError>,
+    },
+    ImplRejected(InstantiatedTraitImplError),
+}
+
+#[derive(Debug, Clone)]
+pub struct ImplBlockSatisfyError {
+    pub block: Obj<ImplItem>,
+    pub culprits: Vec<ImplBlockSatisfyErrorCulprit>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ImplBlockSatisfyErrorCulprit {
+    SelfTyNormalizeError(Vec<ImportError>),
+    TargetTraitNormalizeError(Vec<ImportError>),
+    GenericsUnsatisfied(BinderParamWfBinderError),
+}
+
 // === Unification Promises === //
 
 #[derive(Debug, Clone)]
@@ -199,97 +284,6 @@ pub struct InferTyLeaksHrtbVarError {
 pub struct TyAndSimpleTySetUnifyError {
     pub lhs: Ty,
     pub rhs: SimpleTySet,
-}
-
-// === Import errors === //
-
-#[derive(Debug, Clone)]
-pub struct ImportWfError {
-    pub wf_culprits: Vec<ImportWfCulprit>,
-    pub fuel_culprits: Vec<ImportFuelCulprit>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ImportFuelError {
-    pub fuel_culprits: Vec<ImportFuelCulprit>,
-}
-
-#[derive(Debug, Clone)]
-pub enum ImportWfCulprit {}
-
-#[derive(Debug, Clone)]
-pub struct ImportFuelCulprit {}
-
-pub trait ImportWfReportElsewhereExt: Sized {
-    type Mapped;
-
-    fn report_wf_elsewhere(self) -> Self::Mapped;
-}
-
-impl<'tcx> ImportWfReportElsewhereExt for Promise<'tcx, ImportWfError> {
-    type Mapped = Promise<'tcx, ImportFuelError>;
-
-    fn report_wf_elsewhere(self) -> Self::Mapped {
-        todo!()
-    }
-}
-
-impl<'tcx, T> ImportWfReportElsewhereExt for PromiseValue<'tcx, T, ImportWfError> {
-    type Mapped = PromiseValue<'tcx, T, ImportFuelError>;
-
-    fn report_wf_elsewhere(self) -> Self::Mapped {
-        self.map_promise(|p| p.report_wf_elsewhere())
-    }
-}
-
-// === Instantiation errors === //
-
-#[derive(Debug, Clone)]
-pub struct BinderParamWfBinderError {
-    pub binder: Obj<GenericBinder>,
-    pub errors: Vec<BinderParamWfParamError>,
-}
-
-#[derive(Debug, Clone)]
-pub struct BinderParamWfParamError {
-    pub idx: u32,
-    pub kind: BinderParamWfParamErrorKind,
-}
-
-#[derive(Debug, Clone)]
-pub enum BinderParamWfParamErrorKind {
-    ClauseFuelError(ImportFuelError),
-    OutlivesNotMet(GeneralOutlivesError),
-    ImplNotMet(UninstantiatedTraitImplError),
-}
-
-#[derive(Debug, Clone)]
-pub struct TraitSpecResolutionError {
-    pub self_ty: Ty,
-    pub spec: TraitSpec,
-    pub culprits: Vec<TraitSpecResolutionErrorCulprit>,
-}
-
-#[derive(Debug, Clone)]
-pub enum TraitSpecResolutionErrorCulprit {
-    AssocParaNotMet {
-        idx: u32,
-        error: Vec<TraitClauseError>,
-    },
-    ImplRejected(InstantiatedTraitImplError),
-}
-
-#[derive(Debug, Clone)]
-pub struct ImplBlockSatisfyError {
-    pub block: Obj<ImplItem>,
-    pub culprits: Vec<ImplBlockSatisfyErrorCulprit>,
-}
-
-#[derive(Debug, Clone)]
-pub enum ImplBlockSatisfyErrorCulprit {
-    SelfTyFuelError(ImportFuelError),
-    TargetTraitFuelError(ImportFuelError),
-    GenericsUnsatisfied(BinderParamWfBinderError),
 }
 
 // === Obligation errors === //

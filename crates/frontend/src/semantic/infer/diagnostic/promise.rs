@@ -356,6 +356,16 @@ impl<'tcx, E: 'tcx> PromiseHandle<'tcx, E> {
     }
 }
 
+pub trait AnyPromiseHandle<'tcx> {
+    fn accept(&self, ccx: &mut ClauseCx<'tcx>);
+}
+
+impl<'tcx, E: 'tcx> AnyPromiseHandle<'tcx> for PromiseHandle<'tcx, E> {
+    fn accept(&self, ccx: &mut ClauseCx<'tcx>) {
+        self.accept(ccx);
+    }
+}
+
 // === Promise Joiners === //
 
 pub trait JoinablePromise<'tcx, E: 'tcx>: Sized {

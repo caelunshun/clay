@@ -3,10 +3,10 @@ use crate::{
     semantic::{
         infer::{
             BinderParamWfBinderError, BinderParamWfParamError, BinderParamWfParamErrorKind,
-            ClauseCx, ClauseFuel, ClauseImportEnv, CreateWfObligations, GenericSubst, HrtbUniverse,
-            ImplBlockSatisfyError, ImplBlockSatisfyErrorCulprit, ImportWfReportElsewhereExt,
-            MultiPromiseBuilder, Promise, PromiseValue, TraitSpecResolutionError,
-            TraitSpecResolutionErrorCulprit,
+            ClauseCx, ClauseFuel, ClauseImportEnv, GenericSubst, HrtbUniverse,
+            ImplBlockSatisfyError, ImplBlockSatisfyErrorCulprit, ImportError, ImportWfMode,
+            MultiPromise, MultiPromiseBuilder, MultiPromiseValue, Promise, PromiseValue,
+            TraitSpecResolutionError, TraitSpecResolutionErrorCulprit,
         },
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnOwner,
@@ -33,17 +33,18 @@ pub struct ClauseCxUniversalInstantiation<'a, 'tcx> {
 }
 
 /// Machinery
-impl ClauseCxUniversalInstantiation<'_, '_> {
+impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
     pub fn binder_to_init_vars(
         &mut self,
-        cause: &ObligeCause,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         binder_parent_env: &ClauseImportEnv,
         binder: Obj<GenericBinder>,
-    ) -> TyOrReList {
+    ) -> MultiPromiseValue<'tcx, TyOrReList, ImportError> {
         let substs = self.binder_to_uninit_vars(universe, binder);
-        self.init_vars_for_binder(cause, universe, binder_parent_env, binder, substs);
-        substs
+        let promise = self.init_vars_for_binder(fuel, universe, binder_parent_env, binder, substs);
+
+        promise.and_value(substs)
     }
 
     pub fn binder_to_uninit_vars(
@@ -76,13 +77,15 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
 
     pub fn init_vars_for_binder(
         &mut self,
-        cause: &ObligeCause,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         binder_parent_env: &ClauseImportEnv,
         target_binder: Obj<GenericBinder>,
         target_vars: TyOrReList,
-    ) {
+    ) -> MultiPromise<'tcx, ImportError> {
         let s = self.ccx.session();
+
+        let mut collector = MultiPromiseBuilder::new();
 
         let binder_env = binder_parent_env
             .clone()
@@ -95,12 +98,13 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
                         let clause = self
                             .ccx
                             .importer(
-                                cause.clone(),
+                                fuel,
                                 universe.clone(),
                                 binder_env.clone(),
-                                SigImporterWfMode::Skip,
+                                ImportWfMode::ReportElsewhere,
                             )
-                            .import_trait_clause(clause);
+                            .import_trait_clause(clause)
+                            .flat_join(&mut collector);
 
                         let TraitClause::Outlives(allowed_to_outlive_dir, allowed_to_outlive) =
                             clause
@@ -123,12 +127,13 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
                     let clauses = self
                         .ccx
                         .importer(
-                            cause.clone(),
+                            fuel,
                             universe.clone(),
                             binder_env.clone(),
-                            SigImporterWfMode::Skip,
+                            ImportWfMode::ReportElsewhere,
                         )
-                        .import_trait_clause_list(*generic.r(s).clauses);
+                        .import_trait_clause_list(*generic.r(s).clauses)
+                        .flat_join(&mut collector);
 
                     self.ccx
                         .init_ty_universal_var_direct_clauses(target, clauses);
@@ -136,17 +141,19 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
                 _ => unreachable!(),
             }
         }
+
+        collector.finish()
     }
 }
 
 /// Specialized
-impl ClauseCxUniversalInstantiation<'_, '_> {
+impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
     pub fn env_for_trait_def(
         &mut self,
-        cause: &ObligeCause,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         def: Obj<TraitItem>,
-    ) -> ClauseImportEnv {
+    ) -> MultiPromiseValue<'tcx, ClauseImportEnv, ImportError> {
         let s = self.ccx.session();
         let tcx = self.ccx.tcx();
 
@@ -158,8 +165,11 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
         let self_ty = tcx.intern(TyKind::UniversalVar(self_var));
 
         // Create universal variables for each parameter.
-        let generic_params = self.binder_to_init_vars(
-            cause,
+        let PromiseValue {
+            value: generic_params,
+            promise,
+        } = self.binder_to_init_vars(
+            fuel,
             universe,
             &ClauseImportEnv::new(Some(self_ty), []),
             *def.r(s).generics,
@@ -183,18 +193,18 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
             })]),
         );
 
-        ClauseImportEnv::new(
+        promise.and_value(ClauseImportEnv::new(
             Some(self_ty),
             [GenericSubst::new(*def.r(s).generics, generic_params)],
-        )
+        ))
     }
 
     pub fn env_for_adt_def(
         &mut self,
-        cause: &ObligeCause,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         def: Obj<AdtItem>,
-    ) -> ClauseImportEnv {
+    ) -> MultiPromiseValue<'tcx, ClauseImportEnv, ImportError> {
         let s = self.ccx.session();
         let tcx = self.ccx.tcx();
 
@@ -208,27 +218,29 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
         }));
 
         // Initialize the clauses.
-        self.init_vars_for_binder(
-            cause,
+        let promise = self.init_vars_for_binder(
+            fuel,
             universe,
             &ClauseImportEnv::new(Some(self_ty), []),
             def.r(s).generics,
             sig_generic_substs,
         );
 
-        ClauseImportEnv::new(
+        promise.and_value(ClauseImportEnv::new(
             Some(self_ty),
             [GenericSubst::new(def.r(s).generics, sig_generic_substs)],
-        )
+        ))
     }
 
     pub fn env_for_impl_block(
         &mut self,
-        cause: &ObligeCause,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         def: Obj<ImplItem>,
-    ) -> ClauseImportEnv {
+    ) -> MultiPromiseValue<'tcx, ClauseImportEnv, ImportError> {
         let s = self.ccx.session();
+
+        let mut collector = MultiPromiseBuilder::new();
 
         // Create universal parameters.
         let sig_generic_substs = self.binder_to_uninit_vars(universe, def.r(s).generics);
@@ -237,70 +249,86 @@ impl ClauseCxUniversalInstantiation<'_, '_> {
         let self_ty = self
             .ccx
             .importer(
-                cause.clone(),
+                fuel,
                 universe.clone(),
                 ClauseImportEnv::new(
                     None,
                     [GenericSubst::new(def.r(s).generics, sig_generic_substs)],
                 ),
-                SigImporterWfMode::DelayBug,
+                ImportWfMode::ReportElsewhere,
             )
-            .import_ty(*def.r(s).target);
+            .import_ty(*def.r(s).target)
+            .flat_join(&mut collector);
 
         // Initialize the clauses.
         self.init_vars_for_binder(
-            cause,
+            fuel,
             universe,
             &ClauseImportEnv::new(Some(self_ty), []),
             def.r(s).generics,
             sig_generic_substs,
-        );
+        )
+        .flat_join(&mut collector);
 
-        ClauseImportEnv::new(
+        collector.finish().and_value(ClauseImportEnv::new(
             Some(self_ty),
             [GenericSubst::new(def.r(s).generics, sig_generic_substs)],
-        )
+        ))
     }
 
     pub fn env_for_fn_def(
         &mut self,
-        cause: &ObligeCause,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         def: Obj<FnDef>,
-    ) -> ClauseImportEnv {
+    ) -> MultiPromiseValue<'tcx, ClauseImportEnv, ImportError> {
         let s = self.ccx.session();
+
+        let mut collector = MultiPromiseBuilder::new();
 
         // Get parent environment
         let mut env = match *def.r(s).owner {
             FnDefOwner::Item(_item) => ClauseImportEnv::new(None, []),
-            FnDefOwner::TraitMethod(def, _idx) => self.env_for_trait_def(cause, universe, def),
-            FnDefOwner::ImplMethod(def, _idx) => self.env_for_impl_block(cause, universe, def),
+            FnDefOwner::TraitMethod(def, _idx) => self
+                .env_for_trait_def(fuel, universe, def)
+                .flat_join(&mut collector),
+            FnDefOwner::ImplMethod(def, _idx) => self
+                .env_for_impl_block(fuel, universe, def)
+                .flat_join(&mut collector),
         };
 
         // Extend with function environment
-        let substs = self.binder_to_init_vars(cause, universe, &env, def.r(s).generics);
+        let substs = self
+            .binder_to_init_vars(fuel, universe, &env, def.r(s).generics)
+            .flat_join(&mut collector);
 
         env.push_subst(GenericSubst::new(def.r(s).generics, substs));
 
-        env
+        collector.finish().and_value(env)
     }
 
     pub fn env_for_type_alias_def(
         &mut self,
-        cause: &ObligeCause,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         def: Obj<TypeAliasItem>,
-    ) -> ClauseImportEnv {
+    ) -> MultiPromiseValue<'tcx, ClauseImportEnv, ImportError> {
         let s = self.ccx.session();
 
-        let substs = self.binder_to_init_vars(
-            cause,
+        let PromiseValue {
+            value: substs,
+            promise,
+        } = self.binder_to_init_vars(
+            fuel,
             universe,
             &ClauseImportEnv::new(None, []),
             def.r(s).generics,
         );
 
-        ClauseImportEnv::new(None, [GenericSubst::new(def.r(s).generics, substs)])
+        promise.and_value(ClauseImportEnv::new(
+            None,
+            [GenericSubst::new(def.r(s).generics, substs)],
+        ))
     }
 }
 
@@ -386,16 +414,12 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                                 fuel,
                                 universe.clone(),
                                 binder_env.clone(),
-                                // We skip WF for the *condition itself* since generic binders are
-                                // WF-checked elsewhere and should not have any inference variables
-                                // requiring a re-issuing of the WF obligations.
-                                SigImporterWfMode::Skip,
+                                ImportWfMode::ReportElsewhere,
                             )
                             .import_ty_or_re(must_outlive)
-                            .report_wf_elsewhere()
                             .map(move |_ccx, error| BinderParamWfParamError {
                                 idx: idx as u32,
-                                kind: BinderParamWfParamErrorKind::ClauseFuelError(error),
+                                kind: BinderParamWfParamErrorKind::ClauseCannotImport(error),
                             })
                             .join(&mut collector);
 
@@ -420,14 +444,12 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                                 fuel,
                                 universe.clone(),
                                 binder_env.clone(),
-                                // See above.
-                                SigImporterWfMode::Skip,
+                                ImportWfMode::ReportElsewhere,
                             )
                             .import_trait_clause(clause)
-                            .report_wf_elsewhere()
                             .map(move |_ccx, error| BinderParamWfParamError {
                                 idx: idx as u32,
-                                kind: BinderParamWfParamErrorKind::ClauseFuelError(error),
+                                kind: BinderParamWfParamErrorKind::ClauseCannotImport(error),
                             })
                             .join(&mut collector);
 
@@ -897,11 +919,11 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                 fuel,
                 universe.clone(),
                 env.clone(),
-                CreateWfObligations::Yes,
+                WfImportMode::ReportHere,
             )
             .import_ty(*block.r(s).target)
-            .report_wf_elsewhere()
-            .map(move |_ccx, error| ImplBlockSatisfyErrorCulprit::SelfTyFuelError(error))
+            .report_wf_never()
+            .map(move |_ccx, error| ImplBlockSatisfyErrorCulprit::SelfTyNormalizeError(error))
             .join(&mut collector);
 
         env.self_ty = Some(target_ty);
@@ -912,11 +934,13 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                     fuel,
                     universe.clone(),
                     env.clone(),
-                    CreateWfObligations::Yes,
+                    WfImportMode::ReportHere,
                 )
                 .import_trait_instance(target_ty, trait_)
-                .report_wf_elsewhere()
-                .map(move |_ccx, error| ImplBlockSatisfyErrorCulprit::TargetTraitFuelError(error))
+                .report_wf_never()
+                .map(move |_ccx, error| {
+                    ImplBlockSatisfyErrorCulprit::TargetTraitNormalizeError(error)
+                })
                 .join(&mut collector)
         });
 

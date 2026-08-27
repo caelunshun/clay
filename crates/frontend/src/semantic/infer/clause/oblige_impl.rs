@@ -602,11 +602,12 @@ impl<'tcx> ClauseCx<'tcx> {
 impl<'tcx> ClauseCx<'tcx> {
     pub fn oblige_covered(
         &mut self,
-        cause: ObligeCause,
         must_mention: impl IntoIterator<Item = UniversalTyVar>,
         in_type: Option<Ty>,
         in_trait: Option<TraitSpec>,
-    ) {
+    ) -> Promise<'tcx, NotCoveredError> {
+        let (promise, handle) = Promise::new();
+
         let mut counter = 0u32;
         let must_mention = Rc::new(
             must_mention
@@ -619,12 +620,14 @@ impl<'tcx> ClauseCx<'tcx> {
                 .collect::<FxHashMap<_, _>>(),
         );
 
-        self.push_obligation(ClauseObligation::Covered(
-            cause,
+        self.push_obligation(ClauseObligation::Covered {
+            handle,
             must_mention,
             in_type,
             in_trait,
-        ));
+        });
+
+        promise
     }
 
     pub(super) fn run_oblige_covered(
@@ -697,6 +700,8 @@ impl<'tcx> ClauseCx<'tcx> {
             .collect::<Vec<_>>();
 
         if missing_mentions.is_empty() {
+            handle.accept(self);
+
             return Ok(());
         }
 
@@ -704,13 +709,14 @@ impl<'tcx> ClauseCx<'tcx> {
             return Err(ObligationNotReady::CoverMissingInfer);
         }
 
-        NotCoveredError {
-            cause,
-            missing_mentions,
-            in_trait,
-            in_type,
-        }
-        .report(self);
+        handle.reject(
+            self,
+            NotCoveredError {
+                missing_mentions,
+                in_trait,
+                in_type,
+            },
+        );
 
         Ok(())
     }

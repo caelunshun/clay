@@ -5,7 +5,7 @@ use crate::{
     },
     semantic::{
         infer::{
-            CoherenceMap, FloatingInferVar, GeneralOutlivesError, HrtbUniverse,
+            AnyPromiseHandle, CoherenceMap, FloatingInferVar, GeneralOutlivesError, HrtbUniverse,
             InstantiatedTraitImplError, MultiPromise, MultiPromiseBuilder, NotCoveredError,
             ObligationNotReady, ObligationResult, Promise, PromiseHandle, PromiseMode,
             ReAndReUnifyError, TyAndSimpleTySetUnifyError, TyAndTyRegionUnifyError,
@@ -303,6 +303,8 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     pub(super) fn kill_obligations_with_id(&mut self, kill_id: ClauseFuelKillId) {
+        let mut to_accept = Vec::<Box<dyn AnyPromiseHandle<'tcx>>>::new();
+
         self.pending_obligations.retain(|obligation| {
             let other_kill_id = match obligation.kind {
                 ClauseObligation::TyUnifiesTy { .. }
@@ -312,8 +314,26 @@ impl<'tcx> ClauseCx<'tcx> {
                 ClauseObligation::TyMeetsTrait { fuel, .. } => Some(fuel.kill_id()),
             };
 
-            Some(kill_id) != other_kill_id
+            let should_kill = Some(kill_id) == other_kill_id;
+
+            if should_kill {
+                match &obligation.kind {
+                    ClauseObligation::TyUnifiesTy { .. }
+                    | ClauseObligation::TyOutlivesRe { .. }
+                    | ClauseObligation::UnifyReifiedElaboratedClauses { .. }
+                    | ClauseObligation::Covered { .. } => unreachable!(),
+                    ClauseObligation::TyMeetsTrait { handle, .. } => {
+                        to_accept.push(Box::new(handle.clone()));
+                    }
+                }
+            }
+
+            !should_kill
         });
+
+        for to_accept in to_accept {
+            to_accept.accept(self);
+        }
     }
 }
 
@@ -626,11 +646,35 @@ impl<'tcx> ClauseCx<'tcx> {
         self.poll_obligations();
 
         for state in &self.pending_obligations {
-            ObligationUnfulfilled {
-                obligation: state.kind.clone(),
-                reason: state.not_ready.clone().unwrap(),
+            match &state.kind {
+                ClauseObligation::TyUnifiesTy { .. } => {
+                    unreachable!()
+                }
+                ClauseObligation::TyMeetsTrait {
+                    handle,
+                    fuel,
+                    universe,
+                    lhs,
+                    rhs,
+                } => todo!(),
+                ClauseObligation::TyOutlivesRe {
+                    handle,
+                    lhs,
+                    rhs,
+                    dir,
+                } => todo!(),
+                ClauseObligation::UnifyReifiedElaboratedClauses {
+                    root,
+                    clauses,
+                    reified_vars,
+                } => todo!(),
+                ClauseObligation::Covered {
+                    handle,
+                    must_mention,
+                    in_type,
+                    in_trait,
+                } => todo!(),
             }
-            .report(self);
         }
 
         self.ucx().verify(self);
