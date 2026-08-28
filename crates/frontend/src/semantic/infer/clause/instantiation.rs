@@ -3,8 +3,9 @@ use crate::{
     semantic::{
         infer::{
             BinderParamWfBinderError, BinderParamWfParamError, BinderParamWfParamErrorKind,
-            ClauseCx, ClauseFuel, ClauseImportEnv, GenericSubst, HrtbUniverse,
-            ImplBlockSatisfyError, ImplBlockSatisfyErrorCulprit, ImportError, ImportWfMode,
+            ClauseCx, ClauseFuel, ClauseImportEnv, FnInstanceResolutionError,
+            FnInstanceResolutionErrorKind, GenericSubst, HrtbUniverse, ImplBlockSatisfyError,
+            ImplBlockSatisfyErrorCulprit, ImportError, ImportWfMode, InherentImplBlockSatisfyError,
             MultiPromise, MultiPromiseBuilder, MultiPromiseValue, Promise, PromiseValue,
             TraitSpecResolutionError, TraitSpecResolutionErrorCulprit,
         },
@@ -17,6 +18,7 @@ use crate::{
             UniversalTyVarSourceInfo,
         },
     },
+    typed_joiner,
 };
 
 // === Universal === //
@@ -566,30 +568,40 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
 
     pub fn resolve_inherent_impl_block_env(
         &mut self,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         block: Obj<ImplItem>,
         self_ty: Ty,
-    ) -> InstantiatedImplBlock {
-        let instantiation = self.fresh_impl_block(cause, universe, block);
+    ) -> PromiseValue<'tcx, InstantiatedImplBlock, InherentImplBlockSatisfyError> {
+        let PromiseValue {
+            value: instantiation,
+            promise: block_clauses_promise,
+        } = self.fresh_impl_block(fuel, universe, block);
 
         debug_assert!(instantiation.target_trait.is_none());
 
-        self.ccx.oblige_ty_unifies_ty(
-            cause.clone(),
-            instantiation.target_ty,
-            self_ty,
-            RelationMode::Equate,
-        );
+        let self_ty_unify_promise =
+            self.ccx
+                .oblige_ty_unifies_ty(instantiation.target_ty, self_ty, RelationMode::Equate);
 
-        instantiation
+        let promise = typed_joiner! {
+            let block_clauses = block_clauses_promise;
+            let self_ty_unify = self_ty_unify_promise;
+            |ccx| InherentImplBlockSatisfyError {
+                block_clauses: block_clauses.map(Box::new),
+                self_ty_unify: self_ty_unify.map(Box::new),
+            }
+        };
+
+        promise.and_value(instantiation)
     }
 
     pub fn resolve_fn_instance_sig(
         &mut self,
-        cause: &ObligeCause,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         fn_instance: FnInstance,
-    ) -> InstantiatedFnSig {
+    ) -> PromiseValue<'tcx, InstantiatedFnSig, FnInstanceResolutionError> {
         let tcx = self.ccx.tcx();
         let s = self.ccx.session();
 
@@ -598,20 +610,41 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                 let def = *def.r(s).def;
 
                 let fn_binder = def.r(s).generics;
-                let early_args = self.fresh_early_args(
-                    cause,
+                let PromiseValue {
+                    value: early_args,
+                    promise: early_args_err,
+                } = self.fresh_early_args(
+                    fuel,
                     universe,
                     fn_instance,
                     ClauseImportEnv::new(None, []),
                     fn_binder,
                 );
 
-                self.resolve_fn_def_sig(
-                    cause,
+                let PromiseValue {
+                    value: sig,
+                    promise: sig_import_err,
+                } = self.resolve_fn_def_sig(
+                    fuel,
                     universe,
                     def,
                     ClauseImportEnv::new(None, [GenericSubst::new(fn_binder, early_args)]),
-                )
+                );
+
+                let promise = typed_joiner! {
+                    let early_args_err = early_args_err;
+                    let sig_import_err = sig_import_err;
+
+                    |ccx| FnInstanceResolutionError {
+                        instance: fn_instance,
+                        kind: FnInstanceResolutionErrorKind::Item {
+                            early_args_err: early_args_err.map(Box::new),
+                            sig_import_err: sig_import_err,
+                        }
+                    }
+                };
+
+                promise.and_value(sig)
             }
             FnOwner::Trait(FnOwnerTrait {
                 instance,
@@ -622,10 +655,16 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                 let fn_binder = fn_def.r(s).generics;
 
                 let instance_binder = *instance.def.r(s).generics;
-                let instance = self.resolve_trait_spec(cause, universe, self_ty, instance);
+                let PromiseValue {
+                    value: instance,
+                    promise: resolve_instance_err,
+                } = self.resolve_trait_spec(fuel, universe, self_ty, instance);
 
-                let early_args = self.fresh_early_args(
-                    cause,
+                let PromiseValue {
+                    value: early_args,
+                    promise: early_args_err,
+                } = self.fresh_early_args(
+                    fuel,
                     universe,
                     fn_instance,
                     ClauseImportEnv::new(
@@ -635,8 +674,11 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                     fn_binder,
                 );
 
-                self.resolve_fn_def_sig(
-                    cause,
+                let PromiseValue {
+                    value: sig,
+                    promise: sig_import_err,
+                } = self.resolve_fn_def_sig(
+                    fuel,
                     universe,
                     fn_def,
                     ClauseImportEnv::new(
@@ -646,7 +688,24 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                             GenericSubst::new(fn_binder, early_args),
                         ],
                     ),
-                )
+                );
+
+                let promise = typed_joiner! {
+                    let resolve_instance_err = resolve_instance_err;
+                    let early_args_err = early_args_err;
+                    let sig_import_err = sig_import_err;
+
+                    |ccx| FnInstanceResolutionError {
+                        instance: fn_instance,
+                        kind: FnInstanceResolutionErrorKind::Trait {
+                            resolve_instance_err: resolve_instance_err.map(Box::new),
+                            early_args_err: early_args_err.map(Box::new),
+                            sig_import_err
+                        }
+                    }
+                };
+
+                promise.and_value(sig)
             }
             FnOwner::Inherent(FnOwnerInherent {
                 self_ty,
@@ -656,12 +715,19 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                 let fn_def = block.r(s).methods[method_idx as usize].unwrap();
                 let fn_binder = fn_def.r(s).generics;
 
-                let parent_env = self
-                    .resolve_inherent_impl_block_env(cause, universe, block, self_ty)
-                    .env;
+                let PromiseValue {
+                    value:
+                        InstantiatedImplBlock {
+                            env: parent_env, ..
+                        },
+                    promise: resolve_block_err,
+                } = self.resolve_inherent_impl_block_env(fuel, universe, block, self_ty);
 
-                let early_args = self.fresh_early_args(
-                    cause,
+                let PromiseValue {
+                    value: early_args,
+                    promise: early_args_err,
+                } = self.fresh_early_args(
+                    fuel,
                     universe,
                     fn_instance,
                     parent_env.clone(),
@@ -671,12 +737,36 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                 let full_env =
                     parent_env.with_subst(GenericSubst::new(fn_def.r(s).generics, early_args));
 
-                self.resolve_fn_def_sig(cause, universe, fn_def, full_env)
+                let PromiseValue {
+                    value: sig,
+                    promise: sig_import_err,
+                } = self.resolve_fn_def_sig(fuel, universe, fn_def, full_env);
+
+                let promise = typed_joiner! {
+                    let resolve_block_err = resolve_block_err;
+                    let early_args_err = early_args_err;
+                    let sig_import_err = sig_import_err;
+
+                    |ccx| FnInstanceResolutionError {
+                        instance: fn_instance,
+                        kind: FnInstanceResolutionErrorKind::Inherent {
+                            resolve_block_err: resolve_block_err.map(Box::new),
+                            early_args_err: early_args_err.map(Box::new),
+                            sig_import_err
+                        }
+                    }
+                };
+
+                promise.and_value(sig)
             }
             FnOwner::AdtCtor(FnOwnerAdtCtor { ctor }) => {
                 let item = ctor.r(s).owner.item(s);
-                let early_args = self.fresh_early_args(
-                    cause,
+
+                let PromiseValue {
+                    value: early_args,
+                    promise: early_args_err,
+                } = self.fresh_early_args(
+                    fuel,
                     universe,
                     fn_instance,
                     ClauseImportEnv::new(None, []),
@@ -693,6 +783,8 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                     [GenericSubst::new(item.r(s).generics, early_args)],
                 );
 
+                let mut import_collector = MultiPromiseBuilder::new();
+
                 let args = tcx.intern_list(
                     &ctor
                         .r(s)
@@ -701,36 +793,52 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                         .map(|field| {
                             self.ccx
                                 .importer(
-                                    cause.clone(),
+                                    fuel,
                                     universe.clone(),
                                     env.clone(),
-                                    SigImporterWfMode::DelayBug,
+                                    ImportWfMode::ReportElsewhere,
                                 )
                                 .import_ty(*field.ty)
+                                .flat_join(&mut import_collector)
                         })
                         .collect::<Vec<_>>(),
                 );
 
-                InstantiatedFnSig {
+                let sig = InstantiatedFnSig {
                     args,
                     ret_ty: self_ty,
-                }
+                };
+
+                let promise = typed_joiner! {
+                    let early_args_err = early_args_err;
+                    let sig_import_err = import_collector.finish();
+
+                    |ccx| FnInstanceResolutionError {
+                        instance: fn_instance,
+                        kind: FnInstanceResolutionErrorKind::AdtCtor {
+                            early_args_err: early_args_err.map(Box::new),
+                            sig_import_err
+                        }
+                    }
+                };
+
+                promise.and_value(sig)
             }
         }
     }
 
     fn fresh_early_args(
         &mut self,
-        cause: &ObligeCause,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         fn_instance: FnInstance,
         parent_env: ClauseImportEnv,
         binder: Obj<GenericBinder>,
-    ) -> TyOrReList {
+    ) -> PromiseValue<'tcx, TyOrReList, BinderParamWfBinderError> {
         let s = self.ccx.session();
 
         if let Some(provided) = fn_instance.r(s).early_args {
-            return provided;
+            return PromiseValue::trivial(provided);
         }
 
         let early_args =
@@ -741,37 +849,31 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                 }
             });
 
-        let spanned_early_args =
-            early_args
-                .r(s)
-                .iter()
-                .zip(&binder.r(s).defs)
-                .map(|(&para, generic)| {
-                    let cause = cause.clone().child(ObligeCauseFrame::Step(
-                        ObligeCauseStep::ImportEnvMeetsRequirements {
-                            clause: generic.span(s),
-                        },
-                    ));
+        let promise = self.ensure_binder_params_wf(
+            fuel,
+            universe,
+            binder,
+            parent_env,
+            None,
+            early_args.r(s).iter().copied(),
+        );
 
-                    (cause, para)
-                });
-
-        self.ensure_binder_params_wf(universe, binder, parent_env, None, spanned_early_args);
-
-        early_args
+        promise.and_value(early_args)
     }
 
     pub fn resolve_fn_def_sig(
         &mut self,
-        cause: &ObligeCause,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         def: Obj<FnDef>,
         env: ClauseImportEnv,
-    ) -> InstantiatedFnSig {
+    ) -> MultiPromiseValue<'tcx, InstantiatedFnSig, ImportError> {
         let s = self.ccx.session();
         let tcx = self.ccx.tcx();
 
-        InstantiatedFnSig {
+        let mut collector = MultiPromiseBuilder::new();
+
+        let output = InstantiatedFnSig {
             args: tcx.intern_list(
                 &def.r(s)
                     .args
@@ -780,25 +882,29 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                     .map(|arg| {
                         self.ccx
                             .importer(
-                                cause.clone(),
+                                fuel,
                                 universe.clone(),
                                 env.clone(),
-                                SigImporterWfMode::DelayBug,
+                                ImportWfMode::ReportElsewhere,
                             )
                             .import_ty(arg.ty)
+                            .flat_join(&mut collector)
                     })
                     .collect::<Vec<_>>(),
             ),
             ret_ty: self
                 .ccx
                 .importer(
-                    cause.clone(),
+                    fuel,
                     universe.clone(),
                     env.clone(),
-                    SigImporterWfMode::DelayBug,
+                    ImportWfMode::ReportElsewhere,
                 )
-                .import_ty(*def.r(s).ret_ty),
-        }
+                .import_ty(*def.r(s).ret_ty)
+                .flat_join(&mut collector),
+        };
+
+        collector.finish().and_value(output)
     }
 }
 
@@ -857,7 +963,7 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
 
     pub fn fresh_type_relative_fn_def_to_fn_owner(
         &mut self,
-        cause: &ObligeCause,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         self_ty: Ty,
         def: Obj<FnDef>,
@@ -870,7 +976,7 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                 let instance = self.fresh_trait_item_to_unconstrained_trait_spec(universe, item);
 
                 self.ccx.oblige_ty_meets_trait_instantiated(
-                    cause.clone(),
+                    fuel,
                     universe.clone(),
                     self_ty,
                     instance,
@@ -919,10 +1025,9 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                 fuel,
                 universe.clone(),
                 env.clone(),
-                WfImportMode::ReportHere,
+                ImportWfMode::ReportElsewhere,
             )
             .import_ty(*block.r(s).target)
-            .report_wf_never()
             .map(move |_ccx, error| ImplBlockSatisfyErrorCulprit::SelfTyNormalizeError(error))
             .join(&mut collector);
 
@@ -934,10 +1039,9 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                     fuel,
                     universe.clone(),
                     env.clone(),
-                    WfImportMode::ReportHere,
+                    ImportWfMode::ReportElsewhere,
                 )
                 .import_trait_instance(target_ty, trait_)
-                .report_wf_never()
                 .map(move |_ccx, error| {
                     ImplBlockSatisfyErrorCulprit::TargetTraitNormalizeError(error)
                 })

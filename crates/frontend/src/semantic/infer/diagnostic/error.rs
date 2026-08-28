@@ -3,8 +3,8 @@ use crate::{
     semantic::{
         infer::HrtbUniverse,
         syntax::{
-            FnOwnerTrait, GenericBinder, HrtbBinder, ImplItem, InferTyVar, Re, RelationMode,
-            SigProjectType, SimpleTySet, TraitClauseList, TraitParam, TraitSpec, Ty,
+            FnInstance, FnOwnerTrait, GenericBinder, HrtbBinder, ImplItem, InferTyVar, Re,
+            RelationMode, SigProjectType, SimpleTySet, TraitClauseList, TraitParam, TraitSpec, Ty,
             UniversalReVar, UniversalTyVar,
         },
     },
@@ -190,6 +190,12 @@ pub enum TraitSpecResolutionErrorCulprit {
 }
 
 #[derive(Debug, Clone)]
+pub struct InherentImplBlockSatisfyError {
+    pub block_clauses: Option<Box<ImplBlockSatisfyError>>,
+    pub self_ty_unify: Option<Box<TyAndTyUnifyError>>,
+}
+
+#[derive(Debug, Clone)]
 pub struct ImplBlockSatisfyError {
     pub block: Obj<ImplItem>,
     pub culprits: Vec<ImplBlockSatisfyErrorCulprit>,
@@ -200,6 +206,34 @@ pub enum ImplBlockSatisfyErrorCulprit {
     SelfTyNormalizeError(Vec<ImportError>),
     TargetTraitNormalizeError(Vec<ImportError>),
     GenericsUnsatisfied(BinderParamWfBinderError),
+}
+
+#[derive(Debug, Clone)]
+pub struct FnInstanceResolutionError {
+    pub instance: FnInstance,
+    pub kind: FnInstanceResolutionErrorKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum FnInstanceResolutionErrorKind {
+    Item {
+        early_args_err: Option<Box<BinderParamWfBinderError>>,
+        sig_import_err: Option<Vec<ImportError>>,
+    },
+    Trait {
+        resolve_instance_err: Option<Box<TraitSpecResolutionError>>,
+        early_args_err: Option<Box<BinderParamWfBinderError>>,
+        sig_import_err: Option<Vec<ImportError>>,
+    },
+    Inherent {
+        resolve_block_err: Option<Box<InherentImplBlockSatisfyError>>,
+        early_args_err: Option<Box<BinderParamWfBinderError>>,
+        sig_import_err: Option<Vec<ImportError>>,
+    },
+    AdtCtor {
+        early_args_err: Option<Box<BinderParamWfBinderError>>,
+        sig_import_err: Option<Vec<ImportError>>,
+    },
 }
 
 // === Unification Promises === //
