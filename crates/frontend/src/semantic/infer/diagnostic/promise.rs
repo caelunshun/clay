@@ -1,5 +1,5 @@
 use crate::{
-    base::{ErrorGuaranteed, HardDiag},
+    base::{Diag, ErrorGuaranteed, HardDiag},
     semantic::infer::ClauseCx,
 };
 use bytemuck::{TransparentWrapper, TransparentWrapperAlloc as _};
@@ -130,11 +130,11 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
         self.report_with(|ccx, err| err.to_diag(ccx).emit());
     }
 
-    pub fn report_delay_bug(self)
-    where
-        E: ErrorToDiag<'tcx>,
-    {
-        self.report_with(|ccx, err| err.to_diag(ccx).to_delay_bug().emit());
+    pub fn report_delay_bug(self) {
+        self.report_with(|_ccx, _err| {
+            // err.to_diag(ccx).to_delay_bug().emit()
+            Diag::anon_err("delay bug").to_delay_bug().emit()
+        });
     }
 
     // TODO: Use bug machinery
@@ -268,10 +268,7 @@ impl<'tcx, T, E: 'tcx> PromiseValue<'tcx, T, E> {
         self.finish_promise(|p| p.report_loud())
     }
 
-    pub fn report_delay_bug(self) -> T
-    where
-        E: ErrorToDiag<'tcx>,
-    {
+    pub fn report_delay_bug(self) -> T {
         self.finish_promise(|p| p.report_delay_bug())
     }
 

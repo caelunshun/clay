@@ -45,7 +45,7 @@ use crate::{
     semantic::{
         infer::{
             ClauseCx, ClauseImportEnv, ClauseObligation, FloatingInferVar, GenericSubst,
-            HrtbUniverse, ObligationNotReady, ObligationResult, SigImporterWfMode,
+            HrtbUniverse, ImportWfMode, ObligationNotReady, ObligationResult,
         },
         syntax::{
             AnyGeneric, HrtbBinder, InferTyVar, InferTyVarSourceInfo, Mutability, Re, RelationMode,
@@ -114,11 +114,10 @@ impl<'tcx> ClauseCx<'tcx> {
             return elaborated;
         }
 
-        // TODO: create an actual clause
-        let cause = ObligeCause::new_empty_report();
         let var_universe = self.lookup_universal_ty_hrtb_universe(var).clone();
 
         // If not, elaborate the clause list without merging projections.
+        let fuel = self.fresh_clause_fuel();
         let lub_re = self.fresh_re_universal(UniversalReVarSourceInfo::ElaboratedLub);
 
         let mut elaborated = Vec::new();
@@ -198,18 +197,19 @@ impl<'tcx> ClauseCx<'tcx> {
 
                         let implicit_clauses = self
                             .importer(
-                                cause.clone(),
+                                fuel,
                                 // Associated types vary in the same way as their parent generic.
                                 var_universe.clone(),
                                 ClauseImportEnv::new(
                                     Some(tcx.intern(TyKind::UniversalVar(var))),
                                     [GenericSubst::new(*spec.def.r(s).generics, new_param_equals)],
                                 ),
-                                // We must skip WF for these clauses because, otherwise, we'd have
-                                // to expand any infinite loops of projection universals.
-                                SigImporterWfMode::Skip,
+                                ImportWfMode::ReportElsewhere,
                             )
-                            .import_trait_clause_list(*base.r(s).clauses);
+                            .import_trait_clause_list(*base.r(s).clauses)
+                            // N.B. we're importing with maximum fuel so, if this fails, the primary
+                            // `ReportHere` import should also fail.
+                            .report_delay_bug();
 
                         let all_clauses = explicit_clauses
                             .r(s)
@@ -244,16 +244,18 @@ impl<'tcx> ClauseCx<'tcx> {
                     // Explore and push on the elaborated super-trait constraints.
                     let inherits = self
                         .importer(
-                            cause.clone(),
+                            fuel,
                             // Associated types vary in the same way as their parent generic.
                             var_universe.clone(),
                             ClauseImportEnv::new(
                                 Some(tcx.intern(TyKind::UniversalVar(var))),
                                 [GenericSubst::new(*spec.def.r(s).generics, new_param_equals)],
                             ),
-                            SigImporterWfMode::DelayBug,
+                            ImportWfMode::ReportElsewhere,
                         )
-                        .import_trait_clause_list(*spec.def.r(s).inherits);
+                        .import_trait_clause_list(*spec.def.r(s).inherits)
+                        // See above.
+                        .report_delay_bug();
 
                     elaborated.extend(inherits.r(s).iter().copied());
                 }
@@ -266,12 +268,11 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // Create an obligation to properly resolve reified associated type inference variables to
         // proper universals (see module comment).
-        self.push_obligation(ClauseObligation::UnifyReifiedElaboratedClauses(
-            ObligeCause::new(ObligeCauseBehavior::Report),
-            var,
-            elaborated,
-            reified_vars.clone(),
-        ));
+        self.push_obligation(ClauseObligation::UnifyReifiedElaboratedClauses {
+            root: var,
+            clauses: elaborated,
+            reified_vars: reified_vars.clone(),
+        });
 
         // Record the elaboration and return it.
         let elaborated = UniversalElaboration {
@@ -509,12 +510,9 @@ impl ClauseCx<'_> {
                         self.force_update_permissions_of_ty_var(var, SimpleTySet::all());
                     }
 
-                    self.oblige_ty_unifies_ty(
-                        cause.clone(),
-                        resolved,
-                        actual,
-                        RelationMode::Equate,
-                    );
+                    self.oblige_ty_unifies_ty(resolved, actual, RelationMode::Equate)
+                        // Permission sets ensure that this always succeeds.
+                        .report_delay_bug();
                 }
             }
 
@@ -525,7 +523,6 @@ impl ClauseCx<'_> {
                 let fresh_re = self.fresh_re_infer();
 
                 self.oblige_ty_unifies_ty(
-                    cause.clone(),
                     tcx.intern(TyKind::Trait(
                         fresh_re,
                         Mutability::Mut,
@@ -537,7 +534,9 @@ impl ClauseCx<'_> {
                         tcx.intern_list(&[TraitClause::Trait(remaining)]),
                     )),
                     RelationMode::Equate,
-                );
+                )
+                // TODO: Check this.
+                .report_delay_bug();
             }
         }
 
