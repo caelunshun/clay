@@ -33,6 +33,7 @@ pub struct UninstantiatedTraitImplError {
     pub rhs: HrtbBinder,
     pub rhs_instantiated: TraitSpec,
     pub spec_not_met: Option<InstantiatedTraitImplErrorKind>,
+    pub rhs_hrtb_error: Option<InstantiateHrtbUniversalError>,
 }
 
 #[derive(Debug, Clone)]
@@ -48,12 +49,15 @@ pub enum InstantiatedTraitImplErrorKind {
     NoSuitableImpl,
     InherentUnsatisfied(InherentImplUnsatisfiedError),
     ImplBlockUnsatisfied(BlockImplUnsatisfiedError),
+    FnDefImplUnsatisfied(FnImplUnsatisfiedError),
 }
 
 #[derive(Debug, Clone)]
 pub struct InherentImplUnsatisfiedError {
     pub lhs: HrtbBinder,
     pub rhs: TraitSpec,
+    pub lhs_instantiated: TraitSpec,
+    pub lhs_instantiate_error: Option<InstantiateHrtbInferError>,
     pub culprits: Vec<InherentImplErrorImplCulprit>,
 }
 
@@ -62,6 +66,8 @@ pub enum InherentImplErrorImplCulprit {
     RegionEquate(u32, ReAndReUnifyError),
     TyEquateRegion(u32, TyAndTyRegionUnifyError),
     TyEquate(u32, TyAndTyUnifyError),
+    RegionMeets(u32, Vec<GeneralOutlivesError>),
+    TyMeets(u32, Vec<TraitClauseError>),
 }
 
 #[derive(Debug, Clone)]
@@ -72,8 +78,19 @@ pub struct BlockImplUnsatisfiedError {
 
 #[derive(Debug, Clone)]
 pub enum BlockImplUnsatisfiedErrorCulprit {
-    AssocMismatch,
-    AssocNotSatisfied,
+    BlockUnsatisfied(Box<ImplBlockSatisfyError>),
+    SelfTyUnify(Box<TyAndTyRegionUnifyError>),
+    GenericReUnify(u32, Box<ReAndReUnifyError>),
+    GenericTyUnify(u32, Box<TyAndTyRegionUnifyError>),
+    AssocTyUnify(u32, Box<TyAndTyUnifyError>),
+    AssocSpecMet(u32, Box<Vec<TraitClauseError>>),
+}
+
+#[derive(Debug, Clone)]
+pub struct FnImplUnsatisfiedError {
+    pub resolve_fn: Option<Box<FnInstanceResolutionError>>,
+    pub unify_args: Option<Box<TyAndTyRegionUnifyError>>,
+    pub unify_output: Option<Box<TyAndTyRegionUnifyError>>,
 }
 
 // === Outlives Error === //
@@ -217,8 +234,8 @@ pub struct ImplBlockSatisfyError {
 
 #[derive(Debug, Clone)]
 pub enum ImplBlockSatisfyErrorCulprit {
-    SelfTyNormalizeError(Vec<ImportError>),
-    TargetTraitNormalizeError(Vec<ImportError>),
+    SelfTyImportError(Vec<ImportError>),
+    TargetTraitImportError(Vec<ImportError>),
     GenericsUnsatisfied(BinderParamWfBinderError),
 }
 

@@ -1028,7 +1028,7 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                 ImportWfMode::ReportElsewhere,
             )
             .import_ty(*block.r(s).target)
-            .map(move |_ccx, error| ImplBlockSatisfyErrorCulprit::SelfTyNormalizeError(error))
+            .map(move |_ccx, error| ImplBlockSatisfyErrorCulprit::SelfTyImportError(error))
             .join(&mut collector);
 
         env.self_ty = Some(target_ty);
@@ -1042,9 +1042,7 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                     ImportWfMode::ReportElsewhere,
                 )
                 .import_trait_instance(target_ty, trait_)
-                .map(move |_ccx, error| {
-                    ImplBlockSatisfyErrorCulprit::TargetTraitNormalizeError(error)
-                })
+                .map(move |_ccx, error| ImplBlockSatisfyErrorCulprit::TargetTraitImportError(error))
                 .join(&mut collector)
         });
 

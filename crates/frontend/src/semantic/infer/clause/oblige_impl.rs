@@ -5,12 +5,12 @@ use crate::{
     base::arena::{HasInterner as _, Obj},
     semantic::{
         infer::{
-            BlockImplUnsatisfiedError, ClauseCx, ClauseFuel, ClauseObligation, HrtbUniverse,
-            HrtbUniverseInfo, InherentImplErrorImplCulprit, InherentImplUnsatisfiedError,
-            InstantiatedImplBlock, InstantiatedTraitImplError, InstantiatedTraitImplErrorKind,
-            MultiPromise, MultiPromiseBuilder, NotCoveredError, ObligationNotReady,
-            ObligationResult, Promise, PromiseHandle, PromiseValue, TraitClauseError,
-            UninstantiatedTraitImplError,
+            BlockImplUnsatisfiedError, BlockImplUnsatisfiedErrorCulprit, ClauseCx, ClauseFuel,
+            ClauseObligation, FnImplUnsatisfiedError, HrtbUniverse, HrtbUniverseInfo,
+            InherentImplErrorImplCulprit, InherentImplUnsatisfiedError, InstantiatedImplBlock,
+            InstantiatedTraitImplError, InstantiatedTraitImplErrorKind, MultiPromise,
+            MultiPromiseBuilder, NotCoveredError, ObligationNotReady, ObligationResult, Promise,
+            PromiseHandle, PromiseValue, TraitClauseError, UninstantiatedTraitImplError,
         },
         syntax::{
             HrtbBinder, ImplItem, RelationMode, SimpleTySet, TraitClause, TraitClauseList,
@@ -82,13 +82,17 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         };
 
-        let rhs_instantiated = self.instantiate_hrtb_universal(fuel, universe.clone(), rhs);
+        let PromiseValue {
+            value: rhs_instantiated,
+            promise: rhs_hrtb_error,
+        } = self.instantiate_hrtb_universal(fuel, universe.clone(), rhs);
 
         let spec_not_met =
             self.oblige_ty_meets_trait_instantiated(fuel, universe, lhs, rhs_instantiated);
 
         typed_joiner! {
             let spec_not_met = spec_not_met;
+            let rhs_hrtb_error = rhs_hrtb_error;
 
             |ccx| {
                 UninstantiatedTraitImplError {
@@ -96,6 +100,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     rhs,
                     rhs_instantiated,
                     spec_not_met: spec_not_met.map(|v| v.kind),
+                    rhs_hrtb_error,
                 }
             }
         }
@@ -223,7 +228,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
         if let Ok(confirmation) = self
             .clone()
-            .try_select_special_impl(cause, &universe, lhs, rhs)
+            .try_select_special_impl(fuel, &universe, lhs, rhs)
         {
             debug_assert!(prev_confirmation.is_none());
             prev_confirmation = Some(confirmation)
@@ -232,7 +237,7 @@ impl<'tcx> ClauseCx<'tcx> {
         for candidate in candidates {
             let Ok(confirmation) = self
                 .clone()
-                .try_select_block_impl(cause, &universe, lhs, candidate, rhs)
+                .try_select_block_impl(fuel, &universe, lhs, candidate, rhs)
             else {
                 continue;
             };
@@ -257,7 +262,13 @@ impl<'tcx> ClauseCx<'tcx> {
             return Ok(());
         };
 
-        *self = confirmation;
+        *self = confirmation
+            .map(move |_ccx, error| InstantiatedTraitImplError {
+                lhs,
+                rhs,
+                kind: error,
+            })
+            .forward(self, handle);
 
         Ok(())
     }
@@ -320,7 +331,10 @@ impl<'tcx> ClauseCx<'tcx> {
         // Instantiate the current clause existentially and match its elaborated parameters against
         // our specification.
         let lhs_orig = lhs;
-        let lhs = self.instantiate_hrtb_infer(cause.clone(), universe.clone(), lhs);
+        let PromiseValue {
+            value: lhs,
+            promise: lhs_instantiate_error,
+        } = self.instantiate_hrtb_infer(fuel, universe.clone(), lhs);
 
         let mut param_iter = lhs.params.r(s).iter().zip(rhs.params.r(s)).enumerate();
 
@@ -399,39 +413,47 @@ impl<'tcx> ClauseCx<'tcx> {
                 },
                 TraitParam::Unspecified(rhs) => match lhs {
                     TyOrRe::Re(lhs) => {
-                        // TODO
                         self.oblige_re_meets_clauses(lhs, rhs)
                             .map(move |_ccx, error| {
-                                InherentImplErrorImplCulprit::TyEquate(idx as u32, error)
+                                InherentImplErrorImplCulprit::RegionMeets(idx as u32, error)
                             })
                             .join(&mut culprits);
                     }
                     TyOrRe::Ty(lhs) => {
-                        // TODO
-                        self.oblige_ty_meets_clauses(fuel, universe, lhs, rhs);
+                        self.oblige_ty_meets_clauses(fuel, universe, lhs, rhs)
+                            .map(move |_ccx, error| {
+                                InherentImplErrorImplCulprit::TyMeets(idx as u32, error)
+                            })
+                            .join(&mut culprits);
                     }
                 },
             }
         }
 
-        let promise = culprits
-            .finish()
-            .map(|_ccx, culprits| InherentImplUnsatisfiedError {
+        let promise = typed_joiner! {
+            let culprits = culprits.finish();
+            let lhs_instantiate_error = lhs_instantiate_error;
+
+            |ccx| InherentImplUnsatisfiedError {
                 lhs: lhs_orig,
                 rhs,
-                culprits,
-            });
+                lhs_instantiated: lhs,
+                lhs_instantiate_error,
+                culprits: culprits.unwrap_or_default(),
+            }
+        };
 
         Ok(Ok(promise.and_value(self)))
     }
 
     fn try_select_block_impl(
         mut self,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         lhs: Ty,
         rhs: Obj<ImplItem>,
         spec: TraitSpec,
-    ) -> Result<PromiseValue<'tcx, Self, BlockImplUnsatisfiedError>, SelectionRejected> {
+    ) -> Result<PromiseValue<'tcx, Self, InstantiatedTraitImplErrorKind>, SelectionRejected> {
         let s = self.session();
 
         let mut collector = MultiPromiseBuilder::new();
@@ -444,7 +466,11 @@ impl<'tcx> ClauseCx<'tcx> {
             ..
         } = self
             .instantiate_infer()
-            .fresh_impl_block(cause, universe, rhs);
+            .fresh_impl_block(fuel, universe, rhs)
+            .map(move |_ccx, error| {
+                BlockImplUnsatisfiedErrorCulprit::BlockUnsatisfied(Box::new(error))
+            })
+            .join(&mut collector);
 
         let target_trait = target_trait.unwrap();
 
@@ -454,7 +480,11 @@ impl<'tcx> ClauseCx<'tcx> {
             .unify_ty_and_ty(lhs, target_ty, RelationMode::Equate)
         {
             Ok(promise) => {
-                // TODO: Handle promise!!!
+                promise
+                    .map(move |_ccx, error| {
+                        BlockImplUnsatisfiedErrorCulprit::SelfTyUnify(Box::new(error))
+                    })
+                    .join(&mut collector);
             }
             Err(_err) => return Err(SelectionRejected),
         }
@@ -462,19 +492,26 @@ impl<'tcx> ClauseCx<'tcx> {
         // See whether our RHS trait's generic parameters can be satisfied by this `impl`.
         debug_assert_eq!(target_trait.def, spec.def);
 
-        for (&instance, &required_param) in target_trait
+        for (idx, (&instance, &required_param)) in target_trait
             .params
             .r(s)
             .iter()
             .zip(spec.params.r(s))
+            .enumerate()
             .take(*spec.def.r(s).regular_generic_count as usize)
         {
             match required_param {
                 TraitParam::Equals(required) => match (instance, required) {
                     (TyOrRe::Re(instance), TyOrRe::Re(required)) => {
-                        // TODO: Handle promise!!!
                         self.ucx_mut()
-                            .unify_re_and_re(instance, required, RelationMode::Equate);
+                            .unify_re_and_re(instance, required, RelationMode::Equate)
+                            .map(move |_ccx, error| {
+                                BlockImplUnsatisfiedErrorCulprit::GenericReUnify(
+                                    idx as u32,
+                                    Box::new(error),
+                                )
+                            })
+                            .join(&mut collector);
                     }
                     (TyOrRe::Ty(instance), TyOrRe::Ty(required)) => {
                         match self.ucx_mut().unify_ty_and_ty(
@@ -483,7 +520,14 @@ impl<'tcx> ClauseCx<'tcx> {
                             RelationMode::Equate,
                         ) {
                             Ok(promise) => {
-                                // TODO: Handle promise
+                                promise
+                                    .map(move |_ccx, error| {
+                                        BlockImplUnsatisfiedErrorCulprit::GenericTyUnify(
+                                            idx as u32,
+                                            Box::new(error),
+                                        )
+                                    })
+                                    .join(&mut collector);
                             }
                             Err(_) => return Err(SelectionRejected),
                         }
@@ -497,11 +541,12 @@ impl<'tcx> ClauseCx<'tcx> {
         }
 
         // Register obligations for associated types.
-        for (&instance_ty, &required_param) in target_trait
+        for (idx, (&instance_ty, &required_param)) in target_trait
             .params
             .r(s)
             .iter()
             .zip(spec.params.r(s))
+            .enumerate()
             .skip(*spec.def.r(s).regular_generic_count as usize)
         {
             // Associated types are never regions.
@@ -513,36 +558,45 @@ impl<'tcx> ClauseCx<'tcx> {
                         unreachable!()
                     };
 
-                    self.oblige_ty_unifies_ty(
-                        cause.clone(),
-                        instance_ty,
-                        required_ty,
-                        RelationMode::Equate,
-                    );
+                    self.oblige_ty_unifies_ty(instance_ty, required_ty, RelationMode::Equate)
+                        .map(move |_ccx, error| {
+                            BlockImplUnsatisfiedErrorCulprit::AssocTyUnify(
+                                idx as u32,
+                                Box::new(error),
+                            )
+                        })
+                        .join(&mut collector);
                 }
                 TraitParam::Unspecified(additional_clauses) => {
-                    self.oblige_ty_meets_clauses(cause, universe, instance_ty, additional_clauses);
+                    self.oblige_ty_meets_clauses(fuel, universe, instance_ty, additional_clauses)
+                        .map(move |_ccx, error| {
+                            BlockImplUnsatisfiedErrorCulprit::AssocSpecMet(
+                                idx as u32,
+                                Box::new(error),
+                            )
+                        })
+                        .join(&mut collector);
                 }
             }
         }
 
-        let promise = collector
-            .finish()
-            .map(move |_ccx, culprits| BlockImplUnsatisfiedError {
+        let promise = collector.finish().map(move |_ccx, culprits| {
+            InstantiatedTraitImplErrorKind::ImplBlockUnsatisfied(BlockImplUnsatisfiedError {
                 block: rhs,
                 culprits,
-            });
+            })
+        });
 
         Ok(promise.and_value(self))
     }
 
     fn try_select_special_impl(
         mut self,
-        cause: &ObligeCause,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         lhs: Ty,
         rhs: TraitSpec,
-    ) -> Result<Self, SelectionRejected> {
+    ) -> Result<PromiseValue<'tcx, Self, InstantiatedTraitImplErrorKind>, SelectionRejected> {
         let s = self.session();
         let tcx = self.tcx();
         let krate = self.krate();
@@ -563,34 +617,41 @@ impl<'tcx> ClauseCx<'tcx> {
                 unreachable!()
             };
 
-            let sig = self
+            let PromiseValue {
+                value: sig,
+                promise: resolve_fn_promise,
+            } = self
                 .instantiate_infer()
-                .resolve_fn_instance_sig(cause, universe, instance);
+                .resolve_fn_instance_sig(fuel, universe, instance);
 
-            match self.ucx_mut().unify_ty_and_ty(
+            let Ok(unify_args_promise) = self.ucx_mut().unify_ty_and_ty(
                 rhs_input,
                 tcx.intern(TyKind::Tuple(sig.args)),
                 RelationMode::Equate,
-            ) {
-                Ok(promise) => {
-                    // TODO: Handle promise!!!
-                }
-                Err(_) => return Err(SelectionRejected),
-            }
+            ) else {
+                return Err(SelectionRejected);
+            };
 
-            match self
-                .ucx_mut()
-                .unify_ty_and_ty(rhs_output, sig.ret_ty, RelationMode::Equate)
-            {
-                Ok(promise) => {
-                    // TODO: Handle promise!!!
-                }
-                Err(_) => {
-                    return Err(SelectionRejected);
-                }
-            }
+            let Ok(unify_output_promise) =
+                self.ucx_mut()
+                    .unify_ty_and_ty(rhs_output, sig.ret_ty, RelationMode::Equate)
+            else {
+                return Err(SelectionRejected);
+            };
 
-            return Ok(self);
+            let promise = typed_joiner! {
+                let resolve_fn = resolve_fn_promise;
+                let unify_args = unify_args_promise;
+                let unify_output = unify_output_promise;
+
+                |ccx| InstantiatedTraitImplErrorKind::FnDefImplUnsatisfied(FnImplUnsatisfiedError {
+                    resolve_fn: resolve_fn.map(Box::new),
+                    unify_args: unify_args.map(Box::new),
+                    unify_output: unify_output.map(Box::new),
+                })
+            };
+
+            return Ok(promise.and_value(self));
         }
 
         Err(SelectionRejected)
