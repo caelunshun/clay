@@ -7,10 +7,11 @@ use crate::{
     },
     semantic::{
         infer::{
-            ClauseCx, ClauseFuel, HrtbInferParamNotValid, HrtbInferParamNotValidKind, HrtbUniverse,
-            HrtbUniverseInfo, ImportError, InstantiateHrtbInferError,
-            InstantiateHrtbUniversalError, MultiPromise, MultiPromiseBuilder, MultiPromiseValue,
-            PromiseValue, TraitSpecResolutionError, UnifyCxMode,
+            BinderParamWfBinderError, ClauseCx, ClauseFuel, HrtbInferParamNotValid,
+            HrtbInferParamNotValidKind, HrtbUniverse, HrtbUniverseInfo, ImportError,
+            InstantiateHrtbInferError, InstantiateHrtbUniversalError, MultiPromise,
+            MultiPromiseBuilder, MultiPromiseValue, Promise, PromiseValue,
+            TraitSpecResolutionError, UnifyCxMode,
         },
         lower::generics::normalize_positional_generic_arity,
         syntax::{
@@ -364,14 +365,17 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 body
             }
             SigTyKind::Reference(re, muta, pointee) => {
-                let pointee_span = pointee.r(s).span;
-
                 let re = self.import_re(re).flat_join(&mut collector);
                 let pointee = self.import_ty(pointee).flat_join(&mut collector);
 
                 if self.opts.wf_mode.do_wf() {
                     self.ccx
-                        .oblige_ty_outlives_re(pointee, re, RelationDirection::LhsOntoRhs);
+                        .oblige_ty_outlives_re(pointee, re, RelationDirection::LhsOntoRhs)
+                        .map(move |_ccx, error| ImportError::BadRefPointee {
+                            ty,
+                            error: Box::new(error),
+                        })
+                        .join(&mut collector);
                 }
 
                 tcx.intern(TyKind::Reference(re, muta, pointee))
@@ -439,7 +443,6 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
                 let instance = self
                     .ccx
-                    .instantiate_infer()
                     .resolve_trait_spec(self.fuel, &self.opts.universe, target, spec_imported)
                     .filter_map(move |_ccx, error| {
                         // TODO: filter if we're in no-WF mode
@@ -527,7 +530,6 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             ) => {
                 let instance = self
                     .ccx
-                    .instantiate_infer()
                     .resolve_trait_spec(self.fuel, &self.opts.universe, self_ty, instance)
                     .filter_map(move |_ccx, error| {
                         // TODO: filter if we're in no-WF mode
@@ -563,7 +565,6 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             ) => {
                 let block_args = self
                     .ccx
-                    .instantiate_infer()
                     .resolve_inherent_impl_block_env(self.fuel, &self.opts.universe, block, self_ty)
                     .filter_map(move |_ccx, error| {
                         // TODO: filter if we're in no-WF mode
@@ -644,14 +645,22 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         if self.opts.wf_mode.do_wf() {
             let env = make_env(args_imported);
 
-            self.ccx.instantiate_infer().ensure_binder_params_wf(
-                self.fuel,
-                &self.opts.universe,
-                binder,
-                env.clone(),
-                None,
-                args_imported.r(s).iter().copied(),
-            );
+            self.ccx
+                .ensure_binder_params_wf(
+                    self.fuel,
+                    &self.opts.universe,
+                    binder,
+                    env.clone(),
+                    None,
+                    args_imported,
+                )
+                .map(move |_ccx, error| ImportError::BadGenerics {
+                    binder,
+                    env,
+                    args,
+                    error: Box::new(error),
+                })
+                .join(&mut collector);
         }
 
         collector.finish().and_value(args_imported)
@@ -693,7 +702,6 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         if self.opts.wf_mode.do_wf() {
             self.ensure_trait_instance_args_wf_no_self_obligation(
                 instance_applies_to,
-                instance.params.r(s).iter().map(|v| v.span(s)),
                 instance_imported,
                 AssocParamWfMode::Check,
             );
@@ -705,10 +713,9 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
     fn ensure_trait_instance_args_wf_no_self_obligation(
         &mut self,
         applies_to: Ty,
-        spans: impl IntoIterator<Item = Span>,
         instance: TraitInstance,
         assoc_wf_mode: AssocParamWfMode,
-    ) {
+    ) -> Promise<'tcx, BinderParamWfBinderError> {
         let s = self.ccx.session();
 
         let binder = *instance.def.r(s).generics;
@@ -723,14 +730,14 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             AssocParamWfMode::Ignore => Some(*instance.def.r(s).regular_generic_count),
         };
 
-        self.ccx.instantiate_infer().ensure_binder_params_wf(
+        self.ccx.ensure_binder_params_wf(
             self.fuel,
             &self.opts.universe,
             binder,
             binder_env,
             param_truncation,
-            instance.params.r(s).iter().copied(),
-        );
+            instance.params,
+        )
     }
 
     // === Spec drivers === //
@@ -871,7 +878,8 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         let mut collector = MultiPromiseBuilder::new();
 
         if let Some(wf_self_ty) = wf_self_ty {
-            self.check_hrtb_binder_wf(wf_self_ty, binder);
+            self.check_hrtb_binder_wf(wf_self_ty, binder)
+                .flat_join(&mut collector);
         }
 
         // Enter nested universe
@@ -992,21 +1000,27 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             .import_trait_spec_with_self_ty(Some(wf_self_ty), binder.inner)
             .flat_join(&mut collector);
 
-        self.ccx.oblige_covered(
-            /* must_mention */
-            hrtb_universals
-                .iter()
-                .filter_map(|ty_or_re| ty_or_re.as_ty())
-                .map(|ty| {
-                    let TyKind::UniversalVar(var) = *ty.r(s) else {
-                        unreachable!()
-                    };
+        self.ccx
+            .oblige_covered(
+                /* must_mention */
+                hrtb_universals
+                    .iter()
+                    .filter_map(|ty_or_re| ty_or_re.as_ty())
+                    .map(|ty| {
+                        let TyKind::UniversalVar(var) = *ty.r(s) else {
+                            unreachable!()
+                        };
 
-                    var
-                }),
-            /* in_type */ None,
-            /* in_trait */ Some(bound),
-        );
+                        var
+                    }),
+                /* in_type */ None,
+                /* in_trait */ Some(bound),
+            )
+            .map(move |_ccx, error| ImportError::HrtbNotCovered {
+                binder,
+                error: Box::new(error),
+            })
+            .join(&mut collector);
 
         // Exit nested universe
         self.opts = old_opts;
@@ -1107,7 +1121,6 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         // takes priority.
         let instance = self
             .ccx
-            .instantiate_infer()
             .resolve_trait_spec(self.fuel, &self.opts.universe, wf_self_ty, spec_imported)
             .filter_map(move |_ccx, error| {
                 // No filtering needed because we know we're in WF mode.
@@ -1118,23 +1131,20 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             .join(&mut collector);
 
         // Check the parameters.
-        let spans = spec
-            .params
-            .r(s)
-            .iter()
-            .take(*spec.def.r(s).regular_generic_count as usize)
-            .map(|v| v.span);
-
         self.ensure_trait_instance_args_wf_no_self_obligation(
             wf_self_ty,
-            spans,
             instance,
             // We don't verify the well-formedness of the associated types within a spec to be
             // consistent with rustc's behavior, which seems to exist to make a few common patterns
             // work. This is fine because, if the associated type is not WF, no impl for it will
             // exist.
             AssocParamWfMode::Ignore,
-        );
+        )
+        .map(move |_ccx, error| ImportError::BadTraitSpec {
+            spec,
+            error: Box::new(error),
+        })
+        .join(&mut collector);
 
         collector.finish().and_value(spec_imported)
     }
@@ -1293,7 +1303,7 @@ struct HrtbInstantiator<'a, 'tcx> {
 }
 
 impl<'a, 'tcx> HrtbInstantiator<'a, 'tcx> {
-    pub fn new(
+    fn new(
         ccx: &'a mut ClauseCx<'tcx>,
         normalize_errors: &'a mut MultiPromiseBuilder<'tcx, TraitSpecResolutionError>,
         fuel: ClauseFuel,
@@ -1308,10 +1318,6 @@ impl<'a, 'tcx> HrtbInstantiator<'a, 'tcx> {
             replace_with,
             top: DebruijnTop::new(replace_with.r(s).len()),
         }
-    }
-
-    pub fn replace_with(&self) -> TyOrReList {
-        self.replace_with
     }
 }
 
@@ -1357,7 +1363,6 @@ impl<'tcx> TyFolder<'tcx> for HrtbInstantiator<'_, 'tcx> {
             }) if self.top.len() == self.replace_with.r(s).len() => {
                 let instance = self
                     .ccx
-                    .instantiate_infer()
                     .resolve_trait_spec(self.fuel, HrtbUniverse::ROOT_REF, target, spec)
                     .filter_map(move |_ccx, error| {
                         // TODO: filter non-fuel errors

@@ -144,8 +144,9 @@ impl<'tcx> ClauseCx<'tcx> {
                 // (trivial)
             }
             TyKind::Reference(lhs, _muta, _pointee) => {
-                // TODO: Handle promise!!!
-                self.ucx_mut().unify_re_and_re(lhs, rhs, dir.to_mode());
+                self.ucx_mut()
+                    .unify_re_and_re(lhs, rhs, dir.to_mode())
+                    .join(&mut collector);
             }
             TyKind::Adt(lhs) => {
                 // ADTs are bounded by the regions which they mention.
@@ -166,8 +167,9 @@ impl<'tcx> ClauseCx<'tcx> {
             }
 
             TyKind::Trait(lhs_re, _muta, _lhs_spec) => {
-                // TODO: Handle promise!!!
-                self.ucx_mut().unify_re_and_re(lhs_re, rhs, dir.to_mode());
+                self.ucx_mut()
+                    .unify_re_and_re(lhs_re, rhs, dir.to_mode())
+                    .join(&mut collector);
             }
             TyKind::Tuple(lhs) => {
                 for &lhs in lhs.r(s) {

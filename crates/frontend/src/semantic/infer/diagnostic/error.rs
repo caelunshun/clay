@@ -1,11 +1,12 @@
 use crate::{
     base::arena::Obj,
     semantic::{
-        infer::HrtbUniverse,
+        infer::{ClauseImportEnv, HrtbUniverse},
         syntax::{
             FnInstance, FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, ImplItem,
-            InferTyVar, Re, RelationMode, SigProjectType, SimpleTySet, TraitClauseList, TraitParam,
-            TraitSpec, Ty, UniversalReVar, UniversalTyVar,
+            InferTyVar, Re, RelationMode, SigGenericList, SigHrtbBinder, SigProjectType,
+            SigTraitSpec, SigTy, SimpleTySet, TraitClauseList, TraitParam, TraitSpec, Ty,
+            TyOrReList, UniversalReVar, UniversalTyVar,
         },
     },
 };
@@ -154,6 +155,24 @@ pub enum ImportError {
     NoShadowImpl {
         error: Box<TraitSpecResolutionError>,
     },
+    BadRefPointee {
+        ty: SigTy,
+        error: Box<TyOutlivesReError>,
+    },
+    BadGenerics {
+        binder: Obj<GenericBinder>,
+        env: ClauseImportEnv,
+        args: SigGenericList,
+        error: Box<BinderParamWfBinderError>,
+    },
+    BadTraitSpec {
+        spec: SigTraitSpec,
+        error: Box<BinderParamWfBinderError>,
+    },
+    HrtbNotCovered {
+        binder: SigHrtbBinder,
+        error: Box<NotCoveredError>,
+    },
 }
 
 // === HRTB errors === //
@@ -188,6 +207,7 @@ pub enum HrtbInferParamNotValidKind {
 #[derive(Debug, Clone)]
 pub struct BinderParamWfBinderError {
     pub binder: Obj<GenericBinder>,
+    pub params: TyOrReList,
     pub errors: Vec<BinderParamWfParamError>,
 }
 

@@ -112,13 +112,14 @@ impl<'tcx> ReUnifyTracker<'tcx> {
                     return Ok(());
                 }
 
-                cst.handle.reject(
-                    ccx,
-                    ReAndReUnifyErrorCause {
-                        requires_var: var,
-                        to_outlive: must_outlive.to_re(),
-                    },
-                );
+                // TODO
+                // cst.handle.reject(
+                //     ccx,
+                //     ReAndReUnifyErrorCause {
+                //         requires_var: var,
+                //         to_outlive: must_outlive.to_re(),
+                //     },
+                // );
 
                 Err(ErrorGuaranteed::new_unchecked())
             })

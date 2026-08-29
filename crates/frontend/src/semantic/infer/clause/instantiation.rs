@@ -23,39 +23,29 @@ use crate::{
 
 // === Universal === //
 
-impl<'tcx> ClauseCx<'tcx> {
-    pub fn instantiate_universal(&mut self) -> ClauseCxUniversalInstantiation<'_, 'tcx> {
-        ClauseCxUniversalInstantiation { ccx: self }
-    }
-}
-
-/// Utilities for instantiating various type system objects universally.
-pub struct ClauseCxUniversalInstantiation<'a, 'tcx> {
-    ccx: &'a mut ClauseCx<'tcx>,
-}
-
 /// Machinery
-impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
-    pub fn binder_to_init_vars(
+impl<'tcx> ClauseCx<'tcx> {
+    pub fn universal_binder_to_init_vars(
         &mut self,
         fuel: ClauseFuel,
         universe: &HrtbUniverse,
         binder_parent_env: &ClauseImportEnv,
         binder: Obj<GenericBinder>,
     ) -> MultiPromiseValue<'tcx, TyOrReList, ImportError> {
-        let substs = self.binder_to_uninit_vars(universe, binder);
-        let promise = self.init_vars_for_binder(fuel, universe, binder_parent_env, binder, substs);
+        let substs = self.universal_binder_to_uninit_vars(universe, binder);
+        let promise =
+            self.universal_init_vars_for_binder(fuel, universe, binder_parent_env, binder, substs);
 
         promise.and_value(substs)
     }
 
-    pub fn binder_to_uninit_vars(
+    pub fn universal_binder_to_uninit_vars(
         &mut self,
         universe: &HrtbUniverse,
         binder: Obj<GenericBinder>,
     ) -> TyOrReList {
-        let s = self.ccx.session();
-        let tcx = self.ccx.tcx();
+        let s = self.session();
+        let tcx = self.tcx();
 
         let vars =
             binder
@@ -63,11 +53,10 @@ impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
                 .defs
                 .iter()
                 .map(|&generic| match generic {
-                    AnyGeneric::Re(generic) => TyOrRe::Re(
-                        self.ccx
-                            .fresh_re_universal(UniversalReVarSourceInfo::Root(generic)),
-                    ),
-                    AnyGeneric::Ty(generic) => TyOrRe::Ty(self.ccx.fresh_ty_universal(
+                    AnyGeneric::Re(generic) => {
+                        TyOrRe::Re(self.fresh_re_universal(UniversalReVarSourceInfo::Root(generic)))
+                    }
+                    AnyGeneric::Ty(generic) => TyOrRe::Ty(self.fresh_ty_universal(
                         universe.clone(),
                         UniversalTyVarSourceInfo::Root(generic),
                     )),
@@ -77,7 +66,7 @@ impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
         tcx.intern_list(&vars)
     }
 
-    pub fn init_vars_for_binder(
+    pub fn universal_init_vars_for_binder(
         &mut self,
         fuel: ClauseFuel,
         universe: &HrtbUniverse,
@@ -85,7 +74,7 @@ impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
         target_binder: Obj<GenericBinder>,
         target_vars: TyOrReList,
     ) -> MultiPromise<'tcx, ImportError> {
-        let s = self.ccx.session();
+        let s = self.session();
 
         let mut collector = MultiPromiseBuilder::new();
 
@@ -98,7 +87,6 @@ impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
                 (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
                     for &clause in generic.r(s).clauses.elems.r(s) {
                         let clause = self
-                            .ccx
                             .importer(
                                 fuel,
                                 universe.clone(),
@@ -114,7 +102,7 @@ impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
                             unreachable!()
                         };
 
-                        self.ccx.permit_universe_re_outlives_general(
+                        self.permit_universe_re_outlives_general(
                             target,
                             allowed_to_outlive,
                             allowed_to_outlive_dir,
@@ -127,7 +115,6 @@ impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
                     };
 
                     let clauses = self
-                        .ccx
                         .importer(
                             fuel,
                             universe.clone(),
@@ -137,8 +124,7 @@ impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
                         .import_trait_clause_list(*generic.r(s).clauses)
                         .flat_join(&mut collector);
 
-                    self.ccx
-                        .init_ty_universal_var_direct_clauses(target, clauses);
+                    self.init_ty_universal_var_direct_clauses(target, clauses);
                 }
                 _ => unreachable!(),
             }
@@ -149,20 +135,19 @@ impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
 }
 
 /// Specialized
-impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
-    pub fn env_for_trait_def(
+impl<'tcx> ClauseCx<'tcx> {
+    pub fn universal_env_for_trait_def(
         &mut self,
         fuel: ClauseFuel,
         universe: &HrtbUniverse,
         def: Obj<TraitItem>,
     ) -> MultiPromiseValue<'tcx, ClauseImportEnv, ImportError> {
-        let s = self.ccx.session();
-        let tcx = self.ccx.tcx();
+        let s = self.session();
+        let tcx = self.tcx();
 
         // Create a universal variable representing `Self`
-        let self_var = self
-            .ccx
-            .fresh_ty_universal_var(universe.clone(), UniversalTyVarSourceInfo::TraitSelf);
+        let self_var =
+            self.fresh_ty_universal_var(universe.clone(), UniversalTyVarSourceInfo::TraitSelf);
 
         let self_ty = tcx.intern(TyKind::UniversalVar(self_var));
 
@@ -170,7 +155,7 @@ impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
         let PromiseValue {
             value: generic_params,
             promise,
-        } = self.binder_to_init_vars(
+        } = self.universal_binder_to_init_vars(
             fuel,
             universe,
             &ClauseImportEnv::new(Some(self_ty), []),
@@ -178,7 +163,7 @@ impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
         );
 
         // Make `Self` implement the trait with these synthesized parameters.
-        self.ccx.init_ty_universal_var_direct_clauses(
+        self.init_ty_universal_var_direct_clauses(
             self_var,
             tcx.intern_list(&[TraitClause::Trait(HrtbBinder {
                 defs: tcx.intern_list(&[]),
@@ -201,17 +186,17 @@ impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
         ))
     }
 
-    pub fn env_for_adt_def(
+    pub fn universal_env_for_adt_def(
         &mut self,
         fuel: ClauseFuel,
         universe: &HrtbUniverse,
         def: Obj<AdtItem>,
     ) -> MultiPromiseValue<'tcx, ClauseImportEnv, ImportError> {
-        let s = self.ccx.session();
-        let tcx = self.ccx.tcx();
+        let s = self.session();
+        let tcx = self.tcx();
 
         // Create universal parameters.
-        let sig_generic_substs = self.binder_to_uninit_vars(universe, def.r(s).generics);
+        let sig_generic_substs = self.universal_binder_to_uninit_vars(universe, def.r(s).generics);
 
         // Create the `Self` type.
         let self_ty = tcx.intern(TyKind::Adt(AdtInstance {
@@ -220,7 +205,7 @@ impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
         }));
 
         // Initialize the clauses.
-        let promise = self.init_vars_for_binder(
+        let promise = self.universal_init_vars_for_binder(
             fuel,
             universe,
             &ClauseImportEnv::new(Some(self_ty), []),
@@ -234,22 +219,21 @@ impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
         ))
     }
 
-    pub fn env_for_impl_block(
+    pub fn universal_env_for_impl_block(
         &mut self,
         fuel: ClauseFuel,
         universe: &HrtbUniverse,
         def: Obj<ImplItem>,
     ) -> MultiPromiseValue<'tcx, ClauseImportEnv, ImportError> {
-        let s = self.ccx.session();
+        let s = self.session();
 
         let mut collector = MultiPromiseBuilder::new();
 
         // Create universal parameters.
-        let sig_generic_substs = self.binder_to_uninit_vars(universe, def.r(s).generics);
+        let sig_generic_substs = self.universal_binder_to_uninit_vars(universe, def.r(s).generics);
 
         // Create the `Self` type.
         let self_ty = self
-            .ccx
             .importer(
                 fuel,
                 universe.clone(),
@@ -263,7 +247,7 @@ impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
             .flat_join(&mut collector);
 
         // Initialize the clauses.
-        self.init_vars_for_binder(
+        self.universal_init_vars_for_binder(
             fuel,
             universe,
             &ClauseImportEnv::new(Some(self_ty), []),
@@ -278,13 +262,13 @@ impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
         ))
     }
 
-    pub fn env_for_fn_def(
+    pub fn universal_env_for_fn_def(
         &mut self,
         fuel: ClauseFuel,
         universe: &HrtbUniverse,
         def: Obj<FnDef>,
     ) -> MultiPromiseValue<'tcx, ClauseImportEnv, ImportError> {
-        let s = self.ccx.session();
+        let s = self.session();
 
         let mut collector = MultiPromiseBuilder::new();
 
@@ -292,16 +276,16 @@ impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
         let mut env = match *def.r(s).owner {
             FnDefOwner::Item(_item) => ClauseImportEnv::new(None, []),
             FnDefOwner::TraitMethod(def, _idx) => self
-                .env_for_trait_def(fuel, universe, def)
+                .universal_env_for_trait_def(fuel, universe, def)
                 .flat_join(&mut collector),
             FnDefOwner::ImplMethod(def, _idx) => self
-                .env_for_impl_block(fuel, universe, def)
+                .universal_env_for_impl_block(fuel, universe, def)
                 .flat_join(&mut collector),
         };
 
         // Extend with function environment
         let substs = self
-            .binder_to_init_vars(fuel, universe, &env, def.r(s).generics)
+            .universal_binder_to_init_vars(fuel, universe, &env, def.r(s).generics)
             .flat_join(&mut collector);
 
         env.push_subst(GenericSubst::new(def.r(s).generics, substs));
@@ -309,18 +293,18 @@ impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
         collector.finish().and_value(env)
     }
 
-    pub fn env_for_type_alias_def(
+    pub fn universal_env_for_type_alias_def(
         &mut self,
         fuel: ClauseFuel,
         universe: &HrtbUniverse,
         def: Obj<TypeAliasItem>,
     ) -> MultiPromiseValue<'tcx, ClauseImportEnv, ImportError> {
-        let s = self.ccx.session();
+        let s = self.session();
 
         let PromiseValue {
             value: substs,
             promise,
-        } = self.binder_to_init_vars(
+        } = self.universal_binder_to_init_vars(
             fuel,
             universe,
             &ClauseImportEnv::new(None, []),
@@ -336,20 +320,9 @@ impl<'tcx> ClauseCxUniversalInstantiation<'_, 'tcx> {
 
 // === Inference === //
 
-impl<'tcx> ClauseCx<'tcx> {
-    pub fn instantiate_infer(&mut self) -> ClauseCxInferInstantiation<'_, 'tcx> {
-        ClauseCxInferInstantiation { ccx: self }
-    }
-}
-
-/// Utilities for instantiating various type system objects with placeholder inference variables.
-pub struct ClauseCxInferInstantiation<'a, 'tcx> {
-    ccx: &'a mut ClauseCx<'tcx>,
-}
-
 /// Machinery
-impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
-    pub fn fresh_binder_to_unconstrained_params(
+impl<'tcx> ClauseCx<'tcx> {
+    pub fn fresh_binder_to_unconstrained_infer_params(
         &mut self,
         universe: &HrtbUniverse,
         binder: Obj<GenericBinder>,
@@ -359,8 +332,8 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
             Obj<TypeGeneric>,
         ) -> InferTyVarSourceInfo,
     ) -> TyOrReList {
-        let s = self.ccx.session();
-        let tcx = self.ccx.tcx();
+        let s = self.session();
+        let tcx = self.tcx();
 
         tcx.intern_list(
             &binder
@@ -369,11 +342,11 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                 .iter()
                 .enumerate()
                 .map(|(idx, &def)| match def {
-                    AnyGeneric::Re(_) => TyOrRe::Re(self.ccx.fresh_re_infer()),
+                    AnyGeneric::Re(_) => TyOrRe::Re(self.fresh_re_infer()),
                     AnyGeneric::Ty(def) => {
-                        let info = create_info(self.ccx, idx, def);
+                        let info = create_info(self, idx, def);
 
-                        TyOrRe::Ty(self.ccx.fresh_ty_infer(universe.clone(), info))
+                        TyOrRe::Ty(self.fresh_ty_infer(universe.clone(), info))
                     }
                 })
                 .collect::<Vec<_>>(),
@@ -387,17 +360,17 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
         binder: Obj<GenericBinder>,
         binder_env: ClauseImportEnv,
         verify_first_n: Option<u32>,
-        params: impl IntoIterator<Item = TyOrRe>,
+        params: TyOrReList,
     ) -> Promise<'tcx, BinderParamWfBinderError> {
-        let s = self.ccx.session();
+        let s = self.session();
 
         let mut collector = MultiPromiseBuilder::new();
 
-        for (idx, (&generic, var)) in binder
+        for (idx, (&generic, &var)) in binder
             .r(s)
             .defs
             .iter()
-            .zip(params)
+            .zip(params.r(s))
             .take(verify_first_n.map_or(usize::MAX, |v| v as usize))
             .enumerate()
         {
@@ -411,7 +384,6 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                         };
 
                         let must_outlive = self
-                            .ccx
                             .importer(
                                 fuel,
                                 universe.clone(),
@@ -425,23 +397,21 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                             })
                             .join(&mut collector);
 
-                        self.ccx
-                            .oblige_general_outlives(
-                                TyOrRe::Re(var),
-                                must_outlive,
-                                must_outlive_dir,
-                            )
-                            .map(move |_ccx, error| BinderParamWfParamError {
-                                idx: idx as u32,
-                                kind: BinderParamWfParamErrorKind::OutlivesNotMet(error),
-                            })
-                            .join(&mut collector);
+                        self.oblige_general_outlives(
+                            TyOrRe::Re(var),
+                            must_outlive,
+                            must_outlive_dir,
+                        )
+                        .map(move |_ccx, error| BinderParamWfParamError {
+                            idx: idx as u32,
+                            kind: BinderParamWfParamErrorKind::OutlivesNotMet(error),
+                        })
+                        .join(&mut collector);
                     }
                 }
                 (AnyGeneric::Ty(generic), TyOrRe::Ty(var)) => {
                     for &clause in generic.r(s).clauses.elems.r(s) {
                         let clause = self
-                            .ccx
                             .importer(
                                 fuel,
                                 universe.clone(),
@@ -457,21 +427,19 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
 
                         match clause {
                             TraitClause::Outlives(must_outlive_dir, must_outlive) => {
-                                self.ccx
-                                    .oblige_general_outlives(
-                                        TyOrRe::Ty(var),
-                                        must_outlive,
-                                        must_outlive_dir,
-                                    )
-                                    .map(move |_ccx, error| BinderParamWfParamError {
-                                        idx: idx as u32,
-                                        kind: BinderParamWfParamErrorKind::OutlivesNotMet(error),
-                                    })
-                                    .join(&mut collector);
+                                self.oblige_general_outlives(
+                                    TyOrRe::Ty(var),
+                                    must_outlive,
+                                    must_outlive_dir,
+                                )
+                                .map(move |_ccx, error| BinderParamWfParamError {
+                                    idx: idx as u32,
+                                    kind: BinderParamWfParamErrorKind::OutlivesNotMet(error),
+                                })
+                                .join(&mut collector);
                             }
                             TraitClause::Trait(rhs) => {
-                                self.ccx
-                                    .oblige_ty_meets_trait(fuel, universe.clone(), var, rhs)
+                                self.oblige_ty_meets_trait(fuel, universe.clone(), var, rhs)
                                     .map(move |_ccx, error| BinderParamWfParamError {
                                         idx: idx as u32,
                                         kind: BinderParamWfParamErrorKind::ImplNotMet(error),
@@ -487,12 +455,16 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
 
         collector
             .finish()
-            .map(move |_ccx, errors| BinderParamWfBinderError { binder, errors })
+            .map(move |_ccx, errors| BinderParamWfBinderError {
+                binder,
+                params,
+                errors,
+            })
     }
 }
 
 /// Full resolution
-impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
+impl<'tcx> ClauseCx<'tcx> {
     /// Resolves all the projected types of a `TraitSpec` applying to a specified `self_ty`,
     /// returning a complete `TraitInstance`.
     pub fn resolve_trait_spec(
@@ -502,8 +474,8 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
         self_ty: Ty,
         spec: TraitSpec,
     ) -> PromiseValue<'tcx, TraitInstance, TraitSpecResolutionError> {
-        let s = self.ccx.session();
-        let tcx = self.ccx.tcx();
+        let s = self.session();
+        let tcx = self.tcx();
 
         let mut collector = MultiPromiseBuilder::new();
 
@@ -515,7 +487,7 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
             .map(|(idx, &param)| match param {
                 TraitParam::Equals(value) => value,
                 TraitParam::Unspecified(clauses) => {
-                    let projection = self.ccx.fresh_ty_infer(
+                    let projection = self.fresh_ty_infer(
                         universe.clone(),
                         InferTyVarSourceInfo::Projection {
                             self_ty,
@@ -524,8 +496,7 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                         },
                     );
 
-                    self.ccx
-                        .oblige_ty_meets_clauses(fuel, universe, projection, clauses)
+                    self.oblige_ty_meets_clauses(fuel, universe, projection, clauses)
                         .map(
                             move |_ccx, error| TraitSpecResolutionErrorCulprit::AssocParaNotMet {
                                 idx: idx as u32,
@@ -544,16 +515,15 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
             params: tcx.intern_list(&params),
         };
 
-        self.ccx
-            .oblige_ty_meets_trait_instantiated(
-                fuel,
-                universe.clone(),
-                self_ty,
-                // Force the fresh variables to be properly constrained.
-                instance.to_spec(tcx),
-            )
-            .map(move |_ccx, error| TraitSpecResolutionErrorCulprit::ImplRejected(error))
-            .join(&mut collector);
+        self.oblige_ty_meets_trait_instantiated(
+            fuel,
+            universe.clone(),
+            self_ty,
+            // Force the fresh variables to be properly constrained.
+            instance.to_spec(tcx),
+        )
+        .map(move |_ccx, error| TraitSpecResolutionErrorCulprit::ImplRejected(error))
+        .join(&mut collector);
 
         let promise = collector
             .finish()
@@ -581,8 +551,7 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
         debug_assert!(instantiation.target_trait.is_none());
 
         let self_ty_unify_promise =
-            self.ccx
-                .oblige_ty_unifies_ty(instantiation.target_ty, self_ty, RelationMode::Equate);
+            self.oblige_ty_unifies_ty(instantiation.target_ty, self_ty, RelationMode::Equate);
 
         let promise = typed_joiner! {
             let block_clauses = block_clauses_promise;
@@ -602,8 +571,8 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
         universe: &HrtbUniverse,
         fn_instance: FnInstance,
     ) -> PromiseValue<'tcx, InstantiatedFnSig, FnInstanceResolutionError> {
-        let tcx = self.ccx.tcx();
-        let s = self.ccx.session();
+        let tcx = self.tcx();
+        let s = self.session();
 
         match fn_instance.r(s).owner {
             FnOwner::Item(def) => {
@@ -613,7 +582,7 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                 let PromiseValue {
                     value: early_args,
                     promise: early_args_err,
-                } = self.fresh_early_args(
+                } = self.obtain_fn_instance_early_args(
                     fuel,
                     universe,
                     fn_instance,
@@ -663,7 +632,7 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                 let PromiseValue {
                     value: early_args,
                     promise: early_args_err,
-                } = self.fresh_early_args(
+                } = self.obtain_fn_instance_early_args(
                     fuel,
                     universe,
                     fn_instance,
@@ -726,7 +695,7 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                 let PromiseValue {
                     value: early_args,
                     promise: early_args_err,
-                } = self.fresh_early_args(
+                } = self.obtain_fn_instance_early_args(
                     fuel,
                     universe,
                     fn_instance,
@@ -765,7 +734,7 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                 let PromiseValue {
                     value: early_args,
                     promise: early_args_err,
-                } = self.fresh_early_args(
+                } = self.obtain_fn_instance_early_args(
                     fuel,
                     universe,
                     fn_instance,
@@ -791,15 +760,14 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                         .fields
                         .iter()
                         .map(|field| {
-                            self.ccx
-                                .importer(
-                                    fuel,
-                                    universe.clone(),
-                                    env.clone(),
-                                    ImportWfMode::ReportElsewhere,
-                                )
-                                .import_ty(*field.ty)
-                                .flat_join(&mut import_collector)
+                            self.importer(
+                                fuel,
+                                universe.clone(),
+                                env.clone(),
+                                ImportWfMode::ReportElsewhere,
+                            )
+                            .import_ty(*field.ty)
+                            .flat_join(&mut import_collector)
                         })
                         .collect::<Vec<_>>(),
                 );
@@ -827,7 +795,7 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
         }
     }
 
-    fn fresh_early_args(
+    fn obtain_fn_instance_early_args(
         &mut self,
         fuel: ClauseFuel,
         universe: &HrtbUniverse,
@@ -835,28 +803,23 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
         parent_env: ClauseImportEnv,
         binder: Obj<GenericBinder>,
     ) -> PromiseValue<'tcx, TyOrReList, BinderParamWfBinderError> {
-        let s = self.ccx.session();
+        let s = self.session();
 
         if let Some(provided) = fn_instance.r(s).early_args {
             return PromiseValue::trivial(provided);
         }
 
-        let early_args =
-            self.fresh_binder_to_unconstrained_params(universe, binder, |_ccx, idx, _generic| {
-                InferTyVarSourceInfo::LateBoundFnGeneric {
-                    instance: fn_instance,
-                    idx: idx as u32,
-                }
-            });
-
-        let promise = self.ensure_binder_params_wf(
-            fuel,
+        let early_args = self.fresh_binder_to_unconstrained_infer_params(
             universe,
             binder,
-            parent_env,
-            None,
-            early_args.r(s).iter().copied(),
+            |_ccx, idx, _generic| InferTyVarSourceInfo::LateBoundFnGeneric {
+                instance: fn_instance,
+                idx: idx as u32,
+            },
         );
+
+        let promise =
+            self.ensure_binder_params_wf(fuel, universe, binder, parent_env, None, early_args);
 
         promise.and_value(early_args)
     }
@@ -868,8 +831,8 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
         def: Obj<FnDef>,
         env: ClauseImportEnv,
     ) -> MultiPromiseValue<'tcx, InstantiatedFnSig, ImportError> {
-        let s = self.ccx.session();
-        let tcx = self.ccx.tcx();
+        let s = self.session();
+        let tcx = self.tcx();
 
         let mut collector = MultiPromiseBuilder::new();
 
@@ -880,20 +843,18 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                     .r(s)
                     .iter()
                     .map(|arg| {
-                        self.ccx
-                            .importer(
-                                fuel,
-                                universe.clone(),
-                                env.clone(),
-                                ImportWfMode::ReportElsewhere,
-                            )
-                            .import_ty(arg.ty)
-                            .flat_join(&mut collector)
+                        self.importer(
+                            fuel,
+                            universe.clone(),
+                            env.clone(),
+                            ImportWfMode::ReportElsewhere,
+                        )
+                        .import_ty(arg.ty)
+                        .flat_join(&mut collector)
                     })
                     .collect::<Vec<_>>(),
             ),
             ret_ty: self
-                .ccx
                 .importer(
                     fuel,
                     universe.clone(),
@@ -920,14 +881,14 @@ pub struct InstantiatedImplBlock {
 pub struct SignatureMismatchError;
 
 /// Instantiation.
-impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
+impl<'tcx> ClauseCx<'tcx> {
     fn fresh_trait_item_to_unconstrained_trait_spec(
         &mut self,
         universe: &HrtbUniverse,
         item: Obj<TraitItem>,
     ) -> TraitSpec {
-        let s = self.ccx.session();
-        let tcx = self.ccx.tcx();
+        let s = self.session();
+        let tcx = self.tcx();
 
         let params = tcx.intern_list(
             &item
@@ -945,8 +906,8 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
                     }
 
                     match def.kind() {
-                        TyOrReKind::Re => TraitParam::Equals(TyOrRe::Re(self.ccx.fresh_re_infer())),
-                        TyOrReKind::Ty => TraitParam::Equals(TyOrRe::Ty(self.ccx.fresh_ty_infer(
+                        TyOrReKind::Re => TraitParam::Equals(TyOrRe::Re(self.fresh_re_infer())),
+                        TyOrReKind::Ty => TraitParam::Equals(TyOrRe::Ty(self.fresh_ty_infer(
                             universe.clone(),
                             InferTyVarSourceInfo::TraitParam {
                                 trait_: item,
@@ -968,19 +929,14 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
         self_ty: Ty,
         def: Obj<FnDef>,
     ) -> FnOwner {
-        let s = self.ccx.session();
+        let s = self.session();
 
         match *def.r(s).owner {
             FnDefOwner::Item(_) => unreachable!(),
             FnDefOwner::TraitMethod(item, method_idx) => {
                 let instance = self.fresh_trait_item_to_unconstrained_trait_spec(universe, item);
 
-                self.ccx.oblige_ty_meets_trait_instantiated(
-                    fuel,
-                    universe.clone(),
-                    self_ty,
-                    instance,
-                );
+                self.oblige_ty_meets_trait_instantiated(fuel, universe.clone(), self_ty, instance);
 
                 FnOwner::Trait(FnOwnerTrait {
                     instance,
@@ -1002,12 +958,12 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
         universe: &HrtbUniverse,
         block: Obj<ImplItem>,
     ) -> PromiseValue<'tcx, InstantiatedImplBlock, ImplBlockSatisfyError> {
-        let s = self.ccx.session();
+        let s = self.session();
 
         let mut collector = MultiPromiseBuilder::new();
 
         // Instantiate fresh variables for each `impl` block generic.
-        let params = self.fresh_binder_to_unconstrained_params(
+        let params = self.fresh_binder_to_unconstrained_infer_params(
             universe,
             block.r(s).generics,
             |_ccx, idx, _def| InferTyVarSourceInfo::ImplBlockParam {
@@ -1020,7 +976,6 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
         let mut env = ClauseImportEnv::new(None, [GenericSubst::new(block.r(s).generics, params)]);
 
         let target_ty = self
-            .ccx
             .importer(
                 fuel,
                 universe.clone(),
@@ -1034,16 +989,15 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
         env.self_ty = Some(target_ty);
 
         let target_trait = block.r(s).trait_.map(|trait_| {
-            self.ccx
-                .importer(
-                    fuel,
-                    universe.clone(),
-                    env.clone(),
-                    ImportWfMode::ReportElsewhere,
-                )
-                .import_trait_instance(target_ty, trait_)
-                .map(move |_ccx, error| ImplBlockSatisfyErrorCulprit::TargetTraitImportError(error))
-                .join(&mut collector)
+            self.importer(
+                fuel,
+                universe.clone(),
+                env.clone(),
+                ImportWfMode::ReportElsewhere,
+            )
+            .import_trait_instance(target_ty, trait_)
+            .map(move |_ccx, error| ImplBlockSatisfyErrorCulprit::TargetTraitImportError(error))
+            .join(&mut collector)
         });
 
         self.ensure_binder_params_wf(
@@ -1052,7 +1006,7 @@ impl<'tcx> ClauseCxInferInstantiation<'_, 'tcx> {
             block.r(s).generics,
             env.clone(),
             None,
-            params.r(s).iter().copied(),
+            params,
         )
         .map(move |_ccx, error| ImplBlockSatisfyErrorCulprit::GenericsUnsatisfied(error))
         .join(&mut collector);

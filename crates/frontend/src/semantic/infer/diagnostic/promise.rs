@@ -1,5 +1,5 @@
 use crate::{
-    base::{Diag, ErrorGuaranteed, HardDiag},
+    base::{Diag, ErrorGuaranteed},
     semantic::infer::ClauseCx,
 };
 use bytemuck::{TransparentWrapper, TransparentWrapperAlloc as _};
@@ -27,10 +27,6 @@ impl PromiseProbe {
     pub fn had_error(&self) -> bool {
         self.had_error.get()
     }
-}
-
-pub trait ErrorToDiag<'tcx>: Sized {
-    fn to_diag(self, ccx: &mut ClauseCx<'tcx>) -> HardDiag;
 }
 
 pub type MultiPromise<'tcx, E> = Promise<'tcx, Vec<E>>;
@@ -76,15 +72,18 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
         Promise { builder: node }
     }
 
+    // TODO: Use proper reporting machinery
     pub fn filter_delay_bug<E2, F>(self, f: F) -> Promise<'tcx, E2>
     where
-        E: ErrorToDiag<'tcx>,
+        E: fmt::Debug,
         E2: 'tcx,
         F: 'tcx + FnOnce(&mut ClauseCx<'tcx>, E) -> Result<E2, E>,
     {
         self.filter_map(move |ccx, err| match f(ccx, err) {
             Ok(mapped) => Ok(mapped),
-            Err(orig) => Err(orig.to_diag(ccx).to_delay_bug().emit()),
+            Err(orig) => Err(Diag::anon_err(format_args!("{orig:#?}"))
+                .to_delay_bug()
+                .emit()),
         })
     }
 
@@ -123,17 +122,23 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
         ));
     }
 
+    // TODO: Use proper reporting machinery
     pub fn report_loud(self)
     where
-        E: ErrorToDiag<'tcx>,
+        E: fmt::Debug,
     {
-        self.report_with(|ccx, err| err.to_diag(ccx).emit());
+        self.report_with(|_ccx, err| Diag::anon_err(format_args!("{err:#?}")).emit());
     }
 
-    pub fn report_delay_bug(self) {
-        self.report_with(|_ccx, _err| {
-            // err.to_diag(ccx).to_delay_bug().emit()
-            Diag::anon_err("delay bug").to_delay_bug().emit()
+    // TODO: Use proper reporting machinery
+    pub fn report_delay_bug(self)
+    where
+        E: fmt::Debug,
+    {
+        self.report_with(|_ccx, err| {
+            Diag::anon_err(format_args!("{err:#?}"))
+                .to_delay_bug()
+                .emit()
         });
     }
 
@@ -228,7 +233,7 @@ impl<'tcx, T, E: 'tcx> PromiseValue<'tcx, T, E> {
 
     pub fn filter_delay_bug<E2, F>(self, f: F) -> PromiseValue<'tcx, T, E2>
     where
-        E: ErrorToDiag<'tcx>,
+        E: fmt::Debug,
         E2: 'tcx,
         F: 'tcx + FnOnce(&mut ClauseCx<'tcx>, E) -> Result<E2, E>,
     {
@@ -263,12 +268,15 @@ impl<'tcx, T, E: 'tcx> PromiseValue<'tcx, T, E> {
 
     pub fn report_loud(self) -> T
     where
-        E: ErrorToDiag<'tcx>,
+        E: fmt::Debug,
     {
         self.finish_promise(|p| p.report_loud())
     }
 
-    pub fn report_delay_bug(self) -> T {
+    pub fn report_delay_bug(self) -> T
+    where
+        E: fmt::Debug,
+    {
         self.finish_promise(|p| p.report_delay_bug())
     }
 

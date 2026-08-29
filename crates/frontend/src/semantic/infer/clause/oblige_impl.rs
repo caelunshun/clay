@@ -465,7 +465,6 @@ impl<'tcx> ClauseCx<'tcx> {
             target_trait,
             ..
         } = self
-            .instantiate_infer()
             .fresh_impl_block(fuel, universe, rhs)
             .map(move |_ccx, error| {
                 BlockImplUnsatisfiedErrorCulprit::BlockUnsatisfied(Box::new(error))
@@ -620,9 +619,7 @@ impl<'tcx> ClauseCx<'tcx> {
             let PromiseValue {
                 value: sig,
                 promise: resolve_fn_promise,
-            } = self
-                .instantiate_infer()
-                .resolve_fn_instance_sig(fuel, universe, instance);
+            } = self.resolve_fn_instance_sig(fuel, universe, instance);
 
             let Ok(unify_args_promise) = self.ucx_mut().unify_ty_and_ty(
                 rhs_input,
