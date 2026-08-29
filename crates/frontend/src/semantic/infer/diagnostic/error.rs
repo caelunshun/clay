@@ -144,20 +144,27 @@ pub enum ImportError {
 #[derive(Debug, Clone)]
 pub struct InstantiateHrtbUniversalError {
     pub value: HrtbBinder,
-    pub culprits: Vec<InstantiateHrtbUniversalErrorCulprit>,
+    pub normalize_errors: Vec<TraitSpecResolutionError>,
 }
-
-#[derive(Debug, Clone)]
-pub enum InstantiateHrtbUniversalErrorCulprit {}
 
 #[derive(Debug, Clone)]
 pub struct InstantiateHrtbInferError {
     pub value: HrtbBinder,
-    pub culprits: Vec<InstantiateHrtbInferErrorCulprit>,
+    pub param_not_valid: Vec<HrtbInferParamNotValid>,
+    pub normalize_errors: Vec<TraitSpecResolutionError>,
 }
 
 #[derive(Debug, Clone)]
-pub enum InstantiateHrtbInferErrorCulprit {}
+pub struct HrtbInferParamNotValid {
+    pub idx: u32,
+    pub kind: HrtbInferParamNotValidKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum HrtbInferParamNotValidKind {
+    RegionNotMet(Vec<GeneralOutlivesError>),
+    TyNotMet(Vec<TraitClauseError>),
+}
 
 // === Infer instantiation errors === //
 

@@ -7,8 +7,10 @@ use crate::{
     },
     semantic::{
         infer::{
-            ClauseCx, ClauseFuel, HrtbUniverse, HrtbUniverseInfo, ImportError, MultiPromise,
-            MultiPromiseBuilder, MultiPromiseValue, PromiseValue, UnifyCxMode,
+            ClauseCx, ClauseFuel, HrtbInferParamNotValid, HrtbInferParamNotValidKind, HrtbUniverse,
+            HrtbUniverseInfo, ImportError, InstantiateHrtbInferError,
+            InstantiateHrtbUniversalError, MultiPromise, MultiPromiseBuilder, MultiPromiseValue,
+            PromiseValue, TraitSpecResolutionError, UnifyCxMode,
         },
         lower::generics::normalize_positional_generic_arity,
         syntax::{
@@ -23,6 +25,7 @@ use crate::{
             TypeAliasItem, TypeGeneric, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
         },
     },
+    typed_joiner,
     utils::hash::FxHashMap,
 };
 use hashbrown::hash_map;
@@ -1139,13 +1142,13 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
 // === HrtbInstantiator === //
 
-impl ClauseCx<'_> {
+impl<'tcx> ClauseCx<'tcx> {
     pub fn instantiate_hrtb_universal(
         &mut self,
         fuel: ClauseFuel,
         universe: HrtbUniverse,
         value: HrtbBinder,
-    ) -> TraitSpec {
+    ) -> PromiseValue<'tcx, TraitSpec, InstantiateHrtbUniversalError> {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -1167,22 +1170,36 @@ impl ClauseCx<'_> {
 
         let vars = tcx.intern_list(&vars);
 
+        let mut normalize_errors = MultiPromiseBuilder::new();
+
         // Initialize their clauses.
         for (&def, &var) in defs.r(s).iter().zip(vars.r(s)) {
-            let clauses = HrtbInstantiator::new(self, cause, vars).fold(def.clauses);
+            let clauses =
+                HrtbInstantiator::new(self, &mut normalize_errors, fuel, vars).fold(def.clauses);
 
             self.init_any_universal_var_direct_clauses(var, clauses);
         }
 
-        HrtbInstantiator::new(self, cause, vars).fold(inner)
+        let output = HrtbInstantiator::new(self, &mut normalize_errors, fuel, vars).fold(inner);
+
+        let promise = normalize_errors
+            .finish()
+            .map(
+                move |_ccx, normalize_errors| InstantiateHrtbUniversalError {
+                    value,
+                    normalize_errors,
+                },
+            );
+
+        promise.and_value(output)
     }
 
     pub fn instantiate_hrtb_infer(
         &mut self,
-        cause: ObligeCause,
+        fuel: ClauseFuel,
         universe: HrtbUniverse,
         value: HrtbBinder,
-    ) -> TraitSpec {
+    ) -> PromiseValue<'tcx, TraitSpec, InstantiateHrtbInferError> {
         let tcx = self.tcx();
         let s = self.session();
 
@@ -1206,24 +1223,30 @@ impl ClauseCx<'_> {
 
         let vars = tcx.intern_list(&vars);
 
-        // Constrain the new inference variables with their obligations.
-        for (&def, &var) in defs.r(s).iter().zip(vars.r(s)) {
-            let clauses = HrtbInstantiator::new(self, &cause, vars).fold(def.clauses);
+        let mut param_not_valid_collector = MultiPromiseBuilder::new();
+        let mut normalize_error_collector = MultiPromiseBuilder::new();
 
-            let cause = cause.clone().child(
-                ObligeCauseStep::HrtbExistentialInferenceIsPossible {
-                    lhs: var,
-                    rhs: clauses,
-                }
-                .into(),
-            );
+        // Constrain the new inference variables with their obligations.
+        for (idx, (&def, &var)) in defs.r(s).iter().zip(vars.r(s)).enumerate() {
+            let clauses = HrtbInstantiator::new(self, &mut normalize_error_collector, fuel, vars)
+                .fold(def.clauses);
 
             match var {
                 TyOrRe::Re(var) => {
-                    self.oblige_re_meets_clauses(&cause, var, clauses);
+                    self.oblige_re_meets_clauses(var, clauses)
+                        .map(move |_ccx, error| HrtbInferParamNotValid {
+                            idx: idx as u32,
+                            kind: HrtbInferParamNotValidKind::RegionNotMet(error),
+                        })
+                        .join(&mut param_not_valid_collector);
                 }
                 TyOrRe::Ty(var) => {
-                    self.oblige_ty_meets_clauses(&cause, &universe, var, clauses);
+                    self.oblige_ty_meets_clauses(fuel, &universe, var, clauses)
+                        .map(move |_ccx, error| HrtbInferParamNotValid {
+                            idx: idx as u32,
+                            kind: HrtbInferParamNotValidKind::TyNotMet(error),
+                        })
+                        .join(&mut param_not_valid_collector);
 
                     let TyKind::InferVar(var) = *var.r(s) else {
                         unreachable!()
@@ -1243,13 +1266,28 @@ impl ClauseCx<'_> {
         }
 
         // Fold the inner type
-        HrtbInstantiator::new(self, &cause, vars).fold(inner)
+        let output =
+            HrtbInstantiator::new(self, &mut normalize_error_collector, fuel, vars).fold(inner);
+
+        let promise = typed_joiner! {
+            let param_not_valid = param_not_valid_collector.finish();
+            let normalize_errors = normalize_error_collector.finish();
+
+            |ccx| InstantiateHrtbInferError {
+                value,
+                param_not_valid: param_not_valid.unwrap_or_default(),
+                normalize_errors: normalize_errors.unwrap_or_default(),
+            }
+        };
+
+        promise.and_value(output)
     }
 }
 
 struct HrtbInstantiator<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
-    cause: &'a ObligeCause,
+    normalize_errors: &'a mut MultiPromiseBuilder<'tcx, TraitSpecResolutionError>,
+    fuel: ClauseFuel,
     replace_with: TyOrReList,
     top: DebruijnTop,
 }
@@ -1257,14 +1295,16 @@ struct HrtbInstantiator<'a, 'tcx> {
 impl<'a, 'tcx> HrtbInstantiator<'a, 'tcx> {
     pub fn new(
         ccx: &'a mut ClauseCx<'tcx>,
-        cause: &'a ObligeCause,
+        normalize_errors: &'a mut MultiPromiseBuilder<'tcx, TraitSpecResolutionError>,
+        fuel: ClauseFuel,
         replace_with: TyOrReList,
     ) -> Self {
         let s = ccx.session();
 
         Self {
             ccx,
-            cause,
+            normalize_errors,
+            fuel,
             replace_with,
             top: DebruijnTop::new(replace_with.r(s).len()),
         }
@@ -1315,12 +1355,16 @@ impl<'tcx> TyFolder<'tcx> for HrtbInstantiator<'_, 'tcx> {
                 spec,
                 assoc_idx,
             }) if self.top.len() == self.replace_with.r(s).len() => {
-                let instance = self.ccx.instantiate_infer().resolve_trait_spec(
-                    &self.cause.clone().into_delay_bug(),
-                    HrtbUniverse::ROOT_REF,
-                    target,
-                    spec,
-                );
+                let instance = self
+                    .ccx
+                    .instantiate_infer()
+                    .resolve_trait_spec(self.fuel, HrtbUniverse::ROOT_REF, target, spec)
+                    .filter_map(move |_ccx, error| {
+                        // TODO: filter non-fuel errors
+
+                        Ok(error)
+                    })
+                    .join(self.normalize_errors);
 
                 return Ok(instance.params.r(s)[assoc_idx as usize].unwrap_ty());
             }
