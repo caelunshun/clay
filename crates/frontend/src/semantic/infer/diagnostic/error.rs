@@ -3,9 +3,9 @@ use crate::{
     semantic::{
         infer::HrtbUniverse,
         syntax::{
-            FnInstance, FnOwnerTrait, GenericBinder, HrtbBinder, ImplItem, InferTyVar, Re,
-            RelationMode, SigProjectType, SimpleTySet, TraitClauseList, TraitParam, TraitSpec, Ty,
-            UniversalReVar, UniversalTyVar,
+            FnInstance, FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, ImplItem,
+            InferTyVar, Re, RelationMode, SigProjectType, SimpleTySet, TraitClauseList, TraitParam,
+            TraitSpec, Ty, UniversalReVar, UniversalTyVar,
         },
     },
 };
@@ -128,6 +128,13 @@ pub enum ImportError {
     },
     TraitFnOwner {
         owner: FnOwnerTrait,
+        error: Box<TraitSpecResolutionError>,
+    },
+    InherentBlockEnv {
+        owner: FnOwnerInherent,
+        error: Box<InherentImplBlockSatisfyError>,
+    },
+    NoShadowImpl {
         error: Box<TraitSpecResolutionError>,
     },
 }

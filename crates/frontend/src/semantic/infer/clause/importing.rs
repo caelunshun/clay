@@ -7,8 +7,8 @@ use crate::{
     },
     semantic::{
         infer::{
-            ClauseCx, ClauseFuel, HrtbUniverse, HrtbUniverseInfo, ImportError, MultiPromiseBuilder,
-            MultiPromiseValue, PromiseValue, UnifyCxMode,
+            ClauseCx, ClauseFuel, HrtbUniverse, HrtbUniverseInfo, ImportError, MultiPromise,
+            MultiPromiseBuilder, MultiPromiseValue, PromiseValue, UnifyCxMode,
         },
         lower::generics::normalize_positional_generic_arity,
         syntax::{
@@ -512,9 +512,9 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         let mut collector = MultiPromiseBuilder::new();
 
         let early_args = args.map(|args| match owner {
-            FnOwner::Item(def) => {
-                self.import_simple_generic_args(def.r(s).def.r(s).generics, args, fix_arity)
-            }
+            FnOwner::Item(def) => self
+                .import_simple_generic_args(def.r(s).def.r(s).generics, args, fix_arity)
+                .flat_join(&mut collector),
             FnOwner::Trait(
                 owner @ FnOwnerTrait {
                     instance,
@@ -549,16 +549,28 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                         ],
                     )
                 })
+                .flat_join(&mut collector)
             }
-            FnOwner::Inherent(FnOwnerInherent {
-                self_ty,
-                block,
-                method_idx,
-            }) => {
+            FnOwner::Inherent(
+                owner @ FnOwnerInherent {
+                    self_ty,
+                    block,
+                    method_idx,
+                },
+            ) => {
                 let block_args = self
                     .ccx
                     .instantiate_infer()
                     .resolve_inherent_impl_block_env(self.fuel, &self.opts.universe, block, self_ty)
+                    .filter_map(move |_ccx, error| {
+                        // TODO: filter if we're in no-WF mode
+
+                        Ok(ImportError::InherentBlockEnv {
+                            owner,
+                            error: Box::new(error),
+                        })
+                    })
+                    .join(&mut collector)
                     .params;
 
                 let method_def = block.r(s).methods[method_idx as usize].unwrap();
@@ -573,15 +585,16 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                         ],
                     )
                 })
+                .flat_join(&mut collector)
             }
-            FnOwner::AdtCtor(FnOwnerAdtCtor { ctor }) => self.import_simple_generic_args(
-                ctor.r(s).owner.item(s).r(s).generics,
-                args,
-                fix_arity,
-            ),
+            FnOwner::AdtCtor(FnOwnerAdtCtor { ctor }) => self
+                .import_simple_generic_args(ctor.r(s).owner.item(s).r(s).generics, args, fix_arity)
+                .flat_join(&mut collector),
         });
 
-        tcx.intern(FnInstanceInner { owner, early_args })
+        collector
+            .finish()
+            .and_value(tcx.intern(FnInstanceInner { owner, early_args }))
     }
 
     fn import_simple_generic_args(
@@ -605,7 +618,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         let tcx = self.tcx();
         let s = self.session();
 
-        let mut collector = ImportPromiseBuilder::new();
+        let mut collector = MultiPromiseBuilder::new();
 
         let args = if fix_arity.should_fix() {
             normalize_positional_generic_arity(
@@ -621,26 +634,12 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             args
         };
 
-        let args_imported = self.import_ty_or_re_list(args.elems).join(&mut collector);
+        let args_imported = self
+            .import_ty_or_re_list(args.elems)
+            .flat_join(&mut collector);
 
         if self.opts.wf_mode.do_wf() {
             let env = make_env(args_imported);
-
-            let args_spanned = args_imported
-                .r(s)
-                .iter()
-                .zip(args.elems.r(s))
-                .zip(&binder.r(s).defs)
-                .map(|((&ty_or_re, sig), generic)| {
-                    let cause = self.cause.clone().child(ObligeCauseFrame::Origin(
-                        ObligeCauseOrigin::ImportWfForGenericParam {
-                            use_span: sig.span(s),
-                            clause_span: generic.span(s),
-                        },
-                    ));
-
-                    (cause, ty_or_re)
-                });
 
             self.ccx.instantiate_infer().ensure_binder_params_wf(
                 self.fuel,
@@ -648,11 +647,11 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 binder,
                 env.clone(),
                 None,
-                args_spanned,
+                args_imported.r(s).iter().copied(),
             );
         }
 
-        args_imported
+        collector.finish().and_value(args_imported)
     }
 }
 
@@ -690,8 +689,6 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
         if self.opts.wf_mode.do_wf() {
             self.ensure_trait_instance_args_wf_no_self_obligation(
-                &self.fuel,
-                &self.opts.universe.clone(),
                 instance_applies_to,
                 instance.params.r(s).iter().map(|v| v.span(s)),
                 instance_imported,
@@ -704,8 +701,6 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
     fn ensure_trait_instance_args_wf_no_self_obligation(
         &mut self,
-        cause: &ObligeCause,
-        universe: &HrtbUniverse,
         applies_to: Ty,
         spans: impl IntoIterator<Item = Span>,
         instance: TraitInstance,
@@ -720,34 +715,18 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             [GenericSubst::new(binder, instance.params)],
         );
 
-        let params_wf = instance
-            .params
-            .r(s)
-            .iter()
-            .zip(spans)
-            .zip(&binder.r(s).defs)
-            .map(|((&para, span), generic)| {
-                let cause = cause.clone().child(ObligeCauseFrame::Origin(
-                    ObligeCauseOrigin::ImportWfForGenericParam {
-                        use_span: span,
-                        clause_span: generic.span(s),
-                    },
-                ));
-
-                (cause, para)
-            });
-
         let param_truncation = match assoc_wf_mode {
             AssocParamWfMode::Check => None,
             AssocParamWfMode::Ignore => Some(*instance.def.r(s).regular_generic_count),
         };
 
         self.ccx.instantiate_infer().ensure_binder_params_wf(
-            universe,
+            self.fuel,
+            &self.opts.universe,
             binder,
             binder_env,
             param_truncation,
-            params_wf,
+            instance.params.r(s).iter().copied(),
         );
     }
 
@@ -768,18 +747,22 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
     ) -> ImportPromise<'tcx, TraitClause> {
         let s = self.session();
 
-        self.import_trait_clause_list_inner(&[clause]).r(s)[0]
+        self.import_trait_clause_list_inner(&[clause])
+            .map_value(|v| v.r(s)[0])
     }
 
     pub fn import_hrtb_binder(&mut self, clause: SigHrtbBinder) -> ImportPromise<'tcx, HrtbBinder> {
-        let TraitClause::Trait(clause) = self.import_trait_clause(SigTraitClause {
+        self.import_trait_clause(SigTraitClause {
             span: clause.defs_span,
             kind: SigTraitClauseKind::Trait(clause),
-        }) else {
-            unreachable!();
-        };
+        })
+        .map_value(|v| {
+            let TraitClause::Trait(clause) = v else {
+                unreachable!()
+            };
 
-        clause
+            clause
+        })
     }
 
     pub fn import_trait_spec(&mut self, clause: SigTraitSpec) -> ImportPromise<'tcx, TraitSpec> {
@@ -790,14 +773,19 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             defs: Obj::new_slice(&[], s),
             inner: clause,
         })
-        .inner
+        .map_value(|v| v.inner)
     }
 
     // === Inner === //
 
-    fn import_trait_clause_list_inner(&mut self, clauses: &[SigTraitClause]) -> TraitClauseList {
+    fn import_trait_clause_list_inner(
+        &mut self,
+        clauses: &[SigTraitClause],
+    ) -> ImportPromise<'tcx, TraitClauseList> {
         let s = self.session();
         let tcx = self.tcx();
+
+        let mut collector = MultiPromiseBuilder::new();
 
         let wf_self_var = self.opts.wf_mode.do_wf().then(|| {
             self.ccx.fresh_ty_universal_var(
@@ -810,43 +798,50 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
         let wf_self_ty = wf_self_var.map(|var| tcx.intern(TyKind::UniversalVar(var)));
 
-        let clauses = self.import_trait_clause_list_with_self_ty(wf_self_ty, clauses);
+        let clauses = self
+            .import_trait_clause_list_with_self_ty(wf_self_ty, clauses)
+            .flat_join(&mut collector);
 
         if let Some(wf_self_ty) = wf_self_var {
             self.ccx
                 .init_ty_universal_var_direct_clauses(wf_self_ty, clauses);
         }
 
-        clauses
+        collector.finish().and_value(clauses)
     }
 
     fn import_trait_clause_list_with_self_ty(
         &mut self,
         wf_self_ty: Option<Ty>,
         clauses: &[SigTraitClause],
-    ) -> TraitClauseList {
+    ) -> ImportPromise<'tcx, TraitClauseList> {
         let tcx = self.tcx();
+
+        let mut collector = MultiPromiseBuilder::new();
 
         let clauses = clauses
             .iter()
-            .map(|&clause| self.import_trait_clause_with_self_ty(wf_self_ty, clause))
+            .map(|&clause| {
+                self.import_trait_clause_with_self_ty(wf_self_ty, clause)
+                    .flat_join(&mut collector)
+            })
             .collect::<Vec<_>>();
 
-        tcx.intern_list(&clauses)
+        collector.finish().and_value(tcx.intern_list(&clauses))
     }
 
     fn import_trait_clause_with_self_ty(
         &mut self,
         wf_self_ty: Option<Ty>,
         clause: SigTraitClause,
-    ) -> TraitClause {
+    ) -> ImportPromise<'tcx, TraitClause> {
         match clause.kind {
-            SigTraitClauseKind::Outlives(dir, rhs) => {
-                TraitClause::Outlives(dir, self.import_ty_or_re(rhs))
-            }
-            SigTraitClauseKind::Trait(binder) => {
-                TraitClause::Trait(self.import_hrtb_binder_with_self_ty(wf_self_ty, binder))
-            }
+            SigTraitClauseKind::Outlives(dir, rhs) => self
+                .import_ty_or_re(rhs)
+                .map_value(|v| TraitClause::Outlives(dir, v)),
+            SigTraitClauseKind::Trait(binder) => self
+                .import_hrtb_binder_with_self_ty(wf_self_ty, binder)
+                .map_value(TraitClause::Trait),
         }
     }
 
@@ -854,16 +849,23 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         &mut self,
         wf_self_ty: Option<Ty>,
         binder: SigHrtbBinder,
-    ) -> HrtbBinder {
+    ) -> ImportPromise<'tcx, HrtbBinder> {
         let s = self.session();
         let tcx = self.tcx();
 
         if binder.defs.r(s).is_empty() {
-            return HrtbBinder {
+            let PromiseValue {
+                value: inner,
+                promise: inner_promise,
+            } = self.import_trait_spec_with_self_ty(wf_self_ty, binder.inner);
+
+            return inner_promise.and_value(HrtbBinder {
                 defs: tcx.intern_list(&[]),
-                inner: self.import_trait_spec_with_self_ty(wf_self_ty, binder.inner),
-            };
+                inner,
+            });
         }
+
+        let mut collector = MultiPromiseBuilder::new();
 
         if let Some(wf_self_ty) = wf_self_ty {
             self.check_hrtb_binder_wf(wf_self_ty, binder);
@@ -878,7 +880,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 universe: parent_universe,
                 env: parent_env,
                 // Can't push WF obligations for types involving unsubstituted HRTB variables.
-                wf_mode: false,
+                wf_mode: ImportWfMode::ReportElsewhere,
                 // Can't project until this HRTB binder is alleviated.
                 defer_project_in_binder: true,
             },
@@ -897,22 +899,32 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                         span: def.span,
                         name: def.name,
                         kind: def.kind,
-                        clauses: self.import_trait_clause_list(def.clauses),
+                        clauses: self
+                            .import_trait_clause_list(def.clauses)
+                            .flat_join(&mut collector),
                     })
                     .collect::<Vec<_>>(),
             ),
-            inner: self.import_trait_spec(binder.inner),
+            inner: self
+                .import_trait_spec(binder.inner)
+                .flat_join(&mut collector),
         };
 
         // Exit nested universe
         self.opts = old_opts;
         self.hrtb_substs.pop(binders_pushed);
 
-        imported_binder
+        collector.finish().and_value(imported_binder)
     }
 
-    fn check_hrtb_binder_wf(&mut self, wf_self_ty: Ty, binder: SigHrtbBinder) {
+    fn check_hrtb_binder_wf(
+        &mut self,
+        wf_self_ty: Ty,
+        binder: SigHrtbBinder,
+    ) -> MultiPromise<'tcx, ImportError> {
         let s = self.session();
+
+        let mut collector = MultiPromiseBuilder::new();
 
         let nested_universe = self.opts.universe.clone().nest(HrtbUniverseInfo {});
 
@@ -947,7 +959,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 universe: nested_universe.clone(),
                 env: parent_env,
                 // We went through all this effort to spawn WF obligations, after all.
-                wf_mode: true,
+                wf_mode: ImportWfMode::ReportHere,
                 // We want to reveal projection errors.
                 defer_project_in_binder: false,
             },
@@ -959,22 +971,25 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
         // WF-check each bound variable, initializing their corresponding universal.
         for (def, &var) in binder.defs.r(s).iter().zip(&hrtb_universals) {
-            let clauses = self.import_trait_clause_list_with_self_ty(
-                // N.B. if we're working with a region, it is safe not to pass an `wf_self_ty` because
-                // it will never be used because we'll never try to expand an HRTB binder. It also just
-                // wouldn't make any sense to pass.
-                var.as_ty(),
-                def.clauses.elems.r(s),
-            );
+            let clauses = self
+                .import_trait_clause_list_with_self_ty(
+                    // N.B. if we're working with a region, it is safe not to pass an `wf_self_ty` because
+                    // it will never be used because we'll never try to expand an HRTB binder. It also just
+                    // wouldn't make any sense to pass.
+                    var.as_ty(),
+                    def.clauses.elems.r(s),
+                )
+                .flat_join(&mut collector);
 
             self.ccx.init_any_universal_var_direct_clauses(var, clauses);
         }
 
         // WF-check the main body.
-        let bound = self.import_trait_spec_with_self_ty(Some(wf_self_ty), binder.inner);
+        let bound = self
+            .import_trait_spec_with_self_ty(Some(wf_self_ty), binder.inner)
+            .flat_join(&mut collector);
 
         self.ccx.oblige_covered(
-            self.cause.clone(),
             /* must_mention */
             hrtb_universals
                 .iter()
@@ -993,15 +1008,19 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         // Exit nested universe
         self.opts = old_opts;
         self.hrtb_substs.pop(binders_pushed);
+
+        collector.finish()
     }
 
     fn import_trait_spec_with_self_ty(
         &mut self,
         wf_self_ty: Option<Ty>,
         spec: SigTraitSpec,
-    ) -> TraitSpec {
+    ) -> ImportPromise<'tcx, TraitSpec> {
         let s = self.session();
         let tcx = self.tcx();
+
+        let mut collector = MultiPromiseBuilder::new();
 
         // Let's begin by importing this spec directly.
         let spec_imported = TraitSpec {
@@ -1012,12 +1031,13 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                     .r(s)
                     .iter()
                     .map(|para| match para.kind {
-                        SigTraitParamKind::Equals(ty_or_re) => {
-                            TraitParam::Equals(self.import_ty_or_re(ty_or_re))
-                        }
-                        SigTraitParamKind::Unspecified(clauses) => {
-                            TraitParam::Unspecified(self.import_trait_clause_list(clauses))
-                        }
+                        SigTraitParamKind::Equals(ty_or_re) => TraitParam::Equals(
+                            self.import_ty_or_re(ty_or_re).flat_join(&mut collector),
+                        ),
+                        SigTraitParamKind::Unspecified(clauses) => TraitParam::Unspecified(
+                            self.import_trait_clause_list(clauses)
+                                .flat_join(&mut collector),
+                        ),
                     })
                     .collect::<Vec<_>>(),
             ),
@@ -1025,7 +1045,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
         // Now, we can optionally perform WF checks on it.
         let Some(wf_self_ty) = wf_self_ty else {
-            return spec_imported;
+            return collector.finish().and_value(spec_imported);
         };
 
         // We instantiate the `spec` as an instance to ensure that each associated type inference
@@ -1082,12 +1102,17 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         //
         // ...where the last clause fails to pass its self obligation because the earlier clause
         // takes priority.
-        let instance = self.ccx.instantiate_infer().resolve_trait_spec(
-            &self.cause,
-            &self.opts.universe,
-            wf_self_ty,
-            spec_imported,
-        );
+        let instance = self
+            .ccx
+            .instantiate_infer()
+            .resolve_trait_spec(self.fuel, &self.opts.universe, wf_self_ty, spec_imported)
+            .filter_map(move |_ccx, error| {
+                // No filtering needed because we know we're in WF mode.
+                Ok(ImportError::NoShadowImpl {
+                    error: Box::new(error),
+                })
+            })
+            .join(&mut collector);
 
         // Check the parameters.
         let spans = spec
@@ -1098,8 +1123,6 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             .map(|v| v.span);
 
         self.ensure_trait_instance_args_wf_no_self_obligation(
-            &self.cause.clone(),
-            &self.opts.universe.clone(),
             wf_self_ty,
             spans,
             instance,
@@ -1110,7 +1133,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             AssocParamWfMode::Ignore,
         );
 
-        spec_imported
+        collector.finish().and_value(spec_imported)
     }
 }
 
