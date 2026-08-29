@@ -6,7 +6,7 @@ use crate::{
             ClauseCx, ClauseFuel, ClauseImportEnv, FnInstanceResolutionError,
             FnInstanceResolutionErrorKind, GenericSubst, HrtbUniverse, ImplBlockSatisfyError,
             ImplBlockSatisfyErrorCulprit, ImportError, ImportWfMode, InherentImplBlockSatisfyError,
-            MultiPromise, MultiPromiseBuilder, MultiPromiseValue, Promise, PromiseValue,
+            MultiPromiseBuilder, MultiPromiseValue, Promise, PromiseValue,
             TraitSpecResolutionError, TraitSpecResolutionErrorCulprit,
         },
         syntax::{
@@ -25,58 +25,45 @@ use crate::{
 
 /// Machinery
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn universal_binder_to_init_vars(
+    fn universal_binder_to_init_vars(
         &mut self,
-        fuel: ClauseFuel,
-        universe: &HrtbUniverse,
         binder_parent_env: &ClauseImportEnv,
         binder: Obj<GenericBinder>,
-    ) -> MultiPromiseValue<'tcx, TyOrReList, ImportError> {
-        let substs = self.universal_binder_to_uninit_vars(universe, binder);
-        let promise =
-            self.universal_init_vars_for_binder(fuel, universe, binder_parent_env, binder, substs);
-
-        promise.and_value(substs)
+    ) -> TyOrReList {
+        let substs = self.universal_binder_to_uninit_vars(binder);
+        self.universal_init_vars_for_binder(binder_parent_env, binder, substs);
+        substs
     }
 
-    pub fn universal_binder_to_uninit_vars(
-        &mut self,
-        universe: &HrtbUniverse,
-        binder: Obj<GenericBinder>,
-    ) -> TyOrReList {
+    fn universal_binder_to_uninit_vars(&mut self, binder: Obj<GenericBinder>) -> TyOrReList {
         let s = self.session();
         let tcx = self.tcx();
 
-        let vars =
-            binder
-                .r(s)
-                .defs
-                .iter()
-                .map(|&generic| match generic {
-                    AnyGeneric::Re(generic) => {
-                        TyOrRe::Re(self.fresh_re_universal(UniversalReVarSourceInfo::Root(generic)))
-                    }
-                    AnyGeneric::Ty(generic) => TyOrRe::Ty(self.fresh_ty_universal(
-                        universe.clone(),
-                        UniversalTyVarSourceInfo::Root(generic),
-                    )),
-                })
-                .collect::<Vec<_>>();
+        let vars = binder
+            .r(s)
+            .defs
+            .iter()
+            .map(|&generic| match generic {
+                AnyGeneric::Re(generic) => {
+                    TyOrRe::Re(self.fresh_re_universal(UniversalReVarSourceInfo::Root(generic)))
+                }
+                AnyGeneric::Ty(generic) => TyOrRe::Ty(self.fresh_ty_universal(
+                    HrtbUniverse::ROOT,
+                    UniversalTyVarSourceInfo::Root(generic),
+                )),
+            })
+            .collect::<Vec<_>>();
 
         tcx.intern_list(&vars)
     }
 
-    pub fn universal_init_vars_for_binder(
+    fn universal_init_vars_for_binder(
         &mut self,
-        fuel: ClauseFuel,
-        universe: &HrtbUniverse,
         binder_parent_env: &ClauseImportEnv,
         target_binder: Obj<GenericBinder>,
         target_vars: TyOrReList,
-    ) -> MultiPromise<'tcx, ImportError> {
+    ) {
         let s = self.session();
-
-        let mut collector = MultiPromiseBuilder::new();
 
         let binder_env = binder_parent_env
             .clone()
@@ -86,15 +73,7 @@ impl<'tcx> ClauseCx<'tcx> {
             match (generic, subst) {
                 (AnyGeneric::Re(generic), TyOrRe::Re(target)) => {
                     for &clause in generic.r(s).clauses.elems.r(s) {
-                        let clause = self
-                            .importer(
-                                fuel,
-                                universe.clone(),
-                                binder_env.clone(),
-                                ImportWfMode::ReportElsewhere,
-                            )
-                            .import_trait_clause(clause)
-                            .flat_join(&mut collector);
+                        let clause = self.import_elsewhere(&binder_env, clause);
 
                         let TraitClause::Outlives(allowed_to_outlive_dir, allowed_to_outlive) =
                             clause
@@ -114,50 +93,30 @@ impl<'tcx> ClauseCx<'tcx> {
                         unreachable!()
                     };
 
-                    let clauses = self
-                        .importer(
-                            fuel,
-                            universe.clone(),
-                            binder_env.clone(),
-                            ImportWfMode::ReportElsewhere,
-                        )
-                        .import_trait_clause_list(*generic.r(s).clauses)
-                        .flat_join(&mut collector);
+                    let clauses = self.import_elsewhere(&binder_env, *generic.r(s).clauses);
 
                     self.init_ty_universal_var_direct_clauses(target, clauses);
                 }
                 _ => unreachable!(),
             }
         }
-
-        collector.finish()
     }
 }
 
 /// Specialized
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn universal_env_for_trait_def(
-        &mut self,
-        fuel: ClauseFuel,
-        universe: &HrtbUniverse,
-        def: Obj<TraitItem>,
-    ) -> MultiPromiseValue<'tcx, ClauseImportEnv, ImportError> {
+    pub fn universal_env_for_trait_def(&mut self, def: Obj<TraitItem>) -> ClauseImportEnv {
         let s = self.session();
         let tcx = self.tcx();
 
         // Create a universal variable representing `Self`
         let self_var =
-            self.fresh_ty_universal_var(universe.clone(), UniversalTyVarSourceInfo::TraitSelf);
+            self.fresh_ty_universal_var(HrtbUniverse::ROOT, UniversalTyVarSourceInfo::TraitSelf);
 
         let self_ty = tcx.intern(TyKind::UniversalVar(self_var));
 
         // Create universal variables for each parameter.
-        let PromiseValue {
-            value: generic_params,
-            promise,
-        } = self.universal_binder_to_init_vars(
-            fuel,
-            universe,
+        let generic_params = self.universal_binder_to_init_vars(
             &ClauseImportEnv::new(Some(self_ty), []),
             *def.r(s).generics,
         );
@@ -180,23 +139,18 @@ impl<'tcx> ClauseCx<'tcx> {
             })]),
         );
 
-        promise.and_value(ClauseImportEnv::new(
+        ClauseImportEnv::new(
             Some(self_ty),
             [GenericSubst::new(*def.r(s).generics, generic_params)],
-        ))
+        )
     }
 
-    pub fn universal_env_for_adt_def(
-        &mut self,
-        fuel: ClauseFuel,
-        universe: &HrtbUniverse,
-        def: Obj<AdtItem>,
-    ) -> MultiPromiseValue<'tcx, ClauseImportEnv, ImportError> {
+    pub fn universal_env_for_adt_def(&mut self, def: Obj<AdtItem>) -> ClauseImportEnv {
         let s = self.session();
         let tcx = self.tcx();
 
         // Create universal parameters.
-        let sig_generic_substs = self.universal_binder_to_uninit_vars(universe, def.r(s).generics);
+        let sig_generic_substs = self.universal_binder_to_uninit_vars(def.r(s).generics);
 
         // Create the `Self` type.
         let self_ty = tcx.intern(TyKind::Adt(AdtInstance {
@@ -205,116 +159,69 @@ impl<'tcx> ClauseCx<'tcx> {
         }));
 
         // Initialize the clauses.
-        let promise = self.universal_init_vars_for_binder(
-            fuel,
-            universe,
+        self.universal_init_vars_for_binder(
             &ClauseImportEnv::new(Some(self_ty), []),
             def.r(s).generics,
             sig_generic_substs,
         );
 
-        promise.and_value(ClauseImportEnv::new(
+        ClauseImportEnv::new(
             Some(self_ty),
             [GenericSubst::new(def.r(s).generics, sig_generic_substs)],
-        ))
+        )
     }
 
-    pub fn universal_env_for_impl_block(
-        &mut self,
-        fuel: ClauseFuel,
-        universe: &HrtbUniverse,
-        def: Obj<ImplItem>,
-    ) -> MultiPromiseValue<'tcx, ClauseImportEnv, ImportError> {
+    pub fn universal_env_for_impl_block(&mut self, def: Obj<ImplItem>) -> ClauseImportEnv {
         let s = self.session();
 
-        let mut collector = MultiPromiseBuilder::new();
-
         // Create universal parameters.
-        let sig_generic_substs = self.universal_binder_to_uninit_vars(universe, def.r(s).generics);
+        let sig_generic_substs = self.universal_binder_to_uninit_vars(def.r(s).generics);
 
         // Create the `Self` type.
-        let self_ty = self
-            .importer(
-                fuel,
-                universe.clone(),
-                ClauseImportEnv::new(
-                    None,
-                    [GenericSubst::new(def.r(s).generics, sig_generic_substs)],
-                ),
-                ImportWfMode::ReportElsewhere,
-            )
-            .import_ty(*def.r(s).target)
-            .flat_join(&mut collector);
+        let self_ty = self.import_elsewhere(
+            &ClauseImportEnv::new(
+                None,
+                [GenericSubst::new(def.r(s).generics, sig_generic_substs)],
+            ),
+            *def.r(s).target,
+        );
 
         // Initialize the clauses.
         self.universal_init_vars_for_binder(
-            fuel,
-            universe,
             &ClauseImportEnv::new(Some(self_ty), []),
             def.r(s).generics,
             sig_generic_substs,
-        )
-        .flat_join(&mut collector);
+        );
 
-        collector.finish().and_value(ClauseImportEnv::new(
+        ClauseImportEnv::new(
             Some(self_ty),
             [GenericSubst::new(def.r(s).generics, sig_generic_substs)],
-        ))
+        )
     }
 
-    pub fn universal_env_for_fn_def(
-        &mut self,
-        fuel: ClauseFuel,
-        universe: &HrtbUniverse,
-        def: Obj<FnDef>,
-    ) -> MultiPromiseValue<'tcx, ClauseImportEnv, ImportError> {
+    pub fn universal_env_for_fn_def(&mut self, def: Obj<FnDef>) -> ClauseImportEnv {
         let s = self.session();
 
-        let mut collector = MultiPromiseBuilder::new();
-
         // Get parent environment
-        let mut env = match *def.r(s).owner {
+        let env = match *def.r(s).owner {
             FnDefOwner::Item(_item) => ClauseImportEnv::new(None, []),
-            FnDefOwner::TraitMethod(def, _idx) => self
-                .universal_env_for_trait_def(fuel, universe, def)
-                .flat_join(&mut collector),
-            FnDefOwner::ImplMethod(def, _idx) => self
-                .universal_env_for_impl_block(fuel, universe, def)
-                .flat_join(&mut collector),
+            FnDefOwner::TraitMethod(def, _idx) => self.universal_env_for_trait_def(def),
+            FnDefOwner::ImplMethod(def, _idx) => self.universal_env_for_impl_block(def),
         };
 
         // Extend with function environment
-        let substs = self
-            .universal_binder_to_init_vars(fuel, universe, &env, def.r(s).generics)
-            .flat_join(&mut collector);
+        let substs = self.universal_binder_to_init_vars(&env, def.r(s).generics);
 
-        env.push_subst(GenericSubst::new(def.r(s).generics, substs));
-
-        collector.finish().and_value(env)
+        env.with_subst(GenericSubst::new(def.r(s).generics, substs))
     }
 
-    pub fn universal_env_for_type_alias_def(
-        &mut self,
-        fuel: ClauseFuel,
-        universe: &HrtbUniverse,
-        def: Obj<TypeAliasItem>,
-    ) -> MultiPromiseValue<'tcx, ClauseImportEnv, ImportError> {
+    pub fn universal_env_for_type_alias_def(&mut self, def: Obj<TypeAliasItem>) -> ClauseImportEnv {
         let s = self.session();
 
-        let PromiseValue {
-            value: substs,
-            promise,
-        } = self.universal_binder_to_init_vars(
-            fuel,
-            universe,
-            &ClauseImportEnv::new(None, []),
-            def.r(s).generics,
-        );
+        let substs =
+            self.universal_binder_to_init_vars(&ClauseImportEnv::new(None, []), def.r(s).generics);
 
-        promise.and_value(ClauseImportEnv::new(
-            None,
-            [GenericSubst::new(def.r(s).generics, substs)],
-        ))
+        ClauseImportEnv::new(None, [GenericSubst::new(def.r(s).generics, substs)])
     }
 }
 

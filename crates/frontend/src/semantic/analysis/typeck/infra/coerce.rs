@@ -2,7 +2,7 @@ use crate::{
     base::arena::{HasInterner, HasListInterner, Obj},
     semantic::{
         analysis::typeck::{BodyCtxt, infra::deref::attempt_deref_clobber_obligations},
-        infer::{ClauseCx, HrtbUniverse, ObligeCause, ObligeCauseOrigin},
+        infer::{ClauseCx, HrtbUniverse},
         syntax::{
             Divergence, HirExpr, InferTyVarSourceInfo, Mutability, Re, RelationMode, SimpleTyKind,
             TraitClauseList, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,

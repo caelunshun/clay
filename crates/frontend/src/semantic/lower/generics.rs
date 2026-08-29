@@ -519,7 +519,10 @@ impl IntraItemLowerCtxt<'_> {
         Ok(SigTraitInstance {
             span: for_trait.span,
             def,
-            params,
+            params: SigGenericList {
+                segment_span: for_trait.span,
+                elems: params,
+            },
         })
     }
 }

@@ -2,7 +2,7 @@ use crate::{
     base::{ErrorGuaranteed, Session, arena::Obj},
     semantic::{
         analysis::{sigck::CrateSigckVisitor, typeck::confirm::ConfirmCtxt},
-        infer::{ClauseCx, ClauseImportEnv, HrtbUniverse, ObligeCause, UnifyCx, UnifyCxMode},
+        infer::{ClauseCx, ClauseImportEnv, HrtbUniverse, UnifyCx, UnifyCxMode},
         syntax::{
             Crate, FnDef, HirExpr, HirLabelledBlock, HirLocal, HirPat, InferTyVar,
             InferTyVarSourceInfo, Item, Ty, TyCtxt,
@@ -19,11 +19,7 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
 
     // Setup a `ClauseCx` for signature validation.
     let mut ccx = ClauseCx::new(tcx, cx.coherence, cx.krate, UnifyCxMode::RegionBlind);
-    let env_sig = ccx.instantiate_universal().env_for_fn_def(
-        &ObligeCause::new_empty_report(),
-        HrtbUniverse::ROOT_REF,
-        def,
-    );
+    let env_sig = ccx.universal_env_for_fn_def(def);
 
     // WF-check the signature.
     cx.visit_generic_binder(&mut ccx, &env_sig, def.r(s).generics);
@@ -34,7 +30,7 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
 
         for arg in def.r(s).args.r(s) {
             let env = bcx.import_env;
-            let ascription = bcx.ccx_mut().import(env, arg.ty);
+            let ascription = bcx.ccx_mut().import_here(env, arg.ty);
 
             bcx.check_pat_demand(arg.pat, ascription, None);
         }
@@ -44,10 +40,10 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
         ConfirmCtxt::new(&mut bcx).confirm(body);
     } else {
         for arg in def.r(s).args.r(s) {
-            ccx.import(&env_sig, arg.ty);
+            ccx.import_here(&env_sig, arg.ty);
         }
 
-        ccx.import(&env_sig, *def.r(s).ret_ty);
+        ccx.import_here(&env_sig, *def.r(s).ret_ty);
     }
 
     ccx.verify();
@@ -83,7 +79,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
     ) -> Self {
         let s = ccx.session();
 
-        let return_ty = ccx.import(import_env, *def.r(s).ret_ty);
+        let return_ty = ccx.import_here(import_env, *def.r(s).ret_ty);
 
         Self {
             ccx,

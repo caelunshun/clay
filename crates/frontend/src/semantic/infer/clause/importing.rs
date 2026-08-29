@@ -7,11 +7,10 @@ use crate::{
     },
     semantic::{
         infer::{
-            BinderParamWfBinderError, ClauseCx, ClauseFuel, HrtbInferParamNotValid,
-            HrtbInferParamNotValidKind, HrtbUniverse, HrtbUniverseInfo, ImportError,
-            InstantiateHrtbInferError, InstantiateHrtbUniversalError, MultiPromise,
-            MultiPromiseBuilder, MultiPromiseValue, Promise, PromiseValue,
-            TraitSpecResolutionError, UnifyCxMode,
+            ClauseCx, ClauseFuel, HrtbInferParamNotValid, HrtbInferParamNotValidKind, HrtbUniverse,
+            HrtbUniverseInfo, ImportError, InstantiateHrtbInferError,
+            InstantiateHrtbUniversalError, MultiPromise, MultiPromiseBuilder, MultiPromiseValue,
+            PromiseValue, TraitSpecResolutionError, UnifyCxMode,
         },
         lower::generics::normalize_positional_generic_arity,
         syntax::{
@@ -145,11 +144,7 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    pub fn import<I: SigImportable<'tcx>>(
-        &mut self,
-        env: &ClauseImportEnv,
-        target: I,
-    ) -> ImportPromise<'tcx, I::Output> {
+    pub fn importer_here(&mut self, env: &ClauseImportEnv) -> SigImporter<'_, 'tcx> {
         let fuel = self.fresh_clause_fuel();
 
         self.importer(
@@ -158,7 +153,37 @@ impl<'tcx> ClauseCx<'tcx> {
             env.clone(),
             ImportWfMode::ReportHere,
         )
-        .import(target)
+    }
+
+    pub fn importer_elsewhere(&mut self, env: &ClauseImportEnv) -> SigImporter<'_, 'tcx> {
+        let fuel = self.fresh_clause_fuel();
+
+        self.importer(
+            fuel,
+            HrtbUniverse::ROOT,
+            env.clone(),
+            ImportWfMode::ReportElsewhere,
+        )
+    }
+
+    pub fn import_here<I: SigImportable<'tcx>>(
+        &mut self,
+        env: &ClauseImportEnv,
+        target: I,
+    ) -> I::Output {
+        self.importer_here(env).import(target).report_loud()
+    }
+
+    pub fn import_elsewhere<I: SigImportable<'tcx>>(
+        &mut self,
+        env: &ClauseImportEnv,
+        target: I,
+    ) -> I::Output {
+        self.importer_elsewhere(env)
+            .import(target)
+            // We're performing this import with zero spent fuel so it should succeed *iff* the WF
+            // import also succeeds.
+            .report_delay_bug()
     }
 }
 
@@ -667,12 +692,6 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
     }
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-enum AssocParamWfMode {
-    Check,
-    Ignore,
-}
-
 /// Traits
 impl<'a, 'tcx> SigImporter<'a, 'tcx> {
     // === Instance logic === //
@@ -683,61 +702,16 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         instance: SigTraitInstance,
     ) -> ImportPromise<'tcx, TraitInstance> {
         let s = self.session();
-        let tcx = self.tcx();
-
-        let mut collector = MultiPromiseBuilder::new();
-
-        let instance_imported = TraitInstance {
-            def: instance.def,
-            params: tcx.intern_list(
-                &instance
-                    .params
-                    .r(s)
-                    .iter()
-                    .map(|&ty_or_re| self.import_ty_or_re(ty_or_re).flat_join(&mut collector))
-                    .collect::<Vec<_>>(),
-            ),
-        };
-
-        if self.opts.wf_mode.do_wf() {
-            self.ensure_trait_instance_args_wf_no_self_obligation(
-                instance_applies_to,
-                instance_imported,
-                AssocParamWfMode::Check,
-            );
-        }
-
-        collector.finish().and_value(instance_imported)
-    }
-
-    fn ensure_trait_instance_args_wf_no_self_obligation(
-        &mut self,
-        applies_to: Ty,
-        instance: TraitInstance,
-        assoc_wf_mode: AssocParamWfMode,
-    ) -> Promise<'tcx, BinderParamWfBinderError> {
-        let s = self.ccx.session();
 
         let binder = *instance.def.r(s).generics;
 
-        let binder_env = ClauseImportEnv::new(
-            Some(applies_to),
-            [GenericSubst::new(binder, instance.params)],
-        );
-
-        let param_truncation = match assoc_wf_mode {
-            AssocParamWfMode::Check => None,
-            AssocParamWfMode::Ignore => Some(*instance.def.r(s).regular_generic_count),
-        };
-
-        self.ccx.ensure_binder_params_wf(
-            self.fuel,
-            &self.opts.universe,
-            binder,
-            binder_env,
-            param_truncation,
-            instance.params,
-        )
+        self.import_generic_args(binder, instance.params, FixArity::AssumeCorrect, |args| {
+            ClauseImportEnv::new(Some(instance_applies_to), [GenericSubst::new(binder, args)])
+        })
+        .map_value(|params| TraitInstance {
+            def: instance.def,
+            params,
+        })
     }
 
     // === Spec drivers === //
@@ -1131,20 +1105,25 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             .join(&mut collector);
 
         // Check the parameters.
-        self.ensure_trait_instance_args_wf_no_self_obligation(
-            wf_self_ty,
-            instance,
-            // We don't verify the well-formedness of the associated types within a spec to be
-            // consistent with rustc's behavior, which seems to exist to make a few common patterns
-            // work. This is fine because, if the associated type is not WF, no impl for it will
-            // exist.
-            AssocParamWfMode::Ignore,
-        )
-        .map(move |_ccx, error| ImportError::BadTraitSpec {
-            spec,
-            error: Box::new(error),
-        })
-        .join(&mut collector);
+        let binder = *instance.def.r(s).generics;
+
+        self.ccx
+            .ensure_binder_params_wf(
+                self.fuel,
+                &self.opts.universe,
+                binder,
+                ClauseImportEnv::new(
+                    Some(wf_self_ty),
+                    [GenericSubst::new(binder, instance.params)],
+                ),
+                Some(*instance.def.r(s).regular_generic_count),
+                instance.params,
+            )
+            .map(move |_ccx, error| ImportError::BadTraitSpec {
+                spec,
+                error: Box::new(error),
+            })
+            .join(&mut collector);
 
         collector.finish().and_value(spec_imported)
     }

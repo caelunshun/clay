@@ -50,7 +50,7 @@ impl CoherenceMap {
                     self.by_shape.insert(
                         trait_eraser.shape_of_trait_impl(
                             trait_.def,
-                            &trait_.params.r(s)[..arg_count],
+                            &trait_.params.elems.r(s)[..arg_count],
                             *item.r(s).target,
                         ),
                         CoherenceMapEntry::TraitImpl(item),

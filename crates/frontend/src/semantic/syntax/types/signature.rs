@@ -256,7 +256,7 @@ impl fmt::Debug for SigTraitSpec {
 pub struct SigTraitInstance {
     pub span: Span,
     pub def: Obj<TraitItem>,
-    pub params: SigTyOrReList,
+    pub params: SigGenericList,
 }
 
 impl fmt::Debug for SigTraitInstance {
