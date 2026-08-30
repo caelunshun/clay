@@ -8,6 +8,7 @@ use crate::{
             ImplBlockSatisfyErrorCulprit, ImportError, ImportWfMode, InherentImplBlockSatisfyError,
             MultiPromiseBuilder, MultiPromiseValue, Promise, PromiseValue,
             TraitSpecResolutionError, TraitSpecResolutionErrorCulprit,
+            TypeRelativeFnDefToOwnerError,
         },
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnOwner,
@@ -835,7 +836,7 @@ impl<'tcx> ClauseCx<'tcx> {
         universe: &HrtbUniverse,
         self_ty: Ty,
         def: Obj<FnDef>,
-    ) -> FnOwner {
+    ) -> PromiseValue<'tcx, FnOwner, TypeRelativeFnDefToOwnerError> {
         let s = self.session();
 
         match *def.r(s).owner {
@@ -843,19 +844,28 @@ impl<'tcx> ClauseCx<'tcx> {
             FnDefOwner::TraitMethod(item, method_idx) => {
                 let instance = self.fresh_trait_item_to_unconstrained_trait_spec(universe, item);
 
-                self.oblige_ty_meets_trait_instantiated(fuel, universe.clone(), self_ty, instance);
+                let promise = self
+                    .oblige_ty_meets_trait_instantiated(fuel, universe.clone(), self_ty, instance)
+                    .map(move |_ccx, error| TypeRelativeFnDefToOwnerError::Trait {
+                        item,
+                        method_idx,
+                        self_ty,
+                        error: Box::new(error),
+                    });
 
-                FnOwner::Trait(FnOwnerTrait {
+                promise.and_value(FnOwner::Trait(FnOwnerTrait {
                     instance,
                     self_ty,
                     method_idx,
-                })
+                }))
             }
-            FnDefOwner::ImplMethod(block, method_idx) => FnOwner::Inherent(FnOwnerInherent {
-                self_ty,
-                block,
-                method_idx,
-            }),
+            FnDefOwner::ImplMethod(block, method_idx) => {
+                PromiseValue::trivial(FnOwner::Inherent(FnOwnerInherent {
+                    self_ty,
+                    block,
+                    method_idx,
+                }))
+            }
         }
     }
 

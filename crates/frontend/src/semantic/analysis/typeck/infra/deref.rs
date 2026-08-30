@@ -1,7 +1,7 @@
 use crate::{
     base::arena::{HasInterner as _, HasListInterner as _},
     semantic::{
-        infer::{ClauseCx, HrtbUniverse, ObligeCause, ObligeCauseProbe},
+        infer::{ClauseCx, ClauseFuel, HrtbUniverse, PromiseProbe},
         syntax::{InferTyVarSourceInfo, TraitParam, TraitSpec, Ty, TyKind, TyOrRe},
     },
 };
@@ -74,17 +74,18 @@ pub fn attempt_deref_clobber_obligations(ccx: &mut ClauseCx<'_>, curr: Ty) -> Op
     //     bar.bind(Vec::new());
     // }
     // ```
-    let probe = ObligeCauseProbe::default();
+    let probe = PromiseProbe::default();
 
     ccx.oblige_ty_meets_trait_instantiated(
-        ObligeCause::new_probe(probe.clone()),
+        ClauseFuel::new(),
         HrtbUniverse::ROOT,
         curr,
         TraitSpec {
             def: krate.r(s).lang_items.deref_trait().unwrap(),
             params: tcx.intern_list(&[TraitParam::Equals(TyOrRe::Ty(next_infer))]),
         },
-    );
+    )
+    .probe(probe.clone());
 
     ccx.poll_obligations();
 

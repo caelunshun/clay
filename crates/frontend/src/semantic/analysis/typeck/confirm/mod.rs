@@ -5,7 +5,7 @@ use crate::{
     },
     semantic::{
         analysis::typeck::{BodyCtxt, OverloadResolution},
-        infer::{ClauseCx, FloatingInferVar, ObligeCause, UnifyCx},
+        infer::{ClauseCx, FloatingInferVar, UnifyCx},
         syntax::{
             FnInstanceInner, FnOwner, FnOwnerTrait, HirBlock, HirExpr, HirExprKind,
             HirLabelledBlock, HirLocal, HirPat, HirPatKind, HirStmt, RelationMode, ThirBlock,
@@ -74,12 +74,9 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
                 continue;
             };
 
-            _ = self.ucx_mut().unify_ty_and_ty(
-                &ObligeCause::new_never_report(),
-                var_ty,
-                fallback,
-                RelationMode::Equate,
-            );
+            // TODO
+            self.ucx_mut()
+                .unify_ty_and_ty(var_ty, fallback, RelationMode::Equate);
 
             self.ccx_mut().poll_obligations();
         }

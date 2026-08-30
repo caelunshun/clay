@@ -2,7 +2,10 @@ use crate::{
     base::{Session, arena::Obj},
     semantic::{
         analysis::typeck::type_check_function,
-        infer::{ClauseCx, ClauseImportEnv, CoherenceMap, GenericSubst, HrtbUniverse, UnifyCxMode},
+        infer::{
+            ClauseCx, ClauseFuel, ClauseImportEnv, CoherenceMap, GenericSubst, HrtbUniverse,
+            UnifyCxMode,
+        },
         syntax::{
             AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FnItem, GenericBinder, ImplItem,
             ItemKind, TraitItem, TyCtxt, TypeAliasItem,
@@ -127,10 +130,8 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
                 let super_clause_span = super_clause.span;
                 let super_clause = ccx.import_elsewhere(&trait_env, super_clause);
 
-                let fuel = ccx.fresh_clause_fuel();
-
                 ccx.oblige_ty_meets_clause(
-                    fuel,
+                    ClauseFuel::new(),
                     HrtbUniverse::ROOT_REF,
                     env.unwrap_self_ty(),
                     super_clause,

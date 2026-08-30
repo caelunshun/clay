@@ -6,7 +6,7 @@ use crate::{
     parse::token::Ident,
     semantic::{
         analysis::typeck::{BodyCtxt, infra::lookup::LookupMethodResult},
-        infer::{FixArity, HrtbUniverse, ObligeCause, ObligeCauseOrigin},
+        infer::{ClauseFuel, FixArity, HrtbUniverse},
         syntax::{
             Divergence, HirExpr, InferTyVarSourceInfo, InstantiatedFnSig, RelationMode,
             SigGenericList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
@@ -47,18 +47,22 @@ impl BodyCtxt<'_, '_> {
             InferTyVarSourceInfo::FunctionRetVal { span: site_span },
         );
 
-        self.ccx_mut().oblige_ty_meets_trait_instantiated(
-            ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall { site_span }),
-            HrtbUniverse::ROOT,
-            callee,
-            TraitSpec {
-                def: fn_once_trait,
-                params: tcx.intern_list(&[
-                    TraitParam::Equals(TyOrRe::Ty(input_ty)),
-                    TraitParam::Equals(TyOrRe::Ty(output_ty)),
-                ]),
-            },
-        );
+        self.ccx_mut()
+            .oblige_ty_meets_trait_instantiated(
+                ClauseFuel::new(),
+                HrtbUniverse::ROOT,
+                callee,
+                TraitSpec {
+                    def: fn_once_trait,
+                    params: tcx.intern_list(&[
+                        TraitParam::Equals(TyOrRe::Ty(input_ty)),
+                        TraitParam::Equals(TyOrRe::Ty(output_ty)),
+                    ]),
+                },
+            )
+            // TODO
+            .map(move |_ccx, error| ("HirBodyCheckFunctionCall", site_span, error))
+            .report_loud();
 
         let TyKind::Tuple(expected_args) =
             self.ccx_mut().peel_ty_infer_var_after_poll(input_ty).r(s)
@@ -131,40 +135,38 @@ impl BodyCtxt<'_, '_> {
 
         let owner = self
             .ccx_mut()
-            .instantiate_infer()
             .fresh_type_relative_fn_def_to_fn_owner(
-                &ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall {
-                    site_span: name.span,
-                }),
+                ClauseFuel::new(),
                 HrtbUniverse::ROOT_REF,
                 self_ty,
                 resolution,
-            );
+            )
+            // TODO
+            .map(move |_ccx, error| ("HirBodyCheckFunctionCall", name.span, error))
+            .report_loud();
 
         let instance = self
             .ccx
             .importer_here(self.import_env)
-            .import_fn_instance_from_owner(owner, generics, FixArity::Normalize);
+            .import_fn_instance_from_owner(owner, generics, FixArity::Normalize)
+            .report_loud();
 
         let InstantiatedFnSig {
             args: expected_args,
             ret_ty: expected_output,
-        } = self.ccx_mut().instantiate_infer().resolve_fn_instance_sig(
-            &ObligeCause::new_empty_report(),
-            HrtbUniverse::ROOT_REF,
-            instance,
-        );
+        } = self
+            .ccx_mut()
+            .resolve_fn_instance_sig(ClauseFuel::new(), HrtbUniverse::ROOT_REF, instance)
+            // TODO
+            .report_loud();
 
         let (self_ty, expected_args) = expected_args.r(s).split_first().unwrap();
 
-        self.ccx_mut().oblige_ty_unifies_ty(
-            ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall {
-                site_span: name.span,
-            }),
-            *self_ty,
-            receiver,
-            RelationMode::Equate,
-        );
+        self.ccx_mut()
+            .oblige_ty_unifies_ty(*self_ty, receiver, RelationMode::Equate)
+            // TODO
+            .map(move |_ccx, error| ("HirBodyCheckFunctionCall", name.span, error))
+            .report_loud();
 
         if expected_args.len() != args.r(s).len() {
             return tcx.intern(TyKind::Error(

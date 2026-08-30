@@ -44,8 +44,8 @@ use crate::{
     base::arena::{HasInterner, HasListInterner},
     semantic::{
         infer::{
-            ClauseCx, ClauseImportEnv, ClauseObligation, FloatingInferVar, GenericSubst,
-            HrtbUniverse, ImportWfMode, ObligationNotReady, ObligationResult,
+            ClauseCx, ClauseFuel, ClauseImportEnv, ClauseObligation, FloatingInferVar,
+            GenericSubst, HrtbUniverse, ImportWfMode, ObligationNotReady, ObligationResult,
         },
         syntax::{
             AnyGeneric, HrtbBinder, InferTyVar, InferTyVarSourceInfo, Mutability, Re, RelationMode,
@@ -117,7 +117,6 @@ impl<'tcx> ClauseCx<'tcx> {
         let var_universe = self.lookup_universal_ty_hrtb_universe(var).clone();
 
         // If not, elaborate the clause list without merging projections.
-        let fuel = self.fresh_clause_fuel();
         let lub_re = self.fresh_re_universal(UniversalReVarSourceInfo::ElaboratedLub);
 
         let mut elaborated = Vec::new();
@@ -197,7 +196,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
                         let implicit_clauses = self
                             .importer(
-                                fuel,
+                                ClauseFuel::new(),
                                 // Associated types vary in the same way as their parent generic.
                                 var_universe.clone(),
                                 ClauseImportEnv::new(
@@ -244,7 +243,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     // Explore and push on the elaborated super-trait constraints.
                     let inherits = self
                         .importer(
-                            fuel,
+                            ClauseFuel::new(),
                             // Associated types vary in the same way as their parent generic.
                             var_universe.clone(),
                             ClauseImportEnv::new(

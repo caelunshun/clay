@@ -7,9 +7,7 @@ use crate::{
     parse::ast::AstLit,
     semantic::{
         analysis::typeck::BodyCtxt,
-        infer::{
-            ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse, ObligeCause, ObligeCauseOrigin,
-        },
+        infer::{ClauseFuel, ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse},
         syntax::{
             AdtCtorSyntax, AdtInstance, Divergence, FnInstanceInner, FnOwner, FnOwnerAdtCtor,
             HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirStmt, HirStructExpr,
@@ -49,7 +47,7 @@ impl BodyCtxt<'_, '_> {
                     let ascription = if let Some(ascription) = stmt.r(s).ascription {
                         let import_env = self.import_env;
 
-                        let ascription = self.ccx_mut().import(import_env, ascription);
+                        let ascription = self.ccx_mut().import_here(import_env, ascription);
 
                         if let Some(init) = stmt.r(s).init {
                             self.check_expr_demand(init, ascription).and_do(divergence);
@@ -162,7 +160,8 @@ impl BodyCtxt<'_, '_> {
                             FnOwner::Item(def),
                             early_args,
                             FixArity::AssumeCorrect,
-                        ),
+                        )
+                        .report_loud(),
                 ))
             }
             HirExprKind::TypeRelative {
@@ -173,9 +172,9 @@ impl BodyCtxt<'_, '_> {
             } => 'res: {
                 let env = self.import_env;
 
-                let self_ty = self.ccx_mut().import(env, self_ty);
+                let self_ty = self.ccx_mut().import_here(env, self_ty);
 
-                let as_trait = as_trait.map(|as_trait| self.ccx_mut().import(env, as_trait));
+                let as_trait = as_trait.map(|as_trait| self.ccx_mut().import_here(env, as_trait));
 
                 let Some(resolution) =
                     self.lookup_type_relative(self_ty, as_trait, assoc_name, assoc_args)
@@ -189,7 +188,7 @@ impl BodyCtxt<'_, '_> {
             }
             HirExprKind::Cast(expr, as_ty) => {
                 let env = self.import_env;
-                let as_ty = self.ccx_mut().import(env, as_ty);
+                let as_ty = self.ccx_mut().import_here(env, as_ty);
 
                 self.check_expr_demand(expr, as_ty).and_do(&mut divergence)
             }
@@ -228,20 +227,25 @@ impl BodyCtxt<'_, '_> {
                 );
                 let into_iter_trait = self.krate().r(s).lang_items.into_iterator_trait().unwrap();
 
-                self.ccx_mut().oblige_ty_meets_trait_instantiated(
-                    ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckForLoopIter {
-                        iter_span: iter.r(s).span,
-                    }),
-                    HrtbUniverse::ROOT,
-                    iter_ty,
-                    TraitSpec {
-                        def: into_iter_trait,
-                        params: tcx.intern_list(&[
-                            TraitParam::Unspecified(tcx.intern_list(&[])),
-                            TraitParam::Equals(TyOrRe::Ty(elem_ty)),
-                        ]),
-                    },
-                );
+                self.ccx_mut()
+                    .oblige_ty_meets_trait_instantiated(
+                        ClauseFuel::new(),
+                        HrtbUniverse::ROOT,
+                        iter_ty,
+                        TraitSpec {
+                            def: into_iter_trait,
+                            params: tcx.intern_list(&[
+                                TraitParam::Unspecified(tcx.intern_list(&[])),
+                                TraitParam::Equals(TyOrRe::Ty(elem_ty)),
+                            ]),
+                        },
+                    )
+                    // TODO
+                    .map({
+                        let span = iter.r(s).span;
+                        move |_ccx, error| ("HirBodyCheckForLoopIter", span, error)
+                    })
+                    .report_loud();
 
                 self.check_pat_demand(pat, elem_ty, Some(&mut divergence));
 
@@ -285,16 +289,18 @@ impl BodyCtxt<'_, '_> {
                 } else {
                     if let Some(demand) = self.block_break_demands[&label] {
                         if !divergence.must_diverge() {
-                            self.ccx_mut().oblige_ty_unifies_ty(
-                                ObligeCause::new_report(
-                                    ObligeCauseOrigin::HirBodyCheckReturnUnit {
-                                        span: block.r(s).span,
-                                    },
-                                ),
-                                demand,
-                                tcx.intern(TyKind::Tuple(tcx.intern_list(&[]))),
-                                RelationMode::Equate,
-                            );
+                            self.ccx_mut()
+                                .oblige_ty_unifies_ty(
+                                    demand,
+                                    tcx.intern(TyKind::Tuple(tcx.intern_list(&[]))),
+                                    RelationMode::Equate,
+                                )
+                                // TODO
+                                .map({
+                                    let span = block.r(s).span;
+                                    move |_ccx, error| ("HirBodyCheckReturnUnit", span, error)
+                                })
+                                .report_loud();
                         }
 
                         demand
@@ -355,7 +361,7 @@ impl BodyCtxt<'_, '_> {
             }
             HirExprKind::AdtCtorTy(ty) => 'check: {
                 let ty_span = ty.r(s).span;
-                let ty = self.ccx_mut().import(import_env, ty);
+                let ty = self.ccx_mut().import_here(import_env, ty);
 
                 let ctor = match self.resolve_ty_as_adt_ctor_instance(ty_span, ty) {
                     Ok(v) => v,
@@ -402,7 +408,7 @@ impl BodyCtxt<'_, '_> {
                     }
                 }
 
-                let AdtInstance { def: _, params } = self.ccx_mut().import(
+                let AdtInstance { def: _, params } = self.ccx_mut().import_here(
                     import_env,
                     SigAdtInstance {
                         def: item.r(s).adt(s),
@@ -464,9 +470,7 @@ impl BodyCtxt<'_, '_> {
                         [GenericSubst::new(instance_owner.r(s).generics, ctor.params)],
                     );
 
-                    let init_ty = self
-                        .ccx_mut()
-                        .import_report_elsewhere(&init_ty_env, init_ty_orig);
+                    let init_ty = self.ccx_mut().import_elsewhere(&init_ty_env, init_ty_orig);
 
                     // Mapping follows evaluation order with some filtering for unmatched fields.
                     self.check_expr_demand(init_expr, init_ty)

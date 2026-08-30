@@ -22,7 +22,10 @@ use crate::{
     utils::hash::FxHashMap,
 };
 use index_vec::IndexVec;
-use std::rc::Rc;
+use std::{
+    rc::Rc,
+    sync::atomic::{AtomicU32, Ordering::*},
+};
 
 // === Obligation Definitions === //
 
@@ -70,8 +73,13 @@ pub struct ClauseFuel {
 }
 
 impl ClauseFuel {
-    pub fn new(remaining: u32, kill_id: ClauseFuelKillId) -> Self {
-        Self { remaining, kill_id }
+    pub fn new() -> Self {
+        static GEN: AtomicU32 = AtomicU32::new(0);
+
+        Self {
+            remaining: 128,
+            kill_id: ClauseFuelKillId(GEN.fetch_add(1, Relaxed)),
+        }
     }
 
     pub fn consume(self) -> Self {
@@ -142,7 +150,6 @@ pub struct ClauseCx<'tcx> {
     coherence: &'tcx CoherenceMap,
     krate: Obj<Crate>,
     promise_mode: PromiseMode,
-    fuel_kill_gen: ClauseFuelKillId,
     pub(super) universal_vars: IndexVec<UniversalTyVar, UniversalTyVarDescriptor>,
 }
 
@@ -171,7 +178,6 @@ impl<'tcx> ClauseCx<'tcx> {
             coherence,
             krate,
             promise_mode: PromiseMode::RootContext,
-            fuel_kill_gen: ClauseFuelKillId(0),
             universal_vars: IndexVec::new(),
         }
     }
@@ -340,22 +346,6 @@ impl<'tcx> ClauseCx<'tcx> {
 // === Basic operations === //
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn fresh_clause_fuel(&mut self) -> ClauseFuel {
-        let kill_id = self.fuel_kill_gen;
-
-        self.fuel_kill_gen = ClauseFuelKillId(
-            self.fuel_kill_gen
-                .0
-                .checked_add(1)
-                .expect("too many clause fuel generations created"),
-        );
-
-        ClauseFuel {
-            remaining: 64,
-            kill_id,
-        }
-    }
-
     pub fn fresh_ty_infer_var_restricted(
         &mut self,
         max_universe: HrtbUniverse,

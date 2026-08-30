@@ -3,7 +3,7 @@ use crate::{
     parse::ast::AstMutability,
     semantic::{
         analysis::typeck::BodyCtxt,
-        infer::{HrtbUniverse, ObligeCause, ObligeCauseOrigin},
+        infer::HrtbUniverse,
         syntax::{
             Divergence, HirPat, HirPatKind, InferTyVarSourceInfo, Mutability, Re, RelationMode, Ty,
             TyKind,
@@ -65,17 +65,14 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     demand
                 };
 
-                self.ccx_mut().oblige_ty_unifies_ty(
-                    ObligeCause::new_report(
-                        ObligeCauseOrigin::HirBodyCheckPattern {
-                            pat_span: pat.r(s).span,
-                        }
-                        .into(),
-                    ),
-                    local_ty,
-                    bound_ty,
-                    RelationMode::Equate,
-                );
+                self.ccx_mut()
+                    .oblige_ty_unifies_ty(local_ty, bound_ty, RelationMode::Equate)
+                    // TODO
+                    .map({
+                        let span = pat.r(s).span;
+                        move |_ccx, error| ("HirBodyCheckPattern", span, error)
+                    })
+                    .report_loud();
 
                 if let Some(binding) = binding {
                     self.check_pat_inner(binding, demand, default_by_ref, place_divergence);

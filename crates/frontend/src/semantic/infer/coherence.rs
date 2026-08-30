@@ -87,9 +87,9 @@ impl CoherenceMap {
         }
     }
 
-    pub fn gather_inherent_impl_method_candidates<'a>(
+    pub fn gather_inherent_impl_method_candidates<'a, 'tcx>(
         &'a self,
-        ccx: &'a ClauseCx<'a>,
+        ccx: &'a ClauseCx<'tcx>,
         receiver: Ty,
         name: Symbol,
     ) -> impl Iterator<Item = Obj<FnDef>> + 'a {

@@ -145,10 +145,8 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     pub fn importer_here(&mut self, env: &ClauseImportEnv) -> SigImporter<'_, 'tcx> {
-        let fuel = self.fresh_clause_fuel();
-
         self.importer(
-            fuel,
+            ClauseFuel::new(),
             HrtbUniverse::ROOT,
             env.clone(),
             ImportWfMode::ReportHere,
@@ -156,10 +154,8 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     pub fn importer_elsewhere(&mut self, env: &ClauseImportEnv) -> SigImporter<'_, 'tcx> {
-        let fuel = self.fresh_clause_fuel();
-
         self.importer(
-            fuel,
+            ClauseFuel::new(),
             HrtbUniverse::ROOT,
             env.clone(),
             ImportWfMode::ReportElsewhere,

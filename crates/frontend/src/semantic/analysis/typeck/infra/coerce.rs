@@ -2,7 +2,7 @@ use crate::{
     base::arena::{HasInterner, HasListInterner, Obj},
     semantic::{
         analysis::typeck::{BodyCtxt, infra::deref::attempt_deref_clobber_obligations},
-        infer::{ClauseCx, HrtbUniverse},
+        infer::{ClauseCx, ClauseFuel, HrtbUniverse},
         syntax::{
             Divergence, HirExpr, InferTyVarSourceInfo, Mutability, Re, RelationMode, SimpleTyKind,
             TraitClauseList, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
@@ -64,17 +64,14 @@ impl BodyCtxt<'_, '_> {
         let target = CoercionPossibility::new(self, demand).resolve(self);
         let out_ty = self.apply_coercions(&[(expr, actual)], target);
 
-        self.ccx_mut().oblige_ty_unifies_ty(
-            ObligeCause::new_report(
-                ObligeCauseOrigin::HirBodyCheckCoercion {
-                    expr_span: expr.r(s).span,
-                }
-                .into(),
-            ),
-            out_ty,
-            demand,
-            RelationMode::Equate,
-        );
+        self.ccx_mut()
+            .oblige_ty_unifies_ty(out_ty, demand, RelationMode::Equate)
+            // TODO
+            .map({
+                let span = expr.r(s).span;
+                move |_ccx, error| ("HirBodyCheckCoercion", span, error)
+            })
+            .report_loud();
 
         TyAndDivergence::new(demand, divergence)
     }
@@ -93,17 +90,14 @@ impl BodyCtxt<'_, '_> {
                         continue;
                     }
 
-                    self.ccx_mut().oblige_ty_unifies_ty(
-                        ObligeCause::new_report(
-                            ObligeCauseOrigin::HirBodyCheckCoercion {
-                                expr_span: expr.r(s).span,
-                            }
-                            .into(),
-                        ),
-                        actual,
-                        solid,
-                        RelationMode::Equate,
-                    );
+                    self.ccx_mut()
+                        .oblige_ty_unifies_ty(actual, solid, RelationMode::Equate)
+                        // TODO
+                        .map({
+                            let span = expr.r(s).span;
+                            move |_ccx, error| ("HirBodyCheckCoercion", span, error)
+                        })
+                        .report_loud();
                 }
 
                 solid
@@ -149,22 +143,24 @@ impl BodyCtxt<'_, '_> {
                                     InferTyVarSourceInfo::UnifyHelper,
                                 );
 
-                                self.ccx_mut().oblige_ty_meets_trait_instantiated(
-                                    ObligeCause::new_report(
-                                        ObligeCauseOrigin::HirBodyCheckCoercion {
-                                            expr_span: expr.r(s).span,
-                                        }
-                                        .into(),
-                                    ),
-                                    HrtbUniverse::ROOT,
-                                    output_pointee,
-                                    TraitSpec {
-                                        def: krate.r(s).lang_items.deref_trait().unwrap(),
-                                        params: tcx.intern_list(&[TraitParam::Equals(TyOrRe::Ty(
-                                            next_output,
-                                        ))]),
-                                    },
-                                );
+                                self.ccx_mut()
+                                    .oblige_ty_meets_trait_instantiated(
+                                        ClauseFuel::new(),
+                                        HrtbUniverse::ROOT,
+                                        output_pointee,
+                                        TraitSpec {
+                                            def: krate.r(s).lang_items.deref_trait().unwrap(),
+                                            params: tcx.intern_list(&[TraitParam::Equals(
+                                                TyOrRe::Ty(next_output),
+                                            )]),
+                                        },
+                                    )
+                                    // TODO
+                                    .map(move |_ccx, error| {
+                                        let span = expr.r(s).span;
+                                        ("HirBodyCheckCoercion", span, error)
+                                    })
+                                    .report_loud();
 
                                 output_pointee = next_output;
                             }
@@ -173,17 +169,14 @@ impl BodyCtxt<'_, '_> {
                         }
                     };
 
-                    self.ccx_mut().oblige_ty_unifies_ty(
-                        ObligeCause::new_report(
-                            ObligeCauseOrigin::HirBodyCheckCoercion {
-                                expr_span: expr.r(s).span,
-                            }
-                            .into(),
-                        ),
-                        output_ty,
-                        unify_ty,
-                        RelationMode::Equate,
-                    );
+                    self.ccx_mut()
+                        .oblige_ty_unifies_ty(output_ty, unify_ty, RelationMode::Equate)
+                        // TODO
+                        .map({
+                            let span = expr.r(s).span;
+                            move |_ccx, error| ("HirBodyCheckCoercion", span, error)
+                        })
+                        .report_loud();
                 }
 
                 unify_ty
@@ -199,17 +192,19 @@ impl BodyCtxt<'_, '_> {
                         continue;
                     }
 
-                    self.ccx_mut().oblige_ty_meets_clauses(
-                        &ObligeCause::new_report(
-                            ObligeCauseOrigin::HirBodyCheckCoercion {
-                                expr_span: expr.r(s).span,
-                            }
-                            .into(),
-                        ),
-                        HrtbUniverse::ROOT_REF,
-                        actual,
-                        to_clauses,
-                    );
+                    self.ccx_mut()
+                        .oblige_ty_meets_clauses(
+                            ClauseFuel::new(),
+                            HrtbUniverse::ROOT_REF,
+                            actual,
+                            to_clauses,
+                        )
+                        // TODO
+                        .map({
+                            let span = expr.r(s).span;
+                            move |_ccx, error| ("HirBodyCheckCoercion", span, error)
+                        })
+                        .report_loud();
                 }
 
                 tcx.intern(TyKind::Trait(Re::Erased, to_muta, to_clauses))
@@ -354,12 +349,7 @@ fn compute_deref_glb_clobber_obligations(ccx: &mut ClauseCx<'_>, pointees: &[Ty]
             if ccx
                 .ucx()
                 .clone()
-                .unify_ty_and_ty(
-                    &ObligeCause::new_never_report(),
-                    first,
-                    *other,
-                    RelationMode::Equate,
-                )
+                .unify_ty_and_ty(first, *other, RelationMode::Equate)
                 .is_err()
             {
                 // We've reached our GLB.

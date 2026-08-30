@@ -8,8 +8,8 @@ use crate::{
     semantic::{
         analysis::typeck::{BodyCtxt, infra::deref::attempt_deref},
         infer::{
-            ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse, ObligeCause, ObligeCauseOrigin,
-            ObligeCauseProbe, UnboundVarHandlingMode,
+            ClauseFuel, ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse, PromiseProbe,
+            UnboundVarHandlingMode,
         },
         lower::modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},
         syntax::{
@@ -71,7 +71,7 @@ impl BodyCtxt<'_, '_> {
                             )],
                         );
 
-                        let field = self.ccx_mut().import_report_elsewhere(&env, *field.ty);
+                        let field = self.ccx_mut().import_elsewhere(&env, *field.ty);
 
                         return Some(field);
                     }
@@ -207,20 +207,23 @@ impl BodyCtxt<'_, '_> {
 
         let owner = self
             .ccx_mut()
-            .instantiate_infer()
             .fresh_type_relative_fn_def_to_fn_owner(
-                &ObligeCause::new_report(ObligeCauseOrigin::HirBodyCheckFunctionCall {
-                    site_span: assoc_name.span,
-                }),
+                ClauseFuel::new(),
                 HrtbUniverse::ROOT_REF,
                 self_ty,
                 resolution,
-            );
+            )
+            // TODO
+            .map(move |_ccx, error| ("HirBodyCheckFunctionCall", assoc_name.span, error))
+            .report_loud();
 
         let instance = self
             .ccx
             .importer_here(self.import_env)
-            .import_fn_instance_from_owner(owner, assoc_args, FixArity::Normalize);
+            .import_fn_instance_from_owner(owner, assoc_args, FixArity::Normalize)
+            // TODO
+            .map(move |_ccx, error| ("HirBodyCheckFunctionCall", assoc_name.span, error))
+            .report_loud();
 
         Some(tcx.intern(TyKind::FnDef(instance)))
     }
@@ -428,8 +431,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
 
         let mut fork = self.ccx().clone().with_silent();
 
-        let probe = ObligeCauseProbe::default();
-        let cause = ObligeCause::new_probe(probe.clone());
+        let probe = PromiseProbe::default();
 
         match query {
             MethodQuery::Method(receiver) => {
@@ -441,13 +443,13 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                     .fresh_ty_infer(HrtbUniverse::ROOT, InferTyVarSourceInfo::MethodLookupHelper);
 
                 let expected_owner = fork
-                    .instantiate_infer()
                     .fresh_type_relative_fn_def_to_fn_owner(
-                        &cause,
+                        ClauseFuel::new(),
                         HrtbUniverse::ROOT_REF,
                         self_ty,
                         candidate,
-                    );
+                    )
+                    .probe(probe.clone());
 
                 let expected_instance = tcx.intern(FnInstanceInner {
                     owner: expected_owner,
@@ -457,27 +459,30 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                 let InstantiatedFnSig {
                     args: expected_args,
                     ret_ty: _,
-                } = fork.instantiate_infer().resolve_fn_instance_sig(
-                    &cause,
-                    HrtbUniverse::ROOT_REF,
-                    expected_instance,
-                );
+                } = fork
+                    .resolve_fn_instance_sig(
+                        ClauseFuel::new(),
+                        HrtbUniverse::ROOT_REF,
+                        expected_instance,
+                    )
+                    .probe(probe.clone());
 
                 let [expected_receiver, ..] = *expected_args.r(s) else {
                     unreachable!()
                 };
 
-                fork.oblige_ty_unifies_ty(cause, receiver, expected_receiver, RelationMode::Equate);
+                fork.oblige_ty_unifies_ty(receiver, expected_receiver, RelationMode::Equate)
+                    .probe(probe.clone());
             }
             MethodQuery::AssocFn(self_ty) => {
                 let expected_owner = fork
-                    .instantiate_infer()
                     .fresh_type_relative_fn_def_to_fn_owner(
-                        &cause,
+                        ClauseFuel::new(),
                         HrtbUniverse::ROOT_REF,
                         self_ty,
                         candidate,
-                    );
+                    )
+                    .probe(probe.clone());
 
                 let expected_instance = tcx.intern(FnInstanceInner {
                     owner: expected_owner,
@@ -485,11 +490,12 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                 });
 
                 // Call for validation side-effect of non-early-bound functions.
-                fork.instantiate_infer().resolve_fn_instance_sig(
-                    &cause,
+                fork.resolve_fn_instance_sig(
+                    ClauseFuel::new(),
                     HrtbUniverse::ROOT_REF,
                     expected_instance,
-                );
+                )
+                .probe(probe.clone());
             }
         }
 

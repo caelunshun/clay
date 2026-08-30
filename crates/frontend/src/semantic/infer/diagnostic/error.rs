@@ -5,8 +5,8 @@ use crate::{
         syntax::{
             FnInstance, FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, ImplItem,
             InferTyVar, Re, RelationMode, SigGenericList, SigHrtbBinder, SigProjectType,
-            SigTraitSpec, SigTy, SimpleTySet, TraitClauseList, TraitParam, TraitSpec, Ty,
-            TyOrReList, UniversalReVar, UniversalTyVar,
+            SigTraitSpec, SigTy, SimpleTySet, TraitClauseList, TraitItem, TraitParam, TraitSpec,
+            Ty, TyOrReList, UniversalReVar, UniversalTyVar,
         },
     },
 };
@@ -284,6 +284,16 @@ pub enum FnInstanceResolutionErrorKind {
     AdtCtor {
         early_args_err: Option<Box<BinderParamWfBinderError>>,
         sig_import_err: Option<Vec<ImportError>>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum TypeRelativeFnDefToOwnerError {
+    Trait {
+        item: Obj<TraitItem>,
+        method_idx: u32,
+        self_ty: Ty,
+        error: Box<InstantiatedTraitImplError>,
     },
 }
 
