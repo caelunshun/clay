@@ -9,8 +9,9 @@ use crate::{
             ClauseObligation, FnImplUnsatisfiedError, HrtbUniverse, HrtbUniverseInfo,
             InherentImplErrorImplCulprit, InherentImplUnsatisfiedError, InstantiatedImplBlock,
             InstantiatedTraitImplError, InstantiatedTraitImplErrorKind, MultiPromise,
-            MultiPromiseBuilder, NotCoveredError, ObligationNotReady, ObligationResult, Promise,
-            PromiseHandle, PromiseValue, TraitClauseError, UninstantiatedTraitImplError,
+            MultiPromiseBuilder, NotCoveredError, ObligationNotReady, ObligationResult,
+            ObligationTermination, Promise, PromiseHandle, PromiseValue, TraitClauseError,
+            UninstantiatedTraitImplError,
         },
         syntax::{
             HrtbBinder, ImplItem, RelationMode, SimpleTySet, TraitClause, TraitClauseList,
@@ -138,8 +139,6 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // Enforce fuel limit.
         if fuel.is_exhausted() {
-            self.kill_obligations_with_id(fuel.kill_id());
-
             handle.reject(
                 self,
                 InstantiatedTraitImplError {
@@ -149,7 +148,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 },
             );
 
-            return Ok(());
+            return Ok(ObligationTermination::FuelExhausted(fuel.kill_id()));
         }
 
         // See whether the type itself can provide the implementation.
@@ -179,7 +178,7 @@ impl<'tcx> ClauseCx<'tcx> {
                             })
                             .forward(self, handle);
 
-                        return Ok(());
+                        return Ok(ObligationTermination::Regular);
                     }
                     Err(SelectionRejected) => {
                         // (fallthrough)
@@ -203,7 +202,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 // Error types can do anything.
                 handle.accept(self);
 
-                return Ok(());
+                return Ok(ObligationTermination::Regular);
             }
 
             // LHS HRTBs should have been instantiated right before the obligation.
@@ -259,7 +258,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 },
             );
 
-            return Ok(());
+            return Ok(ObligationTermination::Regular);
         };
 
         *self = confirmation
@@ -270,7 +269,7 @@ impl<'tcx> ClauseCx<'tcx> {
             })
             .forward(self, handle);
 
-        Ok(())
+        Ok(ObligationTermination::Regular)
     }
 
     fn try_select_inherent_impl(
@@ -694,7 +693,7 @@ impl<'tcx> ClauseCx<'tcx> {
         must_mention: Rc<FxHashMap<UniversalTyVar, u32>>,
         in_type: Option<Ty>,
         in_trait: Option<TraitSpec>,
-    ) -> ObligationResult<()> {
+    ) -> ObligationResult {
         struct CoverVisitor<'a, 'tcx> {
             ccx: &'a ClauseCx<'tcx>,
             must_mention: Rc<FxHashMap<UniversalTyVar, u32>>,
@@ -760,7 +759,7 @@ impl<'tcx> ClauseCx<'tcx> {
         if missing_mentions.is_empty() {
             handle.accept(self);
 
-            return Ok(());
+            return Ok(ObligationTermination::Regular);
         }
 
         if visitor.had_holes {
@@ -776,6 +775,6 @@ impl<'tcx> ClauseCx<'tcx> {
             },
         );
 
-        Ok(())
+        Ok(ObligationTermination::Regular)
     }
 }

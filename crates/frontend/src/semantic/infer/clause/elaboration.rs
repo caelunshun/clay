@@ -46,6 +46,7 @@ use crate::{
         infer::{
             ClauseCx, ClauseFuel, ClauseImportEnv, ClauseObligation, FloatingInferVar,
             GenericSubst, HrtbUniverse, ImportWfMode, ObligationNotReady, ObligationResult,
+            ObligationTermination,
         },
         syntax::{
             AnyGeneric, HrtbBinder, InferTyVar, InferTyVarSourceInfo, Mutability, Re, RelationMode,
@@ -545,7 +546,7 @@ impl ClauseCx<'_> {
             .unwrap()
             .wip_reification_state = None;
 
-        Ok(())
+        Ok(ObligationTermination::Regular)
     }
 }
 

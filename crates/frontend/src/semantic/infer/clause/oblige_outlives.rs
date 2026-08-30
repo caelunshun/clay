@@ -3,7 +3,8 @@
 use crate::semantic::{
     infer::{
         ClauseCx, ClauseObligation, GeneralOutlivesError, MultiPromiseBuilder, ObligationNotReady,
-        ObligationResult, Promise, PromiseHandle, TyOutlivesReError, TyOutlivesTyError,
+        ObligationResult, ObligationTermination, Promise, PromiseHandle, TyOutlivesReError,
+        TyOutlivesTyError,
     },
     syntax::{Re, RelationDirection, RelationMode, SimpleTySet, Ty, TyKind, TyOrRe},
 };
@@ -209,6 +210,6 @@ impl<'tcx> ClauseCx<'tcx> {
             .map(move |_ccx, errors| TyOutlivesReError { lhs, rhs, errors })
             .forward(self, handle);
 
-        Ok(())
+        Ok(ObligationTermination::Regular)
     }
 }

@@ -7,8 +7,8 @@ use crate::{
         infer::{
             AnyPromiseHandle, CoherenceMap, FloatingInferVar, GeneralOutlivesError, HrtbUniverse,
             InstantiatedTraitImplError, MultiPromise, MultiPromiseBuilder, NotCoveredError,
-            ObligationNotReady, ObligationResult, Promise, PromiseHandle, PromiseMode,
-            ReAndReUnifyError, TyAndSimpleTySetUnifyError, TyAndTyRegionUnifyError,
+            ObligationNotReady, ObligationResult, ObligationTermination, Promise, PromiseHandle,
+            PromiseMode, ReAndReUnifyError, TyAndSimpleTySetUnifyError, TyAndTyRegionUnifyError,
             TyAndTyStructuralUnifyError, TyAndTyUnifyError, TyAndTyUnifyErrorKind,
             TyOutlivesReError, UnifyCx, UnifyCxMode,
             clause::elaboration::{UniversalElaboration, WipReificationState},
@@ -289,13 +289,24 @@ impl<'tcx> ClauseCx<'tcx> {
                 // If we finished processing the obligation, remove it from the queue and mark
                 // progress so we can continue processing.
                 match res {
-                    Ok(()) => {
+                    Ok(kind) => {
                         *self = fork;
                         self.pending_obligations.swap_remove(curr_idx);
+
+                        match kind {
+                            ObligationTermination::Regular => {
+                                // (fallthrough)
+                            }
+                            ObligationTermination::FuelExhausted(kill_id) => {
+                                self.kill_obligations_with_id(kill_id);
+                            }
+                        }
+
                         made_progress = true;
                         // (forces depth-first expansion)
                         break;
                     }
+
                     Err(err) => {
                         self.pending_obligations[curr_idx].not_ready = Some(err);
                     }
@@ -308,7 +319,7 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    pub(super) fn kill_obligations_with_id(&mut self, kill_id: ClauseFuelKillId) {
+    fn kill_obligations_with_id(&mut self, kill_id: ClauseFuelKillId) {
         let mut to_accept = Vec::<Box<dyn AnyPromiseHandle<'tcx>>>::new();
 
         self.pending_obligations.retain(|obligation| {
@@ -588,7 +599,7 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         }
 
-        Ok(())
+        Ok(ObligationTermination::Regular)
     }
 
     pub fn unify_ty_and_ty(

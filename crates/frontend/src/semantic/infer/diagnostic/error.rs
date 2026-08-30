@@ -1,7 +1,7 @@
 use crate::{
     base::arena::Obj,
     semantic::{
-        infer::{ClauseImportEnv, HrtbUniverse},
+        infer::{ClauseFuelKillId, ClauseImportEnv, HrtbUniverse},
         syntax::{
             FnInstance, FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, ImplItem,
             InferTyVar, Re, RelationMode, SigGenericList, SigHrtbBinder, SigProjectType,
@@ -383,7 +383,13 @@ pub struct TyAndSimpleTySetUnifyError {
 
 // === Obligation errors === //
 
-pub type ObligationResult<T = ()> = Result<T, ObligationNotReady>;
+pub type ObligationResult<T = ObligationTermination> = Result<T, ObligationNotReady>;
+
+#[derive(Debug)]
+pub enum ObligationTermination {
+    Regular,
+    FuelExhausted(ClauseFuelKillId),
+}
 
 #[derive(Debug, Clone)]
 pub enum ObligationNotReady {
