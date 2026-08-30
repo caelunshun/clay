@@ -1,6 +1,6 @@
 use crate::{
     base::{Diag, ErrorGuaranteed},
-    semantic::infer::ClauseCx,
+    semantic::infer::{ClauseCx, ToDebugTree},
 };
 use bytemuck::{TransparentWrapper, TransparentWrapperAlloc as _};
 use derive_where::derive_where;
@@ -125,18 +125,20 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
     // TODO: Use proper reporting machinery
     pub fn report_loud(self)
     where
-        E: fmt::Debug,
+        E: ToDebugTree,
     {
-        self.report_with(|_ccx, err| Diag::anon_err(format_args!("{err:#?}")).emit());
+        self.report_with(|ccx, err| {
+            Diag::anon_err(err.to_debug_tree(&ccx.pretty()).to_string()).emit()
+        });
     }
 
     // TODO: Use proper reporting machinery
     pub fn report_delay_bug(self)
     where
-        E: fmt::Debug,
+        E: ToDebugTree,
     {
-        self.report_with(|_ccx, err| {
-            Diag::anon_err(format_args!("{err:#?}"))
+        self.report_with(|ccx, err| {
+            Diag::anon_err(err.to_debug_tree(&ccx.pretty()).to_string())
                 .to_delay_bug()
                 .emit()
         });
@@ -268,14 +270,14 @@ impl<'tcx, T, E: 'tcx> PromiseValue<'tcx, T, E> {
 
     pub fn report_loud(self) -> T
     where
-        E: fmt::Debug,
+        E: ToDebugTree,
     {
         self.finish_promise(|p| p.report_loud())
     }
 
     pub fn report_delay_bug(self) -> T
     where
-        E: fmt::Debug,
+        E: ToDebugTree,
     {
         self.finish_promise(|p| p.report_delay_bug())
     }

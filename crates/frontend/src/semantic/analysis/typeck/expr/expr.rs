@@ -7,7 +7,7 @@ use crate::{
     parse::ast::AstLit,
     semantic::{
         analysis::typeck::BodyCtxt,
-        infer::{ClauseFuel, ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse},
+        infer::{ClauseFuel, ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse, SpannedError},
         syntax::{
             AdtCtorSyntax, AdtInstance, Divergence, FnInstanceInner, FnOwner, FnOwnerAdtCtor,
             HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirStmt, HirStructExpr,
@@ -243,7 +243,7 @@ impl BodyCtxt<'_, '_> {
                     // TODO
                     .map({
                         let span = iter.r(s).span;
-                        move |_ccx, error| ("HirBodyCheckForLoopIter", span, error)
+                        move |_ccx, error| SpannedError(span, error)
                     })
                     .report_loud();
 
@@ -298,7 +298,7 @@ impl BodyCtxt<'_, '_> {
                                 // TODO
                                 .map({
                                     let span = block.r(s).span;
-                                    move |_ccx, error| ("HirBodyCheckReturnUnit", span, error)
+                                    move |_ccx, error| SpannedError(span, error)
                                 })
                                 .report_loud();
                         }

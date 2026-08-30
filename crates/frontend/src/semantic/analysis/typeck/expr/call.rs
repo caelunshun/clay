@@ -6,7 +6,7 @@ use crate::{
     parse::token::Ident,
     semantic::{
         analysis::typeck::{BodyCtxt, infra::lookup::LookupMethodResult},
-        infer::{ClauseFuel, FixArity, HrtbUniverse},
+        infer::{ClauseFuel, FixArity, HrtbUniverse, SpannedError},
         syntax::{
             Divergence, HirExpr, InferTyVarSourceInfo, InstantiatedFnSig, RelationMode,
             SigGenericList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
@@ -61,7 +61,7 @@ impl BodyCtxt<'_, '_> {
                 },
             )
             // TODO
-            .map(move |_ccx, error| ("HirBodyCheckFunctionCall", site_span, error))
+            .map(move |_ccx, error| SpannedError(site_span, error))
             .report_loud();
 
         let TyKind::Tuple(expected_args) =
@@ -142,7 +142,7 @@ impl BodyCtxt<'_, '_> {
                 resolution,
             )
             // TODO
-            .map(move |_ccx, error| ("HirBodyCheckFunctionCall", name.span, error))
+            .map(move |_ccx, error| SpannedError(name.span, error))
             .report_loud();
 
         let instance = self
@@ -165,7 +165,7 @@ impl BodyCtxt<'_, '_> {
         self.ccx_mut()
             .oblige_ty_unifies_ty(*self_ty, receiver, RelationMode::Equate)
             // TODO
-            .map(move |_ccx, error| ("HirBodyCheckFunctionCall", name.span, error))
+            .map(move |_ccx, error| SpannedError(name.span, error))
             .report_loud();
 
         if expected_args.len() != args.r(s).len() {

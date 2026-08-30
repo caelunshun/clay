@@ -2,7 +2,7 @@ use crate::{
     base::arena::{HasInterner, HasListInterner, Obj},
     semantic::{
         analysis::typeck::{BodyCtxt, infra::deref::attempt_deref_clobber_obligations},
-        infer::{ClauseCx, ClauseFuel, HrtbUniverse},
+        infer::{ClauseCx, ClauseFuel, HrtbUniverse, SpannedError},
         syntax::{
             Divergence, HirExpr, InferTyVarSourceInfo, Mutability, Re, RelationMode, SimpleTyKind,
             TraitClauseList, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
@@ -69,7 +69,7 @@ impl BodyCtxt<'_, '_> {
             // TODO
             .map({
                 let span = expr.r(s).span;
-                move |_ccx, error| ("HirBodyCheckCoercion", span, error)
+                move |_ccx, error| SpannedError(span, error)
             })
             .report_loud();
 
@@ -95,7 +95,7 @@ impl BodyCtxt<'_, '_> {
                         // TODO
                         .map({
                             let span = expr.r(s).span;
-                            move |_ccx, error| ("HirBodyCheckCoercion", span, error)
+                            move |_ccx, error| SpannedError(span, error)
                         })
                         .report_loud();
                 }
@@ -156,9 +156,9 @@ impl BodyCtxt<'_, '_> {
                                         },
                                     )
                                     // TODO
-                                    .map(move |_ccx, error| {
+                                    .map({
                                         let span = expr.r(s).span;
-                                        ("HirBodyCheckCoercion", span, error)
+                                        move |_ccx, error| SpannedError(span, error)
                                     })
                                     .report_loud();
 
@@ -174,7 +174,7 @@ impl BodyCtxt<'_, '_> {
                         // TODO
                         .map({
                             let span = expr.r(s).span;
-                            move |_ccx, error| ("HirBodyCheckCoercion", span, error)
+                            move |_ccx, error| SpannedError(span, error)
                         })
                         .report_loud();
                 }
@@ -202,7 +202,7 @@ impl BodyCtxt<'_, '_> {
                         // TODO
                         .map({
                             let span = expr.r(s).span;
-                            move |_ccx, error| ("HirBodyCheckCoercion", span, error)
+                            move |_ccx, error| SpannedError(span, error)
                         })
                         .report_loud();
                 }

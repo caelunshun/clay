@@ -3,7 +3,7 @@ use crate::{
     parse::ast::{AstAssignOpKind, AstBinOpKind, AstBinOpSpanned, AstUnOpKind},
     semantic::{
         analysis::typeck::{BodyCtxt, OverloadResolution},
-        infer::{ClauseCx, ClauseFuel, HrtbUniverse},
+        infer::{ClauseCx, ClauseFuel, HrtbUniverse, SpannedError},
         syntax::{
             Divergence, HirExpr, HirPat, InferTyVarSourceInfo, RelationMode, SimpleTyKind,
             SimpleTySet, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
@@ -97,8 +97,7 @@ impl BodyCtxt<'_, '_> {
             // TODO
             .map({
                 let span = expr.r(s).span;
-
-                move |_ccx, error| ("op", span, error)
+                move |_ccx, error| SpannedError(span, error)
             })
             .report_loud();
 
@@ -170,7 +169,7 @@ impl BodyCtxt<'_, '_> {
             .map({
                 let span = expr.r(s).span;
 
-                move |_ccx, error| ("op", span, error)
+                move |_ccx, error| SpannedError(span, error)
             })
             .report_loud();
 
@@ -259,7 +258,7 @@ impl BodyCtxt<'_, '_> {
                 .map({
                     let span = expr.r(s).span;
 
-                    move |_ccx, error| ("op", span, error)
+                    move |_ccx, error| SpannedError(span, error)
                 })
                 .report_loud();
         }
@@ -309,7 +308,7 @@ impl BodyCtxt<'_, '_> {
             // TODO
             .map({
                 let span = expr.r(s).span;
-                move |_ccx, error| ("HirBodyCheckIndex", span, error)
+                move |_ccx, error| SpannedError(span, error)
             })
             .report_loud();
 

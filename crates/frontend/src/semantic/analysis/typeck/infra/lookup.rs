@@ -9,7 +9,7 @@ use crate::{
         analysis::typeck::{BodyCtxt, infra::deref::attempt_deref},
         infer::{
             ClauseFuel, ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse, PromiseProbe,
-            UnboundVarHandlingMode,
+            SpannedError, UnboundVarHandlingMode,
         },
         lower::modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},
         syntax::{
@@ -214,7 +214,7 @@ impl BodyCtxt<'_, '_> {
                 resolution,
             )
             // TODO
-            .map(move |_ccx, error| ("HirBodyCheckFunctionCall", assoc_name.span, error))
+            .map(move |_ccx, error| SpannedError(assoc_name.span, error))
             .report_loud();
 
         let instance = self
@@ -222,7 +222,7 @@ impl BodyCtxt<'_, '_> {
             .importer_here(self.import_env)
             .import_fn_instance_from_owner(owner, assoc_args, FixArity::Normalize)
             // TODO
-            .map(move |_ccx, error| ("HirBodyCheckFunctionCall", assoc_name.span, error))
+            .map(move |_ccx, error| SpannedError(assoc_name.span, error))
             .report_loud();
 
         Some(tcx.intern(TyKind::FnDef(instance)))

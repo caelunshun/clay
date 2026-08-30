@@ -3,7 +3,7 @@ use crate::{
     parse::ast::AstMutability,
     semantic::{
         analysis::typeck::BodyCtxt,
-        infer::HrtbUniverse,
+        infer::{HrtbUniverse, SpannedError},
         syntax::{
             Divergence, HirPat, HirPatKind, InferTyVarSourceInfo, Mutability, Re, RelationMode, Ty,
             TyKind,
@@ -70,7 +70,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     // TODO
                     .map({
                         let span = pat.r(s).span;
-                        move |_ccx, error| ("HirBodyCheckPattern", span, error)
+                        move |_ccx, error| SpannedError(span, error)
                     })
                     .report_loud();
 
