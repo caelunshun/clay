@@ -309,7 +309,7 @@ pub enum UniversalReVarSourceInfo {
 #[derive(Debug, Copy, Clone)]
 pub enum UniversalTyVarSourceInfo {
     TraitSelf,
-    HrtbVar,
+    HrtbVar(Symbol),
     ClauseWfHelper { clauses: Obj<[SigTraitClause]> },
     HrtbWf { binder: SigHrtbBinder, idx: u32 },
     Root(Obj<TypeGeneric>),

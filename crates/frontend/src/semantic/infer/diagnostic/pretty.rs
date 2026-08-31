@@ -5,7 +5,7 @@ use crate::{
         syntax::{
             AdtInstance, FloatKind, HrtbBinder, HrtbDebruijnDef, InferTyVar, IntKind, Item, Re,
             SimpleTyKind, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyKind,
-            TyOrRe, TyOrReList, UniversalTyVar,
+            TyOrRe, TyOrReList, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
     utils::lang::{SimpleListFormatGlue, format_list, format_list_into},
@@ -250,10 +250,35 @@ impl_pretty! {
         f.write_str(value.r(s).path.as_str(s))
     }
     InferTyVar => |cx, value, f| {
-        write!(f, "{value:?}")
+        match cx.ccx.lookup_ty_infer_var_without_poll(value) {
+            Ok(resolved) => cx.wrap(resolved).fmt(f),
+            Err(root) => write!(f, "?{root:?}"),
+        }
     }
     UniversalTyVar => |cx, value, f| {
-        write!(f, "{value:?}")
+        let s = cx.session();
+
+        match cx.ccx().lookup_universal_ty_src_info(value) {
+            UniversalTyVarSourceInfo::TraitSelf => write!(f, "Self"),
+            UniversalTyVarSourceInfo::HrtbVar(name) => write!(f, "{name}"),
+            UniversalTyVarSourceInfo::ClauseWfHelper { clauses } => {
+                // TODO
+                write!(f, "[clause WF helper]")
+            },
+            UniversalTyVarSourceInfo::HrtbWf { binder, idx } => {
+                write!(f, "{}", binder.defs.r(s)[idx as usize].name)
+            },
+            UniversalTyVarSourceInfo::Root(generic) => write!(f, "{}", generic.r(s).ident.text),
+            UniversalTyVarSourceInfo::Projection(lhs, spec, idx) => {
+                write!(
+                    f,
+                    "<{} as {}>::{}",
+                    cx.wrap(lhs),
+                    cx.wrap(spec),
+                    spec.def.r(s).generics.r(s).defs[idx as usize].ident(s).text(),
+                )
+            },
+        }
     }
 }
 

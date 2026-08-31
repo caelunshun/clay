@@ -51,6 +51,17 @@ impl DebugTree {
     pub fn push_sublist(&mut self, list: impl Into<DebugTree>) {
         let list = list.into();
 
+        if let [DebugTreePart::Sublist(_)] = &list.parts[..] {
+            let [DebugTreePart::Sublist(list)] =
+                <[DebugTreePart; 1]>::try_from(list.parts).unwrap()
+            else {
+                unreachable!();
+            };
+
+            self.push_sublist(list);
+            return;
+        }
+
         if list.is_empty() {
             return;
         }
@@ -735,7 +746,25 @@ pub struct InstantiateHrtbInferError {
 
 impl ToDebugTree for InstantiateHrtbInferError {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        DebugTree::new()
+            .with_prose("instantiate HRTB infer")
+            .with_prose(format!("value: {}", pretty.wrap(self.value)))
+            .with(|cx| {
+                if self.param_not_valid.is_empty() {
+                    return;
+                }
+
+                cx.push_prose("param not valid:");
+                cx.push_sublist(self.param_not_valid.to_debug_tree(pretty));
+            })
+            .with(|cx| {
+                if self.normalize_errors.is_empty() {
+                    return;
+                }
+
+                cx.push_prose("normalize errors:");
+                cx.push_sublist(self.normalize_errors.to_debug_tree(pretty));
+            })
     }
 }
 
@@ -747,7 +776,9 @@ pub struct HrtbInferParamNotValid {
 
 impl ToDebugTree for HrtbInferParamNotValid {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        DebugTree::new()
+            .with_prose(format!("idx: {}", self.idx))
+            .with_sublist(self.kind.to_debug_tree(pretty))
     }
 }
 
@@ -759,7 +790,14 @@ pub enum HrtbInferParamNotValidKind {
 
 impl ToDebugTree for HrtbInferParamNotValidKind {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        match self {
+            HrtbInferParamNotValidKind::RegionNotMet(errors) => DebugTree::new()
+                .with_prose("region not met")
+                .with_sublist(errors.to_debug_tree(pretty)),
+            HrtbInferParamNotValidKind::TyNotMet(errors) => DebugTree::new()
+                .with_prose("ty not met")
+                .with_sublist(errors.to_debug_tree(pretty)),
+        }
     }
 }
 
@@ -774,7 +812,9 @@ pub struct BinderParamWfBinderError {
 
 impl ToDebugTree for BinderParamWfBinderError {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        DebugTree::new()
+            .with_prose("binder param WF error")
+            .with_sublist(self.errors.to_debug_tree(pretty))
     }
 }
 
@@ -786,7 +826,9 @@ pub struct BinderParamWfParamError {
 
 impl ToDebugTree for BinderParamWfParamError {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        DebugTree::new()
+            .with_prose(format!("idx: {}", self.idx))
+            .with_sublist(self.kind.to_debug_tree(pretty))
     }
 }
 
@@ -799,7 +841,13 @@ pub enum BinderParamWfParamErrorKind {
 
 impl ToDebugTree for BinderParamWfParamErrorKind {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        match self {
+            BinderParamWfParamErrorKind::ClauseCannotImport(errors) => DebugTree::new()
+                .with_prose("cannot import")
+                .with_sublist(errors.to_debug_tree(pretty)),
+            BinderParamWfParamErrorKind::OutlivesNotMet(error) => error.to_debug_tree(pretty),
+            BinderParamWfParamErrorKind::ImplNotMet(error) => error.to_debug_tree(pretty),
+        }
     }
 }
 
@@ -812,7 +860,11 @@ pub struct TraitSpecResolutionError {
 
 impl ToDebugTree for TraitSpecResolutionError {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        DebugTree::new()
+            .with_prose("trait spec resolution error")
+            .with_prose(format!("self ty: {}", pretty.wrap(self.self_ty)))
+            .with_prose(format!("spec: {}", pretty.wrap(self.spec)))
+            .with_sublist(self.culprits.to_debug_tree(pretty))
     }
 }
 
@@ -827,7 +879,12 @@ pub enum TraitSpecResolutionErrorCulprit {
 
 impl ToDebugTree for TraitSpecResolutionErrorCulprit {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        match self {
+            TraitSpecResolutionErrorCulprit::AssocParaNotMet { idx, error } => DebugTree::new()
+                .with_prose(format!("idx: {}", idx))
+                .with_sublist(error.to_debug_tree(pretty)),
+            TraitSpecResolutionErrorCulprit::ImplRejected(error) => error.to_debug_tree(pretty),
+        }
     }
 }
 
@@ -839,7 +896,24 @@ pub struct InherentImplBlockSatisfyError {
 
 impl ToDebugTree for InherentImplBlockSatisfyError {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        DebugTree::new()
+            .with_prose("inherent impl block satisfy error")
+            .with(|cx| {
+                let Some(block_clauses) = &self.block_clauses else {
+                    return;
+                };
+
+                cx.push_prose("block clauses:");
+                cx.push_sublist(block_clauses.to_debug_tree(pretty));
+            })
+            .with(|cx| {
+                let Some(self_ty_unify) = &self.self_ty_unify else {
+                    return;
+                };
+
+                cx.push_prose("self ty unify:");
+                cx.push_sublist(self_ty_unify.to_debug_tree(pretty));
+            })
     }
 }
 
@@ -851,7 +925,12 @@ pub struct ImplBlockSatisfyError {
 
 impl ToDebugTree for ImplBlockSatisfyError {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        let s = pretty.session();
+
+        DebugTree::new()
+            .with_prose("impl block satisfy error")
+            .with_prose(format!("block: {}", self.block.r(s).target.r(s).span))
+            .with_sublist(self.culprits.to_debug_tree(pretty))
     }
 }
 
@@ -864,7 +943,15 @@ pub enum ImplBlockSatisfyErrorCulprit {
 
 impl ToDebugTree for ImplBlockSatisfyErrorCulprit {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        match self {
+            ImplBlockSatisfyErrorCulprit::SelfTyImportError(errors) => DebugTree::new()
+                .with_prose("self ty import")
+                .with_sublist(errors.to_debug_tree(pretty)),
+            ImplBlockSatisfyErrorCulprit::TargetTraitImportError(errors) => DebugTree::new()
+                .with_prose("target trait import")
+                .with_sublist(errors.to_debug_tree(pretty)),
+            ImplBlockSatisfyErrorCulprit::GenericsUnsatisfied(error) => error.to_debug_tree(pretty),
+        }
     }
 }
 

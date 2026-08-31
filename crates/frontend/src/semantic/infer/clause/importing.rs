@@ -1147,9 +1147,10 @@ impl<'tcx> ClauseCx<'tcx> {
                 TyOrReKind::Re => {
                     TyOrRe::Re(self.fresh_re_universal(UniversalReVarSourceInfo::HrtbVar))
                 }
-                TyOrReKind::Ty => TyOrRe::Ty(
-                    self.fresh_ty_universal(universe.clone(), UniversalTyVarSourceInfo::HrtbVar),
-                ),
+                TyOrReKind::Ty => TyOrRe::Ty(self.fresh_ty_universal(
+                    universe.clone(),
+                    UniversalTyVarSourceInfo::HrtbVar(def.name),
+                )),
             })
             .collect::<Vec<_>>();
 

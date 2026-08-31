@@ -78,14 +78,14 @@ pub struct SimpleListFormatGlue<'a> {
 impl<'a> SimpleListFormatGlue<'a> {
     pub const OR_LIST: SimpleListFormatGlue<'static> = SimpleListFormatGlue {
         space: " ",
-        comma: ", ",
+        comma: ",",
         conjunction: "or",
         oxford_comma: true,
     };
 
     pub const AND_LIST: SimpleListFormatGlue<'static> = SimpleListFormatGlue {
         space: " ",
-        comma: ", ",
+        comma: ",",
         conjunction: "and",
         oxford_comma: true,
     };
@@ -96,9 +96,9 @@ impl<'a> SimpleListFormatGlue<'a> {
 
     pub const fn new_delimited(delimiter: &'a str) -> Self {
         Self {
-            comma: "",
-            conjunction: "",
-            space: delimiter,
+            comma: delimiter,
+            conjunction: delimiter,
+            space: "",
             oxford_comma: false,
         }
     }
@@ -114,7 +114,7 @@ impl ListFormatGlue for SimpleListFormatGlue<'_> {
     }
 
     fn conjunction(&self) -> impl fmt::Display {
-        self.comma
+        self.conjunction
     }
 
     fn oxford_comma(&self) -> bool {
@@ -267,6 +267,18 @@ mod test {
         assert_eq!(
             format_list(["a", "b", "c", "d", "e"], SimpleListFormatGlue::OR_LIST),
             "a, b, c, d, or e"
+        );
+
+        assert_eq!(format_list(["a"], SimpleListFormatGlue::COMMA_LIST), "a");
+
+        assert_eq!(
+            format_list(["a", "b"], SimpleListFormatGlue::COMMA_LIST),
+            "a, b"
+        );
+
+        assert_eq!(
+            format_list(["a", "b", "c"], SimpleListFormatGlue::COMMA_LIST),
+            "a, b, c"
         );
     }
 }
