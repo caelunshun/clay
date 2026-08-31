@@ -94,6 +94,8 @@ impl<'a> SimpleListFormatGlue<'a> {
 
     pub const PLUS_LIST: SimpleListFormatGlue<'static> = SimpleListFormatGlue::new_delimited(" + ");
 
+    pub const PIPE_LIST: SimpleListFormatGlue<'static> = SimpleListFormatGlue::new_delimited(" | ");
+
     pub const fn new_delimited(delimiter: &'a str) -> Self {
         Self {
             comma: delimiter,

@@ -438,11 +438,8 @@ impl<'tcx> ClauseCx<'tcx> {
         self.ucx_mut().fresh_re_universal(src_info)
     }
 
-    pub fn lookup_universal_re_src_info(
-        &mut self,
-        var: UniversalReVar,
-    ) -> UniversalReVarSourceInfo {
-        self.ucx_mut().lookup_universal_re_src_info(var)
+    pub fn lookup_universal_re_src_info(&self, var: UniversalReVar) -> UniversalReVarSourceInfo {
+        self.ucx().lookup_universal_re_src_info(var)
     }
 
     pub fn permit_universe_re_outlives_re(

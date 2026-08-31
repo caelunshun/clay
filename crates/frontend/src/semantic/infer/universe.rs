@@ -31,6 +31,7 @@ use std::{fmt, hash, rc::Rc};
 #[derive(Clone)]
 pub struct HrtbUniverse {
     inner: HrtbUniverseInner,
+    level: u32,
 }
 
 #[derive(Clone)]
@@ -95,14 +96,18 @@ impl hash::Hash for HrtbUniverse {
 impl HrtbUniverse {
     pub const ROOT: HrtbUniverse = Self {
         inner: HrtbUniverseInner::Root,
+        level: 0,
     };
 
     pub const ROOT_REF: &'static HrtbUniverse = &Self::ROOT;
 
     #[must_use]
     pub fn nest(self, info: HrtbUniverseInfo) -> Self {
+        let level = self.level + 1;
+
         Self {
             inner: HrtbUniverseInner::Child(Rc::new(HrtbUniverseChild { parent: self, info })),
+            level,
         }
     }
 
@@ -130,6 +135,11 @@ impl HrtbUniverse {
             HrtbUniverseInner::Root => None,
             HrtbUniverseInner::Child(child) => Some(&child.info),
         }
+    }
+
+    #[must_use]
+    pub fn level(&self) -> u32 {
+        self.level
     }
 
     #[must_use]

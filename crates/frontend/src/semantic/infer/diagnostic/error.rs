@@ -963,7 +963,10 @@ pub struct FnInstanceResolutionError {
 
 impl ToDebugTree for FnInstanceResolutionError {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        DebugTree::new()
+            .with_prose("fn instance resolution error")
+            .with_prose(format!("instance: {}", pretty.wrap(self.instance)))
+            .with_sublist(self.kind.to_debug_tree(pretty))
     }
 }
 
@@ -991,7 +994,110 @@ pub enum FnInstanceResolutionErrorKind {
 
 impl ToDebugTree for FnInstanceResolutionErrorKind {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        match self {
+            FnInstanceResolutionErrorKind::Item {
+                early_args_err,
+                sig_import_err,
+            } => DebugTree::new()
+                .with_prose("item fn unsatisfied")
+                .with(|cx| {
+                    let Some(early_args_err) = early_args_err else {
+                        return;
+                    };
+
+                    cx.push_prose("early args error:");
+                    cx.push_sublist(early_args_err.to_debug_tree(pretty));
+                })
+                .with(|cx| {
+                    let Some(sig_import_err) = sig_import_err else {
+                        return;
+                    };
+
+                    cx.push_prose("sig import error:");
+                    cx.push_sublist(sig_import_err.to_debug_tree(pretty));
+                }),
+            FnInstanceResolutionErrorKind::Trait {
+                resolve_instance_err,
+                early_args_err,
+                sig_import_err,
+            } => DebugTree::new()
+                .with_prose("trait fn unsatisfied")
+                .with(|cx| {
+                    let Some(resolve_instance_err) = resolve_instance_err else {
+                        return;
+                    };
+
+                    cx.push_prose("resolve instance error:");
+                    cx.push_sublist(resolve_instance_err.to_debug_tree(pretty));
+                })
+                .with(|cx| {
+                    let Some(early_args_err) = early_args_err else {
+                        return;
+                    };
+
+                    cx.push_prose("early args error:");
+                    cx.push_sublist(early_args_err.to_debug_tree(pretty));
+                })
+                .with(|cx| {
+                    let Some(sig_import_err) = sig_import_err else {
+                        return;
+                    };
+
+                    cx.push_prose("sig import error:");
+                    cx.push_sublist(sig_import_err.to_debug_tree(pretty));
+                }),
+            FnInstanceResolutionErrorKind::Inherent {
+                resolve_block_err,
+                early_args_err,
+                sig_import_err,
+            } => DebugTree::new()
+                .with_prose("inherent fn unsatisfied")
+                .with(|cx| {
+                    let Some(resolve_block_err) = resolve_block_err else {
+                        return;
+                    };
+
+                    cx.push_prose("resolve block error:");
+                    cx.push_sublist(resolve_block_err.to_debug_tree(pretty));
+                })
+                .with(|cx| {
+                    let Some(early_args_err) = early_args_err else {
+                        return;
+                    };
+
+                    cx.push_prose("early args error:");
+                    cx.push_sublist(early_args_err.to_debug_tree(pretty));
+                })
+                .with(|cx| {
+                    let Some(sig_import_err) = sig_import_err else {
+                        return;
+                    };
+
+                    cx.push_prose("sig import error:");
+                    cx.push_sublist(sig_import_err.to_debug_tree(pretty));
+                }),
+            FnInstanceResolutionErrorKind::AdtCtor {
+                early_args_err,
+                sig_import_err,
+            } => DebugTree::new()
+                .with_prose("ADT ctor fn unsatisfied")
+                .with(|cx| {
+                    let Some(early_args_err) = early_args_err else {
+                        return;
+                    };
+
+                    cx.push_prose("early args error:");
+                    cx.push_sublist(early_args_err.to_debug_tree(pretty));
+                })
+                .with(|cx| {
+                    let Some(sig_import_err) = sig_import_err else {
+                        return;
+                    };
+
+                    cx.push_prose("sig import error:");
+                    cx.push_sublist(sig_import_err.to_debug_tree(pretty));
+                }),
+        }
     }
 }
 
@@ -1007,7 +1113,24 @@ pub enum TypeRelativeFnDefToOwnerError {
 
 impl ToDebugTree for TypeRelativeFnDefToOwnerError {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        let s = pretty.session();
+
+        match self {
+            TypeRelativeFnDefToOwnerError::Trait {
+                item,
+                method_idx,
+                self_ty,
+                error,
+            } => DebugTree::new()
+                .with_prose("type relative fn def to owner error (trait)")
+                .with_prose(format!("trait: {}", pretty.wrap(item.r(s).item)))
+                .with_prose(format!(
+                    "method: {}",
+                    item.r(s).methods[*method_idx as usize].r(s).name.text
+                ))
+                .with_prose(format!("self type: {}", pretty.wrap(self_ty)))
+                .with_sublist(error.to_debug_tree(pretty)),
+        }
     }
 }
 
@@ -1023,7 +1146,12 @@ pub struct TyAndTyUnifyError {
 
 impl ToDebugTree for TyAndTyUnifyError {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        DebugTree::new()
+            .with_prose("cannot unify")
+            .with_prose(format!("LHS: {}", pretty.wrap(self.lhs)))
+            .with_prose(format!("RHS: {}", pretty.wrap(self.rhs)))
+            .with_prose(format!("mode: {:?}", self.mode))
+            .with_sublist(self.kind.to_debug_tree(pretty))
     }
 }
 
@@ -1035,7 +1163,14 @@ pub enum TyAndTyUnifyErrorKind {
 
 impl ToDebugTree for TyAndTyUnifyErrorKind {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        match self {
+            TyAndTyUnifyErrorKind::Structural(culprits) => DebugTree::new()
+                .with_prose("structural error")
+                .with_sublist(culprits.to_debug_tree(pretty)),
+            TyAndTyUnifyErrorKind::Region(culprits) => DebugTree::new()
+                .with_prose("region error")
+                .with_sublist(culprits.to_debug_tree(pretty)),
+        }
     }
 }
 
@@ -1049,7 +1184,12 @@ pub struct TyAndTyRegionUnifyError {
 
 impl ToDebugTree for TyAndTyRegionUnifyError {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        DebugTree::new()
+            .with_prose("ty and ty region error")
+            .with_prose(format!("LHS: {}", pretty.wrap(self.lhs)))
+            .with_prose(format!("RHS: {}", pretty.wrap(self.rhs)))
+            .with_prose(format!("mode: {:?}", self.mode))
+            .with_sublist(self.regions.to_debug_tree(pretty))
     }
 }
 
@@ -1063,7 +1203,12 @@ pub struct ReAndReUnifyError {
 
 impl ToDebugTree for ReAndReUnifyError {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        DebugTree::new()
+            .with_prose("re and re unify error")
+            .with_prose(format!("LHS: {}", pretty.wrap(self.lhs)))
+            .with_prose(format!("RHS: {}", pretty.wrap(self.rhs)))
+            .with_prose(format!("mode: {:?}", self.mode))
+            .with_sublist(self.causes.to_debug_tree(pretty))
     }
 }
 
@@ -1075,7 +1220,9 @@ pub struct ReAndReUnifyErrorCause {
 
 impl ToDebugTree for ReAndReUnifyErrorCause {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        DebugTree::new()
+            .with_prose(format!("requires var: {}", pretty.wrap(self.requires_var)))
+            .with_prose(format!("to outlive: {}", pretty.wrap(self.to_outlive)))
     }
 }
 
@@ -1090,7 +1237,11 @@ pub struct TyAndTyStructuralUnifyError {
 
 impl ToDebugTree for TyAndTyStructuralUnifyError {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        DebugTree::new()
+            .with_prose("ty and ty structural error")
+            .with_prose(format!("LHS: {}", pretty.wrap(self.origin_lhs)))
+            .with_prose(format!("RHS: {}", pretty.wrap(self.origin_rhs)))
+            .with_sublist(self.culprits.to_debug_tree(pretty))
     }
 }
 
@@ -1104,12 +1255,47 @@ pub enum TyAndTyUnifyCulprit {
     LeaksHrtbVar(InferTyLeaksHrtbVarError),
     NotPermittedSolid(SimpleTySet, Ty),
     NotPermittedFloating(SimpleTySet, SimpleTySet),
-    UnifyDenied,
 }
 
 impl ToDebugTree for TyAndTyUnifyCulprit {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        match self {
+            TyAndTyUnifyCulprit::Types(lhs, rhs) => DebugTree::new()
+                .with_prose("type mismatch")
+                .with_prose(format!("LHS: {}", pretty.wrap(lhs)))
+                .with_prose(format!("RHS: {}", pretty.wrap(rhs))),
+            TyAndTyUnifyCulprit::ClauseLists(lhs, rhs) => DebugTree::new()
+                .with_prose("clause mismatch")
+                .with_prose(format!("LHS: {}", pretty.wrap(lhs)))
+                .with_prose(format!("RHS: {}", pretty.wrap(rhs))),
+            TyAndTyUnifyCulprit::Params(lhs, rhs) => DebugTree::new()
+                .with_prose("param mismatch")
+                .with_prose(format!(
+                    "LHS: {}",
+                    match lhs {
+                        TraitParam::Equals(v) => format!("equals {}", pretty.wrap(v)),
+                        TraitParam::Unspecified(v) => format!("unspec {}", pretty.wrap(v)),
+                    }
+                ))
+                .with_prose(format!(
+                    "RHS: {}",
+                    match rhs {
+                        TraitParam::Equals(v) => format!("equals {}", pretty.wrap(v)),
+                        TraitParam::Unspecified(v) => format!("unspec {}", pretty.wrap(v)),
+                    }
+                )),
+            TyAndTyUnifyCulprit::Occurs(error) => error.to_debug_tree(pretty),
+            TyAndTyUnifyCulprit::LeaksUniversal(error) => error.to_debug_tree(pretty),
+            TyAndTyUnifyCulprit::LeaksHrtbVar(error) => error.to_debug_tree(pretty),
+            TyAndTyUnifyCulprit::NotPermittedSolid(lhs, rhs) => DebugTree::new()
+                .with_prose("bad infer restriction solid")
+                .with_prose(format!("LHS: {}", pretty.wrap(lhs)))
+                .with_prose(format!("RHS: {}", pretty.wrap(rhs))),
+            TyAndTyUnifyCulprit::NotPermittedFloating(lhs, rhs) => DebugTree::new()
+                .with_prose("bad infer restriction floating")
+                .with_prose(format!("LHS: {}", pretty.wrap(lhs)))
+                .with_prose(format!("RHS: {}", pretty.wrap(rhs))),
+        }
     }
 }
 
@@ -1121,7 +1307,10 @@ pub struct InferTyOccursError {
 
 impl ToDebugTree for InferTyOccursError {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        DebugTree::new()
+            .with_prose("infer ty reoccurs")
+            .with_prose(format!("var: {}", pretty.wrap(self.var)))
+            .with_prose(format!("occurs in: {}", pretty.wrap(self.occurs_in)))
     }
 }
 
@@ -1134,7 +1323,21 @@ pub struct InferTyLeaksUniversalError {
 
 impl ToDebugTree for InferTyLeaksUniversalError {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        DebugTree::new()
+            .with_prose("infer ty leaks universe")
+            .with_prose(format!("var: {}", pretty.wrap(self.var)))
+            .with_prose(format!("max universe: {}", self.max_universe.level()))
+            .with_prose(format!(
+                "leaks universal: {}",
+                pretty.wrap(self.leaks_universal)
+            ))
+            .with_prose(format!(
+                "which has universe: {}",
+                pretty
+                    .ccx()
+                    .lookup_universal_ty_hrtb_universe(self.leaks_universal)
+                    .level(),
+            ))
     }
 }
 
@@ -1145,7 +1348,9 @@ pub struct InferTyLeaksHrtbVarError {
 
 impl ToDebugTree for InferTyLeaksHrtbVarError {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        DebugTree::new()
+            .with_prose("infer ty leaks HRTB var")
+            .with_prose(format!("var: {}", pretty.wrap(self.var)))
     }
 }
 
@@ -1157,7 +1362,10 @@ pub struct TyAndSimpleTySetUnifyError {
 
 impl ToDebugTree for TyAndSimpleTySetUnifyError {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
-        todo!()
+        DebugTree::new()
+            .with_prose("ty and simple ty unify")
+            .with_prose(format!("LHS: {}", pretty.wrap(self.lhs)))
+            .with_prose(format!("RHS: {}", pretty.wrap(self.rhs)))
     }
 }
 

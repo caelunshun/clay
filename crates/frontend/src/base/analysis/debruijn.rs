@@ -192,6 +192,12 @@ pub struct DebruijnRelative {
     raw: NonZeroU32,
 }
 
+impl DebruijnRelative {
+    pub fn idx(self) -> NonZeroU32 {
+        self.raw
+    }
+}
+
 #[derive(Debug, Clone)]
 #[derive_where(Default)]
 pub struct DebruijnMap<T> {
@@ -209,6 +215,10 @@ impl<T> DebruijnMap<T> {
         DebruijnTop::new(self.elems.len())
     }
 
+    pub fn try_rel_to_abs(&self, rel: DebruijnRelative) -> Option<DebruijnAbsolute> {
+        self.top().try_lookup_relative(rel)
+    }
+
     pub fn rel_to_abs(&self, rel: DebruijnRelative) -> DebruijnAbsolute {
         self.top().lookup_relative(rel)
     }
@@ -220,6 +230,15 @@ impl<T> DebruijnMap<T> {
     pub fn lookup_mut(&mut self, rel: DebruijnRelative) -> &mut T {
         let idx = self.rel_to_abs(rel).index();
         &mut self.elems[idx]
+    }
+
+    pub fn try_lookup(&self, rel: DebruijnRelative) -> Option<&T> {
+        Some(&self.elems[self.try_rel_to_abs(rel)?.index()])
+    }
+
+    pub fn try_lookup_mut(&mut self, rel: DebruijnRelative) -> Option<&mut T> {
+        let idx = self.try_rel_to_abs(rel)?.index();
+        Some(&mut self.elems[idx])
     }
 
     pub fn pop(&mut self, count: usize) {
