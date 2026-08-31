@@ -43,7 +43,7 @@ pub enum UnifyCxMode {
 pub struct UnifyCx<'tcx> {
     tcx: &'tcx TyCtxt,
     types: TyUnifyTracker,
-    regions: Option<ReUnifyTracker<'tcx>>,
+    pub(super) regions: Option<ReUnifyTracker<'tcx>>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -81,9 +81,9 @@ impl<'tcx> UnifyCx<'tcx> {
         }
     }
 
-    pub fn verify(&self, ccx: &ClauseCx<'tcx>) {
-        if let Some(re) = &self.regions {
-            re.verify(ccx);
+    pub fn verify(ccx: &mut ClauseCx<'tcx>) {
+        if ccx.ucx().regions.is_some() {
+            ReUnifyTracker::verify(ccx);
         }
     }
 

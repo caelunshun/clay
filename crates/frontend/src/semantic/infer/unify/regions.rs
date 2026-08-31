@@ -102,30 +102,45 @@ impl<'tcx> ReUnifyTracker<'tcx> {
         }
     }
 
-    pub fn verify(&self, ccx: &ClauseCx<'tcx>) {
-        let permissions = ReElaboratedPermissions::new(self);
-        let mut outlives = ReIncrementalConstraints::new(self);
+    pub fn verify(ccx: &mut ClauseCx<'tcx>) {
+        fn get_this<'a, 'tcx>(ccx: &'a mut ClauseCx<'tcx>) -> &'a mut ReUnifyTracker<'tcx> {
+            ccx.ucx_mut().regions.as_mut().unwrap()
+        }
 
-        for cst in &self.constraints {
+        let this = get_this(ccx);
+        let permissions = ReElaboratedPermissions::new(this);
+        let mut outlives = ReIncrementalConstraints::new(this);
+
+        let mut to_resolve = Vec::new();
+
+        for cst in &this.constraints {
             outlives.add_constraint(cst.lhs, cst.rhs, |var, must_outlive| {
                 if permissions.can_outlive(var, must_outlive) {
                     return Ok(());
                 }
 
-                // TODO
-                // cst.handle.reject(
-                //     ccx,
-                //     ReAndReUnifyErrorCause {
-                //         requires_var: var,
-                //         to_outlive: must_outlive.to_re(),
-                //     },
-                // );
+                to_resolve.push((
+                    cst.handle.clone(),
+                    ReAndReUnifyErrorCause {
+                        requires_var: var,
+                        to_outlive: must_outlive.to_re(),
+                    },
+                ));
 
                 Err(ErrorGuaranteed::new_unchecked())
             })
         }
 
-        // TODO: Accept remaining handles
+        for (promise, err) in to_resolve {
+            promise.reject(ccx, err);
+        }
+
+        for cst_idx in 0..get_this(ccx).constraints.len() {
+            get_this(ccx).constraints[cst_idx]
+                .handle
+                .clone()
+                .accept_if_not_rejected(ccx);
+        }
     }
 }
 

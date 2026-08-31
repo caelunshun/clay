@@ -712,6 +712,6 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         }
 
-        self.ucx().verify(self);
+        UnifyCx::verify(self);
     }
 }
