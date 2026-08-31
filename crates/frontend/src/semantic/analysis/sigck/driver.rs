@@ -4,7 +4,7 @@ use crate::{
         analysis::typeck::type_check_function,
         infer::{
             ClauseCx, ClauseFuel, ClauseImportEnv, CoherenceMap, GenericSubst, HrtbUniverse,
-            UnifyCxMode,
+            SpannedError, UnifyCxMode,
         },
         syntax::{
             AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FnItem, GenericBinder, ImplItem,
@@ -135,7 +135,9 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
                     HrtbUniverse::ROOT_REF,
                     env.unwrap_self_ty(),
                     super_clause,
-                );
+                )
+                .map(move |_ccx, error| SpannedError(super_clause_span, error))
+                .report_loud();
             }
         }
 

@@ -367,6 +367,7 @@ impl ToDebugTree for InstantiatedTraitImplError {
 pub enum InstantiatedTraitImplErrorKind {
     RecursionLimit,
     NoSuitableImpl,
+    CannotProgress(ObligationNotReady),
     InherentUnsatisfied(InherentImplUnsatisfiedError),
     ImplBlockUnsatisfied(BlockImplUnsatisfiedError),
     FnDefImplUnsatisfied(FnImplUnsatisfiedError),
@@ -381,6 +382,7 @@ impl ToDebugTree for InstantiatedTraitImplErrorKind {
             InstantiatedTraitImplErrorKind::NoSuitableImpl => {
                 DebugTree::new().with_prose("no suitable impl met")
             }
+            InstantiatedTraitImplErrorKind::CannotProgress(error) => error.to_debug_tree(pretty),
             InstantiatedTraitImplErrorKind::InherentUnsatisfied(error) => {
                 error.to_debug_tree(pretty)
             }
@@ -593,7 +595,7 @@ pub struct TyOutlivesTyError {
     pub lhs: Ty,
     pub rhs: Ty,
     pub joiner: Re,
-    pub errors: Vec<ReAndReUnifyError>,
+    pub errors: Vec<TyOutlivesReErrorCulprit>,
 }
 
 impl ToDebugTree for TyOutlivesTyError {
@@ -612,7 +614,7 @@ impl ToDebugTree for TyOutlivesTyError {
 pub struct TyOutlivesReError {
     pub lhs: Ty,
     pub rhs: Re,
-    pub errors: Vec<ReAndReUnifyError>,
+    pub errors: Vec<TyOutlivesReErrorCulprit>,
 }
 
 impl ToDebugTree for TyOutlivesReError {
@@ -623,6 +625,21 @@ impl ToDebugTree for TyOutlivesReError {
             .with_prose(format!("RHS: {}", pretty.wrap(self.rhs)))
             .with_prose(format!("Errors:"))
             .with_sublist(self.errors.to_debug_tree(pretty))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum TyOutlivesReErrorCulprit {
+    Regular(ReAndReUnifyError),
+    CannotProgress(ObligationNotReady),
+}
+
+impl ToDebugTree for TyOutlivesReErrorCulprit {
+    fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
+        match self {
+            TyOutlivesReErrorCulprit::Regular(error) => error.to_debug_tree(pretty),
+            TyOutlivesReErrorCulprit::CannotProgress(error) => error.to_debug_tree(pretty),
+        }
     }
 }
 
@@ -1385,5 +1402,35 @@ pub enum ObligationNotReady {
     ElabStillResolving,
     MultipleApplicableImpls,
     ElaborationHasInferForInherentSelection,
-    CoverMissingInfer,
+    CoverMissingInfer {
+        missing_mentions: Vec<UniversalTyVar>,
+    },
+}
+
+impl ToDebugTree for ObligationNotReady {
+    fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
+        match self {
+            ObligationNotReady::UnresolvedInfer(var) => DebugTree::new()
+                .with_prose("cannot progress")
+                .with_prose(format!("{} could not be inferred", pretty.wrap(var))),
+            ObligationNotReady::ElabStillResolving => DebugTree::new()
+                .with_prose("cannot progress")
+                .with_prose("elab still resolving"),
+            ObligationNotReady::MultipleApplicableImpls => DebugTree::new()
+                .with_prose("cannot progress")
+                .with_prose("multiple applicable impls"),
+            ObligationNotReady::ElaborationHasInferForInherentSelection => DebugTree::new()
+                .with_prose("cannot progress")
+                .with_prose("elaboration still has infer for inherent selection"),
+            ObligationNotReady::CoverMissingInfer { missing_mentions } => DebugTree::new()
+                .with_prose("cannot progress")
+                .with_prose("missing infer var while checking cover")
+                .with_prose("missing mentions:")
+                .with_sublists(
+                    missing_mentions
+                        .iter()
+                        .map(|v| DebugTree::new().with_prose(format!("{}", pretty.wrap(v)))),
+                ),
+        }
+    }
 }

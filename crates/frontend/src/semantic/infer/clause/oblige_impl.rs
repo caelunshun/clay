@@ -763,7 +763,7 @@ impl<'tcx> ClauseCx<'tcx> {
         }
 
         if visitor.had_holes {
-            return Err(ObligationNotReady::CoverMissingInfer);
+            return Err(ObligationNotReady::CoverMissingInfer { missing_mentions });
         }
 
         handle.reject(

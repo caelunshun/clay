@@ -6,11 +6,12 @@ use crate::{
     semantic::{
         infer::{
             AnyPromiseHandle, CoherenceMap, FloatingInferVar, GeneralOutlivesError, HrtbUniverse,
-            InstantiatedTraitImplError, MultiPromise, MultiPromiseBuilder, NotCoveredError,
-            ObligationNotReady, ObligationResult, ObligationTermination, Promise, PromiseHandle,
-            PromiseMode, ReAndReUnifyError, TyAndSimpleTySetUnifyError, TyAndTyRegionUnifyError,
-            TyAndTyStructuralUnifyError, TyAndTyUnifyError, TyAndTyUnifyErrorKind,
-            TyOutlivesReError, UnifyCx, UnifyCxMode,
+            InstantiatedTraitImplError, InstantiatedTraitImplErrorKind, MultiPromise,
+            MultiPromiseBuilder, NotCoveredError, ObligationNotReady, ObligationResult,
+            ObligationTermination, Promise, PromiseHandle, PromiseMode, ReAndReUnifyError,
+            TyAndSimpleTySetUnifyError, TyAndTyRegionUnifyError, TyAndTyStructuralUnifyError,
+            TyAndTyUnifyError, TyAndTyUnifyErrorKind, TyOutlivesReError, TyOutlivesReErrorCulprit,
+            UnifyCx, UnifyCxMode,
             clause::elaboration::{UniversalElaboration, WipReificationState},
         },
         syntax::{
@@ -643,35 +644,71 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn verify(&mut self) {
         self.poll_obligations();
 
-        for state in &self.pending_obligations {
+        while let Some(state) = self.pending_obligations.pop() {
+            let not_ready = state.not_ready.clone().unwrap();
+
             match &state.kind {
                 ClauseObligation::TyUnifiesTy { .. } => {
                     unreachable!()
                 }
                 ClauseObligation::TyMeetsTrait {
                     handle,
-                    fuel,
-                    universe,
+                    fuel: _,
+                    universe: _,
                     lhs,
                     rhs,
-                } => todo!(),
+                } => {
+                    handle.reject(
+                        self,
+                        InstantiatedTraitImplError {
+                            lhs: *lhs,
+                            rhs: *rhs,
+                            kind: InstantiatedTraitImplErrorKind::CannotProgress(not_ready),
+                        },
+                    );
+                }
                 ClauseObligation::TyOutlivesRe {
                     handle,
                     lhs,
                     rhs,
-                    dir,
-                } => todo!(),
+                    dir: _,
+                } => {
+                    handle.reject(
+                        self,
+                        TyOutlivesReError {
+                            lhs: *lhs,
+                            rhs: *rhs,
+                            errors: [TyOutlivesReErrorCulprit::CannotProgress(not_ready)].into(),
+                        },
+                    );
+                }
                 ClauseObligation::UnifyReifiedElaboratedClauses {
-                    root,
-                    clauses,
-                    reified_vars,
-                } => todo!(),
+                    root: _,
+                    clauses: _,
+                    reified_vars: _,
+                } => {
+                    // (ignored)
+                }
                 ClauseObligation::Covered {
                     handle,
-                    must_mention,
+                    must_mention: _,
                     in_type,
                     in_trait,
-                } => todo!(),
+                } => {
+                    let ObligationNotReady::CoverMissingInfer { missing_mentions } = not_ready
+                    else {
+                        unreachable!()
+                    };
+
+                    handle.reject(
+                        self,
+                        NotCoveredError {
+                            missing_mentions,
+                            in_trait: *in_trait,
+                            in_type: *in_type,
+                        },
+                    );
+                }
             }
         }
 

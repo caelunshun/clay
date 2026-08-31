@@ -4,7 +4,7 @@ use crate::semantic::{
     infer::{
         ClauseCx, ClauseObligation, GeneralOutlivesError, MultiPromiseBuilder, ObligationNotReady,
         ObligationResult, ObligationTermination, Promise, PromiseHandle, TyOutlivesReError,
-        TyOutlivesTyError,
+        TyOutlivesReErrorCulprit, TyOutlivesTyError,
     },
     syntax::{Re, RelationDirection, RelationMode, SimpleTySet, Ty, TyKind, TyOrRe},
 };
@@ -147,6 +147,7 @@ impl<'tcx> ClauseCx<'tcx> {
             TyKind::Reference(lhs, _muta, _pointee) => {
                 self.ucx_mut()
                     .unify_re_and_re(lhs, rhs, dir.to_mode())
+                    .map(|_ccx, error| TyOutlivesReErrorCulprit::Regular(error))
                     .join(&mut collector);
             }
             TyKind::Adt(lhs) => {
@@ -156,6 +157,7 @@ impl<'tcx> ClauseCx<'tcx> {
                         TyOrRe::Re(lhs) => {
                             self.ucx_mut()
                                 .unify_re_and_re(lhs, rhs, dir.to_mode())
+                                .map(|_ccx, error| TyOutlivesReErrorCulprit::Regular(error))
                                 .join(&mut collector);
                         }
                         TyOrRe::Ty(lhs) => {
@@ -170,6 +172,7 @@ impl<'tcx> ClauseCx<'tcx> {
             TyKind::Trait(lhs_re, _muta, _lhs_spec) => {
                 self.ucx_mut()
                     .unify_re_and_re(lhs_re, rhs, dir.to_mode())
+                    .map(|_ccx, error| TyOutlivesReErrorCulprit::Regular(error))
                     .join(&mut collector);
             }
             TyKind::Tuple(lhs) => {
@@ -185,6 +188,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     .lub_re;
 
                 self.oblige_re_outlives_re(lub_re, rhs, dir.to_mode())
+                    .map(|_ccx, error| TyOutlivesReErrorCulprit::Regular(error))
                     .join(&mut collector);
             }
             TyKind::InferVar(inf_lhs) => {
