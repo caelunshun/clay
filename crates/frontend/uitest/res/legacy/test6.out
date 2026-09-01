@@ -1,22 +1,13 @@
-error: could not make necessary inferences to show that `?0 {Imported { span: test6.fir:12:14-15 }}` implements `crate::Whee`: UnresolvedInfer(
-    0,
-)
-   ┌─ test6.fir:12:14
-   │
-12 │     type T = _;
-   │              ^
-
-note: Origin(
-    ImportWfForGenericParam {
-        use_span: test6.fir:12:14-15,
-        clause_span: test6.fir:8:13-17,
-    },
-)
-
-note: Step(
-    ImplInstantiatedClause {
-        lhs: 0: ?0 {Imported { span: test6.fir:12:14-15 }},
-        rhs: crate::Whee,
-    },
-)
+error: - 
+    - bad generics
+      span: test6.fir:12:14-15
+        - binder param WF error
+            - idx: 0
+                - trait not implemented
+                  LHS: ?0
+                  RHS: Whee
+                  RHS instance: Whee
+                  spec not met:
+                    - cannot progress
+                      ?0 could not be inferred
 

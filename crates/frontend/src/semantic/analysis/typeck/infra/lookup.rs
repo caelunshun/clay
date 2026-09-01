@@ -13,9 +13,9 @@ use crate::{
         },
         lower::modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},
         syntax::{
-            AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, InferTyVarSourceInfo,
-            InstantiatedFnSig, Mutability, Re, RelationMode, SigGenericList, TraitClause,
-            TraitSpec, Ty, TyFolderInfallibleExt as _, TyKind, TyOrReList,
+            AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, FnOwner, FnOwnerTrait,
+            InferTyVarSourceInfo, InstantiatedFnSig, Mutability, Re, RelationMode, SigGenericList,
+            TraitClause, TraitSpec, Ty, TyFolderInfallibleExt as _, TyKind, TyOrReList,
         },
     },
     utils::lang::IterEither,
@@ -189,33 +189,40 @@ impl BodyCtxt<'_, '_> {
             return Some(tcx.intern(TyKind::Error(err)));
         }
 
-        let resolution = if let Some(as_trait) = as_trait {
-            let &idx = as_trait.def.r(s).name_to_method.get(&assoc_name.text)?;
-            as_trait.def.r(s).methods[idx as usize]
+        let owner = if let Some(as_trait) = as_trait {
+            let &method_idx = as_trait.def.r(s).name_to_method.get(&assoc_name.text)?;
+
+            FnOwner::Trait(FnOwnerTrait {
+                instance: as_trait,
+                self_ty,
+                method_idx,
+            })
         } else {
             let scope_trait_candidates = self.collect_scope_trait_candidates(assoc_name);
             let generic_clause_candidates =
                 self.collect_generic_clause_candidates(self_ty, assoc_name);
 
-            self.lookup_single(
+            let resolution = self.lookup_single(
                 MethodQuery::AssocFn(self_ty),
                 assoc_name,
                 &scope_trait_candidates,
                 &generic_clause_candidates,
-            )?
-        };
+            )?;
 
-        let owner = self
-            .ccx_mut()
-            .fresh_type_relative_fn_def_to_fn_owner(
-                ClauseFuel::new(),
-                HrtbUniverse::ROOT_REF,
-                self_ty,
-                resolution,
-            )
-            // TODO
-            .map(move |_ccx, error| SpannedError(assoc_name.span, error))
-            .report_loud();
+            let owner = self
+                .ccx_mut()
+                .fresh_type_relative_fn_def_to_fn_owner(
+                    ClauseFuel::new(),
+                    HrtbUniverse::ROOT_REF,
+                    self_ty,
+                    resolution,
+                )
+                // TODO
+                .map(move |_ccx, error| SpannedError(assoc_name.span, error))
+                .report_loud();
+
+            owner
+        };
 
         let instance = self
             .ccx

@@ -660,6 +660,7 @@ pub enum ImportError {
         error: Box<InherentImplBlockSatisfyError>,
     },
     NoShadowImpl {
+        span: Span,
         error: Box<TraitSpecResolutionError>,
     },
     BadRefPointee {
@@ -697,8 +698,9 @@ impl ToDebugTree for ImportError {
             ImportError::InherentBlockEnv { owner: _, error } => DebugTree::new()
                 .with_prose("inherent block env not WF")
                 .with_sublist(error.to_debug_tree(pretty)),
-            ImportError::NoShadowImpl { error } => DebugTree::new()
+            ImportError::NoShadowImpl { span, error } => DebugTree::new()
                 .with_prose("no shadow impl")
+                .with_prose(format!("span: {span}"))
                 .with_sublist(error.to_debug_tree(pretty)),
             ImportError::BadRefPointee { ty, error } => DebugTree::new()
                 .with_prose("bad ref pointee")

@@ -1007,6 +1007,8 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         let s = self.session();
         let tcx = self.tcx();
 
+        let span = spec.span;
+
         let mut collector = MultiPromiseBuilder::new();
 
         // Let's begin by importing this spec directly.
@@ -1095,6 +1097,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             .filter_map(move |_ccx, error| {
                 // No filtering needed because we know we're in WF mode.
                 Ok(ImportError::NoShadowImpl {
+                    span,
                     error: Box::new(error),
                 })
             })

@@ -57,6 +57,6 @@ mod case4 {
 
     trait Funny {
         // OK
-        type Hehe: for<T> Meow<T> + for<T> Meow<T, Other = T>;
+        type Hehe: for<T> Meow<T> + for<T> Meow<T, Other = T>;  // FIXME: no shadow impl??
     }
 }

@@ -1,16 +1,41 @@
-error: universal type `{HRTB universal capture #2: crate::Projector}` not covered by trait `crate::Helper<<{HRTB universal capture #2: crate::Projector} as crate::Projector>::Out>`
-   ┌─ test32.fir:64:13
-   │
-64 │ fn uh_oh<Q: for<T: Projector> Helper<<T as Projector>::Out>>(v: Q) {
-   │             ^^^^^^^^^^^^^^^^^
+error: - span: test32.fir:83:18-24
+  cannot unify
+  LHS: str
+  RHS: ?75
+  mode: Equate
+    - structural error
+        - bad infer restriction solid
+          LHS: u8 | u16 | u32 | u64 | i8 | i16 | i32 | i64
+          RHS: str
 
-note: Origin(
-    ImportWfHrtb {
-        binder_span: test32.fir:64:13-30,
-    },
-)
+error: - span: test32.fir:74:26-40
+  trait not implemented
+  LHS: fn @ <?33 as Helper<(), ?29>>::meow
+  RHS: std::FnOnce<(Option<?33>, bool), ()>
+    - fn impl unsatisfied
+      resolve fn:
+        - fn instance resolution error
+          instance: fn @ <?33 as Helper<(), ?29>>::meow
+            - trait fn unsatisfied
+              resolve instance error:
+                - trait spec resolution error
+                  self ty: ?33
+                  spec: Helper<(), ?29>
+                    - trait not implemented
+                      LHS: ?33
+                      RHS: Helper<(), ?29>
+                        - cannot progress
+                          ?33 could not be inferred
 
-error: universal elab helper went uninferred, good luck!
-
-error: universal elab helper went uninferred, good luck!
+error: - 
+    - no shadow impl
+      span: test32.fir:74:5-11
+        - trait spec resolution error
+          self ty: [clause WF helper]
+          spec: Helper<(), ?29>
+            - trait not implemented
+              LHS: [clause WF helper]
+              RHS: Helper<(), ?29>
+                - cannot progress
+                  elaboration still has infer for inherent selection
 

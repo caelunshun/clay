@@ -1,0 +1,11 @@
+error: - span: test27.fir:59:11-15
+    - trait fn owner not WF
+        - trait spec resolution error
+          self ty: ?0
+          spec: Meow
+            - trait not implemented
+              LHS: ?0
+              RHS: Meow
+                - cannot progress
+                  ?0 could not be inferred
+

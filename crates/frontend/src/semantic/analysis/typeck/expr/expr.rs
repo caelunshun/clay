@@ -7,7 +7,10 @@ use crate::{
     parse::ast::AstLit,
     semantic::{
         analysis::typeck::BodyCtxt,
-        infer::{ClauseFuel, ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse, SpannedError},
+        infer::{
+            ClauseFuel, ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse, PrettyFmtOpts,
+            SpannedError,
+        },
         syntax::{
             AdtCtorSyntax, AdtInstance, Divergence, FnInstanceInner, FnOwner, FnOwnerAdtCtor,
             HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirStmt, HirStructExpr,

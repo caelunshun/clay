@@ -1,0 +1,54 @@
+error: - span: test25.fir:24:18-19
+  cannot unify
+  LHS: u32
+  RHS: i32
+  mode: Equate
+    - structural error
+        - type mismatch
+          LHS: u32
+          RHS: i32
+
+error: - span: test25.fir:28:18-19
+  cannot unify
+  LHS: <T as Meow>::Out
+  RHS: i32
+  mode: Equate
+    - structural error
+        - type mismatch
+          LHS: <T as Meow>::Out
+          RHS: i32
+
+error: - 
+    - no shadow impl
+      span: test25.fir:31:13-41
+        - trait spec resolution error
+          self ty: [clause WF helper]
+          spec: Meow<Out = ?2>
+            - trait not implemented
+              LHS: [clause WF helper]
+              RHS: Meow<Out = ?2>
+                - cannot progress
+                  elaboration still has infer for inherent selection
+            - projection failed
+              span: test25.fir:31:30-34
+                - trait spec resolution error
+                  self ty: T
+                  spec: Meow
+                    - trait not implemented
+                      LHS: T
+                      RHS: Meow<Out = ?2>
+                        - cannot progress
+                          elaboration still has infer for inherent selection
+
+error: - 
+    - projection failed
+      span: test25.fir:31:52-56
+        - trait spec resolution error
+          self ty: T
+          spec: Meow
+            - trait not implemented
+              LHS: T
+              RHS: Meow<Out = i32>
+                - cannot progress
+                  elaboration still has infer for inherent selection
+

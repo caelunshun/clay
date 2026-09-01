@@ -55,13 +55,30 @@ impl Projector for () {
     type Out = ();
 }
 
-trait Helper<T> {
-    fn meow(me: Self);
+enum Option<T> {
+    Some(T),
+    None,
+}
+
+use Option::*;
+
+trait Helper<T, V> {
+    fn meow<S>(me: Option<Self>, v: S);
 }
 
 // We need to defer importing of HRTB `SigProject` and `SigAlias` types until the
 // `HrtbSubstitutionFolder` is used.
-fn uh_oh<Q: for<T: Projector> Helper<<T as Projector>::Out>>(v: Q) {
-    Helper::<_>::meow(v);
-    Helper::<()>::meow(v);
+fn uh_oh<Q: for<T: Projector> Helper<T, <T as Projector>::Out>>(v: Q) {
+    Helper::<(), _>::meow(Some(v), 3);
+    <Q as Helper<(), _>>::meow(None(), "meow");
+    Helper::<(), _>::meow(None(), true);
+    Helper::<(), _>::meow(None::<Q>(), 4.0);
+
+    let foo = Helper::<(), _>::meow;
+    foo(Some(v), 1);
+    foo(Some(v), "meow");
+
+    let foo = Helper::<(), _>::meow::<_>;
+    foo(Some(v), 1.0);
+    foo(Some(v), "meow");
 }

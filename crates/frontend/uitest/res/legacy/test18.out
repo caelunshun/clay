@@ -10,7 +10,7 @@ error: expected `as`
 25 │     fn next<'a: &shorter Self>(&'a mut self) -> <Self::Output as LendingOutput<'a>>::Output {
    │                                                      ^
 
-error: expected type (`Self`,  `&`,  `@`,  `(`,  `_`,  ,  `<`) ,  path part (identifier,  `super`,  `crate`,  ,  `self`)
+error: expected type (`Self`, `&`, `@`, `(`, `_`, or `<`) or path part (identifier, `super`, `crate`, or `self`)
    ┌─ test18.fir:30:23
    │
 30 │ pub fn demo(mut iter: impl Iterator) {
