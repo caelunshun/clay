@@ -128,7 +128,7 @@ impl<'tcx> ReUnifyTracker<'tcx> {
                 ));
 
                 Err(ErrorGuaranteed::new_unchecked())
-            })
+            });
         }
 
         for (promise, err) in to_resolve {
@@ -353,6 +353,8 @@ impl ReIncrementalConstraints {
     ) {
         self.direct_outlive_graph.add(lhs, rhs);
 
+        let mut okay = true;
+
         for (var, var_outlives) in self.transitive_universal_outlives.iter_mut_enumerated() {
             if !(lhs == InferRe::Universal(var) || var_outlives.contains(&lhs)) {
                 continue;
@@ -378,6 +380,8 @@ impl ReIncrementalConstraints {
                                 var_outlives.remove(marked);
                             }
 
+                            okay = false;
+
                             break;
                         }
                     }
@@ -396,6 +400,10 @@ impl ReIncrementalConstraints {
             }
 
             self.dfs_queue.clear();
+        }
+
+        if !okay {
+            self.direct_outlive_graph.remove(lhs, rhs);
         }
     }
 }
@@ -500,6 +508,11 @@ struct DirectedInferReGraph(InferReMap<SmallVec<[InferRe; 1]>>);
 impl DirectedInferReGraph {
     fn add(&mut self, lhs: InferRe, rhs: InferRe) {
         self.0.get_mut(lhs).push(rhs);
+    }
+
+    fn remove(&mut self, lhs: InferRe, rhs: InferRe) {
+        let target = self.0.get_mut(lhs);
+        target.remove(target.iter().position(|&v| v == rhs).unwrap());
     }
 
     fn successors(&self, re: InferRe) -> &[InferRe] {

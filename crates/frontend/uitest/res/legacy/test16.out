@@ -65,31 +65,6 @@ error: -
                                         to outlive: 'a
 
 error: - 
-    - no shadow impl
-      span: test16.fir:17:21-29
-        - trait spec resolution error
-          self ty: [clause WF helper]
-          spec: Meow<'a>
-            - trait not implemented
-              LHS: [clause WF helper]
-              RHS: Meow<'a>
-                - inherent unsatisfied
-                  LHS: Meow<'a>
-                  RHS: Meow<'a>
-                  LHS instantiated: Meow<'a>
-                  Culprits:
-                    - idx: 0
-                        - re and re unify error
-                          LHS: 'a
-                          RHS: 'a
-                          mode: Equate
-                            - 
-                                - requires var: 'a
-                                  to outlive: 'u1
-                                  - requires var: 'a
-                                    to outlive: 'u1
-
-error: - 
     - bad generics
       span: test16.fir:19:55-56
         - binder param WF error
