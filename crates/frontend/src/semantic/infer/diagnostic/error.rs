@@ -198,7 +198,7 @@ impl fmt::Write for IndentedFmt<'_, '_> {
             }
 
             if self.state == IndentedFmtState::AtStart {
-                for _ in 0..self.level {
+                for _ in 0..self.level.min(100) {
                     self.f.write_str(" ")?;
                 }
 

@@ -7,6 +7,7 @@ use crate::{
     parse::token::Ident,
     semantic::{
         analysis::typeck::BodyCtxt,
+        infer::PrettyFmtOpts,
         syntax::{
             AdtCtor, AdtCtorFieldIdx, AdtCtorInstance, AdtCtorUnresolved, AdtInstance, AdtKind,
             HirPatListFrontAndTail, HirPatListFrontAndTailLen, SigAdtInstance, Ty, TyKind,
@@ -131,7 +132,7 @@ impl BodyCtxt<'_, '_> {
                     span,
                     format_args!(
                         "expected ADT constructor; got `{}`",
-                        self.ccx.pretty().wrap(ty),
+                        self.ccx.pretty(PrettyFmtOpts::default()).wrap(ty),
                     ),
                 )
                 .emit());

@@ -53,18 +53,7 @@ pub struct HrtbUniverseInfo {
 
 impl fmt::Debug for HrtbUniverse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut f = f.debug_list();
-
-        for curr in self.ancestors() {
-            let entry = match curr.info() {
-                Some(info) => info as &dyn fmt::Debug,
-                None => &fmt::from_fn(|f| f.write_str("<root>")),
-            };
-
-            f.entry(entry);
-        }
-
-        f.finish()
+        f.debug_tuple("HrtbUniverse").field(&self.level()).finish()
     }
 }
 

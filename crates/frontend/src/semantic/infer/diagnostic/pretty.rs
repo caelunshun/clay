@@ -20,14 +20,20 @@ use std::{
 // === PrettyFmtCx === //
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn pretty(&self) -> PrettyFmtCx<'_, 'tcx> {
-        PrettyFmtCx::new(self)
+    pub fn pretty(&self, opts: PrettyFmtOpts) -> PrettyFmtCx<'_, 'tcx> {
+        PrettyFmtCx::new(self, opts)
     }
 }
 
 pub struct PrettyFmtCx<'a, 'tcx> {
     ccx: &'a ClauseCx<'tcx>,
+    opts: PrettyFmtOpts,
     fmt_state: RefCell<FmtState>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PrettyFmtOpts {
+    pub verbose: bool,
 }
 
 #[derive(Default)]
@@ -36,9 +42,10 @@ struct FmtState {
 }
 
 impl<'a, 'tcx> PrettyFmtCx<'a, 'tcx> {
-    pub fn new(ccx: &'a ClauseCx<'tcx>) -> Self {
+    pub fn new(ccx: &'a ClauseCx<'tcx>, opts: PrettyFmtOpts) -> Self {
         Self {
             ccx,
+            opts,
             fmt_state: RefCell::default(),
         }
     }
@@ -222,7 +229,7 @@ impl_pretty! {
                 SimpleListFormatGlue::COMMA_LIST,
             )?;
 
-            f.write_str(">")?;
+            f.write_str("> ")?;
         }
 
         let count = cx.fmt_state
@@ -265,14 +272,7 @@ impl_pretty! {
 
         cx.wrap(def.r(s).item).fmt(f)?;
 
-        if params.r(s).is_empty() {
-            return Ok(());
-        }
-
-        f.write_str("<")?;
-
-        format_list_into(
-            f,
+        let generics = format_list(
             params.r(s)
                 .iter()
                 .enumerate()
@@ -299,9 +299,11 @@ impl_pretty! {
                     }
                 }),
             SimpleListFormatGlue::COMMA_LIST,
-        )?;
+        );
 
-        f.write_str(">")?;
+        if !generics.is_empty() {
+            write!(f, "<{generics}>")?;
+        }
 
         Ok(())
     }
@@ -312,7 +314,14 @@ impl_pretty! {
     InferTyVar => |cx, value, f| {
         match cx.ccx.lookup_ty_infer_var_without_poll(value) {
             Ok(resolved) => cx.wrap(resolved).fmt(f),
-            Err(root) => write!(f, "?{root:?}"),
+            Err(root) => {
+                if cx.opts.verbose {
+                    write!(f, "?(level = {}) {}", root.max_universe.level(), root.root.index())
+                } else {
+                    // TODO
+                    write!(f, "?{}", root.root.index())
+                }
+            },
         }
     }
     SimpleTySet => |cx, value, f| {
@@ -320,6 +329,10 @@ impl_pretty! {
     }
     UniversalTyVar => |cx, value, f| {
         let s = cx.session();
+
+        if cx.opts.verbose {
+            write!(f, "u(level = {}) ", cx.ccx().lookup_universal_ty_hrtb_universe(value).level())?;
+        }
 
         match cx.ccx().lookup_universal_ty_src_info(value) {
             UniversalTyVarSourceInfo::TraitSelf => write!(f, "Self"),

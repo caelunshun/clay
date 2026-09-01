@@ -1161,12 +1161,15 @@ impl<'tcx> ClauseCx<'tcx> {
         // Initialize their clauses.
         for (&def, &var) in defs.r(s).iter().zip(vars.r(s)) {
             let clauses =
-                HrtbInstantiator::new(self, &mut normalize_errors, fuel, vars).fold(def.clauses);
+                HrtbInstantiator::new(self, &mut normalize_errors, universe.clone(), fuel, vars)
+                    .fold(def.clauses);
 
             self.init_any_universal_var_direct_clauses(var, clauses);
         }
 
-        let output = HrtbInstantiator::new(self, &mut normalize_errors, fuel, vars).fold(inner);
+        let output =
+            HrtbInstantiator::new(self, &mut normalize_errors, universe.clone(), fuel, vars)
+                .fold(inner);
 
         let promise = normalize_errors
             .finish()
@@ -1214,8 +1217,14 @@ impl<'tcx> ClauseCx<'tcx> {
 
         // Constrain the new inference variables with their obligations.
         for (idx, (&def, &var)) in defs.r(s).iter().zip(vars.r(s)).enumerate() {
-            let clauses = HrtbInstantiator::new(self, &mut normalize_error_collector, fuel, vars)
-                .fold(def.clauses);
+            let clauses = HrtbInstantiator::new(
+                self,
+                &mut normalize_error_collector,
+                universe.clone(),
+                fuel,
+                vars,
+            )
+            .fold(def.clauses);
 
             match var {
                 TyOrRe::Re(var) => {
@@ -1252,8 +1261,14 @@ impl<'tcx> ClauseCx<'tcx> {
         }
 
         // Fold the inner type
-        let output =
-            HrtbInstantiator::new(self, &mut normalize_error_collector, fuel, vars).fold(inner);
+        let output = HrtbInstantiator::new(
+            self,
+            &mut normalize_error_collector,
+            universe.clone(),
+            fuel,
+            vars,
+        )
+        .fold(inner);
 
         let promise = typed_joiner! {
             let param_not_valid = param_not_valid_collector.finish();
@@ -1273,6 +1288,7 @@ impl<'tcx> ClauseCx<'tcx> {
 struct HrtbInstantiator<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
     normalize_errors: &'a mut MultiPromiseBuilder<'tcx, TraitSpecResolutionError>,
+    universe: HrtbUniverse,
     fuel: ClauseFuel,
     replace_with: TyOrReList,
     top: DebruijnTop,
@@ -1282,6 +1298,7 @@ impl<'a, 'tcx> HrtbInstantiator<'a, 'tcx> {
     fn new(
         ccx: &'a mut ClauseCx<'tcx>,
         normalize_errors: &'a mut MultiPromiseBuilder<'tcx, TraitSpecResolutionError>,
+        universe: HrtbUniverse,
         fuel: ClauseFuel,
         replace_with: TyOrReList,
     ) -> Self {
@@ -1290,6 +1307,7 @@ impl<'a, 'tcx> HrtbInstantiator<'a, 'tcx> {
         Self {
             ccx,
             normalize_errors,
+            universe,
             fuel,
             replace_with,
             top: DebruijnTop::new(replace_with.r(s).len()),
@@ -1339,7 +1357,7 @@ impl<'tcx> TyFolder<'tcx> for HrtbInstantiator<'_, 'tcx> {
             }) if self.top.len() == self.replace_with.r(s).len() => {
                 let instance = self
                     .ccx
-                    .resolve_trait_spec(self.fuel, HrtbUniverse::ROOT_REF, target, spec)
+                    .resolve_trait_spec(self.fuel, &self.universe, target, spec)
                     .filter_map(move |_ccx, error| {
                         // TODO: filter non-fuel errors
 
