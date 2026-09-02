@@ -138,7 +138,9 @@ impl_pretty! {
                 write!(f, "&{} {}{}", cx.wrap(lt), muta.opt_space_qual(), cx.wrap(pointee))
             },
             TyKind::Adt(instance) => cx.wrap(instance).fmt(f),
-            TyKind::Trait(re, muta, clauses) => todo!(),
+            TyKind::Trait(lt, muta, clauses) => {
+                write!(f, "&{} {}dyn {}", cx.wrap(lt), muta.opt_space_qual(), cx.wrap(clauses))
+            },
             TyKind::Tuple(types) => {
                 if let [unique] = types.r(s) {
                     write!(f, "({},)", cx.wrap(unique))

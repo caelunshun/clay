@@ -1,7 +1,7 @@
 experimental = ["setup-scripts"]
 
 [scripts.setup.setup-frontend-uitest]
-command = "cargo run -p fir-frontend-uitest --bin setup_harness"
+command = "cargo run --bin setup_harness"
 
 [[profile.default.scripts]]
 filter = "deps(fir-frontend-uitest)"

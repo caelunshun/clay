@@ -44,27 +44,29 @@ error: -
               LHS: [clause WF helper]
               RHS: case4::Meow<T, Other = T>
                 - inherent unsatisfied
-                  LHS: for<T> case4::Meow<T, Other = <[clause WF helper] as case4::Meow<T>>::Other>
+                  LHS: for<T> case4::Meow<T, Other = ?2>
                   RHS: case4::Meow<T, Other = T>
-                  LHS instantiated: case4::Meow<T, Other = <[clause WF helper] as case4::Meow<debruijn(1)>>::Other>
+                  LHS instantiated: case4::Meow<T, Other = ?2>
                   Culprits:
                     - idx: 1
                         - cannot unify
-                          LHS: <[clause WF helper] as case4::Meow<debruijn(1)>>::Other
+                          LHS: ?2
                           RHS: T
                           mode: Equate
                             - structural error
-                                - type mismatch
-                                  LHS: <[clause WF helper] as case4::Meow<debruijn(1)>>::Other
-                                  RHS: T
+                                - infer ty leaks universe
+                                  var: ?2
+                                  max universe: 0
+                                  leaks universal: T
+                                  which has universe: 1
                     - bad trait spec
                       span: unspec_spec_wf.fir:60:27-34
                         - binder param WF error
                             - idx: 0
                                 - trait not implemented
                                   LHS: T
-                                  RHS: case4::Thump<<[clause WF helper] as case4::Meow<debruijn(1)>>::Other>
-                                  RHS instance: case4::Thump<<[clause WF helper] as case4::Meow<debruijn(1)>>::Other>
+                                  RHS: case4::Thump<?2>
+                                  RHS instance: case4::Thump<?2>
                                   spec not met:
                                     - no suitable impl met
 

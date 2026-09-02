@@ -41,7 +41,10 @@
 //! ...which rustc doesn't even handle correctly.
 
 use crate::{
-    base::arena::{HasInterner, HasListInterner},
+    base::{
+        arena::{HasInterner, HasListInterner},
+        syntax::Span,
+    },
     semantic::{
         infer::{
             ClauseCx, ClauseFuel, ClauseImportEnv, ClauseObligation, FloatingInferVar,
@@ -49,12 +52,13 @@ use crate::{
             ObligationTermination,
         },
         syntax::{
-            AnyGeneric, HrtbBinder, InferTyVar, InferTyVarSourceInfo, Mutability, Re, RelationMode,
-            SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyFolder,
-            TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorExt,
+            AnyGeneric, HrtbBinder, HrtbDebruijnDef, InferTyVar, InferTyVarSourceInfo, Mutability,
+            Re, RelationMode, SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty,
+            TyCtxt, TyFolder, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorExt,
             UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
+    symbol,
     utils::hash::{FxHashMap, FxHashSet},
 };
 use smallvec::SmallVec;
@@ -137,8 +141,6 @@ impl<'tcx> ClauseCx<'tcx> {
                     elaborated.push(TraitClause::Outlives(outlive_dir, outlive));
                 }
                 TraitClause::Trait(HrtbBinder { defs, inner: spec }) => {
-                    // TODO: Handle binders correctly.
-
                     // Replace unspecified parameters with fresh universals.
                     let new_param_equals = spec
                         .params
@@ -591,6 +593,18 @@ impl<'tcx> TyFolder<'tcx> for MergeRepresentativeFolder<'_, 'tcx> {
 
     fn tcx(&self) -> &'tcx TyCtxt {
         self.ccx.tcx()
+    }
+
+    fn fold_hrtb_debruijn_def(
+        &mut self,
+        defs: HrtbDebruijnDef,
+    ) -> Result<HrtbDebruijnDef, Self::Error> {
+        Ok(HrtbDebruijnDef {
+            span: Span::DUMMY,
+            name: symbol!(""),
+            kind: defs.kind,
+            clauses: self.fold(defs.clauses),
+        })
     }
 
     fn fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {

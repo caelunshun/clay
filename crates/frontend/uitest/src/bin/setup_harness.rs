@@ -6,8 +6,6 @@ fn main() {
 
     Command::new("cargo")
         .arg("build")
-        .arg("-p")
-        .arg("fir-frontend")
         .spawn()
         .unwrap()
         .wait()
