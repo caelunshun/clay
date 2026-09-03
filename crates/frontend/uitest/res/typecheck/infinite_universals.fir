@@ -1,27 +1,37 @@
 #[lang("fn_once_trait")]
 trait FnOnce<I, O> {}
 
-trait Meow {
-    type Generator: for<T> UhOh<T>;
+type FunkyIdentity<T> = <(T,) as FunkyIdentityHelper>::Out;
 
-    fn get_universal<T>() -> <Generator as UhOh<T>>::Output {
+trait FunkyIdentityHelper {
+    type Out;
+}
+
+impl<T> FunkyIdentityHelper for (T,) {
+    type Out = T;
+}
+
+trait Meow {
+    type Generator: for<'a, T> UhOh<'a, FunkyIdentity<T>>;
+
+    fn get_universal<'a, T>() -> <Generator as UhOh<'a, T>>::Output {
         loop {}
     }
 }
 
-trait UhOh<T> {
+trait UhOh<'a, T> {
     type Output;
 }
 
-fn uhh<T: Meow>() {
-    let foo = T::get_universal::<u32>();
-    let bar = T::get_universal::<i32>();
+fn uhh<'a, 'b, T: Meow>() {
+    // FIXME: Should be rejected.
+    eq(T::get_universal::<'a, u32>(), T::get_universal::<'a, i32>());
 
     // FIXME: Should be rejected.
-    // Idea: we can leave HRTB projections uninstantiated during elaboration and let the
-    // `oblige_impl` routine contribute new instantiations of that HRTB just in front of it in the
-    // elaborated clause list.
-    eq(foo, bar);
+    eq(T::get_universal::<'a, u32>(), T::get_universal::<'b, u32>());
+
+    // Should be accepted.
+    eq(T::get_universal::<'a, u32>(), T::get_universal::<'a, u32>());
 }
 
 fn eq<T>(lhs: T, rhs: T) {}
