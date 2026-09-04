@@ -49,13 +49,13 @@ use crate::{
         infer::{
             ClauseCx, ClauseFuel, ClauseImportEnv, ClauseObligation, FloatingInferVar,
             GenericSubst, HrtbUniverse, ImportWfMode, ObligationNotReady, ObligationResult,
-            ObligationTermination,
+            ObligationTermination, clause::UniversalTyDescriptor,
         },
         syntax::{
             AnyGeneric, HrtbBinder, HrtbDebruijnDef, InferTyVar, InferTyVarSourceInfo, Mutability,
             Re, RelationMode, SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty,
             TyCtxt, TyFolder, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorExt,
-            UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
+            UniversalReVarSourceInfo, UniversalTy, UniversalTyProjectionInner,
         },
     },
     symbol,
@@ -74,6 +74,7 @@ pub struct UniversalElaboration {
 }
 
 impl UniversalElaboration {
+    // FIXME: Can become stale accidentally
     pub fn collect_roots_if_floating(&self, ccx: &ClauseCx<'_>) -> Option<WipReificationRootSet> {
         self.wip_reification_state
             .as_ref()
@@ -109,24 +110,24 @@ impl WipReificationState {
 impl<'tcx> ClauseCx<'tcx> {
     pub fn elaborate_ty_universal_clauses_possibly_floating(
         &mut self,
-        var: UniversalTyVar,
+        universal: UniversalTy,
     ) -> UniversalElaboration {
         let s = self.session();
         let tcx = self.tcx();
 
         // See whether this universal variable has been elaborated yet.
-        if let Some(elaborated) = self.universal_vars[var].elaboration.clone() {
+        if let Some(elaborated) = self.universal_vars[&universal].elaboration.clone() {
             return elaborated;
         }
 
-        let var_universe = self.lookup_universal_ty_hrtb_universe(var).clone();
+        let var_universe = self.lookup_universal_ty_hrtb_universe(universal).clone();
 
         // If not, elaborate the clause list without merging projections.
         let lub_re = self.fresh_re_universal(UniversalReVarSourceInfo::ElaboratedLub);
 
         let mut elaborated = Vec::new();
         let mut queue = VecDeque::from_iter(
-            self.direct_ty_universal_clauses_possibly_floating(var)
+            self.direct_ty_universal_clauses_possibly_floating(universal)
                 .r(s)
                 .iter()
                 .copied(),
@@ -150,14 +151,12 @@ impl<'tcx> ClauseCx<'tcx> {
                         .map(|(idx, param)| match *param {
                             TraitParam::Equals(ty_or_re) => ty_or_re,
                             TraitParam::Unspecified(_) => {
-                                let universal = self.lookup_universal_ty_hrtb_universe(var).clone();
-                                let var = self.fresh_ty_infer_var_restricted(
+                                let universal =
+                                    self.lookup_universal_ty_hrtb_universe(universal).clone();
+                                let var = self.fresh_ty_infer_var(
                                     // Associated types vary in the same way as their parent generic.
                                     universal.clone(),
                                     InferTyVarSourceInfo::ElaborationUnifyHelper,
-                                    // Prevent this type from unifying with other concrete types
-                                    // until elaboration is finished.
-                                    SimpleTySet::ELAB_UNIVERSAL_VAR,
                                 );
 
                                 reified_vars.insert(
@@ -203,7 +202,7 @@ impl<'tcx> ClauseCx<'tcx> {
                                 // Associated types vary in the same way as their parent generic.
                                 var_universe.clone(),
                                 ClauseImportEnv::new(
-                                    Some(tcx.intern(TyKind::UniversalVar(var))),
+                                    Some(tcx.intern(TyKind::Universal(universal))),
                                     [GenericSubst::new(*spec.def.r(s).generics, new_param_equals)],
                                 ),
                                 ImportWfMode::ReportElsewhere,
@@ -250,7 +249,7 @@ impl<'tcx> ClauseCx<'tcx> {
                             // Associated types vary in the same way as their parent generic.
                             var_universe.clone(),
                             ClauseImportEnv::new(
-                                Some(tcx.intern(TyKind::UniversalVar(var))),
+                                Some(tcx.intern(TyKind::Universal(universal))),
                                 [GenericSubst::new(*spec.def.r(s).generics, new_param_equals)],
                             ),
                             ImportWfMode::ReportElsewhere,
@@ -271,7 +270,7 @@ impl<'tcx> ClauseCx<'tcx> {
         // Create an obligation to properly resolve reified associated type inference variables to
         // proper universals (see module comment).
         self.push_obligation(ClauseObligation::UnifyReifiedElaboratedClauses {
-            root: var,
+            root: universal,
             clauses: elaborated,
             reified_vars: reified_vars.clone(),
         });
@@ -282,7 +281,7 @@ impl<'tcx> ClauseCx<'tcx> {
             lub_re,
             wip_reification_state: Some(reified_vars),
         };
-        self.universal_vars[var].elaboration = Some(elaborated.clone());
+        self.universal_vars.get_mut(&universal).unwrap().elaboration = Some(elaborated.clone());
 
         elaborated
     }
@@ -310,7 +309,7 @@ impl<'tcx> ClauseCx<'tcx> {
 impl ClauseCx<'_> {
     pub(super) fn oblige_unify_reified_elaborated_clauses(
         &mut self,
-        root: UniversalTyVar,
+        root: UniversalTy,
         clauses: TraitClauseList,
         reified_vars: WipReificationState,
     ) -> ObligationResult {
@@ -467,14 +466,14 @@ impl ClauseCx<'_> {
                         // (keep as is)
                     }
                     AssocParam::Reified(first_wip, clauses) => {
-                        let var = self.fresh_ty_universal_var(
-                            first_wip.universal.clone(),
-                            UniversalTyVarSourceInfo::Projection(
-                                root,
-                                first_wip.src_info_spec,
-                                first_wip.src_info_idx,
-                            ),
-                        );
+                        let var = UniversalTy::Projection(tcx.intern(UniversalTyProjectionInner {
+                            target: root,
+                            spec: first_wip.src_info_spec,
+                            assoc_idx: first_wip.src_info_idx,
+                        }));
+
+                        // TODO: normalize `var`
+
                         let clauses = clauses
                             .iter()
                             .flat_map(|v| v.r(s))
@@ -483,9 +482,16 @@ impl ClauseCx<'_> {
 
                         let clauses = tcx.intern_list(&clauses);
 
-                        self.init_ty_universal_var_direct_clauses(var, clauses);
+                        // FIXME: This is cursed.
+                        self.universal_vars.insert(
+                            var,
+                            UniversalTyDescriptor {
+                                direct_clauses: Some(clauses),
+                                elaboration: None,
+                            },
+                        );
 
-                        *assoc_param = AssocParam::Concrete(tcx.intern(TyKind::UniversalVar(var)));
+                        *assoc_param = AssocParam::Concrete(tcx.intern(TyKind::Universal(var)));
                     }
                 }
             }
@@ -542,7 +548,9 @@ impl ClauseCx<'_> {
             }
         }
 
-        self.universal_vars[root]
+        self.universal_vars
+            .get_mut(&root)
+            .unwrap()
             .elaboration
             .as_mut()
             .unwrap()

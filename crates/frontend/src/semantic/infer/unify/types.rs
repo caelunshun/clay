@@ -1,8 +1,11 @@
-use crate::semantic::{
-    infer::{FloatingInferVar, HrtbUniverse},
-    syntax::{
-        InferTyVar, InferTyVarSourceInfo, SimpleTySet, Ty, TyCtxt, UniversalTyVar,
-        UniversalTyVarSourceInfo,
+use crate::{
+    base::Session,
+    semantic::{
+        infer::{FloatingInferVar, HrtbUniverse},
+        syntax::{
+            InferTyVar, InferTyVarSourceInfo, SimpleTySet, Ty, TyCtxt, UniversalTy, UniversalTyVar,
+            UniversalTyVarSourceInfo,
+        },
     },
 };
 use disjoint::DisjointSetVec;
@@ -85,8 +88,13 @@ impl TyUnifyTracker {
         self.disjoint[var.index()].source_info.clone()
     }
 
-    pub fn lookup_universal_hrtb_universe(&self, var: UniversalTyVar) -> &HrtbUniverse {
-        &self.universals[var].in_universe
+    pub fn lookup_universal_hrtb_universe(&self, s: &Session, ty: UniversalTy) -> &HrtbUniverse {
+        match ty {
+            UniversalTy::Root(var) => &self.universals[var].in_universe,
+            UniversalTy::Projection(projection) => {
+                self.lookup_universal_hrtb_universe(s, projection.r(s).target)
+            }
+        }
     }
 
     pub fn lookup_infer(&self, var: InferTyVar) -> Result<Ty, FloatingInferVar<'_>> {

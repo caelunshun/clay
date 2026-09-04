@@ -7,7 +7,8 @@ use crate::{
         AdtInstance, FnInstance, FnInstanceInner, FnOwner, FnOwnerAdtCtor, FnOwnerInherent,
         FnOwnerTrait, HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, HrtbProjection, Re,
         TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty,
-        TyCtxt, TyKind, TyList, TyOrRe, TyOrReList,
+        TyCtxt, TyKind, TyList, TyOrRe, TyOrReList, UniversalTy, UniversalTyProjection,
+        UniversalTyProjectionInner,
     },
 };
 use std::{convert::Infallible, hash};
@@ -129,6 +130,19 @@ pub trait TyFolder<'tcx> {
 
     fn fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
         self.super_fallible(ty)
+    }
+
+    // === Universals === //
+
+    fn fold_universal(&mut self, ty: UniversalTy) -> Result<UniversalTy, Self::Error> {
+        self.super_fallible(ty)
+    }
+
+    fn fold_universal_projection(
+        &mut self,
+        projection: UniversalTyProjection,
+    ) -> Result<UniversalTyProjection, Self::Error> {
+        self.super_fallible(projection)
     }
 
     // === Binders === //
@@ -509,14 +523,11 @@ impl TyFoldable for Ty {
         let s = folder.session();
 
         let kind = match *me.r(s) {
-            TyKind::Simple(_)
-            | TyKind::Error(_)
-            | TyKind::HrtbVar(_)
-            | TyKind::InferVar(_)
-            | TyKind::UniversalVar(_) => {
+            TyKind::Simple(_) | TyKind::Error(_) | TyKind::HrtbVar(_) | TyKind::InferVar(_) => {
                 // (dead end)
                 *me.r(s)
             }
+            TyKind::Universal(universal) => TyKind::Universal(folder.fold_fallible(universal)?),
             TyKind::Reference(re, muta, pointee) => TyKind::Reference(
                 folder.fold_fallible(re)?,
                 muta,
@@ -536,6 +547,61 @@ impl TyFoldable for Ty {
         };
 
         Ok(tcx.intern(kind))
+    }
+}
+
+// === Universals === //
+
+impl TyFoldable for UniversalTy {
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    where
+        F: ?Sized + TyFolder<'tcx>,
+    {
+        folder.fold_universal(me)
+    }
+
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    where
+        F: ?Sized + TyFolder<'tcx>,
+    {
+        match me {
+            UniversalTy::Root(_var) => {
+                // (dead-end)
+                Ok(me)
+            }
+            UniversalTy::Projection(projection) => {
+                Ok(UniversalTy::Projection(folder.fold_fallible(projection)?))
+            }
+        }
+    }
+}
+
+impl TyFoldable for UniversalTyProjection {
+    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    where
+        F: ?Sized + TyFolder<'tcx>,
+    {
+        folder.fold_universal_projection(me)
+    }
+
+    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    where
+        F: ?Sized + TyFolder<'tcx>,
+    {
+        let s = folder.session();
+        let tcx = folder.tcx();
+
+        let UniversalTyProjectionInner {
+            target,
+            spec,
+            assoc_idx,
+        } = *me.r(s);
+
+        Ok(tcx.intern(UniversalTyProjectionInner {
+            target: folder.fold_fallible(target)?,
+            spec: folder.fold_fallible(spec)?,
+            assoc_idx,
+        }))
     }
 }
 

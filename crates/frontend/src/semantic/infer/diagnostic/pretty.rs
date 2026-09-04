@@ -7,7 +7,8 @@ use crate::{
             FnOwnerInherent, FnOwnerTrait, HrtbBinder, HrtbDebruijn, HrtbDebruijnDef,
             HrtbProjection, InferTyVar, IntKind, Item, Re, SimpleTyKind, SimpleTySet, TraitClause,
             TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe, TyOrReList,
-            UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
+            UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProjection,
+            UniversalTyProjectionInner, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
     utils::lang::{SimpleListFormatGlue, format_list, format_list_into},
@@ -173,7 +174,7 @@ impl_pretty! {
                 )
             },
             TyKind::InferVar(var) => cx.wrap(var).fmt(f),
-            TyKind::UniversalVar(var) => cx.wrap(var).fmt(f),
+            TyKind::Universal(var) => cx.wrap(var).fmt(f),
             TyKind::Error(_) => f.write_str("<error>"),
         }
     }
@@ -329,11 +330,19 @@ impl_pretty! {
     SimpleTySet => |cx, value, f| {
         format_list_into(f, value.names(), SimpleListFormatGlue::PIPE_LIST)
     }
+    UniversalTy => |cx, value, f| {
+        match value {
+            UniversalTy::Root(var) => cx.wrap(var).fmt(f),
+            UniversalTy::Projection(projection) => cx.wrap(projection).fmt(f),
+        }
+    }
     UniversalTyVar => |cx, value, f| {
         let s = cx.session();
 
         if cx.opts.verbose {
-            write!(f, "u(level = {}) ", cx.ccx().lookup_universal_ty_hrtb_universe(value).level())?;
+            let universe = cx.ccx().lookup_universal_ty_hrtb_universe(UniversalTy::Root(value));
+
+            write!(f, "u(level = {}) ", universe.level())?;
         }
 
         match cx.ccx().lookup_universal_ty_src_info(value) {
@@ -347,16 +356,20 @@ impl_pretty! {
                 write!(f, "{}", binder.defs.r(s)[idx as usize].name)
             },
             UniversalTyVarSourceInfo::Root(generic) => write!(f, "{}", generic.r(s).ident.text),
-            UniversalTyVarSourceInfo::Projection(lhs, spec, idx) => {
-                write!(
-                    f,
-                    "<{} as {}>::{}",
-                    cx.wrap(lhs),
-                    cx.wrap(spec),
-                    spec.def.r(s).generics.r(s).defs[idx as usize].ident(s).text(),
-                )
-            },
         }
+    }
+    UniversalTyProjection => |cx, value, f| {
+        let s = cx.session();
+
+        let UniversalTyProjectionInner { target, spec, assoc_idx } = *value.r(s);
+
+        write!(
+            f,
+            "<{} as {}>::{}",
+            cx.wrap(target),
+            cx.wrap(spec),
+            spec.def.r(s).generics.r(s).defs[assoc_idx as usize].ident(s).text(),
+        )
     }
     FnInstance => |cx, value, f| {
         let s = cx.session();

@@ -238,7 +238,7 @@ impl CoercionPossibility {
             | TyKind::Tuple(_)
             | TyKind::FnDef(_)
             | TyKind::InferVar(_)
-            | TyKind::UniversalVar(_)
+            | TyKind::Universal(_)
             | TyKind::Error(_) => Self::Solid(ty),
 
             TyKind::Reference(_, _, _) => Self::ThinReference(smallvec![ty]),

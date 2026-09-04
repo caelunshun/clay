@@ -4,7 +4,8 @@ use crate::{
         AdtInstance, FnInstance, FnInstanceInner, FnOwner, FnOwnerAdtCtor, FnOwnerInherent,
         FnOwnerTrait, HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, HrtbProjection, Re,
         TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty,
-        TyCtxt, TyKind, TyList, TyOrRe, TyOrReList,
+        TyCtxt, TyKind, TyList, TyOrRe, TyOrReList, UniversalTy, UniversalTyProjection,
+        UniversalTyProjectionInner,
     },
 };
 use std::{convert::Infallible, ops::ControlFlow};
@@ -94,6 +95,19 @@ pub trait TyVisitor<'tcx> {
 
     fn visit_ty(&mut self, ty: Ty) -> ControlFlow<Self::Break> {
         self.walk_fallible(ty)
+    }
+
+    // === Universals === //
+
+    fn visit_universal(&mut self, ty: UniversalTy) -> ControlFlow<Self::Break> {
+        self.walk_fallible(ty)
+    }
+
+    fn visit_universal_projection(
+        &mut self,
+        projection: UniversalTyProjection,
+    ) -> ControlFlow<Self::Break> {
+        self.walk_fallible(projection)
     }
 
     // === Binders === //
@@ -490,12 +504,11 @@ impl TyVisitable for Ty {
         let s = visitor.session();
 
         match *me.r(s) {
-            TyKind::Simple(_)
-            | TyKind::Error(_)
-            | TyKind::HrtbVar(_)
-            | TyKind::InferVar(_)
-            | TyKind::UniversalVar(_) => {
+            TyKind::Simple(_) | TyKind::Error(_) | TyKind::HrtbVar(_) | TyKind::InferVar(_) => {
                 // (dead end)
+            }
+            TyKind::Universal(universal) => {
+                visitor.visit_fallible(universal)?;
             }
             TyKind::Reference(re, _muta, pointee) => {
                 visitor.visit_fallible(re)?;
@@ -518,6 +531,61 @@ impl TyVisitable for Ty {
                 visitor.visit_fallible(tys)?;
             }
         }
+
+        ControlFlow::Continue(())
+    }
+}
+
+// === Universals === //
+
+impl TyVisitable for UniversalTy {
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + TyVisitor<'tcx>,
+    {
+        visitor.visit_universal(me)
+    }
+
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + TyVisitor<'tcx>,
+    {
+        let s = visitor.session();
+
+        match me {
+            UniversalTy::Root(_var) => {
+                // (dead_end)
+            }
+            UniversalTy::Projection(projection) => {
+                visitor.visit_fallible(projection)?;
+            }
+        }
+
+        ControlFlow::Continue(())
+    }
+}
+
+impl TyVisitable for UniversalTyProjection {
+    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + TyVisitor<'tcx>,
+    {
+        visitor.visit_universal_projection(me)
+    }
+
+    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + TyVisitor<'tcx>,
+    {
+        let s = visitor.session();
+        let UniversalTyProjectionInner {
+            target,
+            spec,
+            assoc_idx: _,
+        } = *me.r(s);
+
+        visitor.visit_fallible(target)?;
+        visitor.visit_fallible(spec)?;
 
         ControlFlow::Continue(())
     }

@@ -310,7 +310,7 @@ impl ImportedShapeEraser<'_, '_> {
             TyKind::HrtbVar(_)
             | TyKind::HrtbProjection(_)
             | TyKind::InferVar(_)
-            | TyKind::UniversalVar(_)
+            | TyKind::Universal(_)
             | TyKind::FnDef(_)
             | TyKind::Error(_) => TyShape::Hole,
 

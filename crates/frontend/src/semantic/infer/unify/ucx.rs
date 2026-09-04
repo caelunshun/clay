@@ -13,8 +13,8 @@ use crate::{
             InferTyVarSourceInfo, Mutability, Re, ReVariance, RelationDirection, RelationMode,
             SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitParamList, Ty, TyCtxt,
             TyFolder, TyFolderExt, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorExt,
-            TyVisitorInfallibleExt, UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar,
-            UniversalTyVarSourceInfo,
+            TyVisitorInfallibleExt, UniversalReVar, UniversalReVarSourceInfo, UniversalTy,
+            UniversalTyProjectionInner, UniversalTyVar, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -128,8 +128,9 @@ impl<'tcx> UnifyCx<'tcx> {
         self.types.lookup_infer_src_info(var)
     }
 
-    pub fn lookup_universal_ty_hrtb_universe(&self, var: UniversalTyVar) -> &HrtbUniverse {
-        self.types.lookup_universal_hrtb_universe(var)
+    pub fn lookup_universal_ty_hrtb_universe(&self, ty: UniversalTy) -> &HrtbUniverse {
+        self.types
+            .lookup_universal_hrtb_universe(self.session(), ty)
     }
 
     pub fn peel_ty_infer_var(&self, ty: Ty) -> Ty {
@@ -533,10 +534,12 @@ impl<'tcx> UnifyCx<'tcx> {
                     }
                 }
             },
+            (TyKind::Universal(lhs), TyKind::Universal(rhs)) => {
+                self.unify_universal_and_universal_inner(lhs, rhs, ty_culprits, re_collector);
+            }
             // Omissions okay because of intern equality fast-path:
             //
             // - `(Simple, Simple)`
-            // - `(UniversalVar, UniversalVar)`
             // - `(HrtbVar, HrtbVar)`
             // - `(FnDef(FnDefAdtCtor), FnDef(FnDefAdtCtor))`
             //
@@ -545,6 +548,96 @@ impl<'tcx> UnifyCx<'tcx> {
                 ty_culprits.push(TyAndTyUnifyCulprit::Types(lhs, rhs));
             }
         }
+    }
+
+    fn unify_universal_and_universal_inner(
+        &mut self,
+        lhs: UniversalTy,
+        rhs: UniversalTy,
+        ty_culprits: &mut Vec<TyAndTyUnifyCulprit>,
+        re_collector: &mut MultiPromiseBuilder<'tcx, ReAndReUnifyError>,
+    ) {
+        let s = self.session();
+        let tcx = self.tcx;
+
+        match (lhs, rhs) {
+            (UniversalTy::Root(lhs), UniversalTy::Root(rhs)) => {
+                if lhs == rhs {
+                    return;
+                }
+
+                // (fallthrough)
+            }
+            (UniversalTy::Projection(lhs), UniversalTy::Projection(rhs)) => 'proj: {
+                let UniversalTyProjectionInner {
+                    target: lhs_target,
+                    spec: lhs_spec,
+                    assoc_idx: lhs_assoc_id,
+                } = *lhs.r(s);
+
+                let UniversalTyProjectionInner {
+                    target: rhs_target,
+                    spec: rhs_spec,
+                    assoc_idx: rhs_assoc_id,
+                } = *rhs.r(s);
+
+                if lhs_assoc_id != rhs_assoc_id {
+                    break 'proj;
+                }
+
+                if lhs_spec.def != rhs_spec.def {
+                    break 'proj;
+                }
+
+                self.unify_universal_and_universal_inner(
+                    lhs_target,
+                    rhs_target,
+                    ty_culprits,
+                    re_collector,
+                );
+
+                for (&lhs_para, &rhs_para) in lhs_spec
+                    .params
+                    .r(s)
+                    .iter()
+                    .zip(rhs_spec.params.r(s).iter())
+                    .take(*lhs_spec.def.r(s).regular_generic_count as usize)
+                {
+                    let (TraitParam::Equals(lhs_para), TraitParam::Equals(rhs_para)) =
+                        (lhs_para, rhs_para)
+                    else {
+                        unreachable!()
+                    };
+
+                    match (lhs_para, rhs_para) {
+                        (TyOrRe::Re(lhs_para), TyOrRe::Re(rhs_para)) => {
+                            self.unify_re_and_re(lhs_para, rhs_para, RelationMode::Equate)
+                                .join(re_collector);
+                        }
+                        (TyOrRe::Ty(lhs_para), TyOrRe::Ty(rhs_para)) => {
+                            self.unify_ty_and_ty_inner(
+                                lhs_para,
+                                rhs_para,
+                                ty_culprits,
+                                re_collector,
+                                RelationMode::Equate,
+                            );
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+
+                return;
+            }
+            _ => {
+                // (fallthrough)
+            }
+        }
+
+        ty_culprits.push(TyAndTyUnifyCulprit::Types(
+            tcx.intern(TyKind::Universal(lhs)),
+            tcx.intern(TyKind::Universal(rhs)),
+        ));
     }
 
     fn unify_var_and_non_var_ty(
@@ -629,7 +722,7 @@ impl<'tcx> UnifyCx<'tcx> {
         }
 
         impl<'tcx> TyVisitor<'tcx> for HrtbLeakUniversalVisitor<'_, 'tcx> {
-            type Break = UniversalTyVar;
+            type Break = UniversalTy;
 
             fn tcx(&self) -> &'tcx TyCtxt {
                 self.ucx.tcx()
@@ -643,7 +736,7 @@ impl<'tcx> UnifyCx<'tcx> {
                             // (don't constrain yet)
                         }
                     },
-                    TyKind::UniversalVar(var) => {
+                    TyKind::Universal(var) => {
                         if !self
                             .ucx
                             .lookup_universal_ty_hrtb_universe(var)

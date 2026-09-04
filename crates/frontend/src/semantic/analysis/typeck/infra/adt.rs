@@ -127,7 +127,7 @@ impl BodyCtxt<'_, '_> {
             | TyKind::Tuple(..)
             | TyKind::FnDef(..)
             | TyKind::InferVar(..)
-            | TyKind::UniversalVar(..) => {
+            | TyKind::Universal(..) => {
                 return Err(Diag::span_err(
                     span,
                     format_args!(

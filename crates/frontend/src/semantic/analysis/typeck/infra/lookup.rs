@@ -91,7 +91,7 @@ impl BodyCtxt<'_, '_> {
                 | TyKind::Reference(_, _, _)
                 | TyKind::Trait(_, _, _)
                 | TyKind::FnDef(_)
-                | TyKind::UniversalVar(_) => {
+                | TyKind::Universal(_) => {
                     // (fallthrough, no special handling)
                 }
                 TyKind::HrtbVar(_) | TyKind::HrtbProjection(_) => unreachable!(),
@@ -269,7 +269,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                 | TyKind::Tuple(_)
                 | TyKind::FnDef(_) => false,
 
-                TyKind::InferVar(_) | TyKind::UniversalVar(_) | TyKind::Error(_) => true,
+                TyKind::InferVar(_) | TyKind::Universal(_) | TyKind::Error(_) => true,
             }
         }
 
@@ -328,12 +328,12 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
         let s = self.session();
         let ty = self.ccx_mut().peel_ty_infer_var_after_poll(ty);
 
-        let TyKind::UniversalVar(var) = *ty.r(s) else {
+        let TyKind::Universal(universal) = *ty.r(s) else {
             return Vec::new();
         };
 
         self.ccx_mut()
-            .elaborate_ty_universal_clauses_possibly_floating(var)
+            .elaborate_ty_universal_clauses_possibly_floating(universal)
             .clauses
             .r(s)
             .iter()

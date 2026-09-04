@@ -16,7 +16,7 @@ use crate::{
         syntax::{
             HrtbBinder, ImplItem, RelationMode, SimpleTySet, TraitClause, TraitClauseList,
             TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe, TyVisitor, TyVisitorInfallibleExt,
-            UniversalTyVar,
+            UniversalTy, UniversalTyVar,
         },
     },
     typed_joiner,
@@ -156,7 +156,7 @@ impl<'tcx> ClauseCx<'tcx> {
             TyKind::Trait(_re, _muta, clauses) => {
                 todo!()
             }
-            TyKind::UniversalVar(universal) => {
+            TyKind::Universal(universal) => {
                 let universal_elab =
                     self.elaborate_ty_universal_clauses_possibly_floating(universal);
 
@@ -659,7 +659,7 @@ impl<'tcx> ClauseCx<'tcx> {
 impl<'tcx> ClauseCx<'tcx> {
     pub fn oblige_covered(
         &mut self,
-        must_mention: impl IntoIterator<Item = UniversalTyVar>,
+        must_mention: impl IntoIterator<Item = UniversalTy>,
         in_type: Option<Ty>,
         in_trait: Option<TraitSpec>,
     ) -> Promise<'tcx, NotCoveredError> {
@@ -690,13 +690,13 @@ impl<'tcx> ClauseCx<'tcx> {
     pub(super) fn run_oblige_covered(
         &mut self,
         handle: PromiseHandle<'tcx, NotCoveredError>,
-        must_mention: Rc<FxHashMap<UniversalTyVar, u32>>,
+        must_mention: Rc<FxHashMap<UniversalTy, u32>>,
         in_type: Option<Ty>,
         in_trait: Option<TraitSpec>,
     ) -> ObligationResult {
         struct CoverVisitor<'a, 'tcx> {
             ccx: &'a ClauseCx<'tcx>,
-            must_mention: Rc<FxHashMap<UniversalTyVar, u32>>,
+            must_mention: Rc<FxHashMap<UniversalTy, u32>>,
             cover_set: Vec<bool>,
             had_holes: bool,
         }
@@ -719,7 +719,7 @@ impl<'tcx> ClauseCx<'tcx> {
                             self.had_holes = true;
                         }
                     }
-                    TyKind::UniversalVar(var) => {
+                    TyKind::Universal(var) => {
                         if let Some(&must_mention) = self.must_mention.get(&var) {
                             self.cover_set[must_mention as usize] = true;
                         }

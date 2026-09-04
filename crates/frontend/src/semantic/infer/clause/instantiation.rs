@@ -15,7 +15,7 @@ use crate::{
             FnOwnerAdtCtor, FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, ImplItem,
             InferTyVarSourceInfo, InstantiatedFnSig, RelationMode, SigTraitClauseKind, TraitClause,
             TraitInstance, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReKind,
-            TyOrReList, TypeAliasItem, TypeGeneric, UniversalReVarSourceInfo,
+            TyOrReList, TypeAliasItem, TypeGeneric, UniversalReVarSourceInfo, UniversalTy,
             UniversalTyVarSourceInfo,
         },
     },
@@ -90,7 +90,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     }
                 }
                 (AnyGeneric::Ty(generic), TyOrRe::Ty(target_ty)) => {
-                    let TyKind::UniversalVar(target) = *target_ty.r(s) else {
+                    let TyKind::Universal(target) = *target_ty.r(s) else {
                         unreachable!()
                     };
 
@@ -111,10 +111,11 @@ impl<'tcx> ClauseCx<'tcx> {
         let tcx = self.tcx();
 
         // Create a universal variable representing `Self`
-        let self_var =
-            self.fresh_ty_universal_var(HrtbUniverse::ROOT, UniversalTyVarSourceInfo::TraitSelf);
+        let self_var = UniversalTy::Root(
+            self.fresh_ty_universal_var(HrtbUniverse::ROOT, UniversalTyVarSourceInfo::TraitSelf),
+        );
 
-        let self_ty = tcx.intern(TyKind::UniversalVar(self_var));
+        let self_ty = tcx.intern(TyKind::Universal(self_var));
 
         // Create universal variables for each parameter.
         let generic_params = self.universal_binder_to_init_vars(

@@ -12,7 +12,7 @@ use crate::{
     symbol,
 };
 use index_vec::define_index_type;
-use std::{fmt, rc::Rc};
+use std::fmt;
 
 // === Type === //
 
@@ -131,10 +131,61 @@ pub enum TyKind {
     /// An inference variable.
     InferVar(InferTyVar),
 
-    /// An universal type variable.
-    UniversalVar(UniversalTyVar),
+    /// An universal type.
+    Universal(UniversalTy),
 
     Error(ErrorGuaranteed),
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum UniversalTy {
+    Root(UniversalTyVar),
+
+    /// A universal variable derived from the unspecified associated types in another universal's
+    /// clause list. These types unify *iff* they share the same underlying `target` and their
+    /// `spec`s and `assoc_idx`s unify.
+    ///
+    /// This leads to a somewhat bizarre situation in the following case...
+    ///
+    /// ```ignore
+    /// trait Foo<T>: Bar<BarProj = FooProj> {
+    ///     type FooProj;
+    /// }
+    ///
+    /// trait Bar {
+    ///     type BarProj;
+    /// }
+    ///
+    /// fn demo<T: Foo<i32> + Foo<u32>>() {}
+    /// ```
+    ///
+    /// When we elaborate `T`'s universal clauses it...
+    ///
+    /// ```ignore
+    /// T: Foo<i32, FooProj = _> + Bar<BarProj = _> + Foo<u32, FooProj = _> + Bar<BarProj = _>
+    /// ```
+    ///
+    /// ...we see that all of these associated types must be the same universal. In this case, we
+    /// unify the inference placeholder to `UniversalProjection(<T as Foo<i32>>::FooProj)`. This
+    /// choice is somewhat arbitrary but acceptable so long as we remain consistent.
+    ///
+    /// That consistency part is a bit tricky since a given universal projection can found itself
+    /// elaborated multiple times depending on the nominal substitutions made to regions. Hence,
+    /// elaboration *has to be stable* for a given input!
+    Projection(UniversalTyProjection),
+}
+
+pub type UniversalTyProjection = Intern<UniversalTyProjectionInner>;
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct UniversalTyProjectionInner {
+    pub target: UniversalTy,
+
+    /// This `spec` always has a trivial projection set.
+    pub spec: TraitSpec,
+
+    /// The index of the generic we're projecting.
+    pub assoc_idx: u32,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -313,7 +364,6 @@ pub enum UniversalTyVarSourceInfo {
     ClauseWfHelper { clauses: Obj<[SigTraitClause]> },
     HrtbWf { binder: SigHrtbBinder, idx: u32 },
     Root(Obj<TypeGeneric>),
-    Projection(UniversalTyVar, TraitSpec, u32),
 }
 
 // === Infer Var === //
@@ -403,7 +453,7 @@ bitflags::bitflags! {
         // === Categories === //
 
         /// Types which could be a `UniversalVar`.
-        const MAYBE_UNIVERSAL = Self::OTHER.bits() | Self::ELAB_UNIVERSAL_VAR.bits();
+        const MAYBE_UNIVERSAL = Self::OTHER.bits();
 
         const UNSIGNED_INT = Self::U8.bits() | Self::U16.bits() | Self::U32.bits() | Self::U64.bits();
         const SIGNED_INT = Self::I8.bits() | Self::I16.bits() | Self::I32.bits() | Self::I64.bits();
@@ -430,8 +480,6 @@ bitflags::bitflags! {
         // arithmetic checking.
         const BOOL = 1 << 11;
         const CHAR = 1 << 12;
-
-        const ELAB_UNIVERSAL_VAR = 1 << 13;
     }
 }
 
@@ -445,7 +493,7 @@ impl SimpleTySet {
             bits ^= curr;
 
             match SimpleTySet::from_bits_retain(curr) {
-                SimpleTySet::OTHER | SimpleTySet::ELAB_UNIVERSAL_VAR => {
+                SimpleTySet::OTHER => {
                     // (ignored)
                 }
                 SimpleTySet::U8 => names.push(symbol!("u8")),
@@ -480,6 +528,8 @@ impl SimpleTySet {
             TyKind::Simple(SimpleTyKind::Int(IntKind::S64)) => self.contains(SimpleTySet::I64),
             TyKind::Simple(SimpleTyKind::Float(FloatKind::S32)) => self.contains(SimpleTySet::F32),
             TyKind::Simple(SimpleTyKind::Float(FloatKind::S64)) => self.contains(SimpleTySet::F64),
+            TyKind::Simple(SimpleTyKind::Bool) => self.contains(SimpleTySet::BOOL),
+            TyKind::Simple(SimpleTyKind::Char) => self.contains(SimpleTySet::CHAR),
 
             TyKind::Reference(_, _, _)
             | TyKind::Adt(_)
@@ -488,10 +538,8 @@ impl SimpleTySet {
             | TyKind::FnDef(_)
             | TyKind::HrtbVar(_)
             | TyKind::HrtbProjection(_)
-            | TyKind::UniversalVar(_)
-            | TyKind::Simple(
-                SimpleTyKind::Bool | SimpleTyKind::Char | SimpleTyKind::Str | SimpleTyKind::Never,
-            )
+            | TyKind::Universal(_)
+            | TyKind::Simple(SimpleTyKind::Str | SimpleTyKind::Never)
             | TyKind::Error(_) => self.contains(SimpleTySet::OTHER),
 
             TyKind::InferVar(_) => unreachable!(),
@@ -504,7 +552,7 @@ impl SimpleTySet {
         }
 
         let kind = match SimpleTySet::from_bits_retain(1 << self.bits().trailing_zeros()) {
-            SimpleTySet::OTHER | SimpleTySet::ELAB_UNIVERSAL_VAR => None,
+            SimpleTySet::OTHER => None,
             SimpleTySet::U8 => Some(SimpleTyKind::Uint(IntKind::S8)),
             SimpleTySet::U16 => Some(SimpleTyKind::Uint(IntKind::S16)),
             SimpleTySet::U32 => Some(SimpleTyKind::Uint(IntKind::S32)),

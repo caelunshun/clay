@@ -22,7 +22,8 @@ use crate::{
             SigTraitParamKind, SigTraitSpec, SigTy, SigTyKind, SigTyList, SigTyOrRe, SigTyOrReList,
             TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt,
             TyFolder, TyFolderInfallibleExt, TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList,
-            TypeAliasItem, TypeGeneric, UniversalReVarSourceInfo, UniversalTyVarSourceInfo,
+            TypeAliasItem, TypeGeneric, UniversalReVarSourceInfo, UniversalTy,
+            UniversalTyVarSourceInfo,
         },
     },
     typed_joiner,
@@ -768,15 +769,15 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         let mut collector = MultiPromiseBuilder::new();
 
         let wf_self_var = self.opts.wf_mode.do_wf().then(|| {
-            self.ccx.fresh_ty_universal_var(
+            UniversalTy::Root(self.ccx.fresh_ty_universal_var(
                 self.opts.universe.clone(),
                 UniversalTyVarSourceInfo::ClauseWfHelper {
                     clauses: Obj::new_slice(clauses, s),
                 },
-            )
+            ))
         });
 
-        let wf_self_ty = wf_self_var.map(|var| tcx.intern(TyKind::UniversalVar(var)));
+        let wf_self_ty = wf_self_var.map(|var| tcx.intern(TyKind::Universal(var)));
 
         let clauses = self
             .import_trait_clause_list_with_self_ty(wf_self_ty, clauses)
@@ -977,7 +978,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                     .iter()
                     .filter_map(|ty_or_re| ty_or_re.as_ty())
                     .map(|ty| {
-                        let TyKind::UniversalVar(var) = *ty.r(s) else {
+                        let TyKind::Universal(var) = *ty.r(s) else {
                             unreachable!()
                         };
 

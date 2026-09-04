@@ -182,9 +182,9 @@ impl<'tcx> ClauseCx<'tcx> {
                         .flat_join(&mut collector);
                 }
             }
-            TyKind::UniversalVar(var) => {
+            TyKind::Universal(universal) => {
                 let lub_re = self
-                    .elaborate_ty_universal_clauses_possibly_floating(var)
+                    .elaborate_ty_universal_clauses_possibly_floating(universal)
                     .lub_re;
 
                 self.oblige_re_outlives_re(lub_re, rhs, dir.to_mode())

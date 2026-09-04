@@ -17,12 +17,12 @@ use crate::{
         syntax::{
             Crate, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection, RelationMode,
             SimpleTySet, TraitClause, TraitClauseList, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe,
-            UniversalReVar, UniversalReVarSourceInfo, UniversalTyVar, UniversalTyVarSourceInfo,
+            UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyVar,
+            UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
 };
-use index_vec::IndexVec;
 use std::{
     rc::Rc,
     sync::atomic::{AtomicU32, Ordering::*},
@@ -52,13 +52,13 @@ pub enum ClauseObligation<'tcx> {
         dir: RelationDirection,
     },
     UnifyReifiedElaboratedClauses {
-        root: UniversalTyVar,
+        root: UniversalTy,
         clauses: TraitClauseList,
         reified_vars: WipReificationState,
     },
     Covered {
         handle: PromiseHandle<'tcx, NotCoveredError>,
-        must_mention: Rc<FxHashMap<UniversalTyVar, u32>>,
+        must_mention: Rc<FxHashMap<UniversalTy, u32>>,
         in_type: Option<Ty>,
         in_trait: Option<TraitSpec>,
     },
@@ -151,7 +151,7 @@ pub struct ClauseCx<'tcx> {
     coherence: &'tcx CoherenceMap,
     krate: Obj<Crate>,
     promise_mode: PromiseMode,
-    pub(super) universal_vars: IndexVec<UniversalTyVar, UniversalTyVarDescriptor>,
+    pub(super) universal_vars: FxHashMap<UniversalTy, UniversalTyDescriptor>,
 }
 
 #[derive(Clone)]
@@ -161,8 +161,9 @@ struct ClauseObligationState<'tcx> {
 }
 
 #[derive(Clone)]
-pub(super) struct UniversalTyVarDescriptor {
-    direct_clauses: Option<TraitClauseList>,
+pub(super) struct UniversalTyDescriptor {
+    // FIXME
+    pub(super) direct_clauses: Option<TraitClauseList>,
     pub(super) elaboration: Option<UniversalElaboration>,
 }
 
@@ -179,7 +180,7 @@ impl<'tcx> ClauseCx<'tcx> {
             coherence,
             krate,
             promise_mode: PromiseMode::RootContext,
-            universal_vars: IndexVec::new(),
+            universal_vars: FxHashMap::default(),
         }
     }
 
@@ -460,12 +461,13 @@ impl<'tcx> ClauseCx<'tcx> {
     ) -> UniversalTyVar {
         let var = self.ucx_mut().fresh_ty_universal_var(in_universe, src_info);
 
-        let var_parallel = self.universal_vars.push(UniversalTyVarDescriptor {
-            direct_clauses: None,
-            elaboration: None,
-        });
-
-        debug_assert_eq!(var, var_parallel);
+        self.universal_vars.insert(
+            UniversalTy::Root(var),
+            UniversalTyDescriptor {
+                direct_clauses: None,
+                elaboration: None,
+            },
+        );
 
         var
     }
@@ -475,9 +477,9 @@ impl<'tcx> ClauseCx<'tcx> {
         in_universe: HrtbUniverse,
         src_info: UniversalTyVarSourceInfo,
     ) -> Ty {
-        self.tcx().intern(TyKind::UniversalVar(
+        self.tcx().intern(TyKind::Universal(UniversalTy::Root(
             self.fresh_ty_universal_var(in_universe, src_info),
-        ))
+        )))
     }
 
     pub fn init_any_universal_var_direct_clauses(&mut self, var: TyOrRe, clauses: TraitClauseList) {
@@ -486,21 +488,21 @@ impl<'tcx> ClauseCx<'tcx> {
         match var {
             TyOrRe::Re(var) => self.init_re_universal_var_direct_clauses(var, clauses),
             TyOrRe::Ty(var) => {
-                let TyKind::UniversalVar(var) = *var.r(s) else {
+                let TyKind::Universal(universal) = *var.r(s) else {
                     unreachable!()
                 };
 
-                self.init_ty_universal_var_direct_clauses(var, clauses);
+                self.init_ty_universal_var_direct_clauses(universal, clauses);
             }
         }
     }
 
     pub fn init_ty_universal_var_direct_clauses(
         &mut self,
-        var: UniversalTyVar,
+        var: UniversalTy,
         clauses: TraitClauseList,
     ) {
-        let descriptor = &mut self.universal_vars[var];
+        let descriptor = self.universal_vars.get_mut(&var).unwrap();
 
         assert!(descriptor.direct_clauses.is_none());
         descriptor.direct_clauses = Some(clauses);
@@ -520,9 +522,9 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn direct_ty_universal_clauses_possibly_floating(
         &self,
-        var: UniversalTyVar,
+        var: UniversalTy,
     ) -> TraitClauseList {
-        self.universal_vars[var].direct_clauses.unwrap()
+        self.universal_vars[&var].direct_clauses.unwrap()
     }
 
     pub fn lookup_universal_ty_src_info(&self, var: UniversalTyVar) -> UniversalTyVarSourceInfo {
@@ -533,8 +535,8 @@ impl<'tcx> ClauseCx<'tcx> {
         self.ucx().lookup_infer_ty_src_info(var)
     }
 
-    pub fn lookup_universal_ty_hrtb_universe(&self, var: UniversalTyVar) -> &HrtbUniverse {
-        self.ucx().lookup_universal_ty_hrtb_universe(var)
+    pub fn lookup_universal_ty_hrtb_universe(&self, universal: UniversalTy) -> &HrtbUniverse {
+        self.ucx().lookup_universal_ty_hrtb_universe(universal)
     }
 
     pub fn oblige_re_outlives_re(

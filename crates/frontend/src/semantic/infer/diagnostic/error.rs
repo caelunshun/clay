@@ -6,7 +6,7 @@ use crate::{
             FnInstance, FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, ImplItem,
             InferTyVar, Re, RelationMode, SigGenericList, SigHrtbBinder, SigProjectType,
             SigTraitSpec, SigTy, SimpleTySet, TraitClauseList, TraitItem, TraitParam, TraitSpec,
-            Ty, TyOrReList, UniversalReVar, UniversalTyVar,
+            Ty, TyOrReList, UniversalReVar, UniversalTy, UniversalTyVar,
         },
     },
 };
@@ -259,7 +259,7 @@ impl<T: ToDebugTree> ToDebugTree for SpannedError<T> {
 
 #[derive(Debug, Clone)]
 pub struct NotCoveredError {
-    pub missing_mentions: Vec<UniversalTyVar>,
+    pub missing_mentions: Vec<UniversalTy>,
     pub in_trait: Option<TraitSpec>,
     pub in_type: Option<Ty>,
 }
@@ -1337,7 +1337,7 @@ impl ToDebugTree for InferTyOccursError {
 pub struct InferTyLeaksUniversalError {
     pub var: InferTyVar,
     pub max_universe: HrtbUniverse,
-    pub leaks_universal: UniversalTyVar,
+    pub leaks_universal: UniversalTy,
 }
 
 impl ToDebugTree for InferTyLeaksUniversalError {
@@ -1404,9 +1404,7 @@ pub enum ObligationNotReady {
     ElabStillResolving,
     MultipleApplicableImpls,
     ElaborationHasInferForInherentSelection,
-    CoverMissingInfer {
-        missing_mentions: Vec<UniversalTyVar>,
-    },
+    CoverMissingInfer { missing_mentions: Vec<UniversalTy> },
 }
 
 impl ToDebugTree for ObligationNotReady {
