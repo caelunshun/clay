@@ -3,8 +3,8 @@ use crate::{
     semantic::{
         infer::{FloatingInferVar, HrtbUniverse},
         syntax::{
-            InferTyVar, InferTyVarSourceInfo, SimpleTySet, Ty, TyCtxt, UniversalTy, UniversalTyVar,
-            UniversalTyVarSourceInfo,
+            InferTyVar, InferTyVarSourceInfo, SimpleTySet, Ty, TyCtxt, UniversalTy,
+            UniversalTyRoot, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -14,7 +14,7 @@ use index_vec::IndexVec;
 #[derive(Debug, Clone)]
 pub struct TyUnifyTracker {
     disjoint: DisjointSetVec<DisjointTyInferNode>,
-    universals: IndexVec<UniversalTyVar, UniversalTyVarDescriptor>,
+    universals: IndexVec<UniversalTyRoot, UniversalTyVarDescriptor>,
 }
 
 #[derive(Debug, Clone)]
@@ -73,15 +73,15 @@ impl TyUnifyTracker {
         &mut self,
         in_universe: HrtbUniverse,
         source_info: UniversalTyVarSourceInfo,
-    ) -> UniversalTyVar {
+    ) -> UniversalTyRoot {
         self.universals.push(UniversalTyVarDescriptor {
             in_universe,
             source_info,
         })
     }
 
-    pub fn lookup_universal_src_info(&self, var: UniversalTyVar) -> UniversalTyVarSourceInfo {
-        self.universals[var].source_info
+    pub fn lookup_universal_root_src_info(&self, idx: UniversalTyRoot) -> UniversalTyVarSourceInfo {
+        self.universals[idx].source_info
     }
 
     pub fn lookup_infer_src_info(&self, var: InferTyVar) -> InferTyVarSourceInfo {
@@ -111,20 +111,6 @@ impl TyUnifyTracker {
                 perm_set: *perm_set,
             }),
         }
-    }
-
-    pub fn force_update_permissions_of_ty_var(&mut self, var: InferTyVar, perms: SimpleTySet) {
-        let root_var = self.disjoint.root_of(var.index());
-
-        let DisjointTyInferRoot::Floating {
-            perm_set,
-            max_universe: _,
-        } = self.disjoint[root_var].root.as_mut().unwrap()
-        else {
-            return;
-        };
-
-        *perm_set = perms;
     }
 
     pub fn restrict_floating_infer_max_universe(&mut self, var: InferTyVar, other: &HrtbUniverse) {

@@ -139,53 +139,36 @@ pub enum TyKind {
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum UniversalTy {
-    Root(UniversalTyVar),
-
-    /// A universal variable derived from the unspecified associated types in another universal's
-    /// clause list. These types unify *iff* they share the same underlying `target` and their
-    /// `spec`s and `assoc_idx`s unify.
-    ///
-    /// This leads to a somewhat bizarre situation in the following case...
-    ///
-    /// ```ignore
-    /// trait Foo<T>: Bar<BarProj = FooProj> {
-    ///     type FooProj;
-    /// }
-    ///
-    /// trait Bar {
-    ///     type BarProj;
-    /// }
-    ///
-    /// fn demo<T: Foo<i32> + Foo<u32>>() {}
-    /// ```
-    ///
-    /// When we elaborate `T`'s universal clauses it...
-    ///
-    /// ```ignore
-    /// T: Foo<i32, FooProj = _> + Bar<BarProj = _> + Foo<u32, FooProj = _> + Bar<BarProj = _>
-    /// ```
-    ///
-    /// ...we see that all of these associated types must be the same universal. In this case, we
-    /// unify the inference placeholder to `UniversalProjection(<T as Foo<i32>>::FooProj)`. This
-    /// choice is somewhat arbitrary but acceptable so long as we remain consistent.
-    ///
-    /// That consistency part is a bit tricky since a given universal projection can found itself
-    /// elaborated multiple times depending on the nominal substitutions made to regions. Hence,
-    /// elaboration *has to be stable* for a given input!
-    Projection(UniversalTyProjection),
+    Root(UniversalTyRoot),
+    Projection(UniversalTyProj),
 }
 
-pub type UniversalTyProjection = Intern<UniversalTyProjectionInner>;
+pub type UniversalTyProj = Intern<UniversalTyProjInner>;
+
+define_index_type! {
+    pub struct UniversalTyProjIdx = u32;
+}
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct UniversalTyProjectionInner {
+pub struct UniversalTyProjInner {
     pub target: UniversalTy,
+    pub kind: UniversalTyProjKind,
 
-    /// This `spec` always has a trivial projection set.
-    pub spec: TraitSpec,
+    /// An ID for projection's state containing its pre-initialized direct clauses, debug info, and
+    /// cached elaboration. This should not be considered as relevant for unification.
+    pub idx: UniversalTyProjIdx,
+}
 
-    /// The index of the generic we're projecting.
-    pub assoc_idx: u32,
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum UniversalTyProjKind {
+    /// Universals which don't depend on arguments to HRTB clauses.
+    HrtbInvariant { id: u32 },
+    /// Universals which depend on the specific arguments to an HRTB clause.
+    HrtbRelative {
+        parent_clause_idx: u32,
+        parent_clause_hrtb_args: TyOrReList,
+        assoc_idx: u32,
+    },
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -341,7 +324,7 @@ pub struct InstantiatedFnSig {
 // === Universal Var === //
 
 define_index_type! {
-    pub struct UniversalTyVar = u32;
+    pub struct UniversalTyRoot = u32;
 }
 
 define_index_type! {

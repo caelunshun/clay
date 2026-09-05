@@ -6,7 +6,7 @@ use crate::{
             FnInstance, FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, ImplItem,
             InferTyVar, Re, RelationMode, SigGenericList, SigHrtbBinder, SigProjectType,
             SigTraitSpec, SigTy, SimpleTySet, TraitClauseList, TraitItem, TraitParam, TraitSpec,
-            Ty, TyOrReList, UniversalReVar, UniversalTy, UniversalTyVar,
+            Ty, TyOrReList, UniversalReVar, UniversalTy,
         },
     },
 };

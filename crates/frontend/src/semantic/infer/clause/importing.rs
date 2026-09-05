@@ -769,7 +769,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         let mut collector = MultiPromiseBuilder::new();
 
         let wf_self_var = self.opts.wf_mode.do_wf().then(|| {
-            UniversalTy::Root(self.ccx.fresh_ty_universal_var(
+            UniversalTy::Root(self.ccx.fresh_ty_universal_root_idx(
                 self.opts.universe.clone(),
                 UniversalTyVarSourceInfo::ClauseWfHelper {
                     clauses: Obj::new_slice(clauses, s),
@@ -785,7 +785,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
         if let Some(wf_self_ty) = wf_self_var {
             self.ccx
-                .init_ty_universal_var_direct_clauses(wf_self_ty, clauses);
+                .init_ty_universal_direct_clauses(wf_self_ty, clauses);
         }
 
         collector.finish().and_value(clauses)
@@ -923,7 +923,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                         idx: idx as u32,
                     },
                 )),
-                TyOrReKind::Ty => TyOrRe::Ty(self.ccx.fresh_ty_universal(
+                TyOrReKind::Ty => TyOrRe::Ty(self.ccx.fresh_ty_universal_root(
                     nested_universe.clone(),
                     UniversalTyVarSourceInfo::HrtbWf {
                         binder,
@@ -963,7 +963,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 )
                 .flat_join(&mut collector);
 
-            self.ccx.init_any_universal_var_direct_clauses(var, clauses);
+            self.ccx.init_any_universal_direct_clauses(var, clauses);
         }
 
         // WF-check the main body.
@@ -1151,7 +1151,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 TyOrReKind::Re => {
                     TyOrRe::Re(self.fresh_re_universal(UniversalReVarSourceInfo::HrtbVar))
                 }
-                TyOrReKind::Ty => TyOrRe::Ty(self.fresh_ty_universal(
+                TyOrReKind::Ty => TyOrRe::Ty(self.fresh_ty_universal_root(
                     universe.clone(),
                     UniversalTyVarSourceInfo::HrtbVar(def.name),
                 )),
@@ -1168,7 +1168,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 HrtbInstantiator::new(self, &mut normalize_errors, universe.clone(), fuel, vars)
                     .fold(def.clauses);
 
-            self.init_any_universal_var_direct_clauses(var, clauses);
+            self.init_any_universal_direct_clauses(var, clauses);
         }
 
         let output =

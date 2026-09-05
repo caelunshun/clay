@@ -5,7 +5,7 @@ use crate::{
     },
     semantic::syntax::{
         FnInstanceInner, HrtbDebruijnDef, MirPlaceElem, TraitClause, TraitClauseList, TraitParam,
-        Ty, TyKind, TyOrRe, TyShape, UniversalTyProjectionInner,
+        Ty, TyKind, TyOrRe, TyShape, UniversalTyProjInner,
     },
 };
 use std::{ops::Deref, rc::Rc};
@@ -24,7 +24,7 @@ pub struct TyCtxtInner {
 #[derive(Debug, Default)]
 pub struct Interners {
     pub ty: Interner<TyKind>,
-    pub universal_projection: Interner<UniversalTyProjectionInner>,
+    pub universal_projection: Interner<UniversalTyProjInner>,
     pub fn_instance: Interner<FnInstanceInner>,
     pub ty_list: ListInterner<Ty>,
     pub ty_or_re_list: ListInterner<TyOrRe>,
@@ -67,8 +67,8 @@ impl HasInterner<TyKind> for TyCtxt {
     }
 }
 
-impl HasInterner<UniversalTyProjectionInner> for TyCtxt {
-    fn interner(&self) -> &Interner<UniversalTyProjectionInner> {
+impl HasInterner<UniversalTyProjInner> for TyCtxt {
+    fn interner(&self) -> &Interner<UniversalTyProjInner> {
         &self.interners.universal_projection
     }
 }

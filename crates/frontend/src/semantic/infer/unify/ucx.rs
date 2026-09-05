@@ -14,7 +14,7 @@ use crate::{
             SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitParamList, Ty, TyCtxt,
             TyFolder, TyFolderExt, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorExt,
             TyVisitorInfallibleExt, UniversalReVar, UniversalReVarSourceInfo, UniversalTy,
-            UniversalTyProjectionInner, UniversalTyVar, UniversalTyVarSourceInfo,
+            UniversalTyProjInner, UniversalTyProjKind, UniversalTyRoot, UniversalTyVarSourceInfo,
         },
     },
 };
@@ -104,11 +104,11 @@ impl<'tcx> UnifyCx<'tcx> {
         self.types.next_infer()
     }
 
-    pub fn fresh_ty_universal_var(
+    pub fn fresh_ty_universal_root(
         &mut self,
         in_universe: HrtbUniverse,
         src_info: UniversalTyVarSourceInfo,
-    ) -> UniversalTyVar {
+    ) -> UniversalTyRoot {
         self.types.fresh_universal(in_universe, src_info)
     }
 
@@ -116,12 +116,11 @@ impl<'tcx> UnifyCx<'tcx> {
         self.types.lookup_infer(var)
     }
 
-    pub fn force_update_permissions_of_ty_var(&mut self, var: InferTyVar, perms: SimpleTySet) {
-        self.types.force_update_permissions_of_ty_var(var, perms);
-    }
-
-    pub fn lookup_universal_ty_src_info(&self, var: UniversalTyVar) -> UniversalTyVarSourceInfo {
-        self.types.lookup_universal_src_info(var)
+    pub fn lookup_universal_ty_root_src_info(
+        &self,
+        idx: UniversalTyRoot,
+    ) -> UniversalTyVarSourceInfo {
+        self.types.lookup_universal_root_src_info(idx)
     }
 
     pub fn lookup_infer_ty_src_info(&self, var: InferTyVar) -> InferTyVarSourceInfo {
@@ -569,24 +568,65 @@ impl<'tcx> UnifyCx<'tcx> {
                 // (fallthrough)
             }
             (UniversalTy::Projection(lhs), UniversalTy::Projection(rhs)) => 'proj: {
-                let UniversalTyProjectionInner {
+                let UniversalTyProjInner {
                     target: lhs_target,
-                    spec: lhs_spec,
-                    assoc_idx: lhs_assoc_id,
+                    kind: lhs_kind,
+                    idx: _,
                 } = *lhs.r(s);
 
-                let UniversalTyProjectionInner {
+                let UniversalTyProjInner {
                     target: rhs_target,
-                    spec: rhs_spec,
-                    assoc_idx: rhs_assoc_id,
+                    kind: rhs_kind,
+                    idx: _,
                 } = *rhs.r(s);
 
-                if lhs_assoc_id != rhs_assoc_id {
-                    break 'proj;
-                }
-
-                if lhs_spec.def != rhs_spec.def {
-                    break 'proj;
+                match (lhs_kind, rhs_kind) {
+                    (
+                        UniversalTyProjKind::HrtbInvariant { id: lhs_id },
+                        UniversalTyProjKind::HrtbInvariant { id: rhs_id },
+                    ) if lhs_id == rhs_id => {
+                        // (fallthrough)
+                    }
+                    (
+                        UniversalTyProjKind::HrtbRelative {
+                            parent_clause_idx: lhs_parent_clause_idx,
+                            parent_clause_hrtb_args: lhs_parent_clause_hrtb_args,
+                            assoc_idx: lhs_assoc_idx,
+                        },
+                        UniversalTyProjKind::HrtbRelative {
+                            parent_clause_idx: rhs_parent_clause_idx,
+                            parent_clause_hrtb_args: rhs_parent_clause_hrtb_args,
+                            assoc_idx: rhs_assoc_idx,
+                        },
+                    ) if lhs_parent_clause_idx == rhs_parent_clause_idx
+                        && lhs_assoc_idx == rhs_assoc_idx =>
+                    {
+                        for (&lhs_para, &rhs_para) in lhs_parent_clause_hrtb_args
+                            .r(s)
+                            .iter()
+                            .zip(rhs_parent_clause_hrtb_args.r(s))
+                        {
+                            match (lhs_para, rhs_para) {
+                                (TyOrRe::Re(lhs_para), TyOrRe::Re(rhs_para)) => {
+                                    self.unify_re_and_re(lhs_para, rhs_para, RelationMode::Equate)
+                                        .join(re_collector);
+                                }
+                                (TyOrRe::Ty(lhs_para), TyOrRe::Ty(rhs_para)) => {
+                                    self.unify_ty_and_ty_inner(
+                                        lhs_para,
+                                        rhs_para,
+                                        ty_culprits,
+                                        re_collector,
+                                        RelationMode::Equate,
+                                    );
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                    }
+                    _ => {
+                        break 'proj;
+                    }
                 }
 
                 self.unify_universal_and_universal_inner(
@@ -595,37 +635,6 @@ impl<'tcx> UnifyCx<'tcx> {
                     ty_culprits,
                     re_collector,
                 );
-
-                for (&lhs_para, &rhs_para) in lhs_spec
-                    .params
-                    .r(s)
-                    .iter()
-                    .zip(rhs_spec.params.r(s).iter())
-                    .take(*lhs_spec.def.r(s).regular_generic_count as usize)
-                {
-                    let (TraitParam::Equals(lhs_para), TraitParam::Equals(rhs_para)) =
-                        (lhs_para, rhs_para)
-                    else {
-                        unreachable!()
-                    };
-
-                    match (lhs_para, rhs_para) {
-                        (TyOrRe::Re(lhs_para), TyOrRe::Re(rhs_para)) => {
-                            self.unify_re_and_re(lhs_para, rhs_para, RelationMode::Equate)
-                                .join(re_collector);
-                        }
-                        (TyOrRe::Ty(lhs_para), TyOrRe::Ty(rhs_para)) => {
-                            self.unify_ty_and_ty_inner(
-                                lhs_para,
-                                rhs_para,
-                                ty_culprits,
-                                re_collector,
-                                RelationMode::Equate,
-                            );
-                        }
-                        _ => unreachable!(),
-                    }
-                }
 
                 return;
             }

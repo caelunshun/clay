@@ -49,13 +49,13 @@ use crate::{
         infer::{
             ClauseCx, ClauseFuel, ClauseImportEnv, ClauseObligation, FloatingInferVar,
             GenericSubst, HrtbUniverse, ImportWfMode, ObligationNotReady, ObligationResult,
-            ObligationTermination, clause::UniversalTyDescriptor,
+            ObligationTermination,
         },
         syntax::{
             AnyGeneric, HrtbBinder, HrtbDebruijnDef, InferTyVar, InferTyVarSourceInfo, Mutability,
-            Re, RelationMode, SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty,
-            TyCtxt, TyFolder, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorExt,
-            UniversalReVarSourceInfo, UniversalTy, UniversalTyProjectionInner,
+            Re, RelationMode, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt,
+            TyFolder, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorExt,
+            UniversalReVarSourceInfo, UniversalTy, UniversalTyProjKind,
         },
     },
     symbol,
@@ -116,7 +116,7 @@ impl<'tcx> ClauseCx<'tcx> {
         let tcx = self.tcx();
 
         // See whether this universal variable has been elaborated yet.
-        if let Some(elaborated) = self.universal_vars[&universal].elaboration.clone() {
+        if let Some(elaborated) = self.universal_ty_elaboration_state(universal).cloned() {
             return elaborated;
         }
 
@@ -281,7 +281,8 @@ impl<'tcx> ClauseCx<'tcx> {
             lub_re,
             wip_reification_state: Some(reified_vars),
         };
-        self.universal_vars.get_mut(&universal).unwrap().elaboration = Some(elaborated.clone());
+
+        *self.universal_ty_elaboration_state_mut(universal) = Some(elaborated.clone());
 
         elaborated
     }
@@ -388,6 +389,8 @@ impl ClauseCx<'_> {
         }
 
         // Finally, let's give our unification variables their actual identities.
+        let mut invariant_id_gen = 0u32;
+
         for clauses in merged_clauses.into_values() {
             let def = clauses.first().unwrap().inner.def;
             let regular_generic_count = *def.r(s).regular_generic_count as usize;
@@ -466,13 +469,16 @@ impl ClauseCx<'_> {
                         // (keep as is)
                     }
                     AssocParam::Reified(first_wip, clauses) => {
-                        let var = UniversalTy::Projection(tcx.intern(UniversalTyProjectionInner {
-                            target: root,
-                            spec: first_wip.src_info_spec,
-                            assoc_idx: first_wip.src_info_idx,
-                        }));
+                        let proj = self.fresh_ty_universal_proj(
+                            root,
+                            first_wip.src_info_spec,
+                            first_wip.src_info_idx,
+                            UniversalTyProjKind::HrtbInvariant {
+                                id: invariant_id_gen,
+                            },
+                        );
 
-                        // TODO: normalize `var`
+                        invariant_id_gen += 1;
 
                         let clauses = clauses
                             .iter()
@@ -482,16 +488,9 @@ impl ClauseCx<'_> {
 
                         let clauses = tcx.intern_list(&clauses);
 
-                        // FIXME: This is cursed.
-                        self.universal_vars.insert(
-                            var,
-                            UniversalTyDescriptor {
-                                direct_clauses: Some(clauses),
-                                elaboration: None,
-                            },
-                        );
+                        self.init_ty_universal_direct_clauses(proj, clauses);
 
-                        *assoc_param = AssocParam::Concrete(tcx.intern(TyKind::Universal(var)));
+                        *assoc_param = AssocParam::Concrete(tcx.intern(TyKind::Universal(proj)));
                     }
                 }
             }
@@ -514,12 +513,7 @@ impl ClauseCx<'_> {
                         unreachable!()
                     };
 
-                    if let TyKind::InferVar(var) = *actual.r(s) {
-                        self.force_update_permissions_of_ty_var(var, SimpleTySet::all());
-                    }
-
                     self.oblige_ty_unifies_ty(resolved, actual, RelationMode::Equate)
-                        // Permission sets ensure that this always succeeds.
                         .report_delay_bug();
                 }
             }
@@ -548,10 +542,7 @@ impl ClauseCx<'_> {
             }
         }
 
-        self.universal_vars
-            .get_mut(&root)
-            .unwrap()
-            .elaboration
+        self.universal_ty_elaboration_state_mut(root)
             .as_mut()
             .unwrap()
             .wip_reification_state = None;

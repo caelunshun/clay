@@ -16,7 +16,7 @@ use crate::{
         syntax::{
             HrtbBinder, ImplItem, RelationMode, SimpleTySet, TraitClause, TraitClauseList,
             TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe, TyVisitor, TyVisitorInfallibleExt,
-            UniversalTy, UniversalTyVar,
+            UniversalTy,
         },
     },
     typed_joiner,

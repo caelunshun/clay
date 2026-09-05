@@ -48,7 +48,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 AnyGeneric::Re(generic) => {
                     TyOrRe::Re(self.fresh_re_universal(UniversalReVarSourceInfo::Root(generic)))
                 }
-                AnyGeneric::Ty(generic) => TyOrRe::Ty(self.fresh_ty_universal(
+                AnyGeneric::Ty(generic) => TyOrRe::Ty(self.fresh_ty_universal_root(
                     HrtbUniverse::ROOT,
                     UniversalTyVarSourceInfo::Root(generic),
                 )),
@@ -96,7 +96,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
                     let clauses = self.import_elsewhere(&binder_env, *generic.r(s).clauses);
 
-                    self.init_ty_universal_var_direct_clauses(target, clauses);
+                    self.init_ty_universal_direct_clauses(target, clauses);
                 }
                 _ => unreachable!(),
             }
@@ -111,9 +111,11 @@ impl<'tcx> ClauseCx<'tcx> {
         let tcx = self.tcx();
 
         // Create a universal variable representing `Self`
-        let self_var = UniversalTy::Root(
-            self.fresh_ty_universal_var(HrtbUniverse::ROOT, UniversalTyVarSourceInfo::TraitSelf),
-        );
+        let self_var =
+            UniversalTy::Root(self.fresh_ty_universal_root_idx(
+                HrtbUniverse::ROOT,
+                UniversalTyVarSourceInfo::TraitSelf,
+            ));
 
         let self_ty = tcx.intern(TyKind::Universal(self_var));
 
@@ -124,7 +126,7 @@ impl<'tcx> ClauseCx<'tcx> {
         );
 
         // Make `Self` implement the trait with these synthesized parameters.
-        self.init_ty_universal_var_direct_clauses(
+        self.init_ty_universal_direct_clauses(
             self_var,
             tcx.intern_list(&[TraitClause::Trait(HrtbBinder {
                 defs: tcx.intern_list(&[]),

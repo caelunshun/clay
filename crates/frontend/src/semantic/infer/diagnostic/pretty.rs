@@ -7,8 +7,8 @@ use crate::{
             FnOwnerInherent, FnOwnerTrait, HrtbBinder, HrtbDebruijn, HrtbDebruijnDef,
             HrtbProjection, InferTyVar, IntKind, Item, Re, SimpleTyKind, SimpleTySet, TraitClause,
             TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe, TyOrReList,
-            UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProjection,
-            UniversalTyProjectionInner, UniversalTyVar, UniversalTyVarSourceInfo,
+            UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProj,
+            UniversalTyRoot, UniversalTyVarSourceInfo,
         },
     },
     utils::lang::{SimpleListFormatGlue, format_list, format_list_into},
@@ -336,7 +336,7 @@ impl_pretty! {
             UniversalTy::Projection(projection) => cx.wrap(projection).fmt(f),
         }
     }
-    UniversalTyVar => |cx, value, f| {
+    UniversalTyRoot => |cx, value, f| {
         let s = cx.session();
 
         if cx.opts.verbose {
@@ -345,7 +345,7 @@ impl_pretty! {
             write!(f, "u(level = {}) ", universe.level())?;
         }
 
-        match cx.ccx().lookup_universal_ty_src_info(value) {
+        match cx.ccx().lookup_universal_ty_root_src_info(value) {
             UniversalTyVarSourceInfo::TraitSelf => write!(f, "Self"),
             UniversalTyVarSourceInfo::HrtbVar(name) => write!(f, "{name}"),
             UniversalTyVarSourceInfo::ClauseWfHelper { clauses } => {
@@ -358,10 +358,14 @@ impl_pretty! {
             UniversalTyVarSourceInfo::Root(generic) => write!(f, "{}", generic.r(s).ident.text),
         }
     }
-    UniversalTyProjection => |cx, value, f| {
+    UniversalTyProj => |cx, value, f| {
         let s = cx.session();
 
-        let UniversalTyProjectionInner { target, spec, assoc_idx } = *value.r(s);
+        let HrtbProjection {
+            target,
+            spec,
+            assoc_idx,
+        } = cx.ccx().lookup_universal_ty_proj_debug_spec(value);
 
         write!(
             f,

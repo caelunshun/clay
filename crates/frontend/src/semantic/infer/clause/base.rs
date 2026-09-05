@@ -15,14 +15,16 @@ use crate::{
             clause::elaboration::{UniversalElaboration, WipReificationState},
         },
         syntax::{
-            Crate, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection, RelationMode,
-            SimpleTySet, TraitClause, TraitClauseList, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe,
-            UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyVar,
+            Crate, HrtbProjection, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection,
+            RelationMode, SimpleTySet, TraitClause, TraitClauseList, TraitSpec, Ty, TyCtxt, TyKind,
+            TyOrRe, UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProj,
+            UniversalTyProjIdx, UniversalTyProjInner, UniversalTyProjKind, UniversalTyRoot,
             UniversalTyVarSourceInfo,
         },
     },
     utils::hash::FxHashMap,
 };
+use index_vec::IndexVec;
 use std::{
     rc::Rc,
     sync::atomic::{AtomicU32, Ordering::*},
@@ -151,7 +153,8 @@ pub struct ClauseCx<'tcx> {
     coherence: &'tcx CoherenceMap,
     krate: Obj<Crate>,
     promise_mode: PromiseMode,
-    pub(super) universal_vars: FxHashMap<UniversalTy, UniversalTyDescriptor>,
+    universal_roots: IndexVec<UniversalTyRoot, UniversalTyRootDescriptor>,
+    universal_projs: IndexVec<UniversalTyProjIdx, UniversalTyProjDescriptor>,
 }
 
 #[derive(Clone)]
@@ -161,10 +164,17 @@ struct ClauseObligationState<'tcx> {
 }
 
 #[derive(Clone)]
-pub(super) struct UniversalTyDescriptor {
-    // FIXME
-    pub(super) direct_clauses: Option<TraitClauseList>,
-    pub(super) elaboration: Option<UniversalElaboration>,
+struct UniversalTyRootDescriptor {
+    direct_clauses: Option<TraitClauseList>,
+    elaboration: Option<UniversalElaboration>,
+}
+
+#[derive(Clone)]
+struct UniversalTyProjDescriptor {
+    direct_clauses: Option<TraitClauseList>,
+    elaboration: Option<UniversalElaboration>,
+    debug_spec: TraitSpec,
+    debug_assoc_idx: u32,
 }
 
 impl<'tcx> ClauseCx<'tcx> {
@@ -180,7 +190,8 @@ impl<'tcx> ClauseCx<'tcx> {
             coherence,
             krate,
             promise_mode: PromiseMode::RootContext,
-            universal_vars: FxHashMap::default(),
+            universal_roots: IndexVec::new(),
+            universal_projs: IndexVec::new(),
         }
     }
 
@@ -354,6 +365,80 @@ impl<'tcx> ClauseCx<'tcx> {
             to_accept.accept(self);
         }
     }
+
+    pub fn verify(&mut self) {
+        self.poll_obligations();
+
+        while let Some(state) = self.pending_obligations.pop() {
+            let not_ready = state.not_ready.clone().unwrap();
+
+            match &state.kind {
+                ClauseObligation::TyUnifiesTy { .. } => {
+                    unreachable!()
+                }
+                ClauseObligation::TyMeetsTrait {
+                    handle,
+                    fuel: _,
+                    universe: _,
+                    lhs,
+                    rhs,
+                } => {
+                    handle.reject(
+                        self,
+                        InstantiatedTraitImplError {
+                            lhs: *lhs,
+                            rhs: *rhs,
+                            kind: InstantiatedTraitImplErrorKind::CannotProgress(not_ready),
+                        },
+                    );
+                }
+                ClauseObligation::TyOutlivesRe {
+                    handle,
+                    lhs,
+                    rhs,
+                    dir: _,
+                } => {
+                    handle.reject(
+                        self,
+                        TyOutlivesReError {
+                            lhs: *lhs,
+                            rhs: *rhs,
+                            errors: [TyOutlivesReErrorCulprit::CannotProgress(not_ready)].into(),
+                        },
+                    );
+                }
+                ClauseObligation::UnifyReifiedElaboratedClauses {
+                    root: _,
+                    clauses: _,
+                    reified_vars: _,
+                } => {
+                    // (ignored)
+                }
+                ClauseObligation::Covered {
+                    handle,
+                    must_mention: _,
+                    in_type,
+                    in_trait,
+                } => {
+                    let ObligationNotReady::CoverMissingInfer { missing_mentions } = not_ready
+                    else {
+                        unreachable!()
+                    };
+
+                    handle.reject(
+                        self,
+                        NotCoveredError {
+                            missing_mentions,
+                            in_trait: *in_trait,
+                            in_type: *in_type,
+                        },
+                    );
+                }
+            }
+        }
+
+        UnifyCx::verify(self);
+    }
 }
 
 // === Basic operations === //
@@ -410,11 +495,6 @@ impl<'tcx> ClauseCx<'tcx> {
         self.ucx().lookup_ty_infer_var(var)
     }
 
-    pub fn force_update_permissions_of_ty_var(&mut self, var: InferTyVar, perms: SimpleTySet) {
-        self.ucx_mut()
-            .force_update_permissions_of_ty_var(var, perms);
-    }
-
     pub fn lookup_ty_infer_var_after_poll(
         &mut self,
         var: InferTyVar,
@@ -454,60 +534,6 @@ impl<'tcx> ClauseCx<'tcx> {
             .permit_universe_re_outlives_re(universal, other, dir);
     }
 
-    pub fn fresh_ty_universal_var(
-        &mut self,
-        in_universe: HrtbUniverse,
-        src_info: UniversalTyVarSourceInfo,
-    ) -> UniversalTyVar {
-        let var = self.ucx_mut().fresh_ty_universal_var(in_universe, src_info);
-
-        self.universal_vars.insert(
-            UniversalTy::Root(var),
-            UniversalTyDescriptor {
-                direct_clauses: None,
-                elaboration: None,
-            },
-        );
-
-        var
-    }
-
-    pub fn fresh_ty_universal(
-        &mut self,
-        in_universe: HrtbUniverse,
-        src_info: UniversalTyVarSourceInfo,
-    ) -> Ty {
-        self.tcx().intern(TyKind::Universal(UniversalTy::Root(
-            self.fresh_ty_universal_var(in_universe, src_info),
-        )))
-    }
-
-    pub fn init_any_universal_var_direct_clauses(&mut self, var: TyOrRe, clauses: TraitClauseList) {
-        let s = self.session();
-
-        match var {
-            TyOrRe::Re(var) => self.init_re_universal_var_direct_clauses(var, clauses),
-            TyOrRe::Ty(var) => {
-                let TyKind::Universal(universal) = *var.r(s) else {
-                    unreachable!()
-                };
-
-                self.init_ty_universal_var_direct_clauses(universal, clauses);
-            }
-        }
-    }
-
-    pub fn init_ty_universal_var_direct_clauses(
-        &mut self,
-        var: UniversalTy,
-        clauses: TraitClauseList,
-    ) {
-        let descriptor = self.universal_vars.get_mut(&var).unwrap();
-
-        assert!(descriptor.direct_clauses.is_none());
-        descriptor.direct_clauses = Some(clauses);
-    }
-
     pub fn init_re_universal_var_direct_clauses(&mut self, var: Re, clauses: TraitClauseList) {
         let s = self.session();
 
@@ -520,23 +546,8 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    pub fn direct_ty_universal_clauses_possibly_floating(
-        &self,
-        var: UniversalTy,
-    ) -> TraitClauseList {
-        self.universal_vars[&var].direct_clauses.unwrap()
-    }
-
-    pub fn lookup_universal_ty_src_info(&self, var: UniversalTyVar) -> UniversalTyVarSourceInfo {
-        self.ucx().lookup_universal_ty_src_info(var)
-    }
-
     pub fn lookup_infer_ty_src_info(&self, var: InferTyVar) -> InferTyVarSourceInfo {
         self.ucx().lookup_infer_ty_src_info(var)
-    }
-
-    pub fn lookup_universal_ty_hrtb_universe(&self, universal: UniversalTy) -> &HrtbUniverse {
-        self.ucx().lookup_universal_ty_hrtb_universe(universal)
     }
 
     pub fn oblige_re_outlives_re(
@@ -642,78 +653,176 @@ impl<'tcx> ClauseCx<'tcx> {
 
         collector.finish()
     }
+}
 
-    pub fn verify(&mut self) {
-        self.poll_obligations();
+// === Universal Management === //
 
-        while let Some(state) = self.pending_obligations.pop() {
-            let not_ready = state.not_ready.clone().unwrap();
+impl<'tcx> ClauseCx<'tcx> {
+    pub fn fresh_ty_universal_root_idx(
+        &mut self,
+        in_universe: HrtbUniverse,
+        src_info: UniversalTyVarSourceInfo,
+    ) -> UniversalTyRoot {
+        let var = self
+            .ucx_mut()
+            .fresh_ty_universal_root(in_universe, src_info);
 
-            match &state.kind {
-                ClauseObligation::TyUnifiesTy { .. } => {
+        let var_shadow = self.universal_roots.push(UniversalTyRootDescriptor {
+            direct_clauses: None,
+            elaboration: None,
+        });
+        debug_assert_eq!(var, var_shadow);
+
+        var
+    }
+
+    pub fn fresh_ty_universal_root(
+        &mut self,
+        in_universe: HrtbUniverse,
+        src_info: UniversalTyVarSourceInfo,
+    ) -> Ty {
+        self.tcx().intern(TyKind::Universal(UniversalTy::Root(
+            self.fresh_ty_universal_root_idx(in_universe, src_info),
+        )))
+    }
+
+    pub fn fresh_ty_universal_proj_unwrapped(
+        &mut self,
+        target: UniversalTy,
+        debug_spec: TraitSpec,
+        debug_assoc_idx: u32,
+        kind: UniversalTyProjKind,
+    ) -> UniversalTyProj {
+        let idx = self.universal_projs.push(UniversalTyProjDescriptor {
+            direct_clauses: None,
+            elaboration: None,
+            debug_spec,
+            debug_assoc_idx,
+        });
+
+        self.tcx()
+            .intern(UniversalTyProjInner { target, kind, idx })
+    }
+
+    pub fn fresh_ty_universal_proj(
+        &mut self,
+        target: UniversalTy,
+        debug_spec: TraitSpec,
+        debug_assoc_idx: u32,
+        kind: UniversalTyProjKind,
+    ) -> UniversalTy {
+        UniversalTy::Projection(self.fresh_ty_universal_proj_unwrapped(
+            target,
+            debug_spec,
+            debug_assoc_idx,
+            kind,
+        ))
+    }
+
+    pub fn init_any_universal_direct_clauses(&mut self, var: TyOrRe, clauses: TraitClauseList) {
+        let s = self.session();
+
+        match var {
+            TyOrRe::Re(var) => self.init_re_universal_var_direct_clauses(var, clauses),
+            TyOrRe::Ty(var) => {
+                let TyKind::Universal(universal) = *var.r(s) else {
                     unreachable!()
-                }
-                ClauseObligation::TyMeetsTrait {
-                    handle,
-                    fuel: _,
-                    universe: _,
-                    lhs,
-                    rhs,
-                } => {
-                    handle.reject(
-                        self,
-                        InstantiatedTraitImplError {
-                            lhs: *lhs,
-                            rhs: *rhs,
-                            kind: InstantiatedTraitImplErrorKind::CannotProgress(not_ready),
-                        },
-                    );
-                }
-                ClauseObligation::TyOutlivesRe {
-                    handle,
-                    lhs,
-                    rhs,
-                    dir: _,
-                } => {
-                    handle.reject(
-                        self,
-                        TyOutlivesReError {
-                            lhs: *lhs,
-                            rhs: *rhs,
-                            errors: [TyOutlivesReErrorCulprit::CannotProgress(not_ready)].into(),
-                        },
-                    );
-                }
-                ClauseObligation::UnifyReifiedElaboratedClauses {
-                    root: _,
-                    clauses: _,
-                    reified_vars: _,
-                } => {
-                    // (ignored)
-                }
-                ClauseObligation::Covered {
-                    handle,
-                    must_mention: _,
-                    in_type,
-                    in_trait,
-                } => {
-                    let ObligationNotReady::CoverMissingInfer { missing_mentions } = not_ready
-                    else {
-                        unreachable!()
-                    };
+                };
 
-                    handle.reject(
-                        self,
-                        NotCoveredError {
-                            missing_mentions,
-                            in_trait: *in_trait,
-                            in_type: *in_type,
-                        },
-                    );
-                }
+                self.init_ty_universal_direct_clauses(universal, clauses);
             }
         }
+    }
 
-        UnifyCx::verify(self);
+    pub fn init_ty_universal_direct_clauses(
+        &mut self,
+        universal: UniversalTy,
+        clauses: TraitClauseList,
+    ) {
+        let s = self.session();
+
+        match universal {
+            UniversalTy::Root(idx) => {
+                let descriptor = &mut self.universal_roots[idx];
+
+                assert!(descriptor.direct_clauses.is_none());
+                descriptor.direct_clauses = Some(clauses);
+            }
+            UniversalTy::Projection(inner) => {
+                let descriptor = &mut self.universal_projs[inner.r(s).idx];
+
+                assert!(descriptor.direct_clauses.is_none());
+                descriptor.direct_clauses = Some(clauses);
+            }
+        }
+    }
+
+    pub fn direct_ty_universal_clauses_possibly_floating(
+        &self,
+        universal: UniversalTy,
+    ) -> TraitClauseList {
+        let s = self.session();
+
+        match universal {
+            UniversalTy::Root(idx) => self.universal_roots[idx].direct_clauses.unwrap(),
+            UniversalTy::Projection(inner) => {
+                self.universal_projs[inner.r(s).idx].direct_clauses.unwrap()
+            }
+        }
+    }
+
+    pub fn lookup_universal_ty_root_src_info(
+        &self,
+        idx: UniversalTyRoot,
+    ) -> UniversalTyVarSourceInfo {
+        self.ucx().lookup_universal_ty_root_src_info(idx)
+    }
+
+    pub fn lookup_universal_ty_proj_debug_spec(&self, proj: UniversalTyProj) -> HrtbProjection {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let UniversalTyProjDescriptor {
+            direct_clauses: _,
+            elaboration: _,
+            debug_spec,
+            debug_assoc_idx,
+        } = self.universal_projs[proj.r(s).idx];
+
+        HrtbProjection {
+            target: tcx.intern(TyKind::Universal(proj.r(s).target)),
+            spec: debug_spec,
+            assoc_idx: debug_assoc_idx,
+        }
+    }
+
+    pub fn lookup_universal_ty_hrtb_universe(&self, universal: UniversalTy) -> &HrtbUniverse {
+        self.ucx().lookup_universal_ty_hrtb_universe(universal)
+    }
+
+    pub(super) fn universal_ty_elaboration_state(
+        &self,
+        universal: UniversalTy,
+    ) -> Option<&UniversalElaboration> {
+        let s = self.session();
+
+        match universal {
+            UniversalTy::Root(idx) => self.universal_roots[idx].elaboration.as_ref(),
+            UniversalTy::Projection(proj) => {
+                self.universal_projs[proj.r(s).idx].elaboration.as_ref()
+            }
+        }
+    }
+
+    pub(super) fn universal_ty_elaboration_state_mut(
+        &mut self,
+        universal: UniversalTy,
+    ) -> &mut Option<UniversalElaboration> {
+        let s = self.session();
+
+        match universal {
+            UniversalTy::Root(idx) => &mut self.universal_roots[idx].elaboration,
+            UniversalTy::Projection(proj) => &mut self.universal_projs[proj.r(s).idx].elaboration,
+        }
     }
 }
