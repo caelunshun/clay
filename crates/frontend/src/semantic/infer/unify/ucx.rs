@@ -14,7 +14,7 @@ use crate::{
             SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitParamList, Ty, TyCtxt,
             TyFolder, TyFolderExt, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorExt,
             TyVisitorInfallibleExt, UniversalReVar, UniversalReVarSourceInfo, UniversalTy,
-            UniversalTyProjInner, UniversalTyProjKind, UniversalTyRoot, UniversalTyVarSourceInfo,
+            UniversalTyProjInner, UniversalTyProjKind, UniversalTyRoot, UniversalTyRootSourceInfo,
         },
     },
 };
@@ -107,7 +107,7 @@ impl<'tcx> UnifyCx<'tcx> {
     pub fn fresh_ty_universal_root(
         &mut self,
         in_universe: HrtbUniverse,
-        src_info: UniversalTyVarSourceInfo,
+        src_info: UniversalTyRootSourceInfo,
     ) -> UniversalTyRoot {
         self.types.fresh_universal(in_universe, src_info)
     }
@@ -119,7 +119,7 @@ impl<'tcx> UnifyCx<'tcx> {
     pub fn lookup_universal_ty_root_src_info(
         &self,
         idx: UniversalTyRoot,
-    ) -> UniversalTyVarSourceInfo {
+    ) -> UniversalTyRootSourceInfo {
         self.types.lookup_universal_root_src_info(idx)
     }
 

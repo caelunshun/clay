@@ -23,7 +23,7 @@ use crate::{
             TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt,
             TyFolder, TyFolderInfallibleExt, TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList,
             TypeAliasItem, TypeGeneric, UniversalReVarSourceInfo, UniversalTy,
-            UniversalTyVarSourceInfo,
+            UniversalTyRootSourceInfo,
         },
     },
     typed_joiner,
@@ -771,7 +771,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         let wf_self_var = self.opts.wf_mode.do_wf().then(|| {
             UniversalTy::Root(self.ccx.fresh_ty_universal_root_idx(
                 self.opts.universe.clone(),
-                UniversalTyVarSourceInfo::ClauseWfHelper {
+                UniversalTyRootSourceInfo::ClauseWfHelper {
                     clauses: Obj::new_slice(clauses, s),
                 },
             ))
@@ -925,7 +925,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 )),
                 TyOrReKind::Ty => TyOrRe::Ty(self.ccx.fresh_ty_universal_root(
                     nested_universe.clone(),
-                    UniversalTyVarSourceInfo::HrtbWf {
+                    UniversalTyRootSourceInfo::HrtbWf {
                         binder,
                         idx: idx as u32,
                     },
@@ -1153,7 +1153,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 }
                 TyOrReKind::Ty => TyOrRe::Ty(self.fresh_ty_universal_root(
                     universe.clone(),
-                    UniversalTyVarSourceInfo::HrtbVar(def.name),
+                    UniversalTyRootSourceInfo::HrtbVar(def.name),
                 )),
             })
             .collect::<Vec<_>>();

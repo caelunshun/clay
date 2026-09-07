@@ -12,14 +12,14 @@ use crate::{
             TyAndSimpleTySetUnifyError, TyAndTyRegionUnifyError, TyAndTyStructuralUnifyError,
             TyAndTyUnifyError, TyAndTyUnifyErrorKind, TyOutlivesReError, TyOutlivesReErrorCulprit,
             UnifyCx, UnifyCxMode,
-            clause::elaboration::{UniversalElaboration, WipReificationState},
+            clause::{UniversalElaboration, WipReificationState},
         },
         syntax::{
             Crate, HrtbProjection, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection,
             RelationMode, SimpleTySet, TraitClause, TraitClauseList, TraitSpec, Ty, TyCtxt, TyKind,
             TyOrRe, UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProj,
             UniversalTyProjIdx, UniversalTyProjInner, UniversalTyProjKind, UniversalTyRoot,
-            UniversalTyVarSourceInfo,
+            UniversalTyRootSourceInfo,
         },
     },
     utils::hash::FxHashMap,
@@ -661,7 +661,7 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn fresh_ty_universal_root_idx(
         &mut self,
         in_universe: HrtbUniverse,
-        src_info: UniversalTyVarSourceInfo,
+        src_info: UniversalTyRootSourceInfo,
     ) -> UniversalTyRoot {
         let var = self
             .ucx_mut()
@@ -679,7 +679,7 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn fresh_ty_universal_root(
         &mut self,
         in_universe: HrtbUniverse,
-        src_info: UniversalTyVarSourceInfo,
+        src_info: UniversalTyRootSourceInfo,
     ) -> Ty {
         self.tcx().intern(TyKind::Universal(UniversalTy::Root(
             self.fresh_ty_universal_root_idx(in_universe, src_info),
@@ -774,7 +774,7 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn lookup_universal_ty_root_src_info(
         &self,
         idx: UniversalTyRoot,
-    ) -> UniversalTyVarSourceInfo {
+    ) -> UniversalTyRootSourceInfo {
         self.ucx().lookup_universal_ty_root_src_info(idx)
     }
 

@@ -2,6 +2,7 @@ mod base;
 pub use self::base::*;
 
 mod elaboration;
+pub use self::elaboration::*;
 
 // mod exporting;
 

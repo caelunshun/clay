@@ -48,7 +48,7 @@ use crate::{
     semantic::{
         infer::{
             ClauseCx, ClauseFuel, ClauseImportEnv, ClauseObligation, FloatingInferVar,
-            GenericSubst, HrtbUniverse, ImportWfMode, ObligationNotReady, ObligationResult,
+            GenericSubst, ImportWfMode, ObligationNotReady, ObligationResult,
             ObligationTermination,
         },
         syntax::{
@@ -91,7 +91,6 @@ pub struct WipReificationRootSet(FxHashSet<InferTyVar>);
 #[derive(Debug, Clone)]
 struct WipReifiedVar {
     reified_clauses: Option<TraitClauseList>,
-    universal: HrtbUniverse,
     src_info_spec: TraitSpec,
     src_info_idx: u32,
 }
@@ -122,18 +121,18 @@ impl<'tcx> ClauseCx<'tcx> {
 
         let var_universe = self.lookup_universal_ty_hrtb_universe(universal).clone();
 
-        // If not, elaborate the clause list without merging projections.
+        // If not, elaborate the clause list without merging associated types.
         let lub_re = self.fresh_re_universal(UniversalReVarSourceInfo::ElaboratedLub);
 
         let mut elaborated = Vec::new();
-        let mut queue = VecDeque::from_iter(
-            self.direct_ty_universal_clauses_possibly_floating(universal)
-                .r(s)
-                .iter()
-                .copied(),
-        );
-
         let mut reified_vars = FxHashMap::default();
+
+        let mut queue = self
+            .direct_ty_universal_clauses_possibly_floating(universal)
+            .r(s)
+            .iter()
+            .copied()
+            .collect::<VecDeque<_>>();
 
         while let Some(target) = queue.pop_front() {
             match target {
@@ -142,6 +141,10 @@ impl<'tcx> ClauseCx<'tcx> {
                     elaborated.push(TraitClause::Outlives(outlive_dir, outlive));
                 }
                 TraitClause::Trait(HrtbBinder { defs, inner: spec }) => {
+                    if !defs.r(s).is_empty() {
+                        continue;
+                    }
+
                     // Replace unspecified parameters with fresh universals.
                     let new_param_equals = spec
                         .params
@@ -151,11 +154,9 @@ impl<'tcx> ClauseCx<'tcx> {
                         .map(|(idx, param)| match *param {
                             TraitParam::Equals(ty_or_re) => ty_or_re,
                             TraitParam::Unspecified(_) => {
-                                let universal =
-                                    self.lookup_universal_ty_hrtb_universe(universal).clone();
                                 let var = self.fresh_ty_infer_var(
                                     // Associated types vary in the same way as their parent generic.
-                                    universal.clone(),
+                                    self.lookup_universal_ty_hrtb_universe(universal).clone(),
                                     InferTyVarSourceInfo::ElaborationUnifyHelper,
                                 );
 
@@ -163,7 +164,6 @@ impl<'tcx> ClauseCx<'tcx> {
                                     var,
                                     WipReifiedVar {
                                         reified_clauses: None,
-                                        universal,
                                         src_info_spec: spec,
                                         src_info_idx: idx as u32,
                                     },
@@ -264,7 +264,6 @@ impl<'tcx> ClauseCx<'tcx> {
         }
 
         let elaborated = self.tcx().intern_list(&elaborated);
-
         let reified_vars = WipReificationState(Rc::new(reified_vars));
 
         // Create an obligation to properly resolve reified associated type inference variables to

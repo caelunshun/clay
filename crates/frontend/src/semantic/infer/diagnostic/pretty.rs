@@ -8,7 +8,7 @@ use crate::{
             HrtbProjection, InferTyVar, IntKind, Item, Re, SimpleTyKind, SimpleTySet, TraitClause,
             TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe, TyOrReList,
             UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProj,
-            UniversalTyRoot, UniversalTyVarSourceInfo,
+            UniversalTyRoot, UniversalTyRootSourceInfo,
         },
     },
     utils::lang::{SimpleListFormatGlue, format_list, format_list_into},
@@ -346,16 +346,16 @@ impl_pretty! {
         }
 
         match cx.ccx().lookup_universal_ty_root_src_info(value) {
-            UniversalTyVarSourceInfo::TraitSelf => write!(f, "Self"),
-            UniversalTyVarSourceInfo::HrtbVar(name) => write!(f, "{name}"),
-            UniversalTyVarSourceInfo::ClauseWfHelper { clauses } => {
+            UniversalTyRootSourceInfo::TraitSelf => write!(f, "Self"),
+            UniversalTyRootSourceInfo::HrtbVar(name) => write!(f, "{name}"),
+            UniversalTyRootSourceInfo::ClauseWfHelper { clauses } => {
                 // TODO
                 write!(f, "[clause WF helper]")
             },
-            UniversalTyVarSourceInfo::HrtbWf { binder, idx } => {
+            UniversalTyRootSourceInfo::HrtbWf { binder, idx } => {
                 write!(f, "{}", binder.defs.r(s)[idx as usize].name)
             },
-            UniversalTyVarSourceInfo::Root(generic) => write!(f, "{}", generic.r(s).ident.text),
+            UniversalTyRootSourceInfo::Root(generic) => write!(f, "{}", generic.r(s).ident.text),
         }
     }
     UniversalTyProj => |cx, value, f| {

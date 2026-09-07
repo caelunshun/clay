@@ -16,7 +16,7 @@ use crate::{
             InferTyVarSourceInfo, InstantiatedFnSig, RelationMode, SigTraitClauseKind, TraitClause,
             TraitInstance, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReKind,
             TyOrReList, TypeAliasItem, TypeGeneric, UniversalReVarSourceInfo, UniversalTy,
-            UniversalTyVarSourceInfo,
+            UniversalTyRootSourceInfo,
         },
     },
     typed_joiner,
@@ -50,7 +50,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 }
                 AnyGeneric::Ty(generic) => TyOrRe::Ty(self.fresh_ty_universal_root(
                     HrtbUniverse::ROOT,
-                    UniversalTyVarSourceInfo::Root(generic),
+                    UniversalTyRootSourceInfo::Root(generic),
                 )),
             })
             .collect::<Vec<_>>();
@@ -114,7 +114,7 @@ impl<'tcx> ClauseCx<'tcx> {
         let self_var =
             UniversalTy::Root(self.fresh_ty_universal_root_idx(
                 HrtbUniverse::ROOT,
-                UniversalTyVarSourceInfo::TraitSelf,
+                UniversalTyRootSourceInfo::TraitSelf,
             ));
 
         let self_ty = tcx.intern(TyKind::Universal(self_var));

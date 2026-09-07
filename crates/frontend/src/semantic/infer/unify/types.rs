@@ -4,7 +4,7 @@ use crate::{
         infer::{FloatingInferVar, HrtbUniverse},
         syntax::{
             InferTyVar, InferTyVarSourceInfo, SimpleTySet, Ty, TyCtxt, UniversalTy,
-            UniversalTyRoot, UniversalTyVarSourceInfo,
+            UniversalTyRoot, UniversalTyRootSourceInfo,
         },
     },
 };
@@ -35,7 +35,7 @@ enum DisjointTyInferRoot {
 #[derive(Debug, Clone)]
 struct UniversalTyVarDescriptor {
     in_universe: HrtbUniverse,
-    source_info: UniversalTyVarSourceInfo,
+    source_info: UniversalTyRootSourceInfo,
 }
 
 impl Default for TyUnifyTracker {
@@ -72,7 +72,7 @@ impl TyUnifyTracker {
     pub fn fresh_universal(
         &mut self,
         in_universe: HrtbUniverse,
-        source_info: UniversalTyVarSourceInfo,
+        source_info: UniversalTyRootSourceInfo,
     ) -> UniversalTyRoot {
         self.universals.push(UniversalTyVarDescriptor {
             in_universe,
@@ -80,7 +80,10 @@ impl TyUnifyTracker {
         })
     }
 
-    pub fn lookup_universal_root_src_info(&self, idx: UniversalTyRoot) -> UniversalTyVarSourceInfo {
+    pub fn lookup_universal_root_src_info(
+        &self,
+        idx: UniversalTyRoot,
+    ) -> UniversalTyRootSourceInfo {
         self.universals[idx].source_info
     }
 

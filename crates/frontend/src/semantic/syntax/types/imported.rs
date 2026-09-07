@@ -137,10 +137,38 @@ pub enum TyKind {
     Error(ErrorGuaranteed),
 }
 
+// === Universals === //
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum UniversalTy {
     Root(UniversalTyRoot),
     Projection(UniversalTyProj),
+}
+
+define_index_type! {
+    pub struct UniversalTyRoot = u32;
+}
+
+define_index_type! {
+    pub struct UniversalReVar = u32;
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum UniversalTyRootSourceInfo {
+    TraitSelf,
+    HrtbVar(Symbol),
+    ClauseWfHelper { clauses: Obj<[SigTraitClause]> },
+    HrtbWf { binder: SigHrtbBinder, idx: u32 },
+    Root(Obj<TypeGeneric>),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum UniversalReVarSourceInfo {
+    Root(Obj<RegionGeneric>),
+    ElaboratedLub,
+    HrtbVar,
+    HrtbWf { binder: SigHrtbBinder, idx: u32 },
+    MirLocal(MirLocalIdx),
 }
 
 pub type UniversalTyProj = Intern<UniversalTyProjInner>;
@@ -321,34 +349,6 @@ pub struct InstantiatedFnSig {
     pub ret_ty: Ty,
 }
 
-// === Universal Var === //
-
-define_index_type! {
-    pub struct UniversalTyRoot = u32;
-}
-
-define_index_type! {
-    pub struct UniversalReVar = u32;
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum UniversalReVarSourceInfo {
-    Root(Obj<RegionGeneric>),
-    ElaboratedLub,
-    HrtbVar,
-    HrtbWf { binder: SigHrtbBinder, idx: u32 },
-    MirLocal(MirLocalIdx),
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum UniversalTyVarSourceInfo {
-    TraitSelf,
-    HrtbVar(Symbol),
-    ClauseWfHelper { clauses: Obj<[SigTraitClause]> },
-    HrtbWf { binder: SigHrtbBinder, idx: u32 },
-    Root(Obj<TypeGeneric>),
-}
-
 // === Infer Var === //
 
 define_index_type! {
@@ -433,7 +433,7 @@ pub enum InferTyVarSourceInfo {
 bitflags::bitflags! {
     #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
     pub struct SimpleTySet: u16 {
-        // === Categories === //
+        // Categories
 
         /// Types which could be a `UniversalVar`.
         const MAYBE_UNIVERSAL = Self::OTHER.bits();
@@ -445,7 +445,7 @@ bitflags::bitflags! {
         const NUM = Self::INT.bits() | Self::FLOAT.bits();
         const SIGNED_NUM = Self::SIGNED_INT.bits() | Self::FLOAT.bits();
 
-        // === Variants === //
+        // Variants
 
         const OTHER = 1 << 0;
         const U8 = 1 << 1;

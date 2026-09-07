@@ -1,6 +1,5 @@
 //! Logic to implement the type-implements-trait obligation.
 
-use super::elaboration::{UniversalElaboration, WipReificationRootSet};
 use crate::{
     base::arena::{HasInterner as _, Obj},
     semantic::{
@@ -11,7 +10,7 @@ use crate::{
             InstantiatedTraitImplError, InstantiatedTraitImplErrorKind, MultiPromise,
             MultiPromiseBuilder, NotCoveredError, ObligationNotReady, ObligationResult,
             ObligationTermination, Promise, PromiseHandle, PromiseValue, TraitClauseError,
-            UninstantiatedTraitImplError,
+            UninstantiatedTraitImplError, UniversalElaboration, WipReificationRootSet,
         },
         syntax::{
             HrtbBinder, ImplItem, RelationMode, SimpleTySet, TraitClause, TraitClauseList,
