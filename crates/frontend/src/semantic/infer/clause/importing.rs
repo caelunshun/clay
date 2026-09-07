@@ -1131,13 +1131,19 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
 // === HrtbInstantiator === //
 
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct InstantiatedTraitSpec {
+    pub spec: TraitSpec,
+    pub params: TyOrReList,
+}
+
 impl<'tcx> ClauseCx<'tcx> {
     pub fn instantiate_hrtb_universal(
         &mut self,
         fuel: ClauseFuel,
         universe: HrtbUniverse,
         value: HrtbBinder,
-    ) -> PromiseValue<'tcx, TraitSpec, InstantiateHrtbUniversalError> {
+    ) -> PromiseValue<'tcx, InstantiatedTraitSpec, InstantiateHrtbUniversalError> {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -1184,7 +1190,10 @@ impl<'tcx> ClauseCx<'tcx> {
                 },
             );
 
-        promise.and_value(output)
+        promise.and_value(InstantiatedTraitSpec {
+            params: vars,
+            spec: output,
+        })
     }
 
     pub fn instantiate_hrtb_infer(

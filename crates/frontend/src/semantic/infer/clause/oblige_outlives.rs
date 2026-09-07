@@ -183,9 +183,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 }
             }
             TyKind::Universal(universal) => {
-                let lub_re = self
-                    .elaborate_ty_universal_clauses_possibly_floating(universal)
-                    .lub_re;
+                let lub_re = self.elaborate_universal(universal).lub_re;
 
                 self.oblige_re_outlives_re(lub_re, rhs, dir.to_mode())
                     .map(|_ccx, error| TyOutlivesReErrorCulprit::Regular(error))
@@ -214,6 +212,6 @@ impl<'tcx> ClauseCx<'tcx> {
             .map(move |_ccx, errors| TyOutlivesReError { lhs, rhs, errors })
             .forward(self, handle);
 
-        Ok(ObligationTermination::Regular)
+        Ok(ObligationTermination::Finished)
     }
 }

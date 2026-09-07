@@ -1394,7 +1394,8 @@ pub type ObligationResult<T = ObligationTermination> = Result<T, ObligationNotRe
 
 #[derive(Debug)]
 pub enum ObligationTermination {
-    Regular,
+    Finished,
+    CommitAndKeep,
     FuelExhausted(ClauseFuelKillId),
 }
 

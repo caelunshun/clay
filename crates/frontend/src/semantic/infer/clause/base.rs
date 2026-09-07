@@ -11,8 +11,7 @@ use crate::{
             ObligationTermination, Promise, PromiseHandle, PromiseMode, ReAndReUnifyError,
             TyAndSimpleTySetUnifyError, TyAndTyRegionUnifyError, TyAndTyStructuralUnifyError,
             TyAndTyUnifyError, TyAndTyUnifyErrorKind, TyOutlivesReError, TyOutlivesReErrorCulprit,
-            UnifyCx, UnifyCxMode,
-            clause::{UniversalElaboration, WipReificationState},
+            UnifyCx, UnifyCxMode, UniversalElaboration,
         },
         syntax::{
             Crate, HrtbProjection, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection,
@@ -53,16 +52,14 @@ pub enum ClauseObligation<'tcx> {
         rhs: Re,
         dir: RelationDirection,
     },
-    UnifyReifiedElaboratedClauses {
-        root: UniversalTy,
-        clauses: TraitClauseList,
-        reified_vars: WipReificationState,
-    },
     Covered {
         handle: PromiseHandle<'tcx, NotCoveredError>,
         must_mention: Rc<FxHashMap<UniversalTy, u32>>,
         in_type: Option<Ty>,
         in_trait: Option<TraitSpec>,
+    },
+    PollElaboration {
+        universal: UniversalTy,
     },
 }
 
@@ -286,17 +283,15 @@ impl<'tcx> ClauseCx<'tcx> {
                         rhs,
                         dir: direction,
                     } => fork.run_oblige_ty_outlives_re(handle, lhs, rhs, direction),
-                    ClauseObligation::UnifyReifiedElaboratedClauses {
-                        root,
-                        clauses,
-                        reified_vars,
-                    } => fork.oblige_unify_reified_elaborated_clauses(root, clauses, reified_vars),
                     ClauseObligation::Covered {
                         handle,
                         must_mention,
                         in_type,
                         in_trait,
                     } => fork.run_oblige_covered(handle, must_mention, in_type, in_trait),
+                    ClauseObligation::PollElaboration { universal } => {
+                        fork.run_poll_elaboration(universal)
+                    }
                 };
 
                 // If we finished processing the obligation, remove it from the queue and mark
@@ -304,18 +299,23 @@ impl<'tcx> ClauseCx<'tcx> {
                 match res {
                     Ok(kind) => {
                         *self = fork;
-                        self.pending_obligations.swap_remove(curr_idx);
+                        made_progress = true;
 
                         match kind {
-                            ObligationTermination::Regular => {
+                            ObligationTermination::Finished => {
                                 // (fallthrough)
+                            }
+                            ObligationTermination::CommitAndKeep => {
+                                // Intentionally does not terminate obligation.
+                                continue;
                             }
                             ObligationTermination::FuelExhausted(kill_id) => {
                                 self.kill_obligations_with_id(kill_id);
+                                // (fallthrough)
                             }
                         }
 
-                        made_progress = true;
+                        self.pending_obligations.swap_remove(curr_idx);
                         // (forces depth-first expansion)
                         break;
                     }
@@ -339,7 +339,7 @@ impl<'tcx> ClauseCx<'tcx> {
             let other_kill_id = match obligation.kind {
                 ClauseObligation::TyUnifiesTy { .. }
                 | ClauseObligation::TyOutlivesRe { .. }
-                | ClauseObligation::UnifyReifiedElaboratedClauses { .. }
+                | ClauseObligation::PollElaboration { .. }
                 | ClauseObligation::Covered { .. } => None,
                 ClauseObligation::TyMeetsTrait { fuel, .. } => Some(fuel.kill_id()),
             };
@@ -350,7 +350,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 match &obligation.kind {
                     ClauseObligation::TyUnifiesTy { .. }
                     | ClauseObligation::TyOutlivesRe { .. }
-                    | ClauseObligation::UnifyReifiedElaboratedClauses { .. }
+                    | ClauseObligation::PollElaboration { .. }
                     | ClauseObligation::Covered { .. } => unreachable!(),
                     ClauseObligation::TyMeetsTrait { handle, .. } => {
                         to_accept.push(Box::new(handle.clone()));
@@ -407,11 +407,7 @@ impl<'tcx> ClauseCx<'tcx> {
                         },
                     );
                 }
-                ClauseObligation::UnifyReifiedElaboratedClauses {
-                    root: _,
-                    clauses: _,
-                    reified_vars: _,
-                } => {
+                ClauseObligation::PollElaboration { universal: _ } => {
                     // (ignored)
                 }
                 ClauseObligation::Covered {
@@ -610,7 +606,7 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         }
 
-        Ok(ObligationTermination::Regular)
+        Ok(ObligationTermination::Finished)
     }
 
     pub fn unify_ty_and_ty(

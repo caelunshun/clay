@@ -5,12 +5,12 @@ use crate::{
     semantic::{
         infer::{
             BlockImplUnsatisfiedError, BlockImplUnsatisfiedErrorCulprit, ClauseCx, ClauseFuel,
-            ClauseObligation, FnImplUnsatisfiedError, HrtbUniverse, HrtbUniverseInfo,
-            InherentImplErrorImplCulprit, InherentImplUnsatisfiedError, InstantiatedImplBlock,
-            InstantiatedTraitImplError, InstantiatedTraitImplErrorKind, MultiPromise,
-            MultiPromiseBuilder, NotCoveredError, ObligationNotReady, ObligationResult,
-            ObligationTermination, Promise, PromiseHandle, PromiseValue, TraitClauseError,
-            UninstantiatedTraitImplError, UniversalElaboration, WipReificationRootSet,
+            ClauseObligation, ElaboratedClause, FnImplUnsatisfiedError, HrtbUniverse,
+            HrtbUniverseInfo, InherentImplErrorImplCulprit, InherentImplUnsatisfiedError,
+            InstantiatedImplBlock, InstantiatedTraitImplError, InstantiatedTraitImplErrorKind,
+            InstantiatedTraitSpec, MultiPromise, MultiPromiseBuilder, NotCoveredError,
+            ObligationNotReady, ObligationResult, ObligationTermination, Promise, PromiseHandle,
+            PromiseValue, TraitClauseError, UninstantiatedTraitImplError, UniversalElaboration,
         },
         syntax::{
             HrtbBinder, ImplItem, RelationMode, SimpleTySet, TraitClause, TraitClauseList,
@@ -83,7 +83,11 @@ impl<'tcx> ClauseCx<'tcx> {
         };
 
         let PromiseValue {
-            value: rhs_instantiated,
+            value:
+                InstantiatedTraitSpec {
+                    spec: rhs_instantiated,
+                    params: _,
+                },
             promise: rhs_hrtb_error,
         } = self.instantiate_hrtb_universal(fuel, universe.clone(), rhs);
 
@@ -156,13 +160,14 @@ impl<'tcx> ClauseCx<'tcx> {
                 todo!()
             }
             TyKind::Universal(universal) => {
-                let universal_elab =
-                    self.elaborate_ty_universal_clauses_possibly_floating(universal);
+                let universal_elab = self.elaborate_universal(universal);
 
-                match self
-                    .clone()
-                    .try_select_inherent_impl(fuel, &universe, universal_elab, rhs)?
-                {
+                match self.clone().try_select_inherent_impl(
+                    fuel,
+                    &universe,
+                    &universal_elab,
+                    rhs,
+                )? {
                     Ok(PromiseValue {
                         value: fork,
                         promise,
@@ -177,7 +182,7 @@ impl<'tcx> ClauseCx<'tcx> {
                             })
                             .forward(self, handle);
 
-                        return Ok(ObligationTermination::Regular);
+                        return Ok(ObligationTermination::Finished);
                     }
                     Err(SelectionRejected) => {
                         // (fallthrough)
@@ -201,7 +206,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 // Error types can do anything.
                 handle.accept(self);
 
-                return Ok(ObligationTermination::Regular);
+                return Ok(ObligationTermination::Finished);
             }
 
             // LHS HRTBs should have been instantiated right before the obligation.
@@ -257,7 +262,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 },
             );
 
-            return Ok(ObligationTermination::Regular);
+            return Ok(ObligationTermination::Finished);
         };
 
         *self = confirmation
@@ -268,39 +273,43 @@ impl<'tcx> ClauseCx<'tcx> {
             })
             .forward(self, handle);
 
-        Ok(ObligationTermination::Regular)
+        Ok(ObligationTermination::Finished)
     }
 
     fn try_select_inherent_impl(
         self,
         fuel: ClauseFuel,
         universe: &HrtbUniverse,
-        lhs: UniversalElaboration,
+        lhs: &UniversalElaboration,
         rhs: TraitSpec,
     ) -> ObligationResult<
         Result<PromiseValue<'tcx, Self, InherentImplUnsatisfiedError>, SelectionRejected>,
     > {
         let s = self.session();
 
-        let reified_var_roots = lhs.collect_roots_if_floating(&self);
+        for &lhs in &lhs.elaborated_clauses {
+            match lhs {
+                ElaboratedClause::NotReady {
+                    binder_defs,
+                    universal_roots,
+                    instantiated,
+                    instantiated_with_late: late_associations,
+                } => {
+                    // Early path
+                    if instantiated.def != rhs.def {
+                        continue;
+                    }
 
-        for &lhs in lhs.clauses.r(s) {
-            let TraitClause::Trait(lhs) = lhs else {
-                continue;
-            };
+                    todo!()
+                }
+                ElaboratedClause::Ready(lhs) => {
+                    // Early path
+                    if lhs.inner.def != rhs.def {
+                        continue;
+                    }
 
-            if lhs.inner.def != rhs.def {
-                continue;
-            }
-
-            if let Ok(promise) = self.clone().try_select_single_inherent_impl(
-                fuel,
-                universe,
-                lhs,
-                rhs,
-                reified_var_roots.as_ref(),
-            )? {
-                return Ok(Ok(promise));
+                    todo!()
+                }
             }
         }
 
@@ -313,7 +322,6 @@ impl<'tcx> ClauseCx<'tcx> {
         universe: &HrtbUniverse,
         lhs: HrtbBinder,
         rhs: TraitSpec,
-        reified_var_roots: Option<&WipReificationRootSet>,
     ) -> ObligationResult<
         Result<PromiseValue<'tcx, Self, InherentImplUnsatisfiedError>, SelectionRejected>,
     > {
@@ -758,7 +766,7 @@ impl<'tcx> ClauseCx<'tcx> {
         if missing_mentions.is_empty() {
             handle.accept(self);
 
-            return Ok(ObligationTermination::Regular);
+            return Ok(ObligationTermination::Finished);
         }
 
         if visitor.had_holes {
@@ -774,6 +782,6 @@ impl<'tcx> ClauseCx<'tcx> {
             },
         );
 
-        Ok(ObligationTermination::Regular)
+        Ok(ObligationTermination::Finished)
     }
 }
