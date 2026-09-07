@@ -1,26 +1,30 @@
 use crate::{
-    base::arena::{HasInterner as _, HasListInterner},
+    base::{
+        analysis::DebruijnRelative,
+        arena::{HasInterner as _, HasListInterner},
+    },
     semantic::{
         infer::{
             ClauseCx, ClauseFuel, ClauseImportEnv, ClauseObligation, GenericSubst, ImportWfMode,
             InstantiatedTraitSpec, ObligationResult, ObligationTermination,
         },
         syntax::{
-            HrtbBinder, HrtbDebruijnDef, InferTyVarSourceInfo, Re, TraitClause, TraitParam,
-            TraitSpec, TyKind, TyOrRe, TyOrReList, UniversalReVarSourceInfo, UniversalTy,
+            HrtbBinder, HrtbDebruijn, HrtbDebruijnDef, InferTyVarSourceInfo, Re, TraitClause,
+            TraitParam, TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt, TyKind, TyOrRe,
+            TyOrReList, UniversalReVarSourceInfo, UniversalTy, UniversalTyOrReRoot,
         },
     },
-    utils::hash::FxHashSet,
+    utils::hash::{FxHashMap, FxHashSet},
 };
-use rustc_hash::FxHashMap;
-use std::collections::VecDeque;
+use hashbrown::hash_map;
+use std::{collections::VecDeque, convert::Infallible, num::NonZeroU32};
 
 // === Driver === //
 
 #[derive(Debug, Clone)]
 pub struct UniversalElaboration {
     pub lub_re: Re,
-    pub hrtb_universals: FxHashMap<TyOrRe, HrtbDebruijnDef>,
+    pub hrtb_universals: FxHashMap<UniversalTyOrReRoot, HrtbDebruijnDef>,
     pub elaborated_clauses: Vec<ElaboratedClause>,
 }
 
@@ -100,6 +104,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     .map(|&param| match param {
                         TraitParam::Equals(eq) => eq,
                         TraitParam::Unspecified(_spec) => TyOrRe::Ty(self.fresh_ty_infer(
+                            // TODO: Fix this universe. :sob:
                             var_universe.clone(),
                             InferTyVarSourceInfo::LateAssocElabPlaceholder,
                         )),
@@ -117,7 +122,15 @@ impl<'tcx> ClauseCx<'tcx> {
                 hrtbs_as_universals
                     .r(s)
                     .iter()
-                    .copied()
+                    .map(|&param| match param {
+                        TyOrRe::Re(Re::UniversalVar(root)) => UniversalTyOrReRoot::Re(root),
+                        TyOrRe::Ty(ty)
+                            if let TyKind::Universal(UniversalTy::Root(root)) = *ty.r(s) =>
+                        {
+                            UniversalTyOrReRoot::Ty(root)
+                        }
+                        _ => unreachable!(),
+                    })
                     .zip(binder.defs.r(s).iter().copied()),
             );
 
@@ -197,6 +210,10 @@ impl<'tcx> ClauseCx<'tcx> {
             // clauses.
             // TODO
 
+            // Next, unify `instantiated_with_late` with universals based off of HRTB temporary
+            // universals.
+            // TODO.
+
             // We have enough information to finish this clause. Convert it into its HRTB form and
             // mark it as done.
             // TODO
@@ -213,6 +230,136 @@ impl<'tcx> ClauseCx<'tcx> {
         universal: UniversalTy,
         instantiated: TraitSpec,
     ) -> Option<HrtbBinder> {
-        todo!()
+        struct ReverseTranscriptase<'a, 'tcx> {
+            ccx: &'a mut ClauseCx<'tcx>,
+            universal: UniversalTy,
+            universal_root_to_debruijn: FxHashMap<UniversalTyOrReRoot, ReverseDebruijnDef>,
+            debruijn_defs_backward: Vec<HrtbDebruijnDef>,
+        }
+
+        struct ReverseDebruijnDef {
+            idx: u32,
+            covered: bool,
+        }
+
+        impl ReverseTranscriptase<'_, '_> {
+            fn universal_to_hrtb_if_was_instantiated(
+                &mut self,
+                var: UniversalTyOrReRoot,
+                covered: bool,
+            ) -> Option<HrtbDebruijn> {
+                let entry = match self.universal_root_to_debruijn.entry(var) {
+                    hash_map::Entry::Occupied(entry) => {
+                        let entry = entry.into_mut();
+                        entry.covered |= covered;
+
+                        return Some(HrtbDebruijn(DebruijnRelative::new(
+                            NonZeroU32::new(entry.idx + 1).unwrap(),
+                        )));
+                    }
+                    hash_map::Entry::Vacant(entry) => entry,
+                };
+
+                let def = self
+                    .ccx
+                    .universal_ty_elaboration_state(self.universal)
+                    .as_ref()
+                    .unwrap()
+                    .hrtb_universals
+                    .get(&var)
+                    .copied()?;
+
+                let idx = self.debruijn_defs_backward.len() as u32;
+
+                entry.insert(ReverseDebruijnDef { idx, covered });
+
+                self.debruijn_defs_backward.push(def);
+
+                Some(HrtbDebruijn(DebruijnRelative::new(
+                    NonZeroU32::new(idx + 1).unwrap(),
+                )))
+            }
+        }
+
+        impl<'tcx> TyFolder<'tcx> for ReverseTranscriptase<'_, 'tcx> {
+            type Error = Infallible;
+
+            fn tcx(&self) -> &'tcx TyCtxt {
+                self.ccx.tcx()
+            }
+
+            fn fold_re(&mut self, re: Re) -> Result<Re, Self::Error> {
+                let Re::UniversalVar(universal) = re else {
+                    return Ok(re);
+                };
+
+                let Some(debruijn) = self.universal_to_hrtb_if_was_instantiated(
+                    UniversalTyOrReRoot::Re(universal),
+                    true,
+                ) else {
+                    // Not an HRTB.
+                    return Ok(re);
+                };
+
+                Ok(Re::HrtbVar(debruijn))
+            }
+
+            fn fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
+                let s = self.session();
+                let tcx = self.tcx();
+
+                let ty = self.ccx.peel_ty_infer_var_without_poll(ty);
+
+                let TyKind::Universal(mut universal) = *ty.r(s) else {
+                    return Ok(self.super_(ty));
+                };
+
+                let mut covered = true;
+                let universal = loop {
+                    match universal {
+                        UniversalTy::Root(root) => break root,
+                        UniversalTy::Projection(inner) => {
+                            universal = inner.r(s).target;
+                            covered = false;
+                        }
+                    }
+                };
+
+                let Some(debruijn) = self.universal_to_hrtb_if_was_instantiated(
+                    UniversalTyOrReRoot::Ty(universal),
+                    covered,
+                ) else {
+                    // Not an HRTB.
+                    return Ok(ty);
+                };
+
+                Ok(tcx.intern(TyKind::HrtbVar(debruijn)))
+            }
+        }
+
+        let tcx = self.tcx();
+        let mut folder = ReverseTranscriptase {
+            ccx: self,
+            universal,
+            universal_root_to_debruijn: FxHashMap::default(),
+            debruijn_defs_backward: Vec::new(),
+        };
+
+        let inner = folder.fold(instantiated);
+
+        if folder
+            .universal_root_to_debruijn
+            .values()
+            .any(|v| !v.covered)
+        {
+            return None;
+        }
+
+        folder.debruijn_defs_backward.reverse();
+
+        Some(HrtbBinder {
+            defs: tcx.intern_list(&folder.debruijn_defs_backward),
+            inner,
+        })
     }
 }

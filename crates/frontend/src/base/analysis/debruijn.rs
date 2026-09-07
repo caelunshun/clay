@@ -193,6 +193,10 @@ pub struct DebruijnRelative {
 }
 
 impl DebruijnRelative {
+    pub fn new(raw: NonZeroU32) -> Self {
+        Self { raw }
+    }
+
     pub fn idx(self) -> NonZeroU32 {
         self.raw
     }

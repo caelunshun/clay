@@ -145,6 +145,12 @@ pub enum UniversalTy {
     Projection(UniversalTyProj),
 }
 
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum UniversalTyOrReRoot {
+    Ty(UniversalTyRoot),
+    Re(UniversalReVar),
+}
+
 define_index_type! {
     pub struct UniversalTyRoot = u32;
 }
