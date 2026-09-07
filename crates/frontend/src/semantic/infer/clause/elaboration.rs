@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        analysis::DebruijnRelative,
+        analysis::{DebruijnRelative, DebruijnTop},
         arena::{HasInterner as _, HasListInterner},
     },
     semantic::{
@@ -9,15 +9,16 @@ use crate::{
             InstantiatedTraitSpec, ObligationResult, ObligationTermination,
         },
         syntax::{
-            HrtbBinder, HrtbDebruijn, HrtbDebruijnDef, InferTyVarSourceInfo, Re, TraitClause,
-            TraitParam, TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt, TyKind, TyOrRe,
-            TyOrReList, UniversalReVarSourceInfo, UniversalTy, UniversalTyOrReRoot,
+            HrtbBinder, HrtbDebruijn, HrtbDebruijnDef, HrtbProjection, InferTyVarSourceInfo, Re,
+            TraitClause, TraitParam, TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt,
+            TyKind, TyOrRe, TyOrReList, TyVisitor, TyVisitorInfallibleExt,
+            UniversalReVarSourceInfo, UniversalTy, UniversalTyOrReRoot, UniversalTyProjInner,
         },
     },
     utils::hash::{FxHashMap, FxHashSet},
 };
 use hashbrown::hash_map;
-use std::{collections::VecDeque, convert::Infallible, num::NonZeroU32};
+use std::{collections::VecDeque, convert::Infallible, num::NonZeroU32, ops::ControlFlow};
 
 // === Driver === //
 
@@ -104,7 +105,6 @@ impl<'tcx> ClauseCx<'tcx> {
                     .map(|&param| match param {
                         TraitParam::Equals(eq) => eq,
                         TraitParam::Unspecified(_spec) => TyOrRe::Ty(self.fresh_ty_infer(
-                            // TODO: Fix this universe. :sob:
                             var_universe.clone(),
                             InferTyVarSourceInfo::LateAssocElabPlaceholder,
                         )),
@@ -171,23 +171,29 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     pub(super) fn run_poll_elaboration(&mut self, universal: UniversalTy) -> ObligationResult {
-        let elaborated_clauses = move |ccx: &mut ClauseCx<'_>| -> &mut Vec<ElaboratedClause> {
+        fn elaborated_clauses<'a>(
+            ccx: &'a mut ClauseCx<'_>,
+            universal: UniversalTy,
+        ) -> &'a mut Vec<ElaboratedClause> {
             let Some(UniversalElaboration {
                 lub_re: _,
                 hrtb_universals: _,
                 elaborated_clauses,
-            }) = self.universal_ty_elaboration_state_mut(universal)
+            }) = ccx.universal_ty_elaboration_state_mut(universal)
             else {
                 unreachable!()
             };
 
             elaborated_clauses
-        };
+        }
 
-        let mut shadowed_clauses = FxHashSet::default();
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let mut shadowed_clauses = FxHashSet::<usize>::default();
         let mut next_clause_idx = 0usize;
 
-        'outer: while next_clause_idx < elaborated_clauses(self).len() {
+        while next_clause_idx < elaborated_clauses(self, universal).len() {
             let curr_clause_idx = next_clause_idx;
             next_clause_idx += 1;
 
@@ -198,7 +204,7 @@ impl<'tcx> ClauseCx<'tcx> {
             let ElaboratedClause::NotReady {
                 instantiated,
                 instantiated_with_late,
-            } = elaborated_clauses(self)[curr_clause_idx]
+            } = elaborated_clauses(self, universal)[curr_clause_idx]
             else {
                 continue;
             };
@@ -210,156 +216,287 @@ impl<'tcx> ClauseCx<'tcx> {
             // clauses.
             // TODO
 
+            // Next, concretize unspecified associated types as fresh universals. These universals
+            // are based off instantiated HRTB universals rather than HRTBs so that we can unify
+            // with `instantiated_with_late` inference variables and so that we can convert it into
+            // HRTB form using a straightforward `hrtb_binder_from_elab_universals` call.
+            let proj_spec = TraitSpec {
+                def: instantiated.def,
+                params: tcx.intern_list(
+                    &instantiated
+                        .params
+                        .r(s)
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, &param)| {
+                            if idx >= *instantiated.def.r(s).regular_generic_count as usize {
+                                return TraitParam::Unspecified(tcx.intern_list(&[]));
+                            }
+
+                            debug_assert!(matches!(param, TraitParam::Equals(_)));
+                            param
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+            };
+
+            let instantiated =
+                TraitSpec {
+                    def: instantiated.def,
+                    params: tcx.intern_list(
+                        &instantiated
+                            .params
+                            .r(s)
+                            .iter()
+                            .enumerate()
+                            .map(|(idx, &param)| {
+                                TraitParam::Equals(match param {
+                                    TraitParam::Equals(eq) => eq,
+                                    TraitParam::Unspecified(clauses) => TyOrRe::Ty(tcx.intern(
+                                        TyKind::Universal(self.fresh_ty_universal_proj(
+                                            universal, proj_spec, idx as u32,
+                                        )),
+                                    )),
+                                })
+                            })
+                            .collect::<Vec<_>>(),
+                    ),
+                };
+
             // Next, unify `instantiated_with_late` with universals based off of HRTB temporary
             // universals.
-            // TODO.
+            // TODO
 
             // We have enough information to finish this clause. Convert it into its HRTB form and
             // mark it as done.
             // TODO
         }
 
-        match is_done {
+        match elaborated_clauses(self, universal)
+            .iter()
+            .all(|v| matches!(v, ElaboratedClause::Ready(_)))
+        {
             true => Ok(ObligationTermination::Finished),
             false => Ok(ObligationTermination::CommitAndKeep),
         }
     }
+}
 
+// === HRTB universals to binder === //
+
+impl<'tcx> ClauseCx<'tcx> {
     pub fn hrtb_binder_from_elab_universals(
         &mut self,
         universal: UniversalTy,
         instantiated: TraitSpec,
     ) -> Option<HrtbBinder> {
-        struct ReverseTranscriptase<'a, 'tcx> {
-            ccx: &'a mut ClauseCx<'tcx>,
-            universal: UniversalTy,
-            universal_root_to_debruijn: FxHashMap<UniversalTyOrReRoot, ReverseDebruijnDef>,
-            debruijn_defs_backward: Vec<HrtbDebruijnDef>,
+        let tcx = self.tcx();
+
+        // Transform HRTB universals into HRTBs
+        let (inner, debruijn_defs) = {
+            let mut folder = ReverseTranscriptase {
+                ccx: self,
+                universal,
+                universal_root_to_debruijn: FxHashMap::default(),
+                debruijn_defs_backward: Vec::new(),
+            };
+
+            let inner = folder.fold(instantiated);
+
+            folder.debruijn_defs_backward.reverse();
+            (inner, folder.debruijn_defs_backward)
+        };
+
+        // Check whether the type is covered.
+        let mut cover_visitor = HrtbCoverChecker {
+            ccx: self,
+            was_covered: (0..debruijn_defs.len()).map(|_| false).collect(),
+            top: DebruijnTop::new(debruijn_defs.len()),
+        };
+
+        cover_visitor.visit(inner);
+
+        if !cover_visitor.was_covered.iter().all(|&v| v) {
+            return None;
         }
 
-        struct ReverseDebruijnDef {
-            idx: u32,
-            covered: bool,
-        }
+        Some(HrtbBinder {
+            defs: tcx.intern_list(&debruijn_defs),
+            inner,
+        })
+    }
+}
 
-        impl ReverseTranscriptase<'_, '_> {
-            fn universal_to_hrtb_if_was_instantiated(
-                &mut self,
-                var: UniversalTyOrReRoot,
-                covered: bool,
-            ) -> Option<HrtbDebruijn> {
-                let entry = match self.universal_root_to_debruijn.entry(var) {
-                    hash_map::Entry::Occupied(entry) => {
-                        let entry = entry.into_mut();
-                        entry.covered |= covered;
+struct ReverseTranscriptase<'a, 'tcx> {
+    ccx: &'a mut ClauseCx<'tcx>,
+    universal: UniversalTy,
+    universal_root_to_debruijn: FxHashMap<UniversalTyOrReRoot, u32>,
+    debruijn_defs_backward: Vec<HrtbDebruijnDef>,
+}
 
-                        return Some(HrtbDebruijn(DebruijnRelative::new(
-                            NonZeroU32::new(entry.idx + 1).unwrap(),
-                        )));
-                    }
-                    hash_map::Entry::Vacant(entry) => entry,
-                };
+impl ReverseTranscriptase<'_, '_> {
+    fn universal_to_hrtb_if_was_instantiated(
+        &mut self,
+        var: UniversalTyOrReRoot,
+    ) -> Option<HrtbDebruijn> {
+        let entry = match self.universal_root_to_debruijn.entry(var) {
+            hash_map::Entry::Occupied(entry) => {
+                let idx = *entry.into_mut();
 
-                let def = self
-                    .ccx
-                    .universal_ty_elaboration_state(self.universal)
-                    .as_ref()
-                    .unwrap()
-                    .hrtb_universals
-                    .get(&var)
-                    .copied()?;
-
-                let idx = self.debruijn_defs_backward.len() as u32;
-
-                entry.insert(ReverseDebruijnDef { idx, covered });
-
-                self.debruijn_defs_backward.push(def);
-
-                Some(HrtbDebruijn(DebruijnRelative::new(
+                return Some(HrtbDebruijn(DebruijnRelative::new(
                     NonZeroU32::new(idx + 1).unwrap(),
-                )))
+                )));
             }
-        }
+            hash_map::Entry::Vacant(entry) => entry,
+        };
 
-        impl<'tcx> TyFolder<'tcx> for ReverseTranscriptase<'_, 'tcx> {
-            type Error = Infallible;
+        let def = self
+            .ccx
+            .universal_ty_elaboration_state(self.universal)
+            .as_ref()
+            .unwrap()
+            .hrtb_universals
+            .get(&var)
+            .copied()?;
 
-            fn tcx(&self) -> &'tcx TyCtxt {
-                self.ccx.tcx()
-            }
+        let idx = self.debruijn_defs_backward.len() as u32;
 
-            fn fold_re(&mut self, re: Re) -> Result<Re, Self::Error> {
-                let Re::UniversalVar(universal) = re else {
-                    return Ok(re);
-                };
+        entry.insert(idx);
 
-                let Some(debruijn) = self.universal_to_hrtb_if_was_instantiated(
-                    UniversalTyOrReRoot::Re(universal),
-                    true,
-                ) else {
+        self.debruijn_defs_backward.push(def);
+
+        Some(HrtbDebruijn(DebruijnRelative::new(
+            NonZeroU32::new(idx + 1).unwrap(),
+        )))
+    }
+}
+
+impl<'tcx> TyFolder<'tcx> for ReverseTranscriptase<'_, 'tcx> {
+    type Error = Infallible;
+
+    fn tcx(&self) -> &'tcx TyCtxt {
+        self.ccx.tcx()
+    }
+
+    fn fold_re(&mut self, re: Re) -> Result<Re, Self::Error> {
+        let Re::UniversalVar(universal) = re else {
+            return Ok(re);
+        };
+
+        let Some(debruijn) =
+            self.universal_to_hrtb_if_was_instantiated(UniversalTyOrReRoot::Re(universal))
+        else {
+            // Not an HRTB.
+            return Ok(re);
+        };
+
+        Ok(Re::HrtbVar(debruijn))
+    }
+
+    fn fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
+        let tcx = self.tcx();
+        let s = self.session();
+
+        let ty = self.ccx.peel_ty_infer_var_without_poll(ty);
+
+        let TyKind::Universal(universal) = *ty.r(s) else {
+            return Ok(self.super_(ty));
+        };
+
+        match universal {
+            UniversalTy::Root(root) => {
+                let Some(debruijn) =
+                    self.universal_to_hrtb_if_was_instantiated(UniversalTyOrReRoot::Ty(root))
+                else {
                     // Not an HRTB.
-                    return Ok(re);
-                };
-
-                Ok(Re::HrtbVar(debruijn))
-            }
-
-            fn fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
-                let s = self.session();
-                let tcx = self.tcx();
-
-                let ty = self.ccx.peel_ty_infer_var_without_poll(ty);
-
-                let TyKind::Universal(mut universal) = *ty.r(s) else {
-                    return Ok(self.super_(ty));
-                };
-
-                let mut covered = true;
-                let universal = loop {
-                    match universal {
-                        UniversalTy::Root(root) => break root,
-                        UniversalTy::Projection(inner) => {
-                            universal = inner.r(s).target;
-                            covered = false;
-                        }
-                    }
-                };
-
-                let Some(debruijn) = self.universal_to_hrtb_if_was_instantiated(
-                    UniversalTyOrReRoot::Ty(universal),
-                    covered,
-                ) else {
-                    // Not an HRTB.
-                    return Ok(ty);
+                    return Ok(tcx.intern(TyKind::Universal(universal)));
                 };
 
                 Ok(tcx.intern(TyKind::HrtbVar(debruijn)))
             }
+            UniversalTy::Projection(proj) => {
+                let UniversalTyProjInner {
+                    target,
+                    as_spec,
+                    assoc_idx,
+                    cache_idx: _,
+                } = *proj.r(s);
+
+                let target = self.fold(tcx.intern(TyKind::Universal(target)));
+                let as_spec = self.fold(as_spec);
+
+                // TODO: only spawn if this is a new HRTB derivation (not needed for correctness but
+                // possibly useful for performance)
+                Ok(tcx.intern(TyKind::HrtbProjection(HrtbProjection {
+                    target: target,
+                    spec: as_spec,
+                    assoc_idx,
+                })))
+            }
         }
+    }
 
-        let tcx = self.tcx();
-        let mut folder = ReverseTranscriptase {
-            ccx: self,
-            universal,
-            universal_root_to_debruijn: FxHashMap::default(),
-            debruijn_defs_backward: Vec::new(),
-        };
+    fn fold_universal(&mut self, _ty: UniversalTy) -> Result<UniversalTy, Self::Error> {
+        unreachable!()
+    }
+}
 
-        let inner = folder.fold(instantiated);
+struct HrtbCoverChecker<'a, 'tcx> {
+    ccx: &'a mut ClauseCx<'tcx>,
+    was_covered: Vec<bool>,
+    top: DebruijnTop,
+}
 
-        if folder
-            .universal_root_to_debruijn
-            .values()
-            .any(|v| !v.covered)
+impl HrtbCoverChecker<'_, '_> {
+    fn visit_debruijn(&mut self, var: HrtbDebruijn) {
+        if let Some(status) = self
+            .was_covered
+            .get_mut(self.top.lookup_relative(var.0).index())
         {
-            return None;
+            *status = true;
+        }
+    }
+}
+
+impl<'tcx> TyVisitor<'tcx> for HrtbCoverChecker<'_, 'tcx> {
+    type Break = Infallible;
+
+    fn tcx(&self) -> &'tcx TyCtxt {
+        self.ccx.tcx()
+    }
+
+    fn visit_hrtb_binder(&mut self, binder: HrtbBinder) -> ControlFlow<Self::Break> {
+        let s = self.session();
+
+        let range = self.top.move_inwards_by(binder.defs.r(s).len());
+        self.visit(binder.inner);
+        self.top.move_outwards_by(range.len());
+
+        ControlFlow::Continue(())
+    }
+
+    fn visit_re(&mut self, re: Re) -> ControlFlow<Self::Break> {
+        if let Re::HrtbVar(var) = re {
+            self.visit_debruijn(var);
         }
 
-        folder.debruijn_defs_backward.reverse();
+        ControlFlow::Continue(())
+    }
 
-        Some(HrtbBinder {
-            defs: tcx.intern_list(&folder.debruijn_defs_backward),
-            inner,
-        })
+    fn visit_ty(&mut self, ty: Ty) -> ControlFlow<Self::Break> {
+        let s = self.session();
+        let ty = self.ccx.peel_ty_infer_var_without_poll(ty);
+
+        if let TyKind::HrtbVar(var) = *ty.r(s) {
+            self.visit_debruijn(var);
+        }
+
+        ControlFlow::Continue(())
+    }
+
+    fn visit_hrtb_projection(&mut self, _projection: HrtbProjection) -> ControlFlow<Self::Break> {
+        // (ignore `projection` since it doesn't contribute to cover)
+
+        ControlFlow::Continue(())
     }
 }

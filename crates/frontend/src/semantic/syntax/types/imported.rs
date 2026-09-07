@@ -186,23 +186,21 @@ define_index_type! {
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct UniversalTyProjInner {
     pub target: UniversalTy,
-    pub kind: UniversalTyProjKind,
+
+    /// The specification as which this projection was instantiated. This is considered for
+    /// unification purposes. All associated parameters are expected to be left `Unspecified`.
+    ///
+    /// Since this field must be updated in tandem with `cache_idx`, it is never folded or visited.
+    pub as_spec: TraitSpec,
+
+    /// The index of the associated type we're projecting.
+    ///
+    /// This field must be updated in tandem with `cache_idx`.
+    pub assoc_idx: u32,
 
     /// An ID for projection's state containing its pre-initialized direct clauses, debug info, and
     /// cached elaboration. This should not be considered as relevant for unification.
-    pub idx: UniversalTyProjIdx,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum UniversalTyProjKind {
-    /// Universals which don't depend on arguments to HRTB clauses.
-    HrtbInvariant { id: u32 },
-    /// Universals which depend on the specific arguments to an HRTB clause.
-    HrtbRelative {
-        parent_clause_idx: u32,
-        parent_clause_hrtb_args: TyOrReList,
-        assoc_idx: u32,
-    },
+    pub cache_idx: UniversalTyProjIdx,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

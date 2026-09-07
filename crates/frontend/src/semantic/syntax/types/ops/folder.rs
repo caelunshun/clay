@@ -8,7 +8,7 @@ use crate::{
         FnOwnerTrait, HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, HrtbProjection, Re,
         TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty,
         TyCtxt, TyKind, TyList, TyOrRe, TyOrReList, UniversalTy, UniversalTyProj,
-        UniversalTyProjInner, UniversalTyProjKind,
+        UniversalTyProjInner,
     },
 };
 use std::{convert::Infallible, hash};
@@ -143,13 +143,6 @@ pub trait TyFolder<'tcx> {
         projection: UniversalTyProj,
     ) -> Result<UniversalTyProj, Self::Error> {
         self.super_fallible(projection)
-    }
-
-    fn fold_universal_proj_kind(
-        &mut self,
-        kind: UniversalTyProjKind,
-    ) -> Result<UniversalTyProjKind, Self::Error> {
-        self.super_fallible(kind)
     }
 
     // === Binders === //
@@ -598,43 +591,19 @@ impl TyFoldable for UniversalTyProj {
         let s = folder.session();
         let tcx = folder.tcx();
 
-        let UniversalTyProjInner { target, kind, idx } = *me.r(s);
+        let UniversalTyProjInner {
+            target,
+            as_spec,
+            assoc_idx,
+            cache_idx,
+        } = *me.r(s);
 
         Ok(tcx.intern(UniversalTyProjInner {
             target: folder.fold_fallible(target)?,
-            kind: folder.fold_fallible(kind)?,
-            idx,
+            as_spec, // Intentionally not folded.
+            assoc_idx,
+            cache_idx,
         }))
-    }
-}
-
-impl TyFoldable for UniversalTyProjKind {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
-    where
-        F: ?Sized + TyFolder<'tcx>,
-    {
-        folder.fold_universal_proj_kind(me)
-    }
-
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
-    where
-        F: ?Sized + TyFolder<'tcx>,
-    {
-        match me {
-            UniversalTyProjKind::HrtbInvariant { id: _ } => {
-                // (dead end)
-                Ok(me)
-            }
-            UniversalTyProjKind::HrtbRelative {
-                parent_clause_idx,
-                parent_clause_hrtb_args,
-                assoc_idx,
-            } => Ok(UniversalTyProjKind::HrtbRelative {
-                parent_clause_idx,
-                parent_clause_hrtb_args: folder.fold_fallible(parent_clause_hrtb_args)?,
-                assoc_idx,
-            }),
-        }
     }
 }
 

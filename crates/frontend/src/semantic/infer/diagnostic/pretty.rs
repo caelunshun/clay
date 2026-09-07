@@ -8,7 +8,7 @@ use crate::{
             HrtbProjection, InferTyVar, IntKind, Item, Re, SimpleTyKind, SimpleTySet, TraitClause,
             TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe, TyOrReList,
             UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProj,
-            UniversalTyRoot, UniversalTyRootSourceInfo,
+            UniversalTyProjInner, UniversalTyRoot, UniversalTyRootSourceInfo,
         },
     },
     utils::lang::{SimpleListFormatGlue, format_list, format_list_into},
@@ -361,18 +361,19 @@ impl_pretty! {
     UniversalTyProj => |cx, value, f| {
         let s = cx.session();
 
-        let HrtbProjection {
+        let UniversalTyProjInner {
             target,
-            spec,
+            as_spec,
             assoc_idx,
-        } = cx.ccx().lookup_universal_ty_proj_debug_spec(value);
+            cache_idx: _,
+        } = *value.r(s);
 
         write!(
             f,
             "<{} as {}>::{}",
             cx.wrap(target),
-            cx.wrap(spec),
-            spec.def.r(s).generics.r(s).defs[assoc_idx as usize].ident(s).text(),
+            cx.wrap(as_spec),
+            as_spec.def.r(s).generics.r(s).defs[assoc_idx as usize].ident(s).text(),
         )
     }
     FnInstance => |cx, value, f| {

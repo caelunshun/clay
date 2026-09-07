@@ -14,7 +14,7 @@ use crate::{
             SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitParamList, Ty, TyCtxt,
             TyFolder, TyFolderExt, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorExt,
             TyVisitorInfallibleExt, UniversalReVar, UniversalReVarSourceInfo, UniversalTy,
-            UniversalTyProjInner, UniversalTyProjKind, UniversalTyRoot, UniversalTyRootSourceInfo,
+            UniversalTyProjInner, UniversalTyRoot, UniversalTyRootSourceInfo,
         },
     },
 };
@@ -88,11 +88,7 @@ impl<'tcx> UnifyCx<'tcx> {
     }
 
     pub fn substitutor(&self, mode: UnboundVarHandlingMode) -> InferTySubstitutor<'_, 'tcx> {
-        InferTySubstitutor {
-            ucx: self,
-            mode,
-            had_hole_flag: false,
-        }
+        InferTySubstitutor { ucx: self, mode }
     }
 
     pub fn fresh_ty_infer_var(
@@ -574,62 +570,59 @@ impl<'tcx> UnifyCx<'tcx> {
             (UniversalTy::Projection(lhs), UniversalTy::Projection(rhs)) => 'proj: {
                 let UniversalTyProjInner {
                     target: lhs_target,
-                    kind: lhs_kind,
-                    idx: _,
+                    as_spec: lhs_as_spec,
+                    assoc_idx: lhs_assoc_idx,
+                    cache_idx: lhs_cache_idx,
                 } = *lhs.r(s);
 
                 let UniversalTyProjInner {
                     target: rhs_target,
-                    kind: rhs_kind,
-                    idx: _,
+                    as_spec: rhs_as_spec,
+                    assoc_idx: rhs_assoc_idx,
+                    cache_idx: rhs_cache_idx,
                 } = *rhs.r(s);
 
-                match (lhs_kind, rhs_kind) {
-                    (
-                        UniversalTyProjKind::HrtbInvariant { id: lhs_id },
-                        UniversalTyProjKind::HrtbInvariant { id: rhs_id },
-                    ) if lhs_id == rhs_id => {
-                        // (fallthrough)
-                    }
-                    (
-                        UniversalTyProjKind::HrtbRelative {
-                            parent_clause_idx: lhs_parent_clause_idx,
-                            parent_clause_hrtb_args: lhs_parent_clause_hrtb_args,
-                            assoc_idx: lhs_assoc_idx,
-                        },
-                        UniversalTyProjKind::HrtbRelative {
-                            parent_clause_idx: rhs_parent_clause_idx,
-                            parent_clause_hrtb_args: rhs_parent_clause_hrtb_args,
-                            assoc_idx: rhs_assoc_idx,
-                        },
-                    ) if lhs_parent_clause_idx == rhs_parent_clause_idx
-                        && lhs_assoc_idx == rhs_assoc_idx =>
-                    {
-                        for (&lhs_para, &rhs_para) in lhs_parent_clause_hrtb_args
-                            .r(s)
-                            .iter()
-                            .zip(rhs_parent_clause_hrtb_args.r(s))
-                        {
-                            match (lhs_para, rhs_para) {
-                                (TyOrRe::Re(lhs_para), TyOrRe::Re(rhs_para)) => {
-                                    self.unify_re_and_re(lhs_para, rhs_para, RelationMode::Equate)
-                                        .join(re_collector);
-                                }
-                                (TyOrRe::Ty(lhs_para), TyOrRe::Ty(rhs_para)) => {
-                                    self.unify_ty_and_ty_inner(
-                                        lhs_para,
-                                        rhs_para,
-                                        ty_culprits,
-                                        re_collector,
-                                        RelationMode::Equate,
-                                    );
-                                }
-                                _ => unreachable!(),
-                            }
+                if lhs_cache_idx == rhs_cache_idx {
+                    // (fast path)
+                    return;
+                }
+
+                if lhs_as_spec.def != rhs_as_spec.def {
+                    break 'proj;
+                }
+
+                if lhs_assoc_idx != rhs_assoc_idx {
+                    break 'proj;
+                }
+
+                for (&lhs_para, &rhs_para) in lhs_as_spec
+                    .params
+                    .r(s)
+                    .iter()
+                    .zip(rhs_as_spec.params.r(s))
+                    .take(*lhs_as_spec.def.r(s).regular_generic_count as usize)
+                {
+                    let (TraitParam::Equals(lhs_para), TraitParam::Equals(rhs_para)) =
+                        (lhs_para, rhs_para)
+                    else {
+                        unreachable!()
+                    };
+
+                    match (lhs_para, rhs_para) {
+                        (TyOrRe::Re(lhs_para), TyOrRe::Re(rhs_para)) => {
+                            self.unify_re_and_re(lhs_para, rhs_para, RelationMode::Equate)
+                                .join(re_collector);
                         }
-                    }
-                    _ => {
-                        break 'proj;
+                        (TyOrRe::Ty(lhs_para), TyOrRe::Ty(rhs_para)) => {
+                            self.unify_ty_and_ty_inner(
+                                lhs_para,
+                                rhs_para,
+                                ty_culprits,
+                                re_collector,
+                                RelationMode::Equate,
+                            );
+                        }
+                        _ => unreachable!(),
                     }
                 }
 
@@ -1033,7 +1026,6 @@ impl<'tcx> UnifyCx<'tcx> {
 pub struct InferTySubstitutor<'a, 'tcx> {
     pub ucx: &'a UnifyCx<'tcx>,
     pub mode: UnboundVarHandlingMode,
-    pub had_hole_flag: bool,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -1062,19 +1054,15 @@ impl<'tcx> TyFolder<'tcx> for InferTySubstitutor<'_, 'tcx> {
 
         Ok(match self.ucx.lookup_ty_infer_var(var) {
             Ok(v) => self.fold(v),
-            Err(floating) => {
-                self.had_hole_flag = true;
-
-                match self.mode {
-                    UnboundVarHandlingMode::Error(error) => self.tcx().intern(TyKind::Error(error)),
-                    UnboundVarHandlingMode::NormalizeToRoot => {
-                        self.tcx().intern(TyKind::InferVar(floating.root))
-                    }
-                    UnboundVarHandlingMode::Panic => {
-                        unreachable!("unexpected ambiguous inference variable")
-                    }
+            Err(floating) => match self.mode {
+                UnboundVarHandlingMode::Error(error) => self.tcx().intern(TyKind::Error(error)),
+                UnboundVarHandlingMode::NormalizeToRoot => {
+                    self.tcx().intern(TyKind::InferVar(floating.root))
                 }
-            }
+                UnboundVarHandlingMode::Panic => {
+                    unreachable!("unexpected ambiguous inference variable")
+                }
+            },
         })
     }
 }

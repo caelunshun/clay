@@ -14,11 +14,10 @@ use crate::{
             UnifyCx, UnifyCxMode, UniversalElaboration,
         },
         syntax::{
-            Crate, HrtbProjection, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection,
-            RelationMode, SimpleTySet, TraitClause, TraitClauseList, TraitSpec, Ty, TyCtxt, TyKind,
-            TyOrRe, UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProj,
-            UniversalTyProjIdx, UniversalTyProjInner, UniversalTyProjKind, UniversalTyRoot,
-            UniversalTyRootSourceInfo,
+            Crate, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection, RelationMode,
+            SimpleTySet, TraitClause, TraitClauseList, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe,
+            UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProj,
+            UniversalTyProjIdx, UniversalTyProjInner, UniversalTyRoot, UniversalTyRootSourceInfo,
         },
     },
     utils::hash::FxHashMap,
@@ -170,8 +169,6 @@ struct UniversalTyRootDescriptor {
 struct UniversalTyProjDescriptor {
     direct_clauses: Option<TraitClauseList>,
     elaboration: Option<UniversalElaboration>,
-    debug_spec: TraitSpec,
-    debug_assoc_idx: u32,
 }
 
 impl<'tcx> ClauseCx<'tcx> {
@@ -685,34 +682,29 @@ impl<'tcx> ClauseCx<'tcx> {
     pub fn fresh_ty_universal_proj_unwrapped(
         &mut self,
         target: UniversalTy,
-        debug_spec: TraitSpec,
-        debug_assoc_idx: u32,
-        kind: UniversalTyProjKind,
+        as_spec: TraitSpec,
+        assoc_idx: u32,
     ) -> UniversalTyProj {
-        let idx = self.universal_projs.push(UniversalTyProjDescriptor {
+        let cache_idx = self.universal_projs.push(UniversalTyProjDescriptor {
             direct_clauses: None,
             elaboration: None,
-            debug_spec,
-            debug_assoc_idx,
         });
 
-        self.tcx()
-            .intern(UniversalTyProjInner { target, kind, idx })
+        self.tcx().intern(UniversalTyProjInner {
+            target,
+            as_spec,
+            assoc_idx,
+            cache_idx,
+        })
     }
 
     pub fn fresh_ty_universal_proj(
         &mut self,
         target: UniversalTy,
-        debug_spec: TraitSpec,
-        debug_assoc_idx: u32,
-        kind: UniversalTyProjKind,
+        as_spec: TraitSpec,
+        assoc_idx: u32,
     ) -> UniversalTy {
-        UniversalTy::Projection(self.fresh_ty_universal_proj_unwrapped(
-            target,
-            debug_spec,
-            debug_assoc_idx,
-            kind,
-        ))
+        UniversalTy::Projection(self.fresh_ty_universal_proj_unwrapped(target, as_spec, assoc_idx))
     }
 
     pub fn init_any_universal_direct_clauses(&mut self, var: TyOrRe, clauses: TraitClauseList) {
@@ -745,7 +737,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 descriptor.direct_clauses = Some(clauses);
             }
             UniversalTy::Projection(inner) => {
-                let descriptor = &mut self.universal_projs[inner.r(s).idx];
+                let descriptor = &mut self.universal_projs[inner.r(s).cache_idx];
 
                 assert!(descriptor.direct_clauses.is_none());
                 descriptor.direct_clauses = Some(clauses);
@@ -761,9 +753,9 @@ impl<'tcx> ClauseCx<'tcx> {
 
         match universal {
             UniversalTy::Root(idx) => self.universal_roots[idx].direct_clauses.unwrap(),
-            UniversalTy::Projection(inner) => {
-                self.universal_projs[inner.r(s).idx].direct_clauses.unwrap()
-            }
+            UniversalTy::Projection(inner) => self.universal_projs[inner.r(s).cache_idx]
+                .direct_clauses
+                .unwrap(),
         }
     }
 
@@ -772,24 +764,6 @@ impl<'tcx> ClauseCx<'tcx> {
         idx: UniversalTyRoot,
     ) -> UniversalTyRootSourceInfo {
         self.ucx().lookup_universal_ty_root_src_info(idx)
-    }
-
-    pub fn lookup_universal_ty_proj_debug_spec(&self, proj: UniversalTyProj) -> HrtbProjection {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        let UniversalTyProjDescriptor {
-            direct_clauses: _,
-            elaboration: _,
-            debug_spec,
-            debug_assoc_idx,
-        } = self.universal_projs[proj.r(s).idx];
-
-        HrtbProjection {
-            target: tcx.intern(TyKind::Universal(proj.r(s).target)),
-            spec: debug_spec,
-            assoc_idx: debug_assoc_idx,
-        }
     }
 
     pub fn lookup_universal_ty_hrtb_universe(&self, universal: UniversalTy) -> &HrtbUniverse {
@@ -804,9 +778,9 @@ impl<'tcx> ClauseCx<'tcx> {
 
         match universal {
             UniversalTy::Root(idx) => self.universal_roots[idx].elaboration.as_ref(),
-            UniversalTy::Projection(proj) => {
-                self.universal_projs[proj.r(s).idx].elaboration.as_ref()
-            }
+            UniversalTy::Projection(proj) => self.universal_projs[proj.r(s).cache_idx]
+                .elaboration
+                .as_ref(),
         }
     }
 
@@ -818,7 +792,9 @@ impl<'tcx> ClauseCx<'tcx> {
 
         match universal {
             UniversalTy::Root(idx) => &mut self.universal_roots[idx].elaboration,
-            UniversalTy::Projection(proj) => &mut self.universal_projs[proj.r(s).idx].elaboration,
+            UniversalTy::Projection(proj) => {
+                &mut self.universal_projs[proj.r(s).cache_idx].elaboration
+            }
         }
     }
 }

@@ -5,7 +5,7 @@ use crate::{
         FnOwnerTrait, HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, HrtbProjection, Re,
         TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty,
         TyCtxt, TyKind, TyList, TyOrRe, TyOrReList, UniversalTy, UniversalTyProj,
-        UniversalTyProjInner, UniversalTyProjKind,
+        UniversalTyProjInner,
     },
 };
 use std::{convert::Infallible, ops::ControlFlow};
@@ -108,13 +108,6 @@ pub trait TyVisitor<'tcx> {
         projection: UniversalTyProj,
     ) -> ControlFlow<Self::Break> {
         self.walk_fallible(projection)
-    }
-
-    fn visit_universal_projection_kind(
-        &mut self,
-        kind: UniversalTyProjKind,
-    ) -> ControlFlow<Self::Break> {
-        self.walk_fallible(kind)
     }
 
     // === Binders === //
@@ -585,41 +578,13 @@ impl TyVisitable for UniversalTyProj {
         let s = visitor.session();
         let UniversalTyProjInner {
             target,
-            kind,
-            idx: _,
+            // Intentionally not visited
+            as_spec: _,
+            assoc_idx: _,
+            cache_idx: _,
         } = *me.r(s);
 
         visitor.visit_fallible(target)?;
-        visitor.visit_fallible(kind)?;
-
-        ControlFlow::Continue(())
-    }
-}
-
-impl TyVisitable for UniversalTyProjKind {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
-    where
-        V: ?Sized + TyVisitor<'tcx>,
-    {
-        visitor.visit_universal_projection_kind(me)
-    }
-
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
-    where
-        V: ?Sized + TyVisitor<'tcx>,
-    {
-        match me {
-            UniversalTyProjKind::HrtbInvariant { id: _ } => {
-                // (dead end)
-            }
-            UniversalTyProjKind::HrtbRelative {
-                parent_clause_idx: _,
-                parent_clause_hrtb_args,
-                assoc_idx: _,
-            } => {
-                visitor.visit_fallible(parent_clause_hrtb_args)?;
-            }
-        }
 
         ControlFlow::Continue(())
     }
