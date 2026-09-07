@@ -361,7 +361,7 @@ define_index_type! {
 
 #[derive(Debug, Clone)]
 pub enum InferTyVarSourceInfo {
-    ElaborationUnifyHelper,
+    LateAssocElabPlaceholder,
     HrtbLhsInstantiation {
         span: Span,
         clauses: LateInit<TraitClauseList>,

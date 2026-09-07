@@ -6,16 +6,21 @@ use crate::{
             InstantiatedTraitSpec, ObligationResult, ObligationTermination,
         },
         syntax::{
-            HrtbBinder, HrtbDebruijnDefList, InferTyVarSourceInfo, Re, TraitClause, TraitParam,
+            HrtbBinder, HrtbDebruijnDef, InferTyVarSourceInfo, Re, TraitClause, TraitParam,
             TraitSpec, TyKind, TyOrRe, TyOrReList, UniversalReVarSourceInfo, UniversalTy,
         },
     },
+    utils::hash::FxHashSet,
 };
+use rustc_hash::FxHashMap;
 use std::collections::VecDeque;
+
+// === Driver === //
 
 #[derive(Debug, Clone)]
 pub struct UniversalElaboration {
     pub lub_re: Re,
+    pub hrtb_universals: FxHashMap<TyOrRe, HrtbDebruijnDef>,
     pub elaborated_clauses: Vec<ElaboratedClause>,
 }
 
@@ -25,19 +30,11 @@ pub enum ElaboratedClause {
     /// selection fork must be rejected and the obligation must be deferred until the clause becomes
     /// `Ready`.
     NotReady {
-        /// The set of binder variables from the root clause from which this clause was elaborated.
-        /// Might not cover `instantiated` and may need to be reduced before creating its equivalent
-        /// `Ready` form.
-        binder_defs: HrtbDebruijnDefList,
-
-        /// The universals spawned for each binder definition.
-        universal_roots: TyOrReList,
-
         /// A partially elaborated clause which...
         ///
         /// - may contain `Unspecified` associated type parameters
-        /// - may contain temporary universals to fill in for HRTB variables
         /// - may contain inference variables which haven't yet been solved
+        /// - may contain temporary universals to fill in for HRTB variables; see `hrtb_universals`
         ///
         instantiated: TraitSpec,
 
@@ -67,6 +64,7 @@ impl<'tcx> ClauseCx<'tcx> {
         let lub_re = self.fresh_re_universal(UniversalReVarSourceInfo::ElaboratedLub);
 
         let mut elaborated_clauses = Vec::new();
+        let mut hrtb_universals = FxHashMap::default();
 
         let mut queue = self
             .direct_ty_universal_clauses_possibly_floating(universal)
@@ -86,10 +84,9 @@ impl<'tcx> ClauseCx<'tcx> {
             };
 
             // Otherwise, instantiate the clause and push its elaboration.
-            let binder_defs = binder.defs;
             let InstantiatedTraitSpec {
                 spec: instantiated,
-                params: universal_roots,
+                params: hrtbs_as_universals,
             } = self
                 .instantiate_hrtb_universal(ClauseFuel::new(), var_universe.clone(), binder)
                 // TODO
@@ -104,18 +101,25 @@ impl<'tcx> ClauseCx<'tcx> {
                         TraitParam::Equals(eq) => eq,
                         TraitParam::Unspecified(_spec) => TyOrRe::Ty(self.fresh_ty_infer(
                             var_universe.clone(),
-                            InferTyVarSourceInfo::ElaborationUnifyHelper,
+                            InferTyVarSourceInfo::LateAssocElabPlaceholder,
                         )),
                     })
                     .collect::<Vec<_>>(),
             );
 
             elaborated_clauses.push(ElaboratedClause::NotReady {
-                binder_defs,
-                universal_roots,
                 instantiated,
                 instantiated_with_late,
             });
+
+            // Record our HRTB universals so we can recover them.
+            hrtb_universals.extend(
+                hrtbs_as_universals
+                    .r(s)
+                    .iter()
+                    .copied()
+                    .zip(binder.defs.r(s).iter().copied()),
+            );
 
             // Explore and push on the elaborated super-trait constraints.
             let inherits = self
@@ -142,6 +146,7 @@ impl<'tcx> ClauseCx<'tcx> {
         // Push an obligation to repeatedly poll for completion of `NotReady` clauses.
         let elaboration = UniversalElaboration {
             lub_re,
+            hrtb_universals,
             elaborated_clauses,
         };
 
@@ -153,13 +158,61 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     pub(super) fn run_poll_elaboration(&mut self, universal: UniversalTy) -> ObligationResult {
-        let mut is_done = true;
+        let elaborated_clauses = move |ccx: &mut ClauseCx<'_>| -> &mut Vec<ElaboratedClause> {
+            let Some(UniversalElaboration {
+                lub_re: _,
+                hrtb_universals: _,
+                elaborated_clauses,
+            }) = self.universal_ty_elaboration_state_mut(universal)
+            else {
+                unreachable!()
+            };
 
-        // Attempt to finish whichever obligations we can.
+            elaborated_clauses
+        };
+
+        let mut shadowed_clauses = FxHashSet::default();
+        let mut next_clause_idx = 0usize;
+
+        'outer: while next_clause_idx < elaborated_clauses(self).len() {
+            let curr_clause_idx = next_clause_idx;
+            next_clause_idx += 1;
+
+            if shadowed_clauses.contains(&curr_clause_idx) {
+                continue;
+            }
+
+            let ElaboratedClause::NotReady {
+                instantiated,
+                instantiated_with_late,
+            } = elaborated_clauses(self)[curr_clause_idx]
+            else {
+                continue;
+            };
+
+            // First, ensure that `instantiated` has all its inference variables solved.
+            // TODO
+
+            // Next, let's build up a full context for all our clauses by considering subsequent
+            // clauses.
+            // TODO
+
+            // We have enough information to finish this clause. Convert it into its HRTB form and
+            // mark it as done.
+            // TODO
+        }
 
         match is_done {
             true => Ok(ObligationTermination::Finished),
             false => Ok(ObligationTermination::CommitAndKeep),
         }
+    }
+
+    pub fn hrtb_binder_from_elab_universals(
+        &mut self,
+        universal: UniversalTy,
+        instantiated: TraitSpec,
+    ) -> Option<HrtbBinder> {
+        todo!()
     }
 }

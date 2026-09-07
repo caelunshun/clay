@@ -88,7 +88,11 @@ impl<'tcx> UnifyCx<'tcx> {
     }
 
     pub fn substitutor(&self, mode: UnboundVarHandlingMode) -> InferTySubstitutor<'_, 'tcx> {
-        InferTySubstitutor { ucx: self, mode }
+        InferTySubstitutor {
+            ucx: self,
+            mode,
+            had_hole_flag: false,
+        }
     }
 
     pub fn fresh_ty_infer_var(
@@ -1029,6 +1033,7 @@ impl<'tcx> UnifyCx<'tcx> {
 pub struct InferTySubstitutor<'a, 'tcx> {
     pub ucx: &'a UnifyCx<'tcx>,
     pub mode: UnboundVarHandlingMode,
+    pub had_hole_flag: bool,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -1055,17 +1060,21 @@ impl<'tcx> TyFolder<'tcx> for InferTySubstitutor<'_, 'tcx> {
             return self.super_fallible(ty);
         };
 
-        match self.ucx.lookup_ty_infer_var(var) {
-            Ok(v) => self.fold_fallible(v),
-            Err(floating) => Ok(match self.mode {
-                UnboundVarHandlingMode::Error(error) => self.tcx().intern(TyKind::Error(error)),
-                UnboundVarHandlingMode::NormalizeToRoot => {
-                    self.tcx().intern(TyKind::InferVar(floating.root))
+        Ok(match self.ucx.lookup_ty_infer_var(var) {
+            Ok(v) => self.fold(v),
+            Err(floating) => {
+                self.had_hole_flag = true;
+
+                match self.mode {
+                    UnboundVarHandlingMode::Error(error) => self.tcx().intern(TyKind::Error(error)),
+                    UnboundVarHandlingMode::NormalizeToRoot => {
+                        self.tcx().intern(TyKind::InferVar(floating.root))
+                    }
+                    UnboundVarHandlingMode::Panic => {
+                        unreachable!("unexpected ambiguous inference variable")
+                    }
                 }
-                UnboundVarHandlingMode::Panic => {
-                    unreachable!("unexpected ambiguous inference variable")
-                }
-            }),
-        }
+            }
+        })
     }
 }
