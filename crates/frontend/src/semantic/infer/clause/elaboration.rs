@@ -7,13 +7,14 @@ use crate::{
         infer::{
             ClauseCx, ClauseFuel, ClauseImportEnv, ClauseObligation, GenericSubst, ImportWfMode,
             InstantiatedTraitSpec, ObligationNotReady, ObligationResult, ObligationTermination,
-            UnboundVarHandlingMode,
+            PrettyFmtOpts, UnboundVarHandlingMode,
         },
         syntax::{
-            HrtbBinder, HrtbDebruijn, HrtbDebruijnDef, HrtbProjection, InferTyVar,
-            InferTyVarSourceInfo, Re, RelationMode, TraitClause, TraitParam, TraitSpec, Ty, TyCtxt,
-            TyFolder, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorInfallibleExt,
-            UniversalReVarSourceInfo, UniversalTy, UniversalTyOrReRoot, UniversalTyProjInner,
+            AnyGeneric, HrtbBinder, HrtbDebruijn, HrtbDebruijnDef, HrtbProjection, InferTyVar,
+            InferTyVarSourceInfo, Re, RelationMode, TraitClause, TraitInstance, TraitParam,
+            TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor,
+            TyVisitorInfallibleExt, UniversalReVarSourceInfo, UniversalTy, UniversalTyOrReRoot,
+            UniversalTyProjInner,
         },
     },
     utils::hash::{FxHashMap, FxHashSet},
@@ -51,7 +52,14 @@ pub enum ElaboratedClause {
         late_assoc_params: Rc<[Option<InferTyVar>]>,
     },
 
-    /// A fully elaborated clause, which can be used without any caveats.
+    /// A fully elaborated clause where...
+    ///
+    /// - all inference variables are resolved
+    /// - the binder is properly covering the target
+    /// - all associated types are properly merged
+    ///
+    /// The only job of the user is to instantiate `Unspecified` parameters and ensure that their
+    /// direct clauses include the trait's base clauses.
     Ready(HrtbBinder),
 }
 
@@ -268,28 +276,22 @@ impl<'tcx> ClauseCx<'tcx> {
             {
                 let regular_generic_count = *instantiated.def.r(s).regular_generic_count as usize;
 
-                for ((idx, &param), &late_init) in instantiated
+                let instantiated =
+                    self.resolve_elaborated_universal_trait_spec(universal, instantiated);
+
+                for (&late_init_to, &late_init_var) in instantiated
                     .params
                     .r(s)
                     .iter()
-                    .enumerate()
                     .skip(regular_generic_count)
                     .zip(instantiated_with_late.iter())
                 {
-                    let Some(late_init_var) = late_init else {
+                    let Some(late_init_var) = late_init_var else {
                         continue;
                     };
 
-                    let late_init_to = match param {
-                        TraitParam::Equals(eq) => eq.unwrap_ty(),
-                        TraitParam::Unspecified(clauses) => {
-                            let projection =
-                                self.fresh_ty_universal_proj(universal, instantiated, idx as u32);
-
-                            self.init_ty_universal_direct_clauses(projection, clauses);
-
-                            tcx.intern(TyKind::Universal(projection))
-                        }
+                    let TyOrRe::Ty(late_init_to) = late_init_to else {
+                        unreachable!()
                     };
 
                     self.unify_ty_and_ty(
@@ -304,7 +306,8 @@ impl<'tcx> ClauseCx<'tcx> {
 
             // We have enough information to finish this clause. Convert it into its HRTB form and
             // mark it as done.
-            let finished_binder = self.hrtb_binder_from_elab_universals(universal, instantiated);
+            let finished_binder =
+                self.hrtb_binder_from_elaboration_universals(universal, instantiated);
 
             if !self.is_hrtb_binder_from_elab_universals_covered(finished_binder) {
                 // Discard the clause since it contains projections which cannot be effectively
@@ -332,7 +335,7 @@ impl<'tcx> ClauseCx<'tcx> {
 // === HRTB universals to binder === //
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn hrtb_binder_from_elab_universals(
+    pub fn hrtb_binder_from_elaboration_universals(
         &mut self,
         universal: UniversalTy,
         instantiated: TraitSpec,
@@ -368,6 +371,85 @@ impl<'tcx> ClauseCx<'tcx> {
         cover_visitor.visit(binder.inner);
 
         cover_visitor.was_covered.iter().all(|&v| v)
+    }
+
+    pub fn resolve_elaborated_universal_trait_spec(
+        &mut self,
+        universal: UniversalTy,
+        spec: TraitSpec,
+    ) -> TraitInstance {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let universe = self.lookup_universal_ty_hrtb_universe(universal).clone();
+
+        let instance = spec
+            .params
+            .r(s)
+            .iter()
+            .enumerate()
+            .map(|(idx, &param)| match param {
+                TraitParam::Equals(v) => v,
+                TraitParam::Unspecified(_) => TyOrRe::Ty(tcx.intern(TyKind::Universal(
+                    self.fresh_ty_universal_proj(universal, spec, idx as u32),
+                ))),
+            })
+            .collect::<Vec<_>>();
+
+        let instance = TraitInstance {
+            def: spec.def,
+            params: tcx.intern_list(&instance),
+        };
+
+        for ((&param, &instantiation), &generic) in spec
+            .params
+            .r(s)
+            .iter()
+            .zip(instance.params.r(s))
+            .zip(&spec.def.r(s).generics.r(s).defs)
+        {
+            let TraitParam::Unspecified(extra_clauses) = param else {
+                continue;
+            };
+
+            let TyOrRe::Ty(instantiation) = instantiation else {
+                unreachable!()
+            };
+
+            let TyKind::Universal(instantiation) = *instantiation.r(s) else {
+                unreachable!()
+            };
+
+            let AnyGeneric::Ty(generic) = generic else {
+                unreachable!()
+            };
+
+            let base_clauses = self
+                .importer(
+                    ClauseFuel::new(),
+                    universe.clone(),
+                    ClauseImportEnv::new(
+                        Some(tcx.intern(TyKind::Universal(universal))),
+                        [GenericSubst::new(*spec.def.r(s).generics, instance.params)],
+                    ),
+                    ImportWfMode::ReportElsewhere,
+                )
+                .import_trait_clause_list(*generic.r(s).clauses)
+                .report_delay_bug();
+
+            let clauses = tcx.intern_list(
+                &extra_clauses
+                    .r(s)
+                    .iter()
+                    .chain(base_clauses.r(s))
+                    .copied()
+                    .collect::<Vec<_>>(),
+            );
+
+            self.init_ty_universal_direct_clauses(instantiation, clauses);
+        }
+
+        instance
     }
 }
 

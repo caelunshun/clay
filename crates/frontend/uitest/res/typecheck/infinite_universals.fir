@@ -30,12 +30,12 @@ trait IsEq {}
 impl<T> IsEq for (T, T) {}
 
 struct Uhh<'a, 'b, T: Meow> {
-    // FIXME: Should be rejected.
+    // Should be rejected.
     case1: AssertEq<(
         <<T as Meow>::Generator as UhOh<'a, u32>>::Output,
         <<T as Meow>::Generator as UhOh<'a, i32>>::Output,
     )>,
-    // FIXME: Should be rejected.
+    // Should be rejected.
     case2: AssertEq<(
         <<T as Meow>::Generator as UhOh<'a, u32>>::Output,
         <<T as Meow>::Generator as UhOh<'b, u32>>::Output,

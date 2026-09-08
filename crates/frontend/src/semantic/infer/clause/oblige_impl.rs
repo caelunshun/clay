@@ -292,7 +292,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 } => {
                     let mut fork = self.clone();
 
-                    let lhs = fork.hrtb_binder_from_elab_universals(universal, instantiated);
+                    let lhs = fork.hrtb_binder_from_elaboration_universals(universal, instantiated);
 
                     match fork.try_select_single_inherent_impl(fuel, universe, universal, lhs, rhs)
                     {
@@ -346,19 +346,17 @@ impl<'tcx> ClauseCx<'tcx> {
         // our specification.
         let lhs_orig = lhs;
         let PromiseValue {
-            value: lhs,
+            value: lhs_spec,
             promise: lhs_instantiate_error,
         } = self.instantiate_hrtb_infer(fuel, universe.clone(), lhs);
 
+        let lhs = self.resolve_elaborated_universal_trait_spec(universal, lhs_spec);
+
         let mut param_iter = lhs.params.r(s).iter().zip(rhs.params.r(s)).enumerate();
 
-        for (idx, (&lhs_param, &rhs_param)) in
+        for (idx, (&lhs, &rhs_param)) in
             (&mut param_iter).take(*rhs.def.r(s).regular_generic_count as usize)
         {
-            let TraitParam::Equals(lhs) = lhs_param else {
-                unreachable!();
-            };
-
             match rhs_param {
                 TraitParam::Equals(rhs) => match (lhs, rhs) {
                     (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
@@ -394,18 +392,7 @@ impl<'tcx> ClauseCx<'tcx> {
         }
 
         // If we can, push its obligations.
-        for (idx, (&lhs_param, &rhs_param)) in param_iter {
-            let lhs = match lhs_param {
-                TraitParam::Equals(eq) => eq,
-                TraitParam::Unspecified(clauses) => {
-                    let projection = self.fresh_ty_universal_proj(universal, rhs, idx as u32);
-
-                    self.init_ty_universal_direct_clauses(projection, clauses);
-
-                    TyOrRe::Ty(tcx.intern(TyKind::Universal(projection)))
-                }
-            };
-
+        for (idx, (&lhs, &rhs_param)) in param_iter {
             match rhs_param {
                 TraitParam::Equals(rhs) => match (lhs, rhs) {
                     (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
@@ -450,7 +437,7 @@ impl<'tcx> ClauseCx<'tcx> {
             |ccx| InherentImplUnsatisfiedError {
                 lhs: lhs_orig,
                 rhs,
-                lhs_instantiated: lhs,
+                lhs_instantiated: lhs_spec,
                 lhs_instantiate_error,
                 culprits: culprits.unwrap_or_default(),
             }
