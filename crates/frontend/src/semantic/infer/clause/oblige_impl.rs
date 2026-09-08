@@ -281,7 +281,10 @@ impl<'tcx> ClauseCx<'tcx> {
     ) -> ObligationResult<
         Result<PromiseValue<'tcx, Self, InherentImplUnsatisfiedError>, SelectionRejected>,
     > {
-        for lhs in self.elaborate_universal(universal).elaborated_clauses {
+        for lhs in self
+            .elaborate_universal_or_request(universal)?
+            .elaborated_clauses
+        {
             match lhs {
                 ElaboratedClause::NotReady {
                     instantiated,

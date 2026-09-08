@@ -318,6 +318,16 @@ impl<'tcx> ClauseCx<'tcx> {
                     }
 
                     Err(err) => {
+                        match err {
+                            ObligationNotReady::RequestMissingElaboration(universal) => {
+                                self.elaborate_universal_immediately(universal);
+                                made_progress = true;
+                            }
+                            _ => {
+                                // (fallthrough)
+                            }
+                        }
+
                         self.pending_obligations[curr_idx].not_ready = Some(err);
                     }
                 }

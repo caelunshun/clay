@@ -183,7 +183,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 }
             }
             TyKind::Universal(universal) => {
-                let lub_re = self.elaborate_universal(universal).lub_re;
+                let lub_re = self.elaborate_universal_immediately(universal).lub_re;
 
                 self.oblige_re_outlives_re(lub_re, rhs, dir.to_mode())
                     .map(|_ccx, error| TyOutlivesReErrorCulprit::Regular(error))

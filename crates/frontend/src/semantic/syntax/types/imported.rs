@@ -148,7 +148,7 @@ pub enum UniversalTy {
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum UniversalTyOrReRoot {
     Ty(UniversalTyRoot),
-    Re(UniversalReVar),
+    Re(Re),
 }
 
 define_index_type! {

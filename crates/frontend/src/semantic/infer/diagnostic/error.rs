@@ -1406,6 +1406,7 @@ pub enum ObligationNotReady {
     MultipleApplicableImpls,
     ElaborationHasInferForInherentSelection,
     CoverMissingInfer { missing_mentions: Vec<UniversalTy> },
+    RequestMissingElaboration(UniversalTy),
 }
 
 impl ToDebugTree for ObligationNotReady {
@@ -1432,6 +1433,7 @@ impl ToDebugTree for ObligationNotReady {
                         .iter()
                         .map(|v| DebugTree::new().with_prose(format!("{}", pretty.wrap(v)))),
                 ),
+            ObligationNotReady::RequestMissingElaboration(_) => unreachable!(),
         }
     }
 }

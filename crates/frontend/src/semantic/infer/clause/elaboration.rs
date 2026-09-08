@@ -6,7 +6,7 @@ use crate::{
     semantic::{
         infer::{
             ClauseCx, ClauseFuel, ClauseImportEnv, ClauseObligation, GenericSubst, ImportWfMode,
-            InstantiatedTraitSpec, ObligationResult, ObligationTermination,
+            InstantiatedTraitSpec, ObligationNotReady, ObligationResult, ObligationTermination,
         },
         syntax::{
             HrtbBinder, HrtbDebruijn, HrtbDebruijnDef, HrtbProjection, InferTyVar,
@@ -55,7 +55,21 @@ pub enum ElaboratedClause {
 }
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn elaborate_universal(&mut self, universal: UniversalTy) -> UniversalElaboration {
+    pub fn elaborate_universal_or_request(
+        &mut self,
+        universal: UniversalTy,
+    ) -> ObligationResult<UniversalElaboration> {
+        if let Some(cached) = self.universal_ty_elaboration_state(universal).cloned() {
+            Ok(cached)
+        } else {
+            Err(ObligationNotReady::RequestMissingElaboration(universal))
+        }
+    }
+
+    pub fn elaborate_universal_immediately(
+        &mut self,
+        universal: UniversalTy,
+    ) -> UniversalElaboration {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -143,7 +157,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     .r(s)
                     .iter()
                     .map(|&param| match param {
-                        TyOrRe::Re(Re::UniversalVar(root)) => UniversalTyOrReRoot::Re(root),
+                        TyOrRe::Re(root) => UniversalTyOrReRoot::Re(root),
                         TyOrRe::Ty(ty)
                             if let TyKind::Universal(UniversalTy::Root(root)) = *ty.r(s) =>
                         {
@@ -402,9 +416,9 @@ impl<'tcx> TyFolder<'tcx> for HrtbReverseTranscriptase<'_, 'tcx> {
             return Ok(re);
         };
 
-        let Some(debruijn) =
-            self.universal_to_hrtb_if_was_instantiated(UniversalTyOrReRoot::Re(universal))
-        else {
+        let Some(debruijn) = self.universal_to_hrtb_if_was_instantiated(UniversalTyOrReRoot::Re(
+            Re::UniversalVar(universal),
+        )) else {
             // Not an HRTB.
             return Ok(re);
         };

@@ -333,7 +333,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
         };
 
         self.ccx_mut()
-            .elaborate_universal(universal)
+            .elaborate_universal_immediately(universal)
             .elaborated_clauses
             .iter()
             .map(|clause| match clause {
