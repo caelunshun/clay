@@ -8,14 +8,14 @@ use crate::{
     semantic::{
         analysis::typeck::{BodyCtxt, infra::deref::attempt_deref},
         infer::{
-            ClauseFuel, ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse, PromiseProbe,
-            SpannedError, UnboundVarHandlingMode,
+            ClauseFuel, ClauseImportEnv, ElaboratedClause, FixArity, GenericSubst, HrtbUniverse,
+            PromiseProbe, SpannedError, UnboundVarHandlingMode,
         },
         lower::modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},
         syntax::{
             AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, FnOwner, FnOwnerTrait,
             InferTyVarSourceInfo, InstantiatedFnSig, Mutability, Re, RelationMode, SigGenericList,
-            TraitClause, TraitSpec, Ty, TyFolderInfallibleExt as _, TyKind, TyOrReList,
+            TraitSpec, Ty, TyFolderInfallibleExt as _, TyKind, TyOrReList,
         },
     },
     utils::lang::IterEither,
@@ -333,13 +333,15 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
         };
 
         self.ccx_mut()
-            .elaborate_ty_universal_clauses_possibly_floating(universal)
-            .clauses
-            .r(s)
+            .elaborate_universal(universal)
+            .elaborated_clauses
             .iter()
-            .flat_map(|clause| match clause {
-                TraitClause::Outlives(_, _) => None,
-                TraitClause::Trait(binder) => Some(binder.inner.def),
+            .map(|clause| match clause {
+                ElaboratedClause::NotReady {
+                    instantiated,
+                    late_assoc_params: _,
+                } => instantiated.def,
+                ElaboratedClause::Ready(binder) => binder.inner.def,
             })
             .filter_map(|def| {
                 let &idx = def.r(s).name_to_method.get(&name.text)?;

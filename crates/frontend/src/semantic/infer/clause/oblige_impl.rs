@@ -10,7 +10,7 @@ use crate::{
             InstantiatedImplBlock, InstantiatedTraitImplError, InstantiatedTraitImplErrorKind,
             InstantiatedTraitSpec, MultiPromise, MultiPromiseBuilder, NotCoveredError,
             ObligationNotReady, ObligationResult, ObligationTermination, Promise, PromiseHandle,
-            PromiseValue, TraitClauseError, UninstantiatedTraitImplError, UniversalElaboration,
+            PromiseValue, TraitClauseError, UninstantiatedTraitImplError,
         },
         syntax::{
             HrtbBinder, ImplItem, RelationMode, SimpleTySet, TraitClause, TraitClauseList,
@@ -160,14 +160,10 @@ impl<'tcx> ClauseCx<'tcx> {
                 todo!()
             }
             TyKind::Universal(universal) => {
-                let universal_elab = self.elaborate_universal(universal);
-
-                match self.clone().try_select_inherent_impl(
-                    fuel,
-                    &universe,
-                    &universal_elab,
-                    rhs,
-                )? {
+                match self
+                    .clone()
+                    .try_select_inherent_impl(fuel, &universe, universal, rhs)?
+                {
                     Ok(PromiseValue {
                         value: fork,
                         promise,
@@ -277,38 +273,50 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     fn try_select_inherent_impl(
-        self,
+        mut self,
         fuel: ClauseFuel,
         universe: &HrtbUniverse,
-        lhs: &UniversalElaboration,
+        universal: UniversalTy,
         rhs: TraitSpec,
     ) -> ObligationResult<
         Result<PromiseValue<'tcx, Self, InherentImplUnsatisfiedError>, SelectionRejected>,
     > {
-        let s = self.session();
-
-        for &lhs in &lhs.elaborated_clauses {
+        for lhs in self.elaborate_universal(universal).elaborated_clauses {
             match lhs {
                 ElaboratedClause::NotReady {
-                    binder_defs,
-                    universal_roots,
                     instantiated,
-                    instantiated_with_late: late_associations,
+                    late_assoc_params: _,
                 } => {
-                    // Early path
-                    if instantiated.def != rhs.def {
-                        continue;
-                    }
+                    let mut fork = self.clone();
 
-                    todo!()
+                    let lhs = fork.hrtb_binder_from_elab_universals(universal, instantiated);
+
+                    match fork.try_select_single_inherent_impl(fuel, universe, universal, lhs, rhs)
+                    {
+                        Ok(_) => {
+                            return Err(ObligationNotReady::ElabStillResolving);
+                        }
+                        Err(SelectionRejected) => {
+                            continue;
+                        }
+                    }
                 }
                 ElaboratedClause::Ready(lhs) => {
-                    // Early path
-                    if lhs.inner.def != rhs.def {
-                        continue;
-                    }
+                    let fork = self.clone();
 
-                    todo!()
+                    match fork.try_select_single_inherent_impl(fuel, universe, universal, lhs, rhs)
+                    {
+                        Ok(PromiseValue {
+                            value: fork,
+                            promise,
+                        }) => {
+                            self = fork;
+                            return Ok(Ok(promise.and_value(self)));
+                        }
+                        Err(SelectionRejected) => {
+                            continue;
+                        }
+                    }
                 }
             }
         }
@@ -320,17 +328,14 @@ impl<'tcx> ClauseCx<'tcx> {
         mut self,
         fuel: ClauseFuel,
         universe: &HrtbUniverse,
+        universal: UniversalTy,
         lhs: HrtbBinder,
         rhs: TraitSpec,
-    ) -> ObligationResult<
-        Result<PromiseValue<'tcx, Self, InherentImplUnsatisfiedError>, SelectionRejected>,
-    > {
+    ) -> Result<PromiseValue<'tcx, Self, InherentImplUnsatisfiedError>, SelectionRejected> {
+        let tcx = self.tcx();
         let s = self.session();
 
         assert_eq!(lhs.inner.def, rhs.def);
-
-        let is_ready_if_selected =
-            self.is_elaborated_clause_ready_if_selected(reified_var_roots, lhs);
 
         let mut culprits = MultiPromiseBuilder::new();
 
@@ -373,7 +378,7 @@ impl<'tcx> ClauseCx<'tcx> {
                                 })
                                 .join(&mut culprits),
                             Err(_err) => {
-                                return Ok(Err(SelectionRejected));
+                                return Err(SelectionRejected);
                             }
                         }
                     }
@@ -385,18 +390,17 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         }
 
-        // If we couldn't definitively reject this clause and it's unfinished, we need to wait for
-        // more inferences. This is important because, otherwise, we could either select the
-        // incorrect clause if the generic parameters contain unresolved projections or even
-        // possibly allow a recursive projection to compile.
-        if !is_ready_if_selected {
-            return Err(ObligationNotReady::ElaborationHasInferForInherentSelection);
-        }
-
         // If we can, push its obligations.
         for (idx, (&lhs_param, &rhs_param)) in param_iter {
-            let TraitParam::Equals(lhs) = lhs_param else {
-                unreachable!();
+            let lhs = match lhs_param {
+                TraitParam::Equals(eq) => eq,
+                TraitParam::Unspecified(clauses) => {
+                    let projection = self.fresh_ty_universal_proj(universal, rhs, idx as u32);
+
+                    self.init_ty_universal_direct_clauses(projection, clauses);
+
+                    TyOrRe::Ty(tcx.intern(TyKind::Universal(projection)))
+                }
             };
 
             match rhs_param {
@@ -449,7 +453,7 @@ impl<'tcx> ClauseCx<'tcx> {
             }
         };
 
-        Ok(Ok(promise.and_value(self)))
+        Ok(promise.and_value(self))
     }
 
     fn try_select_block_impl(
