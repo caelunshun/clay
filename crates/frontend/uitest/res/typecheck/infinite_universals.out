@@ -1,0 +1,60 @@
+error: - 
+    - projection failed
+      span: infinite_universals.fir:46:36-49
+        - trait spec resolution error
+          self ty: <T as Meow>::Generator
+          spec: UhOh<'a, u32>
+            - trait not implemented
+              LHS: <T as Meow>::Generator
+              RHS: UhOh<'a, u32, Output = ?20>
+                - no suitable impl met
+            - projection failed
+              span: infinite_universals.fir:45:36-49
+                - trait spec resolution error
+                  self ty: <T as Meow>::Generator
+                  spec: UhOh<'a, u32>
+                    - trait not implemented
+                      LHS: <T as Meow>::Generator
+                      RHS: UhOh<'a, u32, Output = ?20>
+                        - no suitable impl met
+
+error: - 
+    - projection failed
+      span: infinite_universals.fir:41:36-49
+        - trait spec resolution error
+          self ty: <T as Meow>::Generator
+          spec: UhOh<'b, u32>
+            - trait not implemented
+              LHS: <T as Meow>::Generator
+              RHS: UhOh<'b, u32, Output = ?12>
+                - no suitable impl met
+            - projection failed
+              span: infinite_universals.fir:40:36-49
+                - trait spec resolution error
+                  self ty: <T as Meow>::Generator
+                  spec: UhOh<'a, u32>
+                    - trait not implemented
+                      LHS: <T as Meow>::Generator
+                      RHS: UhOh<'a, u32, Output = ?12>
+                        - no suitable impl met
+
+error: - 
+    - projection failed
+      span: infinite_universals.fir:36:36-49
+        - trait spec resolution error
+          self ty: <T as Meow>::Generator
+          spec: UhOh<'a, i32>
+            - trait not implemented
+              LHS: <T as Meow>::Generator
+              RHS: UhOh<'a, i32, Output = ?4>
+                - no suitable impl met
+            - projection failed
+              span: infinite_universals.fir:35:36-49
+                - trait spec resolution error
+                  self ty: <T as Meow>::Generator
+                  spec: UhOh<'a, u32>
+                    - trait not implemented
+                      LHS: <T as Meow>::Generator
+                      RHS: UhOh<'a, u32, Output = ?4>
+                        - no suitable impl met
+

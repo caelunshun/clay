@@ -1,7 +1,7 @@
 use crate::{
     base::{
         Session,
-        arena::{HasInterner, Obj},
+        arena::{HasInterner, HasListInterner as _, Obj},
     },
     semantic::{
         infer::{
@@ -15,8 +15,8 @@ use crate::{
         },
         syntax::{
             Crate, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection, RelationMode,
-            SimpleTySet, TraitClause, TraitClauseList, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe,
-            UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProj,
+            SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyKind,
+            TyOrRe, UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProj,
             UniversalTyProjIdx, UniversalTyProjInner, UniversalTyRoot, UniversalTyRootSourceInfo,
         },
     },
@@ -695,10 +695,33 @@ impl<'tcx> ClauseCx<'tcx> {
         as_spec: TraitSpec,
         assoc_idx: u32,
     ) -> UniversalTyProj {
+        let s = self.session();
+        let tcx = self.tcx();
+
         let cache_idx = self.universal_projs.push(UniversalTyProjDescriptor {
             direct_clauses: None,
             elaboration: None,
         });
+
+        let as_spec = TraitSpec {
+            def: as_spec.def,
+            params: tcx.intern_list(
+                &as_spec
+                    .params
+                    .r(s)
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, &para)| {
+                        if idx >= *as_spec.def.r(s).regular_generic_count as usize {
+                            TraitParam::Unspecified(tcx.intern_list(&[]))
+                        } else {
+                            debug_assert!(matches!(para, TraitParam::Equals(_)));
+                            para
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+        };
 
         self.tcx().intern(UniversalTyProjInner {
             target,

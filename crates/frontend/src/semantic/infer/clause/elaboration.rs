@@ -7,6 +7,7 @@ use crate::{
         infer::{
             ClauseCx, ClauseFuel, ClauseImportEnv, ClauseObligation, GenericSubst, ImportWfMode,
             InstantiatedTraitSpec, ObligationNotReady, ObligationResult, ObligationTermination,
+            UnboundVarHandlingMode,
         },
         syntax::{
             HrtbBinder, HrtbDebruijn, HrtbDebruijnDef, HrtbProjection, InferTyVar,
@@ -246,7 +247,17 @@ impl<'tcx> ClauseCx<'tcx> {
             let instantiated_with_late = instantiated_with_late.clone();
 
             // First, ensure that `instantiated` has all its inference variables solved.
-            // TODO
+            {
+                let mut folder = self
+                    .ucx()
+                    .substitutor(UnboundVarHandlingMode::NormalizeToRoot);
+
+                instantiated = folder.fold(instantiated);
+
+                if folder.did_trap_floating {
+                    continue;
+                }
+            }
 
             // Next, let's build up a full context for all our clauses by considering subsequent
             // clauses.
