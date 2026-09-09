@@ -281,6 +281,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 let regular_generic_count = *instantiated.def.r(s).regular_generic_count as usize;
 
                 let instantiated = self.resolve_elaborated_universal_trait_spec(
+                    ClauseFuel::new(),
                     &universe,
                     universal,
                     instantiated,
@@ -386,6 +387,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn resolve_elaborated_universal_trait_spec(
         &mut self,
+        fuel: ClauseFuel,
         universe: &HrtbUniverse,
         universal: UniversalTy,
         spec: TraitSpec,
@@ -436,7 +438,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
             let base_clauses = self
                 .importer(
-                    ClauseFuel::new(),
+                    fuel,
                     universe.clone(),
                     ClauseImportEnv::new(
                         Some(tcx.intern(TyKind::Universal(universal))),

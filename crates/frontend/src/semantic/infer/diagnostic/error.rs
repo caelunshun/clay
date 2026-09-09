@@ -1441,7 +1441,6 @@ pub enum ObligationNotReady {
     UnresolvedInfer(InferTyVar),
     ElabStillResolving,
     MultipleApplicableImpls,
-    ElaborationHasInferForInherentSelection,
     CoverMissingInfer { missing_mentions: Vec<UniversalTy> },
     RequestMissingElaboration(UniversalTy),
 }
@@ -1458,9 +1457,6 @@ impl ToDebugTree for ObligationNotReady {
             ObligationNotReady::MultipleApplicableImpls => DebugTree::new()
                 .with_prose("cannot progress")
                 .with_prose("multiple applicable impls"),
-            ObligationNotReady::ElaborationHasInferForInherentSelection => DebugTree::new()
-                .with_prose("cannot progress")
-                .with_prose("elaboration still has infer for inherent selection"),
             ObligationNotReady::CoverMissingInfer { missing_mentions } => DebugTree::new()
                 .with_prose("cannot progress")
                 .with_prose("missing infer var while checking cover")

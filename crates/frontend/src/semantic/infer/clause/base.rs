@@ -299,12 +299,14 @@ impl<'tcx> ClauseCx<'tcx> {
 
                         match kind {
                             ObligationTermination::Finished => {
-                                // (fallthrough)
+                                made_progress = true;
+                                self.pending_obligations.swap_remove(curr_idx);
+
+                                break;
                             }
                             ObligationTermination::CommitAndKeep {
                                 made_progress: self_made_progress,
                             } => {
-                                // Intentionally does not terminate obligation.
                                 if self_made_progress {
                                     made_progress = true;
                                     break;
@@ -313,18 +315,14 @@ impl<'tcx> ClauseCx<'tcx> {
                                 }
                             }
                             ObligationTermination::FuelExhausted(kill_id) => {
+                                made_progress = true;
+                                self.pending_obligations.swap_remove(curr_idx);
+
                                 self.kill_obligations_with_id(kill_id);
-                                // (fallthrough)
+                                break;
                             }
                         }
-
-                        made_progress = true;
-                        self.pending_obligations.swap_remove(curr_idx);
-
-                        // (forces depth-first expansion)
-                        break;
                     }
-
                     Err(err) => {
                         match err {
                             ObligationNotReady::RequestMissingElaboration(universal) => {
@@ -385,8 +383,6 @@ impl<'tcx> ClauseCx<'tcx> {
         self.poll_obligations();
 
         while let Some(state) = self.pending_obligations.pop() {
-            let not_ready = state.not_ready.clone().unwrap();
-
             match &state.kind {
                 ClauseObligation::TyUnifiesTy { .. } => {
                     unreachable!()
@@ -398,6 +394,8 @@ impl<'tcx> ClauseCx<'tcx> {
                     lhs,
                     rhs,
                 } => {
+                    let not_ready = state.not_ready.clone().unwrap();
+
                     handle.reject(
                         self,
                         InstantiatedTraitImplError {
@@ -414,6 +412,8 @@ impl<'tcx> ClauseCx<'tcx> {
                     rhs,
                     dir: _,
                 } => {
+                    let not_ready = state.not_ready.clone().unwrap();
+
                     handle.reject(
                         self,
                         TyOutlivesReError {
@@ -432,6 +432,8 @@ impl<'tcx> ClauseCx<'tcx> {
                     in_type,
                     in_trait,
                 } => {
+                    let not_ready = state.not_ready.clone().unwrap();
+
                     let ObligationNotReady::CoverMissingInfer { missing_mentions } = not_ready
                     else {
                         unreachable!()

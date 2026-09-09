@@ -371,7 +371,7 @@ impl<'tcx> ClauseCx<'tcx> {
             promise: lhs_instantiate_error,
         } = self.instantiate_hrtb_infer(fuel, universe.clone(), lhs);
 
-        let lhs = self.resolve_elaborated_universal_trait_spec(universe, universal, lhs_spec);
+        let lhs = self.resolve_elaborated_universal_trait_spec(fuel, universe, universal, lhs_spec);
 
         let mut param_iter = lhs.params.r(s).iter().zip(rhs.params.r(s)).enumerate();
 
