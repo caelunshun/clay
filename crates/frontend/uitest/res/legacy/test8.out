@@ -19,46 +19,52 @@ error:
   span: test8.fir:43:20-36
     - binder param WF error
         - idx: 0
-            - trait not implemented
+            - uninstantiated trait not implemented
               LHS: (&'b (), &'c ())
               RHS: demo2::Whee
               RHS instance: demo2::Whee
               spec not met:
-                - block impl unsatisfied
-                  block: test8.fir:30:23-39
-                    - ty and ty region error
-                      LHS: (&'b (), &'c ())
-                      RHS: (&'?0 (), &'?0 ())
-                      mode: Equate
-                        - re and re unify error
-                          LHS: 'c
-                          RHS: '?0
+                - instantiated trait not implemented
+                  LHS: (&'b (), &'c ())
+                  RHS: demo2::Whee
+                    - block impl unsatisfied
+                      block: test8.fir:30:23-39
+                        - ty and ty region error
+                          LHS: (&'b (), &'c ())
+                          RHS: (&'?0 (), &'?0 ())
                           mode: Equate
-                            - requires var: 'c
-                              to outlive: 'b
+                            - re and re unify error
+                              LHS: 'c
+                              RHS: '?0
+                              mode: Equate
+                                - requires var: 'c
+                                  to outlive: 'b
 
 error: 
 - bad generics
   span: test8.fir:48:20-36
     - binder param WF error
         - idx: 0
-            - trait not implemented
+            - uninstantiated trait not implemented
               LHS: (&'b (), &'c ())
               RHS: demo2::Whee
               RHS instance: demo2::Whee
               spec not met:
-                - block impl unsatisfied
-                  block: test8.fir:30:23-39
-                    - ty and ty region error
-                      LHS: (&'b (), &'c ())
-                      RHS: (&'?0 (), &'?0 ())
-                      mode: Equate
-                        - re and re unify error
-                          LHS: 'c
-                          RHS: '?0
+                - instantiated trait not implemented
+                  LHS: (&'b (), &'c ())
+                  RHS: demo2::Whee
+                    - block impl unsatisfied
+                      block: test8.fir:30:23-39
+                        - ty and ty region error
+                          LHS: (&'b (), &'c ())
+                          RHS: (&'?0 (), &'?0 ())
                           mode: Equate
-                            - requires var: 'c
-                              to outlive: 'b
-                                - requires var: 'b
-                                  to outlive: 'c
+                            - re and re unify error
+                              LHS: 'c
+                              RHS: '?0
+                              mode: Equate
+                                - requires var: 'c
+                                  to outlive: 'b
+                                    - requires var: 'b
+                                      to outlive: 'c
 

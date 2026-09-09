@@ -1,9 +1,12 @@
 error: 
 - span: test21.fir:70:17-28
-  trait not implemented
-  LHS: fn @ meow<?34>
+  uninstantiated trait not implemented
+  LHS: fn @ meow<?(34) _>
   RHS: for<T: Meow> std::FnOnce<(T,), T>
-  RHS instance: std::FnOnce<(T,), T>
+  RHS instance: std::FnOnce<(u(17) T,), u(17) T>
   spec not met:
-    - no suitable impl met
+    - instantiated trait not implemented
+      LHS: fn @ meow<?(34) _>
+      RHS: std::FnOnce<(u(17) T,), u(17) T>
+        - no suitable impl met
 

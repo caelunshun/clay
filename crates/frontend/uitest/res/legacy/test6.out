@@ -3,11 +3,14 @@ error:
   span: test6.fir:12:14-15
     - binder param WF error
         - idx: 0
-            - trait not implemented
-              LHS: ?0
+            - uninstantiated trait not implemented
+              LHS: ?(0) _
               RHS: Whee
               RHS instance: Whee
               spec not met:
-                - cannot progress
-                  ?0 could not be inferred
+                - instantiated trait not implemented
+                  LHS: ?(0) _
+                  RHS: Whee
+                    - cannot progress
+                      ?(0) _ could not be inferred
 

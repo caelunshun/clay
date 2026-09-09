@@ -55,9 +55,10 @@ trait Helper<T, V> {}
 
 trait Fuzzy {}
 
-fn rejected<Q: for<T: Projector> Helper<<T as Projector>::Out, T>>() {}
+fn less_spec<Q: for<T: Projector> Helper<<T as Projector>::Out, T>>() {
+    more_spec::<Q>;
+}
 
-fn accepted<Q: for<T: Projector<Out: Fuzzy>> Helper<<T as Projector>::Out, T>>() {
-    // FIXME: why is the diagnostic so short??
-    rejected::<Q>;
+fn more_spec<Q: for<T: Projector<Out: Fuzzy>> Helper<<T as Projector>::Out, T>>() {
+    less_spec::<Q>;
 }

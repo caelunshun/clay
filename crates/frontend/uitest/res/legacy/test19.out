@@ -4,7 +4,7 @@ error:
     - binder param WF error
         - idx: 0
             - ty outlives region
-              LHS: T
+              LHS: u(0) T
               RHS: 'a
               Errors:
                 - re and re unify error
@@ -20,7 +20,7 @@ error:
     - binder param WF error
         - idx: 1
             - ty outlives region
-              LHS: T
+              LHS: u(0) T
               RHS: 'a
               Errors:
                 - re and re unify error
@@ -36,7 +36,7 @@ error:
     - binder param WF error
         - idx: 0
             - ty outlives region
-              LHS: T
+              LHS: u(0) T
               RHS: 'a
               Errors:
                 - re and re unify error
@@ -52,7 +52,7 @@ error:
     - binder param WF error
         - idx: 1
             - ty outlives region
-              LHS: T
+              LHS: u(0) T
               RHS: 'a
               Errors:
                 - re and re unify error

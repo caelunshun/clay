@@ -316,8 +316,11 @@ impl<'tcx> ClauseCx<'tcx> {
             // mark it as done.
             made_progress = true;
 
-            let finished_binder =
-                self.hrtb_binder_from_elaboration_universals(universal, instantiated);
+            let finished_binder = self.hrtb_binder_from_elaboration_universals(
+                universe.clone(),
+                universal,
+                instantiated,
+            );
 
             if !self.is_hrtb_binder_from_elab_universals_covered(finished_binder) {
                 // Discard the clause since it contains projections which cannot be effectively
@@ -347,6 +350,7 @@ impl<'tcx> ClauseCx<'tcx> {
 impl<'tcx> ClauseCx<'tcx> {
     pub fn hrtb_binder_from_elaboration_universals(
         &mut self,
+        universe: HrtbUniverse,
         universal: UniversalTy,
         instantiated: TraitSpec,
     ) -> HrtbBinder {
@@ -354,7 +358,9 @@ impl<'tcx> ClauseCx<'tcx> {
 
         let mut folder = HrtbReverseTranscriptase {
             ccx: self,
+            universe,
             universal,
+            infer_remapping: FxHashMap::default(),
             universal_root_to_debruijn: FxHashMap::default(),
             debruijn_defs_backward: Vec::new(),
         };
@@ -467,7 +473,9 @@ impl<'tcx> ClauseCx<'tcx> {
 
 struct HrtbReverseTranscriptase<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
+    universe: HrtbUniverse,
     universal: UniversalTy,
+    infer_remapping: FxHashMap<InferTyVar, InferTyVar>,
     universal_root_to_debruijn: FxHashMap<UniversalTyOrReRoot, u32>,
     debruijn_defs_backward: Vec<HrtbDebruijnDef>,
 }
@@ -539,8 +547,23 @@ impl<'tcx> TyFolder<'tcx> for HrtbReverseTranscriptase<'_, 'tcx> {
 
         let ty = self.ccx.peel_ty_infer_var_without_poll(ty);
 
-        let TyKind::Universal(universal) = *ty.r(s) else {
-            return Ok(self.super_(ty));
+        let universal = match *ty.r(s) {
+            TyKind::Universal(universal) => universal,
+            TyKind::InferVar(var) => {
+                let var = *self.infer_remapping.entry(var).or_insert_with(|| {
+                    // Ensures that unsolved inference variables belong in the right universe for
+                    // not-ready obligation checks.
+                    self.ccx.fresh_ty_infer_var(
+                        self.universe.clone(),
+                        InferTyVarSourceInfo::LateAssocElabPlaceholder,
+                    )
+                });
+
+                return Ok(tcx.intern(TyKind::InferVar(var)));
+            }
+            _ => {
+                return Ok(self.super_(ty));
+            }
         };
 
         match universal {

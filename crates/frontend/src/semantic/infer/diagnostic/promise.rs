@@ -130,7 +130,7 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
         self.report_with(|ccx, err| {
             Diag::anon_err(format!(
                 "\n{}",
-                err.to_debug_tree(&ccx.pretty(PrettyFmtOpts { verbose: false }))
+                err.to_debug_tree(&ccx.pretty(PrettyFmtOpts { verbose: true }))
             ))
             .emit()
         });
@@ -144,7 +144,7 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
         self.report_with(|ccx, err| {
             Diag::anon_err(format!(
                 "\n{}",
-                err.to_debug_tree(&ccx.pretty(PrettyFmtOpts { verbose: false }))
+                err.to_debug_tree(&ccx.pretty(PrettyFmtOpts { verbose: true }))
             ))
             .to_delay_bug()
             .emit()

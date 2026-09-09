@@ -3,11 +3,14 @@ error:
   span: uncovered_impl_until_normalize.fir:20:17-20
     - binder param WF error
         - idx: 0
-            - trait not implemented
+            - uninstantiated trait not implemented
               LHS: i32
               RHS: Foo
               RHS instance: Foo
               spec not met:
-                - cannot progress
-                  multiple applicable impls
+                - instantiated trait not implemented
+                  LHS: i32
+                  RHS: Foo
+                    - cannot progress
+                      multiple applicable impls
 

@@ -12,7 +12,7 @@ error:
 error: 
 - span: test23.fir:179:5-13
   cannot unify
-  LHS: ?27
+  LHS: ?(27) _
   RHS: ()
   mode: Equate
     - structural error

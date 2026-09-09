@@ -5,10 +5,10 @@ use crate::{
         syntax::{
             AdtCtorOwner, AdtInstance, FloatKind, FnInstance, FnOwner, FnOwnerAdtCtor,
             FnOwnerInherent, FnOwnerTrait, HrtbBinder, HrtbDebruijn, HrtbDebruijnDef,
-            HrtbProjection, InferTyVar, IntKind, Item, Re, SimpleTyKind, SimpleTySet, TraitClause,
-            TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe, TyOrReList,
-            UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProj,
-            UniversalTyProjInner, UniversalTyRoot, UniversalTyRootSourceInfo,
+            HrtbProjection, InferTyVar, InferTyVarSourceInfo, IntKind, Item, Re, SimpleTyKind,
+            SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyKind,
+            TyOrRe, TyOrReList, UniversalReVar, UniversalReVarSourceInfo, UniversalTy,
+            UniversalTyProj, UniversalTyProjInner, UniversalTyRoot, UniversalTyRootSourceInfo,
         },
     },
     utils::lang::{SimpleListFormatGlue, format_list, format_list_into},
@@ -315,15 +315,53 @@ impl_pretty! {
         f.write_str(value.r(s).path.as_str(s))
     }
     InferTyVar => |cx, value, f| {
+        let s = cx.session();
+
         match cx.ccx.lookup_ty_infer_var_without_poll(value) {
             Ok(resolved) => cx.wrap(resolved).fmt(f),
             Err(root) => {
                 if cx.opts.verbose {
-                    write!(f, "?(level = {}) {}", root.max_universe.level(), root.root.index())
-                } else {
-                    // TODO
-                    write!(f, "?{}", root.root.index())
+                    write!(f, "?({:?}) ", root.root)?;
                 }
+
+                match cx.ccx.lookup_infer_ty_src_info(root.root) {
+                    InferTyVarSourceInfo::Projection { self_ty, spec, idx } => {
+                        write!(
+                            f,
+                            "<{} as {}>::{}",
+                            cx.wrap(self_ty),
+                            cx.wrap(spec),
+                            spec.def.r(s).generics.r(s).defs[idx as usize].ident(s).text(),
+                        )?;
+                    },
+
+                    InferTyVarSourceInfo::LateAssocElabPlaceholder
+                    | InferTyVarSourceInfo::HrtbLhsInstantiation { .. }
+                    | InferTyVarSourceInfo::DirectlyImported { .. }
+                    | InferTyVarSourceInfo::TraitParam { .. }
+                    | InferTyVarSourceInfo::ImplBlockParam { .. }
+                    | InferTyVarSourceInfo::LateBoundFnGeneric { .. }
+                    | InferTyVarSourceInfo::Local { .. }
+                    | InferTyVarSourceInfo::FunctionArgs { .. }
+                    | InferTyVarSourceInfo::FunctionRetVal { .. }
+                    | InferTyVarSourceInfo::MethodReceiver { .. }
+                    | InferTyVarSourceInfo::OverloadedResult { .. }
+                    | InferTyVarSourceInfo::Literal { .. }
+                    | InferTyVarSourceInfo::ForLoopElem { .. }
+                    | InferTyVarSourceInfo::IndexInput { .. }
+                    | InferTyVarSourceInfo::IndexOutput { .. }
+                    | InferTyVarSourceInfo::LoopDemand { .. }
+                    | InferTyVarSourceInfo::HoleInfer { .. }
+                    | InferTyVarSourceInfo::PatType { .. }
+                    | InferTyVarSourceInfo::EmptyArrayElem { .. }
+                    | InferTyVarSourceInfo::UnifyHelper
+                    | InferTyVarSourceInfo::DerefHelper
+                    | InferTyVarSourceInfo::MethodLookupHelper => {
+                        write!(f, "_")?;
+                    }
+                }
+
+                Ok(())
             },
         }
     }
@@ -340,9 +378,7 @@ impl_pretty! {
         let s = cx.session();
 
         if cx.opts.verbose {
-            let universe = cx.ccx().lookup_universal_ty_hrtb_universe(UniversalTy::Root(value));
-
-            write!(f, "u(level = {}) ", universe.level())?;
+            write!(f, "u({}) ", value.index())?;
         }
 
         match cx.ccx().lookup_universal_ty_root_src_info(value) {
@@ -365,8 +401,12 @@ impl_pretty! {
             target,
             as_spec,
             assoc_idx,
-            cache_idx: _,
+            cache_idx,
         } = *value.r(s);
+
+        if cx.opts.verbose {
+            write!(f, "u({cache_idx:?}) ")?;
+        }
 
         write!(
             f,

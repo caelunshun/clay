@@ -3,34 +3,45 @@ error:
   span: test7.fir:23:15-56
     - binder param WF error
         - idx: 0
-            - trait not implemented
-              LHS: Foo
+            - uninstantiated trait not implemented
+              LHS: u(2) Foo
               RHS: Meow
               RHS instance: Meow
               spec not met:
-                - no suitable impl met
+                - instantiated trait not implemented
+                  LHS: u(2) Foo
+                  RHS: Meow
+                    - no suitable impl met
 
 error: 
 - bad trait spec
   span: test7.fir:27:28-49
     - binder param WF error
         - idx: 0
-            - trait not implemented
-              LHS: Foo
+            - uninstantiated trait not implemented
+              LHS: u(0) Foo
               RHS: Meow
               RHS instance: Meow
               spec not met:
-                - no suitable impl met
+                - instantiated trait not implemented
+                  LHS: u(0) Foo
+                  LHS elaboration:
+                    - clauses:
+                  RHS: Meow
+                    - no suitable impl met
 
 error: 
 - bad generics
   span: test7.fir:32:14-16
     - binder param WF error
         - idx: 0
-            - trait not implemented
+            - uninstantiated trait not implemented
               LHS: ()
               RHS: Meow
               RHS instance: Meow
               spec not met:
-                - no suitable impl met
+                - instantiated trait not implemented
+                  LHS: ()
+                  RHS: Meow
+                    - no suitable impl met
 

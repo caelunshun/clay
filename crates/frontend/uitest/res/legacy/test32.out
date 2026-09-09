@@ -2,7 +2,7 @@ error:
 - span: test32.fir:83:18-24
   cannot unify
   LHS: str
-  RHS: ?79
+  RHS: ?(79) _
   mode: Equate
     - structural error
         - bad infer restriction solid
@@ -11,33 +11,33 @@ error:
 
 error: 
 - span: test32.fir:74:26-40
-  trait not implemented
-  LHS: fn @ <?37 as Helper<(), ?33>>::meow
-  RHS: std::FnOnce<(Option<?37>, bool), ()>
+  instantiated trait not implemented
+  LHS: fn @ <?(37) _ as Helper<(), ?(33) _>>::meow
+  RHS: std::FnOnce<(Option<?(37) _>, bool), ()>
     - fn impl unsatisfied
       resolve fn:
         - fn instance resolution error
-          instance: fn @ <?37 as Helper<(), ?33>>::meow
+          instance: fn @ <?(37) _ as Helper<(), ?(33) _>>::meow
             - trait fn unsatisfied
               resolve instance error:
                 - trait spec resolution error
-                  self ty: ?37
-                  spec: Helper<(), ?33>
-                    - trait not implemented
-                      LHS: ?37
-                      RHS: Helper<(), ?33>
+                  self ty: ?(37) _
+                  spec: Helper<(), ?(33) _>
+                    - instantiated trait not implemented
+                      LHS: ?(37) _
+                      RHS: Helper<(), ?(33) _>
                         - cannot progress
-                          ?37 could not be inferred
+                          ?(37) _ could not be inferred
 
 error: 
 - no shadow impl
   span: test32.fir:74:5-11
     - trait spec resolution error
-      self ty: [clause WF helper]
-      spec: Helper<(), ?33>
-        - trait not implemented
-          LHS: [clause WF helper]
-          RHS: Helper<(), ?33>
+      self ty: u(10) [clause WF helper]
+      spec: Helper<(), ?(33) _>
+        - instantiated trait not implemented
+          LHS: u(10) [clause WF helper]
+          RHS: Helper<(), ?(33) _>
             - cannot progress
               elab still resolving
 

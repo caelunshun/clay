@@ -104,7 +104,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     lhs,
                     rhs,
                     rhs_instantiated,
-                    spec_not_met: spec_not_met.map(|v| v.kind),
+                    spec_not_met,
                     rhs_hrtb_error,
                 }
             }
@@ -310,7 +310,11 @@ impl<'tcx> ClauseCx<'tcx> {
 
                     let mut fork = self.clone();
 
-                    let lhs = fork.hrtb_binder_from_elaboration_universals(universal, instantiated);
+                    let lhs = fork.hrtb_binder_from_elaboration_universals(
+                        universe.clone(),
+                        universal,
+                        instantiated,
+                    );
 
                     match fork.try_select_single_inherent_impl(fuel, universe, universal, lhs, rhs)
                     {

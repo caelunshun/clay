@@ -322,14 +322,14 @@ pub struct UninstantiatedTraitImplError {
     pub lhs: Ty,
     pub rhs: HrtbBinder,
     pub rhs_instantiated: TraitSpec,
-    pub spec_not_met: Option<InstantiatedTraitImplErrorKind>,
+    pub spec_not_met: Option<InstantiatedTraitImplError>,
     pub rhs_hrtb_error: Option<InstantiateHrtbUniversalError>,
 }
 
 impl ToDebugTree for UninstantiatedTraitImplError {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
         DebugTree::new()
-            .with_prose("trait not implemented")
+            .with_prose("uninstantiated trait not implemented")
             .with_prose(format!("LHS: {}", pretty.wrap(self.lhs)))
             .with_prose(format!("RHS: {}", pretty.wrap(self.rhs)))
             .with_prose(format!(
@@ -366,7 +366,7 @@ pub struct InstantiatedTraitImplError {
 impl ToDebugTree for InstantiatedTraitImplError {
     fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
         DebugTree::new()
-            .with_prose("trait not implemented")
+            .with_prose("instantiated trait not implemented")
             .with_prose(format!("LHS: {}", pretty.wrap(self.lhs)))
             .with(|cx| {
                 let Some(lhs_elab) = &self.lhs_elab else {

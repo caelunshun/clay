@@ -3,21 +3,24 @@ error:
   span: unspec_spec_wf.fir:13:20-29
     - binder param WF error
         - idx: 0
-            - trait not implemented
+            - uninstantiated trait not implemented
               LHS: u32
-              RHS: case1::Thump<<[clause WF helper] as case1::Meow<u32>>::Other>
-              RHS instance: case1::Thump<<[clause WF helper] as case1::Meow<u32>>::Other>
+              RHS: case1::Thump<u(1) <u(3) [clause WF helper] as case1::Meow<u32>>::Other>
+              RHS instance: case1::Thump<u(1) <u(3) [clause WF helper] as case1::Meow<u32>>::Other>
               spec not met:
-                - no suitable impl met
+                - instantiated trait not implemented
+                  LHS: u32
+                  RHS: case1::Thump<u(1) <u(3) [clause WF helper] as case1::Meow<u32>>::Other>
+                    - no suitable impl met
 
 error: 
 - no shadow impl
   span: unspec_spec_wf.fir:28:20-29
     - trait spec resolution error
-      self ty: [clause WF helper]
+      self ty: u(3) [clause WF helper]
       spec: case2::Meow<u32>
-        - trait not implemented
-          LHS: [clause WF helper]
+        - instantiated trait not implemented
+          LHS: u(3) [clause WF helper]
           LHS elaboration:
             - clauses:
                 - ready
@@ -30,22 +33,22 @@ error:
               Culprits:
                 - idx: 1
                     - cannot unify
-                      LHS: <[clause WF helper] as case2::Meow<u32>>::Other
+                      LHS: u(1) <u(3) [clause WF helper] as case2::Meow<u32>>::Other
                       RHS: u32
                       mode: Equate
                         - structural error
                             - type mismatch
-                              LHS: <[clause WF helper] as case2::Meow<u32>>::Other
+                              LHS: u(1) <u(3) [clause WF helper] as case2::Meow<u32>>::Other
                               RHS: u32
 
 error: 
 - no shadow impl
   span: unspec_spec_wf.fir:44:32-54
     - trait spec resolution error
-      self ty: [clause WF helper]
+      self ty: u(3) [clause WF helper]
       spec: case3::Meow<u32, Other = u32>
-        - trait not implemented
-          LHS: [clause WF helper]
+        - instantiated trait not implemented
+          LHS: u(3) [clause WF helper]
           LHS elaboration:
             - clauses:
                 - ready
@@ -60,33 +63,69 @@ error:
               Culprits:
                 - idx: 1
                     - cannot unify
-                      LHS: <[clause WF helper] as case3::Meow<u32>>::Other
+                      LHS: u(1) <u(3) [clause WF helper] as case3::Meow<u32>>::Other
                       RHS: u32
                       mode: Equate
                         - structural error
                             - type mismatch
-                              LHS: <[clause WF helper] as case3::Meow<u32>>::Other
+                              LHS: u(1) <u(3) [clause WF helper] as case3::Meow<u32>>::Other
                               RHS: u32
     - bad trait spec
       span: unspec_spec_wf.fir:44:20-29
         - binder param WF error
             - idx: 0
-                - trait not implemented
+                - uninstantiated trait not implemented
                   LHS: u32
-                  RHS: case3::Thump<<[clause WF helper] as case3::Meow<u32>>::Other>
-                  RHS instance: case3::Thump<<[clause WF helper] as case3::Meow<u32>>::Other>
+                  RHS: case3::Thump<u(2) <u(3) [clause WF helper] as case3::Meow<u32>>::Other>
+                  RHS instance: case3::Thump<u(2) <u(3) [clause WF helper] as case3::Meow<u32>>::Other>
                   spec not met:
-                    - no suitable impl met
+                    - instantiated trait not implemented
+                      LHS: u32
+                      RHS: case3::Thump<u(2) <u(3) [clause WF helper] as case3::Meow<u32>>::Other>
+                        - no suitable impl met
 
 error: 
-- bad trait spec
-  span: unspec_spec_wf.fir:60:27-34
-    - binder param WF error
-        - idx: 0
-            - trait not implemented
-              LHS: T
-              RHS: case4::Thump<<[clause WF helper] as case4::Meow<T>>::Other>
-              RHS instance: case4::Thump<<[clause WF helper] as case4::Meow<T>>::Other>
-              spec not met:
-                - no suitable impl met
+- no shadow impl
+  span: unspec_spec_wf.fir:60:44-62
+    - trait spec resolution error
+      self ty: u(3) [clause WF helper]
+      spec: case4::Meow<u(6) T, Other = u(6) T>
+        - instantiated trait not implemented
+          LHS: u(3) [clause WF helper]
+          LHS elaboration:
+            - clauses:
+                - ready
+                  binder: for<T> case4::Meow<T>
+                    - ready
+                      binder: for<T> case4::Meow<T, Other = T>
+          RHS: case4::Meow<u(6) T, Other = u(6) T>
+            - inherent unsatisfied
+              LHS: for<T> case4::Meow<T>
+              RHS: case4::Meow<u(6) T, Other = u(6) T>
+              LHS instantiated: case4::Meow<u(6) T>
+              Culprits:
+                - idx: 1
+                    - cannot unify
+                      LHS: u(1) <u(3) [clause WF helper] as case4::Meow<u(6) T>>::Other
+                      RHS: u(6) T
+                      mode: Equate
+                        - structural error
+                            - type mismatch
+                              LHS: u(1) <u(3) [clause WF helper] as case4::Meow<u(6) T>>::Other
+                              RHS: u(6) T
+    - bad trait spec
+      span: unspec_spec_wf.fir:60:27-34
+        - binder param WF error
+            - idx: 0
+                - uninstantiated trait not implemented
+                  LHS: u(4) T
+                  RHS: case4::Thump<u(2) <u(3) [clause WF helper] as case4::Meow<u(4) T>>::Other>
+                  RHS instance: case4::Thump<u(2) <u(3) [clause WF helper] as case4::Meow<u(4) T>>::Other>
+                  spec not met:
+                    - instantiated trait not implemented
+                      LHS: u(4) T
+                      LHS elaboration:
+                        - clauses:
+                      RHS: case4::Thump<u(2) <u(3) [clause WF helper] as case4::Meow<u(4) T>>::Other>
+                        - no suitable impl met
 
