@@ -5,9 +5,9 @@ use crate::{
     },
     semantic::{
         infer::{
-            ClauseCx, ClauseFuel, ClauseImportEnv, ClauseObligation, GenericSubst, ImportWfMode,
-            InstantiatedTraitSpec, ObligationNotReady, ObligationResult, ObligationTermination,
-            PrettyFmtOpts, UnboundVarHandlingMode,
+            ClauseCx, ClauseFuel, ClauseImportEnv, ClauseObligation, GenericSubst, HrtbUniverse,
+            ImportWfMode, InstantiatedTraitSpec, ObligationNotReady, ObligationResult,
+            ObligationTermination, UnboundVarHandlingMode,
         },
         syntax::{
             AnyGeneric, HrtbBinder, HrtbDebruijn, HrtbDebruijnDef, HrtbProjection, InferTyVar,
@@ -115,6 +115,7 @@ impl<'tcx> ClauseCx<'tcx> {
             let InstantiatedTraitSpec {
                 spec: instantiated,
                 params: hrtbs_as_universals,
+                mapped_binder_defs: binder_defs_as_universals,
             } = self
                 .instantiate_hrtb_universal(ClauseFuel::new(), var_universe.clone(), binder)
                 // TODO
@@ -174,7 +175,7 @@ impl<'tcx> ClauseCx<'tcx> {
                         }
                         _ => unreachable!(),
                     })
-                    .zip(binder.defs.r(s).iter().copied()),
+                    .zip(binder_defs_as_universals.r(s).iter().copied()),
             );
 
             // Explore and push on the elaborated super-trait constraints.
@@ -233,6 +234,9 @@ impl<'tcx> ClauseCx<'tcx> {
         let s = self.session();
         let tcx = self.tcx();
 
+        let universe = self.lookup_universal_ty_hrtb_universe(universal).clone();
+
+        let mut made_progress = false;
         let mut shadowed_clauses = FxHashSet::<usize>::default();
         let mut next_clause_idx = 0usize;
 
@@ -276,8 +280,11 @@ impl<'tcx> ClauseCx<'tcx> {
             {
                 let regular_generic_count = *instantiated.def.r(s).regular_generic_count as usize;
 
-                let instantiated =
-                    self.resolve_elaborated_universal_trait_spec(universal, instantiated);
+                let instantiated = self.resolve_elaborated_universal_trait_spec(
+                    &universe,
+                    universal,
+                    instantiated,
+                );
 
                 for (&late_init_to, &late_init_var) in instantiated
                     .params
@@ -306,6 +313,8 @@ impl<'tcx> ClauseCx<'tcx> {
 
             // We have enough information to finish this clause. Convert it into its HRTB form and
             // mark it as done.
+            made_progress = true;
+
             let finished_binder =
                 self.hrtb_binder_from_elaboration_universals(universal, instantiated);
 
@@ -327,7 +336,7 @@ impl<'tcx> ClauseCx<'tcx> {
             .all(|v| matches!(v, ElaboratedClause::Ready(_)))
         {
             true => Ok(ObligationTermination::Finished),
-            false => Ok(ObligationTermination::CommitAndKeep),
+            false => Ok(ObligationTermination::CommitAndKeep { made_progress }),
         }
     }
 }
@@ -370,18 +379,19 @@ impl<'tcx> ClauseCx<'tcx> {
 
         cover_visitor.visit(binder.inner);
 
-        cover_visitor.was_covered.iter().all(|&v| v)
+        // FIXME
+        // cover_visitor.was_covered.iter().all(|&v| v)
+        true
     }
 
     pub fn resolve_elaborated_universal_trait_spec(
         &mut self,
+        universe: &HrtbUniverse,
         universal: UniversalTy,
         spec: TraitSpec,
     ) -> TraitInstance {
         let s = self.session();
         let tcx = self.tcx();
-
-        let universe = self.lookup_universal_ty_hrtb_universe(universal).clone();
 
         let instance = spec
             .params
@@ -476,7 +486,7 @@ impl HrtbReverseTranscriptase<'_, '_> {
             hash_map::Entry::Vacant(entry) => entry,
         };
 
-        let def = self
+        let def_with_universals = self
             .ccx
             .universal_ty_elaboration_state(self.universal)
             .as_ref()
@@ -489,7 +499,9 @@ impl HrtbReverseTranscriptase<'_, '_> {
 
         entry.insert(idx);
 
-        self.debruijn_defs_backward.push(def);
+        let def_with_hrtbs = self.fold(def_with_universals);
+
+        self.debruijn_defs_backward.push(def_with_hrtbs);
 
         Some(HrtbDebruijn(DebruijnRelative::new(
             NonZeroU32::new(idx + 1).unwrap(),
@@ -612,6 +624,8 @@ impl<'tcx> TyVisitor<'tcx> for HrtbCoverChecker<'_, 'tcx> {
     fn visit_ty(&mut self, ty: Ty) -> ControlFlow<Self::Break> {
         let s = self.session();
         let ty = self.ccx.peel_ty_infer_var_without_poll(ty);
+
+        self.walk(ty);
 
         if let TyKind::HrtbVar(var) = *ty.r(s) {
             self.visit_debruijn(var);

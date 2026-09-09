@@ -16,14 +16,14 @@ use crate::{
         syntax::{
             AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, FnOwner, FnOwnerAdtCtor,
             FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, HrtbDebruijnDef,
-            HrtbProjection, InferTyVarSourceInfo, Re, RegionGeneric, RelationDirection,
-            SigAdtInstance, SigGenericList, SigHrtbBinder, SigProjectType, SigRe, SigReKind,
-            SigTraitClause, SigTraitClauseKind, SigTraitClauseList, SigTraitInstance,
-            SigTraitParamKind, SigTraitSpec, SigTy, SigTyKind, SigTyList, SigTyOrRe, SigTyOrReList,
-            TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt,
-            TyFolder, TyFolderInfallibleExt, TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList,
-            TypeAliasItem, TypeGeneric, UniversalReVarSourceInfo, UniversalTy,
-            UniversalTyRootSourceInfo,
+            HrtbDebruijnDefList, HrtbProjection, InferTyVarSourceInfo, Re, RegionGeneric,
+            RelationDirection, SigAdtInstance, SigGenericList, SigHrtbBinder, SigProjectType,
+            SigRe, SigReKind, SigTraitClause, SigTraitClauseKind, SigTraitClauseList,
+            SigTraitInstance, SigTraitParamKind, SigTraitSpec, SigTy, SigTyKind, SigTyList,
+            SigTyOrRe, SigTyOrReList, TraitClause, TraitClauseList, TraitInstance, TraitParam,
+            TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt, TyKind, TyList, TyOrRe,
+            TyOrReKind, TyOrReList, TypeAliasItem, TypeGeneric, UniversalReVarSourceInfo,
+            UniversalTy, UniversalTyRootSourceInfo,
         },
     },
     typed_joiner,
@@ -1135,6 +1135,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 pub struct InstantiatedTraitSpec {
     pub spec: TraitSpec,
     pub params: TyOrReList,
+    pub mapped_binder_defs: HrtbDebruijnDefList,
 }
 
 impl<'tcx> ClauseCx<'tcx> {
@@ -1169,13 +1170,24 @@ impl<'tcx> ClauseCx<'tcx> {
         let mut normalize_errors = MultiPromiseBuilder::new();
 
         // Initialize their clauses.
+        let mut mapped_binder_defs = Vec::new();
+
         for (&def, &var) in defs.r(s).iter().zip(vars.r(s)) {
-            let clauses =
+            let mapped_clauses =
                 HrtbInstantiator::new(self, &mut normalize_errors, universe.clone(), fuel, vars)
                     .fold(def.clauses);
 
-            self.init_any_universal_direct_clauses(var, clauses);
+            self.init_any_universal_direct_clauses(var, mapped_clauses);
+
+            mapped_binder_defs.push(HrtbDebruijnDef {
+                span: def.span,
+                name: def.name,
+                kind: def.kind,
+                clauses: mapped_clauses,
+            })
         }
+
+        let mapped_binder_defs = tcx.intern_list(&mapped_binder_defs);
 
         let output =
             HrtbInstantiator::new(self, &mut normalize_errors, universe.clone(), fuel, vars)
@@ -1193,6 +1205,7 @@ impl<'tcx> ClauseCx<'tcx> {
         promise.and_value(InstantiatedTraitSpec {
             params: vars,
             spec: output,
+            mapped_binder_defs,
         })
     }
 

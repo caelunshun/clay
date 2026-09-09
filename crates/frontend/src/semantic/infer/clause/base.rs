@@ -296,15 +296,21 @@ impl<'tcx> ClauseCx<'tcx> {
                 match res {
                     Ok(kind) => {
                         *self = fork;
-                        made_progress = true;
 
                         match kind {
                             ObligationTermination::Finished => {
                                 // (fallthrough)
                             }
-                            ObligationTermination::CommitAndKeep => {
+                            ObligationTermination::CommitAndKeep {
+                                made_progress: self_made_progress,
+                            } => {
                                 // Intentionally does not terminate obligation.
-                                continue;
+                                if self_made_progress {
+                                    made_progress = true;
+                                    break;
+                                } else {
+                                    continue;
+                                }
                             }
                             ObligationTermination::FuelExhausted(kill_id) => {
                                 self.kill_obligations_with_id(kill_id);
@@ -312,7 +318,9 @@ impl<'tcx> ClauseCx<'tcx> {
                             }
                         }
 
+                        made_progress = true;
                         self.pending_obligations.swap_remove(curr_idx);
+
                         // (forces depth-first expansion)
                         break;
                     }
@@ -394,6 +402,7 @@ impl<'tcx> ClauseCx<'tcx> {
                         self,
                         InstantiatedTraitImplError {
                             lhs: *lhs,
+                            lhs_elab: None,
                             rhs: *rhs,
                             kind: InstantiatedTraitImplErrorKind::CannotProgress(not_ready),
                         },

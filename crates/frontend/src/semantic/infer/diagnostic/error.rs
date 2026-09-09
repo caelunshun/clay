@@ -1,7 +1,10 @@
 use crate::{
     base::{arena::Obj, syntax::Span},
     semantic::{
-        infer::{ClauseFuelKillId, ClauseImportEnv, HrtbUniverse, PrettyFmtCx},
+        infer::{
+            ClauseFuelKillId, ClauseImportEnv, ElaboratedClause, HrtbUniverse, PrettyFmtCx,
+            UniversalElaboration,
+        },
         syntax::{
             FnInstance, FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, ImplItem,
             InferTyVar, Re, RelationMode, SigGenericList, SigHrtbBinder, SigProjectType,
@@ -226,6 +229,7 @@ impl DebugTree {
                 DebugTreePart::Sublist(sublist) => {
                     f.change_level_now(2)?;
                     sublist.format(f)?;
+                    f.change_level_now(2)?;
                 }
             }
         }
@@ -349,6 +353,7 @@ impl ToDebugTree for UninstantiatedTraitImplError {
 #[derive(Debug, Clone)]
 pub struct InstantiatedTraitImplError {
     pub lhs: Ty,
+    pub lhs_elab: Option<UniversalElaboration>,
     pub rhs: TraitSpec,
     pub kind: InstantiatedTraitImplErrorKind,
 }
@@ -358,8 +363,40 @@ impl ToDebugTree for InstantiatedTraitImplError {
         DebugTree::new()
             .with_prose("trait not implemented")
             .with_prose(format!("LHS: {}", pretty.wrap(self.lhs)))
+            .with(|cx| {
+                let Some(lhs_elab) = &self.lhs_elab else {
+                    return;
+                };
+
+                cx.push_prose("LHS elaboration:");
+                cx.push_sublist(lhs_elab.to_debug_tree(pretty));
+            })
             .with_prose(format!("RHS: {}", pretty.wrap(self.rhs)))
             .with_sublist(self.kind.to_debug_tree(pretty))
+    }
+}
+
+impl ToDebugTree for UniversalElaboration {
+    fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
+        DebugTree::new()
+            .with_prose("clauses:")
+            .with_sublist(self.elaborated_clauses.to_debug_tree(pretty))
+    }
+}
+
+impl ToDebugTree for ElaboratedClause {
+    fn to_debug_tree(&self, pretty: &PrettyFmtCx<'_, '_>) -> DebugTree {
+        match self {
+            ElaboratedClause::NotReady {
+                instantiated,
+                late_assoc_params: _,
+            } => DebugTree::new()
+                .with_prose("not ready")
+                .with_prose(format!("instantiated: {}", pretty.wrap(instantiated))),
+            ElaboratedClause::Ready(binder) => DebugTree::new()
+                .with_prose("ready")
+                .with_prose(format!("binder: {}", pretty.wrap(binder))),
+        }
     }
 }
 
@@ -1395,7 +1432,7 @@ pub type ObligationResult<T = ObligationTermination> = Result<T, ObligationNotRe
 #[derive(Debug)]
 pub enum ObligationTermination {
     Finished,
-    CommitAndKeep,
+    CommitAndKeep { made_progress: bool },
     FuelExhausted(ClauseFuelKillId),
 }
 

@@ -87,6 +87,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 InstantiatedTraitSpec {
                     spec: rhs_instantiated,
                     params: _,
+                    mapped_binder_defs: _,
                 },
             promise: rhs_hrtb_error,
         } = self.instantiate_hrtb_universal(fuel, universe.clone(), rhs);
@@ -140,12 +141,22 @@ impl<'tcx> ClauseCx<'tcx> {
     ) -> ObligationResult {
         let s = self.session();
 
+        let lhs_elab = match *lhs.r(s) {
+            TyKind::Universal(universal)
+                if let Some(elab) = self.elaborate_universal_or_request(universal).ok() =>
+            {
+                Some(elab)
+            }
+            _ => None,
+        };
+
         // Enforce fuel limit.
         if fuel.is_exhausted() {
             handle.reject(
                 self,
                 InstantiatedTraitImplError {
                     lhs,
+                    lhs_elab,
                     rhs,
                     kind: InstantiatedTraitImplErrorKind::RecursionLimit,
                 },
@@ -173,6 +184,7 @@ impl<'tcx> ClauseCx<'tcx> {
                         promise
                             .map(move |_ccx, error| InstantiatedTraitImplError {
                                 lhs,
+                                lhs_elab,
                                 rhs,
                                 kind: InstantiatedTraitImplErrorKind::InherentUnsatisfied(error),
                             })
@@ -253,6 +265,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 self,
                 InstantiatedTraitImplError {
                     lhs,
+                    lhs_elab,
                     rhs,
                     kind: InstantiatedTraitImplErrorKind::NoSuitableImpl,
                 },
@@ -264,6 +277,7 @@ impl<'tcx> ClauseCx<'tcx> {
         *self = confirmation
             .map(move |_ccx, error| InstantiatedTraitImplError {
                 lhs,
+                lhs_elab,
                 rhs,
                 kind: error,
             })
@@ -290,6 +304,10 @@ impl<'tcx> ClauseCx<'tcx> {
                     instantiated,
                     late_assoc_params: _,
                 } => {
+                    if instantiated.def != rhs.def {
+                        continue;
+                    }
+
                     let mut fork = self.clone();
 
                     let lhs = fork.hrtb_binder_from_elaboration_universals(universal, instantiated);
@@ -305,6 +323,10 @@ impl<'tcx> ClauseCx<'tcx> {
                     }
                 }
                 ElaboratedClause::Ready(lhs) => {
+                    if lhs.inner.def != rhs.def {
+                        continue;
+                    }
+
                     let fork = self.clone();
 
                     match fork.try_select_single_inherent_impl(fuel, universe, universal, lhs, rhs)
@@ -335,7 +357,6 @@ impl<'tcx> ClauseCx<'tcx> {
         lhs: HrtbBinder,
         rhs: TraitSpec,
     ) -> Result<PromiseValue<'tcx, Self, InherentImplUnsatisfiedError>, SelectionRejected> {
-        let tcx = self.tcx();
         let s = self.session();
 
         assert_eq!(lhs.inner.def, rhs.def);
@@ -350,7 +371,7 @@ impl<'tcx> ClauseCx<'tcx> {
             promise: lhs_instantiate_error,
         } = self.instantiate_hrtb_infer(fuel, universe.clone(), lhs);
 
-        let lhs = self.resolve_elaborated_universal_trait_spec(universal, lhs_spec);
+        let lhs = self.resolve_elaborated_universal_trait_spec(universe, universal, lhs_spec);
 
         let mut param_iter = lhs.params.r(s).iter().zip(rhs.params.r(s)).enumerate();
 
