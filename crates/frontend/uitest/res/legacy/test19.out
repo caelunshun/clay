@@ -1,64 +1,64 @@
-error: - 
-    - bad generics
-      span: test19.fir:29:43-48
-        - binder param WF error
-            - idx: 0
-                - ty outlives region
-                  LHS: T
+error: 
+- bad generics
+  span: test19.fir:29:43-48
+    - binder param WF error
+        - idx: 0
+            - ty outlives region
+              LHS: T
+              RHS: 'a
+              Errors:
+                - re and re unify error
+                  LHS: 'u1
                   RHS: 'a
-                  Errors:
-                    - re and re unify error
-                      LHS: 'u1
-                      RHS: 'a
-                      mode: RhsOntoLhs
-                        - requires var: 'a
-                          to outlive: 'u1
+                  mode: RhsOntoLhs
+                    - requires var: 'a
+                      to outlive: 'u1
 
-error: - 
-    - bad generics
-      span: test19.fir:35:43-48
-        - binder param WF error
-            - idx: 1
-                - ty outlives region
-                  LHS: T
+error: 
+- bad generics
+  span: test19.fir:35:43-48
+    - binder param WF error
+        - idx: 1
+            - ty outlives region
+              LHS: T
+              RHS: 'a
+              Errors:
+                - re and re unify error
+                  LHS: 'u1
                   RHS: 'a
-                  Errors:
-                    - re and re unify error
-                      LHS: 'u1
-                      RHS: 'a
-                      mode: RhsOntoLhs
-                        - requires var: 'a
-                          to outlive: 'u1
+                  mode: RhsOntoLhs
+                    - requires var: 'a
+                      to outlive: 'u1
 
-error: - 
-    - bad generics
-      span: test19.fir:41:44-49
-        - binder param WF error
-            - idx: 0
-                - ty outlives region
-                  LHS: T
+error: 
+- bad generics
+  span: test19.fir:41:44-49
+    - binder param WF error
+        - idx: 0
+            - ty outlives region
+              LHS: T
+              RHS: 'a
+              Errors:
+                - re and re unify error
+                  LHS: 'u1
                   RHS: 'a
-                  Errors:
-                    - re and re unify error
-                      LHS: 'u1
-                      RHS: 'a
-                      mode: LhsOntoRhs
-                        - requires var: 'u1
-                          to outlive: 'a
+                  mode: LhsOntoRhs
+                    - requires var: 'u1
+                      to outlive: 'a
 
-error: - 
-    - bad generics
-      span: test19.fir:47:42-47
-        - binder param WF error
-            - idx: 1
-                - ty outlives region
-                  LHS: T
+error: 
+- bad generics
+  span: test19.fir:47:42-47
+    - binder param WF error
+        - idx: 1
+            - ty outlives region
+              LHS: T
+              RHS: 'a
+              Errors:
+                - re and re unify error
+                  LHS: 'u1
                   RHS: 'a
-                  Errors:
-                    - re and re unify error
-                      LHS: 'u1
-                      RHS: 'a
-                      mode: LhsOntoRhs
-                        - requires var: 'u1
-                          to outlive: 'a
+                  mode: LhsOntoRhs
+                    - requires var: 'u1
+                      to outlive: 'a
 

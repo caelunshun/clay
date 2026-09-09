@@ -1,4 +1,5 @@
-error: - span: test20.fir:68:11-14
+error: 
+- span: test20.fir:68:11-14
   cannot unify
   LHS: Option<&'erased mut ?4>
   RHS: bool

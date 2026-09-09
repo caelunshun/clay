@@ -1,65 +1,64 @@
-error: - 
-    - bad generics
-      span: test8.fir:22:23-23:26
-        - binder param WF error
-            - idx: 1
-                - ty outlives region
-                  LHS: &'b ()
+error: 
+- bad generics
+  span: test8.fir:22:23-23:26
+    - binder param WF error
+        - idx: 1
+            - ty outlives region
+              LHS: &'b ()
+              RHS: 'a
+              Errors:
+                - re and re unify error
+                  LHS: 'b
                   RHS: 'a
-                  Errors:
-                    - re and re unify error
-                      LHS: 'b
-                      RHS: 'a
-                      mode: LhsOntoRhs
-                        - requires var: 'b
-                          to outlive: 'a
+                  mode: LhsOntoRhs
+                    - requires var: 'b
+                      to outlive: 'a
 
-error: - 
-    - bad generics
-      span: test8.fir:43:20-36
-        - binder param WF error
-            - idx: 0
-                - trait not implemented
-                  LHS: (&'b (), &'c ())
-                  RHS: demo2::Whee
-                  RHS instance: demo2::Whee
-                  spec not met:
-                    - block impl unsatisfied
-                      block: test8.fir:30:23-39
-                        - ty and ty region error
-                          LHS: (&'b (), &'c ())
-                          RHS: (&'?0 (), &'?0 ())
+error: 
+- bad generics
+  span: test8.fir:43:20-36
+    - binder param WF error
+        - idx: 0
+            - trait not implemented
+              LHS: (&'b (), &'c ())
+              RHS: demo2::Whee
+              RHS instance: demo2::Whee
+              spec not met:
+                - block impl unsatisfied
+                  block: test8.fir:30:23-39
+                    - ty and ty region error
+                      LHS: (&'b (), &'c ())
+                      RHS: (&'?0 (), &'?0 ())
+                      mode: Equate
+                        - re and re unify error
+                          LHS: 'c
+                          RHS: '?0
                           mode: Equate
-                            - re and re unify error
-                              LHS: 'c
-                              RHS: '?0
-                              mode: Equate
-                                - requires var: 'c
-                                  to outlive: 'b
+                            - requires var: 'c
+                              to outlive: 'b
 
-error: - 
-    - bad generics
-      span: test8.fir:48:20-36
-        - binder param WF error
-            - idx: 0
-                - trait not implemented
-                  LHS: (&'b (), &'c ())
-                  RHS: demo2::Whee
-                  RHS instance: demo2::Whee
-                  spec not met:
-                    - block impl unsatisfied
-                      block: test8.fir:30:23-39
-                        - ty and ty region error
-                          LHS: (&'b (), &'c ())
-                          RHS: (&'?0 (), &'?0 ())
+error: 
+- bad generics
+  span: test8.fir:48:20-36
+    - binder param WF error
+        - idx: 0
+            - trait not implemented
+              LHS: (&'b (), &'c ())
+              RHS: demo2::Whee
+              RHS instance: demo2::Whee
+              spec not met:
+                - block impl unsatisfied
+                  block: test8.fir:30:23-39
+                    - ty and ty region error
+                      LHS: (&'b (), &'c ())
+                      RHS: (&'?0 (), &'?0 ())
+                      mode: Equate
+                        - re and re unify error
+                          LHS: 'c
+                          RHS: '?0
                           mode: Equate
-                            - re and re unify error
-                              LHS: 'c
-                              RHS: '?0
-                              mode: Equate
-                                - 
-                                    - requires var: 'c
-                                      to outlive: 'b
-                                      - requires var: 'b
-                                        to outlive: 'c
+                            - requires var: 'c
+                              to outlive: 'b
+                                - requires var: 'b
+                                  to outlive: 'c
 

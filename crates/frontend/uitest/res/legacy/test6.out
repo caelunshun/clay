@@ -1,13 +1,13 @@
-error: - 
-    - bad generics
-      span: test6.fir:12:14-15
-        - binder param WF error
-            - idx: 0
-                - trait not implemented
-                  LHS: ?0
-                  RHS: Whee
-                  RHS instance: Whee
-                  spec not met:
-                    - cannot progress
-                      ?0 could not be inferred
+error: 
+- bad generics
+  span: test6.fir:12:14-15
+    - binder param WF error
+        - idx: 0
+            - trait not implemented
+              LHS: ?0
+              RHS: Whee
+              RHS instance: Whee
+              spec not met:
+                - cannot progress
+                  ?0 could not be inferred
 

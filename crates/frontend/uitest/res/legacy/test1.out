@@ -1,92 +1,92 @@
-error: - 
-    - bad trait spec
-      span: test1.fir:23:23-50
-        - binder param WF error
-            - idx: 0
-                - trait not implemented
-                  LHS: ((), (((),),), ((),))
-                  RHS: MyTrait
-                  RHS instance: MyTrait
-                  spec not met:
-                    - block impl unsatisfied
+error: 
+- bad trait spec
+  span: test1.fir:23:23-50
+    - binder param WF error
+        - idx: 0
+            - trait not implemented
+              LHS: ((), (((),),), ((),))
+              RHS: MyTrait
+              RHS instance: MyTrait
+              spec not met:
+                - block impl unsatisfied
+                  block: test1.fir:17:73-82
+                    - impl block satisfy error
                       block: test1.fir:17:73-82
-                        - impl block satisfy error
-                          block: test1.fir:17:73-82
-                            - binder param WF error
-                                - idx: 1
-                                    - trait not implemented
-                                      LHS: (((),),)
-                                      RHS: Generic<((),)>
-                                      RHS instance: Generic<((),)>
-                                      spec not met:
-                                        - no suitable impl met
+                        - binder param WF error
+                            - idx: 1
+                                - trait not implemented
+                                  LHS: (((),),)
+                                  RHS: Generic<((),)>
+                                  RHS instance: Generic<((),)>
+                                  spec not met:
+                                    - no suitable impl met
 
-error: - 
-    - bad generics
-      span: test1.fir:25:11-32
-        - binder param WF error
-            - idx: 0
-                - trait not implemented
-                  LHS: ((), (((),),), ((),))
-                  RHS: MyTrait
-                  RHS instance: MyTrait
-                  spec not met:
-                    - block impl unsatisfied
+error: 
+- bad generics
+  span: test1.fir:25:11-32
+    - binder param WF error
+        - idx: 0
+            - trait not implemented
+              LHS: ((), (((),),), ((),))
+              RHS: MyTrait
+              RHS instance: MyTrait
+              spec not met:
+                - block impl unsatisfied
+                  block: test1.fir:17:73-82
+                    - impl block satisfy error
                       block: test1.fir:17:73-82
-                        - impl block satisfy error
-                          block: test1.fir:17:73-82
-                            - binder param WF error
-                                - idx: 1
-                                    - trait not implemented
-                                      LHS: (((),),)
-                                      RHS: Generic<((),)>
-                                      RHS instance: Generic<((),)>
-                                      spec not met:
-                                        - no suitable impl met
+                        - binder param WF error
+                            - idx: 1
+                                - trait not implemented
+                                  LHS: (((),),)
+                                  RHS: Generic<((),)>
+                                  RHS instance: Generic<((),)>
+                                  spec not met:
+                                    - no suitable impl met
 
-error: - 
-    - bad trait spec
-      span: test1.fir:28:19-46
-        - binder param WF error
-            - idx: 0
-                - trait not implemented
-                  LHS: ((), (((),),), ((),))
-                  RHS: MyTrait
-                  RHS instance: MyTrait
-                  spec not met:
-                    - block impl unsatisfied
+error: 
+- bad trait spec
+  span: test1.fir:28:19-46
+    - binder param WF error
+        - idx: 0
+            - trait not implemented
+              LHS: ((), (((),),), ((),))
+              RHS: MyTrait
+              RHS instance: MyTrait
+              spec not met:
+                - block impl unsatisfied
+                  block: test1.fir:17:73-82
+                    - impl block satisfy error
                       block: test1.fir:17:73-82
-                        - impl block satisfy error
-                          block: test1.fir:17:73-82
-                            - binder param WF error
-                                - idx: 1
-                                    - trait not implemented
-                                      LHS: (((),),)
-                                      RHS: Generic<((),)>
-                                      RHS instance: Generic<((),)>
-                                      spec not met:
-                                        - no suitable impl met
+                        - binder param WF error
+                            - idx: 1
+                                - trait not implemented
+                                  LHS: (((),),)
+                                  RHS: Generic<((),)>
+                                  RHS instance: Generic<((),)>
+                                  spec not met:
+                                    - no suitable impl met
 
-error: - 
-    - bad generics
-      span: test1.fir:36:16-37
-        - binder param WF error
-            - idx: 0
-                - trait not implemented
-                  LHS: ((), (((),),), ((),))
-                  RHS: MyTrait
-                  RHS instance: MyTrait
-                  spec not met:
-                    - block impl unsatisfied
+error: 
+- bad generics
+  span: test1.fir:36:16-37
+    - binder param WF error
+        - idx: 0
+            - trait not implemented
+              LHS: ((), (((),),), ((),))
+              RHS: MyTrait
+              RHS instance: MyTrait
+              spec not met:
+                - block impl unsatisfied
+                  block: test1.fir:17:73-82
+                    - impl block satisfy error
                       block: test1.fir:17:73-82
-                        - impl block satisfy error
-                          block: test1.fir:17:73-82
-                            - binder param WF error
-                                - idx: 1
-                                    - trait not implemented
-                                      LHS: (((),),)
-                                      RHS: Generic<((),)>
-                                      RHS instance: Generic<((),)>
-                                      spec not met:
-                                        - no suitable impl met
+                        - binder param WF error
+                            - idx: 1
+                                - trait not implemented
+                                  LHS: (((),),)
+                                  RHS: Generic<((),)>
+                                  RHS instance: Generic<((),)>
+                                  spec not met:
+                                    - no suitable impl met
 

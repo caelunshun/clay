@@ -1,4 +1,5 @@
-error: - span: test35.fir:1:19-3:1
+error: 
+- span: test35.fir:1:19-3:1
   cannot unify
   LHS: u32
   RHS: ()

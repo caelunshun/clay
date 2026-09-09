@@ -1,12 +1,12 @@
-error: - 
-    - bad generics
-      span: test15.fir:11:50-70
-        - binder param WF error
-            - idx: 0
-                - trait not implemented
-                  LHS: ((),)
-                  RHS: Meow
-                  RHS instance: Meow
-                  spec not met:
-                    - no suitable impl met
+error: 
+- bad generics
+  span: test15.fir:11:50-70
+    - binder param WF error
+        - idx: 0
+            - trait not implemented
+              LHS: ((),)
+              RHS: Meow
+              RHS instance: Meow
+              spec not met:
+                - no suitable impl met
 

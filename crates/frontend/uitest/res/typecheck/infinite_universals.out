@@ -1,54 +1,53 @@
-error: - 
-    - projection failed
-      span: infinite_universals.fir:40:36-49
-        - trait spec resolution error
-          self ty: <T as Meow>::Generator
-          spec: UhOh<'a, u32>
-            - trait not implemented
-              LHS: <T as Meow>::Generator
+error: 
+- projection failed
+  span: infinite_universals.fir:40:36-49
+    - trait spec resolution error
+      self ty: <T as Meow>::Generator
+      spec: UhOh<'a, u32>
+        - trait not implemented
+          LHS: <T as Meow>::Generator
+          RHS: UhOh<'a, u32, Output = <<T as Meow>::Generator as UhOh<'?2, u32>>::Output>
+            - inherent unsatisfied
+              LHS: for<T, a> UhOh<'a, T>
               RHS: UhOh<'a, u32, Output = <<T as Meow>::Generator as UhOh<'?2, u32>>::Output>
-                - inherent unsatisfied
-                  LHS: for<T, a> UhOh<'a, T>
-                  RHS: UhOh<'a, u32, Output = <<T as Meow>::Generator as UhOh<'?2, u32>>::Output>
-                  LHS instantiated: UhOh<'?3, u32>
-                  Culprits:
-                    - idx: 2
-                        - cannot unify
-                          LHS: <<T as Meow>::Generator as UhOh<'?3, u32>>::Output
-                          RHS: <<T as Meow>::Generator as UhOh<'?2, u32>>::Output
-                          mode: Equate
-                            - region error
-                                - re and re unify error
-                                  LHS: '?3
-                                  RHS: '?2
-                                  mode: Equate
-                                    - 
-                                        - requires var: 'a
-                                          to outlive: 'b
-                                          - requires var: 'b
-                                            to outlive: 'a
+              LHS instantiated: UhOh<'?3, u32>
+              Culprits:
+                - idx: 2
+                    - cannot unify
+                      LHS: <<T as Meow>::Generator as UhOh<'?3, u32>>::Output
+                      RHS: <<T as Meow>::Generator as UhOh<'?2, u32>>::Output
+                      mode: Equate
+                        - region error
+                            - re and re unify error
+                              LHS: '?3
+                              RHS: '?2
+                              mode: Equate
+                                - requires var: 'a
+                                  to outlive: 'b
+                                    - requires var: 'b
+                                      to outlive: 'a
 
-error: - 
-    - projection failed
-      span: infinite_universals.fir:35:36-49
-        - trait spec resolution error
-          self ty: <T as Meow>::Generator
-          spec: UhOh<'a, u32>
-            - trait not implemented
-              LHS: <T as Meow>::Generator
+error: 
+- projection failed
+  span: infinite_universals.fir:35:36-49
+    - trait spec resolution error
+      self ty: <T as Meow>::Generator
+      spec: UhOh<'a, u32>
+        - trait not implemented
+          LHS: <T as Meow>::Generator
+          RHS: UhOh<'a, u32, Output = <<T as Meow>::Generator as UhOh<'?4, i32>>::Output>
+            - inherent unsatisfied
+              LHS: for<T, a> UhOh<'a, T>
               RHS: UhOh<'a, u32, Output = <<T as Meow>::Generator as UhOh<'?4, i32>>::Output>
-                - inherent unsatisfied
-                  LHS: for<T, a> UhOh<'a, T>
-                  RHS: UhOh<'a, u32, Output = <<T as Meow>::Generator as UhOh<'?4, i32>>::Output>
-                  LHS instantiated: UhOh<'?5, u32>
-                  Culprits:
-                    - idx: 2
-                        - cannot unify
-                          LHS: <<T as Meow>::Generator as UhOh<'?5, u32>>::Output
-                          RHS: <<T as Meow>::Generator as UhOh<'?4, i32>>::Output
-                          mode: Equate
-                            - structural error
-                                - type mismatch
-                                  LHS: u32
-                                  RHS: i32
+              LHS instantiated: UhOh<'?5, u32>
+              Culprits:
+                - idx: 2
+                    - cannot unify
+                      LHS: <<T as Meow>::Generator as UhOh<'?5, u32>>::Output
+                      RHS: <<T as Meow>::Generator as UhOh<'?4, i32>>::Output
+                      mode: Equate
+                        - structural error
+                            - type mismatch
+                              LHS: u32
+                              RHS: i32
 

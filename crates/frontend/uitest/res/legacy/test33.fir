@@ -58,5 +58,6 @@ trait Fuzzy {}
 fn rejected<Q: for<T: Projector> Helper<<T as Projector>::Out, T>>() {}
 
 fn accepted<Q: for<T: Projector<Out: Fuzzy>> Helper<<T as Projector>::Out, T>>() {
+    // FIXME: why is the diagnostic so short??
     rejected::<Q>;
 }

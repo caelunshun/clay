@@ -1,4 +1,5 @@
-error: - span: test23.fir:157:22-24
+error: 
+- span: test23.fir:157:22-24
   cannot unify
   LHS: &'erased ()
   RHS: &'erased mut ()
@@ -8,7 +9,8 @@ error: - span: test23.fir:157:22-24
           LHS: &'erased ()
           RHS: &'erased mut ()
 
-error: - span: test23.fir:179:5-13
+error: 
+- span: test23.fir:179:5-13
   cannot unify
   LHS: ?27
   RHS: ()

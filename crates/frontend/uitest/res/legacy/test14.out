@@ -1,16 +1,16 @@
-error: - 
-    - bad generics
-      span: test14.fir:1:60-65
-        - binder param WF error
-            - idx: 1
-                - ty outlives region
-                  LHS: T
+error: 
+- bad generics
+  span: test14.fir:1:60-65
+    - binder param WF error
+        - idx: 1
+            - ty outlives region
+              LHS: T
+              RHS: 'c
+              Errors:
+                - re and re unify error
+                  LHS: 'u3
                   RHS: 'c
-                  Errors:
-                    - re and re unify error
-                      LHS: 'u3
-                      RHS: 'c
-                      mode: LhsOntoRhs
-                        - requires var: 'u3
-                          to outlive: 'c
+                  mode: LhsOntoRhs
+                    - requires var: 'u3
+                      to outlive: 'c
 

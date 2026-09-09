@@ -32,6 +32,7 @@ pub trait Projector<T> {
     type Out;
 }
 
+// FIXME: should be accepted
 fn hello<
     T: Projector<i32>
      + Projector<u32, Out = <T as Projector<i32>>::Out>

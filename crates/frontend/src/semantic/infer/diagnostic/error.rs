@@ -54,6 +54,11 @@ impl DebugTree {
     pub fn push_sublist(&mut self, list: impl Into<DebugTree>) {
         let list = list.into();
 
+        if self.is_empty() {
+            *self = list;
+            return;
+        }
+
         if let [DebugTreePart::Sublist(_)] = &list.parts[..] {
             let [DebugTreePart::Sublist(list)] =
                 <[DebugTreePart; 1]>::try_from(list.parts).unwrap()
@@ -229,7 +234,7 @@ impl DebugTree {
                 DebugTreePart::Sublist(sublist) => {
                     f.change_level_now(2)?;
                     sublist.format(f)?;
-                    f.change_level_now(2)?;
+                    f.change_level_now(-2)?;
                 }
             }
         }

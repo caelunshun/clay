@@ -1,60 +1,60 @@
-error: - 
-    - projection failed
-      span: test34.fir:27:19-30
-        - trait spec resolution error
-          self ty: ()
-          spec: Forever<()>
-            - trait not implemented
-              LHS: ()
-              RHS: Forever<(), Out = ?2>
-                - block impl unsatisfied
+error: 
+- projection failed
+  span: test34.fir:27:19-30
+    - trait spec resolution error
+      self ty: ()
+      spec: Forever<()>
+        - trait not implemented
+          LHS: ()
+          RHS: Forever<(), Out = ?2>
+            - block impl unsatisfied
+              block: test34.fir:23:36-38
+                - impl block satisfy error
                   block: test34.fir:23:36-38
-                    - impl block satisfy error
-                      block: test34.fir:23:36-38
-                        - binder param WF error
-                            - idx: 0
-                                - trait not implemented
-                                  LHS: ()
-                                  RHS: Forever<()>
-                                  RHS instance: Forever<()>
-                                  spec not met:
-                                    - block impl unsatisfied
+                    - binder param WF error
+                        - idx: 0
+                            - trait not implemented
+                              LHS: ()
+                              RHS: Forever<()>
+                              RHS instance: Forever<()>
+                              spec not met:
+                                - block impl unsatisfied
+                                  block: test34.fir:23:36-38
+                                    - impl block satisfy error
                                       block: test34.fir:23:36-38
-                                        - impl block satisfy error
-                                          block: test34.fir:23:36-38
-                                            - target trait import
-                                                - projection failed
-                                                  span: test34.fir:24:22-32
-                                                    - trait spec resolution error
-                                                      self ty: ()
-                                                      spec: Forever<()>
-                                                        - trait not implemented
-                                                          LHS: ()
-                                                          RHS: Forever<(), Out = ?8>
-                                                            - block impl unsatisfied
+                                        - target trait import
+                                            - projection failed
+                                              span: test34.fir:24:22-32
+                                                - trait spec resolution error
+                                                  self ty: ()
+                                                  spec: Forever<()>
+                                                    - trait not implemented
+                                                      LHS: ()
+                                                      RHS: Forever<(), Out = ?8>
+                                                        - block impl unsatisfied
+                                                          block: test34.fir:23:36-38
+                                                            - impl block satisfy error
                                                               block: test34.fir:23:36-38
-                                                                - impl block satisfy error
-                                                                  block: test34.fir:23:36-38
-                                                                    - binder param WF error
-                                                                        - idx: 0
-                                                                            - trait not implemented
-                                                                              LHS: ()
-                                                                              RHS: Forever<()>
-                                                                              RHS instance: Forever<()>
-                                                                              spec not met:
-                                                                                - block impl unsatisfied
+                                                                - binder param WF error
+                                                                    - idx: 0
+                                                                        - trait not implemented
+                                                                          LHS: ()
+                                                                          RHS: Forever<()>
+                                                                          RHS instance: Forever<()>
+                                                                          spec not met:
+                                                                            - block impl unsatisfied
+                                                                              block: test34.fir:23:36-38
+                                                                                - impl block satisfy error
                                                                                   block: test34.fir:23:36-38
-                                                                                    - impl block satisfy error
-                                                                                      block: test34.fir:23:36-38
-                                                                                        - target trait import
-                                                                                            - projection failed
-                                                                                              span: test34.fir:24:22-32
-                                                                                                - trait spec resolution error
-                                                                                                  self ty: ()
-                                                                                                  spec: Forever<()>
-                                                                                                    - trait not implemented
-                                                                                                    LHS: ()
-                                                                                                    RHS: Forever<(), Out = ?12>
+                                                                                    - target trait import
+                                                                                        - projection failed
+                                                                                          span: test34.fir:24:22-32
+                                                                                            - trait spec resolution error
+                                                                                              self ty: ()
+                                                                                              spec: Forever<()>
+                                                                                                - trait not implemented
+                                                                                                  LHS: ()
+                                                                                                  RHS: Forever<(), Out = ?12>
                                                                                                     - block impl unsatisfied
                                                                                                     block: test34.fir:23:36-38
                                                                                                     - impl block satisfy error

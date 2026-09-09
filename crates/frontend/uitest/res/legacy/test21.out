@@ -1,8 +1,9 @@
-error: - span: test21.fir:70:17-28
-    - trait not implemented
-      LHS: fn @ meow<?34>
-      RHS: for<T: Meow> std::FnOnce<(T,), T>
-      RHS instance: std::FnOnce<(T,), T>
-      spec not met:
-        - no suitable impl met
+error: 
+- span: test21.fir:70:17-28
+  trait not implemented
+  LHS: fn @ meow<?34>
+  RHS: for<T: Meow> std::FnOnce<(T,), T>
+  RHS instance: std::FnOnce<(T,), T>
+  spec not met:
+    - no suitable impl met
 

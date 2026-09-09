@@ -1,58 +1,58 @@
-error: - 
-    - projection failed
-      span: test26.fir:24:23-30
-        - trait spec resolution error
-          self ty: ()
-          spec: Forever
-            - trait not implemented
-              LHS: ()
-              RHS: Forever<Out = ?128>
-                - block impl unsatisfied
+error: 
+- projection failed
+  span: test26.fir:24:23-30
+    - trait spec resolution error
+      self ty: ()
+      spec: Forever
+        - trait not implemented
+          LHS: ()
+          RHS: Forever<Out = ?128>
+            - block impl unsatisfied
+              block: test26.fir:23:18-20
+                - impl block satisfy error
                   block: test26.fir:23:18-20
-                    - impl block satisfy error
-                      block: test26.fir:23:18-20
-                        - target trait import
-                            - projection failed
-                              span: test26.fir:24:23-30
-                                - trait spec resolution error
-                                  self ty: ()
-                                  spec: Forever
-                                    - trait not implemented
-                                      LHS: ()
-                                      RHS: Forever<Out = ?128>
-                                        - block impl unsatisfied
+                    - target trait import
+                        - projection failed
+                          span: test26.fir:24:23-30
+                            - trait spec resolution error
+                              self ty: ()
+                              spec: Forever
+                                - trait not implemented
+                                  LHS: ()
+                                  RHS: Forever<Out = ?128>
+                                    - block impl unsatisfied
+                                      block: test26.fir:23:18-20
+                                        - impl block satisfy error
                                           block: test26.fir:23:18-20
-                                            - impl block satisfy error
-                                              block: test26.fir:23:18-20
-                                                - target trait import
-                                                    - projection failed
-                                                      span: test26.fir:24:23-30
-                                                        - trait spec resolution error
-                                                          self ty: ()
-                                                          spec: Forever
-                                                            - trait not implemented
-                                                              LHS: ()
-                                                              RHS: Forever<Out = ?128>
-                                                                - block impl unsatisfied
+                                            - target trait import
+                                                - projection failed
+                                                  span: test26.fir:24:23-30
+                                                    - trait spec resolution error
+                                                      self ty: ()
+                                                      spec: Forever
+                                                        - trait not implemented
+                                                          LHS: ()
+                                                          RHS: Forever<Out = ?128>
+                                                            - block impl unsatisfied
+                                                              block: test26.fir:23:18-20
+                                                                - impl block satisfy error
                                                                   block: test26.fir:23:18-20
-                                                                    - impl block satisfy error
-                                                                      block: test26.fir:23:18-20
-                                                                        - target trait import
-                                                                            - projection failed
-                                                                              span: test26.fir:24:23-30
-                                                                                - trait spec resolution error
-                                                                                  self ty: ()
-                                                                                  spec: Forever
-                                                                                    - trait not implemented
-                                                                                      LHS: ()
-                                                                                      RHS: Forever<Out = ?128>
-                                                                                        - block impl unsatisfied
+                                                                    - target trait import
+                                                                        - projection failed
+                                                                          span: test26.fir:24:23-30
+                                                                            - trait spec resolution error
+                                                                              self ty: ()
+                                                                              spec: Forever
+                                                                                - trait not implemented
+                                                                                  LHS: ()
+                                                                                  RHS: Forever<Out = ?128>
+                                                                                    - block impl unsatisfied
+                                                                                      block: test26.fir:23:18-20
+                                                                                        - impl block satisfy error
                                                                                           block: test26.fir:23:18-20
-                                                                                            - impl block satisfy error
-                                                                                              block: test26.fir:23:18-20
-                                                                                                - target trait import
-                                                                                                    - projection failed
-                                                                                                    span: test26.fir:24:23-30
+                                                                                            - target trait import
+                                                                                                - projection failed
+                                                                                                  span: test26.fir:24:23-30
                                                                                                     - trait spec resolution error
                                                                                                     self ty: ()
                                                                                                     spec: Forever
@@ -1660,61 +1660,61 @@ error: -
                                                                                                     RHS: Forever<Out = ?128>
                                                                                                     - recursion limit met
 
-error: - 
-    - projection failed
-      span: test26.fir:27:19-26
-        - trait spec resolution error
-          self ty: ()
-          spec: Forever
-            - trait not implemented
-              LHS: ()
-              RHS: Forever<Out = ?129>
-                - block impl unsatisfied
+error: 
+- projection failed
+  span: test26.fir:27:19-26
+    - trait spec resolution error
+      self ty: ()
+      spec: Forever
+        - trait not implemented
+          LHS: ()
+          RHS: Forever<Out = ?129>
+            - block impl unsatisfied
+              block: test26.fir:23:18-20
+                - impl block satisfy error
                   block: test26.fir:23:18-20
-                    - impl block satisfy error
-                      block: test26.fir:23:18-20
-                        - target trait import
-                            - projection failed
-                              span: test26.fir:24:23-30
-                                - trait spec resolution error
-                                  self ty: ()
-                                  spec: Forever
-                                    - trait not implemented
-                                      LHS: ()
-                                      RHS: Forever<Out = ?129>
-                                        - block impl unsatisfied
+                    - target trait import
+                        - projection failed
+                          span: test26.fir:24:23-30
+                            - trait spec resolution error
+                              self ty: ()
+                              spec: Forever
+                                - trait not implemented
+                                  LHS: ()
+                                  RHS: Forever<Out = ?129>
+                                    - block impl unsatisfied
+                                      block: test26.fir:23:18-20
+                                        - impl block satisfy error
                                           block: test26.fir:23:18-20
-                                            - impl block satisfy error
-                                              block: test26.fir:23:18-20
-                                                - target trait import
-                                                    - projection failed
-                                                      span: test26.fir:24:23-30
-                                                        - trait spec resolution error
-                                                          self ty: ()
-                                                          spec: Forever
-                                                            - trait not implemented
-                                                              LHS: ()
-                                                              RHS: Forever<Out = ?129>
-                                                                - block impl unsatisfied
+                                            - target trait import
+                                                - projection failed
+                                                  span: test26.fir:24:23-30
+                                                    - trait spec resolution error
+                                                      self ty: ()
+                                                      spec: Forever
+                                                        - trait not implemented
+                                                          LHS: ()
+                                                          RHS: Forever<Out = ?129>
+                                                            - block impl unsatisfied
+                                                              block: test26.fir:23:18-20
+                                                                - impl block satisfy error
                                                                   block: test26.fir:23:18-20
-                                                                    - impl block satisfy error
-                                                                      block: test26.fir:23:18-20
-                                                                        - target trait import
-                                                                            - projection failed
-                                                                              span: test26.fir:24:23-30
-                                                                                - trait spec resolution error
-                                                                                  self ty: ()
-                                                                                  spec: Forever
-                                                                                    - trait not implemented
-                                                                                      LHS: ()
-                                                                                      RHS: Forever<Out = ?129>
-                                                                                        - block impl unsatisfied
+                                                                    - target trait import
+                                                                        - projection failed
+                                                                          span: test26.fir:24:23-30
+                                                                            - trait spec resolution error
+                                                                              self ty: ()
+                                                                              spec: Forever
+                                                                                - trait not implemented
+                                                                                  LHS: ()
+                                                                                  RHS: Forever<Out = ?129>
+                                                                                    - block impl unsatisfied
+                                                                                      block: test26.fir:23:18-20
+                                                                                        - impl block satisfy error
                                                                                           block: test26.fir:23:18-20
-                                                                                            - impl block satisfy error
-                                                                                              block: test26.fir:23:18-20
-                                                                                                - target trait import
-                                                                                                    - projection failed
-                                                                                                    span: test26.fir:24:23-30
+                                                                                            - target trait import
+                                                                                                - projection failed
+                                                                                                  span: test26.fir:24:23-30
                                                                                                     - trait spec resolution error
                                                                                                     self ty: ()
                                                                                                     spec: Forever

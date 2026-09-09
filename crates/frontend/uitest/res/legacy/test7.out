@@ -1,36 +1,36 @@
-error: - 
-    - bad trait spec
-      span: test7.fir:23:15-56
-        - binder param WF error
-            - idx: 0
-                - trait not implemented
-                  LHS: Foo
-                  RHS: Meow
-                  RHS instance: Meow
-                  spec not met:
-                    - no suitable impl met
+error: 
+- bad trait spec
+  span: test7.fir:23:15-56
+    - binder param WF error
+        - idx: 0
+            - trait not implemented
+              LHS: Foo
+              RHS: Meow
+              RHS instance: Meow
+              spec not met:
+                - no suitable impl met
 
-error: - 
-    - bad trait spec
-      span: test7.fir:27:28-49
-        - binder param WF error
-            - idx: 0
-                - trait not implemented
-                  LHS: Foo
-                  RHS: Meow
-                  RHS instance: Meow
-                  spec not met:
-                    - no suitable impl met
+error: 
+- bad trait spec
+  span: test7.fir:27:28-49
+    - binder param WF error
+        - idx: 0
+            - trait not implemented
+              LHS: Foo
+              RHS: Meow
+              RHS instance: Meow
+              spec not met:
+                - no suitable impl met
 
-error: - 
-    - bad generics
-      span: test7.fir:32:14-16
-        - binder param WF error
-            - idx: 0
-                - trait not implemented
-                  LHS: ()
-                  RHS: Meow
-                  RHS instance: Meow
-                  spec not met:
-                    - no suitable impl met
+error: 
+- bad generics
+  span: test7.fir:32:14-16
+    - binder param WF error
+        - idx: 0
+            - trait not implemented
+              LHS: ()
+              RHS: Meow
+              RHS instance: Meow
+              spec not met:
+                - no suitable impl met
 

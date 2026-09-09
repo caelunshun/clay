@@ -1,4 +1,5 @@
-error: - span: block_missing_trailing_expr.fir:1:18-18
+error: 
+- span: block_missing_trailing_expr.fir:1:18-18
   cannot unify
   LHS: u32
   RHS: ()

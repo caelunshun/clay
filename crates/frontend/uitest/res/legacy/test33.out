@@ -1,38 +1,12 @@
-error: - 
-    - bad generics
-      span: test33.fir:61:16-17
-        - binder param WF error
-            - idx: 0
-                - trait not implemented
-                  LHS: Q
-                  RHS: for<T: Projector> Helper<<T as Projector>::Out, T>
-                  RHS instance: Helper<<T as Projector>::Out, T>
-                  spec not met:
-                    - inherent unsatisfied
-                      LHS: for<T: Projector<Out: Fuzzy>> Helper<<T as Projector>::Out, T>
-                      RHS: Helper<<T as Projector>::Out, T>
-                      LHS instantiated: Helper<<T as Projector>::Out, T>
-                      LHS instantiate error:
-                        - instantiate HRTB infer
-                          value: for<T: Projector<Out: Fuzzy>> Helper<<T as Projector>::Out, T>
-                          param not valid:
-                            - idx: 0
-                                - ty not met
-                                    - trait not implemented
-                                      LHS: T
-                                      RHS: Projector<Out: Fuzzy>
-                                      RHS instance: Projector<Out: Fuzzy>
-                                      spec not met:
-                                        - inherent unsatisfied
-                                          LHS: Projector<Out = <T as Projector>::Out>
-                                          RHS: Projector<Out: Fuzzy>
-                                          LHS instantiated: Projector<Out = <T as Projector>::Out>
-                                          Culprits:
-                                            - idx: 0
-                                                - trait not implemented
-                                                  LHS: <T as Projector>::Out
-                                                  RHS: Fuzzy
-                                                  RHS instance: Fuzzy
-                                                  spec not met:
-                                                    - no suitable impl met
+error: 
+- bad generics
+  span: test33.fir:62:16-17
+    - binder param WF error
+        - idx: 0
+            - trait not implemented
+              LHS: Q
+              RHS: for<T: Projector> Helper<<T as Projector>::Out, T>
+              RHS instance: Helper<<T as Projector>::Out, T>
+              spec not met:
+                - no suitable impl met
 

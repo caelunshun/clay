@@ -1,0 +1,34 @@
+error: 
+- no shadow impl
+  span: test24.fir:40:8-50
+    - trait spec resolution error
+      self ty: [clause WF helper]
+      spec: Meow<<T as Projector<i32>>::Out, Hey: Bar>
+        - idx: 1
+            - trait not implemented
+              LHS: <[clause WF helper] as Meow<<T as Projector<i32>>::Out>>::Hey
+              RHS: Bar
+              RHS instance: Bar
+              spec not met:
+                - no suitable impl met
+
+error: 
+- span: test24.fir:44:9-23
+  trait not implemented
+  LHS: fn @ demo
+  RHS: std::FnOnce<(<T as Meow<<T as Projector<i32>>::Out>>::Hey,), ()>
+    - fn impl unsatisfied
+      resolve fn:
+        - fn instance resolution error
+          instance: fn @ demo
+            - item fn unsatisfied
+              early args error:
+                - binder param WF error
+                    - idx: 0
+                        - trait not implemented
+                          LHS: <T as Meow<<T as Projector<i32>>::Out>>::Hey
+                          RHS: Bar
+                          RHS instance: Bar
+                          spec not met:
+                            - no suitable impl met
+
