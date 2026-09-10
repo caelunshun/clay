@@ -47,9 +47,8 @@ struct Uhh<'a, 'b, T: Meow> {
     )>,
 }
 
-/*
 fn uhh<'a, 'b, T: Meow>() {
-    // FIXME: Should be rejected.
+    // Should be rejected.
     eq(T::get_universal::<'a, u32>(), T::get_universal::<'a, i32>());
 
     // FIXME: Should be rejected.
@@ -60,4 +59,3 @@ fn uhh<'a, 'b, T: Meow>() {
 }
 
 fn eq<T>(lhs: T, rhs: T) {}
-*/

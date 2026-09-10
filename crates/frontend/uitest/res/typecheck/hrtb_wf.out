@@ -1,0 +1,14 @@
+error: 
+- bad ref pointee
+  span: hrtb_wf.fir:3:34-39
+    - ty outlives region
+      LHS: u(2) T
+      RHS: 'u0
+      Errors:
+        - re and re unify error
+          LHS: 'u3
+          RHS: 'u0
+          mode: LhsOntoRhs
+            - requires var: 'u3
+              to outlive: 'u0
+

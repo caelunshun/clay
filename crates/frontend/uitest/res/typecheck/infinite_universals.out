@@ -51,3 +51,14 @@ error:
                               LHS: u32
                               RHS: i32
 
+error: 
+- span: infinite_universals.fir:52:66-68
+  cannot unify
+  LHS: u(12) <u(10) <u(0) T as Meow>::Generator as UhOh<'erased, i32>>::Output
+  RHS: u(7) <u(5) <u(0) T as Meow>::Generator as UhOh<'erased, u32>>::Output
+  mode: Equate
+    - structural error
+        - type mismatch
+          LHS: i32
+          RHS: u32
+

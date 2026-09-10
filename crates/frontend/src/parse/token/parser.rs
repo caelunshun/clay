@@ -477,7 +477,7 @@ fn parse_char_lit_or_lifetime(p: P) -> Option<TokenTree> {
             Diag::span_err(start.to(p.prev_span()), "lifetime cannot contain escapes").emit();
         }
 
-        if !accum.chars().next().unwrap().is_xid_start() {
+        if !accum.chars().next().unwrap().is_xid_start() && accum.chars().next().unwrap() != '_' {
             Diag::span_err(
                 start.to(p.prev_span()),
                 "lifetime cannot start with that character",

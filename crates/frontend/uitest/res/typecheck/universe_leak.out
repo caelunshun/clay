@@ -1,0 +1,23 @@
+error: 
+- span: universe_leak.fir:16:20-37
+  instantiated trait not implemented
+  LHS: fn @ types::taker_types
+  RHS: FnOnce<(fn @ types::hrtb_types<?(7) _>,), ()>
+    - fn impl unsatisfied
+      resolve fn:
+        - fn instance resolution error
+          instance: fn @ types::taker_types
+            - item fn unsatisfied
+              early args error:
+                - binder param WF error
+                    - idx: 0
+                        - uninstantiated trait not implemented
+                          LHS: fn @ types::hrtb_types<?(7) _>
+                          RHS: for<T> FnOnce<(T,), ()>
+                          RHS instance: FnOnce<(u(1) T,), ()>
+                          spec not met:
+                            - instantiated trait not implemented
+                              LHS: fn @ types::hrtb_types<?(7) _>
+                              RHS: FnOnce<(u(1) T,), ()>
+                                - no suitable impl met
+

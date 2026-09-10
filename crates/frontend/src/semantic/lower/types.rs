@@ -134,6 +134,10 @@ impl IntraItemLowerCtxt<'_> {
             return SigReKind::Gc.wrap(ast.span);
         }
 
+        if ast.name == symbol!("_") {
+            return SigReKind::Infer.wrap(ast.span);
+        }
+
         todo!()
     }
 

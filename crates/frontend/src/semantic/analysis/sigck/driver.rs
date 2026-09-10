@@ -116,17 +116,15 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
                 .report_loud();
 
             // Let's ensure that the type implements its super-traits as well.
-            let trait_def = trait_.def;
-
             let trait_env = ClauseImportEnv::new(
                 Some(env.unwrap_self_ty()),
                 [GenericSubst::new(
-                    *trait_def.r(s).generics,
+                    *trait_.def.r(s).generics,
                     base_trait_instance.params,
                 )],
             );
 
-            for &super_clause in trait_def.r(s).inherits.elems.r(s) {
+            for &super_clause in trait_.def.r(s).inherits.elems.r(s) {
                 let super_clause_span = super_clause.span;
                 let super_clause = ccx.import_elsewhere(&trait_env, super_clause);
 
