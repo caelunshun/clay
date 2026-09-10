@@ -43,49 +43,6 @@ error:
 
 error: 
 - no shadow impl
-  span: unspec_spec_wf.fir:44:32-54
-    - trait spec resolution error
-      self ty: u(3) [clause WF helper]
-      spec: case3::Meow<u32, Other = u32>
-        - instantiated trait not implemented
-          LHS: u(3) [clause WF helper]
-          LHS elaboration:
-            - clauses:
-                - ready
-                  binder: case3::Meow<u32>
-                    - ready
-                      binder: case3::Meow<u32, Other = u32>
-          RHS: case3::Meow<u32, Other = u32>
-            - inherent unsatisfied
-              LHS: case3::Meow<u32>
-              RHS: case3::Meow<u32, Other = u32>
-              LHS instantiated: case3::Meow<u32>
-              Culprits:
-                - idx: 1
-                    - cannot unify
-                      LHS: u(1) <u(3) [clause WF helper] as case3::Meow<u32>>::Other
-                      RHS: u32
-                      mode: Equate
-                        - structural error
-                            - type mismatch
-                              LHS: u(1) <u(3) [clause WF helper] as case3::Meow<u32>>::Other
-                              RHS: u32
-    - bad trait spec
-      span: unspec_spec_wf.fir:44:20-29
-        - binder param WF error
-            - idx: 0
-                - uninstantiated trait not implemented
-                  LHS: u32
-                  RHS: case3::Thump<u(2) <u(3) [clause WF helper] as case3::Meow<u32>>::Other>
-                  RHS instance: case3::Thump<u(2) <u(3) [clause WF helper] as case3::Meow<u32>>::Other>
-                  spec not met:
-                    - instantiated trait not implemented
-                      LHS: u32
-                      RHS: case3::Thump<u(2) <u(3) [clause WF helper] as case3::Meow<u32>>::Other>
-                        - no suitable impl met
-
-error: 
-- no shadow impl
   span: unspec_spec_wf.fir:60:44-62
     - trait spec resolution error
       self ty: u(3) [clause WF helper]

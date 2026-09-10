@@ -88,11 +88,11 @@ impl<'tcx> UnifyCx<'tcx> {
     }
 
     pub fn substitutor(&self, mode: UnboundVarHandlingMode) -> InferTySubstitutor<'_, 'tcx> {
-        InferTySubstitutor {
-            ucx: self,
-            mode,
-            did_trap_floating: false,
-        }
+        InferTySubstitutor { ucx: self, mode }
+    }
+
+    pub fn fallible_substitutor(&self) -> FallibleInferTySubstitutor<'_, 'tcx> {
+        FallibleInferTySubstitutor { ucx: self }
     }
 
     pub fn fresh_ty_infer_var(
@@ -1030,7 +1030,6 @@ impl<'tcx> UnifyCx<'tcx> {
 pub struct InferTySubstitutor<'a, 'tcx> {
     pub ucx: &'a UnifyCx<'tcx>,
     pub mode: UnboundVarHandlingMode,
-    pub did_trap_floating: bool,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -1059,19 +1058,39 @@ impl<'tcx> TyFolder<'tcx> for InferTySubstitutor<'_, 'tcx> {
 
         Ok(match self.ucx.lookup_ty_infer_var(var) {
             Ok(v) => self.fold(v),
-            Err(floating) => {
-                self.did_trap_floating = true;
-
-                match self.mode {
-                    UnboundVarHandlingMode::Error(error) => self.tcx().intern(TyKind::Error(error)),
-                    UnboundVarHandlingMode::NormalizeToRoot => {
-                        self.tcx().intern(TyKind::InferVar(floating.root))
-                    }
-                    UnboundVarHandlingMode::Panic => {
-                        unreachable!("unexpected ambiguous inference variable")
-                    }
+            Err(floating) => match self.mode {
+                UnboundVarHandlingMode::Error(error) => self.tcx().intern(TyKind::Error(error)),
+                UnboundVarHandlingMode::NormalizeToRoot => {
+                    self.tcx().intern(TyKind::InferVar(floating.root))
                 }
-            }
+                UnboundVarHandlingMode::Panic => {
+                    unreachable!("unexpected ambiguous inference variable")
+                }
+            },
+        })
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct FallibleInferTySubstitutor<'a, 'tcx> {
+    pub ucx: &'a UnifyCx<'tcx>,
+}
+
+impl<'tcx> TyFolder<'tcx> for FallibleInferTySubstitutor<'_, 'tcx> {
+    type Error = InferTyVar;
+
+    fn tcx(&self) -> &'tcx TyCtxt {
+        self.ucx.tcx()
+    }
+
+    fn fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
+        let TyKind::InferVar(var) = *ty.r(self.session()) else {
+            return self.super_fallible(ty);
+        };
+
+        Ok(match self.ucx.lookup_ty_infer_var(var) {
+            Ok(v) => self.fold_fallible(v)?,
+            Err(_) => return Err(var),
         })
     }
 }

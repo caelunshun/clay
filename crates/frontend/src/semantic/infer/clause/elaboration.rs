@@ -7,17 +7,17 @@ use crate::{
         infer::{
             ClauseCx, ClauseFuel, ClauseImportEnv, ClauseObligation, GenericSubst, HrtbUniverse,
             ImportWfMode, InstantiatedTraitSpec, ObligationNotReady, ObligationResult,
-            ObligationTermination, UnboundVarHandlingMode,
+            ObligationTermination,
         },
         syntax::{
             AnyGeneric, HrtbBinder, HrtbDebruijn, HrtbDebruijnDef, HrtbProjection, InferTyVar,
             InferTyVarSourceInfo, Re, RelationMode, TraitClause, TraitInstance, TraitParam,
-            TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor,
-            TyVisitorInfallibleExt, UniversalReVarSourceInfo, UniversalTy, UniversalTyOrReRoot,
-            UniversalTyProjInner,
+            TraitSpec, Ty, TyCtxt, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyKind, TyOrRe,
+            TyVisitor, TyVisitorInfallibleExt, UniversalReVarSourceInfo, UniversalTy,
+            UniversalTyOrReRoot, UniversalTyProjInner,
         },
     },
-    utils::hash::{FxHashMap, FxHashSet},
+    utils::hash::FxHashMap,
 };
 use hashbrown::hash_map;
 use std::{collections::VecDeque, convert::Infallible, num::NonZeroU32, ops::ControlFlow, rc::Rc};
@@ -237,19 +237,14 @@ impl<'tcx> ClauseCx<'tcx> {
         let universe = self.lookup_universal_ty_hrtb_universe(universal).clone();
 
         let mut made_progress = false;
-        let mut shadowed_clauses = FxHashSet::<usize>::default();
         let mut next_clause_idx = 0usize;
 
-        while next_clause_idx < elaborated_clauses(self, universal).len() {
+        'readying_clauses: while next_clause_idx < elaborated_clauses(self, universal).len() {
             let curr_clause_idx = next_clause_idx;
             next_clause_idx += 1;
 
-            if shadowed_clauses.contains(&curr_clause_idx) {
-                continue;
-            }
-
             let ElaboratedClause::NotReady {
-                mut instantiated,
+                instantiated,
                 late_assoc_params: ref instantiated_with_late,
             } = elaborated_clauses(self, universal)[curr_clause_idx]
             else {
@@ -259,24 +254,152 @@ impl<'tcx> ClauseCx<'tcx> {
             let instantiated_with_late = instantiated_with_late.clone();
 
             // First, ensure that `instantiated` has all its inference variables solved.
-            {
-                let mut folder = self
-                    .ucx()
-                    .substitutor(UnboundVarHandlingMode::NormalizeToRoot);
-
-                instantiated = folder.fold(instantiated);
-
-                if folder.did_trap_floating {
-                    continue;
-                }
-            }
+            let Ok(instantiated) = self
+                .ucx()
+                .fallible_substitutor()
+                .fold_fallible(instantiated)
+            else {
+                continue;
+            };
 
             // Next, let's build up a full context for all our clauses by considering subsequent
             // clauses.
-            // TODO
+            let instantiated = {
+                let mut next_peer_idx = curr_clause_idx + 1;
+                let mut merge_targets = Vec::new();
 
-            // Next, unify `instantiated_with_late` with universals based off of HRTB temporary
-            // universals.
+                let mut instantiated_merge_params = instantiated.params.r(s).to_vec();
+
+                'scan_peers: while next_peer_idx < elaborated_clauses(self, universal).len() {
+                    let curr_peer_idx = next_peer_idx;
+                    next_peer_idx += 1;
+
+                    let ElaboratedClause::NotReady {
+                        instantiated: peer_instantiated,
+                        late_assoc_params: _,
+                    } = elaborated_clauses(self, universal)[curr_peer_idx]
+                    else {
+                        continue;
+                    };
+
+                    if peer_instantiated.def != instantiated.def {
+                        continue;
+                    }
+
+                    // Skip peer clauses we couldn't possibly unify with.
+                    let mut probe = self.clone();
+
+                    for (&lhs, &rhs) in instantiated
+                        .params
+                        .r(s)
+                        .iter()
+                        .zip(peer_instantiated.params.r(s))
+                        .take(*instantiated.def.r(s).regular_generic_count as usize)
+                    {
+                        let (TraitParam::Equals(lhs), TraitParam::Equals(rhs)) = (lhs, rhs) else {
+                            unreachable!()
+                        };
+
+                        let (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) = (lhs, rhs) else {
+                            continue;
+                        };
+
+                        if probe
+                            .unify_ty_and_ty(lhs, rhs, RelationMode::Equate)
+                            .is_err()
+                        {
+                            continue 'scan_peers;
+                        }
+                    }
+
+                    // If this peer clause isn't ready, we can't resolve the main clause.
+                    if self
+                        .ucx()
+                        .fallible_substitutor()
+                        .fold_fallible(instantiated)
+                        .is_err()
+                    {
+                        continue 'readying_clauses;
+                    }
+
+                    // Otherwise, queue up a merge assuming no other clauses prevent it.
+                    merge_targets.push(curr_peer_idx);
+                }
+
+                merge_targets.reverse();
+
+                for merge_target_idx in merge_targets {
+                    let ElaboratedClause::NotReady {
+                        instantiated: merge_target,
+                        late_assoc_params: _,
+                    } = elaborated_clauses(self, universal)[merge_target_idx]
+                    else {
+                        unreachable!()
+                    };
+
+                    for (merge_into, &merge_from) in instantiated_merge_params
+                        .iter_mut()
+                        .zip(merge_target.params.r(s))
+                        .skip(*instantiated.def.r(s).regular_generic_count as usize)
+                    {
+                        match (merge_into, merge_from) {
+                            (TraitParam::Equals(_), _) => {
+                                // (dropped)
+                            }
+                            (
+                                merge_into @ TraitParam::Unspecified(_),
+                                overriding_param @ TraitParam::Equals(_),
+                            ) => {
+                                *merge_into = overriding_param;
+                            }
+                            (
+                                merge_into @ TraitParam::Unspecified(_),
+                                TraitParam::Unspecified(rhs),
+                            ) => {
+                                let TraitParam::Unspecified(lhs) = *merge_into else {
+                                    unreachable!()
+                                };
+
+                                *merge_into = TraitParam::Unspecified(tcx.intern_list(
+                                    &lhs.r(s).iter().chain(rhs.r(s)).copied().collect::<Vec<_>>(),
+                                ));
+                            }
+                        }
+                    }
+
+                    elaborated_clauses(self, universal).remove(merge_target_idx);
+                }
+
+                TraitSpec {
+                    def: instantiated.def,
+                    params: tcx.intern_list(&instantiated_merge_params),
+                }
+            };
+
+            // We have enough information to finish this clause. Convert it into its HRTB form and
+            // mark it as done.
+            made_progress = true;
+
+            let finished_binder = self.hrtb_binder_from_elaboration_universals(
+                universe.clone(),
+                universal,
+                instantiated,
+            );
+
+            if !self.is_hrtb_binder_from_elab_universals_covered(finished_binder) {
+                // Discard the clause since it contains projections which cannot be effectively
+                // covered by an HRTB binder.
+                elaborated_clauses(self, universal).remove(curr_clause_idx);
+                next_clause_idx -= 1;
+
+                continue;
+            }
+
+            elaborated_clauses(self, universal)[curr_clause_idx] =
+                ElaboratedClause::Ready(finished_binder);
+
+            // Finally, unify `instantiated_with_late` with universals based off of HRTB temporary
+            // universals so that super-traits can also begin being marked as done.
             {
                 let regular_generic_count = *instantiated.def.r(s).regular_generic_count as usize;
 
@@ -311,28 +434,6 @@ impl<'tcx> ClauseCx<'tcx> {
                     .report_never();
                 }
             }
-
-            // We have enough information to finish this clause. Convert it into its HRTB form and
-            // mark it as done.
-            made_progress = true;
-
-            let finished_binder = self.hrtb_binder_from_elaboration_universals(
-                universe.clone(),
-                universal,
-                instantiated,
-            );
-
-            if !self.is_hrtb_binder_from_elab_universals_covered(finished_binder) {
-                // Discard the clause since it contains projections which cannot be effectively
-                // covered by an HRTB binder.
-                elaborated_clauses(self, universal).remove(curr_clause_idx);
-                next_clause_idx -= 1;
-
-                continue;
-            }
-
-            elaborated_clauses(self, universal)[curr_clause_idx] =
-                ElaboratedClause::Ready(finished_binder);
         }
 
         match elaborated_clauses(self, universal)
@@ -386,9 +487,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
         cover_visitor.visit(binder.inner);
 
-        // FIXME
-        // cover_visitor.was_covered.iter().all(|&v| v)
-        true
+        cover_visitor.was_covered.iter().all(|&v| v)
     }
 
     pub fn resolve_elaborated_universal_trait_spec(
@@ -588,8 +687,6 @@ impl<'tcx> TyFolder<'tcx> for HrtbReverseTranscriptase<'_, 'tcx> {
                 let target = self.fold(tcx.intern(TyKind::Universal(target)));
                 let as_spec = self.fold(as_spec);
 
-                // TODO: only spawn if this is a new HRTB derivation (not needed for correctness but
-                // possibly useful for performance)
                 Ok(tcx.intern(TyKind::HrtbProjection(HrtbProjection {
                     target: target,
                     spec: as_spec,
