@@ -33,7 +33,7 @@ error:
               elab still resolving
 
 error: 
-- no shadow impl
+- no reflexive impl
   span: test25.fir:31:13-41
     - trait spec resolution error
       self ty: u(1) [clause WF helper]

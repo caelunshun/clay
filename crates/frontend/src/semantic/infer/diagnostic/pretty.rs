@@ -382,16 +382,16 @@ impl_pretty! {
         }
 
         match cx.ccx().lookup_universal_ty_root_src_info(value) {
-            UniversalTyRootSourceInfo::TraitSelf => write!(f, "Self"),
-            UniversalTyRootSourceInfo::HrtbVar(name) => write!(f, "{name}"),
-            UniversalTyRootSourceInfo::ClauseWfHelper { clauses } => {
+            UniversalTyRootSourceInfo::Root(generic) => write!(f, "{}", generic.r(s).ident.text),
+            UniversalTyRootSourceInfo::InstantiatedHrtb(name) => write!(f, "{name}"),
+            UniversalTyRootSourceInfo::WfTraitSelf => write!(f, "Self"),
+            UniversalTyRootSourceInfo::WfReflexive { clauses } => {
                 // TODO
                 write!(f, "[clause WF helper]")
             },
-            UniversalTyRootSourceInfo::HrtbWf { binder, idx } => {
+            UniversalTyRootSourceInfo::WfHrtbUniversal { binder, idx } => {
                 write!(f, "{}", binder.defs.r(s)[idx as usize].name)
             },
-            UniversalTyRootSourceInfo::Root(generic) => write!(f, "{}", generic.r(s).ident.text),
         }
     }
     UniversalTyProj => |cx, value, f| {

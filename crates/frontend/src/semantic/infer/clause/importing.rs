@@ -771,7 +771,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         let wf_self_var = self.opts.wf_mode.do_wf().then(|| {
             UniversalTy::Root(self.ccx.fresh_ty_universal_root_idx(
                 self.opts.universe.clone(),
-                UniversalTyRootSourceInfo::ClauseWfHelper {
+                UniversalTyRootSourceInfo::WfReflexive {
                     clauses: Obj::new_slice(clauses, s),
                 },
             ))
@@ -925,7 +925,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 )),
                 TyOrReKind::Ty => TyOrRe::Ty(self.ccx.fresh_ty_universal_root(
                     nested_universe.clone(),
-                    UniversalTyRootSourceInfo::HrtbWf {
+                    UniversalTyRootSourceInfo::WfHrtbUniversal {
                         binder,
                         idx: idx as u32,
                     },
@@ -1097,7 +1097,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             .resolve_trait_spec(self.fuel, &self.opts.universe, wf_self_ty, spec_imported)
             .filter_map(move |_ccx, error| {
                 // No filtering needed because we know we're in WF mode.
-                Ok(ImportError::NoShadowImpl {
+                Ok(ImportError::NoReflexiveImpl {
                     span,
                     error: Box::new(error),
                 })
@@ -1160,7 +1160,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 }
                 TyOrReKind::Ty => TyOrRe::Ty(self.fresh_ty_universal_root(
                     universe.clone(),
-                    UniversalTyRootSourceInfo::HrtbVar(def.name),
+                    UniversalTyRootSourceInfo::InstantiatedHrtb(def.name),
                 )),
             })
             .collect::<Vec<_>>();

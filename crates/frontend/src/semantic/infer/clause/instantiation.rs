@@ -111,11 +111,10 @@ impl<'tcx> ClauseCx<'tcx> {
         let tcx = self.tcx();
 
         // Create a universal variable representing `Self`
-        let self_var =
-            UniversalTy::Root(self.fresh_ty_universal_root_idx(
-                HrtbUniverse::ROOT,
-                UniversalTyRootSourceInfo::TraitSelf,
-            ));
+        let self_var = UniversalTy::Root(self.fresh_ty_universal_root_idx(
+            HrtbUniverse::ROOT,
+            UniversalTyRootSourceInfo::WfTraitSelf,
+        ));
 
         let self_ty = tcx.intern(TyKind::Universal(self_var));
 

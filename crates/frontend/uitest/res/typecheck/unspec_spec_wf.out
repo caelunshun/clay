@@ -14,7 +14,7 @@ error:
                     - no suitable impl met
 
 error: 
-- no shadow impl
+- no reflexive impl
   span: unspec_spec_wf.fir:28:20-29
     - trait spec resolution error
       self ty: u(3) [clause WF helper]
@@ -42,7 +42,7 @@ error:
                               RHS: u32
 
 error: 
-- no shadow impl
+- no reflexive impl
   span: unspec_spec_wf.fir:60:44-62
     - trait spec resolution error
       self ty: u(3) [clause WF helper]

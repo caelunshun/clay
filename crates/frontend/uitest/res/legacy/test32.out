@@ -30,7 +30,7 @@ error:
                           ?(37) _ could not be inferred
 
 error: 
-- no shadow impl
+- no reflexive impl
   span: test32.fir:74:5-11
     - trait spec resolution error
       self ty: u(10) [clause WF helper]

@@ -161,11 +161,11 @@ define_index_type! {
 
 #[derive(Debug, Copy, Clone)]
 pub enum UniversalTyRootSourceInfo {
-    TraitSelf,
-    HrtbVar(Symbol),
-    ClauseWfHelper { clauses: Obj<[SigTraitClause]> },
-    HrtbWf { binder: SigHrtbBinder, idx: u32 },
     Root(Obj<TypeGeneric>),
+    InstantiatedHrtb(Symbol),
+    WfTraitSelf,
+    WfReflexive { clauses: Obj<[SigTraitClause]> },
+    WfHrtbUniversal { binder: SigHrtbBinder, idx: u32 },
 }
 
 #[derive(Debug, Copy, Clone)]
