@@ -2,16 +2,16 @@ use crate::{
     base::{
         Session,
         arena::{HasInterner, HasListInterner, LateInit, Obj},
+        syntax::HasSpan,
     },
     semantic::{
         analysis::typeck::{BodyCtxt, OverloadResolution},
         infer::{ClauseCx, FloatingInferVar, UnifyCx},
         syntax::{
-            FnInstanceInner, FnOwner, FnOwnerTrait, HirBlock, HirExpr, HirExprKind,
-            HirLabelledBlock, HirLocal, HirPat, HirPatKind, HirStmt, RelationMode, ThirBlock,
+            FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirLocal,
+            HirPat, HirPatKind, HirStmt, RelationMode, SigTy, SigTyInner, SigTyKind, ThirBlock,
             ThirExpr, ThirExprKind, ThirLabelledBlock, ThirLetStmt, ThirLocal, ThirPat,
-            ThirPatKind, ThirStmt, TraitParam, TraitSpec, Ty, TyCtxt, TyFoldable,
-            TyFolderInfallibleExt, TyKind, TyOrRe,
+            ThirPatKind, ThirStmt, TraitParam, TraitSpec, TyCtxt, TyKind, TyOrRe,
         },
     },
     utils::hash::FxHashMap,
@@ -74,19 +74,18 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
                 continue;
             };
 
-            // TODO
             self.ucx_mut()
-                .unify_ty_and_ty(var_ty, fallback, RelationMode::Equate);
+                .unify_ty_and_ty(var_ty, fallback, RelationMode::Equate)
+                .unwrap()
+                .report_never();
 
             self.ccx_mut().poll_obligations();
         }
 
-        // FIXME: Re-enable
-        // // Lower the function to its THIR representation.
-        // LateInit::init(&self.bcx.def.r(s).thir_body, Some(self.confirm_expr(body)));
+        // Lower the function to its THIR representation.
+        LateInit::init(&self.bcx.def.r(s).thir_body, Some(self.confirm_expr(body)));
     }
 
-    /*
     fn confirm_expr(&mut self, expr: Obj<HirExpr>) -> Obj<ThirExpr> {
         // TODO: Apply coercions
         self.confirm_expr_without_adjustments(expr)
@@ -104,9 +103,9 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
 
     fn confirm_expr_without_adjustments(&mut self, expr: Obj<HirExpr>) -> Obj<ThirExpr> {
         let s = self.session();
-        let tcx = self.tcx();
 
-        let ty = self.confirm_ty(self.bcx.expr_types_pre_coerce[&expr]);
+        let ty = self.bcx.expr_types_pre_coerce[&expr];
+        let ty = self.ccx_mut().export(expr.r(s).span, ty);
 
         let expr_thir = Obj::new(
             ThirExpr {
@@ -136,30 +135,31 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
                     OverloadResolution::Call => {
                         let overload = self.bcx.decode_bin_op_kind(op.kind).overload.unwrap();
 
-                        ThirExprKind::Call(
-                            Obj::new(
-                                ThirExpr {
-                                    span: expr.r(s).span,
-                                    ty: tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
-                                        owner: FnOwner::Trait(FnOwnerTrait {
-                                            instance: TraitSpec {
-                                                def: overload,
-                                                params: tcx.intern_list(&[
-                                                    TraitParam::Equals(TyOrRe::Ty(rhs.r(s).ty)),
-                                                    TraitParam::Equals(TyOrRe::Ty(ty)),
-                                                ]),
-                                            },
-                                            self_ty: lhs.r(s).ty,
-                                            method_idx: 0,
-                                        }),
-                                        early_args: None,
-                                    }))),
-                                    kind: LateInit::new(ThirExprKind::CreatePathZst),
-                                },
-                                s,
-                            ),
-                            Obj::new_slice(&[lhs, rhs], s),
-                        )
+                        todo!();
+                        // ThirExprKind::Call(
+                        //     Obj::new(
+                        //         ThirExpr {
+                        //             span: expr.r(s).span,
+                        //             ty: tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
+                        //                 owner: FnOwner::Trait(FnOwnerTrait {
+                        //                     instance: TraitSpec {
+                        //                         def: overload,
+                        //                         params: tcx.intern_list(&[
+                        //                             TraitParam::Equals(TyOrRe::Ty(rhs.r(s).ty)),
+                        //                             TraitParam::Equals(TyOrRe::Ty(ty)),
+                        //                         ]),
+                        //                     },
+                        //                     self_ty: lhs.r(s).ty,
+                        //                     method_idx: 0,
+                        //                 }),
+                        //                 early_args: None,
+                        //             }))),
+                        //             kind: LateInit::new(ThirExprKind::CreatePathZst),
+                        //         },
+                        //         s,
+                        //     ),
+                        //     Obj::new_slice(&[lhs, rhs], s),
+                        // )
                     }
                     OverloadResolution::Error(error) => ThirExprKind::Error(error),
                 }
@@ -172,29 +172,30 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
                     OverloadResolution::Call => {
                         let overload = self.bcx.decode_un_op_kind(op).overload.unwrap();
 
-                        ThirExprKind::Call(
-                            Obj::new(
-                                ThirExpr {
-                                    span: expr.r(s).span,
-                                    ty: tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
-                                        owner: FnOwner::Trait(FnOwnerTrait {
-                                            instance: TraitSpec {
-                                                def: overload,
-                                                params: tcx.intern_list(&[TraitParam::Equals(
-                                                    TyOrRe::Ty(ty),
-                                                )]),
-                                            },
-                                            self_ty: lhs.r(s).ty,
-                                            method_idx: 0,
-                                        }),
-                                        early_args: None,
-                                    }))),
-                                    kind: LateInit::new(ThirExprKind::CreatePathZst),
-                                },
-                                s,
-                            ),
-                            Obj::new_slice(&[lhs], s),
-                        )
+                        todo!()
+                        // ThirExprKind::Call(
+                        //     Obj::new(
+                        //         ThirExpr {
+                        //             span: expr.r(s).span,
+                        //             ty: tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
+                        //                 owner: FnOwner::Trait(FnOwnerTrait {
+                        //                     instance: TraitSpec {
+                        //                         def: overload,
+                        //                         params: tcx.intern_list(&[TraitParam::Equals(
+                        //                             TyOrRe::Ty(ty),
+                        //                         )]),
+                        //                     },
+                        //                     self_ty: lhs.r(s).ty,
+                        //                     method_idx: 0,
+                        //                 }),
+                        //                 early_args: None,
+                        //             }))),
+                        //             kind: LateInit::new(ThirExprKind::CreatePathZst),
+                        //         },
+                        //         s,
+                        //     ),
+                        //     Obj::new_slice(&[lhs], s),
+                        // )
                     }
                     OverloadResolution::Error(error) => ThirExprKind::Error(error),
                 }
@@ -219,15 +220,31 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
             },
             HirExprKind::While(cond, block) => ThirExprKind::While(
                 self.confirm_expr(cond),
-                self.confirm_block(block, tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))),
+                self.confirm_block(
+                    block,
+                    Obj::new(
+                        SigTyInner {
+                            span: block.r(s).span,
+                            kind: SigTyKind::Tuple(Obj::new_slice(&[], s)),
+                        },
+                        s,
+                    ),
+                ),
             ),
             HirExprKind::Let(lhs, rhs) => {
                 ThirExprKind::Let(self.confirm_pat(lhs), self.confirm_expr(rhs))
             }
             HirExprKind::ForLoop { pat, iter, body } => todo!(),
-            HirExprKind::Loop(block) => ThirExprKind::Loop(
-                self.confirm_block(block, tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))),
-            ),
+            HirExprKind::Loop(block) => ThirExprKind::Loop(self.confirm_block(
+                block,
+                Obj::new(
+                    SigTyInner {
+                        span: block.r(s).span,
+                        kind: SigTyKind::Tuple(Obj::new_slice(&[], s)),
+                    },
+                    s,
+                ),
+            )),
             HirExprKind::Match(obj, obj1) => todo!(),
             HirExprKind::Block(block) => ThirExprKind::Block(self.confirm_block(block, ty)),
             HirExprKind::Assign(lhs, rhs) => {
@@ -264,7 +281,7 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
         label.map(|expr| self.expr_confirmations[&expr])
     }
 
-    fn confirm_block(&mut self, block: Obj<HirBlock>, ty: Ty) -> Obj<ThirBlock> {
+    fn confirm_block(&mut self, block: Obj<HirBlock>, ty: SigTy) -> Obj<ThirBlock> {
         let s = self.session();
 
         let stmts = block
@@ -290,7 +307,7 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
     fn confirm_opt_block(
         &mut self,
         block: Option<Obj<HirBlock>>,
-        ty: Ty,
+        ty: SigTy,
     ) -> Option<Obj<ThirBlock>> {
         block.map(|block| self.confirm_block(block, ty))
     }
@@ -308,7 +325,13 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
                     init: self.confirm_opt_expr(stmt.r(s).init),
                     else_clause: self.confirm_opt_block(
                         stmt.r(s).else_clause,
-                        tcx.intern(TyKind::Tuple(tcx.intern_list(&[]))),
+                        Obj::new(
+                            SigTyInner {
+                                span: stmt.r(s).span,
+                                kind: SigTyKind::Tuple(Obj::new_slice(&[], s)),
+                            },
+                            s,
+                        ),
                     ),
                 },
                 s,
@@ -354,10 +377,13 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
             HirPatKind::Error(error) => ThirPatKind::Error(error),
         };
 
+        let ty = self.bcx.pat_types_pre_adjust[&pat];
+        let ty = self.ccx_mut().export(pat.r(s).span, ty);
+
         Obj::new(
             ThirPat {
                 span: pat.r(s).span,
-                ty: self.bcx.pat_types_pre_adjust[&pat],
+                ty,
                 kind,
             },
             s,
@@ -372,7 +398,7 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
         }
 
         let ty = self.bcx.type_of_local(local);
-        let ty = self.confirm_ty(ty);
+        let ty = self.ccx_mut().export(local.r(s).name.span(), ty);
         let thir = Obj::new(
             ThirLocal {
                 mutability: local.r(s).mutability,
@@ -386,9 +412,4 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
 
         thir
     }
-
-    fn confirm_ty<T: TyFoldable>(&mut self, ty: T) -> T {
-        self.ccx_mut().exporter().fold(ty)
-    }
-    */
 }

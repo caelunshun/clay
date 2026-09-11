@@ -12,11 +12,10 @@ use crate::{
         },
         syntax::{
             AdtInstance, AdtItem, AnyGeneric, FnDef, FnDefOwner, FnInstance, FnOwner,
-            FnOwnerAdtCtor, FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, ImplItem,
-            InferTyVarSourceInfo, InstantiatedFnSig, RelationMode, SigTraitClauseKind, TraitClause,
-            TraitInstance, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReKind,
-            TyOrReList, TypeAliasItem, TypeGeneric, UniversalReVarSourceInfo, UniversalTy,
-            UniversalTyRootSourceInfo,
+            GenericBinder, HrtbBinder, ImplItem, InferTyVarSourceInfo, InstantiatedFnSig,
+            RelationMode, SigTraitClauseKind, TraitClause, TraitInstance, TraitItem, TraitParam,
+            TraitSpec, Ty, TyKind, TyOrRe, TyOrReKind, TyOrReList, TypeAliasItem, TypeGeneric,
+            UniversalReVarSourceInfo, UniversalTy, UniversalTyRootSourceInfo,
         },
     },
     typed_joiner,
@@ -525,11 +524,11 @@ impl<'tcx> ClauseCx<'tcx> {
 
                 promise.and_value(sig)
             }
-            FnOwner::Trait(FnOwnerTrait {
+            FnOwner::Trait {
                 instance,
                 self_ty,
                 method_idx,
-            }) => {
+            } => {
                 let fn_def = instance.def.r(s).methods[method_idx as usize];
                 let fn_binder = fn_def.r(s).generics;
 
@@ -586,11 +585,11 @@ impl<'tcx> ClauseCx<'tcx> {
 
                 promise.and_value(sig)
             }
-            FnOwner::Inherent(FnOwnerInherent {
+            FnOwner::Inherent {
                 self_ty,
                 block,
                 method_idx,
-            }) => {
+            } => {
                 let fn_def = block.r(s).methods[method_idx as usize].unwrap();
                 let fn_binder = fn_def.r(s).generics;
 
@@ -638,7 +637,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
                 promise.and_value(sig)
             }
-            FnOwner::AdtCtor(FnOwnerAdtCtor { ctor }) => {
+            FnOwner::AdtCtor(ctor) => {
                 let item = ctor.r(s).owner.item(s);
 
                 let PromiseValue {
@@ -855,19 +854,17 @@ impl<'tcx> ClauseCx<'tcx> {
                         error: Box::new(error),
                     });
 
-                promise.and_value(FnOwner::Trait(FnOwnerTrait {
+                promise.and_value(FnOwner::Trait {
                     instance,
                     self_ty,
                     method_idx,
-                }))
+                })
             }
-            FnDefOwner::ImplMethod(block, method_idx) => {
-                PromiseValue::trivial(FnOwner::Inherent(FnOwnerInherent {
-                    self_ty,
-                    block,
-                    method_idx,
-                }))
-            }
+            FnDefOwner::ImplMethod(block, method_idx) => PromiseValue::trivial(FnOwner::Inherent {
+                self_ty,
+                block,
+                method_idx,
+            }),
         }
     }
 

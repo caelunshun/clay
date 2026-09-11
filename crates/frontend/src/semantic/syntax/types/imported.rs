@@ -323,28 +323,17 @@ pub struct FnInstanceInner {
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum FnOwner {
     Item(Obj<FnItem>),
-    Trait(FnOwnerTrait),
-    Inherent(FnOwnerInherent),
-    AdtCtor(FnOwnerAdtCtor),
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct FnOwnerTrait {
-    pub instance: TraitSpec,
-    pub self_ty: Ty,
-    pub method_idx: u32,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct FnOwnerInherent {
-    pub self_ty: Ty,
-    pub block: Obj<ImplItem>,
-    pub method_idx: u32,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct FnOwnerAdtCtor {
-    pub ctor: Obj<AdtCtor>,
+    Trait {
+        instance: TraitSpec,
+        self_ty: Ty,
+        method_idx: u32,
+    },
+    Inherent {
+        self_ty: Ty,
+        block: Obj<ImplItem>,
+        method_idx: u32,
+    },
+    AdtCtor(Obj<AdtCtor>),
 }
 
 #[derive(Debug, Copy, Clone)]

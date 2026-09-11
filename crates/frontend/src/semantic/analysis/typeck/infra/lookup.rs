@@ -13,7 +13,7 @@ use crate::{
         },
         lower::modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},
         syntax::{
-            AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, FnOwner, FnOwnerTrait,
+            AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, FnOwner,
             InferTyVarSourceInfo, InstantiatedFnSig, Mutability, Re, RelationMode, SigGenericList,
             TraitSpec, Ty, TyFolderInfallibleExt as _, TyKind, TyOrReList,
         },
@@ -192,11 +192,11 @@ impl BodyCtxt<'_, '_> {
         let owner = if let Some(as_trait) = as_trait {
             let &method_idx = as_trait.def.r(s).name_to_method.get(&assoc_name.text)?;
 
-            FnOwner::Trait(FnOwnerTrait {
+            FnOwner::Trait {
                 instance: as_trait,
                 self_ty,
                 method_idx,
-            })
+            }
         } else {
             let scope_trait_candidates = self.collect_scope_trait_candidates(assoc_name);
             let generic_clause_candidates =

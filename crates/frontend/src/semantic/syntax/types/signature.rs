@@ -5,8 +5,8 @@ use crate::{
         syntax::{Span, Symbol},
     },
     semantic::syntax::{
-        AdtItem, HrtbDebruijn, Mutability, RegionGeneric, RelationDirection, SimpleTyKind,
-        TraitItem, TyOrReKind, TypeAliasItem, TypeGeneric,
+        AdtCtor, AdtItem, FnItem, HrtbDebruijn, ImplItem, Mutability, RegionGeneric,
+        RelationDirection, SimpleTyKind, TraitItem, TyOrReKind, TypeAliasItem, TypeGeneric,
     },
 };
 use std::fmt;
@@ -152,6 +152,9 @@ pub enum SigTyKind {
     /// the clause `for<T> Foo<T>`).
     HrtbVar(HrtbDebruijn),
 
+    /// A reference to a function instance. Generally only present in exported types.
+    FnDef(SigFnInstance),
+
     Error(ErrorGuaranteed),
 }
 
@@ -165,6 +168,29 @@ impl SigTyKind {
 pub struct SigAdtInstance {
     pub def: Obj<AdtItem>,
     pub params: SigGenericList,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct SigFnInstance {
+    pub span: Span,
+    pub owner: SigFnOwner,
+    pub early_args: Option<SigGenericList>,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum SigFnOwner {
+    Item(Obj<FnItem>),
+    Trait {
+        instance: SigTraitSpec,
+        self_ty: SigTy,
+        method_idx: u32,
+    },
+    Inherent {
+        self_ty: SigTy,
+        block: Obj<ImplItem>,
+        method_idx: u32,
+    },
+    AdtCtor(Obj<AdtCtor>),
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

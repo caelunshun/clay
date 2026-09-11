@@ -4,11 +4,10 @@ use crate::{
         arena::{HasInterner, HasListInterner, Intern},
     },
     semantic::syntax::{
-        AdtInstance, FnInstance, FnInstanceInner, FnOwner, FnOwnerAdtCtor, FnOwnerInherent,
-        FnOwnerTrait, HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, HrtbProjection, Re,
-        TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty,
-        TyCtxt, TyKind, TyList, TyOrRe, TyOrReList, UniversalTy, UniversalTyProj,
-        UniversalTyProjInner,
+        AdtInstance, FnInstance, FnInstanceInner, FnOwner, HrtbBinder, HrtbDebruijnDef,
+        HrtbDebruijnDefList, HrtbProjection, Re, TraitClause, TraitClauseList, TraitInstance,
+        TraitParam, TraitParamList, TraitSpec, Ty, TyCtxt, TyKind, TyList, TyOrRe, TyOrReList,
+        UniversalTy, UniversalTyProj, UniversalTyProjInner,
     },
 };
 use std::{convert::Infallible, hash};
@@ -402,27 +401,25 @@ impl TyFoldable for FnOwner {
     {
         match me {
             FnOwner::Item(def) => Ok(FnOwner::Item(def)),
-            FnOwner::Trait(FnOwnerTrait {
+            FnOwner::Trait {
                 instance,
                 self_ty,
                 method_idx,
-            }) => Ok(FnOwner::Trait(FnOwnerTrait {
+            } => Ok(FnOwner::Trait {
                 instance: folder.fold_fallible(instance)?,
                 self_ty: folder.fold_fallible(self_ty)?,
                 method_idx,
-            })),
-            FnOwner::Inherent(FnOwnerInherent {
+            }),
+            FnOwner::Inherent {
                 self_ty,
                 block,
                 method_idx,
-            }) => Ok(FnOwner::Inherent(FnOwnerInherent {
+            } => Ok(FnOwner::Inherent {
                 self_ty: folder.fold_fallible(self_ty)?,
                 block,
                 method_idx,
-            })),
-            FnOwner::AdtCtor(FnOwnerAdtCtor { ctor }) => {
-                Ok(FnOwner::AdtCtor(FnOwnerAdtCtor { ctor }))
-            }
+            }),
+            FnOwner::AdtCtor(ctor) => Ok(FnOwner::AdtCtor(ctor)),
         }
     }
 }

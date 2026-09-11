@@ -9,10 +9,10 @@ use crate::{
         analysis::typeck::BodyCtxt,
         infer::{ClauseFuel, ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse, SpannedError},
         syntax::{
-            AdtCtorSyntax, AdtInstance, Divergence, FnInstanceInner, FnOwner, FnOwnerAdtCtor,
-            HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirStmt, HirStructExpr,
-            InferTyVarSourceInfo, LabelTargetKind, Re, RelationMode, SigAdtInstance, SimpleTyKind,
-            SimpleTySet, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            AdtCtorSyntax, AdtInstance, Divergence, FnInstanceInner, FnOwner, HirBlock, HirExpr,
+            HirExprKind, HirLabelledBlock, HirStmt, HirStructExpr, InferTyVarSourceInfo,
+            LabelTargetKind, Re, RelationMode, SigAdtInstance, SimpleTyKind, SimpleTySet,
+            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -386,7 +386,7 @@ impl BodyCtxt<'_, '_> {
                 }
 
                 tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
-                    owner: FnOwner::AdtCtor(FnOwnerAdtCtor { ctor: ctor.def }),
+                    owner: FnOwner::AdtCtor(ctor.def),
                     early_args: Some(ctor.params),
                 })))
             }
@@ -417,7 +417,7 @@ impl BodyCtxt<'_, '_> {
                 );
 
                 tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
-                    owner: FnOwner::AdtCtor(FnOwnerAdtCtor { ctor }),
+                    owner: FnOwner::AdtCtor(ctor),
                     early_args: Some(params),
                 })))
             }

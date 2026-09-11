@@ -6,10 +6,10 @@ use crate::{
             UniversalElaboration,
         },
         syntax::{
-            FnInstance, FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, ImplItem,
-            InferTyVar, Re, RelationMode, SigGenericList, SigHrtbBinder, SigProjectType,
-            SigTraitSpec, SigTy, SimpleTySet, TraitClauseList, TraitItem, TraitParam, TraitSpec,
-            Ty, TyOrReList, UniversalReVar, UniversalTy,
+            FnInstance, GenericBinder, HrtbBinder, ImplItem, InferTyVar, Re, RelationMode,
+            SigGenericList, SigHrtbBinder, SigProjectType, SigTraitSpec, SigTy, SimpleTySet,
+            TraitClauseList, TraitItem, TraitParam, TraitSpec, Ty, TyOrReList, UniversalReVar,
+            UniversalTy,
         },
     },
 };
@@ -694,11 +694,15 @@ pub enum ImportError {
         error: Box<TraitSpecResolutionError>,
     },
     TraitFnOwner {
-        owner: FnOwnerTrait,
+        instance: TraitSpec,
+        self_ty: Ty,
+        method_idx: u32,
         error: Box<TraitSpecResolutionError>,
     },
     InherentBlockEnv {
-        owner: FnOwnerInherent,
+        self_ty: Ty,
+        block: Obj<ImplItem>,
+        method_idx: u32,
         error: Box<InherentImplBlockSatisfyError>,
     },
     NoReflexiveImpl {
@@ -734,10 +738,20 @@ impl ToDebugTree for ImportError {
                 .with_prose("projection failed")
                 .with_prose(format!("span: {}", ty.spec.span))
                 .with_sublist(error.to_debug_tree(pretty)),
-            ImportError::TraitFnOwner { owner: _, error } => DebugTree::new()
+            ImportError::TraitFnOwner {
+                instance: _,
+                self_ty: _,
+                method_idx: _,
+                error,
+            } => DebugTree::new()
                 .with_prose("trait fn owner not WF")
                 .with_sublist(error.to_debug_tree(pretty)),
-            ImportError::InherentBlockEnv { owner: _, error } => DebugTree::new()
+            ImportError::InherentBlockEnv {
+                self_ty: _,
+                block: _,
+                method_idx: _,
+                error,
+            } => DebugTree::new()
                 .with_prose("inherent block env not WF")
                 .with_sublist(error.to_debug_tree(pretty)),
             ImportError::NoReflexiveImpl { span, error } => DebugTree::new()

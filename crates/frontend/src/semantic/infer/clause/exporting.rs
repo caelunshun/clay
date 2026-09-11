@@ -3,14 +3,14 @@ use crate::{
     semantic::{
         infer::ClauseCx,
         syntax::{
-            AdtInstance, HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, HrtbProjection, Re,
-            SigAdtInstance, SigGenericList, SigHrtbBinder, SigHrtbDebruijnDef,
-            SigHrtbDebruijnDefList, SigProjectType, SigRe, SigReKind, SigTraitClause,
-            SigTraitClauseKind, SigTraitClauseList, SigTraitParam, SigTraitParamKind,
-            SigTraitParamList, SigTraitSpec, SigTy, SigTyInner, SigTyKind, SigTyList, SigTyOrRe,
-            SigTyOrReList, TraitClause, TraitClauseList, TraitParam, TraitParamList, TraitSpec, Ty,
-            TyKind, TyList, TyOrRe, TyOrReList, UniversalTy, UniversalTyProjInner,
-            UniversalTyRootSourceInfo,
+            AdtInstance, FnInstance, FnInstanceInner, FnOwner, HrtbBinder, HrtbDebruijnDef,
+            HrtbDebruijnDefList, HrtbProjection, Re, SigAdtInstance, SigFnInstance, SigFnOwner,
+            SigGenericList, SigHrtbBinder, SigHrtbDebruijnDef, SigHrtbDebruijnDefList,
+            SigProjectType, SigRe, SigReKind, SigTraitClause, SigTraitClauseKind,
+            SigTraitClauseList, SigTraitParam, SigTraitParamKind, SigTraitParamList, SigTraitSpec,
+            SigTy, SigTyInner, SigTyKind, SigTyList, SigTyOrRe, SigTyOrReList, TraitClause,
+            TraitClauseList, TraitParam, TraitParamList, TraitSpec, Ty, TyKind, TyList, TyOrRe,
+            TyOrReList, UniversalTy, UniversalTyProjInner, UniversalTyRootSourceInfo,
         },
     },
 };
@@ -53,6 +53,8 @@ impl_sig_exportable! {
     export_re: Re => SigRe;
     export_ty: Ty => SigTy;
     export_adt: AdtInstance => SigAdtInstance;
+    export_fn_instance: FnInstance => SigFnInstance;
+    export_fn_owner: FnOwner => SigFnOwner;
     export_hrtb_projection: HrtbProjection => SigProjectType;
     export_trait_clause_list: TraitClauseList => SigTraitClauseList;
     export_trait_clause: TraitClause => SigTraitClause;
@@ -126,7 +128,7 @@ impl<'a, 'tcx> SigExporter<'a, 'tcx> {
                 self.export_trait_clause_list(clauses),
             ),
             TyKind::Tuple(types) => SigTyKind::Tuple(self.export_ty_list(types)),
-            TyKind::FnDef(def) => todo!(),
+            TyKind::FnDef(def) => SigTyKind::FnDef(self.export_fn_instance(def)),
             TyKind::HrtbVar(idx) => SigTyKind::HrtbVar(idx),
             TyKind::HrtbProjection(proj) => SigTyKind::Project(self.export_hrtb_projection(proj)),
             TyKind::InferVar(infer_ty_var) => todo!(),
@@ -152,6 +154,49 @@ impl<'a, 'tcx> SigExporter<'a, 'tcx> {
                 segment_span: self.span,
                 elems: self.export_ty_or_re_list(params),
             },
+        }
+    }
+
+    pub fn export_fn_instance(&mut self, instance: FnInstance) -> SigFnInstance {
+        let s = self.ccx.session();
+
+        let FnInstanceInner { owner, early_args } = *instance.r(s);
+
+        let owner = self.export_fn_owner(owner);
+        let early_args = early_args.map(|early_args| SigGenericList {
+            segment_span: self.span,
+            elems: self.export_ty_or_re_list(early_args),
+        });
+
+        SigFnInstance {
+            span: self.span,
+            owner,
+            early_args,
+        }
+    }
+
+    pub fn export_fn_owner(&mut self, owner: FnOwner) -> SigFnOwner {
+        match owner {
+            FnOwner::Item(def) => SigFnOwner::Item(def),
+            FnOwner::Trait {
+                instance,
+                self_ty,
+                method_idx,
+            } => SigFnOwner::Trait {
+                instance: self.export_trait_spec(instance),
+                self_ty: self.export_ty(self_ty),
+                method_idx,
+            },
+            FnOwner::Inherent {
+                self_ty,
+                block,
+                method_idx,
+            } => SigFnOwner::Inherent {
+                self_ty: self.export_ty(self_ty),
+                block,
+                method_idx,
+            },
+            FnOwner::AdtCtor(def) => SigFnOwner::AdtCtor(def),
         }
     }
 

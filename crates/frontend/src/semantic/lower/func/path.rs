@@ -15,8 +15,8 @@ use crate::{
         syntax::{
             AdtCtorUnresolved, AdtItem, EnumVariantItem, FnItem, HirLocal, Item, ItemKind,
             LocalNameIdent, LocalNameSymbol, SigAdtInstance, SigGenericList, SigTraitParamList,
-            SigTraitSpec, SigTy, SigTyInner, SigTyKind, SigTyOrReList, TraitItem, TyCtxt,
-            TypeAliasItem, TypeGeneric,
+            SigTraitSpec, SigTy, SigTyInner, SigTyKind, TraitItem, TyCtxt, TypeAliasItem,
+            TypeGeneric,
         },
     },
 };

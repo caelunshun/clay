@@ -14,16 +14,15 @@ use crate::{
         },
         lower::generics::normalize_positional_generic_arity,
         syntax::{
-            AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, FnOwner, FnOwnerAdtCtor,
-            FnOwnerInherent, FnOwnerTrait, GenericBinder, HrtbBinder, HrtbDebruijnDef,
-            HrtbDebruijnDefList, HrtbProjection, InferTyVarSourceInfo, Re, RegionGeneric,
-            RelationDirection, SigAdtInstance, SigGenericList, SigHrtbBinder, SigProjectType,
-            SigRe, SigReKind, SigTraitClause, SigTraitClauseKind, SigTraitClauseList,
-            SigTraitInstance, SigTraitParamKind, SigTraitSpec, SigTy, SigTyKind, SigTyList,
-            SigTyOrRe, SigTyOrReList, TraitClause, TraitClauseList, TraitInstance, TraitParam,
-            TraitSpec, Ty, TyCtxt, TyFolder, TyFolderInfallibleExt, TyKind, TyList, TyOrRe,
-            TyOrReKind, TyOrReList, TypeAliasItem, TypeGeneric, UniversalReVarSourceInfo,
-            UniversalTy, UniversalTyRootSourceInfo,
+            AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, FnOwner, GenericBinder,
+            HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, HrtbProjection, InferTyVarSourceInfo,
+            Re, RegionGeneric, RelationDirection, SigAdtInstance, SigFnInstance, SigFnOwner,
+            SigGenericList, SigHrtbBinder, SigProjectType, SigRe, SigReKind, SigTraitClause,
+            SigTraitClauseKind, SigTraitClauseList, SigTraitInstance, SigTraitParamKind,
+            SigTraitSpec, SigTy, SigTyKind, SigTyList, SigTyOrRe, SigTyOrReList, TraitClause,
+            TraitClauseList, TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt, TyFolder,
+            TyFolderInfallibleExt, TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList, TypeAliasItem,
+            TypeGeneric, UniversalReVarSourceInfo, UniversalTy, UniversalTyRootSourceInfo,
         },
     },
     typed_joiner,
@@ -213,6 +212,8 @@ impl_sig_importable! {
     import_ty: SigTy => Ty;
     import_re: SigRe => Re;
     import_adt: SigAdtInstance => AdtInstance;
+    import_fn_instance: SigFnInstance => FnInstance;
+    import_fn_owner: SigFnOwner => FnOwner;
     import_trait_clause_list: SigTraitClauseList => TraitClauseList;
     import_trait_clause: SigTraitClause => TraitClause;
     import_hrtb_binder: SigHrtbBinder => HrtbBinder;
@@ -481,6 +482,9 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
                 instance.params.r(s)[assoc_idx as usize].unwrap_ty()
             }
+            SigTyKind::FnDef(instance) => tcx.intern(TyKind::FnDef(
+                self.import_fn_instance(instance).flat_join(&mut collector),
+            )),
 
             SigTyKind::Error(err) => tcx.intern(TyKind::Error(err)),
         };
@@ -528,6 +532,100 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         collector.finish().and_value(output)
     }
 
+    pub fn import_fn_instance(
+        &mut self,
+        instance: SigFnInstance,
+    ) -> ImportPromise<'tcx, FnInstance> {
+        let SigFnInstance {
+            span: _,
+            owner,
+            early_args,
+        } = instance;
+
+        let mut collector = MultiPromiseBuilder::new();
+
+        let owner = self.import_fn_owner(owner).flat_join(&mut collector);
+
+        let instance = self
+            .import_fn_instance_from_owner(owner, early_args, FixArity::AssumeCorrect)
+            .flat_join(&mut collector);
+
+        collector.finish().and_value(instance)
+    }
+
+    pub fn import_fn_owner(&mut self, owner: SigFnOwner) -> ImportPromise<'tcx, FnOwner> {
+        let mut collector = MultiPromiseBuilder::new();
+
+        let owner = match owner {
+            SigFnOwner::Item(def) => FnOwner::Item(def),
+            SigFnOwner::Trait {
+                instance,
+                self_ty,
+                method_idx,
+            } => {
+                let self_ty = self.import_ty(self_ty).flat_join(&mut collector);
+
+                let instance = self.import_trait_spec(instance).flat_join(&mut collector);
+
+                if self.opts.wf_mode.do_wf() {
+                    self.ccx
+                        .resolve_trait_spec(self.fuel, &self.opts.universe, self_ty, instance)
+                        .filter_map(move |_ccx, error| {
+                            // No filtering needed because we know we're in WF mode.
+                            Ok(ImportError::TraitFnOwner {
+                                instance,
+                                self_ty,
+                                method_idx,
+                                error: Box::new(error),
+                            })
+                        })
+                        .join(&mut collector);
+                }
+
+                FnOwner::Trait {
+                    instance,
+                    self_ty,
+                    method_idx,
+                }
+            }
+            SigFnOwner::Inherent {
+                self_ty,
+                block,
+                method_idx,
+            } => {
+                let self_ty = self.import_ty(self_ty).flat_join(&mut collector);
+
+                if self.opts.wf_mode.do_wf() {
+                    self.ccx
+                        .resolve_inherent_impl_block_env(
+                            self.fuel,
+                            &self.opts.universe,
+                            block,
+                            self_ty,
+                        )
+                        .filter_map(move |_ccx, error| {
+                            Ok(ImportError::InherentBlockEnv {
+                                self_ty,
+                                block,
+                                method_idx,
+                                error: Box::new(error),
+                            })
+                        })
+                        .join(&mut collector);
+                }
+
+                FnOwner::Inherent {
+                    self_ty,
+                    block,
+                    method_idx,
+                }
+            }
+            SigFnOwner::AdtCtor(ctor) => FnOwner::AdtCtor(ctor),
+        };
+
+        collector.finish().and_value(owner)
+    }
+
     pub fn import_fn_instance_from_owner(
         &mut self,
         owner: FnOwner,
@@ -543,13 +641,11 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             FnOwner::Item(def) => self
                 .import_simple_generic_args(def.r(s).def.r(s).generics, args, fix_arity)
                 .flat_join(&mut collector),
-            FnOwner::Trait(
-                owner @ FnOwnerTrait {
-                    instance,
-                    self_ty,
-                    method_idx,
-                },
-            ) => {
+            FnOwner::Trait {
+                instance,
+                self_ty,
+                method_idx,
+            } => {
                 let instance = self
                     .ccx
                     .resolve_trait_spec(self.fuel, &self.opts.universe, self_ty, instance)
@@ -557,7 +653,9 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                         // TODO: filter if we're in no-WF mode
 
                         Ok(ImportError::TraitFnOwner {
-                            owner,
+                            instance,
+                            self_ty,
+                            method_idx,
                             error: Box::new(error),
                         })
                     })
@@ -578,13 +676,11 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 })
                 .flat_join(&mut collector)
             }
-            FnOwner::Inherent(
-                owner @ FnOwnerInherent {
-                    self_ty,
-                    block,
-                    method_idx,
-                },
-            ) => {
+            FnOwner::Inherent {
+                self_ty,
+                block,
+                method_idx,
+            } => {
                 let block_args = self
                     .ccx
                     .resolve_inherent_impl_block_env(self.fuel, &self.opts.universe, block, self_ty)
@@ -592,7 +688,9 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                         // TODO: filter if we're in no-WF mode
 
                         Ok(ImportError::InherentBlockEnv {
-                            owner,
+                            self_ty,
+                            block,
+                            method_idx,
                             error: Box::new(error),
                         })
                     })
@@ -613,7 +711,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
                 })
                 .flat_join(&mut collector)
             }
-            FnOwner::AdtCtor(FnOwnerAdtCtor { ctor }) => self
+            FnOwner::AdtCtor(ctor) => self
                 .import_simple_generic_args(ctor.r(s).owner.item(s).r(s).generics, args, fix_arity)
                 .flat_join(&mut collector),
         });

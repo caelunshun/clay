@@ -1,11 +1,10 @@
 use crate::{
     base::Session,
     semantic::syntax::{
-        AdtInstance, FnInstance, FnInstanceInner, FnOwner, FnOwnerAdtCtor, FnOwnerInherent,
-        FnOwnerTrait, HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, HrtbProjection, Re,
-        TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitParamList, TraitSpec, Ty,
-        TyCtxt, TyKind, TyList, TyOrRe, TyOrReList, UniversalTy, UniversalTyProj,
-        UniversalTyProjInner,
+        AdtInstance, FnInstance, FnInstanceInner, FnOwner, HrtbBinder, HrtbDebruijnDef,
+        HrtbDebruijnDefList, HrtbProjection, Re, TraitClause, TraitClauseList, TraitInstance,
+        TraitParam, TraitParamList, TraitSpec, Ty, TyCtxt, TyKind, TyList, TyOrRe, TyOrReList,
+        UniversalTy, UniversalTyProj, UniversalTyProjInner,
     },
 };
 use std::{convert::Infallible, ops::ControlFlow};
@@ -372,22 +371,22 @@ impl TyVisitable for FnOwner {
         V: ?Sized + TyVisitor<'tcx>,
     {
         match me {
-            FnOwner::Item(_) | FnOwner::AdtCtor(FnOwnerAdtCtor { ctor: _ }) => {
+            FnOwner::Item(_) | FnOwner::AdtCtor(_) => {
                 // (dead end)
             }
-            FnOwner::Trait(FnOwnerTrait {
+            FnOwner::Trait {
                 instance,
                 self_ty,
                 method_idx: _,
-            }) => {
+            } => {
                 visitor.visit_fallible(instance)?;
                 visitor.visit_fallible(self_ty)?;
             }
-            FnOwner::Inherent(FnOwnerInherent {
+            FnOwner::Inherent {
                 self_ty,
                 block: _,
                 method_idx: _,
-            }) => {
+            } => {
                 visitor.visit_fallible(self_ty)?;
             }
         }

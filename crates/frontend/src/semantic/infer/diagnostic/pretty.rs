@@ -3,12 +3,12 @@ use crate::{
     semantic::{
         infer::ClauseCx,
         syntax::{
-            AdtCtorOwner, AdtInstance, FloatKind, FnInstance, FnOwner, FnOwnerAdtCtor,
-            FnOwnerInherent, FnOwnerTrait, HrtbBinder, HrtbDebruijn, HrtbDebruijnDef,
-            HrtbProjection, InferTyVar, InferTyVarSourceInfo, IntKind, Item, Re, SimpleTyKind,
-            SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyKind,
-            TyOrRe, TyOrReList, UniversalReVar, UniversalReVarSourceInfo, UniversalTy,
-            UniversalTyProj, UniversalTyProjInner, UniversalTyRoot, UniversalTyRootSourceInfo,
+            AdtCtorOwner, AdtInstance, FloatKind, FnInstance, FnOwner, HrtbBinder, HrtbDebruijn,
+            HrtbDebruijnDef, HrtbProjection, InferTyVar, InferTyVarSourceInfo, IntKind, Item, Re,
+            SimpleTyKind, SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty,
+            TyCtxt, TyKind, TyOrRe, TyOrReList, UniversalReVar, UniversalReVarSourceInfo,
+            UniversalTy, UniversalTyProj, UniversalTyProjInner, UniversalTyRoot,
+            UniversalTyRootSourceInfo,
         },
     },
     utils::lang::{SimpleListFormatGlue, format_list, format_list_into},
@@ -425,7 +425,7 @@ impl_pretty! {
             FnOwner::Item(def) => {
                 write!(f, "{}", cx.wrap(def.r(s).item))?;
             },
-            FnOwner::Trait(FnOwnerTrait { instance, self_ty, method_idx }) => {
+            FnOwner::Trait { instance, self_ty, method_idx } => {
                 write!(
                     f,
                     "<{} as {}>::{}",
@@ -434,7 +434,7 @@ impl_pretty! {
                     instance.def.r(s).methods[method_idx as usize].r(s).name.text,
                 )?;
             },
-            FnOwner::Inherent(FnOwnerInherent { self_ty, block, method_idx }) => {
+            FnOwner::Inherent { self_ty, block, method_idx } => {
                 write!(
                     f,
                     "<{}>::{}",
@@ -442,7 +442,7 @@ impl_pretty! {
                     block.r(s).methods[method_idx as usize].unwrap().r(s).name.text,
                 )?;
             },
-            FnOwner::AdtCtor(FnOwnerAdtCtor { ctor }) => {
+            FnOwner::AdtCtor(ctor) => {
                 match ctor.r(s).owner {
                     AdtCtorOwner::Struct(def) => {
                         write!(f, "{}", cx.wrap(def.r(s).adt.r(s).item))?;
