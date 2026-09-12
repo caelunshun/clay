@@ -209,6 +209,7 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
                 assoc_args: _,
             } => ThirExprKind::CreatePathZst,
             HirExprKind::Cast(target, _) => return self.confirm_expr(target),
+            HirExprKind::Use(_) => todo!(),
             HirExprKind::If {
                 cond,
                 truthy,

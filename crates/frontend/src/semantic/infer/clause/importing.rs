@@ -431,6 +431,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             SigTyKind::SelfTy => self.opts.env.unwrap_self_ty(),
 
             SigTyKind::Generic(generic) => self.opts.env.lookup_ty(s, generic),
+            SigTyKind::UsedDyn(site) => todo!(),
 
             SigTyKind::Infer => self.ccx.fresh_ty_infer(
                 self.opts.universe.clone(),

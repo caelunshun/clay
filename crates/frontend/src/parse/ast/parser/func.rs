@@ -771,6 +771,15 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
                 continue 'chaining;
             }
 
+            if match_kw(kw!("use")).expect(p).is_some() {
+                lhs = AstExpr {
+                    span: dot.span.to(p.prev_span()),
+                    kind: AstExprKind::Use(Box::new(lhs)),
+                };
+
+                continue 'chaining;
+            }
+
             let Some(name) = match_ident().expect(p) else {
                 p.stuck().ignore_about_to_break();
 

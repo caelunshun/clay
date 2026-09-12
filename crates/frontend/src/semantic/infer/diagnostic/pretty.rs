@@ -386,6 +386,14 @@ impl_pretty! {
 
         match cx.ccx().lookup_universal_ty_root_src_info(value) {
             UniversalTyRootSourceInfo::Root(generic) => write!(f, "{}", generic.r(s).ident.text),
+            UniversalTyRootSourceInfo::UsedDyn { span, site } => write!(
+                f,
+                "existential #{site:?} (dyn {clauses} from {span})",
+                clauses = cx.wrap(
+                    cx.ccx()
+                        .direct_ty_universal_clauses_possibly_floating(UniversalTy::Root(value)),
+                ),
+            ),
             UniversalTyRootSourceInfo::InstantiatedHrtb(name) => write!(f, "{name}"),
             UniversalTyRootSourceInfo::WfTraitSelf => write!(f, "Self"),
             UniversalTyRootSourceInfo::WfReflexive { clauses } => {

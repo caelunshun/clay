@@ -5,7 +5,7 @@ use crate::{
         syntax::{Span, Symbol},
     },
     semantic::syntax::{
-        AdtCtor, AdtItem, FnItem, HrtbDebruijn, ImplItem, Mutability, RegionGeneric,
+        AdtCtor, AdtItem, DynUseSiteIdx, FnItem, HrtbDebruijn, ImplItem, Mutability, RegionGeneric,
         RelationDirection, SimpleTyKind, TraitItem, TyOrReKind, TypeAliasItem, TypeGeneric,
     },
 };
@@ -123,6 +123,13 @@ pub enum SigTyKind {
 
     /// A reference to a type-generic.
     Generic(Obj<TypeGeneric>),
+
+    /// A universal obtained by calling `.use` on a `dyn Trait`-object. The actual universals are
+    /// spawned by the consumer of the inference context and passed as part of the import
+    /// environment so that it can substitute them in for `UsedDyn` instances. Export logic,
+    /// meanwhile, automatically turns universals with a `UniversalTyRootSourceInfo` of `UsedDyn`
+    /// into such a `UsedDyn` instance.
+    UsedDyn(DynUseSiteIdx),
 
     /// A request to create an inference variable (e.g. `_`).
     Infer,

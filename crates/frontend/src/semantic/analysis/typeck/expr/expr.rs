@@ -7,12 +7,16 @@ use crate::{
     parse::ast::AstLit,
     semantic::{
         analysis::typeck::BodyCtxt,
-        infer::{ClauseFuel, ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse, SpannedError},
+        infer::{
+            ClauseFuel, ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse, PrettyFmtOpts,
+            SpannedError,
+        },
         syntax::{
-            AdtCtorSyntax, AdtInstance, Divergence, FnInstanceInner, FnOwner, HirBlock, HirExpr,
-            HirExprKind, HirLabelledBlock, HirStmt, HirStructExpr, InferTyVarSourceInfo,
-            LabelTargetKind, Re, RelationMode, SigAdtInstance, SimpleTyKind, SimpleTySet,
-            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            AdtCtorSyntax, AdtInstance, Divergence, DynUseSiteIdx, FnInstanceInner, FnOwner,
+            HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirStmt, HirStructExpr,
+            InferTyVarSourceInfo, LabelTargetKind, Re, RelationMode, SigAdtInstance, SimpleTyKind,
+            SimpleTySet, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe, UniversalTy,
+            UniversalTyRootSourceInfo,
         },
     },
 };
@@ -191,6 +195,47 @@ impl BodyCtxt<'_, '_> {
                 let as_ty = self.ccx_mut().import_here(env, as_ty);
 
                 self.check_expr_demand(expr, as_ty).and_do(&mut divergence)
+            }
+            HirExprKind::Use(expr) => 'use_expr: {
+                let inner_ty = self.check_expr(expr, None).and_do(&mut divergence);
+                let inner_ty = self.ccx_mut().peel_ty_infer_var_after_poll(inner_ty);
+
+                match *inner_ty.r(s) {
+                    TyKind::Trait(lt, muta, clauses) => {
+                        let universal =
+                            UniversalTy::Root(self.ccx_mut().fresh_ty_universal_root_idx(
+                                HrtbUniverse::ROOT,
+                                UniversalTyRootSourceInfo::UsedDyn {
+                                    span: expr.r(s).span,
+                                    // TODO: allocate these and confirm them so we can do analysis
+                                    // in MIR.
+                                    site: DynUseSiteIdx::from_raw(0),
+                                },
+                            ));
+
+                        self.ccx_mut()
+                            .init_ty_universal_direct_clauses(universal, clauses);
+
+                        tcx.intern(TyKind::Reference(
+                            lt,
+                            muta,
+                            tcx.intern(TyKind::Universal(universal)),
+                        ))
+                    }
+                    TyKind::Error(err) => break 'use_expr tcx.intern(TyKind::Error(err)),
+                    _ => {
+                        break 'use_expr tcx.intern(TyKind::Error(
+                            Diag::span_err(
+                                expr.r(s).span,
+                                format_args!(
+                                    "expected `dyn Trait`-object, got `{}`",
+                                    self.ccx().pretty(PrettyFmtOpts::default()).wrap(inner_ty)
+                                ),
+                            )
+                            .emit(),
+                        ));
+                    }
+                }
             }
             HirExprKind::If {
                 cond,

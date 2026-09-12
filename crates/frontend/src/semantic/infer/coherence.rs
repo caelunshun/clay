@@ -221,6 +221,7 @@ impl SigShapeEraser<'_> {
             | SigTyKind::Alias(_, _)
             | SigTyKind::Project(_)
             | SigTyKind::FnDef(_)
+            | SigTyKind::UsedDyn(_)
             | SigTyKind::Error(_) => TyShape::Hole,
 
             SigTyKind::Simple(kind) => TyShape::Solid(SolidTyShape {

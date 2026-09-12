@@ -84,6 +84,7 @@ pub enum AstExprKind {
     Unary(AstUnOpKind, Box<AstExpr>),
     Lit(AstLit),
     Cast(Box<AstExpr>, Box<AstTy>),
+    Use(Box<AstExpr>),
     Let(Box<AstPat>, Box<AstExpr>, Span),
     If {
         cond: Box<AstExpr>,
@@ -131,6 +132,7 @@ impl AstExprKind {
             | AstExprKind::Unary(..)
             | AstExprKind::Lit(..)
             | AstExprKind::Cast(..)
+            | AstExprKind::Use(..)
             | AstExprKind::Let(..)
             | AstExprKind::Assign(..)
             | AstExprKind::AssignOp(..)

@@ -160,12 +160,48 @@ define_index_type! {
     pub struct UniversalReVar = u32;
 }
 
+define_index_type! {
+    pub struct DynUseSiteIdx = u32;
+}
+
 #[derive(Debug, Copy, Clone)]
 pub enum UniversalTyRootSourceInfo {
+    /// A universal derived from a generic parameter.
     Root(Obj<TypeGeneric>),
+
+    /// A universal derived from the process of `.use`'ing a `dyn Trait`-object. It is the
+    /// responsibility of the borrow-checker using the inference context to ensure that only one
+    /// instance of such a universal is alive at once since, otherwise, one could do...
+    ///
+    /// ```ignore
+    /// fn meow(my_vec: Vec<@dyn Foo<Assoc:>>) {
+    ///     let mut collector = Vec::<&'_ _>::new();
+    ///
+    ///     for elem in my_vec {
+    ///         collector.push(elem.use.borrow_assoc());
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// ...and get a `collector` with a mixed set of types. This is done by bounding the lifetime of
+    /// the `UsedDyn` type universal to a virtual local which lives  from the last `.use` invocation
+    /// for a given lexical site to its next use during borrow checking. This uniqueness property
+    /// also ensures that we never mix associated types of different sizes when working with
+    /// multiple distinct `dyn Trait` instances with the same `.use` site.
+    UsedDyn { span: Span, site: DynUseSiteIdx },
+
+    /// A universally instantiated HRTB variable for use in solving.
     InstantiatedHrtb(Symbol),
+
+    /// A `Self` type for well-formedness checking.
     WfTraitSelf,
+
+    /// An instantiation of a universal reflexively implementing all the traits in a
+    /// `SigTraitClause` list for the purposes of WF-checking such a list.
     WfReflexive { clauses: Obj<[SigTraitClause]> },
+
+    /// A universal instantiation of an HRTB parameter for the purposes of WF-checking an HRTB
+    /// binder.
     WfHrtbUniversal { binder: SigHrtbBinder, idx: u32 },
 }
 

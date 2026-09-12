@@ -224,6 +224,7 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::Cast(expr, as_ty) => {
                 HirExprKind::Cast(self.lower_expr(expr), self.lower_ty(as_ty))
             }
+            AstExprKind::Use(expr) => HirExprKind::Use(self.lower_expr(expr)),
             AstExprKind::Let(..) => HirExprKind::Error(
                 Diag::span_err(
                     ast.span,
@@ -683,6 +684,7 @@ impl IntraItemLowerCtxt<'_> {
             }
 
             AstExprKind::Cast(..)
+            | AstExprKind::Use(..)
             | AstExprKind::Let(..)
             | AstExprKind::If { .. }
             | AstExprKind::While { .. }

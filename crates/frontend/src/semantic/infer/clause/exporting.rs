@@ -357,6 +357,7 @@ impl<'a, 'tcx> SigExporter<'a, 'tcx> {
         let kind = match universal {
             UniversalTy::Root(root) => match self.ccx.lookup_universal_ty_root_src_info(root) {
                 UniversalTyRootSourceInfo::Root(generic) => SigTyKind::Generic(generic),
+                UniversalTyRootSourceInfo::UsedDyn { span: _, site } => SigTyKind::UsedDyn(site),
                 UniversalTyRootSourceInfo::InstantiatedHrtb(_)
                 | UniversalTyRootSourceInfo::WfTraitSelf
                 | UniversalTyRootSourceInfo::WfReflexive { .. }

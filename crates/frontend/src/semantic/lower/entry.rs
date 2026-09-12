@@ -343,6 +343,9 @@ impl<'ast> UseLowerCtxt<'ast> {
             AstExprKind::Cast(target, _ty) => {
                 self.lower_expr_items(item_id, target);
             }
+            AstExprKind::Use(target) => {
+                self.lower_expr_items(item_id, target);
+            }
             AstExprKind::Let(_path, scrutinee, _span) => {
                 self.lower_expr_items(item_id, scrutinee);
             }

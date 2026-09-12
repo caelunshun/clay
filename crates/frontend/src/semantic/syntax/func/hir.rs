@@ -209,6 +209,7 @@ pub enum HirExprKind {
         assoc_args: Option<SigGenericList>,
     },
     Cast(Obj<HirExpr>, SigTy),
+    Use(Obj<HirExpr>),
     If {
         cond: Obj<HirExpr>,
         truthy: Obj<HirExpr>,
