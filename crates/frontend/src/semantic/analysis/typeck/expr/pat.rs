@@ -60,7 +60,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                 let local_ty = self.type_of_local(name);
                 let bound_ty = if let Some(by_ref) = by_ref {
-                    tcx.intern(TyKind::Reference(Re::Erased, by_ref, demand))
+                    tcx.intern(TyKind::Reference(Re::ERASED, by_ref, demand))
                 } else {
                     demand
                 };

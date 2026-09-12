@@ -473,12 +473,7 @@ impl TyVisitable for Re {
         V: ?Sized + TyVisitor<'tcx>,
     {
         match me {
-            Re::Gc
-            | Re::Erased
-            | Re::Error(_)
-            | Re::HrtbVar(_)
-            | Re::InferVar(_)
-            | Re::UniversalVar(_) => {
+            Re::Gc | Re::Error(_) | Re::HrtbVar(_) | Re::InferVar(_) | Re::UniversalVar(_) => {
                 _ = visitor;
                 // (dead end)
             }

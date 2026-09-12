@@ -86,10 +86,11 @@ pub enum Re {
     /// A universally-quantified lifetime parameter.
     UniversalVar(UniversalReVar),
 
-    /// The lifetime used when we don't want to worry about lifetimes.
-    Erased,
-
     Error(ErrorGuaranteed),
+}
+
+impl Re {
+    pub const ERASED: Re = Re::InferVar(InferReVar::ERASED);
 }
 
 pub type Ty = Intern<TyKind>;
@@ -172,7 +173,7 @@ pub enum UniversalTyRootSourceInfo {
 pub enum UniversalReVarSourceInfo {
     Root(Obj<RegionGeneric>),
     ElaboratedLub,
-    HrtbVar,
+    InstantiatedHrtbVar,
     HrtbWf { binder: SigHrtbBinder, idx: u32 },
     MirLocal(MirLocalIdx),
 }
@@ -346,6 +347,12 @@ pub struct InstantiatedFnSig {
 
 define_index_type! {
     pub struct InferReVar = u32;
+}
+
+impl InferReVar {
+    pub const ERASED: InferReVar = InferReVar {
+        _raw: InferReVar::MAX_INDEX as u32,
+    };
 }
 
 define_index_type! {

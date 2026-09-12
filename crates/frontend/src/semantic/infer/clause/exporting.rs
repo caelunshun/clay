@@ -1,16 +1,21 @@
 use crate::{
-    base::{arena::Obj, syntax::Span},
+    base::{
+        Diag,
+        arena::{HasInterner as _, Obj},
+        syntax::Span,
+    },
     semantic::{
         infer::ClauseCx,
         syntax::{
             AdtInstance, FnInstance, FnInstanceInner, FnOwner, HrtbBinder, HrtbDebruijnDef,
-            HrtbDebruijnDefList, HrtbProjection, Re, SigAdtInstance, SigFnInstance, SigFnOwner,
-            SigGenericList, SigHrtbBinder, SigHrtbDebruijnDef, SigHrtbDebruijnDefList,
+            HrtbDebruijnDefList, HrtbProjection, Re, RelationMode, SigAdtInstance, SigFnInstance,
+            SigFnOwner, SigGenericList, SigHrtbBinder, SigHrtbDebruijnDef, SigHrtbDebruijnDefList,
             SigProjectType, SigRe, SigReKind, SigTraitClause, SigTraitClauseKind,
             SigTraitClauseList, SigTraitParam, SigTraitParamKind, SigTraitParamList, SigTraitSpec,
             SigTy, SigTyInner, SigTyKind, SigTyList, SigTyOrRe, SigTyOrReList, TraitClause,
             TraitClauseList, TraitParam, TraitParamList, TraitSpec, Ty, TyKind, TyList, TyOrRe,
-            TyOrReList, UniversalTy, UniversalTyProjInner, UniversalTyRootSourceInfo,
+            TyOrReList, UniversalReVarSourceInfo, UniversalTy, UniversalTyProjInner,
+            UniversalTyRootSourceInfo,
         },
     },
 };
@@ -99,10 +104,17 @@ impl<'a, 'tcx> SigExporter<'a, 'tcx> {
     pub fn export_re(&mut self, re: Re) -> SigRe {
         let kind = match re {
             Re::Gc => SigReKind::Gc,
-            Re::HrtbVar(hrtb_debruijn) => todo!(),
-            Re::InferVar(infer_re_var) => todo!(),
-            Re::UniversalVar(universal_re_var) => todo!(),
-            Re::Erased => SigReKind::Infer,
+            Re::HrtbVar(debruijn) => SigReKind::HrtbVar(debruijn),
+            Re::InferVar(_) => SigReKind::Infer,
+            Re::UniversalVar(var) => match self.ccx.lookup_universal_re_src_info(var) {
+                UniversalReVarSourceInfo::Root(generic) => SigReKind::Generic(generic),
+                UniversalReVarSourceInfo::ElaboratedLub
+                | UniversalReVarSourceInfo::InstantiatedHrtbVar
+                | UniversalReVarSourceInfo::HrtbWf { .. }
+                | UniversalReVarSourceInfo::MirLocal(_) => {
+                    todo!()
+                }
+            },
             Re::Error(error) => SigReKind::Error(error),
         };
 
@@ -114,6 +126,8 @@ impl<'a, 'tcx> SigExporter<'a, 'tcx> {
 
     pub fn export_ty(&mut self, ty: Ty) -> SigTy {
         let s = self.ccx.session();
+        let tcx = self.ccx.tcx();
+
         let ty = self.ccx.peel_ty_infer_var_without_poll(ty);
 
         let kind = match *ty.r(s) {
@@ -131,7 +145,20 @@ impl<'a, 'tcx> SigExporter<'a, 'tcx> {
             TyKind::FnDef(def) => SigTyKind::FnDef(self.export_fn_instance(def)),
             TyKind::HrtbVar(idx) => SigTyKind::HrtbVar(idx),
             TyKind::HrtbProjection(proj) => SigTyKind::Project(self.export_hrtb_projection(proj)),
-            TyKind::InferVar(infer_ty_var) => todo!(),
+            TyKind::InferVar(var) => {
+                let err = Diag::span_err(self.span, "type hints required for this type").emit();
+
+                self.ccx
+                    .unify_ty_and_ty(
+                        tcx.intern(TyKind::InferVar(var)),
+                        tcx.intern(TyKind::Error(err)),
+                        RelationMode::Equate,
+                    )
+                    .unwrap()
+                    .report_never();
+
+                SigTyKind::Error(err)
+            }
             TyKind::Universal(universal) => return self.export_universal_ty(universal),
             TyKind::Error(error) => SigTyKind::Error(error),
         };

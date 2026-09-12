@@ -330,7 +330,7 @@ impl BodyCtxt<'_, '_> {
             HirExprKind::Local(local) => self.type_of_local(local),
             HirExprKind::AddrOf(mutability, pointee) => {
                 let pointee = self.check_expr(pointee, None).and_do(&mut divergence);
-                tcx.intern(TyKind::Reference(Re::Erased, mutability, pointee))
+                tcx.intern(TyKind::Reference(Re::ERASED, mutability, pointee))
             }
             HirExprKind::Break { label, value } => {
                 if label.kind.can_break_with_value() {

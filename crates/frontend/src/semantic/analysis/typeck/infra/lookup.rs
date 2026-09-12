@@ -146,7 +146,7 @@ impl BodyCtxt<'_, '_> {
             }
 
             if let Some(res) = self.lookup_single_method(
-                tcx.intern(TyKind::Reference(Re::Erased, Mutability::Not, receiver)),
+                tcx.intern(TyKind::Reference(Re::ERASED, Mutability::Not, receiver)),
                 name,
                 &scope_trait_candidates,
                 &generic_clause_candidates,
@@ -155,7 +155,7 @@ impl BodyCtxt<'_, '_> {
             }
 
             if let Some(res) = self.lookup_single_method(
-                tcx.intern(TyKind::Reference(Re::Erased, Mutability::Mut, receiver)),
+                tcx.intern(TyKind::Reference(Re::ERASED, Mutability::Mut, receiver)),
                 name,
                 &scope_trait_candidates,
                 &generic_clause_candidates,

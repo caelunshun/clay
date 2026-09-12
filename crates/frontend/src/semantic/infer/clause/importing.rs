@@ -10,7 +10,7 @@ use crate::{
             ClauseCx, ClauseFuel, HrtbInferParamNotValid, HrtbInferParamNotValidKind, HrtbUniverse,
             HrtbUniverseInfo, ImportError, InstantiateHrtbInferError,
             InstantiateHrtbUniversalError, MultiPromise, MultiPromiseBuilder, MultiPromiseValue,
-            PromiseValue, TraitSpecResolutionError, UnifyCxMode,
+            PromiseValue, TraitSpecResolutionError,
         },
         lower::generics::normalize_positional_generic_arity,
         syntax::{
@@ -494,10 +494,6 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
 
     pub fn import_re(&mut self, re: SigRe) -> ImportPromise<'tcx, Re> {
         let s = self.session();
-
-        if self.ccx.mode() == UnifyCxMode::RegionBlind {
-            return PromiseValue::trivial(Re::Erased);
-        }
 
         let output = match re.kind {
             SigReKind::Gc => Re::Gc,
@@ -1253,9 +1249,9 @@ impl<'tcx> ClauseCx<'tcx> {
             .r(s)
             .iter()
             .map(|def| match def.kind {
-                TyOrReKind::Re => {
-                    TyOrRe::Re(self.fresh_re_universal(UniversalReVarSourceInfo::HrtbVar))
-                }
+                TyOrReKind::Re => TyOrRe::Re(
+                    self.fresh_re_universal(UniversalReVarSourceInfo::InstantiatedHrtbVar),
+                ),
                 TyOrReKind::Ty => TyOrRe::Ty(self.fresh_ty_universal_root(
                     universe.clone(),
                     UniversalTyRootSourceInfo::InstantiatedHrtb(def.name),

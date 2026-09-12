@@ -21,3 +21,9 @@ error:
                               RHS: FnOnce<(u(1) T,), ()>
                                 - no suitable impl met
 
+error: type hints required for this type
+   ┌─ universe_leak.fir:16:21
+   │
+16 │         taker_types(hrtb_types::<_>);
+   │                     ^^^^^^^^^^^^^^^
+

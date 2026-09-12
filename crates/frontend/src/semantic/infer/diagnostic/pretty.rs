@@ -4,11 +4,11 @@ use crate::{
         infer::ClauseCx,
         syntax::{
             AdtCtorOwner, AdtInstance, FloatKind, FnInstance, FnOwner, HrtbBinder, HrtbDebruijn,
-            HrtbDebruijnDef, HrtbProjection, InferTyVar, InferTyVarSourceInfo, IntKind, Item, Re,
-            SimpleTyKind, SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty,
-            TyCtxt, TyKind, TyOrRe, TyOrReList, UniversalReVar, UniversalReVarSourceInfo,
-            UniversalTy, UniversalTyProj, UniversalTyProjInner, UniversalTyRoot,
-            UniversalTyRootSourceInfo,
+            HrtbDebruijnDef, HrtbProjection, InferReVar, InferTyVar, InferTyVarSourceInfo, IntKind,
+            Item, Re, SimpleTyKind, SimpleTySet, TraitClause, TraitClauseList, TraitParam,
+            TraitSpec, Ty, TyCtxt, TyKind, TyOrRe, TyOrReList, UniversalReVar,
+            UniversalReVarSourceInfo, UniversalTy, UniversalTyProj, UniversalTyProjInner,
+            UniversalTyRoot, UniversalTyRootSourceInfo,
         },
     },
     utils::lang::{SimpleListFormatGlue, format_list, format_list_into},
@@ -108,9 +108,12 @@ impl_pretty! {
         match value {
             Re::Gc => f.write_str("'gc"),
             Re::HrtbVar(debruijn) => write!(f, "'{}", cx.wrap(debruijn)),
-            Re::InferVar(infer) => write!(f, "'?{}", infer.index()),
+            Re::InferVar(infer) => if infer != InferReVar::ERASED {
+                write!(f, "'?{}", infer.index())
+            } else {
+                write!(f, "'erased")
+            },
             Re::UniversalVar(re) => cx.wrap(re).fmt(f),
-            Re::Erased => f.write_str("'erased"),
             Re::Error(_) => f.write_str("'error"),
         }
     }
@@ -123,7 +126,7 @@ impl_pretty! {
             },
             // TODO
             | UniversalReVarSourceInfo::ElaboratedLub
-            | UniversalReVarSourceInfo::HrtbVar
+            | UniversalReVarSourceInfo::InstantiatedHrtbVar
             | UniversalReVarSourceInfo::HrtbWf { .. }
             | UniversalReVarSourceInfo::MirLocal(..) => {
                 write!(f, "'u{:?}", value)

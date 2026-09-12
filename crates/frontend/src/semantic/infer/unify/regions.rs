@@ -1,7 +1,7 @@
 use crate::{
     base::ErrorGuaranteed,
     semantic::{
-        infer::{ClauseCx, Promise, PromiseHandle, ReAndReUnifyErrorCause},
+        infer::{ClauseCx, Promise, PromiseHandle, ReAndReUnifyErrorCause, UnifyCxMode},
         syntax::{InferReVar, Re, RelationDirection, UniversalReVar, UniversalReVarSourceInfo},
     },
     utils::hash::FxHashSet,
@@ -14,12 +14,17 @@ use std::ops::ControlFlow;
 
 #[derive(Debug, Clone)]
 pub struct ReUnifyTracker<'tcx> {
-    /// The next fresh inference variable to yield to the user.
-    next_infer: InferReVar,
+    non_blind_state: Option<NonBlindState<'tcx>>,
 
     /// A map from universal variable to the set of regions it's explicitly permitted to outlive or
     /// be outlived by.
     universals: IndexVec<UniversalReVar, ReUniversalState>,
+}
+
+#[derive(Debug, Clone)]
+struct NonBlindState<'tcx> {
+    /// The next fresh inference variable to yield to the user.
+    next_infer: InferReVar,
 
     /// The set of user-generated constraints between regions. May contain duplicate constraints and
     /// redundant constraints like `'gc: 'other` or `'other: 'other`.
@@ -46,17 +51,27 @@ struct ReConstraint<'tcx> {
     rhs: InferRe,
 }
 
-impl<'tcx> Default for ReUnifyTracker<'tcx> {
-    fn default() -> Self {
+impl<'tcx> ReUnifyTracker<'tcx> {
+    pub fn new(mode: UnifyCxMode) -> Self {
         Self {
-            next_infer: InferReVar::from_raw(0),
+            non_blind_state: match mode {
+                UnifyCxMode::RegionAware => Some(NonBlindState {
+                    next_infer: InferReVar::from_raw(0),
+                    constraints: Vec::new(),
+                }),
+                UnifyCxMode::RegionBlind => None,
+            },
             universals: IndexVec::new(),
-            constraints: Vec::new(),
         }
     }
-}
 
-impl<'tcx> ReUnifyTracker<'tcx> {
+    pub fn mode(&self) -> UnifyCxMode {
+        match self.non_blind_state.is_some() {
+            true => UnifyCxMode::RegionAware,
+            false => UnifyCxMode::RegionBlind,
+        }
+    }
+
     pub fn fresh_universal(&mut self, src_info: UniversalReVarSourceInfo) -> UniversalReVar {
         self.universals.push(ReUniversalState {
             src_info,
@@ -70,24 +85,38 @@ impl<'tcx> ReUnifyTracker<'tcx> {
     }
 
     pub fn fresh_infer(&mut self) -> InferReVar {
-        let var = self.next_infer;
-        self.next_infer += 1;
+        let Some(non_blind_state) = &mut self.non_blind_state else {
+            return InferReVar::ERASED;
+        };
+
+        let var = non_blind_state.next_infer;
+        non_blind_state.next_infer += 1;
         var
     }
 
     pub fn constrain(&mut self, lhs: Re, rhs: Re) -> Promise<'tcx, ReAndReUnifyErrorCause> {
+        let Some(non_blind_state) = &mut self.non_blind_state else {
+            return Promise::trivial();
+        };
+
         let (Ok(lhs), Ok(rhs)) = (InferRe::from_re(lhs), InferRe::from_re(rhs)) else {
             return Promise::trivial();
         };
 
         let (promise, handle) = Promise::new();
 
-        self.constraints.push(ReConstraint { handle, lhs, rhs });
+        non_blind_state
+            .constraints
+            .push(ReConstraint { handle, lhs, rhs });
 
         promise
     }
 
     pub fn permit(&mut self, universal: UniversalReVar, other: Re, dir: RelationDirection) {
+        if self.non_blind_state.is_none() {
+            return;
+        }
+
         let Ok(other) = InferRe::from_re(other) else {
             return;
         };
@@ -104,16 +133,21 @@ impl<'tcx> ReUnifyTracker<'tcx> {
 
     pub fn verify(ccx: &mut ClauseCx<'tcx>) {
         fn get_this<'a, 'tcx>(ccx: &'a mut ClauseCx<'tcx>) -> &'a mut ReUnifyTracker<'tcx> {
-            ccx.ucx_mut().regions.as_mut().unwrap()
+            &mut ccx.ucx_mut().regions
         }
 
         let this = get_this(ccx);
+
+        if this.non_blind_state.is_none() {
+            return;
+        }
+
         let permissions = ReElaboratedPermissions::new(this);
         let mut outlives = ReIncrementalConstraints::new(this);
 
         let mut to_resolve = Vec::new();
 
-        for cst in &this.constraints {
+        for cst in &this.non_blind_state.as_ref().unwrap().constraints {
             outlives.add_constraint(cst.lhs, cst.rhs, |var, must_outlive| {
                 if permissions.can_outlive(var, must_outlive) {
                     return Ok(());
@@ -135,8 +169,14 @@ impl<'tcx> ReUnifyTracker<'tcx> {
             promise.reject(ccx, err);
         }
 
-        for cst_idx in 0..get_this(ccx).constraints.len() {
-            get_this(ccx).constraints[cst_idx]
+        for cst_idx in 0..get_this(ccx)
+            .non_blind_state
+            .as_ref()
+            .unwrap()
+            .constraints
+            .len()
+        {
+            get_this(ccx).non_blind_state.as_ref().unwrap().constraints[cst_idx]
                 .handle
                 .clone()
                 .accept_if_not_rejected(ccx);
@@ -191,7 +231,7 @@ impl ReElaboratedPermissions {
         // Also convert direct constraints, excluding permissions, into a graph.
         let mut cst_graph = InferReGraph::default();
 
-        for cst in &tracker.constraints {
+        for cst in &tracker.non_blind_state.as_ref().unwrap().constraints {
             cst_graph.add(cst.lhs, cst.rhs);
         }
 
@@ -422,9 +462,13 @@ impl InferRe {
         match re {
             Re::Gc => Ok(InferRe::Gc),
             Re::UniversalVar(var) => Ok(InferRe::Universal(var)),
-            Re::InferVar(var) => Ok(InferRe::Infer(var)),
+            Re::InferVar(var) => {
+                assert_ne!(var, InferReVar::ERASED);
+
+                Ok(InferRe::Infer(var))
+            }
             Re::Error(err) => Err(err),
-            Re::HrtbVar(_) | Re::Erased => unreachable!(),
+            Re::HrtbVar(_) => unreachable!(),
         }
     }
 

@@ -43,7 +43,7 @@ pub enum UnifyCxMode {
 pub struct UnifyCx<'tcx> {
     tcx: &'tcx TyCtxt,
     types: TyUnifyTracker,
-    pub(super) regions: Option<ReUnifyTracker<'tcx>>,
+    pub(super) regions: ReUnifyTracker<'tcx>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -58,10 +58,7 @@ impl<'tcx> UnifyCx<'tcx> {
         Self {
             tcx,
             types: TyUnifyTracker::default(),
-            regions: match mode {
-                UnifyCxMode::RegionBlind => None,
-                UnifyCxMode::RegionAware => Some(ReUnifyTracker::default()),
-            },
+            regions: ReUnifyTracker::new(mode),
         }
     }
 
@@ -74,17 +71,11 @@ impl<'tcx> UnifyCx<'tcx> {
     }
 
     pub fn mode(&self) -> UnifyCxMode {
-        if self.regions.is_some() {
-            UnifyCxMode::RegionAware
-        } else {
-            UnifyCxMode::RegionBlind
-        }
+        self.regions.mode()
     }
 
     pub fn verify(ccx: &mut ClauseCx<'tcx>) {
-        if ccx.ucx().regions.is_some() {
-            ReUnifyTracker::verify(ccx);
-        }
+        ReUnifyTracker::verify(ccx);
     }
 
     pub fn substitutor(&self, mode: UnboundVarHandlingMode) -> InferTySubstitutor<'_, 'tcx> {
@@ -152,18 +143,11 @@ impl<'tcx> UnifyCx<'tcx> {
     }
 
     pub fn fresh_re_universal(&mut self, src_info: UniversalReVarSourceInfo) -> Re {
-        if let Some(regions) = &mut self.regions {
-            Re::UniversalVar(regions.fresh_universal(src_info))
-        } else {
-            Re::Erased
-        }
+        Re::UniversalVar(self.regions.fresh_universal(src_info))
     }
 
     pub fn lookup_universal_re_src_info(&self, var: UniversalReVar) -> UniversalReVarSourceInfo {
-        self.regions
-            .as_ref()
-            .expect("cannot `lookup_universal_re_src_info` in a region-blind context")
-            .lookup_universal_src_info(var)
+        self.regions.lookup_universal_src_info(var)
     }
 
     pub fn permit_universe_re_outlives_re(
@@ -172,26 +156,15 @@ impl<'tcx> UnifyCx<'tcx> {
         other: Re,
         dir: RelationDirection,
     ) {
-        let Some(regions) = &mut self.regions else {
-            debug_assert!(matches!(universal, Re::Erased));
-            debug_assert!(matches!(other, Re::Erased));
-
-            return;
-        };
-
         let Re::UniversalVar(universal) = universal else {
             unreachable!()
         };
 
-        regions.permit(universal, other, dir);
+        self.regions.permit(universal, other, dir);
     }
 
     pub fn fresh_re_infer(&mut self) -> Re {
-        if let Some(regions) = &mut self.regions {
-            Re::InferVar(regions.fresh_infer())
-        } else {
-            Re::Erased
-        }
+        Re::InferVar(self.regions.fresh_infer())
     }
 
     pub fn unify_re_and_re(
@@ -200,17 +173,10 @@ impl<'tcx> UnifyCx<'tcx> {
         rhs: Re,
         mode: RelationMode,
     ) -> Promise<'tcx, ReAndReUnifyError> {
-        let Some(regions) = &mut self.regions else {
-            debug_assert!(matches!(lhs, Re::Erased));
-            debug_assert!(matches!(rhs, Re::Erased));
-
-            return Promise::trivial();
-        };
-
         let mut collector = MultiPromiseBuilder::default();
 
         for (lhs, rhs) in mode.enumerate(lhs, rhs) {
-            regions.constrain(lhs, rhs).join(&mut collector);
+            self.regions.constrain(lhs, rhs).join(&mut collector);
         }
 
         collector

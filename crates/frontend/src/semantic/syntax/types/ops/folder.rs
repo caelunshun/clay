@@ -490,12 +490,7 @@ impl TyFoldable for Re {
         F: ?Sized + TyFolder<'tcx>,
     {
         match me {
-            Re::Gc
-            | Re::Erased
-            | Re::Error(_)
-            | Re::HrtbVar(_)
-            | Re::InferVar(_)
-            | Re::UniversalVar(_) => {
+            Re::Gc | Re::Error(_) | Re::HrtbVar(_) | Re::InferVar(_) | Re::UniversalVar(_) => {
                 // (dead end)
                 _ = folder;
                 Ok(me)
