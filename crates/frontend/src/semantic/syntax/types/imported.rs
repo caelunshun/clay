@@ -170,24 +170,13 @@ pub enum UniversalTyRootSourceInfo {
     Root(Obj<TypeGeneric>),
 
     /// A universal derived from the process of `.use`'ing a `dyn Trait`-object. It is the
-    /// responsibility of the borrow-checker using the inference context to ensure that only one
-    /// instance of such a universal is alive at once since, otherwise, one could do...
-    ///
-    /// ```ignore
-    /// fn meow(my_vec: Vec<@dyn Foo<Assoc:>>) {
-    ///     let mut collector = Vec::<&'_ _>::new();
-    ///
-    ///     for elem in my_vec {
-    ///         collector.push(elem.use.borrow_assoc());
-    ///     }
-    /// }
-    /// ```
-    ///
-    /// ...and get a `collector` with a mixed set of types. This is done by bounding the lifetime of
-    /// the `UsedDyn` type universal to a virtual local which lives  from the last `.use` invocation
-    /// for a given lexical site to its next use during borrow checking. This uniqueness property
-    /// also ensures that we never mix associated types of different sizes when working with
-    /// multiple distinct `dyn Trait` instances with the same `.use` site.
+    /// responsibility of the borrow-checker using the inference context to ensure that no code may
+    /// use this universal type until the `.use` call for this site has occurred and that no objects
+    /// which explicitly mention this universal or any of its derived projections are live between
+    /// multiple calls to the same `.use` for a given site. This allows us to analyze this situation
+    /// isomorphically to as if we had forced each `.use` expression to call a higher-ranked
+    /// function generic over all possible of a given `dyn Trait`'s underlying types, making it
+    /// sound.
     UsedDyn { span: Span, site: DynUseSiteIdx },
 
     /// A universally instantiated HRTB variable for use in solving.
