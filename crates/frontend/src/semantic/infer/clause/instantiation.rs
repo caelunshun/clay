@@ -67,7 +67,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
         let binder_env = binder_parent_env
             .clone()
-            .with_subst(GenericSubst::new(target_binder, target_vars));
+            .with_generics(GenericSubst::new(target_binder, target_vars));
 
         for (&generic, &subst) in target_binder.r(s).defs.iter().zip(target_vars.r(s)) {
             match (generic, subst) {
@@ -214,7 +214,7 @@ impl<'tcx> ClauseCx<'tcx> {
         // Extend with function environment
         let substs = self.universal_binder_to_init_vars(&env, def.r(s).generics);
 
-        env.with_subst(GenericSubst::new(def.r(s).generics, substs))
+        env.with_generics(GenericSubst::new(def.r(s).generics, substs))
     }
 
     pub fn universal_env_for_type_alias_def(&mut self, def: Obj<TypeAliasItem>) -> ClauseImportEnv {
@@ -613,7 +613,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 );
 
                 let full_env =
-                    parent_env.with_subst(GenericSubst::new(fn_def.r(s).generics, early_args));
+                    parent_env.with_generics(GenericSubst::new(fn_def.r(s).generics, early_args));
 
                 let PromiseValue {
                     value: sig,

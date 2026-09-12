@@ -161,7 +161,7 @@ define_index_type! {
 }
 
 define_index_type! {
-    pub struct DynUseSiteIdx = u32;
+    pub struct DynSiteIdx = u32;
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -177,7 +177,7 @@ pub enum UniversalTyRootSourceInfo {
     /// isomorphically to as if we had forced each `.use` expression to call a higher-ranked
     /// function generic over all possible of a given `dyn Trait`'s underlying types, making it
     /// sound.
-    UsedDyn { span: Span, site: DynUseSiteIdx },
+    UsedDyn { span: Span, site: DynSiteIdx },
 
     /// A universally instantiated HRTB variable for use in solving.
     InstantiatedHrtb(Symbol),

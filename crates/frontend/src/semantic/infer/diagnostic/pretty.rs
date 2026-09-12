@@ -396,8 +396,7 @@ impl_pretty! {
             ),
             UniversalTyRootSourceInfo::InstantiatedHrtb(name) => write!(f, "{name}"),
             UniversalTyRootSourceInfo::WfTraitSelf => write!(f, "Self"),
-            UniversalTyRootSourceInfo::WfReflexive { clauses } => {
-                // TODO
+            UniversalTyRootSourceInfo::WfReflexive { clauses: _ } => {
                 write!(f, "[clause WF helper]")
             },
             UniversalTyRootSourceInfo::WfHrtbUniversal { binder, idx } => {

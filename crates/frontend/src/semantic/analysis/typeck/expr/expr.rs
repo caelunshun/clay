@@ -12,10 +12,10 @@ use crate::{
             SpannedError,
         },
         syntax::{
-            AdtCtorSyntax, AdtInstance, Divergence, DynUseSiteIdx, FnInstanceInner, FnOwner,
-            HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirStmt, HirStructExpr,
-            InferTyVarSourceInfo, LabelTargetKind, Re, RelationMode, SigAdtInstance, SimpleTyKind,
-            SimpleTySet, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe, UniversalTy,
+            AdtCtorSyntax, AdtInstance, Divergence, DynSiteIdx, FnInstanceInner, FnOwner, HirBlock,
+            HirExpr, HirExprKind, HirLabelledBlock, HirStmt, HirStructExpr, InferTyVarSourceInfo,
+            LabelTargetKind, Re, RelationMode, SigAdtInstance, SimpleTyKind, SimpleTySet,
+            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe, UniversalTy,
             UniversalTyRootSourceInfo,
         },
     },
@@ -209,7 +209,7 @@ impl BodyCtxt<'_, '_> {
                                     span: expr.r(s).span,
                                     // TODO: allocate these and confirm them so we can do analysis
                                     // in MIR.
-                                    site: DynUseSiteIdx::from_raw(0),
+                                    site: DynSiteIdx::from_raw(0),
                                 },
                             ));
 
@@ -416,55 +416,65 @@ impl BodyCtxt<'_, '_> {
                 };
 
                 match &ctor.def.r(s).syntax {
-                    AdtCtorSyntax::Unit | AdtCtorSyntax::Tuple => {
-                        // (fallthrough)
+                    AdtCtorSyntax::Unit => tcx.intern(TyKind::Adt(AdtInstance {
+                        def: ctor.def.r(s).owner.item(s),
+                        params: ctor.params,
+                    })),
+                    AdtCtorSyntax::Tuple => {
+                        tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
+                            owner: FnOwner::AdtCtor(ctor.def),
+                            early_args: Some(ctor.params),
+                        })))
                     }
-                    AdtCtorSyntax::Named(_) => {
-                        break 'check tcx.intern(TyKind::Error(
-                            Diag::span_err(
-                                ty_span,
-                                "cannot create functions out of braced constructors",
-                            )
-                            .emit(),
-                        ));
-                    }
+                    AdtCtorSyntax::Named(_) => tcx.intern(TyKind::Error(
+                        Diag::span_err(
+                            ty_span,
+                            "cannot create functions out of braced constructors",
+                        )
+                        .emit(),
+                    )),
                 }
-
-                tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
-                    owner: FnOwner::AdtCtor(ctor.def),
-                    early_args: Some(ctor.params),
-                })))
             }
-            HirExprKind::AdtCtorEnumVariant(item, params) => 'check: {
+            HirExprKind::AdtCtorEnumVariant(item, params) => {
                 let ctor = *item.r(s).adt_variant(s).r(s).ctor;
 
                 match &ctor.r(s).syntax {
-                    AdtCtorSyntax::Unit | AdtCtorSyntax::Tuple => {
-                        // (fallthrough)
+                    AdtCtorSyntax::Unit => {
+                        let AdtInstance { def: _, params } = self.ccx_mut().import_here(
+                            import_env,
+                            SigAdtInstance {
+                                def: item.r(s).adt(s),
+                                params,
+                            },
+                        );
+
+                        tcx.intern(TyKind::Adt(AdtInstance {
+                            def: ctor.r(s).owner.item(s),
+                            params,
+                        }))
                     }
-                    AdtCtorSyntax::Named(_) => {
-                        break 'check tcx.intern(TyKind::Error(
-                            Diag::span_err(
-                                expr.r(s).span,
-                                "cannot create functions out of braced constructors",
-                            )
-                            .emit(),
-                        ));
+                    AdtCtorSyntax::Tuple => {
+                        let AdtInstance { def: _, params } = self.ccx_mut().import_here(
+                            import_env,
+                            SigAdtInstance {
+                                def: item.r(s).adt(s),
+                                params,
+                            },
+                        );
+
+                        tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
+                            owner: FnOwner::AdtCtor(ctor),
+                            early_args: Some(params),
+                        })))
                     }
+                    AdtCtorSyntax::Named(_) => tcx.intern(TyKind::Error(
+                        Diag::span_err(
+                            expr.r(s).span,
+                            "cannot create functions out of braced constructors",
+                        )
+                        .emit(),
+                    )),
                 }
-
-                let AdtInstance { def: _, params } = self.ccx_mut().import_here(
-                    import_env,
-                    SigAdtInstance {
-                        def: item.r(s).adt(s),
-                        params,
-                    },
-                );
-
-                tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
-                    owner: FnOwner::AdtCtor(ctor),
-                    early_args: Some(params),
-                })))
             }
             HirExprKind::Struct(HirStructExpr {
                 ctor_span,

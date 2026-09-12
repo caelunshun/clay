@@ -42,7 +42,7 @@ struct Vec<T>;
 
 impl<T> Vec<T> {
     fn new() -> Self {
-        Self()
+        Self
     }
 
     fn push(&mut self, value: T) {}
@@ -56,9 +56,9 @@ fn main() {
         let init: @dyn Meow;
 
         if i == 0 {
-            init = Foo();
+            init = Foo;
         } else if i == 1 {
-            init = Bar();
+            init = Bar;
         } else {
             break;
         }

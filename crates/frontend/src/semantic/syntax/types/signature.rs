@@ -5,7 +5,7 @@ use crate::{
         syntax::{Span, Symbol},
     },
     semantic::syntax::{
-        AdtCtor, AdtItem, DynUseSiteIdx, FnItem, HrtbDebruijn, ImplItem, Mutability, RegionGeneric,
+        AdtCtor, AdtItem, DynSiteIdx, FnItem, HrtbDebruijn, ImplItem, Mutability, RegionGeneric,
         RelationDirection, SimpleTyKind, TraitItem, TyOrReKind, TypeAliasItem, TypeGeneric,
     },
 };
@@ -129,7 +129,7 @@ pub enum SigTyKind {
     /// environment so that it can substitute them in for `UsedDyn` instances. Export logic,
     /// meanwhile, automatically turns universals with a `UniversalTyRootSourceInfo` of `UsedDyn`
     /// into such a `UsedDyn` instance.
-    UsedDyn(DynUseSiteIdx),
+    UsedDyn(DynSiteIdx),
 
     /// A request to create an inference variable (e.g. `_`).
     Infer,

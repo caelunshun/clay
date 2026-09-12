@@ -20,7 +20,7 @@ struct Vec<T>;
 
 impl<T> Vec<T> {
     fn new() -> Self {
-        Self()
+        Self
     }
 
     fn push(&mut self, value: T) {}

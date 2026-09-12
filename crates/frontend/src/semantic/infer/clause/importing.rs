@@ -14,15 +14,16 @@ use crate::{
         },
         lower::generics::normalize_positional_generic_arity,
         syntax::{
-            AdtInstance, AnyGeneric, FnInstance, FnInstanceInner, FnOwner, GenericBinder,
-            HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, HrtbProjection, InferTyVarSourceInfo,
-            Re, RegionGeneric, RelationDirection, SigAdtInstance, SigFnInstance, SigFnOwner,
-            SigGenericList, SigHrtbBinder, SigProjectType, SigRe, SigReKind, SigTraitClause,
-            SigTraitClauseKind, SigTraitClauseList, SigTraitInstance, SigTraitParamKind,
-            SigTraitSpec, SigTy, SigTyKind, SigTyList, SigTyOrRe, SigTyOrReList, TraitClause,
-            TraitClauseList, TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt, TyFolder,
-            TyFolderInfallibleExt, TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList, TypeAliasItem,
-            TypeGeneric, UniversalReVarSourceInfo, UniversalTy, UniversalTyRootSourceInfo,
+            AdtInstance, AnyGeneric, DynSiteIdx, FnInstance, FnInstanceInner, FnOwner,
+            GenericBinder, HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, HrtbProjection,
+            InferTyVarSourceInfo, Re, RegionGeneric, RelationDirection, SigAdtInstance,
+            SigFnInstance, SigFnOwner, SigGenericList, SigHrtbBinder, SigProjectType, SigRe,
+            SigReKind, SigTraitClause, SigTraitClauseKind, SigTraitClauseList, SigTraitInstance,
+            SigTraitParamKind, SigTraitSpec, SigTy, SigTyKind, SigTyList, SigTyOrRe, SigTyOrReList,
+            TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitSpec, Ty, TyCtxt,
+            TyFolder, TyFolderInfallibleExt, TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList,
+            TypeAliasItem, TypeGeneric, UniversalReVarSourceInfo, UniversalTy, UniversalTyRoot,
+            UniversalTyRootSourceInfo,
         },
     },
     typed_joiner,
@@ -38,7 +39,8 @@ use std::{convert::Infallible, mem};
 pub struct ClauseImportEnv {
     _private: (),
     pub self_ty: Option<Ty>,
-    pub substs: SmallVec<[GenericSubst; Self::SMALL_CAP]>,
+    pub generics: SmallVec<[GenericSubst; Self::SMALL_CAP]>,
+    pub dyn_sites: SmallVec<[UniversalTyRoot; Self::SMALL_CAP]>,
 }
 
 impl ClauseImportEnv {
@@ -48,16 +50,26 @@ impl ClauseImportEnv {
         Self {
             _private: (),
             self_ty,
-            substs: substs.into_iter().collect(),
+            generics: substs.into_iter().collect(),
+            dyn_sites: SmallVec::new(),
         }
     }
 
-    pub fn push_subst(&mut self, subst: GenericSubst) {
-        self.substs.push(subst);
+    pub fn push_generics(&mut self, subst: GenericSubst) {
+        self.generics.push(subst);
     }
 
-    pub fn with_subst(mut self, subst: GenericSubst) -> Self {
-        self.push_subst(subst);
+    pub fn with_generics(mut self, subst: GenericSubst) -> Self {
+        self.push_generics(subst);
+        self
+    }
+
+    pub fn set_dyn_sites(&mut self, sites: impl IntoIterator<Item = UniversalTyRoot>) {
+        self.dyn_sites = SmallVec::from_iter(sites);
+    }
+
+    pub fn with_dyn_sites(mut self, sites: impl IntoIterator<Item = UniversalTyRoot>) -> Self {
+        self.set_dyn_sites(sites);
         self
     }
 
@@ -69,7 +81,7 @@ impl ClauseImportEnv {
         let pos = generic.binder(s);
 
         let binder = self
-            .substs
+            .generics
             .iter()
             .find(|v| v.binder == pos.def)
             .unwrap_or_else(|| {
@@ -85,6 +97,10 @@ impl ClauseImportEnv {
 
     pub fn lookup_ty(&self, s: &Session, generic: Obj<TypeGeneric>) -> Ty {
         self.lookup_generic(s, AnyGeneric::Ty(generic)).unwrap_ty()
+    }
+
+    pub fn lookup_dyn_site(&self, site: DynSiteIdx) -> UniversalTyRoot {
+        self.dyn_sites[site.index()]
     }
 }
 
@@ -431,7 +447,9 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
             SigTyKind::SelfTy => self.opts.env.unwrap_self_ty(),
 
             SigTyKind::Generic(generic) => self.opts.env.lookup_ty(s, generic),
-            SigTyKind::UsedDyn(site) => todo!(),
+            SigTyKind::UsedDyn(site) => tcx.intern(TyKind::Universal(UniversalTy::Root(
+                self.opts.env.lookup_dyn_site(site),
+            ))),
 
             SigTyKind::Infer => self.ccx.fresh_ty_infer(
                 self.opts.universe.clone(),

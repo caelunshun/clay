@@ -70,9 +70,9 @@ trait Helper<T, V> {
 // `HrtbSubstitutionFolder` is used.
 fn uh_oh<Q: for<T: Projector> Helper<T, <T as Projector>::Out>>(v: Q) {
     Helper::<(), _>::meow(Some(v), 3);
-    <Q as Helper<(), _>>::meow(None(), "meow");
-    Helper::<(), _>::meow(None(), true);
-    Helper::<(), _>::meow(None::<Q>(), 4.0);
+    <Q as Helper<(), _>>::meow(None, "meow");
+    Helper::<(), _>::meow(None, true);
+    Helper::<(), _>::meow(None::<Q>, 4.0);
 
     let foo = Helper::<(), _>::meow;
     foo(Some(v), 1);
