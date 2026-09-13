@@ -2,7 +2,6 @@ use crate::{
     base::{
         Diag, LeafDiag, Session,
         arena::{HasInterner as _, Obj},
-        syntax::Span,
     },
     parse::token::Ident,
     semantic::{
@@ -15,7 +14,7 @@ use crate::{
         syntax::{
             AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, FnOwner,
             InferTyVarSourceInfo, InstantiatedFnSig, Mutability, Re, RelationMode, SigGenericList,
-            TraitSpec, Ty, TyFolderInfallibleExt as _, TyKind, TyOrReList,
+            TraitSpec, Ty, TyFolderInfallibleExt as _, TyKind,
         },
     },
     utils::lang::IterEither,
@@ -234,13 +233,6 @@ impl BodyCtxt<'_, '_> {
 
         Some(tcx.intern(TyKind::FnDef(instance)))
     }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub struct SpannedImportedAssocArgs<'a> {
-    pub segment_span: Span,
-    pub arg_spans: &'a [Span],
-    pub args: TyOrReList,
 }
 
 #[derive(Debug, Copy, Clone)]

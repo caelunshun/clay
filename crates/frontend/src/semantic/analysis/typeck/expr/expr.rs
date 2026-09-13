@@ -421,6 +421,8 @@ impl BodyCtxt<'_, '_> {
                         params: ctor.params,
                     })),
                     AdtCtorSyntax::Tuple => {
+                        _ = self.check_tuple_ctor_visibilities(ty_span, ctor);
+
                         tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
                             owner: FnOwner::AdtCtor(ctor.def),
                             early_args: Some(ctor.params),

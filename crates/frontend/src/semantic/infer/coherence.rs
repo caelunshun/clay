@@ -314,6 +314,7 @@ impl ImportedShapeEraser<'_, '_> {
             | TyKind::InferVar(_)
             | TyKind::Universal(_)
             | TyKind::FnDef(_)
+            | TyKind::Trait(_, _, _)
             | TyKind::Error(_) => TyShape::Hole,
 
             TyKind::Simple(kind) => TyShape::Solid(SolidTyShape {
@@ -335,7 +336,6 @@ impl ImportedShapeEraser<'_, '_> {
                         .collect::<Vec<_>>(),
                 ),
             }),
-            TyKind::Trait(_re, _muta, _intern) => todo!(),
             TyKind::Tuple(children) => TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Tuple(children.r(s).len() as u32),
                 children: tcx.intern_list(

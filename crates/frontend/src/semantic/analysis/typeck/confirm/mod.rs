@@ -83,7 +83,7 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
         }
 
         // Lower the function to its THIR representation.
-        LateInit::init(&self.bcx.def.r(s).thir_body, Some(self.confirm_expr(body)));
+        // LateInit::init(&self.bcx.def.r(s).thir_body, Some(self.confirm_expr(body)));
     }
 
     fn confirm_expr(&mut self, expr: Obj<HirExpr>) -> Obj<ThirExpr> {
@@ -372,7 +372,7 @@ impl<'a, 'b, 'tcx> ConfirmCtxt<'a, 'b, 'tcx> {
             HirPatKind::Deref(_mutability, pat) => ThirPatKind::Deref(self.confirm_pat(pat)),
             HirPatKind::AdtUnit(adt_ctor_instance) => todo!(),
             HirPatKind::AdtTuple(adt_ctor_instance, hir_pat_list_front_and_tail) => todo!(),
-            HirPatKind::AdtNamed(adt_ctor_instance, obj) => todo!(),
+            HirPatKind::AdtNamed(adt_ctor_instance, obj, rest) => todo!(),
             HirPatKind::PlaceExpr(expr) => ThirPatKind::Place(self.confirm_expr(expr)),
             HirPatKind::Range(hir_range_expr) => todo!(),
             HirPatKind::Error(error) => ThirPatKind::Error(error),

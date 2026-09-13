@@ -6,7 +6,8 @@ use crate::{
     },
     parse::{
         ast::{
-            AstAssignOpKind, AstBinOpSpanned, AstLit, AstOptMutability, AstRangeLimits, AstUnOpKind,
+            AstAssignOpKind, AstBinOpSpanned, AstLit, AstOptMutability, AstPatStructRest,
+            AstRangeLimits, AstUnOpKind,
         },
         token::Ident,
     },
@@ -112,7 +113,7 @@ pub enum HirPatKind {
     AdtTuple(AdtCtorUnresolved, HirPatListFrontAndTail),
 
     /// Match a named struct or enum variant.
-    AdtNamed(AdtCtorUnresolved, Obj<[HirPatNamedField]>),
+    AdtNamed(AdtCtorUnresolved, Obj<[HirPatNamedField]>, AstPatStructRest),
 
     /// Bind to a target place expression. Only available in destructuring patterns.
     PlaceExpr(Obj<HirExpr>),

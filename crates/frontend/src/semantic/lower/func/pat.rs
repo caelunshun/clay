@@ -388,7 +388,7 @@ impl IntraItemLowerCtxt<'_> {
                     s,
                 );
 
-                HirPatKind::AdtNamed(ctor, fields)
+                HirPatKind::AdtNamed(ctor, fields, *rest)
             }
             AstPatKind::PathAndParen(path, children) => 'pat: {
                 let res = match self.resolve_expr_path(path).fail_on_unbound_local() {

@@ -3,12 +3,12 @@ use crate::{
     semantic::{
         infer::ClauseCx,
         syntax::{
-            AdtCtorOwner, AdtInstance, FloatKind, FnInstance, FnOwner, HrtbBinder, HrtbDebruijn,
-            HrtbDebruijnDef, HrtbProjection, InferReVar, InferTyVar, InferTyVarSourceInfo, IntKind,
-            Item, Re, SimpleTyKind, SimpleTySet, TraitClause, TraitClauseList, TraitParam,
-            TraitSpec, Ty, TyCtxt, TyKind, TyOrRe, TyOrReList, UniversalReVar,
-            UniversalReVarSourceInfo, UniversalTy, UniversalTyProj, UniversalTyProjInner,
-            UniversalTyRoot, UniversalTyRootSourceInfo,
+            AdtCtor, AdtCtorOwner, AdtInstance, FloatKind, FnInstance, FnOwner, HrtbBinder,
+            HrtbDebruijn, HrtbDebruijnDef, HrtbProjection, InferReVar, InferTyVar,
+            InferTyVarSourceInfo, IntKind, Item, Re, SimpleTyKind, SimpleTySet, TraitClause,
+            TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe, TyOrReList,
+            UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProj,
+            UniversalTyProjInner, UniversalTyRoot, UniversalTyRootSourceInfo,
         },
     },
     utils::lang::{SimpleListFormatGlue, format_list, format_list_into},
@@ -316,6 +316,11 @@ impl_pretty! {
     Obj<Item> => |cx, value, f| {
         let s = cx.session();
         f.write_str(value.r(s).path.as_str(s))
+    }
+    Obj<AdtCtor> => |cx, value, f| {
+        let s = cx.session();
+
+        f.write_str(&value.r(s).owner.bare_identified_what(s))
     }
     InferTyVar => |cx, value, f| {
         let s = cx.session();

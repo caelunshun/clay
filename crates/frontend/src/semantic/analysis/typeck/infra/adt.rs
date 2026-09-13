@@ -10,7 +10,7 @@ use crate::{
         infer::PrettyFmtOpts,
         syntax::{
             AdtCtor, AdtCtorFieldIdx, AdtCtorInstance, AdtCtorUnresolved, AdtInstance, AdtKind,
-            HirPatListFrontAndTail, HirPatListFrontAndTailLen, SigAdtInstance, Ty, TyKind,
+            SigAdtInstance, Ty, TyKind,
         },
     },
     utils::{
@@ -184,64 +184,6 @@ impl BodyCtxt<'_, '_> {
                 ),
             )
             .emit())
-        }
-    }
-
-    pub fn check_pat_tuple_visibilities(
-        &mut self,
-        span: Span,
-        ctor: AdtCtorInstance,
-        children: HirPatListFrontAndTail,
-    ) {
-        let s = self.session();
-
-        let expected_len = ctor.def.r(s).fields.len() as u32;
-
-        let arity_offense = match children.len(s) {
-            HirPatListFrontAndTailLen::Exactly(v) if v != expected_len => Some((v, "", "")),
-            HirPatListFrontAndTailLen::AtLeast(v) if v > expected_len => {
-                Some((v, " at least", "only "))
-            }
-            _ => None,
-        };
-
-        if let Some((child_count, at_least, only)) = arity_offense {
-            Diag::span_err(
-                span,
-                format_args!(
-                    "this pattern has{at_least} {child_count} field{}, but the \
-                     corresponding tuple {} {only}has {}",
-                    if child_count == 1 { "" } else { "s" },
-                    ctor.def.r(s).owner.bare_identified_what(s),
-                    expected_len,
-                ),
-            )
-            .emit();
-        }
-
-        let front_fields = children.front.r(s).iter().zip(&ctor.def.r(s).fields);
-
-        let back_fields = children
-            .tail
-            .iter()
-            .flat_map(|v| v.r(s).iter())
-            .zip(ctor.def.r(s).fields.iter().rev());
-
-        for (pat, field) in front_fields.chain(back_fields) {
-            if field.vis.is_visible_to(self.item(), s) {
-                continue;
-            }
-
-            Diag::span_err(
-                pat.r(s).span,
-                format_args!(
-                    "field `{}` of {} is not visible to {}",
-                    field.idx.raw(),
-                    ctor.def.r(s).owner.bare_identified_what(s),
-                    self.item().r(s).bare_category_path(s),
-                ),
-            )
-            .emit();
         }
     }
 
