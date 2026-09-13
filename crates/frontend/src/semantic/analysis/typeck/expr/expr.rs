@@ -13,9 +13,9 @@ use crate::{
         },
         syntax::{
             AdtCtorSyntax, AdtInstance, Divergence, DynSiteIdx, FnInstanceInner, FnOwner, HirBlock,
-            HirExpr, HirExprKind, HirLabelledBlock, HirStmt, HirStructExpr, InferTyVarSourceInfo,
-            LabelTargetKind, Re, RelationMode, SigAdtInstance, SimpleTyKind, SimpleTySet,
-            TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe, UniversalTy,
+            HirExpr, HirExprKind, HirLabelledBlock, HirMatchArm, HirStmt, HirStructExpr,
+            InferTyVarSourceInfo, LabelTargetKind, Re, RelationMode, SigAdtInstance, SimpleTyKind,
+            SimpleTySet, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe, UniversalTy,
             UniversalTyRootSourceInfo,
         },
     },
@@ -313,7 +313,44 @@ impl BodyCtxt<'_, '_> {
                     tcx.intern(TyKind::Simple(SimpleTyKind::Never))
                 }
             }
-            HirExprKind::Match(scrutinee, arms) => todo!(),
+            HirExprKind::Match(scrutinee, arms) => {
+                let scrutinee = self
+                    .check_expr_inner(scrutinee, None)
+                    .and_do(&mut divergence);
+
+                let arm_demand = demand_hint.unwrap_or_else(|| {
+                    self.ccx_mut().fresh_ty_infer(
+                        HrtbUniverse::ROOT,
+                        InferTyVarSourceInfo::HoleInfer {
+                            span: expr.r(s).span,
+                        },
+                    )
+                });
+
+                for &arm in arms.r(s) {
+                    let HirMatchArm {
+                        span: _,
+                        pat,
+                        guard,
+                        body,
+                    } = *arm.r(s);
+
+                    self.check_pat_demand(pat, scrutinee, Some(&mut divergence));
+
+                    if let Some(guard) = guard {
+                        self.check_expr_demand(
+                            guard,
+                            tcx.intern(TyKind::Simple(SimpleTyKind::Bool)),
+                        )
+                        .and_do(&mut divergence);
+                    }
+
+                    self.check_expr_demand(body, arm_demand)
+                        .and_do(&mut divergence);
+                }
+
+                arm_demand
+            }
             HirExprKind::Block(block) => {
                 let label = HirLabelledBlock {
                     target: expr,
