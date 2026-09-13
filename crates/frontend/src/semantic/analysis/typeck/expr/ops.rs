@@ -1,9 +1,12 @@
 use crate::{
-    base::arena::{HasInterner, HasListInterner as _, Obj},
+    base::{
+        Diag,
+        arena::{HasInterner, HasListInterner as _, Obj},
+    },
     parse::ast::{AstAssignOpKind, AstBinOpKind, AstBinOpSpanned, AstUnOpKind},
     semantic::{
         analysis::typeck::{BodyCtxt, OverloadResolution},
-        infer::{ClauseCx, ClauseFuel, HrtbUniverse, SpannedError},
+        infer::{ClauseCx, ClauseFuel, HrtbUniverse, PrettyFmtOpts, SpannedError, ToDebugTree},
         syntax::{
             Divergence, HirExpr, HirPat, InferTyVarSourceInfo, RelationMode, SimpleTyKind,
             SimpleTySet, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
@@ -18,20 +21,20 @@ impl BodyCtxt<'_, '_> {
         &mut self,
         expr: Obj<HirExpr>,
         kind: AstBinOpSpanned,
-        lhs: Obj<HirExpr>,
-        rhs: Obj<HirExpr>,
+        lhs_expr: Obj<HirExpr>,
+        rhs_expr: Obj<HirExpr>,
         divergence: &mut Divergence,
     ) -> Ty {
         let s = self.session();
         let tcx = self.tcx();
 
-        let lhs = self.check_expr(lhs, None).and_do(divergence);
-        let rhs = self.check_expr(rhs, None).and_do(divergence);
+        let lhs = self.check_expr(lhs_expr, None).and_do(divergence);
+        let rhs = self.check_expr(rhs_expr, None).and_do(divergence);
 
         let kind_info = self.decode_bin_op_kind(kind.kind);
 
         // Attempt a primitive operation.
-        'try_prim: {
+        let overload = 'try_prim_before_overload: {
             // We don't do `with_silent` but that's okay because we never poll this context until
             // accepted.
             let mut prim_fork = self.ccx().clone();
@@ -39,11 +42,19 @@ impl BodyCtxt<'_, '_> {
             let lhs = peel_ref_for_prim_op(&mut prim_fork, lhs);
             let rhs = peel_ref_for_prim_op(&mut prim_fork, rhs);
 
-            if prim_fork
-                .unify_ty_and_simple_set(lhs, kind_info.lhs)
-                .is_err()
-            {
-                break 'try_prim;
+            if let Err(err) = prim_fork.unify_ty_and_simple_set(lhs, kind_info.lhs) {
+                if let Some(overload) = kind_info.overload {
+                    break 'try_prim_before_overload overload;
+                }
+
+                // TODO
+                let err = Diag::anon_err(
+                    SpannedError(lhs_expr.r(s).span, err)
+                        .to_debug_tree(&self.ccx().pretty(PrettyFmtOpts::default())),
+                )
+                .emit();
+
+                return tcx.intern(TyKind::Error(err));
             }
 
             match kind_info.rhs {
@@ -52,14 +63,36 @@ impl BodyCtxt<'_, '_> {
                         Ok(promise) => {
                             promise.report_loud();
                         }
-                        Err(_) => {
-                            break 'try_prim;
+                        Err(err) => {
+                            if let Some(overload) = kind_info.overload {
+                                break 'try_prim_before_overload overload;
+                            }
+
+                            // TODO
+                            let err = Diag::anon_err(
+                                SpannedError(rhs_expr.r(s).span, *err)
+                                    .to_debug_tree(&self.ccx().pretty(PrettyFmtOpts::default())),
+                            )
+                            .emit();
+
+                            return tcx.intern(TyKind::Error(err));
                         }
                     }
                 }
                 EquateOrSet::Unrelated(rhs_set) => {
-                    if prim_fork.unify_ty_and_simple_set(lhs, rhs_set).is_err() {
-                        break 'try_prim;
+                    if let Err(err) = prim_fork.unify_ty_and_simple_set(lhs, rhs_set) {
+                        if let Some(overload) = kind_info.overload {
+                            break 'try_prim_before_overload overload;
+                        }
+
+                        // TODO
+                        let err = Diag::anon_err(
+                            SpannedError(lhs_expr.r(s).span, err)
+                                .to_debug_tree(&self.ccx().pretty(PrettyFmtOpts::default())),
+                        )
+                        .emit();
+
+                        return tcx.intern(TyKind::Error(err));
                     }
                 }
             }
@@ -87,7 +120,7 @@ impl BodyCtxt<'_, '_> {
                 HrtbUniverse::ROOT,
                 lhs,
                 TraitSpec {
-                    def: kind_info.overload.unwrap(),
+                    def: overload,
                     params: tcx.intern_list(&[
                         TraitParam::Equals(TyOrRe::Ty(rhs)),
                         TraitParam::Equals(TyOrRe::Ty(result_ty)),

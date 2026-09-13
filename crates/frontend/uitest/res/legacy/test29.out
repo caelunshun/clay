@@ -1,0 +1,42 @@
+error: 
+- span: test29.fir:16:5-12
+  uninstantiated trait not implemented
+  LHS: &'gc dyn for<T> Trait<(T,)>
+  RHS: for<T> Trait<(T,)>
+  RHS instance: Trait<(u(3) T,)>
+  spec not met:
+    - instantiated trait not implemented
+      LHS: &'gc dyn for<T> Trait<(T,)>
+      RHS: Trait<(u(3) T,)>
+        - no suitable impl met
+
+error: 
+- HRTB not covered
+  span: test29.fir:19:36-47
+    - missing coverings
+      in Trait<(u(0) V,)>
+      of...
+        - u(3) T
+
+error: 
+- span: test29.fir:21:5-12
+  uninstantiated trait not implemented
+  LHS: &'gc dyn for<T> Trait<(u(0) V,)>
+  RHS: for<T> Trait<(u(0) V,)>
+  RHS instance: Trait<(u(0) V,)>
+  spec not met:
+    - instantiated trait not implemented
+      LHS: &'gc dyn for<T> Trait<(u(0) V,)>
+      RHS: Trait<(u(0) V,)>
+        - no suitable impl met
+
+error: 
+- span: test29.fir:32:28-31
+  cannot unify
+  LHS: (&'gc dyn for<T> Trait<(?(2) _,)>,)
+  RHS: (&'gc dyn for<T> Trait<(T,)>,)
+  mode: Equate
+    - structural error
+        - infer ty leaks HRTB var
+          var: ?(2) _
+

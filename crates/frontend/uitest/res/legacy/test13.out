@@ -1,127 +1,141 @@
 error: identifier `c` not bound in all patterns
-  ┌─ test13.fir:2:16
+  ┌─ test13.fir:5:16
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                ^ variable not in all patterns
   │
-  ┌─ test13.fir:2:20
+  ┌─ test13.fir:5:20
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                    - pattern doesn't bind `c`
   │
-  ┌─ test13.fir:2:24
+  ┌─ test13.fir:5:24
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                        - pattern doesn't bind `c`
   │
-  ┌─ test13.fir:2:28
+  ┌─ test13.fir:5:28
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                            - pattern doesn't bind `c`
 
 error: identifier `d` not bound in all patterns
-  ┌─ test13.fir:2:20
+  ┌─ test13.fir:5:20
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                    ^ variable not in all patterns
   │
-  ┌─ test13.fir:2:16
+  ┌─ test13.fir:5:16
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                - pattern doesn't bind `d`
   │
-  ┌─ test13.fir:2:24
+  ┌─ test13.fir:5:24
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                        - pattern doesn't bind `d`
   │
-  ┌─ test13.fir:2:28
+  ┌─ test13.fir:5:28
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                            - pattern doesn't bind `d`
 
 error: identifier `e` not bound in all patterns
-  ┌─ test13.fir:2:24
+  ┌─ test13.fir:5:24
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                        ^ variable not in all patterns
   │
-  ┌─ test13.fir:2:16
+  ┌─ test13.fir:5:16
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                - pattern doesn't bind `e`
   │
-  ┌─ test13.fir:2:20
+  ┌─ test13.fir:5:20
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                    - pattern doesn't bind `e`
   │
-  ┌─ test13.fir:2:28
+  ┌─ test13.fir:5:28
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                            - pattern doesn't bind `e`
 
 error: identifier `f` not bound in all patterns
-  ┌─ test13.fir:2:28
+  ┌─ test13.fir:5:28
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                            ^ variable not in all patterns
   │
-  ┌─ test13.fir:2:16
+  ┌─ test13.fir:5:16
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                - pattern doesn't bind `f`
   │
-  ┌─ test13.fir:2:20
+  ┌─ test13.fir:5:20
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                    - pattern doesn't bind `f`
   │
-  ┌─ test13.fir:2:24
+  ┌─ test13.fir:5:24
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                        - pattern doesn't bind `f`
 
 error: identifier `g` not bound in all patterns
-  ┌─ test13.fir:2:31
+  ┌─ test13.fir:5:31
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                               ^ variable not in all patterns
   │
-  ┌─ test13.fir:2:35
+  ┌─ test13.fir:5:35
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                                   -- pattern doesn't bind `g`
   │
-  ┌─ test13.fir:2:40
+  ┌─ test13.fir:5:40
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                                        -- pattern doesn't bind `g`
   │
-  ┌─ test13.fir:2:45
+  ┌─ test13.fir:5:45
   │
-2 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
+5 │     let [a, b, c | d | e | f, g | () | () | ()] = [1, 2, 3, 4];
   │                                             -- pattern doesn't bind `g`
 
 error: `||` not allowed in if-`let` chain
-  ┌─ test13.fir:8:9
-  │
-8 │         || let maz = 3
-  │         ^^
-  │
-  ┌─ test13.fir:8:12
-  │
-8 │         || let maz = 3
-  │            ----------- `let` expression used here after the `||`
-
-error: `||` not allowed in if-`let` chain
-   ┌─ test13.fir:10:9
+   ┌─ test13.fir:11:9
    │
-10 │         || foo
+11 │         || let maz = 3
    │         ^^
    │
    ┌─ test13.fir:11:12
    │
-11 │         && let uh_oh = 6
+11 │         || let maz = 3
+   │            ----------- `let` expression used here after the `||`
+
+error: `||` not allowed in if-`let` chain
+   ┌─ test13.fir:13:9
+   │
+13 │         || foo
+   │         ^^
+   │
+   ┌─ test13.fir:14:12
+   │
+14 │         && let uh_oh = 6
    │            ------------- `let` expression used here after the `||`
+
+error: type must be known by this point
+  ┌─ test13.fir:9:26
+  │
+9 │         && let bar = foo.bar
+  │                          ^^^
+
+error: - span: test13.fir:13:12-15
+  ty and ty structural error
+  LHS: bool
+  RHS: _
+    - bad infer restriction solid
+      LHS: u8 | u16 | u32 | u64 | i8 | i16 | i32 | i64
+      RHS: bool
 
