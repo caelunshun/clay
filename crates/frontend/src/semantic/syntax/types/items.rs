@@ -1,12 +1,12 @@
 use crate::{
     base::{
-        Session,
-        arena::{LateInit, Obj},
+        HasSession, Session,
+        arena::{HasInterner, LateInit, Obj},
         syntax::{HasSpan, Span, Symbol},
     },
     parse::token::{Ident, Lifetime},
     semantic::syntax::{
-        FnDef, Item, TyOrReKind, TyOrReList, Visibility,
+        AdtInstance, FnDef, Item, Ty, TyCtxt, TyKind, TyOrReKind, TyOrReList, Visibility,
         types::signature::{SigTraitClauseList, SigTraitInstance, SigTy},
     },
     symbol,
@@ -140,25 +140,47 @@ pub enum AdtCtorSyntax {
 }
 
 impl AdtCtorSyntax {
-    #[must_use]
-    pub fn is_unit(&self) -> bool {
-        matches!(self, AdtCtorSyntax::Unit)
-    }
-
-    #[must_use]
-    pub fn is_tuple(&self) -> bool {
-        matches!(self, AdtCtorSyntax::Tuple)
-    }
-
-    #[must_use]
-    pub fn is_named(&self) -> bool {
-        matches!(self, AdtCtorSyntax::Named(..))
+    pub fn style(&self) -> AdtCtorSyntaxStyle {
+        match self {
+            AdtCtorSyntax::Unit => AdtCtorSyntaxStyle::Unit,
+            AdtCtorSyntax::Tuple => AdtCtorSyntaxStyle::Tuple,
+            AdtCtorSyntax::Named(_) => AdtCtorSyntaxStyle::Named,
+        }
     }
 
     pub fn unwrap_names(&self) -> &FxHashMap<Symbol, AdtCtorFieldIdx> {
         match self {
             AdtCtorSyntax::Named(v) => v,
             _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum AdtCtorSyntaxStyle {
+    Unit,
+    Tuple,
+    Named,
+}
+
+impl AdtCtorSyntaxStyle {
+    pub fn is_unit(&self) -> bool {
+        matches!(self, AdtCtorSyntaxStyle::Unit)
+    }
+
+    pub fn is_tuple(&self) -> bool {
+        matches!(self, AdtCtorSyntaxStyle::Tuple)
+    }
+
+    pub fn is_named(&self) -> bool {
+        matches!(self, AdtCtorSyntaxStyle::Named)
+    }
+
+    pub fn style_name(self) -> Symbol {
+        match self {
+            AdtCtorSyntaxStyle::Unit => symbol!("unit-style"),
+            AdtCtorSyntaxStyle::Tuple => symbol!("tuple-style"),
+            AdtCtorSyntaxStyle::Named => symbol!("braced"),
         }
     }
 }
@@ -176,6 +198,19 @@ pub struct AdtCtorField {
 pub struct AdtCtorInstance {
     pub def: Obj<AdtCtor>,
     pub params: TyOrReList,
+}
+
+impl AdtCtorInstance {
+    pub fn to_adt_instance(self, s: &Session) -> AdtInstance {
+        AdtInstance {
+            def: self.def.r(s).owner.item(s),
+            params: self.params,
+        }
+    }
+
+    pub fn to_adt_instance_ty(self, tcx: &TyCtxt) -> Ty {
+        tcx.intern(TyKind::Adt(self.to_adt_instance(tcx.session())))
+    }
 }
 
 // === Type Aliases === //

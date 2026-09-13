@@ -1,16 +1,18 @@
 use crate::{
     base::{
-        Diag,
+        Diag, ErrorGuaranteed,
         arena::{HasInterner as _, HasListInterner, Obj},
+        syntax::Span,
     },
     parse::ast::{AstMutability, AstPatStructRest},
     semantic::{
         analysis::typeck::BodyCtxt,
         infer::{ClauseImportEnv, GenericSubst, HrtbUniverse, PrettyFmtOpts, SpannedError},
         syntax::{
-            AdtCtorField, AdtCtorSyntax, AdtInstance, Divergence, HirPat, HirPatKind,
-            HirPatListFrontAndTail, HirPatListFrontAndTailLen, HirPatNamedField,
-            InferTyVarSourceInfo, Mutability, Re, RelationMode, Ty, TyKind, TyOrRe,
+            AdtCtorField, AdtCtorInstance, AdtCtorSyntaxStyle, AdtCtorUnresolved, AdtInstance,
+            Divergence, HirPat, HirPatKind, HirPatListFrontAndTail, HirPatListFrontAndTailLen,
+            HirPatNamedField, InferTyVarSourceInfo, Mutability, Re, RelationMode, Ty, TyKind,
+            TyOrRe,
         },
     },
 };
@@ -238,7 +240,13 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         .report_never();
                 }
             }
-            HirPatKind::Lit(obj) => todo!(),
+            HirPatKind::Lit(expr) => {
+                self.peel_references_from_demand_and_normalize(&mut demand, &mut default_by_ref);
+                let res = self.check_expr_demand(expr, demand);
+
+                // This should just be a literal.
+                assert!(!res.divergence.must_diverge());
+            }
             HirPatKind::Or(patterns) => {
                 for &pat in patterns.r(s) {
                     self.check_pat_inner(
@@ -272,64 +280,33 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                 self.check_pat_inner(pointee_pat, demand, default_by_ref, place_divergence);
             }
-            HirPatKind::AdtUnit(adt_ctor_instance) => todo!(),
+            HirPatKind::AdtUnit(instance) => {
+                _ = self.check_pat_ctor(
+                    pat,
+                    pat.r(s).span,
+                    instance,
+                    AdtCtorSyntaxStyle::Unit,
+                    &mut demand,
+                    &mut default_by_ref,
+                );
+            }
             HirPatKind::AdtTuple(instance, fields) => 'check: {
-                let s = self.session();
-
+                // Verify constructor
                 let instance_span = pat.r(s).span;
 
-                // Verify constructor
-                let Ok(ctor) = self.resolve_adt_ctor(instance_span, instance) else {
+                let Ok(ctor) = self.check_pat_ctor(
+                    pat,
+                    instance_span,
+                    instance,
+                    AdtCtorSyntaxStyle::Tuple,
+                    &mut demand,
+                    &mut default_by_ref,
+                ) else {
                     break 'check;
                 };
 
                 let adt_item = ctor.def.r(s).owner.item(s);
-
-                let adt_ty = tcx.intern(TyKind::Adt(AdtInstance {
-                    def: adt_item,
-                    params: ctor.params,
-                }));
-
-                self.peel_references_from_demand_and_normalize(&mut demand, &mut default_by_ref);
-
-                self.ccx_mut()
-                    .oblige_ty_unifies_ty(demand, adt_ty, RelationMode::Equate)
-                    // TODO
-                    .map({
-                        let span = pat.r(s).span;
-                        move |_ccx, error| SpannedError(span, error)
-                    })
-                    .report_loud();
-
-                match &ctor.def.r(s).syntax {
-                    AdtCtorSyntax::Unit => {
-                        Diag::span_err(
-                            instance_span,
-                            format_args!(
-                                "expected tuple-style constructor but {} has a unit-style constructor",
-                                self.ccx().pretty(PrettyFmtOpts::default()).wrap(ctor.def),
-                            ),
-                        )
-                        .emit();
-
-                        break 'check;
-                    }
-                    AdtCtorSyntax::Named(_) => {
-                        Diag::span_err(
-                            instance_span,
-                            format_args!(
-                                "expected tuple-style constructor but {} has a braced constructor",
-                                self.ccx().pretty(PrettyFmtOpts::default()).wrap(ctor.def),
-                            ),
-                        )
-                        .emit();
-
-                        break 'check;
-                    }
-                    AdtCtorSyntax::Tuple => {
-                        // (fallthrough)
-                    }
-                }
+                let adt_ty = ctor.to_adt_instance_ty(tcx);
 
                 // Verify tuple arity
                 let expected_len = ctor.def.r(s).fields.len() as u32;
@@ -396,60 +373,22 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 }
             }
             HirPatKind::AdtNamed(instance, fields, rest) => 'check: {
+                // Verify constructor
                 let instance_span = pat.r(s).span;
 
-                // Verify constructor
-                let Ok(ctor) = self.resolve_adt_ctor(instance_span, instance) else {
+                let Ok(ctor) = self.check_pat_ctor(
+                    pat,
+                    instance_span,
+                    instance,
+                    AdtCtorSyntaxStyle::Named,
+                    &mut demand,
+                    &mut default_by_ref,
+                ) else {
                     break 'check;
                 };
 
                 let adt_item = ctor.def.r(s).owner.item(s);
-
-                let adt_ty = tcx.intern(TyKind::Adt(AdtInstance {
-                    def: adt_item,
-                    params: ctor.params,
-                }));
-
-                self.peel_references_from_demand_and_normalize(&mut demand, &mut default_by_ref);
-
-                self.ccx_mut()
-                    .oblige_ty_unifies_ty(demand, adt_ty, RelationMode::Equate)
-                    // TODO
-                    .map({
-                        let span = pat.r(s).span;
-                        move |_ccx, error| SpannedError(span, error)
-                    })
-                    .report_loud();
-
-                match &ctor.def.r(s).syntax {
-                    AdtCtorSyntax::Unit => {
-                        Diag::span_err(
-                            instance_span,
-                            format_args!(
-                                "expected braced constructor but {} has a unit-style constructor",
-                                self.ccx().pretty(PrettyFmtOpts::default()).wrap(ctor.def),
-                            ),
-                        )
-                        .emit();
-
-                        break 'check;
-                    }
-                    AdtCtorSyntax::Tuple => {
-                        Diag::span_err(
-                            instance_span,
-                            format_args!(
-                                "expected braced constructor but {} has a tuple-style constructor",
-                                self.ccx().pretty(PrettyFmtOpts::default()).wrap(ctor.def),
-                            ),
-                        )
-                        .emit();
-
-                        break 'check;
-                    }
-                    AdtCtorSyntax::Named(_) => {
-                        // (fallthrough)
-                    }
-                }
+                let adt_ty = ctor.to_adt_instance_ty(tcx);
 
                 // Verify fields
                 let field_mapping = self.match_up_ctor_members(
@@ -511,5 +450,48 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             *default_by_ref = Some((default_by_ref.unwrap_or(muta)).min(muta));
             *demand = pointee;
         }
+    }
+
+    fn check_pat_ctor(
+        &mut self,
+        pat: Obj<HirPat>,
+        instance_span: Span,
+        instance: AdtCtorUnresolved,
+        expected_syntax: AdtCtorSyntaxStyle,
+        demand: &mut Ty,
+        default_by_ref: &mut Option<Mutability>,
+    ) -> Result<AdtCtorInstance, ErrorGuaranteed> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let ctor = self.resolve_adt_ctor(instance_span, instance)?;
+
+        self.peel_references_from_demand_and_normalize(demand, default_by_ref);
+
+        self.ccx_mut()
+            .oblige_ty_unifies_ty(*demand, ctor.to_adt_instance_ty(tcx), RelationMode::Equate)
+            // TODO
+            .map({
+                let span = pat.r(s).span;
+                move |_ccx, error| SpannedError(span, error)
+            })
+            .report_loud();
+
+        let actual_syntax = ctor.def.r(s).syntax.style();
+
+        if actual_syntax != expected_syntax {
+            return Err(Diag::span_err(
+                instance_span,
+                format_args!(
+                    "expected {} constructor but {} has a {} constructor",
+                    expected_syntax.style_name(),
+                    self.ccx().pretty(PrettyFmtOpts::default()).wrap(ctor.def),
+                    actual_syntax.style_name(),
+                ),
+            )
+            .emit());
+        }
+
+        Ok(ctor)
     }
 }

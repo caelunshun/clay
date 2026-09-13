@@ -222,6 +222,7 @@ impl SigShapeEraser<'_> {
             | SigTyKind::Project(_)
             | SigTyKind::FnDef(_)
             | SigTyKind::UsedDyn(_)
+            | SigTyKind::Trait(_, _, _)
             | SigTyKind::Error(_) => TyShape::Hole,
 
             SigTyKind::Simple(kind) => TyShape::Solid(SolidTyShape {
@@ -244,7 +245,6 @@ impl SigShapeEraser<'_> {
                         .collect::<Vec<_>>(),
                 ),
             }),
-            SigTyKind::Trait(_re, _muta, _intern) => todo!(),
             SigTyKind::Tuple(children) => TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Tuple(children.r(s).len() as u32),
                 children: self.tcx.intern_list(

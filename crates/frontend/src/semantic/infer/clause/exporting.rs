@@ -112,7 +112,7 @@ impl<'a, 'tcx> SigExporter<'a, 'tcx> {
                 | UniversalReVarSourceInfo::InstantiatedHrtbVar
                 | UniversalReVarSourceInfo::HrtbWf { .. }
                 | UniversalReVarSourceInfo::MirLocal(_) => {
-                    todo!()
+                    unreachable!()
                 }
             },
             Re::Error(error) => SigReKind::Error(error),

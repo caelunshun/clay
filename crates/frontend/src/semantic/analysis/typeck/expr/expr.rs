@@ -416,10 +416,7 @@ impl BodyCtxt<'_, '_> {
                 };
 
                 match &ctor.def.r(s).syntax {
-                    AdtCtorSyntax::Unit => tcx.intern(TyKind::Adt(AdtInstance {
-                        def: ctor.def.r(s).owner.item(s),
-                        params: ctor.params,
-                    })),
+                    AdtCtorSyntax::Unit => ctor.to_adt_instance_ty(tcx),
                     AdtCtorSyntax::Tuple => {
                         _ = self.check_tuple_ctor_visibilities(ty_span, ctor);
 

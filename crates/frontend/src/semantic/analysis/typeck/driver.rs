@@ -120,6 +120,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         self.ccx
     }
 
+    #[expect(unused)]
     pub fn ucx(&self) -> &UnifyCx<'tcx> {
         self.ccx.ucx()
     }
