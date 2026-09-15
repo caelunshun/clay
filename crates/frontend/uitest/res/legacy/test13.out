@@ -136,6 +136,6 @@ error: - span: test13.fir:13:12-15
   LHS: bool
   RHS: _
     - bad infer restriction solid
-      LHS: u8 | u16 | u32 | u64 | i8 | i16 | i32 | i64
+      LHS: u8 | u16 | u32 | u64 | i8 | i16 | i32 | i64 | f32 | f64
       RHS: bool
 

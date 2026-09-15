@@ -7,7 +7,8 @@ use crate::{
         Diag, LeafDiag, Session,
         syntax::{CharCursor, CharParser, Parser, RawCharCursor, Span, Symbol},
     },
-    parse::token::{Lifetime, NumLitBase, TokenNumLit, punct},
+    parse::token::{IntegralKind, Lifetime, NumLitBase, TokenNumLit, TokenNumLitKind, punct},
+    semantic::syntax::{FloatKind, IntKind},
     symbol,
 };
 use unicode_xid::UnicodeXID;
@@ -148,12 +149,7 @@ fn parse_group(p: P, group_start: Span, delimiter: GroupDelimiter) -> TokenGroup
         }
 
         // Parse identifiers (and prefixed string literals)
-        if let Some(token) = parse_ident(p, builder.glued_num().is_none()) {
-            let TokenTree::Ident(ident) = token else {
-                builder.push(token);
-                continue;
-            };
-
+        if let Some(ident) = parse_ident(p, builder.glued_num().is_none()) {
             if let Some(glued) = builder.glued_num() {
                 Diag::span_err(
                     ident.span,
@@ -241,7 +237,7 @@ fn parse_group(p: P, group_start: Span, delimiter: GroupDelimiter) -> TokenGroup
     }
 }
 
-fn parse_ident(p: P, visible: bool) -> Option<TokenTree> {
+fn parse_ident(p: P, visible: bool) -> Option<Ident> {
     let start = p.next_span();
 
     let first_ch = p.expect_covert(visible, symbol!("identifier"), match_ident_first_char)?;
@@ -571,13 +567,14 @@ fn parse_num_lit(p: P, builder: &mut GroupBuilder) -> bool {
         })
     }
 
-    fn match_integral_part(p: P, base: NumLitBase) {
+    fn match_integral_part(p: P, base: NumLitBase, accum: &mut String) {
         loop {
             if p.expect(symbol!("`_`"), |c| match_ch(c, '_')) {
                 continue;
             }
 
-            if expect_digit(p, base).is_some() {
+            if let Some(digit) = expect_digit(p, base) {
+                accum.push(digit);
                 continue;
             }
 
@@ -586,15 +583,6 @@ fn parse_num_lit(p: P, builder: &mut GroupBuilder) -> bool {
     }
 
     let start = p.next_span();
-    let start_text = p.cursor_unsafe().iter.remaining_text();
-    let finish_num = |last_sp: Span, remaining: &str| -> TokenNumLit {
-        let text = &start_text[..(start_text.len() - remaining.len())];
-
-        TokenNumLit {
-            span: start.to(last_sp),
-            text: Symbol::new(text),
-        }
-    };
 
     // Match first digit
     let Some(first_digit) = p.expect(symbol!("digit"), |c| c.eat().filter(|v| v.is_ascii_digit()))
@@ -603,8 +591,11 @@ fn parse_num_lit(p: P, builder: &mut GroupBuilder) -> bool {
     };
 
     // Match base prefix
+    let mut int_part = String::new();
+
     let base = 'base: {
         if first_digit != '0' {
+            int_part.push(first_digit);
             break 'base NumLitBase::Decimal;
         }
 
@@ -620,87 +611,198 @@ fn parse_num_lit(p: P, builder: &mut GroupBuilder) -> bool {
             break 'base NumLitBase::Binary;
         }
 
+        int_part.push(first_digit);
         NumLitBase::Decimal
     };
 
     // Match integral part
-    match_integral_part(p, base);
+    match_integral_part(p, base, &mut int_part);
+    let int_part = Symbol::new(&int_part);
 
     // If this is potentially a floating point number...
-    if base == NumLitBase::Decimal {
-        let int_part_end_sp = p.prev_span();
-        let int_part_remaining = p.cursor_unsafe().iter.remaining_text();
+    if base != NumLitBase::Decimal {
+        let suffix = parse_num_lit_suffix(p)
+            .filter(|&(span, kind)| match kind {
+                IntegralKind::Int(_) | IntegralKind::Uint(_) => true,
+                IntegralKind::Float(_) => {
+                    Diag::span_err(
+                        span,
+                        format_args!("{} float literal is not supported", base.name()),
+                    )
+                    .emit();
+                    false
+                }
+            })
+            .map(|v| v.1);
 
-        // Match the period.
-        if p.expect(symbol!("`.`"), |c| match_ch(c, '.')) {
-            let first_period_sp = p.prev_span();
+        builder.push(TokenNumLit {
+            span: start.to(p.prev_span()),
+            kind: TokenNumLitKind::Integral {
+                base,
+                value: int_part,
+                suffix,
+            },
+        });
 
-            // This could either be...
-            //
-            // 1. A regular floating point number (e.g. `123.456`)
-            // 2. A floating point number without the suffix (e.g. `123. `, `123.+`, etc)
-            // 3. A method call on a number (e.g. `123.sin()`)
-            // 4. A range operation (e.g. `1..6`)
-            //
-            // In the case of `((,),).0.0`, we parse `0.0` as a floating point number and let the
-            // parser split it up into two field accesses.
-            //
-            // We only have to handle the 3rd and 4th cases specially, which we do here...
-            if let Some(ident) = parse_ident(p, true) {
-                builder.push(finish_num(int_part_end_sp, int_part_remaining));
-
-                builder.push(TokenPunct {
-                    span: first_period_sp,
-                    ch: punct!('.'),
-                    glued: false,
-                });
-
-                builder.push(ident);
-
-                return true;
-            }
-
-            if p.expect(symbol!("`.`"), |c| match_ch(c, '.')) {
-                builder.push(finish_num(int_part_end_sp, int_part_remaining));
-
-                builder.push(TokenPunct {
-                    span: first_period_sp,
-                    ch: punct!('.'),
-                    glued: false,
-                });
-
-                builder.push(TokenPunct {
-                    span: p.prev_span(),
-                    ch: punct!('.'),
-                    glued: true,
-                });
-
-                return true;
-            }
-
-            // Match the decimal portion.
-            match_integral_part(p, base);
-        }
-
-        // Match an `e` or `E`.
-        if p.expect(symbol!("`E`"), |c| match_ch(c, 'E'))
-            || p.expect(symbol!("`e`"), |c| match_ch(c, 'e'))
-        {
-            // Match the sign.
-            _ = p.expect(symbol!("`+`"), |c| match_ch(c, '+'))
-                || p.expect(symbol!("`-`"), |c| match_ch(c, '-'));
-
-            // Match the exponential portion.
-            match_integral_part(p, base);
-        }
+        return true;
     }
 
-    builder.push(finish_num(
-        p.prev_span(),
-        p.cursor_unsafe().iter.remaining_text(),
-    ));
+    // Match the period.
+    let dec_part = if p.expect(symbol!("`.`"), |c| match_ch(c, '.')) {
+        let first_period_sp = p.prev_span();
+
+        // This could either be...
+        //
+        // 1. A regular floating point number (e.g. `123.456`)
+        // 2. A floating point number without the suffix (e.g. `123. `, `123.+`, etc)
+        // 3. A method call on a number (e.g. `123.sin()`)
+        // 4. A range operation (e.g. `1..6`)
+        //
+        // In the case of `((,),).0.0`, we parse `0.0` as a floating point number and let the
+        // parser split it up into two field accesses.
+        //
+        // We only have to handle the 3rd and 4th cases specially, which we do here...
+        if let Some(ident) = parse_ident(p, true) {
+            builder.push(TokenNumLit {
+                span: start.to(p.prev_span()),
+                kind: TokenNumLitKind::Integral {
+                    base,
+                    value: int_part,
+                    suffix: None,
+                },
+            });
+
+            builder.push(TokenPunct {
+                span: first_period_sp,
+                ch: punct!('.'),
+                glued: false,
+            });
+
+            builder.push(ident);
+
+            return true;
+        }
+
+        if p.expect(symbol!("`.`"), |c| match_ch(c, '.')) {
+            builder.push(TokenNumLit {
+                span: start.to(p.prev_span()),
+                kind: TokenNumLitKind::Integral {
+                    base,
+                    value: int_part,
+                    suffix: None,
+                },
+            });
+
+            builder.push(TokenPunct {
+                span: first_period_sp,
+                ch: punct!('.'),
+                glued: false,
+            });
+
+            builder.push(TokenPunct {
+                span: p.prev_span(),
+                ch: punct!('.'),
+                glued: true,
+            });
+
+            return true;
+        }
+
+        // Match the decimal portion.
+        let mut accum = String::new();
+        match_integral_part(p, base, &mut accum);
+        Some(Symbol::new(&accum))
+    } else {
+        None
+    };
+
+    // Match an `e` or `E`.
+    let exp_part = if p.expect(symbol!("`E`"), |c| match_ch(c, 'E'))
+        || p.expect(symbol!("`e`"), |c| match_ch(c, 'e'))
+    {
+        let mut accum = String::new();
+
+        // Match the sign.
+        if p.expect(symbol!("`+`"), |c| match_ch(c, '+')) {
+            accum.push('+');
+        }
+
+        if p.expect(symbol!("`-`"), |c| match_ch(c, '-')) {
+            accum.push('-');
+        }
+
+        // Match the exponential portion.
+        match_integral_part(p, base, &mut accum);
+        Some(Symbol::new(&accum))
+    } else {
+        None
+    };
+
+    let suffix = parse_num_lit_suffix(p);
+
+    if dec_part.is_some() || exp_part.is_some() {
+        let suffix = suffix.and_then(|(span, suffix)| {
+            let IntegralKind::Float(suffix) = suffix else {
+                Diag::span_err(span, "cannot use integer suffix for floating-point literal").emit();
+                return None;
+            };
+
+            Some(suffix)
+        });
+
+        builder.push(TokenNumLit {
+            span: start.to(p.prev_span()),
+            kind: TokenNumLitKind::Floating {
+                int_part,
+                dec_part,
+                exp_part,
+                suffix,
+            },
+        });
+    } else {
+        builder.push(TokenNumLit {
+            span: start.to(p.prev_span()),
+            kind: TokenNumLitKind::Integral {
+                base,
+                value: int_part,
+                suffix: suffix.map(|v| v.1),
+            },
+        });
+    }
 
     true
+}
+
+fn parse_num_lit_suffix(p: P) -> Option<(Span, IntegralKind)> {
+    let s = &Session::fetch();
+
+    let ident = parse_ident(p, true)?;
+
+    if ident.raw {
+        Diag::span_err(
+            ident.span,
+            "raw identifier not expected after numeric literal",
+        )
+        .emit();
+
+        return None;
+    }
+
+    [
+        ("i8", IntegralKind::Int(IntKind::S8)),
+        ("u8", IntegralKind::Uint(IntKind::S8)),
+        ("i16", IntegralKind::Int(IntKind::S16)),
+        ("u16", IntegralKind::Uint(IntKind::S16)),
+        ("i32", IntegralKind::Int(IntKind::S32)),
+        ("u32", IntegralKind::Uint(IntKind::S32)),
+        ("i64", IntegralKind::Int(IntKind::S64)),
+        ("u64", IntegralKind::Uint(IntKind::S64)),
+        ("f32", IntegralKind::Float(FloatKind::S32)),
+        ("f64", IntegralKind::Float(FloatKind::S64)),
+    ]
+    .into_iter()
+    .find(|&(text, _kind)| text == ident.text.as_str(s))
+    .map(|v| (ident.span, v.1))
 }
 
 fn match_ch(c: C, ch: char) -> bool {

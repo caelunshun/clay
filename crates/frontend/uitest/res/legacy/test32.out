@@ -6,7 +6,7 @@ error:
   mode: Equate
     - structural error
         - bad infer restriction solid
-          LHS: u8 | u16 | u32 | u64 | i8 | i16 | i32 | i64
+          LHS: f32 | f64
           RHS: str
 
 error: 

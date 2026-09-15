@@ -4,7 +4,10 @@ use crate::{
         arena::{HasInterner as _, HasListInterner as _, Obj},
         syntax::HasSpan as _,
     },
-    parse::ast::AstLit,
+    parse::{
+        ast::AstLit,
+        token::{IntegralKind, NumLitBase, TokenNumLitKind},
+    },
     semantic::{
         analysis::typeck::BodyCtxt,
         infer::{
@@ -12,11 +15,11 @@ use crate::{
             SpannedError,
         },
         syntax::{
-            AdtCtorSyntax, AdtInstance, Divergence, DynSiteIdx, FnInstanceInner, FnOwner, HirBlock,
-            HirExpr, HirExprKind, HirLabelledBlock, HirMatchArm, HirStmt, HirStructExpr,
-            InferTyVarSourceInfo, LabelTargetKind, Re, RelationMode, SigAdtInstance, SimpleTyKind,
-            SimpleTySet, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe, UniversalTy,
-            UniversalTyRootSourceInfo,
+            AdtCtorSyntax, AdtInstance, Divergence, DynSiteIdx, FloatKind, FnInstanceInner,
+            FnOwner, HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirMatchArm, HirStmt,
+            HirStructExpr, InferTyVarSourceInfo, IntKind, LabelTargetKind, Re, RelationMode,
+            SigAdtInstance, SimpleTyKind, SimpleTySet, TraitParam, TraitSpec, Ty, TyAndDivergence,
+            TyKind, TyOrRe, UniversalTy, UniversalTyRootSourceInfo,
         },
     },
 };
@@ -140,12 +143,58 @@ impl BodyCtxt<'_, '_> {
                 self.check_expr_inner_un_op(expr, kind, lhs, &mut divergence)
             }
             HirExprKind::Literal(lit) => match lit {
-                AstLit::Number(_) => {
-                    // TODO: Register the correct inference constraints.
+                AstLit::Number(lit) => {
+                    let constraints = match lit.kind {
+                        // Has suffix
+                        TokenNumLitKind::Integral {
+                            base: _,
+                            value: _,
+                            suffix: Some(suffix),
+                        } => match suffix {
+                            IntegralKind::Int(IntKind::S8) => SimpleTySet::I8,
+                            IntegralKind::Uint(IntKind::S8) => SimpleTySet::U8,
+                            IntegralKind::Int(IntKind::S16) => SimpleTySet::I16,
+                            IntegralKind::Uint(IntKind::S16) => SimpleTySet::U16,
+                            IntegralKind::Int(IntKind::S32) => SimpleTySet::I32,
+                            IntegralKind::Uint(IntKind::S32) => SimpleTySet::U32,
+                            IntegralKind::Int(IntKind::S64) => SimpleTySet::I64,
+                            IntegralKind::Uint(IntKind::S64) => SimpleTySet::U64,
+                            IntegralKind::Float(FloatKind::S32) => SimpleTySet::F32,
+                            IntegralKind::Float(FloatKind::S64) => SimpleTySet::F64,
+                        },
+                        TokenNumLitKind::Floating {
+                            int_part: _,
+                            dec_part: _,
+                            exp_part: _,
+                            suffix: Some(suffix),
+                        } => match suffix {
+                            FloatKind::S32 => SimpleTySet::F32,
+                            FloatKind::S64 => SimpleTySet::F64,
+                        },
+
+                        // No suffix.
+                        TokenNumLitKind::Integral {
+                            base: NumLitBase::Decimal,
+                            value: _,
+                            suffix: None,
+                        } => SimpleTySet::NUM,
+                        TokenNumLitKind::Integral {
+                            base: NumLitBase::Binary | NumLitBase::Hexadecimal | NumLitBase::Octal,
+                            value: _,
+                            suffix: None,
+                        } => SimpleTySet::INT,
+                        TokenNumLitKind::Floating {
+                            int_part: _,
+                            dec_part: _,
+                            exp_part: _,
+                            suffix: None,
+                        } => SimpleTySet::FLOAT,
+                    };
+
                     let var = self.ccx.fresh_ty_infer_var_restricted(
                         HrtbUniverse::ROOT,
                         InferTyVarSourceInfo::Literal { span: lit.span() },
-                        SimpleTySet::INT,
+                        constraints,
                     );
                     self.int_infers.push(var);
                     tcx.intern(TyKind::InferVar(var))
