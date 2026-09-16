@@ -210,4 +210,10 @@ define_lang_items! {
     bit_shl_assign_trait => TraitValidator;
     bit_shr_assign_trait => TraitValidator;
     vec => TypeValidator;
+    range => TypeValidator;
+    range_from => TypeValidator;
+    range_full => TypeValidator;
+    range_inclusive => TypeValidator;
+    range_to => TypeValidator;
+    range_to_inclusive => TypeValidator;
 }

@@ -4,8 +4,9 @@ use crate::{
         analysis::typeck::{BodyCtxt, infra::deref::attempt_deref_clobber_obligations},
         infer::{ClauseCx, ClauseFuel, HrtbUniverse, SpannedError},
         syntax::{
-            Divergence, HirExpr, InferTyVarSourceInfo, Mutability, Re, RelationMode, SimpleTyKind,
-            TraitClauseList, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            Divergence, DivergenceJoin, HirExpr, InferTyVarSourceInfo, Mutability, Re,
+            RelationMode, SimpleTyKind, TraitClauseList, TraitParam, TraitSpec, Ty,
+            TyAndDivergence, TyKind, TyOrRe,
         },
     },
 };
@@ -25,13 +26,16 @@ impl BodyCtxt<'_, '_> {
     pub fn check_exprs_equate(
         &mut self,
         exprs: impl IntoIterator<Item = Obj<HirExpr>>,
+        join: DivergenceJoin,
     ) -> TyAndDivergence {
-        let mut divergence = Divergence::MayDiverge;
+        let mut divergence = join.default_divergence();
 
         let exprs = exprs
             .into_iter()
             .map(|expr| {
-                let actual = self.check_expr_inner(expr, None).and_do(&mut divergence);
+                let actual = self
+                    .check_expr_inner(expr, None)
+                    .join(join, &mut divergence);
                 (expr, actual)
             })
             .collect::<Vec<_>>();

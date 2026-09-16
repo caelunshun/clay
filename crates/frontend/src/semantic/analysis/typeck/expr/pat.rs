@@ -242,10 +242,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             }
             HirPatKind::Lit(expr) => {
                 self.peel_references_from_demand_and_normalize(&mut demand, &mut default_by_ref);
-                let res = self.check_expr_demand(expr, demand);
-
-                // This should just be a literal.
-                assert!(!res.divergence.must_diverge());
+                self.check_expr_demand(expr, demand).ignore_divergence();
             }
             HirPatKind::Or(patterns) => {
                 for &pat in patterns.r(s) {
@@ -427,7 +424,20 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 self.check_expr_demand(place, demand)
                     .and_do(place_divergence.unwrap());
             }
-            HirPatKind::Range(hir_range_expr) => todo!(),
+            HirPatKind::Range(expr) => {
+                let res = self.check_range_expr(expr).ignore_divergence();
+
+                if let Some(elem_ty) = res.elem_ty() {
+                    self.ccx_mut()
+                        .oblige_ty_unifies_ty(demand, elem_ty, RelationMode::Equate)
+                        // TODO
+                        .map({
+                            let span = pat.r(s).span;
+                            move |_ccx, error| SpannedError(span, error)
+                        })
+                        .report_loud();
+                }
+            }
         }
 
         self.pat_types_pre_adjust.insert(pat, demand);

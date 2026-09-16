@@ -35,7 +35,7 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
             bcx.check_pat_demand(arg.pat, ascription, None);
         }
 
-        bcx.check_expr_demand(body, bcx.return_ty).ignore();
+        bcx.check_expr_demand(body, bcx.return_ty).ignore_divergence();
 
         ConfirmCtxt::new(&mut bcx).confirm(body);
     } else {

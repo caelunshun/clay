@@ -61,24 +61,17 @@ pub struct FnArg {
 // === Divergence === //
 
 #[derive(Debug, Copy, Clone)]
-#[must_use]
-pub struct TyAndDivergence {
-    pub ty: Ty,
-    pub divergence: Divergence,
+pub enum DivergenceJoin {
+    Sequential,
+    Choice,
 }
 
-impl TyAndDivergence {
-    pub const fn new(ty: Ty, divergence: Divergence) -> Self {
-        Self { ty, divergence }
-    }
-
-    pub fn ignore(self) {
-        // (empty)
-    }
-
-    pub fn and_do(self, divergence: &mut Divergence) -> Ty {
-        *divergence &= self.divergence;
-        self.ty
+impl DivergenceJoin {
+    pub fn default_divergence(self) -> Divergence {
+        match self {
+            DivergenceJoin::Sequential => Divergence::MayDiverge,
+            DivergenceJoin::Choice => Divergence::MustDiverge,
+        }
     }
 }
 
@@ -86,6 +79,20 @@ impl TyAndDivergence {
 pub enum Divergence {
     MustDiverge,
     MayDiverge,
+}
+
+impl Divergence {
+    #[must_use]
+    pub fn join(self, mode: DivergenceJoin, other: Divergence) -> Divergence {
+        match mode {
+            DivergenceJoin::Sequential => self & other,
+            DivergenceJoin::Choice => self | other,
+        }
+    }
+
+    pub fn join_assign(&mut self, mode: DivergenceJoin, other: Divergence) {
+        *self = self.join(mode, other);
+    }
 }
 
 impl BitOr for Divergence {
@@ -125,6 +132,40 @@ impl BitAndAssign for Divergence {
 impl Divergence {
     pub fn must_diverge(self) -> bool {
         matches!(self, Self::MustDiverge)
+    }
+}
+
+pub type TyAndDivergence = DivergenceAnd<Ty>;
+
+#[derive(Debug, Copy, Clone)]
+#[must_use]
+pub struct DivergenceAnd<T> {
+    pub value: T,
+    pub divergence: Divergence,
+}
+
+impl<T> DivergenceAnd<T> {
+    pub const fn new(value: T, divergence: Divergence) -> Self {
+        Self { value, divergence }
+    }
+
+    pub fn ignore_divergence(self) -> T {
+        self.value
+    }
+
+    pub fn and_do(self, divergence: &mut Divergence) -> T {
+        *divergence &= self.divergence;
+        self.value
+    }
+
+    pub fn or_do(self, divergence: &mut Divergence) -> T {
+        *divergence |= self.divergence;
+        self.value
+    }
+
+    pub fn join(self, mode: DivergenceJoin, divergence: &mut Divergence) -> T {
+        divergence.join_assign(mode, self.divergence);
+        self.value
     }
 }
 

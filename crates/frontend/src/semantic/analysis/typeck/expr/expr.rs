@@ -15,11 +15,11 @@ use crate::{
             SpannedError,
         },
         syntax::{
-            AdtCtorSyntax, AdtInstance, Divergence, DynSiteIdx, FloatKind, FnInstanceInner,
-            FnOwner, HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirMatchArm, HirStmt,
-            HirStructExpr, InferTyVarSourceInfo, IntKind, LabelTargetKind, Re, RelationMode,
-            SigAdtInstance, SimpleTyKind, SimpleTySet, TraitParam, TraitSpec, Ty, TyAndDivergence,
-            TyKind, TyOrRe, UniversalTy, UniversalTyRootSourceInfo,
+            AdtCtorSyntax, AdtInstance, Divergence, DivergenceJoin, DynSiteIdx, FloatKind,
+            FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirLabelledBlock,
+            HirMatchArm, HirStmt, HirStructExpr, InferTyVarSourceInfo, IntKind, LabelTargetKind,
+            Re, RelationMode, SigAdtInstance, SimpleTyKind, SimpleTySet, TraitParam, TraitSpec, Ty,
+            TyAndDivergence, TyKind, TyOrRe, UniversalTy, UniversalTyRootSourceInfo,
         },
     },
 };
@@ -107,7 +107,7 @@ impl BodyCtxt<'_, '_> {
                         },
                     )
                 } else {
-                    self.check_exprs_equate(elems.r(s).iter().copied())
+                    self.check_exprs_equate(elems.r(s).iter().copied(), DivergenceJoin::Sequential)
                         .and_do(&mut divergence)
                 };
 
@@ -294,8 +294,12 @@ impl BodyCtxt<'_, '_> {
                 self.check_expr_demand(cond, tcx.intern(TyKind::Simple(SimpleTyKind::Bool)))
                     .and_do(&mut divergence);
 
-                self.check_exprs_equate([Some(truthy), falsy].into_iter().flatten())
-                    .and_do(&mut divergence)
+                // TODO: Flatten
+                self.check_exprs_equate(
+                    [Some(truthy), falsy].into_iter().flatten(),
+                    DivergenceJoin::Choice,
+                )
+                .and_do(&mut divergence)
             }
             HirExprKind::While(cond, block) => {
                 self.check_expr_demand(cond, tcx.intern(TyKind::Simple(SimpleTyKind::Bool)))
@@ -363,9 +367,7 @@ impl BodyCtxt<'_, '_> {
                 }
             }
             HirExprKind::Match(scrutinee, arms) => {
-                let scrutinee = self
-                    .check_expr_inner(scrutinee, None)
-                    .and_do(&mut divergence);
+                let scrutinee = self.check_expr(scrutinee, None).and_do(&mut divergence);
 
                 let arm_demand = demand_hint.unwrap_or_else(|| {
                     self.ccx_mut().fresh_ty_infer(
@@ -376,6 +378,8 @@ impl BodyCtxt<'_, '_> {
                     )
                 });
 
+                let mut body_divergence = Divergence::MustDiverge;
+
                 for &arm in arms.r(s) {
                     let HirMatchArm {
                         span: _,
@@ -384,20 +388,25 @@ impl BodyCtxt<'_, '_> {
                         body,
                     } = *arm.r(s);
 
-                    self.check_pat_demand(pat, scrutinee, Some(&mut divergence));
+                    let mut arm_divergence = Divergence::MayDiverge;
+
+                    self.check_pat_demand(pat, scrutinee, Some(&mut arm_divergence));
 
                     if let Some(guard) = guard {
                         self.check_expr_demand(
                             guard,
                             tcx.intern(TyKind::Simple(SimpleTyKind::Bool)),
                         )
-                        .and_do(&mut divergence);
+                        .and_do(&mut arm_divergence);
                     }
 
                     self.check_expr_demand(body, arm_demand)
-                        .and_do(&mut divergence);
+                        .and_do(&mut arm_divergence);
+
+                    body_divergence |= arm_divergence;
                 }
 
+                divergence &= body_divergence;
                 arm_demand
             }
             HirExprKind::Block(block) => {
@@ -457,7 +466,10 @@ impl BodyCtxt<'_, '_> {
             HirExprKind::Index(target, index) => {
                 self.check_expr_inner_index(expr, target, index, &mut divergence)
             }
-            HirExprKind::Range(range_expr) => todo!(),
+            HirExprKind::Range(expr) => self
+                .check_range_expr(expr)
+                .and_do(&mut divergence)
+                .range_ty(self),
             HirExprKind::Local(local) => self.type_of_local(local),
             HirExprKind::AddrOf(mutability, pointee) => {
                 let pointee = self.check_expr(pointee, None).and_do(&mut divergence);
@@ -478,7 +490,8 @@ impl BodyCtxt<'_, '_> {
                             )
                         });
 
-                    self.check_expr_demand(value.unwrap(), demand).ignore();
+                    self.check_expr_demand(value.unwrap(), demand)
+                        .ignore_divergence();
                 } else {
                     debug_assert!(value.is_none());
                 }
@@ -487,7 +500,8 @@ impl BodyCtxt<'_, '_> {
             }
             HirExprKind::Continue(_label) => tcx.intern(TyKind::Simple(SimpleTyKind::Never)),
             HirExprKind::Return(rv) => {
-                self.check_expr_demand(rv, self.return_ty).ignore();
+                self.check_expr_demand(rv, self.return_ty)
+                    .ignore_divergence();
                 tcx.intern(TyKind::Simple(SimpleTyKind::Never))
             }
             HirExprKind::AdtCtorTy(ty) => 'check: {
