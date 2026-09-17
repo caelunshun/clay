@@ -396,8 +396,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         .map(|&HirPatNamedField { name, pat }| (name, pat))
                         .collect(),
                     match rest {
-                        AstPatStructRest::Rest(span) => Some(span),
-                        AstPatStructRest::None => None,
+                        AstPatStructRest::Rest(_) => None,
+                        AstPatStructRest::None => Some(instance_span),
                     },
                 );
 

@@ -244,7 +244,6 @@ impl BuilderModuleTree {
         s: &Session,
     ) -> IndexVec<BuilderItemId, Obj<Item>> {
         // Determine public paths for each module.
-        // TODO: improve this algorithm.
         for item_id in self.items.indices() {
             match self.items[item_id].direct_parent {
                 Some(parent) => {

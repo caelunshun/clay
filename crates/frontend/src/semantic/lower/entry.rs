@@ -429,8 +429,12 @@ impl<'ast> UseLowerCtxt<'ast> {
                     self.lower_expr_items(item_id, high);
                 }
             }
-            AstExprKind::Underscore => todo!(),
-            AstExprKind::Path(_path) => todo!(),
+            AstExprKind::Underscore => {
+                // (dead end)
+            }
+            AstExprKind::Path(_path) => {
+                // (dead end)
+            }
             AstExprKind::AddrOf(_muta, target) => {
                 self.lower_expr_items(item_id, target);
             }
@@ -439,7 +443,9 @@ impl<'ast> UseLowerCtxt<'ast> {
                     self.lower_expr_items(item_id, value);
                 }
             }
-            AstExprKind::Continue(_label) => todo!(),
+            AstExprKind::Continue(_label) => {
+                // (dead end)
+            }
             AstExprKind::Return(value) => {
                 if let Some(value) = value {
                     self.lower_expr_items(item_id, value);
