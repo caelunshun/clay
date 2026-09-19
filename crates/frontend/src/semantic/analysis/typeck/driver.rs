@@ -134,14 +134,16 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             return ty.clone();
         }
 
-        let ty = self.ccx.fresh_ty_infer(
-            HrtbUniverse::ROOT,
-            InferTyVarSourceInfo::Local {
-                name: hir.r(s).name,
-            },
+        let late = ThirLateLocal::new(
+            hir,
+            self.ccx.fresh_ty_infer(
+                HrtbUniverse::ROOT,
+                InferTyVarSourceInfo::Local {
+                    name: hir.r(s).name,
+                },
+            ),
+            self,
         );
-
-        let late = self.create_late_local(hir, ty);
 
         self.local_types.insert(hir, late.clone());
 

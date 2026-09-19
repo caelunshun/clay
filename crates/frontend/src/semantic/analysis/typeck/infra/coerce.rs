@@ -1,11 +1,14 @@
 use crate::{
     base::arena::{HasInterner, HasListInterner, Obj},
     semantic::{
-        analysis::typeck::{BodyCtxt, infra::deref::attempt_deref_clobber_obligations},
+        analysis::typeck::{
+            BodyCtxt,
+            infra::{confirm::ThirLateExpr, deref::attempt_deref_clobber_obligations},
+        },
         infer::{ClauseCx, ClauseFuel, HrtbUniverse, SpannedError},
         syntax::{
-            Divergence, DivergenceJoin, HirExpr, InferTyVarSourceInfo, Mutability, Re,
-            RelationMode, SimpleTyKind, TraitClauseList, TraitParam, TraitSpec, Ty,
+            Divergence, DivergenceAnd, DivergenceJoin, HirExpr, InferTyVarSourceInfo, Mutability,
+            Re, RelationMode, SimpleTyKind, TraitClauseList, TraitParam, TraitSpec, Ty,
             TyAndDivergence, TyKind, TyOrRe,
         },
     },
@@ -15,8 +18,12 @@ use std::cmp::Ordering;
 
 // === BodyCtxt === //
 
-impl BodyCtxt<'_, '_> {
-    pub fn check_expr(&mut self, expr: Obj<HirExpr>, demand: Option<Ty>) -> TyAndDivergence {
+impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
+    pub fn check_expr(
+        &mut self,
+        expr: Obj<HirExpr>,
+        demand: Option<Ty>,
+    ) -> DivergenceAnd<ThirLateExpr<'a, 'tcx>> {
         match demand {
             Some(demand) => self.check_expr_demand(expr, demand),
             None => self.check_expr_inner(expr, None),
@@ -27,7 +34,7 @@ impl BodyCtxt<'_, '_> {
         &mut self,
         exprs: impl IntoIterator<Item = Obj<HirExpr>>,
         join: DivergenceJoin,
-    ) -> TyAndDivergence {
+    ) -> DivergenceAnd<Vec<ThirLateExpr<'a, 'tcx>>> {
         let mut divergence = join.default_divergence();
 
         let exprs = exprs
@@ -58,7 +65,11 @@ impl BodyCtxt<'_, '_> {
         TyAndDivergence::new(output, divergence)
     }
 
-    pub fn check_expr_demand(&mut self, expr: Obj<HirExpr>, demand: Ty) -> TyAndDivergence {
+    pub fn check_expr_demand(
+        &mut self,
+        expr: Obj<HirExpr>,
+        demand: Ty,
+    ) -> DivergenceAnd<ThirLateExpr<'a, 'tcx>> {
         let s = self.session();
         let mut divergence = Divergence::MayDiverge;
 

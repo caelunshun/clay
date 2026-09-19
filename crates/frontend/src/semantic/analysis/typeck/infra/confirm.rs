@@ -1,11 +1,12 @@
 use crate::{
     base::{
-        arena::{LateInit, Obj},
+        ErrorGuaranteed,
+        arena::{HasInterner as _, LateInit, Obj},
         syntax::{HasSpan, Span},
     },
     semantic::{
         analysis::typeck::BodyCtxt,
-        syntax::{HirLocal, ThirExpr, ThirExprKind, ThirLocal, Ty},
+        syntax::{HirLocal, ThirExpr, ThirExprKind, ThirLocal, ThirPat, ThirPatKind, Ty, TyKind},
     },
     utils::mem::ArenaRc,
 };
@@ -137,20 +138,20 @@ where
     }
 }
 
-impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
-    pub fn create_late_init<T, V, F>(
-        &mut self,
+impl<'a, 'tcx, T, V> ThirLateInit<'a, 'tcx, T, V> {
+    pub fn new<F>(
         phase: ThirConfirmPhase,
         data: T,
         ensure_init: F,
-    ) -> ThirLateInit<'a, 'tcx, T, V>
+        bcx: &mut BodyCtxt<'a, 'tcx>,
+    ) -> Self
     where
         T: 'a,
         V: 'a,
-        F: 'a + FnOnce(&mut Self, &T) -> V,
+        F: 'a + FnOnce(&mut BodyCtxt<'a, 'tcx>, &T) -> V,
     {
         let inner = ArenaRc::new(
-            self.thir_queue.arena.clone(),
+            bcx.thir_queue.arena.clone(),
             ThirLateInitInner {
                 early_data: data,
                 late_state: OnceCell::new(),
@@ -158,21 +159,19 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             },
         );
 
-        self.thir_queue.queue.push(ThirLateInitQueueEntry {
+        bcx.thir_queue.queue.push(ThirLateInitQueueEntry {
             phase,
             target: ArenaRc::map::<dyn 'a + AnyErasedConfirm<'a, 'tcx>>(inner.clone(), |v| v),
         });
 
-        ThirLateInit {
+        Self {
             inner: ArenaRc::map::<dyn 'a + ErasedConfirm<'a, 'tcx, Early = T, Late = V>>(
                 inner,
                 |v| v,
             ),
         }
     }
-}
 
-impl<'a, 'tcx, T, V> ThirLateInit<'a, 'tcx, T, V> {
     pub fn early(&self) -> &T {
         self.inner.early_data()
     }
@@ -203,10 +202,14 @@ struct ThirLateLocalInfo {
     ty: Ty,
 }
 
-impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
-    pub fn create_late_local(&mut self, hir: Obj<HirLocal>, ty: Ty) -> ThirLateLocal<'a, 'tcx> {
+impl<'a, 'tcx> ThirLateLocal<'a, 'tcx> {
+    pub fn new(
+        hir: Obj<HirLocal>,
+        ty: Ty,
+        bcx: &mut BodyCtxt<'a, 'tcx>,
+    ) -> ThirLateLocal<'a, 'tcx> {
         ThirLateLocal {
-            inner: self.create_late_init(
+            inner: ThirLateInit::new(
                 ThirConfirmPhase::ConfirmLocals,
                 ThirLateLocalInfo { hir, ty },
                 move |bcx, inner| {
@@ -223,6 +226,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         s,
                     )
                 },
+                bcx,
             ),
         }
     }
@@ -242,6 +246,71 @@ impl<'a, 'tcx> ThirLateLocal<'a, 'tcx> {
     }
 }
 
+// === Patterns === //
+
+#[derive(Clone)]
+pub struct ThirLatePat<'a, 'tcx> {
+    inner: ThirLateInit<'a, 'tcx, ThirLatePatInner>,
+}
+
+struct ThirLatePatInner {
+    pat: Obj<ThirPat>,
+    ty: Ty,
+}
+
+impl<'a, 'tcx> ThirLatePat<'a, 'tcx> {
+    pub fn new(
+        span: Span,
+        ty: Ty,
+        kind: impl 'a + FnOnce(&mut BodyCtxt<'a, 'tcx>) -> ThirPatKind,
+        bcx: &mut BodyCtxt<'a, 'tcx>,
+    ) -> ThirLatePat<'a, 'tcx> {
+        let s = bcx.session();
+
+        ThirLatePat {
+            inner: ThirLateInit::new(
+                ThirConfirmPhase::ConfirmExprs,
+                ThirLatePatInner {
+                    pat: Obj::new(
+                        ThirPat {
+                            span,
+                            ty: LateInit::uninit(),
+                            kind: LateInit::uninit(),
+                        },
+                        s,
+                    ),
+                    ty,
+                },
+                move |bcx, inner| {
+                    let s = bcx.session();
+
+                    LateInit::init(
+                        &inner.pat.r(s).ty,
+                        bcx.ccx_mut().export(inner.pat.r(s).span, inner.ty),
+                    );
+
+                    LateInit::init(&inner.pat.r(s).kind, kind(bcx));
+                },
+                bcx,
+            ),
+        }
+    }
+
+    pub fn ty(&self) -> Ty {
+        self.inner.early().ty
+    }
+
+    pub fn thir(&self) -> Obj<ThirPat> {
+        self.inner.early().pat
+    }
+
+    pub fn kind(&self, bcx: &mut BodyCtxt<'a, 'tcx>) -> &'tcx ThirPatKind {
+        let s = bcx.session();
+
+        &self.inner.early_ensure_init(bcx).pat.r(s).kind
+    }
+}
+
 // === Expressions === //
 
 #[derive(Clone)]
@@ -254,17 +323,17 @@ struct ThirLateExprInner {
     ty: Ty,
 }
 
-impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
-    pub fn create_late_expr(
-        &mut self,
+impl<'a, 'tcx> ThirLateExpr<'a, 'tcx> {
+    pub fn new(
         span: Span,
         ty: Ty,
-        kind: impl 'a + FnOnce(&mut Self) -> ThirExprKind,
+        kind: impl 'a + FnOnce(&mut BodyCtxt<'a, 'tcx>) -> ThirExprKind,
+        bcx: &mut BodyCtxt<'a, 'tcx>,
     ) -> ThirLateExpr<'a, 'tcx> {
-        let s = self.session();
+        let s = bcx.session();
 
         ThirLateExpr {
-            inner: self.create_late_init(
+            inner: ThirLateInit::new(
                 ThirConfirmPhase::ConfirmExprs,
                 ThirLateExprInner {
                     expr: Obj::new(
@@ -287,17 +356,31 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                     LateInit::init(&inner.expr.r(s).kind, kind(bcx));
                 },
+                bcx,
             ),
         }
     }
-}
 
-impl<'a, 'tcx> ThirLateExpr<'a, 'tcx> {
+    pub fn new_err(
+        span: Span,
+        err: ErrorGuaranteed,
+        bcx: &mut BodyCtxt<'a, 'tcx>,
+    ) -> ThirLateExpr<'a, 'tcx> {
+        let tcx = bcx.tcx();
+
+        Self::new(
+            span,
+            tcx.intern(TyKind::Error(err)),
+            move |_bcx| ThirExprKind::Error(err),
+            bcx,
+        )
+    }
+
     pub fn ty(&self) -> Ty {
         self.inner.early().ty
     }
 
-    pub fn expr(&self) -> Obj<ThirExpr> {
+    pub fn thir(&self) -> Obj<ThirExpr> {
         self.inner.early().expr
     }
 
