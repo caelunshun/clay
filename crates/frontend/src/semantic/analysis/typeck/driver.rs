@@ -1,11 +1,13 @@
 use crate::{
     base::{ErrorGuaranteed, Session, arena::Obj},
     semantic::{
-        analysis::{sigck::CrateSigckVisitor, typeck::infra::confirm::ThirQueue},
+        analysis::{
+            sigck::CrateSigckVisitor,
+            typeck::infra::confirm::{ThirLateInitQueue, ThirLateLocal},
+        },
         infer::{ClauseCx, ClauseImportEnv, HrtbUniverse, UnifyCx, UnifyCxMode},
         syntax::{
-            Crate, FnDef, HirExpr, HirLabelledBlock, HirLocal, HirPat, InferTyVar,
-            InferTyVarSourceInfo, Item, Ty, TyCtxt,
+            Crate, FnDef, HirLabelledBlock, HirLocal, InferTyVarSourceInfo, Item, Ty, TyCtxt,
         },
     },
     utils::hash::FxHashMap,
@@ -38,7 +40,7 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
         bcx.check_expr_demand(body, bcx.return_ty)
             .ignore_divergence();
 
-        ThirQueue::confirm_everything(&mut bcx);
+        bcx.finish_confirmation();
     } else {
         for arg in def.r(s).args.r(s) {
             ccx.import_here(&env_sig, arg.ty);
@@ -56,13 +58,9 @@ pub(super) struct BodyCtxt<'a, 'tcx> {
     pub ccx: &'a mut ClauseCx<'tcx>,
     pub def: Obj<FnDef>,
     pub import_env: &'a ClauseImportEnv,
-    pub local_types: FxHashMap<Obj<HirLocal>, Ty>,
+    pub local_types: FxHashMap<Obj<HirLocal>, ThirLateLocal<'a, 'tcx>>,
     pub block_break_demands: FxHashMap<HirLabelledBlock, Option<Ty>>,
-    pub int_infers: Vec<InferTyVar>,
-    pub expr_types_pre_coerce: FxHashMap<Obj<HirExpr>, Ty>,
-    pub overload_resolutions: FxHashMap<Obj<HirExpr>, OverloadResolution>,
-    pub pat_types_pre_adjust: FxHashMap<Obj<HirPat>, Ty>,
-    pub thir_queue: ThirQueue<'a, 'tcx>,
+    pub thir_queue: ThirLateInitQueue<'a, 'tcx>,
     pub return_ty: Ty,
 }
 
@@ -89,11 +87,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             import_env,
             local_types: FxHashMap::default(),
             block_break_demands: FxHashMap::default(),
-            int_infers: Vec::new(),
-            expr_types_pre_coerce: FxHashMap::default(),
-            overload_resolutions: FxHashMap::default(),
-            pat_types_pre_adjust: FxHashMap::default(),
-            thir_queue: ThirQueue::default(),
+            thir_queue: ThirLateInitQueue::default(),
             return_ty,
         }
     }
@@ -133,16 +127,24 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         self.ccx.ucx_mut()
     }
 
-    pub fn type_of_local(&mut self, local: Obj<HirLocal>) -> Ty {
+    pub fn type_of_local(&mut self, hir: Obj<HirLocal>) -> ThirLateLocal<'a, 'tcx> {
         let s = self.session();
 
-        *self.local_types.entry(local).or_insert_with(|| {
-            self.ccx.fresh_ty_infer(
-                HrtbUniverse::ROOT,
-                InferTyVarSourceInfo::Local {
-                    name: local.r(s).name,
-                },
-            )
-        })
+        if let Some(ty) = self.local_types.get(&hir) {
+            return ty.clone();
+        }
+
+        let ty = self.ccx.fresh_ty_infer(
+            HrtbUniverse::ROOT,
+            InferTyVarSourceInfo::Local {
+                name: hir.r(s).name,
+            },
+        );
+
+        let late = self.create_late_local(hir, ty);
+
+        self.local_types.insert(hir, late.clone());
+
+        late
     }
 }
