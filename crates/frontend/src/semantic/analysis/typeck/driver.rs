@@ -8,7 +8,7 @@ use crate::{
             InferTyVarSourceInfo, Item, Ty, TyCtxt,
         },
     },
-    utils::hash::FxHashMap,
+    utils::{hash::FxHashMap, mem::GpArena},
 };
 
 // === Driver === //
@@ -35,7 +35,8 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
             bcx.check_pat_demand(arg.pat, ascription, None);
         }
 
-        bcx.check_expr_demand(body, bcx.return_ty).ignore_divergence();
+        bcx.check_expr_demand(body, bcx.return_ty)
+            .ignore_divergence();
 
         ConfirmCtxt::new(&mut bcx).confirm(body);
     } else {
@@ -61,6 +62,7 @@ pub(super) struct BodyCtxt<'a, 'tcx> {
     pub expr_types_pre_coerce: FxHashMap<Obj<HirExpr>, Ty>,
     pub overload_resolutions: FxHashMap<Obj<HirExpr>, OverloadResolution>,
     pub pat_types_pre_adjust: FxHashMap<Obj<HirPat>, Ty>,
+    pub confirm_arena: GpArena<'a>,
     pub return_ty: Ty,
 }
 
@@ -91,6 +93,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             expr_types_pre_coerce: FxHashMap::default(),
             overload_resolutions: FxHashMap::default(),
             pat_types_pre_adjust: FxHashMap::default(),
+            confirm_arena: GpArena::default(),
             return_ty,
         }
     }

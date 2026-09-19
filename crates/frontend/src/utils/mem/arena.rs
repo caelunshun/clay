@@ -2,9 +2,9 @@ use bumpalo::Bump;
 use derive_where::derive_where;
 use std::{
     cell::RefCell,
-    fmt,
-    marker::PhantomData,
+    fmt, mem,
     num::NonZeroU64,
+    ops::Deref,
     ptr::NonNull,
     sync::atomic::{AtomicU64, Ordering::Relaxed},
 };
@@ -82,6 +82,7 @@ impl Drop for GpArena<'_> {
 // === GpMutPtr === //
 
 #[derive_where(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[repr(C)]
 pub struct GpMutPtr<T: ?Sized> {
     generation: GpGeneration,
     ptr: NonNull<T>,
@@ -104,6 +105,14 @@ impl<T: ?Sized> GpMutPtr<T> {
 
     pub unsafe fn new_unchecked(generation: GpGeneration, ptr: NonNull<T>) -> Self {
         Self { generation, ptr }
+    }
+
+    pub fn erase<V>(self, erase: fn(&Self) -> &V) -> GpErasedMutPtr<V>
+    where
+        T: Sized,
+        V: ?Sized + GpAnyMutPtr,
+    {
+        GpErasedMutPtr::new(self, erase)
     }
 }
 
@@ -161,17 +170,6 @@ impl<T: ?Sized> GpMutPtr<T> {
         self.ptr
     }
 
-    pub fn project<V>(
-        self,
-        proj: impl Projection<T, Output = V>,
-        arena: &GpArena<'_>,
-    ) -> GpMutPtr<V>
-    where
-        V: ?Sized,
-    {
-        proj.project(arena, self)
-    }
-
     pub fn r<'a>(self, arena: &'a GpArena<'_>) -> &'a T {
         assert_eq!(arena.generation, self.generation);
 
@@ -184,6 +182,44 @@ impl<T: ?Sized> GpMutPtr<T> {
         unsafe { self.ptr.as_mut() }
     }
 }
+
+// === GpErasedMutPtr === //
+
+#[derive_where(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct GpErasedMutPtr<T: ?Sized + GpAnyMutPtr> {
+    ptr: GpMutPtr<()>,
+    #[derive_where(skip)]
+    erase: unsafe fn(&GpMutPtr<()>) -> &T,
+}
+
+impl<T: ?Sized + GpAnyMutPtr> GpErasedMutPtr<T> {
+    pub fn new<V>(ptr: GpMutPtr<V>, erase: fn(&GpMutPtr<V>) -> &T) -> Self {
+        Self {
+            ptr: unsafe { GpMutPtr::new_unchecked(ptr.generation(), ptr.ptr().cast()) },
+            erase: unsafe {
+                mem::transmute::<fn(&GpMutPtr<V>) -> &T, unsafe fn(&GpMutPtr<()>) -> &T>(erase)
+            },
+        }
+    }
+}
+
+impl<T: ?Sized + GpAnyMutPtr> Deref for GpErasedMutPtr<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { (self.erase)(&self.ptr) }
+    }
+}
+
+mod sealed {
+    pub trait Sealed {}
+}
+
+pub trait GpAnyMutPtr: sealed::Sealed {}
+
+impl<T: ?Sized> sealed::Sealed for GpMutPtr<T> {}
+
+impl<T: ?Sized> GpAnyMutPtr for GpMutPtr<T> {}
 
 // === GpImmPtr === //
 
@@ -259,58 +295,3 @@ impl<T: ?Sized> GpImmPtr<T> {
         self.raw.r(arena)
     }
 }
-
-// === Projection === //
-
-pub unsafe trait Projection<I: ?Sized>: Sized {
-    type Output: ?Sized;
-
-    fn project(self, arena: &GpArena, input: GpMutPtr<I>) -> GpMutPtr<Self::Output>;
-}
-
-pub struct CoercionProjection<I, O, F>
-where
-    O: ?Sized,
-    F: FnOnce(NonNull<I>) -> NonNull<O>,
-{
-    _ty: PhantomData<(fn(I) -> I, fn(O) -> O)>,
-    f: F,
-}
-
-unsafe impl<I, O, F> Projection<I> for CoercionProjection<I, O, F>
-where
-    O: ?Sized,
-    F: FnOnce(NonNull<I>) -> NonNull<O>,
-{
-    type Output = O;
-
-    fn project(self, _arena: &GpArena, input: GpMutPtr<I>) -> GpMutPtr<Self::Output> {
-        unsafe { GpMutPtr::new_unchecked(input.generation(), (self.f)(input.ptr)) }
-    }
-}
-
-#[doc(hidden)]
-pub mod coercion_projection_internals {
-    use crate::utils::mem::CoercionProjection;
-    use std::{marker::PhantomData, ptr::NonNull};
-
-    pub unsafe fn create<I, O, F>(f: F) -> CoercionProjection<I, O, F>
-    where
-        O: ?Sized,
-        F: FnOnce(NonNull<I>) -> NonNull<O>,
-    {
-        CoercionProjection {
-            _ty: PhantomData,
-            f,
-        }
-    }
-}
-
-#[macro_export]
-macro_rules! coercion_projection {
-    ($ty:ty) => {
-        unsafe { $crate::utils::mem::coercion_projection_internals::create::<_, $ty, _>(|v| v) }
-    };
-}
-
-pub use coercion_projection;
