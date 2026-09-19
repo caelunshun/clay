@@ -1,5 +1,8 @@
+mod arena;
+pub use self::arena::*;
+
 mod mapped_rc;
-pub use mapped_rc::*;
+pub use self::mapped_rc::*;
 
 mod handle;
-pub use handle::*;
+pub use self::handle::*;

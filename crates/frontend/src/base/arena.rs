@@ -1,80 +1,26 @@
 use crate::{
     base::{HasSession, Session},
-    utils::hash::{FxBuildHasher, FxHashMap, hash_map},
+    utils::{
+        hash::{FxBuildHasher, FxHashMap, hash_map},
+        mem::GpImmPtr,
+    },
 };
-use bumpalo::Bump;
 use derive_where::derive_where;
 use std::{
-    any::{Any, TypeId},
+    any::TypeId,
     cell::{Cell, RefCell, UnsafeCell},
     fmt,
     hash::{self, BuildHasher as _, BuildHasherDefault},
     mem::MaybeUninit,
-    num::NonZeroU64,
     ops::Deref,
     ptr::NonNull,
-    sync::atomic::{AtomicU64, Ordering::*},
 };
 
-// === GpArena === //
-
-pub struct GpArena {
-    generation: NonZeroU64,
-    bump: bumpalo::Bump,
-    drop_queue: RefCell<GpArenaDropQueue>,
-}
-
-struct GpArenaDropQueue {
-    singles: Vec<NonNull<dyn Any>>,
-    lists: Vec<GpList>,
-}
-
-#[derive(Copy, Clone)]
-struct GpList {
-    base: NonNull<()>,
-    len: usize,
-    drop: unsafe fn(NonNull<()>, usize),
-}
-
-impl fmt::Debug for GpArena {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("GpArena").finish_non_exhaustive()
-    }
-}
-
-impl Default for GpArena {
-    fn default() -> Self {
-        static ID_GEN: AtomicU64 = AtomicU64::new(1);
-
-        Self {
-            generation: NonZeroU64::new(ID_GEN.fetch_add(1, Relaxed)).unwrap(),
-            bump: Bump::new(),
-            drop_queue: RefCell::new(GpArenaDropQueue {
-                singles: Vec::new(),
-                lists: Vec::new(),
-            }),
-        }
-    }
-}
-
-impl Drop for GpArena {
-    fn drop(&mut self) {
-        let inner = self.drop_queue.get_mut();
-
-        for &single in &inner.singles {
-            unsafe { single.drop_in_place() };
-        }
-
-        for &GpList { base, len, drop } in &inner.lists {
-            unsafe { drop(base, len) };
-        }
-    }
-}
+// === Obj === //
 
 #[derive_where(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct Obj<T: ?Sized + 'static> {
-    generation: NonZeroU64,
-    ptr: NonNull<T>,
+    raw: GpImmPtr<T>,
 }
 
 impl<T> fmt::Debug for Obj<T>
@@ -87,7 +33,7 @@ where
                 const { RefCell::new(FxHashMap::with_hasher(BuildHasherDefault::new())) };
         }
 
-        let key = (TypeId::of::<T>(), self.ptr.cast());
+        let key = (TypeId::of::<T>(), self.raw.ptr().cast());
 
         let (reentrant_depth, was_non_reentrant) = REENTRANT_FMT.with_borrow_mut(|map| {
             let len = map.len();
@@ -118,14 +64,8 @@ impl<T: 'static> Obj<T> {
     where
         T: Sized,
     {
-        let this = &s.gp_arena;
-        let ptr = NonNull::from(this.bump.alloc(value));
-
-        this.drop_queue.borrow_mut().singles.push(ptr);
-
         Self {
-            generation: this.generation,
-            ptr,
+            raw: GpImmPtr::new(value, &s.gp_arena),
         }
     }
 }
@@ -135,20 +75,8 @@ impl<T: 'static> Obj<[T]> {
     where
         T: Clone,
     {
-        let this = &s.gp_arena;
-        let ptr = NonNull::from(this.bump.alloc_slice_clone(value));
-
-        this.drop_queue.borrow_mut().lists.push(GpList {
-            base: ptr.cast(),
-            len: ptr.len(),
-            drop: |ptr, len| unsafe {
-                NonNull::slice_from_raw_parts(ptr.cast::<T>(), len).drop_in_place();
-            },
-        });
-
         Self {
-            generation: this.generation,
-            ptr,
+            raw: GpImmPtr::new_slice(value, &s.gp_arena),
         }
     }
 
@@ -156,21 +84,8 @@ impl<T: 'static> Obj<[T]> {
         value: impl IntoIterator<Item = T, IntoIter: ExactSizeIterator>,
         s: &Session,
     ) -> Self {
-        let this = &s.gp_arena;
-
-        let ptr = NonNull::from(this.bump.alloc_slice_fill_iter(value));
-
-        this.drop_queue.borrow_mut().lists.push(GpList {
-            base: ptr.cast(),
-            len: ptr.len(),
-            drop: |ptr, len| unsafe {
-                NonNull::slice_from_raw_parts(ptr.cast::<T>(), len).drop_in_place();
-            },
-        });
-
         Self {
-            generation: this.generation,
-            ptr,
+            raw: GpImmPtr::new_iter(value, &s.gp_arena),
         }
     }
 }
@@ -178,14 +93,12 @@ impl<T: 'static> Obj<[T]> {
 impl<T: ?Sized + 'static> Obj<T> {
     pub fn map<V: ?Sized>(self, f: impl FnOnce(&T) -> &V, s: &Session) -> Obj<V> {
         Obj {
-            generation: self.generation,
-            ptr: NonNull::from(f(self.r(s))),
+            raw: self.raw.map(f, &s.gp_arena),
         }
     }
 
     pub fn r(self, s: &Session) -> &T {
-        assert_eq!(s.gp_arena.generation, self.generation);
-        unsafe { self.ptr.as_ref() }
+        self.raw.r(&s.gp_arena)
     }
 }
 

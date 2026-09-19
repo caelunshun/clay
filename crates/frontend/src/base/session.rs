@@ -1,7 +1,9 @@
-use crate::base::{
-    DiagCtxt,
-    arena::GpArena,
-    syntax::{SourceMap, SymbolInterner},
+use crate::{
+    base::{
+        DiagCtxt,
+        syntax::{SourceMap, SymbolInterner},
+    },
+    utils::mem::GpArena,
 };
 use std::{cell::RefCell, ops::Deref, rc::Rc};
 
@@ -21,7 +23,7 @@ pub struct SessionInner {
     pub symbols: SymbolInterner,
     pub diag: DiagCtxt,
     pub source_map: SourceMap,
-    pub gp_arena: GpArena,
+    pub gp_arena: GpArena<'static>,
 }
 
 impl Session {
