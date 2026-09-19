@@ -1,14 +1,14 @@
 use crate::{
     base::{ErrorGuaranteed, Session, arena::Obj},
     semantic::{
-        analysis::{sigck::CrateSigckVisitor, typeck::confirm::ConfirmCtxt},
+        analysis::{sigck::CrateSigckVisitor, typeck::infra::confirm::ThirQueue},
         infer::{ClauseCx, ClauseImportEnv, HrtbUniverse, UnifyCx, UnifyCxMode},
         syntax::{
             Crate, FnDef, HirExpr, HirLabelledBlock, HirLocal, HirPat, InferTyVar,
             InferTyVarSourceInfo, Item, Ty, TyCtxt,
         },
     },
-    utils::{hash::FxHashMap, mem::GpArena},
+    utils::hash::FxHashMap,
 };
 
 // === Driver === //
@@ -38,7 +38,7 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
         bcx.check_expr_demand(body, bcx.return_ty)
             .ignore_divergence();
 
-        ConfirmCtxt::new(&mut bcx).confirm(body);
+        ThirQueue::confirm_everything(&mut bcx);
     } else {
         for arg in def.r(s).args.r(s) {
             ccx.import_here(&env_sig, arg.ty);
@@ -62,7 +62,7 @@ pub(super) struct BodyCtxt<'a, 'tcx> {
     pub expr_types_pre_coerce: FxHashMap<Obj<HirExpr>, Ty>,
     pub overload_resolutions: FxHashMap<Obj<HirExpr>, OverloadResolution>,
     pub pat_types_pre_adjust: FxHashMap<Obj<HirPat>, Ty>,
-    pub confirm_arena: GpArena<'a>,
+    pub thir_queue: ThirQueue<'a, 'tcx>,
     pub return_ty: Ty,
 }
 
@@ -93,7 +93,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             expr_types_pre_coerce: FxHashMap::default(),
             overload_resolutions: FxHashMap::default(),
             pat_types_pre_adjust: FxHashMap::default(),
-            confirm_arena: GpArena::default(),
+            thir_queue: ThirQueue::default(),
             return_ty,
         }
     }
@@ -128,6 +128,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         self.ccx.ucx()
     }
 
+    #[expect(unused)]
     pub fn ucx_mut(&mut self) -> &mut UnifyCx<'tcx> {
         self.ccx.ucx_mut()
     }

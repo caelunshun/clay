@@ -2,7 +2,7 @@ use crate::{
     base::{HasSession, Session},
     utils::{
         hash::{FxBuildHasher, FxHashMap, hash_map},
-        mem::GpImmPtr,
+        mem::DropArenaPtr,
     },
 };
 use derive_where::derive_where;
@@ -20,7 +20,7 @@ use std::{
 
 #[derive_where(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct Obj<T: ?Sized + 'static> {
-    raw: GpImmPtr<T>,
+    raw: DropArenaPtr<T>,
 }
 
 impl<T> fmt::Debug for Obj<T>
@@ -65,7 +65,7 @@ impl<T: 'static> Obj<T> {
         T: Sized,
     {
         Self {
-            raw: GpImmPtr::new(value, &s.gp_arena),
+            raw: DropArenaPtr::new(value, &s.gp_arena),
         }
     }
 }
@@ -76,7 +76,7 @@ impl<T: 'static> Obj<[T]> {
         T: Clone,
     {
         Self {
-            raw: GpImmPtr::new_slice(value, &s.gp_arena),
+            raw: DropArenaPtr::new_slice(value, &s.gp_arena),
         }
     }
 
@@ -85,7 +85,7 @@ impl<T: 'static> Obj<[T]> {
         s: &Session,
     ) -> Self {
         Self {
-            raw: GpImmPtr::new_iter(value, &s.gp_arena),
+            raw: DropArenaPtr::new_iter(value, &s.gp_arena),
         }
     }
 }

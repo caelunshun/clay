@@ -3,7 +3,7 @@ use crate::{
         DiagCtxt,
         syntax::{SourceMap, SymbolInterner},
     },
-    utils::mem::GpArena,
+    utils::mem::DropArena,
 };
 use std::{cell::RefCell, ops::Deref, rc::Rc};
 
@@ -23,7 +23,7 @@ pub struct SessionInner {
     pub symbols: SymbolInterner,
     pub diag: DiagCtxt,
     pub source_map: SourceMap,
-    pub gp_arena: GpArena<'static>,
+    pub gp_arena: DropArena<'static>,
 }
 
 impl Session {
@@ -33,7 +33,7 @@ impl Session {
             symbols: SymbolInterner::default(),
             diag: DiagCtxt::default(),
             source_map: SourceMap::default(),
-            gp_arena: GpArena::default(),
+            gp_arena: DropArena::default(),
         }))
     }
 
