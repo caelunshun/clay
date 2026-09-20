@@ -1,7 +1,8 @@
 use crate::{
     base::{
-        Diag,
+        Diag, ErrorGuaranteed,
         arena::{HasInterner, LateInit, Obj},
+        syntax::Span,
     },
     semantic::{
         analysis::typeck::BodyCtxt,
@@ -13,162 +14,48 @@ use crate::{
     utils::{hash::FxHashMap, mem::ArenaRc},
 };
 use bumpalo::Bump;
+use derive_where::derive_where;
 use std::{cell::Cell, rc::Rc};
+
+// === Public === //
 
 #[derive(Default)]
 pub struct BodyCtxtConfirmState<'a, 'tcx> {
     arena: Rc<Bump>,
     started_confirmation: bool,
-    expressions: FxHashMap<Obj<HirExpr>, ExprState<'a, 'tcx>>,
-    patterns: FxHashMap<Obj<HirExpr>, PatState<'a, 'tcx>>,
+    expressions: ConfirmMap<'a, 'tcx, HirExpr, ThirExpr>,
+    patterns: ConfirmMap<'a, 'tcx, HirPat, ThirPat>,
     int_infers: Vec<InferTyVar>,
 }
 
-#[derive(Default)]
-struct ExprState<'a, 'tcx> {
-    definition: Option<ExprStateDefined<'a, 'tcx>>,
-    resolved: Option<ThirExprResolved>,
-}
-
-struct ExprStateDefined<'a, 'tcx> {
-    base: ExprStateBase<'a, 'tcx>,
-    refinements: Vec<ExprStateRefinement<'a, 'tcx>>,
-}
-
-struct ExprStateBase<'a, 'tcx> {
-    ty: Ty,
-    func: ArenaRc<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>) -> ThirExprKind>,
-}
-
-struct ExprStateRefinement<'a, 'tcx> {
-    ty: Ty,
-    func: ArenaRc<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>, Obj<ThirExpr>) -> ThirExprKind>,
-}
-
 #[derive(Debug, Copy, Clone)]
-pub struct ThirExprResolved {
+pub struct ThirExprResolution {
     pub pre_coerce: Obj<ThirExpr>,
     pub post_coerce: Obj<ThirExpr>,
 }
 
-#[derive(Default)]
-struct PatState<'a, 'tcx> {
-    definition: Option<PatStateDefined<'a, 'tcx>>,
-    resolved: Option<ThirPatResolved>,
-}
-
-struct PatStateDefined<'a, 'tcx> {
-    base: PatStateBase<'a, 'tcx>,
-    refinements: Vec<PatStateRefinement<'a, 'tcx>>,
-}
-
-struct PatStateBase<'a, 'tcx> {
-    ty: Ty,
-    func: ArenaRc<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>) -> ThirPatKind>,
-}
-
-struct PatStateRefinement<'a, 'tcx> {
-    ty: Ty,
-    func: ArenaRc<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>, Obj<ThirPat>) -> ThirPatKind>,
-}
-
 #[derive(Debug, Copy, Clone)]
-pub struct ThirPatResolved {
+pub struct ThirPatResolution {
     pub inner: Obj<ThirPat>,
     pub outer: Obj<ThirPat>,
 }
 
 impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
-    pub fn resolve_thir_expr(&mut self, hir: Obj<HirExpr>) -> ThirExprResolved {
+    pub fn resolve_thir_expr(&mut self, hir: Obj<HirExpr>) -> ThirExprResolution {
         let s = self.session();
-        let tcx = self.tcx();
-
-        let expr_span = hir.r(s).span;
 
         assert!(self.confirm_state.started_confirmation);
 
-        let state = self.confirm_state.expressions.entry(hir).or_default();
+        let ConfirmResolution { start, end } = ConfirmMap::resolve(
+            self,
+            |bcx| &mut bcx.confirm_state.expressions,
+            hir.r(s).span,
+            hir,
+        );
 
-        if let Some(resolution) = state.resolved {
-            return resolution;
-        }
-
-        match state.definition.take() {
-            Some(ExprStateDefined { base, refinements }) => {
-                // Create placeholders for the start and end of the refinement chain to allow for
-                // reentrant resolution.
-                let pre_coerce = Obj::new(
-                    ThirExpr {
-                        span: expr_span,
-                        ty: self.ccx.export(expr_span, base.ty),
-                        kind: LateInit::uninit(),
-                    },
-                    s,
-                );
-
-                let post_coerce = refinements.last().map_or(pre_coerce, |refinement| {
-                    Obj::new(
-                        ThirExpr {
-                            span: expr_span,
-                            ty: self.ccx.export(expr_span, refinement.ty),
-                            kind: LateInit::uninit(),
-                        },
-                        s,
-                    )
-                });
-
-                let resolved = ThirExprResolved {
-                    pre_coerce,
-                    post_coerce,
-                };
-                state.resolved = Some(resolved);
-
-                // Initialize expressions.
-                LateInit::init(&pre_coerce.r(s).kind, (base.func)(self));
-
-                let mut prev = pre_coerce;
-
-                for (idx, refinement) in refinements.iter().enumerate() {
-                    let kind = (refinement.func)(self, prev);
-
-                    if idx == refinements.len() - 1 {
-                        LateInit::init(&post_coerce.r(s).kind, kind);
-                    } else {
-                        prev = Obj::new(
-                            ThirExpr {
-                                span: expr_span,
-                                ty: self.ccx.export(expr_span, refinement.ty),
-                                kind: LateInit::new(kind),
-                            },
-                            s,
-                        );
-                    }
-                }
-
-                resolved
-            }
-            None => {
-                let err = Diag::span_err(expr_span, "expression never type-checked")
-                    .to_delay_bug()
-                    .emit();
-
-                let thir = Obj::new(
-                    ThirExpr {
-                        span: expr_span,
-                        ty: self.ccx.export(expr_span, tcx.intern(TyKind::Error(err))),
-                        kind: LateInit::new(ThirExprKind::Error(err)),
-                    },
-                    s,
-                );
-
-                let resolved = ThirExprResolved {
-                    pre_coerce: thir,
-                    post_coerce: thir,
-                };
-                state.resolved = Some(resolved);
-
-                resolved
-            }
+        ThirExprResolution {
+            pre_coerce: start,
+            post_coerce: end,
         }
     }
 
@@ -180,26 +67,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
     ) {
         assert!(!self.confirm_state.started_confirmation);
 
-        let state = self.confirm_state.expressions.entry(hir).or_default();
-
-        assert!(state.definition.is_none());
-
-        state.definition = Some(ExprStateDefined {
-            base: ExprStateBase {
-                ty,
-                func: {
-                    let f = Cell::new(Some(f));
-
-                    ArenaRc::map::<dyn 'a + Fn(&mut Self) -> ThirExprKind>(
-                        ArenaRc::new(self.confirm_state.arena.clone(), move |bcx: &mut Self| {
-                            f.take().unwrap()(bcx)
-                        }),
-                        |v| v,
-                    )
-                },
-            },
-            refinements: Vec::new(),
-        });
+        self.confirm_state
+            .expressions
+            .put(self.confirm_state.arena.clone(), hir, ty, f);
     }
 
     pub fn refine_thir_expr(
@@ -212,44 +82,51 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
         self.confirm_state
             .expressions
-            .get_mut(&hir)
-            .and_then(|v| v.definition.as_mut())
-            .expect("no base expression set up")
-            .refinements
-            .push(ExprStateRefinement {
-                ty,
-                func: {
-                    let f = Cell::new(Some(f));
-
-                    ArenaRc::map::<dyn 'a + Fn(&mut Self, Obj<ThirExpr>) -> ThirExprKind>(
-                        ArenaRc::new(
-                            self.confirm_state.arena.clone(),
-                            move |bcx: &mut Self, base: Obj<ThirExpr>| f.take().unwrap()(bcx, base),
-                        ),
-                        |v| v,
-                    )
-                },
-            });
+            .refine(self.confirm_state.arena.clone(), hir, ty, f);
     }
 
-    pub fn resolve_thir_pat(&mut self, hir: Obj<HirPat>) -> ThirPatResolved {
-        todo!()
+    pub fn resolve_thir_pat(&mut self, hir: Obj<HirPat>) -> ThirPatResolution {
+        let s = self.session();
+
+        assert!(self.confirm_state.started_confirmation);
+
+        let ConfirmResolution { start, end } = ConfirmMap::resolve(
+            self,
+            |bcx| &mut bcx.confirm_state.patterns,
+            hir.r(s).span,
+            hir,
+        );
+
+        ThirPatResolution {
+            inner: start,
+            outer: end,
+        }
     }
 
     pub fn put_thir_pat(
         &mut self,
         hir: Obj<HirPat>,
-        f: impl 'a + FnOnce(&mut Self) -> Obj<ThirPat>,
+        ty: Ty,
+        f: impl 'a + FnOnce(&mut Self) -> ThirPatKind,
     ) {
-        todo!()
+        assert!(!self.confirm_state.started_confirmation);
+
+        self.confirm_state
+            .patterns
+            .put(self.confirm_state.arena.clone(), hir, ty, f);
     }
 
     pub fn refine_thir_pat(
         &mut self,
         hir: Obj<HirPat>,
-        f: impl 'a + FnOnce(&mut Self, Obj<HirPat>) -> Obj<ThirPat>,
+        ty: Ty,
+        f: impl 'a + FnOnce(&mut Self, Obj<ThirPat>) -> ThirPatKind,
     ) {
-        todo!()
+        assert!(!self.confirm_state.started_confirmation);
+
+        self.confirm_state
+            .patterns
+            .refine(self.confirm_state.arena.clone(), hir, ty, f);
     }
 
     pub fn resolve_local(&mut self, hir: Obj<HirLocal>) -> Obj<ThirLocal> {
@@ -262,5 +139,278 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
     pub fn confirm(&mut self) {
         todo!()
+    }
+}
+
+// === Internals === //
+
+trait Confirmable<'a, 'tcx>: Sized + 'static {
+    type Meta;
+    type Body;
+
+    fn create_placeholder(bcx: &mut BodyCtxt<'a, 'tcx>, span: Span, meta: &Self::Meta)
+    -> Obj<Self>;
+
+    fn init_placeholder(bcx: &mut BodyCtxt<'a, 'tcx>, target: Obj<Self>, body: Self::Body);
+
+    fn create_err(bcx: &mut BodyCtxt<'a, 'tcx>, span: Span, err: ErrorGuaranteed) -> Obj<Self>;
+}
+
+impl<'a, 'tcx> Confirmable<'a, 'tcx> for ThirExpr {
+    type Meta = Ty;
+    type Body = ThirExprKind;
+
+    fn create_placeholder(
+        bcx: &mut BodyCtxt<'a, 'tcx>,
+        span: Span,
+        meta: &Self::Meta,
+    ) -> Obj<Self> {
+        let s = bcx.session();
+
+        Obj::new(
+            ThirExpr {
+                span,
+                ty: bcx.ccx_mut().export(span, *meta),
+                kind: LateInit::uninit(),
+            },
+            s,
+        )
+    }
+
+    fn init_placeholder(bcx: &mut BodyCtxt<'a, 'tcx>, target: Obj<Self>, body: Self::Body) {
+        let s = bcx.session();
+        LateInit::init(&target.r(s).kind, body);
+    }
+
+    fn create_err(bcx: &mut BodyCtxt<'a, 'tcx>, span: Span, err: ErrorGuaranteed) -> Obj<Self> {
+        let s = bcx.session();
+        let tcx = bcx.tcx();
+
+        Obj::new(
+            ThirExpr {
+                span,
+                ty: bcx.ccx_mut().export(span, tcx.intern(TyKind::Error(err))),
+                kind: LateInit::new(ThirExprKind::Error(err)),
+            },
+            s,
+        )
+    }
+}
+
+impl<'a, 'tcx> Confirmable<'a, 'tcx> for ThirPat {
+    type Meta = Ty;
+    type Body = ThirPatKind;
+
+    fn create_placeholder(
+        bcx: &mut BodyCtxt<'a, 'tcx>,
+        span: Span,
+        meta: &Self::Meta,
+    ) -> Obj<Self> {
+        let s = bcx.session();
+
+        Obj::new(
+            ThirPat {
+                span,
+                ty: bcx.ccx_mut().export(span, *meta),
+                kind: LateInit::uninit(),
+            },
+            s,
+        )
+    }
+
+    fn init_placeholder(bcx: &mut BodyCtxt<'a, 'tcx>, target: Obj<Self>, body: Self::Body) {
+        let s = bcx.session();
+        LateInit::init(&target.r(s).kind, body);
+    }
+
+    fn create_err(bcx: &mut BodyCtxt<'a, 'tcx>, span: Span, err: ErrorGuaranteed) -> Obj<Self> {
+        let s = bcx.session();
+        let tcx = bcx.tcx();
+
+        Obj::new(
+            ThirPat {
+                span,
+                ty: bcx.ccx_mut().export(span, tcx.intern(TyKind::Error(err))),
+                kind: LateInit::new(ThirPatKind::Error(err)),
+            },
+            s,
+        )
+    }
+}
+
+#[derive_where(Default)]
+struct ConfirmMap<'a, 'tcx, K, V>
+where
+    K: 'static,
+    V: Confirmable<'a, 'tcx>,
+{
+    entries: FxHashMap<Obj<K>, ConfirmEntry<'a, 'tcx, V>>,
+}
+
+#[derive_where(Default)]
+struct ConfirmEntry<'a, 'tcx, V>
+where
+    V: Confirmable<'a, 'tcx>,
+{
+    definition: Option<ConfirmDefinition<'a, 'tcx, V>>,
+    resolution: Option<ConfirmResolution<V>>,
+}
+
+struct ConfirmDefinition<'a, 'tcx, V>
+where
+    V: Confirmable<'a, 'tcx>,
+{
+    base_meta: V::Meta,
+    base_func: ArenaRc<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>) -> V::Body>,
+    refinements: Vec<ConfirmRefinement<'a, 'tcx, V>>,
+}
+
+struct ConfirmRefinement<'a, 'tcx, V>
+where
+    V: Confirmable<'a, 'tcx>,
+{
+    meta: V::Meta,
+    func: ArenaRc<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>, Obj<V>) -> V::Body>,
+}
+
+#[derive_where(Copy, Clone)]
+struct ConfirmResolution<V: 'static> {
+    start: Obj<V>,
+    end: Obj<V>,
+}
+
+impl<'a, 'tcx, K, V> ConfirmMap<'a, 'tcx, K, V>
+where
+    K: 'static,
+    V: Confirmable<'a, 'tcx>,
+{
+    pub fn resolve<FP>(
+        bcx: &mut BodyCtxt<'a, 'tcx>,
+        mut project: FP,
+        hir_span: Span,
+        hir: Obj<K>,
+    ) -> ConfirmResolution<V>
+    where
+        FP: for<'r> FnMut(&'r mut BodyCtxt<'a, 'tcx>) -> &'r mut Self,
+    {
+        let state = project(bcx).entries.entry(hir).or_default();
+
+        if let Some(resolution) = state.resolution {
+            return resolution;
+        }
+
+        match state.definition.take() {
+            Some(ConfirmDefinition {
+                base_meta,
+                base_func,
+                refinements,
+            }) => {
+                // Create placeholders for the start and end of the refinement chain to allow for
+                // reentrant resolution.
+                let start = V::create_placeholder(bcx, hir_span, &base_meta);
+
+                let end = refinements.last().map_or(start, |refinement| {
+                    V::create_placeholder(bcx, hir_span, &refinement.meta)
+                });
+
+                let resolution = ConfirmResolution { start, end };
+
+                project(bcx).entries.get_mut(&hir).unwrap().resolution = Some(resolution);
+
+                // Initialize expressions.
+                let body = base_func(bcx);
+                V::init_placeholder(bcx, start, body);
+
+                let mut prev = start;
+
+                for (idx, refinement) in refinements.iter().enumerate() {
+                    let body = (refinement.func)(bcx, prev);
+
+                    if idx == refinements.len() - 1 {
+                        V::init_placeholder(bcx, start, body);
+                    } else {
+                        prev = V::create_placeholder(bcx, hir_span, &refinement.meta);
+                        V::init_placeholder(bcx, prev, body);
+                    }
+                }
+
+                resolution
+            }
+            None => {
+                let thir = V::create_err(
+                    bcx,
+                    hir_span,
+                    Diag::span_err(hir_span, "never type-checked")
+                        .to_delay_bug()
+                        .emit(),
+                );
+
+                let resolved = ConfirmResolution {
+                    start: thir,
+                    end: thir,
+                };
+
+                project(bcx).entries.get_mut(&hir).unwrap().resolution = Some(resolved);
+
+                resolved
+            }
+        }
+    }
+
+    pub fn put(
+        &mut self,
+        arena: Rc<Bump>,
+        hir: Obj<K>,
+        meta: V::Meta,
+        f: impl 'a + FnOnce(&mut BodyCtxt<'a, 'tcx>) -> V::Body,
+    ) {
+        let state = self.entries.entry(hir).or_default();
+
+        assert!(state.definition.is_none());
+
+        state.definition = Some(ConfirmDefinition {
+            base_meta: meta,
+            base_func: {
+                let f = Cell::new(Some(f));
+
+                ArenaRc::map::<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>) -> V::Body>(
+                    ArenaRc::new(arena, move |bcx: &mut BodyCtxt<'a, 'tcx>| -> V::Body {
+                        f.take().unwrap()(bcx)
+                    }),
+                    |v| v,
+                )
+            },
+            refinements: Vec::new(),
+        });
+    }
+
+    pub fn refine(
+        &mut self,
+        arena: Rc<Bump>,
+        hir: Obj<K>,
+        meta: V::Meta,
+        f: impl 'a + FnOnce(&mut BodyCtxt<'a, 'tcx>, Obj<V>) -> V::Body,
+    ) {
+        self.entries
+            .get_mut(&hir)
+            .and_then(|v| v.definition.as_mut())
+            .expect("no base set up")
+            .refinements
+            .push(ConfirmRefinement {
+                meta,
+                func: {
+                    let f = Cell::new(Some(f));
+
+                    ArenaRc::map::<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>, Obj<V>) -> V::Body>(
+                        ArenaRc::new(
+                            arena,
+                            move |bcx: &mut BodyCtxt<'a, 'tcx>, base: Obj<V>| -> V::Body {
+                                f.take().unwrap()(bcx, base)
+                            },
+                        ),
+                        |v| v,
+                    )
+                },
+            });
     }
 }
