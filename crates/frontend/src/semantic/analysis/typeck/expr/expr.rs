@@ -2,11 +2,6 @@ use crate::{
     base::{
         Diag,
         arena::{HasInterner as _, HasListInterner as _, Obj},
-        syntax::HasSpan as _,
-    },
-    parse::{
-        ast::AstLit,
-        token::{IntegralKind, NumLitBase, TokenNumLitKind},
     },
     semantic::{
         analysis::typeck::BodyCtxt,
@@ -15,11 +10,11 @@ use crate::{
             SpannedError,
         },
         syntax::{
-            AdtCtorSyntax, AdtInstance, Divergence, DivergenceJoin, DynSiteIdx, FloatKind,
-            FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirLabelledBlock,
-            HirMatchArm, HirStmt, HirStructExpr, InferTyVarSourceInfo, IntKind, LabelTargetKind,
-            Re, RelationMode, SigAdtInstance, SimpleTyKind, SimpleTySet, TraitParam, TraitSpec, Ty,
-            TyAndDivergence, TyKind, TyOrRe, UniversalTy, UniversalTyRootSourceInfo,
+            AdtCtorSyntax, AdtInstance, Divergence, DivergenceJoin, DynSiteIdx, FnInstanceInner,
+            FnOwner, HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirMatchArm, HirStmt,
+            HirStructExpr, InferTyVarSourceInfo, LabelTargetKind, Re, RelationMode, SigAdtInstance,
+            SimpleTyKind, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe, UniversalTy,
+            UniversalTyRootSourceInfo,
         },
     },
 };
@@ -113,10 +108,12 @@ impl BodyCtxt<'_, '_> {
 
                 let vec_lang_item = self.krate().r(s).lang_items.vec().unwrap();
 
-                tcx.intern(TyKind::Adt(AdtInstance {
+                let ty = tcx.intern(TyKind::Adt(AdtInstance {
                     def: vec_lang_item,
                     params: tcx.intern_list(&[TyOrRe::Ty(elem)]),
-                }))
+                }));
+
+                self.put_thir_expr(expr, ty, |bcx| todo!())
             }
             HirExprKind::Call(callee, actual_args) => {
                 self.check_expr_inner_call(expr, callee, actual_args, &mut divergence)
@@ -126,7 +123,14 @@ impl BodyCtxt<'_, '_> {
                 name,
                 generics,
                 args,
-            } => self.check_expr_inner_method_call(receiver, name, generics, args, &mut divergence),
+            } => self.check_expr_inner_method_call(
+                expr,
+                receiver,
+                name,
+                generics,
+                args,
+                &mut divergence,
+            ),
             HirExprKind::Tuple(children) => {
                 let children = children
                     .r(s)
@@ -134,7 +138,9 @@ impl BodyCtxt<'_, '_> {
                     .map(|&expr| self.check_expr(expr, None).and_do(&mut divergence))
                     .collect::<Vec<_>>();
 
-                tcx.intern(TyKind::Tuple(tcx.intern_list(&children)))
+                let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&children)));
+
+                self.put_thir_expr(expr, ty, |bcx| todo!())
             }
             HirExprKind::Binary(kind, lhs, rhs) => {
                 self.check_expr_inner_bin_op(expr, kind, lhs, rhs, &mut divergence)
@@ -142,71 +148,11 @@ impl BodyCtxt<'_, '_> {
             HirExprKind::Unary(kind, lhs) => {
                 self.check_expr_inner_un_op(expr, kind, lhs, &mut divergence)
             }
-            HirExprKind::Literal(lit) => match lit {
-                AstLit::Number(lit) => {
-                    let constraints = match lit.kind {
-                        // Has suffix
-                        TokenNumLitKind::Integral {
-                            base: _,
-                            value: _,
-                            suffix: Some(suffix),
-                        } => match suffix {
-                            IntegralKind::Int(IntKind::S8) => SimpleTySet::I8,
-                            IntegralKind::Uint(IntKind::S8) => SimpleTySet::U8,
-                            IntegralKind::Int(IntKind::S16) => SimpleTySet::I16,
-                            IntegralKind::Uint(IntKind::S16) => SimpleTySet::U16,
-                            IntegralKind::Int(IntKind::S32) => SimpleTySet::I32,
-                            IntegralKind::Uint(IntKind::S32) => SimpleTySet::U32,
-                            IntegralKind::Int(IntKind::S64) => SimpleTySet::I64,
-                            IntegralKind::Uint(IntKind::S64) => SimpleTySet::U64,
-                            IntegralKind::Float(FloatKind::S32) => SimpleTySet::F32,
-                            IntegralKind::Float(FloatKind::S64) => SimpleTySet::F64,
-                        },
-                        TokenNumLitKind::Floating {
-                            int_part: _,
-                            dec_part: _,
-                            exp_part: _,
-                            suffix: Some(suffix),
-                        } => match suffix {
-                            FloatKind::S32 => SimpleTySet::F32,
-                            FloatKind::S64 => SimpleTySet::F64,
-                        },
-
-                        // No suffix.
-                        TokenNumLitKind::Integral {
-                            base: NumLitBase::Decimal,
-                            value: _,
-                            suffix: None,
-                        } => SimpleTySet::NUM,
-                        TokenNumLitKind::Integral {
-                            base: NumLitBase::Binary | NumLitBase::Hexadecimal | NumLitBase::Octal,
-                            value: _,
-                            suffix: None,
-                        } => SimpleTySet::INT,
-                        TokenNumLitKind::Floating {
-                            int_part: _,
-                            dec_part: _,
-                            exp_part: _,
-                            suffix: None,
-                        } => SimpleTySet::FLOAT,
-                    };
-
-                    let var = self.ccx.fresh_ty_infer_var_restricted(
-                        HrtbUniverse::ROOT,
-                        InferTyVarSourceInfo::Literal { span: lit.span() },
-                        constraints,
-                    );
-                    self.register_infer_with_fallback(var);
-                    tcx.intern(TyKind::InferVar(var))
-                }
-                AstLit::Char(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Char)),
-                AstLit::String(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Str)),
-                AstLit::Bool(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Bool)),
-            },
+            HirExprKind::Literal(lit) => self.check_expr_inner_lit(expr, &lit),
             HirExprKind::FnItemLit(def, early_args) => {
                 let env = self.import_env;
 
-                tcx.intern(TyKind::FnDef(
+                let ty = tcx.intern(TyKind::FnDef(
                     self.ccx_mut()
                         .importer_here(env)
                         .import_fn_instance_from_owner(
@@ -215,7 +161,9 @@ impl BodyCtxt<'_, '_> {
                             FixArity::AssumeCorrect,
                         )
                         .report_loud(),
-                ))
+                ));
+
+                self.put_thir_expr(expr, ty, |bcx| todo!())
             }
             HirExprKind::TypeRelative {
                 self_ty,
@@ -648,6 +596,8 @@ impl BodyCtxt<'_, '_> {
         {
             divergence = Divergence::MustDiverge;
         }
+
+        self.assert_thir_expr_defined(expr);
 
         TyAndDivergence::new(ty, divergence)
     }

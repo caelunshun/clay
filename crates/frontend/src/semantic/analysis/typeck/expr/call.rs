@@ -5,7 +5,10 @@ use crate::{
     },
     parse::token::Ident,
     semantic::{
-        analysis::typeck::{BodyCtxt, infra::lookup::LookupMethodResult},
+        analysis::typeck::{
+            BodyCtxt,
+            infra::{confirm::ThirExprConfirmedWithTy, lookup::LookupMethodResult},
+        },
         infer::{ClauseFuel, FixArity, HrtbUniverse, SpannedError},
         syntax::{
             Divergence, HirExpr, InferTyVarSourceInfo, InstantiatedFnSig, RelationMode,
@@ -21,7 +24,7 @@ impl BodyCtxt<'_, '_> {
         callee: Obj<HirExpr>,
         actual_args: Obj<[Obj<HirExpr>]>,
         divergence: &mut Divergence,
-    ) -> Ty {
+    ) -> ThirExprConfirmedWithTy {
         let tcx = self.tcx();
         let s = self.session();
 
@@ -32,7 +35,7 @@ impl BodyCtxt<'_, '_> {
                 self.check_expr(actual, None).and_do(divergence);
             }
 
-            return tcx.intern(TyKind::Error(err));
+            return self.put_thir_err(expr, err);
         }
 
         let site_span = expr.r(s).span;
@@ -67,32 +70,35 @@ impl BodyCtxt<'_, '_> {
         let TyKind::Tuple(expected_args) =
             self.ccx_mut().peel_ty_infer_var_after_poll(input_ty).r(s)
         else {
-            return tcx.intern(TyKind::Error(
+            return self.put_thir_err(
+                expr,
                 Diag::span_err(site_span, "annotations needed on input type").emit(),
-            ));
+            );
         };
 
         if expected_args.r(s).len() != actual_args.r(s).len() {
-            return tcx.intern(TyKind::Error(
+            return self.put_thir_err(
+                expr,
                 Diag::span_err(site_span, "argument count mismatch").emit(),
-            ));
+            );
         }
 
         for (&actual, &expected) in actual_args.r(s).iter().zip(expected_args.r(s)) {
             self.check_expr_demand(actual, expected).and_do(divergence);
         }
 
-        output_ty
+        self.put_thir_expr(expr, output_ty, |_bcx| todo!())
     }
 
     pub fn check_expr_inner_method_call(
         &mut self,
+        expr: Obj<HirExpr>,
         receiver: Obj<HirExpr>,
         name: Ident,
         generics: Option<SigGenericList>,
         args: Obj<[Obj<HirExpr>]>,
         divergence: &mut Divergence,
-    ) -> Ty {
+    ) -> ThirExprConfirmedWithTy {
         let tcx = self.tcx();
         let s = self.session();
 
@@ -102,16 +108,16 @@ impl BodyCtxt<'_, '_> {
 
         match *receiver.r(s) {
             TyKind::InferVar(_) => {
-                return tcx.intern(TyKind::Error(
-                    Diag::span_err(
-                        receiver_span,
-                        "type of receiver must be known by this point",
-                    )
-                    .emit(),
-                ));
+                let err = Diag::span_err(
+                    receiver_span,
+                    "type of receiver must be known by this point",
+                )
+                .emit();
+
+                return self.put_thir_err(expr, err);
             }
-            TyKind::Error(error) => {
-                return tcx.intern(TyKind::Error(error));
+            TyKind::Error(err) => {
+                return self.put_thir_err(expr, err);
             }
             _ => {
                 // (fallthrough)
@@ -123,9 +129,10 @@ impl BodyCtxt<'_, '_> {
             resolution,
         }) = self.lookup_method(receiver, name)
         else {
-            return tcx.intern(TyKind::Error(
+            return self.put_thir_err(
+                expr,
                 Diag::span_err(name.span, "failed to find applicable method").emit(),
-            ));
+            );
         };
 
         let self_ty = self.ccx_mut().fresh_ty_infer(
@@ -169,16 +176,17 @@ impl BodyCtxt<'_, '_> {
             .report_loud();
 
         if expected_args.len() != args.r(s).len() {
-            return tcx.intern(TyKind::Error(
+            return self.put_thir_err(
+                expr,
                 Diag::span_err(name.span, "argument count mismatch").emit(),
-            ));
+            );
         }
 
         for (&actual, &expected) in args.r(s).iter().zip(expected_args) {
             self.check_expr_demand(actual, expected).and_do(divergence);
         }
 
-        expected_output
+        self.put_thir_expr(expr, expected_output, |bcx| todo!())
     }
 
     pub fn check_expr_inner_field(

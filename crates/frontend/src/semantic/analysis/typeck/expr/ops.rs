@@ -3,13 +3,16 @@ use crate::{
         Diag,
         arena::{HasInterner, HasListInterner as _, Obj},
     },
-    parse::ast::{AstAssignOpKind, AstBinOpKind, AstBinOpSpanned, AstUnOpKind},
+    parse::{
+        ast::{AstAssignOpKind, AstBinOpKind, AstBinOpSpanned, AstLit, AstUnOpKind},
+        token::{IntegralKind, NumLitBase, TokenNumLitKind},
+    },
     semantic::{
-        analysis::typeck::BodyCtxt,
+        analysis::typeck::{BodyCtxt, infra::confirm::ThirExprConfirmedWithTy},
         infer::{ClauseCx, ClauseFuel, HrtbUniverse, PrettyFmtOpts, SpannedError, ToDebugTree},
         syntax::{
-            Divergence, HirExpr, HirPat, InferTyVarSourceInfo, RelationMode, SimpleTyKind,
-            SimpleTySet, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            Divergence, FloatKind, HirExpr, HirPat, InferTyVarSourceInfo, IntKind, RelationMode,
+            SimpleTyKind, SimpleTySet, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
         },
     },
 };
@@ -17,6 +20,78 @@ use crate::{
 // === BodyCtxt === //
 
 impl BodyCtxt<'_, '_> {
+    pub fn check_expr_inner_lit(
+        &mut self,
+        expr: Obj<HirExpr>,
+        lit: &AstLit,
+    ) -> ThirExprConfirmedWithTy {
+        let tcx = self.tcx();
+
+        let ty = match lit {
+            AstLit::Number(lit) => {
+                let constraints = match lit.kind {
+                    // Has suffix
+                    TokenNumLitKind::Integral {
+                        base: _,
+                        value: _,
+                        suffix: Some(suffix),
+                    } => match suffix {
+                        IntegralKind::Int(IntKind::S8) => SimpleTySet::I8,
+                        IntegralKind::Uint(IntKind::S8) => SimpleTySet::U8,
+                        IntegralKind::Int(IntKind::S16) => SimpleTySet::I16,
+                        IntegralKind::Uint(IntKind::S16) => SimpleTySet::U16,
+                        IntegralKind::Int(IntKind::S32) => SimpleTySet::I32,
+                        IntegralKind::Uint(IntKind::S32) => SimpleTySet::U32,
+                        IntegralKind::Int(IntKind::S64) => SimpleTySet::I64,
+                        IntegralKind::Uint(IntKind::S64) => SimpleTySet::U64,
+                        IntegralKind::Float(FloatKind::S32) => SimpleTySet::F32,
+                        IntegralKind::Float(FloatKind::S64) => SimpleTySet::F64,
+                    },
+                    TokenNumLitKind::Floating {
+                        int_part: _,
+                        dec_part: _,
+                        exp_part: _,
+                        suffix: Some(suffix),
+                    } => match suffix {
+                        FloatKind::S32 => SimpleTySet::F32,
+                        FloatKind::S64 => SimpleTySet::F64,
+                    },
+
+                    // No suffix.
+                    TokenNumLitKind::Integral {
+                        base: NumLitBase::Decimal,
+                        value: _,
+                        suffix: None,
+                    } => SimpleTySet::NUM,
+                    TokenNumLitKind::Integral {
+                        base: NumLitBase::Binary | NumLitBase::Hexadecimal | NumLitBase::Octal,
+                        value: _,
+                        suffix: None,
+                    } => SimpleTySet::INT,
+                    TokenNumLitKind::Floating {
+                        int_part: _,
+                        dec_part: _,
+                        exp_part: _,
+                        suffix: None,
+                    } => SimpleTySet::FLOAT,
+                };
+
+                let var = self.ccx.fresh_ty_infer_var_restricted(
+                    HrtbUniverse::ROOT,
+                    InferTyVarSourceInfo::Literal { span: lit.span },
+                    constraints,
+                );
+                self.register_infer_with_fallback(var);
+                tcx.intern(TyKind::InferVar(var))
+            }
+            AstLit::Char(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Char)),
+            AstLit::String(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Str)),
+            AstLit::Bool(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Bool)),
+        };
+
+        self.put_thir_expr(expr, ty, |bcx| todo!())
+    }
+
     pub fn check_expr_inner_bin_op(
         &mut self,
         expr: Obj<HirExpr>,
@@ -24,7 +99,7 @@ impl BodyCtxt<'_, '_> {
         lhs_expr: Obj<HirExpr>,
         rhs_expr: Obj<HirExpr>,
         divergence: &mut Divergence,
-    ) -> Ty {
+    ) -> ThirExprConfirmedWithTy {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -48,13 +123,14 @@ impl BodyCtxt<'_, '_> {
                 }
 
                 // TODO
-                let err = Diag::anon_err(
-                    SpannedError(lhs_expr.r(s).span, err)
-                        .to_debug_tree(&self.ccx().pretty(PrettyFmtOpts::default())),
-                )
-                .emit();
-
-                return tcx.intern(TyKind::Error(err));
+                return self.put_thir_err(
+                    expr,
+                    Diag::anon_err(
+                        SpannedError(lhs_expr.r(s).span, err)
+                            .to_debug_tree(&self.ccx().pretty(PrettyFmtOpts::default())),
+                    )
+                    .emit(),
+                );
             }
 
             match kind_info.rhs {
@@ -69,13 +145,15 @@ impl BodyCtxt<'_, '_> {
                             }
 
                             // TODO
-                            let err = Diag::anon_err(
-                                SpannedError(rhs_expr.r(s).span, *err)
-                                    .to_debug_tree(&self.ccx().pretty(PrettyFmtOpts::default())),
-                            )
-                            .emit();
-
-                            return tcx.intern(TyKind::Error(err));
+                            return self.put_thir_err(
+                                expr,
+                                Diag::anon_err(
+                                    SpannedError(rhs_expr.r(s).span, *err).to_debug_tree(
+                                        &self.ccx().pretty(PrettyFmtOpts::default()),
+                                    ),
+                                )
+                                .emit(),
+                            );
                         }
                     }
                 }
@@ -86,23 +164,26 @@ impl BodyCtxt<'_, '_> {
                         }
 
                         // TODO
-                        let err = Diag::anon_err(
-                            SpannedError(lhs_expr.r(s).span, err)
-                                .to_debug_tree(&self.ccx().pretty(PrettyFmtOpts::default())),
-                        )
-                        .emit();
-
-                        return tcx.intern(TyKind::Error(err));
+                        return self.put_thir_err(
+                            expr,
+                            Diag::anon_err(
+                                SpannedError(lhs_expr.r(s).span, err)
+                                    .to_debug_tree(&self.ccx().pretty(PrettyFmtOpts::default())),
+                            )
+                            .emit(),
+                        );
                     }
                 }
             }
 
             *self.ccx_mut() = prim_fork;
 
-            return match kind_info.out {
+            let ty = match kind_info.out {
                 EquateOrTy::EqualsLhs => lhs,
                 EquateOrTy::Unrelated(ty) => ty,
             };
+
+            return self.put_thir_expr(expr, ty, |bcx| todo!());
         };
 
         // Otherwise, attempt to perform an overloaded operation.
@@ -131,7 +212,7 @@ impl BodyCtxt<'_, '_> {
             })
             .report_loud();
 
-        result_ty
+        self.put_thir_expr(expr, result_ty, |bcx| todo!())
     }
 
     pub fn check_expr_inner_un_op(
@@ -140,7 +221,7 @@ impl BodyCtxt<'_, '_> {
         kind: AstUnOpKind,
         lhs: Obj<HirExpr>,
         divergence: &mut Divergence,
-    ) -> Ty {
+    ) -> ThirExprConfirmedWithTy {
         let s = self.session();
         let tcx = self.tcx();
 
@@ -157,7 +238,7 @@ impl BodyCtxt<'_, '_> {
                 .unify_ty_and_simple_set(lhs_ty, kind_info.lhs)
                 .is_ok()
             {
-                return lhs_ty;
+                return self.put_thir_expr(expr, lhs_ty, |bcx| todo!());
             }
         }
 
@@ -165,7 +246,7 @@ impl BodyCtxt<'_, '_> {
             && let lhs_ty = self.ccx_mut().peel_ty_infer_var_after_poll(lhs_ty)
             && let TyKind::Reference(_re, _muta, pointee) = *lhs_ty.r(s)
         {
-            return pointee;
+            return self.put_thir_expr(expr, pointee, |bcx| todo!());
         }
 
         // Otherwise, attempt to perform an overloaded operation.
@@ -194,7 +275,7 @@ impl BodyCtxt<'_, '_> {
             })
             .report_loud();
 
-        result_ty
+        self.put_thir_expr(expr, result_ty, |bcx| todo!())
     }
 
     pub fn check_expr_inner_assign_op(

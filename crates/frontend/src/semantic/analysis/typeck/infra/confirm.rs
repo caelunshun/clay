@@ -2,7 +2,7 @@ use crate::{
     base::{
         Diag, ErrorGuaranteed,
         arena::{HasInterner, LateInit, Obj},
-        syntax::Span,
+        syntax::{HasSpan, Span},
     },
     semantic::{
         analysis::typeck::BodyCtxt,
@@ -25,6 +25,7 @@ pub struct BodyCtxtConfirmState<'a, 'tcx> {
     started_confirmation: bool,
     expressions: ConfirmMap<'a, 'tcx, HirExpr, ThirExpr>,
     patterns: ConfirmMap<'a, 'tcx, HirPat, ThirPat>,
+    locals: FxHashMap<Obj<HirLocal>, Obj<ThirLocal>>,
     fallback_infers: Vec<InferTyVar>,
 }
 
@@ -38,6 +39,11 @@ pub struct ThirExprResolution {
 pub struct ThirPatResolution {
     pub inner: Obj<ThirPat>,
     pub outer: Obj<ThirPat>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct ThirExprConfirmedWithTy {
+    pub ty: Ty,
 }
 
 impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
@@ -65,12 +71,26 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         hir: Obj<HirExpr>,
         ty: Ty,
         f: impl 'a + FnOnce(&mut Self) -> ThirExprKind,
-    ) {
+    ) -> ThirExprConfirmedWithTy {
         assert!(!self.confirm_state.started_confirmation);
 
         self.confirm_state
             .expressions
             .put(self.confirm_state.arena.clone(), hir, ty, f);
+
+        ThirExprConfirmedWithTy { ty }
+    }
+
+    pub fn put_thir_err(
+        &mut self,
+        hir: Obj<HirExpr>,
+        err: ErrorGuaranteed,
+    ) -> ThirExprConfirmedWithTy {
+        let tcx = self.tcx();
+
+        self.put_thir_expr(hir, tcx.intern(TyKind::Error(err)), move |_bcx| {
+            ThirExprKind::Error(err)
+        })
     }
 
     pub fn refine_thir_expr(
@@ -153,8 +173,23 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         self.confirm_state.fallback_infers.push(var);
     }
 
-    pub fn resolve_local(&mut self, hir: Obj<HirLocal>) -> Obj<ThirLocal> {
-        todo!()
+    pub fn resolve_thir_local(&mut self, hir: Obj<HirLocal>) -> Obj<ThirLocal> {
+        let s = self.session();
+
+        let ty = self.type_of_local(hir);
+
+        *self.confirm_state.locals.entry(hir).or_insert_with(|| {
+            let hir = hir.r(s);
+
+            Obj::new(
+                ThirLocal {
+                    mutability: hir.mutability,
+                    name: hir.name,
+                    ty: self.ccx.export(hir.name.span(), ty),
+                },
+                s,
+            )
+        })
     }
 
     pub fn resolve_thir_block(&mut self, hir: Obj<HirBlock>) -> Obj<ThirBlock> {
@@ -165,6 +200,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         assert!(!self.confirm_state.started_confirmation);
 
         self.confirm_state.started_confirmation = true;
+
+        // TODO: handle fallbacks
     }
 }
 
