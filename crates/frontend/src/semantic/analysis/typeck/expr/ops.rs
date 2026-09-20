@@ -285,7 +285,7 @@ impl BodyCtxt<'_, '_> {
         lhs: Obj<HirPat>,
         rhs: Obj<HirExpr>,
         divergence: &mut Divergence,
-    ) -> Ty {
+    ) -> ThirExprConfirmedWithTy {
         let tcx = self.tcx();
         let s = self.session();
 
@@ -329,7 +329,10 @@ impl BodyCtxt<'_, '_> {
                 }
 
                 *self.ccx_mut() = prim_fork;
-                break 'assign;
+
+                let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
+
+                return self.put_thir_expr(expr, ty, |bcx| todo!());
             }
 
             // Otherwise, attempt to perform an overloaded operation.
@@ -362,7 +365,9 @@ impl BodyCtxt<'_, '_> {
                 .report_loud();
         }
 
-        tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
+        let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
+
+        self.put_thir_expr(expr, ty, |bcx| todo!())
     }
 
     pub fn check_expr_inner_index(
@@ -371,7 +376,7 @@ impl BodyCtxt<'_, '_> {
         target: Obj<HirExpr>,
         index: Obj<HirExpr>,
         divergence: &mut Divergence,
-    ) -> Ty {
+    ) -> ThirExprConfirmedWithTy {
         let tcx = self.tcx();
         let s = self.session();
 
@@ -413,7 +418,7 @@ impl BodyCtxt<'_, '_> {
 
         self.check_expr_demand(index, index_ty).and_do(divergence);
 
-        output_ty
+        self.put_thir_expr(expr, output_ty, |bcx| todo!())
     }
 }
 

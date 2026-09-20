@@ -191,19 +191,18 @@ impl BodyCtxt<'_, '_> {
 
     pub fn check_expr_inner_field(
         &mut self,
+        expr: Obj<HirExpr>,
         receiver: Obj<HirExpr>,
         name: Ident,
         divergence: &mut Divergence,
-    ) -> Ty {
+    ) -> ThirExprConfirmedWithTy {
         let tcx = self.tcx();
         let receiver = self.check_expr(receiver, None).and_do(divergence);
 
         if let Some(ty) = self.lookup_field(receiver, name) {
-            ty
+            self.put_thir_expr(expr, ty, |bcx| todo!())
         } else {
-            tcx.intern(TyKind::Error(
-                Diag::span_err(name.span, "no such field").emit(),
-            ))
+            self.put_thir_err(expr, Diag::span_err(name.span, "no such field").emit())
         }
     }
 }

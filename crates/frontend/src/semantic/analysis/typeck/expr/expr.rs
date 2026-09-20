@@ -4,7 +4,7 @@ use crate::{
         arena::{HasInterner as _, HasListInterner as _, Obj},
     },
     semantic::{
-        analysis::typeck::BodyCtxt,
+        analysis::typeck::{BodyCtxt, infra::confirm::ThirExprConfirmedWithTy},
         infer::{
             ClauseFuel, ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse, PrettyFmtOpts,
             SpannedError,
@@ -92,7 +92,7 @@ impl BodyCtxt<'_, '_> {
         let import_env = self.import_env;
 
         let mut divergence = Divergence::MayDiverge;
-        let ty = match *expr.r(s).kind {
+        let ThirExprConfirmedWithTy { ty } = match *expr.r(s).kind {
             HirExprKind::Array(elems) => {
                 let elem = if elems.r(s).is_empty() {
                     self.ccx_mut().fresh_ty_infer(
@@ -180,20 +180,21 @@ impl BodyCtxt<'_, '_> {
                 let Some(resolution) =
                     self.lookup_type_relative(self_ty, as_trait, assoc_name, assoc_args)
                 else {
-                    break 'res tcx.intern(TyKind::Error(
-                        Diag::span_err(assoc_name.span, "not found").emit(),
-                    ));
+                    break 'res self
+                        .put_thir_err(expr, Diag::span_err(assoc_name.span, "not found").emit());
                 };
 
-                resolution
+                self.put_thir_expr(expr, resolution, |bcx| todo!())
             }
             HirExprKind::Cast(expr, as_ty) => {
                 let env = self.import_env;
                 let as_ty = self.ccx_mut().import_here(env, as_ty);
 
-                self.check_expr_demand(expr, as_ty).and_do(&mut divergence)
+                let ty = self.check_expr_demand(expr, as_ty).and_do(&mut divergence);
+
+                self.put_thir_expr(expr, ty, |bcx| todo!())
             }
-            HirExprKind::Use(expr) => 'use_expr: {
+            HirExprKind::Use(expr) => {
                 let inner_ty = self.check_expr(expr, None).and_do(&mut divergence);
                 let inner_ty = self.ccx_mut().peel_ty_infer_var_after_poll(inner_ty);
 
@@ -213,25 +214,26 @@ impl BodyCtxt<'_, '_> {
                         self.ccx_mut()
                             .init_ty_universal_direct_clauses(universal, clauses);
 
-                        tcx.intern(TyKind::Reference(
+                        let ty = tcx.intern(TyKind::Reference(
                             lt,
                             muta,
                             tcx.intern(TyKind::Universal(universal)),
-                        ))
-                    }
-                    TyKind::Error(err) => break 'use_expr tcx.intern(TyKind::Error(err)),
-                    _ => {
-                        break 'use_expr tcx.intern(TyKind::Error(
-                            Diag::span_err(
-                                expr.r(s).span,
-                                format_args!(
-                                    "expected `dyn Trait`-object, got `{}`",
-                                    self.ccx().pretty(PrettyFmtOpts::default()).wrap(inner_ty)
-                                ),
-                            )
-                            .emit(),
                         ));
+
+                        self.put_thir_expr(expr, ty, |bcx| todo!())
                     }
+                    TyKind::Error(err) => self.put_thir_err(expr, err),
+                    _ => self.put_thir_err(
+                        expr,
+                        Diag::span_err(
+                            expr.r(s).span,
+                            format_args!(
+                                "expected `dyn Trait`-object, got `{}`",
+                                self.ccx().pretty(PrettyFmtOpts::default()).wrap(inner_ty)
+                            ),
+                        )
+                        .emit(),
+                    ),
                 }
             }
             HirExprKind::If {
@@ -243,11 +245,14 @@ impl BodyCtxt<'_, '_> {
                     .and_do(&mut divergence);
 
                 // TODO: Flatten
-                self.check_exprs_equate(
-                    [Some(truthy), falsy].into_iter().flatten(),
-                    DivergenceJoin::Choice,
-                )
-                .and_do(&mut divergence)
+                let ty = self
+                    .check_exprs_equate(
+                        [Some(truthy), falsy].into_iter().flatten(),
+                        DivergenceJoin::Choice,
+                    )
+                    .and_do(&mut divergence);
+
+                self.put_thir_expr(expr, ty, |bcx| todo!())
             }
             HirExprKind::While(cond, block) => {
                 self.check_expr_demand(cond, tcx.intern(TyKind::Simple(SimpleTyKind::Bool)))
@@ -255,13 +260,17 @@ impl BodyCtxt<'_, '_> {
 
                 self.check_block_with_no_final_expr(block);
 
-                tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
+                let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
+
+                self.put_thir_expr(expr, ty, |bcx| todo!())
             }
             HirExprKind::Let(pat, expr) => {
                 let scrutinee = self.check_expr(expr, None).and_do(&mut divergence);
                 self.check_pat_demand(pat, scrutinee, Some(&mut divergence));
 
-                tcx.intern(TyKind::Simple(SimpleTyKind::Bool))
+                let ty = tcx.intern(TyKind::Simple(SimpleTyKind::Bool));
+
+                self.put_thir_expr(expr, ty, |bcx| todo!())
             }
             HirExprKind::ForLoop { pat, iter, body } => {
                 let iter_ty = self.check_expr(iter, None).and_do(&mut divergence);
@@ -297,7 +306,9 @@ impl BodyCtxt<'_, '_> {
 
                 self.check_block_with_no_final_expr(body);
 
-                tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
+                let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
+
+                self.put_thir_expr(expr, ty, |bcx| todo!())
             }
             HirExprKind::Loop(block) => {
                 let label = HirLabelledBlock {
@@ -308,11 +319,13 @@ impl BodyCtxt<'_, '_> {
                 self.block_break_demands.insert(label, None);
                 self.check_block_with_no_final_expr(block);
 
-                if let Some(break_ty) = self.block_break_demands[&label] {
+                let ty = if let Some(break_ty) = self.block_break_demands[&label] {
                     break_ty
                 } else {
                     tcx.intern(TyKind::Simple(SimpleTyKind::Never))
-                }
+                };
+
+                self.put_thir_expr(expr, ty, |bcx| todo!())
             }
             HirExprKind::Match(scrutinee, arms) => {
                 let scrutinee = self.check_expr(scrutinee, None).and_do(&mut divergence);
@@ -355,7 +368,8 @@ impl BodyCtxt<'_, '_> {
                 }
 
                 divergence &= body_divergence;
-                arm_demand
+
+                self.put_thir_expr(expr, arm_demand, |bcx| todo!())
             }
             HirExprKind::Block(block) => {
                 let label = HirLabelledBlock {
@@ -366,7 +380,7 @@ impl BodyCtxt<'_, '_> {
                 self.block_break_demands.insert(label, demand_hint);
                 self.check_block_stmts(&block.r(s).stmts, &mut divergence);
 
-                if let Some(last_expr) = block.r(s).last_expr {
+                let ty = if let Some(last_expr) = block.r(s).last_expr {
                     if let Some(demand) = self.block_break_demands[&label] {
                         self.check_expr_demand(last_expr, demand)
                             .and_do(&mut divergence)
@@ -397,31 +411,45 @@ impl BodyCtxt<'_, '_> {
                     } else {
                         tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
                     }
-                }
+                };
+
+                self.put_thir_expr(expr, ty, |bcx| todo!())
             }
             HirExprKind::Assign(pat, expr) => {
                 let pat_ty = self.check_pat_infer(pat, Some(&mut divergence));
                 self.check_expr_demand(expr, pat_ty).and_do(&mut divergence);
 
-                tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
+                let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
+
+                self.put_thir_expr(expr, ty, |bcx| todo!())
             }
             HirExprKind::AssignOp(kind, lhs, rhs) => {
                 self.check_expr_inner_assign_op(expr, kind, lhs, rhs, &mut divergence)
             }
             HirExprKind::Field(receiver, name) => {
-                self.check_expr_inner_field(receiver, name, &mut divergence)
+                self.check_expr_inner_field(expr, receiver, name, &mut divergence)
             }
             HirExprKind::Index(target, index) => {
                 self.check_expr_inner_index(expr, target, index, &mut divergence)
             }
-            HirExprKind::Range(expr) => self
-                .check_range_expr(expr)
-                .and_do(&mut divergence)
-                .range_ty(self),
-            HirExprKind::Local(local) => self.type_of_local(local),
+            HirExprKind::Range(inner) => {
+                let ty = self
+                    .check_range_expr(inner)
+                    .and_do(&mut divergence)
+                    .range_ty(self);
+
+                self.put_thir_expr(expr, ty, |bcx| todo!())
+            }
+            HirExprKind::Local(local) => {
+                let ty = self.type_of_local(local);
+
+                self.put_thir_expr(expr, ty, |bcx| todo!())
+            }
             HirExprKind::AddrOf(mutability, pointee) => {
                 let pointee = self.check_expr(pointee, None).and_do(&mut divergence);
-                tcx.intern(TyKind::Reference(Re::ERASED, mutability, pointee))
+                let ty = tcx.intern(TyKind::Reference(Re::ERASED, mutability, pointee));
+
+                self.put_thir_expr(expr, ty, |bcx| todo!())
             }
             HirExprKind::Break { label, value } => {
                 if label.kind.can_break_with_value() {
@@ -444,13 +472,22 @@ impl BodyCtxt<'_, '_> {
                     debug_assert!(value.is_none());
                 }
 
-                tcx.intern(TyKind::Simple(SimpleTyKind::Never))
+                let ty = tcx.intern(TyKind::Simple(SimpleTyKind::Never));
+
+                self.put_thir_expr(expr, ty, |bcx| todo!())
             }
-            HirExprKind::Continue(_label) => tcx.intern(TyKind::Simple(SimpleTyKind::Never)),
+            HirExprKind::Continue(_label) => {
+                let ty = tcx.intern(TyKind::Simple(SimpleTyKind::Never));
+
+                self.put_thir_expr(expr, ty, |bcx| todo!())
+            }
             HirExprKind::Return(rv) => {
                 self.check_expr_demand(rv, self.return_ty)
                     .ignore_divergence();
-                tcx.intern(TyKind::Simple(SimpleTyKind::Never))
+
+                let ty = tcx.intern(TyKind::Simple(SimpleTyKind::Never));
+
+                self.put_thir_expr(expr, ty, |bcx| todo!())
             }
             HirExprKind::AdtCtorTy(ty) => 'check: {
                 let ty_span = ty.r(s).span;
@@ -459,11 +496,11 @@ impl BodyCtxt<'_, '_> {
                 let ctor = match self.resolve_ty_as_adt_ctor_instance(ty_span, ty) {
                     Ok(v) => v,
                     Err(err) => {
-                        break 'check tcx.intern(TyKind::Error(err));
+                        break 'check self.put_thir_err(expr, err);
                     }
                 };
 
-                match &ctor.def.r(s).syntax {
+                let ty = match &ctor.def.r(s).syntax {
                     AdtCtorSyntax::Unit => ctor.to_adt_instance_ty(tcx),
                     AdtCtorSyntax::Tuple => {
                         _ = self.check_tuple_ctor_visibilities(ty_span, ctor);
@@ -473,19 +510,24 @@ impl BodyCtxt<'_, '_> {
                             early_args: Some(ctor.params),
                         })))
                     }
-                    AdtCtorSyntax::Named(_) => tcx.intern(TyKind::Error(
-                        Diag::span_err(
-                            ty_span,
-                            "cannot create functions out of braced constructors",
-                        )
-                        .emit(),
-                    )),
-                }
+                    AdtCtorSyntax::Named(_) => {
+                        break 'check self.put_thir_err(
+                            expr,
+                            Diag::span_err(
+                                ty_span,
+                                "cannot create functions out of braced constructors",
+                            )
+                            .emit(),
+                        );
+                    }
+                };
+
+                self.put_thir_expr(expr, ty, |bcx| todo!())
             }
             HirExprKind::AdtCtorEnumVariant(item, params) => {
                 let ctor = *item.r(s).adt_variant(s).r(s).ctor;
 
-                match &ctor.r(s).syntax {
+                let ty = match &ctor.r(s).syntax {
                     AdtCtorSyntax::Unit => {
                         let AdtInstance { def: _, params } = self.ccx_mut().import_here(
                             import_env,
@@ -521,7 +563,9 @@ impl BodyCtxt<'_, '_> {
                         )
                         .emit(),
                     )),
-                }
+                };
+
+                self.put_thir_expr(expr, ty, |bcx| todo!())
             }
             HirExprKind::Struct(HirStructExpr {
                 ctor_span,
@@ -531,18 +575,19 @@ impl BodyCtxt<'_, '_> {
             }) => 'check: {
                 let ctor = match self.resolve_adt_ctor(ctor_span, ctor) {
                     Ok(v) => v,
-                    Err(err) => break 'check tcx.intern(TyKind::Error(err)),
+                    Err(err) => break 'check self.put_thir_err(expr, err),
                 };
 
                 match &ctor.def.r(s).syntax {
                     AdtCtorSyntax::Unit | AdtCtorSyntax::Tuple => {
-                        break 'check tcx.intern(TyKind::Error(
+                        break 'check self.put_thir_err(
+                            expr,
                             Diag::span_err(
                                 ctor_span,
                                 "cannot use braced initializer for non-braced ADT constructor",
                             )
                             .emit(),
-                        ));
+                        );
                     }
                     AdtCtorSyntax::Named(_) => {
                         // (fallthrough)
@@ -584,9 +629,9 @@ impl BodyCtxt<'_, '_> {
                         .and_do(&mut divergence);
                 }
 
-                instance_ty
+                self.put_thir_expr(expr, instance_ty, |bcx| todo!())
             }
-            HirExprKind::Error(err) => tcx.intern(TyKind::Error(err)),
+            HirExprKind::Error(err) => self.put_thir_err(expr, err),
         };
 
         // Matches rustc behavior—we don't mark a subsequent expression as unreachable unless the
