@@ -49,6 +49,11 @@ pub struct ThirExprConfirmedWithTy {
     pub ty: Ty,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct ThirPatConfirmed {
+    pub pat: Obj<HirPat>,
+}
+
 /// Checking
 impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
     pub fn put_thir_expr(
@@ -66,7 +71,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         ThirExprConfirmedWithTy { expr: hir, ty }
     }
 
-    pub fn put_thir_err(
+    pub fn put_thir_expr_err(
         &mut self,
         hir: Obj<HirExpr>,
         err: ErrorGuaranteed,
@@ -96,12 +101,22 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         hir: Obj<HirPat>,
         ty: Ty,
         f: impl 'a + FnOnce(&mut Self) -> ThirPatKind,
-    ) {
+    ) -> ThirPatConfirmed {
         assert!(!self.confirm_state.started_confirmation);
 
         self.confirm_state
             .patterns
             .put(self.confirm_state.arena.clone(), hir, ty, f);
+
+        ThirPatConfirmed { pat: hir }
+    }
+
+    pub fn put_thir_pat_err(&mut self, hir: Obj<HirPat>, err: ErrorGuaranteed) -> ThirPatConfirmed {
+        let tcx = self.tcx();
+
+        self.put_thir_pat(hir, tcx.intern(TyKind::Error(err)), move |_bcx| {
+            ThirPatKind::Error(err)
+        })
     }
 
     pub fn refine_thir_pat(
@@ -192,13 +207,6 @@ impl BodyCtxt<'_, '_> {
         )
     }
 
-    pub fn confirm_opt_thir_expr_post(
-        &mut self,
-        hir: Option<Obj<HirExpr>>,
-    ) -> Option<Obj<ThirExpr>> {
-        hir.map(|expr| self.confirm_thir_expr_post(expr))
-    }
-
     pub fn confirm_thir_pat(&mut self, hir: Obj<HirPat>) -> ThirPatResolution {
         let s = self.session();
 
@@ -216,6 +224,21 @@ impl BodyCtxt<'_, '_> {
             inner: start,
             outer: end,
         }
+    }
+
+    pub fn confirm_opt_thir_expr_post(
+        &mut self,
+        hir: Option<Obj<HirExpr>>,
+    ) -> Option<Obj<ThirExpr>> {
+        hir.map(|expr| self.confirm_thir_expr_post(expr))
+    }
+
+    pub fn confirm_thir_pat_outer(&mut self, hir: Obj<HirPat>) -> Obj<ThirPat> {
+        self.confirm_thir_pat(hir).outer
+    }
+
+    pub fn confirm_opt_thir_pat_outer(&mut self, hir: Option<Obj<HirPat>>) -> Option<Obj<ThirPat>> {
+        hir.map(|pat| self.confirm_thir_pat_outer(pat))
     }
 
     pub fn confirm_thir_local(&mut self, hir: Obj<HirLocal>) -> Obj<ThirLocal> {
@@ -238,7 +261,7 @@ impl BodyCtxt<'_, '_> {
     }
 }
 
-// === Helpers === //
+// === Synthesis === //
 
 impl BodyCtxt<'_, '_> {
     pub fn confirm_thir_label(&mut self, hir: HirLabelledBlock) -> ThirLabelledBlock {

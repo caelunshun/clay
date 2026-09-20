@@ -182,8 +182,10 @@ impl BodyCtxt<'_, '_> {
                 let Some(resolution) =
                     self.lookup_type_relative(self_ty, as_trait, assoc_name, assoc_args)
                 else {
-                    break 'res self
-                        .put_thir_err(expr, Diag::span_err(assoc_name.span, "not found").emit());
+                    break 'res self.put_thir_expr_err(
+                        expr,
+                        Diag::span_err(assoc_name.span, "not found").emit(),
+                    );
                 };
 
                 self.put_thir_expr(expr, resolution, |_bcx| ThirExprKind::CreatePathZst)
@@ -228,8 +230,8 @@ impl BodyCtxt<'_, '_> {
 
                         self.put_thir_expr(expr, ty, |bcx| todo!())
                     }
-                    TyKind::Error(err) => self.put_thir_err(expr, err),
-                    _ => self.put_thir_err(
+                    TyKind::Error(err) => self.put_thir_expr_err(expr, err),
+                    _ => self.put_thir_expr_err(
                         expr,
                         Diag::span_err(
                             target.r(s).span,
@@ -533,7 +535,7 @@ impl BodyCtxt<'_, '_> {
                 let ctor = match self.resolve_ty_as_adt_ctor_instance(ty_span, ty) {
                     Ok(v) => v,
                     Err(err) => {
-                        break 'check self.put_thir_err(expr, err);
+                        break 'check self.put_thir_expr_err(expr, err);
                     }
                 };
 
@@ -548,7 +550,7 @@ impl BodyCtxt<'_, '_> {
                         })))
                     }
                     AdtCtorSyntax::Named(_) => {
-                        break 'check self.put_thir_err(
+                        break 'check self.put_thir_expr_err(
                             expr,
                             Diag::span_err(
                                 ty_span,
@@ -612,12 +614,12 @@ impl BodyCtxt<'_, '_> {
             }) => 'check: {
                 let ctor = match self.resolve_adt_ctor(ctor_span, ctor) {
                     Ok(v) => v,
-                    Err(err) => break 'check self.put_thir_err(expr, err),
+                    Err(err) => break 'check self.put_thir_expr_err(expr, err),
                 };
 
                 match &ctor.def.r(s).syntax {
                     AdtCtorSyntax::Unit | AdtCtorSyntax::Tuple => {
-                        break 'check self.put_thir_err(
+                        break 'check self.put_thir_expr_err(
                             expr,
                             Diag::span_err(
                                 ctor_span,
@@ -668,7 +670,7 @@ impl BodyCtxt<'_, '_> {
 
                 self.put_thir_expr(expr, instance_ty, |bcx| todo!())
             }
-            HirExprKind::Error(err) => self.put_thir_err(expr, err),
+            HirExprKind::Error(err) => self.put_thir_expr_err(expr, err),
         };
 
         assert_eq!(res.expr, expr);

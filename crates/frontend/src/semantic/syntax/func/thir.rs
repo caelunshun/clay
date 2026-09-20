@@ -26,7 +26,7 @@ pub struct ThirPat {
 
 #[derive(Debug, Clone)]
 pub enum ThirPatKind {
-    Wild,
+    Hole,
     Binding {
         by_ref: Option<Mutability>,
         local: Obj<ThirLocal>,

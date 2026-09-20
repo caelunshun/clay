@@ -35,7 +35,7 @@ impl BodyCtxt<'_, '_> {
                 self.check_expr(actual, None).and_do(divergence);
             }
 
-            return self.put_thir_err(expr, err);
+            return self.put_thir_expr_err(expr, err);
         }
 
         let site_span = expr.r(s).span;
@@ -70,14 +70,14 @@ impl BodyCtxt<'_, '_> {
         let TyKind::Tuple(expected_args) =
             self.ccx_mut().peel_ty_infer_var_after_poll(input_ty).r(s)
         else {
-            return self.put_thir_err(
+            return self.put_thir_expr_err(
                 expr,
                 Diag::span_err(site_span, "annotations needed on input type").emit(),
             );
         };
 
         if expected_args.r(s).len() != actual_args.r(s).len() {
-            return self.put_thir_err(
+            return self.put_thir_expr_err(
                 expr,
                 Diag::span_err(site_span, "argument count mismatch").emit(),
             );
@@ -119,10 +119,10 @@ impl BodyCtxt<'_, '_> {
                 )
                 .emit();
 
-                return self.put_thir_err(expr, err);
+                return self.put_thir_expr_err(expr, err);
             }
             TyKind::Error(err) => {
-                return self.put_thir_err(expr, err);
+                return self.put_thir_expr_err(expr, err);
             }
             _ => {
                 // (fallthrough)
@@ -134,7 +134,7 @@ impl BodyCtxt<'_, '_> {
             resolution,
         }) = self.lookup_method(receiver, name)
         else {
-            return self.put_thir_err(
+            return self.put_thir_expr_err(
                 expr,
                 Diag::span_err(name.span, "failed to find applicable method").emit(),
             );
@@ -181,7 +181,7 @@ impl BodyCtxt<'_, '_> {
             .report_loud();
 
         if expected_args.len() != args.r(s).len() {
-            return self.put_thir_err(
+            return self.put_thir_expr_err(
                 expr,
                 Diag::span_err(name.span, "argument count mismatch").emit(),
             );
@@ -207,7 +207,7 @@ impl BodyCtxt<'_, '_> {
         if let Some(ty) = self.lookup_field(receiver, name) {
             self.put_thir_expr(expr, ty, |bcx| todo!())
         } else {
-            self.put_thir_err(expr, Diag::span_err(name.span, "no such field").emit())
+            self.put_thir_expr_err(expr, Diag::span_err(name.span, "no such field").emit())
         }
     }
 }

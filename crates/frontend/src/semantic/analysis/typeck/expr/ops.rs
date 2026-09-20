@@ -124,7 +124,7 @@ impl BodyCtxt<'_, '_> {
                 }
 
                 // TODO
-                return self.put_thir_err(
+                return self.put_thir_expr_err(
                     expr,
                     Diag::anon_err(
                         SpannedError(lhs_expr.r(s).span, err)
@@ -146,7 +146,7 @@ impl BodyCtxt<'_, '_> {
                             }
 
                             // TODO
-                            return self.put_thir_err(
+                            return self.put_thir_expr_err(
                                 expr,
                                 Diag::anon_err(
                                     SpannedError(rhs_expr.r(s).span, *err).to_debug_tree(
@@ -165,7 +165,7 @@ impl BodyCtxt<'_, '_> {
                         }
 
                         // TODO
-                        return self.put_thir_err(
+                        return self.put_thir_expr_err(
                             expr,
                             Diag::anon_err(
                                 SpannedError(lhs_expr.r(s).span, err)

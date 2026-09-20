@@ -11,8 +11,8 @@ use crate::{
         syntax::{
             AdtCtorField, AdtCtorInstance, AdtCtorSyntaxStyle, AdtCtorUnresolved, AdtInstance,
             Divergence, HirPat, HirPatKind, HirPatListFrontAndTail, HirPatListFrontAndTailLen,
-            HirPatNamedField, InferTyVarSourceInfo, Mutability, Re, RelationMode, Ty, TyKind,
-            TyOrRe,
+            HirPatNamedField, InferTyVarSourceInfo, Mutability, Re, RelationMode, ThirPatKind, Ty,
+            TyKind, TyOrRe,
         },
     },
 };
@@ -54,9 +54,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         let s = self.session();
         let tcx = self.tcx();
 
-        match pat.r(s).kind {
+        let res = match pat.r(s).kind {
             HirPatKind::Hole | HirPatKind::Error(_) => {
-                // (trivially allowed)
+                self.put_thir_pat(pat, demand, move |_bcx| ThirPatKind::Hole)
             }
             HirPatKind::Binding(by_ref, name, binding) => {
                 let by_ref = by_ref
@@ -83,9 +83,19 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 if let Some(binding) = binding {
                     self.check_pat_inner(binding, demand, default_by_ref, place_divergence);
                 }
+
+                self.put_thir_pat(pat, demand, move |bcx| ThirPatKind::Binding {
+                    by_ref,
+                    local: bcx.confirm_thir_local(name),
+                    and_bind: bcx.confirm_opt_thir_pat_outer(binding),
+                })
             }
             HirPatKind::Slice(HirPatListFrontAndTail { front, tail }) => {
-                self.peel_references_from_demand_and_normalize(&mut demand, &mut default_by_ref);
+                self.peel_references_from_demand_and_normalize(
+                    pat,
+                    &mut demand,
+                    &mut default_by_ref,
+                );
 
                 let elem_ty = self.ccx_mut().fresh_ty_infer(
                     HrtbUniverse::ROOT,
@@ -131,9 +141,15 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         );
                     }
                 }
+
+                self.put_thir_pat(pat, demand, |bcx| todo!())
             }
             HirPatKind::Tuple(HirPatListFrontAndTail { front, tail: None }) => {
-                self.peel_references_from_demand_and_normalize(&mut demand, &mut default_by_ref);
+                self.peel_references_from_demand_and_normalize(
+                    pat,
+                    &mut demand,
+                    &mut default_by_ref,
+                );
 
                 let front_infer = front
                     .r(s)
@@ -169,6 +185,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         place_divergence.as_deref_mut(),
                     );
                 }
+
+                self.put_thir_pat(pat, demand, |bcx| todo!())
             }
             HirPatKind::Tuple(HirPatListFrontAndTail {
                 front,
@@ -176,6 +194,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             }) => {
                 let res = 'check: {
                     self.peel_references_from_demand_and_normalize(
+                        pat,
                         &mut demand,
                         &mut default_by_ref,
                     );
@@ -239,10 +258,18 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         .unwrap()
                         .report_never();
                 }
+
+                self.put_thir_pat(pat, demand, |bcx| todo!())
             }
             HirPatKind::Lit(expr) => {
-                self.peel_references_from_demand_and_normalize(&mut demand, &mut default_by_ref);
+                self.peel_references_from_demand_and_normalize(
+                    pat,
+                    &mut demand,
+                    &mut default_by_ref,
+                );
                 self.check_expr_demand(expr, demand).ignore_divergence();
+
+                self.put_thir_pat(pat, demand, |bcx| todo!())
             }
             HirPatKind::Or(patterns) => {
                 for &pat in patterns.r(s) {
@@ -253,6 +280,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         place_divergence.as_deref_mut(),
                     );
                 }
+
+                self.put_thir_pat(pat, demand, |bcx| todo!())
             }
             HirPatKind::Deref(mutability, pointee_pat) => {
                 let pointee_ty = self.ccx_mut().fresh_ty_infer(
@@ -276,6 +305,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     .report_loud();
 
                 self.check_pat_inner(pointee_pat, demand, default_by_ref, place_divergence);
+
+                self.put_thir_pat(pat, demand, |bcx| todo!())
             }
             HirPatKind::AdtUnit(instance) => {
                 _ = self.check_pat_ctor(
@@ -286,20 +317,23 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     &mut demand,
                     &mut default_by_ref,
                 );
+
+                self.put_thir_pat(pat, demand, |bcx| todo!())
             }
             HirPatKind::AdtTuple(instance, fields) => 'check: {
                 // Verify constructor
                 let instance_span = pat.r(s).span;
 
-                let Ok(ctor) = self.check_pat_ctor(
+                let ctor = match self.check_pat_ctor(
                     pat,
                     instance_span,
                     instance,
                     AdtCtorSyntaxStyle::Tuple,
                     &mut demand,
                     &mut default_by_ref,
-                ) else {
-                    break 'check;
+                ) {
+                    Ok(v) => v,
+                    Err(err) => break 'check self.put_thir_pat_err(pat, err),
                 };
 
                 let adt_item = ctor.def.r(s).owner.item(s);
@@ -368,20 +402,25 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         place_divergence.as_deref_mut(),
                     );
                 }
+
+                self.put_thir_pat(pat, demand, |bcx| todo!())
             }
             HirPatKind::AdtNamed(instance, fields, rest) => 'check: {
                 // Verify constructor
                 let instance_span = pat.r(s).span;
 
-                let Ok(ctor) = self.check_pat_ctor(
+                let ctor = match self.check_pat_ctor(
                     pat,
                     instance_span,
                     instance,
                     AdtCtorSyntaxStyle::Named,
                     &mut demand,
                     &mut default_by_ref,
-                ) else {
-                    break 'check;
+                ) {
+                    Ok(v) => v,
+                    Err(err) => {
+                        break 'check self.put_thir_pat_err(pat, err);
+                    }
                 };
 
                 let adt_item = ctor.def.r(s).owner.item(s);
@@ -419,10 +458,14 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         place_divergence.as_deref_mut(),
                     );
                 }
+
+                self.put_thir_pat(pat, demand, |bcx| todo!())
             }
             HirPatKind::PlaceExpr(place) => {
                 self.check_expr_demand(place, demand)
                     .and_do(place_divergence.unwrap());
+
+                self.put_thir_pat(pat, demand, |bcx| todo!())
             }
             HirPatKind::Range(expr) => {
                 let res = self.check_range_expr(expr).ignore_divergence();
@@ -437,27 +480,12 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         })
                         .report_loud();
                 }
+
+                self.put_thir_pat(pat, demand, |bcx| todo!())
             }
-        }
-    }
+        };
 
-    fn peel_references_from_demand_and_normalize(
-        &mut self,
-        demand: &mut Ty,
-        default_by_ref: &mut Option<Mutability>,
-    ) {
-        let s = self.session();
-
-        loop {
-            *demand = self.ccx_mut().peel_ty_infer_var_after_poll(*demand);
-
-            let TyKind::Reference(_re, muta, pointee) = *demand.r(s) else {
-                break;
-            };
-
-            *default_by_ref = Some((default_by_ref.unwrap_or(muta)).min(muta));
-            *demand = pointee;
-        }
+        assert_eq!(res.pat, pat);
     }
 
     fn check_pat_ctor(
@@ -474,7 +502,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
         let ctor = self.resolve_adt_ctor(instance_span, instance)?;
 
-        self.peel_references_from_demand_and_normalize(demand, default_by_ref);
+        self.peel_references_from_demand_and_normalize(pat, demand, default_by_ref);
 
         self.ccx_mut()
             .oblige_ty_unifies_ty(*demand, ctor.to_adt_instance_ty(tcx), RelationMode::Equate)
@@ -501,5 +529,27 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         }
 
         Ok(ctor)
+    }
+
+    fn peel_references_from_demand_and_normalize(
+        &mut self,
+        pat: Obj<HirPat>,
+        demand: &mut Ty,
+        default_by_ref: &mut Option<Mutability>,
+    ) {
+        let s = self.session();
+
+        loop {
+            *demand = self.ccx_mut().peel_ty_infer_var_after_poll(*demand);
+
+            let TyKind::Reference(_re, muta, pointee) = *demand.r(s) else {
+                break;
+            };
+
+            self.refine_thir_pat(pat, *demand, |_bcx, inner| ThirPatKind::Deref(inner));
+
+            *default_by_ref = Some((default_by_ref.unwrap_or(muta)).min(muta));
+            *demand = pointee;
+        }
     }
 }
