@@ -37,7 +37,7 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
         bcx.check_expr_demand(body, bcx.return_ty)
             .ignore_divergence();
 
-        bcx.confirm();
+        bcx.begin_confirmation();
     } else {
         for arg in def.r(s).args.r(s) {
             ccx.import_here(&env_sig, arg.ty);
@@ -59,13 +59,6 @@ pub(super) struct BodyCtxt<'a, 'tcx> {
     pub block_break_demands: FxHashMap<HirLabelledBlock, Option<Ty>>,
     pub confirm_state: BodyCtxtConfirmState<'a, 'tcx>,
     pub return_ty: Ty,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum OverloadResolution {
-    Primitive,
-    Call,
-    Error(ErrorGuaranteed),
 }
 
 impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {

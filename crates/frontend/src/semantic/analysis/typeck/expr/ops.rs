@@ -5,7 +5,7 @@ use crate::{
     },
     parse::ast::{AstAssignOpKind, AstBinOpKind, AstBinOpSpanned, AstUnOpKind},
     semantic::{
-        analysis::typeck::{BodyCtxt, OverloadResolution},
+        analysis::typeck::BodyCtxt,
         infer::{ClauseCx, ClauseFuel, HrtbUniverse, PrettyFmtOpts, SpannedError, ToDebugTree},
         syntax::{
             Divergence, HirExpr, HirPat, InferTyVarSourceInfo, RelationMode, SimpleTyKind,
@@ -99,9 +99,6 @@ impl BodyCtxt<'_, '_> {
 
             *self.ccx_mut() = prim_fork;
 
-            self.overload_resolutions
-                .insert(expr, OverloadResolution::Primitive);
-
             return match kind_info.out {
                 EquateOrTy::EqualsLhs => lhs,
                 EquateOrTy::Unrelated(ty) => ty,
@@ -134,9 +131,6 @@ impl BodyCtxt<'_, '_> {
             })
             .report_loud();
 
-        self.overload_resolutions
-            .insert(expr, OverloadResolution::Call);
-
         result_ty
     }
 
@@ -163,9 +157,6 @@ impl BodyCtxt<'_, '_> {
                 .unify_ty_and_simple_set(lhs_ty, kind_info.lhs)
                 .is_ok()
             {
-                self.overload_resolutions
-                    .insert(expr, OverloadResolution::Primitive);
-
                 return lhs_ty;
             }
         }
@@ -174,9 +165,6 @@ impl BodyCtxt<'_, '_> {
             && let lhs_ty = self.ccx_mut().peel_ty_infer_var_after_poll(lhs_ty)
             && let TyKind::Reference(_re, _muta, pointee) = *lhs_ty.r(s)
         {
-            self.overload_resolutions
-                .insert(expr, OverloadResolution::Primitive);
-
             return pointee;
         }
 
@@ -205,9 +193,6 @@ impl BodyCtxt<'_, '_> {
                 move |_ccx, error| SpannedError(span, error)
             })
             .report_loud();
-
-        self.overload_resolutions
-            .insert(expr, OverloadResolution::Call);
 
         result_ty
     }

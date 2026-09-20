@@ -439,8 +439,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 }
             }
         }
-
-        self.pat_types_pre_adjust.insert(pat, demand);
     }
 
     fn peel_references_from_demand_and_normalize(

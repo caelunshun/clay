@@ -196,7 +196,7 @@ impl BodyCtxt<'_, '_> {
                         InferTyVarSourceInfo::Literal { span: lit.span() },
                         constraints,
                     );
-                    self.int_infers.push(var);
+                    self.register_infer_with_fallback(var);
                     tcx.intern(TyKind::InferVar(var))
                 }
                 AstLit::Char(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Char)),
@@ -648,8 +648,6 @@ impl BodyCtxt<'_, '_> {
         {
             divergence = Divergence::MustDiverge;
         }
-
-        self.expr_types_pre_coerce.insert(expr, ty);
 
         TyAndDivergence::new(ty, divergence)
     }

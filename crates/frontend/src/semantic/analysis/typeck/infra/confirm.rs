@@ -25,7 +25,7 @@ pub struct BodyCtxtConfirmState<'a, 'tcx> {
     started_confirmation: bool,
     expressions: ConfirmMap<'a, 'tcx, HirExpr, ThirExpr>,
     patterns: ConfirmMap<'a, 'tcx, HirPat, ThirPat>,
-    int_infers: Vec<InferTyVar>,
+    fallback_infers: Vec<InferTyVar>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -49,6 +49,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         let ConfirmResolution { start, end } = ConfirmMap::resolve(
             self,
             |bcx| &mut bcx.confirm_state.expressions,
+            ConfirmOrder::BuildingOutwards,
             hir.r(s).span,
             hir,
         );
@@ -85,6 +86,15 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             .refine(self.confirm_state.arena.clone(), hir, ty, f);
     }
 
+    pub fn assert_thir_expr_defined(&self, hir: Obj<HirExpr>) {
+        assert!(!self.confirm_state.started_confirmation);
+
+        assert!(
+            self.confirm_state.expressions.is_defined(hir),
+            "expression not defined"
+        );
+    }
+
     pub fn resolve_thir_pat(&mut self, hir: Obj<HirPat>) -> ThirPatResolution {
         let s = self.session();
 
@@ -93,6 +103,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         let ConfirmResolution { start, end } = ConfirmMap::resolve(
             self,
             |bcx| &mut bcx.confirm_state.patterns,
+            ConfirmOrder::BuildingInwards,
             hir.r(s).span,
             hir,
         );
@@ -129,6 +140,19 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             .refine(self.confirm_state.arena.clone(), hir, ty, f);
     }
 
+    pub fn assert_thir_pat_defined(&self, hir: Obj<HirPat>) {
+        assert!(!self.confirm_state.started_confirmation);
+
+        assert!(
+            self.confirm_state.patterns.is_defined(hir),
+            "pattern not defined"
+        );
+    }
+
+    pub fn register_infer_with_fallback(&mut self, var: InferTyVar) {
+        self.confirm_state.fallback_infers.push(var);
+    }
+
     pub fn resolve_local(&mut self, hir: Obj<HirLocal>) -> Obj<ThirLocal> {
         todo!()
     }
@@ -137,8 +161,10 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         todo!()
     }
 
-    pub fn confirm(&mut self) {
-        todo!()
+    pub fn begin_confirmation(&mut self) {
+        assert!(!self.confirm_state.started_confirmation);
+
+        self.confirm_state.started_confirmation = true;
     }
 }
 
@@ -238,6 +264,12 @@ impl<'a, 'tcx> Confirmable<'a, 'tcx> for ThirPat {
     }
 }
 
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+enum ConfirmOrder {
+    BuildingOutwards,
+    BuildingInwards,
+}
+
 #[derive_where(Default)]
 struct ConfirmMap<'a, 'tcx, K, V>
 where
@@ -284,9 +316,10 @@ where
     K: 'static,
     V: Confirmable<'a, 'tcx>,
 {
-    pub fn resolve<FP>(
+    fn resolve<FP>(
         bcx: &mut BodyCtxt<'a, 'tcx>,
         mut project: FP,
+        order: ConfirmOrder,
         hir_span: Span,
         hir: Obj<K>,
     ) -> ConfirmResolution<V>
@@ -303,8 +336,17 @@ where
             Some(ConfirmDefinition {
                 base_meta,
                 base_func,
-                refinements,
+                mut refinements,
             }) => {
+                match order {
+                    ConfirmOrder::BuildingOutwards => {
+                        // (fallthrough)
+                    }
+                    ConfirmOrder::BuildingInwards => {
+                        refinements.reverse();
+                    }
+                }
+
                 // Create placeholders for the start and end of the refinement chain to allow for
                 // reentrant resolution.
                 let start = V::create_placeholder(bcx, hir_span, &base_meta);
@@ -357,7 +399,7 @@ where
         }
     }
 
-    pub fn put(
+    fn put(
         &mut self,
         arena: Rc<Bump>,
         hir: Obj<K>,
@@ -384,7 +426,7 @@ where
         });
     }
 
-    pub fn refine(
+    fn refine(
         &mut self,
         arena: Rc<Bump>,
         hir: Obj<K>,
@@ -412,5 +454,11 @@ where
                     )
                 },
             });
+    }
+
+    fn is_defined(&self, hir: Obj<K>) -> bool {
+        self.entries
+            .get(&hir)
+            .is_some_and(|v| v.definition.is_some())
     }
 }
