@@ -6,10 +6,11 @@ use crate::{
     },
     semantic::{
         analysis::typeck::BodyCtxt,
+        infer::FloatingInferVar,
         syntax::{
-            HirBlock, HirExpr, HirLocal, HirPat, HirStmt, InferTyVar, SimpleTyKind, ThirBlock,
-            ThirExpr, ThirExprKind, ThirLetStmt, ThirLocal, ThirPat, ThirPatKind, ThirStmt, Ty,
-            TyKind,
+            HirBlock, HirExpr, HirLocal, HirPat, HirStmt, InferTyVar, RelationMode, SimpleTyKind,
+            ThirBlock, ThirExpr, ThirExprKind, ThirLetStmt, ThirLocal, ThirPat, ThirPatKind,
+            ThirStmt, Ty, TyKind,
         },
     },
     utils::{hash::FxHashMap, mem::ArenaRc},
@@ -49,12 +50,12 @@ pub struct ThirExprConfirmedWithTy {
 }
 
 impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
-    pub fn resolve_thir_expr(&mut self, hir: Obj<HirExpr>) -> ThirExprResolution {
+    pub fn confirm_thir_expr(&mut self, hir: Obj<HirExpr>) -> ThirExprResolution {
         let s = self.session();
 
         assert!(self.confirm_state.started_confirmation);
 
-        let ConfirmResolution { start, end } = ConfirmMap::resolve(
+        let ConfirmResolution { start, end } = ConfirmMap::confirm(
             self,
             |bcx| &mut bcx.confirm_state.expressions,
             ConfirmOrder::BuildingOutwards,
@@ -66,6 +67,29 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             pre_coerce: start,
             post_coerce: end,
         }
+    }
+
+    pub fn confirm_thir_expr_post(&mut self, hir: Obj<HirExpr>) -> Obj<ThirExpr> {
+        self.confirm_thir_expr(hir).post_coerce
+    }
+
+    pub fn confirm_thir_expr_list_post(
+        &mut self,
+        hir: Obj<[Obj<HirExpr>]>,
+    ) -> Obj<[Obj<ThirExpr>]> {
+        let s = self.session();
+
+        Obj::new_iter(
+            hir.r(s).iter().map(|&hir| self.confirm_thir_expr_post(hir)),
+            s,
+        )
+    }
+
+    pub fn confirm_opt_thir_expr_post(
+        &mut self,
+        hir: Option<Obj<HirExpr>>,
+    ) -> Option<Obj<ThirExpr>> {
+        hir.map(|expr| self.confirm_thir_expr_post(expr))
     }
 
     pub fn put_thir_expr(
@@ -108,12 +132,12 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             .refine(self.confirm_state.arena.clone(), hir, ty, f);
     }
 
-    pub fn resolve_thir_pat(&mut self, hir: Obj<HirPat>) -> ThirPatResolution {
+    pub fn confirm_thir_pat(&mut self, hir: Obj<HirPat>) -> ThirPatResolution {
         let s = self.session();
 
         assert!(self.confirm_state.started_confirmation);
 
-        let ConfirmResolution { start, end } = ConfirmMap::resolve(
+        let ConfirmResolution { start, end } = ConfirmMap::confirm(
             self,
             |bcx| &mut bcx.confirm_state.patterns,
             ConfirmOrder::BuildingInwards,
@@ -157,7 +181,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         self.confirm_state.fallback_infers.push(var);
     }
 
-    pub fn resolve_thir_local(&mut self, hir: Obj<HirLocal>) -> Obj<ThirLocal> {
+    pub fn confirm_thir_local(&mut self, hir: Obj<HirLocal>) -> Obj<ThirLocal> {
         let s = self.session();
 
         let ty = self.type_of_local(hir);
@@ -176,7 +200,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         })
     }
 
-    pub fn resolve_thir_block_uncached(
+    pub fn confirm_thir_block_uncached(
         &mut self,
         hir: Obj<HirBlock>,
         ret_ty: Ty,
@@ -193,19 +217,14 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     .stmts
                     .iter()
                     .map(|&stmt| match stmt {
-                        HirStmt::Expr(expr) => {
-                            ThirStmt::Expr(self.resolve_thir_expr(expr).post_coerce)
-                        }
+                        HirStmt::Expr(expr) => ThirStmt::Expr(self.confirm_thir_expr_post(expr)),
                         HirStmt::Let(stmt) => ThirStmt::Let(Obj::new(
                             ThirLetStmt {
                                 span: stmt.r(s).span,
-                                pat: self.resolve_thir_pat(stmt.r(s).pat).outer,
-                                init: stmt
-                                    .r(s)
-                                    .init
-                                    .map(|expr| self.resolve_thir_expr(expr).post_coerce),
+                                pat: self.confirm_thir_pat(stmt.r(s).pat).outer,
+                                init: self.confirm_opt_thir_expr_post(stmt.r(s).init),
                                 else_clause: stmt.r(s).else_clause.map(|block| {
-                                    self.resolve_thir_block_uncached(
+                                    self.confirm_thir_block_uncached(
                                         block,
                                         tcx.intern(TyKind::Simple(SimpleTyKind::Never)),
                                     )
@@ -215,21 +234,43 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         )),
                     })
                     .collect::<Vec<_>>(),
-                last_expr: hir
-                    .r(s)
-                    .last_expr
-                    .map(|expr| self.resolve_thir_expr(expr).post_coerce),
+                last_expr: self.confirm_opt_thir_expr_post(hir.r(s).last_expr),
             },
             s,
         )
     }
 
     pub fn begin_confirmation(&mut self) {
-        assert!(!self.confirm_state.started_confirmation);
+        let tcx = self.tcx();
 
+        assert!(!self.confirm_state.started_confirmation);
         self.confirm_state.started_confirmation = true;
 
-        // TODO: handle fallbacks
+        // Assign fallbacks to integer literal inference holes.
+        self.ccx_mut().poll_obligations();
+
+        for idx in 0..self.confirm_state.fallback_infers.len() {
+            let var = self.confirm_state.fallback_infers[idx];
+
+            let Err(FloatingInferVar { perm_set, .. }) =
+                self.ccx().lookup_ty_infer_var_without_poll(var)
+            else {
+                continue;
+            };
+
+            let var_ty = tcx.intern(TyKind::InferVar(var));
+
+            let Some(fallback) = perm_set.to_infer_fallback(tcx) else {
+                continue;
+            };
+
+            self.ucx_mut()
+                .unify_ty_and_ty(var_ty, fallback, RelationMode::Equate)
+                .unwrap()
+                .report_never();
+
+            self.ccx_mut().poll_obligations();
+        }
     }
 }
 
@@ -381,7 +422,7 @@ where
     K: 'static,
     V: Confirmable<'a, 'tcx>,
 {
-    fn resolve<FP>(
+    fn confirm<FP>(
         bcx: &mut BodyCtxt<'a, 'tcx>,
         mut project: FP,
         order: ConfirmOrder,
@@ -519,11 +560,5 @@ where
                     )
                 },
             });
-    }
-
-    fn is_defined(&self, hir: Obj<K>) -> bool {
-        self.entries
-            .get(&hir)
-            .is_some_and(|v| v.definition.is_some())
     }
 }

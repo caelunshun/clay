@@ -1,7 +1,7 @@
 use crate::{
     base::{
         Diag,
-        arena::{HasInterner as _, HasListInterner as _, Obj},
+        arena::{HasListInterner as _, Obj},
     },
     parse::token::Ident,
     semantic::{
@@ -12,7 +12,7 @@ use crate::{
         infer::{ClauseFuel, FixArity, HrtbUniverse, SpannedError},
         syntax::{
             Divergence, HirExpr, InferTyVarSourceInfo, InstantiatedFnSig, RelationMode,
-            SigGenericList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            SigGenericList, ThirExprKind, TraitParam, TraitSpec, TyKind, TyOrRe,
         },
     },
 };
@@ -21,14 +21,14 @@ impl BodyCtxt<'_, '_> {
     pub fn check_expr_inner_call(
         &mut self,
         expr: Obj<HirExpr>,
-        callee: Obj<HirExpr>,
+        callee_expr: Obj<HirExpr>,
         actual_args: Obj<[Obj<HirExpr>]>,
         divergence: &mut Divergence,
     ) -> ThirExprConfirmedWithTy {
         let tcx = self.tcx();
         let s = self.session();
 
-        let callee = self.check_expr(callee, None).and_do(divergence);
+        let callee = self.check_expr(callee_expr, None).and_do(divergence);
 
         if let TyKind::Error(err) = *self.ccx_mut().peel_ty_infer_var_after_poll(callee).r(s) {
             for &actual in actual_args.r(s) {
@@ -87,7 +87,12 @@ impl BodyCtxt<'_, '_> {
             self.check_expr_demand(actual, expected).and_do(divergence);
         }
 
-        self.put_thir_expr(expr, output_ty, |_bcx| todo!())
+        self.put_thir_expr(expr, output_ty, move |bcx| {
+            ThirExprKind::Call(
+                bcx.confirm_thir_expr_post(callee_expr),
+                bcx.confirm_thir_expr_list_post(actual_args),
+            )
+        })
     }
 
     pub fn check_expr_inner_method_call(

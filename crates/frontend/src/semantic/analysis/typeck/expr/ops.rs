@@ -12,7 +12,8 @@ use crate::{
         infer::{ClauseCx, ClauseFuel, HrtbUniverse, PrettyFmtOpts, SpannedError, ToDebugTree},
         syntax::{
             Divergence, FloatKind, HirExpr, HirPat, InferTyVarSourceInfo, IntKind, RelationMode,
-            SimpleTyKind, SimpleTySet, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            SimpleTyKind, SimpleTySet, ThirExprKind, TraitItem, TraitParam, TraitSpec, Ty, TyKind,
+            TyOrRe,
         },
     },
 };
@@ -23,7 +24,7 @@ impl BodyCtxt<'_, '_> {
     pub fn check_expr_inner_lit(
         &mut self,
         expr: Obj<HirExpr>,
-        lit: &AstLit,
+        lit: AstLit,
     ) -> ThirExprConfirmedWithTy {
         let tcx = self.tcx();
 
@@ -89,7 +90,7 @@ impl BodyCtxt<'_, '_> {
             AstLit::Bool(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Bool)),
         };
 
-        self.put_thir_expr(expr, ty, |bcx| todo!())
+        self.put_thir_expr(expr, ty, move |bcx| ThirExprKind::CreateLiteral(lit))
     }
 
     pub fn check_expr_inner_bin_op(

@@ -42,10 +42,7 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
 
         bcx.begin_confirmation();
 
-        LateInit::init(
-            &def.r(s).thir_body,
-            Some(bcx.resolve_thir_expr(body).post_coerce),
-        );
+        LateInit::init(&def.r(s).thir_body, Some(bcx.confirm_thir_expr_post(body)));
     } else {
         for arg in def.r(s).args.r(s) {
             ccx.import_here(&env_sig, arg.ty);
