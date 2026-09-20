@@ -5,45 +5,34 @@ use crate::{
     },
     parse::token::Ident,
     semantic::{
-        analysis::typeck::{
-            BodyCtxt,
-            infra::{confirm::ThirLateExpr, lookup::LookupMethodResult},
-        },
+        analysis::typeck::{BodyCtxt, infra::lookup::LookupMethodResult},
         infer::{ClauseFuel, FixArity, HrtbUniverse, SpannedError},
         syntax::{
-            Divergence, DivergenceAnd, HirExpr, InferTyVarSourceInfo, InstantiatedFnSig,
-            RelationMode, SigGenericList, ThirExprKind, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            Divergence, HirExpr, InferTyVarSourceInfo, InstantiatedFnSig, RelationMode,
+            SigGenericList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
         },
     },
 };
 
-impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
+impl BodyCtxt<'_, '_> {
     pub fn check_expr_inner_call(
         &mut self,
         expr: Obj<HirExpr>,
         callee: Obj<HirExpr>,
         actual_args: Obj<[Obj<HirExpr>]>,
-    ) -> DivergenceAnd<ThirLateExpr<'a, 'tcx>> {
+        divergence: &mut Divergence,
+    ) -> Ty {
         let tcx = self.tcx();
         let s = self.session();
 
-        let mut divergence = Divergence::MayDiverge;
+        let callee = self.check_expr(callee, None).and_do(divergence);
 
-        let callee = self.check_expr(callee, None).and_do(&mut divergence);
-
-        if let TyKind::Error(err) = *self
-            .ccx_mut()
-            .peel_ty_infer_var_after_poll(callee.ty())
-            .r(s)
-        {
+        if let TyKind::Error(err) = *self.ccx_mut().peel_ty_infer_var_after_poll(callee).r(s) {
             for &actual in actual_args.r(s) {
-                self.check_expr(actual, None).and_do(&mut divergence);
+                self.check_expr(actual, None).and_do(divergence);
             }
 
-            return DivergenceAnd::new(
-                ThirLateExpr::new_err(expr.r(s).span, err, self),
-                divergence,
-            );
+            return tcx.intern(TyKind::Error(err));
         }
 
         let site_span = expr.r(s).span;
@@ -62,7 +51,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             .oblige_ty_meets_trait_instantiated(
                 ClauseFuel::new(),
                 HrtbUniverse::ROOT,
-                callee.ty(),
+                callee,
                 TraitSpec {
                     def: fn_once_trait,
                     params: tcx.intern_list(&[
@@ -78,50 +67,22 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         let TyKind::Tuple(expected_args) =
             self.ccx_mut().peel_ty_infer_var_after_poll(input_ty).r(s)
         else {
-            return DivergenceAnd::new(
-                ThirLateExpr::new_err(
-                    expr.r(s).span,
-                    Diag::span_err(site_span, "annotations needed on input type").emit(),
-                    self,
-                ),
-                divergence,
-            );
+            return tcx.intern(TyKind::Error(
+                Diag::span_err(site_span, "annotations needed on input type").emit(),
+            ));
         };
 
         if expected_args.r(s).len() != actual_args.r(s).len() {
-            return DivergenceAnd::new(
-                ThirLateExpr::new_err(
-                    expr.r(s).span,
-                    Diag::span_err(site_span, "argument count mismatch").emit(),
-                    self,
-                ),
-                divergence,
-            );
+            return tcx.intern(TyKind::Error(
+                Diag::span_err(site_span, "argument count mismatch").emit(),
+            ));
         }
-
-        let mut arg_exprs = Vec::new();
 
         for (&actual, &expected) in actual_args.r(s).iter().zip(expected_args.r(s)) {
-            arg_exprs.push(
-                self.check_expr_demand(actual, expected)
-                    .and_do(&mut divergence)
-                    .thir(),
-            );
+            self.check_expr_demand(actual, expected).and_do(divergence);
         }
 
-        DivergenceAnd::new(
-            ThirLateExpr::new(
-                expr.r(s).span,
-                output_ty,
-                move |bcx| {
-                    let s = bcx.session();
-
-                    ThirExprKind::Call(callee.thir(), Obj::new_iter(arg_exprs, s))
-                },
-                self,
-            ),
-            divergence,
-        )
+        output_ty
     }
 
     pub fn check_expr_inner_method_call(

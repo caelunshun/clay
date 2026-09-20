@@ -9,25 +9,22 @@ use crate::{
         token::{IntegralKind, NumLitBase, TokenNumLitKind},
     },
     semantic::{
-        analysis::typeck::{
-            BodyCtxt,
-            infra::confirm::{ThirConfirmPhase, ThirLateExpr},
-        },
+        analysis::typeck::BodyCtxt,
         infer::{
             ClauseFuel, ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse, PrettyFmtOpts,
             SpannedError,
         },
         syntax::{
-            AdtCtorSyntax, AdtInstance, Divergence, DivergenceAnd, DivergenceJoin, DynSiteIdx,
-            FloatKind, FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirLabelledBlock,
+            AdtCtorSyntax, AdtInstance, Divergence, DivergenceJoin, DynSiteIdx, FloatKind,
+            FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirLabelledBlock,
             HirMatchArm, HirStmt, HirStructExpr, InferTyVarSourceInfo, IntKind, LabelTargetKind,
             Re, RelationMode, SigAdtInstance, SimpleTyKind, SimpleTySet, TraitParam, TraitSpec, Ty,
-            TyKind, TyOrRe, UniversalTy, UniversalTyRootSourceInfo,
+            TyAndDivergence, TyKind, TyOrRe, UniversalTy, UniversalTyRootSourceInfo,
         },
     },
 };
 
-impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
+impl BodyCtxt<'_, '_> {
     pub fn check_block_with_no_final_expr(&mut self, block: Obj<HirBlock>) -> Divergence {
         let s = self.session();
 
@@ -94,7 +91,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         &mut self,
         expr: Obj<HirExpr>,
         demand_hint: Option<Ty>,
-    ) -> DivergenceAnd<ThirLateExpr<'a, 'tcx>> {
+    ) -> TyAndDivergence {
         let s = self.session();
         let tcx = self.tcx();
         let import_env = self.import_env;
@@ -199,10 +196,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         InferTyVarSourceInfo::Literal { span: lit.span() },
                         constraints,
                     );
-
-                    // TODO: infer missing variables
-                    self.queue_confirm_task(ThirConfirmPhase::InferHoles, move |bcx| todo!());
-
+                    self.int_infers.push(var);
                     tcx.intern(TyKind::InferVar(var))
                 }
                 AstLit::Char(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Char)),
@@ -476,7 +470,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 .check_range_expr(expr)
                 .and_do(&mut divergence)
                 .range_ty(self),
-            HirExprKind::Local(local) => self.type_of_local(local).ty(),
+            HirExprKind::Local(local) => self.type_of_local(local),
             HirExprKind::AddrOf(mutability, pointee) => {
                 let pointee = self.check_expr(pointee, None).and_do(&mut divergence);
                 tcx.intern(TyKind::Reference(Re::ERASED, mutability, pointee))
@@ -655,6 +649,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             divergence = Divergence::MustDiverge;
         }
 
-        DivergenceAnd::new(ty, divergence)
+        self.expr_types_pre_coerce.insert(expr, ty);
+
+        TyAndDivergence::new(ty, divergence)
     }
 }

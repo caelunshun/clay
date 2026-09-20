@@ -20,8 +20,8 @@ pub struct ThirLocal {
 #[derive(Debug, Clone)]
 pub struct ThirPat {
     pub span: Span,
-    pub ty: LateInit<SigTy>,
-    pub kind: LateInit<ThirPatKind>,
+    pub ty: SigTy,
+    pub kind: ThirPatKind,
 }
 
 #[derive(Debug, Clone)]
