@@ -56,6 +56,7 @@ pub enum ThirExprKind {
     PrimitiveUnOp(AstUnOpKind, Obj<ThirExpr>),
     NoOp(Obj<ThirExpr>),
     Break(ThirLabelledBlock, Option<Obj<ThirExpr>>),
+    Continue(ThirLabelledBlock),
     Return(Obj<ThirExpr>),
     Assign(Obj<ThirPat>, Obj<ThirExpr>),
     Block(Obj<ThirBlock>),

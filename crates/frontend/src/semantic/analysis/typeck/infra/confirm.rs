@@ -8,9 +8,9 @@ use crate::{
         analysis::typeck::BodyCtxt,
         infer::FloatingInferVar,
         syntax::{
-            HirBlock, HirExpr, HirLocal, HirPat, HirStmt, InferTyVar, RelationMode, SimpleTyKind,
-            ThirBlock, ThirExpr, ThirExprKind, ThirLetStmt, ThirLocal, ThirPat, ThirPatKind,
-            ThirStmt, Ty, TyKind,
+            HirBlock, HirExpr, HirLabelledBlock, HirLocal, HirPat, HirStmt, InferTyVar,
+            RelationMode, SimpleTyKind, ThirBlock, ThirExpr, ThirExprKind, ThirLabelledBlock,
+            ThirLetStmt, ThirLocal, ThirPat, ThirPatKind, ThirStmt, Ty, TyKind,
         },
     },
     utils::{hash::FxHashMap, mem::ArenaRc},
@@ -19,7 +19,7 @@ use bumpalo::Bump;
 use derive_where::derive_where;
 use std::{cell::Cell, rc::Rc};
 
-// === Public === //
+// === Infrastructure === //
 
 #[derive(Default)]
 pub struct BodyCtxtConfirmState<'a, 'tcx> {
@@ -49,7 +49,114 @@ pub struct ThirExprConfirmedWithTy {
     pub ty: Ty,
 }
 
+/// Checking
 impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
+    pub fn put_thir_expr(
+        &mut self,
+        hir: Obj<HirExpr>,
+        ty: Ty,
+        f: impl 'a + FnOnce(&mut Self) -> ThirExprKind,
+    ) -> ThirExprConfirmedWithTy {
+        assert!(!self.confirm_state.started_confirmation);
+
+        self.confirm_state
+            .expressions
+            .put(self.confirm_state.arena.clone(), hir, ty, f);
+
+        ThirExprConfirmedWithTy { expr: hir, ty }
+    }
+
+    pub fn put_thir_err(
+        &mut self,
+        hir: Obj<HirExpr>,
+        err: ErrorGuaranteed,
+    ) -> ThirExprConfirmedWithTy {
+        let tcx = self.tcx();
+
+        self.put_thir_expr(hir, tcx.intern(TyKind::Error(err)), move |_bcx| {
+            ThirExprKind::Error(err)
+        })
+    }
+
+    pub fn refine_thir_expr(
+        &mut self,
+        hir: Obj<HirExpr>,
+        ty: Ty,
+        f: impl 'a + FnOnce(&mut Self, Obj<ThirExpr>) -> ThirExprKind,
+    ) {
+        assert!(!self.confirm_state.started_confirmation);
+
+        self.confirm_state
+            .expressions
+            .refine(self.confirm_state.arena.clone(), hir, ty, f);
+    }
+
+    pub fn put_thir_pat(
+        &mut self,
+        hir: Obj<HirPat>,
+        ty: Ty,
+        f: impl 'a + FnOnce(&mut Self) -> ThirPatKind,
+    ) {
+        assert!(!self.confirm_state.started_confirmation);
+
+        self.confirm_state
+            .patterns
+            .put(self.confirm_state.arena.clone(), hir, ty, f);
+    }
+
+    pub fn refine_thir_pat(
+        &mut self,
+        hir: Obj<HirPat>,
+        ty: Ty,
+        f: impl 'a + FnOnce(&mut Self, Obj<ThirPat>) -> ThirPatKind,
+    ) {
+        assert!(!self.confirm_state.started_confirmation);
+
+        self.confirm_state
+            .patterns
+            .refine(self.confirm_state.arena.clone(), hir, ty, f);
+    }
+
+    pub fn register_infer_with_fallback(&mut self, var: InferTyVar) {
+        self.confirm_state.fallback_infers.push(var);
+    }
+}
+
+/// Confirmation
+impl BodyCtxt<'_, '_> {
+    pub fn begin_confirmation(&mut self) {
+        let tcx = self.tcx();
+
+        assert!(!self.confirm_state.started_confirmation);
+        self.confirm_state.started_confirmation = true;
+
+        // Assign fallbacks to integer literal inference holes.
+        self.ccx_mut().poll_obligations();
+
+        for idx in 0..self.confirm_state.fallback_infers.len() {
+            let var = self.confirm_state.fallback_infers[idx];
+
+            let Err(FloatingInferVar { perm_set, .. }) =
+                self.ccx().lookup_ty_infer_var_without_poll(var)
+            else {
+                continue;
+            };
+
+            let var_ty = tcx.intern(TyKind::InferVar(var));
+
+            let Some(fallback) = perm_set.to_infer_fallback(tcx) else {
+                continue;
+            };
+
+            self.ucx_mut()
+                .unify_ty_and_ty(var_ty, fallback, RelationMode::Equate)
+                .unwrap()
+                .report_never();
+
+            self.ccx_mut().poll_obligations();
+        }
+    }
+
     pub fn confirm_thir_expr(&mut self, hir: Obj<HirExpr>) -> ThirExprResolution {
         let s = self.session();
 
@@ -92,46 +199,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         hir.map(|expr| self.confirm_thir_expr_post(expr))
     }
 
-    pub fn put_thir_expr(
-        &mut self,
-        hir: Obj<HirExpr>,
-        ty: Ty,
-        f: impl 'a + FnOnce(&mut Self) -> ThirExprKind,
-    ) -> ThirExprConfirmedWithTy {
-        assert!(!self.confirm_state.started_confirmation);
-
-        self.confirm_state
-            .expressions
-            .put(self.confirm_state.arena.clone(), hir, ty, f);
-
-        ThirExprConfirmedWithTy { expr: hir, ty }
-    }
-
-    pub fn put_thir_err(
-        &mut self,
-        hir: Obj<HirExpr>,
-        err: ErrorGuaranteed,
-    ) -> ThirExprConfirmedWithTy {
-        let tcx = self.tcx();
-
-        self.put_thir_expr(hir, tcx.intern(TyKind::Error(err)), move |_bcx| {
-            ThirExprKind::Error(err)
-        })
-    }
-
-    pub fn refine_thir_expr(
-        &mut self,
-        hir: Obj<HirExpr>,
-        ty: Ty,
-        f: impl 'a + FnOnce(&mut Self, Obj<ThirExpr>) -> ThirExprKind,
-    ) {
-        assert!(!self.confirm_state.started_confirmation);
-
-        self.confirm_state
-            .expressions
-            .refine(self.confirm_state.arena.clone(), hir, ty, f);
-    }
-
     pub fn confirm_thir_pat(&mut self, hir: Obj<HirPat>) -> ThirPatResolution {
         let s = self.session();
 
@@ -151,36 +218,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         }
     }
 
-    pub fn put_thir_pat(
-        &mut self,
-        hir: Obj<HirPat>,
-        ty: Ty,
-        f: impl 'a + FnOnce(&mut Self) -> ThirPatKind,
-    ) {
-        assert!(!self.confirm_state.started_confirmation);
-
-        self.confirm_state
-            .patterns
-            .put(self.confirm_state.arena.clone(), hir, ty, f);
-    }
-
-    pub fn refine_thir_pat(
-        &mut self,
-        hir: Obj<HirPat>,
-        ty: Ty,
-        f: impl 'a + FnOnce(&mut Self, Obj<ThirPat>) -> ThirPatKind,
-    ) {
-        assert!(!self.confirm_state.started_confirmation);
-
-        self.confirm_state
-            .patterns
-            .refine(self.confirm_state.arena.clone(), hir, ty, f);
-    }
-
-    pub fn register_infer_with_fallback(&mut self, var: InferTyVar) {
-        self.confirm_state.fallback_infers.push(var);
-    }
-
     pub fn confirm_thir_local(&mut self, hir: Obj<HirLocal>) -> Obj<ThirLocal> {
         let s = self.session();
 
@@ -198,6 +235,19 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 s,
             )
         })
+    }
+}
+
+// === Helpers === //
+
+impl BodyCtxt<'_, '_> {
+    pub fn confirm_thir_label(&mut self, hir: HirLabelledBlock) -> ThirLabelledBlock {
+        let HirLabelledBlock { target, kind } = hir;
+
+        ThirLabelledBlock {
+            target: self.confirm_thir_expr(target).pre_coerce,
+            kind,
+        }
     }
 
     pub fn confirm_thir_block_uncached(
@@ -238,39 +288,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             },
             s,
         )
-    }
-
-    pub fn begin_confirmation(&mut self) {
-        let tcx = self.tcx();
-
-        assert!(!self.confirm_state.started_confirmation);
-        self.confirm_state.started_confirmation = true;
-
-        // Assign fallbacks to integer literal inference holes.
-        self.ccx_mut().poll_obligations();
-
-        for idx in 0..self.confirm_state.fallback_infers.len() {
-            let var = self.confirm_state.fallback_infers[idx];
-
-            let Err(FloatingInferVar { perm_set, .. }) =
-                self.ccx().lookup_ty_infer_var_without_poll(var)
-            else {
-                continue;
-            };
-
-            let var_ty = tcx.intern(TyKind::InferVar(var));
-
-            let Some(fallback) = perm_set.to_infer_fallback(tcx) else {
-                continue;
-            };
-
-            self.ucx_mut()
-                .unify_ty_and_ty(var_ty, fallback, RelationMode::Equate)
-                .unwrap()
-                .report_never();
-
-            self.ccx_mut().poll_obligations();
-        }
     }
 }
 

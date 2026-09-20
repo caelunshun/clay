@@ -502,12 +502,19 @@ impl BodyCtxt<'_, '_> {
 
                 let ty = tcx.intern(TyKind::Simple(SimpleTyKind::Never));
 
-                self.put_thir_expr(expr, ty, move |bcx| todo!())
+                self.put_thir_expr(expr, ty, move |bcx| {
+                    ThirExprKind::Break(
+                        bcx.confirm_thir_label(label),
+                        bcx.confirm_opt_thir_expr_post(value),
+                    )
+                })
             }
-            HirExprKind::Continue(_label) => {
+            HirExprKind::Continue(label) => {
                 let ty = tcx.intern(TyKind::Simple(SimpleTyKind::Never));
 
-                self.put_thir_expr(expr, ty, |bcx| todo!())
+                self.put_thir_expr(expr, ty, move |bcx| {
+                    ThirExprKind::Continue(bcx.confirm_thir_label(label))
+                })
             }
             HirExprKind::Return(rv) => {
                 self.check_expr_demand(rv, self.return_ty)
@@ -515,7 +522,9 @@ impl BodyCtxt<'_, '_> {
 
                 let ty = tcx.intern(TyKind::Simple(SimpleTyKind::Never));
 
-                self.put_thir_expr(expr, ty, |bcx| todo!())
+                self.put_thir_expr(expr, ty, move |bcx| {
+                    ThirExprKind::Return(bcx.confirm_thir_expr_post(rv))
+                })
             }
             HirExprKind::AdtCtorTy(ty) => 'check: {
                 let ty_span = ty.r(s).span;

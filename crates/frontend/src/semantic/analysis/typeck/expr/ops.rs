@@ -1,7 +1,7 @@
 use crate::{
     base::{
         Diag,
-        arena::{HasInterner, HasListInterner as _, Obj},
+        arena::{HasInterner, HasListInterner as _, LateInit, Obj},
     },
     parse::{
         ast::{AstAssignOpKind, AstBinOpKind, AstBinOpSpanned, AstLit, AstUnOpKind},
@@ -11,9 +11,9 @@ use crate::{
         analysis::typeck::{BodyCtxt, infra::confirm::ThirExprConfirmedWithTy},
         infer::{ClauseCx, ClauseFuel, HrtbUniverse, PrettyFmtOpts, SpannedError, ToDebugTree},
         syntax::{
-            Divergence, FloatKind, HirExpr, HirPat, InferTyVarSourceInfo, IntKind, RelationMode,
-            SimpleTyKind, SimpleTySet, ThirExprKind, TraitItem, TraitParam, TraitSpec, Ty, TyKind,
-            TyOrRe,
+            Divergence, FloatKind, FnInstanceInner, FnOwner, HirExpr, HirPat, InferTyVarSourceInfo,
+            IntKind, RelationMode, SimpleTyKind, SimpleTySet, ThirExpr, ThirExprKind, TraitItem,
+            TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
         },
     },
 };
@@ -90,7 +90,7 @@ impl BodyCtxt<'_, '_> {
             AstLit::Bool(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Bool)),
         };
 
-        self.put_thir_expr(expr, ty, move |bcx| ThirExprKind::CreateLiteral(lit))
+        self.put_thir_expr(expr, ty, move |_bcx| ThirExprKind::CreateLiteral(lit))
     }
 
     pub fn check_expr_inner_bin_op(
@@ -184,7 +184,13 @@ impl BodyCtxt<'_, '_> {
                 EquateOrTy::Unrelated(ty) => ty,
             };
 
-            return self.put_thir_expr(expr, ty, |bcx| todo!());
+            return self.put_thir_expr(expr, ty, move |bcx| {
+                ThirExprKind::PrimitiveBinOp(
+                    kind.kind,
+                    bcx.confirm_thir_expr_post(lhs_expr),
+                    bcx.confirm_thir_expr_post(rhs_expr),
+                )
+            });
         };
 
         // Otherwise, attempt to perform an overloaded operation.
@@ -213,7 +219,43 @@ impl BodyCtxt<'_, '_> {
             })
             .report_loud();
 
-        self.put_thir_expr(expr, result_ty, |bcx| todo!())
+        self.put_thir_expr(expr, result_ty, move |bcx| {
+            let s = bcx.session();
+
+            ThirExprKind::Call(
+                Obj::new(
+                    ThirExpr {
+                        span: expr.r(s).span,
+                        ty: bcx.ccx_mut().export(
+                            expr.r(s).span,
+                            tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
+                                owner: FnOwner::Trait {
+                                    instance: TraitSpec {
+                                        def: overload,
+                                        params: tcx.intern_list(&[
+                                            TraitParam::Equals(TyOrRe::Ty(rhs)),
+                                            TraitParam::Equals(TyOrRe::Ty(result_ty)),
+                                        ]),
+                                    },
+                                    self_ty: lhs,
+                                    method_idx: 0,
+                                },
+                                early_args: Some(tcx.intern_list(&[])),
+                            }))),
+                        ),
+                        kind: LateInit::new(ThirExprKind::CreatePathZst),
+                    },
+                    s,
+                ),
+                Obj::new_iter(
+                    [
+                        bcx.confirm_thir_expr_post(lhs_expr),
+                        bcx.confirm_thir_expr_post(rhs_expr),
+                    ],
+                    s,
+                ),
+            )
+        })
     }
 
     pub fn check_expr_inner_un_op(
@@ -290,81 +332,79 @@ impl BodyCtxt<'_, '_> {
         let tcx = self.tcx();
         let s = self.session();
 
-        'assign: {
-            let lhs = self.check_pat_infer(lhs, Some(divergence));
-            let rhs = self.check_expr(rhs, None).and_do(divergence);
+        let lhs = self.check_pat_infer(lhs, Some(divergence));
+        let rhs = self.check_expr(rhs, None).and_do(divergence);
 
-            let kind_info = self.decode_assign_op_kind(kind);
+        let kind_info = self.decode_assign_op_kind(kind);
 
-            // Attempt a primitive operation.
-            'try_prim: {
-                // See above.
-                let mut prim_fork = self.ccx().clone();
+        // Attempt a primitive operation.
+        'try_prim: {
+            // See above.
+            let mut prim_fork = self.ccx().clone();
 
-                let lhs = peel_ref_for_prim_op(&mut prim_fork, lhs);
-                let rhs = peel_ref_for_prim_op(&mut prim_fork, rhs);
+            let lhs = peel_ref_for_prim_op(&mut prim_fork, lhs);
+            let rhs = peel_ref_for_prim_op(&mut prim_fork, rhs);
 
-                if prim_fork
-                    .unify_ty_and_simple_set(lhs, kind_info.lhs)
-                    .is_err()
-                {
-                    break 'try_prim;
-                }
+            if prim_fork
+                .unify_ty_and_simple_set(lhs, kind_info.lhs)
+                .is_err()
+            {
+                break 'try_prim;
+            }
 
-                match kind_info.rhs {
-                    EquateOrSet::EqualsLhs => {
-                        match prim_fork.unify_ty_and_ty(lhs, rhs, RelationMode::Equate) {
-                            Ok(promise) => {
-                                promise.report_loud();
-                            }
-                            Err(_) => {
-                                break 'try_prim;
-                            }
+            match kind_info.rhs {
+                EquateOrSet::EqualsLhs => {
+                    match prim_fork.unify_ty_and_ty(lhs, rhs, RelationMode::Equate) {
+                        Ok(promise) => {
+                            promise.report_loud();
                         }
-                    }
-                    EquateOrSet::Unrelated(rhs_set) => {
-                        if prim_fork.unify_ty_and_simple_set(lhs, rhs_set).is_err() {
+                        Err(_) => {
                             break 'try_prim;
                         }
                     }
                 }
-
-                *self.ccx_mut() = prim_fork;
-
-                let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
-
-                return self.put_thir_expr(expr, ty, |bcx| todo!());
+                EquateOrSet::Unrelated(rhs_set) => {
+                    if prim_fork.unify_ty_and_simple_set(lhs, rhs_set).is_err() {
+                        break 'try_prim;
+                    }
+                }
             }
 
-            // Otherwise, attempt to perform an overloaded operation.
-            let result_ty = self.ccx_mut().fresh_ty_infer(
-                HrtbUniverse::ROOT,
-                InferTyVarSourceInfo::OverloadedResult {
-                    span: expr.r(s).span,
-                },
-            );
+            *self.ccx_mut() = prim_fork;
 
-            self.ccx_mut()
-                .oblige_ty_meets_trait_instantiated(
-                    ClauseFuel::new(),
-                    HrtbUniverse::ROOT,
-                    lhs,
-                    TraitSpec {
-                        def: kind_info.overload.unwrap(),
-                        params: tcx.intern_list(&[
-                            TraitParam::Equals(TyOrRe::Ty(rhs)),
-                            TraitParam::Equals(TyOrRe::Ty(result_ty)),
-                        ]),
-                    },
-                )
-                // TODO
-                .map({
-                    let span = expr.r(s).span;
+            let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
 
-                    move |_ccx, error| SpannedError(span, error)
-                })
-                .report_loud();
+            return self.put_thir_expr(expr, ty, |bcx| todo!());
         }
+
+        // Otherwise, attempt to perform an overloaded operation.
+        let result_ty = self.ccx_mut().fresh_ty_infer(
+            HrtbUniverse::ROOT,
+            InferTyVarSourceInfo::OverloadedResult {
+                span: expr.r(s).span,
+            },
+        );
+
+        self.ccx_mut()
+            .oblige_ty_meets_trait_instantiated(
+                ClauseFuel::new(),
+                HrtbUniverse::ROOT,
+                lhs,
+                TraitSpec {
+                    def: kind_info.overload.unwrap(),
+                    params: tcx.intern_list(&[
+                        TraitParam::Equals(TyOrRe::Ty(rhs)),
+                        TraitParam::Equals(TyOrRe::Ty(result_ty)),
+                    ]),
+                },
+            )
+            // TODO
+            .map({
+                let span = expr.r(s).span;
+
+                move |_ccx, error| SpannedError(span, error)
+            })
+            .report_loud();
 
         let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
 

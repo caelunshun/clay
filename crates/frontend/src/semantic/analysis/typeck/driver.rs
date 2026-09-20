@@ -119,7 +119,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         self.ccx.ucx()
     }
 
-    #[expect(unused)]
     pub fn ucx_mut(&mut self) -> &mut UnifyCx<'tcx> {
         self.ccx.ucx_mut()
     }
