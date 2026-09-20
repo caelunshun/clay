@@ -13,8 +13,8 @@ use crate::{
             AdtCtorSyntax, AdtInstance, Divergence, DivergenceJoin, DynSiteIdx, FnInstanceInner,
             FnOwner, HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirMatchArm, HirStmt,
             HirStructExpr, InferTyVarSourceInfo, LabelTargetKind, Re, RelationMode, SigAdtInstance,
-            SimpleTyKind, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe, UniversalTy,
-            UniversalTyRootSourceInfo,
+            SimpleTyKind, ThirExprKind, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            UniversalTy, UniversalTyRootSourceInfo,
         },
     },
 };
@@ -415,7 +415,9 @@ impl BodyCtxt<'_, '_> {
                     }
                 };
 
-                self.put_thir_expr(expr, ty, |bcx| todo!())
+                self.put_thir_expr(expr, ty, move |bcx| {
+                    ThirExprKind::Block(bcx.resolve_thir_block_uncached(block, ty))
+                })
             }
             HirExprKind::Assign(pat, rhs) => {
                 let pat_ty = self.check_pat_infer(pat, Some(&mut divergence));

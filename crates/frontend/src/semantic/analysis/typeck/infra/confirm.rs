@@ -7,8 +7,9 @@ use crate::{
     semantic::{
         analysis::typeck::BodyCtxt,
         syntax::{
-            HirBlock, HirExpr, HirLocal, HirPat, InferTyVar, ThirBlock, ThirExpr, ThirExprKind,
-            ThirLocal, ThirPat, ThirPatKind, Ty, TyKind,
+            HirBlock, HirExpr, HirLocal, HirPat, HirStmt, InferTyVar, SimpleTyKind, ThirBlock,
+            ThirExpr, ThirExprKind, ThirLetStmt, ThirLocal, ThirPat, ThirPatKind, ThirStmt, Ty,
+            TyKind,
         },
     },
     utils::{hash::FxHashMap, mem::ArenaRc},
@@ -175,8 +176,52 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         })
     }
 
-    pub fn resolve_thir_block(&mut self, hir: Obj<HirBlock>) -> Obj<ThirBlock> {
-        todo!()
+    pub fn resolve_thir_block_uncached(
+        &mut self,
+        hir: Obj<HirBlock>,
+        ret_ty: Ty,
+    ) -> Obj<ThirBlock> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        Obj::new(
+            ThirBlock {
+                span: hir.r(s).span,
+                ty: self.ccx_mut().export(hir.r(s).span, ret_ty),
+                stmts: hir
+                    .r(s)
+                    .stmts
+                    .iter()
+                    .map(|&stmt| match stmt {
+                        HirStmt::Expr(expr) => {
+                            ThirStmt::Expr(self.resolve_thir_expr(expr).post_coerce)
+                        }
+                        HirStmt::Let(stmt) => ThirStmt::Let(Obj::new(
+                            ThirLetStmt {
+                                span: stmt.r(s).span,
+                                pat: self.resolve_thir_pat(stmt.r(s).pat).outer,
+                                init: stmt
+                                    .r(s)
+                                    .init
+                                    .map(|expr| self.resolve_thir_expr(expr).post_coerce),
+                                else_clause: stmt.r(s).else_clause.map(|block| {
+                                    self.resolve_thir_block_uncached(
+                                        block,
+                                        tcx.intern(TyKind::Simple(SimpleTyKind::Never)),
+                                    )
+                                }),
+                            },
+                            s,
+                        )),
+                    })
+                    .collect::<Vec<_>>(),
+                last_expr: hir
+                    .r(s)
+                    .last_expr
+                    .map(|expr| self.resolve_thir_expr(expr).post_coerce),
+            },
+            s,
+        )
     }
 
     pub fn begin_confirmation(&mut self) {

@@ -1,5 +1,8 @@
 use crate::{
-    base::{ErrorGuaranteed, Session, arena::Obj},
+    base::{
+        Session,
+        arena::{LateInit, Obj},
+    },
     semantic::{
         analysis::{sigck::CrateSigckVisitor, typeck::infra::confirm::BodyCtxtConfirmState},
         infer::{ClauseCx, ClauseImportEnv, HrtbUniverse, UnifyCx, UnifyCxMode},
@@ -38,12 +41,19 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
             .ignore_divergence();
 
         bcx.begin_confirmation();
+
+        LateInit::init(
+            &def.r(s).thir_body,
+            Some(bcx.resolve_thir_expr(body).post_coerce),
+        );
     } else {
         for arg in def.r(s).args.r(s) {
             ccx.import_here(&env_sig, arg.ty);
         }
 
         ccx.import_here(&env_sig, *def.r(s).ret_ty);
+
+        LateInit::init(&def.r(s).thir_body, None);
     }
 
     ccx.verify();
