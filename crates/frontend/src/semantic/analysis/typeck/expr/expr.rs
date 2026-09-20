@@ -4,7 +4,7 @@ use crate::{
         arena::{HasInterner as _, HasListInterner as _, Obj},
     },
     semantic::{
-        analysis::typeck::{BodyCtxt, infra::confirm::ThirExprConfirmedWithTy},
+        analysis::typeck::BodyCtxt,
         infer::{
             ClauseFuel, ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse, PrettyFmtOpts,
             SpannedError,
@@ -92,7 +92,7 @@ impl BodyCtxt<'_, '_> {
         let import_env = self.import_env;
 
         let mut divergence = Divergence::MayDiverge;
-        let ThirExprConfirmedWithTy { ty } = match *expr.r(s).kind {
+        let res = match *expr.r(s).kind {
             HirExprKind::Array(elems) => {
                 let elem = if elems.r(s).is_empty() {
                     self.ccx_mut().fresh_ty_infer(
@@ -186,16 +186,18 @@ impl BodyCtxt<'_, '_> {
 
                 self.put_thir_expr(expr, resolution, |bcx| todo!())
             }
-            HirExprKind::Cast(expr, as_ty) => {
+            HirExprKind::Cast(target, as_ty) => {
                 let env = self.import_env;
                 let as_ty = self.ccx_mut().import_here(env, as_ty);
 
-                let ty = self.check_expr_demand(expr, as_ty).and_do(&mut divergence);
+                let ty = self
+                    .check_expr_demand(target, as_ty)
+                    .and_do(&mut divergence);
 
                 self.put_thir_expr(expr, ty, |bcx| todo!())
             }
-            HirExprKind::Use(expr) => {
-                let inner_ty = self.check_expr(expr, None).and_do(&mut divergence);
+            HirExprKind::Use(target) => {
+                let inner_ty = self.check_expr(target, None).and_do(&mut divergence);
                 let inner_ty = self.ccx_mut().peel_ty_infer_var_after_poll(inner_ty);
 
                 match *inner_ty.r(s) {
@@ -204,7 +206,7 @@ impl BodyCtxt<'_, '_> {
                             UniversalTy::Root(self.ccx_mut().fresh_ty_universal_root_idx(
                                 HrtbUniverse::ROOT,
                                 UniversalTyRootSourceInfo::UsedDyn {
-                                    span: expr.r(s).span,
+                                    span: target.r(s).span,
                                     // TODO: allocate these and confirm them so we can do analysis
                                     // in MIR.
                                     site: DynSiteIdx::from_raw(0),
@@ -226,7 +228,7 @@ impl BodyCtxt<'_, '_> {
                     _ => self.put_thir_err(
                         expr,
                         Diag::span_err(
-                            expr.r(s).span,
+                            target.r(s).span,
                             format_args!(
                                 "expected `dyn Trait`-object, got `{}`",
                                 self.ccx().pretty(PrettyFmtOpts::default()).wrap(inner_ty)
@@ -264,8 +266,8 @@ impl BodyCtxt<'_, '_> {
 
                 self.put_thir_expr(expr, ty, |bcx| todo!())
             }
-            HirExprKind::Let(pat, expr) => {
-                let scrutinee = self.check_expr(expr, None).and_do(&mut divergence);
+            HirExprKind::Let(pat, scrutinee) => {
+                let scrutinee = self.check_expr(scrutinee, None).and_do(&mut divergence);
                 self.check_pat_demand(pat, scrutinee, Some(&mut divergence));
 
                 let ty = tcx.intern(TyKind::Simple(SimpleTyKind::Bool));
@@ -415,9 +417,9 @@ impl BodyCtxt<'_, '_> {
 
                 self.put_thir_expr(expr, ty, |bcx| todo!())
             }
-            HirExprKind::Assign(pat, expr) => {
+            HirExprKind::Assign(pat, rhs) => {
                 let pat_ty = self.check_pat_infer(pat, Some(&mut divergence));
-                self.check_expr_demand(expr, pat_ty).and_do(&mut divergence);
+                self.check_expr_demand(rhs, pat_ty).and_do(&mut divergence);
 
                 let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
 
@@ -634,16 +636,16 @@ impl BodyCtxt<'_, '_> {
             HirExprKind::Error(err) => self.put_thir_err(expr, err),
         };
 
+        assert_eq!(res.expr, expr);
+
         // Matches rustc behavior—we don't mark a subsequent expression as unreachable unless the
         // primitive `Never` type is returned.
         if let TyKind::Simple(SimpleTyKind::Never) =
-            self.ccx_mut().peel_ty_infer_var_after_poll(ty).r(s)
+            self.ccx_mut().peel_ty_infer_var_after_poll(res.ty).r(s)
         {
             divergence = Divergence::MustDiverge;
         }
 
-        self.assert_thir_expr_defined(expr);
-
-        TyAndDivergence::new(ty, divergence)
+        TyAndDivergence::new(res.ty, divergence)
     }
 }

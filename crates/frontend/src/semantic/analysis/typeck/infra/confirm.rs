@@ -43,6 +43,7 @@ pub struct ThirPatResolution {
 
 #[derive(Debug, Copy, Clone)]
 pub struct ThirExprConfirmedWithTy {
+    pub expr: Obj<HirExpr>,
     pub ty: Ty,
 }
 
@@ -78,7 +79,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             .expressions
             .put(self.confirm_state.arena.clone(), hir, ty, f);
 
-        ThirExprConfirmedWithTy { ty }
+        ThirExprConfirmedWithTy { expr: hir, ty }
     }
 
     pub fn put_thir_err(
@@ -104,15 +105,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         self.confirm_state
             .expressions
             .refine(self.confirm_state.arena.clone(), hir, ty, f);
-    }
-
-    pub fn assert_thir_expr_defined(&self, hir: Obj<HirExpr>) {
-        assert!(!self.confirm_state.started_confirmation);
-
-        assert!(
-            self.confirm_state.expressions.is_defined(hir),
-            "expression not defined"
-        );
     }
 
     pub fn resolve_thir_pat(&mut self, hir: Obj<HirPat>) -> ThirPatResolution {
@@ -158,15 +150,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         self.confirm_state
             .patterns
             .refine(self.confirm_state.arena.clone(), hir, ty, f);
-    }
-
-    pub fn assert_thir_pat_defined(&self, hir: Obj<HirPat>) {
-        assert!(!self.confirm_state.started_confirmation);
-
-        assert!(
-            self.confirm_state.patterns.is_defined(hir),
-            "pattern not defined"
-        );
     }
 
     pub fn register_infer_with_fallback(&mut self, var: InferTyVar) {

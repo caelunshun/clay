@@ -1,5 +1,11 @@
 use bumpalo::Bump;
-use std::{cell::Cell, mem::MaybeUninit, ops::Deref, ptr::NonNull, rc::Rc};
+use std::{
+    cell::Cell,
+    mem::{self, MaybeUninit},
+    ops::Deref,
+    ptr::NonNull,
+    rc::Rc,
+};
 
 pub struct ArenaRc<T: ?Sized> {
     header: NonNull<ElemHeader>,
@@ -57,10 +63,14 @@ impl<T> ArenaRc<T> {
     pub fn map<V: ?Sized>(me: Self, f: impl FnOnce(&T) -> &V) -> ArenaRc<V> {
         let pointee = NonNull::from(f(&me));
 
-        ArenaRc {
+        let mapped = ArenaRc {
             header: me.header,
             pointee,
-        }
+        };
+
+        mem::forget(me);
+
+        mapped
     }
 }
 
