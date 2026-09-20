@@ -4,8 +4,7 @@ use crate::{
         analysis::{sigck::CrateSigckVisitor, typeck::infra::confirm::BodyCtxtConfirmState},
         infer::{ClauseCx, ClauseImportEnv, HrtbUniverse, UnifyCx, UnifyCxMode},
         syntax::{
-            Crate, FnDef, HirExpr, HirLabelledBlock, HirLocal, HirPat, InferTyVar,
-            InferTyVarSourceInfo, Item, Ty, TyCtxt,
+            Crate, FnDef, HirLabelledBlock, HirLocal, InferTyVarSourceInfo, Item, Ty, TyCtxt,
         },
     },
     utils::hash::FxHashMap,
@@ -58,10 +57,6 @@ pub(super) struct BodyCtxt<'a, 'tcx> {
     pub import_env: &'a ClauseImportEnv,
     pub local_types: FxHashMap<Obj<HirLocal>, Ty>,
     pub block_break_demands: FxHashMap<HirLabelledBlock, Option<Ty>>,
-    pub int_infers: Vec<InferTyVar>,
-    pub expr_types_pre_coerce: FxHashMap<Obj<HirExpr>, Ty>,
-    pub overload_resolutions: FxHashMap<Obj<HirExpr>, OverloadResolution>,
-    pub pat_types_pre_adjust: FxHashMap<Obj<HirPat>, Ty>,
     pub confirm_state: BodyCtxtConfirmState<'a, 'tcx>,
     pub return_ty: Ty,
 }
@@ -89,10 +84,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             import_env,
             local_types: FxHashMap::default(),
             block_break_demands: FxHashMap::default(),
-            int_infers: Vec::new(),
-            expr_types_pre_coerce: FxHashMap::default(),
-            overload_resolutions: FxHashMap::default(),
-            pat_types_pre_adjust: FxHashMap::default(),
             confirm_state: BodyCtxtConfirmState::default(),
             return_ty,
         }

@@ -43,7 +43,7 @@ pub enum ThirPatKind {
 #[derive(Debug, Clone)]
 pub struct ThirExpr {
     pub span: Span,
-    pub ty: LateInit<SigTy>,
+    pub ty: SigTy,
     pub kind: LateInit<ThirExprKind>,
 }
 
