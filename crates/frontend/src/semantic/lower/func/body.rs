@@ -298,7 +298,7 @@ impl IntraItemLowerCtxt<'_> {
                 HirExprKind::Assign(self.lower_lvalue(lhs), self.lower_expr(rhs))
             }
             AstExprKind::AssignOp(op, lhs, rhs) => {
-                HirExprKind::AssignOp(*op, self.lower_lvalue(lhs), self.lower_expr(rhs))
+                HirExprKind::AssignOp(*op, self.lower_expr(lhs), self.lower_expr(rhs))
             }
             AstExprKind::Field(expr, name) => HirExprKind::Field(self.lower_expr(expr), *name),
             AstExprKind::GenericMethodCall {

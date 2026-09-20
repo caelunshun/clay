@@ -227,7 +227,7 @@ pub enum HirExprKind {
     Match(Obj<HirExpr>, Obj<[Obj<HirMatchArm>]>),
     Block(Obj<HirBlock>),
     Assign(Obj<HirPat>, Obj<HirExpr>),
-    AssignOp(AstAssignOpKind, Obj<HirPat>, Obj<HirExpr>),
+    AssignOp(AstAssignOpKind, Obj<HirExpr>, Obj<HirExpr>),
     Field(Obj<HirExpr>, Ident),
     MethodCall {
         receiver: Obj<HirExpr>,

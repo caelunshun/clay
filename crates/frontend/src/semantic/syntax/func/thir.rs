@@ -58,7 +58,7 @@ pub enum ThirExprKind {
     Break(ThirLabelledBlock, Option<Obj<ThirExpr>>),
     Continue(ThirLabelledBlock),
     Return(Obj<ThirExpr>),
-    Assign(Obj<ThirPat>, Obj<ThirExpr>),
+    Assign(Obj<ThirExpr>, Obj<ThirExpr>),
     Block(Obj<ThirBlock>),
     Loop(Obj<ThirBlock>),
     AddrOf(Mutability, Obj<ThirExpr>),

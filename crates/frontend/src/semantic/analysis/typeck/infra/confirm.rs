@@ -39,6 +39,7 @@ pub struct ThirExprResolution {
 
 #[derive(Debug, Copy, Clone)]
 pub struct ThirPatResolution {
+    #[expect(unused)]
     pub inner: Obj<ThirPat>,
     pub outer: Obj<ThirPat>,
 }

@@ -325,14 +325,14 @@ impl BodyCtxt<'_, '_> {
         &mut self,
         expr: Obj<HirExpr>,
         kind: AstAssignOpKind,
-        lhs: Obj<HirPat>,
+        lhs: Obj<HirExpr>,
         rhs: Obj<HirExpr>,
         divergence: &mut Divergence,
     ) -> ThirExprConfirmedWithTy {
         let tcx = self.tcx();
         let s = self.session();
 
-        let lhs = self.check_pat_infer(lhs, Some(divergence));
+        let lhs = self.check_expr(lhs, None).and_do(divergence);
         let rhs = self.check_expr(rhs, None).and_do(divergence);
 
         let kind_info = self.decode_assign_op_kind(kind);

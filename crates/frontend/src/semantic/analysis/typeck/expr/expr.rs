@@ -67,7 +67,7 @@ impl BodyCtxt<'_, '_> {
                         )
                     };
 
-                    self.check_pat_demand(stmt.r(s).pat, ascription, Some(divergence));
+                    self.check_pat_demand(stmt.r(s).pat, ascription, None);
 
                     if let Some(else_clause) = stmt.r(s).else_clause {
                         let divergence = self.check_block_with_no_final_expr(else_clause);
@@ -283,7 +283,7 @@ impl BodyCtxt<'_, '_> {
             }
             HirExprKind::Let(pat, scrutinee) => {
                 let scrutinee = self.check_expr(scrutinee, None).and_do(&mut divergence);
-                self.check_pat_demand(pat, scrutinee, Some(&mut divergence));
+                self.check_pat_demand(pat, scrutinee, None);
 
                 let ty = tcx.intern(TyKind::Simple(SimpleTyKind::Bool));
 
@@ -319,7 +319,7 @@ impl BodyCtxt<'_, '_> {
                     })
                     .report_loud();
 
-                self.check_pat_demand(pat, elem_ty, Some(&mut divergence));
+                self.check_pat_demand(pat, elem_ty, None);
 
                 self.check_block_with_no_final_expr(body);
 
@@ -375,7 +375,7 @@ impl BodyCtxt<'_, '_> {
 
                     let mut arm_divergence = Divergence::MayDiverge;
 
-                    self.check_pat_demand(pat, scrutinee, Some(&mut arm_divergence));
+                    self.check_pat_demand(pat, scrutinee, None);
 
                     if let Some(guard) = guard {
                         self.check_expr_demand(
@@ -442,12 +442,7 @@ impl BodyCtxt<'_, '_> {
                 })
             }
             HirExprKind::Assign(pat, rhs) => {
-                let pat_ty = self.check_pat_infer(pat, Some(&mut divergence));
-                self.check_expr_demand(rhs, pat_ty).and_do(&mut divergence);
-
-                let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
-
-                self.put_thir_expr(expr, ty, |bcx| todo!())
+                self.check_expr_inner_assign(expr, pat, rhs, &mut divergence)
             }
             HirExprKind::AssignOp(kind, lhs, rhs) => {
                 self.check_expr_inner_assign_op(expr, kind, lhs, rhs, &mut divergence)

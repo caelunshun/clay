@@ -1,28 +1,125 @@
 use crate::{
     base::{
         Diag, ErrorGuaranteed,
-        arena::{HasInterner as _, HasListInterner, Obj},
+        arena::{HasInterner as _, HasListInterner, LateInit, Obj},
         syntax::Span,
     },
-    parse::ast::{AstMutability, AstPatStructRest},
+    parse::{
+        ast::{AstMutability, AstPatStructRest},
+        token::Ident,
+    },
     semantic::{
-        analysis::typeck::BodyCtxt,
+        analysis::typeck::{BodyCtxt, infra::confirm::ThirExprConfirmedWithTy},
         infer::{ClauseImportEnv, GenericSubst, HrtbUniverse, PrettyFmtOpts, SpannedError},
         syntax::{
             AdtCtorField, AdtCtorInstance, AdtCtorSyntaxStyle, AdtCtorUnresolved, AdtInstance,
-            Divergence, HirPat, HirPatKind, HirPatListFrontAndTail, HirPatListFrontAndTailLen,
-            HirPatNamedField, InferTyVarSourceInfo, Mutability, Re, RelationMode, ThirPatKind, Ty,
-            TyKind, TyOrRe,
+            Divergence, HirExpr, HirLocal, HirPat, HirPatKind, HirPatListFrontAndTail,
+            HirPatListFrontAndTailLen, HirPatNamedField, InferTyVarSourceInfo, LocalNameIdent,
+            Mutability, Re, RelationMode, ThirBlock, ThirExpr, ThirExprKind, ThirLetStmt,
+            ThirPatKind, ThirStmt, Ty, TyKind, TyOrRe,
         },
     },
+    symbol,
 };
 
+#[derive(Debug)]
+pub struct PatLvalueState {
+    pub divergence: Divergence,
+    pub temporaries: Vec<PatLvalueTemp>,
+}
+
+impl Default for PatLvalueState {
+    fn default() -> Self {
+        Self {
+            divergence: Divergence::MayDiverge,
+            temporaries: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct PatLvalueTemp {
+    pub stash: Obj<HirLocal>,
+    pub place: Obj<HirExpr>,
+}
+
 impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
-    pub fn check_pat_infer(
+    pub fn check_expr_inner_assign(
         &mut self,
-        pat: Obj<HirPat>,
-        place_divergence: Option<&mut Divergence>,
-    ) -> Ty {
+        expr: Obj<HirExpr>,
+        lhs: Obj<HirPat>,
+        rhs: Obj<HirExpr>,
+        divergence: &mut Divergence,
+    ) -> ThirExprConfirmedWithTy {
+        let tcx = self.tcx();
+
+        let mut pat_lvalue_state = PatLvalueState::default();
+        let pat_ty = self.check_pat_infer(lhs, Some(&mut pat_lvalue_state));
+
+        *divergence &= pat_lvalue_state.divergence;
+
+        self.check_expr_demand(rhs, pat_ty).and_do(divergence);
+
+        let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
+
+        self.put_thir_expr(expr, ty, move |bcx| {
+            let s = bcx.session();
+            let tcx = bcx.tcx();
+
+            let unit_ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
+            let unit_ty_exp = bcx.ccx_mut().export(expr.r(s).span, unit_ty);
+
+            let stmts = [ThirStmt::Let(Obj::new(
+                ThirLetStmt {
+                    span: expr.r(s).span,
+                    pat: bcx.confirm_thir_pat_outer(lhs),
+                    init: Some(bcx.confirm_thir_expr_post(rhs)),
+                    else_clause: None,
+                },
+                s,
+            ))]
+            .into_iter()
+            .chain(pat_lvalue_state.temporaries.into_iter().map(
+                |PatLvalueTemp { stash, place }| {
+                    let stash_ty = bcx.type_of_local(stash);
+
+                    ThirStmt::Expr(Obj::new(
+                        ThirExpr {
+                            span: expr.r(s).span,
+                            ty: unit_ty_exp,
+                            kind: LateInit::new(ThirExprKind::Assign(
+                                bcx.confirm_thir_expr_post(place),
+                                Obj::new(
+                                    ThirExpr {
+                                        span: place.r(s).span,
+                                        ty: bcx.ccx_mut().export(place.r(s).span, stash_ty),
+                                        kind: LateInit::new(ThirExprKind::Local(
+                                            bcx.confirm_thir_local(stash),
+                                        )),
+                                    },
+                                    s,
+                                ),
+                            )),
+                        },
+                        s,
+                    ))
+                },
+            ))
+            .collect::<Vec<_>>();
+
+            ThirExprKind::Block(Obj::new(
+                ThirBlock {
+                    span: expr.r(s).span,
+                    ty: unit_ty_exp,
+                    stmts,
+                    last_expr: None,
+                },
+                s,
+            ))
+        })
+    }
+
+    pub fn check_pat_infer(&mut self, pat: Obj<HirPat>, lvalue: Option<&mut PatLvalueState>) -> Ty {
         let s = self.session();
         let infer = self.ccx_mut().fresh_ty_infer(
             HrtbUniverse::ROOT,
@@ -31,7 +128,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             },
         );
 
-        self.check_pat_demand(pat, infer, place_divergence);
+        self.check_pat_demand(pat, infer, lvalue);
         infer
     }
 
@@ -39,9 +136,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         &mut self,
         pat: Obj<HirPat>,
         demand: Ty,
-        place_divergence: Option<&mut Divergence>,
+        lvalue: Option<&mut PatLvalueState>,
     ) {
-        self.check_pat_inner(pat, demand, None, place_divergence)
+        self.check_pat_inner(pat, demand, None, lvalue)
     }
 
     fn check_pat_inner(
@@ -49,7 +146,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         pat: Obj<HirPat>,
         mut demand: Ty,
         mut default_by_ref: Option<Mutability>,
-        mut place_divergence: Option<&mut Divergence>,
+        mut lvalues: Option<&mut PatLvalueState>,
     ) {
         let s = self.session();
         let tcx = self.tcx();
@@ -81,7 +178,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     .report_loud();
 
                 if let Some(binding) = binding {
-                    self.check_pat_inner(binding, demand, default_by_ref, place_divergence);
+                    self.check_pat_inner(binding, demand, default_by_ref, lvalues);
                 }
 
                 self.put_thir_pat(pat, demand, move |bcx| ThirPatKind::Binding {
@@ -123,22 +220,12 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     .report_loud();
 
                 for &pat in front.r(s) {
-                    self.check_pat_inner(
-                        pat,
-                        elem_ty,
-                        default_by_ref,
-                        place_divergence.as_deref_mut(),
-                    );
+                    self.check_pat_inner(pat, elem_ty, default_by_ref, lvalues.as_deref_mut());
                 }
 
                 if let Some(tail) = tail {
                     for &pat in tail.r(s) {
-                        self.check_pat_inner(
-                            pat,
-                            elem_ty,
-                            default_by_ref,
-                            place_divergence.as_deref_mut(),
-                        );
+                        self.check_pat_inner(pat, elem_ty, default_by_ref, lvalues.as_deref_mut());
                     }
                 }
 
@@ -178,12 +265,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     .report_loud();
 
                 for (&pat, &demand) in front.r(s).iter().zip(&front_infer) {
-                    self.check_pat_inner(
-                        pat,
-                        demand,
-                        default_by_ref,
-                        place_divergence.as_deref_mut(),
-                    );
+                    self.check_pat_inner(pat, demand, default_by_ref, lvalues.as_deref_mut());
                 }
 
                 self.put_thir_pat(pat, demand, |bcx| todo!())
@@ -228,21 +310,11 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     }
 
                     for (&pat, &demand) in front.r(s).iter().zip(elems.r(s)) {
-                        self.check_pat_inner(
-                            pat,
-                            demand,
-                            default_by_ref,
-                            place_divergence.as_deref_mut(),
-                        );
+                        self.check_pat_inner(pat, demand, default_by_ref, lvalues.as_deref_mut());
                     }
 
                     for (&pat, &demand) in tail.r(s).iter().zip(elems.r(s).iter().rev()) {
-                        self.check_pat_inner(
-                            pat,
-                            demand,
-                            default_by_ref,
-                            place_divergence.as_deref_mut(),
-                        );
+                        self.check_pat_inner(pat, demand, default_by_ref, lvalues.as_deref_mut());
                     }
 
                     Ok(())
@@ -273,12 +345,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             }
             HirPatKind::Or(patterns) => {
                 for &pat in patterns.r(s) {
-                    self.check_pat_inner(
-                        pat,
-                        demand,
-                        default_by_ref,
-                        place_divergence.as_deref_mut(),
-                    );
+                    self.check_pat_inner(pat, demand, default_by_ref, lvalues.as_deref_mut());
                 }
 
                 self.put_thir_pat(pat, demand, |bcx| todo!())
@@ -304,7 +371,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     })
                     .report_loud();
 
-                self.check_pat_inner(pointee_pat, demand, default_by_ref, place_divergence);
+                self.check_pat_inner(pointee_pat, demand, default_by_ref, lvalues);
 
                 self.put_thir_pat(pat, demand, |bcx| todo!())
             }
@@ -395,12 +462,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         *field.ty,
                     );
 
-                    self.check_pat_inner(
-                        pat,
-                        demand,
-                        default_by_ref,
-                        place_divergence.as_deref_mut(),
-                    );
+                    self.check_pat_inner(pat, demand, default_by_ref, lvalues.as_deref_mut());
                 }
 
                 self.put_thir_pat(pat, demand, |bcx| todo!())
@@ -451,21 +513,38 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         **ty,
                     );
 
-                    self.check_pat_inner(
-                        pat,
-                        demand,
-                        default_by_ref,
-                        place_divergence.as_deref_mut(),
-                    );
+                    self.check_pat_inner(pat, demand, default_by_ref, lvalues.as_deref_mut());
                 }
 
                 self.put_thir_pat(pat, demand, |bcx| todo!())
             }
             HirPatKind::PlaceExpr(place) => {
-                self.check_expr_demand(place, demand)
-                    .and_do(place_divergence.unwrap());
+                let lvalues = lvalues.unwrap();
 
-                self.put_thir_pat(pat, demand, |bcx| todo!())
+                self.check_expr_demand(place, demand)
+                    .and_do(&mut lvalues.divergence);
+
+                let stash = Obj::new(
+                    HirLocal {
+                        mutability: Mutability::Not,
+                        name: LocalNameIdent::User(Ident::new(place.r(s).span, symbol!("tmp"))),
+                    },
+                    s,
+                );
+
+                let stash_ty = self.type_of_local(stash);
+
+                self.ccx_mut()
+                    .oblige_ty_unifies_ty(stash_ty, demand, RelationMode::Equate)
+                    .report_never();
+
+                lvalues.temporaries.push(PatLvalueTemp { stash, place });
+
+                self.put_thir_pat(pat, demand, move |bcx| ThirPatKind::Binding {
+                    by_ref: None,
+                    local: bcx.confirm_thir_local(stash),
+                    and_bind: None,
+                })
             }
             HirPatKind::Range(expr) => {
                 let res = self.check_range_expr(expr).ignore_divergence();
