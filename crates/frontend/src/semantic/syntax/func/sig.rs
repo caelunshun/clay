@@ -10,7 +10,11 @@ use crate::{
     },
     symbol,
 };
-use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
+use derive_where::derive_where;
+use std::{
+    ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign},
+    slice,
+};
 
 // === FnItem === //
 
@@ -235,5 +239,74 @@ impl LabelTargetKind {
             LabelTargetKind::For => symbol!("a `for` loop"),
             LabelTargetKind::Block => symbol!("a named block"),
         }
+    }
+}
+
+// === PatListFrontAndTail === //
+
+#[derive(Debug)]
+#[derive_where(Copy, Clone)]
+pub struct PatListFrontAndTail<T: 'static> {
+    pub front: Obj<[Obj<T>]>,
+    pub tail: Option<Obj<[Obj<T>]>>,
+}
+
+impl<T: 'static> PatListFrontAndTail<T> {
+    pub fn len(self, s: &Session) -> PatListFrontAndTailLen {
+        if let Some(tail) = self.tail {
+            PatListFrontAndTailLen::AtLeast(self.front.r(s).len() as u32 + tail.r(s).len() as u32)
+        } else {
+            PatListFrontAndTailLen::Exactly(self.front.r(s).len() as u32)
+        }
+    }
+
+    pub fn zip<'s, I>(self, iter: I, s: &'s Session) -> PatListFrontAndTailIter<'s, T, I::IntoIter>
+    where
+        I: IntoIterator<IntoIter: DoubleEndedIterator>,
+    {
+        PatListFrontAndTailIter {
+            front: self.front.r(s).iter(),
+            back: match self.tail {
+                Some(tail) => tail.r(s).iter(),
+                None => [].iter(),
+            },
+            iter: iter.into_iter(),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum PatListFrontAndTailLen {
+    Exactly(u32),
+    AtLeast(u32),
+}
+
+pub struct PatListFrontAndTailIter<'s, T, V>
+where
+    T: 'static,
+    V: DoubleEndedIterator,
+{
+    front: slice::Iter<'s, Obj<T>>,
+    back: slice::Iter<'s, Obj<T>>,
+    iter: V,
+}
+
+impl<T, V> Iterator for PatListFrontAndTailIter<'_, T, V>
+where
+    T: 'static,
+    V: DoubleEndedIterator,
+{
+    type Item = (Obj<T>, V::Item);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(&front) = self.front.next() {
+            return Some((front, self.iter.next().expect("not enough elements")));
+        }
+
+        if let Some(&back) = self.back.next_back() {
+            return Some((back, self.iter.next_back().expect("not enough elements")));
+        }
+
+        None
     }
 }

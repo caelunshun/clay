@@ -5,7 +5,9 @@ use crate::{
         syntax::Span,
     },
     parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
-    semantic::syntax::{LocalNameIdent, Mutability, SigTy, ThirLabelledBlock},
+    semantic::syntax::{
+        AdtCtor, LocalNameIdent, Mutability, PatListFrontAndTail, SigTy, ThirLabelledBlock,
+    },
 };
 
 // === Pattern === //
@@ -34,9 +36,19 @@ pub enum ThirPatKind {
     },
     Deref(Obj<ThirPat>),
     Or(Obj<[Obj<ThirPat>]>),
-    Place(Obj<ThirExpr>),
+    Slice(ThirPatListFrontAndTail),
+    Tuple(ThirPatListFrontAndTail),
+    Adt(Obj<AdtCtor>, Obj<[ThirPatField]>),
     Error(ErrorGuaranteed),
 }
+
+#[derive(Debug, Clone)]
+pub struct ThirPatField {
+    pub idx: u32,
+    pub pat: Obj<ThirPat>,
+}
+
+pub type ThirPatListFrontAndTail = PatListFrontAndTail<ThirPat>;
 
 // === Body === //
 

@@ -14,9 +14,9 @@ use crate::{
         syntax::{
             AdtCtorField, AdtCtorInstance, AdtCtorSyntaxStyle, AdtCtorUnresolved, AdtInstance,
             Divergence, HirExpr, HirLocal, HirPat, HirPatKind, HirPatListFrontAndTail,
-            HirPatListFrontAndTailLen, HirPatNamedField, InferTyVarSourceInfo, LocalNameIdent,
-            Mutability, Re, RelationMode, ThirBlock, ThirExpr, ThirExprKind, ThirLetStmt,
-            ThirPatKind, ThirStmt, Ty, TyKind, TyOrRe,
+            HirPatNamedField, InferTyVarSourceInfo, LocalNameIdent, Mutability,
+            PatListFrontAndTailLen, Re, RelationMode, ThirBlock, ThirExpr, ThirExprKind,
+            ThirLetStmt, ThirPatKind, ThirStmt, Ty, TyKind, TyOrRe,
         },
     },
     symbol,
@@ -187,7 +187,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     and_bind: bcx.confirm_opt_thir_pat_outer(binding),
                 })
             }
-            HirPatKind::Slice(HirPatListFrontAndTail { front, tail }) => {
+            HirPatKind::Slice(hir_list @ HirPatListFrontAndTail { front, tail }) => {
                 self.peel_references_from_demand_and_normalize(
                     pat,
                     &mut demand,
@@ -229,9 +229,11 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     }
                 }
 
-                self.put_thir_pat(pat, demand, |bcx| todo!())
+                self.put_thir_pat(pat, demand, move |bcx| {
+                    ThirPatKind::Slice(bcx.confirm_thir_pat_list_front_and_tail_outer(hir_list))
+                })
             }
-            HirPatKind::Tuple(HirPatListFrontAndTail { front, tail: None }) => {
+            HirPatKind::Tuple(hir_list @ HirPatListFrontAndTail { front, tail: None }) => {
                 self.peel_references_from_demand_and_normalize(
                     pat,
                     &mut demand,
@@ -264,16 +266,20 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     })
                     .report_loud();
 
-                for (&pat, &demand) in front.r(s).iter().zip(&front_infer) {
+                for (pat, &demand) in hir_list.zip(&front_infer, s) {
                     self.check_pat_inner(pat, demand, default_by_ref, lvalues.as_deref_mut());
                 }
 
-                self.put_thir_pat(pat, demand, |bcx| todo!())
+                self.put_thir_pat(pat, demand, move |bcx| {
+                    ThirPatKind::Tuple(bcx.confirm_thir_pat_list_front_and_tail_outer(hir_list))
+                })
             }
-            HirPatKind::Tuple(HirPatListFrontAndTail {
-                front,
-                tail: Some(tail),
-            }) => {
+            HirPatKind::Tuple(
+                hir_list @ HirPatListFrontAndTail {
+                    front,
+                    tail: Some(tail),
+                },
+            ) => {
                 let res = 'check: {
                     self.peel_references_from_demand_and_normalize(
                         pat,
@@ -309,11 +315,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         .emit());
                     }
 
-                    for (&pat, &demand) in front.r(s).iter().zip(elems.r(s)) {
-                        self.check_pat_inner(pat, demand, default_by_ref, lvalues.as_deref_mut());
-                    }
-
-                    for (&pat, &demand) in tail.r(s).iter().zip(elems.r(s).iter().rev()) {
+                    for (pat, &demand) in hir_list.zip(elems.r(s), s) {
                         self.check_pat_inner(pat, demand, default_by_ref, lvalues.as_deref_mut());
                     }
 
@@ -331,7 +333,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                         .report_never();
                 }
 
-                self.put_thir_pat(pat, demand, |bcx| todo!())
+                self.put_thir_pat(pat, demand, move |bcx| {
+                    ThirPatKind::Tuple(bcx.confirm_thir_pat_list_front_and_tail_outer(hir_list))
+                })
             }
             HirPatKind::Lit(expr) => {
                 self.peel_references_from_demand_and_normalize(
@@ -348,7 +352,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     self.check_pat_inner(pat, demand, default_by_ref, lvalues.as_deref_mut());
                 }
 
-                self.put_thir_pat(pat, demand, |bcx| todo!())
+                self.put_thir_pat(pat, demand, move |bcx| {
+                    ThirPatKind::Or(bcx.confirm_thir_pat_list_outer(patterns))
+                })
             }
             HirPatKind::Deref(mutability, pointee_pat) => {
                 let pointee_ty = self.ccx_mut().fresh_ty_infer(
@@ -373,19 +379,28 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                 self.check_pat_inner(pointee_pat, demand, default_by_ref, lvalues);
 
-                self.put_thir_pat(pat, demand, |bcx| todo!())
+                self.put_thir_pat(pat, demand, move |bcx| {
+                    ThirPatKind::Deref(bcx.confirm_thir_pat_outer(pointee_pat))
+                })
             }
-            HirPatKind::AdtUnit(instance) => {
-                _ = self.check_pat_ctor(
+            HirPatKind::AdtUnit(instance) => 'check: {
+                let ctor = match self.check_pat_ctor(
                     pat,
                     pat.r(s).span,
                     instance,
                     AdtCtorSyntaxStyle::Unit,
                     &mut demand,
                     &mut default_by_ref,
-                );
+                ) {
+                    Ok(v) => v,
+                    Err(err) => break 'check self.put_thir_pat_err(pat, err),
+                };
 
-                self.put_thir_pat(pat, demand, |bcx| todo!())
+                self.put_thir_pat(pat, demand, move |bcx| {
+                    let s = bcx.session();
+
+                    ThirPatKind::Adt(ctor.def, Obj::new_iter([], s))
+                })
             }
             HirPatKind::AdtTuple(instance, fields) => 'check: {
                 // Verify constructor
@@ -410,8 +425,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 let expected_len = ctor.def.r(s).fields.len() as u32;
 
                 let arity_offense = match fields.len(s) {
-                    HirPatListFrontAndTailLen::Exactly(v) if v != expected_len => Some((v, "", "")),
-                    HirPatListFrontAndTailLen::AtLeast(v) if v > expected_len => {
+                    PatListFrontAndTailLen::Exactly(v) if v != expected_len => Some((v, "", "")),
+                    PatListFrontAndTailLen::AtLeast(v) if v > expected_len => {
                         Some((v, " at least", "only "))
                     }
                     _ => None,
@@ -432,15 +447,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 }
 
                 // Check fields
-                let front_fields = fields.front.r(s).iter().zip(&ctor.def.r(s).fields);
-
-                let back_fields = fields
-                    .tail
-                    .iter()
-                    .flat_map(|v| v.r(s).iter())
-                    .zip(ctor.def.r(s).fields.iter().rev());
-
-                for (&pat, field) in front_fields.chain(back_fields) {
+                for (pat, field) in fields.zip(&ctor.def.r(s).fields, s) {
                     if !field.vis.is_visible_to(self.item(), s) {
                         Diag::span_err(
                             pat.r(s).span,
@@ -465,7 +472,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     self.check_pat_inner(pat, demand, default_by_ref, lvalues.as_deref_mut());
                 }
 
-                self.put_thir_pat(pat, demand, |bcx| todo!())
+                self.put_thir_pat(pat, demand, move |bcx| todo!())
             }
             HirPatKind::AdtNamed(instance, fields, rest) => 'check: {
                 // Verify constructor

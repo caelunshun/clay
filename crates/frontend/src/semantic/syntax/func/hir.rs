@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        ErrorGuaranteed, Session,
+        ErrorGuaranteed,
         arena::{LateInit, Obj},
         syntax::{HasSpan, Span, Symbol},
     },
@@ -12,7 +12,8 @@ use crate::{
         token::Ident,
     },
     semantic::syntax::{
-        EnumVariantItem, FnItem, HirLabelledBlock, Mutability, SigGenericList, SigTraitSpec, SigTy,
+        EnumVariantItem, FnItem, HirLabelledBlock, Mutability, PatListFrontAndTail, SigGenericList,
+        SigTraitSpec, SigTy,
     },
 };
 use std::fmt;
@@ -138,29 +139,7 @@ pub struct HirPatNamedField {
     pub pat: Obj<HirPat>,
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct HirPatListFrontAndTail {
-    pub front: Obj<[Obj<HirPat>]>,
-    pub tail: Option<Obj<[Obj<HirPat>]>>,
-}
-
-impl HirPatListFrontAndTail {
-    pub fn len(self, s: &Session) -> HirPatListFrontAndTailLen {
-        if let Some(tail) = self.tail {
-            HirPatListFrontAndTailLen::AtLeast(
-                self.front.r(s).len() as u32 + tail.r(s).len() as u32,
-            )
-        } else {
-            HirPatListFrontAndTailLen::Exactly(self.front.r(s).len() as u32)
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum HirPatListFrontAndTailLen {
-    Exactly(u32),
-    AtLeast(u32),
-}
+pub type HirPatListFrontAndTail = PatListFrontAndTail<HirPat>;
 
 // === Body === //
 

@@ -281,13 +281,20 @@ impl BodyCtxt<'_, '_> {
                     )
                 })
             }
-            HirExprKind::Let(pat, scrutinee) => {
-                let scrutinee = self.check_expr(scrutinee, None).and_do(&mut divergence);
+            HirExprKind::Let(pat, scrutinee_expr) => {
+                let scrutinee = self
+                    .check_expr(scrutinee_expr, None)
+                    .and_do(&mut divergence);
                 self.check_pat_demand(pat, scrutinee, None);
 
                 let ty = tcx.intern(TyKind::Simple(SimpleTyKind::Bool));
 
-                self.put_thir_expr(expr, ty, |bcx| todo!())
+                self.put_thir_expr(expr, ty, move |bcx| {
+                    ThirExprKind::Let(
+                        bcx.confirm_thir_pat_outer(pat),
+                        bcx.confirm_thir_expr_post(scrutinee_expr),
+                    )
+                })
             }
             HirExprKind::ForLoop { pat, iter, body } => {
                 let iter_ty = self.check_expr(iter, None).and_do(&mut divergence);

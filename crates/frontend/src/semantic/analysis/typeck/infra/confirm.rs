@@ -8,9 +8,10 @@ use crate::{
         analysis::typeck::BodyCtxt,
         infer::FloatingInferVar,
         syntax::{
-            HirBlock, HirExpr, HirLabelledBlock, HirLocal, HirPat, HirStmt, InferTyVar,
-            RelationMode, SimpleTyKind, ThirBlock, ThirExpr, ThirExprKind, ThirLabelledBlock,
-            ThirLetStmt, ThirLocal, ThirPat, ThirPatKind, ThirStmt, Ty, TyKind,
+            HirBlock, HirExpr, HirLabelledBlock, HirLocal, HirPat, HirPatListFrontAndTail, HirStmt,
+            InferTyVar, RelationMode, SimpleTyKind, ThirBlock, ThirExpr, ThirExprKind,
+            ThirLabelledBlock, ThirLetStmt, ThirLocal, ThirPat, ThirPatKind,
+            ThirPatListFrontAndTail, ThirStmt, Ty, TyKind,
         },
     },
     utils::{hash::FxHashMap, mem::ArenaRc},
@@ -240,6 +241,32 @@ impl BodyCtxt<'_, '_> {
 
     pub fn confirm_opt_thir_pat_outer(&mut self, hir: Option<Obj<HirPat>>) -> Option<Obj<ThirPat>> {
         hir.map(|pat| self.confirm_thir_pat_outer(pat))
+    }
+
+    pub fn confirm_thir_pat_list_outer(&mut self, hir: Obj<[Obj<HirPat>]>) -> Obj<[Obj<ThirPat>]> {
+        let s = self.session();
+
+        Obj::new_iter(
+            hir.r(s).iter().map(|&hir| self.confirm_thir_pat_outer(hir)),
+            s,
+        )
+    }
+
+    pub fn confirm_thir_opt_pat_list_outer(
+        &mut self,
+        hir: Option<Obj<[Obj<HirPat>]>>,
+    ) -> Option<Obj<[Obj<ThirPat>]>> {
+        hir.map(|v| self.confirm_thir_pat_list_outer(v))
+    }
+
+    pub fn confirm_thir_pat_list_front_and_tail_outer(
+        &mut self,
+        hir: HirPatListFrontAndTail,
+    ) -> ThirPatListFrontAndTail {
+        ThirPatListFrontAndTail {
+            front: self.confirm_thir_pat_list_outer(hir.front),
+            tail: self.confirm_thir_opt_pat_list_outer(hir.tail),
+        }
     }
 
     pub fn confirm_thir_local(&mut self, hir: Obj<HirLocal>) -> Obj<ThirLocal> {
