@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        Diag, LeafDiag, Session,
+        Diag, ErrorGuaranteed, LeafDiag, Session,
         arena::{HasInterner as _, Obj},
     },
     parse::token::Ident,
@@ -12,7 +12,7 @@ use crate::{
         },
         lower::modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},
         syntax::{
-            AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, FnOwner,
+            AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, FnOwner, HirExpr,
             InferTyVarSourceInfo, InstantiatedFnSig, Mutability, Re, RelationMode, SigGenericList,
             TraitSpec, Ty, TyFolderInfallibleExt as _, TyKind,
         },
@@ -27,12 +27,22 @@ pub struct LookupMethodResult {
     pub resolution: Obj<FnDef>,
 }
 
-impl BodyCtxt<'_, '_> {
-    pub fn lookup_field(&mut self, receiver: Ty, name: Ident) -> Option<Ty> {
-        let s = self.session();
-        let tcx = self.tcx();
+#[derive(Debug, Copy, Clone)]
+pub struct LookupFieldResult {
+    pub ty: Ty,
+    pub index: u32,
+}
 
-        let mut receiver_iter = receiver;
+impl BodyCtxt<'_, '_> {
+    pub fn lookup_field(
+        &mut self,
+        receiver: Obj<HirExpr>,
+        receiver_ty: Ty,
+        name: Ident,
+    ) -> Result<Option<LookupFieldResult>, ErrorGuaranteed> {
+        let s = self.session();
+
+        let mut receiver_iter = receiver_ty;
 
         let name_as_idx = name.text.as_str(s).parse::<u32>().ok();
 
@@ -70,9 +80,10 @@ impl BodyCtxt<'_, '_> {
                             )],
                         );
 
-                        let field = self.ccx_mut().import_elsewhere(&env, *field.ty);
-
-                        return Some(field);
+                        return Ok(Some(LookupFieldResult {
+                            ty: self.ccx_mut().import_elsewhere(&env, *field.ty),
+                            index: field.idx.raw(),
+                        }));
                     }
                     AdtKind::Enum(_) => {
                         // (fallthrough)
@@ -82,7 +93,10 @@ impl BodyCtxt<'_, '_> {
                     if let Some(name_as_idx) = name_as_idx
                         && let Some(&field_ty) = fields.r(s).get(name_as_idx as usize)
                     {
-                        return Some(field_ty);
+                        return Ok(Some(LookupFieldResult {
+                            ty: field_ty,
+                            index: name_as_idx,
+                        }));
                     }
                 }
 
@@ -95,11 +109,11 @@ impl BodyCtxt<'_, '_> {
                 }
                 TyKind::HrtbVar(_) | TyKind::HrtbProjection(_) => unreachable!(),
                 TyKind::InferVar(_) => {
-                    return Some(tcx.intern(TyKind::Error(
+                    return Err(
                         Diag::span_err(name.span, "type must be known by this point").emit(),
-                    )));
+                    );
                 }
-                TyKind::Error(error) => return Some(tcx.intern(TyKind::Error(error))),
+                TyKind::Error(error) => return Err(error),
             }
 
             let Some(next) = attempt_deref(self.ccx_mut(), receiver) else {
@@ -109,7 +123,7 @@ impl BodyCtxt<'_, '_> {
             receiver_iter = next;
         }
 
-        None
+        Ok(None)
     }
 
     pub fn lookup_method(&mut self, receiver: Ty, name: Ident) -> Option<LookupMethodResult> {

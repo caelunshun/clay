@@ -6,7 +6,8 @@ use crate::{
     },
     parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
     semantic::syntax::{
-        AdtCtor, LocalNameIdent, Mutability, PatListFrontAndTail, SigTy, ThirLabelledBlock,
+        AdtCtor, AdtCtorFieldIdx, DynSiteIdx, LocalNameIdent, Mutability, PatListFrontAndTail,
+        SigTy, ThirLabelledBlock,
     },
 };
 
@@ -44,7 +45,7 @@ pub enum ThirPatKind {
 
 #[derive(Debug, Clone)]
 pub struct ThirPatField {
-    pub idx: u32,
+    pub idx: AdtCtorFieldIdx,
     pub pat: Obj<ThirPat>,
 }
 
@@ -63,6 +64,7 @@ pub struct ThirExpr {
 pub enum ThirExprKind {
     CreatePathZst,
     CreateLiteral(AstLit),
+    CreateArray(Obj<[Obj<ThirExpr>]>),
     CreateTuple(Obj<[Obj<ThirExpr>]>),
     PrimitiveBinOp(AstBinOpKind, Obj<ThirExpr>, Obj<ThirExpr>),
     PrimitiveUnOp(AstUnOpKind, Obj<ThirExpr>),
@@ -75,15 +77,38 @@ pub enum ThirExprKind {
     Loop(Obj<ThirBlock>),
     AddrOf(Mutability, Obj<ThirExpr>),
     Call(Obj<ThirExpr>, Obj<[Obj<ThirExpr>]>),
+    Field(Obj<ThirExpr>, u32),
+    CreateBracedAdt {
+        ctor: Obj<AdtCtor>,
+        fields: Obj<[ThirStructField]>,
+        rest: Option<Obj<ThirExpr>>,
+    },
     Local(Obj<ThirLocal>),
     If {
         cond: Obj<ThirExpr>,
         truthy: Obj<ThirExpr>,
         falsy: Option<Obj<ThirExpr>>,
     },
+    DynUse(DynSiteIdx, Obj<ThirExpr>),
+    Match(Obj<ThirExpr>, Obj<[ThirMatchArm]>),
     While(Obj<ThirExpr>, Obj<ThirBlock>),
     Let(Obj<ThirPat>, Obj<ThirExpr>),
     Error(ErrorGuaranteed),
+}
+
+#[derive(Debug, Clone)]
+pub struct ThirMatchArm {
+    pub span: Span,
+    pub pat: Obj<ThirPat>,
+    pub guard: Option<Obj<ThirExpr>>,
+    pub body: Obj<ThirExpr>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ThirStructField {
+    pub span: Span,
+    pub idx: AdtCtorFieldIdx,
+    pub init: Obj<ThirExpr>,
 }
 
 #[derive(Debug, Clone)]

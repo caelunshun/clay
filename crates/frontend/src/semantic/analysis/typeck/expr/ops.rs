@@ -11,7 +11,7 @@ use crate::{
         analysis::typeck::{BodyCtxt, infra::confirm::ThirExprConfirmedWithTy},
         infer::{ClauseCx, ClauseFuel, HrtbUniverse, PrettyFmtOpts, SpannedError, ToDebugTree},
         syntax::{
-            Divergence, FloatKind, FnInstanceInner, FnOwner, HirExpr, HirPat, InferTyVarSourceInfo,
+            Divergence, FloatKind, FnInstanceInner, FnOwner, HirExpr, InferTyVarSourceInfo,
             IntKind, RelationMode, SimpleTyKind, SimpleTySet, ThirExpr, ThirExprKind, TraitItem,
             TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
         },
@@ -281,7 +281,9 @@ impl BodyCtxt<'_, '_> {
                 .unify_ty_and_simple_set(lhs_ty, kind_info.lhs)
                 .is_ok()
             {
-                return self.put_thir_expr(expr, lhs_ty, |bcx| todo!());
+                return self.put_thir_expr(expr, lhs_ty, move |bcx| {
+                    ThirExprKind::PrimitiveUnOp(kind, bcx.confirm_thir_expr_post(lhs))
+                });
             }
         }
 
@@ -289,7 +291,9 @@ impl BodyCtxt<'_, '_> {
             && let lhs_ty = self.ccx_mut().peel_ty_infer_var_after_poll(lhs_ty)
             && let TyKind::Reference(_re, _muta, pointee) = *lhs_ty.r(s)
         {
-            return self.put_thir_expr(expr, pointee, |bcx| todo!());
+            return self.put_thir_expr(expr, pointee, move |bcx| {
+                ThirExprKind::PrimitiveUnOp(kind, bcx.confirm_thir_expr_post(lhs))
+            });
         }
 
         // Otherwise, attempt to perform an overloaded operation.

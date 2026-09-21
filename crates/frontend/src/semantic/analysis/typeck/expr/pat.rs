@@ -16,7 +16,7 @@ use crate::{
             Divergence, HirExpr, HirLocal, HirPat, HirPatKind, HirPatListFrontAndTail,
             HirPatNamedField, InferTyVarSourceInfo, LocalNameIdent, Mutability,
             PatListFrontAndTailLen, Re, RelationMode, ThirBlock, ThirExpr, ThirExprKind,
-            ThirLetStmt, ThirPatKind, ThirStmt, Ty, TyKind, TyOrRe,
+            ThirLetStmt, ThirPatField, ThirPatKind, ThirStmt, Ty, TyKind, TyOrRe,
         },
     },
     symbol,
@@ -472,7 +472,22 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     self.check_pat_inner(pat, demand, default_by_ref, lvalues.as_deref_mut());
                 }
 
-                self.put_thir_pat(pat, demand, move |bcx| todo!())
+                self.put_thir_pat(pat, demand, move |bcx| {
+                    let s = bcx.session();
+
+                    ThirPatKind::Adt(
+                        ctor.def,
+                        Obj::new_iter(
+                            fields
+                                .zip(&ctor.def.r(s).fields, s)
+                                .map(|(pat, field)| ThirPatField {
+                                    idx: field.idx,
+                                    pat: bcx.confirm_thir_pat_outer(pat),
+                                }),
+                            s,
+                        ),
+                    )
+                })
             }
             HirPatKind::AdtNamed(instance, fields, rest) => 'check: {
                 // Verify constructor
@@ -509,7 +524,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     },
                 );
 
-                for (field_idx, pat) in field_mapping {
+                for &(field_idx, pat) in &field_mapping {
                     let AdtCtorField { ty, .. } = &ctor.def.r(s).fields[field_idx];
 
                     let demand = self.ccx_mut().import_elsewhere(
@@ -523,7 +538,22 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     self.check_pat_inner(pat, demand, default_by_ref, lvalues.as_deref_mut());
                 }
 
-                self.put_thir_pat(pat, demand, |bcx| todo!())
+                self.put_thir_pat(pat, demand, move |bcx| {
+                    let s = bcx.session();
+
+                    ThirPatKind::Adt(
+                        ctor.def,
+                        Obj::new_iter(
+                            field_mapping
+                                .into_iter()
+                                .map(|(resolved_idx, pat)| ThirPatField {
+                                    idx: resolved_idx,
+                                    pat: bcx.confirm_thir_pat_outer(pat),
+                                }),
+                            s,
+                        ),
+                    )
+                })
             }
             HirPatKind::PlaceExpr(place) => {
                 let lvalues = lvalues.unwrap();

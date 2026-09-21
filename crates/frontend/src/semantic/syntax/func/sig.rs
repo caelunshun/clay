@@ -291,6 +291,13 @@ where
     iter: V,
 }
 
+impl<T, V> ExactSizeIterator for PatListFrontAndTailIter<'_, T, V>
+where
+    T: 'static,
+    V: DoubleEndedIterator,
+{
+}
+
 impl<T, V> Iterator for PatListFrontAndTailIter<'_, T, V>
 where
     T: 'static,
@@ -308,5 +315,11 @@ where
         }
 
         None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = self.front.len() + self.back.len();
+
+        (size, Some(size))
     }
 }

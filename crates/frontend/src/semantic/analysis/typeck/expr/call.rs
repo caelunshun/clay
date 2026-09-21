@@ -7,7 +7,10 @@ use crate::{
     semantic::{
         analysis::typeck::{
             BodyCtxt,
-            infra::{confirm::ThirExprConfirmedWithTy, lookup::LookupMethodResult},
+            infra::{
+                confirm::ThirExprConfirmedWithTy,
+                lookup::{LookupFieldResult, LookupMethodResult},
+            },
         },
         infer::{ClauseFuel, FixArity, HrtbUniverse, SpannedError},
         syntax::{
@@ -104,7 +107,6 @@ impl BodyCtxt<'_, '_> {
         args: Obj<[Obj<HirExpr>]>,
         divergence: &mut Divergence,
     ) -> ThirExprConfirmedWithTy {
-        let tcx = self.tcx();
         let s = self.session();
 
         let receiver_span = receiver.r(s).span;
@@ -197,17 +199,20 @@ impl BodyCtxt<'_, '_> {
     pub fn check_expr_inner_field(
         &mut self,
         expr: Obj<HirExpr>,
-        receiver: Obj<HirExpr>,
+        receiver_expr: Obj<HirExpr>,
         name: Ident,
         divergence: &mut Divergence,
     ) -> ThirExprConfirmedWithTy {
-        let tcx = self.tcx();
-        let receiver = self.check_expr(receiver, None).and_do(divergence);
+        let receiver = self.check_expr(receiver_expr, None).and_do(divergence);
 
-        if let Some(ty) = self.lookup_field(receiver, name) {
-            self.put_thir_expr(expr, ty, |bcx| todo!())
-        } else {
-            self.put_thir_expr_err(expr, Diag::span_err(name.span, "no such field").emit())
+        match self.lookup_field(receiver_expr, receiver, name) {
+            Ok(Some(LookupFieldResult { ty, index })) => self.put_thir_expr(expr, ty, move |bcx| {
+                ThirExprKind::Field(bcx.confirm_thir_expr_post(receiver_expr), index)
+            }),
+            Ok(None) => {
+                self.put_thir_expr_err(expr, Diag::span_err(name.span, "no such field").emit())
+            }
+            Err(err) => self.put_thir_expr_err(expr, err),
         }
     }
 }

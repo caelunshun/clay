@@ -13,8 +13,8 @@ use crate::{
             AdtCtorSyntax, AdtInstance, Divergence, DivergenceJoin, DynSiteIdx, FnInstanceInner,
             FnOwner, HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirMatchArm, HirStmt,
             HirStructExpr, InferTyVarSourceInfo, LabelTargetKind, Re, RelationMode, SigAdtInstance,
-            SimpleTyKind, ThirExprKind, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
-            UniversalTy, UniversalTyRootSourceInfo,
+            SimpleTyKind, ThirExprKind, ThirMatchArm, ThirStructField, TraitParam, TraitSpec, Ty,
+            TyAndDivergence, TyKind, TyOrRe, UniversalTy, UniversalTyRootSourceInfo,
         },
     },
 };
@@ -113,7 +113,9 @@ impl BodyCtxt<'_, '_> {
                     params: tcx.intern_list(&[TyOrRe::Ty(elem)]),
                 }));
 
-                self.put_thir_expr(expr, ty, |bcx| todo!())
+                self.put_thir_expr(expr, ty, move |bcx| {
+                    ThirExprKind::CreateArray(bcx.confirm_thir_expr_list_post(elems))
+                })
             }
             HirExprKind::Call(callee, actual_args) => {
                 self.check_expr_inner_call(expr, callee, actual_args, &mut divergence)
@@ -206,6 +208,9 @@ impl BodyCtxt<'_, '_> {
                 let inner_ty = self.check_expr(target, None).and_do(&mut divergence);
                 let inner_ty = self.ccx_mut().peel_ty_infer_var_after_poll(inner_ty);
 
+                // TODO: allocate these and confirm them so we can do analysis in MIR.
+                let site = DynSiteIdx::from_raw(0);
+
                 match *inner_ty.r(s) {
                     TyKind::Trait(lt, muta, clauses) => {
                         let universal =
@@ -213,9 +218,7 @@ impl BodyCtxt<'_, '_> {
                                 HrtbUniverse::ROOT,
                                 UniversalTyRootSourceInfo::UsedDyn {
                                     span: target.r(s).span,
-                                    // TODO: allocate these and confirm them so we can do analysis
-                                    // in MIR.
-                                    site: DynSiteIdx::from_raw(0),
+                                    site,
                                 },
                             ));
 
@@ -228,7 +231,9 @@ impl BodyCtxt<'_, '_> {
                             tcx.intern(TyKind::Universal(universal)),
                         ));
 
-                        self.put_thir_expr(expr, ty, |bcx| todo!())
+                        self.put_thir_expr(expr, ty, move |bcx| {
+                            ThirExprKind::DynUse(site, bcx.confirm_thir_expr_post(target))
+                        })
                     }
                     TyKind::Error(err) => self.put_thir_expr_err(expr, err),
                     _ => self.put_thir_expr_err(
@@ -358,8 +363,10 @@ impl BodyCtxt<'_, '_> {
                     ))
                 })
             }
-            HirExprKind::Match(scrutinee, arms) => {
-                let scrutinee = self.check_expr(scrutinee, None).and_do(&mut divergence);
+            HirExprKind::Match(scrutinee_expr, arms) => {
+                let scrutinee = self
+                    .check_expr(scrutinee_expr, None)
+                    .and_do(&mut divergence);
 
                 let arm_demand = demand_hint.unwrap_or_else(|| {
                     self.ccx_mut().fresh_ty_infer(
@@ -400,7 +407,26 @@ impl BodyCtxt<'_, '_> {
 
                 divergence &= body_divergence;
 
-                self.put_thir_expr(expr, arm_demand, |bcx| todo!())
+                self.put_thir_expr(expr, arm_demand, move |bcx| {
+                    let s = bcx.session();
+
+                    ThirExprKind::Match(
+                        bcx.confirm_thir_expr_post(scrutinee_expr),
+                        Obj::new_iter(
+                            arms.r(s).iter().map(|arm| {
+                                let arm = arm.r(s);
+
+                                ThirMatchArm {
+                                    span: arm.span,
+                                    pat: bcx.confirm_thir_pat_outer(arm.pat),
+                                    guard: bcx.confirm_opt_thir_expr_post(arm.guard),
+                                    body: bcx.confirm_thir_expr_post(arm.body),
+                                }
+                            }),
+                            s,
+                        ),
+                    )
+                })
             }
             HirExprKind::Block(block) => {
                 let label = HirLabelledBlock {
@@ -649,7 +675,7 @@ impl BodyCtxt<'_, '_> {
                     /* deny_missing */ rest.is_none().then_some(ctor_span),
                 );
 
-                for (adt_ctor_field, idx_in_expr) in mapping {
+                for &(adt_ctor_field, idx_in_expr) in &mapping {
                     let init_expr = fields.r(s)[idx_in_expr].init;
 
                     let init_ty_orig = *ctor.def.r(s).fields[adt_ctor_field].ty;
@@ -670,7 +696,26 @@ impl BodyCtxt<'_, '_> {
                         .and_do(&mut divergence);
                 }
 
-                self.put_thir_expr(expr, instance_ty, |bcx| todo!())
+                self.put_thir_expr(expr, instance_ty, move |bcx| {
+                    let s = bcx.session();
+
+                    ThirExprKind::CreateBracedAdt {
+                        ctor: ctor.def,
+                        fields: Obj::new_iter(
+                            mapping.into_iter().map(|(resolved_idx, expr_idx)| {
+                                let field = fields.r(s)[expr_idx];
+
+                                ThirStructField {
+                                    span: field.name.span,
+                                    idx: resolved_idx,
+                                    init: bcx.confirm_thir_expr_post(field.init),
+                                }
+                            }),
+                            s,
+                        ),
+                        rest: bcx.confirm_opt_thir_expr_post(rest),
+                    }
+                })
             }
             HirExprKind::Error(err) => self.put_thir_expr_err(expr, err),
         };
