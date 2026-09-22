@@ -4,8 +4,8 @@ use crate::{
     semantic::{
         analysis::typeck::BodyCtxt,
         syntax::{
-            AdtInstance, AdtItem, Divergence, DivergenceAnd, DivergenceJoin, HirRangeExpr, Ty,
-            TyCtxt, TyKind, TyOrRe,
+            AdtInstance, AdtItem, Divergence, DivergenceAnd, DivergenceJoin, HirRangeExpr,
+            LangItems, Ty, TyKind, TyOrRe,
         },
     },
 };
@@ -31,35 +31,29 @@ impl CheckedRangeExpr {
             CheckedRangeExpr::Full => None,
         }
     }
+
+    pub fn lang_item(self, lang_items: &LangItems) -> Obj<AdtItem> {
+        match self {
+            CheckedRangeExpr::Full => lang_items.range_full().unwrap(),
+            CheckedRangeExpr::RangeFrom(_) => lang_items.range_from().unwrap(),
+            CheckedRangeExpr::RangeTo(_) => lang_items.range_to().unwrap(),
+            CheckedRangeExpr::Range(_) => lang_items.range().unwrap(),
+            CheckedRangeExpr::RangeToInclusive(_) => lang_items.range_to_inclusive().unwrap(),
+            CheckedRangeExpr::RangeInclusive(_) => lang_items.range_inclusive().unwrap(),
+        }
+    }
+
     pub fn range_ty(self, bcx: &mut BodyCtxt<'_, '_>) -> Ty {
         let s = bcx.session();
         let tcx = bcx.tcx();
-        let lang_items = &bcx.krate().r(s).lang_items;
 
-        fn make(tcx: &TyCtxt, item: Obj<AdtItem>, ty: Option<Ty>) -> Ty {
-            tcx.intern(TyKind::Adt(AdtInstance {
-                def: item,
-                params: match ty {
-                    Some(ty) => tcx.intern_list(&[TyOrRe::Ty(ty)]),
-                    None => tcx.intern_list(&[]),
-                },
-            }))
-        }
-
-        match self {
-            CheckedRangeExpr::Full => make(tcx, lang_items.range_full().unwrap(), None),
-            CheckedRangeExpr::RangeFrom(ty) => {
-                make(tcx, lang_items.range_from().unwrap(), Some(ty))
-            }
-            CheckedRangeExpr::RangeTo(ty) => make(tcx, lang_items.range_to().unwrap(), Some(ty)),
-            CheckedRangeExpr::Range(ty) => make(tcx, lang_items.range().unwrap(), Some(ty)),
-            CheckedRangeExpr::RangeToInclusive(ty) => {
-                make(tcx, lang_items.range_to_inclusive().unwrap(), Some(ty))
-            }
-            CheckedRangeExpr::RangeInclusive(ty) => {
-                make(tcx, lang_items.range_inclusive().unwrap(), Some(ty))
-            }
-        }
+        tcx.intern(TyKind::Adt(AdtInstance {
+            def: self.lang_item(&bcx.krate().r(s).lang_items),
+            params: match self.elem_ty() {
+                Some(ty) => tcx.intern_list(&[TyOrRe::Ty(ty)]),
+                None => tcx.intern_list(&[]),
+            },
+        }))
     }
 }
 

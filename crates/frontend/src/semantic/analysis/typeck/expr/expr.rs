@@ -10,11 +10,12 @@ use crate::{
             SpannedError,
         },
         syntax::{
-            AdtCtorSyntax, AdtInstance, Divergence, DivergenceJoin, DynSiteIdx, FnInstanceInner,
-            FnOwner, HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirMatchArm, HirStmt,
-            HirStructExpr, InferTyVarSourceInfo, LabelTargetKind, Re, RelationMode, SigAdtInstance,
-            SimpleTyKind, ThirExprKind, ThirMatchArm, ThirStructField, TraitParam, TraitSpec, Ty,
-            TyAndDivergence, TyKind, TyOrRe, UniversalTy, UniversalTyRootSourceInfo,
+            AdtCtorFieldIdx, AdtCtorSyntax, AdtInstance, Divergence, DivergenceJoin, DynSiteIdx,
+            FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirLabelledBlock,
+            HirMatchArm, HirRangeExpr, HirStmt, HirStructExpr, InferTyVarSourceInfo,
+            LabelTargetKind, Re, RelationMode, SigAdtInstance, SimpleTyKind, ThirExprKind,
+            ThirMatchArm, ThirStructField, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind,
+            TyOrRe, UniversalTy, UniversalTyRootSourceInfo,
         },
     },
 };
@@ -486,13 +487,48 @@ impl BodyCtxt<'_, '_> {
             HirExprKind::Index(target, index) => {
                 self.check_expr_inner_index(expr, target, index, &mut divergence)
             }
-            HirExprKind::Range(inner) => {
-                let ty = self
-                    .check_range_expr(inner)
-                    .and_do(&mut divergence)
-                    .range_ty(self);
+            HirExprKind::Range(
+                inner @ HirRangeExpr {
+                    low,
+                    high,
+                    limits: _,
+                },
+            ) => {
+                let res = self.check_range_expr(inner).and_do(&mut divergence);
+                let ty = res.range_ty(self);
 
-                self.put_thir_expr(expr, ty, |bcx| todo!())
+                self.put_thir_expr(expr, ty, move |bcx| {
+                    let s = bcx.session();
+
+                    let ctor = *res
+                        .lang_item(&bcx.krate().r(s).lang_items)
+                        .r(s)
+                        .kind
+                        .as_struct()
+                        .unwrap()
+                        .r(s)
+                        .ctor;
+
+                    let fields = [
+                        bcx.confirm_opt_thir_expr_post(low),
+                        bcx.confirm_opt_thir_expr_post(high),
+                    ]
+                    .into_iter()
+                    .filter_map(|v| v)
+                    .enumerate()
+                    .map(|(idx, expr)| ThirStructField {
+                        span: expr.r(s).span,
+                        idx: AdtCtorFieldIdx::from_usize(idx),
+                        init: expr,
+                    })
+                    .collect::<Vec<_>>();
+
+                    ThirExprKind::CreateBracedAdt {
+                        ctor,
+                        fields: Obj::new_iter(fields, s),
+                        rest: None,
+                    }
+                })
             }
             HirExprKind::Local(local) => {
                 let ty = self.type_of_local(local);

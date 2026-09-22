@@ -307,15 +307,17 @@ impl BodyCtxt<'_, '_> {
             },
         );
 
+        let op_trait_spec = TraitSpec {
+            def: kind_info.overload.unwrap(),
+            params: tcx.intern_list(&[TraitParam::Equals(TyOrRe::Ty(result_ty))]),
+        };
+
         self.ccx_mut()
             .oblige_ty_meets_trait_instantiated(
                 ClauseFuel::new(),
                 HrtbUniverse::ROOT,
                 lhs_ty,
-                TraitSpec {
-                    def: kind_info.overload.unwrap(),
-                    params: tcx.intern_list(&[TraitParam::Equals(TyOrRe::Ty(result_ty))]),
-                },
+                op_trait_spec,
             )
             // TODO
             .map({
@@ -325,7 +327,25 @@ impl BodyCtxt<'_, '_> {
             })
             .report_loud();
 
-        self.put_thir_expr(expr, result_ty, |bcx| todo!())
+        self.put_thir_expr(expr, result_ty, move |bcx| {
+            let s = bcx.session();
+            let tcx = bcx.tcx();
+
+            let args = [bcx.confirm_thir_expr_post(lhs)];
+
+            bcx.create_thir_instance_call(
+                expr.r(s).span,
+                tcx.intern(FnInstanceInner {
+                    owner: FnOwner::Trait {
+                        instance: op_trait_spec,
+                        self_ty: lhs_ty,
+                        method_idx: 0,
+                    },
+                    early_args: None,
+                }),
+                args,
+            )
+        })
     }
 
     pub fn check_expr_inner_assign_op(
@@ -403,18 +423,20 @@ impl BodyCtxt<'_, '_> {
             },
         );
 
+        let op_trait_spec = TraitSpec {
+            def: kind_info.overload.unwrap(),
+            params: tcx.intern_list(&[
+                TraitParam::Equals(TyOrRe::Ty(rhs)),
+                TraitParam::Equals(TyOrRe::Ty(result_ty)),
+            ]),
+        };
+
         self.ccx_mut()
             .oblige_ty_meets_trait_instantiated(
                 ClauseFuel::new(),
                 HrtbUniverse::ROOT,
                 lhs,
-                TraitSpec {
-                    def: kind_info.overload.unwrap(),
-                    params: tcx.intern_list(&[
-                        TraitParam::Equals(TyOrRe::Ty(rhs)),
-                        TraitParam::Equals(TyOrRe::Ty(result_ty)),
-                    ]),
-                },
+                op_trait_spec,
             )
             // TODO
             .map({
@@ -426,7 +448,28 @@ impl BodyCtxt<'_, '_> {
 
         let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
 
-        self.put_thir_expr(expr, ty, |bcx| todo!())
+        self.put_thir_expr(expr, ty, move |bcx| {
+            let s = bcx.session();
+            let tcx = bcx.tcx();
+
+            let args = [
+                bcx.confirm_thir_expr_post(lhs_expr),
+                bcx.confirm_thir_expr_post(rhs_expr),
+            ];
+
+            bcx.create_thir_instance_call(
+                expr.r(s).span,
+                tcx.intern(FnInstanceInner {
+                    owner: FnOwner::Trait {
+                        instance: op_trait_spec,
+                        self_ty: lhs,
+                        method_idx: 0,
+                    },
+                    early_args: None,
+                }),
+                args,
+            )
+        })
     }
 
     fn create_primitive_assign_op(
@@ -560,32 +603,22 @@ impl BodyCtxt<'_, '_> {
             let s = bcx.session();
             let tcx = bcx.tcx();
 
-            ThirExprKind::Call(
-                Obj::new(
-                    ThirExpr {
-                        span: expr.r(s).span,
-                        ty: bcx.ccx_mut().export(
-                            expr.r(s).span,
-                            tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
-                                owner: FnOwner::Trait {
-                                    instance: index_trait_spec,
-                                    self_ty: target_ty,
-                                    method_idx: 0,
-                                },
-                                early_args: None,
-                            }))),
-                        ),
-                        kind: LateInit::new(ThirExprKind::CreateZst),
+            let args = [
+                bcx.confirm_thir_expr_post(target),
+                bcx.confirm_thir_expr_post(index),
+            ];
+
+            bcx.create_thir_instance_call(
+                expr.r(s).span,
+                tcx.intern(FnInstanceInner {
+                    owner: FnOwner::Trait {
+                        instance: index_trait_spec,
+                        self_ty: target_ty,
+                        method_idx: 0,
                     },
-                    s,
-                ),
-                Obj::new_iter(
-                    [
-                        bcx.confirm_thir_expr_post(target),
-                        bcx.confirm_thir_expr_post(index),
-                    ],
-                    s,
-                ),
+                    early_args: None,
+                }),
+                args,
             )
         })
     }

@@ -9,10 +9,10 @@ use crate::{
         analysis::typeck::BodyCtxt,
         infer::FloatingInferVar,
         syntax::{
-            HirBlock, HirExpr, HirLabelledBlock, HirLocal, HirPat, HirPatListFrontAndTail, HirStmt,
-            InferTyVar, RelationMode, SigTyKind, SimpleTyKind, ThirBlock, ThirExpr, ThirExprKind,
-            ThirLabelledBlock, ThirLetStmt, ThirLocal, ThirPat, ThirPatKind,
-            ThirPatListFrontAndTail, ThirStmt, Ty, TyKind,
+            FnInstance, HirBlock, HirExpr, HirLabelledBlock, HirLocal, HirPat,
+            HirPatListFrontAndTail, HirStmt, InferTyVar, RelationMode, SigTyKind, SimpleTyKind,
+            ThirBlock, ThirExpr, ThirExprKind, ThirLabelledBlock, ThirLetStmt, ThirLocal, ThirPat,
+            ThirPatKind, ThirPatListFrontAndTail, ThirStmt, Ty, TyKind,
         },
     },
     utils::{hash::FxHashMap, mem::ArenaRc},
@@ -402,6 +402,30 @@ impl BodyCtxt<'_, '_> {
                 )),
             },
             s,
+        )
+    }
+
+    pub fn create_thir_instance_call(
+        &mut self,
+        span: Span,
+        instance: FnInstance,
+        args: impl IntoIterator<Item = Obj<ThirExpr>, IntoIter: ExactSizeIterator>,
+    ) -> ThirExprKind {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        ThirExprKind::Call(
+            Obj::new(
+                ThirExpr {
+                    span,
+                    ty: self
+                        .ccx_mut()
+                        .export(span, tcx.intern(TyKind::FnDef(instance))),
+                    kind: LateInit::new(ThirExprKind::CreateZst),
+                },
+                s,
+            ),
+            Obj::new_iter(args, s),
         )
     }
 }
