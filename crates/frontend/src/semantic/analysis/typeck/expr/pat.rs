@@ -2,7 +2,7 @@ use crate::{
     base::{
         Diag, ErrorGuaranteed,
         arena::{HasInterner as _, HasListInterner, LateInit, Obj},
-        syntax::Span,
+        syntax::{HasSpan, Span},
     },
     parse::{
         ast::{AstMutability, AstPatStructRest},
@@ -64,16 +64,30 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
         self.put_thir_expr(expr, ty, move |bcx| {
             let s = bcx.session();
-            let tcx = bcx.tcx();
 
-            let unit_ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
-            let unit_ty_exp = bcx.ccx_mut().export(expr.r(s).span, unit_ty);
+            bcx.create_assign_expr(expr.r(s).span, lhs, rhs, pat_lvalue_state)
+        })
+    }
 
-            let stmts = [ThirStmt::Let(Obj::new(
+    fn create_assign_expr(
+        &mut self,
+        span: Span,
+        lhs: Obj<HirPat>,
+        rhs: Obj<HirExpr>,
+        pat_lvalue_state: PatLvalueState,
+    ) -> ThirExprKind {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let unit_ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
+        let unit_ty_exp = self.ccx_mut().export(span, unit_ty);
+
+        let stmts =
+            [ThirStmt::Let(Obj::new(
                 ThirLetStmt {
-                    span: expr.r(s).span,
-                    pat: bcx.confirm_thir_pat_outer(lhs),
-                    init: Some(bcx.confirm_thir_expr_post(rhs)),
+                    span,
+                    pat: self.confirm_thir_pat_outer(lhs),
+                    init: Some(self.confirm_thir_expr_post(rhs)),
                     else_clause: None,
                 },
                 s,
@@ -81,24 +95,15 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             .into_iter()
             .chain(pat_lvalue_state.temporaries.into_iter().map(
                 |PatLvalueTemp { stash, place }| {
-                    let stash_ty = bcx.type_of_local(stash);
+                    let stash = self.confirm_thir_local(stash);
 
                     ThirStmt::Expr(Obj::new(
                         ThirExpr {
-                            span: expr.r(s).span,
+                            span,
                             ty: unit_ty_exp,
                             kind: LateInit::new(ThirExprKind::Assign(
-                                bcx.confirm_thir_expr_post(place),
-                                Obj::new(
-                                    ThirExpr {
-                                        span: place.r(s).span,
-                                        ty: bcx.ccx_mut().export(place.r(s).span, stash_ty),
-                                        kind: LateInit::new(ThirExprKind::Local(
-                                            bcx.confirm_thir_local(stash),
-                                        )),
-                                    },
-                                    s,
-                                ),
+                                self.confirm_thir_expr_post(place),
+                                self.create_thir_local_expr(stash.r(s).name.span(), stash),
                             )),
                         },
                         s,
@@ -107,16 +112,15 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             ))
             .collect::<Vec<_>>();
 
-            ThirExprKind::Block(Obj::new(
-                ThirBlock {
-                    span: expr.r(s).span,
-                    ty: unit_ty_exp,
-                    stmts,
-                    last_expr: None,
-                },
-                s,
-            ))
-        })
+        ThirExprKind::Block(Obj::new(
+            ThirBlock {
+                span,
+                ty: unit_ty_exp,
+                stmts,
+                last_expr: None,
+            },
+            s,
+        ))
     }
 
     pub fn check_pat_infer(&mut self, pat: Obj<HirPat>, lvalue: Option<&mut PatLvalueState>) -> Ty {

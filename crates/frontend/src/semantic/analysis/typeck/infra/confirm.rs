@@ -4,12 +4,13 @@ use crate::{
         arena::{HasInterner, LateInit, Obj},
         syntax::{HasSpan, Span},
     },
+    parse::ast::AstUnOpKind,
     semantic::{
         analysis::typeck::BodyCtxt,
         infer::FloatingInferVar,
         syntax::{
             HirBlock, HirExpr, HirLabelledBlock, HirLocal, HirPat, HirPatListFrontAndTail, HirStmt,
-            InferTyVar, RelationMode, SimpleTyKind, ThirBlock, ThirExpr, ThirExprKind,
+            InferTyVar, RelationMode, SigTyKind, SimpleTyKind, ThirBlock, ThirExpr, ThirExprKind,
             ThirLabelledBlock, ThirLetStmt, ThirLocal, ThirPat, ThirPatKind,
             ThirPatListFrontAndTail, ThirStmt, Ty, TyKind,
         },
@@ -345,6 +346,60 @@ impl BodyCtxt<'_, '_> {
                     })
                     .collect::<Vec<_>>(),
                 last_expr: self.confirm_opt_thir_expr_post(hir.r(s).last_expr),
+            },
+            s,
+        )
+    }
+
+    pub fn create_thir_local_expr(&mut self, span: Span, local: Obj<ThirLocal>) -> Obj<ThirExpr> {
+        let s = self.session();
+
+        Obj::new(
+            ThirExpr {
+                span,
+                ty: local.r(s).ty,
+                kind: LateInit::new(ThirExprKind::Local(local)),
+            },
+            s,
+        )
+    }
+
+    pub fn create_thir_local_pat(&mut self, span: Span, local: Obj<ThirLocal>) -> Obj<ThirPat> {
+        let s = self.session();
+
+        Obj::new(
+            ThirPat {
+                span,
+                ty: local.r(s).ty,
+                kind: LateInit::new(ThirPatKind::Binding {
+                    by_ref: None,
+                    local,
+                    and_bind: None,
+                }),
+            },
+            s,
+        )
+    }
+
+    pub fn create_thir_local_deref_expr(
+        &mut self,
+        span: Span,
+        local: Obj<ThirLocal>,
+    ) -> Obj<ThirExpr> {
+        let s = self.session();
+
+        let SigTyKind::Reference(_re, _muta, pointee) = local.r(s).ty.r(s).kind else {
+            unreachable!()
+        };
+
+        Obj::new(
+            ThirExpr {
+                span,
+                ty: pointee,
+                kind: LateInit::new(ThirExprKind::PrimitiveUnOp(
+                    AstUnOpKind::Deref,
+                    self.create_thir_local_expr(span, local),
+                )),
             },
             s,
         )

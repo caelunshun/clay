@@ -2,20 +2,23 @@ use crate::{
     base::{
         Diag,
         arena::{HasInterner, HasListInterner as _, LateInit, Obj},
+        syntax::Span,
     },
     parse::{
         ast::{AstAssignOpKind, AstBinOpKind, AstBinOpSpanned, AstLit, AstUnOpKind},
-        token::{IntegralKind, NumLitBase, TokenNumLitKind},
+        token::{Ident, IntegralKind, NumLitBase, TokenNumLitKind},
     },
     semantic::{
         analysis::typeck::{BodyCtxt, infra::confirm::ThirExprConfirmedWithTy},
         infer::{ClauseCx, ClauseFuel, HrtbUniverse, PrettyFmtOpts, SpannedError, ToDebugTree},
         syntax::{
             Divergence, FloatKind, FnInstanceInner, FnOwner, HirExpr, InferTyVarSourceInfo,
-            IntKind, RelationMode, SimpleTyKind, SimpleTySet, ThirExpr, ThirExprKind, TraitItem,
+            IntKind, LocalNameIdent, Mutability, Re, RelationMode, SimpleTyKind, SimpleTySet,
+            ThirBlock, ThirExpr, ThirExprKind, ThirLetStmt, ThirLocal, ThirStmt, TraitItem,
             TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
         },
     },
+    symbol,
 };
 
 // === BodyCtxt === //
@@ -329,15 +332,15 @@ impl BodyCtxt<'_, '_> {
         &mut self,
         expr: Obj<HirExpr>,
         kind: AstAssignOpKind,
-        lhs: Obj<HirExpr>,
-        rhs: Obj<HirExpr>,
+        lhs_expr: Obj<HirExpr>,
+        rhs_expr: Obj<HirExpr>,
         divergence: &mut Divergence,
     ) -> ThirExprConfirmedWithTy {
         let tcx = self.tcx();
         let s = self.session();
 
-        let lhs = self.check_expr(lhs, None).and_do(divergence);
-        let rhs = self.check_expr(rhs, None).and_do(divergence);
+        let lhs = self.check_expr(lhs_expr, None).and_do(divergence);
+        let rhs = self.check_expr(rhs_expr, None).and_do(divergence);
 
         let kind_info = self.decode_assign_op_kind(kind);
 
@@ -376,9 +379,20 @@ impl BodyCtxt<'_, '_> {
 
             *self.ccx_mut() = prim_fork;
 
-            let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
+            let unit_ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
 
-            return self.put_thir_expr(expr, ty, |bcx| todo!());
+            // TODO
+            return self.put_thir_expr(expr, unit_ty, move |bcx| {
+                let s = bcx.session();
+
+                bcx.create_primitive_assign_op(
+                    expr.r(s).span,
+                    kind_info.pair_op,
+                    lhs,
+                    lhs_expr,
+                    rhs_expr,
+                )
+            });
         }
 
         // Otherwise, attempt to perform an overloaded operation.
@@ -413,6 +427,83 @@ impl BodyCtxt<'_, '_> {
         let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
 
         self.put_thir_expr(expr, ty, |bcx| todo!())
+    }
+
+    fn create_primitive_assign_op(
+        &mut self,
+        span: Span,
+        op: AstBinOpKind,
+        lhs_ty: Ty,
+        lhs_expr: Obj<HirExpr>,
+        rhs_expr: Obj<HirExpr>,
+    ) -> ThirExprKind {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let unit_ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
+        let lhs_ref_ty = tcx.intern(TyKind::Reference(Re::ERASED, Mutability::Mut, lhs_ty));
+
+        let lhs_stash = Obj::new(
+            ThirLocal {
+                mutability: Mutability::Not,
+                name: LocalNameIdent::User(Ident::new(span, symbol!("lhs_stash"))),
+                ty: self.ccx_mut().export(span, lhs_ref_ty),
+            },
+            s,
+        );
+
+        ThirExprKind::Block(Obj::new(
+            ThirBlock {
+                span,
+                ty: self.ccx_mut().export(span, unit_ty),
+                stmts: [
+                    ThirStmt::Let(Obj::new(
+                        ThirLetStmt {
+                            span,
+                            pat: self.create_thir_local_pat(span, lhs_stash),
+                            init: Some(Obj::new(
+                                ThirExpr {
+                                    span,
+                                    ty: self.ccx_mut().export(span, lhs_ref_ty),
+                                    kind: LateInit::new(ThirExprKind::AddrOf(
+                                        Mutability::Mut,
+                                        self.confirm_thir_expr_post(lhs_expr),
+                                    )),
+                                },
+                                s,
+                            )),
+                            else_clause: None,
+                        },
+                        s,
+                    )),
+                    ThirStmt::Expr(Obj::new(
+                        ThirExpr {
+                            span,
+                            ty: self.ccx_mut().export(span, unit_ty),
+                            kind: LateInit::new(ThirExprKind::Assign(
+                                self.create_thir_local_deref_expr(span, lhs_stash),
+                                Obj::new(
+                                    ThirExpr {
+                                        span,
+                                        ty: self.ccx_mut().export(span, lhs_ty),
+                                        kind: LateInit::new(ThirExprKind::PrimitiveBinOp(
+                                            op,
+                                            self.create_thir_local_deref_expr(span, lhs_stash),
+                                            self.confirm_thir_expr_post(rhs_expr),
+                                        )),
+                                    },
+                                    s,
+                                ),
+                            )),
+                        },
+                        s,
+                    )),
+                ]
+                .into(),
+                last_expr: None,
+            },
+            s,
+        ))
     }
 
     pub fn check_expr_inner_index(
@@ -520,6 +611,7 @@ pub struct BinaryOperation {
 pub struct AssignOperation {
     pub lhs: SimpleTySet,
     pub rhs: EquateOrSet,
+    pub pair_op: AstBinOpKind,
     pub overload: Option<Obj<TraitItem>>,
 }
 
@@ -667,51 +759,61 @@ impl BodyCtxt<'_, '_> {
             AstAssignOpKind::Add => AssignOperation {
                 lhs: SimpleTySet::NUM,
                 rhs: EquateOrSet::EqualsLhs,
+                pair_op: AstBinOpKind::Add,
                 overload: lang_items.add_assign_trait(),
             },
             AstAssignOpKind::Sub => AssignOperation {
                 lhs: SimpleTySet::NUM,
                 rhs: EquateOrSet::EqualsLhs,
+                pair_op: AstBinOpKind::Sub,
                 overload: lang_items.sub_assign_trait(),
             },
             AstAssignOpKind::Mul => AssignOperation {
                 lhs: SimpleTySet::NUM,
                 rhs: EquateOrSet::EqualsLhs,
+                pair_op: AstBinOpKind::Mul,
                 overload: lang_items.mul_assign_trait(),
             },
             AstAssignOpKind::Div => AssignOperation {
                 lhs: SimpleTySet::NUM,
                 rhs: EquateOrSet::EqualsLhs,
+                pair_op: AstBinOpKind::Div,
                 overload: lang_items.div_assign_trait(),
             },
             AstAssignOpKind::Rem => AssignOperation {
                 lhs: SimpleTySet::NUM,
                 rhs: EquateOrSet::EqualsLhs,
+                pair_op: AstBinOpKind::Rem,
                 overload: lang_items.rem_assign_trait(),
             },
             AstAssignOpKind::BitXor => AssignOperation {
                 lhs: SimpleTySet::INT | SimpleTySet::BOOL,
                 rhs: EquateOrSet::EqualsLhs,
+                pair_op: AstBinOpKind::BitXor,
                 overload: lang_items.bit_xor_assign_trait(),
             },
             AstAssignOpKind::BitAnd => AssignOperation {
                 lhs: SimpleTySet::INT | SimpleTySet::BOOL,
                 rhs: EquateOrSet::EqualsLhs,
+                pair_op: AstBinOpKind::BitAnd,
                 overload: lang_items.bit_and_assign_trait(),
             },
             AstAssignOpKind::BitOr => AssignOperation {
                 lhs: SimpleTySet::INT | SimpleTySet::BOOL,
                 rhs: EquateOrSet::EqualsLhs,
+                pair_op: AstBinOpKind::BitOr,
                 overload: lang_items.bit_or_assign_trait(),
             },
             AstAssignOpKind::Shl => AssignOperation {
                 lhs: SimpleTySet::INT,
                 rhs: EquateOrSet::Unrelated(SimpleTySet::INT),
+                pair_op: AstBinOpKind::Shl,
                 overload: lang_items.bit_shl_assign_trait(),
             },
             AstAssignOpKind::Shr => AssignOperation {
                 lhs: SimpleTySet::INT,
                 rhs: EquateOrSet::Unrelated(SimpleTySet::INT),
+                pair_op: AstBinOpKind::Shl,
                 overload: lang_items.bit_shr_assign_trait(),
             },
         }
