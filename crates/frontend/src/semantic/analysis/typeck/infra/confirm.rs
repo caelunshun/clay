@@ -203,8 +203,17 @@ impl BodyCtxt<'_, '_> {
     ) -> Obj<[Obj<ThirExpr>]> {
         let s = self.session();
 
+        self.confirm_thir_expr_iter_post(hir.r(s).iter().copied())
+    }
+
+    pub fn confirm_thir_expr_iter_post(
+        &mut self,
+        hir: impl IntoIterator<Item = Obj<HirExpr>, IntoIter: ExactSizeIterator>,
+    ) -> Obj<[Obj<ThirExpr>]> {
+        let s = self.session();
+
         Obj::new_iter(
-            hir.r(s).iter().map(|&hir| self.confirm_thir_expr_post(hir)),
+            hir.into_iter().map(|hir| self.confirm_thir_expr_post(hir)),
             s,
         )
     }

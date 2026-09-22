@@ -62,7 +62,7 @@ pub struct ThirExpr {
 
 #[derive(Debug, Clone)]
 pub enum ThirExprKind {
-    CreatePathZst,
+    CreateZst,
     CreateLiteral(AstLit),
     CreateArray(Obj<[Obj<ThirExpr>]>),
     CreateTuple(Obj<[Obj<ThirExpr>]>),

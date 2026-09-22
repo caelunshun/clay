@@ -167,7 +167,7 @@ impl BodyCtxt<'_, '_> {
                         .report_loud(),
                 ));
 
-                self.put_thir_expr(expr, ty, |_bcx| ThirExprKind::CreatePathZst)
+                self.put_thir_expr(expr, ty, |_bcx| ThirExprKind::CreateZst)
             }
             HirExprKind::TypeRelative {
                 self_ty,
@@ -190,7 +190,7 @@ impl BodyCtxt<'_, '_> {
                     );
                 };
 
-                self.put_thir_expr(expr, resolution, |_bcx| ThirExprKind::CreatePathZst)
+                self.put_thir_expr(expr, resolution, |_bcx| ThirExprKind::CreateZst)
             }
             HirExprKind::Cast(target, as_ty) => {
                 let env = self.import_env;
@@ -589,7 +589,7 @@ impl BodyCtxt<'_, '_> {
                     }
                 };
 
-                self.put_thir_expr(expr, ty, |_bcx| ThirExprKind::CreatePathZst)
+                self.put_thir_expr(expr, ty, |_bcx| ThirExprKind::CreateZst)
             }
             HirExprKind::AdtCtorEnumVariant(item, params) => {
                 let ctor = *item.r(s).adt_variant(s).r(s).ctor;
@@ -632,7 +632,7 @@ impl BodyCtxt<'_, '_> {
                     )),
                 };
 
-                self.put_thir_expr(expr, ty, |_bcx| ThirExprKind::CreatePathZst)
+                self.put_thir_expr(expr, ty, |_bcx| ThirExprKind::CreateZst)
             }
             HirExprKind::Struct(HirStructExpr {
                 ctor_span,

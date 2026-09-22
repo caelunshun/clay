@@ -243,7 +243,7 @@ impl BodyCtxt<'_, '_> {
                                 early_args: Some(tcx.intern_list(&[])),
                             }))),
                         ),
-                        kind: LateInit::new(ThirExprKind::CreatePathZst),
+                        kind: LateInit::new(ThirExprKind::CreateZst),
                     },
                     s,
                 ),
@@ -441,18 +441,20 @@ impl BodyCtxt<'_, '_> {
 
         let index_trait = self.krate().r(s).lang_items.index_trait().unwrap();
 
+        let index_trait_spec = TraitSpec {
+            def: index_trait,
+            params: tcx.intern_list(&[
+                TraitParam::Equals(TyOrRe::Ty(index_ty)),
+                TraitParam::Equals(TyOrRe::Ty(output_ty)),
+            ]),
+        };
+
         self.ccx_mut()
             .oblige_ty_meets_trait_instantiated(
                 ClauseFuel::new(),
                 HrtbUniverse::ROOT,
                 target_ty,
-                TraitSpec {
-                    def: index_trait,
-                    params: tcx.intern_list(&[
-                        TraitParam::Equals(TyOrRe::Ty(index_ty)),
-                        TraitParam::Equals(TyOrRe::Ty(output_ty)),
-                    ]),
-                },
+                index_trait_spec,
             )
             // TODO
             .map({
@@ -463,7 +465,38 @@ impl BodyCtxt<'_, '_> {
 
         self.check_expr_demand(index, index_ty).and_do(divergence);
 
-        self.put_thir_expr(expr, output_ty, |bcx| todo!())
+        self.put_thir_expr(expr, output_ty, move |bcx| {
+            let s = bcx.session();
+            let tcx = bcx.tcx();
+
+            ThirExprKind::Call(
+                Obj::new(
+                    ThirExpr {
+                        span: expr.r(s).span,
+                        ty: bcx.ccx_mut().export(
+                            expr.r(s).span,
+                            tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
+                                owner: FnOwner::Trait {
+                                    instance: index_trait_spec,
+                                    self_ty: target_ty,
+                                    method_idx: 0,
+                                },
+                                early_args: None,
+                            }))),
+                        ),
+                        kind: LateInit::new(ThirExprKind::CreateZst),
+                    },
+                    s,
+                ),
+                Obj::new_iter(
+                    [
+                        bcx.confirm_thir_expr_post(target),
+                        bcx.confirm_thir_expr_post(index),
+                    ],
+                    s,
+                ),
+            )
+        })
     }
 }
 

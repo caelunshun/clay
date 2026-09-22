@@ -1,7 +1,7 @@
 use crate::{
     base::{
         Diag,
-        arena::{HasListInterner as _, Obj},
+        arena::{HasInterner, HasListInterner as _, LateInit, Obj},
     },
     parse::token::Ident,
     semantic::{
@@ -15,7 +15,7 @@ use crate::{
         infer::{ClauseFuel, FixArity, HrtbUniverse, SpannedError},
         syntax::{
             Divergence, HirExpr, InferTyVarSourceInfo, InstantiatedFnSig, RelationMode,
-            SigGenericList, ThirExprKind, TraitParam, TraitSpec, TyKind, TyOrRe,
+            SigGenericList, ThirExpr, ThirExprKind, TraitParam, TraitSpec, TyKind, TyOrRe,
         },
     },
 };
@@ -101,7 +101,7 @@ impl BodyCtxt<'_, '_> {
     pub fn check_expr_inner_method_call(
         &mut self,
         expr: Obj<HirExpr>,
-        receiver: Obj<HirExpr>,
+        receiver_expr: Obj<HirExpr>,
         name: Ident,
         generics: Option<SigGenericList>,
         args: Obj<[Obj<HirExpr>]>,
@@ -109,8 +109,8 @@ impl BodyCtxt<'_, '_> {
     ) -> ThirExprConfirmedWithTy {
         let s = self.session();
 
-        let receiver_span = receiver.r(s).span;
-        let receiver = self.check_expr(receiver, None).and_do(divergence);
+        let receiver_span = receiver_expr.r(s).span;
+        let receiver = self.check_expr(receiver_expr, None).and_do(divergence);
         let receiver = self.ccx_mut().peel_ty_infer_var_after_poll(receiver);
 
         match *receiver.r(s) {
@@ -193,7 +193,30 @@ impl BodyCtxt<'_, '_> {
             self.check_expr_demand(actual, expected).and_do(divergence);
         }
 
-        self.put_thir_expr(expr, expected_output, |bcx| todo!())
+        self.put_thir_expr(expr, expected_output, move |bcx| {
+            let s = bcx.session();
+            let tcx = bcx.tcx();
+
+            ThirExprKind::Call(
+                Obj::new(
+                    ThirExpr {
+                        span: expr.r(s).span,
+                        ty: bcx
+                            .ccx_mut()
+                            .export(expr.r(s).span, tcx.intern(TyKind::FnDef(instance))),
+                        kind: LateInit::new(ThirExprKind::CreateZst),
+                    },
+                    s,
+                ),
+                bcx.confirm_thir_expr_iter_post(
+                    [receiver_expr]
+                        .iter()
+                        .chain(args.r(s))
+                        .copied()
+                        .collect::<Vec<_>>(),
+                ),
+            )
+        })
     }
 
     pub fn check_expr_inner_field(
