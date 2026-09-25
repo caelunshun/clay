@@ -27,16 +27,6 @@ pub enum MirInstructionRef<'a> {
     Terminator(&'a MirTerminator),
 }
 
-impl MirInstructionRef<'_> {
-    pub fn span(&self) -> Span {
-        match self {
-            MirInstructionRef::Stmt(stmt) => stmt.span,
-            // TODO
-            MirInstructionRef::Terminator(_) => Span::DUMMY,
-        }
-    }
-}
-
 // === MirDirection === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -83,7 +73,7 @@ define_index_type! {
     pub struct MirBlockIdx = u32;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MirBody {
     pub locals: IndexVec<MirLocalIdx, MirLocal>,
     pub blocks: IndexVec<MirBlockIdx, MirBlock>,
@@ -160,14 +150,22 @@ impl MirBlock {
 
 #[derive(Debug, Clone)]
 pub struct MirStmt {
-    pub span: Span,
+    pub span: MirStmtSourceInfo,
     pub kind: MirStmtKind,
 }
 
 #[derive(Debug, Clone)]
+pub enum MirStmtSourceInfo {
+    Simple(Span),
+    Break,
+    Local,
+}
+
+#[derive(Debug, Clone)]
 pub enum MirStmtKind {
+    StorageLive(MirLocalIdx),
+    StorageDead(MirLocalIdx),
     Assign(Box<(MirPlace, MirAssignRvalue)>),
-    Discard(MirOperand),
 }
 
 #[derive(Debug, Clone, Default)]
