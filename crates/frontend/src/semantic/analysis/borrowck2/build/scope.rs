@@ -10,7 +10,11 @@ define_index_type! {
 }
 
 impl MirBuilderScopeIdx {
-    pub const ENTRY: MirBuilderScopeIdx = MirBuilderScopeIdx { _raw: 0 };
+    // The actual root scope. Does not have locals of its own and never exposed to the user to
+    // ensure that returns can be represented as regular breaks.
+    const BOOTSTRAP_ENTRY: MirBuilderScopeIdx = MirBuilderScopeIdx { _raw: 0 };
+
+    pub const ENTRY: MirBuilderScopeIdx = MirBuilderScopeIdx { _raw: 1 };
 }
 
 define_index_type! {
@@ -45,12 +49,20 @@ impl Default for MirScopedBuilder {
 
         let entry_block = builder.body.blocks.push(MirBlock::default());
 
-        builder.scopes.push(Scope {
-            parent: None,
-            locals: Vec::new(),
-            first_block: entry_block,
-            curr_block: entry_block,
-        });
+        assert_eq!(
+            builder.scopes.push(Scope {
+                parent: None,
+                locals: Vec::new(),
+                first_block: entry_block,
+                curr_block: entry_block,
+            }),
+            MirBuilderScopeIdx::BOOTSTRAP_ENTRY
+        );
+
+        assert_eq!(
+            builder.push_scope(MirBuilderScopeIdx::BOOTSTRAP_ENTRY),
+            MirBuilderScopeIdx::ENTRY
+        );
 
         builder
     }
@@ -87,7 +99,7 @@ impl MirScopedBuilder {
     /// successor count is one (e.g. `loop` entries) but cannot handle jumps out of the current
     /// scope, which must be done with [`Self::push_break`] and [`Self::push_continue`].
     #[must_use]
-    fn push_branch(
+    fn push_branch_dyn(
         &mut self,
         scope: MirBuilderScopeIdx,
         succ_count: usize,
@@ -123,6 +135,17 @@ impl MirScopedBuilder {
             .collect::<SmallVec<[MirBlockIdx; 2]>>());
 
         successors
+    }
+
+    fn push_branch_fixed<const N: usize>(
+        &mut self,
+        scope: MirBuilderScopeIdx,
+        f: impl FnOnce([MirBlockIdx; N]) -> MirTerminator,
+    ) -> [MirBuilderScopeIdx; N] {
+        *self
+            .push_branch_dyn(scope, N, |indices| f(*indices.as_array().unwrap()))
+            .as_array()
+            .unwrap()
     }
 
     fn push_break_shared(
@@ -181,14 +204,7 @@ impl MirScopedBuilder {
 
     /// Finishes the current scope by breaking out to a target which must be an ancestor scope.
     pub fn push_break(&mut self, scope: MirBuilderScopeIdx, target: MirBuilderScopeIdx) {
-        self.push_break_shared(
-            scope,
-            target,
-            self.scopes[scope]
-                .parent
-                .expect("cannot break from the root basic block")
-                .returns_to,
-        );
+        self.push_break_shared(scope, target, self.scopes[scope].parent.unwrap().returns_to);
     }
 
     /// Finishes the current scope by jumping back to the start of an ancestor scope.
@@ -196,8 +212,20 @@ impl MirScopedBuilder {
         self.push_break_shared(scope, target, self.scopes[scope].first_block);
     }
 
-    pub fn finish(self) -> MirBody {
-        // TODO: optimize
+    pub fn finish(mut self) -> MirBody {
+        // Patch up the bootstrap entry.
+        assert!(
+            self.scopes[MirBuilderScopeIdx::BOOTSTRAP_ENTRY]
+                .locals
+                .is_empty()
+        );
+
+        self.body.blocks[self.scopes[MirBuilderScopeIdx::BOOTSTRAP_ENTRY].curr_block].terminator =
+            MirTerminator::Return;
+
+        // Optimize the control-flow graph
+        // TODO
+
         self.body
     }
 }
@@ -206,11 +234,22 @@ impl MirScopedBuilder {
 impl MirScopedBuilder {
     #[must_use]
     pub fn push_scope(&mut self, scope: MirBuilderScopeIdx) -> MirBuilderScopeIdx {
+        let [sub_scope] = self.push_branch_fixed(scope, |[target]| MirTerminator::Goto(target));
+        sub_scope
+    }
+
+    #[must_use]
+    pub fn push_switch_dyn<const N: usize>(
+        &mut self,
+        scope: MirBuilderScopeIdx,
+        scrutinee: MirOperand,
+        constants: &[u64],
+    ) -> SmallVec<[MirBuilderScopeIdx; 2]> {
         todo!()
     }
 
     #[must_use]
-    pub fn push_fixed_switch<const N: usize>(
+    pub fn push_switch_fixed<const N: usize>(
         &mut self,
         scope: MirBuilderScopeIdx,
         scrutinee: MirOperand,
