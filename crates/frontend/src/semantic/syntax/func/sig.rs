@@ -2,13 +2,12 @@ use crate::{
     base::{
         Session,
         arena::{LateInit, Obj},
-        syntax::{Span, Symbol},
+        syntax::Span,
     },
     parse::token::Ident,
     semantic::syntax::{
         GenericBinder, HirExpr, HirPat, ImplItem, Item, SigTy, ThirExpr, TraitItem, Ty, Visibility,
     },
-    symbol,
 };
 use derive_where::derive_where;
 use std::{
@@ -170,75 +169,6 @@ impl<T> DivergenceAnd<T> {
     pub fn join(self, mode: DivergenceJoin, divergence: &mut Divergence) -> T {
         divergence.join_assign(mode, self.divergence);
         self.value
-    }
-}
-
-// === Label === //
-
-pub type HirLabelledBlock = LabelledBlock<Obj<HirExpr>>;
-pub type ThirLabelledBlock = LabelledBlock<Obj<ThirExpr>>;
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct LabelledBlock<T> {
-    pub target: T,
-    pub kind: LabelTargetKind,
-}
-
-impl<T> LabelledBlock<T> {
-    pub fn map<V>(self, f: impl FnOnce(T) -> V) -> LabelledBlock<V> {
-        LabelledBlock {
-            target: f(self.target),
-            kind: self.kind,
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum LabelTargetKind {
-    Loop,
-    While,
-    For,
-    Block,
-}
-
-impl LabelTargetKind {
-    pub fn implicit_innermost(self) -> bool {
-        match self {
-            LabelTargetKind::Loop | LabelTargetKind::While | LabelTargetKind::For => true,
-            LabelTargetKind::Block => false,
-        }
-    }
-
-    pub fn can_break_with_value(self) -> bool {
-        match self {
-            LabelTargetKind::Loop | LabelTargetKind::Block => true,
-            LabelTargetKind::While | LabelTargetKind::For => false,
-        }
-    }
-
-    pub fn can_continue(self) -> bool {
-        match self {
-            LabelTargetKind::Loop | LabelTargetKind::While | LabelTargetKind::For => true,
-            LabelTargetKind::Block => false,
-        }
-    }
-
-    pub fn what(self) -> Symbol {
-        match self {
-            LabelTargetKind::Loop => symbol!("`loop`"),
-            LabelTargetKind::While => symbol!("`while` loop"),
-            LabelTargetKind::For => symbol!("`for` loop"),
-            LabelTargetKind::Block => symbol!("named block"),
-        }
-    }
-
-    pub fn a_what(self) -> Symbol {
-        match self {
-            LabelTargetKind::Loop => symbol!("a `loop`"),
-            LabelTargetKind::While => symbol!("a `while` loop"),
-            LabelTargetKind::For => symbol!("a `for` loop"),
-            LabelTargetKind::Block => symbol!("a named block"),
-        }
     }
 }
 

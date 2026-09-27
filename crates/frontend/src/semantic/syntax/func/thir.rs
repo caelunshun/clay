@@ -7,7 +7,7 @@ use crate::{
     parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
     semantic::syntax::{
         AdtCtor, AdtCtorFieldIdx, DynSiteIdx, LocalNameIdent, Mutability, PatListFrontAndTail,
-        SigTy, ThirLabelledBlock,
+        SigTy,
     },
 };
 
@@ -69,8 +69,8 @@ pub enum ThirExprKind {
     PrimitiveBinOp(AstBinOpKind, Obj<ThirExpr>, Obj<ThirExpr>),
     PrimitiveUnOp(AstUnOpKind, Obj<ThirExpr>),
     NoOp(Obj<ThirExpr>),
-    Break(ThirLabelledBlock, Option<Obj<ThirExpr>>),
-    Continue(ThirLabelledBlock),
+    Break(Obj<ThirExpr>, Option<Obj<ThirExpr>>),
+    Continue(Obj<ThirExpr>),
     Return(Obj<ThirExpr>),
     Assign(Obj<ThirExpr>, Obj<ThirExpr>),
     Block(Obj<ThirBlock>),

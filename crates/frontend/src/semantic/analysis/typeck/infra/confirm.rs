@@ -11,8 +11,8 @@ use crate::{
         syntax::{
             FnInstance, HirBlock, HirExpr, HirLabelledBlock, HirLocal, HirPat,
             HirPatListFrontAndTail, HirStmt, InferTyVar, RelationMode, SigTyKind, SimpleTyKind,
-            ThirBlock, ThirExpr, ThirExprKind, ThirLabelledBlock, ThirLetStmt, ThirLocal, ThirPat,
-            ThirPatKind, ThirPatListFrontAndTail, ThirStmt, Ty, TyKind,
+            ThirBlock, ThirExpr, ThirExprKind, ThirLetStmt, ThirLocal, ThirPat, ThirPatKind,
+            ThirPatListFrontAndTail, ThirStmt, Ty, TyKind,
         },
     },
     utils::{hash::FxHashMap, mem::ArenaRc},
@@ -302,13 +302,10 @@ impl BodyCtxt<'_, '_> {
 // === Synthesis === //
 
 impl BodyCtxt<'_, '_> {
-    pub fn confirm_thir_label(&mut self, hir: HirLabelledBlock) -> ThirLabelledBlock {
-        let HirLabelledBlock { target, kind } = hir;
+    pub fn confirm_thir_label(&mut self, hir: HirLabelledBlock) -> Obj<ThirExpr> {
+        let HirLabelledBlock { target, kind: _ } = hir;
 
-        ThirLabelledBlock {
-            target: self.confirm_thir_expr(target).pre_coerce,
-            kind,
-        }
+        self.confirm_thir_expr(target).pre_coerce
     }
 
     pub fn confirm_thir_block_uncached(

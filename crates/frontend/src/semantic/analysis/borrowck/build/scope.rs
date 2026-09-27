@@ -5,6 +5,8 @@ use crate::semantic::syntax::{
 use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
 
+// === Builder === //
+
 define_index_type! {
     pub struct MirBuilderScopeIdx = u32;
 }
@@ -88,7 +90,7 @@ impl MirScopedBuilder {
     }
 
     /// Pushes a regular statement to a scope.
-    fn push_statement(&mut self, scope: MirBuilderScopeIdx, stmt: MirStmt) {
+    pub fn push_statement(&mut self, scope: MirBuilderScopeIdx, stmt: MirStmt) {
         self.body.blocks[self.scopes[scope].curr_block]
             .stmts
             .push(stmt);
@@ -99,7 +101,7 @@ impl MirScopedBuilder {
     /// successor count is one (e.g. `loop` entries) but cannot handle jumps out of the current
     /// scope, which must be done with [`Self::push_break`] and [`Self::push_continue`].
     #[must_use]
-    fn push_branch_dyn(
+    pub fn push_branch_dyn(
         &mut self,
         scope: MirBuilderScopeIdx,
         succ_count: usize,
@@ -137,7 +139,7 @@ impl MirScopedBuilder {
         successors
     }
 
-    fn push_branch_fixed<const N: usize>(
+    pub fn push_branch_fixed<const N: usize>(
         &mut self,
         scope: MirBuilderScopeIdx,
         f: impl FnOnce([MirBlockIdx; N]) -> MirTerminator,
@@ -262,3 +264,7 @@ impl MirScopedBuilder {
         self.push_break(scope, MirBuilderScopeIdx::ENTRY);
     }
 }
+
+// === Optimizer === //
+
+// TODO

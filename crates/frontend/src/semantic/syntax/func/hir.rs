@@ -12,9 +12,10 @@ use crate::{
         token::Ident,
     },
     semantic::syntax::{
-        EnumVariantItem, FnItem, HirLabelledBlock, Mutability, PatListFrontAndTail, SigGenericList,
-        SigTraitSpec, SigTy,
+        EnumVariantItem, FnItem, Mutability, PatListFrontAndTail, SigGenericList, SigTraitSpec,
+        SigTy,
     },
+    symbol,
 };
 use std::fmt;
 
@@ -255,4 +256,61 @@ pub struct HirMatchArm {
     pub pat: Obj<HirPat>,
     pub guard: Option<Obj<HirExpr>>,
     pub body: Obj<HirExpr>,
+}
+
+// === Labels === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct HirLabelledBlock {
+    pub target: Obj<HirExpr>,
+    pub kind: LabelTargetKind,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum LabelTargetKind {
+    Loop,
+    While,
+    For,
+    Block,
+}
+
+impl LabelTargetKind {
+    pub fn implicit_innermost(self) -> bool {
+        match self {
+            LabelTargetKind::Loop | LabelTargetKind::While | LabelTargetKind::For => true,
+            LabelTargetKind::Block => false,
+        }
+    }
+
+    pub fn can_break_with_value(self) -> bool {
+        match self {
+            LabelTargetKind::Loop | LabelTargetKind::Block => true,
+            LabelTargetKind::While | LabelTargetKind::For => false,
+        }
+    }
+
+    pub fn can_continue(self) -> bool {
+        match self {
+            LabelTargetKind::Loop | LabelTargetKind::While | LabelTargetKind::For => true,
+            LabelTargetKind::Block => false,
+        }
+    }
+
+    pub fn what(self) -> Symbol {
+        match self {
+            LabelTargetKind::Loop => symbol!("`loop`"),
+            LabelTargetKind::While => symbol!("`while` loop"),
+            LabelTargetKind::For => symbol!("`for` loop"),
+            LabelTargetKind::Block => symbol!("named block"),
+        }
+    }
+
+    pub fn a_what(self) -> Symbol {
+        match self {
+            LabelTargetKind::Loop => symbol!("a `loop`"),
+            LabelTargetKind::While => symbol!("a `while` loop"),
+            LabelTargetKind::For => symbol!("a `for` loop"),
+            LabelTargetKind::Block => symbol!("a named block"),
+        }
+    }
 }

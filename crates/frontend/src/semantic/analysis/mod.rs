@@ -1,4 +1,4 @@
-pub mod borrowck2;
+pub mod borrowck;
 pub mod sigck;
 pub mod typeck;
 

@@ -1,7 +1,11 @@
 use crate::{
-    base::{arena::Intern, syntax::Span},
+    base::{
+        ErrorGuaranteed,
+        arena::{HasListInterner, Intern},
+        syntax::Span,
+    },
     parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
-    semantic::syntax::{Mutability, SigTy},
+    semantic::syntax::{Mutability, SigTy, TyCtxt},
 };
 use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
@@ -217,11 +221,31 @@ pub struct MirPlace {
     pub projections: MirPlaceElemList,
 }
 
+impl MirPlace {
+    pub fn extend(self, tcx: &TyCtxt, proj: impl IntoIterator<Item = MirPlaceElem>) -> Self {
+        let s = &tcx.session;
+
+        Self {
+            local: self.local,
+            projections: tcx.intern_list(
+                &self
+                    .projections
+                    .r(s)
+                    .iter()
+                    .copied()
+                    .chain(proj)
+                    .collect::<Vec<_>>(),
+            ),
+        }
+    }
+}
+
 pub type MirPlaceElemList = Intern<[MirPlaceElem]>;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum MirPlaceElem {
     DerefPtr,
+    Field(u32),
 }
 
 #[derive(Debug, Clone)]
@@ -234,6 +258,7 @@ pub enum MirAssignRvalue {
     BinaryOp(AstBinOpKind, Box<(MirOperand, MirOperand)>),
     UnaryOp(AstUnOpKind, MirOperand),
     Discriminant(MirPlace),
+    Error(ErrorGuaranteed),
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
