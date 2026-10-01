@@ -4,21 +4,41 @@ use crate::{
         arena::{HasListInterner as _, Obj},
     },
     semantic::{
-        analysis::borrowck::build::{MirBuilderScopeIdx, MirScopedBuilder},
+        analysis::{
+            borrowck::build::scope::{MirBuilderScopeIdx, MirScopedBuilder},
+            sigck::CrateSigckVisitor,
+        },
         syntax::{
             FnDef, MirAssignRvalue, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirStmt,
             MirStmtKind, MirStmtSourceInfo, SigTy, ThirBlock, ThirExpr, ThirExprKind, ThirLocal,
-            TyCtxt,
+            ThirPat, ThirPatKind, ThirStmt, TyCtxt,
         },
     },
     utils::hash::FxHashMap,
 };
 
+// === Driver === //
+
+pub fn build_function_mir(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
+    let s = cx.session();
+    let tcx = cx.tcx();
+
+    let Some(thir) = *def.r(s).thir_body else {
+        return;
+    };
+
+    let mut builder = MirFromThirCtx::new(tcx, def);
+    let rv = builder.lower_expr_rvalue(MirBuilderScopeIdx::ENTRY, thir);
+    // TODO
+}
+
+// === Context === //
+
 pub struct MirFromThirCtx<'tcx> {
     pub tcx: &'tcx TyCtxt,
     pub def: Obj<FnDef>,
     pub builder: MirScopedBuilder,
-    pub labelled_scopes: FxHashMap<Obj<ThirBlock>, LabelledScope>,
+    pub labelled_scopes: FxHashMap<Obj<ThirExpr>, LabelledScope>,
     pub thir_locals: FxHashMap<Obj<ThirLocal>, MirLocalIdx>,
 }
 
@@ -31,12 +51,18 @@ pub enum MirRvalueOrPlace {
 #[derive(Copy, Clone)]
 pub struct LabelledScope {
     pub scope: MirBuilderScopeIdx,
-    pub loop_place: Option<MirPlace>,
+    pub out_place: Option<MirPlace>,
 }
 
 impl<'tcx> MirFromThirCtx<'tcx> {
     pub fn new(tcx: &'tcx TyCtxt, def: Obj<FnDef>) -> Self {
-        todo!()
+        Self {
+            tcx,
+            def,
+            builder: MirScopedBuilder::default(),
+            labelled_scopes: FxHashMap::default(),
+            thir_locals: FxHashMap::default(),
+        }
     }
 
     pub fn tcx(&self) -> &'tcx TyCtxt {
@@ -151,7 +177,24 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             ThirExprKind::Continue(label) => todo!(),
             ThirExprKind::Return(obj) => todo!(),
             ThirExprKind::Assign(lhs, rhs) => todo!(),
-            ThirExprKind::Block(block) => todo!(),
+            ThirExprKind::Block(block) => {
+                let assign_into =
+                    self.create_assign_into_place_if_needed(scope, &mut assign_into, expr.r(s).ty);
+
+                let scope = self.builder.push_scope(scope);
+
+                self.labelled_scopes.insert(
+                    expr,
+                    LabelledScope {
+                        scope,
+                        out_place: Some(assign_into),
+                    },
+                );
+
+                self.lower_block(scope, block, Some(assign_into));
+
+                MirRvalueOrPlace::Place(assign_into)
+            }
             ThirExprKind::Loop(obj) => todo!(),
             ThirExprKind::AddrOf(mutability, obj) => todo!(),
             ThirExprKind::Call(obj, obj1) => todo!(),
@@ -162,10 +205,9 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             ThirExprKind::CreateBracedAdt { ctor, fields, rest } => {
                 todo!()
             }
-            ThirExprKind::Local(local) => MirRvalueOrPlace::Place(MirPlace {
-                local: *self.thir_locals.get(&local).unwrap(),
-                projections: tcx.intern_list(&[]),
-            }),
+            ThirExprKind::Local(local) => {
+                MirRvalueOrPlace::Place(MirPlace::new(tcx, self.thir_locals[&local], []))
+            }
             ThirExprKind::If {
                 cond,
                 truthy,
@@ -176,6 +218,98 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             ThirExprKind::While(cond, block) => todo!(),
             ThirExprKind::Let(obj, obj1) => todo!(),
             ThirExprKind::Error(error) => MirRvalueOrPlace::Rvalue(MirAssignRvalue::Error(error)),
+        }
+    }
+
+    pub fn lower_block(
+        &mut self,
+        scope: MirBuilderScopeIdx,
+        expr: Obj<ThirBlock>,
+        mut assign_into: Option<MirPlace>,
+    ) {
+        let s = self.session();
+
+        for &stmt in &expr.r(s).stmts {
+            match stmt {
+                ThirStmt::Expr(expr) => {
+                    let scope = self.builder.push_scope(scope);
+                    let rvalue = self.lower_expr_rvalue(scope, expr);
+
+                    self.builder.push_statement(
+                        scope,
+                        MirStmt {
+                            span: MirStmtSourceInfo::Simple(expr.r(s).span),
+                            kind: MirStmtKind::Discard(rvalue),
+                        },
+                    );
+                }
+                ThirStmt::Let(stmt) => {
+                    todo!()
+                }
+            }
+        }
+
+        // TODO
+    }
+
+    pub fn lower_pat(
+        &mut self,
+        local_scope: MirBuilderScopeIdx,
+        accept_scope: MirBuilderScopeIdx,
+        reject_scope: MirBuilderScopeIdx,
+        pat: Obj<ThirPat>,
+        scrutinee: MirPlace,
+    ) {
+        let tcx = self.tcx();
+        let s = self.session();
+
+        match *pat.r(s).kind {
+            ThirPatKind::Hole => {
+                // (trivially accepted)
+            }
+            ThirPatKind::Binding {
+                by_ref,
+                local,
+                and_bind,
+            } => {
+                let mir_local = self.builder.push_local(local_scope, local.r(s).ty);
+
+                self.thir_locals.insert(local, mir_local);
+
+                self.builder.push_statement(
+                    reject_scope,
+                    MirStmt {
+                        span: MirStmtSourceInfo::Simple(pat.r(s).span),
+                        kind: MirStmtKind::Assign(Box::new((
+                            MirPlace::new(tcx, mir_local, []),
+                            match by_ref {
+                                Some(muta) => MirAssignRvalue::Ref(muta, scrutinee),
+                                None => MirAssignRvalue::Use(MirOperand::Move(scrutinee)),
+                            },
+                        ))),
+                    },
+                );
+
+                if let Some(and_bind) = and_bind {
+                    self.lower_pat(local_scope, accept_scope, reject_scope, and_bind, scrutinee);
+                }
+            }
+            ThirPatKind::Deref(pat) => {
+                self.lower_pat(
+                    local_scope,
+                    accept_scope,
+                    reject_scope,
+                    pat,
+                    scrutinee.extend(tcx, [MirPlaceElem::DerefPtr]),
+                );
+            }
+            ThirPatKind::Or(obj) => todo!(),
+            ThirPatKind::Slice(pat_list_front_and_tail) => todo!(),
+            ThirPatKind::Tuple(pat_list_front_and_tail) => todo!(),
+            ThirPatKind::Adt(obj, obj1) => todo!(),
+            ThirPatKind::Error(_error) => {
+                // (trivial)
+            }
         }
     }
 

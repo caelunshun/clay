@@ -1,13 +1,13 @@
 use crate::{
     base::{Session, arena::Obj},
     semantic::{
-        analysis::typeck::type_check_function,
+        analysis::{borrowck::build::build_function_mir, typeck::type_check_function},
         infer::{
             ClauseCx, ClauseFuel, ClauseImportEnv, CoherenceMap, GenericSubst, HrtbUniverse,
             SpannedError, UnifyCxMode,
         },
         syntax::{
-            AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FnItem, GenericBinder, ImplItem,
+            AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FnDef, FnItem, GenericBinder, ImplItem,
             ItemKind, TraitItem, TyCtxt, TypeAliasItem,
         },
     },
@@ -85,7 +85,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
 
         // Finally, let's check method signatures and, if a default one is provided, bodies.
         for &method in methods.iter() {
-            type_check_function(self, method);
+            self.visit_fn_def(method);
         }
 
         ccx.verify();
@@ -151,7 +151,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
                 continue;
             };
 
-            type_check_function(self, *method);
+            self.visit_fn_def(*method);
         }
 
         ccx.verify();
@@ -194,7 +194,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
     pub fn visit_fn_item(&mut self, def: Obj<FnItem>) {
         let s = self.session();
 
-        type_check_function(self, *def.r(s).def);
+        self.visit_fn_def(*def.r(s).def);
     }
 
     pub fn visit_type_alias_item(&mut self, def: Obj<TypeAliasItem>) {
@@ -230,5 +230,10 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
 
             ccx.import_here(env, clauses);
         }
+    }
+
+    pub fn visit_fn_def(&mut self, def: Obj<FnDef>) {
+        type_check_function(self, def);
+        build_function_mir(self, def);
     }
 }

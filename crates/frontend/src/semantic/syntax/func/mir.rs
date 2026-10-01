@@ -170,6 +170,7 @@ pub enum MirStmtKind {
     StorageLive(MirLocalIdx),
     StorageDead(MirLocalIdx),
     Assign(Box<(MirPlace, MirAssignRvalue)>),
+    Discard(MirAssignRvalue),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -222,6 +223,17 @@ pub struct MirPlace {
 }
 
 impl MirPlace {
+    pub fn new(
+        tcx: &TyCtxt,
+        local: MirLocalIdx,
+        projections: impl IntoIterator<Item = MirPlaceElem>,
+    ) -> Self {
+        Self {
+            local,
+            projections: tcx.intern_list(&projections.into_iter().collect::<Vec<_>>()),
+        }
+    }
+
     pub fn extend(self, tcx: &TyCtxt, proj: impl IntoIterator<Item = MirPlaceElem>) -> Self {
         let s = &tcx.session;
 

@@ -1,5 +1,4 @@
 mod driver;
-pub use self::driver::*;
-
 mod scope;
-pub use self::scope::*;
+
+pub use self::driver::build_function_mir;
