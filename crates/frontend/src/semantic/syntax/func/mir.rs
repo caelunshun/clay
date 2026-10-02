@@ -1,18 +1,15 @@
 use crate::{
     base::{
         ErrorGuaranteed,
-        arena::{HasListInterner, Intern},
+        arena::{HasListInterner, Intern, Obj},
         syntax::Span,
     },
     parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
-    semantic::syntax::{Mutability, SigTy, TyCtxt},
+    semantic::syntax::{AdtCtor, Mutability, SigTy, TyCtxt},
 };
 use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
-use std::{
-    ops::{Bound, RangeBounds},
-    slice,
-};
+use std::ops::{Bound, RangeBounds};
 
 // === MirInstructionLoc === //
 
@@ -89,11 +86,12 @@ impl MirBody {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct MirBlock {
     pub stmts: Vec<MirStmt>,
     pub terminator: MirTerminator,
     pub predecessors: SmallVec<[MirBlockIdx; 1]>,
+    pub is_unwind: bool,
 }
 
 impl MirBlock {
@@ -132,19 +130,19 @@ impl MirBlock {
         }
     }
 
-    pub fn successors(&self) -> &[MirBlockIdx] {
+    pub fn successors(&self) -> SmallVec<[MirBlockIdx; 2]> {
         self.terminator.successors()
     }
 
-    pub fn predecessors(&self) -> &[MirBlockIdx] {
-        &self.predecessors
+    pub fn predecessors(&self) -> SmallVec<[MirBlockIdx; 2]> {
+        SmallVec::from_iter(self.predecessors.iter().copied())
     }
 
-    pub fn prev(&self, direction: MirDirection) -> &[MirBlockIdx] {
+    pub fn prev(&self, direction: MirDirection) -> SmallVec<[MirBlockIdx; 2]> {
         self.next(direction.invert())
     }
 
-    pub fn next(&self, direction: MirDirection) -> &[MirBlockIdx] {
+    pub fn next(&self, direction: MirDirection) -> SmallVec<[MirBlockIdx; 2]> {
         match direction {
             MirDirection::Forward => self.successors(),
             MirDirection::Backward => self.predecessors(),
@@ -170,48 +168,87 @@ pub enum MirStmtKind {
     StorageLive(MirLocalIdx),
     StorageDead(MirLocalIdx),
     Assign(Box<(MirPlace, MirAssignRvalue)>),
-    Discard(MirAssignRvalue),
+    DiscardWithoutDrop(MirAssignRvalue),
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub enum MirTerminator {
     Goto(MirBlockIdx),
+    SwitchInt {
+        discr: MirOperand,
+        constants: Box<[u64]>,
+        targets: Box<[MirBlockIdx]>,
+    },
     Call {
         callee: MirOperand,
         args: Box<[MirOperand]>,
         destination: MirPlace,
         target: MirBlockIdx,
+        unwind: MirUnwindBehavior,
     },
-    Drop {
+    EnsureDropped {
         place: MirPlace,
         target: MirBlockIdx,
+        unwind: MirUnwindBehavior,
     },
-    Switch {
-        scrutinee: MirPlace,
-        targets: Box<[MirBlockIdx]>,
+    CallDrop {
+        place: MirPlace,
+        target: MirBlockIdx,
+        unwind: MirUnwindBehavior,
+        drop_flag: Option<MirPlace>,
     },
-    Return,
     Unreachable,
-    #[default]
+    Return,
+    UnwindResume,
     Placeholder,
 }
 
 impl MirTerminator {
-    pub fn successors(&self) -> &[MirBlockIdx] {
-        match self {
-            MirTerminator::Goto(target)
-            | MirTerminator::Call {
+    pub fn successors(&self) -> SmallVec<[MirBlockIdx; 2]> {
+        match *self {
+            MirTerminator::Goto(target) => SmallVec::from_iter([target]),
+            MirTerminator::Call {
                 callee: _,
                 args: _,
                 destination: _,
                 target,
+                unwind,
             }
-            | MirTerminator::Drop { place: _, target } => slice::from_ref(target),
-            MirTerminator::Switch {
-                scrutinee: _,
-                targets,
-            } => targets,
-            MirTerminator::Return | MirTerminator::Unreachable | MirTerminator::Placeholder => &[],
+            | MirTerminator::EnsureDropped {
+                place: _,
+                target,
+                unwind,
+            } => SmallVec::from_iter([target].into_iter().chain(unwind.block())),
+            MirTerminator::CallDrop {
+                place: _,
+                target,
+                unwind,
+                drop_flag: _,
+            } => SmallVec::from_iter([target].into_iter().chain(unwind.block())),
+            MirTerminator::SwitchInt {
+                discr: _,
+                constants: _,
+                ref targets,
+            } => SmallVec::from_iter(targets.iter().copied()),
+            MirTerminator::UnwindResume
+            | MirTerminator::Return
+            | MirTerminator::Unreachable
+            | MirTerminator::Placeholder => SmallVec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirUnwindBehavior {
+    Continue(MirBlockIdx),
+    DoublePanic,
+}
+
+impl MirUnwindBehavior {
+    pub fn block(self) -> Option<MirBlockIdx> {
+        match self {
+            MirUnwindBehavior::Continue(idx) => Some(idx),
+            MirUnwindBehavior::DoublePanic => None,
         }
     }
 }
@@ -263,6 +300,7 @@ pub enum MirPlaceElem {
 #[derive(Debug, Clone)]
 pub enum MirAssignRvalue {
     Tuple(Box<[MirOperand]>),
+    Adt(Obj<AdtCtor>, Box<[MirOperand]>),
     Use(MirOperand),
     Ref(Mutability, MirPlace),
     Zst(SigTy),

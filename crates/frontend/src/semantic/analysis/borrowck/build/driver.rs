@@ -37,7 +37,7 @@ pub fn build_function_mir(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
 pub struct MirFromThirCtx<'tcx> {
     pub tcx: &'tcx TyCtxt,
     pub def: Obj<FnDef>,
-    pub builder: MirScopedBuilder,
+    pub builder: MirScopedBuilder<'tcx>,
     pub labelled_scopes: FxHashMap<Obj<ThirExpr>, LabelledScope>,
     pub thir_locals: FxHashMap<Obj<ThirLocal>, MirLocalIdx>,
 }
@@ -59,7 +59,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         Self {
             tcx,
             def,
-            builder: MirScopedBuilder::default(),
+            builder: MirScopedBuilder::new(tcx),
             labelled_scopes: FxHashMap::default(),
             thir_locals: FxHashMap::default(),
         }
@@ -239,7 +239,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                         scope,
                         MirStmt {
                             span: MirStmtSourceInfo::Simple(expr.r(s).span),
-                            kind: MirStmtKind::Discard(rvalue),
+                            kind: MirStmtKind::DiscardWithoutDrop(rvalue),
                         },
                     );
                 }
