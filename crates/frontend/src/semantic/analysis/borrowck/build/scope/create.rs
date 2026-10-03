@@ -40,7 +40,7 @@ struct Scope {
 #[derive(Copy, Clone)]
 struct ScopeLocal {
     mir_idx: MirLocalIdx,
-    unwind_on_scope_drop_panic: MirBlockIdx,
+    unwind_on_scope_drop_panic: Option<MirBlockIdx>,
 }
 
 #[derive(Copy, Clone)]
@@ -96,8 +96,7 @@ impl<'tcx> MirScopedBuilder<'tcx> {
     pub fn push_local(&mut self, scope: MirBuilderScopeIdx, ty: SigTy) -> MirLocalIdx {
         let mir_idx = self.body.locals.push(MirLocal { ty });
 
-        // TODO: drop detection
-        let unwind_on_scope_drop_panic = {
+        let unwind_on_scope_drop_panic = self.requires_drop(ty).then(|| {
             let continue_unwind_bb = self.scopes[scope].curr_unwind_block;
 
             let drop_self_unwind_bb = self.body.blocks.push(MirBlock {
@@ -114,7 +113,7 @@ impl<'tcx> MirScopedBuilder<'tcx> {
             self.scopes[scope].curr_unwind_block = drop_self_unwind_bb;
 
             continue_unwind_bb
-        };
+        });
 
         self.scopes[scope].locals.push(ScopeLocal {
             mir_idx,
@@ -227,8 +226,7 @@ impl<'tcx> MirScopedBuilder<'tcx> {
             for idx in (0..curr.last_local).rev() {
                 let local = self.scopes[curr.scope].locals[idx];
 
-                // TODO: drop detection
-                {
+                if let Some(unwind_on_scope_drop_panic) = local.unwind_on_scope_drop_panic {
                     let scope_start = self.scopes[scope].curr_block;
                     let scope_continue = self.body.blocks.push(MirBlock {
                         stmts: Vec::new(),
@@ -242,7 +240,7 @@ impl<'tcx> MirScopedBuilder<'tcx> {
                     self.body.blocks[scope_start].terminator = MirTerminator::EnsureDropped {
                         place: MirPlace::new(self.tcx, local.mir_idx, []),
                         target: scope_continue,
-                        unwind: MirUnwindBehavior::Continue(local.unwind_on_scope_drop_panic),
+                        unwind: MirUnwindBehavior::Continue(unwind_on_scope_drop_panic),
                     };
                 }
 
@@ -399,7 +397,7 @@ impl<'tcx> MirScopedBuilder<'tcx> {
             MirTerminator::Return;
 
         // Optimize the control-flow graph
-        // TODO
+        self.cleanup_graph();
 
         self.body
     }
@@ -410,5 +408,10 @@ impl<'tcx> MirScopedBuilder<'tcx> {
     pub fn copy_or_move_operand(&mut self, place: MirPlace) -> MirOperand {
         // TODO: detect
         MirOperand::Move(place)
+    }
+
+    pub fn requires_drop(&mut self, ty: SigTy) -> bool {
+        // TODO: detect
+        true
     }
 }
