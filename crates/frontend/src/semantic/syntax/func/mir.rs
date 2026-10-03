@@ -302,6 +302,10 @@ pub enum MirAssignRvalue {
     Tuple(Box<[MirOperand]>),
     Adt(Obj<AdtCtor>, Box<[MirOperand]>),
     Use(MirOperand),
+    MoveOutRef {
+        can_move_from: Vec<MirPlace>,
+        ref_place: MirPlace,
+    },
     Ref(Mutability, MirPlace),
     Zst(SigTy),
     Literal(SigTy, AstLit),
@@ -309,6 +313,25 @@ pub enum MirAssignRvalue {
     UnaryOp(AstUnOpKind, MirOperand),
     Discriminant(MirPlace),
     Error(ErrorGuaranteed),
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirOperandMode {
+    Copy,
+    Move,
+}
+
+impl MirOperandMode {
+    pub fn is_copy(self) -> bool {
+        self == Self::Copy
+    }
+
+    pub fn to_operand(self, place: MirPlace) -> MirOperand {
+        match self {
+            MirOperandMode::Copy => MirOperand::Copy(place),
+            MirOperandMode::Move => MirOperand::Move(place),
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

@@ -18,10 +18,12 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         scope: MirBuilderScopeIdx,
         expr: Obj<ThirExpr>,
     ) -> MirAssignRvalue {
+        let s = self.session();
+
         match self.lower_expr_preferred(scope, expr, None) {
             MirRvalueOrPlace::Rvalue(rvalue) => rvalue,
             MirRvalueOrPlace::Place(place) => {
-                MirAssignRvalue::Use(self.builder.copy_or_move_operand(place))
+                MirAssignRvalue::Use(self.builder.operand_mode(expr.r(s).ty).to_operand(place))
             }
         }
     }
@@ -76,8 +78,10 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         scope: MirBuilderScopeIdx,
         expr: Obj<ThirExpr>,
     ) -> MirOperand {
+        let s = self.session();
         let place = self.lower_expr_place(scope, expr, None);
-        self.builder.copy_or_move_operand(place)
+
+        self.builder.operand_mode(expr.r(s).ty).to_operand(place)
     }
 
     pub fn lower_expr_operand_list(

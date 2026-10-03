@@ -1,8 +1,8 @@
 #![expect(dead_code)] // TODO
 
 use crate::semantic::syntax::{
-    MirBlock, MirBlockIdx, MirBody, MirLocal, MirLocalIdx, MirOperand, MirPlace, MirStmt,
-    MirStmtKind, MirStmtSourceInfo, MirTerminator, MirUnwindBehavior, SigTy, TyCtxt,
+    MirBlock, MirBlockIdx, MirBody, MirLocal, MirLocalIdx, MirOperand, MirOperandMode, MirPlace,
+    MirStmt, MirStmtKind, MirStmtSourceInfo, MirTerminator, MirUnwindBehavior, SigTy, TyCtxt,
 };
 use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
@@ -405,9 +405,8 @@ impl<'tcx> MirScopedBuilder<'tcx> {
 
 /// Trait detection
 impl<'tcx> MirScopedBuilder<'tcx> {
-    pub fn copy_or_move_operand(&mut self, place: MirPlace) -> MirOperand {
-        // TODO: detect
-        MirOperand::Move(place)
+    pub fn operand_mode(&mut self, ty: SigTy) -> MirOperandMode {
+        todo!()
     }
 
     pub fn requires_drop(&mut self, ty: SigTy) -> bool {
