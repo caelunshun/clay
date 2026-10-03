@@ -161,7 +161,10 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 MirRvalueOrPlace::Place(assign_into)
             }
             ThirExprKind::Loop(obj) => todo!(),
-            ThirExprKind::AddrOf(mutability, obj) => todo!(),
+            ThirExprKind::AddrOf(muta, target) => MirRvalueOrPlace::Rvalue(MirAssignRvalue::Ref(
+                muta,
+                self.lower_expr_place(scope, target, None),
+            )),
             ThirExprKind::Call(callee, args) => {
                 let destination =
                     self.create_assign_into_place_if_needed(scope, &mut assign_into, expr.r(s).ty);
@@ -174,7 +177,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 MirRvalueOrPlace::Place(destination)
             }
             ThirExprKind::Field(target, idx) => MirRvalueOrPlace::Place(
-                self.lower_expr_place(scope, expr, None)
+                self.lower_expr_place(scope, target, None)
                     .extend(tcx, [MirPlaceElem::Field(idx)]),
             ),
             ThirExprKind::CreateBracedAdt { ctor, fields, rest } => {
@@ -202,7 +205,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         &mut self,
         scope: MirBuilderScopeIdx,
         expr: Obj<ThirBlock>,
-        mut assign_into: Option<MirPlace>,
+        last_expr_place: Option<MirPlace>,
     ) {
         let s = self.session();
 
@@ -221,12 +224,12 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     );
                 }
                 ThirStmt::Let(stmt) => {
-                    todo!()
+                    self.lower_let(scope, stmt);
                 }
             }
         }
 
-        // TODO
+        // TODO: lower last expression
     }
 
     pub fn create_assign_into_place_if_needed(

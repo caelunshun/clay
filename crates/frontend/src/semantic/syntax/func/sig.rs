@@ -190,6 +190,14 @@ impl<T: 'static> PatListFrontAndTail<T> {
         }
     }
 
+    pub fn all_elems<'s>(self, s: &'s Session) -> impl 's + Iterator<Item = Obj<T>> {
+        self.front
+            .r(s)
+            .iter()
+            .chain(self.tail.into_iter().flat_map(|v| v.r(s).iter()))
+            .copied()
+    }
+
     pub fn zip<'s, I>(self, iter: I, s: &'s Session) -> PatListFrontAndTailIter<'s, T, I::IntoIter>
     where
         I: IntoIterator<IntoIter: DoubleEndedIterator>,

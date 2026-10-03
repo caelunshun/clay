@@ -1,0 +1,18 @@
+error: expected `=` or `;`
+  ┌─ pat.fir:2:30
+  │
+2 │     let Some(x): Option<u32> else {
+  │                              ^^^^
+
+error: `Some` not found in scope
+  ┌─ pat.fir:2:9
+  │
+2 │     let Some(x): Option<u32> else {
+  │         ^^^^
+
+error: `Option` not found in `crate::main`
+  ┌─ pat.fir:2:18
+  │
+2 │     let Some(x): Option<u32> else {
+  │                  ^^^^^^
+
