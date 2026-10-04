@@ -239,7 +239,6 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             ThirPatKind::Slice(pat_list_front_and_tail) => todo!(),
             ThirPatKind::Tuple(pat_list_front_and_tail) => todo!(),
             ThirPatKind::Adt(obj, obj1) => {
-                // TODO: ensure enum ADTs are locked during matching.
                 todo!()
             }
             ThirPatKind::Error(_error) => {
