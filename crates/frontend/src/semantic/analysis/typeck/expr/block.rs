@@ -98,7 +98,6 @@ impl BodyCtxt<'_, '_> {
 
         self.put_thir_expr(expr, ty, move |bcx| {
             let s = bcx.session();
-            let tcx = bcx.tcx();
 
             ThirExprKind::Block(Obj::new(
                 ThirBlock {

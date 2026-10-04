@@ -7,7 +7,8 @@ use crate::{
         },
         syntax::{
             MirAssignRvalue, MirOperand, MirPlace, MirPlaceElem, MirStmt, MirStmtKind,
-            MirStmtSourceInfo, SigTy, ThirBlock, ThirExpr, ThirExprKind, ThirStmt,
+            MirStmtSourceInfo, SigTy, ThirBlock, ThirBlockTrailing, ThirExpr, ThirExprKind,
+            ThirStmt,
         },
     },
 };
@@ -20,12 +21,18 @@ impl<'tcx> MirFromThirCtx<'tcx> {
     ) -> MirAssignRvalue {
         let s = self.session();
 
-        match self.lower_expr_preferred(scope, expr, None) {
+        let rv = match self.lower_expr_preferred(scope, expr, None) {
             MirRvalueOrPlace::Rvalue(rvalue) => rvalue,
             MirRvalueOrPlace::Place(place) => {
                 MirAssignRvalue::Use(self.builder.operand_mode(expr.r(s).ty).to_operand(place))
             }
+        };
+
+        if expr.r(s).causes_divergence(s) {
+            self.builder.push_unreachable(scope);
         }
+
+        rv
     }
 
     pub fn lower_expr_place(
@@ -36,7 +43,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
     ) -> MirPlace {
         let s = self.session();
 
-        match self.lower_expr_preferred(scope, expr, assign_into) {
+        let rv = match self.lower_expr_preferred(scope, expr, assign_into) {
             MirRvalueOrPlace::Rvalue(rvalue) => {
                 let assign_into =
                     self.create_assign_into_place_if_needed(scope, &mut assign_into, expr.r(s).ty);
@@ -70,7 +77,13 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
                 assign_into.unwrap_or(original_output)
             }
+        };
+
+        if expr.r(s).causes_divergence(s) {
+            self.builder.push_unreachable(scope);
         }
+
+        rv
     }
 
     pub fn lower_expr_operand(
@@ -209,7 +222,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         &mut self,
         scope: MirBuilderScopeIdx,
         expr: Obj<ThirBlock>,
-        last_expr_place: Option<MirPlace>,
+        assign_into: Option<MirPlace>,
     ) {
         let s = self.session();
 
@@ -233,7 +246,20 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             }
         }
 
-        // TODO: lower last expression
+        match (assign_into, expr.r(s).last_expr) {
+            (None, ThirBlockTrailing::Present(_) | ThirBlockTrailing::MissingCoerceNever)
+            | (Some(_), ThirBlockTrailing::MissingNotApplicable) => unreachable!(),
+
+            (Some(place), ThirBlockTrailing::Present(last_expr)) => {
+                self.lower_expr_place(scope, last_expr, Some(place));
+            }
+            (Some(_), ThirBlockTrailing::MissingCoerceNever) => {
+                self.builder.push_unreachable(scope);
+            }
+            (None, ThirBlockTrailing::MissingNotApplicable) => {
+                // (ignored)
+            }
+        }
     }
 
     pub fn create_assign_into_place_if_needed(

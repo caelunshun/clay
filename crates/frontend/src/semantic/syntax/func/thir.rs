@@ -1,13 +1,13 @@
 use crate::{
     base::{
-        ErrorGuaranteed,
+        ErrorGuaranteed, Session,
         arena::{LateInit, Obj},
         syntax::Span,
     },
     parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
     semantic::syntax::{
         AdtCtor, AdtCtorFieldIdx, DynSiteIdx, LocalNameIdent, Mutability, PatListFrontAndTail,
-        SigTy,
+        SigTy, SigTyKind, SimpleTyKind,
     },
 };
 
@@ -58,6 +58,12 @@ pub struct ThirExpr {
     pub span: Span,
     pub ty: SigTy,
     pub kind: LateInit<ThirExprKind>,
+}
+
+impl ThirExpr {
+    pub fn causes_divergence(&self, s: &Session) -> bool {
+        matches!(self.ty.r(s).kind, SigTyKind::Simple(SimpleTyKind::Never))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -118,7 +124,7 @@ pub struct ThirBlock {
     pub last_expr: ThirBlockTrailing,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum ThirBlockTrailing {
     Present(Obj<ThirExpr>),
     MissingCoerceNever,

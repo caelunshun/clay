@@ -406,7 +406,8 @@ impl<'tcx> MirScopedBuilder<'tcx> {
 /// Trait detection
 impl<'tcx> MirScopedBuilder<'tcx> {
     pub fn operand_mode(&mut self, ty: SigTy) -> MirOperandMode {
-        todo!()
+        // TODO: detect
+        MirOperandMode::Move
     }
 
     pub fn requires_drop(&mut self, ty: SigTy) -> bool {

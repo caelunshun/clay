@@ -299,6 +299,7 @@ pub enum MirPlaceElem {
 
 #[derive(Debug, Clone)]
 pub enum MirAssignRvalue {
+    UnreachablePlaceholder,
     Tuple(Box<[MirOperand]>),
     Adt(Obj<AdtCtor>, Box<[MirOperand]>),
     Use(MirOperand),
