@@ -124,21 +124,13 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             ThirExprKind::CreateLiteral(lit) => {
                 MirRvalueOrPlace::Rvalue(MirAssignRvalue::Literal(expr.r(s).ty, lit))
             }
-            ThirExprKind::CreateArray(obj) => todo!(),
-            ThirExprKind::CreateTuple(elems) => {
-                let assign_into =
-                    self.create_assign_into_place_if_needed(scope, &mut assign_into, expr.r(s).ty);
-
-                for (idx, &elem) in elems.r(s).iter().enumerate() {
-                    self.lower_expr_place(
-                        scope,
-                        elem,
-                        Some(assign_into.extend(tcx, [MirPlaceElem::Field(idx as u32)])),
-                    );
-                }
-
-                MirRvalueOrPlace::Place(assign_into)
-            }
+            ThirExprKind::CreateTuple(elems) => MirRvalueOrPlace::Rvalue(MirAssignRvalue::Tuple(
+                elems
+                    .r(s)
+                    .iter()
+                    .map(|&elem| self.lower_expr_operand(scope, elem))
+                    .collect(),
+            )),
             ThirExprKind::PrimitiveBinOp(op, lhs, rhs) => {
                 MirRvalueOrPlace::Rvalue(MirAssignRvalue::BinaryOp(
                     op,
@@ -274,7 +266,6 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             }
             ThirExprKind::DynUse(dyn_site_idx, obj) => todo!(),
             ThirExprKind::Match(obj, obj1) => todo!(),
-            ThirExprKind::While(cond, block) => todo!(),
             ThirExprKind::Let(obj, obj1) => todo!(),
             ThirExprKind::Error(error) => MirRvalueOrPlace::Rvalue(MirAssignRvalue::Error(error)),
         }

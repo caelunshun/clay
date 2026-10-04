@@ -1,7 +1,7 @@
 use crate::{
     base::{
         Diag,
-        arena::{HasInterner as _, HasListInterner as _, Obj},
+        arena::{HasInterner as _, HasListInterner as _, LateInit, Obj},
     },
     semantic::{
         analysis::typeck::BodyCtxt,
@@ -13,8 +13,9 @@ use crate::{
             AdtCtorFieldIdx, AdtCtorSyntax, AdtInstance, Divergence, DivergenceJoin, DynSiteIdx,
             FnInstanceInner, FnOwner, HirExpr, HirExprKind, HirLabelledBlock, HirMatchArm,
             HirRangeExpr, HirStructExpr, InferTyVarSourceInfo, LabelTargetKind, Re, SigAdtInstance,
-            SimpleTyKind, ThirExprKind, ThirMatchArm, ThirStructField, TraitParam, TraitSpec, Ty,
-            TyAndDivergence, TyKind, TyOrRe, UniversalTy, UniversalTyRootSourceInfo,
+            SimpleTyKind, ThirBlock, ThirBlockTrailing, ThirExpr, ThirExprKind, ThirMatchArm,
+            ThirStmt, ThirStructField, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind, TyOrRe,
+            UniversalTy, UniversalTyRootSourceInfo,
         },
     },
 };
@@ -52,7 +53,8 @@ impl BodyCtxt<'_, '_> {
                 }));
 
                 self.put_thir_expr(expr, ty, move |bcx| {
-                    ThirExprKind::CreateArray(bcx.confirm_thir_expr_list_post(elems))
+                    // ThirExprKind::CreateArray(bcx.confirm_thir_expr_list_post(elems))
+                    todo!()
                 })
             }
             HirExprKind::Call(callee, actual_args) => {
@@ -218,10 +220,56 @@ impl BodyCtxt<'_, '_> {
                 let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
 
                 self.put_thir_expr(expr, ty, move |bcx| {
-                    ThirExprKind::While(
-                        bcx.confirm_thir_expr_post(cond),
-                        bcx.create_thir_block_no_trailing(block),
-                    )
+                    let s = bcx.session();
+
+                    let span = expr.r(s).span;
+
+                    let unit_ty = bcx
+                        .ccx_mut()
+                        .export(span, tcx.intern(TyKind::Tuple(tcx.intern_list(&[]))));
+
+                    ThirExprKind::Loop(Obj::new(
+                        ThirBlock {
+                            span,
+                            stmts: [ThirStmt::Expr(Obj::new(
+                                ThirExpr {
+                                    span,
+                                    ty: unit_ty,
+                                    kind: LateInit::new(ThirExprKind::If {
+                                        cond: bcx.confirm_thir_expr_post(cond),
+                                        truthy: Obj::new(
+                                            ThirExpr {
+                                                span,
+                                                ty: unit_ty,
+                                                kind: LateInit::new(ThirExprKind::Block(
+                                                    bcx.create_thir_block_no_trailing(block),
+                                                )),
+                                            },
+                                            s,
+                                        ),
+                                        falsy: Some(Obj::new(
+                                            ThirExpr {
+                                                span,
+                                                ty: bcx.ccx_mut().export(
+                                                    span,
+                                                    tcx.intern(TyKind::Simple(SimpleTyKind::Never)),
+                                                ),
+                                                kind: LateInit::new(ThirExprKind::Break(
+                                                    bcx.confirm_thir_expr_post(expr),
+                                                    Some(bcx.create_thir_unit_ctor(span)),
+                                                )),
+                                            },
+                                            s,
+                                        )),
+                                    }),
+                                },
+                                s,
+                            ))]
+                            .into(),
+                            last_expr: ThirBlockTrailing::MissingNotApplicable,
+                        },
+                        s,
+                    ))
                 })
             }
             HirExprKind::Let(pat, scrutinee_expr) => {

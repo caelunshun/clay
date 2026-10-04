@@ -70,7 +70,6 @@ impl ThirExpr {
 pub enum ThirExprKind {
     CreateZst,
     CreateLiteral(AstLit),
-    CreateArray(Obj<[Obj<ThirExpr>]>),
     CreateTuple(Obj<[Obj<ThirExpr>]>),
     PrimitiveBinOp(AstBinOpKind, Obj<ThirExpr>, Obj<ThirExpr>),
     PrimitiveUnOp(AstUnOpKind, Obj<ThirExpr>),
@@ -97,7 +96,6 @@ pub enum ThirExprKind {
     },
     DynUse(DynSiteIdx, Obj<ThirExpr>),
     Match(Obj<ThirExpr>, Obj<[ThirMatchArm]>),
-    While(Obj<ThirExpr>, Obj<ThirBlock>),
     Let(Obj<ThirPat>, Obj<ThirExpr>),
     Error(ErrorGuaranteed),
 }
