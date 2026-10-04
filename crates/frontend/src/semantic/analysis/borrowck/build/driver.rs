@@ -18,8 +18,8 @@ pub fn build_function_mir(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
         return;
     };
 
-    // let mut builder = MirFromThirCtx::new(tcx, def);
-    // let rv = builder.lower_expr_rvalue(MirBuilderScopeIdx::ENTRY, thir);
+    let mut builder = MirFromThirCtx::new(tcx, def);
+    let rv = builder.lower_expr_rvalue(MirBuilderScopeIdx::ENTRY, thir);
     // TODO
 }
 

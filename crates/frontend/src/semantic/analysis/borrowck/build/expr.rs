@@ -155,10 +155,40 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 ))
             }
             ThirExprKind::NoOp(expr) => self.lower_expr_preferred(scope, expr, assign_into),
-            ThirExprKind::Break(label, value) => todo!(),
-            ThirExprKind::Continue(label) => todo!(),
+            ThirExprKind::Break(label, value) => {
+                let label = self.labelled_scopes[&label];
+
+                if let Some(out_place) = label.out_place {
+                    self.lower_expr_place(scope, value.unwrap(), Some(out_place));
+                } else {
+                    assert!(value.is_none());
+                }
+
+                self.builder.push_break(scope, label.scope);
+
+                MirRvalueOrPlace::Rvalue(MirAssignRvalue::UnreachablePlaceholder)
+            }
+            ThirExprKind::Continue(label) => {
+                self.builder
+                    .push_continue(scope, self.labelled_scopes[&label].scope);
+
+                MirRvalueOrPlace::Rvalue(MirAssignRvalue::UnreachablePlaceholder)
+            }
             ThirExprKind::Return(obj) => todo!(),
-            ThirExprKind::Assign(lhs, rhs) => todo!(),
+            ThirExprKind::Assign(lhs, rhs) => {
+                let lhs = self.lower_expr_place(scope, lhs, None);
+                let rhs = self.lower_expr_rvalue(scope, rhs);
+
+                self.builder.push_statement(
+                    scope,
+                    MirStmt {
+                        span: MirStmtSourceInfo::Simple(expr.r(s).span),
+                        kind: MirStmtKind::Assign(Box::new((lhs, rhs))),
+                    },
+                );
+
+                MirRvalueOrPlace::Rvalue(MirAssignRvalue::Tuple(Box::new([])))
+            }
             ThirExprKind::Block(block) => {
                 let assign_into =
                     self.create_assign_into_place_if_needed(scope, &mut assign_into, expr.r(s).ty);
@@ -177,7 +207,22 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
                 MirRvalueOrPlace::Place(assign_into)
             }
-            ThirExprKind::Loop(obj) => todo!(),
+            ThirExprKind::Loop(block) => {
+                let out_place =
+                    self.create_assign_into_place_if_needed(scope, &mut assign_into, expr.r(s).ty);
+
+                self.labelled_scopes.insert(
+                    expr,
+                    LabelledScope {
+                        scope,
+                        out_place: Some(out_place),
+                    },
+                );
+
+                self.lower_block(scope, block, None);
+
+                MirRvalueOrPlace::Place(out_place)
+            }
             ThirExprKind::AddrOf(muta, target) => MirRvalueOrPlace::Rvalue(MirAssignRvalue::Ref(
                 muta,
                 self.lower_expr_place(scope, target, None),
@@ -208,7 +253,24 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 truthy,
                 falsy,
             } => {
-                todo!()
+                let cond = self.lower_expr_operand(scope, cond);
+
+                let assign_into =
+                    self.create_assign_into_place_if_needed(scope, &mut assign_into, expr.r(s).ty);
+
+                let [truthy_scope, falsy_scope] =
+                    self.builder.push_switch_fixed(scope, cond, [1, 0]);
+
+                self.lower_expr_place(truthy_scope, truthy, Some(assign_into));
+
+                if let Some(falsy) = falsy {
+                    self.lower_expr_place(falsy_scope, falsy, Some(assign_into));
+                }
+
+                self.builder.push_break(truthy_scope, truthy_scope);
+                self.builder.push_break(falsy_scope, falsy_scope);
+
+                MirRvalueOrPlace::Place(assign_into)
             }
             ThirExprKind::DynUse(dyn_site_idx, obj) => todo!(),
             ThirExprKind::Match(obj, obj1) => todo!(),
