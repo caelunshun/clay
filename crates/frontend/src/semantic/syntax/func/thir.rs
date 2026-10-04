@@ -114,9 +114,15 @@ pub struct ThirStructField {
 #[derive(Debug, Clone)]
 pub struct ThirBlock {
     pub span: Span,
-    pub ty: SigTy,
     pub stmts: Vec<ThirStmt>,
-    pub last_expr: Option<Obj<ThirExpr>>,
+    pub last_expr: ThirBlockTrailing,
+}
+
+#[derive(Debug, Clone)]
+pub enum ThirBlockTrailing {
+    Present(Obj<ThirExpr>),
+    MissingCoerceNever,
+    MissingNotApplicable,
 }
 
 #[derive(Debug, Copy, Clone)]

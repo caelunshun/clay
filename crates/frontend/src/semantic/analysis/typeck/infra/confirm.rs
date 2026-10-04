@@ -1,7 +1,7 @@
 use crate::{
     base::{
         Diag, ErrorGuaranteed,
-        arena::{HasInterner, LateInit, Obj},
+        arena::{HasInterner, HasListInterner as _, LateInit, Obj},
         syntax::{HasSpan, Span},
     },
     parse::ast::AstUnOpKind,
@@ -308,46 +308,6 @@ impl BodyCtxt<'_, '_> {
         self.confirm_thir_expr(target).pre_coerce
     }
 
-    pub fn confirm_thir_block_uncached(
-        &mut self,
-        hir: Obj<HirBlock>,
-        ret_ty: Ty,
-    ) -> Obj<ThirBlock> {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        Obj::new(
-            ThirBlock {
-                span: hir.r(s).span,
-                ty: self.ccx_mut().export(hir.r(s).span, ret_ty),
-                stmts: hir
-                    .r(s)
-                    .stmts
-                    .iter()
-                    .map(|&stmt| match stmt {
-                        HirStmt::Expr(expr) => ThirStmt::Expr(self.confirm_thir_expr_post(expr)),
-                        HirStmt::Let(stmt) => ThirStmt::Let(Obj::new(
-                            ThirLetStmt {
-                                span: stmt.r(s).span,
-                                pat: self.confirm_thir_pat(stmt.r(s).pat).outer,
-                                init: self.confirm_opt_thir_expr_post(stmt.r(s).init),
-                                else_clause: stmt.r(s).else_clause.map(|block| {
-                                    self.confirm_thir_block_uncached(
-                                        block,
-                                        tcx.intern(TyKind::Simple(SimpleTyKind::Never)),
-                                    )
-                                }),
-                            },
-                            s,
-                        )),
-                    })
-                    .collect::<Vec<_>>(),
-                last_expr: self.confirm_opt_thir_expr_post(hir.r(s).last_expr),
-            },
-            s,
-        )
-    }
-
     pub fn create_thir_local_expr(&mut self, span: Span, local: Obj<ThirLocal>) -> Obj<ThirExpr> {
         let s = self.session();
 
@@ -423,6 +383,22 @@ impl BodyCtxt<'_, '_> {
                 s,
             ),
             Obj::new_iter(args, s),
+        )
+    }
+
+    pub fn create_thir_unit_ctor(&mut self, span: Span) -> Obj<ThirExpr> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        Obj::new(
+            ThirExpr {
+                span,
+                ty: self
+                    .ccx_mut()
+                    .export(span, tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))),
+                kind: LateInit::new(ThirExprKind::CreateTuple(Obj::new_iter([], s))),
+            },
+            s,
         )
     }
 }

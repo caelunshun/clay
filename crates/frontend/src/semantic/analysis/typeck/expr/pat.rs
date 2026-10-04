@@ -15,8 +15,8 @@ use crate::{
             AdtCtorField, AdtCtorInstance, AdtCtorSyntaxStyle, AdtCtorUnresolved, AdtInstance,
             Divergence, HirExpr, HirLocal, HirPat, HirPatKind, HirPatListFrontAndTail,
             HirPatNamedField, InferTyVarSourceInfo, LocalNameIdent, Mutability,
-            PatListFrontAndTailLen, Re, RelationMode, ThirBlock, ThirExpr, ThirExprKind,
-            ThirLetStmt, ThirPatField, ThirPatKind, ThirStmt, Ty, TyKind, TyOrRe,
+            PatListFrontAndTailLen, Re, RelationMode, ThirBlock, ThirBlockTrailing, ThirExpr,
+            ThirExprKind, ThirLetStmt, ThirPatField, ThirPatKind, ThirStmt, Ty, TyKind, TyOrRe,
         },
     },
     symbol,
@@ -115,9 +115,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         ThirExprKind::Block(Obj::new(
             ThirBlock {
                 span,
-                ty: unit_ty_exp,
                 stmts,
-                last_expr: None,
+                last_expr: ThirBlockTrailing::Present(self.create_thir_unit_ctor(span)),
             },
             s,
         ))

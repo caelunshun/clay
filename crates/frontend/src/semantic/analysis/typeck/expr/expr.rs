@@ -11,78 +11,15 @@ use crate::{
         },
         syntax::{
             AdtCtorFieldIdx, AdtCtorSyntax, AdtInstance, Divergence, DivergenceJoin, DynSiteIdx,
-            FnInstanceInner, FnOwner, HirBlock, HirExpr, HirExprKind, HirLabelledBlock,
-            HirMatchArm, HirRangeExpr, HirStmt, HirStructExpr, InferTyVarSourceInfo,
-            LabelTargetKind, Re, RelationMode, SigAdtInstance, SimpleTyKind, ThirExprKind,
-            ThirMatchArm, ThirStructField, TraitParam, TraitSpec, Ty, TyAndDivergence, TyKind,
-            TyOrRe, UniversalTy, UniversalTyRootSourceInfo,
+            FnInstanceInner, FnOwner, HirExpr, HirExprKind, HirLabelledBlock, HirMatchArm,
+            HirRangeExpr, HirStructExpr, InferTyVarSourceInfo, LabelTargetKind, Re, SigAdtInstance,
+            SimpleTyKind, ThirExprKind, ThirMatchArm, ThirStructField, TraitParam, TraitSpec, Ty,
+            TyAndDivergence, TyKind, TyOrRe, UniversalTy, UniversalTyRootSourceInfo,
         },
     },
 };
 
 impl BodyCtxt<'_, '_> {
-    pub fn check_block_with_no_final_expr(&mut self, block: Obj<HirBlock>) -> Divergence {
-        let s = self.session();
-
-        let mut divergence = Divergence::MayDiverge;
-        self.check_block_stmts(&block.r(s).stmts, &mut divergence);
-
-        if let Some(last_expr) = block.r(s).last_expr {
-            Diag::span_err(
-                last_expr.r(s).span,
-                "trailing block expression not expected",
-            )
-            .emit();
-        }
-
-        divergence
-    }
-
-    pub fn check_block_stmts(&mut self, stmts: &[HirStmt], divergence: &mut Divergence) {
-        let s = self.session();
-
-        for stmt in stmts {
-            match stmt {
-                HirStmt::Expr(expr) => {
-                    self.check_expr(*expr, None).and_do(divergence);
-                }
-                HirStmt::Let(stmt) => {
-                    let ascription = if let Some(ascription) = stmt.r(s).ascription {
-                        let import_env = self.import_env;
-
-                        let ascription = self.ccx_mut().import_here(import_env, ascription);
-
-                        if let Some(init) = stmt.r(s).init {
-                            self.check_expr_demand(init, ascription).and_do(divergence);
-                        }
-
-                        ascription
-                    } else if let Some(init) = stmt.r(s).init {
-                        self.check_expr(init, None).and_do(divergence)
-                    } else {
-                        self.ccx_mut().fresh_ty_infer(
-                            HrtbUniverse::ROOT,
-                            InferTyVarSourceInfo::PatType {
-                                span: stmt.r(s).pat.r(s).span,
-                            },
-                        )
-                    };
-
-                    self.check_pat_demand(stmt.r(s).pat, ascription, None);
-
-                    if let Some(else_clause) = stmt.r(s).else_clause {
-                        let divergence = self.check_block_with_no_final_expr(else_clause);
-
-                        if divergence != Divergence::MustDiverge {
-                            Diag::span_err(else_clause.r(s).span, "`else` block must diverge")
-                                .emit();
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     pub fn check_expr_inner(
         &mut self,
         expr: Obj<HirExpr>,
@@ -276,14 +213,14 @@ impl BodyCtxt<'_, '_> {
                 self.check_expr_demand(cond, tcx.intern(TyKind::Simple(SimpleTyKind::Bool)))
                     .and_do(&mut divergence);
 
-                self.check_block_with_no_final_expr(block);
+                self.check_block_no_trailing(block);
 
                 let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
 
                 self.put_thir_expr(expr, ty, move |bcx| {
                     ThirExprKind::While(
                         bcx.confirm_thir_expr_post(cond),
-                        bcx.confirm_thir_block_uncached(block, ty),
+                        bcx.create_thir_block_no_trailing(block),
                     )
                 })
             }
@@ -334,7 +271,7 @@ impl BodyCtxt<'_, '_> {
 
                 self.check_pat_demand(pat, elem_ty, None);
 
-                self.check_block_with_no_final_expr(body);
+                self.check_block_no_trailing(body);
 
                 let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
 
@@ -347,7 +284,7 @@ impl BodyCtxt<'_, '_> {
                 };
 
                 self.block_break_demands.insert(label, None);
-                self.check_block_with_no_final_expr(block);
+                self.check_block_no_trailing(block);
 
                 let ty = if let Some(break_ty) = self.block_break_demands[&label] {
                     break_ty
@@ -356,12 +293,7 @@ impl BodyCtxt<'_, '_> {
                 };
 
                 self.put_thir_expr(expr, ty, move |bcx| {
-                    let tcx = bcx.tcx();
-
-                    ThirExprKind::Loop(bcx.confirm_thir_block_uncached(
-                        block,
-                        tcx.intern(TyKind::Tuple(tcx.intern_list(&[]))),
-                    ))
+                    ThirExprKind::Loop(bcx.create_thir_block_no_trailing(block))
                 })
             }
             HirExprKind::Match(scrutinee_expr, arms) => {
@@ -430,50 +362,7 @@ impl BodyCtxt<'_, '_> {
                 })
             }
             HirExprKind::Block(block) => {
-                let label = HirLabelledBlock {
-                    target: expr,
-                    kind: LabelTargetKind::Block,
-                };
-
-                self.block_break_demands.insert(label, demand_hint);
-                self.check_block_stmts(&block.r(s).stmts, &mut divergence);
-
-                let ty = if let Some(last_expr) = block.r(s).last_expr {
-                    if let Some(demand) = self.block_break_demands[&label] {
-                        self.check_expr_demand(last_expr, demand)
-                            .and_do(&mut divergence)
-                    } else {
-                        self.check_expr(last_expr, demand_hint)
-                            .and_do(&mut divergence)
-                    }
-                } else {
-                    if let Some(demand) = self.block_break_demands[&label] {
-                        if !divergence.must_diverge() {
-                            self.ccx_mut()
-                                .oblige_ty_unifies_ty(
-                                    demand,
-                                    tcx.intern(TyKind::Tuple(tcx.intern_list(&[]))),
-                                    RelationMode::Equate,
-                                )
-                                // TODO
-                                .map({
-                                    let span = block.r(s).span;
-                                    move |_ccx, error| SpannedError(span, error)
-                                })
-                                .report_loud();
-                        }
-
-                        demand
-                    } else if divergence.must_diverge() {
-                        tcx.intern(TyKind::Simple(SimpleTyKind::Never))
-                    } else {
-                        tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
-                    }
-                };
-
-                self.put_thir_expr(expr, ty, move |bcx| {
-                    ThirExprKind::Block(bcx.confirm_thir_block_uncached(block, ty))
-                })
+                self.check_block_expr(expr, block, demand_hint, &mut divergence)
             }
             HirExprKind::Assign(pat, rhs) => {
                 self.check_expr_inner_assign(expr, pat, rhs, &mut divergence)

@@ -14,8 +14,8 @@ use crate::{
         syntax::{
             Divergence, FloatKind, FnInstanceInner, FnOwner, HirExpr, InferTyVarSourceInfo,
             IntKind, LocalNameIdent, Mutability, Re, RelationMode, SimpleTyKind, SimpleTySet,
-            ThirBlock, ThirExpr, ThirExprKind, ThirLetStmt, ThirLocal, ThirStmt, TraitItem,
-            TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            ThirBlock, ThirBlockTrailing, ThirExpr, ThirExprKind, ThirLetStmt, ThirLocal, ThirStmt,
+            TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
         },
     },
     symbol,
@@ -498,7 +498,6 @@ impl BodyCtxt<'_, '_> {
         ThirExprKind::Block(Obj::new(
             ThirBlock {
                 span,
-                ty: self.ccx_mut().export(span, unit_ty),
                 stmts: [
                     ThirStmt::Let(Obj::new(
                         ThirLetStmt {
@@ -543,7 +542,7 @@ impl BodyCtxt<'_, '_> {
                     )),
                 ]
                 .into(),
-                last_expr: None,
+                last_expr: ThirBlockTrailing::Present(self.create_thir_unit_ctor(span)),
             },
             s,
         ))
