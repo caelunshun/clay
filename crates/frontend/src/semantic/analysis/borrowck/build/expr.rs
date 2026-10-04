@@ -6,7 +6,7 @@ use crate::{
             scope::MirBuilderScopeIdx,
         },
         syntax::{
-            MirAssignRvalue, MirOperand, MirPlace, MirPlaceElem, MirStmt, MirStmtKind,
+            MirAssignRvalue, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirStmt, MirStmtKind,
             MirStmtSourceInfo, SigTy, ThirBlock, ThirBlockTrailing, ThirExpr, ThirExprKind,
             ThirStmt,
         },
@@ -132,6 +132,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     .collect(),
             )),
             ThirExprKind::PrimitiveBinOp(op, lhs, rhs) => {
+                // TODO: logical short-circuiting
                 MirRvalueOrPlace::Rvalue(MirAssignRvalue::BinaryOp(
                     op,
                     Box::new((
@@ -162,7 +163,23 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
                 MirRvalueOrPlace::Rvalue(MirAssignRvalue::UnreachablePlaceholder)
             }
-            ThirExprKind::Return(obj) => todo!(),
+            ThirExprKind::Return(rv) => {
+                let rv = self.lower_expr_rvalue(scope, rv);
+
+                self.builder.push_statement(
+                    scope,
+                    MirStmt {
+                        span: MirStmtSourceInfo::Simple(expr.r(s).span),
+                        kind: MirStmtKind::Assign(Box::new((
+                            MirPlace::new(tcx, MirLocalIdx::RETURN, []),
+                            rv,
+                        ))),
+                    },
+                );
+                self.builder.push_return(scope);
+
+                MirRvalueOrPlace::Rvalue(MirAssignRvalue::UnreachablePlaceholder)
+            }
             ThirExprKind::Assign(lhs, rhs) => {
                 let lhs = self.lower_expr_place(scope, lhs, None);
                 let rhs = self.lower_expr_rvalue(scope, rhs);
@@ -231,13 +248,10 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 truthy,
                 falsy,
             } => {
-                let cond = self.lower_expr_operand(scope, cond);
-
                 let assign_into =
                     self.create_assign_into_place_if_needed(scope, &mut assign_into, expr.r(s).ty);
 
-                let [truthy_scope, falsy_scope] =
-                    self.builder.push_switch_fixed(scope, cond, [1, 0]);
+                let [truthy_scope, falsy_scope] = self.lower_if_expr(scope, cond);
 
                 self.lower_expr_place(truthy_scope, truthy, Some(assign_into));
 
@@ -250,9 +264,20 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
                 MirRvalueOrPlace::Place(assign_into)
             }
-            ThirExprKind::DynUse(dyn_site_idx, obj) => todo!(),
-            ThirExprKind::Match(obj, obj1) => todo!(),
-            ThirExprKind::Let(obj, obj1) => todo!(),
+            ThirExprKind::DynUse(site_idx, target) => {
+                let target = self.lower_expr_operand(scope, target);
+
+                MirRvalueOrPlace::Rvalue(MirAssignRvalue::DynUse(site_idx, target))
+            }
+            ThirExprKind::Match(scrutinee, arms) => {
+                let out_place =
+                    self.create_assign_into_place_if_needed(scope, &mut assign_into, expr.r(s).ty);
+
+                self.lower_match(scope, scrutinee, arms, out_place);
+
+                MirRvalueOrPlace::Place(out_place)
+            }
+            ThirExprKind::Let(_, _) => unreachable!(),
             ThirExprKind::Error(error) => MirRvalueOrPlace::Rvalue(MirAssignRvalue::Error(error)),
         }
     }
@@ -280,7 +305,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     );
                 }
                 ThirStmt::Let(stmt) => {
-                    self.lower_let(scope, stmt);
+                    self.lower_let_stmt(scope, stmt);
                 }
             }
         }
@@ -299,6 +324,17 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 // (ignored)
             }
         }
+    }
+
+    pub fn lower_if_expr(
+        &mut self,
+        scope: MirBuilderScopeIdx,
+        cond: Obj<ThirExpr>,
+    ) -> [MirBuilderScopeIdx; 2] {
+        // TODO: handle `let` expressions and `&&` specially.
+        let cond = self.lower_expr_operand(scope, cond);
+
+        self.builder.push_switch_fixed(scope, cond, [1, 0])
     }
 
     pub fn create_assign_into_place_if_needed(

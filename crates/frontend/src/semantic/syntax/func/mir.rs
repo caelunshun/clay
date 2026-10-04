@@ -5,7 +5,7 @@ use crate::{
         syntax::Span,
     },
     parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
-    semantic::syntax::{AdtCtor, Mutability, SigTy, TyCtxt},
+    semantic::syntax::{AdtCtor, DynSiteIdx, Mutability, SigTy, TyCtxt},
 };
 use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
@@ -313,6 +313,7 @@ pub enum MirAssignRvalue {
     BinaryOp(AstBinOpKind, Box<(MirOperand, MirOperand)>),
     UnaryOp(AstUnOpKind, MirOperand),
     Discriminant(MirPlace),
+    DynUse(DynSiteIdx, MirOperand),
     Error(ErrorGuaranteed),
 }
 

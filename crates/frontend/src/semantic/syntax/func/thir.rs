@@ -100,7 +100,7 @@ pub enum ThirExprKind {
     Error(ErrorGuaranteed),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct ThirMatchArm {
     pub span: Span,
     pub pat: Obj<ThirPat>,

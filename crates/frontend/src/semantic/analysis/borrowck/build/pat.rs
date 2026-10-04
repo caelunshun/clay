@@ -4,8 +4,8 @@ use crate::{
         analysis::borrowck::build::{driver::MirFromThirCtx, scope::MirBuilderScopeIdx},
         syntax::{
             MirAssignRvalue, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirStmt, MirStmtKind,
-            MirStmtSourceInfo, Mutability, SigRe, SigReKind, SigTyInner, SigTyKind, ThirLetStmt,
-            ThirLocal, ThirPat, ThirPatKind,
+            MirStmtSourceInfo, Mutability, SigRe, SigReKind, SigTyInner, SigTyKind, ThirExpr,
+            ThirLetStmt, ThirLocal, ThirMatchArm, ThirPat, ThirPatKind,
         },
     },
     utils::hash::FxHashMap,
@@ -47,7 +47,7 @@ impl PatLowerScopes {
 }
 
 impl<'tcx> MirFromThirCtx<'tcx> {
-    pub fn lower_let(&mut self, scope: MirBuilderScopeIdx, stmt: Obj<ThirLetStmt>) {
+    pub fn lower_let_stmt(&mut self, scope: MirBuilderScopeIdx, stmt: Obj<ThirLetStmt>) {
         let s = self.session();
 
         let ThirLetStmt {
@@ -102,6 +102,89 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         }
 
         self.builder.push_unreachable(break_on_accept);
+    }
+
+    pub fn lower_match(
+        &mut self,
+        scope: MirBuilderScopeIdx,
+        scrutinee: Obj<ThirExpr>,
+        arms: Obj<[ThirMatchArm]>,
+        out_place: MirPlace,
+    ) {
+        let s = self.session();
+        let match_scope = self.builder.push_scope(scope);
+
+        // If our scrutinee is an owned enum, we will take ownership of it here. This allows us to
+        // safely invoke guards when matching on enum variants.
+        let scrutinee = self.lower_expr_place(match_scope, scrutinee, None);
+
+        for &arm in arms.r(s) {
+            let ThirMatchArm {
+                span,
+                pat,
+                guard,
+                body,
+            } = arm;
+
+            // Constructs the following nested scopes...
+            //
+            // ```
+            // 'match_scope: {
+            //     // Arm 1
+            //     'break_on_reject: {
+            //         'break_on_accept: {
+            //              pattern match;
+            //         }
+            //
+            //         if !guard {
+            //             break 'break_on_reject;
+            //         }
+            //
+            //         body;
+            //         break 'match_scope;
+            //     }
+            //
+            //     // Arm 2
+            //     // ...
+            //
+            //     unreachable;
+            // }
+            // continuing logic;
+            // ```
+
+            let break_on_reject = self.builder.push_scope(match_scope);
+            let break_on_accept = self.builder.push_scope(break_on_reject);
+
+            let mut late_use_proxies = FxHashMap::default();
+
+            self.lower_pat(
+                &mut late_use_proxies,
+                PatLowerScopes {
+                    local_scope: match_scope,
+                    match_logic: break_on_reject,
+                    break_on_accept,
+                    break_on_reject,
+                },
+                pat,
+                scrutinee,
+            );
+
+            if let Some(guard) = guard {
+                let guard_scope = self.builder.push_scope(break_on_reject);
+
+                // TODO: introduce guard move proxies
+
+                let [truthy_scope, falsy_scope] = self.lower_if_expr(guard_scope, guard);
+                self.builder.push_break(truthy_scope, guard_scope);
+                self.builder.push_break(falsy_scope, break_on_reject);
+            }
+
+            self.materialize_late_use_proxies(span, break_on_reject, late_use_proxies);
+            self.lower_expr_place(break_on_reject, body, Some(out_place));
+            self.builder.push_break(break_on_reject, match_scope);
+        }
+
+        self.builder.push_unreachable(match_scope);
     }
 
     fn lower_pat_names(&mut self, local_scope: MirBuilderScopeIdx, pat: Obj<ThirPat>) {
