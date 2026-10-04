@@ -1,14 +1,15 @@
 use crate::{
     base::arena::{HasListInterner as _, Obj},
+    parse::ast::{AstBoolLit, AstLit},
     semantic::{
         analysis::borrowck::build::{
             driver::{LabelledScope, MirFromThirCtx, MirRvalueOrPlace},
             scope::MirBuilderScopeIdx,
         },
         syntax::{
-            MirAssignRvalue, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirStmt, MirStmtKind,
-            MirStmtSourceInfo, SigTy, ThirBlock, ThirBlockTrailing, ThirExpr, ThirExprKind,
-            ThirStmt,
+            MirAssignRvalue, MirBinOpKind, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem,
+            MirStmt, MirStmtKind, MirStmtSourceInfo, SigTy, ThirBlock, ThirBlockTrailing, ThirExpr,
+            ThirExprKind, ThirStmt,
         },
     },
 };
@@ -131,16 +132,53 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     .map(|&elem| self.lower_expr_operand(scope, elem))
                     .collect(),
             )),
-            ThirExprKind::PrimitiveBinOp(op, lhs, rhs) => {
-                // TODO: logical short-circuiting
-                MirRvalueOrPlace::Rvalue(MirAssignRvalue::BinaryOp(
+            ThirExprKind::PrimitiveBinOp(op, lhs, rhs) => match MirBinOpKind::from_ast(op) {
+                MirBinOpKind::Straight(op) => MirRvalueOrPlace::Rvalue(MirAssignRvalue::BinaryOp(
                     op,
                     Box::new((
                         self.lower_expr_operand(scope, lhs),
                         self.lower_expr_operand(scope, rhs),
                     )),
-                ))
-            }
+                )),
+                MirBinOpKind::Logical(op) => {
+                    let assign_into = self.create_assign_into_place_if_needed(
+                        scope,
+                        &mut assign_into,
+                        expr.r(s).ty,
+                    );
+
+                    let lhs = self.lower_expr_operand(scope, lhs);
+
+                    let [short_scope, long_scope] = self.builder.push_switch_fixed(
+                        scope,
+                        lhs,
+                        [op.short_circuit_if() as u64, !op.short_circuit_if() as u64],
+                    );
+
+                    self.builder.push_statement(
+                        short_scope,
+                        MirStmt {
+                            span: MirStmtSourceInfo::Simple(expr.r(s).span),
+                            kind: MirStmtKind::Assign(Box::new((
+                                assign_into,
+                                MirAssignRvalue::Literal(
+                                    expr.r(s).ty,
+                                    AstLit::Bool(AstBoolLit {
+                                        span: expr.r(s).span,
+                                        value: op.short_circuit_value(),
+                                    }),
+                                ),
+                            ))),
+                        },
+                    );
+                    self.builder.push_break(short_scope, short_scope);
+
+                    self.lower_expr_place(long_scope, rhs, Some(assign_into));
+                    self.builder.push_break(long_scope, long_scope);
+
+                    MirRvalueOrPlace::Place(assign_into)
+                }
+            },
             ThirExprKind::PrimitiveUnOp(op, lhs) => {
                 MirRvalueOrPlace::Rvalue(MirAssignRvalue::UnaryOp(
                     op,

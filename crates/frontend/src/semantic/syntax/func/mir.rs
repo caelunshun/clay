@@ -310,7 +310,7 @@ pub enum MirAssignRvalue {
     Ref(Mutability, MirPlace),
     Zst(SigTy),
     Literal(SigTy, AstLit),
-    BinaryOp(AstBinOpKind, Box<(MirOperand, MirOperand)>),
+    BinaryOp(MirStraightBinOpKind, Box<(MirOperand, MirOperand)>),
     UnaryOp(AstUnOpKind, MirOperand),
     Discriminant(MirPlace),
     DynUse(DynSiteIdx, MirOperand),
@@ -347,5 +347,100 @@ impl MirOperand {
         let (MirOperand::Copy(place) | MirOperand::Move(place)) = self;
 
         place
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirBinOpKind {
+    Straight(MirStraightBinOpKind),
+    Logical(MirLogicalBinOpKind),
+}
+
+impl MirBinOpKind {
+    pub fn from_ast(op: AstBinOpKind) -> Self {
+        use MirBinOpKind::*;
+        use MirLogicalBinOpKind::*;
+        use MirStraightBinOpKind::*;
+
+        match op {
+            AstBinOpKind::Add => Straight(Add),
+            AstBinOpKind::Sub => Straight(Sub),
+            AstBinOpKind::Mul => Straight(Mul),
+            AstBinOpKind::Div => Straight(Div),
+            AstBinOpKind::Rem => Straight(Rem),
+            AstBinOpKind::BitXor => Straight(BitXor),
+            AstBinOpKind::BitAnd => Straight(BitAnd),
+            AstBinOpKind::BitOr => Straight(BitOr),
+            AstBinOpKind::Shl => Straight(Shl),
+            AstBinOpKind::Shr => Straight(Shr),
+            AstBinOpKind::Eq => Straight(Eq),
+            AstBinOpKind::Lt => Straight(Lt),
+            AstBinOpKind::Le => Straight(Le),
+            AstBinOpKind::Ne => Straight(Ne),
+            AstBinOpKind::Ge => Straight(Ge),
+            AstBinOpKind::Gt => Straight(Gt),
+            AstBinOpKind::And => Logical(And),
+            AstBinOpKind::Or => Logical(Or),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirStraightBinOpKind {
+    /// The `+` operator (addition)
+    Add,
+    /// The `-` operator (subtraction)
+    Sub,
+    /// The `*` operator (multiplication)
+    Mul,
+    /// The `/` operator (division)
+    Div,
+    /// The `%` operator (modulus)
+    Rem,
+    /// The `^` operator (bitwise xor)
+    BitXor,
+    /// The `&` operator (bitwise and)
+    BitAnd,
+    /// The `|` operator (bitwise or)
+    BitOr,
+    /// The `<<` operator (shift left)
+    Shl,
+    /// The `>>` operator (shift right)
+    Shr,
+    /// The `==` operator (equality)
+    Eq,
+    /// The `<` operator (less than)
+    Lt,
+    /// The `<=` operator (less than or equal to)
+    Le,
+    /// The `!=` operator (not equal to)
+    Ne,
+    /// The `>=` operator (greater than or equal to)
+    Ge,
+    /// The `>` operator (greater than)
+    Gt,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirLogicalBinOpKind {
+    /// The `&&` operator (logical and)
+    And,
+    /// The `||` operator (logical or)
+    Or,
+}
+
+impl MirLogicalBinOpKind {
+    pub fn short_circuit_if(self) -> bool {
+        match self {
+            MirLogicalBinOpKind::And => false,
+            MirLogicalBinOpKind::Or => true,
+        }
+    }
+
+    pub fn short_circuit_value(self) -> bool {
+        match self {
+            MirLogicalBinOpKind::And => false,
+            MirLogicalBinOpKind::Or => true,
+        }
     }
 }
