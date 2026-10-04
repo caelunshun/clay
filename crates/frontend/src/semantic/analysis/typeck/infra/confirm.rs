@@ -9,17 +9,16 @@ use crate::{
         analysis::typeck::BodyCtxt,
         infer::FloatingInferVar,
         syntax::{
-            FnInstance, HirBlock, HirExpr, HirLabelledBlock, HirLocal, HirPat,
-            HirPatListFrontAndTail, HirStmt, InferTyVar, RelationMode, SigTyKind, SimpleTyKind,
-            ThirBlock, ThirExpr, ThirExprKind, ThirLetStmt, ThirLocal, ThirPat, ThirPatKind,
-            ThirPatListFrontAndTail, ThirStmt, Ty, TyKind,
+            FnInstance, HirExpr, HirLabelledBlock, HirLocal, HirPat, HirPatListFrontAndTail,
+            InferTyVar, RelationMode, SigTyKind, ThirExpr, ThirExprKind, ThirLocal, ThirPat,
+            ThirPatKind, ThirPatListFrontAndTail, Ty, TyKind,
         },
     },
     utils::{hash::FxHashMap, mem::ArenaRc},
 };
 use bumpalo::Bump;
 use derive_where::derive_where;
-use std::{cell::Cell, rc::Rc};
+use std::{cell::Cell, mem, rc::Rc};
 
 // === Infrastructure === //
 
@@ -519,17 +518,17 @@ struct ConfirmEntry<'a, 'tcx, V>
 where
     V: Confirmable<'a, 'tcx>,
 {
-    definition: Option<ConfirmDefinition<'a, 'tcx, V>>,
+    base: Option<ConfirmationBase<'a, 'tcx, V>>,
+    refinements: Vec<ConfirmRefinement<'a, 'tcx, V>>,
     resolution: Option<ConfirmResolution<V>>,
 }
 
-struct ConfirmDefinition<'a, 'tcx, V>
+struct ConfirmationBase<'a, 'tcx, V>
 where
     V: Confirmable<'a, 'tcx>,
 {
-    base_meta: V::Meta,
-    base_func: ArenaRc<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>) -> V::Body>,
-    refinements: Vec<ConfirmRefinement<'a, 'tcx, V>>,
+    meta: V::Meta,
+    func: ArenaRc<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>) -> V::Body>,
 }
 
 struct ConfirmRefinement<'a, 'tcx, V>
@@ -567,71 +566,60 @@ where
             return resolution;
         }
 
-        match state.definition.take() {
-            Some(ConfirmDefinition {
-                base_meta,
-                base_func,
-                mut refinements,
-            }) => {
-                match order {
-                    ConfirmOrder::BuildingOutwards => {
-                        // (fallthrough)
-                    }
-                    ConfirmOrder::BuildingInwards => {
-                        refinements.reverse();
-                    }
-                }
-
-                // Create placeholders for the start and end of the refinement chain to allow for
-                // reentrant resolution.
-                let start = V::create_placeholder(bcx, hir_span, &base_meta);
-
-                let end = refinements.last().map_or(start, |refinement| {
-                    V::create_placeholder(bcx, hir_span, &refinement.meta)
-                });
-
-                let resolution = ConfirmResolution { start, end };
-
-                project(bcx).entries.get_mut(&hir).unwrap().resolution = Some(resolution);
-
-                // Initialize expressions.
-                let body = base_func(bcx);
-                V::init_placeholder(bcx, start, body);
-
-                let mut prev = start;
-
-                for (idx, refinement) in refinements.iter().enumerate() {
-                    let body = (refinement.func)(bcx, prev);
-
-                    if idx == refinements.len() - 1 {
-                        V::init_placeholder(bcx, start, body);
-                    } else {
-                        prev = V::create_placeholder(bcx, hir_span, &refinement.meta);
-                        V::init_placeholder(bcx, prev, body);
-                    }
-                }
-
-                resolution
+        match order {
+            ConfirmOrder::BuildingOutwards => {
+                // (fallthrough)
             }
-            None => {
-                let thir = V::create_err(
-                    bcx,
-                    hir_span,
-                    Diag::span_err(hir_span, "never type-checked")
-                        .to_delay_bug()
-                        .emit(),
-                );
-
-                let resolved = ConfirmResolution {
-                    start: thir,
-                    end: thir,
-                };
-
-                project(bcx).entries.get_mut(&hir).unwrap().resolution = Some(resolved);
-
-                resolved
+            ConfirmOrder::BuildingInwards => {
+                state.refinements.reverse();
             }
         }
+
+        let base = state.base.take();
+        let refinements = mem::take(&mut state.refinements);
+
+        // Create placeholders for the start and end of the refinement chain to allow for
+        // reentrant resolution.
+        let start = if let Some(base) = &base {
+            V::create_placeholder(bcx, hir_span, &base.meta)
+        } else {
+            V::create_err(
+                bcx,
+                hir_span,
+                Diag::span_err(hir_span, "never type-checked")
+                    .to_delay_bug()
+                    .emit(),
+            )
+        };
+
+        let end = refinements.last().map_or(start, |refinement| {
+            V::create_placeholder(bcx, hir_span, &refinement.meta)
+        });
+
+        let resolution = ConfirmResolution { start, end };
+
+        project(bcx).entries.get_mut(&hir).unwrap().resolution = Some(resolution);
+
+        // Initialize expressions.
+        if let Some(base) = base {
+            let body = (base.func)(bcx);
+            V::init_placeholder(bcx, start, body);
+        }
+
+        let mut prev = start;
+
+        for (idx, refinement) in refinements.iter().enumerate() {
+            let body = (refinement.func)(bcx, prev);
+
+            if idx == refinements.len() - 1 {
+                V::init_placeholder(bcx, start, body);
+            } else {
+                prev = V::create_placeholder(bcx, hir_span, &refinement.meta);
+                V::init_placeholder(bcx, prev, body);
+            }
+        }
+
+        resolution
     }
 
     fn put(
@@ -643,11 +631,11 @@ where
     ) {
         let state = self.entries.entry(hir).or_default();
 
-        assert!(state.definition.is_none());
+        assert!(state.base.is_none());
 
-        state.definition = Some(ConfirmDefinition {
-            base_meta: meta,
-            base_func: {
+        state.base = Some(ConfirmationBase {
+            meta,
+            func: {
                 let f = Cell::new(Some(f));
 
                 ArenaRc::map::<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>) -> V::Body>(
@@ -657,7 +645,6 @@ where
                     |v| v,
                 )
             },
-            refinements: Vec::new(),
         });
     }
 
@@ -668,26 +655,23 @@ where
         meta: V::Meta,
         f: impl 'a + FnOnce(&mut BodyCtxt<'a, 'tcx>, Obj<V>) -> V::Body,
     ) {
-        self.entries
-            .get_mut(&hir)
-            .and_then(|v| v.definition.as_mut())
-            .expect("no base set up")
-            .refinements
-            .push(ConfirmRefinement {
-                meta,
-                func: {
-                    let f = Cell::new(Some(f));
+        let state = self.entries.entry(hir).or_default();
 
-                    ArenaRc::map::<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>, Obj<V>) -> V::Body>(
-                        ArenaRc::new(
-                            arena,
-                            move |bcx: &mut BodyCtxt<'a, 'tcx>, base: Obj<V>| -> V::Body {
-                                f.take().unwrap()(bcx, base)
-                            },
-                        ),
-                        |v| v,
-                    )
-                },
-            });
+        state.refinements.push(ConfirmRefinement {
+            meta,
+            func: {
+                let f = Cell::new(Some(f));
+
+                ArenaRc::map::<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>, Obj<V>) -> V::Body>(
+                    ArenaRc::new(
+                        arena,
+                        move |bcx: &mut BodyCtxt<'a, 'tcx>, base: Obj<V>| -> V::Body {
+                            f.take().unwrap()(bcx, base)
+                        },
+                    ),
+                    |v| v,
+                )
+            },
+        });
     }
 }
