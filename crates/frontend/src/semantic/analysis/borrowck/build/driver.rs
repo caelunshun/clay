@@ -40,7 +40,7 @@ pub enum MirRvalueOrPlace {
 #[derive(Copy, Clone)]
 pub struct LabelledScope {
     pub scope: MirBuilderScopeIdx,
-    pub out_place: Option<MirPlace>,
+    pub out_place: MirPlace,
 }
 
 impl<'tcx> MirFromThirCtx<'tcx> {

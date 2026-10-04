@@ -150,11 +150,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             ThirExprKind::Break(label, value) => {
                 let label = self.labelled_scopes[&label];
 
-                if let Some(out_place) = label.out_place {
-                    self.lower_expr_place(scope, value.unwrap(), Some(out_place));
-                } else {
-                    assert!(value.is_none());
-                }
+                self.lower_expr_place(scope, value, Some(label.out_place));
 
                 self.builder.push_break(scope, label.scope);
 
@@ -182,34 +178,24 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 MirRvalueOrPlace::Rvalue(MirAssignRvalue::Tuple(Box::new([])))
             }
             ThirExprKind::Block(block) => {
-                let assign_into =
+                let out_place =
                     self.create_assign_into_place_if_needed(scope, &mut assign_into, expr.r(s).ty);
 
                 let scope = self.builder.push_scope(scope);
 
-                self.labelled_scopes.insert(
-                    expr,
-                    LabelledScope {
-                        scope,
-                        out_place: Some(assign_into),
-                    },
-                );
+                self.labelled_scopes
+                    .insert(expr, LabelledScope { scope, out_place });
 
-                self.lower_block(scope, block, Some(assign_into));
+                self.lower_block(scope, block, Some(out_place));
 
-                MirRvalueOrPlace::Place(assign_into)
+                MirRvalueOrPlace::Place(out_place)
             }
             ThirExprKind::Loop(block) => {
                 let out_place =
                     self.create_assign_into_place_if_needed(scope, &mut assign_into, expr.r(s).ty);
 
-                self.labelled_scopes.insert(
-                    expr,
-                    LabelledScope {
-                        scope,
-                        out_place: Some(out_place),
-                    },
-                );
+                self.labelled_scopes
+                    .insert(expr, LabelledScope { scope, out_place });
 
                 self.lower_block(scope, block, None);
 

@@ -74,7 +74,7 @@ pub enum ThirExprKind {
     PrimitiveBinOp(AstBinOpKind, Obj<ThirExpr>, Obj<ThirExpr>),
     PrimitiveUnOp(AstUnOpKind, Obj<ThirExpr>),
     NoOp(Obj<ThirExpr>),
-    Break(Obj<ThirExpr>, Option<Obj<ThirExpr>>),
+    Break(Obj<ThirExpr>, Obj<ThirExpr>),
     Continue(Obj<ThirExpr>),
     Return(Obj<ThirExpr>),
     Assign(Obj<ThirExpr>, Obj<ThirExpr>),

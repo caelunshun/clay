@@ -256,7 +256,7 @@ impl BodyCtxt<'_, '_> {
                                                 ),
                                                 kind: LateInit::new(ThirExprKind::Break(
                                                     bcx.confirm_thir_expr_post(expr),
-                                                    Some(bcx.create_thir_unit_ctor(span)),
+                                                    bcx.create_thir_unit_ctor(span),
                                                 )),
                                             },
                                             s,
@@ -508,7 +508,10 @@ impl BodyCtxt<'_, '_> {
                 self.put_thir_expr(expr, ty, move |bcx| {
                     ThirExprKind::Break(
                         bcx.confirm_thir_label(label),
-                        bcx.confirm_opt_thir_expr_post(value),
+                        match value {
+                            Some(value) => bcx.confirm_thir_expr_post(value),
+                            None => bcx.create_thir_unit_ctor(expr.r(s).span),
+                        },
                     )
                 })
             }
