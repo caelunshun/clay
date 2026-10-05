@@ -408,27 +408,28 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         let break_if_falsy = self.builder.push_scope(break_after_truthy);
 
         loop {
-            match *cond.r(s).kind {
-                ThirExprKind::PrimitiveBinOp(AstBinOpKind::And, lhs, rhs) => {
-                    let lhs = self.lower_expr_operand(break_if_falsy, lhs);
+            if let ThirExprKind::PrimitiveBinOp(AstBinOpKind::And, lhs, rhs) = *cond.r(s).kind {
+                match *lhs.r(s).kind {
+                    ThirExprKind::Let(pat, scrutinee) => {
+                        self.lower_let_expr(break_if_falsy, pat, scrutinee);
+                    }
+                    _ => {
+                        let lhs = self.lower_expr_operand(break_if_falsy, lhs);
 
-                    let [truthy, falsy] = self.builder.push_switch_fixed(scope, lhs, [1, 0]);
-                    self.builder.push_break(truthy, truthy);
-                    self.builder.push_break(falsy, break_if_falsy);
+                        let [truthy, falsy] = self.builder.push_switch_fixed(scope, lhs, [1, 0]);
+                        self.builder.push_break(truthy, truthy);
+                        self.builder.push_break(falsy, break_if_falsy);
+                    }
+                }
 
-                    cond = rhs;
-                }
-                ThirExprKind::Let(pat, scrutinee) => {
-                    todo!()
-                }
-                _ => {
-                    let lhs = self.lower_expr_operand(break_if_falsy, cond);
+                cond = rhs;
+            } else {
+                let lhs = self.lower_expr_operand(break_if_falsy, cond);
 
-                    let [truthy, falsy] = self.builder.push_switch_fixed(scope, lhs, [1, 0]);
-                    self.builder.push_break(truthy, truthy);
-                    self.builder.push_break(falsy, break_if_falsy);
-                    break;
-                }
+                let [truthy, falsy] = self.builder.push_switch_fixed(scope, lhs, [1, 0]);
+                self.builder.push_break(truthy, truthy);
+                self.builder.push_break(falsy, break_if_falsy);
+                break;
             }
         }
 

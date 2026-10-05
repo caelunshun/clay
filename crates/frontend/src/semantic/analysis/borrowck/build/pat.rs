@@ -72,9 +72,12 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         // 'break_on_accept: {
         //     'break_on_reject: {
         //         pattern match;
+        //         break 'break_on_accept or 'break_on_reject;
         //     }
+        //
         //     else block;
         // }
+        //
         // continuing logic;
         // ```
 
@@ -134,6 +137,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             //     'break_on_reject: {
             //         'break_on_accept: {
             //              pattern match;
+            //              break 'break_on_accept or 'break_on_reject;
             //         }
             //
             //         if !guard {
@@ -185,6 +189,49 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         }
 
         self.builder.push_unreachable(match_scope);
+    }
+
+    pub fn lower_let_expr(
+        &mut self,
+        break_if_falsy: MirBuilderScopeIdx,
+        pat: Obj<ThirPat>,
+        scrutinee: Obj<ThirExpr>,
+    ) {
+        let s = self.session();
+
+        // Constructs the following nested scopes...
+        //
+        // ```
+        // 'break_if_falsy: {
+        //     previous conditions;
+        //
+        //     'break_if_truthy: {
+        //         pattern matching
+        //         break 'break_if_truthy or 'break_if_falsy;
+        //     }
+        //
+        //     further conditions;
+        // }
+        // ```
+
+        let scrutinee = self.lower_expr_place(break_if_falsy, scrutinee, None);
+        let break_if_truthy = self.builder.push_scope(break_if_falsy);
+
+        let mut late_use_proxies = FxHashMap::default();
+
+        self.lower_pat(
+            &mut late_use_proxies,
+            PatLowerScopes {
+                local_scope: break_if_falsy,
+                match_logic: break_if_truthy,
+                break_on_accept: break_if_truthy,
+                break_on_reject: break_if_falsy,
+            },
+            pat,
+            scrutinee,
+        );
+
+        self.materialize_late_use_proxies(pat.r(s).span, break_if_falsy, late_use_proxies);
     }
 
     fn lower_pat_names(&mut self, local_scope: MirBuilderScopeIdx, pat: Obj<ThirPat>) {
@@ -318,7 +365,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     scrutinee.extend(tcx, [MirPlaceElem::DerefPtr]),
                 );
             }
-            ThirPatKind::Or(obj) => todo!(),
+            ThirPatKind::Or(opts) => todo!(),
             ThirPatKind::Slice(pat_list_front_and_tail) => todo!(),
             ThirPatKind::Tuple(pat_list_front_and_tail) => todo!(),
             ThirPatKind::Adt(obj, obj1) => {
