@@ -1,6 +1,6 @@
 use crate::{
     base::arena::{HasListInterner as _, Obj},
-    parse::ast::{AstBoolLit, AstLit},
+    parse::ast::{AstBinOpKind, AstBoolLit, AstLit},
     semantic::{
         analysis::borrowck::build::{
             driver::{LabelledScope, MirFromThirCtx, MirRvalueOrPlace},
@@ -111,6 +111,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             .collect()
     }
 
+    // TODO: split up logical and temporary scopes
     pub fn lower_expr_preferred(
         &mut self,
         scope: MirBuilderScopeIdx,
@@ -369,10 +370,72 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         scope: MirBuilderScopeIdx,
         cond: Obj<ThirExpr>,
     ) -> [MirBuilderScopeIdx; 2] {
-        // TODO: handle `let` expressions and `&&` specially.
-        let cond = self.lower_expr_operand(scope, cond);
+        let s = self.session();
 
-        self.builder.push_switch_fixed(scope, cond, [1, 0])
+        let mut cond = cond;
+
+        // Constructs the following nested scopes...
+        //
+        // ```
+        // 'break_after_truthy: {
+        //     'break_if_falsy: {
+        //         if !cond_1 {
+        //             break 'break_if_falsy;
+        //         }
+        //
+        //         if !cond_2 {
+        //             break 'break_if_falsy;
+        //         }
+        //
+        //         let binding;
+        //         if !user pat logic {
+        //             break 'break_if_falsy;
+        //         }
+        //
+        //         'truthy_scope: {
+        //             truthy logic;
+        //             user break 'truthy_scope;
+        //         }
+        //
+        //         break 'break_after_truthy;
+        //     }
+        //
+        //     falsy logic;
+        //     user break 'break_after_truthy;
+        // }
+        // ```
+        let break_after_truthy = self.builder.push_scope(scope);
+        let break_if_falsy = self.builder.push_scope(break_after_truthy);
+
+        loop {
+            match *cond.r(s).kind {
+                ThirExprKind::PrimitiveBinOp(AstBinOpKind::And, lhs, rhs) => {
+                    let lhs = self.lower_expr_operand(break_if_falsy, lhs);
+
+                    let [truthy, falsy] = self.builder.push_switch_fixed(scope, lhs, [1, 0]);
+                    self.builder.push_break(truthy, truthy);
+                    self.builder.push_break(falsy, break_if_falsy);
+
+                    cond = rhs;
+                }
+                ThirExprKind::Let(pat, scrutinee) => {
+                    todo!()
+                }
+                _ => {
+                    let lhs = self.lower_expr_operand(break_if_falsy, cond);
+
+                    let [truthy, falsy] = self.builder.push_switch_fixed(scope, lhs, [1, 0]);
+                    self.builder.push_break(truthy, truthy);
+                    self.builder.push_break(falsy, break_if_falsy);
+                    break;
+                }
+            }
+        }
+
+        let truthy_scope = self.builder.push_scope(break_if_falsy);
+        self.builder.push_break(break_if_falsy, break_after_truthy);
+
+        [truthy_scope, break_if_falsy]
     }
 
     pub fn create_assign_into_place_if_needed(
