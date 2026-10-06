@@ -108,7 +108,7 @@ pub struct ThirMatchArm {
     pub body: Obj<ThirExpr>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct ThirStructField {
     pub span: Span,
     pub idx: AdtCtorFieldIdx,

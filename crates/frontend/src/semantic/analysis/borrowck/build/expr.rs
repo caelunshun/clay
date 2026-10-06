@@ -8,8 +8,8 @@ use crate::{
         },
         syntax::{
             MirAssignRvalue, MirBinOpKind, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem,
-            MirStmt, MirStmtKind, MirStmtSourceInfo, SigTy, ThirBlock, ThirBlockTrailing, ThirExpr,
-            ThirExprKind, ThirStmt,
+            MirStmt, MirStmtKind, MirStmtSourceInfo, ResolvedFieldIdx, SigTy, ThirBlock,
+            ThirBlockTrailing, ThirExpr, ThirExprKind, ThirStmt,
         },
     },
 };
@@ -277,7 +277,42 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     .extend(tcx, [MirPlaceElem::Field(field)]),
             ),
             ThirExprKind::CreateBracedAdt { ctor, fields, rest } => {
-                todo!()
+                if let Some(rest) = rest {
+                    let output = self.create_assign_into_place_if_needed(
+                        scope,
+                        &mut assign_into,
+                        expr.r(s).ty,
+                    );
+
+                    self.lower_expr_place(scope, rest, Some(output));
+
+                    for &field in fields.r(s) {
+                        self.lower_expr_place(
+                            scope,
+                            field.init,
+                            Some(output.extend(
+                                tcx,
+                                [MirPlaceElem::Field(ResolvedFieldIdx::Adt(ctor, field.idx))],
+                            )),
+                        );
+                    }
+
+                    MirRvalueOrPlace::Place(output)
+                } else {
+                    let mut field_places = (0..ctor.r(s).fields.len())
+                        .map(|_| None)
+                        .collect::<Box<[_]>>();
+
+                    for &field in fields.r(s) {
+                        field_places[field.idx.index()] =
+                            Some(self.lower_expr_operand(scope, field.init))
+                    }
+
+                    MirRvalueOrPlace::Rvalue(MirAssignRvalue::Adt(
+                        ctor,
+                        field_places.into_iter().map(|v| v.unwrap()).collect(),
+                    ))
+                }
             }
             ThirExprKind::Local(local) => {
                 MirRvalueOrPlace::Place(MirPlace::new(tcx, self.thir_locals[&local], []))

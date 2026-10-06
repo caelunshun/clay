@@ -19,8 +19,14 @@ pub fn build_function_mir(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     };
 
     let mut builder = MirFromThirCtx::new(tcx, def);
-    let rv = builder.lower_expr_rvalue(MirBuilderScopeIdx::ENTRY, thir);
-    // TODO
+
+    // TODO: lower arguments
+
+    builder.lower_expr_place(
+        MirBuilderScopeIdx::ENTRY,
+        thir,
+        Some(MirPlace::new(tcx, MirLocalIdx::RETURN, [])),
+    );
 }
 
 pub struct MirFromThirCtx<'tcx> {
