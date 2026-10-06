@@ -5,7 +5,7 @@ use crate::{
         syntax::Span,
     },
     semantic::{
-        infer::ClauseCx,
+        infer::{ClauseCx, PrettyFmtOpts},
         syntax::{
             AdtInstance, FnInstance, FnInstanceInner, FnOwner, HrtbBinder, HrtbDebruijnDef,
             HrtbDebruijnDefList, HrtbProjection, Re, RelationMode, SigAdtInstance, SigFnInstance,
@@ -358,10 +358,15 @@ impl<'a, 'tcx> SigExporter<'a, 'tcx> {
             UniversalTy::Root(root) => match self.ccx.lookup_universal_ty_root_src_info(root) {
                 UniversalTyRootSourceInfo::Root(generic) => SigTyKind::Generic(generic),
                 UniversalTyRootSourceInfo::UsedDyn { span: _, site } => SigTyKind::UsedDyn(site),
+                UniversalTyRootSourceInfo::WfTraitSelf => SigTyKind::SelfTy,
                 UniversalTyRootSourceInfo::InstantiatedHrtb(_)
-                | UniversalTyRootSourceInfo::WfTraitSelf
                 | UniversalTyRootSourceInfo::WfReflexive { .. }
-                | UniversalTyRootSourceInfo::WfHrtbUniversal { .. } => unreachable!(),
+                | UniversalTyRootSourceInfo::WfHrtbUniversal { .. } => {
+                    unreachable!(
+                        "unexpected universal type `{}`",
+                        self.ccx.pretty(PrettyFmtOpts::default()).wrap(universal)
+                    )
+                }
             },
             UniversalTy::Projection(proj) => {
                 let UniversalTyProjInner {
