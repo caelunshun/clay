@@ -241,9 +241,18 @@ impl BodyCtxt<'_, '_> {
                                             ThirExpr {
                                                 span,
                                                 ty: unit_ty,
-                                                kind: LateInit::new(ThirExprKind::Block(
-                                                    bcx.create_thir_block_no_trailing(block),
-                                                )),
+                                                kind: LateInit::new(ThirExprKind::Block(Obj::new(
+                                                    ThirBlock {
+                                                        span: block.r(s).span,
+                                                        stmts: bcx.create_thir_block_stmts(block),
+                                                        last_expr: ThirBlockTrailing::Present(
+                                                            bcx.create_thir_unit_ctor(
+                                                                block.r(s).span,
+                                                            ),
+                                                        ),
+                                                    },
+                                                    s,
+                                                ))),
                                             },
                                             s,
                                         ),

@@ -165,7 +165,7 @@ impl BodyCtxt<'_, '_> {
         }
     }
 
-    fn create_thir_block_stmts(&mut self, hir: Obj<HirBlock>) -> Vec<ThirStmt> {
+    pub fn create_thir_block_stmts(&mut self, hir: Obj<HirBlock>) -> Vec<ThirStmt> {
         let s = self.session();
 
         hir.r(s)

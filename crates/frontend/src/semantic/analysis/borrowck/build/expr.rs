@@ -359,12 +359,12 @@ impl<'tcx> MirFromThirCtx<'tcx> {
     pub fn lower_block(
         &mut self,
         scope: MirBuilderScopeIdx,
-        expr: Obj<ThirBlock>,
+        block: Obj<ThirBlock>,
         assign_into: Option<MirPlace>,
     ) {
         let s = self.session();
 
-        for &stmt in &expr.r(s).stmts {
+        for &stmt in &block.r(s).stmts {
             match stmt {
                 ThirStmt::Expr(expr) => {
                     let scope = self.builder.push_scope(scope);
@@ -384,7 +384,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             }
         }
 
-        match (assign_into, expr.r(s).last_expr) {
+        match (assign_into, block.r(s).last_expr) {
             (None, ThirBlockTrailing::Present(_) | ThirBlockTrailing::MissingCoerceNever)
             | (Some(_), ThirBlockTrailing::MissingNotApplicable) => unreachable!(),
 
@@ -451,7 +451,9 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     _ => {
                         let lhs = self.lower_expr_operand(break_if_falsy, lhs);
 
-                        let [truthy, falsy] = self.builder.push_switch_fixed(scope, lhs, [1, 0]);
+                        let [truthy, falsy] =
+                            self.builder.push_switch_fixed(break_if_falsy, lhs, [1, 0]);
+
                         self.builder.push_break(truthy, truthy);
                         self.builder.push_break(falsy, break_if_falsy);
                     }
@@ -461,7 +463,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             } else {
                 let lhs = self.lower_expr_operand(break_if_falsy, cond);
 
-                let [truthy, falsy] = self.builder.push_switch_fixed(scope, lhs, [1, 0]);
+                let [truthy, falsy] = self.builder.push_switch_fixed(break_if_falsy, lhs, [1, 0]);
                 self.builder.push_break(truthy, truthy);
                 self.builder.push_break(falsy, break_if_falsy);
                 break;
