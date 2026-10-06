@@ -27,6 +27,18 @@ struct LateUseProxyEntry {
 }
 
 impl<'tcx> MirFromThirCtx<'tcx> {
+    pub fn lower_fn_arg(
+        &mut self,
+        span: Span,
+        scope: MirBuilderScopeIdx,
+        arg_pat: Obj<ThirPat>,
+        arg_value: MirPlace,
+    ) {
+        let reject_scope = self.lower_let_stmt_common(span, scope, arg_pat, arg_value);
+
+        self.builder.push_unreachable(reject_scope);
+    }
+
     pub fn lower_let_stmt(&mut self, scope: MirBuilderScopeIdx, stmt: Obj<ThirLetStmt>) {
         let s = self.session();
 
@@ -46,6 +58,22 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
         let init = self.lower_expr_place(scope, init, None);
 
+        let reject_scope = self.lower_let_stmt_common(stmt.r(s).span, scope, pat, init);
+
+        if let Some(else_clause) = else_clause {
+            self.lower_block(reject_scope, else_clause, None);
+        }
+
+        self.builder.push_unreachable(reject_scope);
+    }
+
+    fn lower_let_stmt_common(
+        &mut self,
+        span: Span,
+        scope: MirBuilderScopeIdx,
+        pat: Obj<ThirPat>,
+        scrutinee: MirPlace,
+    ) -> MirBuilderScopeIdx {
         // Constructs the following nested scopes...
         //
         // ```
@@ -75,16 +103,12 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 break_on_reject,
             },
             pat,
-            init,
+            scrutinee,
         );
 
-        self.materialize_late_use_proxies(stmt.r(s).span, scope, late_use_proxies);
+        self.materialize_late_use_proxies(span, scope, late_use_proxies);
 
-        if let Some(else_clause) = else_clause {
-            self.lower_block(break_on_accept, else_clause, None);
-        }
-
-        self.builder.push_unreachable(break_on_accept);
+        break_on_accept
     }
 
     pub fn lower_match(

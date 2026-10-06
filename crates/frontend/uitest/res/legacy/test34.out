@@ -1724,3 +1724,9 @@ error:
                                                                                                     RHS: Forever<()>
                                                                                                     - recursion limit met
 
+error: type hints required for this type
+   ┌─ test34.fir:27:9
+   │
+27 │ fn meow(v: <() as Forever<()>>::Out) {}
+   │         ^
+

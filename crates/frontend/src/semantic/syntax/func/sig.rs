@@ -6,7 +6,7 @@ use crate::{
     },
     parse::token::Ident,
     semantic::syntax::{
-        AdtCtor, AdtCtorFieldIdx, GenericBinder, HirExpr, HirPat, ImplItem, Item, SigTy, ThirExpr,
+        AdtCtor, AdtCtorFieldIdx, GenericBinder, HirExpr, HirPat, ImplItem, Item, SigTy, ThirBody,
         TraitItem, Ty, Visibility,
     },
 };
@@ -35,7 +35,7 @@ pub struct FnDef {
     pub args: LateInit<Obj<[FnArg]>>,
     pub ret_ty: LateInit<SigTy>,
     pub hir_body: LateInit<Option<Obj<HirExpr>>>,
-    pub thir_body: LateInit<Option<Obj<ThirExpr>>>,
+    pub thir_body: LateInit<Option<ThirBody>>,
 }
 
 #[derive(Debug, Copy, Clone)]

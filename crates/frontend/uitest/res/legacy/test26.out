@@ -3322,3 +3322,9 @@ error:
                                                                                                     RHS: Forever<Out = ?(129) <() as Forever>::Out>
                                                                                                     - recursion limit met
 
+error: type hints required for this type
+   ┌─ test26.fir:27:9
+   │
+27 │ fn meow(v: <() as Forever>::Out) {}
+   │         ^
+

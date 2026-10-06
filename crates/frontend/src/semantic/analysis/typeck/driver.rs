@@ -7,7 +7,8 @@ use crate::{
         analysis::{sigck::CrateSigckVisitor, typeck::infra::confirm::BodyCtxtConfirmState},
         infer::{ClauseCx, ClauseImportEnv, HrtbUniverse, UnifyCx, UnifyCxMode},
         syntax::{
-            Crate, FnDef, HirLabelledBlock, HirLocal, InferTyVarSourceInfo, Item, Ty, TyCtxt,
+            Crate, FnDef, HirLabelledBlock, HirLocal, InferTyVarSourceInfo, Item, ThirBody, Ty,
+            TyCtxt,
         },
     },
     utils::hash::FxHashMap,
@@ -42,7 +43,23 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
 
         bcx.begin_confirmation();
 
-        LateInit::init(&def.r(s).thir_body, Some(bcx.confirm_thir_expr_post(body)));
+        let arg_pats = def
+            .r(s)
+            .args
+            .r(s)
+            .iter()
+            .map(|arg| bcx.confirm_thir_pat_outer(arg.pat))
+            .collect::<Vec<_>>();
+
+        let body = bcx.confirm_thir_expr_post(body);
+
+        LateInit::init(
+            &def.r(s).thir_body,
+            Some(ThirBody {
+                arg_pats,
+                expr: body,
+            }),
+        );
     } else {
         for arg in def.r(s).args.r(s) {
             ccx.import_here(&env_sig, arg.ty);

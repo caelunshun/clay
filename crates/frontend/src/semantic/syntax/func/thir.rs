@@ -54,6 +54,12 @@ pub type ThirPatListFrontAndTail = PatListFrontAndTail<ThirPat>;
 // === Body === //
 
 #[derive(Debug, Clone)]
+pub struct ThirBody {
+    pub arg_pats: Vec<Obj<ThirPat>>,
+    pub expr: Obj<ThirExpr>,
+}
+
+#[derive(Debug, Clone)]
 pub struct ThirExpr {
     pub span: Span,
     pub ty: SigTy,

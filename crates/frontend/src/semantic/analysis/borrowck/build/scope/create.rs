@@ -1,8 +1,12 @@
 #![expect(dead_code)] // TODO
 
-use crate::semantic::syntax::{
-    MirBlock, MirBlockIdx, MirBody, MirLocal, MirLocalIdx, MirOperand, MirOperandMode, MirPlace,
-    MirStmt, MirStmtKind, MirStmtSourceInfo, MirTerminator, MirUnwindBehavior, SigTy, TyCtxt,
+use crate::{
+    base::{Session, arena::Obj},
+    semantic::syntax::{
+        FnDef, MirBlock, MirBlockIdx, MirBody, MirLocal, MirLocalIdx, MirOperand, MirOperandMode,
+        MirPlace, MirStmt, MirStmtKind, MirStmtSourceInfo, MirTerminator, MirUnwindBehavior, SigTy,
+        TyCtxt,
+    },
 };
 use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
@@ -25,6 +29,7 @@ define_index_type! {
 
 pub struct MirScopedBuilder<'tcx> {
     tcx: &'tcx TyCtxt,
+    def: Obj<FnDef>,
     scopes: IndexVec<MirBuilderScopeIdx, Scope>,
     body: MirBody,
 }
@@ -52,11 +57,28 @@ struct ScopeParent {
 
 /// Machinery
 impl<'tcx> MirScopedBuilder<'tcx> {
-    pub fn new(tcx: &'tcx TyCtxt) -> Self {
+    pub fn new(tcx: &'tcx TyCtxt, def: Obj<FnDef>) -> Self {
+        let s = &tcx.session;
+
+        let body = {
+            let mut body = MirBody::default();
+
+            body.locals.push(MirLocal {
+                ty: *def.r(s).ret_ty,
+            });
+
+            for arg in def.r(s).args.r(s) {
+                body.locals.push(MirLocal { ty: arg.ty });
+            }
+
+            body
+        };
+
         let mut builder = Self {
             tcx,
+            def,
             scopes: IndexVec::new(),
-            body: MirBody::default(),
+            body,
         };
 
         let entry_block = builder.body.blocks.push(MirBlock {
@@ -89,6 +111,18 @@ impl<'tcx> MirScopedBuilder<'tcx> {
         );
 
         builder
+    }
+
+    pub fn session(&self) -> &'tcx Session {
+        &self.tcx.session
+    }
+
+    pub fn tcx(&self) -> &'tcx TyCtxt {
+        self.tcx
+    }
+
+    pub fn def(&self) -> Obj<FnDef> {
+        self.def
     }
 
     /// Allocates a local in a scope, which is live for all descendant scopes.
