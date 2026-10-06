@@ -4,8 +4,8 @@ use crate::{
         analysis::borrowck::build::{driver::MirFromThirCtx, scope::MirBuilderScopeIdx},
         syntax::{
             MirAssignRvalue, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirStmt, MirStmtKind,
-            MirStmtSourceInfo, Mutability, SigRe, SigReKind, SigTyInner, SigTyKind, ThirExpr,
-            ThirLetStmt, ThirLocal, ThirMatchArm, ThirPat, ThirPatKind,
+            MirStmtSourceInfo, Mutability, ResolvedFieldIdx, SigRe, SigReKind, SigTyInner,
+            SigTyKind, ThirExpr, ThirLetStmt, ThirLocal, ThirMatchArm, ThirPat, ThirPatKind,
         },
     },
     utils::hash::FxHashMap,
@@ -24,26 +24,6 @@ type LateUseProxyMap = FxHashMap<MirLocalIdx, LateUseProxyEntry>;
 struct LateUseProxyEntry {
     ref_place: MirPlace,
     can_move_from: Option<Vec<MirPlace>>,
-}
-
-impl PatLowerScopes {
-    #[must_use]
-    pub fn nest_accept(self, scope: MirBuilderScopeIdx) -> Self {
-        Self {
-            match_logic: scope,
-            break_on_accept: scope,
-            ..self
-        }
-    }
-
-    #[must_use]
-    pub fn nest_reject(self, scope: MirBuilderScopeIdx) -> Self {
-        Self {
-            match_logic: scope,
-            break_on_reject: scope,
-            ..self
-        }
-    }
 }
 
 impl<'tcx> MirFromThirCtx<'tcx> {
@@ -365,16 +345,105 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     scrutinee.extend(tcx, [MirPlaceElem::DerefPtr]),
                 );
             }
-            ThirPatKind::Or(opts) => todo!(),
+            ThirPatKind::Or(opts) => {
+                self.lower_pat_or(
+                    late_use_proxies,
+                    scopes,
+                    opts.r(s).iter().map(|&opt_pat| (opt_pat, scrutinee)),
+                );
+            }
             ThirPatKind::Slice(pat_list_front_and_tail) => todo!(),
-            ThirPatKind::Tuple(pat_list_front_and_tail) => todo!(),
-            ThirPatKind::Adt(obj, obj1) => {
-                todo!()
+            ThirPatKind::Tuple(list) => {
+                let SigTyKind::Tuple(pat_tuple_elems) = pat.r(s).ty.r(s).kind else {
+                    unreachable!()
+                };
+
+                self.lower_pat_and(
+                    late_use_proxies,
+                    scopes,
+                    list.zip(0..pat_tuple_elems.r(s).len() as u32, s)
+                        .map(|(pat, idx)| {
+                            (
+                                pat,
+                                scrutinee.extend(
+                                    tcx,
+                                    [MirPlaceElem::Field(ResolvedFieldIdx::Tuple(idx))],
+                                ),
+                            )
+                        }),
+                );
+            }
+            ThirPatKind::Adt(ctor, fields) => {
+                self.lower_pat_and(
+                    late_use_proxies,
+                    scopes,
+                    fields.r(s).iter().map(|field| {
+                        (
+                            field.pat,
+                            scrutinee.extend(
+                                tcx,
+                                [MirPlaceElem::Field(ResolvedFieldIdx::Adt(ctor, field.idx))],
+                            ),
+                        )
+                    }),
+                );
             }
             ThirPatKind::Error(_error) => {
                 // (trivial)
             }
         }
+    }
+
+    fn lower_pat_and(
+        &mut self,
+        late_use_proxies: &mut LateUseProxyMap,
+        scopes: PatLowerScopes,
+        children: impl IntoIterator<Item = (Obj<ThirPat>, MirPlace)>,
+    ) {
+        let nested_accept = self.builder.push_scope(scopes.match_logic);
+
+        for (pat, scrutinee) in children {
+            self.lower_pat(
+                late_use_proxies,
+                PatLowerScopes {
+                    local_scope: scopes.local_scope,
+                    match_logic: nested_accept,
+                    break_on_accept: nested_accept,
+                    break_on_reject: scopes.break_on_reject,
+                },
+                pat,
+                scrutinee,
+            );
+        }
+
+        self.builder
+            .push_break(scopes.match_logic, scopes.break_on_accept);
+    }
+
+    fn lower_pat_or(
+        &mut self,
+        late_use_proxies: &mut LateUseProxyMap,
+        scopes: PatLowerScopes,
+        children: impl IntoIterator<Item = (Obj<ThirPat>, MirPlace)>,
+    ) {
+        let nested_reject = self.builder.push_scope(scopes.match_logic);
+
+        for (pat, scrutinee) in children {
+            self.lower_pat(
+                late_use_proxies,
+                PatLowerScopes {
+                    local_scope: scopes.local_scope,
+                    match_logic: nested_reject,
+                    break_on_accept: scopes.break_on_accept,
+                    break_on_reject: nested_reject,
+                },
+                pat,
+                scrutinee,
+            );
+        }
+
+        self.builder
+            .push_break(scopes.match_logic, scopes.break_on_reject);
     }
 
     fn materialize_late_use_proxies(

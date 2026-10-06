@@ -6,7 +6,8 @@ use crate::{
     },
     parse::token::Ident,
     semantic::syntax::{
-        GenericBinder, HirExpr, HirPat, ImplItem, Item, SigTy, ThirExpr, TraitItem, Ty, Visibility,
+        AdtCtor, AdtCtorFieldIdx, GenericBinder, HirExpr, HirPat, ImplItem, Item, SigTy, ThirExpr,
+        TraitItem, Ty, Visibility,
     },
 };
 use derive_where::derive_where;
@@ -260,4 +261,12 @@ where
 
         (size, Some(size))
     }
+}
+
+// === FieldIdx === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum ResolvedFieldIdx {
+    Tuple(u32),
+    Adt(Obj<AdtCtor>, AdtCtorFieldIdx),
 }

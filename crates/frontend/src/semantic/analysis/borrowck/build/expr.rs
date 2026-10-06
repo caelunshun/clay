@@ -272,9 +272,9 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
                 MirRvalueOrPlace::Place(destination)
             }
-            ThirExprKind::Field(target, idx) => MirRvalueOrPlace::Place(
+            ThirExprKind::Field(target, field) => MirRvalueOrPlace::Place(
                 self.lower_expr_place(scope, target, None)
-                    .extend(tcx, [MirPlaceElem::Field(idx)]),
+                    .extend(tcx, [MirPlaceElem::Field(field)]),
             ),
             ThirExprKind::CreateBracedAdt { ctor, fields, rest } => {
                 todo!()

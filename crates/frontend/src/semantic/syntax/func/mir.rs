@@ -5,7 +5,7 @@ use crate::{
         syntax::Span,
     },
     parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
-    semantic::syntax::{AdtCtor, DynSiteIdx, Mutability, SigTy, TyCtxt},
+    semantic::syntax::{AdtCtor, DynSiteIdx, Mutability, ResolvedFieldIdx, SigTy, TyCtxt},
 };
 use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
@@ -294,7 +294,7 @@ pub type MirPlaceElemList = Intern<[MirPlaceElem]>;
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum MirPlaceElem {
     DerefPtr,
-    Field(u32),
+    Field(ResolvedFieldIdx),
 }
 
 #[derive(Debug, Clone)]

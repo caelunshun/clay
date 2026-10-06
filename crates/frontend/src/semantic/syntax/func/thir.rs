@@ -7,7 +7,7 @@ use crate::{
     parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
     semantic::syntax::{
         AdtCtor, AdtCtorFieldIdx, DynSiteIdx, LocalNameIdent, Mutability, PatListFrontAndTail,
-        SigTy, SigTyKind, SimpleTyKind,
+        ResolvedFieldIdx, SigTy, SigTyKind, SimpleTyKind,
     },
 };
 
@@ -82,7 +82,7 @@ pub enum ThirExprKind {
     Loop(Obj<ThirBlock>),
     AddrOf(Mutability, Obj<ThirExpr>),
     Call(Obj<ThirExpr>, Obj<[Obj<ThirExpr>]>),
-    Field(Obj<ThirExpr>, u32),
+    Field(Obj<ThirExpr>, ResolvedFieldIdx),
     CreateBracedAdt {
         ctor: Obj<AdtCtor>,
         fields: Obj<[ThirStructField]>,

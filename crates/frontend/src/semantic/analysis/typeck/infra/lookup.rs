@@ -13,8 +13,8 @@ use crate::{
         lower::modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},
         syntax::{
             AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, FnOwner, HirExpr,
-            InferTyVarSourceInfo, InstantiatedFnSig, Mutability, Re, RelationMode, SigGenericList,
-            TraitSpec, Ty, TyFolderInfallibleExt as _, TyKind,
+            InferTyVarSourceInfo, InstantiatedFnSig, Mutability, Re, RelationMode,
+            ResolvedFieldIdx, SigGenericList, TraitSpec, Ty, TyFolderInfallibleExt as _, TyKind,
         },
     },
     utils::lang::IterEither,
@@ -30,7 +30,7 @@ pub struct LookupMethodResult {
 #[derive(Debug, Copy, Clone)]
 pub struct LookupFieldResult {
     pub ty: Ty,
-    pub index: u32,
+    pub index: ResolvedFieldIdx,
 }
 
 impl BodyCtxt<'_, '_> {
@@ -82,7 +82,7 @@ impl BodyCtxt<'_, '_> {
 
                         return Ok(Some(LookupFieldResult {
                             ty: self.ccx_mut().import_elsewhere(&env, *field.ty),
-                            index: field.idx.raw(),
+                            index: ResolvedFieldIdx::Adt(*def.r(s).ctor, field.idx),
                         }));
                     }
                     AdtKind::Enum(_) => {
@@ -95,7 +95,7 @@ impl BodyCtxt<'_, '_> {
                     {
                         return Ok(Some(LookupFieldResult {
                             ty: field_ty,
-                            index: name_as_idx,
+                            index: ResolvedFieldIdx::Tuple(name_as_idx),
                         }));
                     }
                 }
