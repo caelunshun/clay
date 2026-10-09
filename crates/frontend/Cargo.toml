@@ -18,6 +18,7 @@ indexmap.workspace = true
 paste = "1.0.15"
 rustc-hash = "2.1.1"
 scopeguard = "1.2.0"
+slotmap = "1.1.1"
 smallvec = { version = "1.15.1", features = ["const_generics"] }
 termcolor = "1.4.1"
 thiserror = "2.0.12"

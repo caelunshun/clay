@@ -3,9 +3,8 @@
 use crate::{
     base::{Session, arena::Obj},
     semantic::syntax::{
-        FnDef, MirBlock, MirBlockIdx, MirBody, MirLocal, MirLocalIdx, MirOperand, MirOperandMode,
-        MirPlace, MirStmt, MirStmtKind, MirStmtSourceInfo, MirTerminator, MirUnwindBehavior, SigTy,
-        TyCtxt,
+        FnDef, MirBlockIdx, MirBody, MirLocal, MirLocalIdx, MirOperand, MirOperandMode, MirPlace,
+        MirStmt, MirStmtKind, MirStmtSourceInfo, MirTerminator, MirUnwindBehavior, SigTy, TyCtxt,
     },
 };
 use index_vec::{IndexVec, define_index_type};
@@ -81,18 +80,12 @@ impl<'tcx> MirScopedBuilder<'tcx> {
             body,
         };
 
-        let entry_block = builder.body.blocks.push(MirBlock {
-            stmts: Vec::new(),
-            terminator: MirTerminator::Return,
-            predecessors: SmallVec::new(),
-            is_unwind: false,
-        });
-        let last_unwind_block = builder.body.blocks.push(MirBlock {
-            stmts: Vec::new(),
-            terminator: MirTerminator::UnwindResume,
-            predecessors: SmallVec::new(),
-            is_unwind: true,
-        });
+        let entry_block = builder.body.cfg.create_block();
+
+        let last_unwind_block = builder
+            .body
+            .cfg
+            .create_block_with_terminator(MirTerminator::UnwindResume);
 
         assert_eq!(
             builder.scopes.push(Scope {
@@ -133,16 +126,14 @@ impl<'tcx> MirScopedBuilder<'tcx> {
         let unwind_on_scope_drop_panic = self.requires_drop(ty).then(|| {
             let continue_unwind_bb = self.scopes[scope].curr_unwind_block;
 
-            let drop_self_unwind_bb = self.body.blocks.push(MirBlock {
-                stmts: Vec::new(),
-                terminator: MirTerminator::EnsureDropped {
-                    place: MirPlace::new(self.tcx, mir_idx, []),
-                    target: continue_unwind_bb,
-                    unwind: MirUnwindBehavior::DoublePanic,
-                },
-                predecessors: SmallVec::new(),
-                is_unwind: true,
-            });
+            let drop_self_unwind_bb =
+                self.body
+                    .cfg
+                    .create_block_with_terminator(MirTerminator::EnsureDropped {
+                        place: MirPlace::new(self.tcx, mir_idx, []),
+                        target: continue_unwind_bb,
+                        unwind: MirUnwindBehavior::DoublePanic,
+                    });
 
             self.scopes[scope].curr_unwind_block = drop_self_unwind_bb;
 
@@ -167,9 +158,7 @@ impl<'tcx> MirScopedBuilder<'tcx> {
 
     /// Pushes a regular statement to a scope.
     pub fn push_statement(&mut self, scope: MirBuilderScopeIdx, stmt: MirStmt) {
-        self.body.blocks[self.scopes[scope].curr_block]
-            .stmts
-            .push(stmt);
+        self.body.cfg.push_stmt(self.scopes[scope].curr_block, stmt);
     }
 
     /// Pushes a terminator that branches into some number of child scopes. This can handle diverging
@@ -185,22 +174,12 @@ impl<'tcx> MirScopedBuilder<'tcx> {
     ) -> SmallVec<[MirBuilderScopeIdx; 2]> {
         let branching_block = self.scopes[scope].curr_block;
         let continue_parent_unwind = self.scopes[scope].curr_unwind_block;
-        let returns_to = self.body.blocks.push(MirBlock {
-            stmts: Vec::new(),
-            terminator: MirTerminator::Placeholder,
-            predecessors: SmallVec::new(),
-            is_unwind: false,
-        });
+        let returns_to = self.body.cfg.create_block();
         self.scopes[scope].curr_block = returns_to;
 
         let successors = (0..succ_count)
             .map(|_| {
-                let first_block = self.body.blocks.push(MirBlock {
-                    stmts: Vec::new(),
-                    terminator: MirTerminator::Placeholder,
-                    predecessors: SmallVec::new(),
-                    is_unwind: false,
-                });
+                let first_block = self.body.cfg.create_block();
 
                 self.scopes.push(Scope {
                     parent: Some(ScopeParent {
@@ -216,10 +195,13 @@ impl<'tcx> MirScopedBuilder<'tcx> {
             })
             .collect::<SmallVec<[MirBuilderScopeIdx; 2]>>();
 
-        self.body.blocks[branching_block].terminator = f(&successors
-            .iter()
-            .map(|&scope| self.scopes[scope].first_block)
-            .collect::<SmallVec<[MirBlockIdx; 2]>>());
+        self.body.cfg.init_terminator(
+            branching_block,
+            f(&successors
+                .iter()
+                .map(|&scope| self.scopes[scope].first_block)
+                .collect::<SmallVec<[MirBlockIdx; 2]>>()),
+        );
 
         successors
     }
@@ -262,20 +244,18 @@ impl<'tcx> MirScopedBuilder<'tcx> {
 
                 if let Some(unwind_on_scope_drop_panic) = local.unwind_on_scope_drop_panic {
                     let scope_start = self.scopes[scope].curr_block;
-                    let scope_continue = self.body.blocks.push(MirBlock {
-                        stmts: Vec::new(),
-                        terminator: MirTerminator::Placeholder,
-                        predecessors: SmallVec::new(),
-                        is_unwind: false,
-                    });
+                    let scope_continue = self.body.cfg.create_block();
 
                     self.scopes[scope].curr_block = scope_continue;
 
-                    self.body.blocks[scope_start].terminator = MirTerminator::EnsureDropped {
-                        place: MirPlace::new(self.tcx, local.mir_idx, []),
-                        target: scope_continue,
-                        unwind: MirUnwindBehavior::Continue(unwind_on_scope_drop_panic),
-                    };
+                    self.body.cfg.init_terminator(
+                        scope_start,
+                        MirTerminator::EnsureDropped {
+                            place: MirPlace::new(self.tcx, local.mir_idx, []),
+                            target: scope_continue,
+                            unwind: MirUnwindBehavior::Continue(unwind_on_scope_drop_panic),
+                        },
+                    );
                 }
 
                 self.push_statement(
@@ -301,15 +281,12 @@ impl<'tcx> MirScopedBuilder<'tcx> {
 
         // Push terminator.
         let branching_block = self.scopes[scope].curr_block;
-        let dead_block = self.body.blocks.push(MirBlock {
-            stmts: Vec::new(),
-            terminator: MirTerminator::Placeholder,
-            predecessors: SmallVec::new(),
-            is_unwind: false,
-        });
+        let dead_block = self.body.cfg.create_block();
         self.scopes[scope].curr_block = dead_block;
 
-        self.body.blocks[branching_block].terminator = MirTerminator::Goto(next_bb);
+        self.body
+            .cfg
+            .init_terminator(branching_block, MirTerminator::Goto(next_bb));
     }
 
     /// Finishes the current scope by breaking out to a target which must be an ancestor scope.
@@ -330,16 +307,13 @@ impl<'tcx> MirScopedBuilder<'tcx> {
         let start_bb = self.scopes[scope].curr_block;
         let unwind_bb = self.scopes[scope].curr_unwind_block;
 
-        let continue_bb = self.body.blocks.push(MirBlock {
-            stmts: Vec::new(),
-            terminator: MirTerminator::Placeholder,
-            predecessors: SmallVec::new(),
-            is_unwind: false,
-        });
+        let continue_bb = self.body.cfg.create_block();
 
         self.scopes[scope].curr_block = continue_bb;
-        self.body.blocks[start_bb].terminator =
-            f(continue_bb, MirUnwindBehavior::Continue(unwind_bb));
+        self.body.cfg.init_terminator(
+            start_bb,
+            f(continue_bb, MirUnwindBehavior::Continue(unwind_bb)),
+        );
     }
 
     pub fn push_drop(&mut self, scope: MirBuilderScopeIdx, place: MirPlace) {
@@ -408,30 +382,26 @@ impl<'tcx> MirScopedBuilder<'tcx> {
 
     pub fn push_unreachable(&mut self, scope: MirBuilderScopeIdx) {
         let branching_block = self.scopes[scope].curr_block;
-        let dead_block = self.body.blocks.push(MirBlock {
-            stmts: Vec::new(),
-            terminator: MirTerminator::Placeholder,
-            predecessors: SmallVec::new(),
-            is_unwind: false,
-        });
+        let dead_block = self.body.cfg.create_block();
         self.scopes[scope].curr_block = dead_block;
-
-        self.body.blocks[branching_block].terminator = MirTerminator::Unreachable;
+        self.body
+            .cfg
+            .init_terminator(branching_block, MirTerminator::Unreachable);
     }
 
     pub fn finish(mut self) -> MirBody {
-        // Patch up the bootstrap entry.
         assert!(
             self.scopes[MirBuilderScopeIdx::BOOTSTRAP_ENTRY]
                 .locals
                 .is_empty()
         );
 
-        self.body.blocks[self.scopes[MirBuilderScopeIdx::BOOTSTRAP_ENTRY].curr_block].terminator =
-            MirTerminator::Return;
+        self.body.cfg.init_terminator(
+            self.scopes[MirBuilderScopeIdx::BOOTSTRAP_ENTRY].curr_block,
+            MirTerminator::Return,
+        );
 
-        // Optimize the control-flow graph
-        self.cleanup_graph();
+        // TODO: remove placeholders
 
         self.body
     }

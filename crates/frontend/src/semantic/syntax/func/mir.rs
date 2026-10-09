@@ -1,59 +1,18 @@
 use crate::{
     base::{
         ErrorGuaranteed,
-        arena::{HasListInterner, Intern, Obj},
+        arena::{HasListInterner as _, Intern, Obj},
         syntax::Span,
     },
     parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
     semantic::syntax::{AdtCtor, DynSiteIdx, Mutability, ResolvedFieldIdx, SigTy, TyCtxt},
 };
 use index_vec::{IndexVec, define_index_type};
+use slotmap::{SlotMap, new_key_type};
 use smallvec::SmallVec;
-use std::ops::{Bound, RangeBounds};
+use std::mem;
 
-// === MirInstructionLoc === //
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct MirInstructionLoc {
-    pub block: MirBlockIdx,
-    pub instr: MirInstructionIdx,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, Eq, PartialEq)]
-pub struct MirInstructionIdx(pub usize);
-
-#[derive(Debug, Copy, Clone)]
-pub enum MirInstructionRef<'a> {
-    Stmt(&'a MirStmt),
-    Terminator(&'a MirTerminator),
-}
-
-// === MirDirection === //
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum MirDirection {
-    Forward,
-    Backward,
-}
-
-impl MirDirection {
-    pub fn is_forward(self) -> bool {
-        matches!(self, Self::Forward)
-    }
-
-    pub fn is_backward(self) -> bool {
-        matches!(self, Self::Backward)
-    }
-
-    pub fn invert(self) -> MirDirection {
-        match self {
-            MirDirection::Forward => MirDirection::Backward,
-            MirDirection::Backward => MirDirection::Forward,
-        }
-    }
-}
-
-// === MirLocal === //
+// === MirBody === //
 
 define_index_type! {
     pub struct MirLocalIdx = u32;
@@ -68,87 +27,302 @@ pub struct MirLocal {
     pub ty: SigTy,
 }
 
-// === MirBody === //
+#[derive(Debug, Clone)]
+pub struct MirBody {
+    pub locals: IndexVec<MirLocalIdx, MirLocal>,
+    pub entry: MirBlockIdx,
+    pub cfg: MirBodyCfg,
+}
 
-define_index_type! {
-    pub struct MirBlockIdx = u32;
+impl Default for MirBody {
+    fn default() -> Self {
+        let mut body = Self {
+            locals: IndexVec::default(),
+            entry: MirBlockIdx::default(),
+            cfg: MirBodyCfg::default(),
+        };
+
+        body.entry = body.cfg.create_block();
+
+        body
+    }
+}
+
+// === MirBodyCfg === //
+
+new_key_type! {
+    pub struct MirBlockIdx;
+
+    pub struct MirStmtIdx;
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum MirLocationAfter {
+    BlockStart(MirBlockIdx),
+    Stmt(MirStmtIdx),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum MirLocationBefore {
+    Terminator(MirBlockIdx),
+    Stmt(MirStmtIdx),
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct MirBody {
-    pub locals: IndexVec<MirLocalIdx, MirLocal>,
-    pub blocks: IndexVec<MirBlockIdx, MirBlock>,
-}
-
-impl MirBody {
-    pub fn lookup(&self, loc: MirInstructionLoc) -> MirInstructionRef<'_> {
-        self.blocks[loc.block].lookup(loc.instr)
-    }
+pub struct MirBodyCfg {
+    blocks: SlotMap<MirBlockIdx, MirBlockNode>,
+    stmts: SlotMap<MirStmtIdx, MirStmtNode>,
 }
 
 #[derive(Debug, Clone)]
-pub struct MirBlock {
-    pub stmts: Vec<MirStmt>,
-    pub terminator: MirTerminator,
-    pub predecessors: SmallVec<[MirBlockIdx; 1]>,
-    pub is_unwind: bool,
+pub struct MirBlockNode {
+    predecessors: SmallVec<[MirBlockIdx; 2]>,
+    successors: SmallVec<[MirBlockIdx; 2]>,
+    first_stmt: Option<MirStmtIdx>,
+    last_stmt: Option<MirStmtIdx>,
+    terminator: Option<MirTerminator>,
 }
 
-impl MirBlock {
-    pub fn instructions_ranged(
-        &self,
-        range: impl RangeBounds<MirInstructionIdx>,
-    ) -> impl DoubleEndedIterator<Item = MirInstructionIdx> + 'static {
-        let start = match range.start_bound() {
-            Bound::Included(v) => v.0,
-            Bound::Excluded(v) => v.0 + 1,
-            Bound::Unbounded => 0,
+#[derive(Debug, Clone)]
+pub struct MirStmtNode {
+    block: Option<MirBlockIdx>,
+    prev_stmt: Option<MirStmtIdx>,
+    next_stmt: Option<MirStmtIdx>,
+    stmt: Option<MirStmt>,
+}
+
+impl MirBodyCfg {
+    pub fn create_block(&mut self) -> MirBlockIdx {
+        self.blocks.insert(MirBlockNode {
+            predecessors: SmallVec::new(),
+            successors: SmallVec::new(),
+            first_stmt: None,
+            last_stmt: None,
+            terminator: None,
+        })
+    }
+
+    pub fn create_block_with_terminator(&mut self, terminator: MirTerminator) -> MirBlockIdx {
+        let idx = self.create_block();
+        self.init_terminator(idx, terminator);
+        idx
+    }
+
+    pub fn create_stmt(&mut self) -> MirStmtIdx {
+        self.stmts.insert(MirStmtNode {
+            block: None,
+            prev_stmt: None,
+            next_stmt: None,
+            stmt: None,
+        })
+    }
+
+    pub fn push_stmt(&mut self, block: MirBlockIdx, stmt: MirStmt) -> MirStmtIdx {
+        let idx = self.create_stmt();
+        self.move_stmt_before(idx, MirLocationBefore::Terminator(block));
+        self.init_stmt(idx, stmt);
+        idx
+    }
+
+    pub fn move_stmt_after(&mut self, idx: MirStmtIdx, after: MirLocationAfter) {
+        self.unlink_mir_stmt(idx);
+
+        match after {
+            MirLocationAfter::BlockStart(block) => {
+                self.stmts[idx].block = Some(block);
+
+                let old_first_stmt = self.blocks[block].first_stmt.replace(idx);
+
+                if old_first_stmt.is_some() {
+                    self.stmts[idx].next_stmt = old_first_stmt;
+                } else {
+                    self.blocks[block].last_stmt = Some(idx);
+                }
+            }
+            MirLocationAfter::Stmt(after) => {
+                let block = self.stmts[after]
+                    .block
+                    .expect("cannot relate statements outside of a basic block");
+
+                self.stmts[idx].block = Some(block);
+
+                let old_next_stmt = self.stmts[after].next_stmt.replace(idx);
+
+                if old_next_stmt.is_some() {
+                    self.stmts[idx].next_stmt = old_next_stmt;
+                } else {
+                    self.blocks[block].last_stmt = Some(idx);
+                }
+            }
+        }
+    }
+
+    pub fn move_stmt_before(&mut self, idx: MirStmtIdx, before: MirLocationBefore) {
+        self.unlink_mir_stmt(idx);
+
+        match before {
+            MirLocationBefore::Terminator(block) => {
+                self.stmts[idx].block = Some(block);
+
+                let old_last_stmt = self.blocks[block].last_stmt.replace(idx);
+
+                if old_last_stmt.is_some() {
+                    self.stmts[idx].prev_stmt = old_last_stmt;
+                } else {
+                    self.blocks[block].first_stmt = Some(idx);
+                }
+            }
+            MirLocationBefore::Stmt(before) => {
+                let block = self.stmts[before]
+                    .block
+                    .expect("cannot relate statements outside of a basic block");
+
+                self.stmts[idx].block = Some(block);
+
+                let old_prev_stmt = self.stmts[before].prev_stmt.replace(idx);
+
+                if old_prev_stmt.is_some() {
+                    self.stmts[idx].prev_stmt = old_prev_stmt;
+                } else {
+                    self.blocks[block].first_stmt = Some(idx);
+                }
+            }
+        }
+    }
+
+    pub fn unlink_mir_stmt(&mut self, idx: MirStmtIdx) {
+        let Some(block) = self.stmts[idx].block.take() else {
+            return;
         };
 
-        let end = match range.end_bound() {
-            Bound::Included(v) => v.0 + 1,
-            Bound::Excluded(v) => v.0,
-            Bound::Unbounded => self.stmts.len() + 1,
-        };
+        let prev_stmt = self.stmts[idx].prev_stmt.take();
+        let next_stmt = self.stmts[idx].next_stmt.take();
 
-        (start..end).map(MirInstructionIdx)
-    }
-
-    pub fn instructions(&self) -> impl DoubleEndedIterator<Item = MirInstructionIdx> + 'static {
-        self.instructions_ranged(..)
-    }
-
-    pub fn terminator_idx(&self) -> MirInstructionIdx {
-        MirInstructionIdx(self.stmts.len())
-    }
-
-    pub fn lookup(&self, idx: MirInstructionIdx) -> MirInstructionRef<'_> {
-        if idx.0 == self.stmts.len() {
-            MirInstructionRef::Terminator(&self.terminator)
+        if let Some(prev_stmt) = prev_stmt {
+            self.stmts[prev_stmt].next_stmt = next_stmt;
         } else {
-            MirInstructionRef::Stmt(&self.stmts[idx.0])
+            self.blocks[block].first_stmt = next_stmt;
+        }
+
+        if let Some(next_stmt) = next_stmt {
+            self.stmts[next_stmt].prev_stmt = prev_stmt;
+        } else {
+            self.blocks[block].last_stmt = prev_stmt;
         }
     }
 
-    pub fn successors(&self) -> SmallVec<[MirBlockIdx; 2]> {
-        self.terminator.successors()
+    pub fn block_successors(&self, idx: MirBlockIdx) -> &SmallVec<[MirBlockIdx; 2]> {
+        &self.blocks[idx].successors
     }
 
-    pub fn predecessors(&self) -> SmallVec<[MirBlockIdx; 2]> {
-        SmallVec::from_iter(self.predecessors.iter().copied())
+    pub fn block_predecessors(&self, idx: MirBlockIdx) -> &SmallVec<[MirBlockIdx; 2]> {
+        &self.blocks[idx].predecessors
     }
 
-    pub fn prev(&self, direction: MirDirection) -> SmallVec<[MirBlockIdx; 2]> {
-        self.next(direction.invert())
+    pub fn block_first(&self, idx: MirBlockIdx) -> Option<MirStmtIdx> {
+        self.blocks[idx].first_stmt
     }
 
-    pub fn next(&self, direction: MirDirection) -> SmallVec<[MirBlockIdx; 2]> {
-        match direction {
-            MirDirection::Forward => self.successors(),
-            MirDirection::Backward => self.predecessors(),
+    pub fn block_last(&self, idx: MirBlockIdx) -> Option<MirStmtIdx> {
+        self.blocks[idx].last_stmt
+    }
+
+    pub fn stmt_block(&self, idx: MirStmtIdx) -> Option<MirBlockIdx> {
+        self.stmts[idx].block
+    }
+
+    pub fn stmt_prev(&self, idx: MirStmtIdx) -> Option<MirStmtIdx> {
+        self.stmts[idx].prev_stmt
+    }
+
+    pub fn stmt_next(&self, idx: MirStmtIdx) -> Option<MirStmtIdx> {
+        self.stmts[idx].next_stmt
+    }
+
+    pub fn opt_stmt(&self, idx: MirStmtIdx) -> Option<&MirStmt> {
+        self.stmts[idx].stmt.as_ref()
+    }
+
+    pub fn opt_stmt_mut(&mut self, idx: MirStmtIdx) -> Option<&mut MirStmt> {
+        self.stmts[idx].stmt.as_mut()
+    }
+
+    pub fn stmt(&self, idx: MirStmtIdx) -> &MirStmt {
+        self.opt_stmt(idx).expect("statement not initialized")
+    }
+
+    pub fn stmt_mut(&mut self, idx: MirStmtIdx) -> &mut MirStmt {
+        self.opt_stmt_mut(idx).expect("statement not initialized")
+    }
+
+    pub fn set_stmt(&mut self, idx: MirStmtIdx, stmt: Option<MirStmt>) {
+        self.stmts[idx].stmt = stmt;
+    }
+
+    pub fn init_stmt(&mut self, idx: MirStmtIdx, stmt: MirStmt) {
+        assert!(self.opt_stmt(idx).is_none());
+        self.set_stmt(idx, Some(stmt));
+    }
+
+    pub fn opt_terminator(&self, idx: MirBlockIdx) -> Option<&MirTerminator> {
+        self.blocks[idx].terminator.as_ref()
+    }
+
+    pub fn opt_terminator_mut(&mut self, idx: MirBlockIdx) -> Option<&mut MirTerminator> {
+        self.blocks[idx].terminator.as_mut()
+    }
+
+    pub fn terminator(&self, idx: MirBlockIdx) -> &MirTerminator {
+        self.opt_terminator(idx)
+            .expect("terminator not initialized")
+    }
+
+    pub fn terminator_mut(&mut self, idx: MirBlockIdx) -> &mut MirTerminator {
+        self.opt_terminator_mut(idx)
+            .expect("terminator not initialized")
+    }
+
+    pub fn set_terminator(&mut self, idx: MirBlockIdx, terminator: Option<MirTerminator>) {
+        let new_successors = terminator.as_ref().map_or_default(|v| v.successors());
+
+        {
+            let mut check = new_successors.clone();
+            check.sort_unstable();
+
+            for [a, b] in check.array_windows() {
+                assert!(a != b, "terminators cannot have duplicate successors");
+            }
         }
+
+        for successor in mem::take(&mut self.blocks[idx].successors) {
+            if !self.blocks.contains_key(successor) {
+                continue;
+            }
+
+            let idx = self.blocks[successor]
+                .predecessors
+                .iter()
+                .position(|&v| v == idx)
+                .unwrap();
+
+            self.blocks[successor].predecessors.remove(idx);
+        }
+
+        for &successor in &new_successors {
+            self.blocks[successor].predecessors.push(idx);
+        }
+
+        self.blocks[idx].terminator = terminator;
+        self.blocks[idx].successors = new_successors;
+    }
+
+    pub fn init_terminator(&mut self, idx: MirBlockIdx, terminator: MirTerminator) {
+        assert!(self.opt_terminator(idx).is_none());
+        self.set_terminator(idx, Some(terminator));
     }
 }
+
+// === Definitions === //
 
 #[derive(Debug, Clone)]
 pub struct MirStmt {
@@ -200,7 +374,6 @@ pub enum MirTerminator {
     Unreachable,
     Return,
     UnwindResume,
-    Placeholder,
 }
 
 impl MirTerminator {
@@ -230,10 +403,9 @@ impl MirTerminator {
                 constants: _,
                 ref targets,
             } => SmallVec::from_iter(targets.iter().copied()),
-            MirTerminator::UnwindResume
-            | MirTerminator::Return
-            | MirTerminator::Unreachable
-            | MirTerminator::Placeholder => SmallVec::new(),
+            MirTerminator::UnwindResume | MirTerminator::Return | MirTerminator::Unreachable => {
+                SmallVec::new()
+            }
         }
     }
 }
