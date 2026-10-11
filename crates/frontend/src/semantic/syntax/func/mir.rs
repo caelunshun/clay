@@ -50,6 +50,22 @@ impl Default for MirBody {
 
 // === MirBodyCfg === //
 
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirBodyDirection {
+    Forwards,
+    Backwards,
+}
+
+impl MirBodyDirection {
+    pub fn is_forwards(self) -> bool {
+        self == Self::Forwards
+    }
+
+    pub fn is_backwards(self) -> bool {
+        self == Self::Backwards
+    }
+}
+
 new_key_type! {
     pub struct MirBlockIdx;
 
@@ -68,6 +84,12 @@ pub enum MirLocationBefore {
     Stmt(MirStmtIdx),
 }
 
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct MirBlockLink {
+    pub target: MirBlockIdx,
+    pub at_idx: usize,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct MirBodyCfg {
     blocks: SlotMap<MirBlockIdx, MirBlockNode>,
@@ -75,16 +97,16 @@ pub struct MirBodyCfg {
 }
 
 #[derive(Debug, Clone)]
-pub struct MirBlockNode {
-    predecessors: SmallVec<[MirBlockIdx; 2]>,
-    successors: SmallVec<[MirBlockIdx; 2]>,
+struct MirBlockNode {
+    predecessors: SmallVec<[MirBlockLink; 2]>,
+    successors: SmallVec<[MirBlockLink; 2]>,
     first_stmt: Option<MirStmtIdx>,
     last_stmt: Option<MirStmtIdx>,
     terminator: Option<MirTerminator>,
 }
 
 #[derive(Debug, Clone)]
-pub struct MirStmtNode {
+struct MirStmtNode {
     block: Option<MirBlockIdx>,
     prev_stmt: Option<MirStmtIdx>,
     next_stmt: Option<MirStmtIdx>,
@@ -211,11 +233,15 @@ impl MirBodyCfg {
         }
     }
 
-    pub fn block_successors(&self, idx: MirBlockIdx) -> &SmallVec<[MirBlockIdx; 2]> {
+    pub fn blocks(&self) -> impl ExactSizeIterator<Item = MirBlockIdx> {
+        self.blocks.keys()
+    }
+
+    pub fn block_successors(&self, idx: MirBlockIdx) -> &[MirBlockLink] {
         &self.blocks[idx].successors
     }
 
-    pub fn block_predecessors(&self, idx: MirBlockIdx) -> &SmallVec<[MirBlockIdx; 2]> {
+    pub fn block_predecessors(&self, idx: MirBlockIdx) -> &[MirBlockLink] {
         &self.blocks[idx].predecessors
     }
 
@@ -225,6 +251,18 @@ impl MirBodyCfg {
 
     pub fn block_last(&self, idx: MirBlockIdx) -> Option<MirStmtIdx> {
         self.blocks[idx].last_stmt
+    }
+
+    pub fn block_stmts_interactive(
+        &self,
+        idx: MirBlockIdx,
+        direction: MirBodyDirection,
+    ) -> MirStmtIterInteractive {
+        MirStmtIterInteractive::new(self, idx, direction)
+    }
+
+    pub fn block_stmts(&self, idx: MirBlockIdx, direction: MirBodyDirection) -> MirStmtIter<'_> {
+        MirStmtIter::new(self, idx, direction)
     }
 
     pub fn stmt_block(&self, idx: MirStmtIdx) -> Option<MirBlockIdx> {
@@ -285,33 +323,59 @@ impl MirBodyCfg {
     pub fn set_terminator(&mut self, idx: MirBlockIdx, terminator: Option<MirTerminator>) {
         let new_successors = terminator.as_ref().map_or_default(|v| v.successors());
 
+        // Validate successors
         {
             let mut check = new_successors.clone();
             check.sort_unstable();
+
+            for &a in &check {
+                assert!(a != idx);
+            }
 
             for [a, b] in check.array_windows() {
                 assert!(a != b, "terminators cannot have duplicate successors");
             }
         }
 
-        for successor in mem::take(&mut self.blocks[idx].successors) {
-            if !self.blocks.contains_key(successor) {
+        // Unlink from existing successors' predecessor lists.
+        for MirBlockLink {
+            target: successor,
+            at_idx: remove_at_idx,
+        } in mem::take(&mut self.blocks[idx].successors)
+        {
+            let Some(successor) = self.blocks.get_mut(successor) else {
                 continue;
+            };
+
+            successor.predecessors.swap_remove(remove_at_idx);
+
+            if let Some(&patched) = successor.predecessors.get(remove_at_idx) {
+                self.blocks[patched.target].successors[patched.at_idx].at_idx = remove_at_idx;
             }
-
-            let idx = self.blocks[successor]
-                .predecessors
-                .iter()
-                .position(|&v| v == idx)
-                .unwrap();
-
-            self.blocks[successor].predecessors.remove(idx);
         }
 
-        for &successor in &new_successors {
-            self.blocks[successor].predecessors.push(idx);
-        }
+        // Register into new successors' predecessor lists.
+        let new_successors = new_successors
+            .into_iter()
+            .enumerate()
+            .map(|(back_at_idx, successor)| {
+                let successor_data = &mut self.blocks[successor];
 
+                let fwd_at_idx = successor_data.predecessors.len();
+
+                successor_data.predecessors.push(MirBlockLink {
+                    target: successor,
+                    at_idx: back_at_idx,
+                });
+
+                MirBlockLink {
+                    target: idx,
+                    at_idx: fwd_at_idx,
+                }
+            })
+            .collect::<SmallVec<[_; 2]>>();
+
+        // Update self.
         self.blocks[idx].terminator = terminator;
         self.blocks[idx].successors = new_successors;
     }
@@ -319,6 +383,58 @@ impl MirBodyCfg {
     pub fn init_terminator(&mut self, idx: MirBlockIdx, terminator: MirTerminator) {
         assert!(self.opt_terminator(idx).is_none());
         self.set_terminator(idx, Some(terminator));
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MirStmtIterInteractive {
+    direction: MirBodyDirection,
+    next: Option<MirStmtIdx>,
+}
+
+impl MirStmtIterInteractive {
+    pub fn new(cfg: &MirBodyCfg, block: MirBlockIdx, direction: MirBodyDirection) -> Self {
+        Self {
+            direction,
+            next: match direction {
+                MirBodyDirection::Forwards => cfg.block_first(block),
+                MirBodyDirection::Backwards => cfg.block_last(block),
+            },
+        }
+    }
+
+    pub fn next(&mut self, cfg: &MirBodyCfg) -> Option<MirStmtIdx> {
+        let curr = self.next?;
+
+        self.next = match self.direction {
+            MirBodyDirection::Forwards => cfg.stmt_next(curr),
+            MirBodyDirection::Backwards => cfg.stmt_prev(curr),
+        };
+
+        Some(curr)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MirStmtIter<'a> {
+    cfg: &'a MirBodyCfg,
+    iter: MirStmtIterInteractive,
+}
+
+impl<'a> MirStmtIter<'a> {
+    pub fn new(cfg: &'a MirBodyCfg, block: MirBlockIdx, direction: MirBodyDirection) -> Self {
+        Self {
+            cfg,
+            iter: MirStmtIterInteractive::new(cfg, block, direction),
+        }
+    }
+}
+
+impl Iterator for MirStmtIter<'_> {
+    type Item = MirStmtIdx;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next(self.cfg)
     }
 }
 
