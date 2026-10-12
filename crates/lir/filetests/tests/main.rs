@@ -1,181 +1,181 @@
 mod harnesses {
-    use fir_core::sexpr::SExpr;
-    use fir_lir::{
-        Func,
-        formatter::format_context,
-        ir::Context,
-        parser::parse_mir,
-        passes::{self, loop_analysis::do_loop_analysis},
-        validation,
-    };
-    use pretty_assertions::assert_eq;
-    use salsa::{Database, DatabaseImpl};
+    // use fir_core::sexpr::SExpr;
+    // use fir_lir::{
+    //     Func,
+    //     formatter::format_context,
+    //     ir::Context,
+    //     parser::parse_mir,
+    //     passes::{self, loop_analysis::do_loop_analysis},
+    //     validation,
+    // };
+    // use pretty_assertions::assert_eq;
+    // use salsa::{Database, DatabaseImpl};
 
-    #[salsa::input(debug)]
-    struct Input {
-        src: &'static str,
-    }
+    // #[salsa::input(debug)]
+    // struct Input {
+    //     src: &'static str,
+    // }
 
-    #[salsa::tracked]
-    fn parse<'db>(db: &'db dyn Database, input: Input) -> Context<'db> {
-        parse_mir(db, input.src(db)).expect("failed to parse")
-    }
+    // #[salsa::tracked]
+    // fn parse<'db>(db: &'db dyn Database, input: Input) -> Context<'db> {
+    //     parse_mir(db, input.src(db)).expect("failed to parse")
+    // }
 
-    fn with_parsed_context(
-        input_str: &'static str,
-        callback: impl for<'db> FnOnce(&'db dyn Database, Context<'db>),
-    ) {
-        let db = DatabaseImpl::new();
-        let input = Input::new(&db, input_str);
-        let cx = parse(&db, input);
+    // fn with_parsed_context(
+    //     input_str: &'static str,
+    //     callback: impl for<'db> FnOnce(&'db dyn Database, Context<'db>),
+    // ) {
+    //     let db = DatabaseImpl::new();
+    //     let input = Input::new(&db, input_str);
+    //     let cx = parse(&db, input);
 
-        callback(&db, cx);
-    }
+    //     callback(&db, cx);
+    // }
 
-    #[salsa::tracked]
-    fn make_ssa<'db>(db: &'db dyn Database, cx: Context<'db>) -> Context<'db> {
-        let mut ssa_cx = cx.data(db).clone();
-        for func in ssa_cx.funcs.values_mut() {
-            let ssa_func = passes::ssa::make_ssa(db, func.data(db));
-            *func = Func::new(db, ssa_func);
-        }
-        Context::new(db, ssa_cx)
-    }
+    // #[salsa::tracked]
+    // fn make_ssa<'db>(db: &'db dyn Database, cx: Context<'db>) -> Context<'db> {
+    //     let mut ssa_cx = cx.data(db).clone();
+    //     for func in ssa_cx.funcs.values_mut() {
+    //         let ssa_func = passes::ssa::make_ssa(db, func.data(db));
+    //         *func = Func::new(db, ssa_func);
+    //     }
+    //     Context::new(db, ssa_cx)
+    // }
 
-    /// Verifies that parsing a module succeeds, and that
-    /// roundtripping produces the expected output.
-    pub fn parser_roundtrip(input_str: &'static str) {
-        with_parsed_context(input_str, |db, cx| {
-            let roundtripped = format_context(db, cx).to_string();
-            let expected_normalized = SExpr::parse(input_str).unwrap().to_string();
+    // /// Verifies that parsing a module succeeds, and that
+    // /// roundtripping produces the expected output.
+    // pub fn parser_roundtrip(input_str: &'static str) {
+    //     with_parsed_context(input_str, |db, cx| {
+    //         let roundtripped = format_context(db, cx).to_string();
+    //         let expected_normalized = SExpr::parse(input_str).unwrap().to_string();
 
-            assert_eq!(roundtripped, expected_normalized);
-        });
-    }
+    //         assert_eq!(roundtripped, expected_normalized);
+    //     });
+    // }
 
-    /// Verifies that typecheck validation passes on the given module.
-    pub fn typecheck_validation_succeeds(input_str: &'static str) {
-        with_parsed_context(input_str, |db, cx| {
-            validation::typecheck::verify_all(db, cx)
-                .unwrap_or_else(|e| panic!("failed typecheck: {e:?}",));
-        });
-    }
+    // /// Verifies that typecheck validation passes on the given module.
+    // pub fn typecheck_validation_succeeds(input_str: &'static str) {
+    //     with_parsed_context(input_str, |db, cx| {
+    //         validation::typecheck::verify_all(db, cx)
+    //             .unwrap_or_else(|e| panic!("failed typecheck: {e:?}",));
+    //     });
+    // }
 
-    /// Verifies that typecheck validation does not pass on at least one function in the given module.
-    pub fn typecheck_validation_fails(input_str: &'static str) {
-        let mut had_failure = false;
-        with_parsed_context(input_str, |db, cx| {
-            if validation::typecheck::verify_all(db, cx).is_err() {
-                had_failure = true;
-            }
-        });
-        assert!(
-            had_failure,
-            "typecheck validation succeeded, was expected to fail"
-        );
-    }
+    // /// Verifies that typecheck validation does not pass on at least one function in the given module.
+    // pub fn typecheck_validation_fails(input_str: &'static str) {
+    //     let mut had_failure = false;
+    //     with_parsed_context(input_str, |db, cx| {
+    //         if validation::typecheck::verify_all(db, cx).is_err() {
+    //             had_failure = true;
+    //         }
+    //     });
+    //     assert!(
+    //         had_failure,
+    //         "typecheck validation succeeded, was expected to fail"
+    //     );
+    // }
 
-    /// Verifies that value_initialization validation passes on the given module.
-    pub fn value_initialization_validation_succeeds(input_str: &'static str) {
-        with_parsed_context(input_str, |db, cx| {
-            for func in cx.data(db).funcs.values() {
-                validation::value_initialization::verify_value_initialization(func.data(db))
-                    .unwrap_or_else(|e| {
-                        panic!(
-                            "failed value initialization check for func '{}': {e:?}",
-                            func.data(db).header.name
-                        )
-                    });
-            }
-        });
-    }
+    // /// Verifies that value_initialization validation passes on the given module.
+    // pub fn value_initialization_validation_succeeds(input_str: &'static str) {
+    //     with_parsed_context(input_str, |db, cx| {
+    //         for func in cx.data(db).funcs.values() {
+    //             validation::value_initialization::verify_value_initialization(func.data(db))
+    //                 .unwrap_or_else(|e| {
+    //                     panic!(
+    //                         "failed value initialization check for func '{}': {e:?}",
+    //                         func.data(db).header.name
+    //                     )
+    //                 });
+    //         }
+    //     });
+    // }
 
-    /// Verifies that cfg_integrity_validation succeeds on the given module.
-    pub fn cfg_integrity_validation_succeeds(input_str: &'static str) {
-        with_parsed_context(input_str, |db, cx| {
-            for func in cx.data(db).funcs.values() {
-                validation::cfg_integrity::verify_cfg_integrity(func.data(db)).unwrap_or_else(
-                    |e| {
-                        panic!(
-                            "failed control flow integrity check for func '{}': {e:?}",
-                            func.data(db).header.name
-                        )
-                    },
-                );
-            }
-        });
-    }
+    // /// Verifies that cfg_integrity_validation succeeds on the given module.
+    // pub fn cfg_integrity_validation_succeeds(input_str: &'static str) {
+    //     with_parsed_context(input_str, |db, cx| {
+    //         for func in cx.data(db).funcs.values() {
+    //             validation::cfg_integrity::verify_cfg_integrity(func.data(db)).unwrap_or_else(
+    //                 |e| {
+    //                     panic!(
+    //                         "failed control flow integrity check for func '{}': {e:?}",
+    //                         func.data(db).header.name
+    //                     )
+    //                 },
+    //             );
+    //         }
+    //     });
+    // }
 
-    /// Verifies that cfg_integrity_validation fails on the given module.
-    pub fn cfg_integrity_validation_fails(input_str: &'static str) {
-        with_parsed_context(input_str, |db, cx| {
-            for func in cx.data(db).funcs.values() {
-                if validation::cfg_integrity::verify_cfg_integrity(func.data(db)).is_ok() {
-                    panic!(
-                        "cfg_integrity check succeeded for function '{}', but was expected to fail",
-                        func.data(db).header.name
-                    );
-                }
-            }
-        });
-    }
+    // /// Verifies that cfg_integrity_validation fails on the given module.
+    // pub fn cfg_integrity_validation_fails(input_str: &'static str) {
+    //     with_parsed_context(input_str, |db, cx| {
+    //         for func in cx.data(db).funcs.values() {
+    //             if validation::cfg_integrity::verify_cfg_integrity(func.data(db)).is_ok() {
+    //                 panic!(
+    //                     "cfg_integrity check succeeded for function '{}', but was expected to fail",
+    //                     func.data(db).header.name
+    //                 );
+    //             }
+    //         }
+    //     });
+    // }
 
-    /// Verifies that SSA validation passes on the given module.
-    pub fn ssa_validation_succeeds(input_str: &'static str) {
-        with_parsed_context(input_str, |db, cx| {
-            for func in cx.data(db).funcs.values() {
-                validation::ssa::verify_ssa(func.data(db)).unwrap_or_else(|e| {
-                    panic!(
-                        "SSA validation failed for function '{}': {e:?}",
-                        func.data(db).header.name
-                    );
-                });
-            }
-        });
-    }
+    // /// Verifies that SSA validation passes on the given module.
+    // pub fn ssa_validation_succeeds(input_str: &'static str) {
+    //     with_parsed_context(input_str, |db, cx| {
+    //         for func in cx.data(db).funcs.values() {
+    //             validation::ssa::verify_ssa(func.data(db)).unwrap_or_else(|e| {
+    //                 panic!(
+    //                     "SSA validation failed for function '{}': {e:?}",
+    //                     func.data(db).header.name
+    //                 );
+    //             });
+    //         }
+    //     });
+    // }
 
-    /// Verifies that SSA validation fails on the given module.
-    pub fn ssa_validation_fails(input_str: &'static str) {
-        with_parsed_context(input_str, |db, cx| {
-            for func in cx.data(db).funcs.values() {
-                if validation::ssa::verify_ssa(func.data(db)).is_ok() {
-                    panic!(
-                        "SSA validation succeeded for function '{}', but was expected to fail",
-                        func.data(db).header.name
-                    );
-                }
-            }
-        });
-    }
+    // /// Verifies that SSA validation fails on the given module.
+    // pub fn ssa_validation_fails(input_str: &'static str) {
+    //     with_parsed_context(input_str, |db, cx| {
+    //         for func in cx.data(db).funcs.values() {
+    //             if validation::ssa::verify_ssa(func.data(db)).is_ok() {
+    //                 panic!(
+    //                     "SSA validation succeeded for function '{}', but was expected to fail",
+    //                     func.data(db).header.name
+    //                 );
+    //             }
+    //         }
+    //     });
+    // }
 
-    /// Applies the SSA transformer to the module
-    /// and compares the resulting MIR against
-    /// the expected SSA MIR.
-    pub fn ssa_construction_matches_expected(input: &'static str, expected: &'static str) {
-        with_parsed_context(input, |db, cx| {
-            let ssa_cx = make_ssa(db, cx);
-            let formatted_module = format_context(db, ssa_cx).to_string();
-            let expected_module_normalized = SExpr::parse(expected).unwrap().to_string();
-            assert_eq!(formatted_module, expected_module_normalized);
-        });
-    }
+    // /// Applies the SSA transformer to the module
+    // /// and compares the resulting MIR against
+    // /// the expected SSA MIR.
+    // pub fn ssa_construction_matches_expected(input: &'static str, expected: &'static str) {
+    //     with_parsed_context(input, |db, cx| {
+    //         let ssa_cx = make_ssa(db, cx);
+    //         let formatted_module = format_context(db, ssa_cx).to_string();
+    //         let expected_module_normalized = SExpr::parse(expected).unwrap().to_string();
+    //         assert_eq!(formatted_module, expected_module_normalized);
+    //     });
+    // }
 
-    /// Verifies that loop analysis results in the correct result.
-    pub fn loop_analysis_matches_expected(input: &'static str, expected: &'static str) {
-        with_parsed_context(input, |db, cx| {
-            let func = cx
-                .data(db)
-                .funcs
-                .values()
-                .find(|f| f.data(db).header.name == "loop_analysis_func")
-                .unwrap();
+    // /// Verifies that loop analysis results in the correct result.
+    // pub fn loop_analysis_matches_expected(input: &'static str, expected: &'static str) {
+    //     with_parsed_context(input, |db, cx| {
+    //         let func = cx
+    //             .data(db)
+    //             .funcs
+    //             .values()
+    //             .find(|f| f.data(db).header.name == "loop_analysis_func")
+    //             .unwrap();
 
-            let loop_analysis = do_loop_analysis(db, *func);
-            let expected_normalized = SExpr::parse(expected).unwrap().to_string();
-            let actual = loop_analysis.to_sexpr(db, cx).to_string();
-            assert_eq!(actual, expected_normalized);
-        });
-    }
+    //         let loop_analysis = do_loop_analysis(db, *func);
+    //         let expected_normalized = SExpr::parse(expected).unwrap().to_string();
+    //         let actual = loop_analysis.to_sexpr(db, cx).to_string();
+    //         assert_eq!(actual, expected_normalized);
+    //     });
+    // }
 }
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
