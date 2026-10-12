@@ -1,0 +1,64 @@
+error: 
+- projection failed
+  span: infinite_universals.fir:40:36-49
+    - trait spec resolution error
+      self ty: u(18) <u(0) T as Meow>::Generator
+      spec: UhOh<'a, u32>
+        - instantiated trait not implemented
+          LHS: u(18) <u(0) T as Meow>::Generator
+          RHS: UhOh<'a, u32, Output = u(22) <u(15) <u(0) T as Meow>::Generator as UhOh<'?2, u32>>::Output>
+            - inherent unsatisfied
+              LHS: for<T, a> UhOh<'a, T>
+              RHS: UhOh<'a, u32, Output = u(22) <u(15) <u(0) T as Meow>::Generator as UhOh<'?2, u32>>::Output>
+              LHS instantiated: UhOh<'?3, u32>
+              Culprits:
+                - idx: 2
+                    - cannot unify
+                      LHS: u(26) <u(18) <u(0) T as Meow>::Generator as UhOh<'?3, u32>>::Output
+                      RHS: u(22) <u(15) <u(0) T as Meow>::Generator as UhOh<'?2, u32>>::Output
+                      mode: Equate
+                        - region error
+                            - re and re unify error
+                              LHS: '?3
+                              RHS: '?2
+                              mode: Equate
+                                - requires var: 'a
+                                  to outlive: 'b
+                                    - requires var: 'b
+                                      to outlive: 'a
+
+error: 
+- projection failed
+  span: infinite_universals.fir:35:36-49
+    - trait spec resolution error
+      self ty: u(32) <u(0) T as Meow>::Generator
+      spec: UhOh<'a, u32>
+        - instantiated trait not implemented
+          LHS: u(32) <u(0) T as Meow>::Generator
+          RHS: UhOh<'a, u32, Output = u(36) <u(29) <u(0) T as Meow>::Generator as UhOh<'?4, i32>>::Output>
+            - inherent unsatisfied
+              LHS: for<T, a> UhOh<'a, T>
+              RHS: UhOh<'a, u32, Output = u(36) <u(29) <u(0) T as Meow>::Generator as UhOh<'?4, i32>>::Output>
+              LHS instantiated: UhOh<'?5, u32>
+              Culprits:
+                - idx: 2
+                    - cannot unify
+                      LHS: u(42) <u(32) <u(0) T as Meow>::Generator as UhOh<'?5, u32>>::Output
+                      RHS: u(36) <u(29) <u(0) T as Meow>::Generator as UhOh<'?4, i32>>::Output
+                      mode: Equate
+                        - structural error
+                            - type mismatch
+                              LHS: u32
+                              RHS: i32
+
+error: 
+- span: infinite_universals.fir:52:66-68
+  cannot unify
+  LHS: u(12) <u(10) <u(0) T as Meow>::Generator as UhOh<'erased, i32>>::Output
+  RHS: u(7) <u(5) <u(0) T as Meow>::Generator as UhOh<'erased, u32>>::Output
+  mode: Equate
+    - structural error
+        - type mismatch
+          LHS: i32
+          RHS: u32
+

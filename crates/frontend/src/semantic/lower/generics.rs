@@ -1,7 +1,6 @@
 use crate::{
     base::{
         Diag, ErrorGuaranteed, LeafDiag, Level, Session,
-        analysis::{Spanned, SpannedViewEncode as _},
         arena::{LateInit, Obj},
         syntax::{Span, Symbol},
     },
@@ -13,17 +12,20 @@ use crate::{
         token::Ident,
     },
     semantic::{
-        lower::entry::{InterItemLowerCtxt, IntraItemLowerCtxt},
+        lower::entry::{
+            DefinedGenericRe, DefinedGenericTy, InterItemLowerCtxt, IntraItemLowerCtxt,
+        },
         syntax::{
-            AnyGeneric, GenericBinder, Item, Re, RegionGeneric, SpannedTraitClauseList,
-            SpannedTraitInstance, SpannedTraitInstanceView, SpannedTraitParam,
-            SpannedTraitParamList, SpannedTraitParamView, SpannedTyOrRe, SpannedTyOrReList,
-            SpannedTyOrReView, SpannedTyView, TraitItem, TyCtxt, TyOrRe, TyOrReList, TypeGeneric,
+            AnyGeneric, AnyGenericIdent, GenericBinder, Item, RegionGeneric, SigGenericList,
+            SigHrtbDebruijnDef, SigHrtbDebruijnDefList, SigReKind, SigTraitClauseList,
+            SigTraitInstance, SigTraitParam, SigTraitParamKind, SigTraitParamList, SigTyKind,
+            SigTyOrRe, SigTyOrReList, TraitItem, TyCtxt, TyOrReKind, TypeGeneric,
         },
     },
+    symbol,
     utils::{
         hash::FxHashMap,
-        lang::{AND_LIST_GLUE, format_list},
+        lang::{SimpleListFormatGlue, format_list},
     },
 };
 use hashbrown::hash_map;
@@ -74,6 +76,36 @@ fn lower_generic_defs<'ast>(
     }
 }
 
+fn check_generic_defs_for_duplicates(defs: impl IntoIterator<Item = AnyGenericIdent>) {
+    let mut bound_re_names = FxHashMap::default();
+    let mut bound_ty_names = FxHashMap::default();
+
+    for def in defs {
+        match def {
+            AnyGenericIdent::Re(def) => {
+                if let Some(replaced) = bound_re_names.insert(def.name, def) {
+                    Diag::span_err(def.span, "generic name used more than once")
+                        .child(LeafDiag::span_note(
+                            replaced.span,
+                            "name previously used here",
+                        ))
+                        .emit();
+                }
+            }
+            AnyGenericIdent::Ty(def) => {
+                if let Some(replaced) = bound_ty_names.insert(def.text, def) {
+                    Diag::span_err(def.span, "generic name used more than once")
+                        .child(LeafDiag::span_note(
+                            replaced.span,
+                            "name previously used here",
+                        ))
+                        .emit();
+                }
+            }
+        }
+    }
+}
+
 impl<'ast> InterItemLowerCtxt<'_, 'ast> {
     pub fn lower_generic_defs(
         &mut self,
@@ -83,13 +115,22 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
     ) {
         lower_generic_defs(binder, ast, generic_clause_lists, &self.tcx.session);
     }
+
+    pub fn seal_generic_binder_with_checks(&mut self, binder: GenericBinder) -> Obj<GenericBinder> {
+        let s = &self.tcx.session;
+
+        check_generic_defs_for_duplicates(binder.defs.iter().map(|def| def.ident(s)));
+
+        binder.seal(s)
+    }
 }
 
 impl IntraItemLowerCtxt<'_> {
-    pub fn lower_complete_param_list(
+    pub fn lower_simple_generic_defs(
         &mut self,
         ast: Option<&AstGenericParamList>,
     ) -> Obj<GenericBinder> {
+        let s = &self.tcx.session;
         let mut binder = GenericBinder::default();
         let mut generic_clause_lists = Vec::new();
 
@@ -102,7 +143,9 @@ impl IntraItemLowerCtxt<'_> {
             );
         }
 
-        let binder = self.tcx.seal_generic_binder(binder);
+        check_generic_defs_for_duplicates(binder.defs.iter().map(|def| def.ident(s)));
+
+        let binder = binder.seal(s);
 
         self.scoped(|this| {
             this.define_generics_in_binder(binder);
@@ -119,25 +162,11 @@ impl IntraItemLowerCtxt<'_> {
             match generic {
                 AnyGeneric::Re(generic) => {
                     self.generic_re_names
-                        .define(generic.r(s).lifetime.name, *generic, |other| {
-                            Diag::span_err(generic.r(s).span, "generic name used more than once")
-                                .child(LeafDiag::span_note(
-                                    other.r(s).span,
-                                    "name previously used here",
-                                ))
-                                .emit()
-                        });
+                        .define(generic.r(s).lifetime.name, DefinedGenericRe::Sig(*generic));
                 }
                 AnyGeneric::Ty(generic) => {
                     self.generic_ty_names
-                        .define(generic.r(s).ident.text, *generic, |other| {
-                            Diag::span_err(generic.r(s).span, "generic name used more than once")
-                                .child(LeafDiag::span_note(
-                                    other.r(s).span,
-                                    "name previously used here",
-                                ))
-                                .emit()
-                        });
+                        .define(generic.r(s).ident.text, DefinedGenericTy::Sig(*generic));
                 }
             }
         }
@@ -161,6 +190,90 @@ impl IntraItemLowerCtxt<'_> {
             }
         }
     }
+
+    pub fn define_hrtb_defs_for_ast(&mut self, ast: Option<&AstGenericParamList>) {
+        let Some(ast) = ast else {
+            return;
+        };
+
+        let range = self.generic_debruijn.move_inwards_by(ast.list.len());
+
+        for (idx, def) in ast.list.iter().enumerate() {
+            let Some(def_kind) = def.kind.as_generic_def() else {
+                Diag::span_err(def.span, "expected generic parameter definition").emit();
+                continue;
+            };
+
+            match def_kind {
+                AstGenericDef::Re(lifetime, _clauses) => {
+                    self.generic_re_names.define(
+                        lifetime.name,
+                        DefinedGenericRe::Hrtb(lifetime.span, range.at(idx)),
+                    );
+                }
+                AstGenericDef::Ty(ident, _clauses) => {
+                    self.generic_ty_names.define(
+                        ident.text,
+                        DefinedGenericTy::Hrtb(ident.span, range.at(idx)),
+                    );
+                }
+            }
+        }
+    }
+
+    pub fn check_hrtb_def_ast_for_duplicates(&mut self, ast: Option<&AstGenericParamList>) {
+        let Some(ast) = ast else {
+            return;
+        };
+
+        check_generic_defs_for_duplicates(ast.list.iter().filter_map(|ast| {
+            Some(match ast.kind.as_generic_def()? {
+                AstGenericDef::Re(lifetime, _clauses) => AnyGenericIdent::Re(lifetime),
+                AstGenericDef::Ty(ident, _clauses) => AnyGenericIdent::Ty(ident),
+            })
+        }));
+    }
+
+    pub fn lower_hrtb_def_clauses(
+        &mut self,
+        ast: Option<&AstGenericParamList>,
+    ) -> SigHrtbDebruijnDefList {
+        let s = &self.tcx.session;
+
+        let Some(ast) = ast else {
+            return SigHrtbDebruijnDefList::new_slice(&[], s);
+        };
+
+        let defs = ast
+            .list
+            .iter()
+            .map(|ast| match ast.kind.as_generic_def() {
+                Some(AstGenericDef::Re(lifetime, clauses)) => SigHrtbDebruijnDef {
+                    span: lifetime.span,
+                    name: lifetime.name,
+                    kind: TyOrReKind::Re,
+                    clauses: self.lower_clauses(clauses),
+                },
+                Some(AstGenericDef::Ty(ident, clauses)) => SigHrtbDebruijnDef {
+                    span: ident.span,
+                    name: ident.text,
+                    kind: TyOrReKind::Ty,
+                    clauses: self.lower_clauses(clauses),
+                },
+                None => SigHrtbDebruijnDef {
+                    span: Span::DUMMY,
+                    name: symbol!("error"),
+                    kind: TyOrReKind::Ty,
+                    clauses: SigTraitClauseList {
+                        span: Span::DUMMY,
+                        elems: Obj::new_slice(&[], s),
+                    },
+                },
+            })
+            .collect::<Vec<_>>();
+
+        SigHrtbDebruijnDefList::new_slice(&defs, s)
+    }
 }
 
 // === Complete generic lowering routines === //
@@ -169,7 +282,9 @@ impl IntraItemLowerCtxt<'_> {
     pub fn lower_type_relative_generics(
         &mut self,
         args: Option<&AstGenericParamList>,
-    ) -> Option<SpannedTyOrReList> {
+    ) -> Option<SigGenericList> {
+        let s = &self.tcx.session;
+
         args.as_ref().map(|args| {
             let (positional, associated) = self.lower_generic_params_syntactic(&args.list);
 
@@ -181,7 +296,10 @@ impl IntraItemLowerCtxt<'_> {
                 .emit();
             }
 
-            SpannedTyOrReList::alloc_list(args.span, &positional, self.tcx)
+            SigGenericList {
+                segment_span: args.span,
+                elems: SigTyOrReList::new_slice(&positional, s),
+            }
         })
     }
 
@@ -191,7 +309,7 @@ impl IntraItemLowerCtxt<'_> {
         binder: Obj<GenericBinder>,
         segment_span: Span,
         generics: &[AstGenericParam],
-    ) -> SpannedTyOrReList {
+    ) -> SigGenericList {
         let s = &self.tcx.session;
 
         let (positional, associated) = self.lower_generic_params_syntactic(generics);
@@ -218,7 +336,7 @@ impl IntraItemLowerCtxt<'_> {
         def: Obj<TraitItem>,
         segment_span: Span,
         generics: Option<&AstGenericParamList>,
-    ) -> SpannedTyOrReList {
+    ) -> SigGenericList {
         let s = &self.tcx.session;
 
         let Some(generics) = generics else {
@@ -229,7 +347,6 @@ impl IntraItemLowerCtxt<'_> {
                     Some(*def.r(s).regular_generic_count),
                     segment_span,
                 ),
-                segment_span,
             );
         };
 
@@ -246,7 +363,7 @@ impl IntraItemLowerCtxt<'_> {
             Diag::span_err(associated.span, "associated types cannot be specified here").emit();
         }
 
-        self.construct_trait_instance_from_positionals(def, params, segment_span)
+        self.construct_trait_instance_from_positionals(def, params)
     }
 
     pub fn lower_generics_of_trait_spec_in_fn(
@@ -254,12 +371,11 @@ impl IntraItemLowerCtxt<'_> {
         def: Obj<TraitItem>,
         segment_span: Span,
         generics: Option<&AstGenericParamList>,
-    ) -> SpannedTraitParamList {
+    ) -> SigTraitParamList {
         let s = &self.tcx.session;
 
         let Some(generics) = generics else {
-            return SpannedTraitParamList::alloc_list(
-                segment_span,
+            return SigTraitParamList::new_slice(
                 &self.construct_trait_spec_from_positionals(
                     def,
                     self.synthesize_inferred_generics_for_elision(
@@ -267,9 +383,8 @@ impl IntraItemLowerCtxt<'_> {
                         Some(*def.r(s).regular_generic_count),
                         segment_span,
                     ),
-                    segment_span,
                 ),
-                self.tcx,
+                s,
             );
         };
 
@@ -282,18 +397,18 @@ impl IntraItemLowerCtxt<'_> {
             segment_span,
             &positional,
         );
-        let mut params = self.construct_trait_spec_from_positionals(def, params, segment_span);
+        let mut params = self.construct_trait_spec_from_positionals(def, params);
 
         self.lower_associated_type_generic_params(def, &mut params, &associated);
 
-        SpannedTraitParamList::alloc_list(segment_span, &params, self.tcx)
+        SigTraitParamList::new_slice(&params, s)
     }
 
     pub fn lower_trait_instance_of_impl_block(
         &mut self,
         for_trait: &AstTy,
         body: &AstImplLikeBody,
-    ) -> Result<SpannedTraitInstance, ErrorGuaranteed> {
+    ) -> Result<SigTraitInstance, ErrorGuaranteed> {
         let s = &self.tcx.session;
 
         // Lower target item.
@@ -325,7 +440,10 @@ impl IntraItemLowerCtxt<'_> {
 
         // Lower trait members
         let mut params = params
-            .iter(self.tcx)
+            .elems
+            .r(s)
+            .iter()
+            .copied()
             .map(Some)
             .chain(iter::repeat(None))
             .take(def.r(s).generics.r(s).defs.len())
@@ -346,14 +464,12 @@ impl IntraItemLowerCtxt<'_> {
                     if let Some(old_param) = param {
                         Diag::span_err(name.span, "associated type specified more than once")
                             .child(LeafDiag::span_note(
-                                old_param.own_span(),
+                                old_param.span(s),
                                 "type first specified here",
                             ))
                             .emit();
                     } else {
-                        *param = Some(
-                            SpannedTyOrReView::Ty(exact_ty).encode(exact_ty.own_span(), self.tcx),
-                        );
+                        *param = Some(SigTyOrRe::Ty(exact_ty));
                     }
                 }
                 AstImplLikeMemberKind::TypeInherits(..)
@@ -385,29 +501,29 @@ impl IntraItemLowerCtxt<'_> {
                     if missing_mentions.len() == 1 { "" } else { "s" },
                     format_list(
                         missing_mentions.iter().map(|v| format!("`{v}`")),
-                        AND_LIST_GLUE
+                        SimpleListFormatGlue::AND_LIST,
                     )
                 ),
             )
             .emit()
         });
 
-        let params = params
-            .iter()
-            .map(|param| {
-                param.unwrap_or_else(|| {
-                    SpannedTyOrReView::Ty(
-                        SpannedTyView::Error(missing_mentions.unwrap())
-                            .encode(for_trait.span, self.tcx),
-                    )
-                    .encode(for_trait.span, self.tcx)
-                })
+        let params = params.iter().map(|param| {
+            param.unwrap_or_else(|| {
+                SigTyOrRe::Ty(SigTyKind::Error(missing_mentions.unwrap()).wrap(for_trait.span, s))
             })
-            .collect::<Vec<_>>();
+        });
 
-        let params = SpannedTyOrReList::alloc_list(for_trait.span, &params, self.tcx);
+        let params = SigTyOrReList::new_iter(params, s);
 
-        Ok(SpannedTraitInstanceView { def, params }.encode(for_trait.span, self.tcx))
+        Ok(SigTraitInstance {
+            span: for_trait.span,
+            def,
+            params: SigGenericList {
+                segment_span: for_trait.span,
+                elems: params,
+            },
+        })
     }
 }
 
@@ -417,15 +533,15 @@ impl IntraItemLowerCtxt<'_> {
 pub struct LoweredAssocConstraint {
     pub span: Span,
     pub name: Ident,
-    pub param: SpannedTraitParam,
+    pub param: SigTraitParam,
 }
 
 impl IntraItemLowerCtxt<'_> {
     pub fn lower_generic_params_syntactic(
         &mut self,
         params: &[AstGenericParam],
-    ) -> (Vec<SpannedTyOrRe>, Vec<LoweredAssocConstraint>) {
-        let mut positional = Vec::<SpannedTyOrRe>::new();
+    ) -> (Vec<SigTyOrRe>, Vec<LoweredAssocConstraint>) {
+        let mut positional = Vec::<SigTyOrRe>::new();
         let mut associated = Vec::<LoweredAssocConstraint>::new();
 
         let mut printed_ordering_err = false;
@@ -462,19 +578,16 @@ impl IntraItemLowerCtxt<'_> {
                 AstGenericParamKind::PositionalTy(ty) => {
                     check_ordering(ty.span, &associated);
 
-                    positional
-                        .push(SpannedTyOrReView::Ty(self.lower_ty(ty)).encode(ty.span, self.tcx));
+                    positional.push(SigTyOrRe::Ty(self.lower_ty(ty)));
                 }
                 AstGenericParamKind::PositionalRe(re) => {
                     check_ordering(re.span, &associated);
 
-                    positional
-                        .push(SpannedTyOrReView::Re(self.lower_re(re)).encode(re.span, self.tcx));
+                    positional.push(SigTyOrRe::Re(self.lower_re(re)));
                 }
                 AstGenericParamKind::InheritTy(name, clauses) => {
-                    let param =
-                        SpannedTraitParamView::Unspecified(self.lower_clauses(Some(clauses)))
-                            .encode(clauses.span, self.tcx);
+                    let param = SigTraitParamKind::Unspecified(self.lower_clauses(Some(clauses)))
+                        .wrap(clauses.span);
 
                     if check_mention(*name) {
                         associated.push(LoweredAssocConstraint {
@@ -485,10 +598,8 @@ impl IntraItemLowerCtxt<'_> {
                     }
                 }
                 AstGenericParamKind::TyEquals(name, equals) => {
-                    let param = SpannedTraitParamView::Equals(
-                        SpannedTyOrReView::Ty(self.lower_ty(equals)).encode(equals.span, self.tcx),
-                    )
-                    .encode(equals.span, self.tcx);
+                    let param = SigTraitParamKind::Equals(SigTyOrRe::Ty(self.lower_ty(equals)))
+                        .wrap(equals.span);
 
                     if check_mention(*name) {
                         associated.push(LoweredAssocConstraint {
@@ -516,8 +627,8 @@ impl IntraItemLowerCtxt<'_> {
         binder: Obj<GenericBinder>,
         binder_len_override: Option<u32>,
         segment_span: Span,
-        orig_params: &[SpannedTyOrRe],
-    ) -> SpannedTyOrReList {
+        orig_params: &[SigTyOrRe],
+    ) -> SigGenericList {
         normalize_positional_generic_arity(
             self.tcx,
             binder,
@@ -532,7 +643,7 @@ impl IntraItemLowerCtxt<'_> {
         binder: Obj<GenericBinder>,
         binder_len_override: Option<u32>,
         segment_span: Span,
-    ) -> SpannedTyOrReList {
+    ) -> SigGenericList {
         let s = &self.tcx.session;
 
         let binder_len = binder_len_override.map_or(binder.r(s).defs.len(), |v| v as usize);
@@ -540,42 +651,39 @@ impl IntraItemLowerCtxt<'_> {
         let params = binder.r(s).defs[..binder_len]
             .iter()
             .map(|expected| match expected {
-                AnyGeneric::Re(_) => {
-                    SpannedTyOrReView::Re(Re::SigInfer.encode(segment_span, self.tcx))
-                        .encode(segment_span, self.tcx)
-                }
-                AnyGeneric::Ty(_) => {
-                    SpannedTyOrReView::Ty(SpannedTyView::SigInfer.encode(segment_span, self.tcx))
-                        .encode(segment_span, self.tcx)
-                }
-            })
-            .collect::<Vec<_>>();
+                AnyGeneric::Re(_) => SigTyOrRe::Re(SigReKind::Infer.wrap(segment_span)),
+                AnyGeneric::Ty(_) => SigTyOrRe::Ty(SigTyKind::Infer.wrap(segment_span, s)),
+            });
 
-        SpannedTyOrReList::alloc_list(segment_span, &params, self.tcx)
+        SigGenericList {
+            segment_span,
+            elems: SigTyOrReList::new_iter(params, s),
+        }
     }
 
     pub fn construct_trait_spec_from_positionals(
         &mut self,
         def: Obj<TraitItem>,
-        params: SpannedTyOrReList,
-        outer_span: Span,
-    ) -> Vec<SpannedTraitParam> {
+        params: SigGenericList,
+    ) -> Vec<SigTraitParam> {
         let s = &self.tcx.session;
 
-        debug_assert_eq!(*def.r(s).regular_generic_count as usize, params.len(s));
+        debug_assert_eq!(
+            *def.r(s).regular_generic_count as usize,
+            params.elems.r(s).len()
+        );
 
         params
-            .iter(self.tcx)
-            .map(|ty_or_re| {
-                SpannedTraitParamView::Equals(ty_or_re).encode(ty_or_re.own_span(), self.tcx)
-            })
+            .elems
+            .r(s)
+            .iter()
+            .map(|&ty_or_re| SigTraitParamKind::Equals(ty_or_re).wrap(ty_or_re.span(s)))
             .chain(iter::repeat(
-                SpannedTraitParamView::Unspecified(SpannedTraitClauseList::alloc_list(
-                    outer_span,
-                    &[],
-                    self.tcx,
-                ))
-                .encode(outer_span, self.tcx),
+                SigTraitParamKind::Unspecified(SigTraitClauseList {
+                    span: Span::DUMMY,
+                    elems: Obj::new_slice(&[], s),
+                })
+                .wrap(params.segment_span),
             ))
             .take(def.r(s).generics.r(s).defs.len())
             .collect::<Vec<_>>()
@@ -584,29 +692,36 @@ impl IntraItemLowerCtxt<'_> {
     pub fn construct_trait_instance_from_positionals(
         &mut self,
         def: Obj<TraitItem>,
-        params: SpannedTyOrReList,
-        outer_span: Span,
-    ) -> SpannedTyOrReList {
+        params: SigGenericList,
+    ) -> SigGenericList {
         let s = &self.tcx.session;
 
-        debug_assert_eq!(*def.r(s).regular_generic_count as usize, params.len(s));
+        debug_assert_eq!(
+            *def.r(s).regular_generic_count as usize,
+            params.elems.r(s).len()
+        );
 
         let elaborated_params = params
-            .iter(self.tcx)
-            .chain(iter::repeat(
-                SpannedTyOrReView::Ty(SpannedTyView::SigInfer.encode(outer_span, self.tcx))
-                    .encode(outer_span, self.tcx),
-            ))
+            .elems
+            .r(s)
+            .iter()
+            .copied()
+            .chain(iter::repeat(SigTyOrRe::Ty(
+                SigTyKind::Infer.wrap(params.segment_span, s),
+            )))
             .take(def.r(s).generics.r(s).defs.len())
             .collect::<Vec<_>>();
 
-        SpannedTyOrReList::alloc_list(params.own_span(), &elaborated_params, self.tcx)
+        SigGenericList {
+            segment_span: params.segment_span,
+            elems: SigTyOrReList::new_slice(&elaborated_params, s),
+        }
     }
 
     pub fn lower_associated_type_generic_params(
         &mut self,
         def: Obj<TraitItem>,
-        params: &mut [SpannedTraitParam],
+        params: &mut [SigTraitParam],
         associated: &[LoweredAssocConstraint],
     ) {
         let s = &self.tcx.session;
@@ -640,8 +755,8 @@ pub fn normalize_positional_generic_arity(
     binder: Obj<GenericBinder>,
     binder_len_override: Option<u32>,
     segment_span: Span,
-    orig_params: &[SpannedTyOrRe],
-) -> SpannedTyOrReList {
+    orig_params: &[SigTyOrRe],
+) -> SigGenericList {
     let s = &tcx.session;
 
     let binder_len = binder_len_override.map_or(binder.r(s).defs.len(), |v| v as usize);
@@ -653,7 +768,7 @@ pub fn normalize_positional_generic_arity(
         .zip(orig_params.iter().map(Some).chain(iter::repeat(None)))
         .map(|(expected, actual)| {
             let actual_span = actual.map_or(segment_span, |v| {
-                v.own_span().not_dummy().unwrap_or(segment_span)
+                v.span(s).not_dummy().unwrap_or(segment_span)
             });
 
             let para_or_err = 'para_or_err: {
@@ -673,9 +788,9 @@ pub fn normalize_positional_generic_arity(
                     }));
                 };
 
-                match (actual.view(tcx), expected) {
-                    (SpannedTyOrReView::Ty(_), AnyGeneric::Ty(_)) => Ok(actual),
-                    (SpannedTyOrReView::Re(_), AnyGeneric::Re(_)) => Ok(actual),
+                match (actual, expected) {
+                    (SigTyOrRe::Ty(_), AnyGeneric::Ty(_)) => Ok(actual),
+                    (SigTyOrRe::Re(_), AnyGeneric::Re(_)) => Ok(actual),
                     (_, AnyGeneric::Ty(_)) => Err(Diag::span_err(
                         actual_span,
                         "expected a type but got a lifetime",
@@ -690,19 +805,15 @@ pub fn normalize_positional_generic_arity(
             };
 
             para_or_err.unwrap_or_else(|err| match expected {
-                AnyGeneric::Re(_) => SpannedTyOrReView::Re(Re::Error(err).encode(actual_span, tcx))
-                    .encode(actual_span, tcx),
-                AnyGeneric::Ty(_) => {
-                    SpannedTyOrReView::Ty(SpannedTyView::Error(err).encode(actual_span, tcx))
-                        .encode(actual_span, tcx)
-                }
+                AnyGeneric::Re(_) => SigTyOrRe::Re(SigReKind::Error(err).wrap(actual_span)),
+                AnyGeneric::Ty(_) => SigTyOrRe::Ty(SigTyKind::Error(err).wrap(actual_span, s)),
             })
         })
         .collect::<Vec<_>>();
 
     if orig_params.len() > binder_len {
         Diag::span_err(
-            orig_params[binder_len].own_span(),
+            orig_params[binder_len].span(s),
             "too many generic parameters",
         )
         .child(LeafDiag::new(
@@ -717,27 +828,8 @@ pub fn normalize_positional_generic_arity(
         .emit();
     }
 
-    SpannedTyOrReList::alloc_list(segment_span, &resolved_params, tcx)
-}
-
-pub fn normalize_positional_generic_arity_zip(
-    tcx: &TyCtxt,
-    binder: Obj<GenericBinder>,
-    binder_len_override: Option<u32>,
-    segment_span: Span,
-    orig_params: &[TyOrRe],
-    orig_param_spans: &[Span],
-) -> TyOrReList {
-    normalize_positional_generic_arity(
-        tcx,
-        binder,
-        binder_len_override,
+    SigGenericList {
         segment_span,
-        &orig_params
-            .iter()
-            .zip(orig_param_spans)
-            .map(|(&para, &span)| Spanned::new_saturated(para, span, tcx))
-            .collect::<Vec<_>>(),
-    )
-    .value
+        elems: SigTyOrReList::new_slice(&resolved_params, s),
+    }
 }

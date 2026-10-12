@@ -7,8 +7,8 @@ use crate::{
     parse::{
         ast::{
             AstBinOpKind, AstBinOpSpanned, AstBlock, AstExpr, AstExprKind, AstMatchArm,
-            AstRangeExpr, AstRangeLimits, AstStmt, AstStmtKind, AstStmtLet, AstStructRest,
-            AstUnOpKind,
+            AstPatStructRest, AstRangeExpr, AstRangeLimits, AstStmt, AstStmtKind, AstStmtLet,
+            AstStructRest, AstUnOpKind,
         },
         token::Lifetime,
     },
@@ -18,9 +18,10 @@ use crate::{
             func::{pat::PatOrRest, path::PathResolvedValue},
         },
         syntax::{
-            HirBlock, HirExpr, HirExprKind, HirLabelTargetKind, HirLabelledBlock, HirLetStmt,
-            HirMatchArm, HirPat, HirPatKind, HirPatListFrontAndTail, HirRangeExpr, HirStmt,
-            HirStructExpr, HirStructNamedField, LocalNameSymbol, SpannedTyOrReList,
+            HirBlock, HirExpr, HirExprKind, HirLabelledBlock, HirLetStmt, HirMatchArm, HirPat,
+            HirPatKind, HirPatListFrontAndTail, HirPatNamedField, HirRangeExpr, HirStmt,
+            HirStructExpr, HirStructNamedField, LabelTargetKind, LocalNameSymbol, SigGenericList,
+            SigTyOrReList,
         },
     },
 };
@@ -58,8 +59,7 @@ impl IntraItemLowerCtxt<'_> {
     ) -> Obj<HirBlock> {
         self.scoped(|this| {
             if let Some(label) = label {
-                this.block_label_names
-                    .define(label.name, owner, |_| unreachable!());
+                this.block_label_names.define(label.name, owner);
             }
 
             let prev_block = {
@@ -225,6 +225,7 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::Cast(expr, as_ty) => {
                 HirExprKind::Cast(self.lower_expr(expr), self.lower_ty(as_ty))
             }
+            AstExprKind::Use(expr) => HirExprKind::Use(self.lower_expr(expr)),
             AstExprKind::Let(..) => HirExprKind::Error(
                 Diag::span_err(
                     ast.span,
@@ -247,7 +248,7 @@ impl IntraItemLowerCtxt<'_> {
                     this.lower_block_with_label(
                         HirLabelledBlock {
                             target: expr,
-                            kind: HirLabelTargetKind::While,
+                            kind: LabelTargetKind::While,
                         },
                         *label,
                         block,
@@ -265,7 +266,7 @@ impl IntraItemLowerCtxt<'_> {
                 let body = self.lower_block_with_label(
                     HirLabelledBlock {
                         target: expr,
-                        kind: HirLabelTargetKind::For,
+                        kind: LabelTargetKind::For,
                     },
                     *label,
                     body,
@@ -276,7 +277,7 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::Loop(block, label) => HirExprKind::Loop(self.lower_block_with_label(
                 HirLabelledBlock {
                     target: expr,
-                    kind: HirLabelTargetKind::Loop,
+                    kind: LabelTargetKind::Loop,
                 },
                 *label,
                 block,
@@ -288,7 +289,7 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::Block(block, label) => HirExprKind::Block(self.lower_block_with_label(
                 HirLabelledBlock {
                     target: expr,
-                    kind: HirLabelTargetKind::Block,
+                    kind: LabelTargetKind::Block,
                 },
                 *label,
                 block,
@@ -297,7 +298,7 @@ impl IntraItemLowerCtxt<'_> {
                 HirExprKind::Assign(self.lower_lvalue(lhs), self.lower_expr(rhs))
             }
             AstExprKind::AssignOp(op, lhs, rhs) => {
-                HirExprKind::AssignOp(*op, self.lower_lvalue(lhs), self.lower_expr(rhs))
+                HirExprKind::AssignOp(*op, self.lower_expr(lhs), self.lower_expr(rhs))
             }
             AstExprKind::Field(expr, name) => HirExprKind::Field(self.lower_expr(expr), *name),
             AstExprKind::GenericMethodCall {
@@ -319,11 +320,10 @@ impl IntraItemLowerCtxt<'_> {
                 HirExprKind::MethodCall {
                     receiver: self.lower_expr(target),
                     name: *method,
-                    generics: Some(SpannedTyOrReList::alloc_list(
-                        generics.span,
-                        &positional,
-                        self.tcx,
-                    )),
+                    generics: Some(SigGenericList {
+                        segment_span: generics.span,
+                        elems: SigTyOrReList::new_slice(&positional, s),
+                    }),
                     args: self.lower_exprs(args),
                 }
             }
@@ -450,7 +450,7 @@ impl IntraItemLowerCtxt<'_> {
                             path.span,
                             format_args!(
                                 "expected named struct or enum variant, got {}",
-                                res.bare_what(s)
+                                res.bare_what(s),
                             ),
                         )
                         .emit(),
@@ -654,7 +654,6 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::Tuple(elems) => {
                 HirPatKind::Tuple(self.lower_lvalue_list_front_and_tail("tuple", elems))
             }
-            AstExprKind::Lit(_) => HirPatKind::Lit(self.lower_expr(expr)),
             AstExprKind::Underscore => HirPatKind::Hole,
 
             AstExprKind::Binary(
@@ -673,8 +672,120 @@ impl IntraItemLowerCtxt<'_> {
             AstExprKind::AddrOf(muta, pointee) => {
                 HirPatKind::Deref(muta.as_muta(), self.lower_lvalue(pointee))
             }
+            AstExprKind::Struct(path, fields, rest) => 'path: {
+                let res = match self.resolve_expr_path(path).fail_on_unbound_local() {
+                    Ok(v) => v,
+                    Err(err) => break 'path HirPatKind::Error(err),
+                };
 
-            AstExprKind::Struct(..) | AstExprKind::Call(..) => todo!(),
+                let Some(ctor) = res.as_adt(path, self.tcx) else {
+                    break 'path HirPatKind::Error(
+                        Diag::span_err(
+                            path.span,
+                            format_args!(
+                                "expected named struct or enum variant, got {}",
+                                res.bare_what(s)
+                            ),
+                        )
+                        .emit(),
+                    );
+                };
+
+                let fields = Obj::new_iter(
+                    fields.iter().map(|field| HirPatNamedField {
+                        name: field.name,
+                        pat: match &field.expr {
+                            Some(pat) => self.lower_lvalue(pat),
+                            None => {
+                                let place = if let Some(def) = self
+                                    .func_local_names
+                                    .lookup(LocalNameSymbol::User(field.name.text))
+                                {
+                                    HirExprKind::Local(*def)
+                                } else {
+                                    HirExprKind::Error(
+                                        Diag::span_err(
+                                            field.name.span,
+                                            format_args!(
+                                                "`{}` not found in scope",
+                                                field.name.text
+                                            ),
+                                        )
+                                        .emit(),
+                                    )
+                                };
+
+                                let place = Obj::new(
+                                    HirExpr {
+                                        span: field.name.span,
+                                        kind: LateInit::new(place),
+                                    },
+                                    s,
+                                );
+
+                                Obj::new(
+                                    HirPat {
+                                        span: field.name.span,
+                                        kind: HirPatKind::PlaceExpr(place),
+                                    },
+                                    s,
+                                )
+                            }
+                        },
+                    }),
+                    s,
+                );
+
+                let rest = match *rest {
+                    AstStructRest::Base(ref rest_expr) => {
+                        Diag::span_err(
+                            rest_expr.span,
+                            "functional record updates are not allowed in destructuring \
+                             assignments",
+                        )
+                        .emit();
+
+                        AstPatStructRest::Rest(rest_expr.span)
+                    }
+                    AstStructRest::Rest(span) => AstPatStructRest::Rest(span),
+                    AstStructRest::None => AstPatStructRest::None,
+                };
+
+                HirPatKind::AdtNamed(ctor, fields, rest)
+            }
+            AstExprKind::Call(path, fields) if let AstExprKind::Path(path) = &path.kind => 'path: {
+                let res = match self.resolve_expr_path(path).fail_on_unbound_local() {
+                    Ok(v) => v,
+                    Err(err) => break 'path HirPatKind::Error(err),
+                };
+
+                let Some(ctor) = res.as_adt(path, self.tcx) else {
+                    break 'path HirPatKind::Error(
+                        Diag::span_err(
+                            path.span,
+                            format_args!(
+                                "expected named struct or enum variant, got {}",
+                                res.bare_what(s)
+                            ),
+                        )
+                        .emit(),
+                    );
+                };
+
+                let fields =
+                    self.lower_pat_list_front_and_tail_generic("tuple", fields, |this, ast| {
+                        match &ast.kind {
+                            AstExprKind::Range(AstRangeExpr {
+                                low: None,
+                                high: None,
+                                limits: AstRangeLimits::HalfOpen,
+                            }) => PatOrRest::Rest(ast.span),
+                            _ => PatOrRest::Pat(this.lower_lvalue(ast)),
+                        }
+                    });
+
+                HirPatKind::AdtTuple(ctor, fields)
+            }
 
             AstExprKind::Block(..)
             | AstExprKind::Field(..)
@@ -685,6 +796,7 @@ impl IntraItemLowerCtxt<'_> {
             }
 
             AstExprKind::Cast(..)
+            | AstExprKind::Use(..)
             | AstExprKind::Let(..)
             | AstExprKind::If { .. }
             | AstExprKind::While { .. }
@@ -723,7 +835,9 @@ impl IntraItemLowerCtxt<'_> {
                 },
                 ..,
             )
-            | AstExprKind::Range(..) => HirPatKind::Error(
+            | AstExprKind::Range(..)
+            | AstExprKind::Lit(_)
+            | AstExprKind::Call(_, _) => HirPatKind::Error(
                 Diag::span_err(expr.span, "invalid left-hand side of assignment").emit(),
             ),
 

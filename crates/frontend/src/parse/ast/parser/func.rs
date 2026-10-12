@@ -248,6 +248,7 @@ pub fn parse_expr_pratt_seed(p: P, flags: AstExprFlags) -> Option<AstExpr> {
                 }
 
                 if match_punct(punct!(':')).expect(p2).is_none() {
+                    fields.push(AstExprField { name, expr: None });
                     break;
                 }
 
@@ -765,6 +766,15 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
                 lhs = AstExpr {
                     span: dot.span.to(p.prev_span()),
                     kind: AstExprKind::Cast(Box::new(lhs), Box::new(ty)),
+                };
+
+                continue 'chaining;
+            }
+
+            if match_kw(kw!("use")).expect(p).is_some() {
+                lhs = AstExpr {
+                    span: dot.span.to(p.prev_span()),
+                    kind: AstExprKind::Use(Box::new(lhs)),
                 };
 
                 continue 'chaining;

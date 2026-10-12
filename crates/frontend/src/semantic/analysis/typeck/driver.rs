@@ -1,261 +1,155 @@
 use crate::{
-    base::{Session, arena::Obj},
+    base::{
+        Session,
+        arena::{LateInit, Obj},
+    },
     semantic::{
-        analysis::{
-            ClauseCx, ClauseImportEnvRef, CoherenceMap, ObligeCause, ObligeCauseOrigin, UnifyCxMode,
-        },
+        analysis::{sigck::CrateSigckVisitor, typeck::infra::confirm::BodyCtxtConfirmState},
+        infer::{ClauseCx, ClauseImportEnv, HrtbUniverse, UnifyCx, UnifyCxMode},
         syntax::{
-            AdtCtor, AdtItem, AdtKind, AnyGeneric, Crate, FnItem, GenericBinder, GenericSubst,
-            HrtbUniverse, ImplItem, ItemKind, TraitItem, TyCtxt, TypeAliasItem,
+            Crate, FnDef, HirLabelledBlock, HirLocal, InferTyVarSourceInfo, Item, ThirBody, Ty,
+            TyCtxt,
         },
     },
+    utils::hash::FxHashMap,
 };
 
-#[derive(Debug, Clone)]
-pub struct CrateTypeckVisitor<'tcx> {
-    pub tcx: &'tcx TyCtxt,
-    pub coherence: &'tcx CoherenceMap,
-    pub krate: Obj<Crate>,
+// === Driver === //
+
+pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
+    let s = cx.session();
+    let tcx = cx.tcx();
+
+    // Setup a `ClauseCx` for signature validation.
+    let mut ccx = ClauseCx::new(tcx, cx.coherence, cx.krate, UnifyCxMode::RegionBlind);
+    let env_sig = ccx.universal_env_for_fn_def(def);
+
+    // WF-check the signature.
+    cx.visit_generic_binder(&mut ccx, &env_sig, def.r(s).generics);
+
+    // Check the body
+    if let Some(body) = *def.r(s).hir_body {
+        let mut bcx = BodyCtxt::new(&mut ccx, def, &env_sig);
+
+        for arg in def.r(s).args.r(s) {
+            let env = bcx.import_env;
+            let ascription = bcx.ccx_mut().import_here(env, arg.ty);
+
+            bcx.check_pat_demand(arg.pat, ascription, None);
+        }
+
+        bcx.check_expr_demand(body, bcx.return_ty)
+            .ignore_divergence();
+
+        bcx.begin_confirmation();
+
+        let arg_pats = def
+            .r(s)
+            .args
+            .r(s)
+            .iter()
+            .map(|arg| bcx.confirm_thir_pat_outer(arg.pat))
+            .collect::<Vec<_>>();
+
+        let body = bcx.confirm_thir_expr_post(body);
+
+        LateInit::init(
+            &def.r(s).thir_body,
+            Some(ThirBody {
+                arg_pats,
+                expr: body,
+            }),
+        );
+    } else {
+        for arg in def.r(s).args.r(s) {
+            ccx.import_here(&env_sig, arg.ty);
+        }
+
+        ccx.import_here(&env_sig, *def.r(s).ret_ty);
+
+        LateInit::init(&def.r(s).thir_body, None);
+    }
+
+    ccx.verify();
 }
 
-impl<'tcx> CrateTypeckVisitor<'tcx> {
+// === BodyCtxt === //
+
+pub(super) struct BodyCtxt<'a, 'tcx> {
+    pub ccx: &'a mut ClauseCx<'tcx>,
+    pub def: Obj<FnDef>,
+    pub import_env: &'a ClauseImportEnv,
+    pub local_types: FxHashMap<Obj<HirLocal>, Ty>,
+    pub block_break_demands: FxHashMap<HirLabelledBlock, Option<Ty>>,
+    pub confirm_state: BodyCtxtConfirmState<'a, 'tcx>,
+    pub return_ty: Ty,
+}
+
+impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
+    pub fn new(
+        ccx: &'a mut ClauseCx<'tcx>,
+        def: Obj<FnDef>,
+        import_env: &'a ClauseImportEnv,
+    ) -> Self {
+        let s = ccx.session();
+
+        let return_ty = ccx.import_here(import_env, *def.r(s).ret_ty);
+
+        Self {
+            ccx,
+            def,
+            import_env,
+            local_types: FxHashMap::default(),
+            block_break_demands: FxHashMap::default(),
+            confirm_state: BodyCtxtConfirmState::default(),
+            return_ty,
+        }
+    }
+
     pub fn tcx(&self) -> &'tcx TyCtxt {
-        self.tcx
+        self.ccx.tcx()
     }
 
     pub fn session(&self) -> &'tcx Session {
-        &self.tcx.session
+        self.ccx.session()
     }
 
-    pub fn visit_crate(&mut self) {
-        let s = self.session();
-
-        for &item in &**self.krate.r(s).items {
-            match *item.r(s).kind {
-                ItemKind::Module(_) => {
-                    // (intentionally empty)
-                }
-                ItemKind::Adt(def) => {
-                    self.visit_adt(def);
-                }
-                ItemKind::EnumVariant(_) => {
-                    // (already visited in ADT checks)
-                }
-                ItemKind::Trait(def) => {
-                    self.visit_trait(def);
-                }
-                ItemKind::Impl(def) => {
-                    self.visit_impl(def);
-                }
-                ItemKind::Fn(def) => {
-                    self.visit_fn_item(def);
-                }
-                ItemKind::TypeAlias(def) => {
-                    self.visit_type_alias_item(def);
-                }
-            }
-        }
+    pub fn krate(&self) -> Obj<Crate> {
+        self.ccx().krate()
     }
 
-    pub fn visit_trait(&mut self, def: Obj<TraitItem>) {
-        let tcx = self.tcx();
+    pub fn item(&self) -> Obj<Item> {
         let s = self.session();
-
-        let TraitItem {
-            item: _,
-            generics,
-            inherits,
-            regular_generic_count: _,
-            associated_types: _,
-            methods,
-            name_to_method: _,
-        } = def.r(s);
-
-        // Setup a `ClauseCx` with our environment in mind.
-        let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.create_universal_env_for_trait_def(
-            &ObligeCause::new_empty_report(),
-            HrtbUniverse::ROOT_REF,
-            def,
-        );
-
-        // First, let's ensure that the inherited trait list is well-formed.
-        ccx.importer()
-            .with_clause_applies_to(env.self_ty)
-            .import_report_here(&HrtbUniverse::ROOT, env.as_ref(), **inherits);
-
-        // Now, let's ensure that each generic parameter's clauses are well-formed.
-        self.visit_generic_binder(&mut ccx, env.as_ref(), **generics);
-
-        // Finally, let's check method signatures and, if a default one is provided, bodies.
-        for &method in methods.iter() {
-            self.visit_fn_def(method);
-        }
-
-        ccx.verify();
+        self.def.r(s).owner.as_item(s)
     }
 
-    pub fn visit_impl(&mut self, item: Obj<ImplItem>) {
-        let tcx = self.tcx();
-        let s = self.session();
-
-        let ImplItem {
-            item: _,
-            generics,
-            trait_,
-            target,
-            methods,
-        } = item.r(s);
-
-        // Setup a `ClauseCx` with our environment in mind.
-        let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.create_universal_env_for_impl_block(
-            &ObligeCause::new_empty_report(),
-            HrtbUniverse::ROOT_REF,
-            item,
-        );
-
-        // Let's ensure that the target trait instance is well formed. This includes trait-checking
-        // regular generic parameters *and* associated types.
-        if let Some(trait_) = **trait_ {
-            ccx.importer()
-                .with_clause_applies_to(env.self_ty)
-                .import_report_here(&HrtbUniverse::ROOT, env.as_ref(), trait_);
-
-            // Let's ensure that the type implements its super-traits as well.
-            let trait_def = trait_.value.def;
-
-            for super_clause in trait_def.r(s).inherits.iter(tcx) {
-                let super_clause_span = super_clause.own_span();
-                let super_clause = ccx.import_report_here(
-                    &HrtbUniverse::ROOT,
-                    ClauseImportEnvRef::new(
-                        env.self_ty,
-                        &[GenericSubst {
-                            binder: *trait_def.r(s).generics,
-                            substs: trait_.value.params,
-                        }],
-                    ),
-                    super_clause,
-                );
-
-                ccx.oblige_ty_meets_clause(
-                    ObligeCause::new_report(ObligeCauseOrigin::HirCheckSuperTrait {
-                        block: target.own_span(),
-                        clause: super_clause_span,
-                    }),
-                    HrtbUniverse::ROOT_REF,
-                    env.self_ty,
-                    super_clause,
-                );
-            }
-        }
-
-        // Let's also ensure that our target type is well-formed.
-        ccx.import_report_here(HrtbUniverse::ROOT_REF, env.as_ref(), **target);
-
-        // Let's ensure that `impl` generics all have well-formed clauses.
-        self.visit_generic_binder(&mut ccx, env.as_ref(), *generics);
-
-        // Finally, let's check method signatures and bodies.
-        for method in methods.iter() {
-            let Some(method) = method else {
-                continue;
-            };
-
-            self.visit_fn_def(*method);
-        }
-
-        ccx.verify();
+    pub fn ccx(&self) -> &ClauseCx<'tcx> {
+        self.ccx
     }
 
-    pub fn visit_adt(&mut self, def: Obj<AdtItem>) {
-        let s = self.session();
-        let tcx = self.tcx();
-
-        // Setup a `ClauseCx` with our environment in mind.
-        let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.create_universal_env_for_adt_def(
-            &ObligeCause::new_empty_report(),
-            HrtbUniverse::ROOT_REF,
-            def,
-        );
-
-        // First, let's ensure that each generic parameter's clauses are well-formed.
-        self.visit_generic_binder(&mut ccx, env.as_ref(), def.r(s).generics);
-
-        // Now, WF-check the definition.
-        match *def.r(s).kind {
-            AdtKind::Struct(kind) => {
-                self.visit_adt_ctor(&mut ccx, env.as_ref(), *kind.r(s).ctor);
-            }
-            AdtKind::Enum(kind) => {
-                for variant in kind.r(s).variants.iter() {
-                    self.visit_adt_ctor(&mut ccx, env.as_ref(), *variant.r(s).ctor);
-                }
-            }
-        }
-
-        ccx.verify();
+    pub fn ccx_mut(&mut self) -> &mut ClauseCx<'tcx> {
+        self.ccx
     }
 
-    fn visit_adt_ctor(
-        &mut self,
-        ccx: &mut ClauseCx,
-        env: ClauseImportEnvRef<'_>,
-        ctor: Obj<AdtCtor>,
-    ) {
-        let s = self.session();
-
-        for field in ctor.r(s).fields.iter() {
-            ccx.import_report_here(HrtbUniverse::ROOT_REF, env, *field.ty);
-        }
+    #[expect(unused)]
+    pub fn ucx(&self) -> &UnifyCx<'tcx> {
+        self.ccx.ucx()
     }
 
-    pub fn visit_fn_item(&mut self, def: Obj<FnItem>) {
-        let s = self.session();
-
-        self.visit_fn_def(*def.r(s).def);
+    pub fn ucx_mut(&mut self) -> &mut UnifyCx<'tcx> {
+        self.ccx.ucx_mut()
     }
 
-    pub fn visit_type_alias_item(&mut self, def: Obj<TypeAliasItem>) {
-        let tcx = self.tcx();
+    pub fn type_of_local(&mut self, local: Obj<HirLocal>) -> Ty {
         let s = self.session();
 
-        // Setup a `ClauseCx` with our environment in mind.
-        let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
-        let env = ccx.create_universal_env_for_type_alias_def(
-            &ObligeCause::new_empty_report(),
-            HrtbUniverse::ROOT_REF,
-            def,
-        );
-
-        // First, let's ensure that each generic parameter's clauses are well-formed.
-        self.visit_generic_binder(&mut ccx, env.as_ref(), def.r(s).generics);
-
-        // Now, WF-check the definition.
-        ccx.import_report_here(HrtbUniverse::ROOT_REF, env.as_ref(), *def.r(s).body);
-
-        ccx.verify();
-    }
-
-    pub fn visit_generic_binder(
-        &mut self,
-        ccx: &mut ClauseCx,
-        env: ClauseImportEnvRef<'_>,
-        generics: Obj<GenericBinder>,
-    ) {
-        let s = self.session();
-
-        for &generic in &generics.r(s).defs {
-            let clauses = match generic {
-                AnyGeneric::Re(generic) => *generic.r(s).clauses,
-                AnyGeneric::Ty(generic) => *generic.r(s).clauses,
-            };
-
-            ccx.importer()
-                .with_clause_applies_to(env.self_ty)
-                .import_report_here(HrtbUniverse::ROOT_REF, env, clauses);
-        }
+        *self.local_types.entry(local).or_insert_with(|| {
+            self.ccx.fresh_ty_infer(
+                HrtbUniverse::ROOT,
+                InferTyVarSourceInfo::Local {
+                    name: local.r(s).name,
+                },
+            )
+        })
     }
 }

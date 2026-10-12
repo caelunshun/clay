@@ -10,7 +10,7 @@ use crate::{
     },
     semantic::{
         lower::modules::{
-            FrozenModuleResolver, ItemCategory, ItemCategoryUse, ItemPathFmt, ParentResolver,
+            FrozenModuleResolver, ItemCategory, ItemCategoryAsA, ItemPathFmt, ParentResolver,
             PathResolver, StepLookupError, VisibilityResolver,
         },
         syntax::{Crate, DirectUse, GlobUse, Item, Visibility},
@@ -244,7 +244,6 @@ impl BuilderModuleTree {
         s: &Session,
     ) -> IndexVec<BuilderItemId, Obj<Item>> {
         // Determine public paths for each module.
-        // TODO: improve this algorithm.
         for item_id in self.items.indices() {
             match self.items[item_id].direct_parent {
                 Some(parent) => {
@@ -355,7 +354,7 @@ impl BuilderModuleTree {
                 .stash_path(
                     item_id,
                     |tree| &mut tree.builder.items[item_id].glob_uses[use_idx].target,
-                    Some(ItemCategoryUse::GlobUseTarget),
+                    Some(ItemCategoryAsA::GlobUseTarget),
                 );
             }
         }
@@ -603,7 +602,7 @@ impl PathResolver for ModuleTreeSolverCx<'_> {
         let Some(target) = self.stash_path(
             curr,
             |tree| &mut tree.builder.items[curr].glob_uses[use_idx as usize].target,
-            Some(ItemCategoryUse::GlobUseTarget),
+            Some(ItemCategoryAsA::GlobUseTarget),
         ) else {
             return Err(StepLookupError::NotFound);
         };
@@ -662,7 +661,7 @@ impl ModuleTreeSolverCx<'_> {
         &mut self,
         path_owner: BuilderItemId,
         fetch: impl Fn(&mut Self) -> &mut CachedPath,
-        for_use: Option<ItemCategoryUse>,
+        for_use: Option<ItemCategoryAsA>,
     ) -> Option<AnyItemId> {
         let path = fetch(self);
 

@@ -1,4 +1,4 @@
-use crate::{base::ErrorGuaranteed, utils::hash::FxHashMap};
+use crate::utils::hash::FxHashMap;
 use derive_where::derive_where;
 use std::hash;
 
@@ -11,9 +11,9 @@ pub struct NameResolver<K, T> {
 }
 
 #[derive(Debug, Copy, Clone)]
-struct DefinedName<T> {
-    depth: u32,
-    value: T,
+pub struct DefinedName<T> {
+    pub depth: u32,
+    pub value: T,
 }
 
 #[derive(Debug, Clone)]
@@ -31,26 +31,7 @@ where
         Self::default()
     }
 
-    pub fn define(
-        &mut self,
-        sym: K,
-        value: T,
-        on_shadow: impl FnOnce(T) -> ErrorGuaranteed,
-    ) -> Option<ErrorGuaranteed> {
-        if let Some(replaced) = self.define_inner(sym, value)
-            && replaced.depth == self.depth
-        {
-            return Some(on_shadow(replaced.value));
-        }
-
-        None
-    }
-
-    pub fn define_force_shadow(&mut self, sym: K, value: T) {
-        self.define_inner(sym, value);
-    }
-
-    fn define_inner(&mut self, sym: K, value: T) -> Option<DefinedName<T>> {
+    pub fn define(&mut self, sym: K, value: T) -> Option<DefinedName<T>> {
         let replaced = self.map.insert(
             sym,
             DefinedName {

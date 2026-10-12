@@ -1,68 +1,18 @@
 use crate::{
-    base::{arena::Intern, syntax::Span},
+    base::{
+        ErrorGuaranteed,
+        arena::{HasListInterner as _, Intern, Obj},
+        syntax::Span,
+    },
     parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
-    semantic::syntax::{Mutability, Ty},
+    semantic::syntax::{AdtCtor, DynSiteIdx, Mutability, ResolvedFieldIdx, SigTy, TyCtxt},
 };
 use index_vec::{IndexVec, define_index_type};
+use slotmap::{SlotMap, new_key_type};
 use smallvec::SmallVec;
-use std::{
-    ops::{Bound, RangeBounds},
-    slice,
-};
+use std::mem;
 
-// === MirInstructionLoc === //
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct MirInstructionLoc {
-    pub block: MirBlockIdx,
-    pub instr: MirInstructionIdx,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, Eq, PartialEq)]
-pub struct MirInstructionIdx(pub usize);
-
-#[derive(Debug, Copy, Clone)]
-pub enum MirInstructionRef<'a> {
-    Stmt(&'a MirStmt),
-    Terminator(&'a MirTerminator),
-}
-
-impl MirInstructionRef<'_> {
-    pub fn span(&self) -> Span {
-        match self {
-            MirInstructionRef::Stmt(stmt) => stmt.span,
-            // TODO
-            MirInstructionRef::Terminator(_) => Span::DUMMY,
-        }
-    }
-}
-
-// === MirDirection === //
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum MirDirection {
-    Forward,
-    Backward,
-}
-
-impl MirDirection {
-    pub fn is_forward(self) -> bool {
-        matches!(self, Self::Forward)
-    }
-
-    pub fn is_backward(self) -> bool {
-        matches!(self, Self::Backward)
-    }
-
-    pub fn invert(self) -> MirDirection {
-        match self {
-            MirDirection::Forward => MirDirection::Backward,
-            MirDirection::Backward => MirDirection::Forward,
-        }
-    }
-}
-
-// === MirLocal === //
+// === MirBody === //
 
 define_index_type! {
     pub struct MirLocalIdx = u32;
@@ -74,141 +24,519 @@ impl MirLocalIdx {
 
 #[derive(Debug, Clone)]
 pub struct MirLocal {
-    pub ty: Ty,
-}
-
-// === MirBody === //
-
-define_index_type! {
-    pub struct MirBlockIdx = u32;
+    pub ty: SigTy,
 }
 
 #[derive(Debug, Clone)]
 pub struct MirBody {
     pub locals: IndexVec<MirLocalIdx, MirLocal>,
-    pub blocks: IndexVec<MirBlockIdx, MirBlock>,
+    pub entry: MirBlockIdx,
+    pub cfg: MirBodyCfg,
 }
 
-impl MirBody {
-    pub fn lookup(&self, loc: MirInstructionLoc) -> MirInstructionRef<'_> {
-        self.blocks[loc.block].lookup(loc.instr)
+impl Default for MirBody {
+    fn default() -> Self {
+        let mut body = Self {
+            locals: IndexVec::default(),
+            entry: MirBlockIdx::default(),
+            cfg: MirBodyCfg::default(),
+        };
+
+        body.entry = body.cfg.create_block();
+
+        body
     }
+}
+
+// === MirBodyCfg === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirBodyDirection {
+    Forwards,
+    Backwards,
+}
+
+impl MirBodyDirection {
+    pub fn is_forwards(self) -> bool {
+        self == Self::Forwards
+    }
+
+    pub fn is_backwards(self) -> bool {
+        self == Self::Backwards
+    }
+}
+
+new_key_type! {
+    pub struct MirBlockIdx;
+
+    pub struct MirStmtIdx;
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum MirLocationAfter {
+    BlockStart(MirBlockIdx),
+    Stmt(MirStmtIdx),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum MirLocationBefore {
+    Terminator(MirBlockIdx),
+    Stmt(MirStmtIdx),
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct MirBlockLink {
+    pub target: MirBlockIdx,
+    pub at_idx: usize,
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct MirBlock {
-    pub stmts: Vec<MirStmt>,
-    pub terminator: MirTerminator,
-    pub predecessors: SmallVec<[MirBlockIdx; 1]>,
+pub struct MirBodyCfg {
+    blocks: SlotMap<MirBlockIdx, MirBlockNode>,
+    stmts: SlotMap<MirStmtIdx, MirStmtNode>,
 }
 
-impl MirBlock {
-    pub fn instructions_ranged(
-        &self,
-        range: impl RangeBounds<MirInstructionIdx>,
-    ) -> impl DoubleEndedIterator<Item = MirInstructionIdx> + 'static {
-        let start = match range.start_bound() {
-            Bound::Included(v) => v.0,
-            Bound::Excluded(v) => v.0 + 1,
-            Bound::Unbounded => 0,
+#[derive(Debug, Clone)]
+struct MirBlockNode {
+    predecessors: SmallVec<[MirBlockLink; 2]>,
+    successors: SmallVec<[MirBlockLink; 2]>,
+    first_stmt: Option<MirStmtIdx>,
+    last_stmt: Option<MirStmtIdx>,
+    terminator: Option<MirTerminator>,
+}
+
+#[derive(Debug, Clone)]
+struct MirStmtNode {
+    block: Option<MirBlockIdx>,
+    prev_stmt: Option<MirStmtIdx>,
+    next_stmt: Option<MirStmtIdx>,
+    stmt: Option<MirStmt>,
+}
+
+impl MirBodyCfg {
+    pub fn create_block(&mut self) -> MirBlockIdx {
+        self.blocks.insert(MirBlockNode {
+            predecessors: SmallVec::new(),
+            successors: SmallVec::new(),
+            first_stmt: None,
+            last_stmt: None,
+            terminator: None,
+        })
+    }
+
+    pub fn create_block_with_terminator(&mut self, terminator: MirTerminator) -> MirBlockIdx {
+        let idx = self.create_block();
+        self.init_terminator(idx, terminator);
+        idx
+    }
+
+    pub fn create_stmt(&mut self) -> MirStmtIdx {
+        self.stmts.insert(MirStmtNode {
+            block: None,
+            prev_stmt: None,
+            next_stmt: None,
+            stmt: None,
+        })
+    }
+
+    pub fn push_stmt(&mut self, block: MirBlockIdx, stmt: MirStmt) -> MirStmtIdx {
+        let idx = self.create_stmt();
+        self.move_stmt_before(idx, MirLocationBefore::Terminator(block));
+        self.init_stmt(idx, stmt);
+        idx
+    }
+
+    pub fn move_stmt_after(&mut self, idx: MirStmtIdx, after: MirLocationAfter) {
+        self.unlink_mir_stmt(idx);
+
+        match after {
+            MirLocationAfter::BlockStart(block) => {
+                self.stmts[idx].block = Some(block);
+
+                let old_first_stmt = self.blocks[block].first_stmt.replace(idx);
+
+                if old_first_stmt.is_some() {
+                    self.stmts[idx].next_stmt = old_first_stmt;
+                } else {
+                    self.blocks[block].last_stmt = Some(idx);
+                }
+            }
+            MirLocationAfter::Stmt(after) => {
+                let block = self.stmts[after]
+                    .block
+                    .expect("cannot relate statements outside of a basic block");
+
+                self.stmts[idx].block = Some(block);
+
+                let old_next_stmt = self.stmts[after].next_stmt.replace(idx);
+
+                if old_next_stmt.is_some() {
+                    self.stmts[idx].next_stmt = old_next_stmt;
+                } else {
+                    self.blocks[block].last_stmt = Some(idx);
+                }
+            }
+        }
+    }
+
+    pub fn move_stmt_before(&mut self, idx: MirStmtIdx, before: MirLocationBefore) {
+        self.unlink_mir_stmt(idx);
+
+        match before {
+            MirLocationBefore::Terminator(block) => {
+                self.stmts[idx].block = Some(block);
+
+                let old_last_stmt = self.blocks[block].last_stmt.replace(idx);
+
+                if old_last_stmt.is_some() {
+                    self.stmts[idx].prev_stmt = old_last_stmt;
+                } else {
+                    self.blocks[block].first_stmt = Some(idx);
+                }
+            }
+            MirLocationBefore::Stmt(before) => {
+                let block = self.stmts[before]
+                    .block
+                    .expect("cannot relate statements outside of a basic block");
+
+                self.stmts[idx].block = Some(block);
+
+                let old_prev_stmt = self.stmts[before].prev_stmt.replace(idx);
+
+                if old_prev_stmt.is_some() {
+                    self.stmts[idx].prev_stmt = old_prev_stmt;
+                } else {
+                    self.blocks[block].first_stmt = Some(idx);
+                }
+            }
+        }
+    }
+
+    pub fn unlink_mir_stmt(&mut self, idx: MirStmtIdx) {
+        let Some(block) = self.stmts[idx].block.take() else {
+            return;
         };
 
-        let end = match range.end_bound() {
-            Bound::Included(v) => v.0 + 1,
-            Bound::Excluded(v) => v.0,
-            Bound::Unbounded => self.stmts.len() + 1,
-        };
+        let prev_stmt = self.stmts[idx].prev_stmt.take();
+        let next_stmt = self.stmts[idx].next_stmt.take();
 
-        (start..end).map(MirInstructionIdx)
-    }
-
-    pub fn instructions(&self) -> impl DoubleEndedIterator<Item = MirInstructionIdx> + 'static {
-        self.instructions_ranged(..)
-    }
-
-    pub fn terminator_idx(&self) -> MirInstructionIdx {
-        MirInstructionIdx(self.stmts.len())
-    }
-
-    pub fn lookup(&self, idx: MirInstructionIdx) -> MirInstructionRef<'_> {
-        if idx.0 == self.stmts.len() {
-            MirInstructionRef::Terminator(&self.terminator)
+        if let Some(prev_stmt) = prev_stmt {
+            self.stmts[prev_stmt].next_stmt = next_stmt;
         } else {
-            MirInstructionRef::Stmt(&self.stmts[idx.0])
+            self.blocks[block].first_stmt = next_stmt;
+        }
+
+        if let Some(next_stmt) = next_stmt {
+            self.stmts[next_stmt].prev_stmt = prev_stmt;
+        } else {
+            self.blocks[block].last_stmt = prev_stmt;
         }
     }
 
-    pub fn successors(&self) -> &[MirBlockIdx] {
-        self.terminator.successors()
+    pub fn blocks(&self) -> impl ExactSizeIterator<Item = MirBlockIdx> {
+        self.blocks.keys()
     }
 
-    pub fn predecessors(&self) -> &[MirBlockIdx] {
-        &self.predecessors
+    pub fn block_successors(&self, idx: MirBlockIdx) -> &[MirBlockLink] {
+        &self.blocks[idx].successors
     }
 
-    pub fn prev(&self, direction: MirDirection) -> &[MirBlockIdx] {
-        self.next(direction.invert())
+    pub fn block_predecessors(&self, idx: MirBlockIdx) -> &[MirBlockLink] {
+        &self.blocks[idx].predecessors
     }
 
-    pub fn next(&self, direction: MirDirection) -> &[MirBlockIdx] {
-        match direction {
-            MirDirection::Forward => self.successors(),
-            MirDirection::Backward => self.predecessors(),
+    pub fn block_first(&self, idx: MirBlockIdx) -> Option<MirStmtIdx> {
+        self.blocks[idx].first_stmt
+    }
+
+    pub fn block_last(&self, idx: MirBlockIdx) -> Option<MirStmtIdx> {
+        self.blocks[idx].last_stmt
+    }
+
+    pub fn block_stmts_interactive(
+        &self,
+        idx: MirBlockIdx,
+        direction: MirBodyDirection,
+    ) -> MirStmtIterInteractive {
+        MirStmtIterInteractive::new(self, idx, direction)
+    }
+
+    pub fn block_stmts(&self, idx: MirBlockIdx, direction: MirBodyDirection) -> MirStmtIter<'_> {
+        MirStmtIter::new(self, idx, direction)
+    }
+
+    pub fn stmt_block(&self, idx: MirStmtIdx) -> Option<MirBlockIdx> {
+        self.stmts[idx].block
+    }
+
+    pub fn stmt_prev(&self, idx: MirStmtIdx) -> Option<MirStmtIdx> {
+        self.stmts[idx].prev_stmt
+    }
+
+    pub fn stmt_next(&self, idx: MirStmtIdx) -> Option<MirStmtIdx> {
+        self.stmts[idx].next_stmt
+    }
+
+    pub fn opt_stmt(&self, idx: MirStmtIdx) -> Option<&MirStmt> {
+        self.stmts[idx].stmt.as_ref()
+    }
+
+    pub fn opt_stmt_mut(&mut self, idx: MirStmtIdx) -> Option<&mut MirStmt> {
+        self.stmts[idx].stmt.as_mut()
+    }
+
+    pub fn stmt(&self, idx: MirStmtIdx) -> &MirStmt {
+        self.opt_stmt(idx).expect("statement not initialized")
+    }
+
+    pub fn stmt_mut(&mut self, idx: MirStmtIdx) -> &mut MirStmt {
+        self.opt_stmt_mut(idx).expect("statement not initialized")
+    }
+
+    pub fn set_stmt(&mut self, idx: MirStmtIdx, stmt: Option<MirStmt>) {
+        self.stmts[idx].stmt = stmt;
+    }
+
+    pub fn init_stmt(&mut self, idx: MirStmtIdx, stmt: MirStmt) {
+        assert!(self.opt_stmt(idx).is_none());
+        self.set_stmt(idx, Some(stmt));
+    }
+
+    pub fn opt_terminator(&self, idx: MirBlockIdx) -> Option<&MirTerminator> {
+        self.blocks[idx].terminator.as_ref()
+    }
+
+    pub fn opt_terminator_mut(&mut self, idx: MirBlockIdx) -> Option<&mut MirTerminator> {
+        self.blocks[idx].terminator.as_mut()
+    }
+
+    pub fn terminator(&self, idx: MirBlockIdx) -> &MirTerminator {
+        self.opt_terminator(idx)
+            .expect("terminator not initialized")
+    }
+
+    pub fn terminator_mut(&mut self, idx: MirBlockIdx) -> &mut MirTerminator {
+        self.opt_terminator_mut(idx)
+            .expect("terminator not initialized")
+    }
+
+    pub fn set_terminator(&mut self, idx: MirBlockIdx, terminator: Option<MirTerminator>) {
+        let new_successors = terminator.as_ref().map_or_default(|v| v.successors());
+
+        // Validate successors
+        {
+            let mut check = new_successors.clone();
+            check.sort_unstable();
+
+            for &a in &check {
+                assert!(a != idx);
+            }
+
+            for [a, b] in check.array_windows() {
+                assert!(a != b, "terminators cannot have duplicate successors");
+            }
         }
+
+        // Unlink from existing successors' predecessor lists.
+        for MirBlockLink {
+            target: successor,
+            at_idx: remove_at_idx,
+        } in mem::take(&mut self.blocks[idx].successors)
+        {
+            let Some(successor) = self.blocks.get_mut(successor) else {
+                continue;
+            };
+
+            successor.predecessors.swap_remove(remove_at_idx);
+
+            if let Some(&patched) = successor.predecessors.get(remove_at_idx) {
+                self.blocks[patched.target].successors[patched.at_idx].at_idx = remove_at_idx;
+            }
+        }
+
+        // Register into new successors' predecessor lists.
+        let new_successors = new_successors
+            .into_iter()
+            .enumerate()
+            .map(|(back_at_idx, successor)| {
+                let successor_data = &mut self.blocks[successor];
+
+                let fwd_at_idx = successor_data.predecessors.len();
+
+                successor_data.predecessors.push(MirBlockLink {
+                    target: successor,
+                    at_idx: back_at_idx,
+                });
+
+                MirBlockLink {
+                    target: idx,
+                    at_idx: fwd_at_idx,
+                }
+            })
+            .collect::<SmallVec<[_; 2]>>();
+
+        // Update self.
+        self.blocks[idx].terminator = terminator;
+        self.blocks[idx].successors = new_successors;
+    }
+
+    pub fn init_terminator(&mut self, idx: MirBlockIdx, terminator: MirTerminator) {
+        assert!(self.opt_terminator(idx).is_none());
+        self.set_terminator(idx, Some(terminator));
     }
 }
 
 #[derive(Debug, Clone)]
+pub struct MirStmtIterInteractive {
+    direction: MirBodyDirection,
+    next: Option<MirStmtIdx>,
+}
+
+impl MirStmtIterInteractive {
+    pub fn new(cfg: &MirBodyCfg, block: MirBlockIdx, direction: MirBodyDirection) -> Self {
+        Self {
+            direction,
+            next: match direction {
+                MirBodyDirection::Forwards => cfg.block_first(block),
+                MirBodyDirection::Backwards => cfg.block_last(block),
+            },
+        }
+    }
+
+    pub fn next(&mut self, cfg: &MirBodyCfg) -> Option<MirStmtIdx> {
+        let curr = self.next?;
+
+        self.next = match self.direction {
+            MirBodyDirection::Forwards => cfg.stmt_next(curr),
+            MirBodyDirection::Backwards => cfg.stmt_prev(curr),
+        };
+
+        Some(curr)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MirStmtIter<'a> {
+    cfg: &'a MirBodyCfg,
+    iter: MirStmtIterInteractive,
+}
+
+impl<'a> MirStmtIter<'a> {
+    pub fn new(cfg: &'a MirBodyCfg, block: MirBlockIdx, direction: MirBodyDirection) -> Self {
+        Self {
+            cfg,
+            iter: MirStmtIterInteractive::new(cfg, block, direction),
+        }
+    }
+}
+
+impl Iterator for MirStmtIter<'_> {
+    type Item = MirStmtIdx;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next(self.cfg)
+    }
+}
+
+// === Definitions === //
+
+#[derive(Debug, Clone)]
 pub struct MirStmt {
-    pub span: Span,
+    pub span: MirStmtSourceInfo,
     pub kind: MirStmtKind,
 }
 
 #[derive(Debug, Clone)]
-pub enum MirStmtKind {
-    Assign(Box<(MirPlace, MirAssignRvalue)>),
-    Discard(MirOperand),
+pub enum MirStmtSourceInfo {
+    Simple(Span),
+    Break,
+    Local,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
+pub enum MirStmtKind {
+    StorageLive(MirLocalIdx),
+    StorageDead(MirLocalIdx),
+    Assign(Box<(MirPlace, MirAssignRvalue)>),
+    DiscardWithoutDrop(MirAssignRvalue),
+}
+
+#[derive(Debug, Clone)]
 pub enum MirTerminator {
     Goto(MirBlockIdx),
+    SwitchInt {
+        discr: MirOperand,
+        constants: Box<[u64]>,
+        targets: Box<[MirBlockIdx]>,
+    },
     Call {
         callee: MirOperand,
         args: Box<[MirOperand]>,
         destination: MirPlace,
         target: MirBlockIdx,
+        unwind: MirUnwindBehavior,
     },
-    Drop {
+    EnsureDropped {
         place: MirPlace,
         target: MirBlockIdx,
+        unwind: MirUnwindBehavior,
     },
-    Switch {
-        scrutinee: MirPlace,
-        targets: Box<[MirBlockIdx]>,
+    CallDrop {
+        place: MirPlace,
+        target: MirBlockIdx,
+        unwind: MirUnwindBehavior,
+        drop_flag: Option<MirPlace>,
     },
-    Return,
     Unreachable,
-    #[default]
-    Placeholder,
+    Return,
+    UnwindResume,
 }
 
 impl MirTerminator {
-    pub fn successors(&self) -> &[MirBlockIdx] {
-        match self {
-            MirTerminator::Goto(target)
-            | MirTerminator::Call {
+    pub fn successors(&self) -> SmallVec<[MirBlockIdx; 2]> {
+        match *self {
+            MirTerminator::Goto(target) => SmallVec::from_iter([target]),
+            MirTerminator::Call {
                 callee: _,
                 args: _,
                 destination: _,
                 target,
+                unwind,
             }
-            | MirTerminator::Drop { place: _, target } => slice::from_ref(target),
-            MirTerminator::Switch {
-                scrutinee: _,
-                targets,
-            } => targets,
-            MirTerminator::Return | MirTerminator::Unreachable | MirTerminator::Placeholder => &[],
+            | MirTerminator::EnsureDropped {
+                place: _,
+                target,
+                unwind,
+            } => SmallVec::from_iter([target].into_iter().chain(unwind.block())),
+            MirTerminator::CallDrop {
+                place: _,
+                target,
+                unwind,
+                drop_flag: _,
+            } => SmallVec::from_iter([target].into_iter().chain(unwind.block())),
+            MirTerminator::SwitchInt {
+                discr: _,
+                constants: _,
+                ref targets,
+            } => SmallVec::from_iter(targets.iter().copied()),
+            MirTerminator::UnwindResume | MirTerminator::Return | MirTerminator::Unreachable => {
+                SmallVec::new()
+            }
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirUnwindBehavior {
+    Continue(MirBlockIdx),
+    DoublePanic,
+}
+
+impl MirUnwindBehavior {
+    pub fn block(self) -> Option<MirBlockIdx> {
+        match self {
+            MirUnwindBehavior::Continue(idx) => Some(idx),
+            MirUnwindBehavior::DoublePanic => None,
         }
     }
 }
@@ -219,23 +547,81 @@ pub struct MirPlace {
     pub projections: MirPlaceElemList,
 }
 
+impl MirPlace {
+    pub fn new(
+        tcx: &TyCtxt,
+        local: MirLocalIdx,
+        projections: impl IntoIterator<Item = MirPlaceElem>,
+    ) -> Self {
+        Self {
+            local,
+            projections: tcx.intern_list(&projections.into_iter().collect::<Vec<_>>()),
+        }
+    }
+
+    pub fn extend(self, tcx: &TyCtxt, proj: impl IntoIterator<Item = MirPlaceElem>) -> Self {
+        let s = &tcx.session;
+
+        Self {
+            local: self.local,
+            projections: tcx.intern_list(
+                &self
+                    .projections
+                    .r(s)
+                    .iter()
+                    .copied()
+                    .chain(proj)
+                    .collect::<Vec<_>>(),
+            ),
+        }
+    }
+}
+
 pub type MirPlaceElemList = Intern<[MirPlaceElem]>;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum MirPlaceElem {
     DerefPtr,
+    Field(ResolvedFieldIdx),
 }
 
 #[derive(Debug, Clone)]
 pub enum MirAssignRvalue {
+    UnreachablePlaceholder,
     Tuple(Box<[MirOperand]>),
+    Adt(Obj<AdtCtor>, Box<[MirOperand]>),
     Use(MirOperand),
+    MoveOutRef {
+        can_move_from: Vec<MirPlace>,
+        ref_place: MirPlace,
+    },
     Ref(Mutability, MirPlace),
-    Zst(Ty),
-    Literal(Ty, AstLit),
-    BinaryOp(AstBinOpKind, Box<(MirOperand, MirOperand)>),
+    Zst(SigTy),
+    Literal(SigTy, AstLit),
+    BinaryOp(MirStraightBinOpKind, Box<(MirOperand, MirOperand)>),
     UnaryOp(AstUnOpKind, MirOperand),
     Discriminant(MirPlace),
+    DynUse(DynSiteIdx, MirOperand),
+    Error(ErrorGuaranteed),
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirOperandMode {
+    Copy,
+    Move,
+}
+
+impl MirOperandMode {
+    pub fn is_copy(self) -> bool {
+        self == Self::Copy
+    }
+
+    pub fn to_operand(self, place: MirPlace) -> MirOperand {
+        match self {
+            MirOperandMode::Copy => MirOperand::Copy(place),
+            MirOperandMode::Move => MirOperand::Move(place),
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -249,5 +635,100 @@ impl MirOperand {
         let (MirOperand::Copy(place) | MirOperand::Move(place)) = self;
 
         place
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirBinOpKind {
+    Straight(MirStraightBinOpKind),
+    Logical(MirLogicalBinOpKind),
+}
+
+impl MirBinOpKind {
+    pub fn from_ast(op: AstBinOpKind) -> Self {
+        use MirBinOpKind::*;
+        use MirLogicalBinOpKind::*;
+        use MirStraightBinOpKind::*;
+
+        match op {
+            AstBinOpKind::Add => Straight(Add),
+            AstBinOpKind::Sub => Straight(Sub),
+            AstBinOpKind::Mul => Straight(Mul),
+            AstBinOpKind::Div => Straight(Div),
+            AstBinOpKind::Rem => Straight(Rem),
+            AstBinOpKind::BitXor => Straight(BitXor),
+            AstBinOpKind::BitAnd => Straight(BitAnd),
+            AstBinOpKind::BitOr => Straight(BitOr),
+            AstBinOpKind::Shl => Straight(Shl),
+            AstBinOpKind::Shr => Straight(Shr),
+            AstBinOpKind::Eq => Straight(Eq),
+            AstBinOpKind::Lt => Straight(Lt),
+            AstBinOpKind::Le => Straight(Le),
+            AstBinOpKind::Ne => Straight(Ne),
+            AstBinOpKind::Ge => Straight(Ge),
+            AstBinOpKind::Gt => Straight(Gt),
+            AstBinOpKind::And => Logical(And),
+            AstBinOpKind::Or => Logical(Or),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirStraightBinOpKind {
+    /// The `+` operator (addition)
+    Add,
+    /// The `-` operator (subtraction)
+    Sub,
+    /// The `*` operator (multiplication)
+    Mul,
+    /// The `/` operator (division)
+    Div,
+    /// The `%` operator (modulus)
+    Rem,
+    /// The `^` operator (bitwise xor)
+    BitXor,
+    /// The `&` operator (bitwise and)
+    BitAnd,
+    /// The `|` operator (bitwise or)
+    BitOr,
+    /// The `<<` operator (shift left)
+    Shl,
+    /// The `>>` operator (shift right)
+    Shr,
+    /// The `==` operator (equality)
+    Eq,
+    /// The `<` operator (less than)
+    Lt,
+    /// The `<=` operator (less than or equal to)
+    Le,
+    /// The `!=` operator (not equal to)
+    Ne,
+    /// The `>=` operator (greater than or equal to)
+    Ge,
+    /// The `>` operator (greater than)
+    Gt,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirLogicalBinOpKind {
+    /// The `&&` operator (logical and)
+    And,
+    /// The `||` operator (logical or)
+    Or,
+}
+
+impl MirLogicalBinOpKind {
+    pub fn short_circuit_if(self) -> bool {
+        match self {
+            MirLogicalBinOpKind::And => false,
+            MirLogicalBinOpKind::Or => true,
+        }
+    }
+
+    pub fn short_circuit_value(self) -> bool {
+        match self {
+            MirLogicalBinOpKind::And => false,
+            MirLogicalBinOpKind::Or => true,
+        }
     }
 }

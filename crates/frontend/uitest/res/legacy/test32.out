@@ -1,16 +1,23 @@
-error: universal type `{HRTB universal capture #2: crate::Projector}` not covered by trait `crate::Helper<<{HRTB universal capture #2: crate::Projector} as crate::Projector>::Out>`
-   ┌─ test32.fir:64:13
+error: 
+- span: test32.fir:83:18-24
+  cannot unify
+  LHS: str
+  RHS: ?(73) _
+  mode: Equate
+    - structural error
+        - bad infer restriction solid
+          LHS: f32 | f64
+          RHS: str
+
+error: type hints required for this type
+   ┌─ test32.fir:74:5
    │
-64 │ fn uh_oh<Q: for<T: Projector> Helper<<T as Projector>::Out>>(v: Q) {
-   │             ^^^^^^^^^^^^^^^^^
+74 │     Helper::<(), _>::meow(None, true);
+   │     ^^^^^^^^^^^^^^^^^^^^^
 
-note: Origin(
-    ImportWfHrtb {
-        binder_span: test32.fir:64:13-30,
-    },
-)
-
-error: universal elab helper went uninferred, good luck!
-
-error: universal elab helper went uninferred, good luck!
+error: type hints required for this type
+   ┌─ test32.fir:74:5
+   │
+74 │     Helper::<(), _>::meow(None, true);
+   │     ^^^^^^^^^^^^^^^^^^^^^
 

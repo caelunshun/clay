@@ -6,11 +6,15 @@ use crate::{
     },
     parse::token::Ident,
     semantic::syntax::{
-        GenericBinder, HirExpr, HirPat, ImplItem, Item, SpannedTy, ThirExpr, TraitItem, Ty,
-        Visibility,
+        AdtCtor, AdtCtorFieldIdx, GenericBinder, HirExpr, HirPat, ImplItem, Item, SigTy, ThirBody,
+        TraitItem, Ty, Visibility,
     },
 };
-use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
+use derive_where::derive_where;
+use std::{
+    ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign},
+    slice,
+};
 
 // === FnItem === //
 
@@ -29,9 +33,9 @@ pub struct FnDef {
     pub generics: Obj<GenericBinder>,
     pub has_self_param: LateInit<bool>,
     pub args: LateInit<Obj<[FnArg]>>,
-    pub ret_ty: LateInit<SpannedTy>,
+    pub ret_ty: LateInit<SigTy>,
     pub hir_body: LateInit<Option<Obj<HirExpr>>>,
-    pub thir_body: LateInit<Option<Obj<ThirExpr>>>,
+    pub thir_body: LateInit<Option<ThirBody>>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -55,30 +59,23 @@ impl FnDefOwner {
 pub struct FnArg {
     pub span: Span,
     pub pat: Obj<HirPat>,
-    pub ty: SpannedTy,
+    pub ty: SigTy,
 }
 
 // === Divergence === //
 
 #[derive(Debug, Copy, Clone)]
-#[must_use]
-pub struct TyAndDivergence {
-    pub ty: Ty,
-    pub divergence: Divergence,
+pub enum DivergenceJoin {
+    Sequential,
+    Choice,
 }
 
-impl TyAndDivergence {
-    pub const fn new(ty: Ty, divergence: Divergence) -> Self {
-        Self { ty, divergence }
-    }
-
-    pub fn ignore(self) {
-        // (empty)
-    }
-
-    pub fn and_do(self, divergence: &mut Divergence) -> Ty {
-        *divergence &= self.divergence;
-        self.ty
+impl DivergenceJoin {
+    pub fn default_divergence(self) -> Divergence {
+        match self {
+            DivergenceJoin::Sequential => Divergence::MayDiverge,
+            DivergenceJoin::Choice => Divergence::MustDiverge,
+        }
     }
 }
 
@@ -86,6 +83,20 @@ impl TyAndDivergence {
 pub enum Divergence {
     MustDiverge,
     MayDiverge,
+}
+
+impl Divergence {
+    #[must_use]
+    pub fn join(self, mode: DivergenceJoin, other: Divergence) -> Divergence {
+        match mode {
+            DivergenceJoin::Sequential => self & other,
+            DivergenceJoin::Choice => self | other,
+        }
+    }
+
+    pub fn join_assign(&mut self, mode: DivergenceJoin, other: Divergence) {
+        *self = self.join(mode, other);
+    }
 }
 
 impl BitOr for Divergence {
@@ -126,4 +137,136 @@ impl Divergence {
     pub fn must_diverge(self) -> bool {
         matches!(self, Self::MustDiverge)
     }
+}
+
+pub type TyAndDivergence = DivergenceAnd<Ty>;
+
+#[derive(Debug, Copy, Clone)]
+#[must_use]
+pub struct DivergenceAnd<T> {
+    pub value: T,
+    pub divergence: Divergence,
+}
+
+impl<T> DivergenceAnd<T> {
+    pub const fn new(value: T, divergence: Divergence) -> Self {
+        Self { value, divergence }
+    }
+
+    pub fn ignore_divergence(self) -> T {
+        self.value
+    }
+
+    pub fn and_do(self, divergence: &mut Divergence) -> T {
+        *divergence &= self.divergence;
+        self.value
+    }
+
+    pub fn or_do(self, divergence: &mut Divergence) -> T {
+        *divergence |= self.divergence;
+        self.value
+    }
+
+    pub fn join(self, mode: DivergenceJoin, divergence: &mut Divergence) -> T {
+        divergence.join_assign(mode, self.divergence);
+        self.value
+    }
+}
+
+// === PatListFrontAndTail === //
+
+#[derive(Debug)]
+#[derive_where(Copy, Clone)]
+pub struct PatListFrontAndTail<T: 'static> {
+    pub front: Obj<[Obj<T>]>,
+    pub tail: Option<Obj<[Obj<T>]>>,
+}
+
+impl<T: 'static> PatListFrontAndTail<T> {
+    pub fn len(self, s: &Session) -> PatListFrontAndTailLen {
+        if let Some(tail) = self.tail {
+            PatListFrontAndTailLen::AtLeast(self.front.r(s).len() as u32 + tail.r(s).len() as u32)
+        } else {
+            PatListFrontAndTailLen::Exactly(self.front.r(s).len() as u32)
+        }
+    }
+
+    pub fn all_elems<'s>(self, s: &'s Session) -> impl 's + Iterator<Item = Obj<T>> {
+        self.front
+            .r(s)
+            .iter()
+            .chain(self.tail.into_iter().flat_map(|v| v.r(s).iter()))
+            .copied()
+    }
+
+    pub fn zip<'s, I>(self, iter: I, s: &'s Session) -> PatListFrontAndTailIter<'s, T, I::IntoIter>
+    where
+        I: IntoIterator<IntoIter: DoubleEndedIterator>,
+    {
+        PatListFrontAndTailIter {
+            front: self.front.r(s).iter(),
+            back: match self.tail {
+                Some(tail) => tail.r(s).iter(),
+                None => [].iter(),
+            },
+            iter: iter.into_iter(),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum PatListFrontAndTailLen {
+    Exactly(u32),
+    AtLeast(u32),
+}
+
+pub struct PatListFrontAndTailIter<'s, T, V>
+where
+    T: 'static,
+    V: DoubleEndedIterator,
+{
+    front: slice::Iter<'s, Obj<T>>,
+    back: slice::Iter<'s, Obj<T>>,
+    iter: V,
+}
+
+impl<T, V> ExactSizeIterator for PatListFrontAndTailIter<'_, T, V>
+where
+    T: 'static,
+    V: DoubleEndedIterator,
+{
+}
+
+impl<T, V> Iterator for PatListFrontAndTailIter<'_, T, V>
+where
+    T: 'static,
+    V: DoubleEndedIterator,
+{
+    type Item = (Obj<T>, V::Item);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(&front) = self.front.next() {
+            return Some((front, self.iter.next().expect("not enough elements")));
+        }
+
+        if let Some(&back) = self.back.next_back() {
+            return Some((back, self.iter.next_back().expect("not enough elements")));
+        }
+
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = self.front.len() + self.back.len();
+
+        (size, Some(size))
+    }
+}
+
+// === FieldIdx === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum ResolvedFieldIdx {
+    Tuple(u32),
+    Adt(Obj<AdtCtor>, AdtCtorFieldIdx),
 }

@@ -1,6 +1,0 @@
-error: cannot force `'_` to outlive `'_` without requiring universal `'_` to outlive `'_`
-  ┌─ test28.fir:1:1
-  │
-1 │ // Here's how our borrow-checker reasons about this code.
-  │ ^
-

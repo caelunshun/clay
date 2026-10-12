@@ -1,0 +1,43 @@
+error: 
+- bad trait spec
+  span: unspec_spec_wf.fir:13:20-29
+    - binder param WF error
+        - idx: 0
+            - uninstantiated trait not implemented
+              LHS: u32
+              RHS: case1::Thump<u(1) <u(3) [clause WF helper] as case1::Meow<u32>>::Other>
+              RHS instance: case1::Thump<u(1) <u(3) [clause WF helper] as case1::Meow<u32>>::Other>
+              spec not met:
+                - instantiated trait not implemented
+                  LHS: u32
+                  RHS: case1::Thump<u(1) <u(3) [clause WF helper] as case1::Meow<u32>>::Other>
+                    - no suitable impl met
+
+error: 
+- no reflexive impl
+  span: unspec_spec_wf.fir:28:20-29
+    - trait spec resolution error
+      self ty: u(3) [clause WF helper]
+      spec: case2::Meow<u32>
+        - instantiated trait not implemented
+          LHS: u(3) [clause WF helper]
+          LHS elaboration:
+            - clauses:
+                - ready
+                  binder: case2::Meow<u32>
+          RHS: case2::Meow<u32, Other = u32>
+            - inherent unsatisfied
+              LHS: case2::Meow<u32>
+              RHS: case2::Meow<u32, Other = u32>
+              LHS instantiated: case2::Meow<u32>
+              Culprits:
+                - idx: 1
+                    - cannot unify
+                      LHS: u(1) <u(3) [clause WF helper] as case2::Meow<u32>>::Other
+                      RHS: u32
+                      mode: Equate
+                        - structural error
+                            - type mismatch
+                              LHS: u(1) <u(3) [clause WF helper] as case2::Meow<u32>>::Other
+                              RHS: u32
+

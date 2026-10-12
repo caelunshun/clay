@@ -12,10 +12,12 @@ pub mod std {
 trait Trait<T> {}
 
 fn foo() -> &'gc dyn for<T> Trait<(T,)> {
+    // FIXME: adjust dyn coercion
     loop {}
 }
 
 fn bar<V>(v: V) -> &'gc dyn for<T> Trait<(V,)> {
+    // FIXME: adjust dyn coercion
     loop {}
 }
 

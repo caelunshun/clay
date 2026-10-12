@@ -1,0 +1,72 @@
+error: identifier `a` is bound more than once in the same pattern
+  ┌─ reused_name.fir:1:17
+  │
+1 │ fn foo(a: u32, (a, b): (u32, i32)) {
+  │                 ^
+
+note: identifier was first bound here
+  ┌─ reused_name.fir:1:8
+  │
+1 │ fn foo(a: u32, (a, b): (u32, i32)) {
+  │        ^
+
+error: identifier `a` is bound more than once in the same pattern
+  ┌─ reused_name.fir:2:16
+  │
+2 │     let (a, b, a) = (a, b, a);
+  │                ^
+
+note: identifier was first bound here
+  ┌─ reused_name.fir:2:10
+  │
+2 │     let (a, b, a) = (a, b, a);
+  │          ^
+
+error: generic name used more than once
+  ┌─ reused_name.fir:5:24
+  │
+5 │ pub trait Meow<'a, 'b, 'a, Foo, Bar, Baz, Foo> {
+  │                        ^^
+
+note: name previously used here
+  ┌─ reused_name.fir:5:16
+  │
+5 │ pub trait Meow<'a, 'b, 'a, Foo, Bar, Baz, Foo> {
+  │                ^^
+
+error: generic name used more than once
+  ┌─ reused_name.fir:5:43
+  │
+5 │ pub trait Meow<'a, 'b, 'a, Foo, Bar, Baz, Foo> {
+  │                                           ^^^
+
+note: name previously used here
+  ┌─ reused_name.fir:5:28
+  │
+5 │ pub trait Meow<'a, 'b, 'a, Foo, Bar, Baz, Foo> {
+  │                            ^^^
+
+error: generic name used more than once
+  ┌─ reused_name.fir:6:10
+  │
+6 │     type Bar;
+  │          ^^^
+
+note: name previously used here
+  ┌─ reused_name.fir:5:33
+  │
+5 │ pub trait Meow<'a, 'b, 'a, Foo, Bar, Baz, Foo> {
+  │                                 ^^^
+
+error: generic name used more than once
+  ┌─ reused_name.fir:7:10
+  │
+7 │     type Baz;
+  │          ^^^
+
+note: name previously used here
+  ┌─ reused_name.fir:5:38
+  │
+5 │ pub trait Meow<'a, 'b, 'a, Foo, Bar, Baz, Foo> {
+  │                                      ^^^
+

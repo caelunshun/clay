@@ -1,0 +1,30 @@
+error: expected named struct or enum variant, got function `crate::foo`
+   ┌─ pattern.fir:13:6
+   │
+13 │     (foo(),) = (0,);
+   │      ^^^
+
+error: tuple constructor for struct `crate::pip::Meow` is not visible to function `crate::main` because field `1` is inaccessible
+   ┌─ pattern.fir:16:19
+   │
+16 │     Meow(a, ..) = Meow(1, 1);
+   │                   ^^^^
+
+error: field `1` of struct `crate::pip::Meow` is not visible to function `crate::main`
+   ┌─ pattern.fir:17:13
+   │
+17 │     Meow(a, _) = Meow(1, 1);
+   │             ^
+
+error: tuple constructor for struct `crate::pip::Meow` is not visible to function `crate::main` because field `1` is inaccessible
+   ┌─ pattern.fir:17:18
+   │
+17 │     Meow(a, _) = Meow(1, 1);
+   │                  ^^^^
+
+error: struct `crate::main::Mew` is missing field: b
+   ┌─ pattern.fir:23:5
+   │
+23 │     Mew { a } = Mew { a: 1, b: 0 };
+   │     ^^^^^^^^^
+

@@ -302,8 +302,7 @@ impl IntraItemLowerCtxt<'_> {
 
                         match locals.resolve(name, binding_mode.local_muta.as_muta(), s) {
                             Ok(local) => {
-                                self.func_local_names
-                                    .define_force_shadow(name.as_symbol(), local);
+                                self.func_local_names.define(name.as_symbol(), local);
 
                                 HirPatKind::Binding(
                                     binding_mode.by_ref,
@@ -389,7 +388,7 @@ impl IntraItemLowerCtxt<'_> {
                     s,
                 );
 
-                HirPatKind::AdtNamed(ctor, fields)
+                HirPatKind::AdtNamed(ctor, fields, *rest)
             }
             AstPatKind::PathAndParen(path, children) => 'pat: {
                 let res = match self.resolve_expr_path(path).fail_on_unbound_local() {

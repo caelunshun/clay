@@ -1,0 +1,12 @@
+error: cannot use integer suffix for floating-point literal
+  ┌─ int_suffix.fir:3:8
+  │
+3 │     2.0i32;
+  │        ^^^
+
+error: octal float literal is not supported
+  ┌─ int_suffix.fir:5:8
+  │
+5 │     0o2f32;
+  │        ^^^
+

@@ -1,0 +1,514 @@
+use crate::{
+    base::{arena::Obj, syntax::Span},
+    semantic::{
+        analysis::borrowck::build::{driver::MirFromThirCtx, scope::MirBuilderScopeIdx},
+        syntax::{
+            MirAssignRvalue, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirStmt, MirStmtKind,
+            MirStmtSourceInfo, Mutability, ResolvedFieldIdx, SigRe, SigReKind, SigTyInner,
+            SigTyKind, ThirExpr, ThirLetStmt, ThirLocal, ThirMatchArm, ThirPat, ThirPatKind,
+        },
+    },
+    utils::hash::FxHashMap,
+};
+
+#[derive(Debug, Copy, Clone)]
+struct PatLowerScopes {
+    pub local_scope: MirBuilderScopeIdx,
+    pub match_logic: MirBuilderScopeIdx,
+    pub break_on_accept: MirBuilderScopeIdx,
+    pub break_on_reject: MirBuilderScopeIdx,
+}
+
+type LateUseProxyMap = FxHashMap<MirLocalIdx, LateUseProxyEntry>;
+
+struct LateUseProxyEntry {
+    ref_place: MirPlace,
+    can_move_from: Option<Vec<MirPlace>>,
+}
+
+impl<'tcx> MirFromThirCtx<'tcx> {
+    pub fn lower_fn_arg(
+        &mut self,
+        span: Span,
+        scope: MirBuilderScopeIdx,
+        arg_pat: Obj<ThirPat>,
+        arg_value: MirPlace,
+    ) {
+        let reject_scope = self.lower_let_stmt_common(span, scope, arg_pat, arg_value);
+
+        self.builder.push_unreachable(reject_scope);
+    }
+
+    pub fn lower_let_stmt(&mut self, scope: MirBuilderScopeIdx, stmt: Obj<ThirLetStmt>) {
+        let s = self.session();
+
+        let ThirLetStmt {
+            span: _,
+            pat,
+            init,
+            else_clause,
+        } = *stmt.r(s);
+
+        let Some(init) = init else {
+            assert!(else_clause.is_none());
+            self.lower_pat_names(scope, pat);
+
+            return;
+        };
+
+        let init = self.lower_expr_place(scope, init, None);
+
+        let reject_scope = self.lower_let_stmt_common(stmt.r(s).span, scope, pat, init);
+
+        if let Some(else_clause) = else_clause {
+            self.lower_block(reject_scope, else_clause, None);
+        }
+
+        self.builder.push_unreachable(reject_scope);
+    }
+
+    fn lower_let_stmt_common(
+        &mut self,
+        span: Span,
+        scope: MirBuilderScopeIdx,
+        pat: Obj<ThirPat>,
+        scrutinee: MirPlace,
+    ) -> MirBuilderScopeIdx {
+        // Constructs the following nested scopes...
+        //
+        // ```
+        // 'break_on_accept: {
+        //     'break_on_reject: {
+        //         pattern match;
+        //         break 'break_on_accept or 'break_on_reject;
+        //     }
+        //
+        //     else block;
+        // }
+        //
+        // continuing logic;
+        // ```
+
+        let break_on_accept = self.builder.push_scope(scope);
+        let break_on_reject = self.builder.push_scope(break_on_accept);
+
+        let mut late_use_proxies = FxHashMap::default();
+
+        self.lower_pat(
+            &mut late_use_proxies,
+            PatLowerScopes {
+                local_scope: scope,
+                match_logic: break_on_reject,
+                break_on_accept,
+                break_on_reject,
+            },
+            pat,
+            scrutinee,
+        );
+
+        self.materialize_late_use_proxies(span, scope, late_use_proxies);
+
+        break_on_accept
+    }
+
+    pub fn lower_match(
+        &mut self,
+        scope: MirBuilderScopeIdx,
+        scrutinee: Obj<ThirExpr>,
+        arms: Obj<[ThirMatchArm]>,
+        out_place: MirPlace,
+    ) {
+        let s = self.session();
+        let match_scope = self.builder.push_scope(scope);
+
+        // If our scrutinee is an owned enum, we will take ownership of it here. This allows us to
+        // safely invoke guards when matching on enum variants.
+        let scrutinee = self.lower_expr_place(match_scope, scrutinee, None);
+
+        for &arm in arms.r(s) {
+            let ThirMatchArm {
+                span,
+                pat,
+                guard,
+                body,
+            } = arm;
+
+            // Constructs the following nested scopes...
+            //
+            // ```
+            // 'match_scope: {
+            //     // Arm 1
+            //     'break_on_reject: {
+            //         'break_on_accept: {
+            //              pattern match;
+            //              break 'break_on_accept or 'break_on_reject;
+            //         }
+            //
+            //         if !guard {
+            //             break 'break_on_reject;
+            //         }
+            //
+            //         body;
+            //         break 'match_scope;
+            //     }
+            //
+            //     // Arm 2
+            //     // ...
+            //
+            //     unreachable;
+            // }
+            // continuing logic;
+            // ```
+
+            let break_on_reject = self.builder.push_scope(match_scope);
+            let break_on_accept = self.builder.push_scope(break_on_reject);
+
+            let mut late_use_proxies = FxHashMap::default();
+
+            self.lower_pat(
+                &mut late_use_proxies,
+                PatLowerScopes {
+                    local_scope: match_scope,
+                    match_logic: break_on_reject,
+                    break_on_accept,
+                    break_on_reject,
+                },
+                pat,
+                scrutinee,
+            );
+
+            if let Some(guard) = guard {
+                let guard_scope = self.builder.push_scope(break_on_reject);
+
+                // TODO: introduce guard move proxies
+
+                let [truthy_scope, falsy_scope] = self.lower_if_expr(guard_scope, guard);
+                self.builder.push_break(truthy_scope, guard_scope);
+                self.builder.push_break(falsy_scope, break_on_reject);
+            }
+
+            self.materialize_late_use_proxies(span, break_on_reject, late_use_proxies);
+            self.lower_expr_place(break_on_reject, body, Some(out_place));
+            self.builder.push_break(break_on_reject, match_scope);
+        }
+
+        self.builder.push_unreachable(match_scope);
+    }
+
+    pub fn lower_let_expr(
+        &mut self,
+        break_if_falsy: MirBuilderScopeIdx,
+        pat: Obj<ThirPat>,
+        scrutinee: Obj<ThirExpr>,
+    ) {
+        let s = self.session();
+
+        // Constructs the following nested scopes...
+        //
+        // ```
+        // 'break_if_falsy: {
+        //     previous conditions;
+        //
+        //     'break_if_truthy: {
+        //         pattern matching
+        //         break 'break_if_truthy or 'break_if_falsy;
+        //     }
+        //
+        //     further conditions;
+        // }
+        // ```
+
+        let scrutinee = self.lower_expr_place(break_if_falsy, scrutinee, None);
+        let break_if_truthy = self.builder.push_scope(break_if_falsy);
+
+        let mut late_use_proxies = FxHashMap::default();
+
+        self.lower_pat(
+            &mut late_use_proxies,
+            PatLowerScopes {
+                local_scope: break_if_falsy,
+                match_logic: break_if_truthy,
+                break_on_accept: break_if_truthy,
+                break_on_reject: break_if_falsy,
+            },
+            pat,
+            scrutinee,
+        );
+
+        self.materialize_late_use_proxies(pat.r(s).span, break_if_falsy, late_use_proxies);
+    }
+
+    fn lower_pat_names(&mut self, local_scope: MirBuilderScopeIdx, pat: Obj<ThirPat>) {
+        let s = self.session();
+
+        match *pat.r(s).kind {
+            ThirPatKind::Hole | ThirPatKind::Error(_) => {
+                // (nothing defined)
+            }
+            ThirPatKind::Binding {
+                by_ref: _,
+                local,
+                and_bind,
+            } => {
+                _ = self.ensure_local_defined(local_scope, local);
+
+                if let Some(and_bind) = and_bind {
+                    self.lower_pat_names(local_scope, and_bind);
+                }
+            }
+            ThirPatKind::Deref(pat) => {
+                self.lower_pat_names(local_scope, pat);
+            }
+            ThirPatKind::Or(choices) => {
+                for &choice in choices.r(s) {
+                    self.lower_pat_names(local_scope, choice);
+                }
+            }
+            ThirPatKind::Slice(list) => {
+                for elem in list.all_elems(s) {
+                    self.lower_pat_names(local_scope, elem);
+                }
+            }
+            ThirPatKind::Tuple(list) => {
+                for elem in list.all_elems(s) {
+                    self.lower_pat_names(local_scope, elem);
+                }
+            }
+            ThirPatKind::Adt(_ctor, fields) => {
+                for field in fields.r(s) {
+                    self.lower_pat_names(local_scope, field.pat);
+                }
+            }
+        }
+    }
+
+    fn lower_pat(
+        &mut self,
+        late_use_proxies: &mut LateUseProxyMap,
+        scopes: PatLowerScopes,
+        pat: Obj<ThirPat>,
+        scrutinee: MirPlace,
+    ) {
+        let tcx = self.tcx();
+        let s = self.session();
+
+        match *pat.r(s).kind {
+            ThirPatKind::Hole => {
+                // (trivially accepted)
+            }
+            ThirPatKind::Binding {
+                by_ref,
+                local,
+                and_bind,
+            } => {
+                let mir_local = self.ensure_local_defined(scopes.local_scope, local);
+
+                let init_stmt = MirStmt {
+                    span: MirStmtSourceInfo::Simple(pat.r(s).span),
+                    kind: match by_ref {
+                        Some(muta) => MirStmtKind::Assign(Box::new((
+                            MirPlace::new(tcx, mir_local, []),
+                            MirAssignRvalue::Ref(muta, scrutinee),
+                        ))),
+                        None => {
+                            let late_use_proxy =
+                                late_use_proxies.entry(mir_local).or_insert_with(|| {
+                                    let span = local.r(s).ty.r(s).span;
+
+                                    let ref_local = self.builder.push_local(
+                                        scopes.local_scope,
+                                        Obj::new(
+                                            SigTyInner {
+                                                span,
+                                                kind: SigTyKind::Reference(
+                                                    SigRe {
+                                                        span,
+                                                        kind: SigReKind::Infer,
+                                                    },
+                                                    Mutability::Not,
+                                                    local.r(s).ty,
+                                                ),
+                                            },
+                                            s,
+                                        ),
+                                    );
+
+                                    LateUseProxyEntry {
+                                        ref_place: MirPlace::new(tcx, ref_local, []),
+                                        can_move_from: self
+                                            .builder
+                                            .operand_mode(local.r(s).ty)
+                                            .is_copy()
+                                            .then(Vec::new),
+                                    }
+                                });
+
+                            if let Some(can_move_from) = &mut late_use_proxy.can_move_from {
+                                can_move_from.push(scrutinee);
+                            }
+
+                            MirStmtKind::Assign(Box::new((
+                                late_use_proxy.ref_place,
+                                MirAssignRvalue::Ref(Mutability::Not, scrutinee),
+                            )))
+                        }
+                    },
+                };
+
+                self.builder.push_statement(scopes.match_logic, init_stmt);
+
+                if let Some(and_bind) = and_bind {
+                    self.lower_pat(late_use_proxies, scopes, and_bind, scrutinee);
+                }
+            }
+            ThirPatKind::Deref(pat) => {
+                self.lower_pat(
+                    late_use_proxies,
+                    scopes,
+                    pat,
+                    scrutinee.extend(tcx, [MirPlaceElem::DerefPtr]),
+                );
+            }
+            ThirPatKind::Or(opts) => {
+                self.lower_pat_or(
+                    late_use_proxies,
+                    scopes,
+                    opts.r(s).iter().map(|&opt_pat| (opt_pat, scrutinee)),
+                );
+            }
+            ThirPatKind::Slice(pat_list_front_and_tail) => todo!(),
+            ThirPatKind::Tuple(list) => {
+                let SigTyKind::Tuple(pat_tuple_elems) = pat.r(s).ty.r(s).kind else {
+                    unreachable!()
+                };
+
+                self.lower_pat_and(
+                    late_use_proxies,
+                    scopes,
+                    list.zip(0..pat_tuple_elems.r(s).len() as u32, s)
+                        .map(|(pat, idx)| {
+                            (
+                                pat,
+                                scrutinee.extend(
+                                    tcx,
+                                    [MirPlaceElem::Field(ResolvedFieldIdx::Tuple(idx))],
+                                ),
+                            )
+                        }),
+                );
+            }
+            ThirPatKind::Adt(ctor, fields) => {
+                self.lower_pat_and(
+                    late_use_proxies,
+                    scopes,
+                    fields.r(s).iter().map(|field| {
+                        (
+                            field.pat,
+                            scrutinee.extend(
+                                tcx,
+                                [MirPlaceElem::Field(ResolvedFieldIdx::Adt(ctor, field.idx))],
+                            ),
+                        )
+                    }),
+                );
+            }
+            ThirPatKind::Error(_error) => {
+                // (trivial)
+            }
+        }
+    }
+
+    fn lower_pat_and(
+        &mut self,
+        late_use_proxies: &mut LateUseProxyMap,
+        scopes: PatLowerScopes,
+        children: impl IntoIterator<Item = (Obj<ThirPat>, MirPlace)>,
+    ) {
+        let nested_accept = self.builder.push_scope(scopes.match_logic);
+
+        for (pat, scrutinee) in children {
+            self.lower_pat(
+                late_use_proxies,
+                PatLowerScopes {
+                    local_scope: scopes.local_scope,
+                    match_logic: nested_accept,
+                    break_on_accept: nested_accept,
+                    break_on_reject: scopes.break_on_reject,
+                },
+                pat,
+                scrutinee,
+            );
+        }
+
+        self.builder
+            .push_break(scopes.match_logic, scopes.break_on_accept);
+    }
+
+    fn lower_pat_or(
+        &mut self,
+        late_use_proxies: &mut LateUseProxyMap,
+        scopes: PatLowerScopes,
+        children: impl IntoIterator<Item = (Obj<ThirPat>, MirPlace)>,
+    ) {
+        let nested_reject = self.builder.push_scope(scopes.match_logic);
+
+        for (pat, scrutinee) in children {
+            self.lower_pat(
+                late_use_proxies,
+                PatLowerScopes {
+                    local_scope: scopes.local_scope,
+                    match_logic: nested_reject,
+                    break_on_accept: scopes.break_on_accept,
+                    break_on_reject: nested_reject,
+                },
+                pat,
+                scrutinee,
+            );
+        }
+
+        self.builder
+            .push_break(scopes.match_logic, scopes.break_on_reject);
+    }
+
+    fn materialize_late_use_proxies(
+        &mut self,
+        span: Span,
+        scope: MirBuilderScopeIdx,
+        map: LateUseProxyMap,
+    ) {
+        let tcx = self.tcx();
+
+        for (dest, proxy) in map {
+            let rvalue = match proxy.can_move_from {
+                Some(can_move_from) => MirAssignRvalue::MoveOutRef {
+                    can_move_from,
+                    ref_place: proxy.ref_place,
+                },
+                None => MirAssignRvalue::Use(MirOperand::Copy(
+                    proxy.ref_place.extend(tcx, [MirPlaceElem::DerefPtr]),
+                )),
+            };
+
+            self.builder.push_statement(
+                scope,
+                MirStmt {
+                    span: MirStmtSourceInfo::Simple(span),
+                    kind: MirStmtKind::Assign(Box::new((MirPlace::new(tcx, dest, []), rvalue))),
+                },
+            );
+        }
+    }
+
+    fn ensure_local_defined(
+        &mut self,
+        local_scope: MirBuilderScopeIdx,
+        local: Obj<ThirLocal>,
+    ) -> MirLocalIdx {
+        let s = self.session();
+
+        *self
+            .thir_locals
+            .entry(local)
+            .or_insert_with(|| self.builder.push_local(local_scope, local.r(s).ty))
+    }
+}

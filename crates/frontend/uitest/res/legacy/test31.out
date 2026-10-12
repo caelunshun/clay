@@ -1,0 +1,6 @@
+error: type must be known by this point
+   ┌─ test31.fir:59:22
+   │
+59 │             count: 0.gc,
+   │                      ^^
+

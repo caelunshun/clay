@@ -1,8 +1,8 @@
 use crate::{
     base::{
-        Diag, LeafDiag,
-        analysis::NameResolver,
-        arena::{HasInterner, HasListInterner, LateInit, Obj},
+        Diag, LeafDiag, Session,
+        analysis::{DebruijnAbsolute, DebruijnTop, NameResolver},
+        arena::{LateInit, Obj},
         syntax::{HasSpan as _, Span, Symbol},
     },
     parse::{
@@ -30,14 +30,14 @@ use crate::{
             AdtEnumVariantIdx, AdtItem, AdtKind, AdtKindEnum, AdtKindStruct, AnyGeneric, Crate,
             EnumVariantItem, FnArg, FnDef, FnDefOwner, FnItem, GenericBinder, HirLabelledBlock,
             HirLocal, ImplItem, Item, ItemKind, LangItems, LocalNameSymbol, ModuleItem,
-            RegionGeneric, SpannedTy, TraitItem, TyCtxt, TyKind, TypeAliasItem, TypeGeneric,
+            RegionGeneric, SigTy, SigTyKind, TraitItem, TyCtxt, TypeAliasItem, TypeGeneric,
             Visibility,
         },
     },
     symbol,
     utils::{
         hash::FxHashMap,
-        lang::{AND_LIST_GLUE, format_list},
+        lang::{SimpleListFormatGlue, format_list},
     },
 };
 use hashbrown::hash_map;
@@ -46,96 +46,95 @@ use std::{cell::Cell, rc::Rc};
 
 // === Driver === //
 
-impl TyCtxt {
-    pub fn lower_full_ast(&self, ast: &AstItemModuleContents) -> Obj<Crate> {
-        let s = &self.session;
+pub fn lower_full_ast(tcx: &TyCtxt, ast: &AstItemModuleContents) -> Obj<Crate> {
+    let s = &tcx.session;
 
-        let _delay_and_sort_guard = s.diag.delay_and_sort(s.clone());
+    let _delay_and_sort_guard = s.diag.delay_and_sort(s.clone());
 
-        // Build the module tree.
-        let mut ctxt = UseLowerCtxt {
-            tree: BuilderModuleTree::new(self.session.clone()),
-            inter_tasks: Vec::new(),
-        };
+    // Build the module tree.
+    let mut ctxt = UseLowerCtxt {
+        tree: BuilderModuleTree::new(tcx.session.clone()),
+        inter_tasks: Vec::new(),
+    };
 
-        ctxt.lower_module(BuilderItemId::ROOT, ast);
-        ctxt.push_prelude_glob(*synthesize_bootstrap_prelude(self).r(s).root);
+    ctxt.lower_module(BuilderItemId::ROOT, ast);
+    ctxt.push_prelude_glob(*synthesize_bootstrap_prelude(tcx).r(s).root);
 
-        let krate = Obj::new(
-            Crate {
-                name: symbol!("demo"),
-                is_local: true,
-                root: LateInit::uninit(),
-                prelude: LateInit::uninit(),
-                items: LateInit::uninit(),
-                lang_items: LangItems::default(),
-            },
-            s,
-        );
-        let index_to_item = ctxt.tree.freeze_and_check(krate, s);
-        let root = index_to_item[BuilderItemId::ROOT];
-        let prelude = index_to_item[BuilderItemId::PRELUDE];
+    let krate = Obj::new(
+        Crate {
+            name: symbol!("demo"),
+            is_local: true,
+            root: LateInit::uninit(),
+            prelude: LateInit::uninit(),
+            items: LateInit::uninit(),
+            lang_items: LangItems::default(),
+        },
+        s,
+    );
+    let index_to_item = ctxt.tree.freeze_and_check(krate, s);
+    let root = index_to_item[BuilderItemId::ROOT];
+    let prelude = index_to_item[BuilderItemId::PRELUDE];
 
-        let UseLowerCtxt {
-            tree: _,
-            inter_tasks,
-        } = ctxt;
+    let UseLowerCtxt {
+        tree: _,
+        inter_tasks,
+    } = ctxt;
 
-        // Lower inter-item properties.
-        let mut intra_tasks = Vec::new();
+    // Lower inter-item properties.
+    let mut intra_tasks = Vec::new();
 
-        InterItemLowerCtxt {
-            tcx: self,
+    InterItemLowerCtxt {
+        tcx,
+        root,
+        scope: root,
+        target: root,
+        intra_tasks: &mut intra_tasks,
+        index_to_item: &index_to_item,
+    }
+    .lower_module(ast, None);
+
+    lower_synthetic_module(prelude, s);
+
+    for InterTask {
+        target,
+        scope,
+        mut handler,
+    } in inter_tasks
+    {
+        handler(&mut InterItemLowerCtxt {
+            tcx,
             root,
-            scope: root,
-            target: root,
+            scope: index_to_item[scope],
+            target: index_to_item[target],
             intra_tasks: &mut intra_tasks,
             index_to_item: &index_to_item,
-        }
-        .lower_module(ast, None);
-
-        lower_synthetic_module(prelude, s);
-
-        for InterTask {
-            target,
-            scope,
-            mut handler,
-        } in inter_tasks
-        {
-            handler(&mut InterItemLowerCtxt {
-                tcx: self,
-                root,
-                scope: index_to_item[scope],
-                target: index_to_item[target],
-                intra_tasks: &mut intra_tasks,
-                index_to_item: &index_to_item,
-            });
-        }
-
-        // Lower intra-item properties.
-        for IntraLowerTask {
-            scope,
-            target,
-            mut handler,
-        } in intra_tasks
-        {
-            handler(IntraItemLowerCtxt {
-                tcx: self,
-                root,
-                scope,
-                target,
-                generic_ty_names: NameResolver::new(),
-                generic_re_names: NameResolver::new(),
-                func_local_names: NameResolver::new(),
-                block_label_names: NameResolver::new(),
-                innermost_block: None,
-            });
-        }
-
-        LateInit::init(&krate.r(s).items, index_to_item.raw);
-
-        krate
+        });
     }
+
+    // Lower intra-item properties.
+    for IntraLowerTask {
+        scope,
+        target,
+        mut handler,
+    } in intra_tasks
+    {
+        handler(IntraItemLowerCtxt {
+            tcx,
+            root,
+            scope,
+            target,
+            generic_debruijn: DebruijnTop::ZERO,
+            generic_ty_names: NameResolver::new(),
+            generic_re_names: NameResolver::new(),
+            func_local_names: NameResolver::new(),
+            block_label_names: NameResolver::new(),
+            innermost_block: None,
+        });
+    }
+
+    LateInit::init(&krate.r(s).items, index_to_item.raw);
+
+    krate
 }
 
 // === First Phase === //
@@ -344,6 +343,9 @@ impl<'ast> UseLowerCtxt<'ast> {
             AstExprKind::Cast(target, _ty) => {
                 self.lower_expr_items(item_id, target);
             }
+            AstExprKind::Use(target) => {
+                self.lower_expr_items(item_id, target);
+            }
             AstExprKind::Let(_path, scrutinee, _span) => {
                 self.lower_expr_items(item_id, scrutinee);
             }
@@ -427,8 +429,12 @@ impl<'ast> UseLowerCtxt<'ast> {
                     self.lower_expr_items(item_id, high);
                 }
             }
-            AstExprKind::Underscore => todo!(),
-            AstExprKind::Path(_path) => todo!(),
+            AstExprKind::Underscore => {
+                // (dead end)
+            }
+            AstExprKind::Path(_path) => {
+                // (dead end)
+            }
             AstExprKind::AddrOf(_muta, target) => {
                 self.lower_expr_items(item_id, target);
             }
@@ -437,7 +443,9 @@ impl<'ast> UseLowerCtxt<'ast> {
                     self.lower_expr_items(item_id, value);
                 }
             }
-            AstExprKind::Continue(_label) => todo!(),
+            AstExprKind::Continue(_label) => {
+                // (dead end)
+            }
             AstExprKind::Return(value) => {
                 if let Some(value) = value {
                     self.lower_expr_items(item_id, value);
@@ -751,7 +759,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
 
         LateInit::init(
             &trait_target.r(s).generics,
-            self.tcx.seal_generic_binder(binder),
+            self.seal_generic_binder_with_checks(binder),
         );
 
         LateInit::init(
@@ -792,7 +800,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let target_adt = Obj::new(
             AdtItem {
                 item: self.target,
-                generics: self.tcx.seal_generic_binder(generics),
+                generics: self.seal_generic_binder_with_checks(generics),
                 kind: LateInit::uninit(),
             },
             s,
@@ -840,7 +848,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let target_adt = Obj::new(
             AdtItem {
                 item: self.target,
-                generics: self.tcx.seal_generic_binder(generics),
+                generics: self.seal_generic_binder_with_checks(generics),
                 kind: LateInit::uninit(),
             },
             s,
@@ -957,7 +965,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         &mut self,
         owner: AdtCtorOwner,
         ast: &'ast AstStructKind,
-        field_tys_to_extend: &mut Vec<(&'ast AstTy, Obj<LateInit<SpannedTy>>)>,
+        field_tys_to_extend: &mut Vec<(&'ast AstTy, Obj<LateInit<SigTy>>)>,
         allow_visibilities: bool,
     ) -> Obj<AdtCtor> {
         let s = &self.tcx.session;
@@ -1063,7 +1071,6 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
     }
 
     pub fn lower_impl(&mut self, ast: &'ast AstItemImpl) {
-        let tcx = self.tcx;
         let s = &self.tcx.session;
 
         let mut generics = GenericBinder::default();
@@ -1076,7 +1083,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let target_impl = Obj::new(
             ImplItem {
                 item: self.target,
-                generics: tcx.seal_generic_binder(generics),
+                generics: self.seal_generic_binder_with_checks(generics),
                 trait_: LateInit::uninit(),
                 target: LateInit::uninit(),
                 methods: LateInit::uninit(),
@@ -1146,7 +1153,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                 owner: LateInit::uninit(),
                 name: ast.name,
                 impl_vis,
-                generics: self.tcx.seal_generic_binder(generics),
+                generics: self.seal_generic_binder_with_checks(generics),
                 has_self_param: LateInit::uninit(),
                 args: LateInit::uninit(),
                 ret_ty: LateInit::uninit(),
@@ -1175,7 +1182,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let def = Obj::new(
             TypeAliasItem {
                 item: self.target,
-                generics: self.tcx.seal_generic_binder(generics),
+                generics: self.seal_generic_binder_with_checks(generics),
                 body: LateInit::uninit(),
             },
             s,
@@ -1198,24 +1205,59 @@ pub struct IntraItemLowerCtxt<'tcx> {
     pub root: Obj<Item>,
     pub scope: Obj<Item>,
     pub target: Obj<Item>,
-    pub generic_ty_names: NameResolver<Symbol, Obj<TypeGeneric>>,
-    pub generic_re_names: NameResolver<Symbol, Obj<RegionGeneric>>,
+    pub generic_debruijn: DebruijnTop,
+    pub generic_ty_names: NameResolver<Symbol, DefinedGenericTy>,
+    pub generic_re_names: NameResolver<Symbol, DefinedGenericRe>,
     pub func_local_names: NameResolver<LocalNameSymbol, Obj<HirLocal>>,
     pub block_label_names: NameResolver<Symbol, HirLabelledBlock>,
     pub innermost_block: Option<HirLabelledBlock>,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum DefinedGenericTy {
+    Sig(Obj<TypeGeneric>),
+    Hrtb(Span, DebruijnAbsolute),
+}
+
+impl DefinedGenericTy {
+    pub fn span(self, s: &Session) -> Span {
+        match self {
+            DefinedGenericTy::Sig(def) => def.r(s).span,
+            DefinedGenericTy::Hrtb(span, _) => span,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum DefinedGenericRe {
+    Sig(Obj<RegionGeneric>),
+    Hrtb(Span, DebruijnAbsolute),
+}
+
+impl DefinedGenericRe {
+    pub fn span(self, s: &Session) -> Span {
+        match self {
+            DefinedGenericRe::Sig(def) => def.r(s).span,
+            DefinedGenericRe::Hrtb(span, _) => span,
+        }
+    }
+}
+
 impl IntraItemLowerCtxt<'_> {
     pub fn scoped<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        let old_top = self.generic_debruijn.clone();
         self.generic_ty_names.push_rib();
         self.generic_re_names.push_rib();
         self.block_label_names.push_rib();
         self.func_local_names.push_rib();
+
         let ret = f(self);
+
         self.generic_ty_names.pop_rib();
         self.generic_re_names.pop_rib();
         self.block_label_names.pop_rib();
         self.func_local_names.pop_rib();
+        self.generic_debruijn = old_top;
 
         ret
     }
@@ -1336,7 +1378,7 @@ impl IntraItemLowerCtxt<'_> {
 
         // Establish a method order.
         let method_defs = if let Some(for_trait) = for_trait {
-            let for_trait = for_trait.value.def;
+            let for_trait = for_trait.def;
             let mut new_method_defs = (0..for_trait.r(s).methods.len())
                 .map(|_| None::<Obj<FnDef>>)
                 .collect::<Vec<_>>();
@@ -1401,7 +1443,7 @@ impl IntraItemLowerCtxt<'_> {
                         if missing_names.len() == 1 { "" } else { "s" },
                         format_list(
                             missing_names.iter().map(|v| format!("`{v}`")),
-                            AND_LIST_GLUE
+                            SimpleListFormatGlue::AND_LIST,
                         ),
                     ),
                 )
@@ -1429,7 +1471,7 @@ impl IntraItemLowerCtxt<'_> {
         mut self,
         item: Obj<AdtItem>,
         generic_clause_lists: Vec<Option<&AstTraitClauseList>>,
-        field_tys_to_extend: Vec<(&AstTy, Obj<LateInit<SpannedTy>>)>,
+        field_tys_to_extend: Vec<(&AstTy, Obj<LateInit<SigTy>>)>,
     ) {
         let s = &self.tcx.session;
 
@@ -1486,9 +1528,7 @@ impl IntraItemLowerCtxt<'_> {
         LateInit::init(
             &def.r(s).ret_ty,
             match &ast.ret_ty {
-                AstReturnTy::Omitted => SpannedTy::new_unspanned(
-                    self.tcx.intern(TyKind::Tuple(self.tcx.intern_list(&[]))),
-                ),
+                AstReturnTy::Omitted => SigTyKind::Tuple(Obj::new_iter([], s)).wrap(Span::DUMMY, s),
                 AstReturnTy::Present(ty) => self.lower_ty(ty),
             },
         );

@@ -4,7 +4,7 @@ use crate::{
     flags::should_print_parse_expect_success,
     utils::{
         hash::{FxHashSet, FxIndexMap},
-        lang::{FormatFn, ListFormatter, OR_LIST_GLUE, format_list_into},
+        lang::{FormatFn, ListFormatter, SimpleListFormatGlue, format_list_into},
     },
 };
 use std::{
@@ -293,21 +293,23 @@ impl<I: CursorIter> Parser<I> {
                     FormatFn(|f| {
                         write!(f, "{to_parse}")?;
                         f.write_str(" (")?;
-                        format_list_into(f, &whats, OR_LIST_GLUE)?;
+                        format_list_into(f, &whats, SimpleListFormatGlue::OR_LIST)?;
                         f.write_str(")")?;
 
                         Ok(())
                     }),
-                    OR_LIST_GLUE,
+                    SimpleListFormatGlue::OR_LIST,
                 )
                 .unwrap();
         }
 
         list_fmt
-            .push_many(&mut msg, basic_expectations, OR_LIST_GLUE)
+            .push_many(&mut msg, basic_expectations, SimpleListFormatGlue::OR_LIST)
             .unwrap();
 
-        list_fmt.finish(&mut msg, OR_LIST_GLUE).unwrap();
+        list_fmt
+            .finish(&mut msg, SimpleListFormatGlue::OR_LIST)
+            .unwrap();
 
         let (main_span, unexpected_secondary) = 'fmt: {
             let Some(prev_span) = self.prev_span_not_sof() else {

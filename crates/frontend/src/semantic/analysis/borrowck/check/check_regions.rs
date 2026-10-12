@@ -4,15 +4,15 @@ use crate::{
         arena::{HasInterner, HasListInterner, Obj},
     },
     semantic::{
-        analysis::{
-            ClauseCx, ClauseImportEnvRef, CrateBorrowCheckVisitor, MirDataflowFacts, ObligeCause,
-            ObligeCauseBehavior, UnifyCxMode,
+        analysis::borrowck::{CrateBorrowCheckVisitor, MirDataflowFacts},
+        infer::{
+            ClauseCx, ClauseImportEnv, HrtbUniverse, ObligeCause, ObligeCauseBehavior, UnifyCxMode,
         },
         syntax::{
-            FnDef, HrtbUniverse, IntKind, MirAssignRvalue, MirBlock, MirBody, MirLocal,
-            MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirStmt, MirStmtKind, MirTerminator,
-            Re, RelationDirection, RelationMode, SimpleTyKind, TraitParam, TraitSpec, Ty, TyCtxt,
-            TyKind, TyOrRe, UniversalReVarSourceInfo,
+            FnDef, IntKind, MirAssignRvalue, MirBlock, MirBody, MirLocal, MirLocalIdx, MirOperand,
+            MirPlace, MirPlaceElem, MirStmt, MirStmtKind, MirTerminator, Re, RelationDirection,
+            RelationMode, SimpleTyKind, TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe,
+            UniversalReVarSourceInfo,
         },
     },
 };
@@ -26,7 +26,7 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
 
         let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
 
-        let env = ccx.create_universal_env_for_fn_def(
+        let env = ccx.instantiate_universal().env_for_fn_def(
             &ObligeCause::new_empty_report(),
             HrtbUniverse::ROOT_REF,
             def,
@@ -54,7 +54,7 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
 
         BodyInstantiateCx {
             ccx: &mut ccx,
-            env: env.as_ref(),
+            env: &env,
             local_universals: local_universals.as_slice(),
         }
         .visit_body(&mut body);
@@ -73,7 +73,7 @@ impl<'tcx> CrateBorrowCheckVisitor<'tcx> {
 
 struct BodyInstantiateCx<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
-    env: ClauseImportEnvRef<'a>,
+    env: &'a ClauseImportEnv,
     local_universals: &'a IndexSlice<MirLocalIdx, [Re]>,
 }
 
@@ -91,9 +91,7 @@ impl BodyInstantiateCx<'_, '_> {
     // Import all types within the body and ensure that they're well-formed. Additionally, local
     // types must outlive the universal region associated with that local.
     fn visit_local(&mut self, local_idx: MirLocalIdx, local: &mut MirLocal) {
-        local.ty = self
-            .ccx
-            .import_report_elsewhere(&HrtbUniverse::ROOT, self.env, local.ty);
+        local.ty = self.ccx.import_report_elsewhere(self.env, local.ty);
 
         self.ccx.oblige_ty_outlives_re(
             // TODO
@@ -163,9 +161,7 @@ impl BodyInstantiateCx<'_, '_> {
                 // (ty is uninteresting)
             }
             MirAssignRvalue::Zst(ty) => {
-                *ty = self
-                    .ccx
-                    .import_report_elsewhere(HrtbUniverse::ROOT_REF, self.env, *ty);
+                *ty = self.ccx.import_report_elsewhere(self.env, *ty);
             }
         }
     }

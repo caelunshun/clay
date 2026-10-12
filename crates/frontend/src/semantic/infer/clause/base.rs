@@ -1,0 +1,844 @@
+use crate::{
+    base::{
+        Session,
+        arena::{HasInterner, HasListInterner as _, Obj},
+    },
+    semantic::{
+        infer::{
+            AnyPromiseHandle, CoherenceMap, FloatingInferVar, GeneralOutlivesError, HrtbUniverse,
+            InstantiatedTraitImplError, InstantiatedTraitImplErrorKind, MultiPromise,
+            MultiPromiseBuilder, NotCoveredError, ObligationNotReady, ObligationResult,
+            ObligationTermination, Promise, PromiseHandle, PromiseMode, ReAndReUnifyError,
+            TyAndSimpleTySetUnifyError, TyAndTyRegionUnifyError, TyAndTyStructuralUnifyError,
+            TyAndTyUnifyError, TyAndTyUnifyErrorKind, TyOutlivesReError, TyOutlivesReErrorCulprit,
+            UnifyCx, UnifyCxMode, UniversalElaboration,
+        },
+        syntax::{
+            Crate, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection, RelationMode,
+            SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyKind,
+            TyOrRe, UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProj,
+            UniversalTyProjIdx, UniversalTyProjInner, UniversalTyRoot, UniversalTyRootSourceInfo,
+        },
+    },
+    utils::hash::FxHashMap,
+};
+use index_vec::IndexVec;
+use std::{
+    rc::Rc,
+    sync::atomic::{AtomicU32, Ordering::*},
+};
+
+// === Obligation Definitions === //
+
+#[derive(Debug, Clone)]
+pub enum ClauseObligation<'tcx> {
+    TyUnifiesTy {
+        handle: PromiseHandle<'tcx, TyAndTyUnifyError>,
+        lhs: Ty,
+        rhs: Ty,
+        mode: RelationMode,
+    },
+    TyMeetsTrait {
+        handle: PromiseHandle<'tcx, InstantiatedTraitImplError>,
+        fuel: ClauseFuel,
+        universe: HrtbUniverse,
+        lhs: Ty,
+        rhs: TraitSpec,
+    },
+    TyOutlivesRe {
+        handle: PromiseHandle<'tcx, TyOutlivesReError>,
+        lhs: Ty,
+        rhs: Re,
+        dir: RelationDirection,
+    },
+    Covered {
+        handle: PromiseHandle<'tcx, NotCoveredError>,
+        must_mention: Rc<FxHashMap<UniversalTy, u32>>,
+        in_type: Option<Ty>,
+        in_trait: Option<TraitSpec>,
+    },
+    PollElaboration {
+        universal: UniversalTy,
+    },
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct ClauseFuelKillId(u32);
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct ClauseFuel {
+    remaining: u32,
+    kill_id: ClauseFuelKillId,
+}
+
+impl ClauseFuel {
+    pub fn new() -> Self {
+        static GEN: AtomicU32 = AtomicU32::new(0);
+
+        Self {
+            remaining: 128,
+            kill_id: ClauseFuelKillId(GEN.fetch_add(1, Relaxed)),
+        }
+    }
+
+    pub fn consume(self) -> Self {
+        Self {
+            remaining: self.remaining.saturating_sub(1),
+            kill_id: self.kill_id,
+        }
+    }
+
+    pub fn is_exhausted(self) -> bool {
+        self.remaining == 0
+    }
+
+    pub fn remaining(self) -> u32 {
+        self.remaining
+    }
+
+    pub fn kill_id(self) -> ClauseFuelKillId {
+        self.kill_id
+    }
+}
+
+// === ClauseCx Definition === //
+
+/// A type inference context for solving type obligations of the form...
+///
+/// - `Region: Region`
+/// - `Type = Type`
+/// - `Type: Clauses`
+/// - `well-formed Type`
+///
+/// Obligations are enqueued out of order and the context solves them as inference variables arrive.
+///
+/// This context is built on top of an [`ObligationCx`].
+///
+/// ## Multi-Pass Checking
+///
+/// This context has two modes: region unaware and region aware.
+///
+/// - The region unaware mode just solves for type equalities, making it ideal for a first pass of
+///   type-checker where one just wants to solve for type inference variables. This process is
+///   allowed to fail.
+///
+/// - The region aware mode can take the solved inference types and, after replacing all the erased
+///   regions within those solved inference types with fresh region inference variables, it can run
+///   a second pass of type-checking to ensure that region inference is correct.
+///
+/// If all the types checked with a region aware check were obtained by a prior region unaware
+/// type-check, the inference methods will never return type errors—only region errors.
+///
+/// This two-pass design is necessary because we want each inferred expression type to have its own
+/// set of fresh region inference variables. If we instead tried to do type solving in a single
+/// pass, we'd either have to...
+///
+/// a) Wait until a source expression's type is fully solved so that we can replace all its regions
+///    with fresh region variables, which could prevent us from properly inferring certain patterns.
+///
+/// b) Equate source expression types without instantiating fresh new inference variable for each of
+///    them, preventing us from handling region-based sub-typing. This is what using a region-aware
+///    mode for the first inference pass would accomplish.
+///
+/// Note that, if there are no type inference variables involved in your seed queries (e.g. when
+/// WF-checking traits), you can immediately skip to region aware checking.
+#[derive(Clone)]
+pub struct ClauseCx<'tcx> {
+    ucx: UnifyCx<'tcx>,
+    pending_obligations: Vec<ClauseObligationState<'tcx>>,
+    coherence: &'tcx CoherenceMap,
+    krate: Obj<Crate>,
+    promise_mode: PromiseMode,
+    universal_roots: IndexVec<UniversalTyRoot, UniversalTyRootDescriptor>,
+    universal_projs: IndexVec<UniversalTyProjIdx, UniversalTyProjDescriptor>,
+}
+
+#[derive(Clone)]
+struct ClauseObligationState<'tcx> {
+    kind: ClauseObligation<'tcx>,
+    not_ready: Option<ObligationNotReady>,
+}
+
+#[derive(Clone)]
+struct UniversalTyRootDescriptor {
+    direct_clauses: Option<TraitClauseList>,
+    elaboration: Option<UniversalElaboration>,
+}
+
+#[derive(Clone)]
+struct UniversalTyProjDescriptor {
+    direct_clauses: Option<TraitClauseList>,
+    elaboration: Option<UniversalElaboration>,
+}
+
+impl<'tcx> ClauseCx<'tcx> {
+    pub fn new(
+        tcx: &'tcx TyCtxt,
+        coherence: &'tcx CoherenceMap,
+        krate: Obj<Crate>,
+        mode: UnifyCxMode,
+    ) -> Self {
+        Self {
+            ucx: UnifyCx::new(tcx, mode),
+            pending_obligations: Vec::new(),
+            coherence,
+            krate,
+            promise_mode: PromiseMode::RootContext,
+            universal_roots: IndexVec::new(),
+            universal_projs: IndexVec::new(),
+        }
+    }
+
+    pub fn tcx(&self) -> &'tcx TyCtxt {
+        self.ucx.tcx()
+    }
+
+    pub fn session(&self) -> &'tcx Session {
+        self.ucx.session()
+    }
+
+    pub fn coherence(&self) -> &'tcx CoherenceMap {
+        self.coherence
+    }
+
+    pub fn krate(&self) -> Obj<Crate> {
+        self.krate
+    }
+
+    pub fn ucx(&self) -> &UnifyCx<'tcx> {
+        &self.ucx
+    }
+
+    pub fn ucx_mut(&mut self) -> &mut UnifyCx<'tcx> {
+        &mut self.ucx
+    }
+
+    pub fn promise_mode(&self) -> PromiseMode {
+        self.promise_mode
+    }
+
+    pub fn is_silent(&self) -> bool {
+        !self.promise_mode.is_root()
+    }
+
+    pub fn make_silent(&mut self) {
+        self.promise_mode = PromiseMode::ProbeContext;
+    }
+
+    pub fn with_silent(mut self) -> Self {
+        self.make_silent();
+        self
+    }
+
+    pub fn mode(&self) -> UnifyCxMode {
+        self.ucx().mode()
+    }
+}
+
+// === Obligation Runner === //
+
+impl<'tcx> ClauseCx<'tcx> {
+    pub(super) fn push_obligation(&mut self, kind: ClauseObligation<'tcx>) {
+        self.pending_obligations.push(ClauseObligationState {
+            kind,
+            not_ready: None,
+        });
+    }
+
+    pub fn poll_obligations(&mut self) {
+        loop {
+            let mut made_progress = false;
+
+            // Process all obligations back to front.
+            let mut curr_idx = self.pending_obligations.len();
+
+            while curr_idx > 0 {
+                curr_idx -= 1;
+
+                let kind = self.pending_obligations[curr_idx].kind.clone();
+
+                let mut fork = self.clone();
+
+                let res = match kind {
+                    ClauseObligation::TyUnifiesTy {
+                        handle,
+                        lhs,
+                        rhs,
+                        mode,
+                    } => fork.run_oblige_ty_unifies_ty(handle, lhs, rhs, mode),
+                    ClauseObligation::TyMeetsTrait {
+                        handle,
+                        fuel,
+                        universe,
+                        lhs,
+                        rhs,
+                    } => fork
+                        .run_oblige_ty_meets_trait_instantiated(handle, fuel, universe, lhs, rhs),
+                    ClauseObligation::TyOutlivesRe {
+                        handle,
+                        lhs,
+                        rhs,
+                        dir: direction,
+                    } => fork.run_oblige_ty_outlives_re(handle, lhs, rhs, direction),
+                    ClauseObligation::Covered {
+                        handle,
+                        must_mention,
+                        in_type,
+                        in_trait,
+                    } => fork.run_oblige_covered(handle, must_mention, in_type, in_trait),
+                    ClauseObligation::PollElaboration { universal } => {
+                        fork.run_poll_elaboration(universal)
+                    }
+                };
+
+                // If we finished processing the obligation, remove it from the queue and mark
+                // progress so we can continue processing.
+                match res {
+                    Ok(kind) => {
+                        *self = fork;
+
+                        match kind {
+                            ObligationTermination::Finished => {
+                                made_progress = true;
+                                self.pending_obligations.swap_remove(curr_idx);
+
+                                break;
+                            }
+                            ObligationTermination::CommitAndKeep {
+                                made_progress: self_made_progress,
+                            } => {
+                                if self_made_progress {
+                                    made_progress = true;
+                                    break;
+                                } else {
+                                    continue;
+                                }
+                            }
+                            ObligationTermination::FuelExhausted(kill_id) => {
+                                made_progress = true;
+                                self.pending_obligations.swap_remove(curr_idx);
+
+                                self.kill_obligations_with_id(kill_id);
+                                break;
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        match err {
+                            ObligationNotReady::RequestMissingElaboration(universal) => {
+                                self.elaborate_universal_immediately(universal);
+                                made_progress = true;
+                            }
+                            _ => {
+                                // (fallthrough)
+                            }
+                        }
+
+                        self.pending_obligations[curr_idx].not_ready = Some(err);
+                    }
+                }
+            }
+
+            if !made_progress {
+                break;
+            }
+        }
+    }
+
+    fn kill_obligations_with_id(&mut self, kill_id: ClauseFuelKillId) {
+        let mut to_accept = Vec::<Box<dyn AnyPromiseHandle<'tcx>>>::new();
+
+        self.pending_obligations.retain(|obligation| {
+            let other_kill_id = match obligation.kind {
+                ClauseObligation::TyUnifiesTy { .. }
+                | ClauseObligation::TyOutlivesRe { .. }
+                | ClauseObligation::PollElaboration { .. }
+                | ClauseObligation::Covered { .. } => None,
+                ClauseObligation::TyMeetsTrait { fuel, .. } => Some(fuel.kill_id()),
+            };
+
+            let should_kill = Some(kill_id) == other_kill_id;
+
+            if should_kill {
+                match &obligation.kind {
+                    ClauseObligation::TyUnifiesTy { .. }
+                    | ClauseObligation::TyOutlivesRe { .. }
+                    | ClauseObligation::PollElaboration { .. }
+                    | ClauseObligation::Covered { .. } => unreachable!(),
+                    ClauseObligation::TyMeetsTrait { handle, .. } => {
+                        to_accept.push(Box::new(handle.clone()));
+                    }
+                }
+            }
+
+            !should_kill
+        });
+
+        for to_accept in to_accept {
+            to_accept.accept(self);
+        }
+    }
+
+    pub fn verify(&mut self) {
+        self.poll_obligations();
+
+        while let Some(state) = self.pending_obligations.pop() {
+            match &state.kind {
+                ClauseObligation::TyUnifiesTy { .. } => {
+                    unreachable!()
+                }
+                ClauseObligation::TyMeetsTrait {
+                    handle,
+                    fuel: _,
+                    universe: _,
+                    lhs,
+                    rhs,
+                } => {
+                    let not_ready = state.not_ready.clone().unwrap();
+
+                    handle.reject(
+                        self,
+                        InstantiatedTraitImplError {
+                            lhs: *lhs,
+                            lhs_elab: None,
+                            rhs: *rhs,
+                            kind: InstantiatedTraitImplErrorKind::CannotProgress(not_ready),
+                        },
+                    );
+                }
+                ClauseObligation::TyOutlivesRe {
+                    handle,
+                    lhs,
+                    rhs,
+                    dir: _,
+                } => {
+                    let not_ready = state.not_ready.clone().unwrap();
+
+                    handle.reject(
+                        self,
+                        TyOutlivesReError {
+                            lhs: *lhs,
+                            rhs: *rhs,
+                            errors: [TyOutlivesReErrorCulprit::CannotProgress(not_ready)].into(),
+                        },
+                    );
+                }
+                ClauseObligation::PollElaboration { universal: _ } => {
+                    // (ignored)
+                }
+                ClauseObligation::Covered {
+                    handle,
+                    must_mention: _,
+                    in_type,
+                    in_trait,
+                } => {
+                    let not_ready = state.not_ready.clone().unwrap();
+
+                    let ObligationNotReady::CoverMissingInfer { missing_mentions } = not_ready
+                    else {
+                        unreachable!()
+                    };
+
+                    handle.reject(
+                        self,
+                        NotCoveredError {
+                            missing_mentions,
+                            in_trait: *in_trait,
+                            in_type: *in_type,
+                        },
+                    );
+                }
+            }
+        }
+
+        UnifyCx::verify(self);
+    }
+}
+
+// === Basic operations === //
+
+impl<'tcx> ClauseCx<'tcx> {
+    pub fn fresh_ty_infer_var_restricted(
+        &mut self,
+        max_universe: HrtbUniverse,
+        source_info: InferTyVarSourceInfo,
+        perm_set: SimpleTySet,
+    ) -> InferTyVar {
+        self.ucx_mut()
+            .fresh_ty_infer_var(max_universe, source_info, perm_set)
+    }
+
+    pub fn fresh_ty_infer_restricted(
+        &mut self,
+        max_universe: HrtbUniverse,
+        source_info: InferTyVarSourceInfo,
+        perm_set: SimpleTySet,
+    ) -> Ty {
+        self.tcx()
+            .intern(TyKind::InferVar(self.fresh_ty_infer_var_restricted(
+                max_universe,
+                source_info,
+                perm_set,
+            )))
+    }
+
+    pub fn fresh_ty_infer_var(
+        &mut self,
+        max_universe: HrtbUniverse,
+        source_info: InferTyVarSourceInfo,
+    ) -> InferTyVar {
+        self.fresh_ty_infer_var_restricted(max_universe, source_info, SimpleTySet::all())
+    }
+
+    pub fn fresh_ty_infer(
+        &mut self,
+        max_universe: HrtbUniverse,
+        source_info: InferTyVarSourceInfo,
+    ) -> Ty {
+        self.fresh_ty_infer_restricted(max_universe, source_info, SimpleTySet::all())
+    }
+
+    pub fn next_ty_infer_var(&self) -> InferTyVar {
+        self.ucx().next_ty_infer_var()
+    }
+
+    pub fn lookup_ty_infer_var_without_poll(
+        &self,
+        var: InferTyVar,
+    ) -> Result<Ty, FloatingInferVar<'_>> {
+        self.ucx().lookup_ty_infer_var(var)
+    }
+
+    pub fn lookup_ty_infer_var_after_poll(
+        &mut self,
+        var: InferTyVar,
+    ) -> Result<Ty, FloatingInferVar<'_>> {
+        self.poll_obligations();
+        self.lookup_ty_infer_var_without_poll(var)
+    }
+
+    pub fn peel_ty_infer_var_without_poll(&self, ty: Ty) -> Ty {
+        self.ucx().peel_ty_infer_var(ty)
+    }
+
+    pub fn peel_ty_infer_var_after_poll(&mut self, ty: Ty) -> Ty {
+        self.poll_obligations();
+        self.peel_ty_infer_var_without_poll(ty)
+    }
+
+    pub fn fresh_re_infer(&mut self) -> Re {
+        self.ucx_mut().fresh_re_infer()
+    }
+
+    pub fn fresh_re_universal(&mut self, src_info: UniversalReVarSourceInfo) -> Re {
+        self.ucx_mut().fresh_re_universal(src_info)
+    }
+
+    pub fn lookup_universal_re_src_info(&self, var: UniversalReVar) -> UniversalReVarSourceInfo {
+        self.ucx().lookup_universal_re_src_info(var)
+    }
+
+    pub fn permit_universe_re_outlives_re(
+        &mut self,
+        universal: Re,
+        other: Re,
+        dir: RelationDirection,
+    ) {
+        self.ucx_mut()
+            .permit_universe_re_outlives_re(universal, other, dir);
+    }
+
+    pub fn init_re_universal_var_direct_clauses(&mut self, var: Re, clauses: TraitClauseList) {
+        let s = self.session();
+
+        for clause in clauses.r(s) {
+            let TraitClause::Outlives(permitted_outlive_dir, permitted_outlive) = *clause else {
+                unreachable!();
+            };
+
+            self.permit_universe_re_outlives_general(var, permitted_outlive, permitted_outlive_dir);
+        }
+    }
+
+    pub fn lookup_infer_ty_src_info(&self, var: InferTyVar) -> InferTyVarSourceInfo {
+        self.ucx().lookup_infer_ty_src_info(var)
+    }
+
+    pub fn oblige_re_outlives_re(
+        &mut self,
+        lhs: Re,
+        rhs: Re,
+        mode: RelationMode,
+    ) -> Promise<'tcx, ReAndReUnifyError> {
+        self.ucx_mut().unify_re_and_re(lhs, rhs, mode)
+    }
+
+    pub fn oblige_ty_unifies_ty(
+        &mut self,
+        lhs: Ty,
+        rhs: Ty,
+        mode: RelationMode,
+    ) -> Promise<'tcx, TyAndTyUnifyError> {
+        let (promise, handle) = Promise::new();
+
+        self.push_obligation(ClauseObligation::TyUnifiesTy {
+            handle,
+            lhs,
+            rhs,
+            mode,
+        });
+
+        promise
+    }
+
+    fn run_oblige_ty_unifies_ty(
+        &mut self,
+        handle: PromiseHandle<'tcx, TyAndTyUnifyError>,
+        lhs: Ty,
+        rhs: Ty,
+        mode: RelationMode,
+    ) -> ObligationResult {
+        match self.ucx_mut().unify_ty_and_ty(lhs, rhs, mode) {
+            Ok(promise) => {
+                promise
+                    .map(
+                        move |_ccx, TyAndTyRegionUnifyError { regions, .. }| TyAndTyUnifyError {
+                            lhs,
+                            rhs,
+                            mode,
+                            kind: TyAndTyUnifyErrorKind::Region(regions),
+                        },
+                    )
+                    .forward(self, handle);
+            }
+            Err(error) => {
+                handle.reject(
+                    self,
+                    TyAndTyUnifyError {
+                        lhs,
+                        rhs,
+                        mode,
+                        kind: TyAndTyUnifyErrorKind::Structural(error.culprits),
+                    },
+                );
+            }
+        }
+
+        Ok(ObligationTermination::Finished)
+    }
+
+    pub fn unify_ty_and_ty(
+        &mut self,
+        lhs: Ty,
+        rhs: Ty,
+        mode: RelationMode,
+    ) -> Result<Promise<'tcx, TyAndTyRegionUnifyError>, Box<TyAndTyStructuralUnifyError>> {
+        self.ucx_mut().unify_ty_and_ty(lhs, rhs, mode)
+    }
+
+    pub fn unify_ty_and_simple_set(
+        &mut self,
+        lhs: Ty,
+        rhs: SimpleTySet,
+    ) -> Result<(), TyAndSimpleTySetUnifyError> {
+        self.ucx_mut().unify_ty_and_simple_set(lhs, rhs)
+    }
+
+    pub fn oblige_re_meets_clauses(
+        &mut self,
+        lhs: Re,
+        rhs: TraitClauseList,
+    ) -> MultiPromise<'tcx, GeneralOutlivesError> {
+        let s = self.session();
+
+        let mut collector = MultiPromiseBuilder::new();
+
+        for &clause in rhs.r(s) {
+            match clause {
+                TraitClause::Outlives(dir, rhs) => {
+                    self.oblige_general_outlives(TyOrRe::Re(lhs), rhs, dir)
+                        .join(&mut collector);
+                }
+                TraitClause::Trait(_) => {
+                    unreachable!()
+                }
+            }
+        }
+
+        collector.finish()
+    }
+}
+
+// === Universal Management === //
+
+impl<'tcx> ClauseCx<'tcx> {
+    pub fn fresh_ty_universal_root_idx(
+        &mut self,
+        in_universe: HrtbUniverse,
+        src_info: UniversalTyRootSourceInfo,
+    ) -> UniversalTyRoot {
+        let var = self
+            .ucx_mut()
+            .fresh_ty_universal_root(in_universe, src_info);
+
+        let var_shadow = self.universal_roots.push(UniversalTyRootDescriptor {
+            direct_clauses: None,
+            elaboration: None,
+        });
+        debug_assert_eq!(var, var_shadow);
+
+        var
+    }
+
+    pub fn fresh_ty_universal_root(
+        &mut self,
+        in_universe: HrtbUniverse,
+        src_info: UniversalTyRootSourceInfo,
+    ) -> Ty {
+        self.tcx().intern(TyKind::Universal(UniversalTy::Root(
+            self.fresh_ty_universal_root_idx(in_universe, src_info),
+        )))
+    }
+
+    pub fn fresh_ty_universal_proj_unwrapped(
+        &mut self,
+        target: UniversalTy,
+        as_spec: TraitSpec,
+        assoc_idx: u32,
+    ) -> UniversalTyProj {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let cache_idx = self.universal_projs.push(UniversalTyProjDescriptor {
+            direct_clauses: None,
+            elaboration: None,
+        });
+
+        let as_spec = TraitSpec {
+            def: as_spec.def,
+            params: tcx.intern_list(
+                &as_spec
+                    .params
+                    .r(s)
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, &para)| {
+                        if idx >= *as_spec.def.r(s).regular_generic_count as usize {
+                            TraitParam::Unspecified(tcx.intern_list(&[]))
+                        } else {
+                            debug_assert!(matches!(para, TraitParam::Equals(_)));
+                            para
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+        };
+
+        self.tcx().intern(UniversalTyProjInner {
+            target,
+            as_spec,
+            assoc_idx,
+            cache_idx,
+        })
+    }
+
+    pub fn fresh_ty_universal_proj(
+        &mut self,
+        target: UniversalTy,
+        as_spec: TraitSpec,
+        assoc_idx: u32,
+    ) -> UniversalTy {
+        UniversalTy::Projection(self.fresh_ty_universal_proj_unwrapped(target, as_spec, assoc_idx))
+    }
+
+    pub fn init_any_universal_direct_clauses(&mut self, var: TyOrRe, clauses: TraitClauseList) {
+        let s = self.session();
+
+        match var {
+            TyOrRe::Re(var) => self.init_re_universal_var_direct_clauses(var, clauses),
+            TyOrRe::Ty(var) => {
+                let TyKind::Universal(universal) = *var.r(s) else {
+                    unreachable!()
+                };
+
+                self.init_ty_universal_direct_clauses(universal, clauses);
+            }
+        }
+    }
+
+    pub fn init_ty_universal_direct_clauses(
+        &mut self,
+        universal: UniversalTy,
+        clauses: TraitClauseList,
+    ) {
+        let s = self.session();
+
+        match universal {
+            UniversalTy::Root(idx) => {
+                let descriptor = &mut self.universal_roots[idx];
+
+                assert!(descriptor.direct_clauses.is_none());
+                descriptor.direct_clauses = Some(clauses);
+            }
+            UniversalTy::Projection(inner) => {
+                let descriptor = &mut self.universal_projs[inner.r(s).cache_idx];
+
+                assert!(descriptor.direct_clauses.is_none());
+                descriptor.direct_clauses = Some(clauses);
+            }
+        }
+    }
+
+    pub fn direct_ty_universal_clauses_possibly_floating(
+        &self,
+        universal: UniversalTy,
+    ) -> TraitClauseList {
+        let s = self.session();
+
+        match universal {
+            UniversalTy::Root(idx) => self.universal_roots[idx].direct_clauses.unwrap(),
+            UniversalTy::Projection(inner) => self.universal_projs[inner.r(s).cache_idx]
+                .direct_clauses
+                .unwrap(),
+        }
+    }
+
+    pub fn lookup_universal_ty_root_src_info(
+        &self,
+        idx: UniversalTyRoot,
+    ) -> UniversalTyRootSourceInfo {
+        self.ucx().lookup_universal_ty_root_src_info(idx)
+    }
+
+    pub fn lookup_universal_ty_hrtb_universe(&self, universal: UniversalTy) -> &HrtbUniverse {
+        self.ucx().lookup_universal_ty_hrtb_universe(universal)
+    }
+
+    pub(super) fn universal_ty_elaboration_state(
+        &self,
+        universal: UniversalTy,
+    ) -> Option<&UniversalElaboration> {
+        let s = self.session();
+
+        match universal {
+            UniversalTy::Root(idx) => self.universal_roots[idx].elaboration.as_ref(),
+            UniversalTy::Projection(proj) => self.universal_projs[proj.r(s).cache_idx]
+                .elaboration
+                .as_ref(),
+        }
+    }
+
+    pub(super) fn universal_ty_elaboration_state_mut(
+        &mut self,
+        universal: UniversalTy,
+    ) -> &mut Option<UniversalElaboration> {
+        let s = self.session();
+
+        match universal {
+            UniversalTy::Root(idx) => &mut self.universal_roots[idx].elaboration,
+            UniversalTy::Projection(proj) => {
+                &mut self.universal_projs[proj.r(s).cache_idx].elaboration
+            }
+        }
+    }
+}

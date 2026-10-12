@@ -1,18 +1,19 @@
 use crate::{
     base::{
-        ErrorGuaranteed, Session,
+        ErrorGuaranteed,
         arena::{LateInit, Obj},
         syntax::{HasSpan, Span, Symbol},
     },
     parse::{
         ast::{
-            AstAssignOpKind, AstBinOpSpanned, AstLit, AstOptMutability, AstRangeLimits, AstUnOpKind,
+            AstAssignOpKind, AstBinOpSpanned, AstLit, AstOptMutability, AstPatStructRest,
+            AstRangeLimits, AstUnOpKind,
         },
         token::Ident,
     },
     semantic::syntax::{
-        AdtCtorUnresolved, EnumVariantItem, FnItem, Mutability, SpannedTraitSpec, SpannedTy,
-        SpannedTyOrReList,
+        EnumVariantItem, FnItem, Mutability, PatListFrontAndTail, SigGenericList, SigTraitSpec,
+        SigTy,
     },
     symbol,
 };
@@ -114,7 +115,7 @@ pub enum HirPatKind {
     AdtTuple(AdtCtorUnresolved, HirPatListFrontAndTail),
 
     /// Match a named struct or enum variant.
-    AdtNamed(AdtCtorUnresolved, Obj<[HirPatNamedField]>),
+    AdtNamed(AdtCtorUnresolved, Obj<[HirPatNamedField]>, AstPatStructRest),
 
     /// Bind to a target place expression. Only available in destructuring patterns.
     PlaceExpr(Obj<HirExpr>),
@@ -127,34 +128,19 @@ pub enum HirPatKind {
 }
 
 #[derive(Debug, Copy, Clone)]
+pub enum AdtCtorUnresolved {
+    ResolvedTy(SigTy),
+    ResolvedEnumVariant(Obj<EnumVariantItem>, SigGenericList),
+    UnresolvedEnumVariant(SigTy, Ident),
+}
+
+#[derive(Debug, Copy, Clone)]
 pub struct HirPatNamedField {
     pub name: Ident,
     pub pat: Obj<HirPat>,
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct HirPatListFrontAndTail {
-    pub front: Obj<[Obj<HirPat>]>,
-    pub tail: Option<Obj<[Obj<HirPat>]>>,
-}
-
-impl HirPatListFrontAndTail {
-    pub fn len(self, s: &Session) -> HirPatListFrontAndTailLen {
-        if let Some(tail) = self.tail {
-            HirPatListFrontAndTailLen::AtLeast(
-                self.front.r(s).len() as u32 + tail.r(s).len() as u32,
-            )
-        } else {
-            HirPatListFrontAndTailLen::Exactly(self.front.r(s).len() as u32)
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum HirPatListFrontAndTailLen {
-    Exactly(u32),
-    AtLeast(u32),
-}
+pub type HirPatListFrontAndTail = PatListFrontAndTail<HirPat>;
 
 // === Body === //
 
@@ -175,7 +161,7 @@ pub enum HirStmt {
 pub struct HirLetStmt {
     pub span: Span,
     pub pat: Obj<HirPat>,
-    pub ascription: Option<SpannedTy>,
+    pub ascription: Option<SigTy>,
     pub init: Option<Obj<HirExpr>>,
     pub else_clause: Option<Obj<HirBlock>>,
 }
@@ -194,16 +180,17 @@ pub enum HirExprKind {
     Binary(AstBinOpSpanned, Obj<HirExpr>, Obj<HirExpr>),
     Unary(AstUnOpKind, Obj<HirExpr>),
     Literal(AstLit),
-    AdtCtorTy(SpannedTy),
-    AdtCtorEnumVariant(Obj<EnumVariantItem>, SpannedTyOrReList),
-    FnItemLit(Obj<FnItem>, Option<SpannedTyOrReList>),
+    AdtCtorTy(SigTy),
+    AdtCtorEnumVariant(Obj<EnumVariantItem>, SigGenericList),
+    FnItemLit(Obj<FnItem>, Option<SigGenericList>),
     TypeRelative {
-        self_ty: SpannedTy,
-        as_trait: Option<SpannedTraitSpec>,
+        self_ty: SigTy,
+        as_trait: Option<SigTraitSpec>,
         assoc_name: Ident,
-        assoc_args: Option<SpannedTyOrReList>,
+        assoc_args: Option<SigGenericList>,
     },
-    Cast(Obj<HirExpr>, SpannedTy),
+    Cast(Obj<HirExpr>, SigTy),
+    Use(Obj<HirExpr>),
     If {
         cond: Obj<HirExpr>,
         truthy: Obj<HirExpr>,
@@ -220,12 +207,12 @@ pub enum HirExprKind {
     Match(Obj<HirExpr>, Obj<[Obj<HirMatchArm>]>),
     Block(Obj<HirBlock>),
     Assign(Obj<HirPat>, Obj<HirExpr>),
-    AssignOp(AstAssignOpKind, Obj<HirPat>, Obj<HirExpr>),
+    AssignOp(AstAssignOpKind, Obj<HirExpr>, Obj<HirExpr>),
     Field(Obj<HirExpr>, Ident),
     MethodCall {
         receiver: Obj<HirExpr>,
         name: Ident,
-        generics: Option<SpannedTyOrReList>,
+        generics: Option<SigGenericList>,
         args: Obj<[Obj<HirExpr>]>,
     },
     Index(Obj<HirExpr>, Obj<HirExpr>),
@@ -240,61 +227,6 @@ pub enum HirExprKind {
     Return(Obj<HirExpr>),
     Struct(HirStructExpr),
     Error(ErrorGuaranteed),
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct HirLabelledBlock {
-    pub target: Obj<HirExpr>,
-    pub kind: HirLabelTargetKind,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum HirLabelTargetKind {
-    Loop,
-    While,
-    For,
-    Block,
-}
-
-impl HirLabelTargetKind {
-    pub fn implicit_innermost(self) -> bool {
-        match self {
-            HirLabelTargetKind::Loop | HirLabelTargetKind::While | HirLabelTargetKind::For => true,
-            HirLabelTargetKind::Block => false,
-        }
-    }
-
-    pub fn can_break_with_value(self) -> bool {
-        match self {
-            HirLabelTargetKind::Loop | HirLabelTargetKind::Block => true,
-            HirLabelTargetKind::While | HirLabelTargetKind::For => false,
-        }
-    }
-
-    pub fn can_continue(self) -> bool {
-        match self {
-            HirLabelTargetKind::Loop | HirLabelTargetKind::While | HirLabelTargetKind::For => true,
-            HirLabelTargetKind::Block => false,
-        }
-    }
-
-    pub fn what(self) -> Symbol {
-        match self {
-            HirLabelTargetKind::Loop => symbol!("`loop`"),
-            HirLabelTargetKind::While => symbol!("`while` loop"),
-            HirLabelTargetKind::For => symbol!("`for` loop"),
-            HirLabelTargetKind::Block => symbol!("named block"),
-        }
-    }
-
-    pub fn a_what(self) -> Symbol {
-        match self {
-            HirLabelTargetKind::Loop => symbol!("a `loop`"),
-            HirLabelTargetKind::While => symbol!("a `while` loop"),
-            HirLabelTargetKind::For => symbol!("a `for` loop"),
-            HirLabelTargetKind::Block => symbol!("a named block"),
-        }
-    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -324,4 +256,61 @@ pub struct HirMatchArm {
     pub pat: Obj<HirPat>,
     pub guard: Option<Obj<HirExpr>>,
     pub body: Obj<HirExpr>,
+}
+
+// === Labels === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct HirLabelledBlock {
+    pub target: Obj<HirExpr>,
+    pub kind: LabelTargetKind,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum LabelTargetKind {
+    Loop,
+    While,
+    For,
+    Block,
+}
+
+impl LabelTargetKind {
+    pub fn implicit_innermost(self) -> bool {
+        match self {
+            LabelTargetKind::Loop | LabelTargetKind::While | LabelTargetKind::For => true,
+            LabelTargetKind::Block => false,
+        }
+    }
+
+    pub fn can_break_with_value(self) -> bool {
+        match self {
+            LabelTargetKind::Loop | LabelTargetKind::Block => true,
+            LabelTargetKind::While | LabelTargetKind::For => false,
+        }
+    }
+
+    pub fn can_continue(self) -> bool {
+        match self {
+            LabelTargetKind::Loop | LabelTargetKind::While | LabelTargetKind::For => true,
+            LabelTargetKind::Block => false,
+        }
+    }
+
+    pub fn what(self) -> Symbol {
+        match self {
+            LabelTargetKind::Loop => symbol!("`loop`"),
+            LabelTargetKind::While => symbol!("`while` loop"),
+            LabelTargetKind::For => symbol!("`for` loop"),
+            LabelTargetKind::Block => symbol!("named block"),
+        }
+    }
+
+    pub fn a_what(self) -> Symbol {
+        match self {
+            LabelTargetKind::Loop => symbol!("a `loop`"),
+            LabelTargetKind::While => symbol!("a `while` loop"),
+            LabelTargetKind::For => symbol!("a `for` loop"),
+            LabelTargetKind::Block => symbol!("a named block"),
+        }
+    }
 }

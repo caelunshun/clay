@@ -1,16 +1,13 @@
 use crate::{
     base::{
-        Session,
-        arena::{LateInit, Obj},
-        syntax::{Span, Symbol},
+        HasSession, Session,
+        arena::{HasInterner, LateInit, Obj},
+        syntax::{HasSpan, Span, Symbol},
     },
     parse::token::{Ident, Lifetime},
-    semantic::{
-        lower::func::path::TypeRelativeAssoc,
-        syntax::{
-            EnumVariantItem, FnDef, Item, SpannedTraitClauseList, SpannedTraitInstance,
-            SpannedTraitSpec, SpannedTy, SpannedTyOrReList, TyOrReKind, TyOrReList, Visibility,
-        },
+    semantic::syntax::{
+        AdtInstance, FnDef, Item, Ty, TyCtxt, TyKind, TyOrReKind, TyOrReList, Visibility,
+        types::signature::{SigTraitClauseList, SigTraitInstance, SigTy},
     },
     symbol,
     utils::hash::FxHashMap,
@@ -115,6 +112,13 @@ impl AdtCtorOwner {
             AdtCtorOwner::EnumVariant(..) => symbol!("`enum` variants"),
         }
     }
+
+    pub fn item(self, s: &Session) -> Obj<AdtItem> {
+        match self {
+            AdtCtorOwner::Struct(def) => def.r(s).adt,
+            AdtCtorOwner::EnumVariant(def) => def.r(s).owner.r(s).adt,
+        }
+    }
 }
 
 define_index_type! {
@@ -136,19 +140,12 @@ pub enum AdtCtorSyntax {
 }
 
 impl AdtCtorSyntax {
-    #[must_use]
-    pub fn is_unit(&self) -> bool {
-        matches!(self, AdtCtorSyntax::Unit)
-    }
-
-    #[must_use]
-    pub fn is_tuple(&self) -> bool {
-        matches!(self, AdtCtorSyntax::Tuple)
-    }
-
-    #[must_use]
-    pub fn is_named(&self) -> bool {
-        matches!(self, AdtCtorSyntax::Named(..))
+    pub fn style(&self) -> AdtCtorSyntaxStyle {
+        match self {
+            AdtCtorSyntax::Unit => AdtCtorSyntaxStyle::Unit,
+            AdtCtorSyntax::Tuple => AdtCtorSyntaxStyle::Tuple,
+            AdtCtorSyntax::Named(_) => AdtCtorSyntaxStyle::Named,
+        }
     }
 
     pub fn unwrap_names(&self) -> &FxHashMap<Symbol, AdtCtorFieldIdx> {
@@ -159,31 +156,61 @@ impl AdtCtorSyntax {
     }
 }
 
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum AdtCtorSyntaxStyle {
+    Unit,
+    Tuple,
+    Named,
+}
+
+impl AdtCtorSyntaxStyle {
+    pub fn is_unit(&self) -> bool {
+        matches!(self, AdtCtorSyntaxStyle::Unit)
+    }
+
+    pub fn is_tuple(&self) -> bool {
+        matches!(self, AdtCtorSyntaxStyle::Tuple)
+    }
+
+    pub fn is_named(&self) -> bool {
+        matches!(self, AdtCtorSyntaxStyle::Named)
+    }
+
+    pub fn style_name(self) -> Symbol {
+        match self {
+            AdtCtorSyntaxStyle::Unit => symbol!("unit-style"),
+            AdtCtorSyntaxStyle::Tuple => symbol!("tuple-style"),
+            AdtCtorSyntaxStyle::Named => symbol!("braced"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AdtCtorField {
     pub span: Span,
     pub idx: AdtCtorFieldIdx,
     pub vis: Visibility,
     pub ident: Option<Ident>,
-    pub ty: LateInit<SpannedTy>,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum AdtCtorUnresolved {
-    ResolvedTy(SpannedTy),
-    ResolvedEnumVariant(Obj<EnumVariantItem>, SpannedTyOrReList),
-    TypeRelative {
-        self_ty: SpannedTy,
-        as_trait: Option<SpannedTraitSpec>,
-        assoc: TypeRelativeAssoc,
-    },
+    pub ty: LateInit<SigTy>,
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct AdtCtorInstance {
-    pub span: Span,
     pub def: Obj<AdtCtor>,
-    pub params: SpannedTyOrReList,
+    pub params: TyOrReList,
+}
+
+impl AdtCtorInstance {
+    pub fn to_adt_instance(self, s: &Session) -> AdtInstance {
+        AdtInstance {
+            def: self.def.r(s).owner.item(s),
+            params: self.params,
+        }
+    }
+
+    pub fn to_adt_instance_ty(self, tcx: &TyCtxt) -> Ty {
+        tcx.intern(TyKind::Adt(self.to_adt_instance(tcx.session())))
+    }
 }
 
 // === Type Aliases === //
@@ -197,7 +224,7 @@ pub struct TypeAliasItem {
     pub generics: Obj<GenericBinder>,
 
     /// The body to which the type is expanded.
-    pub body: LateInit<SpannedTy>,
+    pub body: LateInit<SigTy>,
 }
 
 // === Traits === //
@@ -212,7 +239,7 @@ pub struct TraitItem {
     pub generics: LateInit<Obj<GenericBinder>>,
 
     /// The set of traits inherited by the current trait.
-    pub inherits: LateInit<SpannedTraitClauseList>,
+    pub inherits: LateInit<SigTraitClauseList>,
 
     /// The number of generic parameters taken by this trait.
     pub regular_generic_count: LateInit<u32>,
@@ -231,8 +258,8 @@ pub struct TraitItem {
 pub struct ImplItem {
     pub item: Obj<Item>,
     pub generics: Obj<GenericBinder>,
-    pub trait_: LateInit<Option<SpannedTraitInstance>>,
-    pub target: LateInit<SpannedTy>,
+    pub trait_: LateInit<Option<SigTraitInstance>>,
+    pub target: LateInit<SigTy>,
     pub methods: LateInit<Vec<Option<Obj<FnDef>>>>,
 }
 
@@ -242,6 +269,27 @@ pub struct ImplItem {
 #[derive(Debug, Clone, Default)]
 pub struct GenericBinder {
     pub defs: Vec<AnyGeneric>,
+}
+
+impl GenericBinder {
+    pub fn seal(self, s: &Session) -> Obj<GenericBinder> {
+        let binder = Obj::new(self, s);
+
+        for (i, generic) in binder.r(s).defs.iter().enumerate() {
+            LateInit::init(
+                match generic {
+                    AnyGeneric::Re(generic) => &generic.r(s).binder,
+                    AnyGeneric::Ty(generic) => &generic.r(s).binder,
+                },
+                PosInBinder {
+                    def: binder,
+                    idx: i as u32,
+                },
+            );
+        }
+
+        binder
+    }
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -255,6 +303,13 @@ impl AnyGeneric {
         match self {
             AnyGeneric::Re(_) => TyOrReKind::Re,
             AnyGeneric::Ty(_) => TyOrReKind::Ty,
+        }
+    }
+
+    pub fn ident(self, s: &Session) -> AnyGenericIdent {
+        match self {
+            AnyGeneric::Re(def) => AnyGenericIdent::Re(def.r(s).lifetime),
+            AnyGeneric::Ty(def) => AnyGenericIdent::Ty(def.r(s).ident),
         }
     }
 
@@ -287,7 +342,7 @@ impl AnyGeneric {
         }
     }
 
-    pub fn clauses(self, s: &Session) -> SpannedTraitClauseList {
+    pub fn clauses(self, s: &Session) -> SigTraitClauseList {
         match self {
             AnyGeneric::Re(re) => *re.r(s).clauses,
             AnyGeneric::Ty(ty) => *ty.r(s).clauses,
@@ -310,7 +365,7 @@ pub struct RegionGeneric {
     pub lifetime: Lifetime,
     #[derive_where(skip)]
     pub binder: LateInit<PosInBinder>,
-    pub clauses: LateInit<SpannedTraitClauseList>,
+    pub clauses: LateInit<SigTraitClauseList>,
 }
 
 #[derive_where(Debug)]
@@ -321,7 +376,7 @@ pub struct TypeGeneric {
     pub ident: Ident,
     #[derive_where(skip)]
     pub binder: LateInit<PosInBinder>,
-    pub clauses: LateInit<SpannedTraitClauseList>,
+    pub clauses: LateInit<SigTraitClauseList>,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -330,8 +385,26 @@ pub struct PosInBinder {
     pub idx: u32,
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct GenericSubst {
-    pub binder: Obj<GenericBinder>,
-    pub substs: TyOrReList,
+#[derive(Debug, Copy, Clone)]
+pub enum AnyGenericIdent {
+    Re(Lifetime),
+    Ty(Ident),
+}
+
+impl HasSpan for AnyGenericIdent {
+    fn span(&self) -> Span {
+        match self {
+            AnyGenericIdent::Re(v) => v.span,
+            AnyGenericIdent::Ty(v) => v.span,
+        }
+    }
+}
+
+impl AnyGenericIdent {
+    pub fn text(self) -> Symbol {
+        match self {
+            AnyGenericIdent::Re(lifetime) => lifetime.name,
+            AnyGenericIdent::Ty(ident) => ident.text,
+        }
+    }
 }

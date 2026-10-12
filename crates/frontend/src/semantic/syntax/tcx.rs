@@ -1,15 +1,11 @@
 use crate::{
     base::{
-        ErrorGuaranteed, HasSession, Session,
-        analysis::SpannedInfo,
-        arena::{HasInterner, HasListInterner, Interner, ListInterner, Obj},
+        HasSession, Session,
+        arena::{HasInterner, HasListInterner, Interner, ListInterner},
     },
-    semantic::{
-        analysis::{CoherenceMap, CrateBorrowCheckVisitor, CrateTypeckVisitor},
-        syntax::{
-            AttributeKind, Crate, EarlyAttrLang, FnInstanceInner, HrtbDebruijnDef, MirPlaceElem,
-            TraitClause, TraitClauseList, TraitParam, Ty, TyKind, TyOrRe, TyShape,
-        },
+    semantic::syntax::{
+        FnInstanceInner, HrtbDebruijnDef, MirPlaceElem, TraitClause, TraitClauseList, TraitParam,
+        Ty, TyKind, TyOrRe, TyShape, UniversalTyProjInner,
     },
 };
 use std::{ops::Deref, rc::Rc};
@@ -28,13 +24,13 @@ pub struct TyCtxtInner {
 #[derive(Debug, Default)]
 pub struct Interners {
     pub ty: Interner<TyKind>,
+    pub universal_projection: Interner<UniversalTyProjInner>,
     pub fn_instance: Interner<FnInstanceInner>,
     pub ty_list: ListInterner<Ty>,
     pub ty_or_re_list: ListInterner<TyOrRe>,
     pub trait_param_list: ListInterner<TraitParam>,
     pub trait_clause_list: ListInterner<TraitClause>,
     pub list_of_trait_clause_list: ListInterner<TraitClauseList>,
-    pub spanned_info_list: ListInterner<SpannedInfo>,
     pub coherence_ty_list: ListInterner<TyShape>,
     pub hrtb_debruijn_list: ListInterner<HrtbDebruijnDef>,
     pub mir_place_elem_list: ListInterner<MirPlaceElem>,
@@ -71,6 +67,12 @@ impl HasInterner<TyKind> for TyCtxt {
     }
 }
 
+impl HasInterner<UniversalTyProjInner> for TyCtxt {
+    fn interner(&self) -> &Interner<UniversalTyProjInner> {
+        &self.interners.universal_projection
+    }
+}
+
 impl HasInterner<FnInstanceInner> for TyCtxt {
     fn interner(&self) -> &Interner<FnInstanceInner> {
         &self.interners.fn_instance
@@ -104,12 +106,6 @@ impl HasListInterner<TraitClause> for TyCtxt {
 impl HasListInterner<TraitClauseList> for TyCtxt {
     fn interner(&self) -> &ListInterner<TraitClauseList> {
         &self.interners.list_of_trait_clause_list
-    }
-}
-
-impl HasListInterner<SpannedInfo> for TyCtxt {
-    fn interner(&self) -> &ListInterner<SpannedInfo> {
-        &self.interners.spanned_info_list
     }
 }
 

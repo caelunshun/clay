@@ -1,0 +1,521 @@
+use crate::{
+    base::{
+        Diag, ErrorGuaranteed, LeafDiag, Session,
+        arena::{HasInterner as _, Obj},
+    },
+    parse::token::Ident,
+    semantic::{
+        analysis::typeck::{BodyCtxt, infra::deref::attempt_deref},
+        infer::{
+            ClauseFuel, ClauseImportEnv, ElaboratedClause, FixArity, GenericSubst, HrtbUniverse,
+            PromiseProbe, SpannedError, UnboundVarHandlingMode,
+        },
+        lower::modules::{FrozenModuleResolver, ParentResolver as _, traits_in_single_scope},
+        syntax::{
+            AdtCtorSyntax, AdtKind, FnDef, FnDefOwner, FnInstanceInner, FnOwner, HirExpr,
+            InferTyVarSourceInfo, InstantiatedFnSig, Mutability, Re, RelationMode,
+            ResolvedFieldIdx, SigGenericList, TraitSpec, Ty, TyFolderInfallibleExt as _, TyKind,
+        },
+    },
+    utils::lang::IterEither,
+};
+use smallvec::SmallVec;
+
+#[derive(Debug, Copy, Clone)]
+pub struct LookupMethodResult {
+    pub receiver: Ty,
+    pub resolution: Obj<FnDef>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct LookupFieldResult {
+    pub ty: Ty,
+    pub index: ResolvedFieldIdx,
+}
+
+impl BodyCtxt<'_, '_> {
+    pub fn lookup_field(
+        &mut self,
+        receiver: Obj<HirExpr>,
+        receiver_ty: Ty,
+        name: Ident,
+    ) -> Result<Option<LookupFieldResult>, ErrorGuaranteed> {
+        let s = self.session();
+
+        let mut receiver_iter = receiver_ty;
+
+        let name_as_idx = name.text.as_str(s).parse::<u32>().ok();
+
+        loop {
+            let receiver = self.ccx_mut().peel_ty_infer_var_after_poll(receiver_iter);
+
+            match *receiver.r(s) {
+                TyKind::Adt(instance) => match *instance.def.r(s).kind {
+                    AdtKind::Struct(def) => 'search: {
+                        let ctor = def.r(s).ctor.r(s);
+
+                        let field = match &ctor.syntax {
+                            AdtCtorSyntax::Unit => None,
+                            AdtCtorSyntax::Tuple => {
+                                name_as_idx.and_then(|idx| ctor.fields.get(idx as usize))
+                            }
+                            AdtCtorSyntax::Named(fields) => {
+                                fields.get(&name.text).copied().map(|idx| &ctor.fields[idx])
+                            }
+                        };
+
+                        let Some(field) = field else {
+                            break 'search;
+                        };
+
+                        if !field.vis.is_visible_to(self.item(), s) {
+                            break 'search;
+                        }
+
+                        let env = ClauseImportEnv::new(
+                            Some(receiver),
+                            [GenericSubst::new(
+                                instance.def.r(s).generics,
+                                instance.params,
+                            )],
+                        );
+
+                        return Ok(Some(LookupFieldResult {
+                            ty: self.ccx_mut().import_elsewhere(&env, *field.ty),
+                            index: ResolvedFieldIdx::Adt(*def.r(s).ctor, field.idx),
+                        }));
+                    }
+                    AdtKind::Enum(_) => {
+                        // (fallthrough)
+                    }
+                },
+                TyKind::Tuple(fields) => {
+                    if let Some(name_as_idx) = name_as_idx
+                        && let Some(&field_ty) = fields.r(s).get(name_as_idx as usize)
+                    {
+                        return Ok(Some(LookupFieldResult {
+                            ty: field_ty,
+                            index: ResolvedFieldIdx::Tuple(name_as_idx),
+                        }));
+                    }
+                }
+
+                TyKind::Simple(_)
+                | TyKind::Reference(_, _, _)
+                | TyKind::Trait(_, _, _)
+                | TyKind::FnDef(_)
+                | TyKind::Universal(_) => {
+                    // (fallthrough, no special handling)
+                }
+                TyKind::HrtbVar(_) | TyKind::HrtbProjection(_) => unreachable!(),
+                TyKind::InferVar(_) => {
+                    return Err(
+                        Diag::span_err(name.span, "type must be known by this point").emit(),
+                    );
+                }
+                TyKind::Error(error) => return Err(error),
+            }
+
+            let Some(next) = attempt_deref(self.ccx_mut(), receiver) else {
+                break;
+            };
+
+            receiver_iter = next;
+        }
+
+        Ok(None)
+    }
+
+    pub fn lookup_method(&mut self, receiver: Ty, name: Ident) -> Option<LookupMethodResult> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let scope_trait_candidates = self.collect_scope_trait_candidates(name);
+
+        let mut receiver_iter = receiver;
+
+        loop {
+            self.ccx_mut().poll_obligations();
+
+            let receiver = self
+                .ccx()
+                .ucx()
+                .substitutor(UnboundVarHandlingMode::NormalizeToRoot)
+                .fold(receiver_iter);
+
+            if matches!(receiver.r(s), TyKind::InferVar(_) | TyKind::Error(_)) {
+                break;
+            }
+
+            let generic_clause_candidates = self.collect_generic_clause_candidates(receiver, name);
+
+            if let Some(res) = self.lookup_single_method(
+                receiver,
+                name,
+                &scope_trait_candidates,
+                &generic_clause_candidates,
+            ) {
+                return Some(res);
+            }
+
+            if let Some(res) = self.lookup_single_method(
+                tcx.intern(TyKind::Reference(Re::ERASED, Mutability::Not, receiver)),
+                name,
+                &scope_trait_candidates,
+                &generic_clause_candidates,
+            ) {
+                return Some(res);
+            }
+
+            if let Some(res) = self.lookup_single_method(
+                tcx.intern(TyKind::Reference(Re::ERASED, Mutability::Mut, receiver)),
+                name,
+                &scope_trait_candidates,
+                &generic_clause_candidates,
+            ) {
+                return Some(res);
+            }
+
+            let Some(next) = attempt_deref(self.ccx_mut(), receiver) else {
+                break;
+            };
+
+            receiver_iter = next;
+        }
+
+        None
+    }
+
+    pub fn lookup_type_relative(
+        &mut self,
+        self_ty: Ty,
+        as_trait: Option<TraitSpec>,
+        assoc_name: Ident,
+        assoc_args: Option<SigGenericList>,
+    ) -> Option<Ty> {
+        let s = self.session();
+        let tcx = self.tcx();
+
+        let self_ty = self.ccx_mut().peel_ty_infer_var_after_poll(self_ty);
+
+        if let TyKind::Error(err) = *self_ty.r(s) {
+            return Some(tcx.intern(TyKind::Error(err)));
+        }
+
+        let owner = if let Some(as_trait) = as_trait {
+            let &method_idx = as_trait.def.r(s).name_to_method.get(&assoc_name.text)?;
+
+            FnOwner::Trait {
+                instance: as_trait,
+                self_ty,
+                method_idx,
+            }
+        } else {
+            let scope_trait_candidates = self.collect_scope_trait_candidates(assoc_name);
+            let generic_clause_candidates =
+                self.collect_generic_clause_candidates(self_ty, assoc_name);
+
+            let resolution = self.lookup_single(
+                MethodQuery::AssocFn(self_ty),
+                assoc_name,
+                &scope_trait_candidates,
+                &generic_clause_candidates,
+            )?;
+
+            let owner = self
+                .ccx_mut()
+                .fresh_type_relative_fn_def_to_fn_owner(
+                    ClauseFuel::new(),
+                    HrtbUniverse::ROOT_REF,
+                    self_ty,
+                    resolution,
+                )
+                // TODO
+                .map(move |_ccx, error| SpannedError(assoc_name.span, error))
+                .report_loud();
+
+            owner
+        };
+
+        let instance = self
+            .ccx
+            .importer_here(self.import_env)
+            .import_fn_instance_from_owner(owner, assoc_args, FixArity::Normalize)
+            // TODO
+            .map(move |_ccx, error| SpannedError(assoc_name.span, error))
+            .report_loud();
+
+        Some(tcx.intern(TyKind::FnDef(instance)))
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum MethodQuery {
+    Method(Ty),
+    AssocFn(Ty),
+}
+
+impl<'tcx> BodyCtxt<'tcx, '_> {
+    fn collect_inherent_candidates(
+        &mut self,
+        query: MethodQuery,
+        name: Ident,
+    ) -> SmallVec<[Obj<FnDef>; 2]> {
+        let s = self.session();
+        let item = self.item();
+
+        fn is_too_general(ty: Ty, s: &Session) -> bool {
+            match ty.r(s) {
+                TyKind::HrtbVar(_) | TyKind::HrtbProjection(_) => unreachable!(),
+
+                TyKind::Simple(_)
+                | TyKind::Reference(_, _, _)
+                | TyKind::Adt(_)
+                | TyKind::Trait(_, _, _)
+                | TyKind::Tuple(_)
+                | TyKind::FnDef(_) => false,
+
+                TyKind::InferVar(_) | TyKind::Universal(_) | TyKind::Error(_) => true,
+            }
+        }
+
+        let candidates = match query {
+            MethodQuery::Method(receiver) => {
+                let receiver = self.ccx_mut().peel_ty_infer_var_after_poll(receiver);
+
+                if is_too_general(receiver, s) {
+                    return SmallVec::new();
+                }
+
+                IterEither::Left(
+                    self.ccx()
+                        .coherence()
+                        .gather_inherent_impl_method_candidates(self.ccx(), receiver, name.text),
+                )
+            }
+            MethodQuery::AssocFn(self_ty) => {
+                let self_ty = self.ccx_mut().peel_ty_infer_var_after_poll(self_ty);
+
+                if is_too_general(self_ty, s) {
+                    return SmallVec::new();
+                }
+
+                IterEither::Right(
+                    self.ccx()
+                        .coherence()
+                        .gather_inherent_impl_function_candidates(self.ccx(), self_ty, name.text),
+                )
+            }
+        };
+
+        candidates
+            .filter(move |candidate| candidate.r(s).impl_vis.unwrap().is_visible_to(item, s))
+            .collect()
+    }
+
+    fn collect_scope_trait_candidates(&mut self, name: Ident) -> Vec<Obj<FnDef>> {
+        let s = self.session();
+        let resolver = FrozenModuleResolver(s);
+
+        resolver
+            .scope_components(self.item())
+            .into_iter()
+            // : Iterator<Item = Obj<Item>>
+            .flat_map(|scope| traits_in_single_scope(scope, s).iter().copied())
+            // : Iterator<Item = Obj<TraitItem>>
+            .filter_map(|def| {
+                let &idx = def.r(s).name_to_method.get(&name.text)?;
+                Some(def.r(s).methods[idx as usize])
+            })
+            .collect::<Vec<_>>()
+    }
+
+    fn collect_generic_clause_candidates(&mut self, ty: Ty, name: Ident) -> Vec<Obj<FnDef>> {
+        let s = self.session();
+        let ty = self.ccx_mut().peel_ty_infer_var_after_poll(ty);
+
+        let TyKind::Universal(universal) = *ty.r(s) else {
+            return Vec::new();
+        };
+
+        self.ccx_mut()
+            .elaborate_universal_immediately(universal)
+            .elaborated_clauses
+            .iter()
+            .map(|clause| match clause {
+                ElaboratedClause::NotReady {
+                    instantiated,
+                    late_assoc_params: _,
+                } => instantiated.def,
+                ElaboratedClause::Ready(binder) => binder.inner.def,
+            })
+            .filter_map(|def| {
+                let &idx = def.r(s).name_to_method.get(&name.text)?;
+                Some(def.r(s).methods[idx as usize])
+            })
+            .collect::<Vec<_>>()
+    }
+
+    fn lookup_single_method(
+        &mut self,
+        receiver: Ty,
+        name: Ident,
+        scope_trait_candidates: &[Obj<FnDef>],
+        generic_clause_candidates: &[Obj<FnDef>],
+    ) -> Option<LookupMethodResult> {
+        self.lookup_single(
+            MethodQuery::Method(receiver),
+            name,
+            scope_trait_candidates,
+            generic_clause_candidates,
+        )
+        .map(|resolution| LookupMethodResult {
+            receiver,
+            resolution,
+        })
+    }
+
+    fn lookup_single(
+        &mut self,
+        query: MethodQuery,
+        name: Ident,
+        scope_trait_candidates: &[Obj<FnDef>],
+        generic_clause_candidates: &[Obj<FnDef>],
+    ) -> Option<Obj<FnDef>> {
+        let s = self.session();
+
+        // Obtain a list of candidates.
+        let inherent_candidates = self.collect_inherent_candidates(query, name);
+
+        let generic_clause_candidates = generic_clause_candidates.iter().copied();
+        let scope_trait_candidates = scope_trait_candidates.iter().copied();
+
+        let candidates = inherent_candidates
+            .iter()
+            .copied()
+            .chain(generic_clause_candidates)
+            .chain(scope_trait_candidates);
+
+        // Scan for inherent `impl` candidates.
+        let mut selections = SmallVec::<[Obj<FnDef>; 1]>::new();
+
+        for candidate in candidates {
+            // If we started finding trait candidates and already made an inherent selection, break
+            // out.
+            if let Some(selection) = selections.first()
+                && matches!(*selection.r(s).owner, FnDefOwner::ImplMethod(_, _))
+                && !matches!(*candidate.r(s).owner, FnDefOwner::ImplMethod(_, _))
+            {
+                break;
+            }
+
+            // See whether receiver is applicable.
+            if !self.attempt_single_candidate(candidate, query) {
+                continue;
+            }
+
+            if selections.iter().all(|&v| candidate != v) {
+                selections.push(candidate);
+            }
+        }
+
+        if selections.len() > 1 {
+            let mut diag = Diag::span_err(name.span, "multiple applicable items in scope");
+
+            for (idx, selection) in selections.iter().enumerate() {
+                diag.push_child(LeafDiag::span_note(
+                    selection.r(s).name.span,
+                    format_args!(
+                        "candidate #{} is defined in {}",
+                        idx + 1,
+                        selection.r(s).owner.as_item(s).r(s).bare_category_path(s)
+                    ),
+                ));
+            }
+
+            diag.emit();
+        }
+
+        selections.first().copied()
+    }
+
+    #[must_use]
+    fn attempt_single_candidate(&mut self, candidate: Obj<FnDef>, query: MethodQuery) -> bool {
+        let tcx = self.tcx();
+        let s = self.session();
+
+        let mut fork = self.ccx().clone().with_silent();
+
+        let probe = PromiseProbe::default();
+
+        match query {
+            MethodQuery::Method(receiver) => {
+                if !*candidate.r(s).has_self_param {
+                    return false;
+                }
+
+                let self_ty = fork
+                    .fresh_ty_infer(HrtbUniverse::ROOT, InferTyVarSourceInfo::MethodLookupHelper);
+
+                let expected_owner = fork
+                    .fresh_type_relative_fn_def_to_fn_owner(
+                        ClauseFuel::new(),
+                        HrtbUniverse::ROOT_REF,
+                        self_ty,
+                        candidate,
+                    )
+                    .probe(probe.clone());
+
+                let expected_instance = tcx.intern(FnInstanceInner {
+                    owner: expected_owner,
+                    early_args: None,
+                });
+
+                let InstantiatedFnSig {
+                    args: expected_args,
+                    ret_ty: _,
+                } = fork
+                    .resolve_fn_instance_sig(
+                        ClauseFuel::new(),
+                        HrtbUniverse::ROOT_REF,
+                        expected_instance,
+                    )
+                    .probe(probe.clone());
+
+                let [expected_receiver, ..] = *expected_args.r(s) else {
+                    unreachable!()
+                };
+
+                fork.oblige_ty_unifies_ty(receiver, expected_receiver, RelationMode::Equate)
+                    .probe(probe.clone());
+            }
+            MethodQuery::AssocFn(self_ty) => {
+                let expected_owner = fork
+                    .fresh_type_relative_fn_def_to_fn_owner(
+                        ClauseFuel::new(),
+                        HrtbUniverse::ROOT_REF,
+                        self_ty,
+                        candidate,
+                    )
+                    .probe(probe.clone());
+
+                let expected_instance = tcx.intern(FnInstanceInner {
+                    owner: expected_owner,
+                    early_args: None,
+                });
+
+                // Call for validation side-effect of non-early-bound functions.
+                fork.resolve_fn_instance_sig(
+                    ClauseFuel::new(),
+                    HrtbUniverse::ROOT_REF,
+                    expected_instance,
+                )
+                .probe(probe.clone());
+            }
+        }
+
+        fork.poll_obligations();
+
+        !probe.had_error()
+    }
+}

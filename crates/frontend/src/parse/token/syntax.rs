@@ -1,12 +1,10 @@
 use crate::{
-    base::{
-        Session,
-        syntax::{
-            AtomSimplify, Cursor, Delimited, HasSpan, LookaheadResult, Matcher, Parser, ParserLike,
-            Span, StuckHinter, Symbol,
-        },
+    base::syntax::{
+        AtomSimplify, Cursor, Delimited, HasSpan, LookaheadResult, Matcher, Parser, ParserLike,
+        Span, StuckHinter, Symbol,
     },
     parse::ast::Keyword,
+    semantic::syntax::{FloatKind, IntKind},
     symbol,
     utils::lang::ConstFmt,
 };
@@ -300,28 +298,29 @@ impl StrLitKind {
 #[derive(Debug, Copy, Clone)]
 pub struct TokenNumLit {
     pub span: Span,
-    pub text: Symbol,
+    pub kind: TokenNumLitKind,
 }
 
-impl TokenNumLit {
-    pub fn base(self) -> NumLitBase {
-        let session = Session::fetch();
-        let text = self.text.as_str(&session);
+#[derive(Debug, Copy, Clone)]
+pub enum TokenNumLitKind {
+    Integral {
+        base: NumLitBase,
+        value: Symbol,
+        suffix: Option<IntegralKind>,
+    },
+    Floating {
+        int_part: Symbol,
+        dec_part: Option<Symbol>,
+        exp_part: Option<Symbol>,
+        suffix: Option<FloatKind>,
+    },
+}
 
-        if text.starts_with("0x") {
-            return NumLitBase::Hexadecimal;
-        }
-
-        if text.starts_with("0b") {
-            return NumLitBase::Binary;
-        }
-
-        if text.starts_with("0o") {
-            return NumLitBase::Octal;
-        }
-
-        NumLitBase::Decimal
-    }
+#[derive(Debug, Copy, Clone)]
+pub enum IntegralKind {
+    Int(IntKind),
+    Uint(IntKind),
+    Float(FloatKind),
 }
 
 impl HasSpan for TokenNumLit {
@@ -339,6 +338,15 @@ pub enum NumLitBase {
 }
 
 impl NumLitBase {
+    pub fn name(self) -> Symbol {
+        match self {
+            NumLitBase::Decimal => symbol!("decimal"),
+            NumLitBase::Binary => symbol!("binary"),
+            NumLitBase::Hexadecimal => symbol!("hexadecimal"),
+            NumLitBase::Octal => symbol!("octal"),
+        }
+    }
+
     pub fn digit_name(self) -> Symbol {
         match self {
             NumLitBase::Decimal => symbol!("decimal digit"),
