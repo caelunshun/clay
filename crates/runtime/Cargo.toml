@@ -4,10 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-clay-core.workspace = true
-clay-lir.workspace = true
-tracing.workspace = true
-salsa.workspace = true
+
 
 [dev-dependencies]
 tracing-subscriber.workspace = true

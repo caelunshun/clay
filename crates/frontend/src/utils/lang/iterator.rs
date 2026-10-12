@@ -457,6 +457,7 @@ where
 mod tests {
     use super::*;
     use bumpalo::Bump;
+    use rand::{RngExt, SeedableRng, rngs::Xoshiro256PlusPlus};
     use std::collections::BTreeSet;
 
     // === Model === //
@@ -588,19 +589,24 @@ mod tests {
 
     #[test]
     fn prop_test() {
-        fastrand::seed(4);
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(4);
 
         for _ in 0..50_000 {
             let bump = Bump::new();
 
-            fn fill_random<'b>(bump: &'b Bump, validator: &mut Validator<'b>, depth: u32) {
+            fn fill_random<'b>(
+                bump: &'b Bump,
+                rng: &mut Xoshiro256PlusPlus,
+                validator: &mut Validator<'b>,
+                depth: u32,
+            ) {
                 let indent = (0..depth).map(|_| "  ").collect::<Vec<_>>().join("");
 
-                match fastrand::u8(0..=if depth <= 5 { 7 } else { 5 }) {
+                match rng.random_range(0u8..=if depth <= 5 { 7 } else { 5 }) {
                     0..=5 => {
                         let slice = bump.alloc_slice_copy(
-                            &(0..fastrand::u32(0..20))
-                                .filter(|_| fastrand::bool())
+                            &(0..rng.random_range(0u32..20))
+                                .filter(|_| rng.random::<bool>())
                                 .collect::<Vec<_>>(),
                         );
 
@@ -620,8 +626,8 @@ mod tests {
                             _ => unreachable!(),
                         });
 
-                        for _ in 0..fastrand::u8(0..=4) {
-                            fill_random(bump, validator, depth + 1);
+                        for _ in 0..rng.random_range(0u8..=4) {
+                            fill_random(bump, rng, validator, depth + 1);
                         }
 
                         eprintln!("{indent}validator.pop_op();");
@@ -631,15 +637,13 @@ mod tests {
                 }
             }
 
-            eprintln!("\n// Seed {}", fastrand::get_seed());
-
             eprintln!("let mut validator = Validator::default();");
             let mut validator = Validator::default();
 
             eprintln!("validator.push_op(UnionIsectOp::Union);");
             validator.push_op(UnionIsectOp::Union);
 
-            fill_random(&bump, &mut validator, 1);
+            fill_random(&bump, &mut rng, &mut validator, 1);
 
             eprintln!("validator.pop_op();");
             validator.pop_op();

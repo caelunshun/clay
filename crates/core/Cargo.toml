@@ -4,12 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-salsa.workspace = true
-compact_str.workspace = true
 bumpalo.workspace = true
+compact_str.workspace = true
 hashbrown.workspace = true
 indexmap.workspace = true
-allocator-api2.workspace = true
 
 [dev-dependencies]
 indoc.workspace = true
