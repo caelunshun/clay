@@ -20,8 +20,8 @@ use crate::{
             UniversalTyProjIdx, UniversalTyProjInner, UniversalTyRoot, UniversalTyRootSourceInfo,
         },
     },
-    utils::hash::FxHashMap,
 };
+use clay_core::FastHashMap;
 use index_vec::IndexVec;
 use std::{
     rc::Rc,
@@ -53,7 +53,7 @@ pub enum ClauseObligation<'tcx> {
     },
     Covered {
         handle: PromiseHandle<'tcx, NotCoveredError>,
-        must_mention: Rc<FxHashMap<UniversalTy, u32>>,
+        must_mention: Rc<FastHashMap<UniversalTy, u32>>,
         in_type: Option<Ty>,
         in_trait: Option<TraitSpec>,
     },

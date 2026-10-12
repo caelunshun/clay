@@ -16,8 +16,8 @@ use crate::{
         syntax::{Crate, DirectUse, GlobUse, Item, Visibility},
     },
     symbol,
-    utils::hash::FxIndexMap,
 };
+use clay_core::FastIndexMap;
 use index_vec::{IndexVec, define_index_type};
 use std::mem;
 
@@ -51,7 +51,7 @@ struct BuilderItem {
     name: Option<Ident>,
     public_path: Option<Symbol>,
     glob_uses: Vec<BuilderGlobUse>,
-    direct_uses: FxIndexMap<Symbol, BuilderDirectUse>,
+    direct_uses: FastIndexMap<Symbol, BuilderDirectUse>,
 }
 
 struct BuilderGlobUse {
@@ -91,7 +91,7 @@ impl BuilderModuleTree {
                     name: None,
                     public_path: None,
                     glob_uses: Vec::new(),
-                    direct_uses: FxIndexMap::default(),
+                    direct_uses: FastIndexMap::default(),
                 },
                 BuilderItem {
                     direct_parent: None,
@@ -99,7 +99,7 @@ impl BuilderModuleTree {
                     name: Some(Ident::new(Span::DUMMY, symbol!("prelude"))),
                     public_path: None,
                     glob_uses: Vec::new(),
-                    direct_uses: FxIndexMap::default(),
+                    direct_uses: FastIndexMap::default(),
                 },
             ]),
         }
@@ -143,7 +143,7 @@ impl BuilderModuleTree {
             name: Some(name),
             public_path: None,
             glob_uses: Vec::new(),
-            direct_uses: FxIndexMap::default(),
+            direct_uses: FastIndexMap::default(),
         });
 
         self.push_direct_use(
@@ -171,7 +171,7 @@ impl BuilderModuleTree {
             name,
             public_path: None,
             glob_uses: Vec::new(),
-            direct_uses: FxIndexMap::default(),
+            direct_uses: FastIndexMap::default(),
         })
     }
 

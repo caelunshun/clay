@@ -4,8 +4,8 @@ use crate::{
         infer::{ClauseCx, Promise, PromiseHandle, ReAndReUnifyErrorCause, UnifyCxMode},
         syntax::{InferReVar, Re, RelationDirection, UniversalReVar, UniversalReVarSourceInfo},
     },
-    utils::hash::FxHashSet,
 };
+use clay_core::FastHashSet;
 use index_vec::IndexVec;
 use smallvec::SmallVec;
 use std::ops::ControlFlow;
@@ -197,10 +197,10 @@ struct ReElaboratedPermissions {
     ///
     /// - May or may not contain redundant constraints like `'self: 'self`.
     ///
-    permitted_uni_outlives: FxHashSet<(UniversalReVar, UniversalReVar)>,
+    permitted_uni_outlives: FastHashSet<(UniversalReVar, UniversalReVar)>,
 
     /// Universal variables for which `'lhs: 'gc`.
-    permitted_gc_outlives: FxHashSet<UniversalReVar>,
+    permitted_gc_outlives: FastHashSet<UniversalReVar>,
 }
 
 impl ReElaboratedPermissions {
@@ -237,8 +237,8 @@ impl ReElaboratedPermissions {
 
         // DFS each universal's permission set to figure out which universals they are allowed to
         // outlive.
-        let mut permitted_uni_outlives = FxHashSet::default();
-        let mut permitted_gc_outlives = FxHashSet::default();
+        let mut permitted_uni_outlives = FastHashSet::default();
+        let mut permitted_gc_outlives = FastHashSet::default();
 
         let mut perm_dfs = InferReDfs::default();
         let mut cst_dfs = InferReDfs::default();
@@ -368,7 +368,7 @@ struct ReIncrementalConstraints {
     direct_outlive_graph: DirectedInferReGraph,
 
     /// The set of lifetimes each universal is constrained to outlive.
-    transitive_universal_outlives: IndexVec<UniversalReVar, FxHashSet<InferRe>>,
+    transitive_universal_outlives: IndexVec<UniversalReVar, FastHashSet<InferRe>>,
 
     /// A reusable queue for DFS'ing. Always empty in between invocations of `add_constraint`.
     dfs_queue: Vec<InferRe>,
@@ -379,7 +379,7 @@ impl ReIncrementalConstraints {
         Self {
             direct_outlive_graph: DirectedInferReGraph::default(),
             transitive_universal_outlives: IndexVec::from_iter(
-                tracker.universals.iter().map(|_| FxHashSet::default()),
+                tracker.universals.iter().map(|_| FastHashSet::default()),
             ),
             dfs_queue: Vec::new(),
         }
@@ -524,7 +524,7 @@ impl<T: Default> InferReMap<T> {
 struct InferReGraph {
     outlives: DirectedInferReGraph,
     outlived_by: DirectedInferReGraph,
-    entries: FxHashSet<(InferRe, InferRe)>,
+    entries: FastHashSet<(InferRe, InferRe)>,
 }
 
 impl InferReGraph {
@@ -566,7 +566,7 @@ impl DirectedInferReGraph {
 
 #[derive(Debug, Clone, Default)]
 struct InferReDfs {
-    visited: FxHashSet<InferRe>,
+    visited: FastHashSet<InferRe>,
     stack: Vec<InferRe>,
 }
 

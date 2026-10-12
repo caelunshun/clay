@@ -10,8 +10,8 @@ use crate::{
         types::signature::{SigTraitClauseList, SigTraitInstance, SigTy},
     },
     symbol,
-    utils::hash::FxHashMap,
 };
+use clay_core::FastHashMap;
 use derive_where::derive_where;
 use index_vec::{IndexVec, define_index_type};
 use std::fmt;
@@ -65,7 +65,7 @@ pub struct AdtKindStruct {
 pub struct AdtKindEnum {
     pub adt: Obj<AdtItem>,
     pub variants: LateInit<IndexVec<AdtEnumVariantIdx, Obj<AdtEnumVariant>>>,
-    pub by_name: LateInit<FxHashMap<Symbol, AdtEnumVariantIdx>>,
+    pub by_name: LateInit<FastHashMap<Symbol, AdtEnumVariantIdx>>,
 }
 
 define_index_type! {
@@ -136,7 +136,7 @@ pub struct AdtCtor {
 pub enum AdtCtorSyntax {
     Unit,
     Tuple,
-    Named(FxHashMap<Symbol, AdtCtorFieldIdx>),
+    Named(FastHashMap<Symbol, AdtCtorFieldIdx>),
 }
 
 impl AdtCtorSyntax {
@@ -148,7 +148,7 @@ impl AdtCtorSyntax {
         }
     }
 
-    pub fn unwrap_names(&self) -> &FxHashMap<Symbol, AdtCtorFieldIdx> {
+    pub fn unwrap_names(&self) -> &FastHashMap<Symbol, AdtCtorFieldIdx> {
         match self {
             AdtCtorSyntax::Named(v) => v,
             _ => unreachable!(),
@@ -245,13 +245,13 @@ pub struct TraitItem {
     pub regular_generic_count: LateInit<u32>,
 
     /// Maps associated type names to their generic parameter as bound in `generics`.
-    pub associated_types: LateInit<FxHashMap<Symbol, Obj<TypeGeneric>>>,
+    pub associated_types: LateInit<FastHashMap<Symbol, Obj<TypeGeneric>>>,
 
     /// The set of methods defined by this trait.
     pub methods: LateInit<Vec<Obj<FnDef>>>,
 
     /// A map from method names to index.
-    pub name_to_method: LateInit<FxHashMap<Symbol, u32>>,
+    pub name_to_method: LateInit<FastHashMap<Symbol, u32>>,
 }
 
 #[derive(Debug, Clone)]

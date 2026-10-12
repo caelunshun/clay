@@ -13,8 +13,8 @@ use crate::{
         },
     },
     symbol,
-    utils::hash::{FxHashSet, FxIndexMap},
 };
+use clay_core::{FastHashSet, FastIndexMap};
 use derive_where::derive_where;
 
 #[derive(Debug, Clone)]
@@ -37,9 +37,9 @@ pub struct Item {
     pub category: ItemCategory,
     pub name: Option<Ident>,
     pub path: Symbol,
-    pub direct_uses: LateInit<FxIndexMap<Symbol, DirectUse>>,
+    pub direct_uses: LateInit<FastIndexMap<Symbol, DirectUse>>,
     pub glob_uses: LateInit<Vec<GlobUse>>,
-    pub traits_in_scope: LateInit<FxHashSet<Obj<TraitItem>>>,
+    pub traits_in_scope: LateInit<FastHashSet<Obj<TraitItem>>>,
     pub attrs: LateInit<Vec<Obj<Attribute>>>,
     pub kind: LateInit<ItemKind>,
 }

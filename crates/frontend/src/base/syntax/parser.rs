@@ -2,11 +2,9 @@ use super::{HasSpan, Span, Symbol};
 use crate::{
     base::{Diag, ErrorGuaranteed, HardDiag, LeafDiag},
     flags::should_print_parse_expect_success,
-    utils::{
-        hash::{FxHashSet, FxIndexMap},
-        lang::{FormatFn, ListFormatter, SimpleListFormatGlue, format_list_into},
-    },
+    utils::lang::{FormatFn, ListFormatter, SimpleListFormatGlue, format_list_into},
 };
+use clay_core::{FastHashSet, FastIndexMap};
 use std::{
     fmt::Debug,
     ops::{Deref, DerefMut},
@@ -263,11 +261,11 @@ impl<I: CursorIter> Parser<I> {
         // Filter out duplicate expectations, preferring earlier (and thus higher priority) attempts
         // to match something over later ones.
         {
-            let mut expected_names = FxHashSet::default();
+            let mut expected_names = FastHashSet::default();
             self.expected.retain(|v| expected_names.insert(v.what));
         }
 
-        let mut categorized_expectations = FxIndexMap::<Symbol, Vec<Symbol>>::default();
+        let mut categorized_expectations = FastIndexMap::<Symbol, Vec<Symbol>>::default();
         let mut basic_expectations = Vec::new();
 
         for &Expectation { what, to_parse } in self.expected.iter() {

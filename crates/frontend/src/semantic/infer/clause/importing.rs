@@ -27,8 +27,8 @@ use crate::{
         },
     },
     typed_joiner,
-    utils::hash::FxHashMap,
 };
+use clay_core::FastHashMap;
 use hashbrown::hash_map;
 use smallvec::SmallVec;
 use std::{convert::Infallible, mem};
@@ -155,7 +155,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 // We're not in a binder.
                 defer_project_in_binder: false,
             },
-            reentrant_aliases: FxHashMap::default(),
+            reentrant_aliases: FastHashMap::default(),
             hrtb_substs: DebruijnMap::default(),
         }
     }
@@ -240,7 +240,7 @@ pub struct SigImporter<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
     fuel: ClauseFuel,
     opts: SigImporterOpts,
-    reentrant_aliases: FxHashMap<Obj<TypeAliasItem>, ReentrantAliasState>,
+    reentrant_aliases: FastHashMap<Obj<TypeAliasItem>, ReentrantAliasState>,
     hrtb_substs: DebruijnMap<Option<TyOrRe>>,
 }
 

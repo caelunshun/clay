@@ -9,8 +9,8 @@ use crate::{
             FnDef, MirAssignRvalue, MirLocalIdx, MirPlace, ThirBody, ThirExpr, ThirLocal, TyCtxt,
         },
     },
-    utils::hash::FxHashMap,
 };
+use clay_core::FastHashMap;
 
 pub fn build_function_mir(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     let s = cx.session();
@@ -26,8 +26,8 @@ pub fn build_function_mir(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
 
 pub struct MirFromThirCtx<'tcx> {
     pub builder: MirScopedBuilder<'tcx>,
-    pub labelled_scopes: FxHashMap<Obj<ThirExpr>, LabelledScope>,
-    pub thir_locals: FxHashMap<Obj<ThirLocal>, MirLocalIdx>,
+    pub labelled_scopes: FastHashMap<Obj<ThirExpr>, LabelledScope>,
+    pub thir_locals: FastHashMap<Obj<ThirLocal>, MirLocalIdx>,
 }
 
 #[derive(Debug, Clone)]
@@ -46,8 +46,8 @@ impl<'tcx> MirFromThirCtx<'tcx> {
     pub fn new(tcx: &'tcx TyCtxt, def: Obj<FnDef>) -> Self {
         Self {
             builder: MirScopedBuilder::new(tcx, def),
-            labelled_scopes: FxHashMap::default(),
-            thir_locals: FxHashMap::default(),
+            labelled_scopes: FastHashMap::default(),
+            thir_locals: FastHashMap::default(),
         }
     }
 

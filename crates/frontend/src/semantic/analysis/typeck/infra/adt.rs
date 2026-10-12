@@ -13,11 +13,9 @@ use crate::{
             SigAdtInstance, Ty, TyKind,
         },
     },
-    utils::{
-        hash::FxHashMap,
-        lang::{SimpleListFormatGlue, format_list},
-    },
+    utils::lang::{SimpleListFormatGlue, format_list},
 };
+use clay_core::FastHashMap;
 use hashbrown::hash_map;
 
 // TODO: Can we support late-bound ctors too?
@@ -196,7 +194,7 @@ impl BodyCtxt<'_, '_> {
         let s = self.session();
         let name_map = ctor.r(s).syntax.unwrap_names();
 
-        let mut mentions = FxHashMap::default();
+        let mut mentions = FastHashMap::default();
         let mut accum = Vec::new();
 
         for (name, value) in fields {

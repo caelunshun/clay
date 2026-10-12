@@ -1,4 +1,4 @@
-use crate::utils::hash::FxHashSet;
+use clay_core::FastHashSet;
 use std::{fmt, hash, rc::Rc};
 
 /// HRTBs in the RHS position of a type-implements-clause obligation work by instantiating each HRTB
@@ -141,7 +141,7 @@ impl HrtbUniverse {
         let ancestors = self
             .ancestors()
             .filter(|v| !v.is_root())
-            .collect::<FxHashSet<_>>();
+            .collect::<FastHashSet<_>>();
 
         other
             .ancestors()

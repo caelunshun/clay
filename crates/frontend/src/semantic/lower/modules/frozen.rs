@@ -11,8 +11,8 @@ use crate::{
         },
         syntax::{Item, TraitItem},
     },
-    utils::hash::FxHashSet,
 };
+use clay_core::FastHashSet;
 
 // === Visibility Resolver === //
 
@@ -144,13 +144,13 @@ impl PathResolver for FrozenModuleResolver<'_> {
 
 // === Trait Enumeration === //
 
-pub fn traits_in_single_scope(root: Obj<Item>, s: &Session) -> &FxHashSet<Obj<TraitItem>> {
+pub fn traits_in_single_scope(root: Obj<Item>, s: &Session) -> &FastHashSet<Obj<TraitItem>> {
     if let Some(cached) = LateInit::get(&root.r(s).traits_in_scope) {
         return cached;
     }
 
-    let mut visited_modules = FxHashSet::from_iter([root]);
-    let mut discovered_traits = FxHashSet::default();
+    let mut visited_modules = FastHashSet::from_iter([root]);
+    let mut discovered_traits = FastHashSet::default();
     let mut stack = vec![root];
 
     while let Some(top) = stack.pop() {

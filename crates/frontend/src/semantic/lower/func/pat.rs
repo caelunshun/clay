@@ -12,15 +12,15 @@ use crate::{
             LocalNameSymbol, Mutability,
         },
     },
-    utils::hash::FxHashMap,
 };
+use clay_core::FastHashMap;
 use std::{cell::Cell, fmt, mem};
 
 // === Fork Resolution === //
 
 #[derive(Debug)]
 pub struct PatLocalBranchResolver<'a> {
-    locals: &'a mut FxHashMap<LocalNameSymbol, PatLocal>,
+    locals: &'a mut FastHashMap<LocalNameSymbol, PatLocal>,
     case_mention_stack: &'a mut Vec<LocalNameSymbol>,
     should_use_case_mention_stack: bool,
 }
@@ -35,7 +35,7 @@ struct PatLocal {
 impl PatLocalBranchResolver<'_> {
     pub fn start<R>(f: impl FnOnce(&mut PatLocalBranchResolver<'_>) -> R) -> R {
         f(&mut PatLocalBranchResolver {
-            locals: &mut FxHashMap::default(),
+            locals: &mut FastHashMap::default(),
             case_mention_stack: &mut Vec::new(),
             should_use_case_mention_stack: false,
         })
@@ -48,7 +48,7 @@ impl PatLocalBranchResolver<'_> {
         let mut resolver = PatLocalForkResolver {
             locals: self.locals,
             case_mention_stack: self.case_mention_stack,
-            fork_locals: FxHashMap::default(),
+            fork_locals: FastHashMap::default(),
             fork_spans: Vec::new(),
             fork_had_errors: false,
         };
@@ -147,9 +147,9 @@ impl PatLocalBranchResolver<'_> {
 
 #[derive(Debug)]
 pub struct PatLocalForkResolver<'a> {
-    locals: &'a mut FxHashMap<LocalNameSymbol, PatLocal>,
+    locals: &'a mut FastHashMap<LocalNameSymbol, PatLocal>,
     case_mention_stack: &'a mut Vec<LocalNameSymbol>,
-    fork_locals: FxHashMap<LocalNameSymbol, ForkLocalState>,
+    fork_locals: FastHashMap<LocalNameSymbol, ForkLocalState>,
     fork_spans: Vec<Span>,
     fork_had_errors: bool,
 }

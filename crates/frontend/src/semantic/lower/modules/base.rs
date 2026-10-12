@@ -5,8 +5,9 @@ use crate::{
     },
     parse::ast::{AstBarePath, AstPathPart, AstPathPartKind, AstPathPartKw},
     symbol,
-    utils::{hash::FxHashSet, mem::Handle},
+    utils::mem::Handle,
 };
+use clay_core::FastHashSet;
 use smallvec::SmallVec;
 use std::fmt;
 
@@ -337,7 +338,7 @@ pub trait PathResolver: ParentResolver {
                     vis_ctxt,
                     finger,
                     part,
-                    &mut FxHashSet::default(),
+                    &mut FastHashSet::default(),
                 ) {
                     Err(StepResolveError::NotFound) => {}
                     res @ (Ok(_) | Err(_)) => return res,
@@ -353,7 +354,7 @@ pub trait PathResolver: ParentResolver {
             vis_ctxt,
             finger,
             part,
-            &mut FxHashSet::default(),
+            &mut FastHashSet::default(),
         )
     }
 
@@ -449,7 +450,7 @@ fn resolve_step_inner<R>(
     vis_ctxt: R::Item,
     finger: R::Item,
     part: AstPathPart,
-    reentrant_glob_lookups: &mut FxHashSet<R::Item>,
+    reentrant_glob_lookups: &mut FastHashSet<R::Item>,
 ) -> Result<R::Item, StepResolveError<R::Item>>
 where
     R: ?Sized + PathResolver,

@@ -7,7 +7,8 @@ use crate::{
     },
 };
 use index_vec::IndexVec;
-use rustc_hash::FxHashSet;
+use clay_core::{FastHashSet};
+
 use smallvec::SmallVec;
 use std::{
     collections::VecDeque,
@@ -250,7 +251,7 @@ impl MirDataflowFacts {
             });
         }
 
-        let mut dfs_set = FxHashSet::default();
+        let mut dfs_set = FastHashSet::default();
         let mut dfs_stack = Vec::new();
         let mut candidates = Vec::new();
 

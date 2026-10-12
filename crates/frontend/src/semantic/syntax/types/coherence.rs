@@ -5,11 +5,9 @@ use crate::{
         syntax::Symbol,
     },
     semantic::syntax::{AdtItem, Mutability, SimpleTyKind, TraitItem},
-    utils::{
-        hash::FxHashMap,
-        lang::{UnionIsectBuilder, UnionIsectIter, UnionIsectOp},
-    },
+    utils::lang::{UnionIsectBuilder, UnionIsectIter, UnionIsectOp},
 };
+use clay_core::FastHashMap;
 use derive_where::derive_where;
 use index_vec::{IndexVec, define_index_type};
 use std::slice;
@@ -111,7 +109,7 @@ define_index_type! {
 #[derive(Debug, Clone, Default)]
 struct MapLayer {
     universally_matched_by: Vec<EntryIdx>,
-    conditionally_matched_by: FxHashMap<SolidTyShapeKind, ConditionalMatcher>,
+    conditionally_matched_by: FastHashMap<SolidTyShapeKind, ConditionalMatcher>,
 }
 
 #[derive(Debug, Clone)]
@@ -218,8 +216,8 @@ mod tests {
     use crate::{
         base::arena::HasListInterner as _,
         semantic::syntax::{SimpleTyKind, TyCtxt},
-        utils::hash::FxHashSet,
     };
+    use clay_core::FastHashSet;
 
     #[test]
     fn coherence_map() {
@@ -269,8 +267,8 @@ mod tests {
                 &tcx.session,
             )
             .copied()
-            .collect::<FxHashSet<_>>(),
-            FxHashSet::from_iter(["_", "(_, bool)", "(str, _)"]),
+            .collect::<FastHashSet<_>>(),
+            FastHashSet::from_iter(["_", "(_, bool)", "(str, _)"]),
         );
 
         assert_eq!(
@@ -288,8 +286,8 @@ mod tests {
                 &tcx.session,
             )
             .copied()
-            .collect::<FxHashSet<_>>(),
-            FxHashSet::from_iter(["_", "(_, bool)", "(str, _)"]),
+            .collect::<FastHashSet<_>>(),
+            FastHashSet::from_iter(["_", "(_, bool)", "(str, _)"]),
         );
 
         assert_eq!(
@@ -307,8 +305,8 @@ mod tests {
                 &tcx.session,
             )
             .copied()
-            .collect::<FxHashSet<_>>(),
-            FxHashSet::from_iter(["_", "(str, _)"]),
+            .collect::<FastHashSet<_>>(),
+            FastHashSet::from_iter(["_", "(str, _)"]),
         );
     }
 }

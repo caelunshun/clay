@@ -11,8 +11,8 @@ use crate::{
             TyCtxt,
         },
     },
-    utils::hash::FxHashMap,
 };
+use clay_core::FastHashMap;
 
 // === Driver === //
 
@@ -79,8 +79,8 @@ pub(super) struct BodyCtxt<'a, 'tcx> {
     pub ccx: &'a mut ClauseCx<'tcx>,
     pub def: Obj<FnDef>,
     pub import_env: &'a ClauseImportEnv,
-    pub local_types: FxHashMap<Obj<HirLocal>, Ty>,
-    pub block_break_demands: FxHashMap<HirLabelledBlock, Option<Ty>>,
+    pub local_types: FastHashMap<Obj<HirLocal>, Ty>,
+    pub block_break_demands: FastHashMap<HirLabelledBlock, Option<Ty>>,
     pub confirm_state: BodyCtxtConfirmState<'a, 'tcx>,
     pub return_ty: Ty,
 }
@@ -99,8 +99,8 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             ccx,
             def,
             import_env,
-            local_types: FxHashMap::default(),
-            block_break_demands: FxHashMap::default(),
+            local_types: FastHashMap::default(),
+            block_break_demands: FastHashMap::default(),
             confirm_state: BodyCtxtConfirmState::default(),
             return_ty,
         }

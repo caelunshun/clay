@@ -17,8 +17,8 @@ use crate::{
             UniversalTyOrReRoot, UniversalTyProjInner,
         },
     },
-    utils::hash::FxHashMap,
 };
+use clay_core::FastHashMap;
 use hashbrown::hash_map;
 use std::{collections::VecDeque, convert::Infallible, num::NonZeroU32, ops::ControlFlow, rc::Rc};
 
@@ -27,7 +27,7 @@ use std::{collections::VecDeque, convert::Infallible, num::NonZeroU32, ops::Cont
 #[derive(Debug, Clone)]
 pub struct UniversalElaboration {
     pub lub_re: Re,
-    pub hrtb_universals: FxHashMap<UniversalTyOrReRoot, HrtbDebruijnDef>,
+    pub hrtb_universals: FastHashMap<UniversalTyOrReRoot, HrtbDebruijnDef>,
     pub elaborated_clauses: Vec<ElaboratedClause>,
 }
 
@@ -92,7 +92,7 @@ impl<'tcx> ClauseCx<'tcx> {
         let lub_re = self.fresh_re_universal(UniversalReVarSourceInfo::ElaboratedLub);
 
         let mut elaborated_clauses = Vec::new();
-        let mut hrtb_universals = FxHashMap::default();
+        let mut hrtb_universals = FastHashMap::default();
 
         let mut queue = self
             .direct_ty_universal_clauses_possibly_floating(universal)
@@ -461,8 +461,8 @@ impl<'tcx> ClauseCx<'tcx> {
             ccx: self,
             universe,
             universal,
-            infer_remapping: FxHashMap::default(),
-            universal_root_to_debruijn: FxHashMap::default(),
+            infer_remapping: FastHashMap::default(),
+            universal_root_to_debruijn: FastHashMap::default(),
             debruijn_defs_backward: Vec::new(),
         };
 
@@ -574,8 +574,8 @@ struct HrtbReverseTranscriptase<'a, 'tcx> {
     ccx: &'a mut ClauseCx<'tcx>,
     universe: HrtbUniverse,
     universal: UniversalTy,
-    infer_remapping: FxHashMap<InferTyVar, InferTyVar>,
-    universal_root_to_debruijn: FxHashMap<UniversalTyOrReRoot, u32>,
+    infer_remapping: FastHashMap<InferTyVar, InferTyVar>,
+    universal_root_to_debruijn: FastHashMap<UniversalTyOrReRoot, u32>,
     debruijn_defs_backward: Vec<HrtbDebruijnDef>,
 }
 

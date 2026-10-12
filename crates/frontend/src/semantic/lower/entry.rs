@@ -35,11 +35,9 @@ use crate::{
         },
     },
     symbol,
-    utils::{
-        hash::FxHashMap,
-        lang::{SimpleListFormatGlue, format_list},
-    },
+    utils::lang::{SimpleListFormatGlue, format_list},
 };
+use clay_core::FastHashMap;
 use hashbrown::hash_map;
 use index_vec::{IndexSlice, IndexVec};
 use std::{cell::Cell, rc::Rc};
@@ -693,9 +691,9 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         let regular_generic_count = binder.defs.len() as u32;
 
         // Lower members
-        let mut associated_types = FxHashMap::default();
+        let mut associated_types = FastHashMap::default();
         let mut methods = Vec::<FnDefLowerTask>::new();
-        let mut name_to_method = FxHashMap::<Symbol, u32>::default();
+        let mut name_to_method = FastHashMap::<Symbol, u32>::default();
 
         for member in &ast.body.members {
             match &member.kind {
@@ -867,7 +865,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
 
         LateInit::init(&target_adt.r(s).kind, AdtKind::Enum(target_enum));
 
-        let mut by_name = FxHashMap::default();
+        let mut by_name = FastHashMap::default();
         let variants = ast
             .variants
             .iter()
@@ -1020,7 +1018,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                 kind
             }
             AstStructKind::Struct(ast) => {
-                let mut by_name = FxHashMap::<Symbol, AdtCtorFieldIdx>::default();
+                let mut by_name = FastHashMap::<Symbol, AdtCtorFieldIdx>::default();
 
                 let fields = ast
                     .iter()

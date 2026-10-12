@@ -23,11 +23,9 @@ use crate::{
         },
     },
     symbol,
-    utils::{
-        hash::FxHashMap,
-        lang::{SimpleListFormatGlue, format_list},
-    },
+    utils::lang::{SimpleListFormatGlue, format_list},
 };
+use clay_core::FastHashMap;
 use hashbrown::hash_map;
 use std::iter;
 
@@ -77,8 +75,8 @@ fn lower_generic_defs<'ast>(
 }
 
 fn check_generic_defs_for_duplicates(defs: impl IntoIterator<Item = AnyGenericIdent>) {
-    let mut bound_re_names = FxHashMap::default();
-    let mut bound_ty_names = FxHashMap::default();
+    let mut bound_re_names = FastHashMap::default();
+    let mut bound_ty_names = FastHashMap::default();
 
     for def in defs {
         match def {
@@ -556,7 +554,7 @@ impl IntraItemLowerCtxt<'_> {
             }
         };
 
-        let mut mentioned_associations = FxHashMap::<Symbol, Span>::default();
+        let mut mentioned_associations = FastHashMap::<Symbol, Span>::default();
         let mut check_mention = |name: Ident| -> bool {
             match mentioned_associations.entry(name.text) {
                 hash_map::Entry::Vacant(entry) => {

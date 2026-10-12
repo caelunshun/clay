@@ -19,8 +19,8 @@ use crate::{
         },
     },
     typed_joiner,
-    utils::hash::FxHashMap,
 };
+use clay_core::FastHashMap;
 use std::{convert::Infallible, ops::ControlFlow, rc::Rc};
 
 // === Impl Obligation === //
@@ -698,7 +698,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     counter += 1;
                     (k, id)
                 })
-                .collect::<FxHashMap<_, _>>(),
+                .collect::<FastHashMap<_, _>>(),
         );
 
         self.push_obligation(ClauseObligation::Covered {
@@ -714,13 +714,13 @@ impl<'tcx> ClauseCx<'tcx> {
     pub(super) fn run_oblige_covered(
         &mut self,
         handle: PromiseHandle<'tcx, NotCoveredError>,
-        must_mention: Rc<FxHashMap<UniversalTy, u32>>,
+        must_mention: Rc<FastHashMap<UniversalTy, u32>>,
         in_type: Option<Ty>,
         in_trait: Option<TraitSpec>,
     ) -> ObligationResult {
         struct CoverVisitor<'a, 'tcx> {
             ccx: &'a ClauseCx<'tcx>,
-            must_mention: Rc<FxHashMap<UniversalTy, u32>>,
+            must_mention: Rc<FastHashMap<UniversalTy, u32>>,
             cover_set: Vec<bool>,
             had_holes: bool,
         }

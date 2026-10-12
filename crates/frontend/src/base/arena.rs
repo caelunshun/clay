@@ -1,16 +1,14 @@
 use crate::{
     base::{HasSession, Session},
-    utils::{
-        hash::{FxBuildHasher, FxHashMap, hash_map},
-        mem::DropArenaPtr,
-    },
+    utils::{hash::hash_map, mem::DropArenaPtr},
 };
+use clay_core::FastHashMap;
 use derive_where::derive_where;
 use std::{
     any::TypeId,
     cell::{Cell, RefCell, UnsafeCell},
     fmt,
-    hash::{self, BuildHasher as _, BuildHasherDefault},
+    hash::{self, BuildHasher as _},
     mem::MaybeUninit,
     ops::Deref,
     ptr::NonNull,
@@ -29,8 +27,8 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         thread_local! {
-            static REENTRANT_FMT: RefCell<FxHashMap<(TypeId, NonNull<()>), u32>> =
-                const { RefCell::new(FxHashMap::with_hasher(BuildHasherDefault::new())) };
+            static REENTRANT_FMT: RefCell<FastHashMap<(TypeId, NonNull<()>), u32>> =
+                RefCell::new(FastHashMap::default());
         }
 
         let key = (TypeId::of::<T>(), self.raw.ptr().cast());
@@ -142,7 +140,7 @@ pub trait HasInterner<T: 'static + hash::Hash + Eq>: HasSession {
 
 #[derive_where(Default)]
 pub struct Interner<T: 'static> {
-    interns: RefCell<FxHashMap<(Intern<T>, u64), ()>>,
+    interns: RefCell<FastHashMap<(Intern<T>, u64), ()>>,
 }
 
 impl<T: 'static> fmt::Debug for Interner<T> {
@@ -157,7 +155,7 @@ where
 {
     pub fn intern(&self, value: T, s: &Session) -> Intern<T> {
         let mut interns = self.interns.borrow_mut();
-        let hash = FxBuildHasher::default().hash_one(&value);
+        let hash = interns.hasher().hash_one(&value);
 
         match interns
             .raw_entry_mut()
@@ -190,7 +188,7 @@ pub trait HasListInterner<T: 'static + hash::Hash + Eq + Clone>: HasSession {
 #[derive_where(Default)]
 pub struct ListInterner<T: 'static> {
     #[expect(clippy::type_complexity)]
-    interns: RefCell<FxHashMap<(Intern<[T]>, u64), ()>>,
+    interns: RefCell<FastHashMap<(Intern<[T]>, u64), ()>>,
 }
 
 impl<T: 'static> fmt::Debug for ListInterner<T> {
@@ -208,7 +206,7 @@ where
         T: Clone,
     {
         let mut interns = self.interns.borrow_mut();
-        let hash = FxBuildHasher::default().hash_one(values);
+        let hash = interns.hasher().hash_one(values);
 
         match interns
             .raw_entry_mut()

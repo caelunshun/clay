@@ -1,4 +1,4 @@
-use crate::utils::hash::FxHashMap;
+use clay_core::FastHashMap;
 use derive_where::derive_where;
 use std::hash;
 
@@ -6,7 +6,7 @@ use std::hash;
 #[derive_where(Default)]
 pub struct NameResolver<K, T> {
     depth: u32,
-    map: FxHashMap<K, DefinedName<T>>,
+    map: FastHashMap<K, DefinedName<T>>,
     stack: Vec<Op<K, T>>,
 }
 

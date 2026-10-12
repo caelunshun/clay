@@ -8,8 +8,8 @@ use crate::{
             SigTyKind, ThirExpr, ThirLetStmt, ThirLocal, ThirMatchArm, ThirPat, ThirPatKind,
         },
     },
-    utils::hash::FxHashMap,
 };
+use clay_core::FastHashMap;
 
 #[derive(Debug, Copy, Clone)]
 struct PatLowerScopes {
@@ -19,7 +19,7 @@ struct PatLowerScopes {
     pub break_on_reject: MirBuilderScopeIdx,
 }
 
-type LateUseProxyMap = FxHashMap<MirLocalIdx, LateUseProxyEntry>;
+type LateUseProxyMap = FastHashMap<MirLocalIdx, LateUseProxyEntry>;
 
 struct LateUseProxyEntry {
     ref_place: MirPlace,
@@ -92,7 +92,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         let break_on_accept = self.builder.push_scope(scope);
         let break_on_reject = self.builder.push_scope(break_on_accept);
 
-        let mut late_use_proxies = FxHashMap::default();
+        let mut late_use_proxies = FastHashMap::default();
 
         self.lower_pat(
             &mut late_use_proxies,
@@ -163,7 +163,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             let break_on_reject = self.builder.push_scope(match_scope);
             let break_on_accept = self.builder.push_scope(break_on_reject);
 
-            let mut late_use_proxies = FxHashMap::default();
+            let mut late_use_proxies = FastHashMap::default();
 
             self.lower_pat(
                 &mut late_use_proxies,
@@ -221,7 +221,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         let scrutinee = self.lower_expr_place(break_if_falsy, scrutinee, None);
         let break_if_truthy = self.builder.push_scope(break_if_falsy);
 
-        let mut late_use_proxies = FxHashMap::default();
+        let mut late_use_proxies = FastHashMap::default();
 
         self.lower_pat(
             &mut late_use_proxies,

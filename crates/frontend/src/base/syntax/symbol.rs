@@ -1,9 +1,7 @@
-use crate::{
-    base::Session,
-    utils::hash::{FxHashMap, fx_hash_one, hash_map},
-};
+use crate::{base::Session, utils::hash::hash_map};
 use bumpalo::Bump;
-use std::{cell::RefCell, fmt, num::NonZeroU32};
+use clay_core::FastHashMap;
+use std::{cell::RefCell, fmt, hash::BuildHasher as _, num::NonZeroU32};
 
 // === Symbol === //
 
@@ -41,7 +39,7 @@ pub struct SymbolInterner(RefCell<SymbolInternInner>);
 struct SymbolInternInner {
     arena: Bump,
     symbols: Vec<*const str>,
-    symbol_map: FxHashMap<(u64, *const str), Symbol>,
+    symbol_map: FastHashMap<(u64, *const str), Symbol>,
 }
 
 impl fmt::Debug for SymbolInterner {
@@ -52,10 +50,9 @@ impl fmt::Debug for SymbolInterner {
 
 impl SymbolInterner {
     pub fn intern(&self, value: &str) -> Symbol {
-        let hash = fx_hash_one(value);
-
         let mut inner = self.0.borrow_mut();
         let inner = &mut *inner;
+        let hash = inner.symbol_map.hasher().hash_one(value);
 
         let entry =
             inner

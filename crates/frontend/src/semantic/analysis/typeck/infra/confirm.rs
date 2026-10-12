@@ -14,9 +14,10 @@ use crate::{
             ThirPatKind, ThirPatListFrontAndTail, Ty, TyKind,
         },
     },
-    utils::{hash::FxHashMap, mem::ArenaRc},
+    utils::mem::ArenaRc,
 };
 use bumpalo::Bump;
+use clay_core::FastHashMap;
 use derive_where::derive_where;
 use std::{cell::Cell, mem, rc::Rc};
 
@@ -28,7 +29,7 @@ pub struct BodyCtxtConfirmState<'a, 'tcx> {
     started_confirmation: bool,
     expressions: ConfirmMap<'a, 'tcx, HirExpr, ThirExpr>,
     patterns: ConfirmMap<'a, 'tcx, HirPat, ThirPat>,
-    locals: FxHashMap<Obj<HirLocal>, Obj<ThirLocal>>,
+    locals: FastHashMap<Obj<HirLocal>, Obj<ThirLocal>>,
     fallback_infers: Vec<InferTyVar>,
 }
 
@@ -510,7 +511,7 @@ where
     K: 'static,
     V: Confirmable<'a, 'tcx>,
 {
-    entries: FxHashMap<Obj<K>, ConfirmEntry<'a, 'tcx, V>>,
+    entries: FastHashMap<Obj<K>, ConfirmEntry<'a, 'tcx, V>>,
 }
 
 #[derive_where(Default)]
