@@ -25,7 +25,7 @@ impl VecOfPtrScratch {
     }
 }
 
-struct VecOfPtrScratchBuilder<'a, T: SizedPointer> {
+pub struct VecOfPtrScratchBuilder<'a, T: SizedPointer> {
     _ty: PhantomData<Vec<T>>,
     buffer: &'a mut Vec<*mut ()>,
 }
