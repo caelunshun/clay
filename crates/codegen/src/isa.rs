@@ -1,4 +1,4 @@
-/// An ISA supported by fir.
+/// An ISA supported by clay.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Isa {
     /// X64.
@@ -13,7 +13,7 @@ pub enum Isa {
 impl Isa {
     /// Gets the ISA of the current system.
     ///
-    /// Panics if this system is not supported by fir.
+    /// Panics if this system is not supported by clay.
     #[allow(unreachable_code)]
     #[allow(clippy::assertions_on_constants)]
     pub fn native() -> Self {
@@ -61,7 +61,7 @@ impl Isa {
             );
         }
 
-        panic!("this ISA is not supported by fir")
+        panic!("this ISA is not supported by clay")
     }
 
     pub fn pointer_width(&self) -> PointerWidth {

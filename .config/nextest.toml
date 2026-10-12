@@ -4,9 +4,9 @@ experimental = ["setup-scripts"]
 command = "cargo run --bin setup_harness"
 
 [[profile.default.scripts]]
-filter = "deps(fir-frontend-uitest)"
+filter = "deps(clay-frontend-uitest)"
 setup = "setup-frontend-uitest"
 
 [profile.frontend-uitest]
-default-filter = "deps(fir-frontend-uitest)"
+default-filter = "deps(clay-frontend-uitest)"
 fail-fast = false

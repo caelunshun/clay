@@ -1,6 +1,6 @@
 error: 
 - bad generics
-  span: test8.fir:22:23-23:26
+  span: test8.clay:22:23-23:26
     - binder param WF error
         - idx: 1
             - ty outlives region
@@ -16,7 +16,7 @@ error:
 
 error: 
 - bad generics
-  span: test8.fir:43:20-36
+  span: test8.clay:43:20-36
     - binder param WF error
         - idx: 0
             - uninstantiated trait not implemented
@@ -28,7 +28,7 @@ error:
                   LHS: (&'b (), &'c ())
                   RHS: demo2::Whee
                     - block impl unsatisfied
-                      block: test8.fir:30:23-39
+                      block: test8.clay:30:23-39
                         - ty and ty region error
                           LHS: (&'b (), &'c ())
                           RHS: (&'?0 (), &'?0 ())
@@ -42,7 +42,7 @@ error:
 
 error: 
 - bad generics
-  span: test8.fir:48:20-36
+  span: test8.clay:48:20-36
     - binder param WF error
         - idx: 0
             - uninstantiated trait not implemented
@@ -54,7 +54,7 @@ error:
                   LHS: (&'b (), &'c ())
                   RHS: demo2::Whee
                     - block impl unsatisfied
-                      block: test8.fir:30:23-39
+                      block: test8.clay:30:23-39
                         - ty and ty region error
                           LHS: (&'b (), &'c ())
                           RHS: (&'?0 (), &'?0 ())

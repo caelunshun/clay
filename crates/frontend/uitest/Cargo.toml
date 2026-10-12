@@ -1,5 +1,5 @@
 [package]
-name = "fir-frontend-uitest"
+name = "clay-frontend-uitest"
 version = "0.1.0"
 edition = "2024"
 

@@ -17,7 +17,7 @@ use crate::{
 };
 use bumpalo::Bump;
 use cranelift_entity::{EntityRef, SecondaryMap};
-use fir_core::{HashMap, HashSet};
+use clay_core::{HashMap, HashSet};
 use mir::{FuncData, TypeArgs};
 use salsa::Database;
 use std::{

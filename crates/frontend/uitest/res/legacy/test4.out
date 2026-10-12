@@ -1,17 +1,17 @@
 error: resolutions for `A` are ambiguous
-   ┌─ test4.fir:24:10
+   ┌─ test4.clay:24:10
    │
 24 │ use baz::A;
    │          ^
 
 note: first glob import resolves to `crate::baz::foo::a::A`
-   ┌─ test4.fir:11:20
+   ┌─ test4.clay:11:20
    │
 11 │         pub use a::*;
    │                    ^
 
 note: second glob import resolves to `crate::baz::foo::b::A`
-   ┌─ test4.fir:12:20
+   ┌─ test4.clay:12:20
    │
 12 │         pub use b::*;
    │                    ^

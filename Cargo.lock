@@ -273,6 +273,93 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
+name = "clay-core"
+version = "0.1.0"
+dependencies = [
+ "allocator-api2",
+ "bumpalo",
+ "compact_str",
+ "hashbrown 0.16.1",
+ "indexmap",
+ "indoc",
+ "salsa",
+]
+
+[[package]]
+name = "clay-frontend"
+version = "0.1.0"
+dependencies = [
+ "bit-set",
+ "bitflags",
+ "bumpalo",
+ "bytemuck",
+ "cbit",
+ "codespan-reporting",
+ "color-eyre",
+ "derive-where",
+ "disjoint",
+ "fastrand",
+ "hashbrown 0.16.1",
+ "index_vec",
+ "indexmap",
+ "paste",
+ "rustc-hash",
+ "scopeguard",
+ "slotmap",
+ "smallvec",
+ "termcolor",
+ "thiserror",
+ "unicode-xid",
+]
+
+[[package]]
+name = "clay-frontend-uitest"
+version = "0.1.0"
+dependencies = [
+ "bunt",
+ "libtest-mimic",
+ "similar",
+]
+
+[[package]]
+name = "clay-lir"
+version = "0.1.0"
+dependencies = [
+ "bumpalo",
+ "bytemuck",
+ "clay-core",
+ "compact_str",
+ "cranelift-entity",
+ "indoc",
+ "pretty_assertions",
+ "salsa",
+]
+
+[[package]]
+name = "clay-lir-filetests"
+version = "0.1.0"
+dependencies = [
+ "clay-core",
+ "clay-lir",
+ "pretty_assertions",
+ "proc-macro2",
+ "quote",
+ "salsa",
+ "syn",
+]
+
+[[package]]
+name = "clay-runtime"
+version = "0.1.0"
+dependencies = [
+ "clay-core",
+ "clay-lir",
+ "salsa",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "codespan-reporting"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -434,93 +521,6 @@ name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
-
-[[package]]
-name = "fir-core"
-version = "0.1.0"
-dependencies = [
- "allocator-api2",
- "bumpalo",
- "compact_str",
- "hashbrown 0.16.1",
- "indexmap",
- "indoc",
- "salsa",
-]
-
-[[package]]
-name = "fir-frontend"
-version = "0.1.0"
-dependencies = [
- "bit-set",
- "bitflags",
- "bumpalo",
- "bytemuck",
- "cbit",
- "codespan-reporting",
- "color-eyre",
- "derive-where",
- "disjoint",
- "fastrand",
- "hashbrown 0.16.1",
- "index_vec",
- "indexmap",
- "paste",
- "rustc-hash",
- "scopeguard",
- "slotmap",
- "smallvec",
- "termcolor",
- "thiserror",
- "unicode-xid",
-]
-
-[[package]]
-name = "fir-frontend-uitest"
-version = "0.1.0"
-dependencies = [
- "bunt",
- "libtest-mimic",
- "similar",
-]
-
-[[package]]
-name = "fir-lir"
-version = "0.1.0"
-dependencies = [
- "bumpalo",
- "bytemuck",
- "compact_str",
- "cranelift-entity",
- "fir-core",
- "indoc",
- "pretty_assertions",
- "salsa",
-]
-
-[[package]]
-name = "fir-lir-filetests"
-version = "0.1.0"
-dependencies = [
- "fir-core",
- "fir-lir",
- "pretty_assertions",
- "proc-macro2",
- "quote",
- "salsa",
- "syn",
-]
-
-[[package]]
-name = "fir-runtime"
-version = "0.1.0"
-dependencies = [
- "fir-core",
- "fir-lir",
- "salsa",
- "tracing",
- "tracing-subscriber",
-]
 
 [[package]]
 name = "foldhash"

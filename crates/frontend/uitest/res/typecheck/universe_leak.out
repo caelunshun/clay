@@ -1,5 +1,5 @@
 error: 
-- span: universe_leak.fir:16:20-37
+- span: universe_leak.clay:16:20-37
   instantiated trait not implemented
   LHS: fn @ types::taker_types
   RHS: FnOnce<(fn @ types::hrtb_types<?(7) _>,), ()>
@@ -22,7 +22,7 @@ error:
                                 - no suitable impl met
 
 error: type hints required for this type
-   ┌─ universe_leak.fir:16:21
+   ┌─ universe_leak.clay:16:21
    │
 16 │         taker_types(hrtb_types::<_>);
    │                     ^^^^^^^^^^^^^^^

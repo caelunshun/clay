@@ -1,5 +1,5 @@
 error: 
-- span: test21.fir:70:17-28
+- span: test21.clay:70:17-28
   uninstantiated trait not implemented
   LHS: fn @ meow<?(34) _>
   RHS: for<T: Meow> std::FnOnce<(T,), T>

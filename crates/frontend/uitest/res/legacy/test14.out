@@ -1,6 +1,6 @@
 error: 
 - bad generics
-  span: test14.fir:1:60-65
+  span: test14.clay:1:60-65
     - binder param WF error
         - idx: 1
             - ty outlives region

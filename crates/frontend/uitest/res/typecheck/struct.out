@@ -1,11 +1,11 @@
 error: field `b` is not visible to function `crate::main`
-   ┌─ struct.fir:13:23
+   ┌─ struct.clay:13:23
    │
 13 │     Meow { a: "meow", b: 2 }
    │                       ^
 
 error: 
-- span: struct.fir:13:15-21
+- span: struct.clay:13:15-21
   cannot unify
   LHS: str
   RHS: u32
@@ -16,7 +16,7 @@ error:
           RHS: u32
 
 error: 
-- span: struct.fir:13:5-29
+- span: struct.clay:13:5-29
   cannot unify
   LHS: pip::Meow
   RHS: ()

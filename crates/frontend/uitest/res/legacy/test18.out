@@ -1,17 +1,17 @@
 error: expected `as`
-  ┌─ test18.fir:4:54
+  ┌─ test18.clay:4:54
   │
 4 │     fn next<'a: &shorter Self>(&'a mut self) -> <Self::Output as LendingOutput<'a>>::Output;
   │                                                      ^
 
 error: expected `as`
-   ┌─ test18.fir:25:54
+   ┌─ test18.clay:25:54
    │
 25 │     fn next<'a: &shorter Self>(&'a mut self) -> <Self::Output as LendingOutput<'a>>::Output {
    │                                                      ^
 
 error: expected type (`Self`, `&`, `@`, `(`, `_`, or `<`) or path part (identifier, `super`, `crate`, or `self`)
-   ┌─ test18.fir:30:23
+   ┌─ test18.clay:30:23
    │
 30 │ pub fn demo(mut iter: impl Iterator) {
    │                       ^^^^
@@ -19,7 +19,7 @@ error: expected type (`Self`, `&`, `@`, `(`, `_`, or `<`) or path part (identifi
 note: `impl` is a reserved keyword
 
 error: missing method body
-   ┌─ test18.fir:25:8
+   ┌─ test18.clay:25:8
    │
 25 │     fn next<'a: &shorter Self>(&'a mut self) -> <Self::Output as LendingOutput<'a>>::Output {
    │        ^^^^

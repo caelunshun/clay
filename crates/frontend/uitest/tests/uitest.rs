@@ -33,7 +33,7 @@ fn collect_trials(name: &mut String, path: &mut PathBuf, trials: &mut Vec<Trial>
             name.push_str(entry.to_str().unwrap());
 
             collect_trials(name, path, trials);
-        } else if path.is_file() && path.extension() == Some(OsStr::new("fir")) {
+        } else if path.is_file() && path.extension() == Some(OsStr::new("clay")) {
             name.push_str(Path::new(&entry).file_prefix().unwrap().to_str().unwrap());
 
             trials.push(Trial::test(name.clone(), {
@@ -52,7 +52,7 @@ fn run_trial_with_paths(
     input_path: &Path,
     expected_output_path: &Path,
 ) -> Result<(), libtest_mimic::Failed> {
-    let compiler_path = PathBuf::from(expect_env("FIR_FRONTEND_UI_TEST_BIN"));
+    let compiler_path = PathBuf::from(expect_env("CLAY_FRONTEND_UI_TEST_BIN"));
 
     let mut child = Command::new(&compiler_path)
         .current_dir(input_path.parent().unwrap())
@@ -117,7 +117,7 @@ fn run_trial_with_paths(
         );
     }
 
-    if env::var("FIR_FRONTEND_UI_TEST_BLESS").is_ok() {
+    if env::var("CLAY_FRONTEND_UI_TEST_BLESS").is_ok() {
         fs::write(expected_output_path, &actual_output).unwrap_or_else(|err| {
             panic!(
                 "failed to bless expected stdout file at {}:\n{err:?}",

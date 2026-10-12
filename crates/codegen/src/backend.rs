@@ -4,7 +4,7 @@ use crate::{
     isa::Isa,
 };
 use bumpalo::Bump;
-use fir_mir::{
+use clay_mir::{
     entity_ref,
     instr::{CompareMode, LoadOrdering, StoreOrdering},
 };

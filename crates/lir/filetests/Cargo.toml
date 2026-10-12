@@ -1,12 +1,12 @@
 [package]
-name = "fir-lir-filetests"
+name = "clay-lir-filetests"
 version = "0.1.0"
 edition = "2024"
 
 [dev-dependencies]
 salsa.workspace = true
-fir-lir.workspace = true
-fir-core.workspace = true
+clay-lir.workspace = true
+clay-core.workspace = true
 pretty_assertions.workspace = true
 
 [build-dependencies]

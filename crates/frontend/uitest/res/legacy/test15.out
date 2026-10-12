@@ -1,6 +1,6 @@
 error: 
 - bad generics
-  span: test15.fir:11:50-70
+  span: test15.clay:11:50-70
     - binder param WF error
         - idx: 0
             - uninstantiated trait not implemented

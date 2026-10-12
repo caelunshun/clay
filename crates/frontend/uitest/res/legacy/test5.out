@@ -1,17 +1,17 @@
 error: `impl` blocks cannot have visibilities
-  ┌─ test5.fir:4:1
+  ┌─ test5.clay:4:1
   │
 4 │ pub impl MyTrait for () {}
   │ ^^^
 
 error: `impl` blocks cannot have visibilities
-  ┌─ test5.fir:7:1
+  ┌─ test5.clay:7:1
   │
 7 │ priv impl MyTrait for ((),) {}
   │ ^^^^
 
 error: `impl` blocks cannot have visibilities
-   ┌─ test5.fir:10:1
+   ┌─ test5.clay:10:1
    │
 10 │ pub(in self) impl MyTrait for ((),) {}
    │ ^^^^^^^^^^^^

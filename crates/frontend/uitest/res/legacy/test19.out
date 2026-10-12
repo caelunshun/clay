@@ -1,6 +1,6 @@
 error: 
 - bad generics
-  span: test19.fir:29:43-48
+  span: test19.clay:29:43-48
     - binder param WF error
         - idx: 0
             - ty outlives region
@@ -16,7 +16,7 @@ error:
 
 error: 
 - bad generics
-  span: test19.fir:35:43-48
+  span: test19.clay:35:43-48
     - binder param WF error
         - idx: 1
             - ty outlives region
@@ -32,7 +32,7 @@ error:
 
 error: 
 - bad generics
-  span: test19.fir:41:44-49
+  span: test19.clay:41:44-49
     - binder param WF error
         - idx: 0
             - ty outlives region
@@ -48,7 +48,7 @@ error:
 
 error: 
 - bad generics
-  span: test19.fir:47:42-47
+  span: test19.clay:47:42-47
     - binder param WF error
         - idx: 1
             - ty outlives region

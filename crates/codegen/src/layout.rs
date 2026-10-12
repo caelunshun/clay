@@ -1,4 +1,4 @@
-//! Memory layout calculations for fir types.
+//! Memory layout calculations for clay types.
 
 use cranelift_entity::SecondaryMap;
 use mir::{AlgebraicType, AlgebraicTypeKind, Context, PrimType, TypeArgs};

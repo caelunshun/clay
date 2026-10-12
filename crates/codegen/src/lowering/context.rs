@@ -5,7 +5,7 @@ use crate::{
 };
 use bumpalo::Bump;
 use cranelift_entity::SecondaryMap;
-use fir_core::HashMap;
+use clay_core::HashMap;
 
 /// Contains cached allocations for reusing across multiple lowerings.
 #[derive(Default)]

@@ -1,5 +1,5 @@
 error: 
-- span: test25.fir:24:18-19
+- span: test25.clay:24:18-19
   cannot unify
   LHS: u32
   RHS: i32
@@ -10,7 +10,7 @@ error:
           RHS: i32
 
 error: 
-- span: test25.fir:28:18-19
+- span: test25.clay:28:18-19
   cannot unify
   LHS: u(3) <u(0) T as Meow>::Out
   RHS: i32
@@ -22,7 +22,7 @@ error:
 
 error: 
 - projection failed
-  span: test25.fir:31:52-56
+  span: test25.clay:31:52-56
     - trait spec resolution error
       self ty: u(0) T
       spec: Meow
@@ -34,7 +34,7 @@ error:
 
 error: 
 - no reflexive impl
-  span: test25.fir:31:13-41
+  span: test25.clay:31:13-41
     - trait spec resolution error
       self ty: u(1) [clause WF helper]
       spec: Meow<Out = ?(2) <u(0) T as Meow>::Out>
@@ -44,7 +44,7 @@ error:
             - cannot progress
               elab still resolving
     - projection failed
-      span: test25.fir:31:30-34
+      span: test25.clay:31:30-34
         - trait spec resolution error
           self ty: u(0) T
           spec: Meow

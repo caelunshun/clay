@@ -1,5 +1,5 @@
 error: 
-- span: test32.fir:83:18-24
+- span: test32.clay:83:18-24
   cannot unify
   LHS: str
   RHS: ?(73) _
@@ -10,13 +10,13 @@ error:
           RHS: str
 
 error: type hints required for this type
-   ┌─ test32.fir:74:5
+   ┌─ test32.clay:74:5
    │
 74 │     Helper::<(), _>::meow(None, true);
    │     ^^^^^^^^^^^^^^^^^^^^^
 
 error: type hints required for this type
-   ┌─ test32.fir:74:5
+   ┌─ test32.clay:74:5
    │
 74 │     Helper::<(), _>::meow(None, true);
    │     ^^^^^^^^^^^^^^^^^^^^^

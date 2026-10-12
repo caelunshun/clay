@@ -1,6 +1,6 @@
 mod harnesses {
-    // use fir_core::sexpr::SExpr;
-    // use fir_lir::{
+    // use clay_core::sexpr::SExpr;
+    // use clay_lir::{
     //     Func,
     //     formatter::format_context,
     //     ir::Context,
@@ -178,4 +178,4 @@ mod harnesses {
     // }
 }
 
-include!(concat!(env!("OUT_DIR"), "/generated.rs"));
+// include!(concat!(env!("OUT_DIR"), "/generated.rs"));

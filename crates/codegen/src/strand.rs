@@ -1,4 +1,4 @@
-use fir_mir::ir::{BasicBlockId, FuncId};
+use clay_mir::ir::{BasicBlockId, FuncId};
 use mir::{FuncInstance, InstrId, TypeArgs};
 use salsa::Database;
 

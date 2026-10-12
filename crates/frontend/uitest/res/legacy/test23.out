@@ -1,5 +1,5 @@
 error: 
-- span: test23.fir:157:22-24
+- span: test23.clay:157:22-24
   cannot unify
   LHS: &'erased ()
   RHS: &'erased mut ()
@@ -10,7 +10,7 @@ error:
           RHS: &'erased mut ()
 
 error: 
-- span: test23.fir:179:5-13
+- span: test23.clay:179:5-13
   cannot unify
   LHS: ?(27) _
   RHS: ()

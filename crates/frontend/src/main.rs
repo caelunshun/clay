@@ -1,4 +1,4 @@
-use fir_frontend::{
+use clay_frontend::{
     base::{
         Session,
         syntax::{NaiveSegmenter, SourceFileOrigin},

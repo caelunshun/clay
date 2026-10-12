@@ -1,6 +1,6 @@
 error: 
 - bad trait spec
-  span: unspec_spec_wf.fir:13:20-29
+  span: unspec_spec_wf.clay:13:20-29
     - binder param WF error
         - idx: 0
             - uninstantiated trait not implemented
@@ -15,7 +15,7 @@ error:
 
 error: 
 - no reflexive impl
-  span: unspec_spec_wf.fir:28:20-29
+  span: unspec_spec_wf.clay:28:20-29
     - trait spec resolution error
       self ty: u(3) [clause WF helper]
       spec: case2::Meow<u32>

@@ -1,6 +1,6 @@
 error: 
 - projection failed
-  span: infinite_universals.fir:40:36-49
+  span: infinite_universals.clay:40:36-49
     - trait spec resolution error
       self ty: u(18) <u(0) T as Meow>::Generator
       spec: UhOh<'a, u32>
@@ -29,7 +29,7 @@ error:
 
 error: 
 - projection failed
-  span: infinite_universals.fir:35:36-49
+  span: infinite_universals.clay:35:36-49
     - trait spec resolution error
       self ty: u(32) <u(0) T as Meow>::Generator
       spec: UhOh<'a, u32>
@@ -52,7 +52,7 @@ error:
                               RHS: i32
 
 error: 
-- span: infinite_universals.fir:52:66-68
+- span: infinite_universals.clay:52:66-68
   cannot unify
   LHS: u(12) <u(10) <u(0) T as Meow>::Generator as UhOh<'erased, i32>>::Output
   RHS: u(7) <u(5) <u(0) T as Meow>::Generator as UhOh<'erased, u32>>::Output

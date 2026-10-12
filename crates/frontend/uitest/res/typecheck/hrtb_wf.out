@@ -1,6 +1,6 @@
 error: 
 - bad ref pointee
-  span: hrtb_wf.fir:3:34-39
+  span: hrtb_wf.clay:3:34-39
     - ty outlives region
       LHS: u(2) T
       RHS: 'u0

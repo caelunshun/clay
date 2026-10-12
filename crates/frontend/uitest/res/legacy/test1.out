@@ -1,6 +1,6 @@
 error: 
 - bad trait spec
-  span: test1.fir:23:23-50
+  span: test1.clay:23:23-50
     - binder param WF error
         - idx: 0
             - uninstantiated trait not implemented
@@ -12,9 +12,9 @@ error:
                   LHS: ((), (((),),), ((),))
                   RHS: MyTrait
                     - block impl unsatisfied
-                      block: test1.fir:17:73-82
+                      block: test1.clay:17:73-82
                         - impl block satisfy error
-                          block: test1.fir:17:73-82
+                          block: test1.clay:17:73-82
                             - binder param WF error
                                 - idx: 1
                                     - uninstantiated trait not implemented
@@ -29,7 +29,7 @@ error:
 
 error: 
 - bad generics
-  span: test1.fir:25:11-32
+  span: test1.clay:25:11-32
     - binder param WF error
         - idx: 0
             - uninstantiated trait not implemented
@@ -41,9 +41,9 @@ error:
                   LHS: ((), (((),),), ((),))
                   RHS: MyTrait
                     - block impl unsatisfied
-                      block: test1.fir:17:73-82
+                      block: test1.clay:17:73-82
                         - impl block satisfy error
-                          block: test1.fir:17:73-82
+                          block: test1.clay:17:73-82
                             - binder param WF error
                                 - idx: 1
                                     - uninstantiated trait not implemented
@@ -58,7 +58,7 @@ error:
 
 error: 
 - bad trait spec
-  span: test1.fir:28:19-46
+  span: test1.clay:28:19-46
     - binder param WF error
         - idx: 0
             - uninstantiated trait not implemented
@@ -70,9 +70,9 @@ error:
                   LHS: ((), (((),),), ((),))
                   RHS: MyTrait
                     - block impl unsatisfied
-                      block: test1.fir:17:73-82
+                      block: test1.clay:17:73-82
                         - impl block satisfy error
-                          block: test1.fir:17:73-82
+                          block: test1.clay:17:73-82
                             - binder param WF error
                                 - idx: 1
                                     - uninstantiated trait not implemented
@@ -87,7 +87,7 @@ error:
 
 error: 
 - bad generics
-  span: test1.fir:36:16-37
+  span: test1.clay:36:16-37
     - binder param WF error
         - idx: 0
             - uninstantiated trait not implemented
@@ -99,9 +99,9 @@ error:
                   LHS: ((), (((),),), ((),))
                   RHS: MyTrait
                     - block impl unsatisfied
-                      block: test1.fir:17:73-82
+                      block: test1.clay:17:73-82
                         - impl block satisfy error
-                          block: test1.fir:17:73-82
+                          block: test1.clay:17:73-82
                             - binder param WF error
                                 - idx: 1
                                     - uninstantiated trait not implemented

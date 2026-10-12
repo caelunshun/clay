@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.dependencies]
-#fir-runtime = { path = "crates/runtime" }
+#clay-runtime = { path = "crates/runtime" }
 allocator-api2 = "0.2"                                                    # needs to match hashbrown
 bumpalo = { version = "3", features = ["collections", "allocator-api2"] }
 bytemuck = { version = "1", features = ["derive"] }
@@ -19,8 +19,8 @@ compact_str = "0.9"
 cranelift-entity = "0.125"
 crossbeam-utils = "0.8"
 derive-where = "1.6.0"
-fir-core = { path = "crates/core" }
-fir-lir = { path = "crates/lir" }
+clay-core = { path = "crates/core" }
+clay-lir = { path = "crates/lir" }
 hashbrown = "0.16"
 indexmap = "2"
 indoc = "2"

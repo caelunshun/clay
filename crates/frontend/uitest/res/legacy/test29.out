@@ -1,5 +1,5 @@
 error: 
-- span: test29.fir:16:5-12
+- span: test29.clay:16:5-12
   uninstantiated trait not implemented
   LHS: &'gc dyn for<T> Trait<(T,)>
   RHS: for<T> Trait<(T,)>
@@ -12,14 +12,14 @@ error:
 
 error: 
 - HRTB not covered
-  span: test29.fir:19:36-47
+  span: test29.clay:19:36-47
     - missing coverings
       in Trait<(u(0) V,)>
       of...
         - u(3) T
 
 error: 
-- span: test29.fir:21:5-12
+- span: test29.clay:21:5-12
   uninstantiated trait not implemented
   LHS: &'gc dyn for<T> Trait<(u(0) V,)>
   RHS: for<T> Trait<(u(0) V,)>
@@ -31,7 +31,7 @@ error:
         - no suitable impl met
 
 error: 
-- span: test29.fir:32:28-31
+- span: test29.clay:32:28-31
   cannot unify
   LHS: (&'gc dyn for<T> Trait<(?(2) _,)>,)
   RHS: (&'gc dyn for<T> Trait<(T,)>,)

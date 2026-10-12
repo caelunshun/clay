@@ -1,6 +1,6 @@
 error: 
 - bad trait spec
-  span: test7.fir:23:15-56
+  span: test7.clay:23:15-56
     - binder param WF error
         - idx: 0
             - uninstantiated trait not implemented
@@ -15,7 +15,7 @@ error:
 
 error: 
 - bad trait spec
-  span: test7.fir:27:28-49
+  span: test7.clay:27:28-49
     - binder param WF error
         - idx: 0
             - uninstantiated trait not implemented
@@ -32,7 +32,7 @@ error:
 
 error: 
 - bad generics
-  span: test7.fir:32:14-16
+  span: test7.clay:32:14-16
     - binder param WF error
         - idx: 0
             - uninstantiated trait not implemented

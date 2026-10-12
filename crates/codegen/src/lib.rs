@@ -69,7 +69,7 @@
 
 #![cfg_attr(target_arch = "riscv64", feature(stdarch_riscv_feature_detection))]
 
-extern crate fir_mir as mir;
+extern crate clay_mir as mir;
 
 pub mod backend;
 pub mod compiled_strand;

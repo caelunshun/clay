@@ -1,6 +1,6 @@
 error: 
 - bad generics
-  span: test3.fir:28:16-30
+  span: test3.clay:28:16-30
     - binder param WF error
         - idx: 0
             - uninstantiated trait not implemented
@@ -12,9 +12,9 @@ error:
                   LHS: ((u(1) D, u(1) D), u(2) V, u(0) T)
                   RHS: MyTrait
                     - block impl unsatisfied
-                      block: test3.fir:21:73-82
+                      block: test3.clay:21:73-82
                         - impl block satisfy error
-                          block: test3.fir:21:73-82
+                          block: test3.clay:21:73-82
                             - binder param WF error
                                 - idx: 1
                                     - uninstantiated trait not implemented

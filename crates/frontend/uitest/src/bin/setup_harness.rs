@@ -2,7 +2,7 @@ use std::{env, fs::OpenOptions, io::Write as _, path::Path, process::Command};
 
 fn main() {
     // Ensure the binary is build.
-    println!("Building fir-frontend for ui-tests!");
+    println!("Building clay-frontend for ui-tests!");
 
     Command::new("cargo")
         .arg("build")
@@ -19,8 +19,8 @@ fn main() {
 
     writeln!(
         &mut nextest_env,
-        "FIR_FRONTEND_UI_TEST_BIN={}",
-        Path::new("target/debug/fir-frontend")
+        "CLAY_FRONTEND_UI_TEST_BIN={}",
+        Path::new("target/debug/clay-frontend")
             .canonicalize()
             .unwrap()
             .display(),

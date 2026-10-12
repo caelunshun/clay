@@ -1,11 +1,11 @@
 [package]
-name = "fir-codegen"
+name = "clay-codegen"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-fir-core.workspace = true
-fir-lir.workspace = true
+clay-core.workspace = true
+clay-lir.workspace = true
 salsa.workspace = true
 cranelift-entity.workspace = true
 bumpalo.workspace = true
