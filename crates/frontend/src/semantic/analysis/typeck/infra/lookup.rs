@@ -95,7 +95,10 @@ impl BodyCtxt<'_, '_> {
                     {
                         return Ok(Some(LookupFieldResult {
                             ty: field_ty,
-                            index: ResolvedFieldIdx::Tuple(name_as_idx),
+                            index: ResolvedFieldIdx::Tuple {
+                                field_idx: name_as_idx,
+                                max_elems: fields.r(s).len() as u32,
+                            },
                         }));
                     }
                 }

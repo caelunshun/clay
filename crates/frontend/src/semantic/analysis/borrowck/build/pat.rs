@@ -391,7 +391,10 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                                 pat,
                                 scrutinee.extend(
                                     tcx,
-                                    [MirPlaceElem::Field(ResolvedFieldIdx::Tuple(idx))],
+                                    [MirPlaceElem::Field(ResolvedFieldIdx::Tuple {
+                                        field_idx: idx,
+                                        max_elems: pat_tuple_elems.r(s).len() as u32,
+                                    })],
                                 ),
                             )
                         }),

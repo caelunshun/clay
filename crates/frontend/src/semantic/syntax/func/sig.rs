@@ -267,6 +267,6 @@ where
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum ResolvedFieldIdx {
-    Tuple(u32),
+    Tuple { field_idx: u32, max_elems: u32 },
     Adt(Obj<AdtCtor>, AdtCtorFieldIdx),
 }
