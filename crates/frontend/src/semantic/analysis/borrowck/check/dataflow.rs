@@ -6,9 +6,8 @@ use crate::{
         MirStmtKind, MirTerminator, TyCtxt,
     },
 };
+use clay_core::FastHashSet;
 use index_vec::IndexVec;
-use clay_core::{FastHashSet};
-
 use smallvec::SmallVec;
 use std::{
     collections::VecDeque,
@@ -608,7 +607,7 @@ impl GenKillTrans {
 
 #[derive(Eq, PartialEq)]
 pub struct LocalSet {
-    set: SmallVec<[u64; 1]>,
+    set: SmallVec<[u64; 2]>,
     len: usize,
 }
 

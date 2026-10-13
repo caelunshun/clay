@@ -619,6 +619,7 @@ struct BasicBlockState {
 
 // === DataflowOutput === //
 
+#[derive(Debug, Copy, Clone)]
 pub struct DataflowOutput<T> {
     pub is_dirty: bool,
     pub value: T,

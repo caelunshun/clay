@@ -397,7 +397,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
             .chain(scope_trait_candidates);
 
         // Scan for inherent `impl` candidates.
-        let mut selections = SmallVec::<[Obj<FnDef>; 1]>::new();
+        let mut selections = SmallVec::<[Obj<FnDef>; 2]>::new();
 
         for candidate in candidates {
             // If we started finding trait candidates and already made an inherent selection, break
