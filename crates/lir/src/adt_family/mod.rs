@@ -1,17 +1,15 @@
-use crate::adt_family::{enum_::EnumTyFamily, strukt::StructTyFamily};
-use index_vec::IndexVec;
+use crate::{
+    adt_family::{enum_::EnumTyFamily, strukt::StructTyFamily},
+    arena::Ptr,
+};
 
 pub mod enum_;
 pub mod strukt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AdtTyFamily {
-    pub ty_params: IndexVec<TyParamIdx, TyParam>,
+    pub ty_params: Vec<Ptr<TyParam>>,
     pub kind: AdtKind,
-}
-
-index_vec::define_index_type! {
-    pub struct TyParamIdx = u32;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

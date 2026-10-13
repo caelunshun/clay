@@ -4,6 +4,17 @@ use crate::{
     ty::prim::PrimTy,
 };
 
+/// Allows forming a concrete type after substitution
+/// of type parameters.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SubstTy {
+    TyParam(Ptr<TyParam>),
+    Prim(PrimTy),
+    Slice(SliceSubstTy),
+    Buffer(BufferSubstTy),
+    Adt(AdtSubstTy),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AdtSubstTy {
     pub adt_family: AdtTyFamily,
@@ -18,15 +29,4 @@ pub struct SliceSubstTy {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BufferSubstTy {
     pub element: Box<SubstTy>,
-}
-
-/// Allows forming a concrete type after substitution
-/// of type parameters.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum SubstTy {
-    TyParam(Ptr<TyParam>),
-    Prim(PrimTy),
-    Slice(SliceSubstTy),
-    Buffer(BufferSubstTy),
-    Adt(AdtSubstTy),
 }
