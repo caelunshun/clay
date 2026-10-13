@@ -4,5 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+arrayvec.workspace = true
+derive-where.workspace = true
+slotmap.workspace = true
 
 [dev-dependencies]
