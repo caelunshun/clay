@@ -4,6 +4,8 @@ pub enum PrimTy {
     Bool,
     Int(IntTy),
     Float(FloatTy),
+    StrSlice,
+    StrBuffer,
     Never,
 }
 

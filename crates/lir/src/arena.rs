@@ -234,13 +234,15 @@ unsafe impl<T> Sync for Ptr<T> {}
 
 impl<T> Ptr<T> {
     #[inline]
-    pub fn is_alive(&self, ar: &Arena<T>) -> bool {
+    pub fn is_alive(&self, ar: &impl HasArena<T>) -> bool {
+        let ar = ar.arena();
         assert_eq!(self.arena_generation, ar.generation);
         unsafe { self.slot.as_ref().generation == self.slot_generation }
     }
 
     #[inline]
-    pub fn r(self, ar: &Arena<T>) -> &T {
+    pub fn r(self, ar: &impl HasArena<T>) -> &T {
+        let ar = ar.arena();
         assert_eq!(self.arena_generation, ar.generation);
         unsafe {
             let slot = self.slot.as_ref();
@@ -250,13 +252,34 @@ impl<T> Ptr<T> {
     }
 
     #[inline]
-    pub fn m(self, ar: &mut Arena<T>) -> &mut T {
+    pub fn m(self, ar: &mut impl HasArenaMut<T>) -> &mut T {
+        let ar = ar.arena_mut();
         assert_eq!(self.arena_generation, ar.generation);
         unsafe {
             let slot = &mut *self.slot.as_ptr();
             assert_eq!(slot.generation, self.slot_generation);
             slot.value.assume_init_mut()
         }
+    }
+}
+
+pub trait HasArena<T> {
+    fn arena(&self) -> &Arena<T>;
+}
+
+pub trait HasArenaMut<T>: HasArena<T> {
+    fn arena_mut(&mut self) -> &mut Arena<T>;
+}
+
+impl<T> HasArena<T> for Arena<T> {
+    fn arena(&self) -> &Arena<T> {
+        self
+    }
+}
+
+impl<T> HasArenaMut<T> for Arena<T> {
+    fn arena_mut(&mut self) -> &mut Arena<T> {
+        self
     }
 }
 

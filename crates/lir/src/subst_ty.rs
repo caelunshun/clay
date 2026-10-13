@@ -1,19 +1,32 @@
 use crate::{
+    adt_family::{AdtTyFamily, TyParam},
     arena::Ptr,
-    ty_family::{TyFamily, TyParam},
+    ty::prim::PrimTy,
 };
 
-/// Combination of an AbstractTy and a list of type arguments
-/// with which to instantiate it, forming a concrete type after
-/// substitution.
-#[derive(Debug, Clone)]
-pub enum SubstTy {
-    TyParam(Ptr<TyParam>),
-    Instantiation(InstantiationTy),
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AdtSubstTy {
+    pub adt_family: AdtTyFamily,
+    pub ty_args: Vec<SubstTy>,
 }
 
-#[derive(Debug, Clone)]
-pub struct InstantiationTy {
-    pub ty_family: Ptr<TyFamily>,
-    pub ty_args: Vec<Ptr<SubstTy>>,
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SliceSubstTy {
+    pub element: Box<SubstTy>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BufferSubstTy {
+    pub element: Box<SubstTy>,
+}
+
+/// Allows forming a concrete type after substitution
+/// of type parameters.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SubstTy {
+    TyParam(Ptr<TyParam>),
+    Prim(PrimTy),
+    Slice(SliceSubstTy),
+    Buffer(BufferSubstTy),
+    Adt(AdtSubstTy),
 }

@@ -353,6 +353,7 @@ version = "0.1.0"
 dependencies = [
  "arrayvec",
  "derive-where",
+ "index_vec",
  "slotmap",
 ]
 
