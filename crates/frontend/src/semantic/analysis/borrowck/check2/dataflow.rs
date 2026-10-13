@@ -5,7 +5,7 @@ use crate::{
 use bytemuck::TransparentWrapper;
 use derive_where::derive_where;
 use slotmap::SecondaryMap;
-use std::{collections::VecDeque, mem};
+use std::{collections::VecDeque, marker::PhantomData, mem};
 
 // === DataflowAnalysis === //
 
@@ -185,7 +185,6 @@ pub trait ForwardsDataflowAnalysis<'g> {
 
         // Trim unnecessary lattices
         scratch.effect_elems.truncate(body.cfg.blocks().len());
-        scratch.stmt_tmp_effects = None;
     }
 }
 
@@ -355,28 +354,225 @@ pub trait BackwardsDataflowAnalysis<'g> {
 
         // Trim unnecessary lattices
         scratch.effect_elems.truncate(body.cfg.blocks().len());
-        scratch.stmt_tmp_effects = None;
     }
 }
 
-// === DataflowIter === //
+// === DataflowView === //
 
-pub struct DataflowIter<'a, 'g, T> {
-    analysis: &'a mut dyn AnyDataflowAnalysis<'g, Lattice = T>,
-    scratch: &'a DataflowScratch<T>,
+pub struct DataflowView<'a, T> {
+    direction: MirBodyDirection,
+    analysis: &'a mut dyn AnyDataflowAnalysis<Lattice = T>,
+    body: &'a MirBody,
+    scratch: &'a mut DataflowScratch<T>,
+    seek_state: Option<DataflowViewSeekState>,
 }
 
-trait AnyDataflowAnalysis<'g> {
+struct DataflowViewSeekState {
+    block: MirBlockIdx,
+    stmt: MirStmtIdx,
+    out_in_b: bool,
+}
+
+trait AnyDataflowAnalysis {
     type Lattice;
 
-    fn body(&self) -> &'g MirBody;
-
-    fn trans_stmt(&mut self, idx: MirStmtIdx, input: &Self::Lattice, output: &mut Self::Lattice);
+    fn trans_stmt(
+        &mut self,
+        idx: MirStmtIdx,
+        input: &Self::Lattice,
+        output: &mut DataflowOutput<Self::Lattice>,
+    );
 }
 
 #[derive(TransparentWrapper)]
 #[repr(transparent)]
-struct ForwardsDataflowAnalysisWrapper<T: ?Sized>(T);
+#[transparent(T)]
+struct ForwardsDataflowAnalysisWrapper<'g, T: ?Sized> {
+    _ty: PhantomData<fn(&'g ()) -> &'g ()>,
+    inner: T,
+}
+
+impl<'g, T> AnyDataflowAnalysis for ForwardsDataflowAnalysisWrapper<'g, T>
+where
+    T: ?Sized + ForwardsDataflowAnalysis<'g>,
+{
+    type Lattice = T::Lattice;
+
+    fn trans_stmt(
+        &mut self,
+        idx: MirStmtIdx,
+        input: &Self::Lattice,
+        output: &mut DataflowOutput<Self::Lattice>,
+    ) {
+        self.inner.trans_stmt(idx, input, &mut output.value);
+    }
+}
+
+#[derive(TransparentWrapper)]
+#[repr(transparent)]
+#[transparent(T)]
+struct BackwardsDataflowAnalysisWrapper<'g, T: ?Sized> {
+    _ty: PhantomData<fn(&'g ()) -> &'g ()>,
+    inner: T,
+}
+
+impl<'g, T> AnyDataflowAnalysis for BackwardsDataflowAnalysisWrapper<'g, T>
+where
+    T: ?Sized + BackwardsDataflowAnalysis<'g>,
+{
+    type Lattice = T::Lattice;
+
+    fn trans_stmt(
+        &mut self,
+        idx: MirStmtIdx,
+        input: &Self::Lattice,
+        output: &mut DataflowOutput<Self::Lattice>,
+    ) {
+        self.inner.trans_stmt(idx, input, output);
+    }
+}
+
+impl<'a, T> DataflowView<'a, T> {
+    pub fn new_forwards<'g: 'a>(
+        analysis: &'a mut impl ForwardsDataflowAnalysis<'g, Lattice = T>,
+        scratch: &'a mut DataflowScratch<T>,
+    ) -> Self {
+        let body = analysis.body();
+
+        Self {
+            direction: MirBodyDirection::Forwards,
+            analysis: ForwardsDataflowAnalysisWrapper::wrap_mut(analysis),
+            body,
+            scratch,
+            seek_state: None,
+        }
+    }
+
+    pub fn new_backwards<'g: 'a>(
+        analysis: &'a mut impl BackwardsDataflowAnalysis<'g, Lattice = T>,
+        scratch: &'a mut DataflowScratch<T>,
+    ) -> Self {
+        let body = analysis.body();
+
+        Self {
+            direction: MirBodyDirection::Backwards,
+            analysis: BackwardsDataflowAnalysisWrapper::wrap_mut(analysis),
+            body,
+            scratch,
+            seek_state: None,
+        }
+    }
+
+    pub fn body(&self) -> &'a MirBody {
+        self.body
+    }
+
+    pub fn trans_init(&self, block: MirBlockIdx) -> &T {
+        &self.scratch.effect_elems[self.scratch.basic_block_indices[block].seed_idx as usize].value
+    }
+
+    pub fn trans_before(&mut self, target: MirStmtIdx) -> &T {
+        let block = self.body.cfg.stmt_block(target).unwrap();
+
+        let prev = match self.direction {
+            MirBodyDirection::Forwards => self.body.cfg.stmt_prev(target),
+            MirBodyDirection::Backwards => self.body.cfg.stmt_next(target),
+        };
+
+        if let Some(prev) = prev {
+            self.trans_after(prev)
+        } else {
+            self.trans_init(block)
+        }
+    }
+
+    pub fn trans_after(&mut self, target: MirStmtIdx) -> &T {
+        let block = self.body.cfg.stmt_block(target).unwrap();
+
+        // Attempt to fast-path seeking to the result.
+        'seek: {
+            let Some(seek_state) = &mut self.seek_state else {
+                break 'seek;
+            };
+
+            if seek_state.block != block {
+                break 'seek;
+            }
+
+            if seek_state.stmt == target {
+                // Seeking is idempotent.
+                return &self.scratch.stmt_tmp_effects.as_ref().unwrap()
+                    [seek_state.out_in_b as usize]
+                    .value;
+            }
+
+            // Take at least one step towards the result.
+            let [scratch_a, scratch_b] = self.scratch.stmt_tmp_effects.as_mut().unwrap();
+            let scratch_b_ptr = scratch_b as *mut DataflowOutput<_>;
+
+            let (mut scratch_src, mut scratch_dst) = if seek_state.out_in_b {
+                (scratch_b, scratch_a)
+            } else {
+                (scratch_a, scratch_b)
+            };
+
+            for stmt in self.body.cfg.block_stmts(block, self.direction) {
+                self.analysis
+                    .trans_stmt(stmt, &scratch_src.value, scratch_dst);
+
+                if stmt == target {
+                    seek_state.out_in_b = scratch_dst as *mut DataflowOutput<_> == scratch_b_ptr;
+                    seek_state.stmt = target;
+                    return &scratch_dst.value;
+                }
+
+                mem::swap(&mut scratch_src, &mut scratch_dst);
+            }
+
+            // The target was earlier in the block.
+            self.seek_state = None;
+        }
+
+        // Otherwise, scan through the entire block.
+        let start_state = &self.scratch.effect_elems
+            [self.scratch.basic_block_indices[block].seed_idx as usize]
+            .value;
+
+        let [scratch_a, scratch_b] = self.scratch.stmt_tmp_effects.as_mut().unwrap();
+        let scratch_b_ptr = scratch_b as *mut DataflowOutput<_>;
+
+        let mut scratch_src = scratch_a;
+        let mut scratch_dst = scratch_b;
+
+        let mut iter = self.body.cfg.block_stmts(block, self.direction).enumerate();
+
+        loop {
+            let (idx, stmt) = iter.next().unwrap();
+
+            self.analysis.trans_stmt(
+                stmt,
+                if idx == 0 {
+                    start_state
+                } else {
+                    &scratch_src.value
+                },
+                scratch_dst,
+            );
+
+            if stmt == target {
+                self.seek_state = Some(DataflowViewSeekState {
+                    block,
+                    stmt: target,
+                    out_in_b: scratch_dst as *mut DataflowOutput<_> == scratch_b_ptr,
+                });
+
+                return &scratch_dst.value;
+            }
+
+            mem::swap(&mut scratch_src, &mut scratch_dst);
+        }
+    }
+}
 
 // === DataflowScratch === //
 
