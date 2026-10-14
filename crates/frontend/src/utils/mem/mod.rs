@@ -1,6 +1,9 @@
 mod arena_rc;
 pub use self::arena_rc::*;
 
+mod bits;
+pub use self::bits::*;
+
 mod disjoint_borrows;
 pub use self::disjoint_borrows::*;
 

@@ -1,6 +1,7 @@
 use crate::{
     base::Session,
-    semantic::syntax::{AdtCtorOwner, MirBody, MirPlace, MirPlaceElem, ResolvedFieldIdx, TyCtxt},
+    semantic::syntax::{AdtCtorOwner, MirPlace, MirPlaceElem, ResolvedFieldIdx},
+    utils::mem::{BitRange, bit_mask},
 };
 use clay_core::{FastHashMap, FastHashSet};
 use index_vec::{IndexSlice, IndexVec, define_index_type};
@@ -199,10 +200,73 @@ pub struct PlaceSet {
 
 impl PlaceSet {
     pub fn add(&mut self, mapping: &PlaceIdMap, place: MirPlace) {
-        todo!()
+        let bits = BitRange::new_u32(mapping.places[&place].clone());
+
+        if bits.hi_word_excl() > self.bits.len() {
+            self.bits.resize(bits.hi_word_excl(), 0);
+        }
+
+        for word in bits.word_range() {
+            let sub = bits.sub_range(word);
+
+            self.bits[word] |= bit_mask(sub);
+        }
     }
 
     pub fn remove(&mut self, mapping: &PlaceIdMap, place: MirPlace) {
-        todo!()
+        let bits = BitRange::new_u32(mapping.places[&place].clone());
+
+        if bits.hi_word_excl() > self.bits.len() {
+            self.bits.resize(bits.hi_word_excl(), 0);
+        }
+
+        for word in bits.word_range() {
+            let sub = bits.sub_range(word);
+
+            self.bits[word] &= !bit_mask(sub);
+        }
+    }
+
+    pub fn has(&self, mapping: &PlaceIdMap, place: MirPlace) -> bool {
+        let bits = BitRange::new_u32(mapping.places[&place].clone());
+
+        if bits.hi_word_excl() > self.bits.len() {
+            return false;
+        }
+
+        bits.word_range().all(|word| {
+            let mask = bit_mask(bits.sub_range(word));
+            self.bits[word] & mask == mask
+        })
+    }
+
+    pub fn union(&mut self, other: &Self) {
+        if other.bits.len() > self.bits.len() {
+            self.bits.resize(other.bits.len(), 0);
+        }
+
+        for (lhs, &rhs) in self.bits.iter_mut().zip(&other.bits) {
+            *lhs |= rhs;
+        }
+    }
+
+    pub fn intersect(&mut self, other: &Self) {
+        if other.bits.len() > self.bits.len() {
+            self.bits.resize(other.bits.len(), 0);
+        }
+
+        for (lhs, &rhs) in self.bits.iter_mut().zip(&other.bits) {
+            *lhs &= rhs;
+        }
+    }
+
+    pub fn removed(&mut self, other: &Self) {
+        if other.bits.len() > self.bits.len() {
+            self.bits.resize(other.bits.len(), 0);
+        }
+
+        for (lhs, &rhs) in self.bits.iter_mut().zip(&other.bits) {
+            *lhs &= !rhs;
+        }
     }
 }
