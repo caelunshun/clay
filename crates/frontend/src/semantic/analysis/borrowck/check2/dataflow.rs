@@ -37,6 +37,7 @@ pub trait ForwardsDataflowAnalysis<'g> {
 
         scratch.stmt_tmp_effects = Some([
             DataflowOutput {
+                // Permanently dirty to allow for comparison fast-path.
                 is_dirty: true,
                 value: self.init_effect(false),
             },
