@@ -1,7 +1,10 @@
 use crate::{
     base::{Session, arena::Obj},
     semantic::{
-        analysis::{borrowck::build::build_function_mir, typeck::type_check_function},
+        analysis::{
+            borrowck::{build::build_function_mir, check::run_borrow_check},
+            typeck::type_check_function,
+        },
         infer::{
             ClauseCx, ClauseFuel, ClauseImportEnv, CoherenceMap, GenericSubst, HrtbUniverse,
             SpannedError, UnifyCxMode,
@@ -235,5 +238,6 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
     pub fn visit_fn_def(&mut self, def: Obj<FnDef>) {
         type_check_function(self, def);
         build_function_mir(self, def);
+        run_borrow_check(self, def);
     }
 }

@@ -6,8 +6,8 @@ use crate::{
     },
     parse::token::Ident,
     semantic::syntax::{
-        AdtCtor, AdtCtorFieldIdx, GenericBinder, HirExpr, HirPat, ImplItem, Item, SigTy, ThirBody,
-        TraitItem, Ty, Visibility,
+        AdtCtor, AdtCtorFieldIdx, GenericBinder, HirExpr, HirPat, ImplItem, Item, MirBody, SigTy,
+        ThirBody, TraitItem, Ty, Visibility,
     },
 };
 use derive_where::derive_where;
@@ -36,6 +36,7 @@ pub struct FnDef {
     pub ret_ty: LateInit<SigTy>,
     pub hir_body: LateInit<Option<Obj<HirExpr>>>,
     pub thir_body: LateInit<Option<ThirBody>>,
+    pub mir_body: LateInit<Option<MirBody>>,
 }
 
 #[derive(Debug, Copy, Clone)]

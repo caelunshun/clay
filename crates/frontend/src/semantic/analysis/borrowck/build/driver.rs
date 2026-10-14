@@ -1,27 +1,31 @@
 use crate::{
-    base::{Session, arena::Obj},
+    base::{
+        Session,
+        arena::{LateInit, Obj},
+    },
     semantic::{
         analysis::{
             borrowck::build::scope::{MirBuilderScopeIdx, MirScopedBuilder},
             sigck::CrateSigckVisitor,
         },
-        syntax::{
-            FnDef, MirRvalue, MirLocalIdx, MirPlace, ThirBody, ThirExpr, ThirLocal, TyCtxt,
-        },
+        syntax::{FnDef, MirLocalIdx, MirPlace, MirRvalue, ThirBody, ThirExpr, ThirLocal, TyCtxt},
     },
 };
 use clay_core::FastHashMap;
 
-pub fn build_function_mir(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
-    let s = cx.session();
-    let tcx = cx.tcx();
+pub fn build_function_mir(check_cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
+    let s = check_cx.session();
+    let tcx = check_cx.tcx();
 
     let Some(body) = &*def.r(s).thir_body else {
+        LateInit::init(&def.r(s).mir_body, None);
         return;
     };
 
-    let mut builder = MirFromThirCtx::new(tcx, def);
-    builder.lower_fn(body);
+    let mut build_cx = MirFromThirCtx::new(tcx, def);
+    build_cx.lower_fn(body);
+
+    LateInit::init(&def.r(s).mir_body, Some(build_cx.builder.finish()));
 }
 
 pub struct MirFromThirCtx<'tcx> {

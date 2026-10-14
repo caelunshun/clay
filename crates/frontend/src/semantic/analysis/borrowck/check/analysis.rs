@@ -1,5 +1,5 @@
 use crate::semantic::{
-    analysis::borrowck::check2::{
+    analysis::borrowck::check::{
         dataflow::{BackwardsDataflowAnalysis, DataflowOutput},
         places::{PlaceNumbering, PlaceSet},
     },

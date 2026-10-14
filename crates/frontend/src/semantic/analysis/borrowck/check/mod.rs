@@ -1,5 +1,6 @@
+mod analysis;
 mod dataflow;
-pub use self::dataflow::*;
+mod driver;
+mod places;
 
-mod check_regions;
-pub use self::check_regions::*;
+pub use self::driver::run_borrow_check;

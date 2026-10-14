@@ -1157,6 +1157,7 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
                 ret_ty: LateInit::uninit(),
                 hir_body: LateInit::uninit(),
                 thir_body: LateInit::uninit(),
+                mir_body: LateInit::uninit(),
             },
             s,
         );
