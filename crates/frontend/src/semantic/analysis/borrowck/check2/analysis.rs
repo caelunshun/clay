@@ -1,94 +1,10 @@
-use crate::{
-    semantic::{
-        analysis::borrowck::check2::{
-            dataflow::{BackwardsDataflowAnalysis, DataflowOutput},
-            places::PlaceNumbering,
-        },
-        syntax::{MirBlockIdx, MirBody, MirPlace, MirStmtIdx, TyCtxt},
+use crate::semantic::{
+    analysis::borrowck::check2::{
+        dataflow::{BackwardsDataflowAnalysis, DataflowOutput},
+        places::{PlaceNumbering, PlaceSet},
     },
-    utils::mem::{BitRange, bit_mask},
+    syntax::{MirBlockIdx, MirBody, MirStmtIdx, TyCtxt},
 };
-use smallvec::SmallVec;
-
-// === PlaceSet === //
-
-#[derive(Debug, Clone, Eq, PartialEq, Default)]
-pub struct PlaceSet {
-    bits: SmallVec<[u64; 3]>,
-}
-
-impl PlaceSet {
-    pub fn add(&mut self, mapping: &PlaceNumbering, place: MirPlace) {
-        let bits = BitRange::new_u32(mapping.place_to_range[&place].clone());
-
-        if bits.hi_word_excl() > self.bits.len() {
-            self.bits.resize(bits.hi_word_excl(), 0);
-        }
-
-        for word in bits.word_range() {
-            let sub = bits.sub_range(word);
-
-            self.bits[word] |= bit_mask(sub);
-        }
-    }
-
-    pub fn remove(&mut self, mapping: &PlaceNumbering, place: MirPlace) {
-        let bits = BitRange::new_u32(mapping.place_to_range[&place].clone());
-
-        if bits.hi_word_excl() > self.bits.len() {
-            self.bits.resize(bits.hi_word_excl(), 0);
-        }
-
-        for word in bits.word_range() {
-            let sub = bits.sub_range(word);
-
-            self.bits[word] &= !bit_mask(sub);
-        }
-    }
-
-    pub fn has(&self, mapping: &PlaceNumbering, place: MirPlace) -> bool {
-        let bits = BitRange::new_u32(mapping.place_to_range[&place].clone());
-
-        if bits.hi_word_excl() > self.bits.len() {
-            return false;
-        }
-
-        bits.word_range().all(|word| {
-            let mask = bit_mask(bits.sub_range(word));
-            self.bits[word] & mask == mask
-        })
-    }
-
-    pub fn union(&mut self, other: &Self) {
-        if other.bits.len() > self.bits.len() {
-            self.bits.resize(other.bits.len(), 0);
-        }
-
-        for (lhs, &rhs) in self.bits.iter_mut().zip(&other.bits) {
-            *lhs |= rhs;
-        }
-    }
-
-    pub fn intersect(&mut self, other: &Self) {
-        if other.bits.len() > self.bits.len() {
-            self.bits.resize(other.bits.len(), 0);
-        }
-
-        for (lhs, &rhs) in self.bits.iter_mut().zip(&other.bits) {
-            *lhs &= rhs;
-        }
-    }
-
-    pub fn removed(&mut self, other: &Self) {
-        if other.bits.len() > self.bits.len() {
-            self.bits.resize(other.bits.len(), 0);
-        }
-
-        for (lhs, &rhs) in self.bits.iter_mut().zip(&other.bits) {
-            *lhs &= !rhs;
-        }
-    }
-}
 
 // === LivenessAnalysis === //
 
