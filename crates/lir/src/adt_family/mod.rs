@@ -6,19 +6,19 @@ use crate::{
 pub mod enum_;
 pub mod strukt;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdtTyFamily {
     pub ty_params: Vec<Ptr<TyParam>>,
     pub kind: AdtKind,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdtKind {
     Struct(StructTyFamily),
     Enum(EnumTyFamily),
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct TyParam {}
 
 impl TyParam {

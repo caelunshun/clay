@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 arrayvec.workspace = true
+clay-core.workspace = true
 derive-where.workspace = true
 slotmap.workspace = true
 

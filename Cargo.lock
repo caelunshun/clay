@@ -352,6 +352,7 @@ name = "clay-lir"
 version = "0.1.0"
 dependencies = [
  "arrayvec",
+ "clay-core",
  "derive-where",
  "slotmap",
 ]

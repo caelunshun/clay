@@ -2,8 +2,6 @@ use crate::{arena::Ptr, ty::prim::PrimTy};
 
 pub mod prim;
 
-/// Interned: at most one slot in a Soup's `tys` arena holds
-/// any given unique Ty value.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Ty {
     Prim(PrimTy),
