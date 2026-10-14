@@ -1,5 +1,7 @@
 use crate::{
-    semantic::syntax::{MirBlockIdx, MirBody, MirBodyDirection, MirStmtIdx},
+    semantic::syntax::{
+        MirBlockIdx, MirBlockRef, MirBody, MirBodyDirection, MirStmtIdx, MirStmtRef,
+    },
     utils::mem::{DisjointBorrowsScratch, VecOfPtrScratch},
 };
 use bytemuck::TransparentWrapper;
@@ -16,13 +18,18 @@ pub trait ForwardsDataflowAnalysis<'g> {
 
     fn init_effect(&mut self, is_entry: bool) -> Self::Lattice;
 
-    fn trans_stmt(&mut self, idx: MirStmtIdx, input: &Self::Lattice, output: &mut Self::Lattice);
+    fn trans_stmt(
+        &mut self,
+        stmt: MirStmtRef<'g>,
+        input: &Self::Lattice,
+        output: &mut Self::Lattice,
+    );
 
     fn trans_join(&mut self, inputs: &[&Self::Lattice], output: &mut DataflowOutput<Self::Lattice>);
 
     fn trans_terminator(
         &mut self,
-        idx: MirBlockIdx,
+        block: MirBlockRef<'g>,
         input: &Self::Lattice,
         outputs: &mut [&mut DataflowOutput<Self::Lattice>],
     );
@@ -64,16 +71,16 @@ pub trait ForwardsDataflowAnalysis<'g> {
             scratch.worklist.push_back(block);
         }
 
-        for block in body.cfg.blocks() {
-            let predecessors = body.cfg.block_predecessors(block);
+        for block in body.blocks() {
+            let predecessors = block.predecessors();
 
             if predecessors.is_empty() {
                 continue;
             }
 
-            assert!(block != body.entry);
+            assert!(block.block != body.entry);
 
-            scratch.basic_block_indices[block].aux_idx = scratch.effect_elems.len() as u32;
+            scratch.basic_block_indices[block.block].aux_idx = scratch.effect_elems.len() as u32;
 
             for _ in 0..predecessors.len() {
                 scratch.effect_elems.push(DataflowOutput {
@@ -85,7 +92,8 @@ pub trait ForwardsDataflowAnalysis<'g> {
 
         // Run dataflow
         while let Some(curr) = scratch.worklist.pop_front() {
-            let curr_indices = scratch.basic_block_indices[curr];
+            let curr = MirBlockRef::new(body, curr);
+            let curr_indices = scratch.basic_block_indices[curr.block];
 
             // Join block predecessors
             {
@@ -95,7 +103,7 @@ pub trait ForwardsDataflowAnalysis<'g> {
 
                 let predecessors = scratch.ptr_scratch.build(
                     (curr_indices.aux_idx..)
-                        .take(body.cfg.block_predecessors(curr).len())
+                        .take(curr.predecessors().len())
                         .map(|idx| &borrows.get(idx as usize).value),
                 );
 
@@ -122,7 +130,7 @@ pub trait ForwardsDataflowAnalysis<'g> {
             }
 
             let terminator_input = 'stmt: {
-                let mut iter = body.cfg.block_stmts(curr, MirBodyDirection::Forwards);
+                let mut iter = curr.stmts(MirBodyDirection::Forwards);
 
                 let [scratch_src, scratch_dst] = scratch.stmt_tmp_effects.as_mut().unwrap();
                 let mut scratch_src = scratch_src;
@@ -158,7 +166,7 @@ pub trait ForwardsDataflowAnalysis<'g> {
                     TerminatorInput::ByRef(v) => v,
                 };
 
-                let outputs = body.cfg.block_successors(curr).iter().map(|link| {
+                let outputs = curr.successors().iter().map(|link| {
                     let base = scratch.basic_block_indices[link.target].aux_idx;
                     borrows.get_mut(base as usize + link.at_idx)
                 });
@@ -166,7 +174,7 @@ pub trait ForwardsDataflowAnalysis<'g> {
 
                 self.trans_terminator(curr, input, outputs);
 
-                for (&succ, output) in body.cfg.block_successors(curr).iter().zip(outputs) {
+                for (&succ, output) in curr.successors().iter().zip(outputs) {
                     if !mem::take(&mut output.is_dirty) {
                         continue;
                     }
@@ -198,16 +206,16 @@ pub trait BackwardsDataflowAnalysis<'g> {
 
     fn trans_stmt(
         &mut self,
-        idx: MirStmtIdx,
+        stmt: MirStmtRef<'g>,
         input: &Self::Lattice,
         output: &mut DataflowOutput<Self::Lattice>,
     );
 
     fn trans_terminator(
         &mut self,
-        idx: MirBlockIdx,
+        block: MirBlockRef<'g>,
         inputs: &[&Self::Lattice],
-        outputs: &mut DataflowOutput<Self::Lattice>,
+        output: &mut DataflowOutput<Self::Lattice>,
     );
 
     fn run(&mut self, scratch: &mut DataflowScratch<Self::Lattice>) {
@@ -287,7 +295,7 @@ pub trait BackwardsDataflowAnalysis<'g> {
                 assert!(output.is_dirty);
                 output.is_dirty = false;
 
-                self.trans_terminator(curr, inputs, output);
+                self.trans_terminator(MirBlockRef::new(body, curr), inputs, output);
 
                 if !mem::take(&mut output.is_dirty) {
                     // The input effect to the block has not actually changed, even though its
@@ -318,7 +326,7 @@ pub trait BackwardsDataflowAnalysis<'g> {
 
             for stmt in body.cfg.block_stmts(curr, MirBodyDirection::Backwards) {
                 self.trans_stmt(
-                    stmt,
+                    MirStmtRef::new(body, stmt),
                     if stmt == first_stmt {
                         &first_stmt_slot.value
                     } else {
@@ -405,7 +413,11 @@ where
         input: &Self::Lattice,
         output: &mut DataflowOutput<Self::Lattice>,
     ) {
-        self.inner.trans_stmt(idx, input, &mut output.value);
+        self.inner.trans_stmt(
+            MirStmtRef::new(self.inner.body(), idx),
+            input,
+            &mut output.value,
+        );
     }
 }
 
@@ -429,7 +441,8 @@ where
         input: &Self::Lattice,
         output: &mut DataflowOutput<Self::Lattice>,
     ) {
-        self.inner.trans_stmt(idx, input, output);
+        self.inner
+            .trans_stmt(MirStmtRef::new(self.inner.body(), idx), input, output);
     }
 }
 
@@ -624,4 +637,30 @@ struct BasicBlockState {
 pub struct DataflowOutput<T> {
     pub is_dirty: bool,
     pub value: T,
+}
+
+impl<T> DataflowOutput<T> {
+    pub fn set_value(&mut self, value: T)
+    where
+        T: Eq,
+    {
+        if self.value == value {
+            return;
+        }
+
+        self.value = value;
+        self.is_dirty = true;
+    }
+
+    pub fn set_value_ref(&mut self, value: &T)
+    where
+        T: Eq + Clone,
+    {
+        if &self.value == value {
+            return;
+        }
+
+        self.value.clone_from(value);
+        self.is_dirty = true;
+    }
 }

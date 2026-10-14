@@ -401,6 +401,8 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 );
             }
             ThirPatKind::Adt(ctor, fields) => {
+                // TODO: handle enums
+
                 self.lower_pat_and(
                     late_use_proxies,
                     scopes,

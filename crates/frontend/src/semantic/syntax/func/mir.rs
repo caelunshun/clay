@@ -417,7 +417,12 @@ impl MirBodyCfg {
     }
 
     pub fn set_terminator(&mut self, idx: MirBlockIdx, terminator: Option<MirTerminator>) {
-        let new_successors = terminator.as_ref().map_or_default(|v| v.successors());
+        let new_successors = terminator.as_ref().map_or_default(|v| {
+            v.successors()
+                .into_iter()
+                .map(|v| v.target)
+                .collect::<SmallVec<[MirBlockIdx; 2]>>()
+        });
 
         // Validate successors
         {
@@ -579,12 +584,12 @@ impl TraverseMentions for MirStmtKind {
             MirStmtKind::Assign(assign) => {
                 let (lhs, rhs) = &**assign;
 
+                TraverseMentions::traverse_mentions(tcx, rhs, f)?;
+
                 f(MirPlaceMention {
                     kind: MirPlaceMentionKind::INIT,
                     place: *lhs,
                 })?;
-
-                TraverseMentions::traverse_mentions(tcx, rhs, f)?;
             }
             MirStmtKind::DiscardWithoutDrop(rvalue) => {
                 TraverseMentions::traverse_mentions(tcx, rvalue, f)?;
@@ -641,17 +646,17 @@ impl TraverseMentions for MirRvalue {
                 can_move_from,
                 ref_place,
             } => {
+                f(MirPlaceMention {
+                    kind: MirPlaceMentionKind::MOVED,
+                    place: *ref_place,
+                })?;
+
                 for can_move_from in can_move_from {
                     f(MirPlaceMention {
                         kind: MirPlaceMentionKind::MOVED,
                         place: *can_move_from,
                     })?;
                 }
-
-                f(MirPlaceMention {
-                    kind: MirPlaceMentionKind::MOVED,
-                    place: *ref_place,
-                })?;
             }
             MirRvalue::Ref(_muta, place) => {
                 f(MirPlaceMention {
@@ -854,10 +859,19 @@ impl TraverseMentions for MirTerminator {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct MirTerminatorSuccessor {
+    pub target: MirBlockIdx,
+    pub is_unwind: bool,
+}
+
 impl MirTerminator {
-    pub fn successors(&self) -> SmallVec<[MirBlockIdx; 2]> {
+    pub fn successors(&self) -> SmallVec<[MirTerminatorSuccessor; 2]> {
         match *self {
-            MirTerminator::Goto(target) => SmallVec::from_iter([target]),
+            MirTerminator::Goto(target) => SmallVec::from_iter([MirTerminatorSuccessor {
+                target,
+                is_unwind: false,
+            }]),
             MirTerminator::Call {
                 callee: _,
                 args: _,
@@ -869,12 +883,32 @@ impl MirTerminator {
                 place: _,
                 target,
                 unwind,
-            } => SmallVec::from_iter([target].into_iter().chain(unwind.block())),
+            } => SmallVec::from_iter(
+                [MirTerminatorSuccessor {
+                    target,
+                    is_unwind: false,
+                }]
+                .into_iter()
+                .chain(unwind.block().map(|target| MirTerminatorSuccessor {
+                    target,
+                    is_unwind: true,
+                })),
+            ),
             MirTerminator::SwitchInt {
                 discr: _,
                 constants: _,
                 ref targets,
-            } => SmallVec::from_iter(targets.iter().copied()),
+            } => {
+                SmallVec::from_iter(
+                    targets
+                        .iter()
+                        .copied()
+                        .map(|target| MirTerminatorSuccessor {
+                            target,
+                            is_unwind: false,
+                        }),
+                )
+            }
             MirTerminator::UnwindResume | MirTerminator::Return | MirTerminator::Unreachable => {
                 SmallVec::new()
             }
@@ -951,6 +985,9 @@ pub struct MirPlaceMention {
 bitflags::bitflags! {
     #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
     pub struct MirPlaceMentionKind: u32 {
+        const LIVENESS_USE = Self::MOVED.bits() | Self::READ.bits();
+        const LIVENESS_INIT = Self::INIT.bits();
+
         /// Invalidates the place without requiring it to be occupied.
         const INVALIDATED = 1 << 0;
 

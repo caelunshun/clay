@@ -1,6 +1,9 @@
 use crate::{
     base::{Session, arena::HasListInterner},
-    semantic::syntax::{AdtCtorOwner, MirPlace, MirPlaceElem, ResolvedFieldIdx, TyCtxt},
+    semantic::syntax::{
+        AdtCtorOwner, MirBody, MirBodyDirection, MirPlace, MirPlaceElem, ResolvedFieldIdx,
+        TraverseMentions, TyCtxt,
+    },
     utils::mem::{BitRange, bit_mask},
 };
 use clay_core::FastHashMap;
@@ -141,20 +144,20 @@ impl PlaceNumberingBuilder {
         //   sub-components
         //
         fn populate(
-            mapping: &mut PlaceNumbering,
+            numbering: &mut PlaceNumbering,
             nodes: &IndexSlice<TrieNodeIdx, [TrieNode]>,
             node: TrieNodeIdx,
         ) -> bool {
             let node = &nodes[node];
 
-            let first_field = mapping.bit_to_place.len() as u32;
+            let first_field = numbering.bit_to_place.len() as u32;
 
             // A place is structurally live if all its children are structurally live.
             let mut structural_liveness = true;
 
             for child_idx in 0..node.child_count {
                 structural_liveness &= populate(
-                    mapping,
+                    numbering,
                     nodes,
                     TrieNodeIdx::from_usize(node.first_child.index() + child_idx as usize),
                 );
@@ -171,16 +174,16 @@ impl PlaceNumberingBuilder {
             if let Some(place) = node.mention
                 && !structural_liveness
             {
-                mapping.bit_to_place.push(place);
+                numbering.bit_to_place.push(place);
 
                 // Our liveness is now structural again because we have a bit!
                 structural_liveness = true;
             }
 
             if let Some(place) = node.mention {
-                let next_field = mapping.bit_to_place.len() as u32;
+                let next_field = numbering.bit_to_place.len() as u32;
 
-                mapping
+                numbering
                     .place_to_range
                     .insert(place, first_field..next_field);
             }
@@ -188,17 +191,40 @@ impl PlaceNumberingBuilder {
             structural_liveness
         }
 
-        let mut mapping = PlaceNumbering {
+        let mut numbering = PlaceNumbering {
             place_to_range: FastHashMap::default(),
             bit_to_place: Vec::new(),
         };
 
         for idx in 0..self.local_count {
-            populate(&mut mapping, &self.nodes, TrieNodeIdx::from_usize(idx));
+            populate(&mut numbering, &self.nodes, TrieNodeIdx::from_usize(idx));
         }
 
-        mapping
+        numbering
     }
+}
+
+pub fn number_places_in_body(tcx: &TyCtxt, body: &MirBody) -> PlaceNumbering {
+    let s = &tcx.session;
+    let mut builder = PlaceNumberingBuilder::new(body.locals.len());
+
+    for block in body.blocks() {
+        for stmt in block.stmts(MirBodyDirection::Forwards) {
+            cbit::cbit! {
+                for mention in stmt.kind().iter_mentions(tcx) {
+                    builder.mention(s, truncate_place_to_direct(tcx, mention.place));
+                }
+            }
+        }
+
+        cbit::cbit! {
+            for mention in block.terminator().iter_mentions(tcx) {
+                builder.mention(s, truncate_place_to_direct(tcx, mention.place));
+            }
+        }
+    }
+
+    builder.finish()
 }
 
 pub fn truncate_place_to_direct(tcx: &TyCtxt, place: MirPlace) -> MirPlace {
@@ -229,8 +255,8 @@ pub struct PlaceSet {
 }
 
 impl PlaceSet {
-    pub fn add(&mut self, mapping: &PlaceNumbering, place: MirPlace) {
-        let bits = BitRange::new_u32(mapping.place_to_range[&place].clone());
+    pub fn add(&mut self, numbering: &PlaceNumbering, place: MirPlace) {
+        let bits = BitRange::new_u32(numbering.place_to_range[&place].clone());
 
         if bits.hi_word_excl() > self.bits.len() {
             self.bits.resize(bits.hi_word_excl(), 0);
@@ -243,8 +269,8 @@ impl PlaceSet {
         }
     }
 
-    pub fn remove(&mut self, mapping: &PlaceNumbering, place: MirPlace) {
-        let bits = BitRange::new_u32(mapping.place_to_range[&place].clone());
+    pub fn remove(&mut self, numbering: &PlaceNumbering, place: MirPlace) {
+        let bits = BitRange::new_u32(numbering.place_to_range[&place].clone());
 
         if bits.hi_word_excl() > self.bits.len() {
             self.bits.resize(bits.hi_word_excl(), 0);
@@ -257,8 +283,8 @@ impl PlaceSet {
         }
     }
 
-    pub fn has(&self, mapping: &PlaceNumbering, place: MirPlace) -> bool {
-        let bits = BitRange::new_u32(mapping.place_to_range[&place].clone());
+    pub fn has(&self, numbering: &PlaceNumbering, place: MirPlace) -> bool {
+        let bits = BitRange::new_u32(numbering.place_to_range[&place].clone());
 
         if bits.hi_word_excl() > self.bits.len() {
             return false;
