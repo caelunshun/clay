@@ -1,6 +1,7 @@
-use crate::{base::Session, utils::hash::hash_map};
+use crate::base::Session;
 use bumpalo::Bump;
 use clay_core::FastHashMap;
+use hashbrown::hash_map;
 use std::{cell::RefCell, fmt, hash::BuildHasher as _, num::NonZeroU32};
 
 // === Symbol === //

@@ -10,7 +10,7 @@ use crate::{
     },
     semantic::{
         analysis::typeck::{BodyCtxt, infra::confirm::ThirExprConfirmedWithTy},
-        infer::{ClauseCx, ClauseFuel, HrtbUniverse, PrettyFmtOpts, SpannedError, ToDebugTree},
+        infer::{ClauseCx, ClauseFuel, HrtbUniverse, PrettyFmtOpts, SpannedError},
         syntax::{
             Divergence, FloatKind, FnInstanceInner, FnOwner, HirExpr, InferTyVarSourceInfo,
             IntKind, LocalNameIdent, Mutability, Re, RelationMode, SimpleTyKind, SimpleTySet,
@@ -19,6 +19,7 @@ use crate::{
         },
     },
     symbol,
+    utils::format::ToDebugTree as _,
 };
 
 // === BodyCtxt === //

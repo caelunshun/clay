@@ -23,7 +23,7 @@ use crate::{
         },
     },
     symbol,
-    utils::lang::{SimpleListFormatGlue, format_list},
+    utils::format::{SimpleListFormatGlue, format_list},
 };
 use clay_core::FastHashMap;
 use hashbrown::hash_map;

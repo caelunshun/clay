@@ -2,7 +2,7 @@ use super::{HasSpan, Span, Symbol};
 use crate::{
     base::{Diag, ErrorGuaranteed, HardDiag, LeafDiag},
     flags::should_print_parse_expect_success,
-    utils::lang::{FormatFn, ListFormatter, SimpleListFormatGlue, format_list_into},
+    utils::format::{FormatFn, ListFormatter, SimpleListFormatGlue, format_list_into},
 };
 use clay_core::{FastHashSet, FastIndexMap};
 use std::{

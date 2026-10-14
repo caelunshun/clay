@@ -1,6 +1,7 @@
 use crate::{
     base::{Diag, ErrorGuaranteed},
-    semantic::infer::{ClauseCx, PrettyFmtOpts, ToDebugTree},
+    semantic::infer::{ClauseCx, PrettyFmtOpts},
+    utils::format::ToDebugTree,
 };
 use bytemuck::{TransparentWrapper, TransparentWrapperAlloc as _};
 use derive_where::derive_where;

@@ -11,7 +11,7 @@ use crate::{
             UniversalTyProjInner, UniversalTyRoot, UniversalTyRootSourceInfo,
         },
     },
-    utils::lang::{SimpleListFormatGlue, format_list, format_list_into},
+    utils::format::{SimpleListFormatGlue, format_list, format_list_into},
 };
 use std::{
     cell::RefCell,

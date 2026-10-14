@@ -1,6 +1,5 @@
 use crate::{
     base::{Session, arena::Obj},
-    flags,
     semantic::syntax::{
         FnDef, MirBlockIdx, MirBody, MirLocal, MirLocalIdx, MirOperand, MirOperandMode, MirPlace,
         MirStmt, MirStmtKind, MirStmtSourceInfo, MirTerminator, MirUnwindBehavior, SigTy, TyCtxt,
@@ -9,6 +8,8 @@ use crate::{
 use index_vec::{IndexVec, define_index_type};
 use smallvec::SmallVec;
 use std::panic::Location;
+
+// === Building === //
 
 define_index_type! {
     pub struct MirBuilderScopeIdx = u32;
@@ -182,12 +183,6 @@ impl<'tcx> MirScopedBuilder<'tcx> {
             .map(|idx| {
                 let first_block = self.body.cfg.create_block();
 
-                if flags::should_print_mir_builder_locs() {
-                    println!(
-                        "[{caller}] scope {scope:?} child block {idx} has entry {first_block:?}",
-                    );
-                }
-
                 self.scopes.push(Scope {
                     parent: Some(ScopeParent {
                         target: scope,
@@ -210,14 +205,9 @@ impl<'tcx> MirScopedBuilder<'tcx> {
                 .collect::<SmallVec<[MirBlockIdx; 2]>>()),
         );
 
-        if flags::should_print_mir_builder_locs() {
-            println!("[{caller}] scope {scope:?} children return to {returns_to:?}");
-        }
-
         successors
     }
 
-    #[track_caller]
     #[must_use]
     fn push_branch_fixed<const N: usize>(
         &mut self,
@@ -353,14 +343,12 @@ impl<'tcx> MirScopedBuilder<'tcx> {
         });
     }
 
-    #[track_caller]
     #[must_use]
     pub fn push_scope(&mut self, scope: MirBuilderScopeIdx) -> MirBuilderScopeIdx {
         let [sub_scope] = self.push_branch_fixed(scope, |[target]| MirTerminator::Goto(target));
         sub_scope
     }
 
-    #[track_caller]
     #[must_use]
     pub fn push_switch_dyn<const N: usize>(
         &mut self,
@@ -377,7 +365,6 @@ impl<'tcx> MirScopedBuilder<'tcx> {
         })
     }
 
-    #[track_caller]
     #[must_use]
     pub fn push_switch_fixed<const N: usize>(
         &mut self,
