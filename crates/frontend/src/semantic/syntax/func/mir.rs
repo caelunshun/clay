@@ -465,12 +465,12 @@ impl MirBodyCfg {
                 let fwd_at_idx = successor_data.predecessors.len();
 
                 successor_data.predecessors.push(MirBlockLink {
-                    target: successor,
+                    target: idx,
                     at_idx: back_at_idx,
                 });
 
                 MirBlockLink {
-                    target: idx,
+                    target: successor,
                     at_idx: fwd_at_idx,
                 }
             })

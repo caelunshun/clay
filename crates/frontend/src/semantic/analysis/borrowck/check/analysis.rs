@@ -9,9 +9,9 @@ use crate::semantic::{
 // === LivenessAnalysis === //
 
 pub struct LivenessAnalysis<'g> {
-    tcx: &'g TyCtxt,
-    body: &'g MirBody,
-    place_numbering: &'g PlaceNumbering,
+    pub tcx: &'g TyCtxt,
+    pub body: &'g MirBody,
+    pub place_numbering: &'g PlaceNumbering,
 }
 
 impl<'g> BackwardsDataflowAnalysis<'g> for LivenessAnalysis<'g> {

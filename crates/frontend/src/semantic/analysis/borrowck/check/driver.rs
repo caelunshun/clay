@@ -1,7 +1,14 @@
 use crate::{
     base::arena::Obj,
     semantic::{
-        analysis::{borrowck::check::places::number_places_in_body, sigck::CrateSigckVisitor},
+        analysis::{
+            borrowck::check::{
+                analysis::LivenessAnalysis,
+                dataflow::{BackwardsDataflowAnalysis, DataflowScratch},
+                places::number_places_in_body,
+            },
+            sigck::CrateSigckVisitor,
+        },
         syntax::FnDef,
     },
 };
@@ -15,4 +22,13 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     };
 
     let place_numbering = number_places_in_body(tcx, body);
+
+    let mut liveness_scratch = DataflowScratch::default();
+    let mut liveness_analysis = LivenessAnalysis {
+        tcx,
+        body,
+        place_numbering: &place_numbering,
+    };
+
+    liveness_analysis.run(&mut liveness_scratch);
 }
