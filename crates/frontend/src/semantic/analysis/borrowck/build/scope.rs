@@ -1,5 +1,3 @@
-#![expect(dead_code)] // TODO
-
 use crate::{
     base::{Session, arena::Obj},
     semantic::syntax::{
@@ -80,8 +78,6 @@ impl<'tcx> MirScopedBuilder<'tcx> {
             body,
         };
 
-        let entry_block = builder.body.cfg.create_block();
-
         let last_unwind_block = builder
             .body
             .cfg
@@ -91,8 +87,8 @@ impl<'tcx> MirScopedBuilder<'tcx> {
             builder.scopes.push(Scope {
                 parent: None,
                 locals: Vec::new(),
-                first_block: entry_block,
-                curr_block: entry_block,
+                first_block: builder.body.entry,
+                curr_block: builder.body.entry,
                 curr_unwind_block: last_unwind_block,
             }),
             MirBuilderScopeIdx::BOOTSTRAP_ENTRY
@@ -401,7 +397,7 @@ impl<'tcx> MirScopedBuilder<'tcx> {
             MirTerminator::Return,
         );
 
-        // TODO: remove placeholders
+        self.body.cfg.prune_unreachable(self.body.entry);
 
         self.body
     }

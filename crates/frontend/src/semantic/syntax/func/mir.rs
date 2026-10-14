@@ -8,7 +8,7 @@ use crate::{
     semantic::syntax::{AdtCtor, DynSiteIdx, Mutability, ResolvedFieldIdx, SigTy, TyCtxt},
 };
 use index_vec::{IndexVec, define_index_type};
-use slotmap::{SlotMap, new_key_type};
+use slotmap::{SecondaryMap, SlotMap, new_key_type};
 use smallvec::SmallVec;
 use std::{mem, ops::ControlFlow};
 
@@ -484,6 +484,23 @@ impl MirBodyCfg {
     pub fn init_terminator(&mut self, idx: MirBlockIdx, terminator: MirTerminator) {
         assert!(self.opt_terminator(idx).is_none());
         self.set_terminator(idx, Some(terminator));
+    }
+
+    pub fn prune_unreachable(&mut self, entry: MirBlockIdx) {
+        let mut live_scopes = SecondaryMap::from_iter([(entry, ())]);
+        let mut stack = Vec::from_iter([entry]);
+
+        while let Some(curr) = stack.pop() {
+            assert!(self.opt_terminator(curr).is_some());
+
+            for successor in self.block_successors(curr) {
+                if live_scopes.insert(curr, ()).is_none() {
+                    stack.push(successor.target);
+                }
+            }
+        }
+
+        self.blocks.retain(|key, _| live_scopes.contains_key(key));
     }
 }
 
