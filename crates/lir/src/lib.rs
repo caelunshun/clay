@@ -3,11 +3,12 @@
 pub mod adt_family;
 pub mod arena;
 pub mod brick;
-pub mod func;
-pub mod sig;
-pub mod sig_family;
+pub mod func_family;
 pub mod soup;
+pub mod subst_func;
+pub mod subst_trait;
 pub mod subst_ty;
-pub mod trait_;
 pub mod trait_family;
+pub mod trait_impl_family;
 pub mod ty;
+pub mod ty_param;

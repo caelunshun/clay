@@ -1,6 +1,7 @@
 use crate::{
     adt_family::{enum_::EnumTyFamily, strukt::StructTyFamily},
     arena::Ptr,
+    ty_param::TyParam,
 };
 
 pub mod enum_;
@@ -16,13 +17,4 @@ pub struct AdtTyFamily {
 pub enum AdtKind {
     Struct(StructTyFamily),
     Enum(EnumTyFamily),
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct TyParam {}
-
-impl TyParam {
-    pub fn unconstrained() -> Self {
-        Self {}
-    }
 }

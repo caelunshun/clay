@@ -1,9 +1,8 @@
-use crate::{adt_family::AdtTyFamily, arena::Arena, ty::Ty};
+use crate::{adt_family::AdtTyFamily, arena::Arena};
 
 /// Holds all IR structures for a program.
 pub struct Soup {
     pub adt_ty_families: Arena<AdtTyFamily>,
-    pub tys: Arena<Ty>,
 }
 
 macro_rules! impl_has_arena {
@@ -26,5 +25,4 @@ macro_rules! impl_has_arena {
 
 impl_has_arena!(
     adt_ty_families: AdtTyFamily,
-    tys: Ty,
 );
