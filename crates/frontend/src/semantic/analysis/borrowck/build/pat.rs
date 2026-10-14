@@ -3,9 +3,10 @@ use crate::{
     semantic::{
         analysis::borrowck::build::{driver::MirFromThirCtx, scope::MirBuilderScopeIdx},
         syntax::{
-            MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue, MirStmt, MirStmtKind,
-            MirStmtSourceInfo, Mutability, ResolvedFieldIdx, SigRe, SigReKind, SigTyInner,
-            SigTyKind, ThirExpr, ThirLetStmt, ThirLocal, ThirMatchArm, ThirPat, ThirPatKind,
+            MirLocal, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue, MirStmt,
+            MirStmtKind, MirStmtSourceInfo, Mutability, ResolvedFieldIdx, SigRe, SigReKind,
+            SigTyInner, SigTyKind, ThirExpr, ThirLetStmt, ThirLocal, ThirMatchArm, ThirPat,
+            ThirPatKind,
         },
     },
 };
@@ -317,20 +318,22 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
                                     let ref_local = self.builder.push_local(
                                         scopes.local_scope,
-                                        Obj::new(
-                                            SigTyInner {
-                                                span,
-                                                kind: SigTyKind::Reference(
-                                                    SigRe {
-                                                        span,
-                                                        kind: SigReKind::Infer,
-                                                    },
-                                                    Mutability::Not,
-                                                    local.r(s).ty,
-                                                ),
-                                            },
-                                            s,
-                                        ),
+                                        MirLocal {
+                                            ty: Obj::new(
+                                                SigTyInner {
+                                                    span,
+                                                    kind: SigTyKind::Reference(
+                                                        SigRe {
+                                                            span,
+                                                            kind: SigReKind::Infer,
+                                                        },
+                                                        Mutability::Not,
+                                                        local.r(s).ty,
+                                                    ),
+                                                },
+                                                s,
+                                            ),
+                                        },
                                     );
 
                                     LateUseProxyEntry {
@@ -511,9 +514,9 @@ impl<'tcx> MirFromThirCtx<'tcx> {
     ) -> MirLocalIdx {
         let s = self.session();
 
-        *self
-            .thir_locals
-            .entry(local)
-            .or_insert_with(|| self.builder.push_local(local_scope, local.r(s).ty))
+        *self.thir_locals.entry(local).or_insert_with(|| {
+            self.builder
+                .push_local(local_scope, MirLocal { ty: local.r(s).ty })
+        })
     }
 }

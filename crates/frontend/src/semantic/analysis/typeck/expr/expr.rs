@@ -6,7 +6,7 @@ use crate::{
     semantic::{
         analysis::typeck::BodyCtxt,
         infer::{
-            ClauseFuel, ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse, PrettyFmtOpts,
+            ClauseFuel, ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse, ClausePrettyFmtOpts,
             SpannedError,
         },
         syntax::{
@@ -182,7 +182,7 @@ impl BodyCtxt<'_, '_> {
                             target.r(s).span,
                             format_args!(
                                 "expected `dyn Trait`-object, got `{}`",
-                                self.ccx().pretty(PrettyFmtOpts::default()).wrap(inner_ty)
+                                self.ccx().pretty(ClausePrettyFmtOpts::default()).wrap(inner_ty)
                             ),
                         )
                         .emit(),

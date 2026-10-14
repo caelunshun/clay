@@ -10,7 +10,7 @@ use crate::{
     },
     semantic::{
         analysis::typeck::{BodyCtxt, infra::confirm::ThirExprConfirmedWithTy},
-        infer::{ClauseCx, ClauseFuel, HrtbUniverse, PrettyFmtOpts, SpannedError},
+        infer::{ClauseCx, ClauseFuel, ClausePrettyFmtOpts, HrtbUniverse, SpannedError},
         syntax::{
             Divergence, FloatKind, FnInstanceInner, FnOwner, HirExpr, InferTyVarSourceInfo,
             IntKind, LocalNameIdent, Mutability, Re, RelationMode, SimpleTyKind, SimpleTySet,
@@ -132,7 +132,7 @@ impl BodyCtxt<'_, '_> {
                     expr,
                     Diag::anon_err(
                         SpannedError(lhs_expr.r(s).span, err)
-                            .to_debug_tree(&self.ccx().pretty(PrettyFmtOpts::default())),
+                            .to_debug_tree(&self.ccx().pretty(ClausePrettyFmtOpts::default())),
                     )
                     .emit(),
                 );
@@ -154,7 +154,7 @@ impl BodyCtxt<'_, '_> {
                                 expr,
                                 Diag::anon_err(
                                     SpannedError(rhs_expr.r(s).span, *err).to_debug_tree(
-                                        &self.ccx().pretty(PrettyFmtOpts::default()),
+                                        &self.ccx().pretty(ClausePrettyFmtOpts::default()),
                                     ),
                                 )
                                 .emit(),
@@ -172,8 +172,9 @@ impl BodyCtxt<'_, '_> {
                         return self.put_thir_expr_err(
                             expr,
                             Diag::anon_err(
-                                SpannedError(lhs_expr.r(s).span, err)
-                                    .to_debug_tree(&self.ccx().pretty(PrettyFmtOpts::default())),
+                                SpannedError(lhs_expr.r(s).span, err).to_debug_tree(
+                                    &self.ccx().pretty(ClausePrettyFmtOpts::default()),
+                                ),
                             )
                             .emit(),
                         );

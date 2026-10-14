@@ -22,7 +22,7 @@ impl MirLocalIdx {
     pub const RETURN: Self = MirLocalIdx { _raw: 0 };
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct MirLocal {
     pub ty: SigTy,
 }

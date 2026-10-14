@@ -5,7 +5,7 @@ use crate::{
         syntax::Span,
     },
     semantic::{
-        infer::{ClauseCx, PrettyFmtOpts},
+        infer::{ClauseCx, ClausePrettyFmtOpts},
         syntax::{
             AdtInstance, FnInstance, FnInstanceInner, FnOwner, HrtbBinder, HrtbDebruijnDef,
             HrtbDebruijnDefList, HrtbProjection, Re, RelationMode, SigAdtInstance, SigFnInstance,
@@ -364,7 +364,7 @@ impl<'a, 'tcx> SigExporter<'a, 'tcx> {
                 | UniversalTyRootSourceInfo::WfHrtbUniversal { .. } => {
                     unreachable!(
                         "unexpected universal type `{}`",
-                        self.ccx.pretty(PrettyFmtOpts::default()).wrap(universal)
+                        self.ccx.pretty(ClausePrettyFmtOpts::default()).wrap(universal)
                     )
                 }
             },

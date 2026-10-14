@@ -21,19 +21,19 @@ use std::{
 // === PrettyFmtCx === //
 
 impl<'tcx> ClauseCx<'tcx> {
-    pub fn pretty(&self, opts: PrettyFmtOpts) -> PrettyFmtCx<'_, 'tcx> {
-        PrettyFmtCx::new(self, opts)
+    pub fn pretty(&self, opts: ClausePrettyFmtOpts) -> ClausePrettyFmtCx<'_, 'tcx> {
+        ClausePrettyFmtCx::new(self, opts)
     }
 }
 
-pub struct PrettyFmtCx<'a, 'tcx> {
+pub struct ClausePrettyFmtCx<'a, 'tcx> {
     ccx: &'a ClauseCx<'tcx>,
-    opts: PrettyFmtOpts,
+    opts: ClausePrettyFmtOpts,
     fmt_state: RefCell<FmtState>,
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct PrettyFmtOpts {
+pub struct ClausePrettyFmtOpts {
     pub verbose: bool,
 }
 
@@ -42,8 +42,8 @@ struct FmtState {
     hrtb_defs: DebruijnMap<Symbol>,
 }
 
-impl<'a, 'tcx> PrettyFmtCx<'a, 'tcx> {
-    pub fn new(ccx: &'a ClauseCx<'tcx>, opts: PrettyFmtOpts) -> Self {
+impl<'a, 'tcx> ClausePrettyFmtCx<'a, 'tcx> {
+    pub fn new(ccx: &'a ClauseCx<'tcx>, opts: ClausePrettyFmtOpts) -> Self {
         Self {
             ccx,
             opts,
@@ -63,126 +63,140 @@ impl<'a, 'tcx> PrettyFmtCx<'a, 'tcx> {
         self.ccx.session()
     }
 
-    pub fn wrap<T>(&self, value: T) -> PrettyFmt<'_, 'tcx, T> {
-        PrettyFmt { cx: self, value }
+    pub fn wrap<T>(&self, value: T) -> ClausePrettyFmt<'_, 'tcx, T> {
+        ClausePrettyFmt { cx: self, value }
     }
 }
 
 // === PrettyFmt === //
 
-pub struct PrettyFmt<'a, 'tcx, T> {
-    pub cx: &'a PrettyFmtCx<'a, 'tcx>,
+pub struct ClausePrettyFmt<'a, 'tcx, T> {
+    pub cx: &'a ClausePrettyFmtCx<'a, 'tcx>,
     pub value: T,
 }
 
-impl<'a, 'tcx, T: Copy> fmt::Display for PrettyFmt<'a, 'tcx, &'a T>
+impl<'a, 'tcx, T: Copy> fmt::Display for ClausePrettyFmt<'a, 'tcx, &'a T>
 where
-    PrettyFmt<'a, 'tcx, T>: fmt::Display,
+    ClausePrettyFmt<'a, 'tcx, T>: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.cx.wrap(*self.value).fmt(f)
     }
 }
 
-macro_rules! impl_pretty {
-    ($($ty:ty => |$cx:ident, $value:ident, $f:ident| { $($body:tt)*})*) => {$(
-        impl fmt::Display for PrettyFmt<'_, '_, $ty> {
-            fn fmt(&self, #[allow(unused)] $f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                #[allow(unused)]
-                let PrettyFmt { cx: $cx, value: $value } = *self;
-                $($body)*
-            }
-        }
-    )*};
-}
-
-impl_pretty! {
-    TyOrRe => |cx, value, f| {
-        match value {
-            TyOrRe::Re(re) => cx.wrap(re).fmt(f),
-            TyOrRe::Ty(ty) => cx.wrap(ty).fmt(f),
+impl fmt::Display for ClausePrettyFmt<'_, '_, TyOrRe> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.value {
+            TyOrRe::Re(re) => self.cx.wrap(re).fmt(f),
+            TyOrRe::Ty(ty) => self.cx.wrap(ty).fmt(f),
         }
     }
-    Re => |cx, value, f| {
+}
+
+impl fmt::Display for ClausePrettyFmt<'_, '_, Re> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO
-        match value {
+        match self.value {
             Re::Gc => f.write_str("'gc"),
-            Re::HrtbVar(debruijn) => write!(f, "'{}", cx.wrap(debruijn)),
-            Re::InferVar(infer) => if infer != InferReVar::ERASED {
-                write!(f, "'?{}", infer.index())
-            } else {
-                write!(f, "'erased")
-            },
-            Re::UniversalVar(re) => cx.wrap(re).fmt(f),
+            Re::HrtbVar(debruijn) => write!(f, "'{}", self.cx.wrap(debruijn)),
+            Re::InferVar(infer) => {
+                if infer != InferReVar::ERASED {
+                    write!(f, "'?{}", infer.index())
+                } else {
+                    write!(f, "'erased")
+                }
+            }
+            Re::UniversalVar(re) => self.cx.wrap(re).fmt(f),
             Re::Error(_) => f.write_str("'error"),
         }
     }
-    UniversalReVar => |cx, value, f| {
-        let s = cx.session();
+}
 
-        match cx.ccx().lookup_universal_re_src_info(value) {
+impl fmt::Display for ClausePrettyFmt<'_, '_, UniversalReVar> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self.cx.session();
+
+        match self.cx.ccx().lookup_universal_re_src_info(self.value) {
             UniversalReVarSourceInfo::Root(re) => {
                 write!(f, "'{}", re.r(s).lifetime.name)
-            },
+            }
             // TODO
-            | UniversalReVarSourceInfo::ElaboratedLub
+            UniversalReVarSourceInfo::ElaboratedLub
             | UniversalReVarSourceInfo::InstantiatedHrtbVar
             | UniversalReVarSourceInfo::HrtbWf { .. }
             | UniversalReVarSourceInfo::MirLocal(..) => {
-                write!(f, "'u{:?}", value)
+                write!(f, "'u{}", self.value.index())
             }
         }
     }
-    Ty => |cx, value, f| {
-        let s = cx.session();
+}
 
-        match *value.r(s) {
-            TyKind::Simple(kind) => cx.wrap(kind).fmt(f),
+impl fmt::Display for ClausePrettyFmt<'_, '_, Ty> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self.cx.session();
+
+        match *self.value.r(s) {
+            TyKind::Simple(kind) => self.cx.wrap(kind).fmt(f),
             TyKind::Reference(lt, muta, pointee) => {
-                write!(f, "&{} {}{}", cx.wrap(lt), muta.opt_space_qual(), cx.wrap(pointee))
-            },
-            TyKind::Adt(instance) => cx.wrap(instance).fmt(f),
+                write!(
+                    f,
+                    "&{} {}{}",
+                    self.cx.wrap(lt),
+                    muta.opt_space_qual(),
+                    self.cx.wrap(pointee)
+                )
+            }
+            TyKind::Adt(instance) => self.cx.wrap(instance).fmt(f),
             TyKind::Trait(lt, muta, clauses) => {
-                write!(f, "&{} {}dyn {}", cx.wrap(lt), muta.opt_space_qual(), cx.wrap(clauses))
-            },
+                write!(
+                    f,
+                    "&{} {}dyn {}",
+                    self.cx.wrap(lt),
+                    muta.opt_space_qual(),
+                    self.cx.wrap(clauses)
+                )
+            }
             TyKind::Tuple(types) => {
                 if let [unique] = types.r(s) {
-                    write!(f, "({},)", cx.wrap(unique))
+                    write!(f, "({},)", self.cx.wrap(unique))
                 } else {
                     write!(
                         f,
                         "({})",
                         format_list(
-                            types.r(s).iter().map(|value| cx.wrap(value)),
+                            types.r(s).iter().map(|value| self.cx.wrap(value)),
                             SimpleListFormatGlue::COMMA_LIST,
                         ),
                     )
                 }
-            },
-            TyKind::FnDef(def) => cx.wrap(def).fmt(f),
-            TyKind::HrtbVar(var) => cx.wrap(var).fmt(f),
-            TyKind::HrtbProjection(HrtbProjection { target, spec, assoc_idx }) => {
+            }
+            TyKind::FnDef(def) => self.cx.wrap(def).fmt(f),
+            TyKind::HrtbVar(var) => self.cx.wrap(var).fmt(f),
+            TyKind::HrtbProjection(HrtbProjection {
+                target,
+                spec,
+                assoc_idx,
+            }) => {
                 write!(
                     f,
                     "<{} as {}>::{}",
-                    cx.wrap(target),
-                    cx.wrap(spec),
-                    spec.def
-                        .r(s)
-                        .generics
-                        .r(s)
-                        .defs[assoc_idx as usize]
+                    self.cx.wrap(target),
+                    self.cx.wrap(spec),
+                    spec.def.r(s).generics.r(s).defs[assoc_idx as usize]
                         .ident(s)
                         .text(),
                 )
-            },
-            TyKind::InferVar(var) => cx.wrap(var).fmt(f),
-            TyKind::Universal(var) => cx.wrap(var).fmt(f),
+            }
+            TyKind::InferVar(var) => self.cx.wrap(var).fmt(f),
+            TyKind::Universal(var) => self.cx.wrap(var).fmt(f),
             TyKind::Error(_) => f.write_str("<error>"),
         }
     }
-    SimpleTyKind => |cx, value, f| {
-        f.write_str(match value {
+}
+
+impl fmt::Display for ClausePrettyFmt<'_, '_, SimpleTyKind> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self.value {
             SimpleTyKind::Never => "Never",
             SimpleTyKind::Bool => "bool",
             SimpleTyKind::Char => "char",
@@ -199,62 +213,75 @@ impl_pretty! {
             SimpleTyKind::Str => "str",
         })
     }
-    AdtInstance => |cx, value, f| {
-        let s = cx.session();
-        let AdtInstance { def, params } = value;
+}
 
-        f.write_str(&fmt_simple_ctor(cx, def.r(s).item, params))
+impl fmt::Display for ClausePrettyFmt<'_, '_, AdtInstance> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self.cx.session();
+        let AdtInstance { def, params } = self.value;
+        f.write_str(&fmt_simple_ctor(self.cx, def.r(s).item, params))
     }
-    TraitClauseList => |cx, value, f| {
-        let s = cx.session();
+}
 
+impl fmt::Display for ClausePrettyFmt<'_, '_, TraitClauseList> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self.cx.session();
         format_list_into(
             f,
-            value.r(s).iter().map(|clause| cx.wrap(clause)),
+            self.value.r(s).iter().map(|clause| self.cx.wrap(clause)),
             SimpleListFormatGlue::PLUS_LIST,
         )
     }
-    TraitClause => |cx, value, f| {
-        match value {
+}
+impl fmt::Display for ClausePrettyFmt<'_, '_, TraitClause> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.value {
             TraitClause::Outlives(dir, other) => {
-                write!(f, "{} {}", dir.kw(), cx.wrap(other))
-            },
-            TraitClause::Trait(binder) => cx.wrap(binder).fmt(f),
+                write!(f, "{} {}", dir.kw(), self.cx.wrap(other))
+            }
+            TraitClause::Trait(binder) => self.cx.wrap(binder).fmt(f),
         }
     }
-    HrtbBinder => |cx, value, f| {
-        let s = cx.session();
-        let HrtbBinder { defs, inner } = value;
+}
+
+impl fmt::Display for ClausePrettyFmt<'_, '_, HrtbBinder> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self.cx.session();
+        let HrtbBinder { defs, inner } = self.value;
 
         if !defs.r(s).is_empty() {
             f.write_str("for<")?;
-
             format_list_into(
                 f,
-                defs.r(s).iter().map(|def| cx.wrap(def)),
+                defs.r(s).iter().map(|def| self.cx.wrap(def)),
                 SimpleListFormatGlue::COMMA_LIST,
             )?;
-
             f.write_str("> ")?;
         }
 
-        let count = cx.fmt_state
+        let count = self
+            .cx
+            .fmt_state
             .borrow_mut()
             .hrtb_defs
             .push(defs.r(s).iter().map(|v| v.name));
 
-        cx.wrap(inner).fmt(f)?;
-
-        cx.fmt_state
-            .borrow_mut()
-            .hrtb_defs
-            .pop(count);
+        self.cx.wrap(inner).fmt(f)?;
+        self.cx.fmt_state.borrow_mut().hrtb_defs.pop(count);
 
         Ok(())
     }
-    HrtbDebruijnDef => |cx, value, f| {
-        let s = cx.session();
-        let HrtbDebruijnDef { span: _, name, kind: _, clauses } = value;
+}
+
+impl fmt::Display for ClausePrettyFmt<'_, '_, HrtbDebruijnDef> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self.cx.session();
+        let HrtbDebruijnDef {
+            span: _,
+            name,
+            kind: _,
+            clauses,
+        } = self.value;
 
         f.write_str(name.as_str(s))?;
 
@@ -262,24 +289,34 @@ impl_pretty! {
             return Ok(());
         }
 
-        write!(f, ": {}", cx.wrap(clauses))?;
-
+        write!(f, ": {}", self.cx.wrap(clauses))?;
         Ok(())
     }
-    HrtbDebruijn => |cx, value, f| {
-        match cx.fmt_state.borrow().hrtb_defs.try_lookup(value.0) {
+}
+
+impl fmt::Display for ClausePrettyFmt<'_, '_, HrtbDebruijn> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self
+            .cx
+            .fmt_state
+            .borrow()
+            .hrtb_defs
+            .try_lookup(self.value.0)
+        {
             Some(name) => name.fmt(f),
-            None => write!(f, "debruijn({})", value.0.idx()),
+            None => write!(f, "debruijn({})", self.value.0.idx()),
         }
     }
-    TraitSpec => |cx, value, f| {
-        let s = cx.session();
-        let TraitSpec { def, params } = value;
+}
 
-        cx.wrap(def.r(s).item).fmt(f)?;
-
+impl fmt::Display for ClausePrettyFmt<'_, '_, TraitSpec> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self.cx.session();
+        let TraitSpec { def, params } = self.value;
+        self.cx.wrap(def.r(s).item).fmt(f)?;
         let generics = format_list(
-            params.r(s)
+            params
+                .r(s)
                 .iter()
                 .enumerate()
                 .filter_map(|(def_idx, para)| {
@@ -287,62 +324,66 @@ impl_pretty! {
                         let TraitParam::Equals(para) = *para else {
                             unreachable!()
                         };
-
-                        return Some(cx.wrap(para).to_string());
+                        return Some(self.cx.wrap(para).to_string());
                     }
-
                     let name = def.r(s).generics.r(s).defs[def_idx].ident(s).text();
-
                     match para {
-                        TraitParam::Equals(para) => Some(format!("{name} = {}", cx.wrap(para))),
+                        TraitParam::Equals(para) => {
+                            Some(format!("{name} = {}", self.cx.wrap(para)))
+                        }
                         TraitParam::Unspecified(clauses) => {
                             if !clauses.r(s).is_empty() {
-                                Some(format!("{name}: {}", cx.wrap(clauses)))
+                                Some(format!("{name}: {}", self.cx.wrap(clauses)))
                             } else {
                                 None
                             }
-                        },
+                        }
                     }
                 }),
             SimpleListFormatGlue::COMMA_LIST,
         );
-
         if !generics.is_empty() {
             write!(f, "<{generics}>")?;
         }
-
         Ok(())
     }
-    Obj<Item> => |cx, value, f| {
-        let s = cx.session();
-        f.write_str(value.r(s).path.as_str(s))
-    }
-    Obj<AdtCtor> => |cx, value, f| {
-        let s = cx.session();
+}
 
-        f.write_str(&value.r(s).owner.bare_identified_what(s))
+impl fmt::Display for ClausePrettyFmt<'_, '_, Obj<Item>> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self.cx.session();
+        f.write_str(self.value.r(s).path.as_str(s))
     }
-    InferTyVar => |cx, value, f| {
-        let s = cx.session();
+}
 
-        match cx.ccx.lookup_ty_infer_var_without_poll(value) {
-            Ok(resolved) => cx.wrap(resolved).fmt(f),
+impl fmt::Display for ClausePrettyFmt<'_, '_, Obj<AdtCtor>> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self.cx.session();
+        f.write_str(&self.value.r(s).owner.bare_identified_what(s))
+    }
+}
+
+impl fmt::Display for ClausePrettyFmt<'_, '_, InferTyVar> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self.cx.session();
+        match self.cx.ccx().lookup_ty_infer_var_without_poll(self.value) {
+            Ok(resolved) => self.cx.wrap(resolved).fmt(f),
             Err(root) => {
-                if cx.opts.verbose {
+                if self.cx.opts.verbose {
                     write!(f, "?({:?}) ", root.root)?;
                 }
-
-                match cx.ccx.lookup_infer_ty_src_info(root.root) {
+                match self.cx.ccx().lookup_infer_ty_src_info(root.root) {
                     InferTyVarSourceInfo::Projection { self_ty, spec, idx } => {
                         write!(
                             f,
                             "<{} as {}>::{}",
-                            cx.wrap(self_ty),
-                            cx.wrap(spec),
-                            spec.def.r(s).generics.r(s).defs[idx as usize].ident(s).text(),
+                            self.cx.wrap(self_ty),
+                            self.cx.wrap(spec),
+                            spec.def.r(s).generics.r(s).defs[idx as usize]
+                                .ident(s)
+                                .text(),
                         )?;
-                    },
-
+                    }
                     InferTyVarSourceInfo::LateAssocElabPlaceholder
                     | InferTyVarSourceInfo::HrtbLhsInstantiation { .. }
                     | InferTyVarSourceInfo::DirectlyImported { .. }
@@ -368,127 +409,150 @@ impl_pretty! {
                         write!(f, "_")?;
                     }
                 }
-
                 Ok(())
-            },
+            }
         }
     }
-    SimpleTySet => |cx, value, f| {
-        format_list_into(f, value.names(), SimpleListFormatGlue::PIPE_LIST)
-    }
-    UniversalTy => |cx, value, f| {
-        match value {
-            UniversalTy::Root(var) => cx.wrap(var).fmt(f),
-            UniversalTy::Projection(projection) => cx.wrap(projection).fmt(f),
-        }
-    }
-    UniversalTyRoot => |cx, value, f| {
-        let s = cx.session();
+}
 
-        if cx.opts.verbose {
-            write!(f, "u({}) ", value.index())?;
-        }
+impl fmt::Display for ClausePrettyFmt<'_, '_, SimpleTySet> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        format_list_into(f, self.value.names(), SimpleListFormatGlue::PIPE_LIST)
+    }
+}
 
-        match cx.ccx().lookup_universal_ty_root_src_info(value) {
+impl fmt::Display for ClausePrettyFmt<'_, '_, UniversalTy> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.value {
+            UniversalTy::Root(var) => self.cx.wrap(var).fmt(f),
+            UniversalTy::Projection(projection) => self.cx.wrap(projection).fmt(f),
+        }
+    }
+}
+
+impl fmt::Display for ClausePrettyFmt<'_, '_, UniversalTyRoot> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self.cx.session();
+        if self.cx.opts.verbose {
+            write!(f, "u({}) ", self.value.index())?;
+        }
+        match self.cx.ccx().lookup_universal_ty_root_src_info(self.value) {
             UniversalTyRootSourceInfo::Root(generic) => write!(f, "{}", generic.r(s).ident.text),
             UniversalTyRootSourceInfo::UsedDyn { span, site } => write!(
                 f,
                 "existential #{site:?} (dyn {clauses} from {span})",
-                clauses = cx.wrap(
-                    cx.ccx()
-                        .direct_ty_universal_clauses_possibly_floating(UniversalTy::Root(value)),
-                ),
+                clauses =
+                    self.cx
+                        .wrap(self.cx.ccx().direct_ty_universal_clauses_possibly_floating(
+                            UniversalTy::Root(self.value)
+                        ),),
             ),
             UniversalTyRootSourceInfo::InstantiatedHrtb(name) => write!(f, "{name}"),
             UniversalTyRootSourceInfo::WfTraitSelf => write!(f, "Self"),
             UniversalTyRootSourceInfo::WfReflexive { clauses: _ } => {
                 write!(f, "[clause WF helper]")
-            },
+            }
             UniversalTyRootSourceInfo::WfHrtbUniversal { binder, idx } => {
                 write!(f, "{}", binder.defs.r(s)[idx as usize].name)
-            },
+            }
         }
     }
-    UniversalTyProj => |cx, value, f| {
-        let s = cx.session();
+}
 
+impl fmt::Display for ClausePrettyFmt<'_, '_, UniversalTyProj> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self.cx.session();
         let UniversalTyProjInner {
             target,
             as_spec,
             assoc_idx,
             cache_idx,
-        } = *value.r(s);
-
-        if cx.opts.verbose {
+        } = *self.value.r(s);
+        if self.cx.opts.verbose {
             write!(f, "u({cache_idx:?}) ")?;
         }
-
         write!(
             f,
             "<{} as {}>::{}",
-            cx.wrap(target),
-            cx.wrap(as_spec),
-            as_spec.def.r(s).generics.r(s).defs[assoc_idx as usize].ident(s).text(),
+            self.cx.wrap(target),
+            self.cx.wrap(as_spec),
+            as_spec.def.r(s).generics.r(s).defs[assoc_idx as usize]
+                .ident(s)
+                .text(),
         )
     }
-    FnInstance => |cx, value, f| {
-        let s = cx.session();
+}
 
+impl fmt::Display for ClausePrettyFmt<'_, '_, FnInstance> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self.cx.session();
         f.write_str("fn @ ")?;
-
-        match value.r(s).owner {
+        match self.value.r(s).owner {
             FnOwner::Item(def) => {
-                write!(f, "{}", cx.wrap(def.r(s).item))?;
-            },
-            FnOwner::Trait { instance, self_ty, method_idx } => {
+                write!(f, "{}", self.cx.wrap(def.r(s).item))?;
+            }
+            FnOwner::Trait {
+                instance,
+                self_ty,
+                method_idx,
+            } => {
                 write!(
                     f,
                     "<{} as {}>::{}",
-                    cx.wrap(self_ty),
-                    cx.wrap(instance),
-                    instance.def.r(s).methods[method_idx as usize].r(s).name.text,
+                    self.cx.wrap(self_ty),
+                    self.cx.wrap(instance),
+                    instance.def.r(s).methods[method_idx as usize]
+                        .r(s)
+                        .name
+                        .text,
                 )?;
-            },
-            FnOwner::Inherent { self_ty, block, method_idx } => {
+            }
+            FnOwner::Inherent {
+                self_ty,
+                block,
+                method_idx,
+            } => {
                 write!(
                     f,
                     "<{}>::{}",
-                    cx.wrap(self_ty),
-                    block.r(s).methods[method_idx as usize].unwrap().r(s).name.text,
+                    self.cx.wrap(self_ty),
+                    block.r(s).methods[method_idx as usize]
+                        .unwrap()
+                        .r(s)
+                        .name
+                        .text,
                 )?;
-            },
-            FnOwner::AdtCtor(ctor) => {
-                match ctor.r(s).owner {
-                    AdtCtorOwner::Struct(def) => {
-                        write!(f, "{}", cx.wrap(def.r(s).adt.r(s).item))?;
-                    },
-                    AdtCtorOwner::EnumVariant(def) => {
-                        write!(
-                            f,
-                            "{}::{}",
-                            cx.wrap(def.r(s).owner.r(s).adt.r(s).item),
-                            def.r(s).ident.text,
-                        )?;
-                    },
+            }
+            FnOwner::AdtCtor(ctor) => match ctor.r(s).owner {
+                AdtCtorOwner::Struct(def) => {
+                    write!(f, "{}", self.cx.wrap(def.r(s).adt.r(s).item))?;
+                }
+                AdtCtorOwner::EnumVariant(def) => {
+                    write!(
+                        f,
+                        "{}::{}",
+                        self.cx.wrap(def.r(s).owner.r(s).adt.r(s).item),
+                        def.r(s).ident.text,
+                    )?;
                 }
             },
         }
-
-        if let Some(early) = value.r(s).early_args && !early.r(s).is_empty() {
+        if let Some(early) = self.value.r(s).early_args
+            && !early.r(s).is_empty()
+        {
             f.write_char('<')?;
             format_list_into(
                 f,
-                early.r(s).iter().map(|def| cx.wrap(def)),
+                early.r(s).iter().map(|def| self.cx.wrap(def)),
                 SimpleListFormatGlue::COMMA_LIST,
             )?;
             f.write_char('>')?;
         }
-
         Ok(())
     }
 }
 
-fn fmt_simple_ctor(cx: &PrettyFmtCx, def: Obj<Item>, args: TyOrReList) -> String {
+fn fmt_simple_ctor(cx: &ClausePrettyFmtCx, def: Obj<Item>, args: TyOrReList) -> String {
     let s = cx.session();
 
     if args.r(s).is_empty() {

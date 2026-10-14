@@ -7,9 +7,9 @@ use crate::{
             scope::MirBuilderScopeIdx,
         },
         syntax::{
-            MirBinOpKind, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue, MirStmt,
-            MirStmtKind, MirStmtSourceInfo, ResolvedFieldIdx, SigTy, ThirBlock, ThirBlockTrailing,
-            ThirExpr, ThirExprKind, ThirStmt,
+            MirBinOpKind, MirLocal, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue,
+            MirStmt, MirStmtKind, MirStmtSourceInfo, ResolvedFieldIdx, SigTy, ThirBlock,
+            ThirBlockTrailing, ThirExpr, ThirExprKind, ThirStmt,
         },
     },
 };
@@ -483,7 +483,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         let tcx = self.tcx();
 
         *place.get_or_insert_with(|| MirPlace {
-            local: self.builder.push_local(scope, ty),
+            local: self.builder.push_local(scope, MirLocal { ty }),
             projections: tcx.intern_list(&[]),
         })
     }
