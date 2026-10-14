@@ -1,19 +1,19 @@
 use crate::{
-    base::Session,
-    semantic::syntax::{AdtCtorOwner, MirPlace, MirPlaceElem, ResolvedFieldIdx},
+    base::{Session, arena::HasListInterner},
+    semantic::syntax::{AdtCtorOwner, MirPlace, MirPlaceElem, ResolvedFieldIdx, TyCtxt},
 };
 use clay_core::FastHashMap;
 use index_vec::{IndexSlice, IndexVec, define_index_type};
 use std::ops::Range;
 
 #[derive(Debug, Clone)]
-pub struct PlaceIdMap {
+pub struct PlaceNumbering {
     pub place_to_range: FastHashMap<MirPlace, Range<u32>>,
     pub bit_to_place: Vec<MirPlace>,
 }
 
 #[derive(Clone)]
-pub struct PlaceIdMapBuilder {
+pub struct PlaceNumberingBuilder {
     nodes: IndexVec<TrieNodeIdx, TrieNode>,
     local_count: usize,
 }
@@ -29,7 +29,7 @@ struct TrieNode {
     mention: Option<MirPlace>,
 }
 
-impl PlaceIdMapBuilder {
+impl PlaceNumberingBuilder {
     pub fn new(local_count: usize) -> Self {
         Self {
             nodes: (0..local_count)
@@ -82,9 +82,6 @@ impl PlaceIdMapBuilder {
 
         for &part in place.projections.r(s) {
             match part {
-                MirPlaceElem::DerefPtr => {
-                    return;
-                }
                 MirPlaceElem::Field(ResolvedFieldIdx::Adt(adt, field_idx)) => {
                     match adt.r(s).owner {
                         AdtCtorOwner::Struct(_) => {
@@ -107,6 +104,9 @@ impl PlaceIdMapBuilder {
                 }) => {
                     curr = self.ensure_child(curr, field_idx as usize, max_elems as usize);
                 }
+                MirPlaceElem::DerefPtr => {
+                    unreachable!("direct places cannot contain {part:?}");
+                }
             }
         }
 
@@ -115,7 +115,7 @@ impl PlaceIdMapBuilder {
         *mention = Some(place);
     }
 
-    pub fn finish(&self) -> PlaceIdMap {
+    pub fn finish(&self) -> PlaceNumbering {
         // Reserves bits for all child places of the specified `node`, returning `true` if the
         // node's liveness can be determined by looking at its allocated bit range.
         //
@@ -137,7 +137,7 @@ impl PlaceIdMapBuilder {
         //   sub-components
         //
         fn populate(
-            mapping: &mut PlaceIdMap,
+            mapping: &mut PlaceNumbering,
             nodes: &IndexSlice<TrieNodeIdx, [TrieNode]>,
             node: TrieNodeIdx,
         ) -> bool {
@@ -184,7 +184,7 @@ impl PlaceIdMapBuilder {
             structural_liveness
         }
 
-        let mut mapping = PlaceIdMap {
+        let mut mapping = PlaceNumbering {
             place_to_range: FastHashMap::default(),
             bit_to_place: Vec::new(),
         };
@@ -194,5 +194,25 @@ impl PlaceIdMapBuilder {
         }
 
         mapping
+    }
+}
+
+pub fn truncate_place_to_direct(tcx: &TyCtxt, place: MirPlace) -> MirPlace {
+    let s = &tcx.session;
+
+    MirPlace {
+        local: place.local,
+        projections: tcx.intern_list(
+            &place
+                .projections
+                .r(s)
+                .iter()
+                .copied()
+                .take_while(|v| match v {
+                    MirPlaceElem::DerefPtr => false,
+                    MirPlaceElem::Field(_) => true,
+                })
+                .collect::<Vec<_>>(),
+        ),
     }
 }

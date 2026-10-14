@@ -3,7 +3,7 @@ use crate::{
     semantic::{
         analysis::borrowck::build::{driver::MirFromThirCtx, scope::MirBuilderScopeIdx},
         syntax::{
-            MirAssignRvalue, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirStmt, MirStmtKind,
+            MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue, MirStmt, MirStmtKind,
             MirStmtSourceInfo, Mutability, ResolvedFieldIdx, SigRe, SigReKind, SigTyInner,
             SigTyKind, ThirExpr, ThirLetStmt, ThirLocal, ThirMatchArm, ThirPat, ThirPatKind,
         },
@@ -308,7 +308,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     kind: match by_ref {
                         Some(muta) => MirStmtKind::Assign(Box::new((
                             MirPlace::new(tcx, mir_local, []),
-                            MirAssignRvalue::Ref(muta, scrutinee),
+                            MirRvalue::Ref(muta, scrutinee),
                         ))),
                         None => {
                             let late_use_proxy =
@@ -349,7 +349,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
                             MirStmtKind::Assign(Box::new((
                                 late_use_proxy.ref_place,
-                                MirAssignRvalue::Ref(Mutability::Not, scrutinee),
+                                MirRvalue::Ref(Mutability::Not, scrutinee),
                             )))
                         }
                     },
@@ -483,11 +483,11 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
         for (dest, proxy) in map {
             let rvalue = match proxy.can_move_from {
-                Some(can_move_from) => MirAssignRvalue::MoveOutRef {
+                Some(can_move_from) => MirRvalue::MoveOutRef {
                     can_move_from,
                     ref_place: proxy.ref_place,
                 },
-                None => MirAssignRvalue::Use(MirOperand::Copy(
+                None => MirRvalue::Use(MirOperand::Copy(
                     proxy.ref_place.extend(tcx, [MirPlaceElem::DerefPtr]),
                 )),
             };

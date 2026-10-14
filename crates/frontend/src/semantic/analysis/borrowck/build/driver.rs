@@ -6,7 +6,7 @@ use crate::{
             sigck::CrateSigckVisitor,
         },
         syntax::{
-            FnDef, MirAssignRvalue, MirLocalIdx, MirPlace, ThirBody, ThirExpr, ThirLocal, TyCtxt,
+            FnDef, MirRvalue, MirLocalIdx, MirPlace, ThirBody, ThirExpr, ThirLocal, TyCtxt,
         },
     },
 };
@@ -32,7 +32,7 @@ pub struct MirFromThirCtx<'tcx> {
 
 #[derive(Debug, Clone)]
 pub enum MirRvalueOrPlace {
-    Rvalue(MirAssignRvalue),
+    Rvalue(MirRvalue),
     Place(MirPlace),
 }
 

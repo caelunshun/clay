@@ -10,7 +10,7 @@ use crate::{
 use index_vec::{IndexVec, define_index_type};
 use slotmap::{SlotMap, new_key_type};
 use smallvec::SmallVec;
-use std::mem;
+use std::{convert::Infallible, mem, ops::ControlFlow};
 
 // === MirBody === //
 
@@ -45,6 +45,102 @@ impl Default for MirBody {
         body.entry = body.cfg.create_block();
 
         body
+    }
+}
+
+impl MirBody {
+    pub fn blocks<'a>(&'a self) -> impl ExactSizeIterator<Item = MirBlockRef<'a>> {
+        self.cfg.blocks().map(move |id| MirBlockRef::new(self, id))
+    }
+
+    pub fn entry(&self) -> MirBlockRef<'_> {
+        MirBlockRef::new(self, self.entry)
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct MirBlockRef<'g> {
+    pub body: &'g MirBody,
+    pub block: MirBlockIdx,
+}
+
+impl<'g> MirBlockRef<'g> {
+    pub fn new(body: &'g MirBody, block: MirBlockIdx) -> Self {
+        Self { body, block }
+    }
+
+    pub fn stmts(self, direction: MirBodyDirection) -> impl Iterator<Item = MirStmtRef<'g>> {
+        self.body
+            .cfg
+            .block_stmts(self.block, direction)
+            .map(move |stmt| MirStmtRef::new(self.body, stmt))
+    }
+
+    pub fn first_stmt(self) -> Option<MirStmtRef<'g>> {
+        self.body
+            .cfg
+            .block_first(self.block)
+            .map(|stmt| MirStmtRef::new(self.body, stmt))
+    }
+
+    pub fn last_stmt(self) -> Option<MirStmtRef<'g>> {
+        self.body
+            .cfg
+            .block_last(self.block)
+            .map(|stmt| MirStmtRef::new(self.body, stmt))
+    }
+
+    pub fn terminator(self) -> &'g MirTerminator {
+        self.body.cfg.terminator(self.block)
+    }
+
+    pub fn predecessors(self) -> &'g [MirBlockLink] {
+        self.body.cfg.block_predecessors(self.block)
+    }
+
+    pub fn successors(self) -> &'g [MirBlockLink] {
+        self.body.cfg.block_successors(self.block)
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct MirStmtRef<'g> {
+    pub body: &'g MirBody,
+    pub stmt: MirStmtIdx,
+}
+
+impl<'g> MirStmtRef<'g> {
+    pub fn new(body: &'g MirBody, stmt: MirStmtIdx) -> Self {
+        Self { body, stmt }
+    }
+
+    pub fn block(self) -> Option<MirBlockRef<'g>> {
+        self.body
+            .cfg
+            .stmt_block(self.stmt)
+            .map(|block| MirBlockRef::new(self.body, block))
+    }
+
+    pub fn prev(self) -> Option<MirStmtRef<'g>> {
+        self.body
+            .cfg
+            .stmt_prev(self.stmt)
+            .map(|stmt| MirStmtRef::new(self.body, stmt))
+    }
+
+    pub fn next(self) -> Option<MirStmtRef<'g>> {
+        self.body
+            .cfg
+            .stmt_next(self.stmt)
+            .map(|stmt| MirStmtRef::new(self.body, stmt))
+    }
+
+    pub fn stmt(self) -> &'g MirStmt {
+        self.body.cfg.stmt(self.stmt)
+    }
+
+    pub fn kind(self) -> &'g MirStmtKind {
+        &self.stmt().kind
     }
 }
 
@@ -457,8 +553,8 @@ pub enum MirStmtSourceInfo {
 pub enum MirStmtKind {
     StorageLive(MirLocalIdx),
     StorageDead(MirLocalIdx),
-    Assign(Box<(MirPlace, MirAssignRvalue)>),
-    DiscardWithoutDrop(MirAssignRvalue),
+    Assign(Box<(MirLvalue, MirRvalue)>),
+    DiscardWithoutDrop(MirRvalue),
 }
 
 #[derive(Debug, Clone)]
@@ -472,20 +568,14 @@ pub enum MirTerminator {
     Call {
         callee: MirOperand,
         args: Box<[MirOperand]>,
-        destination: MirPlace,
+        destination: MirLvalue,
         target: MirBlockIdx,
         unwind: MirUnwindBehavior,
     },
     EnsureDropped {
-        place: MirPlace,
+        place: MirOperand,
         target: MirBlockIdx,
         unwind: MirUnwindBehavior,
-    },
-    CallDrop {
-        place: MirPlace,
-        target: MirBlockIdx,
-        unwind: MirUnwindBehavior,
-        drop_flag: Option<MirPlace>,
     },
     Unreachable,
     Return,
@@ -507,12 +597,6 @@ impl MirTerminator {
                 place: _,
                 target,
                 unwind,
-            } => SmallVec::from_iter([target].into_iter().chain(unwind.block())),
-            MirTerminator::CallDrop {
-                place: _,
-                target,
-                unwind,
-                drop_flag: _,
             } => SmallVec::from_iter([target].into_iter().chain(unwind.block())),
             MirTerminator::SwitchInt {
                 discr: _,
@@ -542,51 +626,10 @@ impl MirUnwindBehavior {
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct MirPlace {
-    pub local: MirLocalIdx,
-    pub projections: MirPlaceElemList,
-}
-
-impl MirPlace {
-    pub fn new(
-        tcx: &TyCtxt,
-        local: MirLocalIdx,
-        projections: impl IntoIterator<Item = MirPlaceElem>,
-    ) -> Self {
-        Self {
-            local,
-            projections: tcx.intern_list(&projections.into_iter().collect::<Vec<_>>()),
-        }
-    }
-
-    pub fn extend(self, tcx: &TyCtxt, proj: impl IntoIterator<Item = MirPlaceElem>) -> Self {
-        let s = &tcx.session;
-
-        Self {
-            local: self.local,
-            projections: tcx.intern_list(
-                &self
-                    .projections
-                    .r(s)
-                    .iter()
-                    .copied()
-                    .chain(proj)
-                    .collect::<Vec<_>>(),
-            ),
-        }
-    }
-}
-
-pub type MirPlaceElemList = Intern<[MirPlaceElem]>;
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum MirPlaceElem {
-    DerefPtr,
-    Field(ResolvedFieldIdx),
-}
+pub struct MirLvalue(pub MirPlace);
 
 #[derive(Debug, Clone)]
-pub enum MirAssignRvalue {
+pub enum MirRvalue {
     UnreachablePlaceholder,
     Tuple(Box<[MirOperand]>),
     Adt(Obj<AdtCtor>, Box<[MirOperand]>),
@@ -636,6 +679,50 @@ impl MirOperand {
 
         place
     }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct MirPlace {
+    pub local: MirLocalIdx,
+    pub projections: MirPlaceElemList,
+}
+
+impl MirPlace {
+    pub fn new(
+        tcx: &TyCtxt,
+        local: MirLocalIdx,
+        projections: impl IntoIterator<Item = MirPlaceElem>,
+    ) -> Self {
+        Self {
+            local,
+            projections: tcx.intern_list(&projections.into_iter().collect::<Vec<_>>()),
+        }
+    }
+
+    pub fn extend(self, tcx: &TyCtxt, proj: impl IntoIterator<Item = MirPlaceElem>) -> Self {
+        let s = &tcx.session;
+
+        Self {
+            local: self.local,
+            projections: tcx.intern_list(
+                &self
+                    .projections
+                    .r(s)
+                    .iter()
+                    .copied()
+                    .chain(proj)
+                    .collect::<Vec<_>>(),
+            ),
+        }
+    }
+}
+
+pub type MirPlaceElemList = Intern<[MirPlaceElem]>;
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirPlaceElem {
+    DerefPtr,
+    Field(ResolvedFieldIdx),
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -730,5 +817,293 @@ impl MirLogicalBinOpKind {
             MirLogicalBinOpKind::And => false,
             MirLogicalBinOpKind::Or => true,
         }
+    }
+}
+
+// === Visitor === //
+
+pub trait MirVisitable: Sized {
+    fn visit_raw<V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + MirVisitor;
+
+    fn walk_raw<V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + MirVisitor;
+}
+
+pub trait MirVisitor {
+    type Break;
+
+    fn visit_body(&mut self, body: &MirBody) -> ControlFlow<Self::Break> {
+        self.walk_fallible(body)
+    }
+
+    fn visit_block(&mut self, block: MirBlockRef<'_>) -> ControlFlow<Self::Break> {
+        self.walk_fallible(block)
+    }
+
+    fn visit_stmt(&mut self, stmt: MirStmtRef<'_>) -> ControlFlow<Self::Break> {
+        self.walk_fallible(stmt)
+    }
+
+    fn visit_terminator(&mut self, terminator: &MirTerminator) -> ControlFlow<Self::Break> {
+        self.walk_fallible(terminator)
+    }
+
+    fn visit_lvalue(&mut self, place: MirLvalue) -> ControlFlow<Self::Break> {
+        self.walk_fallible(place)
+    }
+
+    fn visit_rvalue(&mut self, rvalue: &MirRvalue) -> ControlFlow<Self::Break> {
+        self.walk_fallible(rvalue)
+    }
+
+    fn visit_operand(&mut self, operand: MirOperand) -> ControlFlow<Self::Break> {
+        self.walk_fallible(operand)
+    }
+
+    fn visit_place(&mut self, place: MirPlace) -> ControlFlow<Self::Break> {
+        self.walk_fallible(place)
+    }
+}
+
+pub trait MirVisitorExt: MirVisitor {
+    fn visit_fallible<T: MirVisitable>(&mut self, value: T) -> ControlFlow<Self::Break> {
+        T::visit_raw(value, self)
+    }
+
+    fn walk_fallible<T: MirVisitable>(&mut self, value: T) -> ControlFlow<Self::Break> {
+        T::walk_raw(value, self)
+    }
+}
+
+impl<T: ?Sized + MirVisitor> MirVisitorExt for T {}
+
+pub trait MirVisitorInfallibleExt: MirVisitor<Break = Infallible> {
+    fn visit<T: MirVisitable>(&mut self, value: T) {
+        ControlFlow::Continue(()) = self.visit_fallible(value)
+    }
+
+    fn walk<T: MirVisitable>(&mut self, value: T) {
+        ControlFlow::Continue(()) = self.walk_fallible(value)
+    }
+}
+
+impl<T: ?Sized + MirVisitor<Break = Infallible>> MirVisitorInfallibleExt for T {}
+
+impl<'a> MirVisitable for &'a MirBody {
+    fn visit_raw<V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + MirVisitor,
+    {
+        visitor.visit_body(me)
+    }
+
+    fn walk_raw<V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + MirVisitor,
+    {
+        for block in me.blocks() {
+            visitor.visit_fallible(block)?;
+        }
+
+        ControlFlow::Continue(())
+    }
+}
+
+impl<'a> MirVisitable for MirBlockRef<'a> {
+    fn visit_raw<V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + MirVisitor,
+    {
+        visitor.visit_block(me)
+    }
+
+    fn walk_raw<V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + MirVisitor,
+    {
+        for stmt in me.stmts(MirBodyDirection::Forwards) {
+            visitor.visit_fallible(stmt)?;
+        }
+
+        visitor.visit_fallible(me.terminator())?;
+
+        ControlFlow::Continue(())
+    }
+}
+
+impl<'a> MirVisitable for MirStmtRef<'a> {
+    fn visit_raw<V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + MirVisitor,
+    {
+        visitor.visit_stmt(me)
+    }
+
+    fn walk_raw<V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + MirVisitor,
+    {
+        match me.kind() {
+            MirStmtKind::StorageLive(_) => {
+                // (empty)
+            }
+            MirStmtKind::StorageDead(_) => {
+                // (empty)
+            }
+            MirStmtKind::Assign(me) => {
+                let &(lhs, ref rhs) = &**me;
+                visitor.visit_fallible(lhs)?;
+                visitor.visit_fallible(rhs)?;
+            }
+            MirStmtKind::DiscardWithoutDrop(rvalue) => {
+                visitor.visit_fallible(rvalue)?;
+            }
+        }
+
+        ControlFlow::Continue(())
+    }
+}
+
+impl<'a> MirVisitable for &'a MirTerminator {
+    fn visit_raw<V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + MirVisitor,
+    {
+        visitor.visit_terminator(me)
+    }
+
+    fn walk_raw<V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + MirVisitor,
+    {
+        match me {
+            MirTerminator::Goto(_)
+            | MirTerminator::Unreachable
+            | MirTerminator::Return
+            | MirTerminator::UnwindResume => {
+                // (empty)
+            }
+            MirTerminator::SwitchInt {
+                discr,
+                constants: _,
+                targets: _,
+            } => {
+                visitor.visit_fallible(*discr)?;
+            }
+            MirTerminator::Call {
+                callee,
+                args,
+                destination,
+                target: _,
+                unwind: _,
+            } => {
+                visitor.visit_fallible(*callee)?;
+
+                for &arg in args {
+                    visitor.visit_fallible(arg)?;
+                }
+
+                visitor.visit_fallible(*destination)?;
+            }
+            MirTerminator::EnsureDropped {
+                place,
+                target: _,
+                unwind: _,
+            } => {
+                visitor.visit_fallible(*place)?;
+            }
+        }
+
+        ControlFlow::Continue(())
+    }
+}
+
+impl<'a> MirVisitable for MirLvalue {
+    fn visit_raw<V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + MirVisitor,
+    {
+        visitor.visit_lvalue(me)
+    }
+
+    fn walk_raw<V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + MirVisitor,
+    {
+        visitor.visit_fallible(me.0)
+    }
+}
+
+impl<'a> MirVisitable for &'a MirRvalue {
+    fn visit_raw<V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + MirVisitor,
+    {
+        visitor.visit_rvalue(me)
+    }
+
+    fn walk_raw<V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + MirVisitor,
+    {
+        match me {
+            MirRvalue::UnreachablePlaceholder => {
+                // (empty)
+            }
+            MirRvalue::Tuple(operands) => todo!(),
+            MirRvalue::Adt(_adt, operands) => todo!(),
+            MirRvalue::Use(operand) => todo!(),
+            MirRvalue::MoveOutRef {
+                can_move_from,
+                ref_place,
+            } => todo!(),
+            MirRvalue::Ref(_muta, place) => todo!(),
+            MirRvalue::Zst(obj) => todo!(),
+            MirRvalue::Literal(obj, ast_lit) => todo!(),
+            MirRvalue::BinaryOp(mir_straight_bin_op_kind, _) => todo!(),
+            MirRvalue::UnaryOp(ast_un_op_kind, mir_operand) => todo!(),
+            MirRvalue::Discriminant(mir_place) => todo!(),
+            MirRvalue::DynUse(dyn_site_idx, mir_operand) => todo!(),
+            MirRvalue::Error(error_guaranteed) => todo!(),
+        }
+
+        ControlFlow::Continue(())
+    }
+}
+
+impl<'a> MirVisitable for MirOperand {
+    fn visit_raw<V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + MirVisitor,
+    {
+        visitor.visit_operand(me)
+    }
+
+    fn walk_raw<V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + MirVisitor,
+    {
+        visitor.visit_fallible(me.place())
+    }
+}
+
+impl<'a> MirVisitable for MirPlace {
+    fn visit_raw<V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + MirVisitor,
+    {
+        visitor.visit_place(me)
+    }
+
+    fn walk_raw<V>(_me: Self, _visitor: &mut V) -> ControlFlow<V::Break>
+    where
+        V: ?Sized + MirVisitor,
+    {
+        // (dead-end)
+
+        ControlFlow::Continue(())
     }
 }

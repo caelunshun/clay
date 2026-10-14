@@ -2,7 +2,7 @@ use crate::{
     semantic::{
         analysis::borrowck::check2::{
             dataflow::{BackwardsDataflowAnalysis, DataflowOutput},
-            place_map::PlaceIdMap,
+            places::PlaceNumbering,
         },
         syntax::{MirBlockIdx, MirBody, MirPlace, MirStmtIdx, TyCtxt},
     },
@@ -18,7 +18,7 @@ pub struct PlaceSet {
 }
 
 impl PlaceSet {
-    pub fn add(&mut self, mapping: &PlaceIdMap, place: MirPlace) {
+    pub fn add(&mut self, mapping: &PlaceNumbering, place: MirPlace) {
         let bits = BitRange::new_u32(mapping.place_to_range[&place].clone());
 
         if bits.hi_word_excl() > self.bits.len() {
@@ -32,7 +32,7 @@ impl PlaceSet {
         }
     }
 
-    pub fn remove(&mut self, mapping: &PlaceIdMap, place: MirPlace) {
+    pub fn remove(&mut self, mapping: &PlaceNumbering, place: MirPlace) {
         let bits = BitRange::new_u32(mapping.place_to_range[&place].clone());
 
         if bits.hi_word_excl() > self.bits.len() {
@@ -46,7 +46,7 @@ impl PlaceSet {
         }
     }
 
-    pub fn has(&self, mapping: &PlaceIdMap, place: MirPlace) -> bool {
+    pub fn has(&self, mapping: &PlaceNumbering, place: MirPlace) -> bool {
         let bits = BitRange::new_u32(mapping.place_to_range[&place].clone());
 
         if bits.hi_word_excl() > self.bits.len() {
@@ -95,7 +95,7 @@ impl PlaceSet {
 pub struct LivenessAnalysis<'g> {
     tcx: &'g TyCtxt,
     body: &'g MirBody,
-    id_map: &'g PlaceIdMap,
+    place_numbering: &'g PlaceNumbering,
 }
 
 impl<'g> BackwardsDataflowAnalysis<'g> for LivenessAnalysis<'g> {
