@@ -83,7 +83,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         //         break 'break_on_accept or 'break_on_reject;
         //     }
         //
-        //     else block;
+        //     else block;  // (provided by caller)
         // }
         //
         // continuing logic;
@@ -108,7 +108,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
         self.materialize_late_use_proxies(span, scope, late_use_proxies);
 
-        break_on_accept
+        break_on_reject
     }
 
     pub fn lower_match(

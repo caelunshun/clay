@@ -491,10 +491,13 @@ impl MirBodyCfg {
         let mut stack = Vec::from_iter([entry]);
 
         while let Some(curr) = stack.pop() {
-            assert!(self.opt_terminator(curr).is_some());
+            assert!(
+                self.opt_terminator(curr).is_some(),
+                "{curr:?} is missing a terminator",
+            );
 
             for successor in self.block_successors(curr) {
-                if live_scopes.insert(curr, ()).is_none() {
+                if live_scopes.insert(successor.target, ()).is_none() {
                     stack.push(successor.target);
                 }
             }

@@ -96,5 +96,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             body.expr,
             Some(MirPlace::new(tcx, MirLocalIdx::RETURN, [])),
         );
+
+        self.builder.push_return(scope);
     }
 }
