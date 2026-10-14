@@ -1,8 +1,16 @@
-use crate::{adt_family::AdtTyFamily, arena::Arena};
+use crate::{
+    adt_family::AdtTyFamily, arena::Arena, brick::Brick, func_family::FuncFamily,
+    trait_family::TraitFamily, trait_impl_family::TraitImplFamily, ty_param::TyParam,
+};
 
 /// Holds all IR structures for a program.
 pub struct Soup {
     pub adt_ty_families: Arena<AdtTyFamily>,
+    pub func_families: Arena<FuncFamily>,
+    pub trait_families: Arena<TraitFamily>,
+    pub trait_impl_families: Arena<TraitImplFamily>,
+    pub ty_params: Arena<TyParam>,
+    pub bricks: Arena<Brick>,
 }
 
 macro_rules! impl_has_arena {
@@ -25,4 +33,9 @@ macro_rules! impl_has_arena {
 
 impl_has_arena!(
     adt_ty_families: AdtTyFamily,
+    func_families: FuncFamily,
+    trait_families: TraitFamily,
+    trait_impl_families: TraitImplFamily,
+    ty_params: TyParam,
+    bricks: Brick,
 );
