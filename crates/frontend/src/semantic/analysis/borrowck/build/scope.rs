@@ -449,7 +449,6 @@ impl<'tcx> MirScopedBuilder<'tcx> {
         unwind_bb
     }
 
-    // TODO: use this, not the discard rvalue statement.
     pub fn push_drop(&mut self, scope: MirBuilderScopeIdx, place: MirPlace) {
         let unwind =
             self.push_unwind_terminator(scope, |target, unwind| MirTerminator::EnsureDropped {

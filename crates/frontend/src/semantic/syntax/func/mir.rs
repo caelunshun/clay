@@ -599,7 +599,6 @@ pub enum MirStmtKind {
     StorageLive(MirLocalIdx),
     StorageDead(MirLocalIdx),
     Assign(Box<(MirPlace, MirRvalue)>),
-    DiscardWithoutDrop(MirRvalue),
 }
 
 impl TraverseMentions for MirStmtKind {
@@ -630,9 +629,6 @@ impl TraverseMentions for MirStmtKind {
                     kind: MirPlaceMentionKind::INIT,
                     place: *lhs,
                 })?;
-            }
-            MirStmtKind::DiscardWithoutDrop(rvalue) => {
-                TraverseMentions::traverse_mentions(tcx, rvalue, f)?;
             }
         }
 
@@ -1418,9 +1414,6 @@ impl fmt::Display for MirPrettyFmt<'_, &MirStmtKind> {
             }
             MirStmtKind::Assign(stmt) => {
                 write!(f, "{} = {};", self.cx.wrap(stmt.0), self.cx.wrap(&stmt.1))?;
-            }
-            MirStmtKind::DiscardWithoutDrop(rvalue) => {
-                write!(f, "dropless _ = {};", self.cx.wrap(rvalue))?;
             }
         }
 

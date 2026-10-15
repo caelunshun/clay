@@ -368,15 +368,9 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             match stmt {
                 ThirStmt::Expr(expr) => {
                     let scope = self.builder.push_scope(scope);
-                    let rvalue = self.lower_expr_rvalue(scope, expr);
 
-                    self.builder.push_statement(
-                        scope,
-                        MirStmt {
-                            source_info: MirStmtSourceInfo::Simple(expr.r(s).span),
-                            kind: MirStmtKind::DiscardWithoutDrop(rvalue),
-                        },
-                    );
+                    // Dropped by leaving the scope.
+                    self.lower_expr_place(scope, expr, None);
 
                     self.builder.push_break(scope, scope);
                 }
