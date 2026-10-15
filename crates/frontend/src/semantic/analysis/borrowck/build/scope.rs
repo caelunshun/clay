@@ -3,15 +3,14 @@ use crate::{
     flags,
     semantic::syntax::{
         FnDef, MirBlockIdx, MirBody, MirLocal, MirLocalIdx, MirOperand, MirOperandMode, MirPlace,
-        MirStmt, MirStmtKind, MirStmtSourceInfo, MirTerminator, MirUnwindBehavior, SigTy, TyCtxt,
+        MirPrettyFmtCx, MirStmt, MirStmtKind, MirStmtSourceInfo, MirTerminator, MirUnwindBehavior,
+        SigTy, TyCtxt,
     },
+    utils::format::{SimpleListFormatGlue, format_list},
 };
-use index_vec::{IndexVec, define_index_type};
+use index_vec::{IndexSlice, IndexVec, define_index_type};
 use smallvec::SmallVec;
-use std::{
-    fmt::{self, Write as _},
-    panic::Location,
-};
+use std::fmt::{self, Write as _};
 
 // === Building === //
 
@@ -108,15 +107,7 @@ impl<'tcx> MirScopedBuilder<'tcx> {
             MirBuilderScopeIdx::ENTRY
         );
 
-        if let Some(debug) = &mut this.debug {
-            debug.push_prose(
-                MirBuilderScopeIdx::ENTRY,
-                format_args!(
-                    "// BB {:?}",
-                    this.scopes[MirBuilderScopeIdx::ENTRY].curr_block
-                ),
-            );
-        }
+        this.push_debug_bb_indicator(MirBuilderScopeIdx::ENTRY);
 
         this
     }
@@ -131,6 +122,44 @@ impl<'tcx> MirScopedBuilder<'tcx> {
 
     pub fn def(&self) -> Obj<FnDef> {
         self.def
+    }
+
+    pub fn body(&self) -> &MirBody {
+        &self.body
+    }
+
+    pub fn body_pretty(&self) -> MirPrettyFmtCx<'_> {
+        MirPrettyFmtCx::new(self.tcx, &self.body)
+    }
+
+    fn push_debug_ext(
+        &mut self,
+        f: impl FnOnce(
+            &mut MirScopeBodyDebug,
+            &IndexSlice<MirBuilderScopeIdx, [Scope]>,
+            MirPrettyFmtCx<'_>,
+        ),
+    ) {
+        if let Some(debug) = &mut self.debug {
+            f(
+                debug,
+                &self.scopes,
+                MirPrettyFmtCx::new(self.tcx, &self.body),
+            );
+        }
+    }
+
+    fn push_debug(&mut self, f: impl FnOnce(&mut MirScopeBodyDebug, MirPrettyFmtCx<'_>)) {
+        self.push_debug_ext(|debug, _scopes, cx| f(debug, cx));
+    }
+
+    fn push_debug_bb_indicator(&mut self, scope: MirBuilderScopeIdx) {
+        self.push_debug_ext(|debug, scopes, _cx| {
+            debug.push_prose(
+                scope,
+                format_args!("// Basic block {:?}", scopes[scope].curr_block),
+            );
+        });
     }
 
     /// Allocates a local in a scope, which is live for all descendant scopes.
@@ -161,25 +190,13 @@ impl<'tcx> MirScopedBuilder<'tcx> {
             unwind_on_scope_drop_panic,
         });
 
-        self.body.cfg.push_stmt(
-            self.scopes[scope].curr_block,
+        self.push_statement(
+            scope,
             MirStmt {
-                span: MirStmtSourceInfo::Local,
+                source_info: MirStmtSourceInfo::Local,
                 kind: MirStmtKind::StorageLive(mir_idx),
             },
         );
-
-        if let Some(debug) = &mut self.debug {
-            debug.push_prose(
-                scope,
-                format_args!(
-                    "let _{}: {:?};  // {}",
-                    mir_idx.index(),
-                    info.ty,
-                    Location::caller()
-                ),
-            );
-        }
 
         mir_idx
     }
@@ -187,32 +204,9 @@ impl<'tcx> MirScopedBuilder<'tcx> {
     /// Pushes a regular statement to a scope.
     #[track_caller]
     pub fn push_statement(&mut self, scope: MirBuilderScopeIdx, stmt: MirStmt) {
-        if let Some(debug) = &mut self.debug {
-            match &stmt.kind {
-                MirStmtKind::StorageLive(local) => {
-                    debug.push_prose(
-                        scope,
-                        format_args!(
-                            "StorageLive(_{});  // {}",
-                            local.index(),
-                            Location::caller()
-                        ),
-                    );
-                }
-                MirStmtKind::StorageDead(local) => {
-                    debug.push_prose(
-                        scope,
-                        format_args!(
-                            "StorageDead(_{});  // {}",
-                            local.index(),
-                            Location::caller()
-                        ),
-                    );
-                }
-                MirStmtKind::Assign(stmt) => todo!(),
-                MirStmtKind::DiscardWithoutDrop(rvalue) => todo!(),
-            }
-        }
+        self.push_debug(|debug, cx| {
+            debug.push_prose(scope, cx.wrap(&stmt));
+        });
 
         self.body.cfg.push_stmt(self.scopes[scope].curr_block, stmt);
     }
@@ -233,12 +227,13 @@ impl<'tcx> MirScopedBuilder<'tcx> {
 
         let returns_to = self.body.cfg.create_block();
         self.scopes[scope].curr_block = returns_to;
+        // (BB indicator added in caller)
 
         let successors = (0..succ_count)
             .map(|_| {
                 let first_block = self.body.cfg.create_block();
 
-                self.scopes.push(Scope {
+                let child_scope = self.scopes.push(Scope {
                     parent: Some(ScopeParent {
                         target: scope,
                         returns_to,
@@ -248,7 +243,11 @@ impl<'tcx> MirScopedBuilder<'tcx> {
                     first_block,
                     curr_block: first_block,
                     curr_unwind_block: continue_parent_unwind,
-                })
+                });
+
+                self.push_debug_bb_indicator(child_scope);
+
+                child_scope
             })
             .collect::<SmallVec<[MirBuilderScopeIdx; 2]>>();
 
@@ -301,9 +300,20 @@ impl<'tcx> MirScopedBuilder<'tcx> {
 
                 if let Some(unwind_on_scope_drop_panic) = local.unwind_on_scope_drop_panic {
                     let scope_start = self.scopes[scope].curr_block;
-                    let scope_continue = self.body.cfg.create_block();
 
+                    self.push_debug(|debug, cx| {
+                        debug.push_prose(
+                            scope,
+                            format_args!(
+                                "ensure-dropped({}) unwind {unwind_on_scope_drop_panic:?};",
+                                cx.wrap(local.mir_idx),
+                            ),
+                        );
+                    });
+
+                    let scope_continue = self.body.cfg.create_block();
                     self.scopes[scope].curr_block = scope_continue;
+                    self.push_debug_bb_indicator(scope);
 
                     self.body.cfg.init_terminator(
                         scope_start,
@@ -318,7 +328,7 @@ impl<'tcx> MirScopedBuilder<'tcx> {
                 self.push_statement(
                     scope,
                     MirStmt {
-                        span: MirStmtSourceInfo::Break,
+                        source_info: MirStmtSourceInfo::Break,
                         kind: MirStmtKind::StorageDead(local.mir_idx),
                     },
                 );
@@ -338,21 +348,35 @@ impl<'tcx> MirScopedBuilder<'tcx> {
 
         // Push terminator.
         let branching_block = self.scopes[scope].curr_block;
-        let dead_block = self.body.cfg.create_block();
-        self.scopes[scope].curr_block = dead_block;
 
         self.body
             .cfg
             .init_terminator(branching_block, MirTerminator::Goto(next_bb));
+
+        self.push_debug(|debug, _cx| {
+            debug.push_prose(scope, format_args!("goto {next_bb:?};"));
+        });
+
+        let dead_block = self.body.cfg.create_block();
+        self.scopes[scope].curr_block = dead_block;
+        self.push_debug_bb_indicator(scope);
     }
 
     /// Finishes the current scope by breaking out to a target which must be an ancestor scope.
     pub fn push_break(&mut self, scope: MirBuilderScopeIdx, target: MirBuilderScopeIdx) {
+        self.push_debug(|debug, _cx| {
+            debug.push_prose(scope, format_args!("// break {target:?}"));
+        });
+
         self.push_break_shared(scope, target, self.scopes[scope].parent.unwrap().returns_to);
     }
 
     /// Finishes the current scope by jumping back to the start of an ancestor scope.
     pub fn push_continue(&mut self, scope: MirBuilderScopeIdx, target: MirBuilderScopeIdx) {
+        self.push_debug(|debug, _cx| {
+            debug.push_prose(scope, format_args!("// continue {target:?}"));
+        });
+
         self.push_break_shared(scope, target, self.scopes[scope].first_block);
     }
 
@@ -360,26 +384,39 @@ impl<'tcx> MirScopedBuilder<'tcx> {
         &mut self,
         scope: MirBuilderScopeIdx,
         f: impl FnOnce(MirBlockIdx, MirUnwindBehavior) -> MirTerminator,
-    ) {
+    ) -> MirBlockIdx {
         let start_bb = self.scopes[scope].curr_block;
         let unwind_bb = self.scopes[scope].curr_unwind_block;
 
         let continue_bb = self.body.cfg.create_block();
-
         self.scopes[scope].curr_block = continue_bb;
+        // (BB indicator added in caller)
+
         self.body.cfg.init_terminator(
             start_bb,
             f(continue_bb, MirUnwindBehavior::Continue(unwind_bb)),
         );
+
+        unwind_bb
     }
 
     // TODO: use this, not the discard rvalue statement.
     pub fn push_drop(&mut self, scope: MirBuilderScopeIdx, place: MirPlace) {
-        self.push_unwind_terminator(scope, |target, unwind| MirTerminator::EnsureDropped {
-            place,
-            target,
-            unwind,
+        let unwind =
+            self.push_unwind_terminator(scope, |target, unwind| MirTerminator::EnsureDropped {
+                place,
+                target,
+                unwind,
+            });
+
+        self.push_debug(|debug, cx| {
+            debug.push_prose(
+                scope,
+                format_args!("ensure-dropped({}) unwind {unwind:?};", cx.wrap(place)),
+            );
         });
+
+        self.push_debug_bb_indicator(scope);
     }
 
     pub fn push_call(
@@ -389,35 +426,78 @@ impl<'tcx> MirScopedBuilder<'tcx> {
         args: Box<[MirOperand]>,
         destination: MirPlace,
     ) {
-        self.push_unwind_terminator(scope, |target, unwind| MirTerminator::Call {
+        let args_fmt = self.debug.is_some().then(|| {
+            let cx = self.body_pretty();
+
+            format_list(
+                args.iter().map(|arg| cx.wrap(*arg)),
+                SimpleListFormatGlue::OR_LIST,
+            )
+        });
+
+        let unwind = self.push_unwind_terminator(scope, |target, unwind| MirTerminator::Call {
             callee,
             args,
             destination,
             target,
             unwind,
         });
+
+        self.push_debug(|debug, cx| {
+            debug.push_prose(
+                scope,
+                format_args!(
+                    "{} = {}({}) unwind {unwind:?};",
+                    cx.wrap(destination),
+                    cx.wrap(callee),
+                    args_fmt.unwrap(),
+                ),
+            );
+        });
+
+        self.push_debug_bb_indicator(scope);
     }
 
     #[must_use]
     pub fn push_scope(&mut self, scope: MirBuilderScopeIdx) -> MirBuilderScopeIdx {
         let [sub_scope] = self.push_branch_fixed(scope, |[target]| MirTerminator::Goto(target));
+
+        self.push_debug(|debug, _cx| debug.push_child(scope, sub_scope));
+        self.push_debug_bb_indicator(scope);
+
         sub_scope
     }
 
     #[must_use]
-    pub fn push_switch_dyn<const N: usize>(
+    pub fn push_switch_dyn(
         &mut self,
         scope: MirBuilderScopeIdx,
         discr: MirOperand,
         constants: &[u64],
     ) -> SmallVec<[MirBuilderScopeIdx; 2]> {
-        self.push_branch_dyn(scope, constants.len(), |matchers| {
+        let children = self.push_branch_dyn(scope, constants.len(), |matchers| {
             MirTerminator::SwitchInt {
                 discr,
                 constants: Box::from_iter(constants.iter().copied()),
                 targets: Box::from_iter(matchers.iter().copied()),
             }
-        })
+        });
+
+        self.push_debug(|debug, cx| {
+            debug.push_prose(scope, format_args!("match {} {{", cx.wrap(discr)));
+
+            for (const_, &child) in constants.iter().zip(&children) {
+                debug.push_prose_inline(scope, format_args!("{const_} => "));
+                debug.push_child(scope, child);
+                debug.push_prose(scope, ",");
+            }
+
+            debug.push_prose(scope, "}");
+        });
+
+        self.push_debug_bb_indicator(scope);
+
+        children
     }
 
     #[must_use]
@@ -427,11 +507,10 @@ impl<'tcx> MirScopedBuilder<'tcx> {
         discr: MirOperand,
         constants: [u64; N],
     ) -> [MirBuilderScopeIdx; N] {
-        self.push_branch_fixed::<N>(scope, |matchers| MirTerminator::SwitchInt {
-            discr,
-            constants: Box::from_iter(constants),
-            targets: Box::from_iter(matchers.iter().copied()),
-        })
+        *self
+            .push_switch_dyn(scope, discr, &constants)
+            .as_array()
+            .unwrap()
     }
 
     pub fn push_return(&mut self, scope: MirBuilderScopeIdx) {
@@ -440,11 +519,18 @@ impl<'tcx> MirScopedBuilder<'tcx> {
 
     pub fn push_unreachable(&mut self, scope: MirBuilderScopeIdx) {
         let branching_block = self.scopes[scope].curr_block;
-        let dead_block = self.body.cfg.create_block();
-        self.scopes[scope].curr_block = dead_block;
+
         self.body
             .cfg
             .init_terminator(branching_block, MirTerminator::Unreachable);
+
+        self.push_debug(|debug, _cx| {
+            debug.push_prose(scope, "unreachable;");
+        });
+
+        let dead_block = self.body.cfg.create_block();
+        self.scopes[scope].curr_block = dead_block;
+        self.push_debug_bb_indicator(scope);
     }
 
     pub fn finish(mut self) -> MirBody {

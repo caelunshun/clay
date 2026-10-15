@@ -305,7 +305,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 let mir_local = self.ensure_local_defined(scopes.local_scope, local);
 
                 let init_stmt = MirStmt {
-                    span: MirStmtSourceInfo::Simple(pat.r(s).span),
+                    source_info: MirStmtSourceInfo::Simple(pat.r(s).span),
                     kind: match by_ref {
                         Some(muta) => MirStmtKind::Assign(Box::new((
                             MirPlace::new(tcx, mir_local, []),
@@ -500,7 +500,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             self.builder.push_statement(
                 scope,
                 MirStmt {
-                    span: MirStmtSourceInfo::Simple(span),
+                    source_info: MirStmtSourceInfo::Simple(span),
                     kind: MirStmtKind::Assign(Box::new((MirPlace::new(tcx, dest, []), rvalue))),
                 },
             );

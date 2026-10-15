@@ -567,11 +567,11 @@ impl Iterator for MirStmtIter<'_> {
 
 #[derive(Debug, Clone)]
 pub struct MirStmt {
-    pub span: MirStmtSourceInfo,
+    pub source_info: MirStmtSourceInfo,
     pub kind: MirStmtKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum MirStmtSourceInfo {
     Simple(Span),
     Break,
@@ -1248,11 +1248,11 @@ impl fmt::Display for MirPrettyFmt<'_, MirOperand> {
     }
 }
 
-impl fmt::Display for MirPrettyFmt<'_, MirRvalue> {
+impl fmt::Display for MirPrettyFmt<'_, &MirRvalue> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = self.cx.session();
 
-        match &self.value {
+        match self.value {
             MirRvalue::UnreachablePlaceholder => {
                 write!(f, "unreachable")?;
             }
@@ -1369,5 +1369,44 @@ impl fmt::Display for MirPrettyFmt<'_, AstLit> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO
         write!(f, "{:?}", self.value)
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, &MirStmt> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}  // {}",
+            self.cx.wrap(&self.value.kind),
+            self.cx.wrap(self.value.source_info)
+        )
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, MirStmtSourceInfo> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO
+        write!(f, "{:?}", self.value)
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, &MirStmtKind> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.value {
+            MirStmtKind::StorageLive(local) => {
+                write!(f, "storage-live({});", self.cx.wrap(*local))?;
+            }
+            MirStmtKind::StorageDead(local) => {
+                write!(f, "storage-dead({});", self.cx.wrap(*local))?;
+            }
+            MirStmtKind::Assign(stmt) => {
+                write!(f, "{} = {};", self.cx.wrap(stmt.0), self.cx.wrap(&stmt.1))?;
+            }
+            MirStmtKind::DiscardWithoutDrop(rvalue) => {
+                write!(f, "dropless _ = {};", self.cx.wrap(rvalue))?;
+            }
+        }
+
+        Ok(())
     }
 }
