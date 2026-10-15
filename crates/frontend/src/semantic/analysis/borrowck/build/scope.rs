@@ -119,8 +119,6 @@ impl<'tcx> MirScopedBuilder<'tcx> {
             MirBuilderScopeIdx::ENTRY
         );
 
-        this.push_debug_bb_indicator(MirBuilderScopeIdx::ENTRY);
-
         this
     }
 

@@ -172,6 +172,12 @@ new_key_type! {
     pub struct MirStmtIdx;
 }
 
+impl fmt::Display for MirBlockIdx {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "bb{:?}", self.0)
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub enum MirLocationAfter {
     BlockStart(MirBlockIdx),
@@ -497,7 +503,7 @@ impl MirBodyCfg {
         while let Some(curr) = stack.pop() {
             assert!(
                 self.opt_terminator(curr).is_some(),
-                "{curr:?} is missing a terminator",
+                "{curr} is missing a terminator",
             );
 
             for successor in self.block_successors(curr) {
@@ -1414,6 +1420,6 @@ impl fmt::Display for MirPrettyFmt<'_, &MirStmtKind> {
 
 impl fmt::Display for MirPrettyFmt<'_, MirBlockIdx> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "bb{:?}", self.value.0)
+        write!(f, "{}", self.value)
     }
 }

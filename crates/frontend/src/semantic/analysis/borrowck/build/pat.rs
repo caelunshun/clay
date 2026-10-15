@@ -62,7 +62,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         let reject_scope = self.lower_let_stmt_common(stmt.r(s).span, scope, pat, init);
 
         if let Some(else_clause) = else_clause {
-            self.lower_block(reject_scope, else_clause, None);
+            self.lower_block_no_terminator(reject_scope, else_clause, None);
         }
 
         self.builder.push_unreachable(reject_scope);

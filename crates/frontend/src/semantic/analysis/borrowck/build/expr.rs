@@ -240,7 +240,8 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 self.labelled_scopes
                     .insert(expr, LabelledScope { scope, out_place });
 
-                self.lower_block(scope, block, Some(out_place));
+                self.lower_block_no_terminator(scope, block, Some(out_place));
+                self.builder.push_break(scope, scope);
 
                 MirRvalueOrPlace::Place(out_place)
             }
@@ -251,7 +252,8 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 self.labelled_scopes
                     .insert(expr, LabelledScope { scope, out_place });
 
-                self.lower_block(scope, block, None);
+                self.lower_block_no_terminator(scope, block, None);
+                self.builder.push_continue(scope, scope);
 
                 MirRvalueOrPlace::Place(out_place)
             }
@@ -354,7 +356,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         }
     }
 
-    pub fn lower_block(
+    pub fn lower_block_no_terminator(
         &mut self,
         scope: MirBuilderScopeIdx,
         block: Obj<ThirBlock>,
@@ -375,6 +377,8 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                             kind: MirStmtKind::DiscardWithoutDrop(rvalue),
                         },
                     );
+
+                    self.builder.push_break(scope, scope);
                 }
                 ThirStmt::Let(stmt) => {
                     self.lower_let_stmt(scope, stmt);
