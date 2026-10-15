@@ -18,14 +18,14 @@ pub trait ForwardsDataflowAnalysis<'g> {
 
     fn init_effect(&mut self, is_entry: bool) -> Self::Lattice;
 
+    fn trans_join(&mut self, inputs: &[&Self::Lattice], output: &mut DataflowOutput<Self::Lattice>);
+
     fn trans_stmt(
         &mut self,
         stmt: MirStmtRef<'g>,
         input: &Self::Lattice,
         output: &mut Self::Lattice,
     );
-
-    fn trans_join(&mut self, inputs: &[&Self::Lattice], output: &mut DataflowOutput<Self::Lattice>);
 
     fn trans_terminator(
         &mut self,
@@ -483,6 +483,19 @@ impl<'a, T> DataflowView<'a, T> {
 
     pub fn trans_init(&self, block: MirBlockIdx) -> &T {
         &self.scratch.effect_elems[self.scratch.basic_block_indices[block].seed_idx as usize].value
+    }
+
+    pub fn trans_before_end(&mut self, block: MirBlockIdx) -> &T {
+        let before_end = match self.direction {
+            MirBodyDirection::Forwards => self.body.cfg.block_last(block),
+            MirBodyDirection::Backwards => self.body.cfg.block_first(block),
+        };
+
+        if let Some(prev) = before_end {
+            self.trans_after(prev)
+        } else {
+            self.trans_init(block)
+        }
     }
 
     pub fn trans_before(&mut self, target: MirStmtIdx) -> &T {

@@ -87,6 +87,8 @@ impl<'tcx> MirScopedBuilder<'tcx> {
                 body.locals.push(MirLocal { ty: arg.ty });
             }
 
+            body.arg_count = def.r(s).args.r(s).len() as u32;
+
             body
         };
 

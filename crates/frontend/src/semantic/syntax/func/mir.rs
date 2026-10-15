@@ -34,6 +34,7 @@ pub struct MirLocal {
 #[derive(Debug, Clone)]
 pub struct MirBody {
     pub locals: IndexVec<MirLocalIdx, MirLocal>,
+    pub arg_count: u32,
     pub entry: MirBlockIdx,
     pub cfg: MirBodyCfg,
 }
@@ -42,6 +43,7 @@ impl Default for MirBody {
     fn default() -> Self {
         let mut body = Self {
             locals: IndexVec::default(),
+            arg_count: 0,
             entry: MirBlockIdx::default(),
             cfg: MirBodyCfg::default(),
         };
@@ -55,6 +57,10 @@ impl Default for MirBody {
 impl MirBody {
     pub fn blocks<'a>(&'a self) -> impl ExactSizeIterator<Item = MirBlockRef<'a>> {
         self.cfg.blocks().map(move |id| MirBlockRef::new(self, id))
+    }
+
+    pub fn arg_locals(&self) -> impl ExactSizeIterator<Item = MirLocalIdx> {
+        (0..self.arg_count + 1).map(MirLocalIdx::from_raw)
     }
 
     pub fn entry(&self) -> MirBlockRef<'_> {
@@ -1053,6 +1059,10 @@ bitflags::bitflags! {
     pub struct MirPlaceMentionKind: u32 {
         const LIVENESS_USE = Self::MOVED.bits() | Self::READ.bits();
         const LIVENESS_INIT = Self::INIT.bits();
+
+        const OCCUPANCY_ADD = Self::INIT.bits();
+        const OCCUPANCY_DEAD = Self::INVALIDATED.bits() | Self::MOVED.bits() | Self::STORAGE_DEAD.bits();
+        const OCCUPANCY_ACCESS = Self::MOVED.bits() | Self::READ.bits();
 
         /// Invalidates the place without requiring it to be occupied.
         const INVALIDATED = 1 << 0;
