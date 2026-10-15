@@ -165,10 +165,12 @@ impl<'tcx> MirScopedBuilder<'tcx> {
 
     fn push_debug_bb_indicator(&mut self, scope: MirBuilderScopeIdx) {
         self.push_debug_ext(|debug, scopes, cx| {
+            debug.push_indent(scope, -2);
             debug.push_prose(
                 scope,
-                format_args!("// Basic block {}", cx.wrap(scopes[scope].curr_block)),
+                format_args!("{}:", cx.wrap(scopes[scope].curr_block)),
             );
+            debug.push_indent(scope, 2);
         });
     }
 
@@ -358,6 +360,30 @@ impl<'tcx> MirScopedBuilder<'tcx> {
         }
 
         // Push terminator.
+        if let old_curr_bb = self.scopes[scope].curr_block
+            && next_bb == old_curr_bb
+        {
+            // Terminators can never branch directly to themselves. To handle this special case—
+            // which should only happen for truly infinite loops (e.g. `loop {}`)!—we introduce a
+            // dummy block.
+            let spacer_block = self.body.cfg.create_block();
+
+            self.push_debug(|debug, cx| {
+                debug.push_prose(
+                    scope,
+                    format!("goto {};  // Loop spacer", cx.wrap(spacer_block)),
+                );
+            });
+
+            self.body
+                .cfg
+                .init_terminator(old_curr_bb, MirTerminator::Goto(spacer_block));
+
+            self.scopes[scope].curr_block = spacer_block;
+
+            self.push_debug_bb_indicator(scope);
+        }
+
         let branching_block = self.scopes[scope].curr_block;
 
         self.body
@@ -376,19 +402,31 @@ impl<'tcx> MirScopedBuilder<'tcx> {
     /// Finishes the current scope by breaking out to a target which must be an ancestor scope.
     pub fn push_break(&mut self, scope: MirBuilderScopeIdx, target: MirBuilderScopeIdx) {
         self.push_debug(|debug, _cx| {
-            debug.push_prose(scope, format_args!("// break {target}"));
+            debug.push_prose(scope, format_args!("break {target} with {{"));
+            debug.push_indent(scope, 4);
         });
 
         self.push_break_shared(scope, target, self.scopes[scope].parent.unwrap().returns_to);
+
+        self.push_debug(|debug, _cx| {
+            debug.push_indent(scope, -4);
+            debug.push_prose(scope, "};");
+        });
     }
 
     /// Finishes the current scope by jumping back to the start of an ancestor scope.
     pub fn push_continue(&mut self, scope: MirBuilderScopeIdx, target: MirBuilderScopeIdx) {
         self.push_debug(|debug, _cx| {
-            debug.push_prose(scope, format_args!("// continue {target}"));
+            debug.push_prose(scope, format_args!("continue {target} with {{"));
+            debug.push_indent(scope, 4);
         });
 
         self.push_break_shared(scope, target, self.scopes[scope].first_block);
+
+        self.push_debug(|debug, _cx| {
+            debug.push_indent(scope, -4);
+            debug.push_prose(scope, "};");
+        });
     }
 
     fn push_unwind_terminator(
@@ -601,6 +639,7 @@ pub struct MirScopeBodyDebug {
 pub enum MirScopeDebugEntry {
     Prose(String),
     Block(MirBuilderScopeIdx),
+    IndentBy(i32),
 }
 
 impl MirScopeBodyDebug {
@@ -628,6 +667,14 @@ impl MirScopeBodyDebug {
         self.annotations[scope].push(MirScopeDebugEntry::Block(child));
     }
 
+    pub fn push_indent(&mut self, scope: MirBuilderScopeIdx, by: i32) {
+        if scope.index() >= self.annotations.len() {
+            self.annotations.resize(scope.index() + 1, Vec::new());
+        }
+
+        self.annotations[scope].push(MirScopeDebugEntry::IndentBy(by));
+    }
+
     fn format_node(&self, scope: MirBuilderScopeIdx, f: &mut IndentedFmt) -> fmt::Result {
         writeln!(f, "{scope}: {{")?;
         f.change_level_now(4)?;
@@ -639,6 +686,9 @@ impl MirScopeBodyDebug {
                 }
                 MirScopeDebugEntry::Block(sub_scope) => {
                     self.format_node(*sub_scope, f)?;
+                }
+                MirScopeDebugEntry::IndentBy(by) => {
+                    f.change_level_subsequent(*by);
                 }
             }
         }

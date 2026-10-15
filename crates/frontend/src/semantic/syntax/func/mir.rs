@@ -230,6 +230,11 @@ impl MirBodyCfg {
         })
     }
 
+    pub fn delete_block(&mut self, block: MirBlockIdx) {
+        self.set_terminator(block, None);
+        self.blocks.remove(block);
+    }
+
     pub fn create_block_with_terminator(&mut self, terminator: MirTerminator) -> MirBlockIdx {
         let idx = self.create_block();
         self.init_terminator(idx, terminator);
@@ -513,7 +518,12 @@ impl MirBodyCfg {
             }
         }
 
-        self.blocks.retain(|key, _| live_scopes.contains_key(key));
+        let mut victims = self.blocks().collect::<Vec<_>>();
+        victims.retain(|victim| !live_scopes.contains_key(*victim));
+
+        for victim in victims {
+            self.delete_block(victim);
+        }
     }
 }
 
