@@ -1411,3 +1411,9 @@ impl fmt::Display for MirPrettyFmt<'_, &MirStmtKind> {
         Ok(())
     }
 }
+
+impl fmt::Display for MirPrettyFmt<'_, MirBlockIdx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "bb{:?}", self.value.0)
+    }
+}

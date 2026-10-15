@@ -13,7 +13,7 @@ pub struct IndentedFmt<'a, 'b> {
 enum IndentedFmtState {
     AtStart,
     Writing,
-    NewlineRequested,
+    NewlineExplicit,
     NewlineImplicit,
 }
 
@@ -57,42 +57,42 @@ impl fmt::Write for IndentedFmt<'_, '_> {
 
             let (payload, remaining_s) = s.split_at(nl);
 
+            // Process payload
+            if !payload.is_empty() {
+                // Insert newline if necessary
+                if matches!(
+                    self.state,
+                    IndentedFmtState::NewlineExplicit | IndentedFmtState::NewlineImplicit
+                ) {
+                    self.f.write_char('\n')?;
+                    self.state = IndentedFmtState::AtStart;
+                }
+
+                if self.state == IndentedFmtState::AtStart {
+                    for _ in 0..self.level.min(100) {
+                        self.f.write_str(" ")?;
+                    }
+
+                    self.state = IndentedFmtState::Writing;
+                }
+
+                self.f.write_str(payload)?;
+            }
+
+            // Process explicit newline and advance
             if !remaining_s.is_empty() {
                 s = &remaining_s[1..];
 
                 // A newline was previously queued up. Honor the request because nothing was
                 // written.
-                if self.state == IndentedFmtState::NewlineRequested {
+                if self.state == IndentedFmtState::NewlineExplicit {
                     self.f.write_char('\n')?;
                 }
 
-                self.state = IndentedFmtState::NewlineRequested;
+                self.state = IndentedFmtState::NewlineExplicit;
             } else {
                 s = "";
             }
-
-            // Process state
-            if payload.is_empty() {
-                continue;
-            }
-
-            if matches!(
-                self.state,
-                IndentedFmtState::NewlineRequested | IndentedFmtState::NewlineImplicit
-            ) {
-                self.f.write_char('\n')?;
-                self.state = IndentedFmtState::AtStart;
-            }
-
-            if self.state == IndentedFmtState::AtStart {
-                for _ in 0..self.level.min(100) {
-                    self.f.write_str(" ")?;
-                }
-
-                self.state = IndentedFmtState::Writing;
-            }
-
-            self.f.write_str(payload)?;
         }
 
         Ok(())
