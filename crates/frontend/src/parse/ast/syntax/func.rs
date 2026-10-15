@@ -313,9 +313,9 @@ pub enum AstUnOpKind {
 impl AstUnOpKind {
     pub fn punct(self) -> AnyPunct {
         match self {
-            AstUnOpKind::Deref => puncts!("*").into(),
-            AstUnOpKind::Not => puncts!("!").into(),
-            AstUnOpKind::Neg => puncts!("-").into(),
+            AstUnOpKind::Deref => punct!('*').into(),
+            AstUnOpKind::Not => punct!('!').into(),
+            AstUnOpKind::Neg => punct!('-').into(),
         }
     }
 }

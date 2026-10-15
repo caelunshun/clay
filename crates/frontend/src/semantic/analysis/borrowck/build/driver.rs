@@ -25,7 +25,7 @@ pub fn build_function_mir(check_cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     let mut build_cx = MirFromThirCtx::new(tcx, def);
     build_cx.lower_fn(body);
 
-    LateInit::init(&def.r(s).mir_body, Some(build_cx.builder.finish()));
+    LateInit::init(&def.r(s).mir_body, Some(build_cx.builder.finish().body));
 }
 
 pub struct MirFromThirCtx<'tcx> {

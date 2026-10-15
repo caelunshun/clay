@@ -1361,7 +1361,8 @@ impl fmt::Display for MirPrettyFmt<'_, &MirRvalue> {
 impl fmt::Display for MirPrettyFmt<'_, SigTy> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO
-        write!(f, "{:?}", self.value)
+        // write!(f, "{:?}", self.value)
+        f.write_str("<type>")
     }
 }
 

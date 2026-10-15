@@ -6,7 +6,7 @@ use crate::{
         MirPrettyFmtCx, MirStmt, MirStmtKind, MirStmtSourceInfo, MirTerminator, MirUnwindBehavior,
         SigTy, TyCtxt,
     },
-    utils::format::{SimpleListFormatGlue, format_list},
+    utils::format::{IndentedFmt, SimpleListFormatGlue, format_list},
 };
 use index_vec::{IndexSlice, IndexVec, define_index_type};
 use smallvec::SmallVec;
@@ -36,6 +36,12 @@ pub struct MirScopedBuilder<'tcx> {
     body: MirBody,
     scopes: IndexVec<MirBuilderScopeIdx, Scope>,
     debug: Option<MirScopeBodyDebug>,
+}
+
+#[derive(Clone)]
+pub struct MirScopedOutput {
+    pub body: MirBody,
+    pub debug: Option<MirScopeBodyDebug>,
 }
 
 struct Scope {
@@ -533,7 +539,7 @@ impl<'tcx> MirScopedBuilder<'tcx> {
         self.push_debug_bb_indicator(scope);
     }
 
-    pub fn finish(mut self) -> MirBody {
+    pub fn finish(mut self) -> MirScopedOutput {
         assert!(
             self.scopes[MirBuilderScopeIdx::BOOTSTRAP_ENTRY]
                 .locals
@@ -545,9 +551,16 @@ impl<'tcx> MirScopedBuilder<'tcx> {
             MirTerminator::Return,
         );
 
+        if let Some(debug) = &self.debug {
+            println!("{debug}");
+        }
+
         self.body.cfg.prune_unreachable(self.body.entry);
 
-        self.body
+        MirScopedOutput {
+            body: self.body,
+            debug: self.debug,
+        }
     }
 }
 
@@ -600,5 +613,33 @@ impl MirScopeBodyDebug {
         }
 
         self.annotations[scope].push(MirScopeDebugEntry::Block(child));
+    }
+
+    fn format_node(&self, scope: MirBuilderScopeIdx, f: &mut IndentedFmt) -> fmt::Result {
+        writeln!(f, "{scope:?}: {{")?;
+        f.change_level_subsequent(4);
+
+        for entry in &self.annotations[scope] {
+            match entry {
+                MirScopeDebugEntry::Prose(prose) => {
+                    f.write_str(prose)?;
+                }
+                MirScopeDebugEntry::Block(sub_scope) => {
+                    self.format_node(*sub_scope, f)?;
+                }
+            }
+        }
+
+        f.change_level_now(-4)?;
+
+        write!(f, "}}")?;
+
+        Ok(())
+    }
+}
+
+impl fmt::Display for MirScopeBodyDebug {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.format_node(MirBuilderScopeIdx::ENTRY, &mut IndentedFmt::new(f))
     }
 }
