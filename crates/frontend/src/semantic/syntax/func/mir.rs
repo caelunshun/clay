@@ -1,16 +1,20 @@
 use crate::{
     base::{
-        ErrorGuaranteed,
+        ErrorGuaranteed, Session,
         arena::{HasListInterner as _, Intern, Obj},
         syntax::Span,
     },
     parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
-    semantic::syntax::{AdtCtor, DynSiteIdx, Mutability, ResolvedFieldIdx, SigTy, TyCtxt},
+    semantic::syntax::{
+        AdtCtor, AdtCtorOwner, AdtCtorSyntax, DynSiteIdx, Mutability, ResolvedFieldIdx, SigTy,
+        TyCtxt,
+    },
+    utils::format::{SimpleListFormatGlue, format_list},
 };
 use index_vec::{IndexVec, define_index_type};
 use slotmap::{SecondaryMap, SlotMap, new_key_type};
 use smallvec::SmallVec;
-use std::{mem, ops::ControlFlow};
+use std::{fmt, mem, ops::ControlFlow};
 
 // === Body === //
 
@@ -777,6 +781,29 @@ pub enum MirStraightBinOpKind {
     Gt,
 }
 
+impl MirStraightBinOpKind {
+    pub fn to_ast(self) -> AstBinOpKind {
+        match self {
+            MirStraightBinOpKind::Add => AstBinOpKind::Add,
+            MirStraightBinOpKind::Sub => AstBinOpKind::Sub,
+            MirStraightBinOpKind::Mul => AstBinOpKind::Mul,
+            MirStraightBinOpKind::Div => AstBinOpKind::Div,
+            MirStraightBinOpKind::Rem => AstBinOpKind::Rem,
+            MirStraightBinOpKind::BitXor => AstBinOpKind::BitXor,
+            MirStraightBinOpKind::BitAnd => AstBinOpKind::BitAnd,
+            MirStraightBinOpKind::BitOr => AstBinOpKind::BitOr,
+            MirStraightBinOpKind::Shl => AstBinOpKind::Shl,
+            MirStraightBinOpKind::Shr => AstBinOpKind::Shr,
+            MirStraightBinOpKind::Eq => AstBinOpKind::Eq,
+            MirStraightBinOpKind::Lt => AstBinOpKind::Lt,
+            MirStraightBinOpKind::Le => AstBinOpKind::Le,
+            MirStraightBinOpKind::Ne => AstBinOpKind::Ne,
+            MirStraightBinOpKind::Ge => AstBinOpKind::Ge,
+            MirStraightBinOpKind::Gt => AstBinOpKind::Gt,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum MirLogicalBinOpKind {
     /// The `&&` operator (logical and)
@@ -786,6 +813,13 @@ pub enum MirLogicalBinOpKind {
 }
 
 impl MirLogicalBinOpKind {
+    pub fn to_ast(self) -> AstBinOpKind {
+        match self {
+            MirLogicalBinOpKind::And => AstBinOpKind::And,
+            MirLogicalBinOpKind::Or => AstBinOpKind::Or,
+        }
+    }
+
     pub fn short_circuit_if(self) -> bool {
         match self {
             MirLogicalBinOpKind::And => false,
@@ -1122,4 +1156,218 @@ pub type MirPlaceElemList = Intern<[MirPlaceElem]>;
 pub enum MirPlaceElem {
     DerefPtr,
     Field(ResolvedFieldIdx),
+}
+
+// === Pretty === //
+
+pub struct MirPrettyFmtCx<'a> {
+    tcx: &'a TyCtxt,
+    body: &'a MirBody,
+}
+
+impl<'a> MirPrettyFmtCx<'a> {
+    pub fn new(tcx: &'a TyCtxt, body: &'a MirBody) -> Self {
+        Self { tcx, body }
+    }
+
+    pub fn wrap<T>(&self, value: T) -> MirPrettyFmt<'_, T> {
+        MirPrettyFmt { cx: self, value }
+    }
+
+    pub fn tcx(&self) -> &'a TyCtxt {
+        self.tcx
+    }
+
+    pub fn session(&self) -> &'a Session {
+        &self.tcx.session
+    }
+
+    pub fn body(&self) -> &'a MirBody {
+        self.body
+    }
+}
+
+pub struct MirPrettyFmt<'a, T> {
+    cx: &'a MirPrettyFmtCx<'a>,
+    value: T,
+}
+
+impl fmt::Display for MirPrettyFmt<'_, MirLocalIdx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "_{}", self.value.index())
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, MirPlace> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self.cx.session();
+
+        self.cx.wrap(self.value.local).fmt(f)?;
+
+        for elem in self.value.projections.r(s) {
+            match elem {
+                MirPlaceElem::DerefPtr => {
+                    write!(f, ".*")?;
+                }
+                MirPlaceElem::Field(ResolvedFieldIdx::Adt(adt, idx)) => {
+                    match adt.r(s).owner {
+                        AdtCtorOwner::Struct(_) => {
+                            // (no coercion)
+                        }
+                        AdtCtorOwner::EnumVariant(variant) => {
+                            write!(f, ".as<{}>", variant.r(s).ident.text)?;
+                        }
+                    }
+
+                    match &adt.r(s).syntax {
+                        AdtCtorSyntax::Unit => unreachable!(),
+                        AdtCtorSyntax::Tuple => {
+                            write!(f, ".{}", idx.index())?;
+                        }
+                        AdtCtorSyntax::Named(_) => {
+                            write!(f, ".{}", adt.r(s).fields[*idx].ident.unwrap().text)?;
+                        }
+                    }
+                }
+                MirPlaceElem::Field(ResolvedFieldIdx::Tuple { field_idx, .. }) => {
+                    write!(f, ".{field_idx}")?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, MirOperand> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.value {
+            MirOperand::Copy(place) => write!(f, "copy({})", self.cx.wrap(place)),
+            MirOperand::Move(place) => write!(f, "move({})", self.cx.wrap(place)),
+        }
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, MirRvalue> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self.cx.session();
+
+        match &self.value {
+            MirRvalue::UnreachablePlaceholder => {
+                write!(f, "unreachable")?;
+            }
+            MirRvalue::Tuple(operands) => {
+                if let [unique] = **operands {
+                    write!(f, "({},)", self.cx.wrap(unique))?;
+                } else {
+                    write!(
+                        f,
+                        "({})",
+                        format_list(
+                            operands.iter().map(|&op| self.cx.wrap(op)),
+                            SimpleListFormatGlue::COMMA_LIST
+                        )
+                    )?;
+                }
+            }
+            MirRvalue::Adt(ctor, operands) => match &ctor.r(s).syntax {
+                AdtCtorSyntax::Unit => {
+                    assert!(operands.is_empty());
+
+                    write!(f, "{}", ctor.r(s).owner.path(s))?;
+                }
+                AdtCtorSyntax::Tuple => {
+                    write!(
+                        f,
+                        "{}({})",
+                        ctor.r(s).owner.path(s),
+                        format_list(
+                            operands.iter().map(|&op| self.cx.wrap(op)),
+                            SimpleListFormatGlue::COMMA_LIST
+                        )
+                    )?;
+                }
+                AdtCtorSyntax::Named(_) => {
+                    write!(
+                        f,
+                        "{} {{ {} }}",
+                        ctor.r(s).owner.path(s),
+                        format_list(
+                            operands.iter().enumerate().map(|(idx, &op)| {
+                                format!(
+                                    "{}: {}",
+                                    ctor.r(s).fields[idx].ident.unwrap().text,
+                                    self.cx.wrap(op)
+                                )
+                            }),
+                            SimpleListFormatGlue::COMMA_LIST
+                        )
+                    )?;
+                }
+            },
+            MirRvalue::Use(operand) => {
+                write!(f, "use({})", self.cx.wrap(*operand))?;
+            }
+            MirRvalue::MoveOutRef {
+                can_move_from,
+                ref_place,
+            } => {
+                write!(
+                    f,
+                    "late-move(*{}, possibly [{}])",
+                    self.cx.wrap(*ref_place),
+                    format_list(
+                        can_move_from.iter().map(|&place| self.cx.wrap(place)),
+                        SimpleListFormatGlue::COMMA_LIST
+                    )
+                )?;
+            }
+            MirRvalue::Ref(muta, place) => {
+                write!(f, "&{}{}", muta.opt_space_qual(), self.cx.wrap(*place))?;
+            }
+            MirRvalue::Zst(ty) => {
+                write!(f, "zst({})", self.cx.wrap(*ty))?;
+            }
+            MirRvalue::Literal(ty, lit) => {
+                write!(f, "{} :: {}", self.cx.wrap(*lit), self.cx.wrap(*ty))?;
+            }
+            MirRvalue::BinaryOp(kind, operands) => {
+                write!(
+                    f,
+                    "{} {} {}",
+                    self.cx.wrap(operands.0),
+                    kind.to_ast().punct().bare_name(),
+                    self.cx.wrap(operands.1)
+                )?;
+            }
+            MirRvalue::UnaryOp(kind, operand) => {
+                write!(f, "{}{}", kind.punct().bare_name(), self.cx.wrap(*operand))?;
+            }
+            MirRvalue::Discriminant(place) => {
+                write!(f, "discriminant({})", self.cx.wrap(*place))?;
+            }
+            MirRvalue::DynUse(_site, operand) => {
+                write!(f, "dyn-use({})", self.cx.wrap(*operand))?;
+            }
+            MirRvalue::Error(_) => {
+                write!(f, "error")?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, SigTy> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO
+        write!(f, "{:?}", self.value)
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, AstLit> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO
+        write!(f, "{:?}", self.value)
+    }
 }

@@ -478,7 +478,7 @@ impl<'tcx> MirScopedBuilder<'tcx> {
     }
 }
 
-// === Debug Info === //
+// === Debug Printing === //
 
 #[derive(Clone, Default)]
 pub struct MirScopeBodyDebug {

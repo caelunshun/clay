@@ -5,9 +5,12 @@ use crate::{
         syntax::{HasSpan, Span, Symbol},
     },
     parse::token::{Ident, Lifetime},
-    semantic::syntax::{
-        AdtInstance, FnDef, Item, Ty, TyCtxt, TyKind, TyOrReKind, TyOrReList, Visibility,
-        types::signature::{SigTraitClauseList, SigTraitInstance, SigTy},
+    semantic::{
+        lower::modules::ItemPathFmt,
+        syntax::{
+            AdtInstance, FnDef, Item, Ty, TyCtxt, TyKind, TyOrReKind, TyOrReList, Visibility,
+            types::signature::{SigTraitClauseList, SigTraitInstance, SigTy},
+        },
     },
     symbol,
 };
@@ -111,6 +114,10 @@ impl AdtCtorOwner {
             AdtCtorOwner::Struct(..) => symbol!("`struct`s"),
             AdtCtorOwner::EnumVariant(..) => symbol!("`enum` variants"),
         }
+    }
+
+    pub fn path(&self, s: &Session) -> ItemPathFmt {
+        self.item(s).r(s).item.r(s).display_path(s)
     }
 
     pub fn item(self, s: &Session) -> Obj<AdtItem> {

@@ -172,6 +172,14 @@ macro_rules! define_punct_seqs {
                 }
             }
 
+            pub fn bare_name(self) -> Symbol {
+                match self {
+                    $(Self::$name => symbol!(concat!(
+                        $($text,)*
+                    )),)*
+                }
+            }
+
             pub fn expectation_name(self) -> Symbol {
                 match self {
                     $(Self::$name => symbol!(concat!(
@@ -235,6 +243,13 @@ pub enum AnyPunct {
 }
 
 impl AnyPunct {
+    pub fn bare_name(self) -> Symbol {
+        match self {
+            AnyPunct::Single(v) => v.bare_name(),
+            AnyPunct::Seq(v) => v.bare_name(),
+        }
+    }
+
     pub fn expectation_name(self) -> Symbol {
         match self {
             AnyPunct::Single(v) => v.expectation_name(),
