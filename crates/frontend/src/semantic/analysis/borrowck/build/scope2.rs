@@ -8,7 +8,7 @@ use crate::{
     utils::mem::ArenaRc,
 };
 use bumpalo::Bump;
-use index_vec::{IndexVec, define_index_type};
+use index_vec::{IndexSlice, IndexVec, define_index_type};
 use std::{fmt, rc::Rc};
 
 // === MirScopedBuilder === //
@@ -286,24 +286,31 @@ impl MirScopedBuilder {
 // === MIR lowering === //
 
 impl MirScopedBuilder {
-    pub fn finish(self) {
+    pub fn finish(self, tcx: &TyCtxt) -> MirBody {
+        let mut raw_builder = RawMirScopedBuilder::new(tcx, self.locals, self.arg_count);
+
+        Self::finish_scope(&mut raw_builder, &self.scopes, MirScopeIdx::ENTRY);
+
+        raw_builder.body
+    }
+
+    fn finish_scope(
+        raw_builder: &mut RawMirScopedBuilder<'_>,
+        scopes: &IndexSlice<MirScopeIdx, [BuilderScope]>,
+        scope: MirScopeIdx,
+    ) {
         todo!()
     }
 }
 
-struct LowerCtxt<'a> {
+struct RawMirScopedBuilder<'a> {
     tcx: &'a TyCtxt,
     body: MirBody,
-    scope_stack: Vec<LowerScope>,
-    live_locals: Vec<LiveLocal>,
+    scope_stack: Vec<RawLowerScope>,
+    live_locals: Vec<RawLiveLocal>,
 }
 
-struct LiveLocal {
-    drop_unwind_target: Option<MirBlockIdx>,
-    idx: MirLocalIdx,
-}
-
-struct LowerScope {
+struct RawLowerScope {
     /// The scope in the `MirScopedBuilder` to which this low-level builder scope corresponds.
     id: MirScopeIdx,
 
@@ -326,9 +333,59 @@ struct LowerScope {
     branch_bb: Option<MirBlockIdx>,
 }
 
+struct RawLiveLocal {
+    drop_unwind_target: Option<MirBlockIdx>,
+    idx: MirLocalIdx,
+}
+
+impl<'tcx> RawMirScopedBuilder<'tcx> {
+    fn new(tcx: &'tcx TyCtxt, locals: IndexVec<MirLocalIdx, MirLocal>, arg_count: u32) -> Self {
+        let mut this = Self {
+            tcx,
+            body: MirBody::default(),
+            scope_stack: Vec::new(),
+            live_locals: Vec::new(),
+        };
+
+        this.body.locals = locals;
+        this.body.arg_count = arg_count;
+
+        let entry_bb = this.body.cfg.create_block();
+
+        let root_unwind_bb = this
+            .body
+            .cfg
+            .create_block_with_terminator(MirTerminator::UnwindResume);
+
+        // N.B. we do not register the return value as a local like all function arguments because
+        // we don't want to drop it before a `return`. The only time we want to drop that place is
+        // when we panic out of the function.
+        let retval_unwind_bb =
+            this.body
+                .cfg
+                .create_block_with_terminator(MirTerminator::EnsureDropped {
+                    place: MirPlace::new(tcx, MirLocalIdx::RETURN, []),
+                    target: root_unwind_bb,
+                    unwind: MirUnwindBehavior::DoublePanic,
+                });
+
+        this.body.entry = entry_bb;
+        this.scope_stack.push(RawLowerScope {
+            id: MirScopeIdx::ENTRY,
+            first_live_local: 0,
+            unwind_bb: retval_unwind_bb,
+            entry_bb,
+            curr_bb: Some(entry_bb),
+            branch_bb: None,
+        });
+
+        this
+    }
+}
+
 // Branch management
-impl LowerCtxt<'_> {
-    fn get_code_head(&mut self, expected_top: MirScopeIdx) -> MirBlockIdx {
+impl RawMirScopedBuilder<'_> {
+    fn expect_top_curr(&mut self, expected_top: MirScopeIdx) -> MirBlockIdx {
         let top = self.scope_stack.last_mut().expect("no active scope");
         assert_eq!(top.id, expected_top);
         assert!(
@@ -346,7 +403,7 @@ impl LowerCtxt<'_> {
     }
 
     fn begin_branch(&mut self, expected_top: MirScopeIdx) {
-        let curr_bb = self.get_code_head(expected_top);
+        let curr_bb = self.expect_top_curr(expected_top);
 
         let top = self.scope_stack.last_mut().unwrap();
         top.curr_bb = None;
@@ -363,7 +420,7 @@ impl LowerCtxt<'_> {
         );
 
         let sub_entry = self.body.cfg.create_block();
-        self.scope_stack.push(LowerScope {
+        self.scope_stack.push(RawLowerScope {
             id,
             first_live_local: self.live_locals.len(),
             unwind_bb: top.unwind_bb,
@@ -397,9 +454,9 @@ impl LowerCtxt<'_> {
 }
 
 // Code pushing
-impl LowerCtxt<'_> {
+impl RawMirScopedBuilder<'_> {
     fn finish_unreachable(&mut self, expected_top: MirScopeIdx) {
-        let block = self.get_code_head(expected_top);
+        let block = self.expect_top_curr(expected_top);
         self.body
             .cfg
             .init_terminator(block, MirTerminator::Unreachable);
@@ -413,7 +470,7 @@ impl LowerCtxt<'_> {
         target: MirScopeIdx,
         is_continue: bool,
     ) {
-        let mut curr_bb = self.get_code_head(expected_top);
+        let mut curr_bb = self.expect_top_curr(expected_top);
 
         let mut scope_iter = self.scope_stack.iter_mut().rev();
         let mut local_iter = self.live_locals.iter().enumerate().rev().peekable();
@@ -514,21 +571,62 @@ impl LowerCtxt<'_> {
         self.finish_break_common(expected_top, target, true);
     }
 
-    fn push_local(&mut self, expected_top: MirScopeIdx, local: MirLocal, can_omit_drop: bool) {
-        todo!()
+    fn push_local(&mut self, expected_top: MirScopeIdx, local: MirLocalIdx, can_omit_drop: bool) {
+        let curr = self.expect_top_curr(expected_top);
+
+        match can_omit_drop {
+            true => {
+                self.live_locals.push(RawLiveLocal {
+                    drop_unwind_target: None,
+                    idx: local,
+                });
+            }
+            false => {
+                let top = self.scope_stack.last_mut().unwrap();
+
+                self.live_locals.push(RawLiveLocal {
+                    drop_unwind_target: Some(top.unwind_bb),
+                    idx: local,
+                });
+
+                top.unwind_bb =
+                    self.body
+                        .cfg
+                        .create_block_with_terminator(MirTerminator::EnsureDropped {
+                            place: MirPlace::new(self.tcx, local, []),
+                            target: top.unwind_bb,
+                            unwind: MirUnwindBehavior::DoublePanic,
+                        });
+            }
+        }
+
+        self.body.cfg.push_stmt(
+            curr,
+            MirStmt {
+                source_info: MirStmtSourceInfo::Local,
+                kind: MirStmtKind::StorageLive(local),
+            },
+        );
     }
 
-    fn push_assign(&mut self, expected_top: MirScopeIdx, lhs: MirPlace, rhs: MirRvalue) {
-        todo!()
+    fn push_stmt(&mut self, expected_top: MirScopeIdx, stmt: MirStmt) {
+        let curr = self.expect_top_curr(expected_top);
+
+        self.body.cfg.push_stmt(curr, stmt);
     }
 
-    fn push_call(
+    fn push_unwind_terminator(
         &mut self,
         expected_top: MirScopeIdx,
-        destination: MirPlace,
-        callee: MirOperand,
-        args: Box<[MirOperand]>,
+        f: impl FnOnce(MirBlockIdx, MirUnwindBehavior) -> MirTerminator,
     ) {
-        todo!()
+        let curr = self.expect_top_curr(expected_top);
+        let top = self.scope_stack.last_mut().unwrap();
+
+        let successor = self.body.cfg.create_block();
+        let terminator = f(successor, MirUnwindBehavior::Continue(top.unwind_bb));
+        self.body.cfg.init_terminator(curr, terminator);
+
+        top.curr_bb = Some(successor);
     }
 }
