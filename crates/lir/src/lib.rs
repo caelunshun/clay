@@ -12,3 +12,5 @@ pub mod trait_family;
 pub mod trait_impl_family;
 pub mod ty;
 pub mod ty_param;
+pub mod pool;
+pub mod error;

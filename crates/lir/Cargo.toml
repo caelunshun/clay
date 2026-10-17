@@ -8,5 +8,6 @@ arrayvec.workspace = true
 clay-core.workspace = true
 derive-where.workspace = true
 slotmap.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]

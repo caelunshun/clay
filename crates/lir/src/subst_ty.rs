@@ -3,7 +3,7 @@ use clay_core::FastIndexMap;
 
 /// Allows forming a concrete type after substitution
 /// of type parameters.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum SubstTy {
     Self_,
     TyParam(Ptr<TyParam>),
@@ -13,20 +13,20 @@ pub enum SubstTy {
     Adt(AdtSubstTyRef),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct AdtSubstTyRef {
-    pub adt_family: AdtTyFamily,
+    pub adt_family: Ptr<AdtTyFamily>,
     pub ty_args: SubstTyArgs,
 }
 
-pub type SubstTyArgs = FastIndexMap<Ptr<TyParam>, SubstTy>;
+pub type SubstTyArgs = Box<FastIndexMap<Ptr<TyParam>, SubstTy>>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct SliceSubstTyRef {
     pub element: Box<SubstTy>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct BufferSubstTyRef {
     pub element: Box<SubstTy>,
 }

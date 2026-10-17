@@ -1,6 +1,6 @@
 use crate::{arena::Ptr, subst_ty::SubstTy};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct EnumTyFamily {
     pub variants: Vec<Ptr<Variant>>,
 }

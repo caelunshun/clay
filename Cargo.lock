@@ -355,6 +355,7 @@ dependencies = [
  "clay-core",
  "derive-where",
  "slotmap",
+ "thiserror",
 ]
 
 [[package]]
