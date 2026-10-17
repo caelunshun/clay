@@ -292,7 +292,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
 
                 IterEither::Left(
                     self.ccx()
-                        .coherence()
+                        .impl_cache()
                         .gather_inherent_impl_method_candidates(self.ccx(), receiver, name.text),
                 )
             }
@@ -305,7 +305,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
 
                 IterEither::Right(
                     self.ccx()
-                        .coherence()
+                        .impl_cache()
                         .gather_inherent_impl_function_candidates(self.ccx(), self_ty, name.text),
                 )
             }

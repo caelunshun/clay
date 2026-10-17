@@ -232,7 +232,7 @@ impl<'tcx> ClauseCx<'tcx> {
         let mut prev_confirmation = None;
 
         let candidates = self
-            .coherence()
+            .impl_cache()
             .gather_trait_impl_candidates(self, lhs, rhs);
 
         if let Ok(confirmation) = self

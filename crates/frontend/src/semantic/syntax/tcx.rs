@@ -31,7 +31,7 @@ pub struct Interners {
     pub trait_param_list: ListInterner<TraitParam>,
     pub trait_clause_list: ListInterner<TraitClause>,
     pub list_of_trait_clause_list: ListInterner<TraitClauseList>,
-    pub coherence_ty_list: ListInterner<TyShape>,
+    pub ty_shape_list: ListInterner<TyShape>,
     pub hrtb_debruijn_list: ListInterner<HrtbDebruijnDef>,
     pub mir_place_elem_list: ListInterner<MirPlaceElem>,
 }
@@ -111,7 +111,7 @@ impl HasListInterner<TraitClauseList> for TyCtxt {
 
 impl HasListInterner<TyShape> for TyCtxt {
     fn interner(&self) -> &ListInterner<TyShape> {
-        &self.interners.coherence_ty_list
+        &self.interners.ty_shape_list
     }
 }
 

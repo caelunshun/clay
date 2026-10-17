@@ -6,7 +6,7 @@ use crate::{
             typeck::type_check_function,
         },
         infer::{
-            ClauseCx, ClauseFuel, ClauseImportEnv, CoherenceMap, GenericSubst, HrtbUniverse,
+            ClauseCx, ClauseFuel, ClauseImportEnv, GenericSubst, HrtbUniverse, ImplCache,
             SpannedError, UnifyCxMode,
         },
         syntax::{
@@ -19,7 +19,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct CrateSigckVisitor<'tcx> {
     pub tcx: &'tcx TyCtxt,
-    pub coherence: &'tcx CoherenceMap,
+    pub impl_cache: &'tcx ImplCache,
     pub krate: Obj<Crate>,
 }
 
@@ -77,7 +77,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
         } = def.r(s);
 
         // Setup a `ClauseCx` with our environment in mind.
-        let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
+        let mut ccx = ClauseCx::new(tcx, self.impl_cache, self.krate, UnifyCxMode::RegionAware);
         let env = ccx.universal_env_for_trait_def(def);
 
         // First, let's ensure that the inherited trait list is well-formed.
@@ -107,7 +107,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
         } = item.r(s);
 
         // Setup a `ClauseCx` with our environment in mind.
-        let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
+        let mut ccx = ClauseCx::new(tcx, self.impl_cache, self.krate, UnifyCxMode::RegionAware);
         let env = ccx.universal_env_for_impl_block(item);
 
         // Let's ensure that the target trait instance is well formed. This includes trait-checking
@@ -165,7 +165,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
         let tcx = self.tcx();
 
         // Setup a `ClauseCx` with our environment in mind.
-        let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
+        let mut ccx = ClauseCx::new(tcx, self.impl_cache, self.krate, UnifyCxMode::RegionAware);
         let env = ccx.universal_env_for_adt_def(def);
 
         // First, let's ensure that each generic parameter's clauses are well-formed.
@@ -205,7 +205,7 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
         let s = self.session();
 
         // Setup a `ClauseCx` with our environment in mind.
-        let mut ccx = ClauseCx::new(tcx, self.coherence, self.krate, UnifyCxMode::RegionAware);
+        let mut ccx = ClauseCx::new(tcx, self.impl_cache, self.krate, UnifyCxMode::RegionAware);
         let env = ccx.universal_env_for_type_alias_def(def);
 
         // First, let's ensure that each generic parameter's clauses are well-formed.
