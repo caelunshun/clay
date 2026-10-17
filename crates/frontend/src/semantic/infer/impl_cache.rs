@@ -396,8 +396,6 @@ impl<'a, T> Iterator for TyShapeMapIter<'a, T> {
     }
 }
 
-// === MapLayer === //
-
 define_index_type! {
     struct EntryIdx = u32;
 }
@@ -509,10 +507,7 @@ impl MapLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        base::arena::HasListInterner as _,
-        semantic::syntax::{SimpleTyKind, TyCtxt},
-    };
+    use crate::semantic::syntax::{SimpleTyKind, TyCtxt};
     use clay_core::FastHashSet;
 
     #[test]

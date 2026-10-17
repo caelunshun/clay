@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 bumpalo.workspace = true
 compact_str.workspace = true
+derive-where.workspace = true
 foldhash.workspace = true
 hashbrown.workspace = true
 indexmap.workspace = true
