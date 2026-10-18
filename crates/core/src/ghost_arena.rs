@@ -2,69 +2,19 @@ use bumpalo::Bump;
 use derive_where::derive_where;
 use std::{
     marker::PhantomData,
-    num::{NonZero, NonZeroU64},
+    num::NonZeroU64,
     ptr::{self, NonNull},
     sync::atomic::{AtomicU64, Ordering::*},
 };
 
 pub struct GhostArena<'m> {
-    _ty: PhantomData<&'m ()>,
+    _ty: PhantomData<fn(&'m ())>,
     bump: Bump,
     uid: NonZeroU64,
-    head: Option<NonNull<GhostHeader>>,
 }
 
-#[derive(Copy, Clone)]
-struct GhostHeader {
-    value: NonNull<GhostHeader>,
-}
-
-impl GhostHeader {
-    fn mark_needs_drop(&mut self) {
-        self.value = self
-            .value
-            .map_addr(|v| unsafe { NonZero::new_unchecked(v.get() | 0b01) });
-    }
-
-    fn mark_condemned(&mut self) {
-        self.value = self
-            .value
-            .map_addr(|v| unsafe { NonZero::new_unchecked(v.get() | 0b10) });
-    }
-
-    fn set_next(&mut self, ptr: NonNull<GhostHeader>) {
-        assert!(ptr.addr().get().is_multiple_of(4));
-
-        self.value = ptr.map_addr(|v| unsafe {
-            NonZero::new_unchecked(v.get() | (self.value.addr().get() & 0b11))
-        });
-    }
-
-    fn needs_drop(self) -> bool {
-        self.value.addr().get() & 0b01 != 0
-    }
-
-    fn is_condemned(self) -> bool {
-        self.value.addr().get() & 0b10 != 0
-    }
-
-    fn next(self) -> NonNull<GhostHeader> {
-        self.value
-            .map_addr(|v| unsafe { NonZero::new_unchecked(v.get() & !0b11) })
-    }
-}
-
-#[repr(C)]
-struct GhostValueWithDrop<T> {
-    drop_fn: unsafe fn(NonNull<GhostValueWithDrop<()>>),
-    inner: GhostValueWithoutDrop<T>,
-}
-
-#[repr(C)]
-struct GhostValueWithoutDrop<T> {
-    header: GhostHeader,
-    value: T,
-}
+unsafe impl Send for GhostArena<'_> {}
+unsafe impl Sync for GhostArena<'_> {}
 
 impl Default for GhostArena<'_> {
     fn default() -> Self {
@@ -74,7 +24,6 @@ impl Default for GhostArena<'_> {
             _ty: PhantomData,
             bump: Default::default(),
             uid: NonZeroU64::new(UID_GEN.fetch_add(1, Relaxed)).unwrap(),
-            head: None,
         }
     }
 }
@@ -84,17 +33,14 @@ impl<'m> GhostArena<'m> {
         Self::default()
     }
 
-    pub fn use_mut<F, R>(&mut self, f: F) -> R
-    where
-        F: for<'g> FnOnce(&mut GhostArenaAcquired<'g, 'm>) -> R,
-    {
+    pub fn acquire_mut<R>(
+        &mut self,
+        f: impl for<'g> FnOnce(&mut GhostArenaAcquired<'g, 'm>) -> R,
+    ) -> R {
         f(unsafe { &mut *(self as *mut GhostArena as *mut GhostArenaAcquired<'_, 'm>) })
     }
 
-    pub fn use_ref<F, R>(&self, f: F) -> R
-    where
-        F: for<'g> FnOnce(&GhostArenaAcquired<'g, 'm>) -> R,
-    {
+    pub fn acquire_ref<R>(&self, f: impl for<'g> FnOnce(&GhostArenaAcquired<'g, 'm>) -> R) -> R {
         f(unsafe { &*(self as *const GhostArena as *const GhostArenaAcquired<'_, 'm>) })
     }
 }
@@ -110,6 +56,9 @@ pub struct GhostPtr<'g, T: ?Sized + GhostPointee<'g>> {
     _marker: PhantomData<fn(&'g ()) -> &'g ()>,
     ptr: NonNull<T>,
 }
+
+unsafe impl<'g, T: ?Sized + GhostPointee<'g>> Send for GhostPtr<'g, T> {}
+unsafe impl<'g, T: ?Sized + GhostPointee<'g>> Sync for GhostPtr<'g, T> {}
 
 impl<'g, T: ?Sized + GhostPointee<'g>> GhostPtr<'g, T> {
     pub fn new<'m>(value: T, ar: &mut GhostArenaAcquired<'g, 'm>) -> Self
@@ -132,19 +81,15 @@ impl<'g, T: ?Sized + GhostPointee<'g>> GhostPtr<'g, T> {
         unsafe { self.ptr.as_mut() }
     }
 
-    pub fn free(self, ar: &mut GhostArenaAcquired<'g, '_>) {
-        todo!()
-    }
-
-    pub fn liberate(self, ar: &GhostArenaAcquired<'g, '_>) -> LiberatedGhostPtr<T::ForLt<'static>> {
-        LiberatedGhostPtr {
+    pub fn liberate(self, ar: &GhostArenaAcquired<'g, '_>) -> DynGhostPtr<T::ForLt<'static>> {
+        DynGhostPtr {
             uid: ar.arena.uid,
             ptr: recast_ptr(self.ptr),
         }
     }
 }
 
-pub unsafe trait GhostPointee<'g> {
+pub unsafe trait GhostPointee<'g>: Send + Sync {
     type ForLt<'new_g>: ?Sized
         + for<'possible_g> GhostPointee<'new_g, ForLt<'possible_g> = Self::ForLt<'possible_g>>;
 }
@@ -157,12 +102,15 @@ where
 }
 
 #[derive_where(Copy, Clone)]
-pub struct LiberatedGhostPtr<T: ?Sized + GhostPointee<'static>> {
+pub struct DynGhostPtr<T: ?Sized + GhostPointee<'static>> {
     uid: NonZeroU64,
     ptr: NonNull<T>,
 }
 
-impl<T: ?Sized + GhostPointee<'static>> LiberatedGhostPtr<T> {
+unsafe impl<T: ?Sized + GhostPointee<'static>> Send for DynGhostPtr<T> {}
+unsafe impl<T: ?Sized + GhostPointee<'static>> Sync for DynGhostPtr<T> {}
+
+impl<T: ?Sized + GhostPointee<'static>> DynGhostPtr<T> {
     pub fn rejoin<'g>(self, ar: &GhostArenaAcquired<'g, '_>) -> GhostPtr<'g, T::ForLt<'g>> {
         assert_eq!(self.uid, ar.arena.uid);
 
