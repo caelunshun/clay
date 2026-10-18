@@ -304,6 +304,7 @@ dependencies = [
  "hashbrown",
  "indexmap",
  "indoc",
+ "thiserror",
 ]
 
 [[package]]

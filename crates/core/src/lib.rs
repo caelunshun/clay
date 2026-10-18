@@ -1,4 +1,4 @@
-pub mod bric;
+pub mod brick;
 pub mod constants;
 pub mod ghost_arena;
 pub mod sexpr;

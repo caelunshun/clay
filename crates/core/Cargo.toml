@@ -10,6 +10,7 @@ derive-where.workspace = true
 foldhash.workspace = true
 hashbrown.workspace = true
 indexmap.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 indoc.workspace = true
