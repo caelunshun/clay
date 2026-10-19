@@ -509,10 +509,7 @@ impl MapLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        base::arena::HasListInterner as _,
-        semantic::syntax::{SimpleTyKind, TyCtxt},
-    };
+    use crate::semantic::syntax::{SimpleTyKind, TyCtxt};
     use clay_core::FastHashSet;
 
     #[test]

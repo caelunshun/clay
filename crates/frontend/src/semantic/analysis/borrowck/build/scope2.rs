@@ -1,321 +1,37 @@
-use crate::{
-    base::arena::Obj,
-    semantic::syntax::{
-        Divergence, FnDef, MirBlockIdx, MirBody, MirLocal, MirLocalIdx, MirOperand, MirPlace,
-        MirRvalue, MirStmt, MirStmtKind, MirStmtSourceInfo, MirTerminator, MirUnwindBehavior,
-        TyCtxt,
-    },
-    utils::mem::ArenaRc,
+use crate::semantic::syntax::{
+    Divergence, MirBlockIdx, MirBody, MirLocalIdx, MirPlace, MirStmt, MirStmtKind,
+    MirStmtSourceInfo, MirTerminator, MirUnwindBehavior, TyCtxt,
 };
-use bumpalo::Bump;
-use index_vec::{IndexSlice, IndexVec, define_index_type};
-use std::{fmt, rc::Rc};
-
-// === MirScopedBuilder === //
+use index_vec::define_index_type;
 
 define_index_type! {
     pub struct MirScopeIdx = u32;
 }
 
-impl fmt::Display for MirScopeIdx {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "'scope_{}", self.index())
-    }
-}
-
 impl MirScopeIdx {
-    pub const ENTRY: MirScopeIdx = MirScopeIdx { _raw: 0 };
+    pub const ENTRY: Self = MirScopeIdx { _raw: 0 };
 }
 
-#[derive(Clone)]
-pub struct MirScopedBuilder {
-    arena: Rc<Bump>,
-    scopes: IndexVec<MirScopeIdx, BuilderScope>,
-    locals: IndexVec<MirLocalIdx, MirLocal>,
-    arg_count: u32,
-    debug_comments: bool,
+#[derive(Debug, Copy, Clone)]
+pub struct MirScopedBranch {
+    pub scope: MirScopeIdx,
+    pub entry: MirBlockIdx,
 }
 
-#[derive(Clone)]
-struct BuilderScope {
-    parent: Option<BuilderScopeParent>,
-    entries: Vec<BuilderScopeEntry>,
-}
-
-#[derive(Copy, Clone)]
-struct BuilderScopeParent {
-    created_at_sort_idx: u32,
-    target: MirScopeIdx,
-}
-
-#[derive(Clone)]
-struct BuilderScopeEntry {
-    sort_idx: u32,
-    kind: BuilderScopeKind,
-}
-
-#[derive(Clone)]
-enum BuilderScopeKind {
-    DebugComment(String),
-    PushSrcHint(MirStmtSourceInfo),
-    PopSrcHint,
-    CreateLocal(MirLocalIdx),
-    Assign(ArenaRc<ScopeEntryAssign>),
-    Break(MirScopeIdx),
-    Continue(MirScopeIdx),
-    Call(ArenaRc<ScopeEntryCall>),
-    Scope(MirScopeIdx),
-    If(ArenaRc<ScopeEntryIf>),
-    Unreachable,
-}
-
-#[derive(Clone)]
-struct ScopeEntryAssign {
-    lhs: MirPlace,
-    rhs: MirRvalue,
-}
-
-#[derive(Clone)]
-struct ScopeEntryCall {
-    callee: MirOperand,
-    args: Box<[MirOperand]>,
-    destination: MirPlace,
-}
-
-#[derive(Clone)]
-struct ScopeEntryIf {
-    discr: MirOperand,
-    truthy: Option<MirScopeIdx>,
-    falsy: Option<MirScopeIdx>,
-}
-
-impl MirScopedBuilder {
-    pub fn new(tcx: &TyCtxt, def: Obj<FnDef>) -> Self {
-        todo!()
-    }
-
-    fn push_entry(&mut self, scope: MirScopeIdx, entry: BuilderScopeKind) {
-        let entries = &mut self.scopes[scope].entries;
-        let sort_idx = entries.len() as u32;
-
-        entries.push(BuilderScopeEntry {
-            sort_idx,
-            kind: entry,
-        });
-    }
-
-    pub fn push_debug_comment(&mut self, scope: MirScopeIdx, text: impl FnOnce() -> String) {
-        if self.debug_comments {
-            self.push_entry(scope, BuilderScopeKind::DebugComment(text()));
-        }
-    }
-
-    pub fn push_src_hint(&mut self, scope: MirScopeIdx, info: MirStmtSourceInfo) {
-        self.push_entry(scope, BuilderScopeKind::PushSrcHint(info));
-    }
-
-    pub fn pop_src_hint(&mut self, scope: MirScopeIdx) {
-        self.push_entry(scope, BuilderScopeKind::PopSrcHint);
-    }
-
-    #[must_use]
-    pub fn push_local(
-        &mut self,
-        scope: MirScopeIdx,
-        in_scope: MirScopeIdx,
-        descriptor: MirLocal,
-    ) -> MirLocalIdx {
-        // Figure out the hoisting index.
-        let sort_idx = 'create: {
-            if scope == in_scope {
-                break 'create self.scopes[scope].entries.len() as u32;
-            }
-
-            let mut curr = scope;
-
-            loop {
-                let Some(parent) = self.scopes[curr].parent else {
-                    panic!("can only push locals to ancestor scopes");
-                };
-
-                if parent.target == in_scope {
-                    break 'create parent.created_at_sort_idx;
-                }
-
-                curr = parent.target;
-            }
-        };
-
-        let local = self.locals.push(descriptor);
-
-        self.scopes[in_scope].entries.push(BuilderScopeEntry {
-            sort_idx,
-            kind: BuilderScopeKind::CreateLocal(local),
-        });
-
-        local
-    }
-
-    pub fn push_assign(&mut self, scope: MirScopeIdx, lhs: MirPlace, rhs: MirRvalue) {
-        self.push_entry(
-            scope,
-            BuilderScopeKind::Assign(ArenaRc::new(
-                self.arena.clone(),
-                ScopeEntryAssign { lhs, rhs },
-            )),
-        );
-    }
-
-    pub fn push_break(&mut self, scope: MirScopeIdx, destination: MirScopeIdx) {
-        self.push_entry(scope, BuilderScopeKind::Break(destination));
-    }
-
-    pub fn push_continue(&mut self, scope: MirScopeIdx, destination: MirScopeIdx) {
-        self.push_entry(scope, BuilderScopeKind::Continue(destination));
-    }
-
-    pub fn push_return(&mut self, scope: MirScopeIdx) {
-        self.push_break(scope, MirScopeIdx::ENTRY);
-    }
-
-    pub fn push_call(
-        &mut self,
-        scope: MirScopeIdx,
-        destination: MirPlace,
-        callee: MirOperand,
-        args: impl IntoIterator<Item = MirOperand>,
-    ) {
-        let args = args.into_iter().collect();
-
-        self.push_entry(
-            scope,
-            BuilderScopeKind::Call(ArenaRc::new(
-                self.arena.clone(),
-                ScopeEntryCall {
-                    callee,
-                    args,
-                    destination,
-                },
-            )),
-        );
-    }
-
-    #[must_use]
-    fn create_child_scope(&mut self, scope: MirScopeIdx) -> MirScopeIdx {
-        let created_at_sort_idx = self.scopes[scope].entries.len() as u32;
-
-        self.scopes.push(BuilderScope {
-            parent: Some(BuilderScopeParent {
-                created_at_sort_idx,
-                target: scope,
-            }),
-            entries: Vec::new(),
-        })
-    }
-
-    #[must_use]
-    pub fn push_scope(&mut self, scope: MirScopeIdx) -> MirScopeIdx {
-        let child = self.create_child_scope(scope);
-        self.push_entry(scope, BuilderScopeKind::Scope(child));
-        child
-    }
-
-    #[must_use]
-    pub fn push_if_true(&mut self, scope: MirScopeIdx, discr: MirOperand) -> MirScopeIdx {
-        let truthy = self.create_child_scope(scope);
-
-        self.push_entry(
-            scope,
-            BuilderScopeKind::If(ArenaRc::new(
-                self.arena.clone(),
-                ScopeEntryIf {
-                    discr,
-                    truthy: Some(truthy),
-                    falsy: None,
-                },
-            )),
-        );
-
-        truthy
-    }
-
-    #[must_use]
-    pub fn push_if_false(&mut self, scope: MirScopeIdx, discr: MirOperand) -> MirScopeIdx {
-        let falsy = self.create_child_scope(scope);
-
-        self.push_entry(
-            scope,
-            BuilderScopeKind::If(ArenaRc::new(
-                self.arena.clone(),
-                ScopeEntryIf {
-                    discr,
-                    truthy: None,
-                    falsy: Some(falsy),
-                },
-            )),
-        );
-
-        falsy
-    }
-
-    #[must_use]
-    pub fn push_if_else(&mut self, scope: MirScopeIdx, discr: MirOperand) -> [MirScopeIdx; 2] {
-        let truthy = self.create_child_scope(scope);
-        let falsy = self.create_child_scope(scope);
-
-        self.push_entry(
-            scope,
-            BuilderScopeKind::If(ArenaRc::new(
-                self.arena.clone(),
-                ScopeEntryIf {
-                    discr,
-                    truthy: Some(truthy),
-                    falsy: Some(falsy),
-                },
-            )),
-        );
-
-        [truthy, falsy]
-    }
-
-    pub fn push_unreachable(&mut self, scope: MirScopeIdx) {
-        self.push_entry(scope, BuilderScopeKind::Unreachable);
-    }
-}
-
-// === MIR lowering === //
-
-impl MirScopedBuilder {
-    pub fn finish(self, tcx: &TyCtxt) -> MirBody {
-        let mut raw_builder = RawMirScopedBuilder::new(tcx, self.locals, self.arg_count);
-
-        Self::finish_scope(&mut raw_builder, &self.scopes, MirScopeIdx::ENTRY);
-
-        raw_builder.body
-    }
-
-    fn finish_scope(
-        raw_builder: &mut RawMirScopedBuilder<'_>,
-        scopes: &IndexSlice<MirScopeIdx, [BuilderScope]>,
-        scope: MirScopeIdx,
-    ) {
-        todo!()
-    }
-}
-
-struct RawMirScopedBuilder<'a> {
+pub struct MirScopedBuilder<'a> {
     tcx: &'a TyCtxt,
     body: MirBody,
-    scope_stack: Vec<RawLowerScope>,
-    live_locals: Vec<RawLiveLocal>,
+    scope_id_gen: MirScopeIdx,
+    scope_stack: Vec<LowerScope>,
+    live_locals: Vec<LiveLocal>,
 }
 
-struct RawLowerScope {
+struct LowerScope {
     /// The scope in the `MirScopedBuilder` to which this low-level builder scope corresponds.
     id: MirScopeIdx,
 
     /// The index of the first local owned by this scope.
-    first_live_local: usize,
+    first_live_local: u32,
 
     /// The latest unwind target we'll be chaining against when creating additional local drop
     /// targets.
@@ -333,21 +49,21 @@ struct RawLowerScope {
     branch_bb: Option<MirBlockIdx>,
 }
 
-struct RawLiveLocal {
+struct LiveLocal {
     drop_unwind_target: Option<MirBlockIdx>,
     idx: MirLocalIdx,
 }
 
-impl<'tcx> RawMirScopedBuilder<'tcx> {
-    fn new(tcx: &'tcx TyCtxt, locals: IndexVec<MirLocalIdx, MirLocal>, arg_count: u32) -> Self {
+impl<'tcx> MirScopedBuilder<'tcx> {
+    pub fn new(tcx: &'tcx TyCtxt, arg_count: u32) -> Self {
         let mut this = Self {
             tcx,
             body: MirBody::default(),
+            scope_id_gen: MirScopeIdx::ENTRY + 1,
             scope_stack: Vec::new(),
             live_locals: Vec::new(),
         };
 
-        this.body.locals = locals;
         this.body.arg_count = arg_count;
 
         let entry_bb = this.body.cfg.create_block();
@@ -370,7 +86,7 @@ impl<'tcx> RawMirScopedBuilder<'tcx> {
                 });
 
         this.body.entry = entry_bb;
-        this.scope_stack.push(RawLowerScope {
+        this.scope_stack.push(LowerScope {
             id: MirScopeIdx::ENTRY,
             first_live_local: 0,
             unwind_bb: retval_unwind_bb,
@@ -381,10 +97,15 @@ impl<'tcx> RawMirScopedBuilder<'tcx> {
 
         this
     }
+
+    pub fn finish(self) -> MirBody {
+        assert!(self.scope_stack.is_empty());
+        self.body
+    }
 }
 
 // Branch management
-impl RawMirScopedBuilder<'_> {
+impl MirScopedBuilder<'_> {
     fn expect_top_curr(&mut self, expected_top: MirScopeIdx) -> MirBlockIdx {
         let top = self.scope_stack.last_mut().expect("no active scope");
         assert_eq!(top.id, expected_top);
@@ -399,10 +120,10 @@ impl RawMirScopedBuilder<'_> {
 
     fn pop_scope_stack(&mut self) {
         let top = self.scope_stack.pop().unwrap();
-        self.live_locals.truncate(top.first_live_local);
+        self.live_locals.truncate(top.first_live_local as usize);
     }
 
-    fn begin_branch(&mut self, expected_top: MirScopeIdx) {
+    pub fn begin_branch(&mut self, expected_top: MirScopeIdx) {
         let curr_bb = self.expect_top_curr(expected_top);
 
         let top = self.scope_stack.last_mut().unwrap();
@@ -411,7 +132,7 @@ impl RawMirScopedBuilder<'_> {
     }
 
     #[must_use]
-    fn add_branch_scope(&mut self, expected_top: MirScopeIdx, id: MirScopeIdx) -> MirBlockIdx {
+    pub fn add_branch_scope(&mut self, expected_top: MirScopeIdx) -> MirScopedBranch {
         let top = self.scope_stack.last().expect("no active scope");
         assert_eq!(top.id, expected_top);
         assert!(
@@ -420,20 +141,30 @@ impl RawMirScopedBuilder<'_> {
         );
 
         let sub_entry = self.body.cfg.create_block();
-        self.scope_stack.push(RawLowerScope {
-            id,
-            first_live_local: self.live_locals.len(),
+        let sub_id = self.scope_id_gen;
+        self.scope_id_gen += 1;
+
+        self.scope_stack.push(LowerScope {
+            id: sub_id,
+            first_live_local: self.live_locals.len() as u32,
             unwind_bb: top.unwind_bb,
             entry_bb: sub_entry,
             curr_bb: Some(sub_entry),
             branch_bb: None,
         });
 
-        sub_entry
+        MirScopedBranch {
+            scope: sub_id,
+            entry: sub_entry,
+        }
     }
 
     #[must_use]
-    fn end_branch(&mut self, expected_top: MirScopeIdx, terminator: MirTerminator) -> Divergence {
+    pub fn end_branch(
+        &mut self,
+        expected_top: MirScopeIdx,
+        terminator: MirTerminator,
+    ) -> Divergence {
         let top = self.scope_stack.last_mut().expect("no active scope");
         assert_eq!(top.id, expected_top);
 
@@ -454,14 +185,22 @@ impl RawMirScopedBuilder<'_> {
 }
 
 // Code pushing
-impl RawMirScopedBuilder<'_> {
-    fn finish_unreachable(&mut self, expected_top: MirScopeIdx) {
+impl MirScopedBuilder<'_> {
+    pub fn finish_unreachable(&mut self, expected_top: MirScopeIdx) {
         let block = self.expect_top_curr(expected_top);
         self.body
             .cfg
             .init_terminator(block, MirTerminator::Unreachable);
 
         self.pop_scope_stack();
+    }
+
+    pub fn finish_break(&mut self, expected_top: MirScopeIdx, target: MirScopeIdx) {
+        self.finish_break_common(expected_top, target, false);
+    }
+
+    pub fn finish_continue(&mut self, expected_top: MirScopeIdx, target: MirScopeIdx) {
+        self.finish_break_common(expected_top, target, true);
     }
 
     fn finish_break_common(
@@ -480,7 +219,7 @@ impl RawMirScopedBuilder<'_> {
 
             // Push drops.
             while let Some(&(live_local_idx, _)) = local_iter.peek()
-                && live_local_idx >= top.first_live_local
+                && live_local_idx as u32 >= top.first_live_local
             {
                 let (_, local) = local_iter.next().unwrap();
 
@@ -563,20 +302,17 @@ impl RawMirScopedBuilder<'_> {
         unreachable!("must break to ancestor");
     }
 
-    fn finish_break(&mut self, expected_top: MirScopeIdx, target: MirScopeIdx) {
-        self.finish_break_common(expected_top, target, false);
-    }
-
-    fn finish_continue(&mut self, expected_top: MirScopeIdx, target: MirScopeIdx) {
-        self.finish_break_common(expected_top, target, true);
-    }
-
-    fn push_local(&mut self, expected_top: MirScopeIdx, local: MirLocalIdx, can_omit_drop: bool) {
+    pub fn push_local(
+        &mut self,
+        expected_top: MirScopeIdx,
+        local: MirLocalIdx,
+        can_omit_drop: bool,
+    ) {
         let curr = self.expect_top_curr(expected_top);
 
         match can_omit_drop {
             true => {
-                self.live_locals.push(RawLiveLocal {
+                self.live_locals.push(LiveLocal {
                     drop_unwind_target: None,
                     idx: local,
                 });
@@ -584,7 +320,7 @@ impl RawMirScopedBuilder<'_> {
             false => {
                 let top = self.scope_stack.last_mut().unwrap();
 
-                self.live_locals.push(RawLiveLocal {
+                self.live_locals.push(LiveLocal {
                     drop_unwind_target: Some(top.unwind_bb),
                     idx: local,
                 });
@@ -609,13 +345,13 @@ impl RawMirScopedBuilder<'_> {
         );
     }
 
-    fn push_stmt(&mut self, expected_top: MirScopeIdx, stmt: MirStmt) {
+    pub fn push_stmt(&mut self, expected_top: MirScopeIdx, stmt: MirStmt) {
         let curr = self.expect_top_curr(expected_top);
 
         self.body.cfg.push_stmt(curr, stmt);
     }
 
-    fn push_unwind_terminator(
+    pub fn push_unwind_terminator(
         &mut self,
         expected_top: MirScopeIdx,
         f: impl FnOnce(MirBlockIdx, MirUnwindBehavior) -> MirTerminator,
