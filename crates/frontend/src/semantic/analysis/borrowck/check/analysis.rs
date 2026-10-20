@@ -58,7 +58,7 @@ impl<'g> BackwardsDataflowAnalysis<'g> for LivenessAnalysis<'g> {
         let mut new_output_success = PlaceSet::default();
         let mut new_output_unwind = PlaceSet::default();
 
-        for (successor, &effect) in block.terminator().successors().iter().zip(inputs) {
+        for (successor, &effect) in block.terminator_kind().successors().iter().zip(inputs) {
             if successor.is_unwind {
                 new_output_unwind.union(effect);
             } else {
@@ -66,7 +66,7 @@ impl<'g> BackwardsDataflowAnalysis<'g> for LivenessAnalysis<'g> {
             }
         }
 
-        for &mention in block.terminator().mentions(self.tcx).iter().rev() {
+        for &mention in block.terminator_kind().mentions(self.tcx).iter().rev() {
             if mention.kind.intersects(MirPlaceMentionKind::LIVENESS_USE) {
                 new_output_success.add(self.place_numbering, mention.place);
                 new_output_unwind.add(self.place_numbering, mention.place);
@@ -170,7 +170,7 @@ impl<'g> ForwardsDataflowAnalysis<'g> for OccupancyAnalysis<'g> {
         let mut new_output_success = input.clone();
         let mut new_output_unwind = input.clone();
 
-        for mention in block.terminator().mentions(self.tcx) {
+        for mention in block.terminator_kind().mentions(self.tcx) {
             if mention.kind.intersects(MirPlaceMentionKind::OCCUPANCY_ADD) {
                 new_output_success.add(self.place_numbering, mention.place);
             }
@@ -182,7 +182,7 @@ impl<'g> ForwardsDataflowAnalysis<'g> for OccupancyAnalysis<'g> {
         }
 
         for (output, MirTerminatorSuccessor { is_unwind, .. }) in
-            outputs.iter_mut().zip(block.terminator().successors())
+            outputs.iter_mut().zip(block.terminator_kind().successors())
         {
             output.set_value_ref(if is_unwind {
                 &new_output_unwind

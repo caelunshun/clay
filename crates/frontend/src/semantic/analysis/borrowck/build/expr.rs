@@ -8,7 +8,7 @@ use crate::{
         },
         syntax::{
             MirBinOpKind, MirLocal, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue,
-            MirStmt, MirStmtKind, MirStmtSourceInfo, ResolvedFieldIdx, SigTy, ThirBlock,
+            MirStmt, MirStmtKind, MirSourceInfo, ResolvedFieldIdx, SigTy, ThirBlock,
             ThirBlockTrailing, ThirExpr, ThirExprKind, ThirStmt,
         },
     },
@@ -52,7 +52,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 self.builder.push_statement(
                     scope,
                     MirStmt {
-                        source_info: MirStmtSourceInfo::Simple(expr.r(s).span),
+                        source_info: MirSourceInfo::Simple(expr.r(s).span),
                         kind: MirStmtKind::Assign(Box::new((assign_into, rvalue))),
                     },
                 );
@@ -66,7 +66,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     self.builder.push_statement(
                         scope,
                         MirStmt {
-                            source_info: MirStmtSourceInfo::Simple(expr.r(s).span),
+                            source_info: MirSourceInfo::Simple(expr.r(s).span),
                             kind: MirStmtKind::Assign(Box::new((
                                 assign_into,
                                 // The original output needs to be invalidated.
@@ -159,7 +159,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     self.builder.push_statement(
                         short_scope,
                         MirStmt {
-                            source_info: MirStmtSourceInfo::Simple(expr.r(s).span),
+                            source_info: MirSourceInfo::Simple(expr.r(s).span),
                             kind: MirStmtKind::Assign(Box::new((
                                 assign_into,
                                 MirRvalue::Literal(
@@ -206,7 +206,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 self.builder.push_statement(
                     scope,
                     MirStmt {
-                        source_info: MirStmtSourceInfo::Simple(expr.r(s).span),
+                        source_info: MirSourceInfo::Simple(expr.r(s).span),
                         kind: MirStmtKind::Assign(Box::new((
                             MirPlace::new(tcx, MirLocalIdx::RETURN, []),
                             rv,
@@ -224,7 +224,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 self.builder.push_statement(
                     scope,
                     MirStmt {
-                        source_info: MirStmtSourceInfo::Simple(expr.r(s).span),
+                        source_info: MirSourceInfo::Simple(expr.r(s).span),
                         kind: MirStmtKind::Assign(Box::new((lhs, rhs))),
                     },
                 );

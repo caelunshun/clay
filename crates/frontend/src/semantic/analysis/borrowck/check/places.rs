@@ -222,7 +222,7 @@ pub fn number_places_in_body(tcx: &TyCtxt, body: &MirBody) -> PlaceNumbering {
         }
 
         cbit::cbit! {
-            for mention in block.terminator().iter_mentions(tcx) {
+            for mention in block.terminator_kind().iter_mentions(tcx) {
                 builder.mention(s, truncate_place_to_direct(tcx, mention.place));
             }
         }

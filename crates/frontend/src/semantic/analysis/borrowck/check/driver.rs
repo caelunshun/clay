@@ -89,7 +89,7 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
         process_mentions(
             occupancy_iter.trans_before_end(block.block).clone(),
             &place_numbering,
-            &block.terminator().mentions(tcx),
+            &block.terminator_kind().mentions(tcx),
             block.terminator(),
         );
     }

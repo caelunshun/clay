@@ -4,7 +4,7 @@ use crate::{
         analysis::borrowck::build::{driver::MirFromThirCtx, scope::MirBuilderScopeIdx},
         syntax::{
             MirLocal, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue, MirStmt,
-            MirStmtKind, MirStmtSourceInfo, Mutability, ResolvedFieldIdx, SigRe, SigReKind,
+            MirStmtKind, MirSourceInfo, Mutability, ResolvedFieldIdx, SigRe, SigReKind,
             SigTyInner, SigTyKind, ThirExpr, ThirLetStmt, ThirLocal, ThirMatchArm, ThirPat,
             ThirPatKind,
         },
@@ -305,7 +305,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 let mir_local = self.ensure_local_defined(scopes.local_scope, local);
 
                 let init_stmt = MirStmt {
-                    source_info: MirStmtSourceInfo::Simple(pat.r(s).span),
+                    source_info: MirSourceInfo::Simple(pat.r(s).span),
                     kind: match by_ref {
                         Some(muta) => MirStmtKind::Assign(Box::new((
                             MirPlace::new(tcx, mir_local, []),
@@ -500,7 +500,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             self.builder.push_statement(
                 scope,
                 MirStmt {
-                    source_info: MirStmtSourceInfo::Simple(span),
+                    source_info: MirSourceInfo::Simple(span),
                     kind: MirStmtKind::Assign(Box::new((MirPlace::new(tcx, dest, []), rvalue))),
                 },
             );

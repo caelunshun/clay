@@ -16,6 +16,24 @@ use slotmap::{SecondaryMap, SlotMap, new_key_type};
 use smallvec::SmallVec;
 use std::{fmt, mem, ops::ControlFlow};
 
+// === Source Info === //
+
+define_index_type! {
+    pub struct MirScopeIdx = u32;
+}
+
+impl MirScopeIdx {
+    pub const ENTRY: Self = MirScopeIdx { _raw: 0 };
+
+    pub const UNCATEGORIZED: Self = MirScopeIdx { _raw: u32::MAX };
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum MirSourceInfo {
+    Simple(Span),
+    Todo,
+}
+
 // === Body === //
 
 define_index_type! {
@@ -102,6 +120,10 @@ impl<'g> MirBlockRef<'g> {
 
     pub fn terminator(self) -> &'g MirTerminator {
         self.body.cfg.terminator(self.block)
+    }
+
+    pub fn terminator_kind(self) -> &'g MirTerminatorKind {
+        &self.terminator().kind
     }
 
     pub fn predecessors(self) -> &'g [MirBlockLink] {
@@ -439,7 +461,8 @@ impl MirBodyCfg {
 
     pub fn set_terminator(&mut self, idx: MirBlockIdx, terminator: Option<MirTerminator>) {
         let new_successors = terminator.as_ref().map_or_default(|v| {
-            v.successors()
+            v.kind
+                .successors()
                 .into_iter()
                 .map(|v| v.target)
                 .collect::<SmallVec<[MirBlockIdx; 2]>>()
@@ -589,15 +612,8 @@ impl Iterator for MirStmtIter<'_> {
 
 #[derive(Debug, Clone)]
 pub struct MirStmt {
-    pub source_info: MirStmtSourceInfo,
+    pub source_info: MirSourceInfo,
     pub kind: MirStmtKind,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum MirStmtSourceInfo {
-    Simple(Span),
-    Break,
-    Local,
 }
 
 #[derive(Debug, Clone)]
@@ -856,7 +872,14 @@ impl MirLogicalBinOpKind {
 // === Terminator === //
 
 #[derive(Debug, Clone)]
-pub enum MirTerminator {
+pub struct MirTerminator {
+    pub debug_scope: MirScopeIdx,
+    pub source_info: MirSourceInfo,
+    pub kind: MirTerminatorKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum MirTerminatorKind {
     Goto(MirBlockIdx),
     SwitchInt {
         discr: MirOperand,
@@ -880,27 +903,27 @@ pub enum MirTerminator {
     UnwindResume,
 }
 
-impl TraverseMentions for MirTerminator {
+impl TraverseMentions for MirTerminatorKind {
     fn traverse_mentions<B>(
         tcx: &TyCtxt,
         me: &Self,
         f: &mut impl FnMut(MirPlaceMention) -> ControlFlow<B>,
     ) -> ControlFlow<B> {
         match me {
-            MirTerminator::Goto(_)
-            | MirTerminator::Unreachable
-            | MirTerminator::Return
-            | MirTerminator::UnwindResume => {
+            MirTerminatorKind::Goto(_)
+            | MirTerminatorKind::Unreachable
+            | MirTerminatorKind::Return
+            | MirTerminatorKind::UnwindResume => {
                 // (no mentions)
             }
-            MirTerminator::SwitchInt {
+            MirTerminatorKind::SwitchInt {
                 discr,
                 constants: _,
                 targets: _,
             } => {
                 TraverseMentions::traverse_mentions(tcx, discr, f)?;
             }
-            MirTerminator::Call {
+            MirTerminatorKind::Call {
                 callee,
                 args,
                 destination,
@@ -915,7 +938,7 @@ impl TraverseMentions for MirTerminator {
                     place: *destination,
                 })?;
             }
-            MirTerminator::EnsureDropped {
+            MirTerminatorKind::EnsureDropped {
                 place,
                 target: _,
                 unwind: _,
@@ -937,21 +960,21 @@ pub struct MirTerminatorSuccessor {
     pub is_unwind: bool,
 }
 
-impl MirTerminator {
+impl MirTerminatorKind {
     pub fn successors(&self) -> SmallVec<[MirTerminatorSuccessor; 2]> {
         match *self {
-            MirTerminator::Goto(target) => SmallVec::from_iter([MirTerminatorSuccessor {
+            MirTerminatorKind::Goto(target) => SmallVec::from_iter([MirTerminatorSuccessor {
                 target,
                 is_unwind: false,
             }]),
-            MirTerminator::Call {
+            MirTerminatorKind::Call {
                 callee: _,
                 args: _,
                 destination: _,
                 target,
                 unwind,
             }
-            | MirTerminator::EnsureDropped {
+            | MirTerminatorKind::EnsureDropped {
                 place: _,
                 target,
                 unwind,
@@ -966,7 +989,7 @@ impl MirTerminator {
                     is_unwind: true,
                 })),
             ),
-            MirTerminator::SwitchInt {
+            MirTerminatorKind::SwitchInt {
                 discr: _,
                 constants: _,
                 ref targets,
@@ -981,9 +1004,9 @@ impl MirTerminator {
                         }),
                 )
             }
-            MirTerminator::UnwindResume | MirTerminator::Return | MirTerminator::Unreachable => {
-                SmallVec::new()
-            }
+            MirTerminatorKind::UnwindResume
+            | MirTerminatorKind::Return
+            | MirTerminatorKind::Unreachable => SmallVec::new(),
         }
     }
 }
@@ -1214,6 +1237,12 @@ pub struct MirPrettyFmt<'a, T> {
     value: T,
 }
 
+impl fmt::Display for MirPrettyFmt<'_, MirBlockIdx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.value)
+    }
+}
+
 impl fmt::Display for MirPrettyFmt<'_, MirLocalIdx> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "_{}", self.value.index())
@@ -1399,17 +1428,10 @@ impl fmt::Display for MirPrettyFmt<'_, &MirStmt> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{}  // {}",
+            "{}{}",
             self.cx.wrap(&self.value.kind),
             self.cx.wrap(self.value.source_info)
         )
-    }
-}
-
-impl fmt::Display for MirPrettyFmt<'_, MirStmtSourceInfo> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO
-        write!(f, "{:?}", self.value)
     }
 }
 
@@ -1431,8 +1453,107 @@ impl fmt::Display for MirPrettyFmt<'_, &MirStmtKind> {
     }
 }
 
-impl fmt::Display for MirPrettyFmt<'_, MirBlockIdx> {
+impl fmt::Display for MirPrettyFmt<'_, &MirTerminator> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.value)
+        write!(
+            f,
+            "{}{}",
+            self.cx.wrap(&self.value.kind),
+            self.cx.wrap(self.value.source_info)
+        )
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, &MirTerminatorKind> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.value {
+            MirTerminatorKind::Goto(block) => {
+                write!(f, "goto({});", self.cx.wrap(*block))?;
+            }
+            MirTerminatorKind::SwitchInt {
+                discr,
+                constants,
+                targets,
+            } => {
+                write!(
+                    f,
+                    "switch({}, [{}]);",
+                    self.cx.wrap(*discr),
+                    format_list(
+                        constants
+                            .iter()
+                            .zip(targets)
+                            .map(|(cst, target)| format!("{cst} => {}", self.cx.wrap(*target))),
+                        SimpleListFormatGlue::COMMA_LIST
+                    )
+                )?;
+            }
+            MirTerminatorKind::Call {
+                callee,
+                args,
+                destination,
+                target,
+                unwind,
+            } => {
+                write!(
+                    f,
+                    "{} = call({}, [{}]) goto {} unwind {};",
+                    self.cx.wrap(*destination),
+                    self.cx.wrap(*callee),
+                    format_list(
+                        args.iter().map(|arg| self.cx.wrap(*arg)),
+                        SimpleListFormatGlue::COMMA_LIST,
+                    ),
+                    self.cx.wrap(*target),
+                    self.cx.wrap(*unwind),
+                )?;
+            }
+            MirTerminatorKind::EnsureDropped {
+                place,
+                target,
+                unwind,
+            } => {
+                write!(
+                    f,
+                    "ensure-dropped({}) goto {} unwind {};",
+                    self.cx.wrap(*place),
+                    self.cx.wrap(*target),
+                    self.cx.wrap(*unwind),
+                )?;
+            }
+            MirTerminatorKind::Unreachable => {
+                write!(f, "unreachable;")?;
+            }
+            MirTerminatorKind::Return => {
+                write!(f, "return;")?;
+            }
+            MirTerminatorKind::UnwindResume => {
+                write!(f, "unwind-resume;")?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, MirUnwindBehavior> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.value {
+            MirUnwindBehavior::Continue(bb) => {
+                write!(f, "{}", self.cx.wrap(bb))?;
+            }
+            MirUnwindBehavior::DoublePanic => {
+                f.write_str("<double panic>")?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, MirSourceInfo> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO
+        write!(f, " // {:?}", self.value)
     }
 }

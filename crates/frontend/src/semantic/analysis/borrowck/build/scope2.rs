@@ -1,16 +1,7 @@
 use crate::semantic::syntax::{
-    Divergence, MirBlockIdx, MirBody, MirLocalIdx, MirPlace, MirStmt, MirStmtKind,
-    MirStmtSourceInfo, MirTerminator, MirUnwindBehavior, TyCtxt,
+    Divergence, MirBlockIdx, MirBody, MirLocal, MirLocalIdx, MirPlace, MirScopeIdx, MirSourceInfo,
+    MirStmt, MirStmtKind, MirTerminator, MirTerminatorKind, MirUnwindBehavior, TyCtxt,
 };
-use index_vec::define_index_type;
-
-define_index_type! {
-    pub struct MirScopeIdx = u32;
-}
-
-impl MirScopeIdx {
-    pub const ENTRY: Self = MirScopeIdx { _raw: 0 };
-}
 
 #[derive(Debug, Copy, Clone)]
 pub struct MirScopedBranch {
@@ -68,22 +59,24 @@ impl<'tcx> MirScopedBuilder<'tcx> {
 
         let entry_bb = this.body.cfg.create_block();
 
-        let root_unwind_bb = this
-            .body
-            .cfg
-            .create_block_with_terminator(MirTerminator::UnwindResume);
+        let root_unwind_bb = this.body.cfg.create_block_with_terminator(MirTerminator {
+            debug_scope: MirScopeIdx::UNCATEGORIZED,
+            source_info: MirSourceInfo::Todo,
+            kind: MirTerminatorKind::UnwindResume,
+        });
 
         // N.B. we do not register the return value as a local like all function arguments because
         // we don't want to drop it before a `return`. The only time we want to drop that place is
         // when we panic out of the function.
-        let retval_unwind_bb =
-            this.body
-                .cfg
-                .create_block_with_terminator(MirTerminator::EnsureDropped {
-                    place: MirPlace::new(tcx, MirLocalIdx::RETURN, []),
-                    target: root_unwind_bb,
-                    unwind: MirUnwindBehavior::DoublePanic,
-                });
+        let retval_unwind_bb = this.body.cfg.create_block_with_terminator(MirTerminator {
+            debug_scope: MirScopeIdx::UNCATEGORIZED,
+            source_info: MirSourceInfo::Todo,
+            kind: MirTerminatorKind::EnsureDropped {
+                place: MirPlace::new(tcx, MirLocalIdx::RETURN, []),
+                target: root_unwind_bb,
+                unwind: MirUnwindBehavior::DoublePanic,
+            },
+        });
 
         this.body.entry = entry_bb;
         this.scope_stack.push(LowerScope {
@@ -186,26 +179,42 @@ impl MirScopedBuilder<'_> {
 
 // Code pushing
 impl MirScopedBuilder<'_> {
-    pub fn finish_unreachable(&mut self, expected_top: MirScopeIdx) {
+    pub fn finish_unreachable(&mut self, expected_top: MirScopeIdx, source_info: MirSourceInfo) {
         let block = self.expect_top_curr(expected_top);
-        self.body
-            .cfg
-            .init_terminator(block, MirTerminator::Unreachable);
+        self.body.cfg.init_terminator(
+            block,
+            MirTerminator {
+                debug_scope: expected_top,
+                source_info,
+                kind: MirTerminatorKind::Unreachable,
+            },
+        );
 
         self.pop_scope_stack();
     }
 
-    pub fn finish_break(&mut self, expected_top: MirScopeIdx, target: MirScopeIdx) {
-        self.finish_break_common(expected_top, target, false);
+    pub fn finish_break(
+        &mut self,
+        expected_top: MirScopeIdx,
+        source_info: MirSourceInfo,
+        target: MirScopeIdx,
+    ) {
+        self.finish_break_common(expected_top, source_info, target, false);
     }
 
-    pub fn finish_continue(&mut self, expected_top: MirScopeIdx, target: MirScopeIdx) {
-        self.finish_break_common(expected_top, target, true);
+    pub fn finish_continue(
+        &mut self,
+        expected_top: MirScopeIdx,
+        source_info: MirSourceInfo,
+        target: MirScopeIdx,
+    ) {
+        self.finish_break_common(expected_top, source_info, target, true);
     }
 
     fn finish_break_common(
         &mut self,
         expected_top: MirScopeIdx,
+        source_info: MirSourceInfo,
         target: MirScopeIdx,
         is_continue: bool,
     ) {
@@ -228,10 +237,14 @@ impl MirScopedBuilder<'_> {
 
                     self.body.cfg.init_terminator(
                         curr_bb,
-                        MirTerminator::EnsureDropped {
-                            place: MirPlace::new(self.tcx, local.idx, []),
-                            target: successor,
-                            unwind: MirUnwindBehavior::Continue(unwind_if_drop_fails),
+                        MirTerminator {
+                            debug_scope: expected_top,
+                            source_info,
+                            kind: MirTerminatorKind::EnsureDropped {
+                                place: MirPlace::new(self.tcx, local.idx, []),
+                                target: successor,
+                                unwind: MirUnwindBehavior::Continue(unwind_if_drop_fails),
+                            },
                         },
                     );
 
@@ -241,7 +254,7 @@ impl MirScopedBuilder<'_> {
                 self.body.cfg.push_stmt(
                     curr_bb,
                     MirStmt {
-                        source_info: MirStmtSourceInfo::Break,
+                        source_info,
                         kind: MirStmtKind::StorageDead(local.idx),
                     },
                 );
@@ -263,16 +276,26 @@ impl MirScopedBuilder<'_> {
                         // dummy block.
                         let spacer_block = self.body.cfg.create_block();
 
-                        self.body
-                            .cfg
-                            .init_terminator(curr_bb, MirTerminator::Goto(spacer_block));
+                        self.body.cfg.init_terminator(
+                            curr_bb,
+                            MirTerminator {
+                                debug_scope: expected_top,
+                                source_info,
+                                kind: MirTerminatorKind::Goto(spacer_block),
+                            },
+                        );
 
                         curr_bb = spacer_block;
                     }
 
-                    self.body
-                        .cfg
-                        .init_terminator(curr_bb, MirTerminator::Goto(next_bb));
+                    self.body.cfg.init_terminator(
+                        curr_bb,
+                        MirTerminator {
+                            debug_scope: expected_top,
+                            source_info,
+                            kind: MirTerminatorKind::Goto(next_bb),
+                        },
+                    );
                 }
                 false => {
                     // This is a `break`. Jump to our parent's successor or return from the body.
@@ -282,14 +305,24 @@ impl MirScopedBuilder<'_> {
                                 .curr_bb
                                 .get_or_insert_with(|| self.body.cfg.create_block());
 
-                            self.body
-                                .cfg
-                                .init_terminator(curr_bb, MirTerminator::Goto(next_bb));
+                            self.body.cfg.init_terminator(
+                                curr_bb,
+                                MirTerminator {
+                                    debug_scope: expected_top,
+                                    source_info,
+                                    kind: MirTerminatorKind::Goto(next_bb),
+                                },
+                            );
                         }
                         None => {
-                            self.body
-                                .cfg
-                                .init_terminator(curr_bb, MirTerminator::Return);
+                            self.body.cfg.init_terminator(
+                                curr_bb,
+                                MirTerminator {
+                                    debug_scope: expected_top,
+                                    source_info,
+                                    kind: MirTerminatorKind::Return,
+                                },
+                            );
                         }
                     }
                 }
@@ -302,13 +335,17 @@ impl MirScopedBuilder<'_> {
         unreachable!("must break to ancestor");
     }
 
+    #[must_use]
     pub fn push_local(
         &mut self,
         expected_top: MirScopeIdx,
-        local: MirLocalIdx,
+        source_info: MirSourceInfo,
+        local: MirLocal,
         can_omit_drop: bool,
-    ) {
+    ) -> MirLocalIdx {
         let curr = self.expect_top_curr(expected_top);
+
+        let local = self.body.locals.push(local);
 
         match can_omit_drop {
             true => {
@@ -325,24 +362,27 @@ impl MirScopedBuilder<'_> {
                     idx: local,
                 });
 
-                top.unwind_bb =
-                    self.body
-                        .cfg
-                        .create_block_with_terminator(MirTerminator::EnsureDropped {
-                            place: MirPlace::new(self.tcx, local, []),
-                            target: top.unwind_bb,
-                            unwind: MirUnwindBehavior::DoublePanic,
-                        });
+                top.unwind_bb = self.body.cfg.create_block_with_terminator(MirTerminator {
+                    debug_scope: MirScopeIdx::UNCATEGORIZED,
+                    source_info: MirSourceInfo::Todo,
+                    kind: MirTerminatorKind::EnsureDropped {
+                        place: MirPlace::new(self.tcx, local, []),
+                        target: top.unwind_bb,
+                        unwind: MirUnwindBehavior::DoublePanic,
+                    },
+                });
             }
         }
 
         self.body.cfg.push_stmt(
             curr,
             MirStmt {
-                source_info: MirStmtSourceInfo::Local,
+                source_info,
                 kind: MirStmtKind::StorageLive(local),
             },
         );
+
+        local
     }
 
     pub fn push_stmt(&mut self, expected_top: MirScopeIdx, stmt: MirStmt) {
