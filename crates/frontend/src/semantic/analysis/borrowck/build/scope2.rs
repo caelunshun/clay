@@ -1,14 +1,13 @@
-use crate::semantic::syntax::{
-    MirBlockIdx, MirBody, MirLocal, MirLocalIdx, MirPlace, MirScopeIdx, MirSourceInfo, MirStmt,
-    MirStmtKind, MirTerminator, MirTerminatorKind, MirUnwindBehavior, TyCtxt,
+use crate::semantic::{
+    analysis::borrowck::build::driver::MirFromThirCtx,
+    syntax::{
+        MirBlockIdx, MirBody, MirLocal, MirLocalIdx, MirPlace, MirScopeIdx, MirSourceInfo, MirStmt,
+        MirStmtKind, MirTerminator, MirTerminatorKind, MirUnwindBehavior, TyCtxt,
+    },
 };
 use slotmap::Key as _;
 
-#[derive(Debug, Copy, Clone)]
-pub struct MirScopedBranch {
-    pub scope: MirScopeIdx,
-    pub entry: MirBlockIdx,
-}
+// === MirScopedBuilder === //
 
 pub struct MirScopedBuilder<'a> {
     tcx: &'a TyCtxt,
@@ -16,6 +15,12 @@ pub struct MirScopedBuilder<'a> {
     scope_id_gen: MirScopeIdx,
     scope_stack: Vec<LowerScope>,
     live_locals: Vec<LiveLocal>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct MirScopedBranch {
+    pub scope: MirScopeIdx,
+    pub entry: MirBlockIdx,
 }
 
 struct LowerScope {
@@ -49,7 +54,7 @@ struct LiveLocal {
 }
 
 impl<'tcx> MirScopedBuilder<'tcx> {
-    pub fn new(tcx: &'tcx TyCtxt, arg_count: u32) -> Self {
+    pub fn new(tcx: &'tcx TyCtxt, return_local: MirLocal, arg_count: u32) -> Self {
         let mut this = Self {
             tcx,
             body: MirBody::default(),
@@ -61,10 +66,12 @@ impl<'tcx> MirScopedBuilder<'tcx> {
         this.body.arg_count = arg_count;
 
         let entry_bb = this.body.cfg.create_block();
+        let return_local = this.body.locals.push(return_local);
+        assert_eq!(return_local, MirLocalIdx::RETURN);
 
         let root_unwind_bb = this.body.cfg.create_block_with_terminator(MirTerminator {
             debug_scope: MirScopeIdx::UNCATEGORIZED,
-            source_info: MirSourceInfo::Todo,
+            source_info: MirSourceInfo::Local(return_local),
             kind: MirTerminatorKind::UnwindResume,
         });
 
@@ -73,9 +80,9 @@ impl<'tcx> MirScopedBuilder<'tcx> {
         // when we panic out of the function.
         let retval_unwind_bb = this.body.cfg.create_block_with_terminator(MirTerminator {
             debug_scope: MirScopeIdx::UNCATEGORIZED,
-            source_info: MirSourceInfo::Todo,
+            source_info: MirSourceInfo::Local(return_local),
             kind: MirTerminatorKind::EnsureDropped {
-                place: MirPlace::new(tcx, MirLocalIdx::RETURN, []),
+                place: MirPlace::new(tcx, return_local, []),
                 target: root_unwind_bb,
                 unwind: MirUnwindBehavior::DoublePanic,
             },
@@ -235,7 +242,7 @@ impl MirScopedBuilder<'_> {
 // Code pushing
 impl MirScopedBuilder<'_> {
     pub fn push_unreachable(&mut self, expected_top: MirScopeIdx, source_info: MirSourceInfo) {
-        let Some(top) = Self::expect_top_mut(&mut self.scope_stack, expected_top) else {
+        let Some(top) = Self::expect_top_ref(&mut self.scope_stack, expected_top) else {
             return;
         };
 
@@ -278,7 +285,7 @@ impl MirScopedBuilder<'_> {
         target: MirScopeIdx,
         is_continue: bool,
     ) {
-        let Some(top) = Self::expect_top_mut(&mut self.scope_stack, expected_top) else {
+        let Some(top) = Self::expect_top_ref(&mut self.scope_stack, expected_top) else {
             return;
         };
 
@@ -413,7 +420,6 @@ impl MirScopedBuilder<'_> {
     pub fn push_local(
         &mut self,
         expected_top: MirScopeIdx,
-        source_info: MirSourceInfo,
         local: MirLocal,
         can_omit_drop: bool,
     ) -> MirLocalIdx {
@@ -440,7 +446,7 @@ impl MirScopedBuilder<'_> {
 
                 top.unwind_bb = self.body.cfg.create_block_with_terminator(MirTerminator {
                     debug_scope: MirScopeIdx::UNCATEGORIZED,
-                    source_info: MirSourceInfo::Todo,
+                    source_info: MirSourceInfo::Local(local),
                     kind: MirTerminatorKind::EnsureDropped {
                         place: MirPlace::new(self.tcx, local, []),
                         target: top.unwind_bb,
@@ -453,7 +459,7 @@ impl MirScopedBuilder<'_> {
         self.body.cfg.push_stmt(
             curr,
             MirStmt {
-                source_info,
+                source_info: MirSourceInfo::Local(local),
                 kind: MirStmtKind::StorageLive(local),
             },
         );
@@ -462,7 +468,7 @@ impl MirScopedBuilder<'_> {
     }
 
     pub fn push_stmt(&mut self, expected_top: MirScopeIdx, stmt: impl FnOnce() -> MirStmt) {
-        let Some(top) = Self::expect_top_mut(&mut self.scope_stack, expected_top) else {
+        let Some(top) = Self::expect_top_ref(&mut self.scope_stack, expected_top) else {
             return;
         };
 
@@ -489,4 +495,10 @@ impl MirScopedBuilder<'_> {
 
         top.curr_bb = Some(successor);
     }
+}
+
+// === Wrappers === //
+
+impl MirFromThirCtx<'_> {
+    // TODO
 }

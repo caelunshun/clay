@@ -30,8 +30,11 @@ impl MirScopeIdx {
 
 #[derive(Debug, Copy, Clone)]
 pub enum MirSourceInfo {
-    Simple(Span),
     Todo,
+    Simple(Span),
+    ExprDivergent,
+    BlockFallthrough,
+    Local(MirLocalIdx),
 }
 
 // === Body === //
