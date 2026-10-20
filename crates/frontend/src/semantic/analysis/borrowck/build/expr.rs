@@ -4,33 +4,31 @@ use crate::{
     semantic::{
         analysis::borrowck::build::{
             driver::{LabelledScope, MirFromThirCtx, MirRvalueOrPlace},
-            scope::MirBuilderScopeIdx,
+            scope::{IfKind, MirScopedBuilder as _},
         },
         syntax::{
             MirBinOpKind, MirLocal, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue,
-            MirStmt, MirStmtKind, MirSourceInfo, ResolvedFieldIdx, SigTy, ThirBlock,
+            MirScopeIdx, MirSourceInfo, MirStmt, MirStmtKind, ResolvedFieldIdx, SigTy, ThirBlock,
             ThirBlockTrailing, ThirExpr, ThirExprKind, ThirStmt,
         },
     },
 };
 
 impl<'tcx> MirFromThirCtx<'tcx> {
-    pub fn lower_expr_rvalue(
-        &mut self,
-        scope: MirBuilderScopeIdx,
-        expr: Obj<ThirExpr>,
-    ) -> MirRvalue {
+    pub fn lower_expr_rvalue(&mut self, scope: MirScopeIdx, expr: Obj<ThirExpr>) -> MirRvalue {
         let s = self.session();
 
         let rv = match self.lower_expr_preferred(scope, expr, None) {
             MirRvalueOrPlace::Rvalue(rvalue) => rvalue,
-            MirRvalueOrPlace::Place(place) => {
-                MirRvalue::Use(self.builder.operand_mode(expr.r(s).ty).to_operand(place))
-            }
+            MirRvalueOrPlace::Place(place) => MirRvalue::Use(
+                self.trait_cache
+                    .operand_mode(expr.r(s).ty)
+                    .to_operand(place),
+            ),
         };
 
         if expr.r(s).causes_divergence(s) {
-            self.builder.push_unreachable(scope);
+            self.push_unreachable(scope, MirSourceInfo::ExprDivergent);
         }
 
         rv
@@ -38,7 +36,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
     pub fn lower_expr_place(
         &mut self,
-        scope: MirBuilderScopeIdx,
+        scope: MirScopeIdx,
         expr: Obj<ThirExpr>,
         mut assign_into: Option<MirPlace>,
     ) -> MirPlace {
@@ -49,12 +47,11 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 let assign_into =
                     self.create_assign_into_place_if_needed(scope, &mut assign_into, expr.r(s).ty);
 
-                self.builder.push_statement(
+                self.push_assign(
                     scope,
-                    MirStmt {
-                        source_info: MirSourceInfo::Simple(expr.r(s).span),
-                        kind: MirStmtKind::Assign(Box::new((assign_into, rvalue))),
-                    },
+                    MirSourceInfo::Simple(expr.r(s).span),
+                    assign_into,
+                    rvalue,
                 );
 
                 assign_into
@@ -63,16 +60,12 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 if let Some(assign_into) = assign_into
                     && original_output != assign_into
                 {
-                    self.builder.push_statement(
+                    self.push_assign(
                         scope,
-                        MirStmt {
-                            source_info: MirSourceInfo::Simple(expr.r(s).span),
-                            kind: MirStmtKind::Assign(Box::new((
-                                assign_into,
-                                // The original output needs to be invalidated.
-                                MirRvalue::Use(MirOperand::Move(original_output)),
-                            ))),
-                        },
+                        MirSourceInfo::Simple(expr.r(s).span),
+                        assign_into,
+                        // The original output needs to be invalidated.
+                        MirRvalue::Use(MirOperand::Move(original_output)),
                     );
                 }
 
@@ -81,26 +74,24 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         };
 
         if expr.r(s).causes_divergence(s) {
-            self.builder.push_unreachable(scope);
+            self.push_unreachable(scope, MirSourceInfo::ExprDivergent);
         }
 
         rv
     }
 
-    pub fn lower_expr_operand(
-        &mut self,
-        scope: MirBuilderScopeIdx,
-        expr: Obj<ThirExpr>,
-    ) -> MirOperand {
+    pub fn lower_expr_operand(&mut self, scope: MirScopeIdx, expr: Obj<ThirExpr>) -> MirOperand {
         let s = self.session();
         let place = self.lower_expr_place(scope, expr, None);
 
-        self.builder.operand_mode(expr.r(s).ty).to_operand(place)
+        self.trait_cache
+            .operand_mode(expr.r(s).ty)
+            .to_operand(place)
     }
 
     pub fn lower_expr_operand_list(
         &mut self,
-        scope: MirBuilderScopeIdx,
+        scope: MirScopeIdx,
         expr: Obj<[Obj<ThirExpr>]>,
     ) -> Box<[MirOperand]> {
         let s = self.session();
@@ -114,7 +105,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
     // TODO: split up logical and temporary scopes
     pub fn lower_expr_preferred(
         &mut self,
-        scope: MirBuilderScopeIdx,
+        scope: MirScopeIdx,
         expr: Obj<ThirExpr>,
         mut assign_into: Option<MirPlace>,
     ) -> MirRvalueOrPlace {
@@ -268,7 +259,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 let callee = self.lower_expr_operand(scope, callee);
                 let args = self.lower_expr_operand_list(scope, args);
 
-                self.builder.push_call(scope, callee, args, destination);
+                self.push_call(scope, MirSourceInfo::Todo, destination, callee, args);
 
                 MirRvalueOrPlace::Place(destination)
             }
@@ -325,16 +316,18 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 let assign_into =
                     self.create_assign_into_place_if_needed(scope, &mut assign_into, expr.r(s).ty);
 
-                let [truthy_scope, falsy_scope] = self.lower_if_expr(scope, cond);
-
-                self.lower_expr_place(truthy_scope, truthy, Some(assign_into));
-
-                if let Some(falsy) = falsy {
-                    self.lower_expr_place(falsy_scope, falsy, Some(assign_into));
-                }
-
-                self.builder.push_break(truthy_scope, truthy_scope);
-                self.builder.push_break(falsy_scope, falsy_scope);
+                self.lower_if_expr(
+                    scope,
+                    cond,
+                    |this, scope| {
+                        self.lower_expr_place(scope, truthy, Some(assign_into));
+                    },
+                    falsy.map(|falsy| {
+                        |this: &mut MirFromThirCtx<'tcx>, scope| {
+                            self.lower_expr_place(scope, falsy, Some(assign_into));
+                        }
+                    }),
+                );
 
                 MirRvalueOrPlace::Place(assign_into)
             }
@@ -358,7 +351,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
     pub fn lower_block_no_terminator(
         &mut self,
-        scope: MirBuilderScopeIdx,
+        scope: MirScopeIdx,
         block: Obj<ThirBlock>,
         assign_into: Option<MirPlace>,
     ) {
@@ -367,12 +360,10 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         for &stmt in &block.r(s).stmts {
             match stmt {
                 ThirStmt::Expr(expr) => {
-                    let scope = self.builder.push_scope(scope);
-
-                    // Dropped by leaving the scope.
-                    self.lower_expr_place(scope, expr, None);
-
-                    self.builder.push_break(scope, scope);
+                    self.push_scope(scope, MirSourceInfo::Todo, |this, scope| {
+                        // Dropped by leaving the scope.
+                        this.lower_expr_place(scope, expr, None);
+                    });
                 }
                 ThirStmt::Let(stmt) => {
                     self.lower_let_stmt(scope, stmt);
@@ -388,7 +379,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 self.lower_expr_place(scope, last_expr, Some(place));
             }
             (Some(_), ThirBlockTrailing::MissingCoerceNever) => {
-                self.builder.push_unreachable(scope);
+                self.push_unreachable(scope, MirSourceInfo::ExprDivergent);
             }
             (None, ThirBlockTrailing::MissingNotApplicable) => {
                 // (ignored)
@@ -398,9 +389,11 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
     pub fn lower_if_expr(
         &mut self,
-        scope: MirBuilderScopeIdx,
+        scope: MirScopeIdx,
         cond: Obj<ThirExpr>,
-    ) -> [MirBuilderScopeIdx; 2] {
+        if_truthy: impl FnOnce(&mut Self, MirScopeIdx),
+        if_falsy: Option<impl FnOnce(&mut Self, MirScopeIdx)>,
+    ) {
         let s = self.session();
 
         let mut cond = cond;
@@ -435,53 +428,66 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         //     user break 'break_after_truthy;
         // }
         // ```
-        let break_after_truthy = self.builder.push_scope(scope);
-        let break_if_falsy = self.builder.push_scope(break_after_truthy);
+        self.push_scope(scope, MirSourceInfo::Todo, |this, break_after_truthy| {
+            this.push_scope(
+                break_after_truthy,
+                MirSourceInfo::Todo,
+                |this, break_if_falsy| {
+                    let lower_cond = |this: &mut MirFromThirCtx<'tcx>, cond: Obj<ThirExpr>| {
+                        let cond = this.lower_expr_operand(break_if_falsy, cond);
 
-        loop {
-            if let ThirExprKind::PrimitiveBinOp(AstBinOpKind::And, lhs, rhs) = *cond.r(s).kind {
-                match *lhs.r(s).kind {
-                    ThirExprKind::Let(pat, scrutinee) => {
-                        self.lower_let_expr(break_if_falsy, pat, scrutinee);
+                        this.push_if(
+                            break_if_falsy,
+                            MirSourceInfo::Todo,
+                            cond,
+                            IfKind::IfFalse,
+                            |this, cond_falsy| {
+                                this.push_break(cond_falsy, MirSourceInfo::Todo, break_if_falsy);
+                            },
+                        );
+                    };
+
+                    loop {
+                        if let ThirExprKind::PrimitiveBinOp(AstBinOpKind::And, lhs, rhs) =
+                            *cond.r(s).kind
+                        {
+                            match *lhs.r(s).kind {
+                                ThirExprKind::Let(pat, scrutinee) => {
+                                    this.lower_let_expr(break_if_falsy, pat, scrutinee);
+                                }
+                                _ => {
+                                    lower_cond(this, lhs);
+                                }
+                            }
+
+                            cond = rhs;
+                        } else {
+                            lower_cond(this, cond);
+                            break;
+                        }
                     }
-                    _ => {
-                        let lhs = self.lower_expr_operand(break_if_falsy, lhs);
 
-                        let [truthy, falsy] =
-                            self.builder.push_switch_fixed(break_if_falsy, lhs, [1, 0]);
+                    if_truthy(this, break_if_falsy);
+                    this.push_break(break_if_falsy, MirSourceInfo::Todo, break_after_truthy);
+                },
+            );
 
-                        self.builder.push_break(truthy, truthy);
-                        self.builder.push_break(falsy, break_if_falsy);
-                    }
-                }
-
-                cond = rhs;
-            } else {
-                let lhs = self.lower_expr_operand(break_if_falsy, cond);
-
-                let [truthy, falsy] = self.builder.push_switch_fixed(break_if_falsy, lhs, [1, 0]);
-                self.builder.push_break(truthy, truthy);
-                self.builder.push_break(falsy, break_if_falsy);
-                break;
+            if let Some(if_falsy) = if_falsy {
+                if_falsy(this, break_after_truthy);
             }
-        }
-
-        let truthy_scope = self.builder.push_scope(break_if_falsy);
-        self.builder.push_break(break_if_falsy, break_after_truthy);
-
-        [truthy_scope, break_if_falsy]
+        });
     }
 
     pub fn create_assign_into_place_if_needed(
         &mut self,
-        scope: MirBuilderScopeIdx,
+        scope: MirScopeIdx,
         place: &mut Option<MirPlace>,
         ty: SigTy,
     ) -> MirPlace {
         let tcx = self.tcx();
 
         *place.get_or_insert_with(|| MirPlace {
-            local: self.builder.push_local(scope, MirLocal { ty }),
+            local: self.push_local(scope, MirLocal { ty }),
             projections: tcx.intern_list(&[]),
         })
     }

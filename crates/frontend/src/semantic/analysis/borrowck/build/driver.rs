@@ -5,10 +5,17 @@ use crate::{
     },
     semantic::{
         analysis::{
-            borrowck::build::scope::{MirBuilderScopeIdx, MirScopedBuilder},
+            borrowck::build::{
+                scope::{MirScopedBuilder, RawMirScopedBuilder},
+                traits::TraitCache,
+            },
             sigck::CrateSigckVisitor,
         },
-        syntax::{FnDef, MirLocalIdx, MirPlace, MirRvalue, ThirBody, ThirExpr, ThirLocal, TyCtxt},
+        infer::ImplCache,
+        syntax::{
+            FnDef, MirLocal, MirLocalIdx, MirPlace, MirRvalue, MirScopeIdx, MirSourceInfo,
+            ThirBody, ThirExpr, ThirLocal, TyCtxt,
+        },
     },
 };
 use clay_core::FastHashMap;
@@ -22,16 +29,29 @@ pub fn build_function_mir(check_cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
         return;
     };
 
-    let mut build_cx = MirFromThirCtx::new(tcx, def);
+    let mut build_cx = MirFromThirCtx::new(tcx, check_cx.impl_cache, def);
     build_cx.lower_fn(body);
 
-    LateInit::init(&def.r(s).mir_body, Some(build_cx.builder.finish().body));
+    LateInit::init(&def.r(s).mir_body, Some(build_cx.raw_builder.finish()));
 }
 
 pub struct MirFromThirCtx<'tcx> {
-    pub builder: MirScopedBuilder<'tcx>,
+    pub tcx: &'tcx TyCtxt,
+    pub def: Obj<FnDef>,
+    pub raw_builder: RawMirScopedBuilder<'tcx>,
+    pub trait_cache: TraitCache<'tcx>,
     pub labelled_scopes: FastHashMap<Obj<ThirExpr>, LabelledScope>,
     pub thir_locals: FastHashMap<Obj<ThirLocal>, MirLocalIdx>,
+}
+
+impl<'tcx> MirScopedBuilder<'tcx> for MirFromThirCtx<'tcx> {
+    fn raw_builder(&mut self) -> &mut RawMirScopedBuilder<'tcx> {
+        &mut self.raw_builder
+    }
+
+    fn trait_cache(&mut self) -> &mut TraitCache<'tcx> {
+        &mut self.trait_cache
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -42,40 +62,50 @@ pub enum MirRvalueOrPlace {
 
 #[derive(Copy, Clone)]
 pub struct LabelledScope {
-    pub scope: MirBuilderScopeIdx,
+    pub scope: MirScopeIdx,
     pub out_place: MirPlace,
 }
 
 impl<'tcx> MirFromThirCtx<'tcx> {
-    pub fn new(tcx: &'tcx TyCtxt, def: Obj<FnDef>) -> Self {
+    pub fn new(tcx: &'tcx TyCtxt, impl_cache: &'tcx ImplCache, def: Obj<FnDef>) -> Self {
+        let s = &tcx.session;
+
+        let mut trait_cache = TraitCache::new(tcx, impl_cache, def);
+        let ret_ty = *def.r(s).ret_ty;
+
+        let raw_builder = RawMirScopedBuilder::new(
+            tcx,
+            MirLocal { ty: ret_ty },
+            trait_cache.can_omit_drop(ret_ty),
+            def.r(s).args.r(s).len() as u32,
+        );
+
         Self {
-            builder: MirScopedBuilder::new(tcx, def),
+            tcx,
+            def,
+            raw_builder,
+            trait_cache,
             labelled_scopes: FastHashMap::default(),
             thir_locals: FastHashMap::default(),
         }
     }
 
     pub fn tcx(&self) -> &'tcx TyCtxt {
-        self.builder.tcx()
+        self.tcx
     }
 
     pub fn session(&self) -> &'tcx Session {
-        self.builder.session()
-    }
-
-    pub fn def(&self) -> Obj<FnDef> {
-        self.builder.def()
+        &self.tcx.session
     }
 
     pub fn lower_fn(&mut self, body: &ThirBody) {
         let s = self.session();
         let tcx = self.tcx();
 
-        let def = self.def();
+        let scope = MirScopeIdx::ENTRY;
 
-        let scope = MirBuilderScopeIdx::ENTRY;
-
-        for (idx, (hir_arg, thir_pat)) in def
+        for (idx, (hir_arg, thir_pat)) in self
+            .def
             .r(s)
             .args
             .r(s)
@@ -97,6 +127,6 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             Some(MirPlace::new(tcx, MirLocalIdx::RETURN, [])),
         );
 
-        self.builder.push_return(scope);
+        self.push_return(scope, MirSourceInfo::BlockFallthrough);
     }
 }

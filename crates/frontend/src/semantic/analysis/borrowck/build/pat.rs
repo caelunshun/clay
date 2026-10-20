@@ -1,10 +1,10 @@
 use crate::{
     base::{arena::Obj, syntax::Span},
     semantic::{
-        analysis::borrowck::build::{driver::MirFromThirCtx, scope::MirBuilderScopeIdx},
+        analysis::borrowck::build::driver::MirFromThirCtx,
         syntax::{
-            MirLocal, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue, MirStmt,
-            MirStmtKind, MirSourceInfo, Mutability, ResolvedFieldIdx, SigRe, SigReKind,
+            MirLocal, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue, MirScopeIdx,
+            MirSourceInfo, MirStmt, MirStmtKind, Mutability, ResolvedFieldIdx, SigRe, SigReKind,
             SigTyInner, SigTyKind, ThirExpr, ThirLetStmt, ThirLocal, ThirMatchArm, ThirPat,
             ThirPatKind,
         },
@@ -14,10 +14,10 @@ use clay_core::FastHashMap;
 
 #[derive(Debug, Copy, Clone)]
 struct PatLowerScopes {
-    pub local_scope: MirBuilderScopeIdx,
-    pub match_logic: MirBuilderScopeIdx,
-    pub break_on_accept: MirBuilderScopeIdx,
-    pub break_on_reject: MirBuilderScopeIdx,
+    pub local_scope: MirScopeIdx,
+    pub match_logic: MirScopeIdx,
+    pub break_on_accept: MirScopeIdx,
+    pub break_on_reject: MirScopeIdx,
 }
 
 type LateUseProxyMap = FastHashMap<MirLocalIdx, LateUseProxyEntry>;
@@ -31,7 +31,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
     pub fn lower_fn_arg(
         &mut self,
         span: Span,
-        scope: MirBuilderScopeIdx,
+        scope: MirScopeIdx,
         arg_pat: Obj<ThirPat>,
         arg_value: MirPlace,
     ) {
@@ -40,7 +40,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         self.builder.push_unreachable(reject_scope);
     }
 
-    pub fn lower_let_stmt(&mut self, scope: MirBuilderScopeIdx, stmt: Obj<ThirLetStmt>) {
+    pub fn lower_let_stmt(&mut self, scope: MirScopeIdx, stmt: Obj<ThirLetStmt>) {
         let s = self.session();
 
         let ThirLetStmt {
@@ -71,10 +71,10 @@ impl<'tcx> MirFromThirCtx<'tcx> {
     fn lower_let_stmt_common(
         &mut self,
         span: Span,
-        scope: MirBuilderScopeIdx,
+        scope: MirScopeIdx,
         pat: Obj<ThirPat>,
         scrutinee: MirPlace,
-    ) -> MirBuilderScopeIdx {
+    ) -> MirScopeIdx {
         // Constructs the following nested scopes...
         //
         // ```
@@ -114,7 +114,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
     pub fn lower_match(
         &mut self,
-        scope: MirBuilderScopeIdx,
+        scope: MirScopeIdx,
         scrutinee: Obj<ThirExpr>,
         arms: Obj<[ThirMatchArm]>,
         out_place: MirPlace,
@@ -198,7 +198,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
     pub fn lower_let_expr(
         &mut self,
-        break_if_falsy: MirBuilderScopeIdx,
+        break_if_falsy: MirScopeIdx,
         pat: Obj<ThirPat>,
         scrutinee: Obj<ThirExpr>,
     ) {
@@ -239,7 +239,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         self.materialize_late_use_proxies(pat.r(s).span, break_if_falsy, late_use_proxies);
     }
 
-    fn lower_pat_names(&mut self, local_scope: MirBuilderScopeIdx, pat: Obj<ThirPat>) {
+    fn lower_pat_names(&mut self, local_scope: MirScopeIdx, pat: Obj<ThirPat>) {
         let s = self.session();
 
         match *pat.r(s).kind {
@@ -481,7 +481,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
     fn materialize_late_use_proxies(
         &mut self,
         span: Span,
-        scope: MirBuilderScopeIdx,
+        scope: MirScopeIdx,
         map: LateUseProxyMap,
     ) {
         let tcx = self.tcx();
@@ -509,7 +509,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
     fn ensure_local_defined(
         &mut self,
-        local_scope: MirBuilderScopeIdx,
+        local_scope: MirScopeIdx,
         local: Obj<ThirLocal>,
     ) -> MirLocalIdx {
         let s = self.session();
