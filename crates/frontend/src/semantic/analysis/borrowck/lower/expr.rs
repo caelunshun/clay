@@ -2,9 +2,9 @@ use crate::{
     base::arena::{HasListInterner as _, Obj},
     parse::ast::{AstBinOpKind, AstBoolLit, AstLit},
     semantic::{
-        analysis::borrowck::build::{
-            driver::{LabelledScope, MirFromThirCtx, MirRvalueOrPlace},
-            scope::{IfKind, MirScopedBuilder as _},
+        analysis::borrowck::{
+            lower::driver::{LabelledScope, MirFromThirCtx, MirRvalueOrPlace},
+            scopes::{IfKind, MirScopedBuilder as _},
         },
         syntax::{
             MirBinOpKind, MirLocal, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue,

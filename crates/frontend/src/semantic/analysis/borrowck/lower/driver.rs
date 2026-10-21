@@ -5,10 +5,7 @@ use crate::{
     },
     semantic::{
         analysis::{
-            borrowck::build::{
-                scope::{MirScopedBuilder, RawMirScopedBuilder},
-                traits::TraitCache,
-            },
+            borrowck::scopes::{MirScopedBuilder, RawMirScopedBuilder, TraitCache},
             sigck::CrateSigckVisitor,
         },
         infer::ImplCache,

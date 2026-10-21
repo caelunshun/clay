@@ -1,9 +1,9 @@
 use crate::{
     base::{arena::Obj, syntax::Span},
     semantic::{
-        analysis::borrowck::build::{
-            driver::MirFromThirCtx,
-            scope::{MirScopedBuilder, MirScopedBuilderRef},
+        analysis::borrowck::{
+            lower::driver::MirFromThirCtx,
+            scopes::{MirScopedBuilder, MirScopedBuilderRef},
         },
         syntax::{
             MirLocal, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue, MirScopeIdx,

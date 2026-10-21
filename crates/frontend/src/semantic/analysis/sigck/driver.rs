@@ -2,7 +2,7 @@ use crate::{
     base::{Session, arena::Obj},
     semantic::{
         analysis::{
-            borrowck::{build::build_function_mir, check::run_borrow_check},
+            borrowck::{check::run_borrow_check, lower::build_function_mir},
             typeck::type_check_function,
         },
         infer::{
