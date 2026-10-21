@@ -112,7 +112,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                         scrutinee,
                     );
 
-                    this.materialize_late_use_proxies(span, scope, late_use_proxies);
+                    this.materialize_late_use_proxies(span, break_on_reject, late_use_proxies);
                 },
             );
 
@@ -478,7 +478,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                         late_use_proxies,
                         PatLowerScopes {
                             local_scope: scopes.local_scope,
-                            match_logic: scopes.match_logic,
+                            match_logic: nested_accept,
                             break_on_accept: nested_accept,
                             break_on_reject: scopes.break_on_reject,
                         },

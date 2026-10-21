@@ -238,6 +238,8 @@ impl<'tcx> CrateSigckVisitor<'tcx> {
     pub fn visit_fn_def(&mut self, def: Obj<FnDef>) {
         type_check_function(self, def);
         build_function_mir(self, def);
-        run_borrow_check(self, def);
+
+        // TODO
+        // run_borrow_check(self, def);
     }
 }

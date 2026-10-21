@@ -39,11 +39,11 @@ pub trait MirScopedBuilder<'tcx> {
 
     fn trait_cache(&mut self) -> &mut TraitCache<'tcx>;
 
-    fn push_local(&mut self, expected_top: MirScopeIdx, local: MirLocal) -> MirLocalIdx {
+    fn push_local(&mut self, in_scope: MirScopeIdx, local: MirLocal) -> MirLocalIdx {
         let can_omit_drop = self.trait_cache().can_omit_drop(local.ty);
 
         self.raw_builder()
-            .push_local(expected_top, local, can_omit_drop)
+            .push_local(in_scope, local, can_omit_drop)
     }
 
     fn push_assign(
@@ -356,8 +356,8 @@ impl<'tcx> RawMirScopedBuilder<'tcx> {
         this
     }
 
-    pub fn finish(self) -> MirBody {
-        assert!(self.scope_stack.is_empty());
+    pub fn finish(mut self) -> MirBody {
+        self.end_scope(MirScopeIdx::ENTRY);
         self.body
     }
 }
@@ -369,7 +369,7 @@ impl RawMirScopedBuilder<'_> {
         expected_top: MirScopeIdx,
     ) -> Option<&LiveBuilderScope> {
         let top = scope_stack.last().expect("no active scope");
-        assert_eq!(top.id, expected_top);
+        assert_eq!(top.id, expected_top, "mismatched top scope");
 
         top.live_state.as_ref()
     }
@@ -379,7 +379,7 @@ impl RawMirScopedBuilder<'_> {
         expected_top: MirScopeIdx,
     ) -> &mut Option<LiveBuilderScope> {
         let top = scope_stack.last_mut().expect("no active scope");
-        assert_eq!(top.id, expected_top);
+        assert_eq!(top.id, expected_top, "mismatched top scope");
 
         &mut top.live_state
     }
@@ -428,7 +428,6 @@ impl RawMirScopedBuilder<'_> {
             .get_or_insert_with(|| self.body.cfg.create_block())
     }
 
-    #[must_use]
     pub fn add_branch_scope(&mut self, expected_top: MirScopeIdx) -> MirScopedBranch {
         let Some(top) = Self::expect_top_ref(&self.scope_stack, expected_top) else {
             let sub_id = self.scope_id_gen;
@@ -493,13 +492,11 @@ impl RawMirScopedBuilder<'_> {
         }
     }
 
-    #[must_use]
     pub fn is_top_live(&self, expected_top: MirScopeIdx) -> bool {
         let top = Self::expect_top_ref(&self.scope_stack, expected_top);
         top.is_some()
     }
 
-    #[must_use]
     pub fn is_top_dead(&self, expected_top: MirScopeIdx) -> bool {
         !self.is_top_live(expected_top)
     }
@@ -688,53 +685,53 @@ impl RawMirScopedBuilder<'_> {
         unreachable!("must break to ancestor");
     }
 
-    #[must_use]
+    // TODO
     pub fn push_local(
         &mut self,
-        expected_top: MirScopeIdx,
+        in_scope: MirScopeIdx,
         local: MirLocal,
         can_omit_drop: bool,
     ) -> MirLocalIdx {
-        let Some(top) = Self::expect_top_mut(&mut self.scope_stack, expected_top) else {
-            return MirLocalIdx::from_usize(MirLocalIdx::MAX_INDEX);
-        };
-
-        let curr = Self::expect_live_pushing(top);
+        // let Some(top) = Self::expect_top_mut(&mut self.scope_stack, in_scope) else {
+        //     return MirLocalIdx::from_usize(MirLocalIdx::MAX_INDEX);
+        // };
+        //
+        // let curr = Self::expect_live_pushing(top);
 
         let local = self.body.locals.push(local);
 
-        match can_omit_drop {
-            true => {
-                self.live_locals.push(BuilderLocal {
-                    drop_unwind_target: None,
-                    idx: local,
-                });
-            }
-            false => {
-                self.live_locals.push(BuilderLocal {
-                    drop_unwind_target: Some(top.unwind_bb),
-                    idx: local,
-                });
-
-                top.unwind_bb = self.body.cfg.create_block_with_terminator(MirTerminator {
-                    debug_scope: MirScopeIdx::UNCATEGORIZED,
-                    source_info: MirSourceInfo::Local(local),
-                    kind: MirTerminatorKind::EnsureDropped {
-                        place: MirPlace::new(self.tcx, local, []),
-                        target: top.unwind_bb,
-                        unwind: MirUnwindBehavior::DoublePanic,
-                    },
-                });
-            }
-        }
-
-        self.body.cfg.push_stmt(
-            curr,
-            MirStmt {
-                source_info: MirSourceInfo::Local(local),
-                kind: MirStmtKind::StorageLive(local),
-            },
-        );
+        // match can_omit_drop {
+        //     true => {
+        //         self.live_locals.push(BuilderLocal {
+        //             drop_unwind_target: None,
+        //             idx: local,
+        //         });
+        //     }
+        //     false => {
+        //         self.live_locals.push(BuilderLocal {
+        //             drop_unwind_target: Some(top.unwind_bb),
+        //             idx: local,
+        //         });
+        //
+        //         top.unwind_bb = self.body.cfg.create_block_with_terminator(MirTerminator {
+        //             debug_scope: MirScopeIdx::UNCATEGORIZED,
+        //             source_info: MirSourceInfo::Local(local),
+        //             kind: MirTerminatorKind::EnsureDropped {
+        //                 place: MirPlace::new(self.tcx, local, []),
+        //                 target: top.unwind_bb,
+        //                 unwind: MirUnwindBehavior::DoublePanic,
+        //             },
+        //         });
+        //     }
+        // }
+        //
+        // self.body.cfg.push_stmt(
+        //     curr,
+        //     MirStmt {
+        //         source_info: MirSourceInfo::Local(local),
+        //         kind: MirStmtKind::StorageLive(local),
+        //     },
+        // );
 
         local
     }

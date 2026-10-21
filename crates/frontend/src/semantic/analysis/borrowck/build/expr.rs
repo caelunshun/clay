@@ -220,7 +220,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     this.labelled_scopes
                         .insert(expr, LabelledScope { scope, out_place });
 
-                    this.lower_block_flat(scope, block, None);
+                    this.lower_block_flat(scope, block, Some(out_place));
 
                     this.labelled_scopes.remove(&expr);
                 });
