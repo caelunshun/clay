@@ -8,8 +8,8 @@ use crate::{
         },
         syntax::{
             MirBinOpKind, MirLocal, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue,
-            MirScopeIdx, MirSourceInfo, MirStmt, MirStmtKind, ResolvedFieldIdx, SigTy, ThirBlock,
-            ThirBlockTrailing, ThirExpr, ThirExprKind, ThirStmt,
+            MirScopeIdx, MirSourceInfo, ResolvedFieldIdx, SigTy, ThirBlock, ThirBlockTrailing,
+            ThirExpr, ThirExprKind, ThirStmt,
         },
     },
 };
@@ -141,17 +141,15 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
                     let lhs = self.lower_expr_operand(scope, lhs);
 
-                    let [short_scope, long_scope] = self.builder.push_switch_fixed(
+                    self.push_if_else(
                         scope,
+                        MirSourceInfo::Todo,
                         lhs,
-                        [op.short_circuit_if() as u64, !op.short_circuit_if() as u64],
-                    );
-
-                    self.builder.push_statement(
-                        short_scope,
-                        MirStmt {
-                            source_info: MirSourceInfo::Simple(expr.r(s).span),
-                            kind: MirStmtKind::Assign(Box::new((
+                        IfKind::trigger_on(op.short_circuit_if()),
+                        |this, short_circuit| {
+                            this.push_assign(
+                                short_circuit,
+                                MirSourceInfo::Todo,
                                 assign_into,
                                 MirRvalue::Literal(
                                     expr.r(s).ty,
@@ -160,13 +158,12 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                                         value: op.short_circuit_value(),
                                     }),
                                 ),
-                            ))),
+                            );
+                        },
+                        |this, long_circuit| {
+                            this.lower_expr_place(long_circuit, rhs, Some(assign_into));
                         },
                     );
-                    self.builder.push_break(short_scope, short_scope);
-
-                    self.lower_expr_place(long_scope, rhs, Some(assign_into));
-                    self.builder.push_break(long_scope, long_scope);
 
                     MirRvalueOrPlace::Place(assign_into)
                 }
@@ -181,30 +178,29 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
                 self.lower_expr_place(scope, value, Some(label.out_place));
 
-                self.builder.push_break(scope, label.scope);
+                self.push_break(scope, MirSourceInfo::Todo, label.scope);
 
                 MirRvalueOrPlace::Rvalue(MirRvalue::UnreachablePlaceholder)
             }
             ThirExprKind::Continue(label) => {
-                self.builder
-                    .push_continue(scope, self.labelled_scopes[&label].scope);
+                self.push_continue(
+                    scope,
+                    MirSourceInfo::Todo,
+                    self.labelled_scopes[&label].scope,
+                );
 
                 MirRvalueOrPlace::Rvalue(MirRvalue::UnreachablePlaceholder)
             }
             ThirExprKind::Return(rv) => {
                 let rv = self.lower_expr_rvalue(scope, rv);
 
-                self.builder.push_statement(
+                self.push_assign(
                     scope,
-                    MirStmt {
-                        source_info: MirSourceInfo::Simple(expr.r(s).span),
-                        kind: MirStmtKind::Assign(Box::new((
-                            MirPlace::new(tcx, MirLocalIdx::RETURN, []),
-                            rv,
-                        ))),
-                    },
+                    MirSourceInfo::Todo,
+                    MirPlace::new(tcx, MirLocalIdx::RETURN, []),
+                    rv,
                 );
-                self.builder.push_return(scope);
+                self.push_return(scope, MirSourceInfo::Todo);
 
                 MirRvalueOrPlace::Rvalue(MirRvalue::UnreachablePlaceholder)
             }
@@ -212,13 +208,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 let lhs = self.lower_expr_place(scope, lhs, None);
                 let rhs = self.lower_expr_rvalue(scope, rhs);
 
-                self.builder.push_statement(
-                    scope,
-                    MirStmt {
-                        source_info: MirSourceInfo::Simple(expr.r(s).span),
-                        kind: MirStmtKind::Assign(Box::new((lhs, rhs))),
-                    },
-                );
+                self.push_assign(scope, MirSourceInfo::Simple(expr.r(s).span), lhs, rhs);
 
                 MirRvalueOrPlace::Rvalue(MirRvalue::Tuple(Box::new([])))
             }
@@ -226,13 +216,14 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 let out_place =
                     self.create_assign_into_place_if_needed(scope, &mut assign_into, expr.r(s).ty);
 
-                let scope = self.builder.push_scope(scope);
+                self.push_scope(scope, MirSourceInfo::Todo, |this, scope| {
+                    this.labelled_scopes
+                        .insert(expr, LabelledScope { scope, out_place });
 
-                self.labelled_scopes
-                    .insert(expr, LabelledScope { scope, out_place });
+                    this.lower_block_flat(scope, block, None);
 
-                self.lower_block_no_terminator(scope, block, Some(out_place));
-                self.builder.push_break(scope, scope);
+                    this.labelled_scopes.remove(&expr);
+                });
 
                 MirRvalueOrPlace::Place(out_place)
             }
@@ -240,11 +231,14 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 let out_place =
                     self.create_assign_into_place_if_needed(scope, &mut assign_into, expr.r(s).ty);
 
-                self.labelled_scopes
-                    .insert(expr, LabelledScope { scope, out_place });
+                self.push_loop(scope, MirSourceInfo::Todo, |this, scope| {
+                    this.labelled_scopes
+                        .insert(expr, LabelledScope { scope, out_place });
 
-                self.lower_block_no_terminator(scope, block, None);
-                self.builder.push_continue(scope, scope);
+                    this.lower_block_flat(scope, block, None);
+
+                    this.labelled_scopes.remove(&expr);
+                });
 
                 MirRvalueOrPlace::Place(out_place)
             }
@@ -320,11 +314,11 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     scope,
                     cond,
                     |this, scope| {
-                        self.lower_expr_place(scope, truthy, Some(assign_into));
+                        this.lower_expr_place(scope, truthy, Some(assign_into));
                     },
                     falsy.map(|falsy| {
-                        |this: &mut MirFromThirCtx<'tcx>, scope| {
-                            self.lower_expr_place(scope, falsy, Some(assign_into));
+                        move |this: &mut MirFromThirCtx<'tcx>, scope| {
+                            this.lower_expr_place(scope, falsy, Some(assign_into));
                         }
                     }),
                 );
@@ -349,7 +343,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         }
     }
 
-    pub fn lower_block_no_terminator(
+    pub fn lower_block_flat(
         &mut self,
         scope: MirScopeIdx,
         block: Obj<ThirBlock>,

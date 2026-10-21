@@ -1,12 +1,14 @@
 use crate::{
     base::{arena::Obj, syntax::Span},
     semantic::{
-        analysis::borrowck::build::driver::MirFromThirCtx,
+        analysis::borrowck::build::{
+            driver::MirFromThirCtx,
+            scope::{MirScopedBuilder, MirScopedBuilderRef},
+        },
         syntax::{
             MirLocal, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue, MirScopeIdx,
-            MirSourceInfo, MirStmt, MirStmtKind, Mutability, ResolvedFieldIdx, SigRe, SigReKind,
-            SigTyInner, SigTyKind, ThirExpr, ThirLetStmt, ThirLocal, ThirMatchArm, ThirPat,
-            ThirPatKind,
+            MirSourceInfo, Mutability, ResolvedFieldIdx, SigRe, SigReKind, SigTyInner, SigTyKind,
+            ThirExpr, ThirLetStmt, ThirLocal, ThirMatchArm, ThirPat, ThirPatKind,
         },
     },
 };
@@ -35,9 +37,9 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         arg_pat: Obj<ThirPat>,
         arg_value: MirPlace,
     ) {
-        let reject_scope = self.lower_let_stmt_common(span, scope, arg_pat, arg_value);
-
-        self.builder.push_unreachable(reject_scope);
+        self.lower_let_stmt_common(span, scope, arg_pat, arg_value, |this, reject_scope| {
+            this.push_unreachable(reject_scope, MirSourceInfo::Todo);
+        });
     }
 
     pub fn lower_let_stmt(&mut self, scope: MirScopeIdx, stmt: Obj<ThirLetStmt>) {
@@ -59,13 +61,13 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
         let init = self.lower_expr_place(scope, init, None);
 
-        let reject_scope = self.lower_let_stmt_common(stmt.r(s).span, scope, pat, init);
-
-        if let Some(else_clause) = else_clause {
-            self.lower_block_no_terminator(reject_scope, else_clause, None);
-        }
-
-        self.builder.push_unreachable(reject_scope);
+        self.lower_let_stmt_common(stmt.r(s).span, scope, pat, init, |this, reject_scope| {
+            if let Some(else_clause) = else_clause {
+                this.lower_block_flat(reject_scope, else_clause, None);
+            } else {
+                this.push_unreachable(reject_scope, MirSourceInfo::Todo);
+            }
+        });
     }
 
     fn lower_let_stmt_common(
@@ -74,7 +76,8 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         scope: MirScopeIdx,
         pat: Obj<ThirPat>,
         scrutinee: MirPlace,
-    ) -> MirScopeIdx {
+        on_reject: impl FnOnce(&mut Self, MirScopeIdx),
+    ) {
         // Constructs the following nested scopes...
         //
         // ```
@@ -90,26 +93,31 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         // continuing logic;
         // ```
 
-        let break_on_accept = self.builder.push_scope(scope);
-        let break_on_reject = self.builder.push_scope(break_on_accept);
-
-        let mut late_use_proxies = FastHashMap::default();
-
-        self.lower_pat(
-            &mut late_use_proxies,
-            PatLowerScopes {
-                local_scope: scope,
-                match_logic: break_on_reject,
+        self.push_scope(scope, MirSourceInfo::Todo, |this, break_on_accept| {
+            this.push_scope(
                 break_on_accept,
-                break_on_reject,
-            },
-            pat,
-            scrutinee,
-        );
+                MirSourceInfo::Todo,
+                |this, break_on_reject| {
+                    let mut late_use_proxies = FastHashMap::default();
 
-        self.materialize_late_use_proxies(span, scope, late_use_proxies);
+                    this.lower_pat(
+                        &mut late_use_proxies,
+                        PatLowerScopes {
+                            local_scope: scope,
+                            match_logic: break_on_reject,
+                            break_on_accept,
+                            break_on_reject,
+                        },
+                        pat,
+                        scrutinee,
+                    );
 
-        break_on_reject
+                    this.materialize_late_use_proxies(span, scope, late_use_proxies);
+                },
+            );
+
+            on_reject(this, break_on_accept);
+        });
     }
 
     pub fn lower_match(
@@ -120,80 +128,104 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         out_place: MirPlace,
     ) {
         let s = self.session();
-        let match_scope = self.builder.push_scope(scope);
 
-        // If our scrutinee is an owned enum, we will take ownership of it here. This allows us to
-        // safely invoke guards when matching on enum variants.
-        let scrutinee = self.lower_expr_place(match_scope, scrutinee, None);
+        self.push_scope(scope, MirSourceInfo::Todo, |this, match_scope| {
+            // If our scrutinee is an owned enum, we will take ownership of it here. This allows us
+            // to safely invoke guards when matching on enum variants.
+            let scrutinee = this.lower_expr_place(match_scope, scrutinee, None);
 
-        for &arm in arms.r(s) {
-            let ThirMatchArm {
-                span,
-                pat,
-                guard,
-                body,
-            } = arm;
+            for &arm in arms.r(s) {
+                let ThirMatchArm {
+                    span,
+                    pat,
+                    guard,
+                    body,
+                } = arm;
 
-            // Constructs the following nested scopes...
-            //
-            // ```
-            // 'match_scope: {
-            //     // Arm 1
-            //     'break_on_reject: {
-            //         'break_on_accept: {
-            //              pattern match;
-            //              break 'break_on_accept or 'break_on_reject;
-            //         }
-            //
-            //         if !guard {
-            //             break 'break_on_reject;
-            //         }
-            //
-            //         body;
-            //         break 'match_scope;
-            //     }
-            //
-            //     // Arm 2
-            //     // ...
-            //
-            //     unreachable;
-            // }
-            // continuing logic;
-            // ```
+                // Constructs the following nested scopes...
+                //
+                // ```
+                // 'match_scope: {
+                //     // Arm 1
+                //     'break_on_reject: {
+                //         'break_on_accept: {
+                //              pattern match;
+                //              break 'break_on_accept or 'break_on_reject;
+                //         }
+                //
+                //         if !guard {
+                //             break 'break_on_reject;
+                //         }
+                //
+                //         body;
+                //         break 'match_scope;
+                //     }
+                //
+                //     // Arm 2
+                //     // ...
+                //
+                //     unreachable;
+                // }
+                // continuing logic;
+                // ```
 
-            let break_on_reject = self.builder.push_scope(match_scope);
-            let break_on_accept = self.builder.push_scope(break_on_reject);
+                let mut late_use_proxies = FastHashMap::default();
 
-            let mut late_use_proxies = FastHashMap::default();
+                this.push_scope(match_scope, MirSourceInfo::Todo, |this, break_on_reject| {
+                    this.push_scope(
+                        break_on_reject,
+                        MirSourceInfo::Todo,
+                        |this, break_on_accept| {
+                            this.lower_pat(
+                                &mut late_use_proxies,
+                                PatLowerScopes {
+                                    local_scope: match_scope,
+                                    match_logic: break_on_reject,
+                                    break_on_accept,
+                                    break_on_reject,
+                                },
+                                pat,
+                                scrutinee,
+                            );
+                        },
+                    );
 
-            self.lower_pat(
-                &mut late_use_proxies,
-                PatLowerScopes {
-                    local_scope: match_scope,
-                    match_logic: break_on_reject,
-                    break_on_accept,
-                    break_on_reject,
-                },
-                pat,
-                scrutinee,
-            );
+                    if let Some(guard) = guard {
+                        this.push_scope(
+                            break_on_reject,
+                            MirSourceInfo::Todo,
+                            |this, guard_scope| {
+                                // TODO: introduce guard move proxies
+                                this.lower_if_expr(
+                                    guard_scope,
+                                    guard,
+                                    |this, truthy_scope| {
+                                        this.push_break(
+                                            truthy_scope,
+                                            MirSourceInfo::Todo,
+                                            guard_scope,
+                                        );
+                                    },
+                                    Some(|this: &mut MirFromThirCtx<'tcx>, falsy_scope| {
+                                        this.push_break(
+                                            falsy_scope,
+                                            MirSourceInfo::Todo,
+                                            break_on_reject,
+                                        );
+                                    }),
+                                );
+                            },
+                        );
+                    }
 
-            if let Some(guard) = guard {
-                let guard_scope = self.builder.push_scope(break_on_reject);
-
-                // TODO: introduce guard move proxies
-
-                let [truthy_scope, falsy_scope] = self.lower_if_expr(guard_scope, guard);
-                self.builder.push_break(truthy_scope, guard_scope);
-                self.builder.push_break(falsy_scope, break_on_reject);
+                    this.materialize_late_use_proxies(span, break_on_reject, late_use_proxies);
+                    this.lower_expr_place(break_on_reject, body, Some(out_place));
+                    this.push_break(break_on_reject, MirSourceInfo::Todo, match_scope);
+                });
             }
 
-            self.materialize_late_use_proxies(span, break_on_reject, late_use_proxies);
-            self.lower_expr_place(break_on_reject, body, Some(out_place));
-            self.builder.push_break(break_on_reject, match_scope);
-        }
-
-        self.builder.push_unreachable(match_scope);
+            this.push_unreachable(match_scope, MirSourceInfo::Todo);
+        });
     }
 
     pub fn lower_let_expr(
@@ -219,21 +251,25 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         // }
         // ```
 
-        let scrutinee = self.lower_expr_place(break_if_falsy, scrutinee, None);
-        let break_if_truthy = self.builder.push_scope(break_if_falsy);
-
         let mut late_use_proxies = FastHashMap::default();
 
-        self.lower_pat(
-            &mut late_use_proxies,
-            PatLowerScopes {
-                local_scope: break_if_falsy,
-                match_logic: break_if_truthy,
-                break_on_accept: break_if_truthy,
-                break_on_reject: break_if_falsy,
+        let scrutinee = self.lower_expr_place(break_if_falsy, scrutinee, None);
+        self.push_scope(
+            break_if_falsy,
+            MirSourceInfo::Todo,
+            |this, break_if_truthy| {
+                this.lower_pat(
+                    &mut late_use_proxies,
+                    PatLowerScopes {
+                        local_scope: break_if_falsy,
+                        match_logic: break_if_truthy,
+                        break_on_accept: break_if_truthy,
+                        break_on_reject: break_if_falsy,
+                    },
+                    pat,
+                    scrutinee,
+                );
             },
-            pat,
-            scrutinee,
         );
 
         self.materialize_late_use_proxies(pat.r(s).span, break_if_falsy, late_use_proxies);
@@ -304,61 +340,62 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             } => {
                 let mir_local = self.ensure_local_defined(scopes.local_scope, local);
 
-                let init_stmt = MirStmt {
-                    source_info: MirSourceInfo::Simple(pat.r(s).span),
-                    kind: match by_ref {
-                        Some(muta) => MirStmtKind::Assign(Box::new((
+                match by_ref {
+                    Some(muta) => {
+                        self.push_assign(
+                            scopes.match_logic,
+                            MirSourceInfo::Todo,
                             MirPlace::new(tcx, mir_local, []),
                             MirRvalue::Ref(muta, scrutinee),
-                        ))),
-                        None => {
-                            let late_use_proxy =
-                                late_use_proxies.entry(mir_local).or_insert_with(|| {
-                                    let span = local.r(s).ty.r(s).span;
+                        );
+                    }
+                    None => {
+                        let late_use_proxy =
+                            late_use_proxies.entry(mir_local).or_insert_with(|| {
+                                let span = local.r(s).ty.r(s).span;
 
-                                    let ref_local = self.builder.push_local(
-                                        scopes.local_scope,
-                                        MirLocal {
-                                            ty: Obj::new(
-                                                SigTyInner {
-                                                    span,
-                                                    kind: SigTyKind::Reference(
-                                                        SigRe {
-                                                            span,
-                                                            kind: SigReKind::Infer,
-                                                        },
-                                                        Mutability::Not,
-                                                        local.r(s).ty,
-                                                    ),
-                                                },
-                                                s,
-                                            ),
-                                        },
-                                    );
+                                let ref_local = self.push_local(
+                                    scopes.local_scope,
+                                    MirLocal {
+                                        ty: Obj::new(
+                                            SigTyInner {
+                                                span,
+                                                kind: SigTyKind::Reference(
+                                                    SigRe {
+                                                        span,
+                                                        kind: SigReKind::Infer,
+                                                    },
+                                                    Mutability::Not,
+                                                    local.r(s).ty,
+                                                ),
+                                            },
+                                            s,
+                                        ),
+                                    },
+                                );
 
-                                    LateUseProxyEntry {
-                                        ref_place: MirPlace::new(tcx, ref_local, []),
-                                        can_move_from: self
-                                            .builder
-                                            .operand_mode(local.r(s).ty)
-                                            .is_copy()
-                                            .then(Vec::new),
-                                    }
-                                });
+                                LateUseProxyEntry {
+                                    ref_place: MirPlace::new(tcx, ref_local, []),
+                                    can_move_from: self
+                                        .trait_cache
+                                        .operand_mode(local.r(s).ty)
+                                        .is_copy()
+                                        .then(Vec::new),
+                                }
+                            });
 
-                            if let Some(can_move_from) = &mut late_use_proxy.can_move_from {
-                                can_move_from.push(scrutinee);
-                            }
-
-                            MirStmtKind::Assign(Box::new((
-                                late_use_proxy.ref_place,
-                                MirRvalue::Ref(Mutability::Not, scrutinee),
-                            )))
+                        if let Some(can_move_from) = &mut late_use_proxy.can_move_from {
+                            can_move_from.push(scrutinee);
                         }
-                    },
-                };
 
-                self.builder.push_statement(scopes.match_logic, init_stmt);
+                        self.push_assign(
+                            scopes.match_logic,
+                            MirSourceInfo::Todo,
+                            late_use_proxy.ref_place,
+                            MirRvalue::Ref(Mutability::Not, scrutinee),
+                        );
+                    }
+                }
 
                 if let Some(and_bind) = and_bind {
                     self.lower_pat(late_use_proxies, scopes, and_bind, scrutinee);
@@ -432,24 +469,31 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         scopes: PatLowerScopes,
         children: impl IntoIterator<Item = (Obj<ThirPat>, MirPlace)>,
     ) {
-        let nested_accept = self.builder.push_scope(scopes.match_logic);
-
         for (pat, scrutinee) in children {
-            self.lower_pat(
-                late_use_proxies,
-                PatLowerScopes {
-                    local_scope: scopes.local_scope,
-                    match_logic: nested_accept,
-                    break_on_accept: nested_accept,
-                    break_on_reject: scopes.break_on_reject,
+            self.push_scope(
+                scopes.match_logic,
+                MirSourceInfo::Todo,
+                |this, nested_accept| {
+                    this.lower_pat(
+                        late_use_proxies,
+                        PatLowerScopes {
+                            local_scope: scopes.local_scope,
+                            match_logic: scopes.match_logic,
+                            break_on_accept: nested_accept,
+                            break_on_reject: scopes.break_on_reject,
+                        },
+                        pat,
+                        scrutinee,
+                    );
                 },
-                pat,
-                scrutinee,
             );
         }
 
-        self.builder
-            .push_break(scopes.match_logic, scopes.break_on_accept);
+        self.push_break(
+            scopes.match_logic,
+            MirSourceInfo::Todo,
+            scopes.break_on_accept,
+        );
     }
 
     fn lower_pat_or(
@@ -458,24 +502,31 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         scopes: PatLowerScopes,
         children: impl IntoIterator<Item = (Obj<ThirPat>, MirPlace)>,
     ) {
-        let nested_reject = self.builder.push_scope(scopes.match_logic);
-
         for (pat, scrutinee) in children {
-            self.lower_pat(
-                late_use_proxies,
-                PatLowerScopes {
-                    local_scope: scopes.local_scope,
-                    match_logic: nested_reject,
-                    break_on_accept: scopes.break_on_accept,
-                    break_on_reject: nested_reject,
+            self.push_scope(
+                scopes.match_logic,
+                MirSourceInfo::Todo,
+                |this, nested_reject| {
+                    this.lower_pat(
+                        late_use_proxies,
+                        PatLowerScopes {
+                            local_scope: scopes.local_scope,
+                            match_logic: nested_reject,
+                            break_on_accept: scopes.break_on_accept,
+                            break_on_reject: nested_reject,
+                        },
+                        pat,
+                        scrutinee,
+                    );
                 },
-                pat,
-                scrutinee,
             );
         }
 
-        self.builder
-            .push_break(scopes.match_logic, scopes.break_on_reject);
+        self.push_break(
+            scopes.match_logic,
+            MirSourceInfo::Todo,
+            scopes.break_on_reject,
+        );
     }
 
     fn materialize_late_use_proxies(
@@ -497,12 +548,11 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 )),
             };
 
-            self.builder.push_statement(
+            self.push_assign(
                 scope,
-                MirStmt {
-                    source_info: MirSourceInfo::Simple(span),
-                    kind: MirStmtKind::Assign(Box::new((MirPlace::new(tcx, dest, []), rvalue))),
-                },
+                MirSourceInfo::Simple(span),
+                MirPlace::new(tcx, dest, []),
+                rvalue,
             );
         }
     }
@@ -515,8 +565,11 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         let s = self.session();
 
         *self.thir_locals.entry(local).or_insert_with(|| {
-            self.builder
-                .push_local(local_scope, MirLocal { ty: local.r(s).ty })
+            MirScopedBuilderRef {
+                raw_builder: &mut self.raw_builder,
+                trait_cache: &mut self.trait_cache,
+            }
+            .push_local(local_scope, MirLocal { ty: local.r(s).ty })
         })
     }
 }

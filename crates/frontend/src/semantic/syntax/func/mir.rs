@@ -886,7 +886,7 @@ pub enum MirTerminatorKind {
     Goto(MirBlockIdx),
     SwitchInt {
         discr: MirOperand,
-        constants: Box<[u64]>,
+        constants: SmallVec<[u64; 2]>,
         targets: Box<[MirBlockIdx]>,
     },
     Call {

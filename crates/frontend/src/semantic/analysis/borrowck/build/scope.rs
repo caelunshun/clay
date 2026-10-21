@@ -16,6 +16,24 @@ pub enum IfKind {
     IfFalse,
 }
 
+impl IfKind {
+    pub fn trigger_on(cond: bool) -> Self {
+        match cond {
+            true => Self::IfTrue,
+            false => Self::IfFalse,
+        }
+    }
+
+    pub fn to_taken_not_taken<T>(self, blocks: [T; 2]) -> [T; 2] {
+        let [taken, not_taken] = blocks;
+
+        match self {
+            IfKind::IfTrue => [taken, not_taken],
+            IfKind::IfFalse => [not_taken, taken],
+        }
+    }
+}
+
 pub trait MirScopedBuilder<'tcx> {
     fn raw_builder(&mut self) -> &mut RawMirScopedBuilder<'tcx>;
 
@@ -130,25 +148,10 @@ pub trait MirScopedBuilder<'tcx> {
         source_info: MirSourceInfo,
         f: impl FnOnce(&mut Self, MirScopeIdx),
     ) {
-        self.raw_builder().begin_branch(expected_top);
-
-        let MirScopedBranch {
-            scope: sub_scope,
-            entry: sub_entry,
-        } = self.raw_builder().add_branch_scope(expected_top);
-
-        f(self, sub_scope);
-
-        self.push_continue(sub_scope, MirSourceInfo::BlockFallthrough, sub_scope);
-
-        self.raw_builder().end_scope(sub_scope);
-
-        self.raw_builder()
-            .end_branch(expected_top, || MirTerminator {
-                debug_scope: expected_top,
-                source_info,
-                kind: MirTerminatorKind::Goto(sub_entry),
-            });
+        self.push_scope(expected_top, source_info, |this, scope| {
+            f(this, scope);
+            this.push_continue(scope, source_info, scope);
+        });
     }
 
     fn push_if(
@@ -157,7 +160,7 @@ pub trait MirScopedBuilder<'tcx> {
         source_info: MirSourceInfo,
         discr: MirOperand,
         kind: IfKind,
-        f: impl FnOnce(&mut Self, MirScopeIdx),
+        if_taken: impl FnOnce(&mut Self, MirScopeIdx),
     ) {
         self.raw_builder().begin_branch(expected_top);
         let fallthrough = self.raw_builder().add_fallthrough_branch(expected_top);
@@ -167,7 +170,7 @@ pub trait MirScopedBuilder<'tcx> {
             entry: branch_entry,
         } = self.raw_builder().add_branch_scope(expected_top);
 
-        f(self, sub_scope);
+        if_taken(self, sub_scope);
 
         self.push_fallthrough(sub_scope, MirSourceInfo::BlockFallthrough);
 
@@ -180,10 +183,7 @@ pub trait MirScopedBuilder<'tcx> {
                 kind: MirTerminatorKind::SwitchInt {
                     discr,
                     constants: [1, 0].into(),
-                    targets: match kind {
-                        IfKind::IfTrue => [branch_entry, fallthrough].into(),
-                        IfKind::IfFalse => [fallthrough, branch_entry].into(),
-                    },
+                    targets: kind.to_taken_not_taken([branch_entry, fallthrough]).into(),
                 },
             });
     }
@@ -193,32 +193,33 @@ pub trait MirScopedBuilder<'tcx> {
         expected_top: MirScopeIdx,
         source_info: MirSourceInfo,
         discr: MirOperand,
-        if_true: impl FnOnce(&mut Self, MirScopeIdx),
-        if_false: impl FnOnce(&mut Self, MirScopeIdx),
+        kind: IfKind,
+        if_taken: impl FnOnce(&mut Self, MirScopeIdx),
+        if_not_taken: impl FnOnce(&mut Self, MirScopeIdx),
     ) {
         self.raw_builder().begin_branch(expected_top);
 
         let MirScopedBranch {
-            scope: truthy_scope,
-            entry: truthy_entry,
+            scope: taken_scope,
+            entry: taken_entry,
         } = self.raw_builder().add_branch_scope(expected_top);
 
-        if_true(self, truthy_scope);
+        if_taken(self, taken_scope);
 
-        self.push_fallthrough(truthy_scope, MirSourceInfo::BlockFallthrough);
+        self.push_fallthrough(taken_scope, MirSourceInfo::BlockFallthrough);
 
-        self.raw_builder().end_scope(truthy_scope);
+        self.raw_builder().end_scope(taken_scope);
 
         let MirScopedBranch {
-            scope: falsy_scope,
-            entry: falsy_entry,
+            scope: not_taken_scope,
+            entry: not_taken_entry,
         } = self.raw_builder().add_branch_scope(expected_top);
 
-        if_false(self, falsy_scope);
+        if_not_taken(self, not_taken_scope);
 
-        self.push_fallthrough(falsy_scope, MirSourceInfo::BlockFallthrough);
+        self.push_fallthrough(not_taken_scope, MirSourceInfo::BlockFallthrough);
 
-        self.raw_builder().end_scope(falsy_scope);
+        self.raw_builder().end_scope(not_taken_scope);
 
         self.raw_builder()
             .end_branch(expected_top, || MirTerminator {
@@ -226,17 +227,34 @@ pub trait MirScopedBuilder<'tcx> {
                 source_info,
                 kind: MirTerminatorKind::SwitchInt {
                     discr,
-                    constants: [0, 1].into(),
-                    targets: [falsy_entry, truthy_entry].into(),
+                    constants: [1, 0].into(),
+                    targets: kind
+                        .to_taken_not_taken([taken_entry, not_taken_entry])
+                        .into(),
                 },
             });
     }
 }
 
+pub struct MirScopedBuilderRef<'a, 'tcx> {
+    pub raw_builder: &'a mut RawMirScopedBuilder<'tcx>,
+    pub trait_cache: &'a mut TraitCache<'tcx>,
+}
+
+impl<'tcx> MirScopedBuilder<'tcx> for MirScopedBuilderRef<'_, 'tcx> {
+    fn raw_builder(&mut self) -> &mut RawMirScopedBuilder<'tcx> {
+        self.raw_builder
+    }
+
+    fn trait_cache(&mut self) -> &mut TraitCache<'tcx> {
+        self.trait_cache
+    }
+}
+
 // === RawMirScopedBuilder === //
 
-pub struct RawMirScopedBuilder<'a> {
-    tcx: &'a TyCtxt,
+pub struct RawMirScopedBuilder<'tcx> {
+    tcx: &'tcx TyCtxt,
     body: MirBody,
     scope_id_gen: MirScopeIdx,
     scope_stack: Vec<BuilderScope>,
