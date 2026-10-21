@@ -85,23 +85,51 @@ impl DropScheduler {
     }
 
     pub fn request_unwind(&mut self, all_after: DropNodeIdx, body: &mut MirBody) -> MirBlockIdx {
-        Self::request_unwind_inner(&self.nodes, &mut self.unwind_routines, all_after, body)
+        Self::request_unwind_inner(
+            &self.nodes,
+            &mut self.unwind_routines,
+            self.unwind_fallthrough_bb,
+            all_after,
+            body,
+        )
     }
 
     fn request_unwind_inner(
         nodes: &IndexSlice<DropNodeIdx, [DropNode]>,
         unwind_routines: &mut FastHashMap<DropNodeIdx, MirBlockIdx>,
+        unwind_fallthrough_bb: MirBlockIdx,
         mut all_after: DropNodeIdx,
         body: &mut MirBody,
     ) -> MirBlockIdx {
         // Values which don't need drop should not result in the creation of a new basic block.
-        while let DropNode::Local {
-            needs_drop: false,
-            next: Some(next),
-            ..
-        } = nodes[all_after]
-        {
-            all_after = next;
+        loop {
+            match nodes[all_after] {
+                DropNode::Scope { .. } => {
+                    // Scopes could have drop requests pushed after them.
+                    break;
+                }
+                DropNode::Local {
+                    needs_drop: true, ..
+                } => {
+                    // (obviously needs a drop)
+                    break;
+                }
+                DropNode::Local {
+                    needs_drop: false,
+                    next: Some(next),
+                    ..
+                } => {
+                    all_after = next;
+                }
+                DropNode::Local {
+                    needs_drop: false,
+                    next: None,
+                    ..
+                } => {
+                    // There is nothing we could possibly need to drop.
+                    return unwind_fallthrough_bb;
+                }
+            }
         }
 
         *unwind_routines
@@ -120,11 +148,12 @@ impl DropScheduler {
             .jump_routines
             .entry(JumpKey {
                 to_block,
-                // N.B. cannot normalize `all_after` because we have to insert storage dead
-                // statements.
+                // N.B. cannot normalize `all_after` because we have to insert `StorageDead` stmts.
                 all_after,
                 until_scope,
             })
             .or_insert_with(|| body.cfg.create_block())
     }
+
+    pub fn finish(&mut self, body: &mut MirBody) {}
 }
