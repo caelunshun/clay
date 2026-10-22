@@ -16,21 +16,20 @@ define_index_type! {
     pub struct DropNodeIdx = u32;
 }
 
-#[derive(Copy, Clone)]
-enum ScopesFixed {
-    Yes,
-    No,
+impl DropNodeIdx {
+    pub const ROOT: Self = Self { _raw: 0 };
 }
 
 enum DropNode {
     Scope {
         scope: MirScopeIdx,
+        successors_fixed: bool,
         next: Option<DropNodeIdx>,
     },
     Local {
         local: MirLocalIdx,
         needs_drop: bool,
-        next: Option<DropNodeIdx>,
+        next: DropNodeIdx,
     },
 }
 
@@ -44,22 +43,35 @@ struct JumpKey {
 impl DropScheduler {
     pub fn new(unwind_fallthrough_bb: MirBlockIdx) -> Self {
         Self {
-            nodes: IndexVec::new(),
+            nodes: IndexVec::from_iter([DropNode::Scope {
+                scope: MirScopeIdx::ENTRY,
+                successors_fixed: true,
+                next: None,
+            }]),
             unwind_routines: FastHashMap::default(),
             jump_routines: FastHashMap::default(),
             unwind_fallthrough_bb,
         }
     }
 
-    pub fn push_scope(&mut self, scope: MirScopeIdx, next: Option<DropNodeIdx>) -> DropNodeIdx {
-        self.nodes.push(DropNode::Scope { scope, next })
+    pub fn push_scope(
+        &mut self,
+        scope: MirScopeIdx,
+        successors_fixed: bool,
+        next: DropNodeIdx,
+    ) -> DropNodeIdx {
+        self.nodes.push(DropNode::Scope {
+            scope,
+            successors_fixed,
+            next: Some(next),
+        })
     }
 
     pub fn push_local_top(
         &mut self,
         local: MirLocalIdx,
         needs_drop: bool,
-        next: Option<DropNodeIdx>,
+        next: DropNodeIdx,
     ) -> DropNodeIdx {
         self.nodes.push(DropNode::Local {
             local,
@@ -74,8 +86,13 @@ impl DropScheduler {
         local: MirLocalIdx,
         needs_drop: bool,
     ) -> DropNodeIdx {
-        let DropNode::Scope { next, .. } = self.nodes[target] else {
-            panic!("target must be a scope");
+        let DropNode::Scope {
+            next: Some(next),
+            successors_fixed: false,
+            ..
+        } = self.nodes[target]
+        else {
+            panic!("target must be a non-fixed scope");
         };
 
         let new = self.nodes.push(DropNode::Local {
@@ -98,7 +115,6 @@ impl DropScheduler {
             &self.nodes,
             &mut self.unwind_routines,
             self.unwind_fallthrough_bb,
-            ScopesFixed::No,
             all_after,
             body,
         )
@@ -108,31 +124,31 @@ impl DropScheduler {
         nodes: &IndexSlice<DropNodeIdx, [DropNode]>,
         unwind_routines: &mut FastHashMap<DropNodeIdx, MirBlockIdx>,
         unwind_fallthrough_bb: MirBlockIdx,
-        scopes_fixed: ScopesFixed,
         mut all_after: DropNodeIdx,
         body: &mut MirBody,
     ) -> MirBlockIdx {
         // Values which don't need drop should not result in the creation of a new basic block.
         loop {
             match nodes[all_after] {
-                DropNode::Scope { next, .. } => {
-                    match scopes_fixed {
-                        ScopesFixed::Yes => {
-                            // (continue scanning)
-                            match next {
-                                Some(next) => {
-                                    all_after = next;
-                                }
-                                None => {
-                                    // There is nothing we could possibly need to drop.
-                                    return unwind_fallthrough_bb;
-                                }
+                DropNode::Scope {
+                    next,
+                    successors_fixed: fixed,
+                    ..
+                } => {
+                    if fixed {
+                        // (continue scanning)
+                        match next {
+                            Some(next) => {
+                                all_after = next;
+                            }
+                            None => {
+                                // There is nothing we could possibly need to drop.
+                                return unwind_fallthrough_bb;
                             }
                         }
-                        ScopesFixed::No => {
-                            // Scopes could have drop requests pushed after them.
-                            break;
-                        }
+                    } else {
+                        // Scopes could have drop requests pushed after them.
+                        break;
                     }
                 }
                 DropNode::Local {
@@ -143,18 +159,10 @@ impl DropScheduler {
                 }
                 DropNode::Local {
                     needs_drop: false,
-                    next: Some(next),
+                    next,
                     ..
                 } => {
                     all_after = next;
-                }
-                DropNode::Local {
-                    needs_drop: false,
-                    next: None,
-                    ..
-                } => {
-                    // There is nothing we could possibly need to drop.
-                    return unwind_fallthrough_bb;
                 }
             }
         }
@@ -196,9 +204,9 @@ impl DropScheduler {
             'build_chain: loop {
                 // Process non-dropping operations in a single basic block without registering
                 // deduplication breadcrumbs.
-                let local_needing_drop = 'build_simple: loop {
+                let (local_needing_drop, next_drop_node) = 'build_simple: loop {
                     match self.nodes[curr_node] {
-                        DropNode::Scope { scope, next } => {
+                        DropNode::Scope { scope, next, .. } => {
                             if scope == until_scope {
                                 body.cfg.init_terminator(
                                     curr_bb,
@@ -220,7 +228,7 @@ impl DropScheduler {
                             next,
                         } => {
                             if needs_drop {
-                                break 'build_simple local;
+                                break 'build_simple (local, next);
                             }
 
                             body.cfg.push_stmt(
@@ -231,7 +239,7 @@ impl DropScheduler {
                                 },
                             );
 
-                            curr_node = next.expect("jump never reached the destination scope");
+                            curr_node = next;
                         }
                     }
                 };
@@ -271,9 +279,7 @@ impl DropScheduler {
                     &self.nodes,
                     &mut self.unwind_routines,
                     self.unwind_fallthrough_bb,
-                    ScopesFixed::Yes,
-                    // TODO: figure out edge behavior
-                    curr_node,
+                    next_drop_node,
                     body,
                 );
 
@@ -290,6 +296,7 @@ impl DropScheduler {
                     },
                 );
 
+                curr_node = next_drop_node;
                 curr_bb = next_bb;
             }
         }
