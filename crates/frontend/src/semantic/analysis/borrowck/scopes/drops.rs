@@ -3,7 +3,7 @@ use crate::semantic::syntax::{
     MirTerminator, MirTerminatorKind, MirUnwindBehavior, TyCtxt,
 };
 use clay_core::FastHashMap;
-use index_vec::{IndexSlice, IndexVec, define_index_type};
+use index_vec::{IndexVec, define_index_type};
 
 pub struct DropScheduler {
     nodes: IndexVec<DropNodeIdx, DropNode>,
@@ -110,26 +110,14 @@ impl DropScheduler {
         new
     }
 
-    pub fn request_unwind(&mut self, all_after: DropNodeIdx, body: &mut MirBody) -> MirBlockIdx {
-        Self::request_unwind_inner(
-            &self.nodes,
-            &mut self.unwind_routines,
-            self.unwind_fallthrough_bb,
-            all_after,
-            body,
-        )
-    }
-
-    fn request_unwind_inner(
-        nodes: &IndexSlice<DropNodeIdx, [DropNode]>,
-        unwind_routines: &mut FastHashMap<DropNodeIdx, MirBlockIdx>,
-        unwind_fallthrough_bb: MirBlockIdx,
+    pub fn request_unwind(
+        &mut self,
         mut all_after: DropNodeIdx,
         body: &mut MirBody,
     ) -> MirBlockIdx {
         // Values which don't need drop should not result in the creation of a new basic block.
         loop {
-            match nodes[all_after] {
+            match self.nodes[all_after] {
                 DropNode::Scope {
                     next,
                     successors_fixed: fixed,
@@ -143,7 +131,7 @@ impl DropScheduler {
                             }
                             None => {
                                 // There is nothing we could possibly need to drop.
-                                return unwind_fallthrough_bb;
+                                return self.unwind_fallthrough_bb;
                             }
                         }
                     } else {
@@ -167,7 +155,8 @@ impl DropScheduler {
             }
         }
 
-        *unwind_routines
+        *self
+            .unwind_routines
             .entry(all_after)
             .or_insert_with(|| body.cfg.create_block())
     }
@@ -191,6 +180,20 @@ impl DropScheduler {
     }
 
     pub fn finish(mut self, tcx: &TyCtxt, body: &mut MirBody) {
+        // Freeze all scopes.
+        for node in &mut self.nodes {
+            match node {
+                DropNode::Scope {
+                    successors_fixed, ..
+                } => {
+                    *successors_fixed = true;
+                }
+                DropNode::Local { .. } => {
+                    // (nothing to do)
+                }
+            }
+        }
+
         // Process jump routines first since they can contribute to requested unwinds.
         for (entry_key, entry_bb) in self.jump_routines.clone() {
             let JumpKey {
@@ -275,13 +278,7 @@ impl DropScheduler {
                 // forwards.
                 let next_bb = body.cfg.create_block();
 
-                let unwind_bb = Self::request_unwind_inner(
-                    &self.nodes,
-                    &mut self.unwind_routines,
-                    self.unwind_fallthrough_bb,
-                    next_drop_node,
-                    body,
-                );
+                let unwind_bb = self.request_unwind(next_drop_node, body);
 
                 body.cfg.init_terminator(
                     curr_bb,
@@ -292,6 +289,77 @@ impl DropScheduler {
                             place: MirPlace::new(tcx, local_needing_drop, []),
                             target: next_bb,
                             unwind: MirUnwindBehavior::Continue(unwind_bb),
+                        },
+                    },
+                );
+
+                curr_node = next_drop_node;
+                curr_bb = next_bb;
+            }
+        }
+
+        // Now, create unwinding operations.
+        for (entry_node, mut curr_bb) in self.unwind_routines.clone() {
+            let mut curr_node = entry_node;
+
+            'build_chain: loop {
+                let (local_needing_drop, next_drop_node) = 'build_simple: loop {
+                    match self.nodes[curr_node] {
+                        DropNode::Scope {
+                            next: Some(next), ..
+                        }
+                        | DropNode::Local {
+                            needs_drop: false,
+                            next,
+                            ..
+                        } => {
+                            curr_node = next;
+                        }
+                        DropNode::Scope { next: None, .. } => {
+                            break 'build_chain;
+                        }
+                        DropNode::Local {
+                            local,
+                            needs_drop: true,
+                            next,
+                        } => {
+                            break 'build_simple (local, next);
+                        }
+                    }
+                };
+
+                // Deduplicate shared jump routines
+                if curr_node != entry_node {
+                    if let Some(&dedup_entry_bb) = self.unwind_routines.get(&curr_node) {
+                        body.cfg.init_terminator(
+                            curr_bb,
+                            MirTerminator {
+                                debug_scope: MirScopeIdx::UNCATEGORIZED,
+                                source_info: MirSourceInfo::Todo,
+                                kind: MirTerminatorKind::Goto(dedup_entry_bb),
+                            },
+                        );
+
+                        break;
+                    }
+
+                    // Otherwise, lay claim to it!
+                    self.unwind_routines.insert(curr_node, curr_bb);
+                }
+
+                // If we're the first to attempt to drop this local, create our drop edge and move
+                // forwards.
+                let next_bb = body.cfg.create_block();
+
+                body.cfg.init_terminator(
+                    curr_bb,
+                    MirTerminator {
+                        debug_scope: MirScopeIdx::UNCATEGORIZED,
+                        source_info: MirSourceInfo::Todo,
+                        kind: MirTerminatorKind::EnsureDropped {
+                            place: MirPlace::new(tcx, local_needing_drop, []),
+                            target: next_bb,
+                            unwind: MirUnwindBehavior::DoublePanic,
                         },
                     },
                 );
