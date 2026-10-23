@@ -1,5 +1,4 @@
 mod drops;
-pub use self::drops::CanPreinsertLocals;
 
 mod raw_builder;
 pub use self::raw_builder::*;

@@ -3,7 +3,7 @@ use crate::{
     semantic::{
         analysis::borrowck::{
             lower::driver::MirFromThirCtx,
-            scopes::{MirScopedBuilder, MirScopedBuilderRef},
+            scopes::{CanHoistLocals, MirScopedBuilder, MirScopedBuilderRef},
         },
         syntax::{
             MirLocal, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue, MirScopeIdx,
@@ -93,31 +93,37 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         // continuing logic;
         // ```
 
-        self.push_scope(scope, MirSourceInfo::Todo, |this, break_on_accept| {
-            this.push_scope(
-                break_on_accept,
-                MirSourceInfo::Todo,
-                |this, break_on_reject| {
-                    let mut late_use_proxies = FastHashMap::default();
+        self.push_scope(
+            scope,
+            MirSourceInfo::Todo,
+            CanHoistLocals::No,
+            |this, break_on_accept| {
+                this.push_scope(
+                    break_on_accept,
+                    MirSourceInfo::Todo,
+                    CanHoistLocals::No,
+                    |this, break_on_reject| {
+                        let mut late_use_proxies = FastHashMap::default();
 
-                    this.lower_pat(
-                        &mut late_use_proxies,
-                        PatLowerScopes {
-                            local_scope: scope,
-                            match_logic: break_on_reject,
-                            break_on_accept,
-                            break_on_reject,
-                        },
-                        pat,
-                        scrutinee,
-                    );
+                        this.lower_pat(
+                            &mut late_use_proxies,
+                            PatLowerScopes {
+                                local_scope: scope,
+                                match_logic: break_on_reject,
+                                break_on_accept,
+                                break_on_reject,
+                            },
+                            pat,
+                            scrutinee,
+                        );
 
-                    this.materialize_late_use_proxies(span, break_on_reject, late_use_proxies);
-                },
-            );
+                        this.materialize_late_use_proxies(span, break_on_reject, late_use_proxies);
+                    },
+                );
 
-            on_reject(this, break_on_accept);
-        });
+                on_reject(this, break_on_accept);
+            },
+        );
     }
 
     pub fn lower_match(
@@ -129,103 +135,121 @@ impl<'tcx> MirFromThirCtx<'tcx> {
     ) {
         let s = self.session();
 
-        self.push_scope(scope, MirSourceInfo::Todo, |this, match_scope| {
-            // If our scrutinee is an owned enum, we will take ownership of it here. This allows us
-            // to safely invoke guards when matching on enum variants.
-            let scrutinee = this.lower_expr_place(match_scope, scrutinee, None);
+        self.push_scope(
+            scope,
+            MirSourceInfo::Todo,
+            CanHoistLocals::No,
+            |this, match_scope| {
+                // If our scrutinee is an owned enum, we will take ownership of it here. This allows us
+                // to safely invoke guards when matching on enum variants.
+                let scrutinee = this.lower_expr_place(match_scope, scrutinee, None);
 
-            for &arm in arms.r(s) {
-                let ThirMatchArm {
-                    span,
-                    pat,
-                    guard,
-                    body,
-                } = arm;
+                for &arm in arms.r(s) {
+                    let ThirMatchArm {
+                        span,
+                        pat,
+                        guard,
+                        body,
+                    } = arm;
 
-                // Constructs the following nested scopes...
-                //
-                // ```
-                // 'match_scope: {
-                //     // Arm 1
-                //     'break_on_reject: {
-                //         'break_on_accept: {
-                //              pattern match;
-                //              break 'break_on_accept or 'break_on_reject;
-                //         }
-                //
-                //         if !guard {
-                //             break 'break_on_reject;
-                //         }
-                //
-                //         body;
-                //         break 'match_scope;
-                //     }
-                //
-                //     // Arm 2
-                //     // ...
-                //
-                //     unreachable;
-                // }
-                // continuing logic;
-                // ```
+                    // Constructs the following nested scopes...
+                    //
+                    // ```
+                    // 'match_scope: {
+                    //     // Arm 1
+                    //     'break_on_reject: {
+                    //         hoisted locals here;
+                    //         'break_on_accept: {
+                    //              pattern match;
+                    //              break 'break_on_accept or 'break_on_reject;
+                    //         }
+                    //
+                    //         if !guard {
+                    //             break 'break_on_reject;
+                    //         }
+                    //
+                    //         body;
+                    //         break 'match_scope;
+                    //     }
+                    //
+                    //     // Arm 2
+                    //     // ...
+                    //
+                    //     unreachable;
+                    // }
+                    // continuing logic;
+                    // ```
 
-                let mut late_use_proxies = FastHashMap::default();
+                    let mut late_use_proxies = FastHashMap::default();
 
-                this.push_scope(match_scope, MirSourceInfo::Todo, |this, break_on_reject| {
                     this.push_scope(
-                        break_on_reject,
+                        match_scope,
                         MirSourceInfo::Todo,
-                        |this, break_on_accept| {
-                            this.lower_pat(
-                                &mut late_use_proxies,
-                                PatLowerScopes {
-                                    local_scope: match_scope,
-                                    match_logic: break_on_reject,
-                                    break_on_accept,
-                                    break_on_reject,
+                        CanHoistLocals::Yes,
+                        |this, break_on_reject| {
+                            this.push_scope(
+                                break_on_reject,
+                                MirSourceInfo::Todo,
+                                CanHoistLocals::No,
+                                |this, break_on_accept| {
+                                    this.lower_pat(
+                                        &mut late_use_proxies,
+                                        PatLowerScopes {
+                                            local_scope: break_on_reject,
+                                            match_logic: break_on_reject,
+                                            break_on_accept,
+                                            break_on_reject,
+                                        },
+                                        pat,
+                                        scrutinee,
+                                    );
                                 },
-                                pat,
-                                scrutinee,
                             );
-                        },
-                    );
 
-                    if let Some(guard) = guard {
-                        this.push_scope(
-                            break_on_reject,
-                            MirSourceInfo::Todo,
-                            |this, guard_scope| {
-                                // TODO: introduce guard move proxies
-                                this.lower_if_expr(
-                                    guard_scope,
-                                    guard,
-                                    |this, truthy_scope| {
-                                        this.push_break(
-                                            truthy_scope,
-                                            MirSourceInfo::Todo,
+                            if let Some(guard) = guard {
+                                this.push_scope(
+                                    break_on_reject,
+                                    MirSourceInfo::Todo,
+                                    CanHoistLocals::No,
+                                    |this, guard_scope| {
+                                        // TODO: introduce guard move proxies
+
+                                        this.lower_if_expr(
                                             guard_scope,
+                                            guard,
+                                            |this, truthy_scope| {
+                                                this.push_break(
+                                                    truthy_scope,
+                                                    MirSourceInfo::Todo,
+                                                    guard_scope,
+                                                );
+                                            },
+                                            Some(|this: &mut MirFromThirCtx<'tcx>, falsy_scope| {
+                                                this.push_break(
+                                                    falsy_scope,
+                                                    MirSourceInfo::Todo,
+                                                    break_on_reject,
+                                                );
+                                            }),
                                         );
                                     },
-                                    Some(|this: &mut MirFromThirCtx<'tcx>, falsy_scope| {
-                                        this.push_break(
-                                            falsy_scope,
-                                            MirSourceInfo::Todo,
-                                            break_on_reject,
-                                        );
-                                    }),
                                 );
-                            },
-                        );
-                    }
+                            }
 
-                    this.materialize_late_use_proxies(span, break_on_reject, late_use_proxies);
-                    this.lower_expr_place(break_on_reject, body, Some(out_place));
-                    this.push_break(break_on_reject, MirSourceInfo::Todo, match_scope);
-                });
-            }
+                            this.materialize_late_use_proxies(
+                                span,
+                                break_on_reject,
+                                late_use_proxies,
+                            );
+                            this.lower_expr_place(break_on_reject, body, Some(out_place));
+                            this.push_break(break_on_reject, MirSourceInfo::Todo, match_scope);
+                        },
+                    );
+                }
 
-            this.push_unreachable(match_scope, MirSourceInfo::Todo);
-        });
+                this.push_unreachable(match_scope, MirSourceInfo::Todo);
+            },
+        );
     }
 
     pub fn lower_let_expr(
@@ -257,6 +281,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         self.push_scope(
             break_if_falsy,
             MirSourceInfo::Todo,
+            CanHoistLocals::No,
             |this, break_if_truthy| {
                 this.lower_pat(
                     &mut late_use_proxies,
@@ -326,6 +351,8 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         pat: Obj<ThirPat>,
         scrutinee: MirPlace,
     ) {
+        debug_assert!(self.can_hoist_local_into(scopes.local_scope));
+
         let tcx = self.tcx();
         let s = self.session();
 
@@ -473,6 +500,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             self.push_scope(
                 scopes.match_logic,
                 MirSourceInfo::Todo,
+                CanHoistLocals::No,
                 |this, nested_accept| {
                     this.lower_pat(
                         late_use_proxies,
@@ -506,6 +534,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             self.push_scope(
                 scopes.match_logic,
                 MirSourceInfo::Todo,
+                CanHoistLocals::No,
                 |this, nested_reject| {
                     this.lower_pat(
                         late_use_proxies,

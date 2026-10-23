@@ -1,10 +1,18 @@
 use crate::{
     base::arena::Obj,
+    bool_enum,
     semantic::{
         infer::{ClauseCx, ClauseImportEnv, ImplCache, UnifyCxMode},
         syntax::{FnDef, MirOperandMode, SigTy, TyCtxt},
     },
 };
+
+bool_enum! {
+    pub enum CanOmitDrop {
+        true => Yes;
+        false => No;
+    }
+}
 
 pub struct TraitCache<'tcx> {
     ccx: ClauseCx<'tcx>,
@@ -31,7 +39,7 @@ impl<'tcx> TraitCache<'tcx> {
         MirOperandMode::Move
     }
 
-    pub fn can_omit_drop(&mut self, ty: SigTy) -> bool {
-        false
+    pub fn can_omit_drop(&mut self, ty: SigTy) -> CanOmitDrop {
+        CanOmitDrop::Yes
     }
 }

@@ -1,14 +1,21 @@
-use crate::semantic::syntax::{
-    MirBlockIdx, MirBody, MirLocalIdx, MirPlace, MirScopeIdx, MirSourceInfo, MirStmt, MirStmtKind,
-    MirTerminator, MirTerminatorKind, MirUnwindBehavior, TyCtxt,
+use crate::{
+    bool_enum,
+    semantic::{
+        analysis::borrowck::scopes::CanOmitDrop,
+        syntax::{
+            MirBlockIdx, MirBody, MirLocalIdx, MirPlace, MirScopeIdx, MirSourceInfo, MirStmt,
+            MirStmtKind, MirTerminator, MirTerminatorKind, MirUnwindBehavior, TyCtxt,
+        },
+    },
 };
 use clay_core::FastHashMap;
 use index_vec::{IndexVec, define_index_type};
 
-#[derive(Copy, Clone)]
-pub enum CanPreinsertLocals {
-    Yes,
-    No,
+bool_enum! {
+    pub enum CanPreinsertLocals {
+        true => Yes;
+        false => No;
+    }
 }
 
 pub struct DropScheduler {
@@ -34,7 +41,7 @@ enum DropNode {
     },
     Local {
         local: MirLocalIdx,
-        needs_drop: bool,
+        can_omit_drop: CanOmitDrop,
         next: DropNodeIdx,
     },
 }
@@ -82,12 +89,12 @@ impl DropScheduler {
     pub fn push_local_top(
         &mut self,
         local: MirLocalIdx,
-        needs_drop: bool,
+        can_omit_drop: CanOmitDrop,
         next: DropNodeIdx,
     ) -> DropNodeIdx {
         self.nodes.push(DropNode::Local {
             local,
-            needs_drop,
+            can_omit_drop,
             next,
         })
     }
@@ -96,7 +103,7 @@ impl DropScheduler {
         &mut self,
         target: DropNodeIdx,
         local: MirLocalIdx,
-        needs_drop: bool,
+        can_omit_drop: CanOmitDrop,
     ) -> DropNodeIdx {
         let DropNode::Scope {
             next: Some(next),
@@ -109,7 +116,7 @@ impl DropScheduler {
 
         let new = self.nodes.push(DropNode::Local {
             local,
-            needs_drop,
+            can_omit_drop,
             next,
         });
 
@@ -163,13 +170,14 @@ impl DropScheduler {
                     }
                 }
                 DropNode::Local {
-                    needs_drop: true, ..
+                    can_omit_drop: CanOmitDrop::No,
+                    ..
                 } => {
-                    // (obviously needs a drop)
+                    // We need a drop!
                     break;
                 }
                 DropNode::Local {
-                    needs_drop: false,
+                    can_omit_drop: CanOmitDrop::Yes,
                     next,
                     ..
                 } => {
@@ -248,10 +256,10 @@ impl DropScheduler {
                         }
                         DropNode::Local {
                             local,
-                            needs_drop,
+                            can_omit_drop,
                             next,
                         } => {
-                            if needs_drop {
+                            if can_omit_drop == CanOmitDrop::No {
                                 break 'build_simple (local, next);
                             }
 
@@ -330,7 +338,7 @@ impl DropScheduler {
                             next: Some(next), ..
                         }
                         | DropNode::Local {
-                            needs_drop: false,
+                            can_omit_drop: CanOmitDrop::Yes,
                             next,
                             ..
                         } => {
@@ -341,7 +349,7 @@ impl DropScheduler {
                         }
                         DropNode::Local {
                             local,
-                            needs_drop: true,
+                            can_omit_drop: CanOmitDrop::No,
                             next,
                         } => {
                             break 'build_simple (local, next);

@@ -1,14 +1,24 @@
-use crate::semantic::{
-    analysis::borrowck::scopes::{
-        CanPreinsertLocals,
-        drops::{DropNodeIdx, DropScheduler},
-    },
-    syntax::{
-        MirBlockIdx, MirBody, MirLocal, MirLocalIdx, MirPlace, MirScopeIdx, MirSourceInfo, MirStmt,
-        MirTerminator, MirTerminatorKind, MirUnwindBehavior, TyCtxt,
+use crate::{
+    bool_enum,
+    semantic::{
+        analysis::borrowck::scopes::{
+            CanOmitDrop,
+            drops::{CanPreinsertLocals, DropNodeIdx, DropScheduler},
+        },
+        syntax::{
+            MirBlockIdx, MirBody, MirLocal, MirLocalIdx, MirPlace, MirScopeIdx, MirSourceInfo,
+            MirStmt, MirTerminator, MirTerminatorKind, MirUnwindBehavior, TyCtxt,
+        },
     },
 };
 use slotmap::Key as _;
+
+bool_enum! {
+    pub enum CanHoistLocals {
+        true => Yes;
+        false => No;
+    }
+}
 
 pub struct RawMirScopedBuilder<'tcx> {
     tcx: &'tcx TyCtxt,
@@ -30,6 +40,9 @@ struct BuilderScope {
 }
 
 struct LiveBuilderScope {
+    /// Whether `push_local` can hoist locals into this scope.
+    can_hoist_locals: CanHoistLocals,
+
     /// If the scope is the top-most live scope, this points to the most recently added local (or
     /// the root scope if we haven't added any locals yet). If is a scope actively building a
     /// branched child, this points to a scope node for the child scope. This node is never
@@ -52,7 +65,7 @@ impl<'tcx> RawMirScopedBuilder<'tcx> {
     pub fn new(
         tcx: &'tcx TyCtxt,
         return_local: MirLocal,
-        can_omit_return_drop: bool,
+        can_omit_return_drop: CanOmitDrop,
         arg_count: u32,
     ) -> Self {
         let mut this = Self {
@@ -75,7 +88,7 @@ impl<'tcx> RawMirScopedBuilder<'tcx> {
             kind: MirTerminatorKind::UnwindResume,
         });
 
-        if !can_omit_return_drop {
+        if can_omit_return_drop.is_truthy() {
             // N.B. we do not register the return value as a local like all function arguments because
             // we don't want to drop it before a `return`. The only time we want to drop that place is
             // when we panic out of the function.
@@ -97,6 +110,7 @@ impl<'tcx> RawMirScopedBuilder<'tcx> {
         this.scope_stack.push(BuilderScope {
             id: MirScopeIdx::ENTRY,
             live_state: Some(LiveBuilderScope {
+                can_hoist_locals: CanHoistLocals::Yes,
                 head_local: DropNodeIdx::ROOT,
                 entry_bb,
                 curr_bb: Some(entry_bb),
@@ -190,7 +204,7 @@ impl RawMirScopedBuilder<'_> {
     pub fn add_branch_scope(
         &mut self,
         expected_top: MirScopeIdx,
-        extensible: CanPreinsertLocals,
+        can_hoist_locals: CanHoistLocals,
     ) -> MirScopedBranch {
         let Some(top) = Self::expect_top_mut(&mut self.scope_stack, expected_top) else {
             // Create a dummy child scope.
@@ -217,6 +231,11 @@ impl RawMirScopedBuilder<'_> {
         self.scope_id_gen += 1;
 
         // Create a drop node for the scope. This will be pushed once the child becomes dead.
+        let extensible = match top.can_hoist_locals {
+            CanHoistLocals::Yes => CanPreinsertLocals::Yes,
+            CanHoistLocals::No => CanPreinsertLocals::No,
+        };
+
         let new_head_local = self
             .drop_scheduler
             .push_scope(sub_id, extensible, top.head_local);
@@ -229,6 +248,7 @@ impl RawMirScopedBuilder<'_> {
         self.scope_stack.push(BuilderScope {
             id: sub_id,
             live_state: Some(LiveBuilderScope {
+                can_hoist_locals,
                 head_local: new_head_local,
                 entry_bb: sub_entry,
                 curr_bb: Some(sub_entry),
@@ -375,7 +395,7 @@ impl RawMirScopedBuilder<'_> {
         &mut self,
         in_scope: MirScopeIdx,
         local: MirLocal,
-        can_omit_drop: bool,
+        can_omit_drop: CanOmitDrop,
     ) -> MirLocalIdx {
         let (top, parents) = self.scope_stack.split_last_mut().unwrap();
 
@@ -389,7 +409,7 @@ impl RawMirScopedBuilder<'_> {
 
             top.head_local =
                 self.drop_scheduler
-                    .push_local_top(local, !can_omit_drop, top.head_local);
+                    .push_local_top(local, can_omit_drop, top.head_local);
 
             return local;
         };
@@ -397,6 +417,7 @@ impl RawMirScopedBuilder<'_> {
         // Handle local creation on ancestor scopes
         let parent = parents
             .iter()
+            .rev()
             .find(|v| v.id == in_scope)
             .expect("in_scope is not an ancestor of the top scope");
 
@@ -407,9 +428,28 @@ impl RawMirScopedBuilder<'_> {
         let local = self.body.locals.push(local);
 
         self.drop_scheduler
-            .push_local_after(parent.head_local, local, !can_omit_drop);
+            .push_local_after(parent.head_local, local, can_omit_drop);
 
         local
+    }
+
+    pub fn can_hoist_local_into(&self, in_scope: MirScopeIdx) -> bool {
+        self.scope_stack
+            .iter()
+            .rev()
+            .find_map(|scope| {
+                if scope.id != in_scope {
+                    return None;
+                }
+
+                let Some(scope) = &scope.live_state else {
+                    // We blanket-allow these operations.
+                    return Some(true);
+                };
+
+                Some(scope.can_hoist_locals.is_truthy())
+            })
+            .expect("in_scope is not an ancestor of the top scope")
     }
 
     pub fn push_stmt(&mut self, expected_top: MirScopeIdx, stmt: impl FnOnce() -> MirStmt) {

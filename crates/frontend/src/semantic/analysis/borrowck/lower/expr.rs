@@ -4,7 +4,7 @@ use crate::{
     semantic::{
         analysis::borrowck::{
             lower::driver::{LabelledScope, MirFromThirCtx, MirRvalueOrPlace},
-            scopes::{IfKind, MirScopedBuilder as _},
+            scopes::{CanHoistLocals, MirScopedBuilder as _, TakenIfEq},
         },
         syntax::{
             MirBinOpKind, MirLocal, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue,
@@ -145,7 +145,8 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                         scope,
                         MirSourceInfo::Todo,
                         lhs,
-                        IfKind::trigger_on(op.short_circuit_if()),
+                        TakenIfEq::from_bool(op.short_circuit_if()),
+                        CanHoistLocals::Yes,
                         |this, short_circuit| {
                             this.push_assign(
                                 short_circuit,
@@ -216,14 +217,19 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 let out_place =
                     self.create_assign_into_place_if_needed(scope, &mut assign_into, expr.r(s).ty);
 
-                self.push_scope(scope, MirSourceInfo::Todo, |this, scope| {
-                    this.labelled_scopes
-                        .insert(expr, LabelledScope { scope, out_place });
+                self.push_scope(
+                    scope,
+                    MirSourceInfo::Todo,
+                    CanHoistLocals::Yes,
+                    |this, scope| {
+                        this.labelled_scopes
+                            .insert(expr, LabelledScope { scope, out_place });
 
-                    this.lower_block_flat(scope, block, Some(out_place));
+                        this.lower_block_flat(scope, block, Some(out_place));
 
-                    this.labelled_scopes.remove(&expr);
-                });
+                        this.labelled_scopes.remove(&expr);
+                    },
+                );
 
                 MirRvalueOrPlace::Place(out_place)
             }
@@ -231,14 +237,19 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 let out_place =
                     self.create_assign_into_place_if_needed(scope, &mut assign_into, expr.r(s).ty);
 
-                self.push_loop(scope, MirSourceInfo::Todo, |this, scope| {
-                    this.labelled_scopes
-                        .insert(expr, LabelledScope { scope, out_place });
+                self.push_loop(
+                    scope,
+                    MirSourceInfo::Todo,
+                    CanHoistLocals::Yes,
+                    |this, scope| {
+                        this.labelled_scopes
+                            .insert(expr, LabelledScope { scope, out_place });
 
-                    this.lower_block_flat(scope, block, None);
+                        this.lower_block_flat(scope, block, None);
 
-                    this.labelled_scopes.remove(&expr);
-                });
+                        this.labelled_scopes.remove(&expr);
+                    },
+                );
 
                 MirRvalueOrPlace::Place(out_place)
             }
@@ -354,10 +365,15 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         for &stmt in &block.r(s).stmts {
             match stmt {
                 ThirStmt::Expr(expr) => {
-                    self.push_scope(scope, MirSourceInfo::Todo, |this, scope| {
-                        // Dropped by leaving the scope.
-                        this.lower_expr_place(scope, expr, None);
-                    });
+                    self.push_scope(
+                        scope,
+                        MirSourceInfo::Todo,
+                        CanHoistLocals::Yes,
+                        |this, scope| {
+                            // Dropped by leaving the scope.
+                            this.lower_expr_place(scope, expr, None);
+                        },
+                    );
                 }
                 ThirStmt::Let(stmt) => {
                     self.lower_let_stmt(scope, stmt);
@@ -422,54 +438,65 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         //     user break 'break_after_truthy;
         // }
         // ```
-        self.push_scope(scope, MirSourceInfo::Todo, |this, break_after_truthy| {
-            this.push_scope(
-                break_after_truthy,
-                MirSourceInfo::Todo,
-                |this, break_if_falsy| {
-                    let lower_cond = |this: &mut MirFromThirCtx<'tcx>, cond: Obj<ThirExpr>| {
-                        let cond = this.lower_expr_operand(break_if_falsy, cond);
+        self.push_scope(
+            scope,
+            MirSourceInfo::Todo,
+            CanHoistLocals::Yes,
+            |this, break_after_truthy| {
+                this.push_scope(
+                    break_after_truthy,
+                    MirSourceInfo::Todo,
+                    CanHoistLocals::Yes,
+                    |this, break_if_falsy| {
+                        let lower_cond = |this: &mut MirFromThirCtx<'tcx>, cond: Obj<ThirExpr>| {
+                            let cond = this.lower_expr_operand(break_if_falsy, cond);
 
-                        this.push_if(
-                            break_if_falsy,
-                            MirSourceInfo::Todo,
-                            cond,
-                            IfKind::IfFalse,
-                            |this, cond_falsy| {
-                                this.push_break(cond_falsy, MirSourceInfo::Todo, break_if_falsy);
-                            },
-                        );
-                    };
+                            this.push_if(
+                                break_if_falsy,
+                                MirSourceInfo::Todo,
+                                cond,
+                                TakenIfEq::IfFalse,
+                                CanHoistLocals::Yes,
+                                |this, cond_falsy| {
+                                    this.push_break(
+                                        cond_falsy,
+                                        MirSourceInfo::Todo,
+                                        break_if_falsy,
+                                    );
+                                },
+                            );
+                        };
 
-                    loop {
-                        if let ThirExprKind::PrimitiveBinOp(AstBinOpKind::And, lhs, rhs) =
-                            *cond.r(s).kind
-                        {
-                            match *lhs.r(s).kind {
-                                ThirExprKind::Let(pat, scrutinee) => {
-                                    this.lower_let_expr(break_if_falsy, pat, scrutinee);
+                        loop {
+                            if let ThirExprKind::PrimitiveBinOp(AstBinOpKind::And, lhs, rhs) =
+                                *cond.r(s).kind
+                            {
+                                match *lhs.r(s).kind {
+                                    ThirExprKind::Let(pat, scrutinee) => {
+                                        this.lower_let_expr(break_if_falsy, pat, scrutinee);
+                                    }
+                                    _ => {
+                                        lower_cond(this, lhs);
+                                    }
                                 }
-                                _ => {
-                                    lower_cond(this, lhs);
-                                }
+
+                                cond = rhs;
+                            } else {
+                                lower_cond(this, cond);
+                                break;
                             }
-
-                            cond = rhs;
-                        } else {
-                            lower_cond(this, cond);
-                            break;
                         }
-                    }
 
-                    if_truthy(this, break_if_falsy);
-                    this.push_break(break_if_falsy, MirSourceInfo::Todo, break_after_truthy);
-                },
-            );
+                        if_truthy(this, break_if_falsy);
+                        this.push_break(break_if_falsy, MirSourceInfo::Todo, break_after_truthy);
+                    },
+                );
 
-            if let Some(if_falsy) = if_falsy {
-                if_falsy(this, break_after_truthy);
-            }
-        });
+                if let Some(if_falsy) = if_falsy {
+                    if_falsy(this, break_after_truthy);
+                }
+            },
+        );
     }
 
     pub fn create_assign_into_place_if_needed(

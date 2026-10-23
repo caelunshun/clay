@@ -1,38 +1,34 @@
-use crate::semantic::{
-    analysis::borrowck::scopes::{
-        CanPreinsertLocals, MirScopedBranch, RawMirScopedBuilder, TraitCache,
-    },
-    syntax::{
-        MirLocal, MirLocalIdx, MirOperand, MirPlace, MirRvalue, MirScopeIdx, MirSourceInfo,
-        MirStmt, MirStmtKind, MirTerminator, MirTerminatorKind,
+use crate::{
+    bool_enum,
+    semantic::{
+        analysis::borrowck::scopes::{
+            CanHoistLocals, MirScopedBranch, RawMirScopedBuilder, TraitCache,
+        },
+        syntax::{
+            MirLocal, MirLocalIdx, MirOperand, MirPlace, MirRvalue, MirScopeIdx, MirSourceInfo,
+            MirStmt, MirStmtKind, MirTerminator, MirTerminatorKind,
+        },
     },
 };
 
-#[derive(Debug, Copy, Clone)]
-pub enum IfKind {
-    IfTrue,
-    IfFalse,
+bool_enum! {
+    pub enum TakenIfEq {
+        true => IfTrue;
+        false => IfFalse;
+    }
 }
 
-impl IfKind {
-    pub fn trigger_on(cond: bool) -> Self {
-        match cond {
-            true => Self::IfTrue,
-            false => Self::IfFalse,
-        }
-    }
-
+impl TakenIfEq {
     pub fn to_taken_not_taken<T>(self, blocks: [T; 2]) -> [T; 2] {
         let [taken, not_taken] = blocks;
 
         match self {
-            IfKind::IfTrue => [taken, not_taken],
-            IfKind::IfFalse => [not_taken, taken],
+            TakenIfEq::IfTrue => [taken, not_taken],
+            TakenIfEq::IfFalse => [not_taken, taken],
         }
     }
 }
 
-// TODO: allow customization of `CanPreinsertLocals`.
 pub trait MirScopedBuilder<'tcx> {
     fn raw_builder(&mut self) -> &mut RawMirScopedBuilder<'tcx>;
 
@@ -43,6 +39,10 @@ pub trait MirScopedBuilder<'tcx> {
 
         self.raw_builder()
             .push_local(in_scope, local, can_omit_drop)
+    }
+
+    fn can_hoist_local_into(&mut self, in_scope: MirScopeIdx) -> bool {
+        self.raw_builder().can_hoist_local_into(in_scope)
     }
 
     fn push_assign(
@@ -119,6 +119,7 @@ pub trait MirScopedBuilder<'tcx> {
         &mut self,
         expected_top: MirScopeIdx,
         source_info: MirSourceInfo,
+        can_hoist_locals: CanHoistLocals,
         f: impl FnOnce(&mut Self, MirScopeIdx),
     ) {
         self.raw_builder().begin_branch(expected_top);
@@ -128,7 +129,7 @@ pub trait MirScopedBuilder<'tcx> {
             entry: sub_entry,
         } = self
             .raw_builder()
-            .add_branch_scope(expected_top, CanPreinsertLocals::Yes);
+            .add_branch_scope(expected_top, can_hoist_locals);
 
         f(self, sub_scope);
 
@@ -147,12 +148,18 @@ pub trait MirScopedBuilder<'tcx> {
         &mut self,
         expected_top: MirScopeIdx,
         source_info: MirSourceInfo,
+        can_hoist_locals: CanHoistLocals,
         f: impl FnOnce(&mut Self, MirScopeIdx),
     ) {
-        self.push_scope(expected_top, source_info, |this, scope| {
-            f(this, scope);
-            this.push_continue(scope, source_info, scope);
-        });
+        self.push_scope(
+            expected_top,
+            source_info,
+            can_hoist_locals,
+            |this, scope| {
+                f(this, scope);
+                this.push_continue(scope, source_info, scope);
+            },
+        );
     }
 
     fn push_if(
@@ -160,7 +167,8 @@ pub trait MirScopedBuilder<'tcx> {
         expected_top: MirScopeIdx,
         source_info: MirSourceInfo,
         discr: MirOperand,
-        kind: IfKind,
+        kind: TakenIfEq,
+        can_hoist_locals: CanHoistLocals,
         if_taken: impl FnOnce(&mut Self, MirScopeIdx),
     ) {
         self.raw_builder().begin_branch(expected_top);
@@ -171,7 +179,7 @@ pub trait MirScopedBuilder<'tcx> {
             entry: branch_entry,
         } = self
             .raw_builder()
-            .add_branch_scope(expected_top, CanPreinsertLocals::Yes);
+            .add_branch_scope(expected_top, can_hoist_locals);
 
         if_taken(self, sub_scope);
 
@@ -196,7 +204,8 @@ pub trait MirScopedBuilder<'tcx> {
         expected_top: MirScopeIdx,
         source_info: MirSourceInfo,
         discr: MirOperand,
-        kind: IfKind,
+        kind: TakenIfEq,
+        can_hoist_locals: CanHoistLocals,
         if_taken: impl FnOnce(&mut Self, MirScopeIdx),
         if_not_taken: impl FnOnce(&mut Self, MirScopeIdx),
     ) {
@@ -207,7 +216,7 @@ pub trait MirScopedBuilder<'tcx> {
             entry: taken_entry,
         } = self
             .raw_builder()
-            .add_branch_scope(expected_top, CanPreinsertLocals::Yes);
+            .add_branch_scope(expected_top, can_hoist_locals);
 
         if_taken(self, taken_scope);
 
@@ -220,7 +229,7 @@ pub trait MirScopedBuilder<'tcx> {
             entry: not_taken_entry,
         } = self
             .raw_builder()
-            .add_branch_scope(expected_top, CanPreinsertLocals::Yes);
+            .add_branch_scope(expected_top, can_hoist_locals);
 
         if_not_taken(self, not_taken_scope);
 
