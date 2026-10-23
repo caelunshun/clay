@@ -5,11 +5,17 @@ use crate::semantic::syntax::{
 use clay_core::FastHashMap;
 use index_vec::{IndexVec, define_index_type};
 
+#[derive(Copy, Clone)]
+pub enum CanPreinsertLocals {
+    Yes,
+    No,
+}
+
 pub struct DropScheduler {
     nodes: IndexVec<DropNodeIdx, DropNode>,
     unwind_routines: FastHashMap<DropNodeIdx, MirBlockIdx>,
     jump_routines: FastHashMap<JumpKey, MirBlockIdx>,
-    unwind_fallthrough_bb: MirBlockIdx,
+    unwind_fallthrough_bb: Option<MirBlockIdx>,
 }
 
 define_index_type! {
@@ -23,7 +29,7 @@ impl DropNodeIdx {
 enum DropNode {
     Scope {
         scope: MirScopeIdx,
-        successors_fixed: bool,
+        extensible: CanPreinsertLocals,
         next: Option<DropNodeIdx>,
     },
     Local {
@@ -40,29 +46,35 @@ struct JumpKey {
     until_scope: MirScopeIdx,
 }
 
-impl DropScheduler {
-    pub fn new(unwind_fallthrough_bb: MirBlockIdx) -> Self {
+impl Default for DropScheduler {
+    fn default() -> Self {
         Self {
             nodes: IndexVec::from_iter([DropNode::Scope {
                 scope: MirScopeIdx::ENTRY,
-                successors_fixed: true,
+                extensible: CanPreinsertLocals::No,
                 next: None,
             }]),
             unwind_routines: FastHashMap::default(),
             jump_routines: FastHashMap::default(),
-            unwind_fallthrough_bb,
+            unwind_fallthrough_bb: None,
         }
+    }
+}
+
+impl DropScheduler {
+    pub fn init_unwind_fallthrough_bb(&mut self, bb: MirBlockIdx) {
+        self.unwind_fallthrough_bb = Some(bb);
     }
 
     pub fn push_scope(
         &mut self,
         scope: MirScopeIdx,
-        successors_fixed: bool,
+        extensible: CanPreinsertLocals,
         next: DropNodeIdx,
     ) -> DropNodeIdx {
         self.nodes.push(DropNode::Scope {
             scope,
-            successors_fixed,
+            extensible,
             next: Some(next),
         })
     }
@@ -88,11 +100,11 @@ impl DropScheduler {
     ) -> DropNodeIdx {
         let DropNode::Scope {
             next: Some(next),
-            successors_fixed: false,
+            extensible: CanPreinsertLocals::Yes,
             ..
         } = self.nodes[target]
         else {
-            panic!("target must be a non-fixed scope");
+            panic!("target must be an extensible scope");
         };
 
         let new = self.nodes.push(DropNode::Local {
@@ -110,6 +122,17 @@ impl DropScheduler {
         new
     }
 
+    pub fn scope_successor(&self, node: DropNodeIdx) -> DropNodeIdx {
+        let DropNode::Scope {
+            next: Some(next), ..
+        } = self.nodes[node]
+        else {
+            panic!("node must be a non-root scope");
+        };
+
+        next
+    }
+
     pub fn request_unwind(
         &mut self,
         mut all_after: DropNodeIdx,
@@ -119,24 +142,24 @@ impl DropScheduler {
         loop {
             match self.nodes[all_after] {
                 DropNode::Scope {
-                    next,
-                    successors_fixed: fixed,
-                    ..
+                    next, extensible, ..
                 } => {
-                    if fixed {
-                        // (continue scanning)
-                        match next {
-                            Some(next) => {
-                                all_after = next;
-                            }
-                            None => {
-                                // There is nothing we could possibly need to drop.
-                                return self.unwind_fallthrough_bb;
+                    match extensible {
+                        CanPreinsertLocals::No => {
+                            match next {
+                                Some(next) => {
+                                    all_after = next;
+                                }
+                                None => {
+                                    // There is nothing we could possibly need to drop.
+                                    return self.unwind_fallthrough_bb.unwrap();
+                                }
                             }
                         }
-                    } else {
-                        // Scopes could have drop requests pushed after them.
-                        break;
+                        CanPreinsertLocals::Yes => {
+                            // Scopes could have drop requests pushed after them.
+                            break;
+                        }
                     }
                 }
                 DropNode::Local {
@@ -183,10 +206,8 @@ impl DropScheduler {
         // Freeze all scopes.
         for node in &mut self.nodes {
             match node {
-                DropNode::Scope {
-                    successors_fixed, ..
-                } => {
-                    *successors_fixed = true;
+                DropNode::Scope { extensible, .. } => {
+                    *extensible = CanPreinsertLocals::No;
                 }
                 DropNode::Local { .. } => {
                     // (nothing to do)

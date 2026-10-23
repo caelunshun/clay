@@ -1,15 +1,21 @@
-use crate::semantic::syntax::{
-    MirBlockIdx, MirBody, MirLocal, MirLocalIdx, MirPlace, MirScopeIdx, MirSourceInfo, MirStmt,
-    MirStmtKind, MirTerminator, MirTerminatorKind, MirUnwindBehavior, TyCtxt,
+use crate::semantic::{
+    analysis::borrowck::scopes::{
+        CanPreinsertLocals,
+        drops::{DropNodeIdx, DropScheduler},
+    },
+    syntax::{
+        MirBlockIdx, MirBody, MirLocal, MirLocalIdx, MirPlace, MirScopeIdx, MirSourceInfo, MirStmt,
+        MirTerminator, MirTerminatorKind, MirUnwindBehavior, TyCtxt,
+    },
 };
 use slotmap::Key as _;
 
 pub struct RawMirScopedBuilder<'tcx> {
     tcx: &'tcx TyCtxt,
     body: MirBody,
+    drop_scheduler: DropScheduler,
     scope_id_gen: MirScopeIdx,
     scope_stack: Vec<BuilderScope>,
-    live_locals: Vec<BuilderLocal>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -24,12 +30,11 @@ struct BuilderScope {
 }
 
 struct LiveBuilderScope {
-    /// The index of the first local owned by this scope.
-    first_live_local: u32,
-
-    /// The latest unwind target we'll be chaining against when creating additional local drop
-    /// targets.
-    unwind_bb: MirBlockIdx,
+    /// If the scope is the top-most live scope, this points to the most recently added local (or
+    /// the root scope if we haven't added any locals yet). If is a scope actively building a
+    /// branched child, this points to a scope node for the child scope. This node is never
+    /// root-most to allow us to insert new locals after it and to run `scope_successor`.
+    head_local: DropNodeIdx,
 
     /// The entrypoint basic-block for this scope. Used for performing `continue` jumps.
     entry_bb: MirBlockIdx,
@@ -43,11 +48,6 @@ struct LiveBuilderScope {
     branch_bb: Option<MirBlockIdx>,
 }
 
-struct BuilderLocal {
-    drop_unwind_target: Option<MirBlockIdx>,
-    idx: MirLocalIdx,
-}
-
 impl<'tcx> RawMirScopedBuilder<'tcx> {
     pub fn new(
         tcx: &'tcx TyCtxt,
@@ -58,9 +58,9 @@ impl<'tcx> RawMirScopedBuilder<'tcx> {
         let mut this = Self {
             tcx,
             body: MirBody::default(),
+            drop_scheduler: DropScheduler::default(),
             scope_id_gen: MirScopeIdx::ENTRY + 1,
             scope_stack: Vec::new(),
-            live_locals: Vec::new(),
         };
 
         this.body.arg_count = arg_count;
@@ -69,17 +69,17 @@ impl<'tcx> RawMirScopedBuilder<'tcx> {
         let return_local = this.body.locals.push(return_local);
         assert_eq!(return_local, MirLocalIdx::RETURN);
 
-        let root_unwind_bb = this.body.cfg.create_block_with_terminator(MirTerminator {
+        let mut root_unwind_bb = this.body.cfg.create_block_with_terminator(MirTerminator {
             debug_scope: MirScopeIdx::UNCATEGORIZED,
             source_info: MirSourceInfo::Local(return_local),
             kind: MirTerminatorKind::UnwindResume,
         });
 
-        let first_unwind_bb = if !can_omit_return_drop {
+        if !can_omit_return_drop {
             // N.B. we do not register the return value as a local like all function arguments because
             // we don't want to drop it before a `return`. The only time we want to drop that place is
             // when we panic out of the function.
-            this.body.cfg.create_block_with_terminator(MirTerminator {
+            root_unwind_bb = this.body.cfg.create_block_with_terminator(MirTerminator {
                 debug_scope: MirScopeIdx::UNCATEGORIZED,
                 source_info: MirSourceInfo::Local(return_local),
                 kind: MirTerminatorKind::EnsureDropped {
@@ -88,16 +88,16 @@ impl<'tcx> RawMirScopedBuilder<'tcx> {
                     unwind: MirUnwindBehavior::DoublePanic,
                 },
             })
-        } else {
-            root_unwind_bb
-        };
+        }
+
+        this.drop_scheduler
+            .init_unwind_fallthrough_bb(root_unwind_bb);
 
         this.body.entry = entry_bb;
         this.scope_stack.push(BuilderScope {
             id: MirScopeIdx::ENTRY,
             live_state: Some(LiveBuilderScope {
-                first_live_local: 0,
-                unwind_bb: first_unwind_bb,
+                head_local: DropNodeIdx::ROOT,
                 entry_bb,
                 curr_bb: Some(entry_bb),
                 branch_bb: None,
@@ -109,6 +109,7 @@ impl<'tcx> RawMirScopedBuilder<'tcx> {
 
     pub fn finish(mut self) -> MirBody {
         self.end_scope(MirScopeIdx::ENTRY);
+        self.drop_scheduler.finish(self.tcx, &mut self.body);
         self.body
     }
 }
@@ -145,12 +146,19 @@ impl RawMirScopedBuilder<'_> {
         top.curr_bb.unwrap()
     }
 
-    fn kill_top(&mut self, expected_top: MirScopeIdx) {
-        let top = Self::expect_top_mut(&mut self.scope_stack, expected_top)
+    fn mark_top_as_dead(&mut self, expected_top: MirScopeIdx) {
+        Self::expect_top_mut(&mut self.scope_stack, expected_top)
             .take()
             .expect("top not live");
 
-        self.live_locals.truncate(top.first_live_local as usize);
+        let Some(parent) = self.scope_stack.iter_mut().nth_back(1) else {
+            return;
+        };
+
+        // Unwrap OK: all ancestor scopes must also be live.
+        let parent = parent.live_state.as_mut().unwrap();
+
+        parent.head_local = self.drop_scheduler.scope_successor(parent.head_local);
     }
 
     pub fn begin_branch(&mut self, expected_top: MirScopeIdx) {
@@ -179,8 +187,13 @@ impl RawMirScopedBuilder<'_> {
             .get_or_insert_with(|| self.body.cfg.create_block())
     }
 
-    pub fn add_branch_scope(&mut self, expected_top: MirScopeIdx) -> MirScopedBranch {
-        let Some(top) = Self::expect_top_ref(&self.scope_stack, expected_top) else {
+    pub fn add_branch_scope(
+        &mut self,
+        expected_top: MirScopeIdx,
+        extensible: CanPreinsertLocals,
+    ) -> MirScopedBranch {
+        let Some(top) = Self::expect_top_mut(&mut self.scope_stack, expected_top) else {
+            // Create a dummy child scope.
             let sub_id = self.scope_id_gen;
             self.scope_id_gen += 1;
 
@@ -200,15 +213,23 @@ impl RawMirScopedBuilder<'_> {
             "must call `begin_branch` before `add_branch_scope`"
         );
 
-        let sub_entry = self.body.cfg.create_block();
         let sub_id = self.scope_id_gen;
         self.scope_id_gen += 1;
+
+        // Create a drop node for the scope. This will be pushed once the child becomes dead.
+        let new_head_local = self
+            .drop_scheduler
+            .push_scope(sub_id, extensible, top.head_local);
+
+        top.head_local = new_head_local;
+
+        // Create the child scope
+        let sub_entry = self.body.cfg.create_block();
 
         self.scope_stack.push(BuilderScope {
             id: sub_id,
             live_state: Some(LiveBuilderScope {
-                first_live_local: self.live_locals.len() as u32,
-                unwind_bb: top.unwind_bb,
+                head_local: new_head_local,
                 entry_bb: sub_entry,
                 curr_bb: Some(sub_entry),
                 branch_bb: None,
@@ -239,7 +260,7 @@ impl RawMirScopedBuilder<'_> {
         self.body.cfg.init_terminator(branch_bb, terminator);
 
         if top.curr_bb.is_none() {
-            self.kill_top(expected_top);
+            self.mark_top_as_dead(expected_top);
         }
     }
 
@@ -277,7 +298,7 @@ impl RawMirScopedBuilder<'_> {
             },
         );
 
-        self.kill_top(expected_top);
+        self.mark_top_as_dead(expected_top);
     }
 
     pub fn push_break(
@@ -309,180 +330,84 @@ impl RawMirScopedBuilder<'_> {
             return;
         };
 
-        let mut curr_bb = Self::expect_live_pushing(top);
+        let curr_bb = Self::expect_live_pushing(top);
+        let top_head_local = top.head_local;
 
-        let mut scope_iter = self.scope_stack.iter_mut().rev();
-        let mut local_iter = self.live_locals.iter().enumerate().rev().peekable();
-
-        while let Some(top) = scope_iter.next() {
-            let &BuilderScope {
-                id: top_id,
-                live_state: Some(ref top),
-            } = &*top
-            else {
-                // If the top is live, so are all of its predecessors.
-                unreachable!();
-            };
-
-            // Push drops.
-            while let Some(&(live_local_idx, _)) = local_iter.peek()
-                && live_local_idx as u32 >= top.first_live_local
-            {
-                let (_, local) = local_iter.next().unwrap();
-
-                if let Some(unwind_if_drop_fails) = local.drop_unwind_target {
-                    let successor = self.body.cfg.create_block();
-
-                    self.body.cfg.init_terminator(
-                        curr_bb,
-                        MirTerminator {
-                            debug_scope: expected_top,
-                            source_info,
-                            kind: MirTerminatorKind::EnsureDropped {
-                                place: MirPlace::new(self.tcx, local.idx, []),
-                                target: successor,
-                                unwind: MirUnwindBehavior::Continue(unwind_if_drop_fails),
-                            },
-                        },
-                    );
-
-                    curr_bb = successor;
+        // Find the target basic block without the jump chain
+        let target_bb = self
+            .scope_stack
+            .iter_mut()
+            .rev()
+            .find_map(|scope| {
+                if scope.id != target {
+                    return None;
                 }
 
-                self.body.cfg.push_stmt(
-                    curr_bb,
-                    MirStmt {
-                        source_info,
-                        kind: MirStmtKind::StorageDead(local.idx),
-                    },
-                );
-            }
+                // Unwrap OK: all ancestors of a live scope are live
+                let scope_live = scope.live_state.as_mut().unwrap();
 
-            // If we've reached our target block, initialize the terminator.
-            if top_id != target {
-                continue;
-            }
+                Some(match is_continue {
+                    true => scope_live.entry_bb,
+                    false => *scope_live
+                        .curr_bb
+                        .get_or_insert_with(|| self.body.cfg.create_block()),
+                })
+            })
+            .expect("target scope is not an ancestor");
 
-            match is_continue {
-                true => {
-                    // This is a `continue`. Jump back to the target's entrypoint.
-                    let next_bb = top.entry_bb;
+        let jump_bb =
+            self.drop_scheduler
+                .request_jump(target_bb, top_head_local, target, &mut self.body);
 
-                    if curr_bb == next_bb {
-                        // Terminators can never branch directly to themselves. To handle this special case—
-                        // which should only happen for truly infinite loops (e.g. `loop {}`)!—we introduce a
-                        // dummy block.
-                        let spacer_block = self.body.cfg.create_block();
+        self.body.cfg.init_terminator(
+            curr_bb,
+            MirTerminator {
+                debug_scope: expected_top,
+                source_info,
+                kind: MirTerminatorKind::Goto(jump_bb),
+            },
+        );
 
-                        self.body.cfg.init_terminator(
-                            curr_bb,
-                            MirTerminator {
-                                debug_scope: expected_top,
-                                source_info,
-                                kind: MirTerminatorKind::Goto(spacer_block),
-                            },
-                        );
-
-                        curr_bb = spacer_block;
-                    }
-
-                    self.body.cfg.init_terminator(
-                        curr_bb,
-                        MirTerminator {
-                            debug_scope: expected_top,
-                            source_info,
-                            kind: MirTerminatorKind::Goto(next_bb),
-                        },
-                    );
-                }
-                false => {
-                    // This is a `break`. Jump to our parent's successor or return from the body.
-                    match scope_iter.next() {
-                        Some(successor) => {
-                            // Unwrap OK: Same as above.
-                            let successor = successor.live_state.as_mut().unwrap();
-
-                            let next_bb = *successor
-                                .curr_bb
-                                .get_or_insert_with(|| self.body.cfg.create_block());
-
-                            self.body.cfg.init_terminator(
-                                curr_bb,
-                                MirTerminator {
-                                    debug_scope: expected_top,
-                                    source_info,
-                                    kind: MirTerminatorKind::Goto(next_bb),
-                                },
-                            );
-                        }
-                        None => {
-                            self.body.cfg.init_terminator(
-                                curr_bb,
-                                MirTerminator {
-                                    debug_scope: expected_top,
-                                    source_info,
-                                    kind: MirTerminatorKind::Return,
-                                },
-                            );
-                        }
-                    }
-                }
-            }
-
-            self.kill_top(expected_top);
-            return;
-        }
-
-        unreachable!("must break to ancestor");
+        self.mark_top_as_dead(expected_top);
     }
 
-    // TODO
     pub fn push_local(
         &mut self,
         in_scope: MirScopeIdx,
         local: MirLocal,
         can_omit_drop: bool,
     ) -> MirLocalIdx {
-        // let Some(top) = Self::expect_top_mut(&mut self.scope_stack, in_scope) else {
-        //     return MirLocalIdx::from_usize(MirLocalIdx::MAX_INDEX);
-        // };
-        //
-        // let curr = Self::expect_live_pushing(top);
+        let (top, parents) = self.scope_stack.split_last_mut().unwrap();
+
+        // Handle local creation on top scope
+        if top.id == in_scope {
+            let Some(top) = &mut top.live_state else {
+                return MirLocalIdx::from_raw(u32::MAX);
+            };
+
+            let local = self.body.locals.push(local);
+
+            top.head_local =
+                self.drop_scheduler
+                    .push_local_top(local, !can_omit_drop, top.head_local);
+
+            return local;
+        };
+
+        // Handle local creation on ancestor scopes
+        let parent = parents
+            .iter()
+            .find(|v| v.id == in_scope)
+            .expect("in_scope is not an ancestor of the top scope");
+
+        let Some(parent) = &parent.live_state else {
+            return MirLocalIdx::from_raw(u32::MAX);
+        };
 
         let local = self.body.locals.push(local);
 
-        // match can_omit_drop {
-        //     true => {
-        //         self.live_locals.push(BuilderLocal {
-        //             drop_unwind_target: None,
-        //             idx: local,
-        //         });
-        //     }
-        //     false => {
-        //         self.live_locals.push(BuilderLocal {
-        //             drop_unwind_target: Some(top.unwind_bb),
-        //             idx: local,
-        //         });
-        //
-        //         top.unwind_bb = self.body.cfg.create_block_with_terminator(MirTerminator {
-        //             debug_scope: MirScopeIdx::UNCATEGORIZED,
-        //             source_info: MirSourceInfo::Local(local),
-        //             kind: MirTerminatorKind::EnsureDropped {
-        //                 place: MirPlace::new(self.tcx, local, []),
-        //                 target: top.unwind_bb,
-        //                 unwind: MirUnwindBehavior::DoublePanic,
-        //             },
-        //         });
-        //     }
-        // }
-        //
-        // self.body.cfg.push_stmt(
-        //     curr,
-        //     MirStmt {
-        //         source_info: MirSourceInfo::Local(local),
-        //         kind: MirStmtKind::StorageLive(local),
-        //     },
-        // );
+        self.drop_scheduler
+            .push_local_after(parent.head_local, local, !can_omit_drop);
 
         local
     }
@@ -510,7 +435,11 @@ impl RawMirScopedBuilder<'_> {
         let curr = Self::expect_live_pushing(top);
 
         let successor = self.body.cfg.create_block();
-        let terminator = f(successor, MirUnwindBehavior::Continue(top.unwind_bb));
+        let unwind_bb = self
+            .drop_scheduler
+            .request_unwind(top.head_local, &mut self.body);
+
+        let terminator = f(successor, MirUnwindBehavior::Continue(unwind_bb));
         self.body.cfg.init_terminator(curr, terminator);
 
         top.curr_bb = Some(successor);

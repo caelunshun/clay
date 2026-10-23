@@ -1,5 +1,7 @@
 use crate::semantic::{
-    analysis::borrowck::scopes::{MirScopedBranch, RawMirScopedBuilder, TraitCache},
+    analysis::borrowck::scopes::{
+        CanPreinsertLocals, MirScopedBranch, RawMirScopedBuilder, TraitCache,
+    },
     syntax::{
         MirLocal, MirLocalIdx, MirOperand, MirPlace, MirRvalue, MirScopeIdx, MirSourceInfo,
         MirStmt, MirStmtKind, MirTerminator, MirTerminatorKind,
@@ -30,6 +32,7 @@ impl IfKind {
     }
 }
 
+// TODO: allow customization of `CanPreinsertLocals`.
 pub trait MirScopedBuilder<'tcx> {
     fn raw_builder(&mut self) -> &mut RawMirScopedBuilder<'tcx>;
 
@@ -123,7 +126,9 @@ pub trait MirScopedBuilder<'tcx> {
         let MirScopedBranch {
             scope: sub_scope,
             entry: sub_entry,
-        } = self.raw_builder().add_branch_scope(expected_top);
+        } = self
+            .raw_builder()
+            .add_branch_scope(expected_top, CanPreinsertLocals::Yes);
 
         f(self, sub_scope);
 
@@ -164,7 +169,9 @@ pub trait MirScopedBuilder<'tcx> {
         let MirScopedBranch {
             scope: sub_scope,
             entry: branch_entry,
-        } = self.raw_builder().add_branch_scope(expected_top);
+        } = self
+            .raw_builder()
+            .add_branch_scope(expected_top, CanPreinsertLocals::Yes);
 
         if_taken(self, sub_scope);
 
@@ -198,7 +205,9 @@ pub trait MirScopedBuilder<'tcx> {
         let MirScopedBranch {
             scope: taken_scope,
             entry: taken_entry,
-        } = self.raw_builder().add_branch_scope(expected_top);
+        } = self
+            .raw_builder()
+            .add_branch_scope(expected_top, CanPreinsertLocals::Yes);
 
         if_taken(self, taken_scope);
 
@@ -209,7 +218,9 @@ pub trait MirScopedBuilder<'tcx> {
         let MirScopedBranch {
             scope: not_taken_scope,
             entry: not_taken_entry,
-        } = self.raw_builder().add_branch_scope(expected_top);
+        } = self
+            .raw_builder()
+            .add_branch_scope(expected_top, CanPreinsertLocals::Yes);
 
         if_not_taken(self, not_taken_scope);
 
