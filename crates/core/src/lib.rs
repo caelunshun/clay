@@ -1,6 +1,6 @@
 pub mod bric;
 pub mod constants;
-pub mod ghost_arena;
+pub mod ghost_heap;
 pub mod sexpr;
 
 pub type FastHashMap<K, V> = hashbrown::HashMap<K, V, foldhash::fast::RandomState>;

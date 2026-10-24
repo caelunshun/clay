@@ -7,16 +7,17 @@ use std::{
     sync::atomic::{AtomicU64, Ordering::*},
 };
 
-pub struct GhostArena<'m> {
+#[derive(Debug)]
+pub struct GhostHeap<'m> {
     _ty: PhantomData<fn(&'m ())>,
     bump: Bump,
     uid: NonZeroU64,
 }
 
-unsafe impl Send for GhostArena<'_> {}
-unsafe impl Sync for GhostArena<'_> {}
+unsafe impl Send for GhostHeap<'_> {}
+unsafe impl Sync for GhostHeap<'_> {}
 
-impl Default for GhostArena<'_> {
+impl Default for GhostHeap<'_> {
     fn default() -> Self {
         static UID_GEN: AtomicU64 = AtomicU64::new(1);
 
@@ -28,7 +29,7 @@ impl Default for GhostArena<'_> {
     }
 }
 
-impl<'m> GhostArena<'m> {
+impl<'m> GhostHeap<'m> {
     pub fn new() -> Self {
         Self::default()
     }
@@ -37,18 +38,18 @@ impl<'m> GhostArena<'m> {
         &mut self,
         f: impl for<'g> FnOnce(&mut GhostArenaAcquired<'g, 'm>) -> R,
     ) -> R {
-        f(unsafe { &mut *(self as *mut GhostArena as *mut GhostArenaAcquired<'_, 'm>) })
+        f(unsafe { &mut *(self as *mut GhostHeap as *mut GhostArenaAcquired<'_, 'm>) })
     }
 
     pub fn acquire_ref<R>(&self, f: impl for<'g> FnOnce(&GhostArenaAcquired<'g, 'm>) -> R) -> R {
-        f(unsafe { &*(self as *const GhostArena as *const GhostArenaAcquired<'_, 'm>) })
+        f(unsafe { &*(self as *const GhostHeap as *const GhostArenaAcquired<'_, 'm>) })
     }
 }
 
 #[repr(transparent)]
 pub struct GhostArenaAcquired<'g, 'm> {
     _marker: PhantomData<fn(&'g ()) -> &'g ()>,
-    arena: GhostArena<'m>,
+    arena: GhostHeap<'m>,
 }
 
 #[derive_where(Copy, Clone)]

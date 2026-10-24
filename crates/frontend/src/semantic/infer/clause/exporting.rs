@@ -364,7 +364,9 @@ impl<'a, 'tcx> SigExporter<'a, 'tcx> {
                 | UniversalTyRootSourceInfo::WfHrtbUniversal { .. } => {
                     unreachable!(
                         "unexpected universal type `{}`",
-                        self.ccx.pretty(ClausePrettyFmtOpts::default()).wrap(universal)
+                        self.ccx
+                            .pretty(ClausePrettyFmtOpts::default())
+                            .wrap(universal)
                     )
                 }
             },

@@ -1,7 +1,7 @@
-use crate::func_family::{instr::Instr, terminator::Terminator};
+use crate::func_family::terminator::Terminator;
+use clay_core::ghost_heap::GhostHeap;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BasicBlock {
-    pub instrs: Vec<Instr>,
     pub terminator: Terminator,
 }

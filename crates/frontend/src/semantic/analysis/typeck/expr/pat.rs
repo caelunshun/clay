@@ -10,7 +10,7 @@ use crate::{
     },
     semantic::{
         analysis::typeck::{BodyCtxt, infra::confirm::ThirExprConfirmedWithTy},
-        infer::{ClauseImportEnv, GenericSubst, HrtbUniverse, ClausePrettyFmtOpts, SpannedError},
+        infer::{ClauseImportEnv, ClausePrettyFmtOpts, GenericSubst, HrtbUniverse, SpannedError},
         syntax::{
             AdtCtorField, AdtCtorInstance, AdtCtorSyntaxStyle, AdtCtorUnresolved, AdtInstance,
             Divergence, HirExpr, HirLocal, HirPat, HirPatKind, HirPatListFrontAndTail,
@@ -295,7 +295,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                             pat.r(s).span,
                             format_args!(
                                 "demand type must be tuple; got {}",
-                                self.ccx().pretty(ClausePrettyFmtOpts::default()).wrap(demand)
+                                self.ccx()
+                                    .pretty(ClausePrettyFmtOpts::default())
+                                    .wrap(demand)
                             ),
                         )
                         .emit());
@@ -640,7 +642,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 format_args!(
                     "expected {} constructor but {} has a {} constructor",
                     expected_syntax.style_name(),
-                    self.ccx().pretty(ClausePrettyFmtOpts::default()).wrap(ctor.def),
+                    self.ccx()
+                        .pretty(ClausePrettyFmtOpts::default())
+                        .wrap(ctor.def),
                     actual_syntax.style_name(),
                 ),
             )
