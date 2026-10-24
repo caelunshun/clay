@@ -3,6 +3,7 @@ use crate::{
         Session,
         arena::{LateInit, Obj},
     },
+    flags,
     semantic::{
         analysis::{
             borrowck::scopes::{MirScopedBuilder, RawMirScopedBuilder, TraitCache},
@@ -30,7 +31,9 @@ pub fn build_function_mir(check_cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     build_cx.lower_fn(body);
     let body = build_cx.finish();
 
-    // println!("{}", MirPrettyFmtCx::new(tcx, &body).flat_body());
+    if flags::should_print_mir_scopes() {
+        println!("{}", MirPrettyFmtCx::new(tcx, &body).flat_body());
+    }
 
     LateInit::init(&def.r(s).mir_body, Some(body));
 }

@@ -214,11 +214,7 @@ impl DropScheduler {
             .or_insert_with(|| body.cfg.create_block())
     }
 
-    pub fn unwind_fallthrough_bb(&self) -> Option<MirBlockIdx> {
-        self.unwind_fallthrough_bb
-    }
-
-    pub fn finish_drop_routines(mut self, tcx: &TyCtxt, body: &mut MirBody) {
+    pub fn finish(mut self, tcx: &TyCtxt, body: &mut MirBody, can_omit_return_drop: CanOmitDrop) {
         // Freeze all scopes.
         for node in &mut self.nodes {
             match node {
@@ -356,6 +352,19 @@ impl DropScheduler {
                             curr_node = next;
                         }
                         DropNode::Scope { next: None, .. } => {
+                            let unwind_bb = *self
+                                .unwind_fallthrough_bb
+                                .get_or_insert_with(|| body.cfg.create_block());
+
+                            body.cfg.init_terminator(
+                                curr_bb,
+                                MirTerminator {
+                                    debug_scope: MirScopeIdx::UNCATEGORIZED,
+                                    source_info: MirSourceInfo::Todo,
+                                    kind: MirTerminatorKind::Goto(unwind_bb),
+                                },
+                            );
+
                             break 'build_chain;
                         }
                         DropNode::Local {
@@ -406,6 +415,42 @@ impl DropScheduler {
 
                 curr_node = next_drop_node;
                 curr_bb = next_bb;
+            }
+        }
+
+        // Handle unwind fallthrough
+        if let Some(unwind_fallthrough_bb) = self.unwind_fallthrough_bb {
+            if can_omit_return_drop.is_falsy() {
+                let new_unwind_bb = body.cfg.create_block_with_terminator(MirTerminator {
+                    debug_scope: MirScopeIdx::UNCATEGORIZED,
+                    source_info: MirSourceInfo::Todo,
+                    kind: MirTerminatorKind::UnwindResume,
+                });
+
+                // N.B. we do not register the return value as a local like all function arguments because
+                // we don't want to drop it before a `return`. The only time we want to drop that place is
+                // when we panic out of the function.
+                body.cfg.init_terminator(
+                    unwind_fallthrough_bb,
+                    MirTerminator {
+                        debug_scope: MirScopeIdx::UNCATEGORIZED,
+                        source_info: MirSourceInfo::Local(MirLocalIdx::RETURN),
+                        kind: MirTerminatorKind::EnsureDropped {
+                            place: MirPlace::new(tcx, MirLocalIdx::RETURN, []),
+                            target: new_unwind_bb,
+                            unwind: MirUnwindBehavior::DoublePanic,
+                        },
+                    },
+                );
+            } else {
+                body.cfg.init_terminator(
+                    unwind_fallthrough_bb,
+                    MirTerminator {
+                        debug_scope: MirScopeIdx::UNCATEGORIZED,
+                        source_info: MirSourceInfo::Todo,
+                        kind: MirTerminatorKind::UnwindResume,
+                    },
+                );
             }
         }
     }
