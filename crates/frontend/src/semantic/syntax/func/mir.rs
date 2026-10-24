@@ -1112,6 +1112,10 @@ impl MirOperandMode {
         self == Self::Copy
     }
 
+    pub fn is_move(self) -> bool {
+        self == Self::Move
+    }
+
     pub fn to_operand(self, place: MirPlace) -> MirOperand {
         match self {
             MirOperandMode::Copy => MirOperand::Copy(place),

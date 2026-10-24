@@ -406,7 +406,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                                     can_move_from: self
                                         .trait_cache
                                         .operand_mode(local.r(s).ty)
-                                        .is_copy()
+                                        .is_move()
                                         .then(Vec::new),
                                 }
                             });
@@ -488,6 +488,14 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 // (trivial)
             }
         }
+
+        // Unless an earlier break overrides this behavior, we assume reaching this point in the
+        // match logic represents an accept.
+        self.push_break(
+            scopes.match_logic,
+            MirSourceInfo::Todo,
+            scopes.break_on_accept,
+        );
     }
 
     fn lower_pat_and(
