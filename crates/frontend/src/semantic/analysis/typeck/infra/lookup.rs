@@ -95,7 +95,10 @@ impl BodyCtxt<'_, '_> {
                     {
                         return Ok(Some(LookupFieldResult {
                             ty: field_ty,
-                            index: ResolvedFieldIdx::Tuple(name_as_idx),
+                            index: ResolvedFieldIdx::Tuple {
+                                field_idx: name_as_idx,
+                                max_elems: fields.r(s).len() as u32,
+                            },
                         }));
                     }
                 }
@@ -289,7 +292,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
 
                 IterEither::Left(
                     self.ccx()
-                        .coherence()
+                        .impl_cache()
                         .gather_inherent_impl_method_candidates(self.ccx(), receiver, name.text),
                 )
             }
@@ -302,7 +305,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
 
                 IterEither::Right(
                     self.ccx()
-                        .coherence()
+                        .impl_cache()
                         .gather_inherent_impl_function_candidates(self.ccx(), self_ty, name.text),
                 )
             }
@@ -397,7 +400,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
             .chain(scope_trait_candidates);
 
         // Scan for inherent `impl` candidates.
-        let mut selections = SmallVec::<[Obj<FnDef>; 1]>::new();
+        let mut selections = SmallVec::<[Obj<FnDef>; 2]>::new();
 
         for candidate in candidates {
             // If we started finding trait candidates and already made an inherent selection, break

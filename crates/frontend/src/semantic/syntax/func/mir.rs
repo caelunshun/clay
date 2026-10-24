@@ -1,18 +1,22 @@
 use crate::{
     base::{
-        ErrorGuaranteed,
+        ErrorGuaranteed, Session,
         arena::{HasListInterner as _, Intern, Obj},
         syntax::Span,
     },
     parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
-    semantic::syntax::{AdtCtor, DynSiteIdx, Mutability, ResolvedFieldIdx, SigTy, TyCtxt},
+    semantic::syntax::{
+        AdtCtor, AdtCtorOwner, AdtCtorSyntax, DynSiteIdx, Mutability, ResolvedFieldIdx, SigTy,
+        TyCtxt,
+    },
+    utils::format::{SimpleListFormatGlue, format_list},
 };
 use index_vec::{IndexVec, define_index_type};
-use slotmap::{SlotMap, new_key_type};
+use slotmap::{SecondaryMap, SlotMap, new_key_type};
 use smallvec::SmallVec;
-use std::mem;
+use std::{fmt, mem, ops::ControlFlow};
 
-// === MirBody === //
+// === Body === //
 
 define_index_type! {
     pub struct MirLocalIdx = u32;
@@ -22,7 +26,7 @@ impl MirLocalIdx {
     pub const RETURN: Self = MirLocalIdx { _raw: 0 };
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct MirLocal {
     pub ty: SigTy,
 }
@@ -30,6 +34,7 @@ pub struct MirLocal {
 #[derive(Debug, Clone)]
 pub struct MirBody {
     pub locals: IndexVec<MirLocalIdx, MirLocal>,
+    pub arg_count: u32,
     pub entry: MirBlockIdx,
     pub cfg: MirBodyCfg,
 }
@@ -38,6 +43,7 @@ impl Default for MirBody {
     fn default() -> Self {
         let mut body = Self {
             locals: IndexVec::default(),
+            arg_count: 0,
             entry: MirBlockIdx::default(),
             cfg: MirBodyCfg::default(),
         };
@@ -48,7 +54,107 @@ impl Default for MirBody {
     }
 }
 
-// === MirBodyCfg === //
+impl MirBody {
+    pub fn blocks<'a>(&'a self) -> impl ExactSizeIterator<Item = MirBlockRef<'a>> {
+        self.cfg.blocks().map(move |id| MirBlockRef::new(self, id))
+    }
+
+    pub fn arg_locals(&self) -> impl ExactSizeIterator<Item = MirLocalIdx> {
+        (0..self.arg_count + 1).map(MirLocalIdx::from_raw)
+    }
+
+    pub fn entry(&self) -> MirBlockRef<'_> {
+        MirBlockRef::new(self, self.entry)
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct MirBlockRef<'g> {
+    pub body: &'g MirBody,
+    pub block: MirBlockIdx,
+}
+
+impl<'g> MirBlockRef<'g> {
+    pub fn new(body: &'g MirBody, block: MirBlockIdx) -> Self {
+        Self { body, block }
+    }
+
+    pub fn stmts(self, direction: MirBodyDirection) -> impl Iterator<Item = MirStmtRef<'g>> {
+        self.body
+            .cfg
+            .block_stmts(self.block, direction)
+            .map(move |stmt| MirStmtRef::new(self.body, stmt))
+    }
+
+    pub fn first_stmt(self) -> Option<MirStmtRef<'g>> {
+        self.body
+            .cfg
+            .block_first(self.block)
+            .map(|stmt| MirStmtRef::new(self.body, stmt))
+    }
+
+    pub fn last_stmt(self) -> Option<MirStmtRef<'g>> {
+        self.body
+            .cfg
+            .block_last(self.block)
+            .map(|stmt| MirStmtRef::new(self.body, stmt))
+    }
+
+    pub fn terminator(self) -> &'g MirTerminator {
+        self.body.cfg.terminator(self.block)
+    }
+
+    pub fn predecessors(self) -> &'g [MirBlockLink] {
+        self.body.cfg.block_predecessors(self.block)
+    }
+
+    pub fn successors(self) -> &'g [MirBlockLink] {
+        self.body.cfg.block_successors(self.block)
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct MirStmtRef<'g> {
+    pub body: &'g MirBody,
+    pub stmt: MirStmtIdx,
+}
+
+impl<'g> MirStmtRef<'g> {
+    pub fn new(body: &'g MirBody, stmt: MirStmtIdx) -> Self {
+        Self { body, stmt }
+    }
+
+    pub fn block(self) -> Option<MirBlockRef<'g>> {
+        self.body
+            .cfg
+            .stmt_block(self.stmt)
+            .map(|block| MirBlockRef::new(self.body, block))
+    }
+
+    pub fn prev(self) -> Option<MirStmtRef<'g>> {
+        self.body
+            .cfg
+            .stmt_prev(self.stmt)
+            .map(|stmt| MirStmtRef::new(self.body, stmt))
+    }
+
+    pub fn next(self) -> Option<MirStmtRef<'g>> {
+        self.body
+            .cfg
+            .stmt_next(self.stmt)
+            .map(|stmt| MirStmtRef::new(self.body, stmt))
+    }
+
+    pub fn stmt(self) -> &'g MirStmt {
+        self.body.cfg.stmt(self.stmt)
+    }
+
+    pub fn kind(self) -> &'g MirStmtKind {
+        &self.stmt().kind
+    }
+}
+
+// === Control Flow Graph === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum MirBodyDirection {
@@ -70,6 +176,12 @@ new_key_type! {
     pub struct MirBlockIdx;
 
     pub struct MirStmtIdx;
+}
+
+impl fmt::Display for MirBlockIdx {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "bb{:?}", self.0)
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -122,6 +234,11 @@ impl MirBodyCfg {
             last_stmt: None,
             terminator: None,
         })
+    }
+
+    pub fn delete_block(&mut self, block: MirBlockIdx) {
+        self.set_terminator(block, None);
+        self.blocks.remove(block);
     }
 
     pub fn create_block_with_terminator(&mut self, terminator: MirTerminator) -> MirBlockIdx {
@@ -321,7 +438,12 @@ impl MirBodyCfg {
     }
 
     pub fn set_terminator(&mut self, idx: MirBlockIdx, terminator: Option<MirTerminator>) {
-        let new_successors = terminator.as_ref().map_or_default(|v| v.successors());
+        let new_successors = terminator.as_ref().map_or_default(|v| {
+            v.successors()
+                .into_iter()
+                .map(|v| v.target)
+                .collect::<SmallVec<[MirBlockIdx; 2]>>()
+        });
 
         // Validate successors
         {
@@ -364,12 +486,12 @@ impl MirBodyCfg {
                 let fwd_at_idx = successor_data.predecessors.len();
 
                 successor_data.predecessors.push(MirBlockLink {
-                    target: successor,
+                    target: idx,
                     at_idx: back_at_idx,
                 });
 
                 MirBlockLink {
-                    target: idx,
+                    target: successor,
                     at_idx: fwd_at_idx,
                 }
             })
@@ -383,6 +505,31 @@ impl MirBodyCfg {
     pub fn init_terminator(&mut self, idx: MirBlockIdx, terminator: MirTerminator) {
         assert!(self.opt_terminator(idx).is_none());
         self.set_terminator(idx, Some(terminator));
+    }
+
+    pub fn prune_unreachable(&mut self, entry: MirBlockIdx) {
+        let mut live_scopes = SecondaryMap::from_iter([(entry, ())]);
+        let mut stack = Vec::from_iter([entry]);
+
+        while let Some(curr) = stack.pop() {
+            assert!(
+                self.opt_terminator(curr).is_some(),
+                "{curr} is missing a terminator",
+            );
+
+            for successor in self.block_successors(curr) {
+                if live_scopes.insert(successor.target, ()).is_none() {
+                    stack.push(successor.target);
+                }
+            }
+        }
+
+        let mut victims = self.blocks().collect::<Vec<_>>();
+        victims.retain(|victim| !live_scopes.contains_key(*victim));
+
+        for victim in victims {
+            self.delete_block(victim);
+        }
     }
 }
 
@@ -438,15 +585,15 @@ impl Iterator for MirStmtIter<'_> {
     }
 }
 
-// === Definitions === //
+// === Statement === //
 
 #[derive(Debug, Clone)]
 pub struct MirStmt {
-    pub span: MirStmtSourceInfo,
+    pub source_info: MirStmtSourceInfo,
     pub kind: MirStmtKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum MirStmtSourceInfo {
     Simple(Span),
     Break,
@@ -457,136 +604,46 @@ pub enum MirStmtSourceInfo {
 pub enum MirStmtKind {
     StorageLive(MirLocalIdx),
     StorageDead(MirLocalIdx),
-    Assign(Box<(MirPlace, MirAssignRvalue)>),
-    DiscardWithoutDrop(MirAssignRvalue),
+    Assign(Box<(MirPlace, MirRvalue)>),
 }
 
-#[derive(Debug, Clone)]
-pub enum MirTerminator {
-    Goto(MirBlockIdx),
-    SwitchInt {
-        discr: MirOperand,
-        constants: Box<[u64]>,
-        targets: Box<[MirBlockIdx]>,
-    },
-    Call {
-        callee: MirOperand,
-        args: Box<[MirOperand]>,
-        destination: MirPlace,
-        target: MirBlockIdx,
-        unwind: MirUnwindBehavior,
-    },
-    EnsureDropped {
-        place: MirPlace,
-        target: MirBlockIdx,
-        unwind: MirUnwindBehavior,
-    },
-    CallDrop {
-        place: MirPlace,
-        target: MirBlockIdx,
-        unwind: MirUnwindBehavior,
-        drop_flag: Option<MirPlace>,
-    },
-    Unreachable,
-    Return,
-    UnwindResume,
-}
-
-impl MirTerminator {
-    pub fn successors(&self) -> SmallVec<[MirBlockIdx; 2]> {
-        match *self {
-            MirTerminator::Goto(target) => SmallVec::from_iter([target]),
-            MirTerminator::Call {
-                callee: _,
-                args: _,
-                destination: _,
-                target,
-                unwind,
-            }
-            | MirTerminator::EnsureDropped {
-                place: _,
-                target,
-                unwind,
-            } => SmallVec::from_iter([target].into_iter().chain(unwind.block())),
-            MirTerminator::CallDrop {
-                place: _,
-                target,
-                unwind,
-                drop_flag: _,
-            } => SmallVec::from_iter([target].into_iter().chain(unwind.block())),
-            MirTerminator::SwitchInt {
-                discr: _,
-                constants: _,
-                ref targets,
-            } => SmallVec::from_iter(targets.iter().copied()),
-            MirTerminator::UnwindResume | MirTerminator::Return | MirTerminator::Unreachable => {
-                SmallVec::new()
-            }
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum MirUnwindBehavior {
-    Continue(MirBlockIdx),
-    DoublePanic,
-}
-
-impl MirUnwindBehavior {
-    pub fn block(self) -> Option<MirBlockIdx> {
-        match self {
-            MirUnwindBehavior::Continue(idx) => Some(idx),
-            MirUnwindBehavior::DoublePanic => None,
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct MirPlace {
-    pub local: MirLocalIdx,
-    pub projections: MirPlaceElemList,
-}
-
-impl MirPlace {
-    pub fn new(
+impl TraverseMentions for MirStmtKind {
+    fn traverse_mentions<B>(
         tcx: &TyCtxt,
-        local: MirLocalIdx,
-        projections: impl IntoIterator<Item = MirPlaceElem>,
-    ) -> Self {
-        Self {
-            local,
-            projections: tcx.intern_list(&projections.into_iter().collect::<Vec<_>>()),
+        me: &Self,
+        f: &mut impl FnMut(MirPlaceMention) -> ControlFlow<B>,
+    ) -> ControlFlow<B> {
+        match me {
+            MirStmtKind::StorageLive(local) => {
+                f(MirPlaceMention {
+                    kind: MirPlaceMentionKind::STORAGE_LIVE,
+                    place: MirPlace::new(tcx, *local, []),
+                })?;
+            }
+            MirStmtKind::StorageDead(local) => {
+                f(MirPlaceMention {
+                    kind: MirPlaceMentionKind::STORAGE_DEAD,
+                    place: MirPlace::new(tcx, *local, []),
+                })?;
+            }
+            MirStmtKind::Assign(assign) => {
+                let (lhs, rhs) = &**assign;
+
+                TraverseMentions::traverse_mentions(tcx, rhs, f)?;
+
+                f(MirPlaceMention {
+                    kind: MirPlaceMentionKind::INIT,
+                    place: *lhs,
+                })?;
+            }
         }
+
+        ControlFlow::Continue(())
     }
-
-    pub fn extend(self, tcx: &TyCtxt, proj: impl IntoIterator<Item = MirPlaceElem>) -> Self {
-        let s = &tcx.session;
-
-        Self {
-            local: self.local,
-            projections: tcx.intern_list(
-                &self
-                    .projections
-                    .r(s)
-                    .iter()
-                    .copied()
-                    .chain(proj)
-                    .collect::<Vec<_>>(),
-            ),
-        }
-    }
-}
-
-pub type MirPlaceElemList = Intern<[MirPlaceElem]>;
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum MirPlaceElem {
-    DerefPtr,
-    Field(ResolvedFieldIdx),
 }
 
 #[derive(Debug, Clone)]
-pub enum MirAssignRvalue {
+pub enum MirRvalue {
     UnreachablePlaceholder,
     Tuple(Box<[MirOperand]>),
     Adt(Obj<AdtCtor>, Box<[MirOperand]>),
@@ -605,36 +662,69 @@ pub enum MirAssignRvalue {
     Error(ErrorGuaranteed),
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum MirOperandMode {
-    Copy,
-    Move,
-}
+impl TraverseMentions for MirRvalue {
+    fn traverse_mentions<B>(
+        tcx: &TyCtxt,
+        me: &Self,
+        f: &mut impl FnMut(MirPlaceMention) -> ControlFlow<B>,
+    ) -> ControlFlow<B> {
+        match me {
+            MirRvalue::UnreachablePlaceholder
+            | MirRvalue::Error(_)
+            | MirRvalue::Zst(_)
+            | MirRvalue::Literal(_, _) => {
+                // (empty)
+            }
+            MirRvalue::Tuple(operands) => {
+                TraverseMentions::traverse_mentions_iter(tcx, operands, f)?;
+            }
+            MirRvalue::Adt(_adt, operands) => {
+                TraverseMentions::traverse_mentions_iter(tcx, operands, f)?;
+            }
+            MirRvalue::Use(operand) => {
+                TraverseMentions::traverse_mentions(tcx, operand, f)?;
+            }
+            MirRvalue::MoveOutRef {
+                can_move_from,
+                ref_place,
+            } => {
+                f(MirPlaceMention {
+                    kind: MirPlaceMentionKind::MOVED,
+                    place: *ref_place,
+                })?;
 
-impl MirOperandMode {
-    pub fn is_copy(self) -> bool {
-        self == Self::Copy
-    }
-
-    pub fn to_operand(self, place: MirPlace) -> MirOperand {
-        match self {
-            MirOperandMode::Copy => MirOperand::Copy(place),
-            MirOperandMode::Move => MirOperand::Move(place),
+                for can_move_from in can_move_from {
+                    f(MirPlaceMention {
+                        kind: MirPlaceMentionKind::MOVED,
+                        place: *can_move_from,
+                    })?;
+                }
+            }
+            MirRvalue::Ref(_muta, place) => {
+                f(MirPlaceMention {
+                    kind: MirPlaceMentionKind::READ,
+                    place: *place,
+                })?;
+            }
+            MirRvalue::BinaryOp(_kind, operands) => {
+                TraverseMentions::traverse_mentions(tcx, &operands.0, f)?;
+                TraverseMentions::traverse_mentions(tcx, &operands.1, f)?;
+            }
+            MirRvalue::UnaryOp(_kind, operand) => {
+                TraverseMentions::traverse_mentions(tcx, operand, f)?;
+            }
+            MirRvalue::Discriminant(place) => {
+                f(MirPlaceMention {
+                    kind: MirPlaceMentionKind::READ,
+                    place: *place,
+                })?;
+            }
+            MirRvalue::DynUse(_site, operand) => {
+                TraverseMentions::traverse_mentions(tcx, operand, f)?;
+            }
         }
-    }
-}
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum MirOperand {
-    Copy(MirPlace),
-    Move(MirPlace),
-}
-
-impl MirOperand {
-    pub fn place(self) -> MirPlace {
-        let (MirOperand::Copy(place) | MirOperand::Move(place)) = self;
-
-        place
+        ControlFlow::Continue(())
     }
 }
 
@@ -709,6 +799,29 @@ pub enum MirStraightBinOpKind {
     Gt,
 }
 
+impl MirStraightBinOpKind {
+    pub fn to_ast(self) -> AstBinOpKind {
+        match self {
+            MirStraightBinOpKind::Add => AstBinOpKind::Add,
+            MirStraightBinOpKind::Sub => AstBinOpKind::Sub,
+            MirStraightBinOpKind::Mul => AstBinOpKind::Mul,
+            MirStraightBinOpKind::Div => AstBinOpKind::Div,
+            MirStraightBinOpKind::Rem => AstBinOpKind::Rem,
+            MirStraightBinOpKind::BitXor => AstBinOpKind::BitXor,
+            MirStraightBinOpKind::BitAnd => AstBinOpKind::BitAnd,
+            MirStraightBinOpKind::BitOr => AstBinOpKind::BitOr,
+            MirStraightBinOpKind::Shl => AstBinOpKind::Shl,
+            MirStraightBinOpKind::Shr => AstBinOpKind::Shr,
+            MirStraightBinOpKind::Eq => AstBinOpKind::Eq,
+            MirStraightBinOpKind::Lt => AstBinOpKind::Lt,
+            MirStraightBinOpKind::Le => AstBinOpKind::Le,
+            MirStraightBinOpKind::Ne => AstBinOpKind::Ne,
+            MirStraightBinOpKind::Ge => AstBinOpKind::Ge,
+            MirStraightBinOpKind::Gt => AstBinOpKind::Gt,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum MirLogicalBinOpKind {
     /// The `&&` operator (logical and)
@@ -718,6 +831,13 @@ pub enum MirLogicalBinOpKind {
 }
 
 impl MirLogicalBinOpKind {
+    pub fn to_ast(self) -> AstBinOpKind {
+        match self {
+            MirLogicalBinOpKind::And => AstBinOpKind::And,
+            MirLogicalBinOpKind::Or => AstBinOpKind::Or,
+        }
+    }
+
     pub fn short_circuit_if(self) -> bool {
         match self {
             MirLogicalBinOpKind::And => false,
@@ -730,5 +850,589 @@ impl MirLogicalBinOpKind {
             MirLogicalBinOpKind::And => false,
             MirLogicalBinOpKind::Or => true,
         }
+    }
+}
+
+// === Terminator === //
+
+#[derive(Debug, Clone)]
+pub enum MirTerminator {
+    Goto(MirBlockIdx),
+    SwitchInt {
+        discr: MirOperand,
+        constants: Box<[u64]>,
+        targets: Box<[MirBlockIdx]>,
+    },
+    Call {
+        callee: MirOperand,
+        args: Box<[MirOperand]>,
+        destination: MirPlace,
+        target: MirBlockIdx,
+        unwind: MirUnwindBehavior,
+    },
+    EnsureDropped {
+        place: MirPlace,
+        target: MirBlockIdx,
+        unwind: MirUnwindBehavior,
+    },
+    Unreachable,
+    Return,
+    UnwindResume,
+}
+
+impl TraverseMentions for MirTerminator {
+    fn traverse_mentions<B>(
+        tcx: &TyCtxt,
+        me: &Self,
+        f: &mut impl FnMut(MirPlaceMention) -> ControlFlow<B>,
+    ) -> ControlFlow<B> {
+        match me {
+            MirTerminator::Goto(_)
+            | MirTerminator::Unreachable
+            | MirTerminator::Return
+            | MirTerminator::UnwindResume => {
+                // (no mentions)
+            }
+            MirTerminator::SwitchInt {
+                discr,
+                constants: _,
+                targets: _,
+            } => {
+                TraverseMentions::traverse_mentions(tcx, discr, f)?;
+            }
+            MirTerminator::Call {
+                callee,
+                args,
+                destination,
+                target: _,
+                unwind: _,
+            } => {
+                TraverseMentions::traverse_mentions(tcx, callee, f)?;
+                TraverseMentions::traverse_mentions_iter(tcx, args, f)?;
+
+                f(MirPlaceMention {
+                    kind: MirPlaceMentionKind::INIT,
+                    place: *destination,
+                })?;
+            }
+            MirTerminator::EnsureDropped {
+                place,
+                target: _,
+                unwind: _,
+            } => {
+                f(MirPlaceMention {
+                    kind: MirPlaceMentionKind::INVALIDATED,
+                    place: *place,
+                })?;
+            }
+        }
+
+        ControlFlow::Continue(())
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct MirTerminatorSuccessor {
+    pub target: MirBlockIdx,
+    pub is_unwind: bool,
+}
+
+impl MirTerminator {
+    pub fn successors(&self) -> SmallVec<[MirTerminatorSuccessor; 2]> {
+        match *self {
+            MirTerminator::Goto(target) => SmallVec::from_iter([MirTerminatorSuccessor {
+                target,
+                is_unwind: false,
+            }]),
+            MirTerminator::Call {
+                callee: _,
+                args: _,
+                destination: _,
+                target,
+                unwind,
+            }
+            | MirTerminator::EnsureDropped {
+                place: _,
+                target,
+                unwind,
+            } => SmallVec::from_iter(
+                [MirTerminatorSuccessor {
+                    target,
+                    is_unwind: false,
+                }]
+                .into_iter()
+                .chain(unwind.block().map(|target| MirTerminatorSuccessor {
+                    target,
+                    is_unwind: true,
+                })),
+            ),
+            MirTerminator::SwitchInt {
+                discr: _,
+                constants: _,
+                ref targets,
+            } => {
+                SmallVec::from_iter(
+                    targets
+                        .iter()
+                        .copied()
+                        .map(|target| MirTerminatorSuccessor {
+                            target,
+                            is_unwind: false,
+                        }),
+                )
+            }
+            MirTerminator::UnwindResume | MirTerminator::Return | MirTerminator::Unreachable => {
+                SmallVec::new()
+            }
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirUnwindBehavior {
+    Continue(MirBlockIdx),
+    DoublePanic,
+}
+
+impl MirUnwindBehavior {
+    pub fn block(self) -> Option<MirBlockIdx> {
+        match self {
+            MirUnwindBehavior::Continue(idx) => Some(idx),
+            MirUnwindBehavior::DoublePanic => None,
+        }
+    }
+}
+
+// === Operand === //
+
+pub trait TraverseMentions: Sized {
+    fn traverse_mentions<B>(
+        tcx: &TyCtxt,
+        me: &Self,
+        f: &mut impl FnMut(MirPlaceMention) -> ControlFlow<B>,
+    ) -> ControlFlow<B>;
+
+    fn traverse_mentions_iter<'a, B>(
+        tcx: &TyCtxt,
+        me: impl IntoIterator<Item = &'a Self>,
+        f: &mut impl FnMut(MirPlaceMention) -> ControlFlow<B>,
+    ) -> ControlFlow<B>
+    where
+        Self: 'a,
+    {
+        for me in me {
+            Self::traverse_mentions(tcx, me, f)?;
+        }
+
+        ControlFlow::Continue(())
+    }
+
+    fn iter_mentions<B>(
+        &self,
+        tcx: &TyCtxt,
+        mut f: impl FnMut(MirPlaceMention) -> ControlFlow<B>,
+    ) -> ControlFlow<B> {
+        Self::traverse_mentions(tcx, self, &mut f)
+    }
+
+    fn mentions(&self, tcx: &TyCtxt) -> SmallVec<[MirPlaceMention; 4]> {
+        let mut collector = SmallVec::new();
+
+        cbit::cbit! {
+            for mention in self.iter_mentions(tcx) {
+                collector.push(mention);
+            }
+        }
+
+        collector
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct MirPlaceMention {
+    pub kind: MirPlaceMentionKind,
+    pub place: MirPlace,
+}
+
+bitflags::bitflags! {
+    #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+    pub struct MirPlaceMentionKind: u32 {
+        const LIVENESS_USE = Self::MOVED.bits() | Self::READ.bits();
+        const LIVENESS_INIT = Self::INIT.bits();
+
+        const OCCUPANCY_ADD = Self::INIT.bits();
+        const OCCUPANCY_DEAD = Self::INVALIDATED.bits() | Self::MOVED.bits() | Self::STORAGE_DEAD.bits();
+        const OCCUPANCY_ACCESS = Self::MOVED.bits() | Self::READ.bits();
+
+        /// Invalidates the place without requiring it to be occupied.
+        const INVALIDATED = 1 << 0;
+
+        /// Requires the place to be occupied and moves it out.
+        const MOVED = 1 << 2;
+
+        /// Requires the place to be occupied and simply reads it.
+        const READ = 1 << 3;
+
+        /// Always initializes the place to a complete value unless the unwind path was taken.
+        const INIT = 1 << 4;
+
+        /// A `StorageLive` statement.
+        const STORAGE_LIVE = 1 << 5;
+
+        /// A `StorageDead` statement.
+        const STORAGE_DEAD = 1 << 6;
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirOperandMode {
+    Copy,
+    Move,
+}
+
+impl MirOperandMode {
+    pub fn is_copy(self) -> bool {
+        self == Self::Copy
+    }
+
+    pub fn to_operand(self, place: MirPlace) -> MirOperand {
+        match self {
+            MirOperandMode::Copy => MirOperand::Copy(place),
+            MirOperandMode::Move => MirOperand::Move(place),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirOperand {
+    Copy(MirPlace),
+    Move(MirPlace),
+}
+
+impl TraverseMentions for MirOperand {
+    fn traverse_mentions<B>(
+        _tcx: &TyCtxt,
+        me: &Self,
+        f: &mut impl FnMut(MirPlaceMention) -> ControlFlow<B>,
+    ) -> ControlFlow<B> {
+        match *me {
+            MirOperand::Copy(place) => f(MirPlaceMention {
+                kind: MirPlaceMentionKind::READ,
+                place,
+            }),
+            MirOperand::Move(place) => f(MirPlaceMention {
+                kind: MirPlaceMentionKind::MOVED,
+                place,
+            }),
+        }
+    }
+}
+
+impl MirOperand {
+    pub fn place(self) -> MirPlace {
+        let (MirOperand::Copy(place) | MirOperand::Move(place)) = self;
+
+        place
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct MirPlace {
+    pub local: MirLocalIdx,
+    pub projections: MirPlaceElemList,
+}
+
+impl MirPlace {
+    pub fn new(
+        tcx: &TyCtxt,
+        local: MirLocalIdx,
+        projections: impl IntoIterator<Item = MirPlaceElem>,
+    ) -> Self {
+        Self {
+            local,
+            projections: tcx.intern_list(&projections.into_iter().collect::<Vec<_>>()),
+        }
+    }
+
+    pub fn extend(self, tcx: &TyCtxt, proj: impl IntoIterator<Item = MirPlaceElem>) -> Self {
+        let s = &tcx.session;
+
+        Self {
+            local: self.local,
+            projections: tcx.intern_list(
+                &self
+                    .projections
+                    .r(s)
+                    .iter()
+                    .copied()
+                    .chain(proj)
+                    .collect::<Vec<_>>(),
+            ),
+        }
+    }
+}
+
+pub type MirPlaceElemList = Intern<[MirPlaceElem]>;
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirPlaceElem {
+    DerefPtr,
+    Field(ResolvedFieldIdx),
+}
+
+// === Pretty === //
+
+pub struct MirPrettyFmtCx<'a> {
+    tcx: &'a TyCtxt,
+    body: &'a MirBody,
+}
+
+impl<'a> MirPrettyFmtCx<'a> {
+    pub fn new(tcx: &'a TyCtxt, body: &'a MirBody) -> Self {
+        Self { tcx, body }
+    }
+
+    pub fn wrap<T>(&self, value: T) -> MirPrettyFmt<'_, T> {
+        MirPrettyFmt { cx: self, value }
+    }
+
+    pub fn tcx(&self) -> &'a TyCtxt {
+        self.tcx
+    }
+
+    pub fn session(&self) -> &'a Session {
+        &self.tcx.session
+    }
+
+    pub fn body(&self) -> &'a MirBody {
+        self.body
+    }
+}
+
+pub struct MirPrettyFmt<'a, T> {
+    cx: &'a MirPrettyFmtCx<'a>,
+    value: T,
+}
+
+impl fmt::Display for MirPrettyFmt<'_, MirLocalIdx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "_{}", self.value.index())
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, MirPlace> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self.cx.session();
+
+        self.cx.wrap(self.value.local).fmt(f)?;
+
+        for elem in self.value.projections.r(s) {
+            match elem {
+                MirPlaceElem::DerefPtr => {
+                    write!(f, ".*")?;
+                }
+                MirPlaceElem::Field(ResolvedFieldIdx::Adt(adt, idx)) => {
+                    match adt.r(s).owner {
+                        AdtCtorOwner::Struct(_) => {
+                            // (no coercion)
+                        }
+                        AdtCtorOwner::EnumVariant(variant) => {
+                            write!(f, ".as<{}>", variant.r(s).ident.text)?;
+                        }
+                    }
+
+                    match &adt.r(s).syntax {
+                        AdtCtorSyntax::Unit => unreachable!(),
+                        AdtCtorSyntax::Tuple => {
+                            write!(f, ".{}", idx.index())?;
+                        }
+                        AdtCtorSyntax::Named(_) => {
+                            write!(f, ".{}", adt.r(s).fields[*idx].ident.unwrap().text)?;
+                        }
+                    }
+                }
+                MirPlaceElem::Field(ResolvedFieldIdx::Tuple { field_idx, .. }) => {
+                    write!(f, ".{field_idx}")?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, MirOperand> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.value {
+            MirOperand::Copy(place) => write!(f, "copy({})", self.cx.wrap(place)),
+            MirOperand::Move(place) => write!(f, "move({})", self.cx.wrap(place)),
+        }
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, &MirRvalue> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self.cx.session();
+
+        match self.value {
+            MirRvalue::UnreachablePlaceholder => {
+                write!(f, "unreachable")?;
+            }
+            MirRvalue::Tuple(operands) => {
+                if let [unique] = **operands {
+                    write!(f, "({},)", self.cx.wrap(unique))?;
+                } else {
+                    write!(
+                        f,
+                        "({})",
+                        format_list(
+                            operands.iter().map(|&op| self.cx.wrap(op)),
+                            SimpleListFormatGlue::COMMA_LIST
+                        )
+                    )?;
+                }
+            }
+            MirRvalue::Adt(ctor, operands) => match &ctor.r(s).syntax {
+                AdtCtorSyntax::Unit => {
+                    assert!(operands.is_empty());
+
+                    write!(f, "{}", ctor.r(s).owner.path(s))?;
+                }
+                AdtCtorSyntax::Tuple => {
+                    write!(
+                        f,
+                        "{}({})",
+                        ctor.r(s).owner.path(s),
+                        format_list(
+                            operands.iter().map(|&op| self.cx.wrap(op)),
+                            SimpleListFormatGlue::COMMA_LIST
+                        )
+                    )?;
+                }
+                AdtCtorSyntax::Named(_) => {
+                    write!(
+                        f,
+                        "{} {{ {} }}",
+                        ctor.r(s).owner.path(s),
+                        format_list(
+                            operands.iter().enumerate().map(|(idx, &op)| {
+                                format!(
+                                    "{}: {}",
+                                    ctor.r(s).fields[idx].ident.unwrap().text,
+                                    self.cx.wrap(op)
+                                )
+                            }),
+                            SimpleListFormatGlue::COMMA_LIST
+                        )
+                    )?;
+                }
+            },
+            MirRvalue::Use(operand) => {
+                write!(f, "use({})", self.cx.wrap(*operand))?;
+            }
+            MirRvalue::MoveOutRef {
+                can_move_from,
+                ref_place,
+            } => {
+                write!(
+                    f,
+                    "late-move(*{}, possibly [{}])",
+                    self.cx.wrap(*ref_place),
+                    format_list(
+                        can_move_from.iter().map(|&place| self.cx.wrap(place)),
+                        SimpleListFormatGlue::COMMA_LIST
+                    )
+                )?;
+            }
+            MirRvalue::Ref(muta, place) => {
+                write!(f, "&{}{}", muta.opt_space_qual(), self.cx.wrap(*place))?;
+            }
+            MirRvalue::Zst(ty) => {
+                write!(f, "zst({})", self.cx.wrap(*ty))?;
+            }
+            MirRvalue::Literal(ty, lit) => {
+                write!(f, "{} :: {}", self.cx.wrap(*lit), self.cx.wrap(*ty))?;
+            }
+            MirRvalue::BinaryOp(kind, operands) => {
+                write!(
+                    f,
+                    "{} {} {}",
+                    self.cx.wrap(operands.0),
+                    kind.to_ast().punct().bare_name(),
+                    self.cx.wrap(operands.1)
+                )?;
+            }
+            MirRvalue::UnaryOp(kind, operand) => {
+                write!(f, "{}{}", kind.punct().bare_name(), self.cx.wrap(*operand))?;
+            }
+            MirRvalue::Discriminant(place) => {
+                write!(f, "discriminant({})", self.cx.wrap(*place))?;
+            }
+            MirRvalue::DynUse(_site, operand) => {
+                write!(f, "dyn-use({})", self.cx.wrap(*operand))?;
+            }
+            MirRvalue::Error(_) => {
+                write!(f, "error")?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, SigTy> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO
+        // write!(f, "{:?}", self.value)
+        f.write_str("<type>")
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, AstLit> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO
+        write!(f, "{:?}", self.value)
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, &MirStmt> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}  // {}",
+            self.cx.wrap(&self.value.kind),
+            self.cx.wrap(self.value.source_info)
+        )
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, MirStmtSourceInfo> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO
+        write!(f, "{:?}", self.value)
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, &MirStmtKind> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.value {
+            MirStmtKind::StorageLive(local) => {
+                write!(f, "storage-live({});", self.cx.wrap(*local))?;
+            }
+            MirStmtKind::StorageDead(local) => {
+                write!(f, "storage-dead({});", self.cx.wrap(*local))?;
+            }
+            MirStmtKind::Assign(stmt) => {
+                write!(f, "{} = {};", self.cx.wrap(stmt.0), self.cx.wrap(&stmt.1))?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl fmt::Display for MirPrettyFmt<'_, MirBlockIdx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.value)
     }
 }

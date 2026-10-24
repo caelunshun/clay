@@ -1,6 +1,7 @@
 use crate::{
     base::{Diag, ErrorGuaranteed},
-    semantic::infer::{ClauseCx, PrettyFmtOpts, ToDebugTree},
+    semantic::infer::{ClauseCx, ClausePrettyFmtOpts},
+    utils::format::ToDebugTree,
 };
 use bytemuck::{TransparentWrapper, TransparentWrapperAlloc as _};
 use derive_where::derive_where;
@@ -130,7 +131,7 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
         self.report_with(|ccx, err| {
             Diag::anon_err(format!(
                 "\n{}",
-                err.to_debug_tree(&ccx.pretty(PrettyFmtOpts { verbose: true }))
+                err.to_debug_tree(&ccx.pretty(ClausePrettyFmtOpts { verbose: true }))
             ))
             .emit()
         });
@@ -144,7 +145,7 @@ impl<'tcx, E: 'tcx> Promise<'tcx, E> {
         self.report_with(|ccx, err| {
             Diag::anon_err(format!(
                 "\n{}",
-                err.to_debug_tree(&ccx.pretty(PrettyFmtOpts { verbose: true }))
+                err.to_debug_tree(&ccx.pretty(ClausePrettyFmtOpts { verbose: true }))
             ))
             .to_delay_bug()
             .emit()

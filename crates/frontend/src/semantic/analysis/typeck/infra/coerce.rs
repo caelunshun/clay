@@ -222,7 +222,7 @@ impl BodyCtxt<'_, '_> {
 #[derive(Debug, Clone)]
 enum CoercionPossibility {
     Solid(Ty),
-    ThinReference(SmallVec<[Ty; 1]>),
+    ThinReference(SmallVec<[Ty; 2]>),
     WideReference(Ty),
 }
 
@@ -379,7 +379,7 @@ fn compute_deref_glb_clobber_obligations(ccx: &mut ClauseCx<'_>, pointees: &[Ty]
 fn compute_deref_chain_clobber_obligations(
     ccx: &mut ClauseCx<'_>,
     mut curr: Ty,
-) -> SmallVec<[Ty; 1]> {
+) -> SmallVec<[Ty; 2]> {
     let mut accum = smallvec![curr];
 
     while let Some(next) = attempt_deref_clobber_obligations(ccx, curr) {

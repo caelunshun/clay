@@ -547,7 +547,7 @@ impl InferReGraph {
 }
 
 #[derive(Debug, Clone, Default)]
-struct DirectedInferReGraph(InferReMap<SmallVec<[InferRe; 1]>>);
+struct DirectedInferReGraph(InferReMap<SmallVec<[InferRe; 2]>>);
 
 impl DirectedInferReGraph {
     fn add(&mut self, lhs: InferRe, rhs: InferRe) {

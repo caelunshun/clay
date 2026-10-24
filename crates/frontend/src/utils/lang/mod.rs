@@ -4,9 +4,6 @@ pub use const_ops::*;
 mod extension;
 pub use extension::*;
 
-mod format;
-pub use format::*;
-
 mod iterator;
 pub use iterator::*;
 

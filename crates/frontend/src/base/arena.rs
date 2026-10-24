@@ -1,9 +1,10 @@
 use crate::{
     base::{HasSession, Session},
-    utils::{hash::hash_map, mem::DropArenaPtr},
+    utils::mem::DropArenaPtr,
 };
 use clay_core::FastHashMap;
 use derive_where::derive_where;
+use hashbrown::hash_map;
 use std::{
     any::TypeId,
     cell::{Cell, RefCell, UnsafeCell},

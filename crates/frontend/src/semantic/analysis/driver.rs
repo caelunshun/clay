@@ -2,7 +2,7 @@ use crate::{
     base::{ErrorGuaranteed, arena::Obj},
     semantic::{
         analysis::sigck::CrateSigckVisitor,
-        infer::CoherenceMap,
+        infer::ImplCache,
         syntax::{AttributeKind, Crate, EarlyAttrLang, TyCtxt},
     },
 };
@@ -10,9 +10,9 @@ use crate::{
 pub fn check_crate(tcx: &TyCtxt, krate: Obj<Crate>) {
     let s = &tcx.session;
 
-    // Compute coherence
-    let mut coherence = CoherenceMap::default();
-    coherence.populate(tcx, krate);
+    // Populate implementation cache
+    let mut impl_cache = ImplCache::default();
+    impl_cache.populate(tcx, krate);
 
     // Discover language items
     for &def in &**krate.r(s).items {
@@ -29,16 +29,8 @@ pub fn check_crate(tcx: &TyCtxt, krate: Obj<Crate>) {
     // Signature-check crate
     CrateSigckVisitor {
         tcx,
-        coherence: &coherence,
+        impl_cache: &impl_cache,
         krate,
     }
     .visit_crate();
-
-    // // Borrow-check crate
-    // CrateBorrowCheckVisitor {
-    //     tcx: self,
-    //     krate,
-    //     coherence: &coherence,
-    // }
-    // .visit_crate();
 }

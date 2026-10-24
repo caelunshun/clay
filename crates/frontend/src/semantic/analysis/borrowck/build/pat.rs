@@ -3,9 +3,10 @@ use crate::{
     semantic::{
         analysis::borrowck::build::{driver::MirFromThirCtx, scope::MirBuilderScopeIdx},
         syntax::{
-            MirAssignRvalue, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirStmt, MirStmtKind,
-            MirStmtSourceInfo, Mutability, ResolvedFieldIdx, SigRe, SigReKind, SigTyInner,
-            SigTyKind, ThirExpr, ThirLetStmt, ThirLocal, ThirMatchArm, ThirPat, ThirPatKind,
+            MirLocal, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue, MirStmt,
+            MirStmtKind, MirStmtSourceInfo, Mutability, ResolvedFieldIdx, SigRe, SigReKind,
+            SigTyInner, SigTyKind, ThirExpr, ThirLetStmt, ThirLocal, ThirMatchArm, ThirPat,
+            ThirPatKind,
         },
     },
 };
@@ -61,7 +62,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         let reject_scope = self.lower_let_stmt_common(stmt.r(s).span, scope, pat, init);
 
         if let Some(else_clause) = else_clause {
-            self.lower_block(reject_scope, else_clause, None);
+            self.lower_block_no_terminator(reject_scope, else_clause, None);
         }
 
         self.builder.push_unreachable(reject_scope);
@@ -83,7 +84,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         //         break 'break_on_accept or 'break_on_reject;
         //     }
         //
-        //     else block;
+        //     else block;  // (provided by caller)
         // }
         //
         // continuing logic;
@@ -108,7 +109,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
         self.materialize_late_use_proxies(span, scope, late_use_proxies);
 
-        break_on_accept
+        break_on_reject
     }
 
     pub fn lower_match(
@@ -304,11 +305,11 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 let mir_local = self.ensure_local_defined(scopes.local_scope, local);
 
                 let init_stmt = MirStmt {
-                    span: MirStmtSourceInfo::Simple(pat.r(s).span),
+                    source_info: MirStmtSourceInfo::Simple(pat.r(s).span),
                     kind: match by_ref {
                         Some(muta) => MirStmtKind::Assign(Box::new((
                             MirPlace::new(tcx, mir_local, []),
-                            MirAssignRvalue::Ref(muta, scrutinee),
+                            MirRvalue::Ref(muta, scrutinee),
                         ))),
                         None => {
                             let late_use_proxy =
@@ -317,20 +318,22 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
                                     let ref_local = self.builder.push_local(
                                         scopes.local_scope,
-                                        Obj::new(
-                                            SigTyInner {
-                                                span,
-                                                kind: SigTyKind::Reference(
-                                                    SigRe {
-                                                        span,
-                                                        kind: SigReKind::Infer,
-                                                    },
-                                                    Mutability::Not,
-                                                    local.r(s).ty,
-                                                ),
-                                            },
-                                            s,
-                                        ),
+                                        MirLocal {
+                                            ty: Obj::new(
+                                                SigTyInner {
+                                                    span,
+                                                    kind: SigTyKind::Reference(
+                                                        SigRe {
+                                                            span,
+                                                            kind: SigReKind::Infer,
+                                                        },
+                                                        Mutability::Not,
+                                                        local.r(s).ty,
+                                                    ),
+                                                },
+                                                s,
+                                            ),
+                                        },
                                     );
 
                                     LateUseProxyEntry {
@@ -349,7 +352,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
                             MirStmtKind::Assign(Box::new((
                                 late_use_proxy.ref_place,
-                                MirAssignRvalue::Ref(Mutability::Not, scrutinee),
+                                MirRvalue::Ref(Mutability::Not, scrutinee),
                             )))
                         }
                     },
@@ -391,13 +394,18 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                                 pat,
                                 scrutinee.extend(
                                     tcx,
-                                    [MirPlaceElem::Field(ResolvedFieldIdx::Tuple(idx))],
+                                    [MirPlaceElem::Field(ResolvedFieldIdx::Tuple {
+                                        field_idx: idx,
+                                        max_elems: pat_tuple_elems.r(s).len() as u32,
+                                    })],
                                 ),
                             )
                         }),
                 );
             }
             ThirPatKind::Adt(ctor, fields) => {
+                // TODO: handle enums
+
                 self.lower_pat_and(
                     late_use_proxies,
                     scopes,
@@ -480,11 +488,11 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
         for (dest, proxy) in map {
             let rvalue = match proxy.can_move_from {
-                Some(can_move_from) => MirAssignRvalue::MoveOutRef {
+                Some(can_move_from) => MirRvalue::MoveOutRef {
                     can_move_from,
                     ref_place: proxy.ref_place,
                 },
-                None => MirAssignRvalue::Use(MirOperand::Copy(
+                None => MirRvalue::Use(MirOperand::Copy(
                     proxy.ref_place.extend(tcx, [MirPlaceElem::DerefPtr]),
                 )),
             };
@@ -492,7 +500,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             self.builder.push_statement(
                 scope,
                 MirStmt {
-                    span: MirStmtSourceInfo::Simple(span),
+                    source_info: MirStmtSourceInfo::Simple(span),
                     kind: MirStmtKind::Assign(Box::new((MirPlace::new(tcx, dest, []), rvalue))),
                 },
             );
@@ -506,9 +514,9 @@ impl<'tcx> MirFromThirCtx<'tcx> {
     ) -> MirLocalIdx {
         let s = self.session();
 
-        *self
-            .thir_locals
-            .entry(local)
-            .or_insert_with(|| self.builder.push_local(local_scope, local.r(s).ty))
+        *self.thir_locals.entry(local).or_insert_with(|| {
+            self.builder
+                .push_local(local_scope, MirLocal { ty: local.r(s).ty })
+        })
     }
 }

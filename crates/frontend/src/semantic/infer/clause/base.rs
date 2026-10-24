@@ -5,7 +5,7 @@ use crate::{
     },
     semantic::{
         infer::{
-            AnyPromiseHandle, CoherenceMap, FloatingInferVar, GeneralOutlivesError, HrtbUniverse,
+            AnyPromiseHandle, FloatingInferVar, GeneralOutlivesError, HrtbUniverse, ImplCache,
             InstantiatedTraitImplError, InstantiatedTraitImplErrorKind, MultiPromise,
             MultiPromiseBuilder, NotCoveredError, ObligationNotReady, ObligationResult,
             ObligationTermination, Promise, PromiseHandle, PromiseMode, ReAndReUnifyError,
@@ -146,7 +146,7 @@ impl ClauseFuel {
 pub struct ClauseCx<'tcx> {
     ucx: UnifyCx<'tcx>,
     pending_obligations: Vec<ClauseObligationState<'tcx>>,
-    coherence: &'tcx CoherenceMap,
+    impl_cache: &'tcx ImplCache,
     krate: Obj<Crate>,
     promise_mode: PromiseMode,
     universal_roots: IndexVec<UniversalTyRoot, UniversalTyRootDescriptor>,
@@ -174,14 +174,14 @@ struct UniversalTyProjDescriptor {
 impl<'tcx> ClauseCx<'tcx> {
     pub fn new(
         tcx: &'tcx TyCtxt,
-        coherence: &'tcx CoherenceMap,
+        impl_cache: &'tcx ImplCache,
         krate: Obj<Crate>,
         mode: UnifyCxMode,
     ) -> Self {
         Self {
             ucx: UnifyCx::new(tcx, mode),
             pending_obligations: Vec::new(),
-            coherence,
+            impl_cache,
             krate,
             promise_mode: PromiseMode::RootContext,
             universal_roots: IndexVec::new(),
@@ -197,8 +197,8 @@ impl<'tcx> ClauseCx<'tcx> {
         self.ucx.session()
     }
 
-    pub fn coherence(&self) -> &'tcx CoherenceMap {
-        self.coherence
+    pub fn impl_cache(&self) -> &'tcx ImplCache {
+        self.impl_cache
     }
 
     pub fn krate(&self) -> Obj<Crate> {

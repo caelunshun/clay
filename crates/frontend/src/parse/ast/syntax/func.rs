@@ -310,6 +310,16 @@ pub enum AstUnOpKind {
     Neg,
 }
 
+impl AstUnOpKind {
+    pub fn punct(self) -> AnyPunct {
+        match self {
+            AstUnOpKind::Deref => punct!('*').into(),
+            AstUnOpKind::Not => punct!('!').into(),
+            AstUnOpKind::Neg => punct!('-').into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AstRangeExpr {
     pub low: Option<Box<AstExpr>>,

@@ -406,6 +406,12 @@ macro_rules! define_puncts {
                 }
             }
 
+            pub fn bare_name(self) -> Symbol {
+                match self {
+                    $(Self::$name => symbol!(concat!($ch)),)*
+                }
+            }
+
             pub fn expectation_name(self) -> Symbol {
                 match self {
                     $(Self::$name => symbol!(concat!("`", $ch, "`")),)*

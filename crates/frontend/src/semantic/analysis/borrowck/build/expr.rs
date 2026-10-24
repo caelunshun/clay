@@ -7,7 +7,7 @@ use crate::{
             scope::MirBuilderScopeIdx,
         },
         syntax::{
-            MirAssignRvalue, MirBinOpKind, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem,
+            MirBinOpKind, MirLocal, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue,
             MirStmt, MirStmtKind, MirStmtSourceInfo, ResolvedFieldIdx, SigTy, ThirBlock,
             ThirBlockTrailing, ThirExpr, ThirExprKind, ThirStmt,
         },
@@ -19,13 +19,13 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         &mut self,
         scope: MirBuilderScopeIdx,
         expr: Obj<ThirExpr>,
-    ) -> MirAssignRvalue {
+    ) -> MirRvalue {
         let s = self.session();
 
         let rv = match self.lower_expr_preferred(scope, expr, None) {
             MirRvalueOrPlace::Rvalue(rvalue) => rvalue,
             MirRvalueOrPlace::Place(place) => {
-                MirAssignRvalue::Use(self.builder.operand_mode(expr.r(s).ty).to_operand(place))
+                MirRvalue::Use(self.builder.operand_mode(expr.r(s).ty).to_operand(place))
             }
         };
 
@@ -52,7 +52,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 self.builder.push_statement(
                     scope,
                     MirStmt {
-                        span: MirStmtSourceInfo::Simple(expr.r(s).span),
+                        source_info: MirStmtSourceInfo::Simple(expr.r(s).span),
                         kind: MirStmtKind::Assign(Box::new((assign_into, rvalue))),
                     },
                 );
@@ -66,11 +66,11 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     self.builder.push_statement(
                         scope,
                         MirStmt {
-                            span: MirStmtSourceInfo::Simple(expr.r(s).span),
+                            source_info: MirStmtSourceInfo::Simple(expr.r(s).span),
                             kind: MirStmtKind::Assign(Box::new((
                                 assign_into,
                                 // The original output needs to be invalidated.
-                                MirAssignRvalue::Use(MirOperand::Move(original_output)),
+                                MirRvalue::Use(MirOperand::Move(original_output)),
                             ))),
                         },
                     );
@@ -122,11 +122,11 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         let s = self.session();
 
         match *expr.r(s).kind {
-            ThirExprKind::CreateZst => MirRvalueOrPlace::Rvalue(MirAssignRvalue::Zst(expr.r(s).ty)),
+            ThirExprKind::CreateZst => MirRvalueOrPlace::Rvalue(MirRvalue::Zst(expr.r(s).ty)),
             ThirExprKind::CreateLiteral(lit) => {
-                MirRvalueOrPlace::Rvalue(MirAssignRvalue::Literal(expr.r(s).ty, lit))
+                MirRvalueOrPlace::Rvalue(MirRvalue::Literal(expr.r(s).ty, lit))
             }
-            ThirExprKind::CreateTuple(elems) => MirRvalueOrPlace::Rvalue(MirAssignRvalue::Tuple(
+            ThirExprKind::CreateTuple(elems) => MirRvalueOrPlace::Rvalue(MirRvalue::Tuple(
                 elems
                     .r(s)
                     .iter()
@@ -134,7 +134,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     .collect(),
             )),
             ThirExprKind::PrimitiveBinOp(op, lhs, rhs) => match MirBinOpKind::from_ast(op) {
-                MirBinOpKind::Straight(op) => MirRvalueOrPlace::Rvalue(MirAssignRvalue::BinaryOp(
+                MirBinOpKind::Straight(op) => MirRvalueOrPlace::Rvalue(MirRvalue::BinaryOp(
                     op,
                     Box::new((
                         self.lower_expr_operand(scope, lhs),
@@ -159,10 +159,10 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     self.builder.push_statement(
                         short_scope,
                         MirStmt {
-                            span: MirStmtSourceInfo::Simple(expr.r(s).span),
+                            source_info: MirStmtSourceInfo::Simple(expr.r(s).span),
                             kind: MirStmtKind::Assign(Box::new((
                                 assign_into,
-                                MirAssignRvalue::Literal(
+                                MirRvalue::Literal(
                                     expr.r(s).ty,
                                     AstLit::Bool(AstBoolLit {
                                         span: expr.r(s).span,
@@ -180,12 +180,10 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     MirRvalueOrPlace::Place(assign_into)
                 }
             },
-            ThirExprKind::PrimitiveUnOp(op, lhs) => {
-                MirRvalueOrPlace::Rvalue(MirAssignRvalue::UnaryOp(
-                    op,
-                    MirOperand::Move(self.lower_expr_place(scope, lhs, None)),
-                ))
-            }
+            ThirExprKind::PrimitiveUnOp(op, lhs) => MirRvalueOrPlace::Rvalue(MirRvalue::UnaryOp(
+                op,
+                MirOperand::Move(self.lower_expr_place(scope, lhs, None)),
+            )),
             ThirExprKind::NoOp(expr) => self.lower_expr_preferred(scope, expr, assign_into),
             ThirExprKind::Break(label, value) => {
                 let label = self.labelled_scopes[&label];
@@ -194,13 +192,13 @@ impl<'tcx> MirFromThirCtx<'tcx> {
 
                 self.builder.push_break(scope, label.scope);
 
-                MirRvalueOrPlace::Rvalue(MirAssignRvalue::UnreachablePlaceholder)
+                MirRvalueOrPlace::Rvalue(MirRvalue::UnreachablePlaceholder)
             }
             ThirExprKind::Continue(label) => {
                 self.builder
                     .push_continue(scope, self.labelled_scopes[&label].scope);
 
-                MirRvalueOrPlace::Rvalue(MirAssignRvalue::UnreachablePlaceholder)
+                MirRvalueOrPlace::Rvalue(MirRvalue::UnreachablePlaceholder)
             }
             ThirExprKind::Return(rv) => {
                 let rv = self.lower_expr_rvalue(scope, rv);
@@ -208,7 +206,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 self.builder.push_statement(
                     scope,
                     MirStmt {
-                        span: MirStmtSourceInfo::Simple(expr.r(s).span),
+                        source_info: MirStmtSourceInfo::Simple(expr.r(s).span),
                         kind: MirStmtKind::Assign(Box::new((
                             MirPlace::new(tcx, MirLocalIdx::RETURN, []),
                             rv,
@@ -217,7 +215,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 );
                 self.builder.push_return(scope);
 
-                MirRvalueOrPlace::Rvalue(MirAssignRvalue::UnreachablePlaceholder)
+                MirRvalueOrPlace::Rvalue(MirRvalue::UnreachablePlaceholder)
             }
             ThirExprKind::Assign(lhs, rhs) => {
                 let lhs = self.lower_expr_place(scope, lhs, None);
@@ -226,12 +224,12 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 self.builder.push_statement(
                     scope,
                     MirStmt {
-                        span: MirStmtSourceInfo::Simple(expr.r(s).span),
+                        source_info: MirStmtSourceInfo::Simple(expr.r(s).span),
                         kind: MirStmtKind::Assign(Box::new((lhs, rhs))),
                     },
                 );
 
-                MirRvalueOrPlace::Rvalue(MirAssignRvalue::Tuple(Box::new([])))
+                MirRvalueOrPlace::Rvalue(MirRvalue::Tuple(Box::new([])))
             }
             ThirExprKind::Block(block) => {
                 let out_place =
@@ -242,7 +240,8 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 self.labelled_scopes
                     .insert(expr, LabelledScope { scope, out_place });
 
-                self.lower_block(scope, block, Some(out_place));
+                self.lower_block_no_terminator(scope, block, Some(out_place));
+                self.builder.push_break(scope, scope);
 
                 MirRvalueOrPlace::Place(out_place)
             }
@@ -253,11 +252,12 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 self.labelled_scopes
                     .insert(expr, LabelledScope { scope, out_place });
 
-                self.lower_block(scope, block, None);
+                self.lower_block_no_terminator(scope, block, None);
+                self.builder.push_continue(scope, scope);
 
                 MirRvalueOrPlace::Place(out_place)
             }
-            ThirExprKind::AddrOf(muta, target) => MirRvalueOrPlace::Rvalue(MirAssignRvalue::Ref(
+            ThirExprKind::AddrOf(muta, target) => MirRvalueOrPlace::Rvalue(MirRvalue::Ref(
                 muta,
                 self.lower_expr_place(scope, target, None),
             )),
@@ -308,7 +308,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                             Some(self.lower_expr_operand(scope, field.init))
                     }
 
-                    MirRvalueOrPlace::Rvalue(MirAssignRvalue::Adt(
+                    MirRvalueOrPlace::Rvalue(MirRvalue::Adt(
                         ctor,
                         field_places.into_iter().map(|v| v.unwrap()).collect(),
                     ))
@@ -341,7 +341,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             ThirExprKind::DynUse(site_idx, target) => {
                 let target = self.lower_expr_operand(scope, target);
 
-                MirRvalueOrPlace::Rvalue(MirAssignRvalue::DynUse(site_idx, target))
+                MirRvalueOrPlace::Rvalue(MirRvalue::DynUse(site_idx, target))
             }
             ThirExprKind::Match(scrutinee, arms) => {
                 let out_place =
@@ -352,11 +352,11 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 MirRvalueOrPlace::Place(out_place)
             }
             ThirExprKind::Let(_, _) => unreachable!(),
-            ThirExprKind::Error(error) => MirRvalueOrPlace::Rvalue(MirAssignRvalue::Error(error)),
+            ThirExprKind::Error(error) => MirRvalueOrPlace::Rvalue(MirRvalue::Error(error)),
         }
     }
 
-    pub fn lower_block(
+    pub fn lower_block_no_terminator(
         &mut self,
         scope: MirBuilderScopeIdx,
         block: Obj<ThirBlock>,
@@ -368,15 +368,11 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             match stmt {
                 ThirStmt::Expr(expr) => {
                     let scope = self.builder.push_scope(scope);
-                    let rvalue = self.lower_expr_rvalue(scope, expr);
 
-                    self.builder.push_statement(
-                        scope,
-                        MirStmt {
-                            span: MirStmtSourceInfo::Simple(expr.r(s).span),
-                            kind: MirStmtKind::DiscardWithoutDrop(rvalue),
-                        },
-                    );
+                    // Dropped by leaving the scope.
+                    self.lower_expr_place(scope, expr, None);
+
+                    self.builder.push_break(scope, scope);
                 }
                 ThirStmt::Let(stmt) => {
                     self.lower_let_stmt(scope, stmt);
@@ -485,7 +481,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         let tcx = self.tcx();
 
         *place.get_or_insert_with(|| MirPlace {
-            local: self.builder.push_local(scope, ty),
+            local: self.builder.push_local(scope, MirLocal { ty }),
             projections: tcx.intern_list(&[]),
         })
     }

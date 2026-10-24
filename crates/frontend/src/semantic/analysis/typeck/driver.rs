@@ -21,7 +21,7 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     let tcx = cx.tcx();
 
     // Setup a `ClauseCx` for signature validation.
-    let mut ccx = ClauseCx::new(tcx, cx.coherence, cx.krate, UnifyCxMode::RegionBlind);
+    let mut ccx = ClauseCx::new(tcx, cx.impl_cache, cx.krate, UnifyCxMode::RegionBlind);
     let env_sig = ccx.universal_env_for_fn_def(def);
 
     // WF-check the signature.

@@ -1,720 +1,679 @@
 use crate::{
-    base::Session,
     semantic::syntax::{
-        MirAssignRvalue, MirBlock, MirBlockIdx, MirBody, MirDirection, MirInstructionIdx,
-        MirInstructionLoc, MirInstructionRef, MirLocalIdx, MirOperand, MirPlace, MirStmt,
-        MirStmtKind, MirTerminator, TyCtxt,
+        MirBlockIdx, MirBlockRef, MirBody, MirBodyDirection, MirStmtIdx, MirStmtRef,
     },
+    utils::mem::{DisjointBorrowsScratch, VecOfPtrScratch},
 };
-use index_vec::IndexVec;
-use clay_core::{FastHashSet};
+use bytemuck::TransparentWrapper;
+use derive_where::derive_where;
+use slotmap::SecondaryMap;
+use std::{collections::VecDeque, marker::PhantomData, mem};
 
-use smallvec::SmallVec;
-use std::{
-    collections::VecDeque,
-    convert::Infallible,
-    fmt, iter, mem,
-    ops::{ControlFlow, RangeBounds},
-};
+// === DataflowAnalysis === //
 
-// === MirBbOperation === //
+pub trait ForwardsDataflowAnalysis<'g> {
+    type Lattice;
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct MirBbOperation {
-    pub kind: MirBbOperationKind,
-    pub place: MirLocalIdx,
-}
+    fn body(&self) -> &'g MirBody;
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum MirBbOperationKind {
-    Provide,
-    Steal,
-    Use,
-}
+    fn init_effect(&mut self, is_entry: bool) -> Self::Lattice;
 
-pub struct MirBbOperationVisitor<'a, F, B>(pub &'a Session, pub F)
-where
-    F: FnMut(MirBbOperation) -> ControlFlow<B>;
+    fn trans_join(&mut self, inputs: &[&Self::Lattice], output: &mut DataflowOutput<Self::Lattice>);
 
-impl<F, B> MirBbOperationVisitor<'_, F, B>
-where
-    F: FnMut(MirBbOperation) -> ControlFlow<B>,
-{
-    pub fn visit_instr(&mut self, instr: MirInstructionRef<'_>) -> ControlFlow<B> {
-        match instr {
-            MirInstructionRef::Stmt(stmt) => self.visit_stmt(stmt),
-            MirInstructionRef::Terminator(terminator) => self.visit_terminator(terminator),
-        }
-    }
+    fn trans_stmt(
+        &mut self,
+        stmt: MirStmtRef<'g>,
+        input: &Self::Lattice,
+        output: &mut Self::Lattice,
+    );
 
-    pub fn visit_stmt(&mut self, stmt: &MirStmt) -> ControlFlow<B> {
-        match &stmt.kind {
-            MirStmtKind::Assign(stmt) => {
-                let (lhs, rhs) = &**stmt;
-                self.visit_rvalue(rhs)?;
-                self.visit_place(MirBbOperationKind::Provide, *lhs)?;
-            }
-            MirStmtKind::Discard(operand) => {
-                self.visit_operand(*operand)?;
-            }
-        }
+    fn trans_terminator(
+        &mut self,
+        block: MirBlockRef<'g>,
+        input: &Self::Lattice,
+        outputs: &mut [&mut DataflowOutput<Self::Lattice>],
+    );
 
-        ControlFlow::Continue(())
-    }
+    fn run(&mut self, scratch: &mut DataflowScratch<Self::Lattice>) {
+        let body = self.body();
 
-    pub fn visit_terminator(&mut self, terminator: &MirTerminator) -> ControlFlow<B> {
-        match terminator {
-            MirTerminator::Call {
-                callee,
-                args,
-                destination,
-                target: _,
-            } => {
-                self.visit_operand(*callee)?;
-                self.visit_operand_list(args)?;
-                self.visit_place(MirBbOperationKind::Provide, *destination)?;
-            }
-            MirTerminator::Drop { place, target: _ } => {
-                self.visit_place(MirBbOperationKind::Steal, *place)?;
-            }
-            MirTerminator::Switch {
-                scrutinee,
-                targets: _,
-            } => {
-                self.visit_place(MirBbOperationKind::Use, *scrutinee)?;
-            }
-            MirTerminator::Goto(_)
-            | MirTerminator::Return
-            | MirTerminator::Unreachable
-            | MirTerminator::Placeholder => {
-                // (empty)
-            }
-        }
+        // Initialize scratch
+        scratch.worklist.clear();
+        scratch.effect_elems.clear();
+        scratch.basic_block_indices.clear();
 
-        ControlFlow::Continue(())
-    }
-
-    pub fn visit_rvalue(&mut self, rvalue: &MirAssignRvalue) -> ControlFlow<B> {
-        match rvalue {
-            MirAssignRvalue::Tuple(elems) => {
-                self.visit_operand_list(elems)?;
-            }
-            MirAssignRvalue::Use(operand) => {
-                self.visit_operand(*operand)?;
-            }
-            MirAssignRvalue::Ref(_muta, place) => {
-                self.visit_place(MirBbOperationKind::Use, *place)?;
-            }
-            MirAssignRvalue::Zst(_) | MirAssignRvalue::Literal(_, _) => {
-                // (empty)
-            }
-            MirAssignRvalue::BinaryOp(_kind, operands) => {
-                let (lhs, rhs) = &**operands;
-                self.visit_operand(*lhs)?;
-                self.visit_operand(*rhs)?;
-            }
-            MirAssignRvalue::UnaryOp(_kind, operand) => {
-                self.visit_operand(*operand)?;
-            }
-            MirAssignRvalue::Discriminant(place) => {
-                self.visit_place(MirBbOperationKind::Use, *place)?;
-            }
-        }
-
-        ControlFlow::Continue(())
-    }
-
-    pub fn visit_operand_list(&mut self, operands: &[MirOperand]) -> ControlFlow<B> {
-        for &operand in operands {
-            self.visit_operand(operand)?;
-        }
-
-        ControlFlow::Continue(())
-    }
-
-    pub fn visit_operand(&mut self, operand: MirOperand) -> ControlFlow<B> {
-        match operand {
-            MirOperand::Copy(place) => self.visit_place(MirBbOperationKind::Use, place),
-            MirOperand::Move(place) => self.visit_place(MirBbOperationKind::Steal, place),
-        }
-    }
-
-    pub fn visit_place(&mut self, kind: MirBbOperationKind, place: MirPlace) -> ControlFlow<B> {
-        // TODO
-        if !place.projections.r(self.0).is_empty() {
-            return ControlFlow::Continue(());
-        }
-
-        (self.1)(MirBbOperation {
-            kind,
-            place: place.local,
-        })
-    }
-}
-
-// === MirDataflowFacts === //
-
-pub struct MirDataflowFacts {
-    pub occupancy: MirDataflow,
-    pub liveness: MirDataflow,
-}
-
-impl MirDataflowFacts {
-    pub fn compute(tcx: &TyCtxt, body: &MirBody) -> Self {
-        let s = &tcx.session;
-
-        // Compute occupancy
-        let occupancy = MirDataflow::new(
-            body,
-            LocalSetJoinOp::Intersect,
-            MirDirection::Forward,
-            |loc| {
-                let mut gk = GenKillTrans::new(body.locals.len());
-                MirBbOperationVisitor(s, |op| {
-                    match op.kind {
-                        MirBbOperationKind::Provide => {
-                            gk.push_gen(op.place);
-                        }
-                        MirBbOperationKind::Steal => {
-                            gk.push_kill(op.place);
-                        }
-                        MirBbOperationKind::Use => {
-                            // (no effect)
-                        }
-                    }
-
-                    ControlFlow::<Infallible>::Continue(())
-                })
-                .visit_instr(body.lookup(loc));
-                gk
+        scratch.stmt_tmp_effects = Some([
+            DataflowOutput {
+                // Permanently dirty to allow for comparison fast-path.
+                is_dirty: true,
+                value: self.init_effect(false),
             },
-        );
+            DataflowOutput {
+                is_dirty: true,
+                value: self.init_effect(false),
+            },
+        ]);
 
-        // Compute liveness
-        let liveness =
-            MirDataflow::new(body, LocalSetJoinOp::Union, MirDirection::Backward, |loc| {
-                let mut gk = GenKillTrans::new(body.locals.len());
-                MirBbOperationVisitor(s, |op| {
-                    match op.kind {
-                        MirBbOperationKind::Provide => {
-                            gk.push_kill(op.place);
-                        }
-                        MirBbOperationKind::Use | MirBbOperationKind::Steal => {
-                            gk.push_gen(op.place);
-                        }
-                    }
+        for block in body.cfg.blocks() {
+            scratch.basic_block_indices.insert(
+                block,
+                BasicBlockState {
+                    seed_idx: scratch.effect_elems.len() as u32,
+                    aux_idx: u32::MAX,
+                },
+            );
 
-                    ControlFlow::<Infallible>::Continue(())
-                })
-                .visit_instr(body.lookup(loc));
-                gk
+            scratch.effect_elems.push(DataflowOutput {
+                is_dirty: true,
+                value: self.init_effect(block == body.entry),
             });
 
-        Self {
-            occupancy,
-            liveness,
-        }
-    }
-
-    pub fn find_last_thief(
-        &self,
-        s: &Session,
-        body: &MirBody,
-        location: MirInstructionLoc,
-        place: MirLocalIdx,
-    ) -> Option<MirInstructionLoc> {
-        fn find_local_thief(
-            s: &Session,
-            block: &MirBlock,
-            range: impl RangeBounds<MirInstructionIdx>,
-            place: MirLocalIdx,
-        ) -> Option<MirInstructionIdx> {
-            block.instructions_ranged(range).rev().find(|&idx| {
-                MirBbOperationVisitor(s, |op| {
-                    if op.kind == MirBbOperationKind::Steal && op.place == place {
-                        ControlFlow::Break(())
-                    } else {
-                        ControlFlow::Continue(())
-                    }
-                })
-                .visit_instr(block.lookup(idx))
-                .is_break()
-            })
+            scratch.worklist.push_back(block);
         }
 
-        if let Some(thief) =
-            find_local_thief(s, &body.blocks[location.block], ..location.instr, place)
-        {
-            return Some(MirInstructionLoc {
-                block: location.block,
-                instr: thief,
-            });
-        }
+        for block in body.blocks() {
+            let predecessors = block.predecessors();
 
-        let mut dfs_set = FastHashSet::default();
-        let mut dfs_stack = Vec::new();
-        let mut candidates = Vec::new();
-
-        for &pred in body.blocks[location.block].predecessors() {
-            if !dfs_set.insert(pred) {
+            if predecessors.is_empty() {
                 continue;
             }
 
-            dfs_stack.push(pred);
-        }
+            assert!(block.block != body.entry);
 
-        while let Some(curr) = dfs_stack.pop() {
-            if let Some(thief) = find_local_thief(s, &body.blocks[curr], .., place) {
-                candidates.push(MirInstructionLoc {
-                    block: curr,
-                    instr: thief,
+            scratch.basic_block_indices[block.block].aux_idx = scratch.effect_elems.len() as u32;
+
+            for _ in 0..predecessors.len() {
+                scratch.effect_elems.push(DataflowOutput {
+                    is_dirty: false,
+                    value: self.init_effect(false),
                 });
-
-                continue;
             }
+        }
 
-            for &pred in body.blocks[curr].predecessors() {
-                if !dfs_set.insert(pred) {
+        // Run dataflow
+        while let Some(curr) = scratch.worklist.pop_front() {
+            let curr = MirBlockRef::new(body, curr);
+            let curr_indices = scratch.basic_block_indices[curr.block];
+
+            // Join block predecessors
+            {
+                let mut borrows = scratch
+                    .effect_elems_borrow
+                    .builder(&mut scratch.effect_elems);
+
+                let predecessors = scratch.ptr_scratch.build(
+                    (curr_indices.aux_idx..)
+                        .take(curr.predecessors().len())
+                        .map(|idx| &borrows.get(idx as usize).value),
+                );
+
+                let successor = borrows.get_mut(curr_indices.seed_idx as usize);
+
+                // N.B. we reuse this flag to both detect whether `trans_join` has updated its
+                // entrypoint effect to a new value and to mark blocks as queued in the worklist.
+                assert!(successor.is_dirty);
+                successor.is_dirty = false;
+
+                self.trans_join(predecessors, successor);
+
+                if !mem::take(&mut successor.is_dirty) {
+                    // The input effect to the block has not actually changed, even though its
+                    // predecessors have changed.
                     continue;
                 }
-
-                dfs_stack.push(pred);
-            }
-        }
-
-        candidates
-            .into_iter()
-            .max_by_key(|&instr| body.lookup(instr).span().hi)
-    }
-
-    pub fn find_next_use(&self) {
-        todo!()
-    }
-
-    #[must_use]
-    pub fn can_outlive_rhs_mask(&self, body: &MirBody, rhs: MirLocalIdx) -> LocalSet {
-        // `lhs` is allowed to outlive `rhs` if, for every instruction, `live(rhs)` implies
-        // `occupied(lhs)`. In other words, a local is allowed to outlive another one if, whenever
-        // the `rhs` local is in use, `lhs` can be referred to.
-        //
-        // Here is a pair of examples to help demonstrate this idea.
-        //
-        // This program is accepted:
-        //
-        // ```
-        // // occupied: {}, live: {}
-        // let mut a = Vec::<i32>::new();
-        // // occupied: {a}, live: {a}
-        // let mut b: &'_ mut Vec<i32> = &mut a;
-        // // occupied: {a, b}, live: {a, b}
-        // b.clear();
-        // // occupied: {a, b}, live: {a}
-        // drop(a);
-        // // occupied: {b}, live: {}
-        // a = Vec::<i32>::new();
-        // // occupied: {a, b}, live: {a}
-        // b = &mut a;
-        // // occupied: {a, b}, live: {b}
-        // b.clear();
-        // // occupied: {a, b}, live: {}
-        //
-        // // 'a can outlive 'b iff, for all instructions, live(b) implies occupied(a)
-        // // This is satisfied by this code so it compiles!
-        // ```
-        //
-        // ...while this program is rejected:
-        //
-        // ```
-        // // occupied: {}, live: {}
-        // let mut a = Vec::<i32>::new();
-        // // occupied: {a}, live: {a}
-        // let mut b: &'_ mut Vec<i32> = &mut a;
-        // // occupied: {a, b}, live: {a, b}
-        // b.clear();
-        // // occupied: {a, b}, live: {a, b}
-        // drop(a);
-        // // occupied: {b}, live: {b}
-        // a = Vec::<i32>::new();
-        // // occupied: {a, b}, live: {a, b}
-        // b.clear();
-        // // occupied: {a, b}, live: {a, b}
-        // b = &mut a;
-        // // occupied: {a, b}, live: {b}
-        // b.clear();
-        // // occupied: {a, b}, live: {}
-        //
-        // // 'a can outlive 'b iff, for all instructions, live(b) implies occupied(a)
-        // // This is broken by...
-        // //
-        // // ```
-        // // drop(a);
-        // // // occupied: {b}, live: {b}
-        // // ```
-        // //
-        // // ...so the code fails to compile!
-        // ```
-
-        let mut outlive_mask = LocalSet::new(body.locals.len());
-        outlive_mask.fill();
-
-        let mut push = |occupancy: &LocalSet, liveness: &LocalSet| {
-            if !liveness.contains(rhs) {
-                return;
             }
 
-            outlive_mask.intersect(occupancy);
-        };
-
-        for (block_idx, block) in body.blocks.iter_enumerated() {
-            for instr_idx in block.instructions() {
-                let loc = MirInstructionLoc {
-                    block: block_idx,
-                    instr: instr_idx,
-                };
-
-                push(
-                    self.occupancy.state_before(loc),
-                    self.liveness.state_before(loc),
-                );
+            // Transition statements
+            enum TerminatorInput<'a, T> {
+                AtIdx(usize),
+                ByRef(&'a T),
             }
 
-            let loc = MirInstructionLoc {
-                block: block_idx,
-                instr: block.terminator_idx(),
-            };
+            let terminator_input = 'stmt: {
+                let mut iter = curr.stmts(MirBodyDirection::Forwards);
 
-            push(
-                self.occupancy.state_after(loc),
-                self.liveness.state_after(loc),
-            );
-        }
+                let [scratch_src, scratch_dst] = scratch.stmt_tmp_effects.as_mut().unwrap();
+                let mut scratch_src = scratch_src;
+                let mut scratch_dst = scratch_dst;
 
-        outlive_mask
-    }
-}
-
-// === MirDataflow === //
-
-#[derive(Clone)]
-pub struct MirDataflow {
-    results: IndexVec<MirBlockIdx, Vec<LocalSet>>,
-}
-
-impl MirDataflow {
-    pub fn new(
-        body: &MirBody,
-        join_op: LocalSetJoinOp,
-        direction: MirDirection,
-        mut trans: impl FnMut(MirInstructionLoc) -> GenKillTrans,
-    ) -> Self {
-        struct Solver<'a> {
-            body: &'a MirBody,
-            join_op: LocalSetJoinOp,
-            direction: MirDirection,
-            block_scratch: IndexVec<MirBlockIdx, BlockScratch>,
-            work_queue: VecDeque<MirBlockIdx>,
-        }
-
-        struct BlockScratch {
-            natural_gen_kill: Vec<GenKillTrans>,
-            natural_total_trans: GenKillTrans,
-            results: LocalSet,
-            in_work_list: bool,
-        }
-
-        impl Solver<'_> {
-            fn update_to_fixpoint(&mut self) {
-                let mut tmp_set = LocalSet::new(self.body.locals.len());
-
-                for bb in self.block_scratch.indices() {
-                    self.mark_dirty(bb);
+                if let Some(stmt) = iter.next() {
+                    self.trans_stmt(
+                        stmt,
+                        &scratch.effect_elems[curr_indices.seed_idx as usize].value,
+                        &mut scratch_src.value,
+                    );
+                } else {
+                    break 'stmt TerminatorInput::AtIdx(curr_indices.seed_idx as usize);
                 }
 
-                while let Some(curr) = self.work_queue.pop_front() {
-                    self.block_scratch[curr].in_work_list = false;
+                for stmt in iter {
+                    self.trans_stmt(stmt, &scratch_src.value, &mut scratch_dst.value);
 
-                    // Join predecessors
-                    self.import_start(curr, &mut tmp_set);
+                    mem::swap(&mut scratch_dst, &mut scratch_src);
+                }
 
-                    // Transition through the block.
-                    tmp_set.trans(&self.block_scratch[curr].natural_total_trans);
+                TerminatorInput::ByRef(&scratch_src.value)
+            };
 
-                    // If our set changed, mark the successors as dirty.
-                    if tmp_set == self.block_scratch[curr].results {
+            // Transition terminator
+            {
+                let mut borrows = scratch
+                    .effect_elems_borrow
+                    .builder(&mut scratch.effect_elems);
+
+                let input = match terminator_input {
+                    TerminatorInput::AtIdx(idx) => &borrows.get(idx).value,
+                    TerminatorInput::ByRef(v) => v,
+                };
+
+                let outputs = curr.successors().iter().map(|link| {
+                    let base = scratch.basic_block_indices[link.target].aux_idx;
+                    borrows.get_mut(base as usize + link.at_idx)
+                });
+                let outputs = scratch.ptr_scratch.build(outputs);
+
+                self.trans_terminator(curr, input, outputs);
+
+                for (&succ, output) in curr.successors().iter().zip(outputs) {
+                    if !mem::take(&mut output.is_dirty) {
                         continue;
                     }
 
-                    self.block_scratch[curr].results.clone_from(&tmp_set);
+                    let slot =
+                        borrows.get_mut(scratch.basic_block_indices[succ.target].seed_idx as usize);
 
-                    for &succ in self.body.blocks[curr].next(self.direction) {
-                        self.mark_dirty(succ);
+                    if slot.is_dirty {
+                        continue;
                     }
+
+                    slot.is_dirty = true;
+                    scratch.worklist.push_back(succ.target);
                 }
-            }
-
-            fn import_start(&self, curr: MirBlockIdx, target: &mut LocalSet) {
-                if let Some((first, remaining)) =
-                    self.body.blocks[curr].prev(self.direction).split_first()
-                {
-                    target.clone_from(&self.block_scratch[*first].results);
-
-                    for &flow_from in remaining {
-                        target.join(self.join_op, &self.block_scratch[flow_from].results);
-                    }
-                } else {
-                    target.clear();
-                }
-            }
-
-            fn mark_dirty(&mut self, bb: MirBlockIdx) {
-                if mem::replace(&mut self.block_scratch[bb].in_work_list, true) {
-                    return;
-                }
-
-                self.work_queue.push_back(bb);
             }
         }
 
-        let block_tmp = body
-            .blocks
-            .iter_enumerated()
-            .map(|(block_idx, block)| {
-                let mut natural_gen_kill = block
-                    .instructions()
-                    .map(|instr_idx| {
-                        trans(MirInstructionLoc {
-                            block: block_idx,
-                            instr: instr_idx,
-                        })
-                    })
-                    .collect::<Vec<_>>();
+        // Trim unnecessary lattices
+        scratch.effect_elems.truncate(body.cfg.blocks().len());
+    }
+}
 
-                if direction.is_backward() {
-                    natural_gen_kill.reverse();
+pub trait BackwardsDataflowAnalysis<'g> {
+    type Lattice;
+
+    fn body(&self) -> &'g MirBody;
+
+    fn init_effect(&mut self) -> Self::Lattice;
+
+    fn trans_stmt(
+        &mut self,
+        stmt: MirStmtRef<'g>,
+        input: &Self::Lattice,
+        output: &mut DataflowOutput<Self::Lattice>,
+    );
+
+    fn trans_terminator(
+        &mut self,
+        block: MirBlockRef<'g>,
+        inputs: &[&Self::Lattice],
+        output: &mut DataflowOutput<Self::Lattice>,
+    );
+
+    fn run(&mut self, scratch: &mut DataflowScratch<Self::Lattice>) {
+        let body = self.body();
+
+        // Initialize scratch
+        scratch.worklist.clear();
+        scratch.effect_elems.clear();
+        scratch.basic_block_indices.clear();
+
+        scratch.stmt_tmp_effects = Some([
+            DataflowOutput {
+                is_dirty: true,
+                value: self.init_effect(),
+            },
+            DataflowOutput {
+                is_dirty: true,
+                value: self.init_effect(),
+            },
+        ]);
+
+        for block in body.cfg.blocks() {
+            let seed_idx = scratch.effect_elems.len() as u32;
+
+            scratch.basic_block_indices.insert(
+                block,
+                BasicBlockState {
+                    seed_idx,
+                    // Will get initialized to a disjoint slot if the block is non-empty.
+                    aux_idx: seed_idx,
+                },
+            );
+
+            scratch.effect_elems.push(DataflowOutput {
+                is_dirty: true,
+                value: self.init_effect(),
+            });
+
+            scratch.worklist.push_back(block);
+        }
+
+        for block in body.cfg.blocks() {
+            if body.cfg.block_first(block).is_none() {
+                continue;
+            }
+
+            scratch.basic_block_indices[block].aux_idx = scratch.effect_elems.len() as u32;
+
+            scratch.effect_elems.push(DataflowOutput {
+                is_dirty: false,
+                value: self.init_effect(),
+            });
+        }
+
+        // Run dataflow
+        while let Some(curr) = scratch.worklist.pop_front() {
+            let curr_indices = scratch.basic_block_indices[curr];
+
+            // Join terminator successors
+            {
+                let mut borrows = scratch
+                    .effect_elems_borrow
+                    .builder(&mut scratch.effect_elems);
+
+                let inputs = scratch
+                    .ptr_scratch
+                    .build(body.cfg.block_successors(curr).iter().map(|&succ| {
+                        &borrows
+                            .get(scratch.basic_block_indices[succ.target].aux_idx as usize)
+                            .value
+                    }));
+
+                let output = borrows.get_mut(curr_indices.seed_idx as usize);
+
+                // N.B. we reuse this flag to both detect whether `trans_terminator` has updated its
+                // entrypoint effect to a new value and to mark blocks as queued in the worklist.
+                assert!(output.is_dirty);
+                output.is_dirty = false;
+
+                self.trans_terminator(MirBlockRef::new(body, curr), inputs, output);
+
+                if !mem::take(&mut output.is_dirty) {
+                    // The input effect to the block has not actually changed, even though its
+                    // predecessors have changed.
+                    continue;
+                }
+            }
+
+            // Transition statements
+            // N.B. No, this is not a typo. We're referring to statements by their iteration order!
+            let [Some(first_stmt), Some(last_stmt)] =
+                [body.cfg.block_last(curr), body.cfg.block_first(curr)]
+            else {
+                continue;
+            };
+
+            let [first_stmt_slot, last_stmt_slot] = scratch
+                .effect_elems
+                .get_disjoint_mut([
+                    curr_indices.seed_idx as usize,
+                    curr_indices.aux_idx as usize,
+                ])
+                .unwrap();
+
+            let [scratch_src, scratch_dst] = scratch.stmt_tmp_effects.as_mut().unwrap();
+            let mut scratch_src = scratch_src;
+            let mut scratch_dst = scratch_dst;
+
+            for stmt in body.cfg.block_stmts(curr, MirBodyDirection::Backwards) {
+                self.trans_stmt(
+                    MirStmtRef::new(body, stmt),
+                    if stmt == first_stmt {
+                        &first_stmt_slot.value
+                    } else {
+                        &scratch_src.value
+                    },
+                    if stmt == last_stmt {
+                        last_stmt_slot
+                    } else {
+                        scratch_dst
+                    },
+                );
+
+                mem::swap(&mut scratch_src, &mut scratch_dst);
+            }
+
+            if !mem::take(&mut last_stmt_slot.is_dirty) {
+                // The `aux_idx` hasn't changed so our predecessors won't observe a change.
+                continue;
+            }
+
+            // Add predecessors to worklist.
+            for pred in body.cfg.block_predecessors(curr) {
+                let pred_seed = scratch.basic_block_indices[pred.target].seed_idx;
+                let pred_seed = &mut scratch.effect_elems[pred_seed as usize];
+
+                if pred_seed.is_dirty {
+                    continue;
                 }
 
-                let mut natural_total_trans = GenKillTrans::new(body.locals.len());
+                pred_seed.is_dirty = true;
+                scratch.worklist.push_back(pred.target);
+            }
+        }
 
-                for step in &natural_gen_kill {
-                    natural_total_trans.push_all(step);
-                }
+        // Trim unnecessary lattices
+        scratch.effect_elems.truncate(body.cfg.blocks().len());
+    }
+}
 
-                BlockScratch {
-                    natural_gen_kill,
-                    natural_total_trans,
-                    results: LocalSet::new(body.locals.len()),
-                    in_work_list: false,
-                }
-            })
-            .collect();
+// === DataflowView === //
 
-        let mut solver = Solver {
+pub struct DataflowView<'a, T> {
+    direction: MirBodyDirection,
+    analysis: &'a mut dyn AnyDataflowAnalysis<Lattice = T>,
+    body: &'a MirBody,
+    scratch: &'a mut DataflowScratch<T>,
+    seek_state: Option<DataflowViewSeekState>,
+}
+
+struct DataflowViewSeekState {
+    block: MirBlockIdx,
+    stmt: MirStmtIdx,
+    out_in_b: bool,
+}
+
+trait AnyDataflowAnalysis {
+    type Lattice;
+
+    fn trans_stmt(
+        &mut self,
+        idx: MirStmtIdx,
+        input: &Self::Lattice,
+        output: &mut DataflowOutput<Self::Lattice>,
+    );
+}
+
+#[derive(TransparentWrapper)]
+#[repr(transparent)]
+#[transparent(T)]
+struct ForwardsDataflowAnalysisWrapper<'g, T: ?Sized> {
+    _ty: PhantomData<fn(&'g ()) -> &'g ()>,
+    inner: T,
+}
+
+impl<'g, T> AnyDataflowAnalysis for ForwardsDataflowAnalysisWrapper<'g, T>
+where
+    T: ?Sized + ForwardsDataflowAnalysis<'g>,
+{
+    type Lattice = T::Lattice;
+
+    fn trans_stmt(
+        &mut self,
+        idx: MirStmtIdx,
+        input: &Self::Lattice,
+        output: &mut DataflowOutput<Self::Lattice>,
+    ) {
+        self.inner.trans_stmt(
+            MirStmtRef::new(self.inner.body(), idx),
+            input,
+            &mut output.value,
+        );
+    }
+}
+
+#[derive(TransparentWrapper)]
+#[repr(transparent)]
+#[transparent(T)]
+struct BackwardsDataflowAnalysisWrapper<'g, T: ?Sized> {
+    _ty: PhantomData<fn(&'g ()) -> &'g ()>,
+    inner: T,
+}
+
+impl<'g, T> AnyDataflowAnalysis for BackwardsDataflowAnalysisWrapper<'g, T>
+where
+    T: ?Sized + BackwardsDataflowAnalysis<'g>,
+{
+    type Lattice = T::Lattice;
+
+    fn trans_stmt(
+        &mut self,
+        idx: MirStmtIdx,
+        input: &Self::Lattice,
+        output: &mut DataflowOutput<Self::Lattice>,
+    ) {
+        self.inner
+            .trans_stmt(MirStmtRef::new(self.inner.body(), idx), input, output);
+    }
+}
+
+impl<'a, T> DataflowView<'a, T> {
+    pub fn new_forwards<'g: 'a>(
+        analysis: &'a mut impl ForwardsDataflowAnalysis<'g, Lattice = T>,
+        scratch: &'a mut DataflowScratch<T>,
+    ) -> Self {
+        let body = analysis.body();
+
+        Self {
+            direction: MirBodyDirection::Forwards,
+            analysis: ForwardsDataflowAnalysisWrapper::wrap_mut(analysis),
             body,
-            join_op,
-            direction,
-            block_scratch: block_tmp,
-            work_queue: VecDeque::new(),
+            scratch,
+            seek_state: None,
+        }
+    }
+
+    pub fn new_backwards<'g: 'a>(
+        analysis: &'a mut impl BackwardsDataflowAnalysis<'g, Lattice = T>,
+        scratch: &'a mut DataflowScratch<T>,
+    ) -> Self {
+        let body = analysis.body();
+
+        Self {
+            direction: MirBodyDirection::Backwards,
+            analysis: BackwardsDataflowAnalysisWrapper::wrap_mut(analysis),
+            body,
+            scratch,
+            seek_state: None,
+        }
+    }
+
+    pub fn body(&self) -> &'a MirBody {
+        self.body
+    }
+
+    pub fn trans_init(&self, block: MirBlockIdx) -> &T {
+        &self.scratch.effect_elems[self.scratch.basic_block_indices[block].seed_idx as usize].value
+    }
+
+    pub fn trans_before_end(&mut self, block: MirBlockIdx) -> &T {
+        let before_end = match self.direction {
+            MirBodyDirection::Forwards => self.body.cfg.block_last(block),
+            MirBodyDirection::Backwards => self.body.cfg.block_first(block),
         };
-        solver.update_to_fixpoint();
 
-        let results = solver
-            .block_scratch
-            .iter_enumerated()
-            .map(|(block_idx, block_scratch)| {
-                let mut points = Vec::new();
-                let mut next_point = LocalSet::new(body.locals.len());
-
-                // Create the entry-point state.
-                solver.import_start(block_idx, &mut next_point);
-                points.push(next_point.clone());
-
-                // Create all intermediate states.
-                for trans in &block_scratch.natural_gen_kill {
-                    next_point.trans(trans);
-                    points.push(next_point.clone());
-                }
-
-                debug_assert_eq!(points.last().unwrap(), &block_scratch.results);
-
-                // Reorder into forward direction
-                if direction.is_backward() {
-                    points.reverse();
-                }
-
-                points
-            })
-            .collect::<IndexVec<MirBlockIdx, _>>();
-
-        Self { results }
-    }
-
-    pub fn state_before(&self, location: MirInstructionLoc) -> &LocalSet {
-        &self.results[location.block][location.instr.0]
-    }
-
-    pub fn state_after(&self, location: MirInstructionLoc) -> &LocalSet {
-        &self.results[location.block][location.instr.0 + 1]
-    }
-}
-
-// === LocalSet === //
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum LocalSetJoinOp {
-    Union,
-    Intersect,
-}
-
-#[derive(Eq, PartialEq)]
-pub struct GenKillTrans {
-    gen_set: LocalSet,
-    kill_set: LocalSet,
-}
-
-impl GenKillTrans {
-    pub fn new(local_count: usize) -> Self {
-        Self {
-            gen_set: LocalSet::new(local_count),
-            kill_set: LocalSet::new(local_count),
+        if let Some(prev) = before_end {
+            self.trans_after(prev)
+        } else {
+            self.trans_init(block)
         }
     }
 
-    pub fn push_gen(&mut self, idx: MirLocalIdx) {
-        self.gen_set.add(idx);
-        self.kill_set.remove(idx);
-    }
+    pub fn trans_before(&mut self, target: MirStmtIdx) -> &T {
+        let block = self.body.cfg.stmt_block(target).unwrap();
 
-    pub fn push_kill(&mut self, idx: MirLocalIdx) {
-        self.kill_set.add(idx);
-        self.gen_set.remove(idx);
-    }
+        let prev = match self.direction {
+            MirBodyDirection::Forwards => self.body.cfg.stmt_prev(target),
+            MirBodyDirection::Backwards => self.body.cfg.stmt_next(target),
+        };
 
-    pub fn push_all(&mut self, other: &GenKillTrans) {
-        self.gen_set.union(&other.gen_set);
-        self.kill_set.remove_all(&other.gen_set);
-
-        self.gen_set.remove_all(&other.kill_set);
-        self.kill_set.union(&other.kill_set);
-    }
-
-    pub fn gen_set(&self) -> &LocalSet {
-        &self.gen_set
-    }
-
-    pub fn kill_set(&self) -> &LocalSet {
-        &self.kill_set
-    }
-}
-
-#[derive(Eq, PartialEq)]
-pub struct LocalSet {
-    set: SmallVec<[u64; 1]>,
-    len: usize,
-}
-
-impl fmt::Debug for LocalSet {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_list().entries(self.iter()).finish()
-    }
-}
-
-impl Clone for LocalSet {
-    fn clone(&self) -> Self {
-        Self {
-            set: self.set.clone(),
-            len: self.len,
+        if let Some(prev) = prev {
+            self.trans_after(prev)
+        } else {
+            self.trans_init(block)
         }
     }
 
-    fn clone_from(&mut self, source: &Self) {
-        self.set.clone_from(&source.set);
-        self.len = source.len;
-    }
-}
+    pub fn trans_after(&mut self, target: MirStmtIdx) -> &T {
+        let block = self.body.cfg.stmt_block(target).unwrap();
 
-impl LocalSet {
-    pub fn new(local_count: usize) -> Self {
-        Self {
-            set: (0..local_count.div_ceil(64)).map(|_| 0u64).collect(),
-            len: local_count,
-        }
-    }
+        // Attempt to fast-path seeking to the result.
+        'seek: {
+            let Some(seek_state) = &mut self.seek_state else {
+                break 'seek;
+            };
 
-    pub fn add(&mut self, idx: MirLocalIdx) {
-        self.set[idx.index() / 64] |= 1 << (idx.index() % 64);
-    }
-
-    pub fn remove(&mut self, idx: MirLocalIdx) {
-        self.set[idx.index() / 64] &= !(1 << (idx.index() % 64));
-    }
-
-    pub fn trans(&mut self, trans: &GenKillTrans) {
-        self.union(&trans.gen_set);
-        self.remove_all(&trans.kill_set);
-    }
-
-    pub fn fill(&mut self) {
-        for v in &mut self.set {
-            *v = u64::MAX;
-        }
-
-        if let Some(last) = self.set.last_mut() {
-            *last = (1 << (self.len % 64)) - 1;
-        }
-    }
-
-    pub fn clear(&mut self) {
-        for v in &mut self.set {
-            *v = 0u64;
-        }
-    }
-
-    #[must_use]
-    pub fn contains(&self, idx: MirLocalIdx) -> bool {
-        self.set[idx.index() / 64] & 1 << (idx.index() % 64) != 0
-    }
-
-    pub fn join(&mut self, op: LocalSetJoinOp, other: &LocalSet) {
-        match op {
-            LocalSetJoinOp::Union => self.union(other),
-            LocalSetJoinOp::Intersect => self.intersect(other),
-        }
-    }
-
-    pub fn union(&mut self, other: &LocalSet) {
-        for (lhs, rhs) in self.set.iter_mut().zip(&other.set) {
-            *lhs |= *rhs;
-        }
-    }
-
-    pub fn intersect(&mut self, other: &LocalSet) {
-        for (lhs, rhs) in self.set.iter_mut().zip(&other.set) {
-            *lhs &= *rhs;
-        }
-    }
-
-    pub fn remove_all(&mut self, other: &LocalSet) {
-        for (lhs, rhs) in self.set.iter_mut().zip(&other.set) {
-            *lhs &= !*rhs;
-        }
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = MirLocalIdx> {
-        let mut next_word_idx = 1usize;
-        let mut curr_word_val = self.set.first().copied().unwrap_or(0);
-
-        iter::from_fn(move || {
-            loop {
-                if curr_word_val != 0 {
-                    let idx = curr_word_val.trailing_zeros() as usize;
-                    curr_word_val ^= 1 << idx;
-                    return Some(MirLocalIdx::from_usize((next_word_idx - 1) * 64 + idx));
-                }
-
-                let &next_word = self.set.get(next_word_idx)?;
-                curr_word_val = next_word;
-                next_word_idx += 1;
+            if seek_state.block != block {
+                break 'seek;
             }
-        })
+
+            if seek_state.stmt == target {
+                // Seeking is idempotent.
+                return &self.scratch.stmt_tmp_effects.as_ref().unwrap()
+                    [seek_state.out_in_b as usize]
+                    .value;
+            }
+
+            // Take at least one step towards the result.
+            let [scratch_a, scratch_b] = self.scratch.stmt_tmp_effects.as_mut().unwrap();
+            let scratch_b_ptr = scratch_b as *mut DataflowOutput<_>;
+
+            let (mut scratch_src, mut scratch_dst) = if seek_state.out_in_b {
+                (scratch_b, scratch_a)
+            } else {
+                (scratch_a, scratch_b)
+            };
+
+            for stmt in self.body.cfg.block_stmts(block, self.direction) {
+                self.analysis
+                    .trans_stmt(stmt, &scratch_src.value, scratch_dst);
+
+                if stmt == target {
+                    seek_state.out_in_b = scratch_dst as *mut DataflowOutput<_> == scratch_b_ptr;
+                    seek_state.stmt = target;
+                    return &scratch_dst.value;
+                }
+
+                mem::swap(&mut scratch_src, &mut scratch_dst);
+            }
+
+            // The target was earlier in the block.
+            self.seek_state = None;
+        }
+
+        // Otherwise, scan through the entire block.
+        let start_state = &self.scratch.effect_elems
+            [self.scratch.basic_block_indices[block].seed_idx as usize]
+            .value;
+
+        let [scratch_a, scratch_b] = self.scratch.stmt_tmp_effects.as_mut().unwrap();
+        let scratch_b_ptr = scratch_b as *mut DataflowOutput<_>;
+
+        let mut scratch_src = scratch_a;
+        let mut scratch_dst = scratch_b;
+
+        let mut iter = self.body.cfg.block_stmts(block, self.direction).enumerate();
+
+        loop {
+            let (idx, stmt) = iter.next().unwrap();
+
+            self.analysis.trans_stmt(
+                stmt,
+                if idx == 0 {
+                    start_state
+                } else {
+                    &scratch_src.value
+                },
+                scratch_dst,
+            );
+
+            if stmt == target {
+                self.seek_state = Some(DataflowViewSeekState {
+                    block,
+                    stmt: target,
+                    out_in_b: scratch_dst as *mut DataflowOutput<_> == scratch_b_ptr,
+                });
+
+                return &scratch_dst.value;
+            }
+
+            mem::swap(&mut scratch_src, &mut scratch_dst);
+        }
+    }
+}
+
+// === DataflowScratch === //
+
+#[derive_where(Default)]
+pub struct DataflowScratch<T> {
+    /// A worklist of basic blocks whose dependencies have been updated.
+    worklist: VecDeque<MirBlockIdx>,
+
+    /// A set of effect lattice values, which are intended to be reused in place as lattice elements
+    /// pass through transfer functions. The first portion of the vector is dedicated to block seed
+    /// effects to simplify the process of trimming.
+    effect_elems: Vec<DataflowOutput<T>>,
+
+    /// A mapping from basic blocks to their entries in `effect_elems`
+    basic_block_indices: SecondaryMap<MirBlockIdx, BasicBlockState>,
+
+    /// A temporary pair of effects for transferring lattice states between statements.
+    stmt_tmp_effects: Option<[DataflowOutput<T>; 2]>,
+
+    /// A data-structure for managing disjoint borrows of `effect_elems`.
+    effect_elems_borrow: DisjointBorrowsScratch,
+
+    /// A scratch buffer for storing vectors of references.
+    ptr_scratch: VecOfPtrScratch,
+}
+
+#[derive(Copy, Clone)]
+struct BasicBlockState {
+    /// The effect state at the beginning of a block. The dirty flag plays dual purpose as both an
+    /// indicator of whether the block is in the worklist and for detecting transfer function dirty
+    /// operation.
+    seed_idx: u32,
+
+    /// An auxiliary index whose interpretation depends on whether this is a forwards or a backwards
+    /// analysis.
+    ///
+    /// If the analysis is forwards, this encodes the index of the first predecessor's output effect
+    /// into this block.
+    ///
+    /// If the analysis is backwards, this encodes the index of the state of the block after the
+    /// first statement. If the block is empty, this will equal the `seed_idx`.
+    aux_idx: u32,
+}
+
+// === DataflowOutput === //
+
+#[derive(Debug, Copy, Clone)]
+pub struct DataflowOutput<T> {
+    pub is_dirty: bool,
+    pub value: T,
+}
+
+impl<T> DataflowOutput<T> {
+    pub fn set_value(&mut self, value: T)
+    where
+        T: Eq,
+    {
+        if self.value == value {
+            return;
+        }
+
+        self.value = value;
+        self.is_dirty = true;
+    }
+
+    pub fn set_value_ref(&mut self, value: &T)
+    where
+        T: Eq + Clone,
+    {
+        if &self.value == value {
+            return;
+        }
+
+        self.value.clone_from(value);
+        self.is_dirty = true;
     }
 }

@@ -7,13 +7,13 @@ use crate::{
     parse::token::Ident,
     semantic::{
         analysis::typeck::BodyCtxt,
-        infer::PrettyFmtOpts,
+        infer::ClausePrettyFmtOpts,
         syntax::{
             AdtCtor, AdtCtorFieldIdx, AdtCtorInstance, AdtCtorUnresolved, AdtInstance, AdtKind,
             SigAdtInstance, Ty, TyKind,
         },
     },
-    utils::lang::{SimpleListFormatGlue, format_list},
+    utils::format::{SimpleListFormatGlue, format_list},
 };
 use clay_core::FastHashMap;
 use hashbrown::hash_map;
@@ -130,7 +130,7 @@ impl BodyCtxt<'_, '_> {
                     span,
                     format_args!(
                         "expected ADT constructor; got `{}`",
-                        self.ccx.pretty(PrettyFmtOpts::default()).wrap(ty),
+                        self.ccx.pretty(ClausePrettyFmtOpts::default()).wrap(ty),
                     ),
                 )
                 .emit());

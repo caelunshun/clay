@@ -305,6 +305,7 @@ version = "0.1.0"
 dependencies = [
  "bumpalo",
  "compact_str",
+ "derive-where",
  "foldhash",
  "hashbrown",
  "indexmap",
