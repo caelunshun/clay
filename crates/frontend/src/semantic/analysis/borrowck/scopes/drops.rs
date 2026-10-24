@@ -11,6 +11,12 @@ use crate::{
 use clay_core::FastHashMap;
 use index_vec::{IndexVec, define_index_type};
 
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum JumpTarget {
+    Return,
+    Goto(MirBlockIdx),
+}
+
 bool_enum! {
     pub enum CanPreinsertLocals {
         true => Yes;
@@ -48,7 +54,7 @@ enum DropNode {
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
 struct JumpKey {
-    to_block: MirBlockIdx,
+    to_block: JumpTarget,
     all_after: DropNodeIdx,
     until_scope: MirScopeIdx,
 }
@@ -194,7 +200,7 @@ impl DropScheduler {
 
     pub fn request_jump(
         &mut self,
-        to_block: MirBlockIdx,
+        to_block: JumpTarget,
         all_after: DropNodeIdx,
         until_scope: MirScopeIdx,
         body: &mut MirBody,
@@ -245,7 +251,10 @@ impl DropScheduler {
                                     MirTerminator {
                                         debug_scope: MirScopeIdx::UNCATEGORIZED,
                                         source_info: MirSourceInfo::Todo,
-                                        kind: MirTerminatorKind::Goto(to_block),
+                                        kind: match to_block {
+                                            JumpTarget::Return => MirTerminatorKind::Return,
+                                            JumpTarget::Goto(bb) => MirTerminatorKind::Goto(bb),
+                                        },
                                     },
                                 );
 

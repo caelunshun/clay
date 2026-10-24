@@ -396,16 +396,14 @@ impl<'a, T> Iterator for TyShapeMapIter<'a, T> {
     }
 }
 
-// === MapLayer === //
-
-define_index_type! {
-    struct EntryIdx = u32;
-}
-
 #[derive(Debug, Clone, Default)]
 struct MapLayer {
     universally_matched_by: Vec<EntryIdx>,
     conditionally_matched_by: FastHashMap<SolidTyShapeKind, ConditionalMatcher>,
+}
+
+define_index_type! {
+    struct EntryIdx = u32;
 }
 
 #[derive(Debug, Clone)]

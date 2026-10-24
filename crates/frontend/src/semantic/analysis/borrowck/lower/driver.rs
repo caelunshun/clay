@@ -10,8 +10,8 @@ use crate::{
         },
         infer::ImplCache,
         syntax::{
-            FnDef, MirLocal, MirLocalIdx, MirPlace, MirRvalue, MirScopeIdx, MirSourceInfo,
-            ThirBody, ThirExpr, ThirLocal, TyCtxt,
+            FnDef, MirLocal, MirLocalIdx, MirPlace, MirPrettyFmtCx, MirRvalue, MirScopeIdx,
+            MirSourceInfo, ThirBody, ThirExpr, ThirLocal, TyCtxt,
         },
     },
 };
@@ -29,7 +29,11 @@ pub fn build_function_mir(check_cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     let mut build_cx = MirFromThirCtx::new(tcx, check_cx.impl_cache, def);
     build_cx.lower_fn(body);
 
-    LateInit::init(&def.r(s).mir_body, Some(build_cx.raw_builder.finish()));
+    let body = build_cx.raw_builder.finish();
+
+    // println!("{}", MirPrettyFmtCx::new(tcx, &body).flat_body());
+
+    LateInit::init(&def.r(s).mir_body, Some(body));
 }
 
 pub struct MirFromThirCtx<'tcx> {

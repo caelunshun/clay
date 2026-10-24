@@ -3,11 +3,11 @@ use crate::{
     semantic::{
         analysis::borrowck::scopes::{
             CanOmitDrop,
-            drops::{CanPreinsertLocals, DropNodeIdx, DropScheduler},
+            drops::{CanPreinsertLocals, DropNodeIdx, DropScheduler, JumpTarget},
         },
         syntax::{
             MirBlockIdx, MirBody, MirLocal, MirLocalIdx, MirPlace, MirScopeIdx, MirSourceInfo,
-            MirStmt, MirTerminator, MirTerminatorKind, MirUnwindBehavior, TyCtxt,
+            MirStmt, MirStmtKind, MirTerminator, MirTerminatorKind, MirUnwindBehavior, TyCtxt,
         },
     },
 };
@@ -76,10 +76,11 @@ impl<'tcx> RawMirScopedBuilder<'tcx> {
             scope_stack: Vec::new(),
         };
 
-        this.body.arg_count = arg_count;
-
         let entry_bb = this.body.cfg.create_block();
+        this.body.entry = entry_bb;
+
         let return_local = this.body.locals.push(return_local);
+        this.body.arg_count = arg_count;
         assert_eq!(return_local, MirLocalIdx::RETURN);
 
         let mut root_unwind_bb = this.body.cfg.create_block_with_terminator(MirTerminator {
@@ -106,7 +107,6 @@ impl<'tcx> RawMirScopedBuilder<'tcx> {
         this.drop_scheduler
             .init_unwind_fallthrough_bb(root_unwind_bb);
 
-        this.body.entry = entry_bb;
         this.scope_stack.push(BuilderScope {
             id: MirScopeIdx::ENTRY,
             live_state: Some(LiveBuilderScope {
@@ -354,30 +354,44 @@ impl RawMirScopedBuilder<'_> {
         let top_head_local = top.head_local;
 
         // Find the target basic block without the jump chain
-        let target_bb = self
-            .scope_stack
-            .iter_mut()
-            .rev()
-            .find_map(|scope| {
+        let jump_target = 'jump_target: {
+            let mut iter = self.scope_stack.iter_mut().rev();
+
+            while let Some(scope) = iter.next() {
                 if scope.id != target {
-                    return None;
+                    continue;
                 }
 
-                // Unwrap OK: all ancestors of a live scope are live
-                let scope_live = scope.live_state.as_mut().unwrap();
+                break 'jump_target match is_continue {
+                    true => {
+                        // Unwrap OK: all ancestors of a live scope are live
+                        let scope_live = scope.live_state.as_mut().unwrap();
 
-                Some(match is_continue {
-                    true => scope_live.entry_bb,
-                    false => *scope_live
-                        .curr_bb
-                        .get_or_insert_with(|| self.body.cfg.create_block()),
-                })
-            })
-            .expect("target scope is not an ancestor");
+                        JumpTarget::Goto(scope_live.entry_bb)
+                    }
+                    false => {
+                        if let Some(scope) = iter.next() {
+                            // Unwrap OK: all ancestors of a live scope are live
+                            let scope_live = scope.live_state.as_mut().unwrap();
+
+                            JumpTarget::Goto(
+                                *scope_live
+                                    .curr_bb
+                                    .get_or_insert_with(|| self.body.cfg.create_block()),
+                            )
+                        } else {
+                            JumpTarget::Return
+                        }
+                    }
+                };
+            }
+
+            panic!("target scope is not an ancestor");
+        };
 
         let jump_bb =
             self.drop_scheduler
-                .request_jump(target_bb, top_head_local, target, &mut self.body);
+                .request_jump(jump_target, top_head_local, target, &mut self.body);
 
         self.body.cfg.init_terminator(
             curr_bb,
@@ -411,6 +425,19 @@ impl RawMirScopedBuilder<'_> {
                 self.drop_scheduler
                     .push_local_top(local, can_omit_drop, top.head_local);
 
+            let insert_into = top.branch_bb.unwrap_or_else(|| {
+                // Unwrap OK: `curr_bb` is present on live scopes so long as we're not branching.
+                top.curr_bb.unwrap()
+            });
+
+            self.body.cfg.push_stmt(
+                insert_into,
+                MirStmt {
+                    source_info: MirSourceInfo::Todo,
+                    kind: MirStmtKind::StorageLive(local),
+                },
+            );
+
             return local;
         };
 
@@ -429,6 +456,15 @@ impl RawMirScopedBuilder<'_> {
 
         self.drop_scheduler
             .push_local_after(parent.head_local, local, can_omit_drop);
+
+        self.body.cfg.push_stmt(
+            // Unwrap OK: only branching scopes can have children.
+            parent.branch_bb.unwrap(),
+            MirStmt {
+                source_info: MirSourceInfo::Todo,
+                kind: MirStmtKind::StorageLive(local),
+            },
+        );
 
         local
     }

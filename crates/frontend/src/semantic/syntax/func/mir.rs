@@ -9,12 +9,16 @@ use crate::{
         AdtCtor, AdtCtorOwner, AdtCtorSyntax, DynSiteIdx, Mutability, ResolvedFieldIdx, SigTy,
         TyCtxt,
     },
-    utils::format::{SimpleListFormatGlue, format_list},
+    utils::format::{IndentedFmt, SimpleListFormatGlue, format_list},
 };
 use index_vec::{IndexVec, define_index_type};
 use slotmap::{SecondaryMap, SlotMap, new_key_type};
 use smallvec::SmallVec;
-use std::{fmt, mem, ops::ControlFlow};
+use std::{
+    fmt::{self, Write as _},
+    mem,
+    ops::ControlFlow,
+};
 
 // === Source Info === //
 
@@ -62,16 +66,12 @@ pub struct MirBody {
 
 impl Default for MirBody {
     fn default() -> Self {
-        let mut body = Self {
+        Self {
             locals: IndexVec::default(),
             arg_count: 0,
             entry: MirBlockIdx::default(),
             cfg: MirBodyCfg::default(),
-        };
-
-        body.entry = body.cfg.create_block();
-
-        body
+        }
     }
 }
 
@@ -119,6 +119,10 @@ impl<'g> MirBlockRef<'g> {
             .cfg
             .block_last(self.block)
             .map(|stmt| MirStmtRef::new(self.body, stmt))
+    }
+
+    pub fn opt_terminator(self) -> Option<&'g MirTerminator> {
+        self.body.cfg.opt_terminator(self.block)
     }
 
     pub fn terminator(self) -> &'g MirTerminator {
@@ -291,34 +295,7 @@ impl MirBodyCfg {
     pub fn move_stmt_after(&mut self, idx: MirStmtIdx, after: MirLocationAfter) {
         self.unlink_mir_stmt(idx);
 
-        match after {
-            MirLocationAfter::BlockStart(block) => {
-                self.stmts[idx].block = Some(block);
-
-                let old_first_stmt = self.blocks[block].first_stmt.replace(idx);
-
-                if old_first_stmt.is_some() {
-                    self.stmts[idx].next_stmt = old_first_stmt;
-                } else {
-                    self.blocks[block].last_stmt = Some(idx);
-                }
-            }
-            MirLocationAfter::Stmt(after) => {
-                let block = self.stmts[after]
-                    .block
-                    .expect("cannot relate statements outside of a basic block");
-
-                self.stmts[idx].block = Some(block);
-
-                let old_next_stmt = self.stmts[after].next_stmt.replace(idx);
-
-                if old_next_stmt.is_some() {
-                    self.stmts[idx].next_stmt = old_next_stmt;
-                } else {
-                    self.blocks[block].last_stmt = Some(idx);
-                }
-            }
-        }
+        todo!();
     }
 
     pub fn move_stmt_before(&mut self, idx: MirStmtIdx, before: MirLocationBefore) {
@@ -328,10 +305,16 @@ impl MirBodyCfg {
             MirLocationBefore::Terminator(block) => {
                 self.stmts[idx].block = Some(block);
 
+                // idx <- block
+                // idx -> block handled implicitly
                 let old_last_stmt = self.blocks[block].last_stmt.replace(idx);
 
-                if old_last_stmt.is_some() {
-                    self.stmts[idx].prev_stmt = old_last_stmt;
+                // prev <- idx
+                self.stmts[idx].prev_stmt = old_last_stmt;
+
+                // prev -> idx
+                if let Some(old_last_stmt) = old_last_stmt {
+                    self.stmts[old_last_stmt].next_stmt = Some(idx);
                 } else {
                     self.blocks[block].first_stmt = Some(idx);
                 }
@@ -343,10 +326,18 @@ impl MirBodyCfg {
 
                 self.stmts[idx].block = Some(block);
 
+                // idx <- before
                 let old_prev_stmt = self.stmts[before].prev_stmt.replace(idx);
 
-                if old_prev_stmt.is_some() {
-                    self.stmts[idx].prev_stmt = old_prev_stmt;
+                // idx -> before
+                self.stmts[idx].next_stmt = Some(before);
+
+                // old_prev_stmt <- idx
+                self.stmts[idx].prev_stmt = old_prev_stmt;
+
+                // old_prev_stmt -> idx
+                if let Some(old_prev_stmt) = old_prev_stmt {
+                    self.stmts[old_prev_stmt].next_stmt = Some(idx);
                 } else {
                     self.blocks[block].first_stmt = Some(idx);
                 }
@@ -1222,6 +1213,10 @@ impl<'a> MirPrettyFmtCx<'a> {
         MirPrettyFmt { cx: self, value }
     }
 
+    pub fn flat_body(&self) -> MirPrettyFmt<'_, FlatBodyFmt> {
+        self.wrap(FlatBodyFmt)
+    }
+
     pub fn tcx(&self) -> &'a TyCtxt {
         self.tcx
     }
@@ -1558,5 +1553,85 @@ impl fmt::Display for MirPrettyFmt<'_, MirSourceInfo> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO
         write!(f, " // {:?}", self.value)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FlatBodyFmt;
+
+impl fmt::Display for MirPrettyFmt<'_, FlatBodyFmt> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt_rich(&mut IndentedFmt::new(f))
+    }
+}
+
+impl MirPrettyFmt<'_, FlatBodyFmt> {
+    fn fmt_rich(&self, f: &mut IndentedFmt<'_, '_>) -> fmt::Result {
+        let body = self.cx.body();
+
+        writeln!(
+            f,
+            "fn({}) -> {}: {} {{",
+            format_list(
+                body.locals
+                    .iter_enumerated()
+                    .skip(1)
+                    .take(body.arg_count as usize)
+                    .map(|(idx, local)| {
+                        format!("{}: {}", self.cx.wrap(idx), self.cx.wrap(local.ty))
+                    }),
+                SimpleListFormatGlue::COMMA_LIST,
+            ),
+            self.cx.wrap(MirLocalIdx::RETURN),
+            self.cx.wrap(body.locals[MirLocalIdx::RETURN].ty)
+        )?;
+
+        f.change_level_now(4)?;
+
+        let mut had_local = false;
+
+        for (idx, local) in body
+            .locals
+            .iter_enumerated()
+            .skip(body.arg_count as usize + 1)
+        {
+            writeln!(f, "let {}: {};", self.cx.wrap(idx), self.cx.wrap(local.ty))?;
+            had_local = true;
+        }
+
+        if had_local {
+            writeln!(f)?;
+        }
+
+        for block in body.blocks() {
+            f.change_level_now(-4)?;
+            writeln!(
+                f,
+                "{}{}:",
+                if block.block == body.entry {
+                    "[entry] "
+                } else {
+                    ""
+                },
+                self.cx.wrap(block.block)
+            )?;
+            f.change_level_now(4)?;
+
+            for stmt in block.stmts(MirBodyDirection::Forwards) {
+                writeln!(f, "{}", self.cx.wrap(stmt.stmt()))?;
+            }
+
+            if let Some(terminator) = block.opt_terminator() {
+                writeln!(f, "{}\n", self.cx.wrap(terminator))?;
+            } else {
+                writeln!(f, "<missing terminator>\n")?;
+            }
+        }
+
+        f.change_level_now(-4)?;
+
+        writeln!(f, "}}")?;
+
+        Ok(())
     }
 }
