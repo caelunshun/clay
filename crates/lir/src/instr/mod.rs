@@ -1,8 +1,9 @@
-use crate::{arena::Ptr, func_family::val::Val, instr::integer::IntAdd};
-use clay_core::ghost_heap::{GhostPointee, GhostPtr};
+use crate::instr::integer::IntAdd;
+use clay_core::ghost_heap::GhostPtr;
 
 pub mod bool_;
 pub mod call;
+pub mod control_flow;
 pub mod enum_;
 pub mod float;
 pub mod integer;

@@ -95,6 +95,22 @@ pub unsafe trait GhostPointee<'g>: Send + Sync {
         + for<'possible_g> GhostPointee<'new_g, ForLt<'possible_g> = Self::ForLt<'possible_g>>;
 }
 
+unsafe impl<'g, T> GhostPointee<'g> for [T]
+where
+    T: GhostPointee<'g> + Sized,
+    for<'new_g> T::ForLt<'new_g>: Sized,
+{
+    type ForLt<'new_g> = [T::ForLt<'new_g>];
+}
+
+unsafe impl<'g, T> GhostPointee<'g> for GhostPtr<'g, T>
+where
+    T: GhostPointee<'g>,
+    for<'new_g> T::ForLt<'new_g>: Sized,
+{
+    type ForLt<'new_g> = GhostPtr<'new_g, T::ForLt<'new_g>>;
+}
+
 fn recast_ptr<'a, 'b, T>(ptr: NonNull<T>) -> NonNull<T::ForLt<'b>>
 where
     T: ?Sized + GhostPointee<'a>,

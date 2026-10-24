@@ -2,7 +2,6 @@ use crate::{arena::Ptr, subst_ty::SubstTy, ty_param::TyParam};
 use clay_core::ghost_heap::GhostHeap;
 
 pub mod basic_block;
-pub mod terminator;
 pub mod val;
 
 pub struct FuncFamily {
