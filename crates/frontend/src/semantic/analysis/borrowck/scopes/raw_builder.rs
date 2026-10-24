@@ -62,12 +62,7 @@ struct LiveBuilderScope {
 }
 
 impl<'tcx> RawMirScopedBuilder<'tcx> {
-    pub fn new(
-        tcx: &'tcx TyCtxt,
-        return_local: MirLocal,
-        can_omit_return_drop: CanOmitDrop,
-        arg_count: u32,
-    ) -> Self {
+    pub fn new(tcx: &'tcx TyCtxt) -> Self {
         let mut this = Self {
             tcx,
             body: MirBody::default(),
@@ -78,34 +73,6 @@ impl<'tcx> RawMirScopedBuilder<'tcx> {
 
         let entry_bb = this.body.cfg.create_block();
         this.body.entry = entry_bb;
-
-        let return_local = this.body.locals.push(return_local);
-        this.body.arg_count = arg_count;
-        assert_eq!(return_local, MirLocalIdx::RETURN);
-
-        let mut root_unwind_bb = this.body.cfg.create_block_with_terminator(MirTerminator {
-            debug_scope: MirScopeIdx::UNCATEGORIZED,
-            source_info: MirSourceInfo::Local(return_local),
-            kind: MirTerminatorKind::UnwindResume,
-        });
-
-        if can_omit_return_drop.is_truthy() {
-            // N.B. we do not register the return value as a local like all function arguments because
-            // we don't want to drop it before a `return`. The only time we want to drop that place is
-            // when we panic out of the function.
-            root_unwind_bb = this.body.cfg.create_block_with_terminator(MirTerminator {
-                debug_scope: MirScopeIdx::UNCATEGORIZED,
-                source_info: MirSourceInfo::Local(return_local),
-                kind: MirTerminatorKind::EnsureDropped {
-                    place: MirPlace::new(tcx, return_local, []),
-                    target: root_unwind_bb,
-                    unwind: MirUnwindBehavior::DoublePanic,
-                },
-            })
-        }
-
-        this.drop_scheduler
-            .init_unwind_fallthrough_bb(root_unwind_bb);
 
         this.scope_stack.push(BuilderScope {
             id: MirScopeIdx::ENTRY,
@@ -121,9 +88,54 @@ impl<'tcx> RawMirScopedBuilder<'tcx> {
         this
     }
 
-    pub fn finish(mut self) -> MirBody {
+    pub fn body(&self) -> &MirBody {
+        &self.body
+    }
+
+    pub fn body_mut(&mut self) -> &mut MirBody {
+        &mut self.body
+    }
+
+    pub fn finish(mut self, can_omit_return_drop: CanOmitDrop) -> MirBody {
         self.end_scope(MirScopeIdx::ENTRY);
-        self.drop_scheduler.finish(self.tcx, &mut self.body);
+
+        if let Some(unwind_bb) = self.drop_scheduler.unwind_fallthrough_bb() {
+            if can_omit_return_drop.is_falsy() {
+                let new_unwind_bb = self.body.cfg.create_block_with_terminator(MirTerminator {
+                    debug_scope: MirScopeIdx::UNCATEGORIZED,
+                    source_info: MirSourceInfo::Todo,
+                    kind: MirTerminatorKind::UnwindResume,
+                });
+
+                // N.B. we do not register the return value as a local like all function arguments because
+                // we don't want to drop it before a `return`. The only time we want to drop that place is
+                // when we panic out of the function.
+                self.body.cfg.init_terminator(
+                    unwind_bb,
+                    MirTerminator {
+                        debug_scope: MirScopeIdx::UNCATEGORIZED,
+                        source_info: MirSourceInfo::Local(MirLocalIdx::RETURN),
+                        kind: MirTerminatorKind::EnsureDropped {
+                            place: MirPlace::new(self.tcx, MirLocalIdx::RETURN, []),
+                            target: new_unwind_bb,
+                            unwind: MirUnwindBehavior::DoublePanic,
+                        },
+                    },
+                );
+            } else {
+                self.body.cfg.init_terminator(
+                    unwind_bb,
+                    MirTerminator {
+                        debug_scope: MirScopeIdx::UNCATEGORIZED,
+                        source_info: MirSourceInfo::Todo,
+                        kind: MirTerminatorKind::UnwindResume,
+                    },
+                );
+            }
+        }
+
+        self.drop_scheduler
+            .finish_drop_routines(self.tcx, &mut self.body);
         self.body
     }
 }

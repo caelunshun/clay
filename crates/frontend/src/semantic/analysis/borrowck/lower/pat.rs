@@ -90,8 +90,11 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         //     else block;  // (provided by caller)
         // }
         //
+        // pattern materialization;
         // continuing logic;
         // ```
+
+        let mut late_use_proxies = FastHashMap::default();
 
         self.push_scope(
             scope,
@@ -103,8 +106,6 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     MirSourceInfo::Todo,
                     CanHoistLocals::No,
                     |this, break_on_reject| {
-                        let mut late_use_proxies = FastHashMap::default();
-
                         this.lower_pat(
                             &mut late_use_proxies,
                             PatLowerScopes {
@@ -116,14 +117,14 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                             pat,
                             scrutinee,
                         );
-
-                        this.materialize_late_use_proxies(span, break_on_reject, late_use_proxies);
                     },
                 );
 
                 on_reject(this, break_on_accept);
             },
         );
+
+        self.materialize_late_use_proxies(span, scope, late_use_proxies);
     }
 
     pub fn lower_match(

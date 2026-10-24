@@ -75,10 +75,6 @@ impl Default for DropScheduler {
 }
 
 impl DropScheduler {
-    pub fn init_unwind_fallthrough_bb(&mut self, bb: MirBlockIdx) {
-        self.unwind_fallthrough_bb = Some(bb);
-    }
-
     pub fn push_scope(
         &mut self,
         scope: MirScopeIdx,
@@ -165,7 +161,9 @@ impl DropScheduler {
                                 }
                                 None => {
                                     // There is nothing we could possibly need to drop.
-                                    return self.unwind_fallthrough_bb.unwrap();
+                                    return *self
+                                        .unwind_fallthrough_bb
+                                        .get_or_insert_with(|| body.cfg.create_block());
                                 }
                             }
                         }
@@ -216,7 +214,11 @@ impl DropScheduler {
             .or_insert_with(|| body.cfg.create_block())
     }
 
-    pub fn finish(mut self, tcx: &TyCtxt, body: &mut MirBody) {
+    pub fn unwind_fallthrough_bb(&self) -> Option<MirBlockIdx> {
+        self.unwind_fallthrough_bb
+    }
+
+    pub fn finish_drop_routines(mut self, tcx: &TyCtxt, body: &mut MirBody) {
         // Freeze all scopes.
         for node in &mut self.nodes {
             match node {

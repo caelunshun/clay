@@ -10,8 +10,8 @@ use crate::{
         },
         infer::ImplCache,
         syntax::{
-            FnDef, MirLocal, MirLocalIdx, MirPlace, MirPrettyFmtCx, MirRvalue, MirScopeIdx,
-            MirSourceInfo, ThirBody, ThirExpr, ThirLocal, TyCtxt,
+            FnDef, MirBody, MirLocal, MirLocalIdx, MirPlace, MirPrettyFmtCx, MirRvalue,
+            MirScopeIdx, MirSourceInfo, ThirBody, ThirExpr, ThirLocal, TyCtxt,
         },
     },
 };
@@ -28,8 +28,7 @@ pub fn build_function_mir(check_cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
 
     let mut build_cx = MirFromThirCtx::new(tcx, check_cx.impl_cache, def);
     build_cx.lower_fn(body);
-
-    let body = build_cx.raw_builder.finish();
+    let body = build_cx.finish();
 
     // println!("{}", MirPrettyFmtCx::new(tcx, &body).flat_body());
 
@@ -71,24 +70,27 @@ impl<'tcx> MirFromThirCtx<'tcx> {
     pub fn new(tcx: &'tcx TyCtxt, impl_cache: &'tcx ImplCache, def: Obj<FnDef>) -> Self {
         let s = &tcx.session;
 
-        let mut trait_cache = TraitCache::new(tcx, impl_cache, def);
-        let ret_ty = *def.r(s).ret_ty;
-
-        let raw_builder = RawMirScopedBuilder::new(
-            tcx,
-            MirLocal { ty: ret_ty },
-            trait_cache.can_omit_drop(ret_ty),
-            def.r(s).args.r(s).len() as u32,
-        );
-
-        Self {
+        let mut this = Self {
             tcx,
             def,
-            raw_builder,
-            trait_cache,
+            raw_builder: RawMirScopedBuilder::new(tcx),
+            trait_cache: TraitCache::new(tcx, impl_cache, def),
             labelled_scopes: FastHashMap::default(),
             thir_locals: FastHashMap::default(),
+        };
+
+        let body = this.raw_builder.body_mut();
+
+        body.arg_count = def.r(s).args.r(s).len() as u32;
+        body.locals.push(MirLocal {
+            ty: *def.r(s).ret_ty,
+        });
+
+        for arg in def.r(s).args.r(s) {
+            this.push_local(MirScopeIdx::ENTRY, MirLocal { ty: arg.ty });
         }
+
+        this
     }
 
     pub fn tcx(&self) -> &'tcx TyCtxt {
@@ -129,5 +131,12 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         );
 
         self.push_return(scope, MirSourceInfo::BlockFallthrough);
+    }
+
+    pub fn finish(mut self) -> MirBody {
+        let s = self.session();
+
+        self.raw_builder
+            .finish(self.trait_cache.can_omit_drop(*self.def.r(s).ret_ty))
     }
 }
