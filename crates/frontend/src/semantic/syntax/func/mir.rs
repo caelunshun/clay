@@ -9,13 +9,13 @@ use crate::{
         AdtCtor, AdtCtorOwner, AdtCtorSyntax, DynSiteIdx, Mutability, ResolvedFieldIdx, SigTy,
         TyCtxt,
     },
-    utils::format::{IndentedFmt, SimpleListFormatGlue, format_list},
+    utils::format::{FormatFn, IndentedFmt, SimpleListFormatGlue, format_list},
 };
 use index_vec::{IndexVec, define_index_type};
 use slotmap::{SecondaryMap, SlotMap, new_key_type};
 use smallvec::SmallVec;
 use std::{
-    fmt::{self, Write as _},
+    fmt::{self, Display as _, Write as _},
     mem,
     ops::ControlFlow,
 };
@@ -229,6 +229,13 @@ pub enum MirLocationBefore {
 pub struct MirBlockLink {
     pub target: MirBlockIdx,
     pub at_idx: usize,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct MirSuccessorId {
+    pub source: MirBlockIdx,
+    pub out_idx: usize,
+    pub target: MirBlockIdx,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1203,22 +1210,30 @@ pub enum MirPlaceElem {
 
 // === Pretty === //
 
-pub struct MirPrettyFmtCx<'a> {
-    tcx: &'a TyCtxt,
-    body: &'a MirBody,
+#[derive(Copy, Clone)]
+pub struct MirPrettyFmt<'a> {
+    pub tcx: &'a TyCtxt,
+    pub body: &'a MirBody,
+    pub hooks: MirPrettyFmtHooks<'a>,
 }
 
-impl<'a> MirPrettyFmtCx<'a> {
+type MirPrettyFmtHookFn<'a, T> =
+    Option<&'a (dyn 'a + Fn(&MirPrettyFmt<'_>, &mut fmt::Formatter<'_>, T) -> fmt::Result)>;
+
+#[derive(Default, Copy, Clone)]
+pub struct MirPrettyFmtHooks<'a> {
+    pub bb_successor: MirPrettyFmtHookFn<'a, MirSuccessorId>,
+    pub start_of_bb: MirPrettyFmtHookFn<'a, MirBlockIdx>,
+    pub after_stmt: MirPrettyFmtHookFn<'a, MirStmtIdx>,
+}
+
+impl<'a> MirPrettyFmt<'a> {
     pub fn new(tcx: &'a TyCtxt, body: &'a MirBody) -> Self {
-        Self { tcx, body }
-    }
-
-    pub fn wrap<T>(&self, value: T) -> MirPrettyFmt<'_, T> {
-        MirPrettyFmt { cx: self, value }
-    }
-
-    pub fn flat_body(&self) -> MirPrettyFmt<'_, FlatBodyFmt> {
-        self.wrap(FlatBodyFmt)
+        Self {
+            tcx,
+            body,
+            hooks: MirPrettyFmtHooks::default(),
+        }
     }
 
     pub fn tcx(&self) -> &'a TyCtxt {
@@ -1232,410 +1247,403 @@ impl<'a> MirPrettyFmtCx<'a> {
     pub fn body(&self) -> &'a MirBody {
         self.body
     }
-}
 
-pub struct MirPrettyFmt<'a, T> {
-    cx: &'a MirPrettyFmtCx<'a>,
-    value: T,
-}
-
-impl fmt::Display for MirPrettyFmt<'_, MirBlockIdx> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.value)
+    pub fn plain_block_label(&self, id: MirBlockIdx) -> impl fmt::Display {
+        FormatFn(move |f| write!(f, "{id}"))
     }
-}
 
-impl fmt::Display for MirPrettyFmt<'_, MirLocalIdx> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "_{}", self.value.index())
+    pub fn plain_local_name(&self, id: MirLocalIdx) -> impl fmt::Display {
+        FormatFn(move |f| write!(f, "_{}", id.index()))
     }
-}
 
-impl fmt::Display for MirPrettyFmt<'_, MirPlace> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = self.cx.session();
+    pub fn place(&self, place: MirPlace) -> impl fmt::Display {
+        FormatFn(move |f| {
+            let s = self.session();
 
-        self.cx.wrap(self.value.local).fmt(f)?;
+            self.plain_local_name(place.local).fmt(f)?;
 
-        for elem in self.value.projections.r(s) {
-            match elem {
-                MirPlaceElem::DerefPtr => {
-                    write!(f, ".*")?;
-                }
-                MirPlaceElem::Field(ResolvedFieldIdx::Adt(adt, idx)) => {
-                    match adt.r(s).owner {
-                        AdtCtorOwner::Struct(_) => {
-                            // (no coercion)
+            for elem in place.projections.r(s) {
+                match elem {
+                    MirPlaceElem::DerefPtr => {
+                        write!(f, ".*")?;
+                    }
+                    MirPlaceElem::Field(ResolvedFieldIdx::Adt(adt, idx)) => {
+                        match adt.r(s).owner {
+                            AdtCtorOwner::Struct(_) => {
+                                // (no coercion)
+                            }
+                            AdtCtorOwner::EnumVariant(variant) => {
+                                write!(f, ".as<{}>", variant.r(s).ident.text)?;
+                            }
                         }
-                        AdtCtorOwner::EnumVariant(variant) => {
-                            write!(f, ".as<{}>", variant.r(s).ident.text)?;
+
+                        match &adt.r(s).syntax {
+                            AdtCtorSyntax::Unit => unreachable!(),
+                            AdtCtorSyntax::Tuple => {
+                                write!(f, ".{}", idx.index())?;
+                            }
+                            AdtCtorSyntax::Named(_) => {
+                                write!(f, ".{}", adt.r(s).fields[*idx].ident.unwrap().text)?;
+                            }
                         }
                     }
-
-                    match &adt.r(s).syntax {
-                        AdtCtorSyntax::Unit => unreachable!(),
-                        AdtCtorSyntax::Tuple => {
-                            write!(f, ".{}", idx.index())?;
-                        }
-                        AdtCtorSyntax::Named(_) => {
-                            write!(f, ".{}", adt.r(s).fields[*idx].ident.unwrap().text)?;
-                        }
+                    MirPlaceElem::Field(ResolvedFieldIdx::Tuple { field_idx, .. }) => {
+                        write!(f, ".{field_idx}")?;
                     }
                 }
-                MirPlaceElem::Field(ResolvedFieldIdx::Tuple { field_idx, .. }) => {
-                    write!(f, ".{field_idx}")?;
+            }
+
+            Ok(())
+        })
+    }
+
+    pub fn operand(&self, operand: MirOperand) -> impl fmt::Display {
+        FormatFn(move |f| match operand {
+            MirOperand::Copy(place) => write!(f, "copy({})", self.place(place)),
+            MirOperand::Move(place) => write!(f, "move({})", self.place(place)),
+        })
+    }
+
+    pub fn rvalue(&self, rvalue: &MirRvalue) -> impl fmt::Display {
+        FormatFn(move |f| {
+            let s = self.session();
+
+            match rvalue {
+                MirRvalue::UnreachablePlaceholder => {
+                    write!(f, "unreachable")?;
                 }
-            }
-        }
+                MirRvalue::Tuple(operands) => {
+                    if let [unique] = **operands {
+                        write!(f, "({},)", self.operand(unique))?;
+                    } else {
+                        write!(
+                            f,
+                            "({})",
+                            format_list(
+                                operands.iter().map(|&op| self.operand(op)),
+                                SimpleListFormatGlue::COMMA_LIST
+                            )
+                        )?;
+                    }
+                }
+                MirRvalue::Adt(ctor, operands) => match &ctor.r(s).syntax {
+                    AdtCtorSyntax::Unit => {
+                        assert!(operands.is_empty());
 
-        Ok(())
-    }
-}
-
-impl fmt::Display for MirPrettyFmt<'_, MirOperand> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.value {
-            MirOperand::Copy(place) => write!(f, "copy({})", self.cx.wrap(place)),
-            MirOperand::Move(place) => write!(f, "move({})", self.cx.wrap(place)),
-        }
-    }
-}
-
-impl fmt::Display for MirPrettyFmt<'_, &MirRvalue> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = self.cx.session();
-
-        match self.value {
-            MirRvalue::UnreachablePlaceholder => {
-                write!(f, "unreachable")?;
-            }
-            MirRvalue::Tuple(operands) => {
-                if let [unique] = **operands {
-                    write!(f, "({},)", self.cx.wrap(unique))?;
-                } else {
+                        write!(f, "{}", ctor.r(s).owner.path(s))?;
+                    }
+                    AdtCtorSyntax::Tuple => {
+                        write!(
+                            f,
+                            "{}({})",
+                            ctor.r(s).owner.path(s),
+                            format_list(
+                                operands.iter().map(|&op| self.operand(op)),
+                                SimpleListFormatGlue::COMMA_LIST
+                            )
+                        )?;
+                    }
+                    AdtCtorSyntax::Named(_) => {
+                        write!(
+                            f,
+                            "{} {{ {} }}",
+                            ctor.r(s).owner.path(s),
+                            format_list(
+                                operands.iter().enumerate().map(|(idx, &op)| {
+                                    format!(
+                                        "{}: {}",
+                                        ctor.r(s).fields[idx].ident.unwrap().text,
+                                        self.operand(op)
+                                    )
+                                }),
+                                SimpleListFormatGlue::COMMA_LIST
+                            )
+                        )?;
+                    }
+                },
+                MirRvalue::Use(operand) => {
+                    write!(f, "use({})", self.operand(*operand))?;
+                }
+                MirRvalue::MoveOutRef {
+                    can_move_from,
+                    ref_place,
+                } => {
                     write!(
                         f,
-                        "({})",
+                        "late-move(*{}, possibly [{}])",
+                        self.place(*ref_place),
                         format_list(
-                            operands.iter().map(|&op| self.cx.wrap(op)),
+                            can_move_from.iter().map(|&place| self.place(place)),
                             SimpleListFormatGlue::COMMA_LIST
                         )
                     )?;
                 }
-            }
-            MirRvalue::Adt(ctor, operands) => match &ctor.r(s).syntax {
-                AdtCtorSyntax::Unit => {
-                    assert!(operands.is_empty());
-
-                    write!(f, "{}", ctor.r(s).owner.path(s))?;
+                MirRvalue::Ref(muta, place) => {
+                    write!(f, "&{}{}", muta.opt_space_qual(), self.place(*place))?;
                 }
-                AdtCtorSyntax::Tuple => {
+                MirRvalue::Zst(ty) => {
+                    write!(f, "zst({})", self.ty(*ty))?;
+                }
+                MirRvalue::Literal(ty, lit) => {
+                    write!(f, "{} :: {}", self.lit(*lit), self.ty(*ty))?;
+                }
+                MirRvalue::BinaryOp(kind, operands) => {
                     write!(
                         f,
-                        "{}({})",
-                        ctor.r(s).owner.path(s),
+                        "{} {} {}",
+                        self.operand(operands.0),
+                        kind.to_ast().punct().bare_name(),
+                        self.operand(operands.1)
+                    )?;
+                }
+                MirRvalue::UnaryOp(kind, operand) => {
+                    write!(f, "{}{}", kind.punct().bare_name(), self.operand(*operand))?;
+                }
+                MirRvalue::Discriminant(place) => {
+                    write!(f, "discriminant({})", self.place(*place))?;
+                }
+                MirRvalue::DynUse(_site, operand) => {
+                    write!(f, "dyn-use({})", self.operand(*operand))?;
+                }
+                MirRvalue::Error(_) => {
+                    write!(f, "error")?;
+                }
+            }
+
+            Ok(())
+        })
+    }
+
+    pub fn ty(&self, ty: SigTy) -> impl fmt::Display {
+        FormatFn(move |f| {
+            // TODO
+            f.write_str("<type>")
+        })
+    }
+
+    pub fn lit(&self, lit: AstLit) -> impl fmt::Display {
+        FormatFn(move |f| {
+            // TODO
+            write!(f, "{:?}", lit)
+        })
+    }
+
+    pub fn plain_stmt(&self, stmt: &MirStmt) -> impl fmt::Display {
+        FormatFn(move |f| {
+            write!(
+                f,
+                "{}{}",
+                self.plain_stmt_kind(&stmt.kind),
+                self.source_info_comment(stmt.source_info)
+            )
+        })
+    }
+
+    pub fn plain_stmt_kind(&self, stmt: &MirStmtKind) -> impl fmt::Display {
+        FormatFn(move |f| {
+            match &stmt {
+                MirStmtKind::StorageLive(local) => {
+                    write!(f, "storage-live({});", self.plain_local_name(*local))?;
+                }
+                MirStmtKind::StorageDead(local) => {
+                    write!(f, "storage-dead({});", self.plain_local_name(*local))?;
+                }
+                MirStmtKind::Assign(stmt) => {
+                    write!(f, "{} = {};", self.place(stmt.0), self.rvalue(&stmt.1))?;
+                }
+            }
+
+            Ok(())
+        })
+    }
+
+    pub fn plain_terminator(&self, terminator: &MirTerminator) -> impl fmt::Display {
+        FormatFn(move |f| {
+            write!(
+                f,
+                "{}{}",
+                self.plain_terminator_kind(&terminator.kind),
+                self.source_info_comment(terminator.source_info)
+            )
+        })
+    }
+
+    pub fn plain_terminator_kind(&self, terminator: &MirTerminatorKind) -> impl fmt::Display {
+        FormatFn(move |f| {
+            match terminator {
+                MirTerminatorKind::Goto(block) => {
+                    write!(f, "goto({});", self.plain_block_label(*block))?;
+                }
+                MirTerminatorKind::SwitchInt {
+                    discr,
+                    constants,
+                    targets,
+                } => {
+                    write!(
+                        f,
+                        "switch({}, [{}]);",
+                        self.operand(*discr),
                         format_list(
-                            operands.iter().map(|&op| self.cx.wrap(op)),
+                            constants.iter().zip(targets).map(|(cst, target)| format!(
+                                "{cst} => {}",
+                                self.plain_block_label(*target)
+                            )),
                             SimpleListFormatGlue::COMMA_LIST
                         )
                     )?;
                 }
-                AdtCtorSyntax::Named(_) => {
+                MirTerminatorKind::Call {
+                    callee,
+                    args,
+                    destination,
+                    target,
+                    unwind,
+                } => {
                     write!(
                         f,
-                        "{} {{ {} }}",
-                        ctor.r(s).owner.path(s),
+                        "{} = call({}, [{}]) goto {} unwind {};",
+                        self.place(*destination),
+                        self.operand(*callee),
                         format_list(
-                            operands.iter().enumerate().map(|(idx, &op)| {
-                                format!(
-                                    "{}: {}",
-                                    ctor.r(s).fields[idx].ident.unwrap().text,
-                                    self.cx.wrap(op)
-                                )
-                            }),
-                            SimpleListFormatGlue::COMMA_LIST
-                        )
+                            args.iter().map(|arg| self.operand(*arg)),
+                            SimpleListFormatGlue::COMMA_LIST,
+                        ),
+                        self.plain_block_label(*target),
+                        self.plain_unwind_label(*unwind),
                     )?;
                 }
-            },
-            MirRvalue::Use(operand) => {
-                write!(f, "use({})", self.cx.wrap(*operand))?;
+                MirTerminatorKind::EnsureDropped {
+                    place,
+                    target,
+                    unwind,
+                } => {
+                    write!(
+                        f,
+                        "ensure-dropped({}) goto {} unwind {};",
+                        self.place(*place),
+                        self.plain_block_label(*target),
+                        self.plain_unwind_label(*unwind),
+                    )?;
+                }
+                MirTerminatorKind::Unreachable => {
+                    write!(f, "unreachable;")?;
+                }
+                MirTerminatorKind::Return => {
+                    write!(f, "return;")?;
+                }
+                MirTerminatorKind::UnwindResume => {
+                    write!(f, "unwind-resume;")?;
+                }
             }
-            MirRvalue::MoveOutRef {
-                can_move_from,
-                ref_place,
-            } => {
-                write!(
-                    f,
-                    "late-move(*{}, possibly [{}])",
-                    self.cx.wrap(*ref_place),
-                    format_list(
-                        can_move_from.iter().map(|&place| self.cx.wrap(place)),
-                        SimpleListFormatGlue::COMMA_LIST
-                    )
-                )?;
-            }
-            MirRvalue::Ref(muta, place) => {
-                write!(f, "&{}{}", muta.opt_space_qual(), self.cx.wrap(*place))?;
-            }
-            MirRvalue::Zst(ty) => {
-                write!(f, "zst({})", self.cx.wrap(*ty))?;
-            }
-            MirRvalue::Literal(ty, lit) => {
-                write!(f, "{} :: {}", self.cx.wrap(*lit), self.cx.wrap(*ty))?;
-            }
-            MirRvalue::BinaryOp(kind, operands) => {
-                write!(
-                    f,
-                    "{} {} {}",
-                    self.cx.wrap(operands.0),
-                    kind.to_ast().punct().bare_name(),
-                    self.cx.wrap(operands.1)
-                )?;
-            }
-            MirRvalue::UnaryOp(kind, operand) => {
-                write!(f, "{}{}", kind.punct().bare_name(), self.cx.wrap(*operand))?;
-            }
-            MirRvalue::Discriminant(place) => {
-                write!(f, "discriminant({})", self.cx.wrap(*place))?;
-            }
-            MirRvalue::DynUse(_site, operand) => {
-                write!(f, "dyn-use({})", self.cx.wrap(*operand))?;
-            }
-            MirRvalue::Error(_) => {
-                write!(f, "error")?;
-            }
-        }
 
-        Ok(())
+            Ok(())
+        })
     }
-}
 
-impl fmt::Display for MirPrettyFmt<'_, SigTy> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO
-        // write!(f, "{:?}", self.value)
-        f.write_str("<type>")
+    pub fn plain_unwind_label(&self, behavior: MirUnwindBehavior) -> impl fmt::Display {
+        FormatFn(move |f| {
+            match behavior {
+                MirUnwindBehavior::Continue(bb) => {
+                    write!(f, "{}", self.plain_block_label(bb))?;
+                }
+                MirUnwindBehavior::DoublePanic => {
+                    f.write_str("<double panic>")?;
+                }
+            }
+
+            Ok(())
+        })
     }
-}
 
-impl fmt::Display for MirPrettyFmt<'_, AstLit> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO
-        write!(f, "{:?}", self.value)
+    pub fn source_info_comment(&self, info: MirSourceInfo) -> impl fmt::Display {
+        FormatFn(move |f| {
+            // TODO
+            write!(f, " // {:?}", info)
+        })
     }
-}
 
-impl fmt::Display for MirPrettyFmt<'_, &MirStmt> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}{}",
-            self.cx.wrap(&self.value.kind),
-            self.cx.wrap(self.value.source_info)
-        )
+    pub fn typed_local_name(&self, local: MirLocalIdx) -> impl fmt::Display {
+        FormatFn(move |f| {
+            write!(
+                f,
+                "{}: {}",
+                self.plain_local_name(local),
+                self.ty(self.body.locals[local].ty)
+            )
+        })
     }
-}
 
-impl fmt::Display for MirPrettyFmt<'_, &MirStmtKind> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.value {
-            MirStmtKind::StorageLive(local) => {
-                write!(f, "storage-live({});", self.cx.wrap(*local))?;
-            }
-            MirStmtKind::StorageDead(local) => {
-                write!(f, "storage-dead({});", self.cx.wrap(*local))?;
-            }
-            MirStmtKind::Assign(stmt) => {
-                write!(f, "{} = {};", self.cx.wrap(stmt.0), self.cx.wrap(&stmt.1))?;
-            }
-        }
+    pub fn flat_body(&self) -> impl fmt::Display {
+        FormatFn(move |f| {
+            let body = self.body();
 
-        Ok(())
-    }
-}
+            let mut f = IndentedFmt::new(f);
 
-impl fmt::Display for MirPrettyFmt<'_, &MirTerminator> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}{}",
-            self.cx.wrap(&self.value.kind),
-            self.cx.wrap(self.value.source_info)
-        )
-    }
-}
-
-impl fmt::Display for MirPrettyFmt<'_, &MirTerminatorKind> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.value {
-            MirTerminatorKind::Goto(block) => {
-                write!(f, "goto({});", self.cx.wrap(*block))?;
-            }
-            MirTerminatorKind::SwitchInt {
-                discr,
-                constants,
-                targets,
-            } => {
-                write!(
-                    f,
-                    "switch({}, [{}]);",
-                    self.cx.wrap(*discr),
-                    format_list(
-                        constants
-                            .iter()
-                            .zip(targets)
-                            .map(|(cst, target)| format!("{cst} => {}", self.cx.wrap(*target))),
-                        SimpleListFormatGlue::COMMA_LIST
-                    )
-                )?;
-            }
-            MirTerminatorKind::Call {
-                callee,
-                args,
-                destination,
-                target,
-                unwind,
-            } => {
-                write!(
-                    f,
-                    "{} = call({}, [{}]) goto {} unwind {};",
-                    self.cx.wrap(*destination),
-                    self.cx.wrap(*callee),
-                    format_list(
-                        args.iter().map(|arg| self.cx.wrap(*arg)),
-                        SimpleListFormatGlue::COMMA_LIST,
-                    ),
-                    self.cx.wrap(*target),
-                    self.cx.wrap(*unwind),
-                )?;
-            }
-            MirTerminatorKind::EnsureDropped {
-                place,
-                target,
-                unwind,
-            } => {
-                write!(
-                    f,
-                    "ensure-dropped({}) goto {} unwind {};",
-                    self.cx.wrap(*place),
-                    self.cx.wrap(*target),
-                    self.cx.wrap(*unwind),
-                )?;
-            }
-            MirTerminatorKind::Unreachable => {
-                write!(f, "unreachable;")?;
-            }
-            MirTerminatorKind::Return => {
-                write!(f, "return;")?;
-            }
-            MirTerminatorKind::UnwindResume => {
-                write!(f, "unwind-resume;")?;
-            }
-        }
-
-        Ok(())
-    }
-}
-
-impl fmt::Display for MirPrettyFmt<'_, MirUnwindBehavior> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.value {
-            MirUnwindBehavior::Continue(bb) => {
-                write!(f, "{}", self.cx.wrap(bb))?;
-            }
-            MirUnwindBehavior::DoublePanic => {
-                f.write_str("<double panic>")?;
-            }
-        }
-
-        Ok(())
-    }
-}
-
-impl fmt::Display for MirPrettyFmt<'_, MirSourceInfo> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO
-        write!(f, " // {:?}", self.value)
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct FlatBodyFmt;
-
-impl fmt::Display for MirPrettyFmt<'_, FlatBodyFmt> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_rich(&mut IndentedFmt::new(f))
-    }
-}
-
-impl MirPrettyFmt<'_, FlatBodyFmt> {
-    fn fmt_rich(&self, f: &mut IndentedFmt<'_, '_>) -> fmt::Result {
-        let body = self.cx.body();
-
-        writeln!(
-            f,
-            "fn({}) -> {}: {} {{",
-            format_list(
-                body.locals
-                    .iter_enumerated()
-                    .skip(1)
-                    .take(body.arg_count as usize)
-                    .map(|(idx, local)| {
-                        format!("{}: {}", self.cx.wrap(idx), self.cx.wrap(local.ty))
-                    }),
-                SimpleListFormatGlue::COMMA_LIST,
-            ),
-            self.cx.wrap(MirLocalIdx::RETURN),
-            self.cx.wrap(body.locals[MirLocalIdx::RETURN].ty)
-        )?;
-
-        f.change_level_now(4)?;
-
-        let mut had_local = false;
-
-        for (idx, local) in body
-            .locals
-            .iter_enumerated()
-            .skip(body.arg_count as usize + 1)
-        {
-            writeln!(f, "let {}: {};", self.cx.wrap(idx), self.cx.wrap(local.ty))?;
-            had_local = true;
-        }
-
-        if had_local {
-            writeln!(f)?;
-        }
-
-        for block in body.blocks() {
-            f.change_level_now(-4)?;
             writeln!(
                 f,
-                "{}{}:",
-                if block.block == body.entry {
-                    "[entry] "
-                } else {
-                    ""
-                },
-                self.cx.wrap(block.block)
+                "fn({}) -> {} {{",
+                format_list(
+                    body.locals
+                        .indices()
+                        .skip(1)
+                        .take(body.arg_count as usize)
+                        .map(|local| self.typed_local_name(local)),
+                    SimpleListFormatGlue::COMMA_LIST,
+                ),
+                self.typed_local_name(MirLocalIdx::RETURN),
             )?;
+
             f.change_level_now(4)?;
 
-            for stmt in block.stmts(MirBodyDirection::Forwards) {
-                writeln!(f, "{}", self.cx.wrap(stmt.stmt()))?;
+            let mut had_local = false;
+
+            for local in body.locals.indices().skip(body.arg_count as usize + 1) {
+                writeln!(f, "let {};", self.typed_local_name(local))?;
+                had_local = true;
             }
 
-            if let Some(terminator) = block.opt_terminator() {
-                writeln!(f, "{}\n", self.cx.wrap(terminator))?;
-            } else {
-                writeln!(f, "<missing terminator>\n")?;
+            if had_local {
+                writeln!(f)?;
             }
-        }
 
-        f.change_level_now(-4)?;
+            for block in body.blocks() {
+                f.change_level_now(-4)?;
+                writeln!(
+                    f,
+                    "{}{}:",
+                    if block.block == body.entry {
+                        "[entry] "
+                    } else {
+                        ""
+                    },
+                    self.plain_block_label(block.block)
+                )?;
+                f.change_level_now(4)?;
 
-        writeln!(f, "}}")?;
+                if let Some(hook) = self.hooks.start_of_bb {
+                    writeln!(f, "{}", FormatFn(|f| hook(self, f, block.block)))?;
+                }
 
-        Ok(())
+                for stmt in block.stmts(MirBodyDirection::Forwards) {
+                    writeln!(f, "{}", self.plain_stmt(stmt.stmt()))?;
+
+                    if let Some(hook) = self.hooks.after_stmt {
+                        writeln!(f, "{}", FormatFn(|f| hook(self, f, stmt.stmt)))?;
+                    }
+                }
+
+                if let Some(terminator) = block.opt_terminator() {
+                    writeln!(f, "{}\n", self.plain_terminator(terminator))?;
+                } else {
+                    writeln!(f, "<missing terminator>\n")?;
+                }
+            }
+
+            f.change_level_now(-4)?;
+
+            writeln!(f, "}}")?;
+
+            Ok(())
+        })
     }
 }

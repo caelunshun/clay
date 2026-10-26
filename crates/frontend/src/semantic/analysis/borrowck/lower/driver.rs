@@ -11,8 +11,8 @@ use crate::{
         },
         infer::ImplCache,
         syntax::{
-            FnDef, MirBody, MirLocal, MirLocalIdx, MirPlace, MirPrettyFmtCx, MirRvalue,
-            MirScopeIdx, MirSourceInfo, ThirBody, ThirExpr, ThirLocal, TyCtxt,
+            FnDef, MirBody, MirLocal, MirLocalIdx, MirPlace, MirPrettyFmt, MirRvalue, MirScopeIdx,
+            MirSourceInfo, ThirBody, ThirExpr, ThirLocal, TyCtxt,
         },
     },
 };
@@ -32,7 +32,7 @@ pub fn build_function_mir(check_cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     let body = build_cx.finish();
 
     if flags::should_print_mir_scopes() {
-        println!("{}", MirPrettyFmtCx::new(tcx, &body).flat_body());
+        println!("{}", MirPrettyFmt::new(tcx, &body).flat_body());
     }
 
     LateInit::init(&def.r(s).mir_body, Some(body));

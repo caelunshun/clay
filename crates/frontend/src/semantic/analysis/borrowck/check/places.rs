@@ -1,15 +1,18 @@
 use crate::{
     base::{Session, arena::HasListInterner},
     semantic::syntax::{
-        AdtCtorOwner, MirBody, MirBodyDirection, MirPlace, MirPlaceElem, ResolvedFieldIdx,
-        TraverseMentions, TyCtxt,
+        AdtCtorOwner, MirBody, MirBodyDirection, MirPlace, MirPlaceElem, MirPrettyFmt,
+        ResolvedFieldIdx, TraverseMentions, TyCtxt,
     },
-    utils::mem::{BitRange, bit_mask},
+    utils::{
+        format::DebugAsDisplay,
+        mem::{BitRange, bit_mask},
+    },
 };
 use clay_core::FastHashMap;
 use index_vec::{IndexSlice, IndexVec, define_index_type};
 use smallvec::SmallVec;
-use std::ops::Range;
+use std::{fmt, ops::Range};
 
 // === PlaceNumbering === //
 
@@ -71,7 +74,7 @@ impl PlaceNumberingBuilder {
 
             self.nodes.extend((0..child_len).map(|_| TrieNode {
                 first_child: TrieNodeIdx::from_raw(u32::MAX),
-                child_count: u32::MAX,
+                child_count: 0,
                 mention: None,
             }));
         }
@@ -259,6 +262,18 @@ pub struct PlaceSet {
 }
 
 impl PlaceSet {
+    pub fn pretty<'a>(
+        &'a self,
+        mir_fmt: &'a MirPrettyFmt,
+        numbering: &'a PlaceNumbering,
+    ) -> PlaceSetPrettyFmt<'a> {
+        PlaceSetPrettyFmt {
+            mir_fmt,
+            set: self,
+            numbering,
+        }
+    }
+
     pub fn add(&mut self, numbering: &PlaceNumbering, place: MirPlace) {
         let bits = BitRange::new_u32(numbering.place_to_range[&place].clone());
 
@@ -328,5 +343,28 @@ impl PlaceSet {
         for (lhs, &rhs) in self.bits.iter_mut().zip(&other.bits) {
             *lhs &= !rhs;
         }
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct PlaceSetPrettyFmt<'a> {
+    pub mir_fmt: &'a MirPrettyFmt<'a>,
+    pub set: &'a PlaceSet,
+    pub numbering: &'a PlaceNumbering,
+}
+
+impl fmt::Display for PlaceSetPrettyFmt<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut f = f.debug_list();
+
+        for place in self.numbering.place_to_range.keys().copied() {
+            if !self.set.has(self.numbering, place) {
+                continue;
+            }
+
+            f.entry(&DebugAsDisplay(self.mir_fmt.place(place)));
+        }
+
+        f.finish()
     }
 }

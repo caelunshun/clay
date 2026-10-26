@@ -8,6 +8,21 @@ pub fn fmt_write(
 }
 
 #[derive(Copy, Clone)]
+pub struct DebugAsDisplay<T>(pub T);
+
+impl<T: fmt::Display> fmt::Debug for DebugAsDisplay<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl<T: fmt::Display> fmt::Display for DebugAsDisplay<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+#[derive(Copy, Clone)]
 pub struct FormatFn<F>(pub F)
 where
     F: Fn(&mut fmt::Formatter<'_>) -> fmt::Result;

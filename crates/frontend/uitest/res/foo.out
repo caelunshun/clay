@@ -1,0 +1,101 @@
+fn(_1: <type>) -> _0: <type> {
+    let _2: <type>;
+    let _3: <type>;
+
+[entry] bb1v1:
+    storage-live(_1); // Todo
+    storage-live(_2); // Todo
+    storage-live(_3); // Todo
+    goto(bb2v1); // Todo
+
+bb2v1:
+    goto(bb3v1); // Todo
+
+bb3v1:
+    _3 = &_1; // Todo
+    goto(bb5v1); // Todo
+
+bb4v1:
+    _2 = late-move(*_3, possibly [_1]); // Simple(foo.clay:1:8-14)
+    goto(bb6v1); // Todo
+
+bb5v1:
+    goto(bb4v1); // Todo
+
+bb6v1:
+    _0 = (); // Simple(foo.clay:1:17-17)
+    goto(bb8v1); // BlockFallthrough
+
+bb7v1:
+    goto(bb9v1); // BlockFallthrough
+
+bb8v1:
+    goto(bb7v1); // Todo
+
+bb9v1:
+    storage-dead(_3); // Todo
+    storage-dead(_2); // Todo
+    storage-dead(_1); // Todo
+    return; // Todo
+
+}
+storage-live(_1); // Todo
+=> [_1, _2, _3, _0]
+
+storage-live(_2); // Todo
+=> [_1, _2, _3, _0]
+
+storage-live(_3); // Todo
+=> [_1, _2, _3, _0]
+
+goto(bb2v1); // Todo
+=> [_1, _2, _3, _0]
+
+goto(bb3v1); // Todo
+=> []
+
+_3 = &_1; // Todo
+=> []
+
+error: womp womp! _3 = &_1; // Todo
+
+goto(bb5v1); // Todo
+=> [_3]
+
+_2 = late-move(*_3, possibly [_1]); // Simple(foo.clay:1:8-14)
+=> []
+
+error: womp womp! _2 = late-move(*_3, possibly [_1]); // Simple(foo.clay:1:8-14)
+
+error: womp womp! _2 = late-move(*_3, possibly [_1]); // Simple(foo.clay:1:8-14)
+
+goto(bb6v1); // Todo
+=> [_2, _3]
+
+goto(bb4v1); // Todo
+=> []
+
+_0 = (); // Simple(foo.clay:1:17-17)
+=> []
+
+goto(bb8v1); // BlockFallthrough
+=> [_1, _2, _3, _0]
+
+goto(bb9v1); // BlockFallthrough
+=> []
+
+goto(bb7v1); // Todo
+=> []
+
+storage-dead(_3); // Todo
+=> []
+
+storage-dead(_2); // Todo
+=> []
+
+storage-dead(_1); // Todo
+=> []
+
+return; // Todo
+=> []
+

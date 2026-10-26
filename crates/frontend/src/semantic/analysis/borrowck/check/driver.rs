@@ -12,7 +12,10 @@ use crate::{
             },
             sigck::CrateSigckVisitor,
         },
-        syntax::{FnDef, MirBodyDirection, MirPlaceMention, MirPlaceMentionKind, TraverseMentions},
+        syntax::{
+            FnDef, MirBodyDirection, MirPlaceMention, MirPlaceMentionKind, MirPrettyFmt,
+            TraverseMentions,
+        },
     },
 };
 use std::fmt;
@@ -55,7 +58,7 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
         mut state: PlaceSet,
         place_numbering: &PlaceNumbering,
         mentions: &[MirPlaceMention],
-        src_info: impl fmt::Debug,
+        src_info: impl fmt::Display,
     ) {
         for mention in mentions {
             if mention.kind.intersects(MirPlaceMentionKind::OCCUPANCY_ADD) {
@@ -67,7 +70,7 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
                 .intersects(MirPlaceMentionKind::OCCUPANCY_ACCESS)
                 && !state.has(place_numbering, mention.place)
             {
-                Diag::anon_err(format_args!("oh no! {src_info:?}")).emit();
+                Diag::anon_err(format_args!("oh no! {src_info}")).emit();
             }
 
             if mention.kind.intersects(MirPlaceMentionKind::OCCUPANCY_DEAD) {
@@ -76,13 +79,15 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
         }
     }
 
+    let fmt_cx = MirPrettyFmt::new(tcx, body);
+
     for block in body.blocks() {
         for stmt in block.stmts(MirBodyDirection::Forwards) {
             process_mentions(
                 occupancy_iter.trans_before(stmt.stmt).clone(),
                 &place_numbering,
                 &stmt.kind().mentions(tcx),
-                stmt.stmt(),
+                fmt_cx.plain_stmt(stmt.stmt()),
             );
         }
 
@@ -90,7 +95,7 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
             occupancy_iter.trans_before_end(block.block).clone(),
             &place_numbering,
             &block.terminator_kind().mentions(tcx),
-            block.terminator(),
+            fmt_cx.plain_terminator(block.terminator()),
         );
     }
 }
