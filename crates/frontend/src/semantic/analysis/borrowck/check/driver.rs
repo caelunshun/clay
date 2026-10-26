@@ -1,5 +1,6 @@
 use crate::{
     base::{Diag, arena::Obj},
+    flags,
     semantic::{
         analysis::{
             borrowck::check::{
@@ -18,7 +19,7 @@ use crate::{
         },
     },
 };
-use std::fmt;
+use std::fmt::{self, Display as _};
 
 pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     let s = cx.session();
@@ -80,6 +81,15 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     }
 
     let fmt_cx = MirPrettyFmt::new(tcx, body);
+
+    if flags::should_print_mir_dataflow() {
+        println!(
+            "{}",
+            occupancy_iter.annotated_flat_body(fmt_cx, |set, f| {
+                set.pretty(&fmt_cx, &place_numbering).fmt(f)
+            })
+        );
+    }
 
     for block in body.blocks() {
         for stmt in block.stmts(MirBodyDirection::Forwards) {

@@ -1,13 +1,13 @@
 use crate::{
     semantic::syntax::{
-        MirBlockIdx, MirBlockRef, MirBody, MirBodyDirection, MirStmtIdx, MirStmtRef,
+        MirBlockIdx, MirBlockRef, MirBody, MirBodyDirection, MirPrettyFmt, MirStmtIdx, MirStmtRef,
     },
     utils::mem::{DisjointBorrowsScratch, VecOfPtrScratch},
 };
 use bytemuck::TransparentWrapper;
 use derive_where::derive_where;
 use slotmap::SecondaryMap;
-use std::{collections::VecDeque, marker::PhantomData, mem};
+use std::{cell::RefCell, collections::VecDeque, fmt, marker::PhantomData, mem};
 
 // === DataflowAnalysis === //
 
@@ -91,7 +91,18 @@ pub trait ForwardsDataflowAnalysis<'g> {
         }
 
         // Run dataflow
+        let mut seed_worklist_remaining = scratch.worklist.len();
+
         while let Some(curr) = scratch.worklist.pop_front() {
+            // We can determine whether this was a seed worklist request by its index because we
+            // always push to the back of the queue and pull from the front.
+            let is_seed_transfer = if seed_worklist_remaining > 0 {
+                seed_worklist_remaining -= 1;
+                true
+            } else {
+                false
+            };
+
             let curr = MirBlockRef::new(body, curr);
             let curr_indices = scratch.basic_block_indices[curr.block];
 
@@ -116,7 +127,9 @@ pub trait ForwardsDataflowAnalysis<'g> {
 
                 self.trans_join(predecessors, successor);
 
-                if !mem::take(&mut successor.is_dirty) {
+                let was_dirty = mem::take(&mut successor.is_dirty);
+
+                if !was_dirty && !is_seed_transfer {
                     // The input effect to the block has not actually changed, even though its
                     // predecessors have changed.
                     continue;
@@ -598,6 +611,41 @@ impl<'a, T> DataflowView<'a, T> {
 
             mem::swap(&mut scratch_src, &mut scratch_dst);
         }
+    }
+
+    pub fn annotated_flat_body(
+        &mut self,
+        cx: MirPrettyFmt<'_>,
+        fmt_state: impl Fn(&T, &mut fmt::Formatter<'_>) -> fmt::Result,
+    ) -> String {
+        let me = RefCell::new(self);
+
+        // Forces a coercion.
+        let mut cx = cx;
+
+        let start_of_block =
+            |_cx: &MirPrettyFmt<'_>, f: &mut fmt::Formatter<'_>, block: MirBlockIdx| {
+                let me = me.borrow();
+                let state = me.trans_init(block);
+
+                fmt_state(state, f)?;
+
+                Ok(())
+            };
+
+        cx.hooks.start_of_block = Some(&start_of_block);
+
+        let after_stmt = |_cx: &MirPrettyFmt<'_>, f: &mut fmt::Formatter<'_>, stmt: MirStmtIdx| {
+            let mut me = me.borrow_mut();
+            let state = me.trans_after(stmt);
+
+            fmt_state(state, f)?;
+
+            Ok(())
+        };
+        cx.hooks.after_stmt = Some(&after_stmt);
+
+        cx.flat_body().to_string()
     }
 }
 

@@ -43,7 +43,7 @@ impl BitRange {
             Ordering::Greater => 0,
         };
 
-        let hi = match word.cmp(&self.hi_word_excl()) {
+        let hi = match word.cmp(&self.hi_word_excl().saturating_sub(1)) {
             Ordering::Less => 64,
             Ordering::Equal => (self.hi_bit_excl() % 64) as u32,
             Ordering::Greater => return 0..0,

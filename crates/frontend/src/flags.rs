@@ -17,3 +17,9 @@ pub fn should_print_mir_scopes() -> bool {
 
     *CACHE.get_or_init(|| env::var("CLAY_PRINT_MIR_SCOPES").is_ok())
 }
+
+pub fn should_print_mir_dataflow() -> bool {
+    static CACHE: OnceLock<bool> = OnceLock::new();
+
+    *CACHE.get_or_init(|| env::var("CLAY_PRINT_MIR_DATAFLOW").is_ok())
+}

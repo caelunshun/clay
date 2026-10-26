@@ -81,7 +81,7 @@ impl MirBody {
     }
 
     pub fn arg_locals(&self) -> impl ExactSizeIterator<Item = MirLocalIdx> {
-        (0..self.arg_count + 1).map(MirLocalIdx::from_raw)
+        (1..self.arg_count + 1).map(MirLocalIdx::from_raw)
     }
 
     pub fn entry(&self) -> MirBlockRef<'_> {
@@ -1223,7 +1223,7 @@ type MirPrettyFmtHookFn<'a, T> =
 #[derive(Default, Copy, Clone)]
 pub struct MirPrettyFmtHooks<'a> {
     pub bb_successor: MirPrettyFmtHookFn<'a, MirSuccessorId>,
-    pub start_of_bb: MirPrettyFmtHookFn<'a, MirBlockIdx>,
+    pub start_of_block: MirPrettyFmtHookFn<'a, MirBlockIdx>,
     pub after_stmt: MirPrettyFmtHookFn<'a, MirStmtIdx>,
 }
 
@@ -1620,7 +1620,7 @@ impl<'a> MirPrettyFmt<'a> {
                 )?;
                 f.change_level_now(4)?;
 
-                if let Some(hook) = self.hooks.start_of_bb {
+                if let Some(hook) = self.hooks.start_of_block {
                     writeln!(f, "{}", FormatFn(|f| hook(self, f, block.block)))?;
                 }
 
