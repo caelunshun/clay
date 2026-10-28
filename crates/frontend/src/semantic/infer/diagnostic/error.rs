@@ -6,10 +6,10 @@ use crate::{
             UniversalElaboration,
         },
         syntax::{
-            FnInstance, GenericBinder, HrtbBinder, ImplItem, InferTyVar, Re, RelationMode,
-            SigGenericList, SigHrtbBinder, SigProjectType, SigTraitSpec, SigTy, SimpleTySet,
-            TraitClauseList, TraitItem, TraitParam, TraitSpec, Ty, TyOrReList, UniversalReVar,
-            UniversalTy,
+            FnInstance, GenericBinder, HrtbBinder, ImplItem, InferTyVar, MirSourceInfo, Re,
+            RelationMode, SigGenericList, SigHrtbBinder, SigProjectType, SigTraitSpec, SigTy,
+            SimpleTySet, TraitClauseList, TraitItem, TraitParam, TraitSpec, Ty, TyOrReList,
+            UniversalReVar, UniversalTy,
         },
     },
     utils::format::{DebugTree, ToDebugTree},
@@ -24,6 +24,17 @@ impl<T: ToDebugTree> ToDebugTree for SpannedError<T> {
     fn to_debug_tree(&self, pretty: &ClausePrettyFmtCx<'_, '_>) -> DebugTree {
         DebugTree::new()
             .with_prose(format!("span: {}", self.0))
+            .with_flat_sublist(self.1.to_debug_tree(pretty))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MirSpannedError<T>(pub MirSourceInfo, pub T);
+
+impl<T: ToDebugTree> ToDebugTree for MirSpannedError<T> {
+    fn to_debug_tree(&self, pretty: &ClausePrettyFmtCx<'_, '_>) -> DebugTree {
+        DebugTree::new()
+            .with_prose(format!("source info: {:?}", self.0))
             .with_flat_sublist(self.1.to_debug_tree(pretty))
     }
 }

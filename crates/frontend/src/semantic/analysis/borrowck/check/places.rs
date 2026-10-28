@@ -18,13 +18,13 @@ use std::{fmt, range::Range};
 // === PlaceNumbering === //
 
 define_index_type! {
-    pub struct AtomicSubPlaceIdx = u32;
+    pub struct AtomicPlaceIdx = u32;
 }
 
 #[derive(Debug, Clone)]
 pub struct PlaceNumbering {
-    pub place_to_range: FastHashMap<MirPlace, Range<AtomicSubPlaceIdx>>,
-    pub bit_to_place: IndexVec<AtomicSubPlaceIdx, MirPlace>,
+    pub place_to_range: FastHashMap<MirPlace, Range<AtomicPlaceIdx>>,
+    pub bit_to_atomic_place: IndexVec<AtomicPlaceIdx, MirPlace>,
 }
 
 #[derive(Clone)]
@@ -158,7 +158,7 @@ impl PlaceNumberingBuilder {
         ) -> bool {
             let node = &nodes[node];
 
-            let first_field = AtomicSubPlaceIdx::from_usize(numbering.bit_to_place.len());
+            let first_field = AtomicPlaceIdx::from_usize(numbering.bit_to_atomic_place.len());
 
             // A place is structurally live if all its children are structurally live.
             let mut structural_liveness = true;
@@ -182,14 +182,14 @@ impl PlaceNumberingBuilder {
             if let Some(place) = node.mention
                 && !structural_liveness
             {
-                numbering.bit_to_place.push(place);
+                numbering.bit_to_atomic_place.push(place);
 
                 // Our liveness is now structural again because we have a bit!
                 structural_liveness = true;
             }
 
             if let Some(place) = node.mention {
-                let next_field = AtomicSubPlaceIdx::from_usize(numbering.bit_to_place.len());
+                let next_field = AtomicPlaceIdx::from_usize(numbering.bit_to_atomic_place.len());
 
                 numbering
                     .place_to_range
@@ -201,7 +201,7 @@ impl PlaceNumberingBuilder {
 
         let mut numbering = PlaceNumbering {
             place_to_range: FastHashMap::default(),
-            bit_to_place: IndexVec::new(),
+            bit_to_atomic_place: IndexVec::new(),
         };
 
         for idx in 0..self.local_count {
@@ -286,15 +286,15 @@ impl PlaceSet {
     pub fn fill(&mut self, numbering: &PlaceNumbering) {
         self.clear();
         self.add_range(
-            Range::from(0..numbering.bit_to_place.len()).map(AtomicSubPlaceIdx::from_usize),
+            Range::from(0..numbering.bit_to_atomic_place.len()).map(AtomicPlaceIdx::from_usize),
         );
     }
 
-    pub fn add_one(&mut self, idx: AtomicSubPlaceIdx) {
+    pub fn add_one(&mut self, idx: AtomicPlaceIdx) {
         self.add_range((idx..(idx + 1)).into());
     }
 
-    pub fn add_range(&mut self, range: Range<AtomicSubPlaceIdx>) {
+    pub fn add_range(&mut self, range: Range<AtomicPlaceIdx>) {
         let bits = BitRange::new_usize(range.map(|v| v.index()));
 
         if bits.hi_word_excl() > self.bits.len() {
@@ -312,11 +312,11 @@ impl PlaceSet {
         self.add_range(numbering.place_to_range[&place]);
     }
 
-    pub fn remove_one(&mut self, idx: AtomicSubPlaceIdx) {
+    pub fn remove_one(&mut self, idx: AtomicPlaceIdx) {
         self.remove_range((idx..(idx + 1)).into());
     }
 
-    pub fn remove_range(&mut self, range: Range<AtomicSubPlaceIdx>) {
+    pub fn remove_range(&mut self, range: Range<AtomicPlaceIdx>) {
         let bits = BitRange::new_usize(range.map(|v| v.index()));
 
         if bits.hi_word_excl() > self.bits.len() {
@@ -334,11 +334,11 @@ impl PlaceSet {
         self.remove_range(numbering.place_to_range[&place]);
     }
 
-    pub fn has_one(&self, idx: AtomicSubPlaceIdx) -> bool {
+    pub fn has_one(&self, idx: AtomicPlaceIdx) -> bool {
         self.has_range((idx..(idx + 1)).into())
     }
 
-    pub fn has_range(&self, range: Range<AtomicSubPlaceIdx>) -> bool {
+    pub fn has_range(&self, range: Range<AtomicPlaceIdx>) -> bool {
         let bits = BitRange::new_usize(range.map(|v| v.index()));
 
         if bits.hi_word_excl() > self.bits.len() {
@@ -385,8 +385,8 @@ impl PlaceSet {
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = AtomicSubPlaceIdx> {
-        bit_iter(&self.bits).map(AtomicSubPlaceIdx::from_usize)
+    pub fn iter(&self) -> impl Iterator<Item = AtomicPlaceIdx> {
+        bit_iter(&self.bits).map(AtomicPlaceIdx::from_usize)
     }
 }
 
