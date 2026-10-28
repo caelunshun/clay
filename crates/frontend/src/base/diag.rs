@@ -416,7 +416,8 @@ fn emit_pretty(source_map: &SourceMap, writer: &mut dyn termcolor::WriteColor, d
             Ok(file
                 .segmentation()
                 .line_span(line_index as u32)
-                .interpret_byte_range())
+                .interpret_byte_range()
+                .into())
         }
     }
 

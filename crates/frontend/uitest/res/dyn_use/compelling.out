@@ -1,0 +1,10 @@
+error: oh no! _14 = call(move(_15), [move(_5)]) goto bb26v1 unwind bb27v1; // Todo
+
+error: oh no! _20 = call(move(_21), [move(_5), move(_16)]) goto bb38v1 unwind bb39v1; // Todo
+
+error: oh no! _20 = call(move(_21), [move(_5), move(_16)]) goto bb38v1 unwind bb39v1; // Todo
+
+error: oh no! _23 = &mut _8; // Simple(compelling.clay:40:11-13)
+
+error: oh no! _27 = *move(_24); // Simple(compelling.clay:40:11-13)
+

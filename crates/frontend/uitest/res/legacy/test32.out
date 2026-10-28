@@ -21,3 +21,15 @@ error: type hints required for this type
 74 │     Helper::<(), _>::meow(None, true);
    │     ^^^^^^^^^^^^^^^^^^^^^
 
+error: oh no! _25 = call(move(_26), [move(_2)]) goto bb33v1 unwind bb34v1; // Todo
+
+error: oh no! _29 = call(move(_30), [move(_2)]) goto bb39v1 unwind bb40v1; // Todo
+
+error: oh no! _28 = call(move(_22), [move(_29), move(_31)]) goto bb41v1 unwind bb40v1; // Todo
+
+error: oh no! _36 = call(move(_37), [move(_2)]) goto bb49v1 unwind bb50v1; // Todo
+
+error: oh no! _40 = call(move(_41), [move(_2)]) goto bb55v1 unwind bb56v1; // Todo
+
+error: oh no! _39 = call(move(_33), [move(_40), move(_42)]) goto bb57v1 unwind bb56v1; // Todo
+

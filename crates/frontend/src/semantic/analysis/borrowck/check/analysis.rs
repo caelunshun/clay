@@ -38,11 +38,11 @@ impl<'g> BackwardsDataflowAnalysis<'g> for LivenessAnalysis<'g> {
 
         for &mention in stmt.kind().mentions(self.tcx).iter().rev() {
             if mention.kind.intersects(MirPlaceMentionKind::LIVENESS_USE) {
-                new_output.add(self.place_numbering, mention.place);
+                new_output.add_place(self.place_numbering, mention.place);
             }
 
             if mention.kind.intersects(MirPlaceMentionKind::LIVENESS_INIT) {
-                new_output.remove(self.place_numbering, mention.place);
+                new_output.remove_place(self.place_numbering, mention.place);
             }
         }
 
@@ -68,12 +68,12 @@ impl<'g> BackwardsDataflowAnalysis<'g> for LivenessAnalysis<'g> {
 
         for &mention in block.terminator_kind().mentions(self.tcx).iter().rev() {
             if mention.kind.intersects(MirPlaceMentionKind::LIVENESS_USE) {
-                new_output_success.add(self.place_numbering, mention.place);
-                new_output_unwind.add(self.place_numbering, mention.place);
+                new_output_success.add_place(self.place_numbering, mention.place);
+                new_output_unwind.add_place(self.place_numbering, mention.place);
             }
 
             if mention.kind.intersects(MirPlaceMentionKind::LIVENESS_INIT) {
-                new_output_success.remove(self.place_numbering, mention.place);
+                new_output_success.remove_place(self.place_numbering, mention.place);
             }
         }
 
@@ -109,7 +109,7 @@ impl<'g> ForwardsDataflowAnalysis<'g> for OccupancyAnalysis<'g> {
 
         if is_entry {
             for local in self.body.arg_locals() {
-                set.add(self.place_numbering, MirPlace::new(self.tcx, local, []));
+                set.add_place(self.place_numbering, MirPlace::new(self.tcx, local, []));
             }
         }
 
@@ -152,11 +152,11 @@ impl<'g> ForwardsDataflowAnalysis<'g> for OccupancyAnalysis<'g> {
 
         for mention in stmt.kind().mentions(self.tcx) {
             if mention.kind.intersects(MirPlaceMentionKind::OCCUPANCY_ADD) {
-                output.add(self.place_numbering, mention.place);
+                output.add_place(self.place_numbering, mention.place);
             }
 
             if mention.kind.intersects(MirPlaceMentionKind::OCCUPANCY_DEAD) {
-                output.remove(self.place_numbering, mention.place);
+                output.remove_place(self.place_numbering, mention.place);
             }
         }
     }
@@ -172,12 +172,12 @@ impl<'g> ForwardsDataflowAnalysis<'g> for OccupancyAnalysis<'g> {
 
         for mention in block.terminator_kind().mentions(self.tcx) {
             if mention.kind.intersects(MirPlaceMentionKind::OCCUPANCY_ADD) {
-                new_output_success.add(self.place_numbering, mention.place);
+                new_output_success.add_place(self.place_numbering, mention.place);
             }
 
             if mention.kind.intersects(MirPlaceMentionKind::OCCUPANCY_DEAD) {
-                new_output_success.remove(self.place_numbering, mention.place);
-                new_output_unwind.remove(self.place_numbering, mention.place);
+                new_output_success.remove_place(self.place_numbering, mention.place);
+                new_output_unwind.remove_place(self.place_numbering, mention.place);
             }
         }
 

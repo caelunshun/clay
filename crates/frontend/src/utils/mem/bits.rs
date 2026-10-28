@@ -1,6 +1,6 @@
-use std::{cmp::Ordering, ops::Range};
+use std::{cmp::Ordering, iter, range::Range};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct BitRange(pub Range<u64>);
 
 impl BitRange {
@@ -8,8 +8,8 @@ impl BitRange {
         Self(range)
     }
 
-    pub fn new_u32(range: Range<u32>) -> Self {
-        Self(range.start.into()..range.end.into())
+    pub fn new_usize(range: Range<usize>) -> Self {
+        Self((range.start as u64..range.end as u64).into())
     }
 
     pub fn bit_range(&self) -> Range<u64> {
@@ -25,7 +25,7 @@ impl BitRange {
     }
 
     pub fn word_range(&self) -> Range<usize> {
-        self.lo_word()..self.hi_word_excl()
+        (self.lo_word()..self.hi_word_excl()).into()
     }
 
     pub fn lo_word(&self) -> usize {
@@ -38,7 +38,7 @@ impl BitRange {
 
     pub fn sub_range(&self, word: usize) -> Range<u32> {
         let lo = match word.cmp(&self.lo_word()) {
-            Ordering::Less => return 0..0,
+            Ordering::Less => return (0..0).into(),
             Ordering::Equal => (self.lo_bit() % 64) as u32,
             Ordering::Greater => 0,
         };
@@ -46,10 +46,10 @@ impl BitRange {
         let hi = match word.cmp(&self.hi_word_excl().saturating_sub(1)) {
             Ordering::Less => 64,
             Ordering::Equal => (self.hi_bit_excl() % 64) as u32,
-            Ordering::Greater => return 0..0,
+            Ordering::Greater => return (0..0).into(),
         };
 
-        lo..hi
+        (lo..hi).into()
     }
 }
 
@@ -61,4 +61,23 @@ pub fn bit_mask(range: Range<u32>) -> u64 {
 
 pub fn right_ones(count: u32) -> u64 {
     1u64.unbounded_shl(count).wrapping_sub(1)
+}
+
+pub fn bit_iter(vec: &[u64]) -> impl Iterator<Item = usize> {
+    vec.iter().enumerate().flat_map(move |(word_idx, &word)| {
+        let word_base = word_idx * 64;
+        bit_iter_single(word).map(move |rel_idx| word_base + rel_idx)
+    })
+}
+
+pub fn bit_iter_single(mut word: u64) -> impl Iterator<Item = usize> {
+    iter::from_fn(move || {
+        if word == 0 {
+            return None;
+        }
+
+        let idx = word.trailing_zeros();
+        word ^= 1 << idx;
+        Some(idx as usize)
+    })
 }

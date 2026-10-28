@@ -1,0 +1,6 @@
+error: oh no! _18 = move(_6) == move(_17); // Simple(reject_site_pollution.clay:60:19-20)
+
+error: oh no! _30 = &mut _6; // Simple(reject_site_pollution.clay:69:11-13)
+
+error: oh no! _34 = *move(_31); // Simple(reject_site_pollution.clay:69:11-13)
+

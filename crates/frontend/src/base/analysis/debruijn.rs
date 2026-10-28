@@ -1,5 +1,5 @@
 use derive_where::derive_where;
-use std::{num::NonZeroU32, ops::Range};
+use std::{num::NonZeroU32, range::Range};
 
 const OVERFLOW_ERR: &str = "overflowed debruijn index";
 
@@ -120,8 +120,8 @@ impl DebruijnAbsoluteRange {
     }
 
     #[must_use]
-    pub const fn range(self) -> Range<DebruijnAbsolute> {
-        self.start()..self.end()
+    pub fn range(self) -> Range<DebruijnAbsolute> {
+        (self.start()..self.end()).into()
     }
 }
 

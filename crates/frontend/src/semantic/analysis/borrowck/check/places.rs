@@ -6,20 +6,25 @@ use crate::{
     },
     utils::{
         format::DebugAsDisplay,
-        mem::{BitRange, bit_mask},
+        lang::RangeExt,
+        mem::{BitRange, bit_iter, bit_mask},
     },
 };
 use clay_core::FastHashMap;
 use index_vec::{IndexSlice, IndexVec, define_index_type};
 use smallvec::SmallVec;
-use std::{fmt, ops::Range};
+use std::{fmt, range::Range};
 
 // === PlaceNumbering === //
 
+define_index_type! {
+    pub struct AtomicSubPlaceIdx = u32;
+}
+
 #[derive(Debug, Clone)]
 pub struct PlaceNumbering {
-    pub place_to_range: FastHashMap<MirPlace, Range<u32>>,
-    pub bit_to_place: Vec<MirPlace>,
+    pub place_to_range: FastHashMap<MirPlace, Range<AtomicSubPlaceIdx>>,
+    pub bit_to_place: IndexVec<AtomicSubPlaceIdx, MirPlace>,
 }
 
 #[derive(Clone)]
@@ -153,7 +158,7 @@ impl PlaceNumberingBuilder {
         ) -> bool {
             let node = &nodes[node];
 
-            let first_field = numbering.bit_to_place.len() as u32;
+            let first_field = AtomicSubPlaceIdx::from_usize(numbering.bit_to_place.len());
 
             // A place is structurally live if all its children are structurally live.
             let mut structural_liveness = true;
@@ -184,11 +189,11 @@ impl PlaceNumberingBuilder {
             }
 
             if let Some(place) = node.mention {
-                let next_field = numbering.bit_to_place.len() as u32;
+                let next_field = AtomicSubPlaceIdx::from_usize(numbering.bit_to_place.len());
 
                 numbering
                     .place_to_range
-                    .insert(place, first_field..next_field);
+                    .insert(place, (first_field..next_field).into());
             }
 
             structural_liveness
@@ -196,7 +201,7 @@ impl PlaceNumberingBuilder {
 
         let mut numbering = PlaceNumbering {
             place_to_range: FastHashMap::default(),
-            bit_to_place: Vec::new(),
+            bit_to_place: IndexVec::new(),
         };
 
         for idx in 0..self.local_count {
@@ -274,8 +279,23 @@ impl PlaceSet {
         }
     }
 
-    pub fn add(&mut self, numbering: &PlaceNumbering, place: MirPlace) {
-        let bits = BitRange::new_u32(numbering.place_to_range[&place].clone());
+    pub fn clear(&mut self) {
+        self.bits.clear();
+    }
+
+    pub fn fill(&mut self, numbering: &PlaceNumbering) {
+        self.clear();
+        self.add_range(
+            Range::from(0..numbering.bit_to_place.len()).map(AtomicSubPlaceIdx::from_usize),
+        );
+    }
+
+    pub fn add_one(&mut self, idx: AtomicSubPlaceIdx) {
+        self.add_range((idx..(idx + 1)).into());
+    }
+
+    pub fn add_range(&mut self, range: Range<AtomicSubPlaceIdx>) {
+        let bits = BitRange::new_usize(range.map(|v| v.index()));
 
         if bits.hi_word_excl() > self.bits.len() {
             self.bits.resize(bits.hi_word_excl(), 0);
@@ -288,8 +308,16 @@ impl PlaceSet {
         }
     }
 
-    pub fn remove(&mut self, numbering: &PlaceNumbering, place: MirPlace) {
-        let bits = BitRange::new_u32(numbering.place_to_range[&place].clone());
+    pub fn add_place(&mut self, numbering: &PlaceNumbering, place: MirPlace) {
+        self.add_range(numbering.place_to_range[&place]);
+    }
+
+    pub fn remove_one(&mut self, idx: AtomicSubPlaceIdx) {
+        self.remove_range((idx..(idx + 1)).into());
+    }
+
+    pub fn remove_range(&mut self, range: Range<AtomicSubPlaceIdx>) {
+        let bits = BitRange::new_usize(range.map(|v| v.index()));
 
         if bits.hi_word_excl() > self.bits.len() {
             self.bits.resize(bits.hi_word_excl(), 0);
@@ -302,17 +330,29 @@ impl PlaceSet {
         }
     }
 
-    pub fn has(&self, numbering: &PlaceNumbering, place: MirPlace) -> bool {
-        let bits = BitRange::new_u32(numbering.place_to_range[&place].clone());
+    pub fn remove_place(&mut self, numbering: &PlaceNumbering, place: MirPlace) {
+        self.remove_range(numbering.place_to_range[&place]);
+    }
+
+    pub fn has_one(&self, idx: AtomicSubPlaceIdx) -> bool {
+        self.has_range((idx..(idx + 1)).into())
+    }
+
+    pub fn has_range(&self, range: Range<AtomicSubPlaceIdx>) -> bool {
+        let bits = BitRange::new_usize(range.map(|v| v.index()));
 
         if bits.hi_word_excl() > self.bits.len() {
             return false;
         }
 
-        bits.word_range().all(|word| {
+        bits.word_range().into_iter().all(|word| {
             let mask = bit_mask(bits.sub_range(word));
             self.bits[word] & mask == mask
         })
+    }
+
+    pub fn has_place(&self, numbering: &PlaceNumbering, place: MirPlace) -> bool {
+        self.has_range(numbering.place_to_range[&place])
     }
 
     pub fn union(&mut self, other: &Self) {
@@ -344,6 +384,10 @@ impl PlaceSet {
             *lhs &= !rhs;
         }
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = AtomicSubPlaceIdx> {
+        bit_iter(&self.bits).map(AtomicSubPlaceIdx::from_usize)
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -358,7 +402,7 @@ impl fmt::Display for PlaceSetPrettyFmt<'_> {
         let mut f = f.debug_list();
 
         for place in self.numbering.place_to_range.keys().copied() {
-            if !self.set.has(self.numbering, place) {
+            if !self.set.has_place(self.numbering, place) {
                 continue;
             }
 

@@ -10,3 +10,19 @@ error:
       RHS: std::FnOnce<(u(17) T,), u(17) T>
         - no suitable impl met
 
+error: oh no! _9 = &_7; // Simple(test21.clay:56:9-11)
+
+error: oh no! _12 = &_8; // Simple(test21.clay:58:14-16)
+
+error: oh no! _21 = &_7; // Simple(test21.clay:64:14-16)
+
+error: oh no! _18 = call(move(_16), [move(_21)]) goto bb47v1 unwind bb48v1; // Todo
+
+error: oh no! _22 = &_8; // Simple(test21.clay:66:14-16)
+
+error: oh no! _18 = call(move(_16), [move(_22)]) goto bb54v1 unwind bb55v1; // Todo
+
+error: oh no! _28 = call(move(_24), [move(_29)]) goto bb70v1 unwind bb71v1; // Todo
+
+error: oh no! _35 = call(move(_31), [move(_36)]) goto bb83v1 unwind bb84v1; // Todo
+

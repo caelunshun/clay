@@ -70,3 +70,5 @@ note: name previously used here
 5 │ pub trait Meow<'a, 'b, 'a, Foo, Bar, Baz, Foo> {
   │                                      ^^^
 
+error: oh no! _7 = (move(_3), move(_5), move(_3)); // Simple(reused_name.clay:2:21-30)
+

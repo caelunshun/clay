@@ -6,7 +6,7 @@ use crate::{
     },
     semantic::syntax::{
         AdtCtor, AdtItem, FloatKind, FnItem, HrtbDebruijn, ImplItem, IntKind, LocalNameIdent,
-        MirLocalIdx, Mutability, RegionGeneric, RelationDirection, SigHrtbBinder, SigTraitClause,
+        MirPlace, Mutability, RegionGeneric, RelationDirection, SigHrtbBinder, SigTraitClause,
         SimpleTyKind, TraitItem, TyCtxt, TyOrReKind, TypeGeneric,
     },
     symbol,
@@ -200,7 +200,7 @@ pub enum UniversalReVarSourceInfo {
     ElaboratedLub,
     InstantiatedHrtbVar,
     HrtbWf { binder: SigHrtbBinder, idx: u32 },
-    MirLocal(MirLocalIdx),
+    MirPlace(MirPlace),
 }
 
 pub type UniversalTyProj = Intern<UniversalTyProjInner>;

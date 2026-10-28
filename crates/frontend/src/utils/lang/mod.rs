@@ -12,3 +12,6 @@ pub use self::iterator::*;
 
 mod match_pair;
 pub use self::match_pair::*;
+
+mod range;
+pub use self::range::*;

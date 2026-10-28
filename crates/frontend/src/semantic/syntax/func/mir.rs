@@ -294,19 +294,43 @@ impl MirBodyCfg {
 
     pub fn push_stmt(&mut self, block: MirBlockIdx, stmt: MirStmt) -> MirStmtIdx {
         let idx = self.create_stmt();
-        self.move_stmt_before(idx, MirLocationBefore::Terminator(block));
+        self.move_single_stmt_before(idx, MirLocationBefore::Terminator(block));
         self.init_stmt(idx, stmt);
         idx
     }
 
-    pub fn move_stmt_after(&mut self, idx: MirStmtIdx, after: MirLocationAfter) {
-        self.unlink_mir_stmt(idx);
-
-        todo!();
+    pub fn after_to_before(&self, after: MirLocationAfter) -> MirLocationBefore {
+        match after {
+            MirLocationAfter::BlockStart(block) => match self.block_first(block) {
+                Some(first) => MirLocationBefore::Stmt(first),
+                None => MirLocationBefore::Terminator(block),
+            },
+            MirLocationAfter::Stmt(after_stmt) => match self.stmt_next(after_stmt) {
+                Some(subsequent) => MirLocationBefore::Stmt(subsequent),
+                None => MirLocationBefore::Terminator(self.stmt_block(after_stmt).unwrap()),
+            },
+        }
     }
 
-    pub fn move_stmt_before(&mut self, idx: MirStmtIdx, before: MirLocationBefore) {
-        self.unlink_mir_stmt(idx);
+    pub fn before_to_after(&self, before: MirLocationBefore) -> MirLocationAfter {
+        match before {
+            MirLocationBefore::Terminator(block) => match self.block_last(block) {
+                Some(last) => MirLocationAfter::Stmt(last),
+                None => MirLocationAfter::BlockStart(block),
+            },
+            MirLocationBefore::Stmt(before_stmt) => match self.stmt_prev(before_stmt) {
+                Some(predecessor) => MirLocationAfter::Stmt(predecessor),
+                None => MirLocationAfter::BlockStart(self.stmt_block(before_stmt).unwrap()),
+            },
+        }
+    }
+
+    pub fn move_single_stmt_after(&mut self, idx: MirStmtIdx, after: MirLocationAfter) {
+        self.move_single_stmt_before(idx, self.after_to_before(after));
+    }
+
+    pub fn move_single_stmt_before(&mut self, idx: MirStmtIdx, before: MirLocationBefore) {
+        self.unlink_single_mir_stmt(idx);
 
         match before {
             MirLocationBefore::Terminator(block) => {
@@ -352,7 +376,7 @@ impl MirBodyCfg {
         }
     }
 
-    pub fn unlink_mir_stmt(&mut self, idx: MirStmtIdx) {
+    pub fn unlink_single_mir_stmt(&mut self, idx: MirStmtIdx) {
         let Some(block) = self.stmts[idx].block.take() else {
             return;
         };

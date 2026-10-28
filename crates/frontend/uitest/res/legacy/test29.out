@@ -40,3 +40,5 @@ error:
         - infer ty leaks HRTB var
           var: ?(2) _
 
+error: oh no! _0 = use(move(_3)); // Simple(test29.clay:33:5-10)
+

@@ -124,7 +124,7 @@ impl fmt::Display for ClausePrettyFmt<'_, '_, UniversalReVar> {
             UniversalReVarSourceInfo::ElaboratedLub
             | UniversalReVarSourceInfo::InstantiatedHrtbVar
             | UniversalReVarSourceInfo::HrtbWf { .. }
-            | UniversalReVarSourceInfo::MirLocal(..) => {
+            | UniversalReVarSourceInfo::MirPlace(..) => {
                 write!(f, "'u{}", self.value.index())
             }
         }

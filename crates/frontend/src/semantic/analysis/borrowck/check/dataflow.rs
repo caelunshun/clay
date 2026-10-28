@@ -1,6 +1,7 @@
 use crate::{
     semantic::syntax::{
-        MirBlockIdx, MirBlockRef, MirBody, MirBodyDirection, MirPrettyFmt, MirStmtIdx, MirStmtRef,
+        MirBlockIdx, MirBlockRef, MirBody, MirBodyDirection, MirLocationAfter, MirLocationBefore,
+        MirPrettyFmt, MirStmtIdx, MirStmtRef,
     },
     utils::mem::{DisjointBorrowsScratch, VecOfPtrScratch},
 };
@@ -284,7 +285,18 @@ pub trait BackwardsDataflowAnalysis<'g> {
         }
 
         // Run dataflow
+        let mut seed_worklist_remaining = scratch.worklist.len();
+
         while let Some(curr) = scratch.worklist.pop_front() {
+            // We can determine whether this was a seed worklist request by its index because we
+            // always push to the back of the queue and pull from the front.
+            let is_seed_transfer = if seed_worklist_remaining > 0 {
+                seed_worklist_remaining -= 1;
+                true
+            } else {
+                false
+            };
+
             let curr_indices = scratch.basic_block_indices[curr];
 
             // Join terminator successors
@@ -310,7 +322,9 @@ pub trait BackwardsDataflowAnalysis<'g> {
 
                 self.trans_terminator(MirBlockRef::new(body, curr), inputs, output);
 
-                if !mem::take(&mut output.is_dirty) {
+                let was_dirty = mem::take(&mut output.is_dirty);
+
+                if !was_dirty && !is_seed_transfer {
                     // The input effect to the block has not actually changed, even though its
                     // predecessors have changed.
                     continue;
@@ -611,6 +625,23 @@ impl<'a, T> DataflowView<'a, T> {
 
             mem::swap(&mut scratch_src, &mut scratch_dst);
         }
+    }
+
+    pub fn natural_before(&mut self, before: MirLocationBefore) -> &T {
+        match self.direction {
+            MirBodyDirection::Forwards => match before {
+                MirLocationBefore::Terminator(block) => self.trans_before_end(block),
+                MirLocationBefore::Stmt(stmt) => self.trans_before(stmt),
+            },
+            MirBodyDirection::Backwards => match before {
+                MirLocationBefore::Terminator(block) => self.trans_init(block),
+                MirLocationBefore::Stmt(stmt) => self.trans_after(stmt),
+            },
+        }
+    }
+
+    pub fn natural_after(&mut self, after: MirLocationAfter) -> &T {
+        self.natural_before(self.body.cfg.after_to_before(after))
     }
 
     pub fn annotated_flat_body(

@@ -3,8 +3,9 @@ use std::{
     cell::RefCell,
     fmt,
     num::{NonZero, NonZeroU32},
-    ops::{self, Add, AddAssign, Sub, SubAssign},
+    ops::{Add, AddAssign, Sub, SubAssign},
     path::PathBuf,
+    range::Range,
     rc::Rc,
 };
 
@@ -274,8 +275,8 @@ impl Span {
         Self::new(self.lo, (self.lo + len).min(self.hi))
     }
 
-    pub fn interpret_byte_range(self) -> ops::Range<usize> {
-        self.lo.usize()..self.hi.usize()
+    pub fn interpret_byte_range(self) -> Range<usize> {
+        (self.lo.usize()..self.hi.usize()).into()
     }
 
     pub fn not_dummy(self) -> Option<Span> {

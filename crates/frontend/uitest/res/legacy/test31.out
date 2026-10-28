@@ -4,3 +4,5 @@ error: type must be known by this point
 59 │             count: 0.gc,
    │                      ^^
 
+error: oh no! _9 = *move(_6); // Simple(test31.clay:66:20-22)
+
