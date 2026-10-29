@@ -12,11 +12,11 @@ bb2v1:
     storage-live(_1); // Todo
     // live: []; occupied: []
     _1 = Number(TokenNumLit { span: bar.clay:2:15-16, kind: Integral { base: Decimal, value: "1"#24, suffix: None } }) :: <type>; // Simple(bar.clay:2:15-16)
-    // live: []; occupied: [_1]
+    // live: [_1]; occupied: [_1]
     storage-live(_2); // Todo
-    // live: []; occupied: [_1]
+    // live: [_1]; occupied: [_1]
     storage-live(_3); // Todo
-    // live: []; occupied: [_1]
+    // live: [_1]; occupied: [_1]
     goto(bb3v1); // Todo
 
 bb3v1:
@@ -26,7 +26,7 @@ bb3v1:
 bb4v1:
     // live: [_1]; occupied: [_1]
     _3 = &_1; // Todo
-    // live: []; occupied: [_1, _3]
+    // live: [_1, _3]; occupied: [_1, _3]
     goto(bb6v1); // Todo
 
 bb5v1:

@@ -333,46 +333,44 @@ pub trait BackwardsDataflowAnalysis<'g> {
 
             // Transition statements
             // N.B. No, this is not a typo. We're referring to statements by their iteration order!
-            let [Some(first_stmt), Some(last_stmt)] = [
+            if let [Some(first_stmt), Some(last_stmt)] = [
                 body.cfg.block_natural_last(curr),
                 body.cfg.block_natural_first(curr),
-            ] else {
-                continue;
-            };
+            ] {
+                let [first_stmt_slot, last_stmt_slot] = scratch
+                    .effect_elems
+                    .get_disjoint_mut([
+                        curr_indices.seed_idx as usize,
+                        curr_indices.aux_idx as usize,
+                    ])
+                    .unwrap();
 
-            let [first_stmt_slot, last_stmt_slot] = scratch
-                .effect_elems
-                .get_disjoint_mut([
-                    curr_indices.seed_idx as usize,
-                    curr_indices.aux_idx as usize,
-                ])
-                .unwrap();
+                let [scratch_src, scratch_dst] = scratch.stmt_tmp_effects.as_mut().unwrap();
+                let mut scratch_src = scratch_src;
+                let mut scratch_dst = scratch_dst;
 
-            let [scratch_src, scratch_dst] = scratch.stmt_tmp_effects.as_mut().unwrap();
-            let mut scratch_src = scratch_src;
-            let mut scratch_dst = scratch_dst;
+                for stmt in body.cfg.block_stmts(curr, MirBodyDirection::Backwards) {
+                    self.trans_stmt(
+                        MirStmtRef::new(body, stmt),
+                        if stmt == first_stmt {
+                            &first_stmt_slot.value
+                        } else {
+                            &scratch_src.value
+                        },
+                        if stmt == last_stmt {
+                            last_stmt_slot
+                        } else {
+                            scratch_dst
+                        },
+                    );
 
-            for stmt in body.cfg.block_stmts(curr, MirBodyDirection::Backwards) {
-                self.trans_stmt(
-                    MirStmtRef::new(body, stmt),
-                    if stmt == first_stmt {
-                        &first_stmt_slot.value
-                    } else {
-                        &scratch_src.value
-                    },
-                    if stmt == last_stmt {
-                        last_stmt_slot
-                    } else {
-                        scratch_dst
-                    },
-                );
+                    mem::swap(&mut scratch_src, &mut scratch_dst);
+                }
 
-                mem::swap(&mut scratch_src, &mut scratch_dst);
-            }
-
-            if !mem::take(&mut last_stmt_slot.is_dirty) {
-                // The `aux_idx` hasn't changed so our predecessors won't observe a change.
-                continue;
+                if !mem::take(&mut last_stmt_slot.is_dirty) {
+                    // The `aux_idx` hasn't changed so our predecessors won't observe a change.
+                    continue;
+                }
             }
 
             // Add predecessors to worklist.
@@ -514,10 +512,7 @@ impl<'a, T> DataflowView<'a, T> {
     }
 
     pub fn trans_before_end(&mut self, block: MirBlockIdx) -> &T {
-        let before_end = match self.direction {
-            MirBodyDirection::Forwards => self.body.cfg.block_natural_last(block),
-            MirBodyDirection::Backwards => self.body.cfg.block_natural_first(block),
-        };
+        let before_end = self.body.cfg.block_dir_last(self.direction, block);
 
         if let Some(prev) = before_end {
             self.trans_after(prev)
@@ -528,11 +523,7 @@ impl<'a, T> DataflowView<'a, T> {
 
     pub fn trans_before(&mut self, target: MirStmtIdx) -> &T {
         let block = self.body.cfg.stmt_block(target).unwrap();
-
-        let prev = match self.direction {
-            MirBodyDirection::Forwards => self.body.cfg.stmt_natural_prev(target),
-            MirBodyDirection::Backwards => self.body.cfg.stmt_natural_next(target),
-        };
+        let prev = self.body.cfg.stmt_dir_prev(self.direction, target);
 
         if let Some(prev) = prev {
             self.trans_after(prev)
