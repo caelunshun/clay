@@ -231,13 +231,6 @@ pub struct MirBlockLink {
     pub at_idx: usize,
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct MirSuccessorId {
-    pub source: MirBlockIdx,
-    pub out_idx: usize,
-    pub target: MirBlockIdx,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct MirBodyCfg {
     blocks: SlotMap<MirBlockIdx, MirBlockNode>,
@@ -1238,25 +1231,45 @@ pub enum MirPlaceElem {
 pub struct MirPrettyFmt<'a> {
     pub tcx: &'a TyCtxt,
     pub body: &'a MirBody,
-    pub hooks: MirPrettyFmtHooks<'a>,
+    pub hooks: &'a (dyn 'a + MirPrettyFmtHooks),
 }
 
-type MirPrettyFmtHookFn<'a, T> =
-    Option<&'a (dyn 'a + Fn(&MirPrettyFmt<'_>, &mut fmt::Formatter<'_>, T) -> fmt::Result)>;
+pub trait MirPrettyFmtHooks {
+    fn start_of_block(
+        &self,
+        cx: &MirPrettyFmt<'_>,
+        f: &mut fmt::Formatter<'_>,
+        block: MirBlockIdx,
+    ) -> fmt::Result {
+        _ = (cx, f, block);
+        Ok(())
+    }
 
-#[derive(Default, Copy, Clone)]
-pub struct MirPrettyFmtHooks<'a> {
-    pub bb_successor: MirPrettyFmtHookFn<'a, MirSuccessorId>,
-    pub start_of_block: MirPrettyFmtHookFn<'a, MirBlockIdx>,
-    pub after_stmt: MirPrettyFmtHookFn<'a, MirStmtIdx>,
+    fn after_stmt(
+        &self,
+        cx: &MirPrettyFmt<'_>,
+        f: &mut fmt::Formatter<'_>,
+        stmt: MirStmtIdx,
+    ) -> fmt::Result {
+        _ = (cx, f, stmt);
+        Ok(())
+    }
 }
 
 impl<'a> MirPrettyFmt<'a> {
+    pub const NO_HOOKS: &'static dyn MirPrettyFmtHooks = {
+        struct Impl;
+
+        impl MirPrettyFmtHooks for Impl {}
+
+        &Impl
+    };
+
     pub fn new(tcx: &'a TyCtxt, body: &'a MirBody) -> Self {
         Self {
             tcx,
             body,
-            hooks: MirPrettyFmtHooks::default(),
+            hooks: Self::NO_HOOKS,
         }
     }
 
@@ -1266,6 +1279,17 @@ impl<'a> MirPrettyFmt<'a> {
 
     pub fn session(&self) -> &'a Session {
         &self.tcx.session
+    }
+
+    pub fn with_hooks<'b>(self, hooks: &'b dyn MirPrettyFmtHooks) -> MirPrettyFmt<'b>
+    where
+        'a: 'b,
+    {
+        MirPrettyFmt {
+            tcx: self.tcx,
+            body: self.body,
+            hooks,
+        }
     }
 
     pub fn body(&self) -> &'a MirBody {
@@ -1644,16 +1668,20 @@ impl<'a> MirPrettyFmt<'a> {
                 )?;
                 f.change_level_now(4)?;
 
-                if let Some(hook) = self.hooks.start_of_block {
-                    writeln!(f, "{}", FormatFn(|f| hook(self, f, block.block)))?;
-                }
+                write!(
+                    f,
+                    "{}",
+                    FormatFn(|f| self.hooks.start_of_block(self, f, block.block))
+                )?;
 
                 for stmt in block.stmts(MirBodyDirection::Forwards) {
                     writeln!(f, "{}", self.plain_stmt(stmt.stmt()))?;
 
-                    if let Some(hook) = self.hooks.after_stmt {
-                        writeln!(f, "{}", FormatFn(|f| hook(self, f, stmt.stmt)))?;
-                    }
+                    write!(
+                        f,
+                        "{}",
+                        FormatFn(|f| self.hooks.after_stmt(self, f, stmt.stmt))
+                    )?;
                 }
 
                 if let Some(terminator) = block.opt_terminator() {

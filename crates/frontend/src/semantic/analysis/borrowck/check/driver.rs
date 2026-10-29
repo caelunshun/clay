@@ -17,19 +17,23 @@ use crate::{
             },
             sigck::CrateSigckVisitor,
         },
-        infer::{ClauseCx, ClauseImportEnv, GenericSubst, MirSpannedError, UnifyCxMode},
+        infer::{
+            ClauseCx, ClauseImportEnv, ClausePrettyFmtOpts, GenericSubst, MirSpannedError,
+            UnifyCxMode,
+        },
         syntax::{
-            AdtInstance, FnDef, MirBody, MirBodyDirection, MirLocalIdx, MirLocationAfter, MirPlace,
-            MirPlaceElem, MirPlaceMention, MirPlaceMentionKind, MirPrettyFmt, MirRvalue,
-            MirSourceInfo, MirStmtKind, MirStraightBinOpKind, MirTerminatorKind, Re,
-            RelationDirection, RelationMode, ResolvedFieldIdx, SimpleTyKind, TraverseMentions, Ty,
-            TyCtxt, TyKind, UniversalReVarSourceInfo,
+            AdtInstance, FnDef, MirBlockIdx, MirBody, MirBodyDirection, MirLocalIdx,
+            MirLocationAfter, MirPlace, MirPlaceElem, MirPlaceMention, MirPlaceMentionKind,
+            MirPrettyFmt, MirPrettyFmtHooks, MirRvalue, MirSourceInfo, MirStmtIdx, MirStmtKind,
+            MirStraightBinOpKind, MirTerminatorKind, Re, RelationDirection, RelationMode,
+            ResolvedFieldIdx, SimpleTyKind, TraverseMentions, Ty, TyCtxt, TyKind, TyOrRe,
+            UniversalReVarSourceInfo,
         },
     },
-    utils::lang::RangeExt,
+    utils::lang::NewtypedRangeExt as _,
 };
 use index_vec::IndexVec;
-use std::fmt::{self, Display as _};
+use std::{cell::RefCell, fmt};
 
 pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     let s = cx.session();
@@ -96,11 +100,63 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     let fmt_cx = MirPrettyFmt::new(tcx, body);
 
     if flags::should_print_mir_dataflow() {
+        pub struct FmtHooks<'r, 'a> {
+            liveness_iter: RefCell<&'r mut DataflowView<'a, PlaceSet>>,
+            occupancy_iter: RefCell<&'r mut DataflowView<'a, PlaceSet>>,
+            place_numbering: &'r PlaceNumbering,
+        }
+
+        impl FmtHooks<'_, '_> {
+            fn print_at(
+                &self,
+                cx: &MirPrettyFmt<'_>,
+                f: &mut fmt::Formatter,
+                place: MirLocationAfter,
+            ) -> fmt::Result {
+                writeln!(
+                    f,
+                    "live: {}; occupied: {}",
+                    self.liveness_iter
+                        .borrow_mut()
+                        .natural_after(place)
+                        .pretty(cx, self.place_numbering),
+                    self.occupancy_iter
+                        .borrow_mut()
+                        .natural_after(place)
+                        .pretty(cx, self.place_numbering)
+                )
+            }
+        }
+
+        impl<'r, 'a> MirPrettyFmtHooks for FmtHooks<'r, 'a> {
+            fn start_of_block(
+                &self,
+                cx: &MirPrettyFmt<'_>,
+                f: &mut fmt::Formatter<'_>,
+                block: MirBlockIdx,
+            ) -> fmt::Result {
+                self.print_at(cx, f, MirLocationAfter::BlockStart(block))
+            }
+
+            fn after_stmt(
+                &self,
+                cx: &MirPrettyFmt<'_>,
+                f: &mut fmt::Formatter<'_>,
+                stmt: MirStmtIdx,
+            ) -> fmt::Result {
+                self.print_at(cx, f, MirLocationAfter::Stmt(stmt))
+            }
+        }
+
         println!(
             "{}",
-            occupancy_iter.annotated_flat_body(fmt_cx, |set, f| {
-                set.pretty(&fmt_cx, &place_numbering).fmt(f)
-            })
+            fmt_cx
+                .with_hooks(&FmtHooks {
+                    liveness_iter: RefCell::new(&mut liveness_iter),
+                    occupancy_iter: RefCell::new(&mut occupancy_iter),
+                    place_numbering: &place_numbering,
+                })
+                .flat_body()
         );
     }
 
@@ -127,7 +183,7 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     let env = ccx.universal_env_for_fn_def(def);
     // TODO: add dyn-site universals to environment
 
-    let shorter_than_sig_universals = ccx.fresh_re_infer();
+    let shortest_sig_universal = ccx.fresh_re_infer();
 
     let atomic_place_universals = place_numbering
         .bit_to_atomic_place
@@ -141,18 +197,22 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
         .map(|&local| ccx.import_elsewhere(&env, local.ty))
         .collect::<IndexVec<MirLocalIdx, Ty>>();
 
-    for var in env.generics.iter().flat_map(|v| v.substs.r(s)) {
-        let Some(Re::UniversalVar(var)) = var.as_re() else {
-            continue;
-        };
-
-        ccx.ucx_mut()
-            .unify_re_and_re(
-                shorter_than_sig_universals,
-                Re::UniversalVar(var),
-                RelationMode::LhsOntoRhs,
-            )
-            .report_never();
+    for &var in env.generics.iter().flat_map(|v| v.substs.r(s)) {
+        match var {
+            TyOrRe::Re(var) => {
+                ccx.ucx_mut()
+                    .unify_re_and_re(var, shortest_sig_universal, RelationMode::LhsOntoRhs)
+                    .report_never();
+            }
+            TyOrRe::Ty(ty) => {
+                ccx.oblige_ty_outlives_re(
+                    ty,
+                    shortest_sig_universal,
+                    RelationDirection::LhsOntoRhs,
+                )
+                .report_never();
+            }
+        }
     }
 
     // TODO: make this not `O(n^2)`.
@@ -160,8 +220,8 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
         // All locals live shorter than our signature universals
         ccx.permit_universe_re_outlives_re(
             atomic_place_universals[rhs],
-            shorter_than_sig_universals,
-            RelationDirection::LhsOntoRhs,
+            shortest_sig_universal,
+            RelationDirection::RhsOntoLhs,
         );
 
         // Determine which other *locals* the `rhs` can outlive.
@@ -270,15 +330,35 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
         }
     }
 
-    RegionTyCheckCx {
+    let mut re_tcx = RegionTyCheckCx {
         ccx: &mut ccx,
         place_numbering: &place_numbering,
         env,
         atomic_place_universals: &atomic_place_universals,
         imported_locals: &imported_locals,
         body: &body,
+    };
+
+    // FIXME: more fine-grained
+    for (local_idx, local_ty) in body.locals.indices().zip(&imported_locals) {
+        for atomic in
+            place_numbering.place_to_range[&MirPlace::new(tcx, local_idx, [])].iter_newtyped()
+        {
+            re_tcx
+                .ccx
+                .oblige_ty_outlives_re(
+                    *local_ty,
+                    atomic_place_universals[atomic],
+                    RelationDirection::LhsOntoRhs,
+                )
+                .report_never();
+        }
     }
-    .check_body();
+
+    // TODO: This is currently needed because the obligations above don't run in order.
+    re_tcx.ccx.poll_obligations();
+
+    re_tcx.check_body();
 
     ccx.verify();
 }
@@ -412,7 +492,10 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
             }
             MirRvalue::Adt(ctor, operands) => {
                 let TyKind::Adt(AdtInstance { def, params }) = *lhs.r(s) else {
-                    unreachable!()
+                    unreachable!(
+                        "expected ADT, got {}",
+                        self.ccx.pretty(ClausePrettyFmtOpts::default()).wrap(lhs)
+                    );
                 };
                 assert_eq!(def, ctor.r(s).owner.item(s));
 
@@ -446,15 +529,12 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
                 let ref_lt = self.ccx.fresh_re_infer();
                 let pointee_ty = self.check_place(*pointee);
 
-                for atomic_place in
-                    self.place_numbering.place_to_range[pointee].map(AtomicPlaceIdx::index)
-                {
-                    let atomic_place = AtomicPlaceIdx::from_usize(atomic_place);
+                for atomic_place in self.place_numbering.place_to_range[pointee].iter_newtyped() {
                     let atomic_universal = self.atomic_place_universals[atomic_place];
 
                     self.ccx
                         .ucx_mut()
-                        .unify_re_and_re(ref_lt, atomic_universal, RelationMode::LhsOntoRhs)
+                        .unify_re_and_re(atomic_universal, ref_lt, RelationMode::LhsOntoRhs)
                         .report_never();
                 }
 

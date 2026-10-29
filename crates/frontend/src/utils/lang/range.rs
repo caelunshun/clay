@@ -14,3 +14,17 @@ impl<T> RangeExt for Range<T> {
         (f(self.start)..f(self.end)).into()
     }
 }
+
+pub trait NewtypedRangeExt: Extension<Range<Self::Idx>> {
+    type Idx: index_vec::Idx;
+
+    fn iter_newtyped(self) -> impl ExactSizeIterator<Item = Self::Idx> + DoubleEndedIterator;
+}
+
+impl<T: index_vec::Idx> NewtypedRangeExt for Range<T> {
+    type Idx = T;
+
+    fn iter_newtyped(self) -> impl ExactSizeIterator<Item = Self::Idx> + DoubleEndedIterator {
+        self.map(T::index).into_iter().map(T::from_usize)
+    }
+}

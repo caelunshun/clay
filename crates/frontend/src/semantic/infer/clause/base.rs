@@ -171,6 +171,19 @@ struct UniversalTyProjDescriptor {
     elaboration: Option<UniversalElaboration>,
 }
 
+// TODO: ensure that...
+//
+// - type unifies type
+// - region outlives region
+// - type outlives region (or vice versa)
+//
+// Either run immediately or, in the case of type-outlives-region, pushes its eventual region
+// constraints such that they exist in proper program order. We rely on this property to, e.g.,
+// ensure that errors never occur for setup operations with `.report_never` and instead occur as
+// the result of explicit user operations.
+//
+// Maybe use `enqueue_xxx` and `assert_xxx` or similar phrasing to make this distinction more
+// obvious.
 impl<'tcx> ClauseCx<'tcx> {
     pub fn new(
         tcx: &'tcx TyCtxt,

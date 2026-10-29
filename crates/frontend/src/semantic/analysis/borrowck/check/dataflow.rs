@@ -1,14 +1,14 @@
 use crate::{
     semantic::syntax::{
         MirBlockIdx, MirBlockRef, MirBody, MirBodyDirection, MirLocationAfter, MirLocationBefore,
-        MirPrettyFmt, MirStmtIdx, MirStmtRef,
+        MirStmtIdx, MirStmtRef,
     },
     utils::mem::{DisjointBorrowsScratch, VecOfPtrScratch},
 };
 use bytemuck::TransparentWrapper;
 use derive_where::derive_where;
 use slotmap::SecondaryMap;
-use std::{cell::RefCell, collections::VecDeque, fmt, marker::PhantomData, mem};
+use std::{collections::VecDeque, marker::PhantomData, mem};
 
 // === DataflowAnalysis === //
 
@@ -642,41 +642,6 @@ impl<'a, T> DataflowView<'a, T> {
 
     pub fn natural_after(&mut self, after: MirLocationAfter) -> &T {
         self.natural_before(self.body.cfg.after_to_before(after))
-    }
-
-    pub fn annotated_flat_body(
-        &mut self,
-        cx: MirPrettyFmt<'_>,
-        fmt_state: impl Fn(&T, &mut fmt::Formatter<'_>) -> fmt::Result,
-    ) -> String {
-        let me = RefCell::new(self);
-
-        // Forces a coercion.
-        let mut cx = cx;
-
-        let start_of_block =
-            |_cx: &MirPrettyFmt<'_>, f: &mut fmt::Formatter<'_>, block: MirBlockIdx| {
-                let me = me.borrow();
-                let state = me.trans_init(block);
-
-                fmt_state(state, f)?;
-
-                Ok(())
-            };
-
-        cx.hooks.start_of_block = Some(&start_of_block);
-
-        let after_stmt = |_cx: &MirPrettyFmt<'_>, f: &mut fmt::Formatter<'_>, stmt: MirStmtIdx| {
-            let mut me = me.borrow_mut();
-            let state = me.trans_after(stmt);
-
-            fmt_state(state, f)?;
-
-            Ok(())
-        };
-        cx.hooks.after_stmt = Some(&after_stmt);
-
-        cx.flat_body().to_string()
     }
 }
 
