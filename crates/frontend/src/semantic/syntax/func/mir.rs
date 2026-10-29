@@ -110,14 +110,14 @@ impl<'g> MirBlockRef<'g> {
     pub fn first_stmt(self) -> Option<MirStmtRef<'g>> {
         self.body
             .cfg
-            .block_first(self.block)
+            .block_natural_first(self.block)
             .map(|stmt| MirStmtRef::new(self.body, stmt))
     }
 
     pub fn last_stmt(self) -> Option<MirStmtRef<'g>> {
         self.body
             .cfg
-            .block_last(self.block)
+            .block_natural_last(self.block)
             .map(|stmt| MirStmtRef::new(self.body, stmt))
     }
 
@@ -163,14 +163,14 @@ impl<'g> MirStmtRef<'g> {
     pub fn prev(self) -> Option<MirStmtRef<'g>> {
         self.body
             .cfg
-            .stmt_prev(self.stmt)
+            .stmt_natural_prev(self.stmt)
             .map(|stmt| MirStmtRef::new(self.body, stmt))
     }
 
     pub fn next(self) -> Option<MirStmtRef<'g>> {
         self.body
             .cfg
-            .stmt_next(self.stmt)
+            .stmt_natural_next(self.stmt)
             .map(|stmt| MirStmtRef::new(self.body, stmt))
     }
 
@@ -193,11 +193,18 @@ pub enum MirBodyDirection {
 
 impl MirBodyDirection {
     pub fn is_forwards(self) -> bool {
-        self == Self::Forwards
+        self == MirBodyDirection::Forwards
     }
 
     pub fn is_backwards(self) -> bool {
-        self == Self::Backwards
+        self == MirBodyDirection::Backwards
+    }
+
+    pub fn flip(self) -> Self {
+        match self {
+            MirBodyDirection::Forwards => MirBodyDirection::Backwards,
+            MirBodyDirection::Backwards => MirBodyDirection::Forwards,
+        }
     }
 }
 
@@ -294,11 +301,11 @@ impl MirBodyCfg {
 
     pub fn after_to_before(&self, after: MirLocationAfter) -> MirLocationBefore {
         match after {
-            MirLocationAfter::BlockStart(block) => match self.block_first(block) {
+            MirLocationAfter::BlockStart(block) => match self.block_natural_first(block) {
                 Some(first) => MirLocationBefore::Stmt(first),
                 None => MirLocationBefore::Terminator(block),
             },
-            MirLocationAfter::Stmt(after_stmt) => match self.stmt_next(after_stmt) {
+            MirLocationAfter::Stmt(after_stmt) => match self.stmt_natural_next(after_stmt) {
                 Some(subsequent) => MirLocationBefore::Stmt(subsequent),
                 None => MirLocationBefore::Terminator(self.stmt_block(after_stmt).unwrap()),
             },
@@ -307,11 +314,11 @@ impl MirBodyCfg {
 
     pub fn before_to_after(&self, before: MirLocationBefore) -> MirLocationAfter {
         match before {
-            MirLocationBefore::Terminator(block) => match self.block_last(block) {
+            MirLocationBefore::Terminator(block) => match self.block_natural_last(block) {
                 Some(last) => MirLocationAfter::Stmt(last),
                 None => MirLocationAfter::BlockStart(block),
             },
-            MirLocationBefore::Stmt(before_stmt) => match self.stmt_prev(before_stmt) {
+            MirLocationBefore::Stmt(before_stmt) => match self.stmt_natural_prev(before_stmt) {
                 Some(predecessor) => MirLocationAfter::Stmt(predecessor),
                 None => MirLocationAfter::BlockStart(self.stmt_block(before_stmt).unwrap()),
             },
@@ -402,36 +409,111 @@ impl MirBodyCfg {
         &self.blocks[idx].predecessors
     }
 
-    pub fn block_first(&self, idx: MirBlockIdx) -> Option<MirStmtIdx> {
+    pub fn block_natural_first(&self, idx: MirBlockIdx) -> Option<MirStmtIdx> {
         self.blocks[idx].first_stmt
     }
 
-    pub fn block_last(&self, idx: MirBlockIdx) -> Option<MirStmtIdx> {
+    pub fn block_natural_last(&self, idx: MirBlockIdx) -> Option<MirStmtIdx> {
         self.blocks[idx].last_stmt
+    }
+
+    pub fn block_dir_first(
+        &self,
+        direction: MirBodyDirection,
+        idx: MirBlockIdx,
+    ) -> Option<MirStmtIdx> {
+        match direction {
+            MirBodyDirection::Forwards => self.block_natural_first(idx),
+            MirBodyDirection::Backwards => self.block_natural_last(idx),
+        }
+    }
+
+    pub fn block_dir_last(
+        &self,
+        direction: MirBodyDirection,
+        idx: MirBlockIdx,
+    ) -> Option<MirStmtIdx> {
+        self.block_dir_first(direction.flip(), idx)
+    }
+
+    pub fn stmts_after_inclusive_interactive(
+        &self,
+        stmt: Option<MirStmtIdx>,
+        direction: MirBodyDirection,
+    ) -> MirStmtIterInteractive {
+        MirStmtIterInteractive::new(stmt, direction)
+    }
+
+    pub fn stmts_after_inclusive(
+        &self,
+        stmt: Option<MirStmtIdx>,
+        direction: MirBodyDirection,
+    ) -> MirStmtIter<'_> {
+        self.stmts_after_inclusive_interactive(stmt, direction)
+            .wrap(self)
+    }
+
+    pub fn stmts_after_exclusive_interactive(
+        &self,
+        stmt: Option<MirStmtIdx>,
+        direction: MirBodyDirection,
+    ) -> MirStmtIterInteractive {
+        self.stmts_after_inclusive_interactive(
+            stmt.and_then(|stmt| self.stmt_dir_next(direction, stmt)),
+            direction,
+        )
+    }
+
+    pub fn stmts_after_exclusive(
+        &self,
+        stmt: Option<MirStmtIdx>,
+        direction: MirBodyDirection,
+    ) -> MirStmtIter<'_> {
+        self.stmts_after_exclusive_interactive(stmt, direction)
+            .wrap(self)
     }
 
     pub fn block_stmts_interactive(
         &self,
-        idx: MirBlockIdx,
+        block: MirBlockIdx,
         direction: MirBodyDirection,
     ) -> MirStmtIterInteractive {
-        MirStmtIterInteractive::new(self, idx, direction)
+        self.stmts_after_inclusive_interactive(self.block_dir_first(direction, block), direction)
     }
 
-    pub fn block_stmts(&self, idx: MirBlockIdx, direction: MirBodyDirection) -> MirStmtIter<'_> {
-        MirStmtIter::new(self, idx, direction)
+    pub fn block_stmts(&self, block: MirBlockIdx, direction: MirBodyDirection) -> MirStmtIter<'_> {
+        self.block_stmts_interactive(block, direction).wrap(self)
     }
 
     pub fn stmt_block(&self, idx: MirStmtIdx) -> Option<MirBlockIdx> {
         self.stmts[idx].block
     }
 
-    pub fn stmt_prev(&self, idx: MirStmtIdx) -> Option<MirStmtIdx> {
+    pub fn stmt_natural_prev(&self, idx: MirStmtIdx) -> Option<MirStmtIdx> {
         self.stmts[idx].prev_stmt
     }
 
-    pub fn stmt_next(&self, idx: MirStmtIdx) -> Option<MirStmtIdx> {
+    pub fn stmt_natural_next(&self, idx: MirStmtIdx) -> Option<MirStmtIdx> {
         self.stmts[idx].next_stmt
+    }
+
+    pub fn stmt_dir_prev(
+        &self,
+        direction: MirBodyDirection,
+        idx: MirStmtIdx,
+    ) -> Option<MirStmtIdx> {
+        self.stmt_dir_next(direction.flip(), idx)
+    }
+
+    pub fn stmt_dir_next(
+        &self,
+        direction: MirBodyDirection,
+        idx: MirStmtIdx,
+    ) -> Option<MirStmtIdx> {
+        match direction {
+            MirBodyDirection::Forwards => self.stmt_natural_next(idx),
+            MirBodyDirection::Backwards => self.stmt_natural_prev(idx),
+        }
     }
 
     pub fn opt_stmt(&self, idx: MirStmtIdx) -> Option<&MirStmt> {
@@ -581,23 +663,20 @@ pub struct MirStmtIterInteractive {
 }
 
 impl MirStmtIterInteractive {
-    pub fn new(cfg: &MirBodyCfg, block: MirBlockIdx, direction: MirBodyDirection) -> Self {
+    pub fn new(first: Option<MirStmtIdx>, direction: MirBodyDirection) -> Self {
         Self {
             direction,
-            next: match direction {
-                MirBodyDirection::Forwards => cfg.block_first(block),
-                MirBodyDirection::Backwards => cfg.block_last(block),
-            },
+            next: first,
         }
+    }
+
+    pub fn wrap<'a>(self, cfg: &'a MirBodyCfg) -> MirStmtIter<'a> {
+        MirStmtIter::new(cfg, self)
     }
 
     pub fn next(&mut self, cfg: &MirBodyCfg) -> Option<MirStmtIdx> {
         let curr = self.next?;
-
-        self.next = match self.direction {
-            MirBodyDirection::Forwards => cfg.stmt_next(curr),
-            MirBodyDirection::Backwards => cfg.stmt_prev(curr),
-        };
+        self.next = cfg.stmt_dir_next(self.direction, curr);
 
         Some(curr)
     }
@@ -610,11 +689,8 @@ pub struct MirStmtIter<'a> {
 }
 
 impl<'a> MirStmtIter<'a> {
-    pub fn new(cfg: &'a MirBodyCfg, block: MirBlockIdx, direction: MirBodyDirection) -> Self {
-        Self {
-            cfg,
-            iter: MirStmtIterInteractive::new(cfg, block, direction),
-        }
+    pub fn new(cfg: &'a MirBodyCfg, iter: MirStmtIterInteractive) -> Self {
+        Self { cfg, iter }
     }
 }
 

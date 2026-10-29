@@ -272,7 +272,7 @@ pub trait BackwardsDataflowAnalysis<'g> {
         }
 
         for block in body.cfg.blocks() {
-            if body.cfg.block_first(block).is_none() {
+            if body.cfg.block_natural_first(block).is_none() {
                 continue;
             }
 
@@ -333,9 +333,10 @@ pub trait BackwardsDataflowAnalysis<'g> {
 
             // Transition statements
             // N.B. No, this is not a typo. We're referring to statements by their iteration order!
-            let [Some(first_stmt), Some(last_stmt)] =
-                [body.cfg.block_last(curr), body.cfg.block_first(curr)]
-            else {
+            let [Some(first_stmt), Some(last_stmt)] = [
+                body.cfg.block_natural_last(curr),
+                body.cfg.block_natural_first(curr),
+            ] else {
                 continue;
             };
 
@@ -514,8 +515,8 @@ impl<'a, T> DataflowView<'a, T> {
 
     pub fn trans_before_end(&mut self, block: MirBlockIdx) -> &T {
         let before_end = match self.direction {
-            MirBodyDirection::Forwards => self.body.cfg.block_last(block),
-            MirBodyDirection::Backwards => self.body.cfg.block_first(block),
+            MirBodyDirection::Forwards => self.body.cfg.block_natural_last(block),
+            MirBodyDirection::Backwards => self.body.cfg.block_natural_first(block),
         };
 
         if let Some(prev) = before_end {
@@ -529,8 +530,8 @@ impl<'a, T> DataflowView<'a, T> {
         let block = self.body.cfg.stmt_block(target).unwrap();
 
         let prev = match self.direction {
-            MirBodyDirection::Forwards => self.body.cfg.stmt_prev(target),
-            MirBodyDirection::Backwards => self.body.cfg.stmt_next(target),
+            MirBodyDirection::Forwards => self.body.cfg.stmt_natural_prev(target),
+            MirBodyDirection::Backwards => self.body.cfg.stmt_natural_next(target),
         };
 
         if let Some(prev) = prev {
@@ -570,7 +571,11 @@ impl<'a, T> DataflowView<'a, T> {
                 (scratch_a, scratch_b)
             };
 
-            for stmt in self.body.cfg.block_stmts(block, self.direction) {
+            for stmt in self
+                .body
+                .cfg
+                .stmts_after_exclusive(Some(seek_state.stmt), self.direction)
+            {
                 self.analysis
                     .trans_stmt(stmt, &scratch_src.value, scratch_dst);
 

@@ -115,7 +115,7 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
             ) -> fmt::Result {
                 writeln!(
                     f,
-                    "live: {}; occupied: {}",
+                    "// live: {}; occupied: {}",
                     self.liveness_iter
                         .borrow_mut()
                         .natural_after(place)

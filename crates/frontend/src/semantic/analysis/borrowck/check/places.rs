@@ -10,7 +10,7 @@ use crate::{
         mem::{BitRange, bit_iter, bit_mask},
     },
 };
-use clay_core::FastHashMap;
+use clay_core::FastIndexMap;
 use index_vec::{IndexSlice, IndexVec, define_index_type};
 use smallvec::SmallVec;
 use std::{fmt, range::Range};
@@ -23,7 +23,7 @@ define_index_type! {
 
 #[derive(Debug, Clone)]
 pub struct PlaceNumbering {
-    pub place_to_range: FastHashMap<MirPlace, Range<AtomicPlaceIdx>>,
+    pub place_to_range: FastIndexMap<MirPlace, Range<AtomicPlaceIdx>>,
     pub bit_to_atomic_place: IndexVec<AtomicPlaceIdx, MirPlace>,
 }
 
@@ -200,7 +200,7 @@ impl PlaceNumberingBuilder {
         }
 
         let mut numbering = PlaceNumbering {
-            place_to_range: FastHashMap::default(),
+            place_to_range: FastIndexMap::default(),
             bit_to_atomic_place: IndexVec::new(),
         };
 

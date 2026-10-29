@@ -4,72 +4,59 @@ fn() -> _0: <type> {
     let _3: <type>;
 
 [entry] bb1v1:
-    live: []; occupied: []
+    // live: []; occupied: []
     goto(bb2v1); // Todo
 
 bb2v1:
-    live: []; occupied: []
+    // live: []; occupied: []
     storage-live(_1); // Todo
-    live: []; occupied: []
+    // live: []; occupied: []
     _1 = Number(TokenNumLit { span: bar.clay:2:15-16, kind: Integral { base: Decimal, value: "1"#24, suffix: None } }) :: <type>; // Simple(bar.clay:2:15-16)
-    live: []; occupied: [_1]
+    // live: []; occupied: [_1]
     storage-live(_2); // Todo
-    live: []; occupied: [_1]
+    // live: []; occupied: [_1]
     storage-live(_3); // Todo
-    live: []; occupied: [_1]
+    // live: []; occupied: [_1]
     goto(bb3v1); // Todo
 
 bb3v1:
-    live: [_1]; occupied: [_1]
+    // live: [_1]; occupied: [_1]
     goto(bb4v1); // Todo
 
 bb4v1:
-    live: [_1]; occupied: [_1]
+    // live: [_1]; occupied: [_1]
     _3 = &_1; // Todo
-    live: []; occupied: [_3, _1]
+    // live: []; occupied: [_1, _3]
     goto(bb6v1); // Todo
 
 bb5v1:
-    live: [_3, _1]; occupied: [_3, _1]
+    // live: [_1, _3]; occupied: [_1, _3]
     _2 = late-move(*_3, possibly [_1]); // Simple(bar.clay:2:5-17)
-    live: [_3, _1]; occupied: [_2]
+    // live: []; occupied: [_2]
     _0 = (); // Simple(bar.clay:2:5-17)
-    live: []; occupied: [_2, _0]
+    // live: []; occupied: [_0, _2]
     goto(bb8v1); // BlockFallthrough
 
 bb6v1:
-    live: [_3, _1]; occupied: [_3, _1]
+    // live: [_1, _3]; occupied: [_1, _3]
     goto(bb5v1); // Todo
 
 bb7v1:
-    live: []; occupied: [_0]
+    // live: []; occupied: [_0]
     goto(bb9v1); // BlockFallthrough
 
 bb8v1:
-    live: []; occupied: [_2, _0]
+    // live: []; occupied: [_0, _2]
     storage-dead(_3); // Todo
-    live: []; occupied: [_2, _0]
+    // live: []; occupied: [_0, _2]
     storage-dead(_2); // Todo
-    live: []; occupied: [_0]
+    // live: []; occupied: [_0]
     storage-dead(_1); // Todo
-    live: []; occupied: [_0]
+    // live: []; occupied: [_0]
     goto(bb7v1); // Todo
 
 bb9v1:
-    live: []; occupied: [_0]
+    // live: []; occupied: [_0]
     return; // Todo
 
 }
-error: 
-- source info: Todo
-  ty and ty region error
-  LHS: &'?1 i32
-  RHS: &'?2 i32
-  mode: RhsOntoLhs
-    - re and re unify error
-      LHS: '?1
-      RHS: '?2
-      mode: RhsOntoLhs
-        - requires var: 'u1
-          to outlive: 'u3
-
