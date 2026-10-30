@@ -1,5 +1,5 @@
 error: 
-- source info: Simple(return_locals.clay:15:5-10)
+- source info: Simple(return_locals.clay:26:5-10)
   ty and ty region error
   LHS: &'a (u32,)
   RHS: &'?1 (u32,)

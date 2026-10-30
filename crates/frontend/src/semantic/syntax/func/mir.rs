@@ -772,7 +772,7 @@ pub enum MirRvalue {
     Zst(SigTy),
     Literal(SigTy, AstLit),
     BinaryOp(MirStraightBinOpKind, Box<(MirOperand, MirOperand)>),
-    UnaryOp(AstUnOpKind, MirOperand),
+    UnaryOp(MirStraightUnOpKind, MirOperand),
     Discriminant(MirPlace),
     DynUse(DynSiteIdx, MirOperand),
     Error(ErrorGuaranteed),
@@ -965,6 +965,43 @@ impl MirLogicalBinOpKind {
         match self {
             MirLogicalBinOpKind::And => false,
             MirLogicalBinOpKind::Or => true,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirUnOpKind {
+    Straight(MirStraightUnOpKind),
+    /// The `*` operator for dereferencing.
+    Deref,
+}
+
+impl MirUnOpKind {
+    pub fn from_ast(op: AstUnOpKind) -> Self {
+        use MirStraightUnOpKind::*;
+        use MirUnOpKind::*;
+
+        match op {
+            AstUnOpKind::Deref => Deref,
+            AstUnOpKind::Not => Straight(Not),
+            AstUnOpKind::Neg => Straight(Neg),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MirStraightUnOpKind {
+    /// The `!` operator for logical inversion
+    Not,
+    /// The `-` operator for negation
+    Neg,
+}
+
+impl MirStraightUnOpKind {
+    pub fn to_ast(self) -> AstUnOpKind {
+        match self {
+            MirStraightUnOpKind::Not => AstUnOpKind::Not,
+            MirStraightUnOpKind::Neg => AstUnOpKind::Neg,
         }
     }
 }
@@ -1297,6 +1334,16 @@ impl MirPlace {
             ),
         }
     }
+
+    pub fn truncate_to_len(self, tcx: &TyCtxt, len: usize) -> Self {
+        let s = &tcx.session;
+
+        Self::new(
+            tcx,
+            self.local,
+            self.projections.r(s)[..len].iter().copied(),
+        )
+    }
 }
 
 pub type MirPlaceElemList = Intern<[MirPlaceElem]>;
@@ -1527,7 +1574,12 @@ impl<'a> MirPrettyFmt<'a> {
                     )?;
                 }
                 MirRvalue::UnaryOp(kind, operand) => {
-                    write!(f, "{}{}", kind.punct().bare_name(), self.operand(*operand))?;
+                    write!(
+                        f,
+                        "{}{}",
+                        kind.to_ast().punct().bare_name(),
+                        self.operand(*operand)
+                    )?;
                 }
                 MirRvalue::Discriminant(place) => {
                     write!(f, "discriminant({})", self.place(*place))?;

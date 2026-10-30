@@ -8,8 +8,8 @@ use crate::{
         },
         syntax::{
             MirBinOpKind, MirLocal, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue,
-            MirScopeIdx, MirSourceInfo, ResolvedFieldIdx, SigTy, ThirBlock, ThirBlockTrailing,
-            ThirExpr, ThirExprKind, ThirStmt,
+            MirScopeIdx, MirSourceInfo, MirUnOpKind, ResolvedFieldIdx, SigTy, ThirBlock,
+            ThirBlockTrailing, ThirExpr, ThirExprKind, ThirStmt,
         },
     },
 };
@@ -169,10 +169,16 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     MirRvalueOrPlace::Place(assign_into)
                 }
             },
-            ThirExprKind::PrimitiveUnOp(op, lhs) => MirRvalueOrPlace::Rvalue(MirRvalue::UnaryOp(
-                op,
-                MirOperand::Move(self.lower_expr_place(scope, lhs, None)),
-            )),
+            ThirExprKind::PrimitiveUnOp(op, lhs) => match MirUnOpKind::from_ast(op) {
+                MirUnOpKind::Straight(op) => MirRvalueOrPlace::Rvalue(MirRvalue::UnaryOp(
+                    op,
+                    MirOperand::Move(self.lower_expr_place(scope, lhs, None)),
+                )),
+                MirUnOpKind::Deref => MirRvalueOrPlace::Place(
+                    self.lower_expr_place(scope, lhs, None)
+                        .extend(tcx, [MirPlaceElem::DerefPtr]),
+                ),
+            },
             ThirExprKind::NoOp(expr) => self.lower_expr_preferred(scope, expr, assign_into),
             ThirExprKind::Break(label, value) => {
                 let label = self.labelled_scopes[&label];

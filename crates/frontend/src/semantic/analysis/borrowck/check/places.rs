@@ -27,6 +27,15 @@ pub struct PlaceNumbering {
     pub bit_to_atomic_place: IndexVec<AtomicPlaceIdx, MirPlace>,
 }
 
+impl PlaceNumbering {
+    #[track_caller]
+    pub fn lookup_range(&self, s: &Session, place: MirPlace) -> Range<AtomicPlaceIdx> {
+        assert!(is_place_direct(s, place));
+
+        self.place_to_range[&place]
+    }
+}
+
 #[derive(Clone)]
 pub struct PlaceNumberingBuilder {
     nodes: IndexVec<TrieNodeIdx, TrieNode>,
@@ -250,12 +259,20 @@ pub fn truncate_place_to_direct(tcx: &TyCtxt, place: MirPlace) -> MirPlace {
                 .r(s)
                 .iter()
                 .copied()
-                .take_while(|v| match v {
-                    MirPlaceElem::DerefPtr => false,
-                    MirPlaceElem::Field(_) => true,
-                })
+                .take_while(|v| is_part_direct(*v))
                 .collect::<Vec<_>>(),
         ),
+    }
+}
+
+pub fn is_place_direct(s: &Session, place: MirPlace) -> bool {
+    place.projections.r(s).iter().copied().all(is_part_direct)
+}
+
+fn is_part_direct(elem: MirPlaceElem) -> bool {
+    match elem {
+        MirPlaceElem::DerefPtr => false,
+        MirPlaceElem::Field(_) => true,
     }
 }
 
@@ -308,8 +325,8 @@ impl PlaceSet {
         }
     }
 
-    pub fn add_place(&mut self, numbering: &PlaceNumbering, place: MirPlace) {
-        self.add_range(numbering.place_to_range[&place]);
+    pub fn add_place(&mut self, s: &Session, numbering: &PlaceNumbering, place: MirPlace) {
+        self.add_range(numbering.lookup_range(s, place));
     }
 
     pub fn remove_one(&mut self, idx: AtomicPlaceIdx) {
@@ -330,8 +347,8 @@ impl PlaceSet {
         }
     }
 
-    pub fn remove_place(&mut self, numbering: &PlaceNumbering, place: MirPlace) {
-        self.remove_range(numbering.place_to_range[&place]);
+    pub fn remove_place(&mut self, s: &Session, numbering: &PlaceNumbering, place: MirPlace) {
+        self.remove_range(numbering.lookup_range(s, place));
     }
 
     pub fn has_one(&self, idx: AtomicPlaceIdx) -> bool {
@@ -351,8 +368,8 @@ impl PlaceSet {
         })
     }
 
-    pub fn has_place(&self, numbering: &PlaceNumbering, place: MirPlace) -> bool {
-        self.has_range(numbering.place_to_range[&place])
+    pub fn has_place(&self, s: &Session, numbering: &PlaceNumbering, place: MirPlace) -> bool {
+        self.has_range(numbering.lookup_range(s, place))
     }
 
     pub fn union(&mut self, other: &Self) {
@@ -399,10 +416,11 @@ pub struct PlaceSetPrettyFmt<'a> {
 
 impl fmt::Display for PlaceSetPrettyFmt<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self.mir_fmt.session();
         let mut f = f.debug_list();
 
         for place in self.numbering.place_to_range.keys().copied() {
-            if !self.set.has_place(self.numbering, place) {
+            if !self.set.has_place(s, self.numbering, place) {
                 continue;
             }
 

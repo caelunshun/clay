@@ -4,7 +4,6 @@ use crate::{
         arena::{HasInterner, HasListInterner, Obj},
     },
     flags,
-    parse::ast::AstUnOpKind,
     semantic::{
         analysis::{
             borrowck::check::{
@@ -13,7 +12,10 @@ use crate::{
                     BackwardsDataflowAnalysis, DataflowScratch, DataflowView,
                     ForwardsDataflowAnalysis as _,
                 },
-                places::{AtomicPlaceIdx, PlaceNumbering, PlaceSet, number_places_in_body},
+                places::{
+                    AtomicPlaceIdx, PlaceNumbering, PlaceSet, is_place_direct,
+                    number_places_in_body,
+                },
             },
             sigck::CrateSigckVisitor,
         },
@@ -25,9 +27,9 @@ use crate::{
             AdtInstance, FnDef, MirBlockIdx, MirBody, MirBodyDirection, MirLocalIdx,
             MirLocationAfter, MirPlace, MirPlaceElem, MirPlaceMention, MirPlaceMentionKind,
             MirPrettyFmt, MirPrettyFmtHooks, MirRvalue, MirSourceInfo, MirStmtIdx, MirStmtKind,
-            MirStraightBinOpKind, MirTerminatorKind, Re, RelationDirection, RelationMode,
-            ResolvedFieldIdx, SimpleTyKind, TraverseMentions, Ty, TyCtxt, TyKind, TyOrRe,
-            UniversalReVarSourceInfo,
+            MirStraightBinOpKind, MirStraightUnOpKind, MirTerminatorKind, Re, RelationDirection,
+            RelationMode, ResolvedFieldIdx, SimpleTyKind, TraverseMentions, Ty, TyCtxt, TyKind,
+            TyOrRe, UniversalReVarSourceInfo,
         },
     },
     utils::lang::NewtypedRangeExt as _,
@@ -73,26 +75,31 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
 
     // Check ownership
     fn process_mentions(
+        s: &Session,
         mut state: PlaceSet,
         place_numbering: &PlaceNumbering,
         mentions: &[MirPlaceMention],
         src_info: impl fmt::Display,
     ) {
         for mention in mentions {
+            if !is_place_direct(s, mention.place) {
+                continue;
+            }
+
             if mention.kind.intersects(MirPlaceMentionKind::OCCUPANCY_ADD) {
-                state.add_place(place_numbering, mention.place);
+                state.add_place(s, place_numbering, mention.place);
             }
 
             if mention
                 .kind
                 .intersects(MirPlaceMentionKind::OCCUPANCY_ACCESS)
-                && !state.has_place(place_numbering, mention.place)
+                && !state.has_place(s, place_numbering, mention.place)
             {
                 Diag::anon_err(format_args!("oh no! {src_info}")).emit();
             }
 
             if mention.kind.intersects(MirPlaceMentionKind::OCCUPANCY_DEAD) {
-                state.remove_place(place_numbering, mention.place);
+                state.remove_place(s, place_numbering, mention.place);
             }
         }
     }
@@ -163,6 +170,7 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     for block in body.blocks() {
         for stmt in block.stmts(MirBodyDirection::Forwards) {
             process_mentions(
+                s,
                 occupancy_iter.trans_before(stmt.stmt).clone(),
                 &place_numbering,
                 &stmt.kind().mentions(tcx),
@@ -171,6 +179,7 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
         }
 
         process_mentions(
+            s,
             occupancy_iter.trans_before_end(block.block).clone(),
             &place_numbering,
             &block.terminator_kind().mentions(tcx),
@@ -341,8 +350,9 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
 
     // FIXME: more fine-grained
     for (local_idx, local_ty) in body.locals.indices().zip(&imported_locals) {
-        for atomic in
-            place_numbering.place_to_range[&MirPlace::new(tcx, local_idx, [])].iter_newtyped()
+        for atomic in place_numbering
+            .lookup_range(s, MirPlace::new(tcx, local_idx, []))
+            .iter_newtyped()
         {
             re_tcx
                 .ccx
@@ -530,17 +540,45 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
                 self.check_assign_types(source_info, lhs, pointee);
             }
             MirRvalue::Ref(mutability, pointee) => {
-                let ref_lt = self.ccx.fresh_re_infer();
                 let pointee_ty = self.check_place(*pointee);
 
-                for atomic_place in self.place_numbering.place_to_range[pointee].iter_newtyped() {
-                    let atomic_universal = self.atomic_place_universals[atomic_place];
+                let ref_lt = if let Some(last_deref) = pointee
+                    .projections
+                    .r(s)
+                    .iter()
+                    .rposition(|elem| matches!(elem, MirPlaceElem::DerefPtr))
+                {
+                    // If `pointee` is a pointer dereference, use the lifetime of the dereferenced
+                    // reference.
 
-                    self.ccx
-                        .ucx_mut()
-                        .unify_re_and_re(atomic_universal, ref_lt, RelationMode::LhsOntoRhs)
-                        .report_never();
-                }
+                    let TyKind::Reference(ref_lt, _, _) = *self
+                        .check_place(pointee.truncate_to_len(tcx, last_deref))
+                        .r(s)
+                    else {
+                        unreachable!()
+                    };
+
+                    ref_lt
+                } else {
+                    // If `pointee` is a local, take the closure of its referenced places.
+
+                    let ref_lt = self.ccx.fresh_re_infer();
+
+                    for atomic_place in self
+                        .place_numbering
+                        .lookup_range(s, *pointee)
+                        .iter_newtyped()
+                    {
+                        let atomic_universal = self.atomic_place_universals[atomic_place];
+
+                        self.ccx
+                            .ucx_mut()
+                            .unify_re_and_re(atomic_universal, ref_lt, RelationMode::LhsOntoRhs)
+                            .report_never();
+                    }
+
+                    ref_lt
+                };
 
                 let rhs = tcx.intern(TyKind::Reference(ref_lt, *mutability, pointee_ty));
                 self.check_assign_types(source_info, lhs, rhs);
@@ -578,14 +616,7 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
                 let op = self.check_place(op.place());
 
                 let rhs = match kind {
-                    AstUnOpKind::Deref => {
-                        let TyKind::Reference(_lt, _muta, pointee) = *op.r(s) else {
-                            unreachable!()
-                        };
-
-                        pointee
-                    }
-                    AstUnOpKind::Not | AstUnOpKind::Neg => op,
+                    MirStraightUnOpKind::Not | MirStraightUnOpKind::Neg => op,
                 };
 
                 self.check_assign_types(source_info, lhs, rhs);

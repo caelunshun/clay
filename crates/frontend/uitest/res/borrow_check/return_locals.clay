@@ -12,9 +12,16 @@ impl<'a, T: &longer 'a> Deref for &'a mut T {
 }
 
 fn accepted<'a>(foo: &'a (u32,)) -> &'a u32 {
-    &foo.0
+    &(*foo).0
 }
 
-fn rejected<'a>() -> &'a (u32,) {
+/*
+fn rejected_1<'a, 'b>(foo: &'a (&'b u32,)) -> &'a u32 {
+    // (*foo).0
+    loop {}
+}
+*/
+
+fn rejected_2<'a>() -> &'a (u32,) {
     &(2,)
 }
