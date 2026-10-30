@@ -6,7 +6,7 @@ use crate::{
         },
         syntax::{
             MirLocal, MirLocalIdx, MirOperand, MirPlace, MirRvalue, MirScopeIdx, MirSourceInfo,
-            MirStmt, MirStmtKind, MirTerminator, MirTerminatorKind,
+            MirStmt, MirStmtKind, MirTerminator, MirTerminatorKind, SigTy,
         },
     },
 };
@@ -55,6 +55,19 @@ pub trait MirScopedBuilder<'tcx> {
         self.raw_builder().push_stmt(expected_top, || MirStmt {
             source_info,
             kind: MirStmtKind::Assign(Box::new((lhs, rhs))),
+        });
+    }
+
+    fn push_discard(
+        &mut self,
+        expected_top: MirScopeIdx,
+        source_info: MirSourceInfo,
+        rhs_ty: SigTy,
+        rhs: MirRvalue,
+    ) {
+        self.raw_builder().push_stmt(expected_top, || MirStmt {
+            source_info,
+            kind: MirStmtKind::Discard(Box::new((rhs_ty, rhs))),
         });
     }
 

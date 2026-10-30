@@ -388,9 +388,15 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
                     MirStmtKind::StorageLive(_) | MirStmtKind::StorageDead(_) => {
                         // (trivially type-checked)
                     }
-                    MirStmtKind::Assign(expr) => {
-                        let (lhs, rhs) = &**expr;
-                        self.check_assign(stmt.stmt().source_info, *lhs, rhs);
+                    MirStmtKind::Assign(assign) => {
+                        let (lhs, rhs) = &**assign;
+                        let lhs = self.check_place(*lhs);
+                        self.check_assign(stmt.stmt().source_info, lhs, rhs);
+                    }
+                    MirStmtKind::Discard(discard) => {
+                        let (lhs, rhs) = &**discard;
+                        let lhs = self.ccx.import_elsewhere(&self.env, *lhs);
+                        self.check_assign(stmt.stmt().source_info, lhs, rhs);
                     }
                 }
             }
@@ -468,11 +474,9 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
         ty
     }
 
-    fn check_assign(&mut self, source_info: MirSourceInfo, lhs: MirPlace, rvalue: &MirRvalue) {
+    fn check_assign(&mut self, source_info: MirSourceInfo, lhs: Ty, rvalue: &MirRvalue) {
         let s = self.session();
         let tcx = self.tcx();
-
-        let lhs = self.check_place(lhs);
 
         match rvalue {
             MirRvalue::UnreachablePlaceholder => {

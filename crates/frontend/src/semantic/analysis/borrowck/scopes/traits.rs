@@ -1,9 +1,9 @@
 use crate::{
-    base::arena::Obj,
+    base::{Session, arena::Obj},
     bool_enum,
     semantic::{
         infer::{ClauseCx, ClauseImportEnv, ImplCache, UnifyCxMode},
-        syntax::{FnDef, MirOperandMode, SigTy, TyCtxt},
+        syntax::{FnDef, MirOperandMode, SigTy, SigTyKind, TyCtxt},
     },
 };
 
@@ -35,11 +35,33 @@ impl<'tcx> TraitCache<'tcx> {
         Self { ccx, env }
     }
 
+    pub fn tcx(&self) -> &'tcx TyCtxt {
+        self.ccx.tcx()
+    }
+
+    pub fn session(&self) -> &'tcx Session {
+        &self.tcx().session
+    }
+
     pub fn operand_mode(&mut self, ty: SigTy) -> MirOperandMode {
+        // TODO
         MirOperandMode::Move
     }
 
     pub fn can_omit_drop(&mut self, ty: SigTy) -> CanOmitDrop {
-        CanOmitDrop::Yes
+        let s = self.session();
+
+        match &ty.r(s).kind {
+            SigTyKind::Tuple(ty) => {
+                if ty.r(s).is_empty() {
+                    return CanOmitDrop::Yes;
+                }
+            }
+            _ => {
+                // (fallthrough)
+            }
+        }
+
+        CanOmitDrop::No
     }
 }

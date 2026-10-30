@@ -4,7 +4,7 @@ use crate::{
     semantic::{
         analysis::borrowck::{
             lower::driver::{LabelledScope, MirFromThirCtx, MirRvalueOrPlace},
-            scopes::{CanHoistLocals, MirScopedBuilder as _, TakenIfEq},
+            scopes::{CanHoistLocals, CanOmitDrop, MirScopedBuilder as _, TakenIfEq},
         },
         syntax::{
             MirBinOpKind, MirLocal, MirLocalIdx, MirOperand, MirPlace, MirPlaceElem, MirRvalue,
@@ -361,6 +361,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         assign_into: Option<MirPlace>,
     ) {
         let s = self.session();
+        let tcx = self.tcx();
 
         for &stmt in &block.r(s).stmts {
             match stmt {
@@ -369,9 +370,21 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                         scope,
                         MirSourceInfo::Todo,
                         CanHoistLocals::Yes,
-                        |this, scope| {
-                            // Dropped by leaving the scope.
-                            this.lower_expr_place(scope, expr, None);
+                        |this, scope| match this.trait_cache.can_omit_drop(expr.r(s).ty) {
+                            CanOmitDrop::No => {
+                                let new_place =
+                                    this.push_local(scope, MirLocal { ty: expr.r(s).ty });
+
+                                this.lower_expr_place(
+                                    scope,
+                                    expr,
+                                    Some(MirPlace::new(tcx, new_place, [])),
+                                );
+                            }
+                            CanOmitDrop::Yes => {
+                                let rv = this.lower_expr_rvalue(scope, expr);
+                                this.push_discard(scope, MirSourceInfo::Todo, expr.r(s).ty, rv);
+                            }
                         },
                     );
                 }

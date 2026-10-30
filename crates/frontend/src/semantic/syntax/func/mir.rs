@@ -715,6 +715,7 @@ pub enum MirStmtKind {
     StorageLive(MirLocalIdx),
     StorageDead(MirLocalIdx),
     Assign(Box<(MirPlace, MirRvalue)>),
+    Discard(Box<(SigTy, MirRvalue)>),
 }
 
 impl TraverseMentions for MirStmtKind {
@@ -736,8 +737,8 @@ impl TraverseMentions for MirStmtKind {
                     place: MirPlace::new(tcx, *local, []),
                 })?;
             }
-            MirStmtKind::Assign(assign) => {
-                let (lhs, rhs) = &**assign;
+            MirStmtKind::Assign(stmt) => {
+                let (lhs, rhs) = &**stmt;
 
                 TraverseMentions::traverse_mentions(tcx, rhs, f)?;
 
@@ -745,6 +746,11 @@ impl TraverseMentions for MirStmtKind {
                     kind: MirPlaceMentionKind::INIT,
                     place: *lhs,
                 })?;
+            }
+            MirStmtKind::Discard(stmt) => {
+                let (_ty, rhs) = &**stmt;
+
+                TraverseMentions::traverse_mentions(tcx, rhs, f)?;
             }
         }
 
@@ -1574,6 +1580,14 @@ impl<'a> MirPrettyFmt<'a> {
                 }
                 MirStmtKind::Assign(stmt) => {
                     write!(f, "{} = {};", self.place(stmt.0), self.rvalue(&stmt.1))?;
+                }
+                MirStmtKind::Discard(stmt) => {
+                    write!(
+                        f,
+                        "discard({} :: {});",
+                        self.rvalue(&stmt.1),
+                        self.ty(stmt.0),
+                    )?;
                 }
             }
 
