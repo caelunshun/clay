@@ -225,7 +225,7 @@ pub fn number_places_in_body(tcx: &TyCtxt, body: &MirBody) -> PlaceNumbering {
     let s = &tcx.session;
     let mut builder = PlaceNumberingBuilder::new(body.locals.len());
 
-    for local in body.arg_locals() {
+    for local in body.locals.indices() {
         builder.mention(s, MirPlace::new(tcx, local, []));
     }
 

@@ -21,54 +21,64 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     let tcx = cx.tcx();
 
     // Setup a `ClauseCx` for signature validation.
-    let mut ccx = ClauseCx::new(tcx, cx.impl_cache, cx.krate, UnifyCxMode::RegionBlind);
-    let env_sig = ccx.universal_env_for_fn_def(def);
+    {
+        let mut ccx = ClauseCx::new(tcx, cx.impl_cache, cx.krate, UnifyCxMode::RegionAware);
+        let env_sig = ccx.universal_env_for_fn_def(def);
 
-    // WF-check the signature.
-    cx.visit_generic_binder(&mut ccx, &env_sig, def.r(s).generics);
+        // WF-check the signature.
+        cx.visit_generic_binder(&mut ccx, &env_sig, def.r(s).generics);
 
-    // Check the body
-    if let Some(body) = *def.r(s).hir_body {
-        let mut bcx = BodyCtxt::new(&mut ccx, def, &env_sig);
-
-        for arg in def.r(s).args.r(s) {
-            let env = bcx.import_env;
-            let ascription = bcx.ccx_mut().import_here(env, arg.ty);
-
-            bcx.check_pat_demand(arg.pat, ascription, None);
-        }
-
-        bcx.check_expr_demand(body, bcx.return_ty)
-            .ignore_divergence();
-
-        bcx.begin_confirmation();
-
-        let arg_pats = def
-            .r(s)
-            .args
-            .r(s)
-            .iter()
-            .map(|arg| bcx.confirm_thir_pat_outer(arg.pat))
-            .collect::<Vec<_>>();
-
-        let body = bcx.confirm_thir_expr_post(body);
-
-        LateInit::init(
-            &def.r(s).thir_body,
-            Some(ThirBody {
-                arg_pats,
-                expr: body,
-            }),
-        );
-    } else {
         for arg in def.r(s).args.r(s) {
             ccx.import_here(&env_sig, arg.ty);
         }
 
         ccx.import_here(&env_sig, *def.r(s).ret_ty);
 
-        LateInit::init(&def.r(s).thir_body, None);
+        ccx.verify();
     }
+
+    // Check the body
+    let mut ccx = ClauseCx::new(tcx, cx.impl_cache, cx.krate, UnifyCxMode::RegionBlind);
+    let env_sig = ccx.universal_env_for_fn_def(def);
+
+    let Some(body) = *def.r(s).hir_body else {
+        LateInit::init(&def.r(s).thir_body, None);
+        return;
+    };
+
+    let mut bcx = BodyCtxt::new(&mut ccx, def, &env_sig);
+
+    for arg in def.r(s).args.r(s) {
+        let env = bcx.import_env;
+        let ascription = bcx.ccx_mut().import_here(env, arg.ty);
+
+        bcx.check_pat_demand(arg.pat, ascription, None);
+    }
+
+    bcx.check_expr_demand(body, bcx.return_ty)
+        .ignore_divergence();
+
+    bcx.begin_confirmation();
+
+    let arg_pats = def
+        .r(s)
+        .args
+        .r(s)
+        .iter()
+        .map(|arg| bcx.confirm_thir_pat_outer(arg.pat))
+        .collect::<Vec<_>>();
+
+    let body = bcx.confirm_thir_expr_post(body);
+
+    LateInit::init(
+        &def.r(s).thir_body,
+        Some(ThirBody {
+            arg_pats,
+            expr: body,
+        }),
+    );
+
+    drop(bcx);
 
     ccx.verify();
 }

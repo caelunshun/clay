@@ -1,0 +1,14 @@
+error: 
+- bad ref pointee
+  span: sig.clay:1:22-32
+    - ty outlives region
+      LHS: &'b ()
+      RHS: 'a
+      Errors:
+        - re and re unify error
+          LHS: 'b
+          RHS: 'a
+          mode: LhsOntoRhs
+            - requires var: 'b
+              to outlive: 'a
+
