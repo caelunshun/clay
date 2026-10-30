@@ -2,11 +2,11 @@ use super::{HasSpan, Span, Symbol};
 use crate::{
     base::{Diag, ErrorGuaranteed, HardDiag, LeafDiag},
     flags::should_print_parse_expect_success,
-    utils::format::{FormatFn, ListFormatter, SimpleListFormatGlue, format_list_into},
+    utils::format::{ListFormatter, SimpleListFormatGlue, format_list_into},
 };
 use clay_core::{FastHashSet, FastIndexMap};
 use std::{
-    fmt::Debug,
+    fmt::{self, Debug},
     ops::{Deref, DerefMut},
     panic::Location,
 };
@@ -288,7 +288,7 @@ impl<I: CursorIter> Parser<I> {
             list_fmt
                 .push(
                     &mut msg,
-                    FormatFn(|f| {
+                    fmt::from_fn(|f| {
                         write!(f, "{to_parse}")?;
                         f.write_str(" (")?;
                         format_list_into(f, &whats, SimpleListFormatGlue::OR_LIST)?;

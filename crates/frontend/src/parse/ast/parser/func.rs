@@ -1,7 +1,7 @@
 use crate::{
     base::{
-        Diag, ErrorGuaranteed, LeafDiag,
-        syntax::{Bp, HasSpan as _, InfixBp, Matcher, Span},
+        Diag, ErrorGuaranteed, LeafDiag, Session,
+        syntax::{Bp, HasSpan as _, InfixBp, Matcher, Span, Symbol},
     },
     kw,
     parse::{
@@ -26,7 +26,7 @@ use crate::{
                 parse_delimited_until_terminator,
             },
         },
-        token::{GroupDelimiter, Lifetime},
+        token::{GroupDelimiter, Ident, Lifetime},
     },
     punct, puncts, symbol,
 };
@@ -776,6 +776,22 @@ pub fn parse_expr_pratt_chain(p: P, flags: AstExprFlags, min_bp: Bp, seed: AstEx
                     span: dot.span.to(p.prev_span()),
                     kind: AstExprKind::Use(Box::new(lhs)),
                 };
+
+                continue 'chaining;
+            }
+
+            if let Some(lit) = match_num_lit().expect(p) {
+                let s = &Session::fetch();
+
+                for lit_part in lit.kind.split_by_dot() {
+                    lhs = AstExpr {
+                        span: dot.span.to(lit.span),
+                        kind: AstExprKind::Field(
+                            Box::new(lhs),
+                            Ident::new(lit.span, Symbol::new(&lit_part.lit(s).to_string())),
+                        ),
+                    };
+                }
 
                 continue 'chaining;
             }

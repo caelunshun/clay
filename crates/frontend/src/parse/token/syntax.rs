@@ -1,14 +1,23 @@
 use crate::{
-    base::syntax::{
-        AtomSimplify, Cursor, Delimited, HasSpan, LookaheadResult, Matcher, Parser, ParserLike,
-        Span, StuckHinter, Symbol,
+    base::{
+        Session,
+        syntax::{
+            AtomSimplify, Cursor, Delimited, HasSpan, LookaheadResult, Matcher, Parser, ParserLike,
+            Span, StuckHinter, Symbol,
+        },
     },
     parse::ast::Keyword,
     semantic::syntax::{FloatKind, IntKind},
     symbol,
     utils::lang::ConstFmt,
 };
-use std::{ops::Deref, rc::Rc, slice, str};
+use smallvec::SmallVec;
+use std::{
+    fmt::{self, Display, Write},
+    ops::Deref,
+    rc::Rc,
+    slice, str,
+};
 
 // === TokenStream === //
 
@@ -301,6 +310,12 @@ pub struct TokenNumLit {
     pub kind: TokenNumLitKind,
 }
 
+impl HasSpan for TokenNumLit {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub enum TokenNumLitKind {
     Integral {
@@ -316,6 +331,78 @@ pub enum TokenNumLitKind {
     },
 }
 
+impl TokenNumLitKind {
+    pub fn split_by_dot(self) -> SmallVec<[TokenNumLitKind; 2]> {
+        match self {
+            TokenNumLitKind::Integral { .. } | TokenNumLitKind::Floating { dec_part: None, .. } => {
+                SmallVec::from_iter([self])
+            }
+            TokenNumLitKind::Floating {
+                int_part,
+                dec_part: Some(dec_part),
+                exp_part,
+                suffix,
+            } => SmallVec::from_iter([
+                TokenNumLitKind::Floating {
+                    int_part,
+                    dec_part: None,
+                    exp_part: None,
+                    suffix: None,
+                },
+                TokenNumLitKind::Floating {
+                    int_part: symbol!(""),
+                    dec_part: Some(dec_part),
+                    exp_part,
+                    suffix,
+                },
+            ]),
+        }
+    }
+
+    pub fn lit(self, s: &Session) -> impl fmt::Display {
+        fmt::from_fn(move |f| match self {
+            TokenNumLitKind::Integral {
+                base,
+                value,
+                suffix,
+            } => {
+                base.lit_prefix().fmt(f)?;
+                f.write_str(value.as_str(s))?;
+
+                if let Some(suffix) = suffix {
+                    suffix.lit_suffix().fmt(f)?;
+                }
+
+                Ok(())
+            }
+            TokenNumLitKind::Floating {
+                int_part,
+                dec_part,
+                exp_part,
+                suffix,
+            } => {
+                f.write_str(int_part.as_str(s))?;
+
+                if let Some(dec_part) = dec_part {
+                    f.write_char('.')?;
+                    f.write_str(dec_part.as_str(s))?;
+                }
+
+                if let Some(exp_part) = exp_part {
+                    f.write_char('e')?;
+                    f.write_str(exp_part.as_str(s))?;
+                }
+
+                if let Some(suffix) = suffix {
+                    suffix.lit_suffix().fmt(f)?;
+                }
+
+                Ok(())
+            }
+        })
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub enum IntegralKind {
     Int(IntKind),
@@ -323,9 +410,17 @@ pub enum IntegralKind {
     Float(FloatKind),
 }
 
-impl HasSpan for TokenNumLit {
-    fn span(&self) -> Span {
-        self.span
+impl IntegralKind {
+    pub fn lit_suffix(self) -> impl fmt::Display {
+        fmt::from_fn(move |f| match self {
+            IntegralKind::Int(kind) => {
+                write!(f, "i{}", kind.bits())
+            }
+            IntegralKind::Uint(kind) => {
+                write!(f, "u{}", kind.bits())
+            }
+            IntegralKind::Float(kind) => fmt::Display::fmt(&kind.lit_suffix(), f),
+        })
     }
 }
 
@@ -338,6 +433,17 @@ pub enum NumLitBase {
 }
 
 impl NumLitBase {
+    pub fn lit_prefix(self) -> impl fmt::Display {
+        fmt::from_fn(move |f| {
+            f.write_str(match self {
+                NumLitBase::Decimal => "",
+                NumLitBase::Binary => "0b",
+                NumLitBase::Hexadecimal => "0x",
+                NumLitBase::Octal => "0o",
+            })
+        })
+    }
+
     pub fn name(self) -> Symbol {
         match self {
             NumLitBase::Decimal => symbol!("decimal"),

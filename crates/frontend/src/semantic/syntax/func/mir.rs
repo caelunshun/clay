@@ -9,7 +9,7 @@ use crate::{
         AdtCtor, AdtCtorOwner, AdtCtorSyntax, DynSiteIdx, Mutability, ResolvedFieldIdx, SigTy,
         TyCtxt,
     },
-    utils::format::{FormatFn, IndentedFmt, SimpleListFormatGlue, format_list},
+    utils::format::{IndentedFmt, SimpleListFormatGlue, fmt_write, format_list},
 };
 use index_vec::{IndexVec, define_index_type};
 use slotmap::{SecondaryMap, SlotMap, new_key_type};
@@ -1379,15 +1379,15 @@ impl<'a> MirPrettyFmt<'a> {
     }
 
     pub fn plain_block_label(&self, id: MirBlockIdx) -> impl fmt::Display {
-        FormatFn(move |f| write!(f, "{id}"))
+        fmt::from_fn(move |f| write!(f, "{id}"))
     }
 
     pub fn plain_local_name(&self, id: MirLocalIdx) -> impl fmt::Display {
-        FormatFn(move |f| write!(f, "_{}", id.index()))
+        fmt::from_fn(move |f| write!(f, "_{}", id.index()))
     }
 
     pub fn place(&self, place: MirPlace) -> impl fmt::Display {
-        FormatFn(move |f| {
+        fmt::from_fn(move |f| {
             let s = self.session();
 
             self.plain_local_name(place.local).fmt(f)?;
@@ -1428,14 +1428,14 @@ impl<'a> MirPrettyFmt<'a> {
     }
 
     pub fn operand(&self, operand: MirOperand) -> impl fmt::Display {
-        FormatFn(move |f| match operand {
+        fmt::from_fn(move |f| match operand {
             MirOperand::Copy(place) => write!(f, "copy({})", self.place(place)),
             MirOperand::Move(place) => write!(f, "move({})", self.place(place)),
         })
     }
 
     pub fn rvalue(&self, rvalue: &MirRvalue) -> impl fmt::Display {
-        FormatFn(move |f| {
+        fmt::from_fn(move |f| {
             let s = self.session();
 
             match rvalue {
@@ -1545,21 +1545,21 @@ impl<'a> MirPrettyFmt<'a> {
     }
 
     pub fn ty(&self, ty: SigTy) -> impl fmt::Display {
-        FormatFn(move |f| {
+        fmt::from_fn(move |f| {
             // TODO
             f.write_str("<type>")
         })
     }
 
     pub fn lit(&self, lit: AstLit) -> impl fmt::Display {
-        FormatFn(move |f| {
+        fmt::from_fn(move |f| {
             // TODO
             write!(f, "{:?}", lit)
         })
     }
 
     pub fn plain_stmt(&self, stmt: &MirStmt) -> impl fmt::Display {
-        FormatFn(move |f| {
+        fmt::from_fn(move |f| {
             write!(
                 f,
                 "{}{}",
@@ -1570,7 +1570,7 @@ impl<'a> MirPrettyFmt<'a> {
     }
 
     pub fn plain_stmt_kind(&self, stmt: &MirStmtKind) -> impl fmt::Display {
-        FormatFn(move |f| {
+        fmt::from_fn(move |f| {
             match &stmt {
                 MirStmtKind::StorageLive(local) => {
                     write!(f, "storage-live({});", self.plain_local_name(*local))?;
@@ -1596,7 +1596,7 @@ impl<'a> MirPrettyFmt<'a> {
     }
 
     pub fn plain_terminator(&self, terminator: &MirTerminator) -> impl fmt::Display {
-        FormatFn(move |f| {
+        fmt::from_fn(move |f| {
             write!(
                 f,
                 "{}{}",
@@ -1607,7 +1607,7 @@ impl<'a> MirPrettyFmt<'a> {
     }
 
     pub fn plain_terminator_kind(&self, terminator: &MirTerminatorKind) -> impl fmt::Display {
-        FormatFn(move |f| {
+        fmt::from_fn(move |f| {
             match terminator {
                 MirTerminatorKind::Goto(block) => {
                     write!(f, "goto({});", self.plain_block_label(*block))?;
@@ -1679,7 +1679,7 @@ impl<'a> MirPrettyFmt<'a> {
     }
 
     pub fn plain_unwind_label(&self, behavior: MirUnwindBehavior) -> impl fmt::Display {
-        FormatFn(move |f| {
+        fmt::from_fn(move |f| {
             match behavior {
                 MirUnwindBehavior::Continue(bb) => {
                     write!(f, "{}", self.plain_block_label(bb))?;
@@ -1694,14 +1694,14 @@ impl<'a> MirPrettyFmt<'a> {
     }
 
     pub fn source_info_comment(&self, info: MirSourceInfo) -> impl fmt::Display {
-        FormatFn(move |f| {
+        fmt::from_fn(move |f| {
             // TODO
             write!(f, " // {:?}", info)
         })
     }
 
     pub fn typed_local_name(&self, local: MirLocalIdx) -> impl fmt::Display {
-        FormatFn(move |f| {
+        fmt::from_fn(move |f| {
             write!(
                 f,
                 "{}: {}",
@@ -1712,7 +1712,7 @@ impl<'a> MirPrettyFmt<'a> {
     }
 
     pub fn flat_body(&self) -> impl fmt::Display {
-        FormatFn(move |f| {
+        fmt::from_fn(move |f| {
             let body = self.body();
 
             let mut f = IndentedFmt::new(f);
@@ -1758,20 +1758,12 @@ impl<'a> MirPrettyFmt<'a> {
                 )?;
                 f.change_level_now(4)?;
 
-                write!(
-                    f,
-                    "{}",
-                    FormatFn(|f| self.hooks.start_of_block(self, f, block.block))
-                )?;
+                fmt_write(&mut f, |f| self.hooks.start_of_block(self, f, block.block))?;
 
                 for stmt in block.stmts(MirBodyDirection::Forwards) {
                     writeln!(f, "{}", self.plain_stmt(stmt.stmt()))?;
 
-                    write!(
-                        f,
-                        "{}",
-                        FormatFn(|f| self.hooks.after_stmt(self, f, stmt.stmt))
-                    )?;
+                    fmt_write(&mut f, |f| self.hooks.after_stmt(self, f, stmt.stmt))?;
                 }
 
                 if let Some(terminator) = block.opt_terminator() {

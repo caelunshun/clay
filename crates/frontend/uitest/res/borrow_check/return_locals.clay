@@ -1,0 +1,20 @@
+#[lang("deref_trait")]
+pub trait Deref {
+    type Target;
+}
+
+impl<'a, T: &longer 'a> Deref for &'a T {
+    type Target = T;
+}
+
+impl<'a, T: &longer 'a> Deref for &'a mut T {
+    type Target = T;
+}
+
+fn accepted<'a>(foo: &'a (u32,)) -> &'a u32 {
+    &foo.0
+}
+
+fn rejected<'a>() -> &'a (u32,) {
+    &(2,)
+}

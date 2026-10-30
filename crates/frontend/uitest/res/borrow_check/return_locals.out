@@ -1,0 +1,13 @@
+error: 
+- source info: Simple(return_locals.clay:15:5-10)
+  ty and ty region error
+  LHS: &'a (u32,)
+  RHS: &'?1 (u32,)
+  mode: RhsOntoLhs
+    - re and re unify error
+      LHS: 'a
+      RHS: '?1
+      mode: RhsOntoLhs
+        - requires var: 'u3
+          to outlive: 'a
+

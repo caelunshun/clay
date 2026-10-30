@@ -3,6 +3,7 @@ use crate::{
     symbol,
 };
 use smallvec::{SmallVec, smallvec};
+use std::fmt;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TyOrReKind {
@@ -144,8 +145,32 @@ pub enum IntKind {
     S64,
 }
 
+impl IntKind {
+    pub fn bits(self) -> u32 {
+        match self {
+            IntKind::S8 => 8,
+            IntKind::S16 => 16,
+            IntKind::S32 => 32,
+            IntKind::S64 => 64,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum FloatKind {
     S32,
     S64,
+}
+
+impl FloatKind {
+    pub fn bits(self) -> u32 {
+        match self {
+            FloatKind::S32 => 32,
+            FloatKind::S64 => 64,
+        }
+    }
+
+    pub fn lit_suffix(self) -> impl fmt::Display {
+        fmt::from_fn(move |f| write!(f, "f{}", self.bits()))
+    }
 }

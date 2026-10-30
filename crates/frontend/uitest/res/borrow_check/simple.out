@@ -1,8 +1,8 @@
 error: 
-- source info: Simple(bar.clay:10:5-20)
+- source info: Simple(simple.clay:12:5-20)
   ty and ty region error
-  LHS: &'?3 i32
-  RHS: &'?5 i32
+  LHS: &'?3 NoCopy
+  RHS: &'?5 NoCopy
   mode: RhsOntoLhs
     - re and re unify error
       LHS: '?3
