@@ -1,8 +1,49 @@
-fn foo<'a, 'b>() {
+mod std {
+    #[lang("deref_trait")]
+    pub trait Deref {
+        type Target;
+    }
+
+    impl<'a, T: &longer 'a> Deref for &'a T {
+        type Target = T;
+    }
+
+    impl<'a, T: &longer 'a> Deref for &'a mut T {
+        type Target = T;
+    }
+
+    #[lang("fn_once_trait")]
+    pub trait FnOnce<I, O> {}
+}
+
+fn demo<'a, 'b>(foo: Invariant<'a>, bar: Invariant<'b>) {
     // FIXME: ascriptions should produce WF errors during borrow-check
-    let bar: &'a &'b ();
+    let ascribe: &'a &'b ();
     faz::<'a, 'b>;
     let stashed = faz::<'a, 'b>;
+
+    // FIXME: ascriptions should produce WF errors during borrow-check
+    MeowStruct { foo, bar };
+
+    // FIXME: ascriptions should produce WF errors during borrow-check
+    MeowNonInfer::<'a, 'b> {};
+
+    // FIXME: calls are unimplemented
+    MeowTuple(foo, bar);
 }
 
 fn faz<'a, 'b: &longer 'a>() {}
+
+struct MeowStruct<'a, 'b: &longer 'a> {
+    foo: Invariant<'a>,
+    bar: Invariant<'b>,
+}
+
+struct Invariant<'a>;
+
+struct MeowTuple<'a, 'b: &longer 'a>(
+    Invariant<'a>,
+    Invariant<'b>,
+);
+
+struct MeowNonInfer<'a, 'b: &longer 'a> {}

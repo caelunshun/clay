@@ -403,7 +403,10 @@ impl<'tcx> UnifyCx<'tcx> {
                             RelationMode::Equate,
                         );
                     }
-                    _ => unreachable!(),
+                    _ => {
+                        ty_culprits.push(TyAndTyUnifyCulprit::Types(lhs, rhs));
+                        break 'func;
+                    }
                 }
 
                 match (lhs_early_args, rhs_early_args) {

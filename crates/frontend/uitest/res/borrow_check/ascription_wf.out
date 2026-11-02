@@ -1,6 +1,10 @@
+error: oh no! _14 = call(move(_15), [move(_3), move(_5)]) goto bb25v1 unwind bb26v1; // Todo
+
+error: oh no! _14 = call(move(_15), [move(_3), move(_5)]) goto bb25v1 unwind bb26v1; // Todo
+
 error: 
 - bad generics
-  span: ascription_wf.clay:6:5-18
+  span: ascription_wf.clay:22:5-18
     - binder param WF error
         - idx: 1
             - re and re unify error
@@ -12,7 +16,7 @@ error:
 
 error: 
 - bad generics
-  span: ascription_wf.clay:9:19-32
+  span: ascription_wf.clay:23:19-32
     - binder param WF error
         - idx: 1
             - re and re unify error

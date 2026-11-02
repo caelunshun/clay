@@ -37,6 +37,8 @@ use crate::{
 use index_vec::IndexVec;
 use std::{cell::RefCell, fmt};
 
+// TODO: type well-formedness for most objects
+//  - Consider avoiding `import_here` in type-checker entirely.
 // TODO: region-aware copy checks
 // TODO: mutability analysis
 pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
