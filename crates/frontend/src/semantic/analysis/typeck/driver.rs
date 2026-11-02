@@ -50,7 +50,7 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
 
     for arg in def.r(s).args.r(s) {
         let env = bcx.import_env;
-        let ascription = bcx.ccx_mut().import_here(env, arg.ty);
+        let ascription = bcx.ccx_mut().import_elsewhere(env, arg.ty);
 
         bcx.check_pat_demand(arg.pat, ascription, None);
     }
@@ -103,7 +103,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
     ) -> Self {
         let s = ccx.session();
 
-        let return_ty = ccx.import_here(import_env, *def.r(s).ret_ty);
+        let return_ty = ccx.import_elsewhere(import_env, *def.r(s).ret_ty);
 
         Self {
             ccx,

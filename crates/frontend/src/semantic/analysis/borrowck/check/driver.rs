@@ -37,6 +37,8 @@ use crate::{
 use index_vec::IndexVec;
 use std::{cell::RefCell, fmt};
 
+// TODO: region-aware copy checks
+// TODO: mutability analysis
 pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     let s = cx.session();
     let tcx = cx.tcx();
@@ -405,6 +407,9 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
                     }
                     MirStmtKind::Discard(discard) => {
                         let (lhs, rhs) = &**discard;
+
+                        // `import_elsewhere` is used because the type should not be constructible
+                        // if it is not WF.
                         let lhs = self.ccx.import_elsewhere(&self.env, *lhs);
                         self.check_assign(stmt.stmt().source_info, lhs, rhs);
                     }
@@ -585,7 +590,7 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
                 self.check_assign_types(source_info, lhs, rhs);
             }
             MirRvalue::Zst(ty) | MirRvalue::Literal(ty, _) => {
-                let rhs = self.ccx.import_elsewhere(&self.env, *ty);
+                let rhs = self.ccx.import_here(&self.env, *ty);
                 self.check_assign_types(source_info, lhs, rhs);
             }
             MirRvalue::BinaryOp(kind, ops) => {

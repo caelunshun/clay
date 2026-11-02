@@ -1,0 +1,24 @@
+error: 
+- bad generics
+  span: ascription_wf.clay:6:5-18
+    - binder param WF error
+        - idx: 1
+            - re and re unify error
+              LHS: 'b
+              RHS: 'a
+              mode: LhsOntoRhs
+                - requires var: 'b
+                  to outlive: 'a
+
+error: 
+- bad generics
+  span: ascription_wf.clay:9:19-32
+    - binder param WF error
+        - idx: 1
+            - re and re unify error
+              LHS: 'b
+              RHS: 'a
+              mode: LhsOntoRhs
+                - requires var: 'b
+                  to outlive: 'a
+

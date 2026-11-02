@@ -51,3 +51,56 @@ error:
                                                           RHS: Fuzzy
                                                             - no suitable impl met
 
+error: 
+- bad generics
+  span: test33.clay:63:5-19
+    - binder param WF error
+        - idx: 0
+            - uninstantiated trait not implemented
+              LHS: u(0) Q
+              RHS: for<T: Projector> Helper<<T as Projector>::Out, T>
+              RHS instance: Helper<u(4) <u(2) T as Projector>::Out, u(2) T>
+              spec not met:
+                - instantiated trait not implemented
+                  LHS: u(0) Q
+                  LHS elaboration:
+                    - clauses:
+                        - ready
+                          binder: for<T: Projector<Out: Fuzzy>> Helper<<T as Projector>::Out, T>
+                  RHS: Helper<u(4) <u(2) T as Projector>::Out, u(2) T>
+                    - inherent unsatisfied
+                      LHS: for<T: Projector<Out: Fuzzy>> Helper<<T as Projector>::Out, T>
+                      RHS: Helper<u(4) <u(2) T as Projector>::Out, u(2) T>
+                      LHS instantiated: Helper<u(4) <u(2) T as Projector>::Out, u(2) T>
+                      LHS instantiate error:
+                        - instantiate HRTB infer
+                          value: for<T: Projector<Out: Fuzzy>> Helper<<T as Projector>::Out, T>
+                          param not valid:
+                            - idx: 0
+                                - ty not met
+                                    - uninstantiated trait not implemented
+                                      LHS: u(2) T
+                                      RHS: Projector<Out: Fuzzy>
+                                      RHS instance: Projector<Out: Fuzzy>
+                                      spec not met:
+                                        - instantiated trait not implemented
+                                          LHS: u(2) T
+                                          RHS: Projector<Out: Fuzzy>
+                                            - inherent unsatisfied
+                                              LHS: Projector
+                                              RHS: Projector<Out: Fuzzy>
+                                              LHS instantiated: Projector
+                                              Culprits:
+                                                - idx: 0
+                                                    - uninstantiated trait not implemented
+                                                      LHS: u(3) <u(2) T as Projector>::Out
+                                                      RHS: Fuzzy
+                                                      RHS instance: Fuzzy
+                                                      spec not met:
+                                                        - instantiated trait not implemented
+                                                          LHS: u(3) <u(2) T as Projector>::Out
+                                                          LHS elaboration:
+                                                            - clauses:
+                                                          RHS: Fuzzy
+                                                            - no suitable impl met
+

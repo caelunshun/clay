@@ -60,5 +60,6 @@ fn less_spec<Q: for<T: Projector> Helper<<T as Projector>::Out, T>>() {
 }
 
 fn more_spec<Q: for<T: Projector<Out: Fuzzy>> Helper<<T as Projector>::Out, T>>() {
+    // FIXME: Should only produce a single diagnostic
     less_spec::<Q>;
 }

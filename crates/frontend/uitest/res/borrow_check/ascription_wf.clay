@@ -1,0 +1,8 @@
+fn foo<'a, 'b>() {
+    // FIXME: ascriptions should produce WF errors during borrow-check
+    let bar: &'a &'b ();
+    faz::<'a, 'b>;
+    let stashed = faz::<'a, 'b>;
+}
+
+fn faz<'a, 'b: &longer 'a>() {}
