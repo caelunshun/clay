@@ -19,6 +19,14 @@ error:
         - u(3) T
 
 error: 
+- HRTB not covered
+  span: test29.clay:19:36-47
+    - missing coverings
+      in Trait<(u(0) V,)>
+      of...
+        - u(2) T
+
+error: 
 - span: test29.clay:21:5-12
   uninstantiated trait not implemented
   LHS: &'gc dyn for<T> Trait<(u(0) V,)>

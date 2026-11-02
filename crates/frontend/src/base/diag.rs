@@ -10,6 +10,7 @@ use std::{
     fmt,
     marker::PhantomData,
     mem, ops,
+    panic::Location,
 };
 
 // === Errors === //
@@ -365,6 +366,13 @@ impl LeafDiag {
 pub struct MultiSpan {
     pub primary: Vec<(Span, StyledMessage)>,
     pub secondary: Vec<(Span, StyledMessage)>,
+}
+
+#[track_caller]
+pub fn anon_delay_bug(message: impl fmt::Display) -> ErrorGuaranteed {
+    Diag::anon_err(format_args!("{}: {message}", Location::caller()))
+        .to_delay_bug()
+        .emit()
 }
 
 // === StyledMessage === //

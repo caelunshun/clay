@@ -1,6 +1,6 @@
 use crate::{
     base::{
-        Diag, Session,
+        Diag, Session, anon_delay_bug,
         arena::{HasInterner, HasListInterner, Obj},
     },
     flags,
@@ -32,7 +32,7 @@ use crate::{
             TyOrRe, UniversalReVarSourceInfo,
         },
     },
-    utils::lang::NewtypedRangeExt as _,
+    utils::{format::ToDebugTree, lang::NewtypedRangeExt as _},
 };
 use index_vec::IndexVec;
 use std::{cell::RefCell, fmt};
@@ -443,6 +443,7 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
 
     fn check_place(&mut self, place: MirPlace) -> Ty {
         let s = self.session();
+        let tcx = self.tcx();
 
         let mut ty = self.imported_locals[place.local];
 
@@ -450,7 +451,7 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
             ty = match proj {
                 MirPlaceElem::DerefPtr => {
                     let TyKind::Reference(_lt, _muta, pointee) = *ty.r(s) else {
-                        unreachable!()
+                        return tcx.intern(TyKind::Error(anon_delay_bug("ill-formed place")));
                     };
 
                     pointee
@@ -460,14 +461,14 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
                     max_elems: _,
                 }) => {
                     let TyKind::Tuple(elems) = *ty.r(s) else {
-                        unreachable!()
+                        return tcx.intern(TyKind::Error(anon_delay_bug("ill-formed place")));
                     };
 
                     elems.r(s)[*field_idx as usize]
                 }
                 MirPlaceElem::Field(ResolvedFieldIdx::Adt(ctor, field_idx)) => {
                     let TyKind::Adt(AdtInstance { def, params }) = *ty.r(s) else {
-                        unreachable!()
+                        return tcx.intern(TyKind::Error(anon_delay_bug("ill-formed place")));
                     };
 
                     let adt_env = ClauseImportEnv::new(
@@ -506,10 +507,8 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
             }
             MirRvalue::Adt(ctor, operands) => {
                 let TyKind::Adt(AdtInstance { def, params }) = *lhs.r(s) else {
-                    unreachable!(
-                        "expected ADT, got {}",
-                        self.ccx.pretty(ClausePrettyFmtOpts::default()).wrap(lhs)
-                    );
+                    anon_delay_bug("ill-formed ADT rvalue");
+                    return;
                 };
                 assert_eq!(def, ctor.r(s).owner.item(s));
 
@@ -534,7 +533,8 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
                 let ref_place = self.check_place(*ref_place);
 
                 let TyKind::Reference(_lt, _muta, pointee) = *ref_place.r(s) else {
-                    unreachable!()
+                    anon_delay_bug("ill-formed move-out-ref instruction");
+                    return;
                 };
 
                 self.check_assign_types(source_info, lhs, pointee);
@@ -555,7 +555,8 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
                         .check_place(pointee.truncate_to_len(tcx, last_deref))
                         .r(s)
                     else {
-                        unreachable!()
+                        anon_delay_bug("ill-formed dereference");
+                        return;
                     };
 
                     ref_lt
@@ -632,9 +633,18 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
     }
 
     fn check_assign_types(&mut self, source_info: MirSourceInfo, lhs: Ty, rhs: Ty) {
-        self.ccx
-            .unify_ty_and_ty(lhs, rhs, RelationMode::RhsOntoLhs)
-            .unwrap()
+        let promise = match self.ccx.unify_ty_and_ty(lhs, rhs, RelationMode::RhsOntoLhs) {
+            Ok(v) => v,
+            Err(err) => {
+                anon_delay_bug(format_args!(
+                    "failed to check assignment {}",
+                    err.to_debug_tree(&self.ccx.pretty(ClausePrettyFmtOpts { verbose: true }))
+                ));
+                return;
+            }
+        };
+
+        promise
             .map(move |_ccx, error| MirSpannedError(source_info, error))
             .report_loud();
     }

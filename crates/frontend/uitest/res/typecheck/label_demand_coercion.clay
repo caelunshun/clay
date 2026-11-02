@@ -12,13 +12,18 @@ impl<'a, T: &longer 'a> Deref for &'a mut T {
 }
 
 fn main() {
+    let out;
     let foo = 'a: {
         if true {
-            break 'a &();
+            out = ();
+            break 'a &out;
         }
 
         if true {
-            break 'a &mut ();
+            out = ();
+            break 'a &mut out;
         }
+
+        // FIXME: no return unify error
     };
 }

@@ -1,0 +1,13 @@
+error: 
+- source info: Simple(test28.clay:68:5-16)
+  ty and ty region error
+  LHS: &'?3 i32
+  RHS: &'?5 i32
+  mode: RhsOntoLhs
+    - re and re unify error
+      LHS: '?3
+      RHS: '?5
+      mode: RhsOntoLhs
+        - requires var: 'u2
+          to outlive: 'u5
+
