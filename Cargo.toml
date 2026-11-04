@@ -13,8 +13,6 @@ members = [
 [workspace.dependencies]
 bit-set = "0.11.1"
 bitflags = "2.13.2"
-bumpalo = { version = "3.20.3", features = ["collections", "allocator-api2"] }
-bytemuck = { version = "1.25.2", features = ["derive", "extern_crate_alloc"] }
 cbit = "0.1.1"
 clay-core = { path = "crates/core" }
 codespan-reporting = "0.13.1"
@@ -27,6 +25,7 @@ hashbrown = "0.17.1"
 index_vec = "0.1.4"
 indexmap = "2.14.2"
 indoc = "2.0.8"
+late-struct = "0.1.0"
 paste = "1.0.15"
 proc-macro2 = "1.0.107"
 quote = "1.0.47"
@@ -38,6 +37,14 @@ termcolor = "1.4.1"
 thiserror = "2.0.21"
 tracing-subscriber = "0.3.23"
 unicode-xid = "0.2.6"
+
+[workspace.dependencies.bumpalo]
+version = "3.20.3"
+features = ["collections", "allocator-api2"]
+
+[workspace.dependencies.bytemuck]
+version = "1.25.2"
+features = ["derive", "extern_crate_alloc"]
 
 [workspace.dependencies.smallvec]
 version = "1.16.3"

@@ -3,9 +3,9 @@ use crate::{
         DiagCtxt,
         syntax::{SourceMap, SymbolInterner},
     },
-    utils::mem::DropArena,
+    utils::bump::{DropBump, ScratchBump},
 };
-use std::{cell::RefCell, ops::Deref, rc::Rc};
+use std::{cell::RefCell, fmt, ops::Deref, rc::Rc};
 
 thread_local! {
     static SESSION_TLS: RefCell<Option<Session>> = const { RefCell::new(None) };
@@ -15,15 +15,21 @@ pub trait HasSession {
     fn session(&self) -> &Session;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Session(Rc<SessionInner>);
 
-#[derive(Debug)]
 pub struct SessionInner {
     pub symbols: SymbolInterner,
     pub diag: DiagCtxt,
     pub source_map: SourceMap,
-    pub gp_arena: DropArena<'static>,
+    pub drop_bump: DropBump<'static>,
+    pub scratch_bump: ScratchBump,
+}
+
+impl fmt::Debug for Session {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Session").finish_non_exhaustive()
+    }
 }
 
 impl Session {
@@ -33,7 +39,8 @@ impl Session {
             symbols: SymbolInterner::default(),
             diag: DiagCtxt::default(),
             source_map: SourceMap::default(),
-            gp_arena: DropArena::default(),
+            drop_bump: DropBump::default(),
+            scratch_bump: ScratchBump::default(),
         }))
     }
 

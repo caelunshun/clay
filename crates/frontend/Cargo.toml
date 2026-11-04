@@ -17,6 +17,7 @@ disjoint.workspace = true
 hashbrown.workspace = true
 index_vec.workspace = true
 indexmap.workspace = true
+late-struct.workspace = true
 paste.workspace = true
 scopeguard.workspace = true
 slotmap.workspace = true

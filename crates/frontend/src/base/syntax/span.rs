@@ -318,12 +318,6 @@ struct SourceMapInner {
     len: FilePos,
 }
 
-impl fmt::Debug for SourceMap {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("SourceMap").finish_non_exhaustive()
-    }
-}
-
 impl SourceMap {
     pub fn create(
         &self,

@@ -14,7 +14,7 @@ use crate::{
             ThirPatKind, ThirPatListFrontAndTail, Ty, TyKind,
         },
     },
-    utils::mem::BumpRc,
+    utils::bump::RcBumpPtr,
 };
 use bumpalo::Bump;
 use clay_core::FastHashMap;
@@ -529,7 +529,7 @@ where
     V: Confirmable<'a, 'tcx>,
 {
     meta: V::Meta,
-    func: BumpRc<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>) -> V::Body>,
+    func: RcBumpPtr<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>) -> V::Body>,
 }
 
 struct ConfirmRefinement<'a, 'tcx, V>
@@ -537,7 +537,7 @@ where
     V: Confirmable<'a, 'tcx>,
 {
     meta: V::Meta,
-    func: BumpRc<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>, Obj<V>) -> V::Body>,
+    func: RcBumpPtr<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>, Obj<V>) -> V::Body>,
 }
 
 #[derive_where(Copy, Clone)]
@@ -639,8 +639,8 @@ where
             func: {
                 let f = Cell::new(Some(f));
 
-                BumpRc::map::<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>) -> V::Body>(
-                    BumpRc::new(arena, move |bcx: &mut BodyCtxt<'a, 'tcx>| -> V::Body {
+                RcBumpPtr::map::<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>) -> V::Body>(
+                    RcBumpPtr::new(arena, move |bcx: &mut BodyCtxt<'a, 'tcx>| -> V::Body {
                         f.take().unwrap()(bcx)
                     }),
                     |v| v,
@@ -663,8 +663,8 @@ where
             func: {
                 let f = Cell::new(Some(f));
 
-                BumpRc::map::<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>, Obj<V>) -> V::Body>(
-                    BumpRc::new(
+                RcBumpPtr::map::<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>, Obj<V>) -> V::Body>(
+                    RcBumpPtr::new(
                         arena,
                         move |bcx: &mut BodyCtxt<'a, 'tcx>, base: Obj<V>| -> V::Body {
                             f.take().unwrap()(bcx, base)

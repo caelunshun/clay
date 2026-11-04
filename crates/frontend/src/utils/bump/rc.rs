@@ -7,7 +7,7 @@ use std::{
     rc::Rc,
 };
 
-pub struct BumpRc<T: ?Sized> {
+pub struct RcBumpPtr<T: ?Sized> {
     header: NonNull<ElemHeader>,
     pointee: NonNull<T>,
 }
@@ -24,7 +24,7 @@ struct Elem<T> {
     value: MaybeUninit<T>,
 }
 
-impl<T> BumpRc<T> {
+impl<T> RcBumpPtr<T> {
     pub fn new(bump: Rc<Bump>, value: T) -> Self {
         let mut header = NonNull::from(bump.alloc(Elem {
             header: ElemHeader {
@@ -60,10 +60,10 @@ impl<T> BumpRc<T> {
         unsafe { me.header.as_ref().bump.assume_init_ref() }
     }
 
-    pub fn map<V: ?Sized>(me: Self, f: impl FnOnce(&T) -> &V) -> BumpRc<V> {
+    pub fn map<V: ?Sized>(me: Self, f: impl FnOnce(&T) -> &V) -> RcBumpPtr<V> {
         let pointee = NonNull::from(f(&me));
 
-        let mapped = BumpRc {
+        let mapped = RcBumpPtr {
             header: me.header,
             pointee,
         };
@@ -74,7 +74,7 @@ impl<T> BumpRc<T> {
     }
 }
 
-impl<T: ?Sized> Deref for BumpRc<T> {
+impl<T: ?Sized> Deref for RcBumpPtr<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -82,7 +82,7 @@ impl<T: ?Sized> Deref for BumpRc<T> {
     }
 }
 
-impl<T: ?Sized> Clone for BumpRc<T> {
+impl<T: ?Sized> Clone for RcBumpPtr<T> {
     fn clone(&self) -> Self {
         let header = unsafe { self.header.as_ref() };
         header.strong.set(
@@ -100,7 +100,7 @@ impl<T: ?Sized> Clone for BumpRc<T> {
     }
 }
 
-impl<T: ?Sized> Drop for BumpRc<T> {
+impl<T: ?Sized> Drop for RcBumpPtr<T> {
     fn drop(&mut self) {
         let header = unsafe { self.header.as_ref() };
         header.strong.set(header.strong.get() - 1);

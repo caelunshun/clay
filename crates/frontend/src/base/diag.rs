@@ -49,7 +49,7 @@ impl EmissionGuarantee for ErrorGuaranteed {
 
 // === Context === //
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct DiagCtxt {
     true_error_emitted: Cell<bool>,
     delay_and_sort_accum: RefCell<Vec<SoftDiag>>,

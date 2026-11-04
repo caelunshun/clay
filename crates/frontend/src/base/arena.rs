@@ -1,6 +1,6 @@
 use crate::{
     base::{HasSession, Session},
-    utils::mem::DropArenaPtr,
+    utils::bump::DropBumpPtr,
 };
 use clay_core::FastHashMap;
 use derive_where::derive_where;
@@ -19,7 +19,7 @@ use std::{
 
 #[derive_where(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct Obj<T: ?Sized + 'static> {
-    raw: DropArenaPtr<T>,
+    raw: DropBumpPtr<T>,
 }
 
 impl<T> fmt::Debug for Obj<T>
@@ -64,27 +64,24 @@ impl<T: 'static> Obj<T> {
         T: Sized,
     {
         Self {
-            raw: DropArenaPtr::new(value, &s.gp_arena),
+            raw: DropBumpPtr::new(value, &s.drop_bump),
         }
     }
 }
 
 impl<T: 'static> Obj<[T]> {
-    pub fn new_slice(value: &[T], s: &Session) -> Self
+    pub fn new_iter(value: impl IntoIterator<Item = T>, s: &Session) -> Self {
+        Self {
+            raw: DropBumpPtr::new_iter(value, &s.drop_bump, &s.scratch_bump),
+        }
+    }
+
+    pub fn new_slice(values: &[T], s: &Session) -> Self
     where
         T: Clone,
     {
         Self {
-            raw: DropArenaPtr::new_slice(value, &s.gp_arena),
-        }
-    }
-
-    pub fn new_iter(
-        value: impl IntoIterator<Item = T, IntoIter: ExactSizeIterator>,
-        s: &Session,
-    ) -> Self {
-        Self {
-            raw: DropArenaPtr::new_iter(value, &s.gp_arena),
+            raw: DropBumpPtr::new_slice(values, &s.drop_bump),
         }
     }
 }
@@ -92,12 +89,12 @@ impl<T: 'static> Obj<[T]> {
 impl<T: ?Sized + 'static> Obj<T> {
     pub fn map<V: ?Sized>(self, f: impl FnOnce(&T) -> &V, s: &Session) -> Obj<V> {
         Obj {
-            raw: self.raw.map(f, &s.gp_arena),
+            raw: self.raw.map(f, &s.drop_bump),
         }
     }
 
     pub fn r(self, s: &Session) -> &T {
-        self.raw.r(&s.gp_arena)
+        self.raw.r(&s.drop_bump)
     }
 }
 
@@ -216,7 +213,7 @@ where
             }) {
             hash_map::RawEntryMut::Occupied(entry) => entry.key().0,
             hash_map::RawEntryMut::Vacant(entry) => {
-                let values = Intern::wrap_unchecked(Obj::new_slice(values, s));
+                let values = Intern::wrap_unchecked(Obj::new_iter(values.iter().cloned(), s));
                 entry.insert_with_hasher(hash, (values, hash), (), |(_, hash)| *hash);
                 values
             }

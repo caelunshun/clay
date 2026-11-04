@@ -43,12 +43,6 @@ struct SymbolInternInner {
     symbol_map: FastHashMap<(u64, *const str), Symbol>,
 }
 
-impl fmt::Debug for SymbolInterner {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SymbolInterner").finish_non_exhaustive()
-    }
-}
-
 impl SymbolInterner {
     pub fn intern(&self, value: &str) -> Symbol {
         let mut inner = self.0.borrow_mut();
