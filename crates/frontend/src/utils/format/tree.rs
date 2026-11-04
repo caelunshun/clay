@@ -1,4 +1,3 @@
-use crate::semantic::infer::ClausePrettyFmtCx;
 use std::fmt::{self, Write as _};
 
 // === IndentedFmt === //
@@ -100,16 +99,6 @@ impl fmt::Write for IndentedFmt<'_, '_> {
 }
 
 // === DebugTree === //
-
-pub trait ToDebugTree: Sized {
-    fn to_debug_tree(&self, pretty: &ClausePrettyFmtCx<'_, '_>) -> DebugTree;
-}
-
-impl<T: ToDebugTree> ToDebugTree for Vec<T> {
-    fn to_debug_tree(&self, pretty: &ClausePrettyFmtCx<'_, '_>) -> DebugTree {
-        DebugTree::new().with_sublists(self.iter().map(|v| v.to_debug_tree(pretty)))
-    }
-}
 
 #[derive(Debug, Clone, Default)]
 pub struct DebugTree {

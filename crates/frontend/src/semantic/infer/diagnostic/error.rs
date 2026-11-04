@@ -12,8 +12,20 @@ use crate::{
             UniversalReVar, UniversalTy,
         },
     },
-    utils::format::{DebugTree, ToDebugTree},
+    utils::format::DebugTree,
 };
+
+// === ToDebugTree === //
+
+pub trait ToDebugTree: Sized {
+    fn to_debug_tree(&self, pretty: &ClausePrettyFmtCx<'_, '_>) -> DebugTree;
+}
+
+impl<T: ToDebugTree> ToDebugTree for Vec<T> {
+    fn to_debug_tree(&self, pretty: &ClausePrettyFmtCx<'_, '_>) -> DebugTree {
+        DebugTree::new().with_sublists(self.iter().map(|v| v.to_debug_tree(pretty)))
+    }
+}
 
 // === Spanned === //
 

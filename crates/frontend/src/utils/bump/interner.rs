@@ -52,7 +52,7 @@ impl<T> DropBumpListInterner<T>
 where
     T: hash::Hash + Eq,
 {
-    pub fn intern<'l>(
+    pub fn intern_iter<'l>(
         &self,
         values: impl IntoIterator<Item = T>,
         drop_bump: &DropBump<'l>,
@@ -61,20 +61,58 @@ where
     where
         T: 'l,
     {
-        let scratch_bump = scratch_bump.acquire_guard();
-        let values = BumpVec::from_iter_in(values, &scratch_bump);
+        let scratch = scratch_bump.acquire_guard();
+        let values = BumpVec::from_iter_in(values, &scratch);
+
+        self.intern_raw(
+            values,
+            |v| v.as_slice(),
+            DropBumpPtr::new_iter_exact,
+            drop_bump,
+        )
+    }
+
+    pub fn intern_slice_clone<'l>(&self, values: &[T], drop_bump: &DropBump<'l>) -> DropBumpPtr<[T]>
+    where
+        T: 'l + Clone,
+    {
+        self.intern_raw(values, |v| *v, DropBumpPtr::new_slice_clone, drop_bump)
+    }
+
+    pub fn intern_slice_copy<'l>(&self, values: &[T], drop_bump: &DropBump<'l>) -> DropBumpPtr<[T]>
+    where
+        T: 'l + Copy,
+    {
+        self.intern_raw(values, |v| *v, DropBumpPtr::new_slice_copy, drop_bump)
+    }
+
+    pub fn intern_raw<'l, V>(
+        &self,
+        values: V,
+        borrow: impl FnOnce(&V) -> &[T],
+        alloc: impl FnOnce(V, &DropBump<'l>) -> DropBumpPtr<[T]>,
+        drop_bump: &DropBump<'l>,
+    ) -> DropBumpPtr<[T]>
+    where
+        T: 'l,
+    {
+        let values_slice = borrow(&values);
+
+        if values_slice.is_empty() {
+            return DropBumpPtr::new_list_empty(drop_bump);
+        }
 
         let mut interns = self.interns.borrow_mut();
-        let hash = interns.hasher().hash_one(&values);
+        let hash = interns.hasher().hash_one(&values_slice);
 
         match interns
             .raw_entry_mut()
             .from_hash(hash, |(other, other_hash)| {
-                hash == *other_hash && values == other.r(drop_bump)
+                hash == *other_hash && values_slice == other.r(drop_bump)
             }) {
             hash_map::RawEntryMut::Occupied(entry) => entry.key().0,
             hash_map::RawEntryMut::Vacant(entry) => {
-                let values = DropBumpPtr::new_iter_exact(values, drop_bump);
+                let values = alloc(values, drop_bump);
                 entry.insert_with_hasher(hash, (values, hash), (), |(_, hash)| *hash);
                 values
             }

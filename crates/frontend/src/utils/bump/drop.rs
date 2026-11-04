@@ -89,6 +89,10 @@ pub struct DropBumpPtr<T: ?Sized> {
 }
 
 impl<T: ?Sized> DropBumpPtr<T> {
+    pub unsafe fn new_unchecked(generation: DropGeneration, ptr: NonNull<T>) -> Self {
+        Self { generation, ptr }
+    }
+
     pub fn new<'l>(value: T, drop_bump: &DropBump<'l>) -> Self
     where
         T: Sized + 'l,
@@ -102,18 +106,63 @@ impl<T: ?Sized> DropBumpPtr<T> {
             ptr,
         }
     }
-
-    pub unsafe fn new_unchecked(generation: DropGeneration, ptr: NonNull<T>) -> Self {
-        Self { generation, ptr }
-    }
 }
 
 impl<T> DropBumpPtr<[T]> {
-    pub fn new_slice<'l>(values: &[T], drop_bump: &DropBump<'l>) -> Self
+    pub fn new_list_empty(drop_bump: &DropBump<'_>) -> Self {
+        Self {
+            generation: drop_bump.generation,
+            ptr: NonNull::slice_from_raw_parts(NonNull::dangling(), 0),
+        }
+    }
+
+    pub unsafe fn new_list_raw<'l>(
+        f: impl FnOnce(&Bump) -> &mut [T],
+        drop_bump: &DropBump<'_>,
+    ) -> Self
+    where
+        T: 'l,
+    {
+        let ptr = NonNull::from(f(&drop_bump.bump));
+
+        if ptr.is_empty() {
+            return Self::new_list_empty(drop_bump);
+        }
+
+        drop_bump.drop_queue.borrow_mut().lists.push(DropQueueList {
+            base: ptr.cast(),
+            len: ptr.len(),
+            drop: |ptr, len| unsafe {
+                NonNull::slice_from_raw_parts(ptr.cast::<T>(), len).drop_in_place();
+            },
+        });
+
+        Self {
+            generation: drop_bump.generation,
+            ptr,
+        }
+    }
+
+    pub fn new_slice_clone<'l>(values: &[T], drop_bump: &DropBump<'l>) -> Self
     where
         T: 'l + Clone,
     {
-        Self::new_iter_exact_with(values.len(), values.iter().cloned(), drop_bump)
+        if values.is_empty() {
+            return Self::new_list_empty(drop_bump);
+        }
+
+        unsafe { Self::new_list_raw(|bump| bump.alloc_slice_clone(values), drop_bump) }
+    }
+
+    pub fn new_slice_copy<'l>(values: &[T], drop_bump: &DropBump<'l>) -> Self
+    where
+        T: 'l + Copy,
+    {
+        if values.is_empty() {
+            return Self::new_list_empty(drop_bump);
+        }
+
+        unsafe { Self::new_list_raw(|bump| bump.alloc_slice_copy(values), drop_bump) }
     }
 
     pub fn new_iter<'l>(
@@ -130,12 +179,12 @@ impl<T> DropBumpPtr<[T]> {
         if let (low, Some(high)) = size_hint
             && low == high
         {
-            return Self::new_iter_exact_with(low, values, drop_bump);
+            return Self::new_iter_assume_exact(low, values, drop_bump);
         }
 
         scratch_bump.acquire(|scratch_bump| {
             let values = BumpVec::from_iter_in(values, scratch_bump);
-            Self::new_iter_exact_with(values.len(), values, drop_bump)
+            Self::new_iter_exact(values, drop_bump)
         })
     }
 
@@ -147,11 +196,10 @@ impl<T> DropBumpPtr<[T]> {
         T: 'l,
     {
         let values = values.into_iter();
-
-        Self::new_iter_exact_with(values.len(), values, drop_bump)
+        Self::new_iter_assume_exact(values.len(), values, drop_bump)
     }
 
-    pub fn new_iter_exact_with<'l>(
+    fn new_iter_assume_exact<'l>(
         values_len: usize,
         values: impl IntoIterator<Item = T>,
         drop_bump: &DropBump<'l>,
@@ -159,35 +207,28 @@ impl<T> DropBumpPtr<[T]> {
     where
         T: 'l,
     {
-        if values_len == 0 {
-            return Self::new_empty(drop_bump);
-        }
-
         let mut values = values.into_iter();
 
-        let ptr = NonNull::from(drop_bump.bump.alloc_slice_fill_with(values_len, |_| {
-            values.next().expect("Iterator supplied too few elements")
-        }));
-
-        drop_bump.drop_queue.borrow_mut().lists.push(DropQueueList {
-            base: ptr.cast(),
-            len: ptr.len(),
-            drop: |ptr, len| unsafe {
-                NonNull::slice_from_raw_parts(ptr.cast::<T>(), len).drop_in_place();
-            },
-        });
-
-        Self {
-            generation: drop_bump.generation,
-            ptr,
-        }
+        Self::new_iter_with(
+            values_len,
+            |_| values.next().expect("Iterator supplied too few elements"),
+            drop_bump,
+        )
     }
 
-    pub fn new_empty(drop_bump: &DropBump<'_>) -> Self {
-        Self {
-            generation: drop_bump.generation,
-            ptr: NonNull::slice_from_raw_parts(NonNull::dangling(), 0),
+    pub fn new_iter_with<'l>(
+        len: usize,
+        f: impl FnMut(usize) -> T,
+        drop_bump: &DropBump<'l>,
+    ) -> Self
+    where
+        T: 'l,
+    {
+        if len == 0 {
+            return Self::new_list_empty(drop_bump);
         }
+
+        unsafe { Self::new_list_raw(|bump| bump.alloc_slice_fill_with(len, f), drop_bump) }
     }
 }
 

@@ -1,6 +1,7 @@
 use crate::{
     base::{
         DiagCtxt,
+        arena::SessionInterners,
         syntax::{SourceMap, SymbolInterner},
     },
     utils::bump::{DropBump, ScratchBump},
@@ -24,6 +25,7 @@ pub struct SessionInner {
     pub source_map: SourceMap,
     pub drop_bump: DropBump<'static>,
     pub scratch_bump: ScratchBump,
+    pub interners: SessionInterners,
 }
 
 impl fmt::Debug for Session {
@@ -41,6 +43,7 @@ impl Session {
             source_map: SourceMap::default(),
             drop_bump: DropBump::default(),
             scratch_bump: ScratchBump::default(),
+            interners: SessionInterners::default(),
         }))
     }
 

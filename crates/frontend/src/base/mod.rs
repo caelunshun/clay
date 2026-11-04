@@ -1,6 +1,8 @@
 pub mod analysis;
-pub mod arena;
 pub mod syntax;
+
+mod arena;
+pub use self::arena::*;
 
 mod diag;
 pub use self::diag::*;
