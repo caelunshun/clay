@@ -1,11 +1,8 @@
 use crate::{
-    base::{
-        Diag, ErrorGuaranteed, LeafDiag,
-        arena::{LateInit, Obj},
-        syntax::{Span, Symbol},
-    },
-    semantic::syntax::{AdtItem, HirExpr, Item, TraitItem, TyCtxt},
+    base::{Diag, ErrorGuaranteed, LeafDiag, Obj, Session, Span, Symbol},
+    semantic::syntax::{AdtItem, HirExpr, Item, TraitItem},
     symbol,
+    utils::mem::LateInit,
 };
 use std::fmt;
 
@@ -33,11 +30,11 @@ pub struct EarlyAttrLang {
 pub trait LangItemValidator: Sized {
     type Stored: fmt::Debug + Clone;
 
-    fn as_item(&self, tcx: &TyCtxt, stored: Self::Stored) -> Obj<Item>;
+    fn as_item(&self, s: &Session, stored: Self::Stored) -> Obj<Item>;
 
     fn assign(
         &self,
-        tcx: &TyCtxt,
+        s: &Session,
         item: Obj<Item>,
         name: Symbol,
         span: Span,
@@ -50,18 +47,18 @@ pub struct TraitValidator;
 impl LangItemValidator for TraitValidator {
     type Stored = Obj<TraitItem>;
 
-    fn as_item(&self, tcx: &TyCtxt, stored: Self::Stored) -> Obj<Item> {
-        stored.r(&tcx.session).item
+    fn as_item(&self, s: &Session, stored: Self::Stored) -> Obj<Item> {
+        stored.r(s).item
     }
 
     fn assign(
         &self,
-        tcx: &TyCtxt,
+        s: &Session,
         item: Obj<Item>,
         name: Symbol,
         span: Span,
     ) -> Result<Self::Stored, ErrorGuaranteed> {
-        item.r(&tcx.session).kind.as_trait().ok_or_else(|| {
+        item.r(s).kind.as_trait().ok_or_else(|| {
             Diag::span_err(span, format_args!("`{name}` language item must be a trait")).emit()
         })
     }
@@ -73,18 +70,18 @@ pub struct TypeValidator;
 impl LangItemValidator for TypeValidator {
     type Stored = Obj<AdtItem>;
 
-    fn as_item(&self, tcx: &TyCtxt, stored: Self::Stored) -> Obj<Item> {
-        stored.r(&tcx.session).item
+    fn as_item(&self, s: &Session, stored: Self::Stored) -> Obj<Item> {
+        stored.r(s).item
     }
 
     fn assign(
         &self,
-        tcx: &TyCtxt,
+        s: &Session,
         item: Obj<Item>,
         name: Symbol,
         span: Span,
     ) -> Result<Self::Stored, ErrorGuaranteed> {
-        item.r(&tcx.session).kind.as_adt().ok_or_else(|| {
+        item.r(s).kind.as_adt().ok_or_else(|| {
             Diag::span_err(span, format_args!("`{name}` language item must be an ADT")).emit()
         })
     }
@@ -106,7 +103,7 @@ macro_rules! define_lang_items {
         impl LangItems {
             pub fn define(
                 &self,
-                tcx: &TyCtxt,
+                s: &Session,
                 name: Symbol,
                 name_span: Span,
                 item: Obj<Item>,
@@ -120,17 +117,17 @@ macro_rules! define_lang_items {
 
                     if name == symbol!(stringify!($name)) {
                         if let Some(&old) = LateInit::get(&self.$name) {
-                            let old = VALIDATOR.with(|validator| validator.as_item(tcx, old));
+                            let old = VALIDATOR.with(|validator| validator.as_item(s, old));
 
                             let mut diag = Diag::span_err(
                                 name_span,
                                 format_args!(
                                     "language item `{name}` already defined at `{}`",
-                                    old.r(&tcx.session).display_path(&tcx.session),
+                                    old.r(s).display_path(s),
                                 ),
                             );
 
-                            if let Some(prev_name) = old.r(&tcx.session).name {
+                            if let Some(prev_name) = old.r(s).name {
                                 diag.push_child(
                                     LeafDiag::span_note(
                                         prev_name.span,
@@ -143,7 +140,7 @@ macro_rules! define_lang_items {
                         }
 
                         let output = VALIDATOR.with(|validator| validator.assign(
-                            tcx,
+                            s,
                             item,
                             name,
                             name_span

@@ -1,60 +1,53 @@
 use crate::{
-    base::{
-        Session,
-        arena::{HasInterner, HasListInterner, Intern},
-    },
+    base::{Intern, ListInternable, Session, ValueInternable},
     semantic::syntax::{
         AdtInstance, FnInstance, FnInstanceInner, FnOwner, HrtbBinder, HrtbDebruijnDef,
         HrtbDebruijnDefList, HrtbProjection, Re, TraitClause, TraitClauseList, TraitInstance,
-        TraitParam, TraitParamList, TraitSpec, Ty, TyCtxt, TyKind, TyList, TyOrRe, TyOrReList,
-        UniversalTy, UniversalTyProj, UniversalTyProjInner,
+        TraitParam, TraitParamList, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReList, UniversalTy,
+        UniversalTyProj, UniversalTyProjInner,
     },
 };
+use bumpalo::collections::Vec as BumpVec;
 use std::{convert::Infallible, hash};
 
 // === Helpers === //
 
-fn super_interned_list<'tcx, T, V>(
+fn super_interned_list<'sess, T, V>(
     folder: &mut T,
     values: Intern<[V]>,
 ) -> Result<Intern<[V]>, T::Error>
 where
-    T: ?Sized + TyFolder<'tcx>,
-    V: Copy + hash::Hash + Eq + TyFoldable,
-    TyCtxt: HasListInterner<V>,
+    T: ?Sized + TyFolder<'sess>,
+    V: Copy + hash::Hash + Eq + TyFoldable + ListInternable,
 {
-    let tcx = folder.tcx();
     let s = folder.session();
+    let scratch_bump = s.scratch_bump.acquire_guard();
 
-    let mut out = Vec::with_capacity(values.r(s).len());
+    let mut out = BumpVec::with_capacity_in(values.r(s).len(), &scratch_bump);
 
     for &value in values.r(s) {
         out.push(folder.fold_fallible(value)?);
     }
 
-    Ok(tcx.intern_list(&out))
+    Ok(Intern::new_slice_copy(&out, s))
 }
 
 // === Core traits === //
 
 pub trait TyFoldable: Sized {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>;
+        F: ?Sized + TyFolder<'sess>;
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>;
+        F: ?Sized + TyFolder<'sess>;
 }
 
-pub trait TyFolder<'tcx> {
+pub trait TyFolder<'sess> {
     type Error;
 
-    fn tcx(&self) -> &'tcx TyCtxt;
-
-    fn session(&self) -> &'tcx Session {
-        &self.tcx().session
-    }
+    fn session(&self) -> &'sess Session;
 
     // === Clauses === //
 
@@ -167,7 +160,7 @@ pub trait TyFolder<'tcx> {
 
 // === Extensions === //
 
-pub trait TyFolderExt<'tcx>: TyFolder<'tcx> {
+pub trait TyFolderExt<'sess>: TyFolder<'sess> {
     fn fold_fallible<T: TyFoldable>(&mut self, value: T) -> Result<T, Self::Error> {
         T::fold_raw(value, self)
     }
@@ -177,9 +170,9 @@ pub trait TyFolderExt<'tcx>: TyFolder<'tcx> {
     }
 }
 
-impl<'tcx, T: ?Sized + TyFolder<'tcx>> TyFolderExt<'tcx> for T {}
+impl<'sess, T: ?Sized + TyFolder<'sess>> TyFolderExt<'sess> for T {}
 
-pub trait TyFolderInfallibleExt<'tcx>: TyFolder<'tcx, Error = Infallible> {
+pub trait TyFolderInfallibleExt<'sess>: TyFolder<'sess, Error = Infallible> {
     fn fold<T: TyFoldable>(&mut self, value: T) -> T {
         let Ok(v) = self.fold_fallible(value);
         v
@@ -191,37 +184,37 @@ pub trait TyFolderInfallibleExt<'tcx>: TyFolder<'tcx, Error = Infallible> {
     }
 }
 
-impl<'tcx, T: ?Sized + TyFolder<'tcx, Error = Infallible>> TyFolderInfallibleExt<'tcx> for T {}
+impl<'sess, T: ?Sized + TyFolder<'sess, Error = Infallible>> TyFolderInfallibleExt<'sess> for T {}
 
 // === Clauses === //
 
 impl TyFoldable for TraitClauseList {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_clause_list(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         super_interned_list(folder, me)
     }
 }
 
 impl TyFoldable for TraitClause {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_clause(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         Ok(match me {
             TraitClause::Outlives(dir, ty_or_re) => {
@@ -233,32 +226,32 @@ impl TyFoldable for TraitClause {
 }
 
 impl TyFoldable for TraitParamList {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_param_list(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         super_interned_list(folder, me)
     }
 }
 
 impl TyFoldable for TraitParam {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_param(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         Ok(match me {
             TraitParam::Equals(ty_or_re) => TraitParam::Equals(folder.fold_fallible(ty_or_re)?),
@@ -272,16 +265,16 @@ impl TyFoldable for TraitParam {
 // === Instances === //
 
 impl TyFoldable for TraitSpec {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_trait_spec(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         let TraitSpec { def, params } = me;
 
@@ -293,16 +286,16 @@ impl TyFoldable for TraitSpec {
 }
 
 impl TyFoldable for TraitInstance {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_trait_instance(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         let TraitInstance { def, params } = me;
 
@@ -314,16 +307,16 @@ impl TyFoldable for TraitInstance {
 }
 
 impl TyFoldable for AdtInstance {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_adt_instance(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         let AdtInstance { def, params } = me;
 
@@ -335,16 +328,16 @@ impl TyFoldable for AdtInstance {
 }
 
 impl TyFoldable for HrtbProjection {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_hrtb_projection(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         let HrtbProjection {
             target,
@@ -361,43 +354,43 @@ impl TyFoldable for HrtbProjection {
 }
 
 impl TyFoldable for FnInstance {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_fn_instance(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
-        let tcx = folder.tcx();
         let s = folder.session();
 
         let FnInstanceInner { owner, early_args } = *me.r(s);
 
-        Ok(tcx.intern(FnInstanceInner {
+        Ok(FnInstanceInner {
             owner: folder.fold_fallible(owner)?,
             early_args: match early_args {
                 Some(early_args) => Some(folder.fold_fallible(early_args)?),
                 None => None,
             },
-        }))
+        }
+        .intern(s))
     }
 }
 
 impl TyFoldable for FnOwner {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_fn_owner(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         match me {
             FnOwner::Item(def) => Ok(FnOwner::Item(def)),
@@ -427,16 +420,16 @@ impl TyFoldable for FnOwner {
 // === Types === //
 
 impl TyFoldable for TyOrRe {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_ty_or_re(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         Ok(match me {
             TyOrRe::Re(re) => TyOrRe::Re(folder.fold_fallible(re)?),
@@ -446,48 +439,48 @@ impl TyFoldable for TyOrRe {
 }
 
 impl TyFoldable for TyOrReList {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_ty_or_re_list(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         super_interned_list(folder, me)
     }
 }
 
 impl TyFoldable for TyList {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_ty_list(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         super_interned_list(folder, me)
     }
 }
 
 impl TyFoldable for Re {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_re(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         match me {
             Re::Gc | Re::Error(_) | Re::HrtbVar(_) | Re::InferVar(_) | Re::UniversalVar(_) => {
@@ -500,18 +493,17 @@ impl TyFoldable for Re {
 }
 
 impl TyFoldable for Ty {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_ty(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
-        let tcx = folder.tcx();
         let s = folder.session();
 
         let kind = match *me.r(s) {
@@ -538,23 +530,23 @@ impl TyFoldable for Ty {
             TyKind::Tuple(tys) => TyKind::Tuple(folder.fold_fallible(tys)?),
         };
 
-        Ok(tcx.intern(kind))
+        Ok(kind.intern(s))
     }
 }
 
 // === Universals === //
 
 impl TyFoldable for UniversalTy {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_universal(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         match me {
             UniversalTy::Root(_var) => {
@@ -569,19 +561,18 @@ impl TyFoldable for UniversalTy {
 }
 
 impl TyFoldable for UniversalTyProj {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_universal_proj(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         let s = folder.session();
-        let tcx = folder.tcx();
 
         let UniversalTyProjInner {
             target,
@@ -590,28 +581,29 @@ impl TyFoldable for UniversalTyProj {
             cache_idx,
         } = *me.r(s);
 
-        Ok(tcx.intern(UniversalTyProjInner {
+        Ok(UniversalTyProjInner {
             target: folder.fold_fallible(target)?,
             as_spec, // Intentionally not folded.
             assoc_idx,
             cache_idx,
-        }))
+        }
+        .intern(s))
     }
 }
 
 // === Binders === //
 
 impl TyFoldable for HrtbBinder {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_hrtb_binder(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         let HrtbBinder { defs, inner } = me;
 
@@ -623,32 +615,32 @@ impl TyFoldable for HrtbBinder {
 }
 
 impl TyFoldable for HrtbDebruijnDefList {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_hrtb_debruijn_def_list(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         super_interned_list(folder, me)
     }
 }
 
 impl TyFoldable for HrtbDebruijnDef {
-    fn fold_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn fold_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         folder.fold_hrtb_debruijn_def(me)
     }
 
-    fn super_raw<'tcx, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
+    fn super_raw<'sess, F>(me: Self, folder: &mut F) -> Result<Self, F::Error>
     where
-        F: ?Sized + TyFolder<'tcx>,
+        F: ?Sized + TyFolder<'sess>,
     {
         let HrtbDebruijnDef {
             span,

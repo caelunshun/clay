@@ -1,9 +1,5 @@
 use crate::{
-    base::{
-        ErrorGuaranteed,
-        arena::{LateInit, Obj},
-        syntax::{HasSpan, Span, Symbol},
-    },
+    base::{ErrorGuaranteed, HasSpan, Obj, Span, Symbol},
     parse::{
         ast::{
             AstAssignOpKind, AstBinOpSpanned, AstLit, AstOptMutability, AstPatStructRest,
@@ -16,6 +12,7 @@ use crate::{
         SigTy,
     },
     symbol,
+    utils::mem::LateInit,
 };
 use std::fmt;
 

@@ -1,9 +1,5 @@
 use crate::{
-    base::{
-        ErrorGuaranteed, Session,
-        arena::Obj,
-        syntax::{Span, Symbol},
-    },
+    base::{ErrorGuaranteed, Obj, Session, Span, Symbol},
     semantic::syntax::{
         AdtCtor, AdtItem, DynSiteIdx, FnItem, HrtbDebruijn, ImplItem, Mutability, RegionGeneric,
         RelationDirection, SimpleTyKind, TraitItem, TyOrReKind, TypeAliasItem, TypeGeneric,

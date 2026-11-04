@@ -9,6 +9,3 @@ pub use self::modules::*;
 
 mod types;
 pub use self::types::*;
-
-mod tcx;
-pub use self::tcx::*;

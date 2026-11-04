@@ -3,8 +3,8 @@ use crate::{
     semantic::syntax::{
         AdtInstance, FnInstance, FnInstanceInner, FnOwner, HrtbBinder, HrtbDebruijnDef,
         HrtbDebruijnDefList, HrtbProjection, Re, TraitClause, TraitClauseList, TraitInstance,
-        TraitParam, TraitParamList, TraitSpec, Ty, TyCtxt, TyKind, TyList, TyOrRe, TyOrReList,
-        UniversalTy, UniversalTyProj, UniversalTyProjInner,
+        TraitParam, TraitParamList, TraitSpec, Ty, TyKind, TyList, TyOrRe, TyOrReList, UniversalTy,
+        UniversalTyProj, UniversalTyProjInner,
     },
 };
 use std::{convert::Infallible, ops::ControlFlow};
@@ -12,23 +12,19 @@ use std::{convert::Infallible, ops::ControlFlow};
 // === Core traits === //
 
 pub trait TyVisitable: Sized {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>;
+        V: ?Sized + TyVisitor<'sess>;
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>;
+        V: ?Sized + TyVisitor<'sess>;
 }
 
-pub trait TyVisitor<'tcx> {
+pub trait TyVisitor<'sess> {
     type Break;
 
-    fn tcx(&self) -> &'tcx TyCtxt;
-
-    fn session(&self) -> &'tcx Session {
-        &self.tcx().session
-    }
+    fn session(&self) -> &'sess Session;
 
     // === Clauses === //
 
@@ -129,7 +125,7 @@ pub trait TyVisitor<'tcx> {
 
 // === Extensions === //
 
-pub trait TyVisitorExt<'tcx>: TyVisitor<'tcx> {
+pub trait TyVisitorExt<'sess>: TyVisitor<'sess> {
     fn visit_fallible<T: TyVisitable>(&mut self, value: T) -> ControlFlow<Self::Break> {
         T::visit_raw(value, self)
     }
@@ -139,9 +135,9 @@ pub trait TyVisitorExt<'tcx>: TyVisitor<'tcx> {
     }
 }
 
-impl<'tcx, T: ?Sized + TyVisitor<'tcx>> TyVisitorExt<'tcx> for T {}
+impl<'sess, T: ?Sized + TyVisitor<'sess>> TyVisitorExt<'sess> for T {}
 
-pub trait TyVisitorInfallibleExt<'tcx>: TyVisitor<'tcx, Break = Infallible> {
+pub trait TyVisitorInfallibleExt<'sess>: TyVisitor<'sess, Break = Infallible> {
     fn visit<T: TyVisitable>(&mut self, value: T) {
         ControlFlow::Continue(()) = self.visit_fallible(value)
     }
@@ -151,21 +147,21 @@ pub trait TyVisitorInfallibleExt<'tcx>: TyVisitor<'tcx, Break = Infallible> {
     }
 }
 
-impl<'tcx, T: ?Sized + TyVisitor<'tcx, Break = Infallible>> TyVisitorInfallibleExt<'tcx> for T {}
+impl<'sess, T: ?Sized + TyVisitor<'sess, Break = Infallible>> TyVisitorInfallibleExt<'sess> for T {}
 
 // === Clauses === //
 
 impl TyVisitable for TraitClauseList {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_clause_list(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         let s = visitor.session();
 
@@ -178,16 +174,16 @@ impl TyVisitable for TraitClauseList {
 }
 
 impl TyVisitable for TraitClause {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_clause(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         match me {
             TraitClause::Outlives(_dir, ty_or_re) => {
@@ -203,16 +199,16 @@ impl TyVisitable for TraitClause {
 }
 
 impl TyVisitable for TraitParamList {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_param_list(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         let s = visitor.session();
 
@@ -225,16 +221,16 @@ impl TyVisitable for TraitParamList {
 }
 
 impl TyVisitable for TraitParam {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_param(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         match me {
             TraitParam::Equals(ty_or_re) => {
@@ -252,16 +248,16 @@ impl TyVisitable for TraitParam {
 // === Instances === //
 
 impl TyVisitable for TraitSpec {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_trait_spec(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         let TraitSpec { def: _, params } = me;
         visitor.visit_fallible(params)?;
@@ -271,16 +267,16 @@ impl TyVisitable for TraitSpec {
 }
 
 impl TyVisitable for TraitInstance {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_trait_instance(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         let TraitInstance { def: _, params } = me;
         visitor.visit_fallible(params)?;
@@ -290,16 +286,16 @@ impl TyVisitable for TraitInstance {
 }
 
 impl TyVisitable for AdtInstance {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_adt_instance(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         let AdtInstance { def: _, params } = me;
         visitor.visit_fallible(params)?;
@@ -309,16 +305,16 @@ impl TyVisitable for AdtInstance {
 }
 
 impl TyVisitable for HrtbProjection {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_hrtb_projection(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         let HrtbProjection {
             target,
@@ -334,16 +330,16 @@ impl TyVisitable for HrtbProjection {
 }
 
 impl TyVisitable for FnInstance {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_fn_instance(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         let s = visitor.session();
         let FnInstanceInner { owner, early_args } = *me.r(s);
@@ -359,16 +355,16 @@ impl TyVisitable for FnInstance {
 }
 
 impl TyVisitable for FnOwner {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_fn_owner(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         match me {
             FnOwner::Item(_) | FnOwner::AdtCtor(_) => {
@@ -398,16 +394,16 @@ impl TyVisitable for FnOwner {
 // === Types === //
 
 impl TyVisitable for TyOrRe {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_ty_or_re(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         match me {
             TyOrRe::Re(re) => visitor.visit_fallible(re),
@@ -417,16 +413,16 @@ impl TyVisitable for TyOrRe {
 }
 
 impl TyVisitable for TyOrReList {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_ty_or_re_list(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         let s = visitor.session();
 
@@ -439,16 +435,16 @@ impl TyVisitable for TyOrReList {
 }
 
 impl TyVisitable for TyList {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_ty_list(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         let s = visitor.session();
 
@@ -461,16 +457,16 @@ impl TyVisitable for TyList {
 }
 
 impl TyVisitable for Re {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_re(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         match me {
             Re::Gc | Re::Error(_) | Re::HrtbVar(_) | Re::InferVar(_) | Re::UniversalVar(_) => {
@@ -484,16 +480,16 @@ impl TyVisitable for Re {
 }
 
 impl TyVisitable for Ty {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_ty(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         let s = visitor.session();
 
@@ -533,16 +529,16 @@ impl TyVisitable for Ty {
 // === Universals === //
 
 impl TyVisitable for UniversalTy {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_universal(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         match me {
             UniversalTy::Root(_var) => {
@@ -558,16 +554,16 @@ impl TyVisitable for UniversalTy {
 }
 
 impl TyVisitable for UniversalTyProj {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_universal_projection(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         let s = visitor.session();
         let UniversalTyProjInner {
@@ -587,16 +583,16 @@ impl TyVisitable for UniversalTyProj {
 // === Binders === //
 
 impl TyVisitable for HrtbBinder {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_hrtb_binder(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         let HrtbBinder { defs: kind, inner } = me;
 
@@ -608,16 +604,16 @@ impl TyVisitable for HrtbBinder {
 }
 
 impl TyVisitable for HrtbDebruijnDefList {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_hrtb_debruijn_def_list(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         let s = visitor.session();
 
@@ -630,16 +626,16 @@ impl TyVisitable for HrtbDebruijnDefList {
 }
 
 impl TyVisitable for HrtbDebruijnDef {
-    fn visit_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn visit_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         visitor.visit_hrtb_debruijn_def(me)
     }
 
-    fn walk_raw<'tcx, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
+    fn walk_raw<'sess, V>(me: Self, visitor: &mut V) -> ControlFlow<V::Break>
     where
-        V: ?Sized + TyVisitor<'tcx>,
+        V: ?Sized + TyVisitor<'sess>,
     {
         let HrtbDebruijnDef {
             span: _,

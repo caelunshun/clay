@@ -181,14 +181,14 @@ impl<T: ?Sized + 'static + fmt::Debug> fmt::Debug for Intern<T> {
     }
 }
 
-impl<T: 'static + ValueInternable> Intern<T> {
+impl<T: ValueInternable> Intern<T> {
     pub fn new(value: T, s: &Session) -> Self {
         let obj = s.interners.raw.get::<T>().intern(value, &s.drop_bump);
         Self::wrap_unchecked(Obj::wrap(obj))
     }
 }
 
-impl<T: 'static + ListInternable> Intern<[T]> {
+impl<T: ListInternable> Intern<[T]> {
     pub fn new_empty(s: &Session) -> Self {
         Self::wrap_unchecked(Obj::new_empty(s))
     }
@@ -239,6 +239,10 @@ impl<T: 'static + ListInternable> Intern<[T]> {
         T: Copy,
     {
         Self::new_slice_copy(&self.r(s)[..len], s)
+    }
+
+    pub fn map<V: ListInternable>(self, s: &Session, f: impl FnMut(T) -> V) -> Intern<[V]> {
+        Intern::new_iter(self.r(s).iter().cloned().map(f), s)
     }
 }
 

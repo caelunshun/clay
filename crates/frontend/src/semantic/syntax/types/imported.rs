@@ -1,15 +1,14 @@
 use crate::{
-    base::{
-        ErrorGuaranteed, Session,
-        arena::{HasInterner, HasListInterner, Intern, LateInit, Obj},
-        syntax::{Span, Symbol},
-    },
+    base::{ErrorGuaranteed, Intern, Obj, Session, Span, Symbol, ValueInternable},
+    list_internable,
     semantic::syntax::{
         AdtCtor, AdtItem, FloatKind, FnItem, HrtbDebruijn, ImplItem, IntKind, LocalNameIdent,
         MirPlace, Mutability, RegionGeneric, RelationDirection, SigHrtbBinder, SigTraitClause,
-        SimpleTyKind, TraitItem, TyCtxt, TyOrReKind, TypeGeneric,
+        SimpleTyKind, TraitItem, TyOrReKind, TypeGeneric,
     },
     symbol,
+    utils::mem::LateInit,
+    value_internable,
 };
 use index_vec::define_index_type;
 use std::fmt;
@@ -17,6 +16,8 @@ use std::fmt;
 // === Type === //
 
 pub type TyOrReList = Intern<[TyOrRe]>;
+
+list_internable!(TyOrRe);
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TyOrRe {
@@ -94,7 +95,12 @@ impl Re {
 }
 
 pub type Ty = Intern<TyKind>;
+
+value_internable!(TyKind);
+
 pub type TyList = Intern<[Ty]>;
+
+list_internable!(Ty);
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TyKind {
@@ -205,6 +211,8 @@ pub enum UniversalReVarSourceInfo {
 
 pub type UniversalTyProj = Intern<UniversalTyProjInner>;
 
+value_internable!(UniversalTyProjInner);
+
 define_index_type! {
     pub struct UniversalTyProjIdx = u32;
 }
@@ -246,8 +254,12 @@ pub struct HrtbProjection {
 
 pub type ListOfTraitClauseList = Intern<[TraitClauseList]>;
 
+list_internable!(TraitClauseList);
+
 /// A trait clause with multiple parts (e.g. `'a + Foo<u32> + Bar<Item = Baz>`).
 pub type TraitClauseList = Intern<[TraitClause]>;
+
+list_internable!(TraitClause);
 
 /// A single trait clause (e.g. `'a` or `Trait<'re1, Ty1, Ty2, AssocA = Ty3, AssocC = Ty4>`).
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -264,6 +276,8 @@ pub struct HrtbBinder {
 
 pub type HrtbDebruijnDefList = Intern<[HrtbDebruijnDef]>;
 
+list_internable!(HrtbDebruijnDef);
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct HrtbDebruijnDef {
     pub span: Span,
@@ -273,6 +287,8 @@ pub struct HrtbDebruijnDef {
 }
 
 pub type TraitParamList = Intern<[TraitParam]>;
+
+list_internable!(TraitParam);
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TraitParam {
@@ -315,19 +331,10 @@ impl fmt::Debug for TraitInstance {
 }
 
 impl TraitInstance {
-    pub fn to_spec(self, tcx: &TyCtxt) -> TraitSpec {
-        let s = &tcx.session;
-
+    pub fn to_spec(self, s: &Session) -> TraitSpec {
         TraitSpec {
             def: self.def,
-            params: tcx.intern_list(
-                &self
-                    .params
-                    .r(s)
-                    .iter()
-                    .map(|&para| TraitParam::Equals(para))
-                    .collect::<Vec<_>>(),
-            ),
+            params: self.params.map(s, TraitParam::Equals),
         }
     }
 }
@@ -335,6 +342,8 @@ impl TraitInstance {
 // === FnInstance === //
 
 pub type FnInstance = Intern<FnInstanceInner>;
+
+value_internable!(FnInstanceInner);
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct FnInstanceInner {
@@ -554,7 +563,7 @@ impl SimpleTySet {
         }
     }
 
-    pub fn to_unique_type(self, tcx: &TyCtxt) -> Option<Ty> {
+    pub fn to_unique_type(self, s: &Session) -> Option<Ty> {
         if self.bits().count_ones() != 1 {
             return None;
         }
@@ -577,32 +586,32 @@ impl SimpleTySet {
             v => unreachable!("{v:?}"),
         }?;
 
-        Some(tcx.intern(TyKind::Simple(kind)))
+        Some(TyKind::Simple(kind).intern(s))
     }
 
-    pub fn to_infer_fallback(self, tcx: &TyCtxt) -> Option<Ty> {
+    pub fn to_infer_fallback(self, s: &Session) -> Option<Ty> {
         if self.intersects(SimpleTySet::I32) {
-            return Some(tcx.intern(TyKind::Simple(SimpleTyKind::Int(IntKind::S32))));
+            return Some(TyKind::Simple(SimpleTyKind::Int(IntKind::S32)).intern(s));
         }
 
         if self.intersects(SimpleTySet::I64) {
-            return Some(tcx.intern(TyKind::Simple(SimpleTyKind::Int(IntKind::S64))));
+            return Some(TyKind::Simple(SimpleTyKind::Int(IntKind::S64)).intern(s));
         }
 
         if self.intersects(SimpleTySet::U32) {
-            return Some(tcx.intern(TyKind::Simple(SimpleTyKind::Uint(IntKind::S32))));
+            return Some(TyKind::Simple(SimpleTyKind::Uint(IntKind::S32)).intern(s));
         }
 
         if self.intersects(SimpleTySet::U64) {
-            return Some(tcx.intern(TyKind::Simple(SimpleTyKind::Uint(IntKind::S64))));
+            return Some(TyKind::Simple(SimpleTyKind::Uint(IntKind::S64)).intern(s));
         }
 
         if self.intersects(SimpleTySet::F32) {
-            return Some(tcx.intern(TyKind::Simple(SimpleTyKind::Float(FloatKind::S32))));
+            return Some(TyKind::Simple(SimpleTyKind::Float(FloatKind::S32)).intern(s));
         }
 
         if self.intersects(SimpleTySet::F64) {
-            return Some(tcx.intern(TyKind::Simple(SimpleTyKind::Float(FloatKind::S64))));
+            return Some(TyKind::Simple(SimpleTyKind::Float(FloatKind::S64)).intern(s));
         }
 
         None

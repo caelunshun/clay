@@ -1,18 +1,12 @@
 use crate::{
-    base::{
-        HasSession, Session,
-        arena::{HasInterner, LateInit, Obj},
-        syntax::{HasSpan, Span, Symbol},
-    },
+    base::{HasSession, HasSpan, Obj, Session, Span, Symbol, ValueInternable},
     parse::token::{Ident, Lifetime},
-    semantic::{
-        lower::modules::ItemPathFmt,
-        syntax::{
-            AdtInstance, FnDef, Item, Ty, TyCtxt, TyKind, TyOrReKind, TyOrReList, Visibility,
-            types::signature::{SigTraitClauseList, SigTraitInstance, SigTy},
-        },
+    semantic::syntax::{
+        AdtInstance, FnDef, Item, Ty, TyKind, TyOrReKind, TyOrReList, Visibility,
+        types::signature::{SigTraitClauseList, SigTraitInstance, SigTy},
     },
     symbol,
+    utils::mem::LateInit,
 };
 use clay_core::FastHashMap;
 use derive_where::derive_where;
@@ -215,8 +209,8 @@ impl AdtCtorInstance {
         }
     }
 
-    pub fn to_adt_instance_ty(self, tcx: &TyCtxt) -> Ty {
-        tcx.intern(TyKind::Adt(self.to_adt_instance(tcx.session())))
+    pub fn to_adt_instance_ty(self, s: &Session) -> Ty {
+        TyKind::Adt(self.to_adt_instance(s.session())).intern(s)
     }
 }
 

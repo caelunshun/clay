@@ -1,13 +1,9 @@
 use crate::{
-    base::{
-        ErrorGuaranteed, Session,
-        arena::{HasListInterner as _, Intern, Obj},
-        syntax::Span,
-    },
+    base::{ErrorGuaranteed, Intern, Obj, Session, Span},
+    list_internable,
     parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
     semantic::syntax::{
         AdtCtor, AdtCtorOwner, AdtCtorSyntax, DynSiteIdx, Mutability, ResolvedFieldIdx, SigTy,
-        TyCtxt,
     },
     utils::format::{IndentedFmt, SimpleListFormatGlue, fmt_write, format_list},
 };
@@ -720,7 +716,7 @@ pub enum MirStmtKind {
 
 impl TraverseMentions for MirStmtKind {
     fn traverse_mentions<B>(
-        tcx: &TyCtxt,
+        s: &Session,
         me: &Self,
         f: &mut impl FnMut(MirPlaceMention) -> ControlFlow<B>,
     ) -> ControlFlow<B> {
@@ -728,19 +724,19 @@ impl TraverseMentions for MirStmtKind {
             MirStmtKind::StorageLive(local) => {
                 f(MirPlaceMention {
                     kind: MirPlaceMentionKind::STORAGE_LIVE,
-                    place: MirPlace::new(tcx, *local, []),
+                    place: MirPlace::new(*local, MirPlaceElemList::new_empty(s)),
                 })?;
             }
             MirStmtKind::StorageDead(local) => {
                 f(MirPlaceMention {
                     kind: MirPlaceMentionKind::STORAGE_DEAD,
-                    place: MirPlace::new(tcx, *local, []),
+                    place: MirPlace::new(*local, MirPlaceElemList::new_empty(s)),
                 })?;
             }
             MirStmtKind::Assign(stmt) => {
                 let (lhs, rhs) = &**stmt;
 
-                TraverseMentions::traverse_mentions(tcx, rhs, f)?;
+                TraverseMentions::traverse_mentions(s, rhs, f)?;
 
                 f(MirPlaceMention {
                     kind: MirPlaceMentionKind::INIT,
@@ -750,7 +746,7 @@ impl TraverseMentions for MirStmtKind {
             MirStmtKind::Discard(stmt) => {
                 let (_ty, rhs) = &**stmt;
 
-                TraverseMentions::traverse_mentions(tcx, rhs, f)?;
+                TraverseMentions::traverse_mentions(s, rhs, f)?;
             }
         }
 
@@ -780,7 +776,7 @@ pub enum MirRvalue {
 
 impl TraverseMentions for MirRvalue {
     fn traverse_mentions<B>(
-        tcx: &TyCtxt,
+        s: &Session,
         me: &Self,
         f: &mut impl FnMut(MirPlaceMention) -> ControlFlow<B>,
     ) -> ControlFlow<B> {
@@ -792,13 +788,13 @@ impl TraverseMentions for MirRvalue {
                 // (empty)
             }
             MirRvalue::Tuple(operands) => {
-                TraverseMentions::traverse_mentions_iter(tcx, operands, f)?;
+                TraverseMentions::traverse_mentions_iter(s, operands, f)?;
             }
             MirRvalue::Adt(_adt, operands) => {
-                TraverseMentions::traverse_mentions_iter(tcx, operands, f)?;
+                TraverseMentions::traverse_mentions_iter(s, operands, f)?;
             }
             MirRvalue::Use(operand) => {
-                TraverseMentions::traverse_mentions(tcx, operand, f)?;
+                TraverseMentions::traverse_mentions(s, operand, f)?;
             }
             MirRvalue::MoveOutRef {
                 can_move_from,
@@ -823,11 +819,11 @@ impl TraverseMentions for MirRvalue {
                 })?;
             }
             MirRvalue::BinaryOp(_kind, operands) => {
-                TraverseMentions::traverse_mentions(tcx, &operands.0, f)?;
-                TraverseMentions::traverse_mentions(tcx, &operands.1, f)?;
+                TraverseMentions::traverse_mentions(s, &operands.0, f)?;
+                TraverseMentions::traverse_mentions(s, &operands.1, f)?;
             }
             MirRvalue::UnaryOp(_kind, operand) => {
-                TraverseMentions::traverse_mentions(tcx, operand, f)?;
+                TraverseMentions::traverse_mentions(s, operand, f)?;
             }
             MirRvalue::Discriminant(place) => {
                 f(MirPlaceMention {
@@ -836,7 +832,7 @@ impl TraverseMentions for MirRvalue {
                 })?;
             }
             MirRvalue::DynUse(_site, operand) => {
-                TraverseMentions::traverse_mentions(tcx, operand, f)?;
+                TraverseMentions::traverse_mentions(s, operand, f)?;
             }
         }
 
@@ -1042,7 +1038,7 @@ pub enum MirTerminatorKind {
 
 impl TraverseMentions for MirTerminatorKind {
     fn traverse_mentions<B>(
-        tcx: &TyCtxt,
+        s: &Session,
         me: &Self,
         f: &mut impl FnMut(MirPlaceMention) -> ControlFlow<B>,
     ) -> ControlFlow<B> {
@@ -1058,7 +1054,7 @@ impl TraverseMentions for MirTerminatorKind {
                 constants: _,
                 targets: _,
             } => {
-                TraverseMentions::traverse_mentions(tcx, discr, f)?;
+                TraverseMentions::traverse_mentions(s, discr, f)?;
             }
             MirTerminatorKind::Call {
                 callee,
@@ -1067,8 +1063,8 @@ impl TraverseMentions for MirTerminatorKind {
                 target: _,
                 unwind: _,
             } => {
-                TraverseMentions::traverse_mentions(tcx, callee, f)?;
-                TraverseMentions::traverse_mentions_iter(tcx, args, f)?;
+                TraverseMentions::traverse_mentions(s, callee, f)?;
+                TraverseMentions::traverse_mentions_iter(s, args, f)?;
 
                 f(MirPlaceMention {
                     kind: MirPlaceMentionKind::INIT,
@@ -1167,13 +1163,13 @@ impl MirUnwindBehavior {
 
 pub trait TraverseMentions: Sized {
     fn traverse_mentions<B>(
-        tcx: &TyCtxt,
+        s: &Session,
         me: &Self,
         f: &mut impl FnMut(MirPlaceMention) -> ControlFlow<B>,
     ) -> ControlFlow<B>;
 
     fn traverse_mentions_iter<'a, B>(
-        tcx: &TyCtxt,
+        s: &Session,
         me: impl IntoIterator<Item = &'a Self>,
         f: &mut impl FnMut(MirPlaceMention) -> ControlFlow<B>,
     ) -> ControlFlow<B>
@@ -1181,7 +1177,7 @@ pub trait TraverseMentions: Sized {
         Self: 'a,
     {
         for me in me {
-            Self::traverse_mentions(tcx, me, f)?;
+            Self::traverse_mentions(s, me, f)?;
         }
 
         ControlFlow::Continue(())
@@ -1189,17 +1185,17 @@ pub trait TraverseMentions: Sized {
 
     fn iter_mentions<B>(
         &self,
-        tcx: &TyCtxt,
+        s: &Session,
         mut f: impl FnMut(MirPlaceMention) -> ControlFlow<B>,
     ) -> ControlFlow<B> {
-        Self::traverse_mentions(tcx, self, &mut f)
+        Self::traverse_mentions(s, self, &mut f)
     }
 
-    fn mentions(&self, tcx: &TyCtxt) -> SmallVec<[MirPlaceMention; 4]> {
+    fn mentions(&self, s: &Session) -> SmallVec<[MirPlaceMention; 4]> {
         let mut collector = SmallVec::new();
 
         cbit::cbit! {
-            for mention in self.iter_mentions(tcx) {
+            for mention in self.iter_mentions(s) {
                 collector.push(mention);
             }
         }
@@ -1275,7 +1271,7 @@ pub enum MirOperand {
 
 impl TraverseMentions for MirOperand {
     fn traverse_mentions<B>(
-        _tcx: &TyCtxt,
+        _s: &Session,
         me: &Self,
         f: &mut impl FnMut(MirPlaceMention) -> ControlFlow<B>,
     ) -> ControlFlow<B> {
@@ -1307,46 +1303,28 @@ pub struct MirPlace {
 }
 
 impl MirPlace {
-    pub fn new(
-        tcx: &TyCtxt,
-        local: MirLocalIdx,
-        projections: impl IntoIterator<Item = MirPlaceElem>,
-    ) -> Self {
-        Self {
-            local,
-            projections: tcx.intern_list(&projections.into_iter().collect::<Vec<_>>()),
-        }
+    pub fn new(local: MirLocalIdx, projections: MirPlaceElemList) -> Self {
+        Self { local, projections }
     }
 
-    pub fn extend(self, tcx: &TyCtxt, proj: impl IntoIterator<Item = MirPlaceElem>) -> Self {
-        let s = &tcx.session;
-
+    pub fn extend(self, s: &Session, proj: impl IntoIterator<Item = MirPlaceElem>) -> Self {
         Self {
             local: self.local,
-            projections: tcx.intern_list(
-                &self
-                    .projections
-                    .r(s)
-                    .iter()
-                    .copied()
-                    .chain(proj)
-                    .collect::<Vec<_>>(),
-            ),
+            projections: self.projections.extend(s, proj),
         }
     }
 
-    pub fn truncate_to_len(self, tcx: &TyCtxt, len: usize) -> Self {
-        let s = &tcx.session;
-
-        Self::new(
-            tcx,
-            self.local,
-            self.projections.r(s)[..len].iter().copied(),
-        )
+    pub fn truncate_to_len(self, s: &Session, len: usize) -> Self {
+        Self {
+            local: self.local,
+            projections: self.projections.truncate_to_len_copy(s, len),
+        }
     }
 }
 
 pub type MirPlaceElemList = Intern<[MirPlaceElem]>;
+
+list_internable!(MirPlaceElem);
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum MirPlaceElem {
@@ -1358,7 +1336,7 @@ pub enum MirPlaceElem {
 
 #[derive(Copy, Clone)]
 pub struct MirPrettyFmt<'a> {
-    pub tcx: &'a TyCtxt,
+    pub session: &'a Session,
     pub body: &'a MirBody,
     pub hooks: &'a (dyn 'a + MirPrettyFmtHooks),
 }
@@ -1394,20 +1372,16 @@ impl<'a> MirPrettyFmt<'a> {
         &Impl
     };
 
-    pub fn new(tcx: &'a TyCtxt, body: &'a MirBody) -> Self {
+    pub fn new(session: &'a Session, body: &'a MirBody) -> Self {
         Self {
-            tcx,
+            session,
             body,
             hooks: Self::NO_HOOKS,
         }
     }
 
-    pub fn tcx(&self) -> &'a TyCtxt {
-        self.tcx
-    }
-
     pub fn session(&self) -> &'a Session {
-        &self.tcx.session
+        self.session
     }
 
     pub fn with_hooks<'b>(self, hooks: &'b dyn MirPrettyFmtHooks) -> MirPrettyFmt<'b>
@@ -1415,7 +1389,7 @@ impl<'a> MirPrettyFmt<'a> {
         'a: 'b,
     {
         MirPrettyFmt {
-            tcx: self.tcx,
+            session: self.session,
             body: self.body,
             hooks,
         }

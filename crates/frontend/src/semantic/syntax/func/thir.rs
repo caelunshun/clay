@@ -1,14 +1,11 @@
 use crate::{
-    base::{
-        ErrorGuaranteed, Session,
-        arena::{LateInit, Obj},
-        syntax::Span,
-    },
+    base::{ErrorGuaranteed, Obj, Session, Span},
     parse::ast::{AstBinOpKind, AstLit, AstUnOpKind},
     semantic::syntax::{
         AdtCtor, AdtCtorFieldIdx, DynSiteIdx, LocalNameIdent, Mutability, PatListFrontAndTail,
         ResolvedFieldIdx, SigTy, SigTyKind, SimpleTyKind,
     },
+    utils::mem::LateInit,
 };
 
 // === Pattern === //

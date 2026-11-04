@@ -1,12 +1,12 @@
 use crate::{
-    base::{
-        arena::{Intern, Obj},
-        syntax::Symbol,
-    },
+    base::{Intern, Obj, Symbol},
+    list_internable,
     semantic::syntax::{AdtItem, Mutability, SimpleTyKind, TraitItem},
 };
 
 pub type TyShapeList = Intern<[TyShape]>;
+
+list_internable!(TyShape);
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TyShape {

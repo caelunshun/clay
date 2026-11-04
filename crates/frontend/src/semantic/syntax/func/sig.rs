@@ -1,14 +1,11 @@
 use crate::{
-    base::{
-        Session,
-        arena::{LateInit, Obj},
-        syntax::Span,
-    },
+    base::{Obj, Session, Span},
     parse::token::Ident,
     semantic::syntax::{
         AdtCtor, AdtCtorFieldIdx, GenericBinder, HirExpr, HirPat, ImplItem, Item, MirBody, SigTy,
         ThirBody, TraitItem, Ty, Visibility,
     },
+    utils::mem::LateInit,
 };
 use derive_where::derive_where;
 use std::{

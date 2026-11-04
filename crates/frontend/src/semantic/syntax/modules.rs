@@ -1,9 +1,5 @@
 use crate::{
-    base::{
-        Session,
-        arena::{LateInit, Obj},
-        syntax::{Span, Symbol},
-    },
+    base::{Obj, Session, Span, Symbol},
     parse::token::Ident,
     semantic::{
         lower::modules::{FrozenModuleResolver, ItemCategory, ItemPathFmt, ParentResolver as _},
@@ -13,6 +9,7 @@ use crate::{
         },
     },
     symbol,
+    utils::mem::LateInit,
 };
 use clay_core::{FastHashSet, FastIndexMap};
 use derive_where::derive_where;

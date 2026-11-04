@@ -1,5 +1,5 @@
 use crate::{
-    base::{analysis::DebruijnRelative, syntax::Symbol},
+    base::{Symbol, analysis::DebruijnRelative},
     symbol,
 };
 use smallvec::{SmallVec, smallvec};
