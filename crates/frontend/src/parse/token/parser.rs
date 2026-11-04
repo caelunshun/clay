@@ -3,11 +3,11 @@ use super::{
     TokenStream, TokenTree,
 };
 use crate::{
-    base::{
-        Diag, LeafDiag, Session,
-        syntax::{CharCursor, CharParser, Parser, RawCharCursor, Span, Symbol},
+    base::{Diag, LeafDiag, Session, Span, Symbol},
+    parse::{
+        token::{IntegralKind, Lifetime, NumLitBase, TokenNumLit, TokenNumLitKind, punct},
+        utils::{CharCursor, CharParser, Parser, RawCharCursor},
     },
-    parse::token::{IntegralKind, Lifetime, NumLitBase, TokenNumLit, TokenNumLitKind, punct},
     semantic::syntax::{FloatKind, IntKind},
     symbol,
 };

@@ -1,5 +1,5 @@
 use crate::{
-    base::{ErrorGuaranteed, syntax::Span},
+    base::{ErrorGuaranteed, Span},
     parse::{
         ast::{
             AstAttribute, AstFnDef, AstGenericParamList, AstTraitClauseList, AstTreePath, AstTy,

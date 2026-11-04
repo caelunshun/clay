@@ -1,7 +1,7 @@
 // FIXME
 
 pub mod expr_bp {
-    use crate::base::syntax::{InfixBp, PostfixBp, PrefixBp};
+    use crate::parse::utils::{InfixBp, PostfixBp, PrefixBp};
 
     // `-exp`
     pub const PRE_NEG: PrefixBp = PrefixBp::new(9);
@@ -128,7 +128,7 @@ pub mod expr_bp {
 }
 
 pub mod ty_bp {
-    use crate::base::syntax::{PostfixBp, PrefixBp};
+    use crate::parse::utils::{PostfixBp, PrefixBp};
 
     pub const PRE_TY_REF: PrefixBp = PrefixBp::new(2);
     pub const POST_TY_OPT: PostfixBp = PostfixBp::new(1);

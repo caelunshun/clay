@@ -1,5 +1,5 @@
 use crate::{
-    base::syntax::{Symbol, symbol},
+    base::{Symbol, symbol},
     parse::token::{Punct, punct},
     utils::lang::{ConstFmt, const_str_eq},
 };

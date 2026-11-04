@@ -1,5 +1,5 @@
 use crate::{
-    base::syntax::{Matcher as _, Span},
+    base::Span,
     kw,
     parse::{
         ast::{
@@ -16,6 +16,7 @@ use crate::{
             },
         },
         token::{GroupDelimiter, TokenParser},
+        utils::Matcher as _,
     },
     punct, symbol,
 };

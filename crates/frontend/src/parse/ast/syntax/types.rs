@@ -1,8 +1,5 @@
 use crate::{
-    base::{
-        ErrorGuaranteed,
-        syntax::{HasSpan, Span},
-    },
+    base::{ErrorGuaranteed, HasSpan, Span},
     parse::{
         ast::{AstBarePath, AstOptMutability},
         token::{Ident, Lifetime},

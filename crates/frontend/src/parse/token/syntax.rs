@@ -1,12 +1,12 @@
 use crate::{
-    base::{
-        Session,
-        syntax::{
-            AtomSimplify, Cursor, Delimited, HasSpan, LookaheadResult, Matcher, Parser, ParserLike,
-            Span, StuckHinter, Symbol,
+    base::{HasSpan, Session, Span, Symbol},
+    parse::{
+        ast::Keyword,
+        utils::{
+            AtomSimplify, Cursor, Delimited, LookaheadResult, Matcher, Parser, ParserLike,
+            StuckHinter,
         },
     },
-    parse::ast::Keyword,
     semantic::syntax::{FloatKind, IntKind},
     symbol,
     utils::lang::ConstFmt,

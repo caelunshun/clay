@@ -1,9 +1,5 @@
 use crate::{
-    base::{
-        DiagCtxt,
-        arena::SessionInterners,
-        syntax::{SourceMap, SymbolInterner},
-    },
+    base::{DiagCtxt, SessionInterners, SourceMap, SymbolInterner},
     utils::bump::{DropBump, ScratchBump},
 };
 use std::{cell::RefCell, fmt, ops::Deref, rc::Rc};

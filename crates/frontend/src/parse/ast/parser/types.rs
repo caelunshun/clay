@@ -1,8 +1,5 @@
 use crate::{
-    base::{
-        ErrorGuaranteed,
-        syntax::{Bp, Matcher as _},
-    },
+    base::ErrorGuaranteed,
     kw,
     parse::{
         ast::{
@@ -18,6 +15,7 @@ use crate::{
             },
         },
         token::GroupDelimiter,
+        utils::{Bp, Matcher as _},
     },
     punct, puncts, symbol, weak_kw,
 };

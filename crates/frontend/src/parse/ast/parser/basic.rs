@@ -1,8 +1,5 @@
 use crate::{
-    base::{
-        Diag,
-        syntax::{Matcher as _, Span, Symbol},
-    },
+    base::{Diag, Span, Symbol},
     kw,
     parse::{
         ast::{
@@ -20,6 +17,7 @@ use crate::{
             GroupDelimiter, Lifetime, TokenCursor, TokenGroup, TokenMatcher, TokenParserLike,
             TokenStream, token_matcher,
         },
+        utils::Matcher as _,
     },
     punct, puncts, symbol,
 };

@@ -1,6 +1,6 @@
 use super::Session;
 use crate::{
-    base::syntax::{FilePos, SourceFileOrigin, SourceMap, SourceMapFile, Span},
+    base::{FilePos, SourceFileOrigin, SourceMap, SourceMapFile, Span},
     flags::should_print_diagnostic_origins,
     utils::mem::MappedRc,
 };

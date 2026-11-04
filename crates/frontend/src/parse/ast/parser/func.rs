@@ -1,8 +1,5 @@
 use crate::{
-    base::{
-        Diag, ErrorGuaranteed, LeafDiag, Session,
-        syntax::{Bp, HasSpan as _, InfixBp, Matcher, Span, Symbol},
-    },
+    base::{Diag, ErrorGuaranteed, HasSpan as _, LeafDiag, Session, Span, Symbol},
     kw,
     parse::{
         ast::{
@@ -27,6 +24,7 @@ use crate::{
             },
         },
         token::{GroupDelimiter, Ident, Lifetime},
+        utils::{Bp, InfixBp, Matcher},
     },
     punct, puncts, symbol,
 };

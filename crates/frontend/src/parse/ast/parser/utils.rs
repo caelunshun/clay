@@ -1,8 +1,5 @@
 use crate::{
-    base::{
-        LeafDiag, Level, Session,
-        syntax::{Matcher as _, Span},
-    },
+    base::{LeafDiag, Level, Session, Span},
     parse::{
         ast::{
             AnyPunct, Keyword, PunctSeq, WeakKeyword,
@@ -12,6 +9,7 @@ use crate::{
             GroupDelimiter, Ident, Lifetime, Punct, TokenCharLit, TokenGroup, TokenMatcher,
             TokenNumLit, TokenPunct, TokenStrLit, token_matcher,
         },
+        utils::Matcher as _,
     },
     punct, symbol,
 };

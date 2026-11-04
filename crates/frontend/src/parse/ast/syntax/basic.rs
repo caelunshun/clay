@@ -1,5 +1,5 @@
 use crate::{
-    base::syntax::{HasSpan, Span, Symbol},
+    base::{HasSpan, Span, Symbol},
     kw,
     parse::{
         ast::{AstGenericParamList, Keyword},

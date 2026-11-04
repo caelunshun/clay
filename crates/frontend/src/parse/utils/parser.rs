@@ -1,6 +1,5 @@
-use super::{HasSpan, Span, Symbol};
 use crate::{
-    base::{Diag, ErrorGuaranteed, HardDiag, LeafDiag},
+    base::{Diag, ErrorGuaranteed, HardDiag, HasSpan, LeafDiag, Span, Symbol},
     flags::should_print_parse_expect_success,
     utils::format::{ListFormatter, SimpleListFormatGlue, format_list_into},
 };

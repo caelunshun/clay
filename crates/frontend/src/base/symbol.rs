@@ -120,11 +120,11 @@ pub mod symbol_internals {
 #[macro_export]
 macro_rules! symbol {
     (fn $text:expr) => {{
-        fn _symbol_getter() -> $crate::base::syntax::symbol_internals::Symbol {
-            static LATE: $crate::base::syntax::symbol_internals::LateSymbol =
-                $crate::base::syntax::symbol_internals::LateSymbol::new();
+        fn _symbol_getter() -> $crate::base::symbol_internals::Symbol {
+            static LATE: $crate::base::symbol_internals::LateSymbol =
+                $crate::base::symbol_internals::LateSymbol::new();
 
-            const INIT: &'static $crate::base::syntax::symbol_internals::str = $text;
+            const INIT: &'static $crate::base::symbol_internals::str = $text;
 
             LATE.get(INIT)
         }
@@ -132,7 +132,7 @@ macro_rules! symbol {
         _symbol_getter
     }};
     ($text:expr) => {{
-        $crate::base::syntax::symbol_internals::symbol!(fn $text)()
+        $crate::base::symbol_internals::symbol!(fn $text)()
     }};
 }
 
