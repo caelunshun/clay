@@ -109,6 +109,13 @@ impl<T: ?Sized> DropBumpPtr<T> {
 }
 
 impl<T> DropBumpPtr<[T]> {
+    pub fn new_slice<'l>(values: &[T], drop_bump: &DropBump<'l>) -> Self
+    where
+        T: 'l + Clone,
+    {
+        Self::new_iter_exact_with(values.len(), values.iter().cloned(), drop_bump)
+    }
+
     pub fn new_iter<'l>(
         values: impl IntoIterator<Item = T>,
         drop_bump: &DropBump<'l>,
@@ -123,23 +130,28 @@ impl<T> DropBumpPtr<[T]> {
         if let (low, Some(high)) = size_hint
             && low == high
         {
-            return Self::new_iter_exact(low, values, drop_bump);
+            return Self::new_iter_exact_with(low, values, drop_bump);
         }
 
         scratch_bump.acquire(|scratch_bump| {
             let values = BumpVec::from_iter_in(values, scratch_bump);
-            Self::new_iter_exact(values.len(), values, drop_bump)
+            Self::new_iter_exact_with(values.len(), values, drop_bump)
         })
     }
 
-    pub fn new_slice<'l>(values: &[T], drop_bump: &DropBump<'l>) -> Self
+    pub fn new_iter_exact<'l>(
+        values: impl IntoIterator<Item = T, IntoIter: ExactSizeIterator>,
+        drop_bump: &DropBump<'l>,
+    ) -> Self
     where
-        T: 'l + Clone,
+        T: 'l,
     {
-        Self::new_iter_exact(values.len(), values.iter().cloned(), drop_bump)
+        let values = values.into_iter();
+
+        Self::new_iter_exact_with(values.len(), values, drop_bump)
     }
 
-    pub fn new_iter_exact<'l>(
+    pub fn new_iter_exact_with<'l>(
         values_len: usize,
         values: impl IntoIterator<Item = T>,
         drop_bump: &DropBump<'l>,
