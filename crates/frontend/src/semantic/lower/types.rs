@@ -15,8 +15,8 @@ use crate::{
         syntax::{
             AdtItem, HrtbDebruijn, Item, ItemKind, RelationDirection, SigAdtInstance,
             SigHrtbBinder, SigProjectType, SigRe, SigReKind, SigTraitClause, SigTraitClauseKind,
-            SigTraitClauseList, SigTraitParamList, SigTraitSpec, SigTy, SigTyKind, SigTyList,
-            SigTyOrRe, TraitItem, TypeAliasItem, TypeGeneric,
+            SigTraitClauseList, SigTraitSpec, SigTy, SigTyKind, SigTyList, SigTyOrRe, TraitItem,
+            TypeAliasItem, TypeGeneric,
         },
     },
     symbol,
@@ -145,7 +145,7 @@ impl IntraItemLowerCtxt<'_> {
         let s = self.session;
 
         match &ast.kind {
-            AstTyKind::This => SigTyKind::SelfTy.wrap(ast.span, s),
+            AstTyKind::This => SigTyKind::SelfTy.wrap(s, ast.span),
             AstTyKind::Name(path, generics) => {
                 let resolver = FrozenModuleResolver(s);
 
@@ -158,13 +158,13 @@ impl IntraItemLowerCtxt<'_> {
                             generics.as_ref().map_or(&[][..], |v| &v.list),
                         );
 
-                        SigTyKind::Adt(SigAdtInstance { def, params }).wrap(ast.span, s)
+                        SigTyKind::Adt(SigAdtInstance { def, params }).wrap(s, ast.span)
                     }
                     Ok(TyPathResolution::GenericSig(def)) => {
-                        SigTyKind::Generic(def).wrap(ast.span, s)
+                        SigTyKind::Generic(def).wrap(s, ast.span)
                     }
                     Ok(TyPathResolution::GenericHrtb(rel)) => {
-                        SigTyKind::HrtbVar(rel).wrap(ast.span, s)
+                        SigTyKind::HrtbVar(rel).wrap(s, ast.span)
                     }
                     Ok(TyPathResolution::TypeAlias(def)) => {
                         let params = self.lower_generics_of_entirely_positional(
@@ -174,7 +174,7 @@ impl IntraItemLowerCtxt<'_> {
                             generics.as_ref().map_or(&[][..], |v| &v.list),
                         );
 
-                        SigTyKind::Alias(def, params).wrap(ast.span, s)
+                        SigTyKind::Alias(def, params).wrap(s, ast.span)
                     }
                     Ok(TyPathResolution::Trait(def)) => SigTyKind::Error(
                         Diag::span_err(
@@ -190,7 +190,7 @@ impl IntraItemLowerCtxt<'_> {
                         ))
                         .emit(),
                     )
-                    .wrap(ast.span, s),
+                    .wrap(s, ast.span),
                     Ok(TyPathResolution::Other(def)) => SigTyKind::Error(
                         Diag::span_err(
                             ast.span,
@@ -201,8 +201,8 @@ impl IntraItemLowerCtxt<'_> {
                         )
                         .emit(),
                     )
-                    .wrap(ast.span, s),
-                    Err(err) => SigTyKind::Error(err).wrap(ast.span, s),
+                    .wrap(s, ast.span),
+                    Err(err) => SigTyKind::Error(err).wrap(s, ast.span),
                 }
             }
             AstTyKind::Reference(lifetime, muta, pointee) => SigTyKind::Reference(
@@ -213,7 +213,7 @@ impl IntraItemLowerCtxt<'_> {
                 muta.as_muta(),
                 self.lower_ty(pointee),
             )
-            .wrap(ast.span, s),
+            .wrap(s, ast.span),
             AstTyKind::Trait(lifetime, muta, spec) => SigTyKind::Trait(
                 match lifetime {
                     Some(ast) => self.lower_re(ast),
@@ -222,21 +222,21 @@ impl IntraItemLowerCtxt<'_> {
                 muta.as_muta(),
                 self.lower_clauses(Some(spec)),
             )
-            .wrap(ast.span, s),
+            .wrap(s, ast.span),
             AstTyKind::Paren(ast) => self.lower_ty(ast),
-            AstTyKind::Tuple(items) => SigTyKind::Tuple(self.lower_tys(items)).wrap(ast.span, s),
+            AstTyKind::Tuple(items) => SigTyKind::Tuple(self.lower_tys(items)).wrap(s, ast.span),
             AstTyKind::Project(target, spec, assoc) => {
                 let target = self.lower_ty(target);
                 let spec = match self.lower_trait_spec(spec) {
                     Ok(spec) => spec,
-                    Err(error) => return SigTyKind::Error(error).wrap(ast.span, s),
+                    Err(error) => return SigTyKind::Error(error).wrap(s, ast.span),
                 };
 
                 let Some(assoc_generic) = spec.def.r(s).associated_types.get(&assoc.text) else {
                     return SigTyKind::Error(
                         Diag::span_err(assoc.span, "no such associated type").emit(),
                     )
-                    .wrap(ast.span, s);
+                    .wrap(s, ast.span);
                 };
 
                 SigTyKind::Project(SigProjectType {
@@ -245,10 +245,10 @@ impl IntraItemLowerCtxt<'_> {
                     assoc_span: assoc.span,
                     assoc_idx: assoc_generic.r(s).binder.idx,
                 })
-                .wrap(ast.span, s)
+                .wrap(s, ast.span)
             }
-            AstTyKind::Infer => SigTyKind::Infer.wrap(ast.span, s),
-            AstTyKind::Error(error) => SigTyKind::Error(*error).wrap(ast.span, s),
+            AstTyKind::Infer => SigTyKind::Infer.wrap(s, ast.span),
+            AstTyKind::Error(error) => SigTyKind::Error(*error).wrap(s, ast.span),
         }
     }
 

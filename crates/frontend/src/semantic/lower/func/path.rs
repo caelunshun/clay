@@ -44,8 +44,8 @@ impl ExprPathResult {
 
     pub fn as_ident_or_res(
         self,
-        path: &AstExprPath,
         s: &Session,
+        path: &AstExprPath,
     ) -> Result<ExprPathIdentOrResolution, ErrorGuaranteed> {
         match self {
             ExprPathResult::Resolved(res) => {
@@ -291,7 +291,7 @@ impl IntraItemLowerCtxt<'_> {
                 };
 
                 ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
-                    self_ty: SigTyKind::SelfTy.wrap(*self_kw, s),
+                    self_ty: SigTyKind::SelfTy.wrap(s, *self_kw),
                     as_trait: None,
                     assoc,
                 })
@@ -394,7 +394,7 @@ impl IntraItemLowerCtxt<'_> {
 
             return match self.lower_rest_as_type_relative_assoc(subsequent) {
                 Ok(Some(assoc)) => {
-                    let self_ty = SigTyKind::Generic(generic).wrap(ident.span, s);
+                    let self_ty = SigTyKind::Generic(generic).wrap(s, ident.span);
 
                     ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
                         self_ty,
@@ -534,7 +534,7 @@ impl IntraItemLowerCtxt<'_> {
                             )
                         }),
                     })
-                    .wrap(adt_segment.part.span(), s);
+                    .wrap(s, adt_segment.part.span());
 
                     let assoc = match self.lower_rest_as_type_relative_assoc(additional_segments) {
                         // Unwrap OK: `additional_segments` is non-empty.
@@ -634,7 +634,7 @@ impl IntraItemLowerCtxt<'_> {
             ));
         };
 
-        let self_ty = SigTyKind::Infer.wrap(def_segment.part.span(), s);
+        let self_ty = SigTyKind::Infer.wrap(s, def_segment.part.span());
 
         ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
             self_ty,
@@ -667,7 +667,7 @@ impl IntraItemLowerCtxt<'_> {
         };
 
         ExprPathResult::Resolved(ExprPathResolution::TypeRelative {
-            self_ty: SigTyKind::Alias(def, params).wrap(def_segment.part.span(), s),
+            self_ty: SigTyKind::Alias(def, params).wrap(s, def_segment.part.span()),
             as_trait: None,
             assoc,
         })

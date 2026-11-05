@@ -65,7 +65,7 @@ pub enum Visibility {
 }
 
 impl Visibility {
-    pub fn is_visible_to(self, vis_ctxt: Obj<Item>, s: &Session) -> bool {
+    pub fn is_visible_to(self, s: &Session, vis_ctxt: Obj<Item>) -> bool {
         match self {
             Visibility::Pub => true,
             Visibility::PubIn(vis_in) => FrozenModuleResolver(s).is_descendant(vis_ctxt, vis_in),

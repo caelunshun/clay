@@ -66,7 +66,7 @@ pub fn lower_full_ast(s: &Session, ast: &AstItemModuleContents) -> Obj<Crate> {
     }
     .alloc_obj(s);
 
-    let index_to_item = ctxt.tree.freeze_and_check(krate, s);
+    let index_to_item = ctxt.tree.freeze_and_check(s, krate);
     let root = index_to_item[BuilderItemId::ROOT];
     let prelude = index_to_item[BuilderItemId::PRELUDE];
 
@@ -88,7 +88,7 @@ pub fn lower_full_ast(s: &Session, ast: &AstItemModuleContents) -> Obj<Crate> {
     }
     .lower_module(ast, None);
 
-    lower_synthetic_module(prelude, s);
+    lower_synthetic_module(s, prelude);
 
     for InterTask {
         target,
@@ -1499,7 +1499,7 @@ impl IntraItemLowerCtxt<'_> {
         LateInit::init(
             &def.r(s).ret_ty,
             match &ast.ret_ty {
-                AstReturnTy::Omitted => SigTyKind::Tuple(Obj::new_empty(s)).wrap(Span::DUMMY, s),
+                AstReturnTy::Omitted => SigTyKind::Tuple(Obj::new_empty(s)).wrap(s, Span::DUMMY),
                 AstReturnTy::Present(ty) => self.lower_ty(ty),
             },
         );

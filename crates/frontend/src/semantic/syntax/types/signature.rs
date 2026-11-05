@@ -162,7 +162,7 @@ pub enum SigTyKind {
 }
 
 impl SigTyKind {
-    pub fn wrap(self, span: Span, s: &Session) -> SigTy {
+    pub fn wrap(self, s: &Session, span: Span) -> SigTy {
         SigTyInner { span, kind: self }.alloc_obj(s)
     }
 }

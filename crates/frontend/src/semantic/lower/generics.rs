@@ -18,7 +18,7 @@ use crate::{
             AnyGeneric, AnyGenericIdent, GenericBinder, Item, RegionGeneric, SigGenericList,
             SigHrtbDebruijnDef, SigHrtbDebruijnDefList, SigReKind, SigTraitClauseList,
             SigTraitInstance, SigTraitParam, SigTraitParamKind, SigTraitParamList, SigTyKind,
-            SigTyOrRe, SigTyOrReList, TraitItem, TyOrReKind, TypeGeneric,
+            SigTyOrRe, TraitItem, TyOrReKind, TypeGeneric,
         },
     },
     symbol,
@@ -511,7 +511,7 @@ impl IntraItemLowerCtxt<'_> {
                     .map(|param| {
                         param.unwrap_or_else(|| {
                             SigTyOrRe::Ty(
-                                SigTyKind::Error(missing_mentions.unwrap()).wrap(for_trait.span, s),
+                                SigTyKind::Error(missing_mentions.unwrap()).wrap(s, for_trait.span),
                             )
                         })
                     })
@@ -648,7 +648,7 @@ impl IntraItemLowerCtxt<'_> {
                 .iter()
                 .map(|expected| match expected {
                     AnyGeneric::Re(_) => SigTyOrRe::Re(SigReKind::Infer.wrap(segment_span)),
-                    AnyGeneric::Ty(_) => SigTyOrRe::Ty(SigTyKind::Infer.wrap(segment_span, s)),
+                    AnyGeneric::Ty(_) => SigTyOrRe::Ty(SigTyKind::Infer.wrap(s, segment_span)),
                 })
                 .alloc_obj_list(s),
         }
@@ -702,7 +702,7 @@ impl IntraItemLowerCtxt<'_> {
                 .iter()
                 .copied()
                 .chain(iter::repeat(SigTyOrRe::Ty(
-                    SigTyKind::Infer.wrap(params.segment_span, s),
+                    SigTyKind::Infer.wrap(s, params.segment_span),
                 )))
                 .take(def.r(s).generics.r(s).defs.len())
                 .alloc_obj_list(s),
@@ -795,7 +795,7 @@ pub fn normalize_positional_generic_arity(
 
             para_or_err.unwrap_or_else(|err| match expected {
                 AnyGeneric::Re(_) => SigTyOrRe::Re(SigReKind::Error(err).wrap(actual_span)),
-                AnyGeneric::Ty(_) => SigTyOrRe::Ty(SigTyKind::Error(err).wrap(actual_span, s)),
+                AnyGeneric::Ty(_) => SigTyOrRe::Ty(SigTyKind::Error(err).wrap(s, actual_span)),
             })
         })
         .collect::<Vec<_>>();

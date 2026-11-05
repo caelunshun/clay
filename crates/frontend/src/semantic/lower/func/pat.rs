@@ -85,9 +85,9 @@ impl PatLocalBranchResolver<'_> {
 
     pub fn resolve(
         &mut self,
+        s: &Session,
         name: LocalNameIdent,
         mutability: Mutability,
-        s: &Session,
     ) -> Result<Obj<HirLocal>, ErrorGuaranteed> {
         let local = match self.locals.entry(name.as_symbol()) {
             hashbrown::hash_map::Entry::Vacant(entry) => {
@@ -266,7 +266,7 @@ impl IntraItemLowerCtxt<'_> {
             } => 'path: {
                 let res = self.resolve_expr_path(path);
 
-                match res.as_ident_or_res(path, s) {
+                match res.as_ident_or_res(s, path) {
                     Ok(ExprPathIdentOrResolution::Ident(name)) => {
                         match name {
                             LocalNameIdent::SelfName(span) => match cx {
@@ -298,7 +298,7 @@ impl IntraItemLowerCtxt<'_> {
                             }
                         }
 
-                        match locals.resolve(name, binding_mode.local_muta.as_muta(), s) {
+                        match locals.resolve(s, name, binding_mode.local_muta.as_muta()) {
                             Ok(local) => {
                                 self.func_local_names.define(name.as_symbol(), local);
 
@@ -362,9 +362,9 @@ impl IntraItemLowerCtxt<'_> {
                         },
                         AstPatFieldKind::Bare(muta) => {
                             let kind = match locals.resolve(
+                                s,
                                 LocalNameIdent::User(field.name),
                                 muta.as_muta(),
-                                s,
                             ) {
                                 Ok(name) => {
                                     HirPatKind::Binding(AstOptMutability::Implicit, name, None)

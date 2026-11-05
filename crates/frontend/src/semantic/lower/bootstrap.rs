@@ -21,59 +21,59 @@ pub fn synthesize_bootstrap_prelude(s: &Session) -> Obj<Crate> {
     let types = [
         (
             symbol!("u8"),
-            SigTyKind::Simple(SimpleTyKind::Uint(IntKind::S8)).wrap(Span::DUMMY, s),
+            SigTyKind::Simple(SimpleTyKind::Uint(IntKind::S8)).wrap(s, Span::DUMMY),
         ),
         (
             symbol!("u16"),
-            SigTyKind::Simple(SimpleTyKind::Uint(IntKind::S16)).wrap(Span::DUMMY, s),
+            SigTyKind::Simple(SimpleTyKind::Uint(IntKind::S16)).wrap(s, Span::DUMMY),
         ),
         (
             symbol!("u32"),
-            SigTyKind::Simple(SimpleTyKind::Uint(IntKind::S32)).wrap(Span::DUMMY, s),
+            SigTyKind::Simple(SimpleTyKind::Uint(IntKind::S32)).wrap(s, Span::DUMMY),
         ),
         (
             symbol!("u64"),
-            SigTyKind::Simple(SimpleTyKind::Uint(IntKind::S64)).wrap(Span::DUMMY, s),
+            SigTyKind::Simple(SimpleTyKind::Uint(IntKind::S64)).wrap(s, Span::DUMMY),
         ),
         (
             symbol!("i8"),
-            SigTyKind::Simple(SimpleTyKind::Int(IntKind::S8)).wrap(Span::DUMMY, s),
+            SigTyKind::Simple(SimpleTyKind::Int(IntKind::S8)).wrap(s, Span::DUMMY),
         ),
         (
             symbol!("i16"),
-            SigTyKind::Simple(SimpleTyKind::Int(IntKind::S16)).wrap(Span::DUMMY, s),
+            SigTyKind::Simple(SimpleTyKind::Int(IntKind::S16)).wrap(s, Span::DUMMY),
         ),
         (
             symbol!("i32"),
-            SigTyKind::Simple(SimpleTyKind::Int(IntKind::S32)).wrap(Span::DUMMY, s),
+            SigTyKind::Simple(SimpleTyKind::Int(IntKind::S32)).wrap(s, Span::DUMMY),
         ),
         (
             symbol!("i64"),
-            SigTyKind::Simple(SimpleTyKind::Int(IntKind::S64)).wrap(Span::DUMMY, s),
+            SigTyKind::Simple(SimpleTyKind::Int(IntKind::S64)).wrap(s, Span::DUMMY),
         ),
         (
             symbol!("f32"),
-            SigTyKind::Simple(SimpleTyKind::Float(FloatKind::S32)).wrap(Span::DUMMY, s),
+            SigTyKind::Simple(SimpleTyKind::Float(FloatKind::S32)).wrap(s, Span::DUMMY),
         ),
         (
             symbol!("f64"),
-            SigTyKind::Simple(SimpleTyKind::Float(FloatKind::S64)).wrap(Span::DUMMY, s),
+            SigTyKind::Simple(SimpleTyKind::Float(FloatKind::S64)).wrap(s, Span::DUMMY),
         ),
         (
             symbol!("bool"),
-            SigTyKind::Simple(SimpleTyKind::Bool).wrap(Span::DUMMY, s),
+            SigTyKind::Simple(SimpleTyKind::Bool).wrap(s, Span::DUMMY),
         ),
         (
             symbol!("char"),
-            SigTyKind::Simple(SimpleTyKind::Char).wrap(Span::DUMMY, s),
+            SigTyKind::Simple(SimpleTyKind::Char).wrap(s, Span::DUMMY),
         ),
         (
             symbol!("str"),
-            SigTyKind::Simple(SimpleTyKind::Str).wrap(Span::DUMMY, s),
+            SigTyKind::Simple(SimpleTyKind::Str).wrap(s, Span::DUMMY),
         ),
         (
             symbol!("Never"),
-            SigTyKind::Simple(SimpleTyKind::Never).wrap(Span::DUMMY, s),
+            SigTyKind::Simple(SimpleTyKind::Never).wrap(s, Span::DUMMY),
         ),
     ];
 
@@ -105,10 +105,10 @@ pub fn synthesize_bootstrap_prelude(s: &Session) -> Obj<Crate> {
     }
     .alloc_obj(s);
 
-    let items = builder.freeze_and_check(krate, s);
+    let items = builder.freeze_and_check(s, krate);
 
-    lower_synthetic_module(items[BuilderItemId::ROOT], s);
-    lower_synthetic_module(items[BuilderItemId::PRELUDE], s);
+    lower_synthetic_module(s, items[BuilderItemId::ROOT]);
+    lower_synthetic_module(s, items[BuilderItemId::PRELUDE]);
 
     for (&item, &(_name, resolves_to)) in type_alias_items.iter().zip(&types) {
         let item = items[item];
@@ -131,7 +131,7 @@ pub fn synthesize_bootstrap_prelude(s: &Session) -> Obj<Crate> {
     krate
 }
 
-pub fn lower_synthetic_module(item: Obj<Item>, s: &Session) {
+pub fn lower_synthetic_module(s: &Session, item: Obj<Item>) {
     LateInit::init(
         &item.r(s).kind,
         ItemKind::Module(ModuleItem { item }.alloc_obj(s)),

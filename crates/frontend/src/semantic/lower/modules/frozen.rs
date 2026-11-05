@@ -112,9 +112,10 @@ impl PathResolver for FrozenModuleResolver<'_> {
         curr: Self::Item,
         use_idx: u32,
     ) -> Result<Self::Item, StepLookupError> {
-        let glob_use = &curr.r(self.0).glob_uses[use_idx as usize];
+        let s = self.0;
+        let glob_use = &curr.r(s).glob_uses[use_idx as usize];
 
-        if !glob_use.visibility.is_visible_to(vis_ctxt, self.0) {
+        if !glob_use.visibility.is_visible_to(s, vis_ctxt) {
             return Err(StepLookupError::NotVisible);
         }
 
@@ -131,7 +132,7 @@ impl PathResolver for FrozenModuleResolver<'_> {
             return Err(StepLookupError::NotFound);
         };
 
-        if !direct_use.visibility.is_visible_to(vis_ctxt, self.0) {
+        if !direct_use.visibility.is_visible_to(self.0, vis_ctxt) {
             return Err(StepLookupError::NotVisible);
         }
 
@@ -141,7 +142,7 @@ impl PathResolver for FrozenModuleResolver<'_> {
 
 // === Trait Enumeration === //
 
-pub fn traits_in_single_scope(root: Obj<Item>, s: &Session) -> &FastHashSet<Obj<TraitItem>> {
+pub fn traits_in_single_scope(s: &Session, root: Obj<Item>) -> &FastHashSet<Obj<TraitItem>> {
     if let Some(cached) = LateInit::get(&root.r(s).traits_in_scope) {
         return cached;
     }
@@ -152,7 +153,7 @@ pub fn traits_in_single_scope(root: Obj<Item>, s: &Session) -> &FastHashSet<Obj<
 
     while let Some(top) = stack.pop() {
         for direct in top.r(s).direct_uses.values() {
-            if !direct.visibility.is_visible_to(root, s) {
+            if !direct.visibility.is_visible_to(s, root) {
                 continue;
             }
 
@@ -162,7 +163,7 @@ pub fn traits_in_single_scope(root: Obj<Item>, s: &Session) -> &FastHashSet<Obj<
         }
 
         for glob in &**top.r(s).glob_uses {
-            if !glob.visibility.is_visible_to(root, s) {
+            if !glob.visibility.is_visible_to(s, root) {
                 continue;
             }
 

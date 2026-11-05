@@ -237,8 +237,8 @@ impl BuilderModuleTree {
 
     pub fn freeze_and_check(
         mut self,
-        krate: Obj<Crate>,
         s: &Session,
+        krate: Obj<Crate>,
     ) -> IndexVec<BuilderItemId, Obj<Item>> {
         // Determine public paths for each module.
         for item_id in self.items.indices() {
