@@ -2,7 +2,7 @@ use crate::{
     base::{Intern, ListInternable, Obj, ValueInternable},
     parse::ast::AstRangeLimits,
     semantic::{
-        analysis::typeck::BodyCtxt,
+        analysis::typeck::driver::BodyCtxt,
         syntax::{
             AdtInstance, AdtItem, Divergence, DivergenceAnd, DivergenceJoin, HirRangeExpr,
             LangItems, Ty, TyKind, TyOrRe,
@@ -45,9 +45,10 @@ impl CheckedRangeExpr {
 
     pub fn range_ty(self, bcx: &mut BodyCtxt<'_, '_>) -> Ty {
         let s = bcx.session();
+        let lang_items = bcx.lang_items();
 
         TyKind::Adt(AdtInstance {
-            def: self.lang_item(&bcx.krate().r(s).lang_items),
+            def: self.lang_item(lang_items),
             params: match self.elem_ty() {
                 Some(ty) => TyOrRe::Ty(ty).intern_single(s),
                 None => Intern::new_empty(s),

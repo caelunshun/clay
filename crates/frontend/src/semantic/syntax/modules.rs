@@ -4,8 +4,8 @@ use crate::{
     semantic::{
         lower::modules::{FrozenModuleResolver, ItemCategory, ItemPathFmt, ParentResolver as _},
         syntax::{
-            AdtEnumVariant, AdtItem, AdtKindEnum, Attribute, FnItem, ImplItem, LangItems,
-            TraitItem, TypeAliasItem,
+            AdtEnumVariant, AdtItem, AdtKindEnum, Attribute, FnItem, ImplItem, TraitItem,
+            TypeAliasItem,
         },
     },
     symbol,
@@ -21,7 +21,6 @@ pub struct Crate {
     pub root: LateInit<Obj<Item>>,
     pub prelude: LateInit<Obj<Item>>,
     pub items: LateInit<Vec<Obj<Item>>>,
-    pub lang_items: LangItems,
 }
 
 #[derive_where(Debug)]

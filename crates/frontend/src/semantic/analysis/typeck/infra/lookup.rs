@@ -2,7 +2,7 @@ use crate::{
     base::{Diag, ErrorGuaranteed, LeafDiag, Obj, Session, ValueInternable},
     parse::token::Ident,
     semantic::{
-        analysis::typeck::{BodyCtxt, infra::deref::attempt_deref},
+        analysis::typeck::{driver::BodyCtxt, infra::deref::attempt_deref},
         infer::{
             ClauseFuel, ClauseImportEnv, ElaboratedClause, FixArity, GenericSubst, HrtbUniverse,
             PromiseProbe, SpannedError, UnboundVarHandlingMode,

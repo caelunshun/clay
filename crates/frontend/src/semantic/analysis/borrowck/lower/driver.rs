@@ -3,10 +3,9 @@ use crate::{
     flags,
     semantic::{
         analysis::{
+            TyCtxt,
             borrowck::scopes::{MirScopedBuilder, RawMirScopedBuilder, TraitCache},
-            sigck::CrateSigckVisitor,
         },
-        infer::ImplCache,
         syntax::{
             FnDef, MirBody, MirLocal, MirLocalIdx, MirPlace, MirPrettyFmt, MirRvalue, MirScopeIdx,
             MirSourceInfo, ThirBody, ThirExpr, ThirLocal,
@@ -16,27 +15,29 @@ use crate::{
 };
 use clay_core::FastHashMap;
 
-pub fn build_function_mir(check_cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
-    let s = check_cx.session();
+impl TyCtxt<'_> {
+    pub fn build_function_mir(&self, def: Obj<FnDef>) {
+        let s = self.session();
 
-    let Some(body) = &*def.r(s).thir_body else {
-        LateInit::init(&def.r(s).mir_body, None);
-        return;
-    };
+        let Some(body) = &*def.r(s).thir_body else {
+            LateInit::init(&def.r(s).mir_body, None);
+            return;
+        };
 
-    let mut build_cx = MirFromThirCtx::new(s, check_cx.impl_cache, def);
-    build_cx.lower_fn(body);
-    let body = build_cx.finish();
+        let mut build_cx = MirFromThirCtx::new(self, def);
+        build_cx.lower_fn(body);
+        let body = build_cx.finish();
 
-    if flags::should_print_mir_scopes() {
-        println!("{}", MirPrettyFmt::new(s, &body).flat_body());
+        if flags::should_print_mir_scopes() {
+            println!("{}", MirPrettyFmt::new(s, &body).flat_body());
+        }
+
+        LateInit::init(&def.r(s).mir_body, Some(body));
     }
-
-    LateInit::init(&def.r(s).mir_body, Some(body));
 }
 
 pub struct MirFromThirCtx<'sess> {
-    pub session: &'sess Session,
+    pub tcx: &'sess TyCtxt<'sess>,
     pub def: Obj<FnDef>,
     pub raw_builder: RawMirScopedBuilder<'sess>,
     pub trait_cache: TraitCache<'sess>,
@@ -67,12 +68,14 @@ pub struct LabelledScope {
 }
 
 impl<'sess> MirFromThirCtx<'sess> {
-    pub fn new(s: &'sess Session, impl_cache: &'sess ImplCache, def: Obj<FnDef>) -> Self {
+    pub fn new(tcx: &'sess TyCtxt<'sess>, def: Obj<FnDef>) -> Self {
+        let s = tcx.session();
+
         let mut this = Self {
-            session: s,
+            tcx,
             def,
             raw_builder: RawMirScopedBuilder::new(s),
-            trait_cache: TraitCache::new(s, impl_cache, def),
+            trait_cache: TraitCache::new(tcx, def),
             labelled_scopes: FastHashMap::default(),
             thir_locals: FastHashMap::default(),
         };
@@ -92,7 +95,7 @@ impl<'sess> MirFromThirCtx<'sess> {
     }
 
     pub fn session(&self) -> &'sess Session {
-        self.session
+        self.tcx.session()
     }
 
     pub fn lower_fn(&mut self, body: &ThirBody) {

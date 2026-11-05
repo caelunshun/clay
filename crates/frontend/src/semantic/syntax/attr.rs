@@ -1,6 +1,6 @@
 use crate::{
     base::{Diag, ErrorGuaranteed, LeafDiag, Obj, Session, Span, Symbol},
-    semantic::syntax::{AdtItem, HirExpr, Item, TraitItem},
+    semantic::syntax::{AdtItem, Crate, HirExpr, Item, TraitItem},
     symbol,
     utils::mem::LateInit,
 };
@@ -170,6 +170,20 @@ macro_rules! define_lang_items {
     };
     (@pick_first { $($first:tt)* } $({ $($remainder:tt)* })*) => {
         $($first)*
+    }
+}
+
+impl LangItems {
+    pub fn populate(&mut self, s: &Session, krate: Obj<Crate>) {
+        for &def in &**krate.r(s).items {
+            for attr in &**def.r(s).attrs {
+                let AttributeKind::Lang(EarlyAttrLang { name }) = attr.r(s).kind else {
+                    continue;
+                };
+
+                let (Ok(()) | Err(ErrorGuaranteed)) = self.define(s, name, attr.r(s).span, def);
+            }
+        }
     }
 }
 

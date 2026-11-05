@@ -8,7 +8,7 @@ use crate::{
         token::Ident,
     },
     semantic::{
-        analysis::typeck::{BodyCtxt, infra::confirm::ThirExprConfirmedWithTy},
+        analysis::typeck::{driver::BodyCtxt, infra::confirm::ThirExprConfirmedWithTy},
         infer::{ClauseImportEnv, ClausePrettyFmtOpts, GenericSubst, HrtbUniverse, SpannedError},
         syntax::{
             AdtCtorField, AdtCtorInstance, AdtCtorSyntaxStyle, AdtCtorUnresolved, AdtInstance,
@@ -202,7 +202,7 @@ impl<'a, 'sess> BodyCtxt<'a, 'sess> {
                     },
                 );
 
-                let vec_lang_item = self.krate().r(s).lang_items.vec().unwrap();
+                let vec_lang_item = self.lang_items().vec().unwrap();
 
                 self.ccx_mut()
                     .oblige_ty_unifies_ty(

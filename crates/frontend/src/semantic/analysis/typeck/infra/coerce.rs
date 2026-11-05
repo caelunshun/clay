@@ -1,7 +1,7 @@
 use crate::{
     base::{ListInternable, Obj, ValueInternable},
     semantic::{
-        analysis::typeck::{BodyCtxt, infra::deref::attempt_deref_clobber_obligations},
+        analysis::typeck::{driver::BodyCtxt, infra::deref::attempt_deref_clobber_obligations},
         infer::{ClauseCx, ClauseFuel, HrtbUniverse, SpannedError},
         syntax::{
             Divergence, DivergenceJoin, HirExpr, InferTyVarSourceInfo, Mutability, Re,
@@ -82,7 +82,7 @@ impl BodyCtxt<'_, '_> {
 
     fn apply_coercions(&mut self, exprs: &[(Obj<HirExpr>, Ty)], target: CoercionResolution) -> Ty {
         let s = self.session();
-        let krate = self.krate();
+        let lang_items = self.lang_items();
 
         match target {
             CoercionResolution::Solid(solid) => {
@@ -152,7 +152,7 @@ impl BodyCtxt<'_, '_> {
                                         HrtbUniverse::ROOT,
                                         output_pointee,
                                         TraitSpec {
-                                            def: krate.r(s).lang_items.deref_trait().unwrap(),
+                                            def: lang_items.deref_trait().unwrap(),
                                             params: TraitParam::Equals(TyOrRe::Ty(next_output))
                                                 .intern_single(s),
                                         },

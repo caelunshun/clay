@@ -1,10 +1,10 @@
 use crate::{
     base::{Obj, Session},
     semantic::{
-        analysis::{sigck::CrateSigckVisitor, typeck::infra::confirm::BodyCtxtConfirmState},
+        analysis::{TyCtxt, typeck::infra::confirm::BodyCtxtConfirmState},
         infer::{ClauseCx, ClauseImportEnv, HrtbUniverse, UnifyCx, UnifyCxMode},
         syntax::{
-            Crate, FnDef, HirLabelledBlock, HirLocal, InferTyVarSourceInfo, Item, ThirBody, Ty,
+            FnDef, HirLabelledBlock, HirLocal, InferTyVarSourceInfo, Item, LangItems, ThirBody, Ty,
         },
     },
     utils::mem::LateInit,
@@ -13,70 +13,72 @@ use clay_core::FastHashMap;
 
 // === Driver === //
 
-pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
-    let s = cx.session();
+impl TyCtxt<'_> {
+    pub fn type_check_function(&self, def: Obj<FnDef>) {
+        let s = self.session();
 
-    // Setup a `ClauseCx` for signature validation.
-    {
-        let mut ccx = ClauseCx::new(s, cx.impl_cache, cx.krate, UnifyCxMode::RegionAware);
-        let env_sig = ccx.universal_env_for_fn_def(def);
+        // Setup a `ClauseCx` for signature validation.
+        {
+            let mut ccx = ClauseCx::new(self, UnifyCxMode::RegionAware);
+            let env_sig = ccx.universal_env_for_fn_def(def);
 
-        // WF-check the signature.
-        cx.visit_generic_binder(&mut ccx, &env_sig, def.r(s).generics);
+            // WF-check the signature.
+            self.visit_generic_binder(&mut ccx, &env_sig, def.r(s).generics);
 
-        for arg in def.r(s).args.r(s) {
-            ccx.import_here(&env_sig, arg.ty);
+            for arg in def.r(s).args.r(s) {
+                ccx.import_here(&env_sig, arg.ty);
+            }
+
+            ccx.import_here(&env_sig, *def.r(s).ret_ty);
+
+            ccx.verify();
         }
 
-        ccx.import_here(&env_sig, *def.r(s).ret_ty);
+        // Check the body
+        let mut ccx = ClauseCx::new(self, UnifyCxMode::RegionBlind);
+        let env_sig = ccx.universal_env_for_fn_def(def);
+
+        let Some(body) = *def.r(s).hir_body else {
+            LateInit::init(&def.r(s).thir_body, None);
+            return;
+        };
+
+        let mut bcx = BodyCtxt::new(&mut ccx, def, &env_sig);
+
+        for arg in def.r(s).args.r(s) {
+            let env = bcx.import_env;
+            let ascription = bcx.ccx_mut().import_elsewhere(env, arg.ty);
+
+            bcx.check_pat_demand(arg.pat, ascription, None);
+        }
+
+        bcx.check_expr_demand(body, bcx.return_ty)
+            .ignore_divergence();
+
+        bcx.begin_confirmation();
+
+        let arg_pats = def
+            .r(s)
+            .args
+            .r(s)
+            .iter()
+            .map(|arg| bcx.confirm_thir_pat_outer(arg.pat))
+            .collect::<Vec<_>>();
+
+        let body = bcx.confirm_thir_expr_post(body);
+
+        LateInit::init(
+            &def.r(s).thir_body,
+            Some(ThirBody {
+                arg_pats,
+                expr: body,
+            }),
+        );
+
+        drop(bcx);
 
         ccx.verify();
     }
-
-    // Check the body
-    let mut ccx = ClauseCx::new(s, cx.impl_cache, cx.krate, UnifyCxMode::RegionBlind);
-    let env_sig = ccx.universal_env_for_fn_def(def);
-
-    let Some(body) = *def.r(s).hir_body else {
-        LateInit::init(&def.r(s).thir_body, None);
-        return;
-    };
-
-    let mut bcx = BodyCtxt::new(&mut ccx, def, &env_sig);
-
-    for arg in def.r(s).args.r(s) {
-        let env = bcx.import_env;
-        let ascription = bcx.ccx_mut().import_elsewhere(env, arg.ty);
-
-        bcx.check_pat_demand(arg.pat, ascription, None);
-    }
-
-    bcx.check_expr_demand(body, bcx.return_ty)
-        .ignore_divergence();
-
-    bcx.begin_confirmation();
-
-    let arg_pats = def
-        .r(s)
-        .args
-        .r(s)
-        .iter()
-        .map(|arg| bcx.confirm_thir_pat_outer(arg.pat))
-        .collect::<Vec<_>>();
-
-    let body = bcx.confirm_thir_expr_post(body);
-
-    LateInit::init(
-        &def.r(s).thir_body,
-        Some(ThirBody {
-            arg_pats,
-            expr: body,
-        }),
-    );
-
-    drop(bcx);
-
-    ccx.verify();
 }
 
 // === BodyCtxt === //
@@ -116,8 +118,8 @@ impl<'a, 'sess> BodyCtxt<'a, 'sess> {
         self.ccx.session()
     }
 
-    pub fn krate(&self) -> Obj<Crate> {
-        self.ccx().krate()
+    pub fn lang_items(&self) -> &'sess LangItems {
+        self.ccx().lang_items()
     }
 
     pub fn item(&self) -> Obj<Item> {

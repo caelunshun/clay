@@ -4,7 +4,7 @@ use crate::{
         ValueInternable,
     },
     semantic::{
-        analysis::typeck::BodyCtxt,
+        analysis::typeck::driver::BodyCtxt,
         infer::{
             ClauseFuel, ClauseImportEnv, ClausePrettyFmtOpts, FixArity, GenericSubst, HrtbUniverse,
             SpannedError,
@@ -28,6 +28,7 @@ impl BodyCtxt<'_, '_> {
         demand_hint: Option<Ty>,
     ) -> TyAndDivergence {
         let s = self.session();
+        let lang_items = self.lang_items();
         let import_env = self.import_env;
 
         let mut divergence = Divergence::MayDiverge;
@@ -45,7 +46,7 @@ impl BodyCtxt<'_, '_> {
                         .and_do(&mut divergence)
                 };
 
-                let vec_lang_item = self.krate().r(s).lang_items.vec().unwrap();
+                let vec_lang_item = lang_items.vec().unwrap();
 
                 let ty = TyKind::Adt(AdtInstance {
                     def: vec_lang_item,
@@ -303,7 +304,7 @@ impl BodyCtxt<'_, '_> {
                         span: pat.r(s).span,
                     },
                 );
-                let into_iter_trait = self.krate().r(s).lang_items.into_iterator_trait().unwrap();
+                let into_iter_trait = lang_items.into_iterator_trait().unwrap();
 
                 self.ccx_mut()
                     .oblige_ty_meets_trait_instantiated(
@@ -444,7 +445,7 @@ impl BodyCtxt<'_, '_> {
                     let s = bcx.session();
 
                     let ctor = *res
-                        .lang_item(&bcx.krate().r(s).lang_items)
+                        .lang_item(lang_items)
                         .r(s)
                         .kind
                         .as_struct()

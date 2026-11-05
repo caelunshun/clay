@@ -8,7 +8,7 @@ use crate::{
         token::{Ident, IntegralKind, NumLitBase, TokenNumLitKind},
     },
     semantic::{
-        analysis::typeck::{BodyCtxt, infra::confirm::ThirExprConfirmedWithTy},
+        analysis::typeck::{driver::BodyCtxt, infra::confirm::ThirExprConfirmedWithTy},
         infer::{
             ClauseCx, ClauseFuel, ClausePrettyFmtOpts, HrtbUniverse, SpannedError, ToDebugTree as _,
         },
@@ -554,6 +554,7 @@ impl BodyCtxt<'_, '_> {
         divergence: &mut Divergence,
     ) -> ThirExprConfirmedWithTy {
         let s = self.session();
+        let lang_items = self.lang_items();
 
         let target_ty = self.check_expr(target, None).and_do(divergence);
         let index_ty = self.ccx_mut().fresh_ty_infer(
@@ -569,7 +570,7 @@ impl BodyCtxt<'_, '_> {
             },
         );
 
-        let index_trait = self.krate().r(s).lang_items.index_trait().unwrap();
+        let index_trait = lang_items.index_trait().unwrap();
 
         let index_trait_spec = TraitSpec {
             def: index_trait,
@@ -671,8 +672,7 @@ pub fn peel_ref_for_prim_op(ccx: &mut ClauseCx<'_>, ty: Ty) -> Ty {
 // Inspired by `enforce_builtin_binop_types` in `rustc`.
 impl BodyCtxt<'_, '_> {
     pub fn decode_un_op_kind(&self, op: AstUnOpKind) -> UnaryOperation {
-        let s = self.session();
-        let lang_items = &self.krate().r(s).lang_items;
+        let lang_items = self.lang_items();
 
         match op {
             AstUnOpKind::Deref => UnaryOperation {
@@ -692,7 +692,7 @@ impl BodyCtxt<'_, '_> {
 
     pub fn decode_bin_op_kind(&self, op: AstBinOpKind) -> BinaryOperation {
         let s = self.session();
-        let lang_items = &self.krate().r(s).lang_items;
+        let lang_items = self.lang_items();
 
         match op {
             AstBinOpKind::Add => BinaryOperation {
@@ -781,8 +781,7 @@ impl BodyCtxt<'_, '_> {
     }
 
     pub fn decode_assign_op_kind(&self, op: AstAssignOpKind) -> AssignOperation {
-        let s = self.session();
-        let lang_items = &self.krate().r(s).lang_items;
+        let lang_items = self.lang_items();
 
         match op {
             AstAssignOpKind::Add => AssignOperation {

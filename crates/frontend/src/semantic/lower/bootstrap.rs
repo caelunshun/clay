@@ -7,8 +7,8 @@ use crate::{
     semantic::{
         lower::modules::{BuilderItemId, BuilderModuleTree, ItemCategory},
         syntax::{
-            Crate, FloatKind, GenericBinder, IntKind, Item, ItemKind, LangItems, ModuleItem,
-            SigTyKind, SimpleTyKind, TypeAliasItem,
+            Crate, FloatKind, GenericBinder, IntKind, Item, ItemKind, ModuleItem, SigTyKind,
+            SimpleTyKind, TypeAliasItem,
         },
     },
     symbol,
@@ -101,7 +101,6 @@ pub fn synthesize_bootstrap_prelude(s: &Session) -> Obj<Crate> {
         root: LateInit::uninit(),
         prelude: LateInit::uninit(),
         items: LateInit::uninit(),
-        lang_items: LangItems::default(),
     }
     .alloc_obj(s);
 

@@ -2,7 +2,8 @@ use crate::{
     base::{Obj, Session},
     bool_enum,
     semantic::{
-        infer::{ClauseCx, ClauseImportEnv, ImplCache, UnifyCxMode},
+        analysis::TyCtxt,
+        infer::{ClauseCx, ClauseImportEnv, UnifyCxMode},
         syntax::{FnDef, MirOperandMode, SigTy, SigTyKind},
     },
 };
@@ -20,13 +21,8 @@ pub struct TraitCache<'sess> {
 }
 
 impl<'sess> TraitCache<'sess> {
-    pub fn new(s: &'sess Session, impl_cache: &'sess ImplCache, def: Obj<FnDef>) -> Self {
-        let mut ccx = ClauseCx::new(
-            s,
-            impl_cache,
-            def.r(s).owner.as_item(s).r(s).krate,
-            UnifyCxMode::RegionBlind,
-        );
+    pub fn new(tcx: &'sess TyCtxt<'sess>, def: Obj<FnDef>) -> Self {
+        let mut ccx = ClauseCx::new(tcx, UnifyCxMode::RegionBlind);
 
         let env = ccx.universal_env_for_fn_def(def);
 

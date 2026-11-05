@@ -1,6 +1,7 @@
 use crate::{
-    base::{Intern, IterInternExt, Obj, Session, ValueInternable},
+    base::{Intern, IterInternExt, Session, ValueInternable},
     semantic::{
+        analysis::TyCtxt,
         infer::{
             AnyPromiseHandle, FloatingInferVar, GeneralOutlivesError, HrtbUniverse, ImplCache,
             InstantiatedTraitImplError, InstantiatedTraitImplErrorKind, MultiPromise,
@@ -11,7 +12,7 @@ use crate::{
             UnifyCx, UnifyCxMode, UniversalElaboration,
         },
         syntax::{
-            Crate, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection, RelationMode,
+            InferTyVar, InferTyVarSourceInfo, LangItems, Re, RelationDirection, RelationMode,
             SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
             UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProj,
             UniversalTyProjIdx, UniversalTyProjInner, UniversalTyRoot, UniversalTyRootSourceInfo,
@@ -141,10 +142,9 @@ impl ClauseFuel {
 /// WF-checking traits), you can immediately skip to region aware checking.
 #[derive(Clone)]
 pub struct ClauseCx<'sess> {
+    tcx: &'sess TyCtxt<'sess>,
     ucx: UnifyCx<'sess>,
     pending_obligations: Vec<ClauseObligationState<'sess>>,
-    impl_cache: &'sess ImplCache,
-    krate: Obj<Crate>,
     promise_mode: PromiseMode,
     universal_roots: IndexVec<UniversalTyRoot, UniversalTyRootDescriptor>,
     universal_projs: IndexVec<UniversalTyProjIdx, UniversalTyProjDescriptor>,
@@ -182,21 +182,19 @@ struct UniversalTyProjDescriptor {
 // Maybe use `enqueue_xxx` and `assert_xxx` or similar phrasing to make this distinction more
 // obvious.
 impl<'sess> ClauseCx<'sess> {
-    pub fn new(
-        s: &'sess Session,
-        impl_cache: &'sess ImplCache,
-        krate: Obj<Crate>,
-        mode: UnifyCxMode,
-    ) -> Self {
+    pub fn new(tcx: &'sess TyCtxt<'sess>, mode: UnifyCxMode) -> Self {
         Self {
-            ucx: UnifyCx::new(s, mode),
+            tcx,
+            ucx: UnifyCx::new(tcx.session(), mode),
             pending_obligations: Vec::new(),
-            impl_cache,
-            krate,
             promise_mode: PromiseMode::RootContext,
             universal_roots: IndexVec::new(),
             universal_projs: IndexVec::new(),
         }
+    }
+
+    pub fn tcx(&self) -> &'sess TyCtxt<'sess> {
+        self.tcx
     }
 
     pub fn session(&self) -> &'sess Session {
@@ -204,11 +202,11 @@ impl<'sess> ClauseCx<'sess> {
     }
 
     pub fn impl_cache(&self) -> &'sess ImplCache {
-        self.impl_cache
+        self.tcx.impl_cache
     }
 
-    pub fn krate(&self) -> Obj<Crate> {
-        self.krate
+    pub fn lang_items(&self) -> &'sess LangItems {
+        self.tcx.lang_items
     }
 
     pub fn ucx(&self) -> &UnifyCx<'sess> {

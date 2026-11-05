@@ -620,10 +620,9 @@ impl<'sess> ClauseCx<'sess> {
         rhs: TraitSpec,
     ) -> Result<PromiseValue<'sess, Self, InstantiatedTraitImplErrorKind>, SelectionRejected> {
         let s = self.session();
-        let krate = self.krate();
         let lhs = self.ucx().peel_ty_infer_var(lhs);
 
-        let lang_items = &krate.r(s).lang_items;
+        let lang_items = self.lang_items();
 
         if (Some(rhs.def) == lang_items.fn_once_trait()
             || Some(rhs.def) == lang_items.fn_mut_trait()

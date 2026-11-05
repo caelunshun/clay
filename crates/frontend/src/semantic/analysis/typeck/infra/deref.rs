@@ -20,7 +20,7 @@ pub fn attempt_deref(ccx: &mut ClauseCx<'_>, curr: Ty) -> Option<Ty> {
 
 pub fn attempt_deref_clobber_obligations(ccx: &mut ClauseCx<'_>, curr: Ty) -> Option<Ty> {
     let s = ccx.session();
-    let krate = ccx.krate();
+    let lang_items = ccx.lang_items();
 
     let next_infer_var =
         ccx.fresh_ty_infer_var(HrtbUniverse::ROOT, InferTyVarSourceInfo::DerefHelper);
@@ -80,7 +80,7 @@ pub fn attempt_deref_clobber_obligations(ccx: &mut ClauseCx<'_>, curr: Ty) -> Op
         HrtbUniverse::ROOT,
         curr,
         TraitSpec {
-            def: krate.r(s).lang_items.deref_trait().unwrap(),
+            def: lang_items.deref_trait().unwrap(),
             params: TraitParam::Equals(TyOrRe::Ty(next_infer)).intern_single(s),
         },
     )

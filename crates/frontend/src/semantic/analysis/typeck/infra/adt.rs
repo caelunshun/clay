@@ -2,7 +2,7 @@ use crate::{
     base::{Diag, ErrorGuaranteed, Obj, Span, ValueInternable},
     parse::token::Ident,
     semantic::{
-        analysis::typeck::BodyCtxt,
+        analysis::typeck::driver::BodyCtxt,
         infer::ClausePrettyFmtOpts,
         syntax::{
             AdtCtor, AdtCtorFieldIdx, AdtCtorInstance, AdtCtorUnresolved, AdtInstance, AdtKind,

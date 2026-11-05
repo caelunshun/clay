@@ -13,15 +13,30 @@ fn main() {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("res");
 
-    collect_trials(&mut String::new(), &mut path, &mut trials);
+    let std_path_canonical = path
+        .join("../../std/lib.clay")
+        .canonicalize()
+        .expect("failed to find standard library");
+
+    collect_trials(
+        &mut String::new(),
+        &std_path_canonical,
+        &mut path,
+        &mut trials,
+    );
 
     libtest_mimic::run(&libtest_mimic::Arguments::from_args(), trials).exit();
 }
 
-fn collect_trials(name: &mut String, path: &mut PathBuf, trials: &mut Vec<Trial>) {
-    for entry in path.read_dir().unwrap() {
+fn collect_trials(
+    name: &mut String,
+    std_path_canonical: &Path,
+    entry_path: &mut PathBuf,
+    trials: &mut Vec<Trial>,
+) {
+    for entry in entry_path.read_dir().unwrap() {
         let entry = entry.unwrap().file_name();
-        path.push(&entry);
+        entry_path.push(&entry);
 
         let old_name_len = name.len();
 
@@ -29,26 +44,34 @@ fn collect_trials(name: &mut String, path: &mut PathBuf, trials: &mut Vec<Trial>
             name.push_str("::");
         }
 
-        if path.is_dir() {
+        if entry_path.is_dir() {
             name.push_str(entry.to_str().unwrap());
 
-            collect_trials(name, path, trials);
-        } else if path.is_file() && path.extension() == Some(OsStr::new("clay")) {
+            collect_trials(name, std_path_canonical, entry_path, trials);
+        } else if entry_path.is_file() && entry_path.extension() == Some(OsStr::new("clay")) {
             name.push_str(Path::new(&entry).file_prefix().unwrap().to_str().unwrap());
 
             trials.push(Trial::test(name.clone(), {
-                let path = path.clone();
+                let std_path_canonical = std_path_canonical.to_path_buf();
+                let entry_path = entry_path.clone();
 
-                move || run_trial_with_paths(&path, &path.with_extension("out"))
+                move || {
+                    run_trial_with_paths(
+                        &std_path_canonical,
+                        &entry_path,
+                        &entry_path.with_extension("out"),
+                    )
+                }
             }));
         }
 
         name.truncate(old_name_len);
-        path.pop();
+        entry_path.pop();
     }
 }
 
 fn run_trial_with_paths(
+    std_path_canonical: &Path,
     input_path: &Path,
     expected_output_path: &Path,
 ) -> Result<(), libtest_mimic::Failed> {
@@ -56,6 +79,7 @@ fn run_trial_with_paths(
 
     let mut child = Command::new(&compiler_path)
         .current_dir(input_path.parent().unwrap())
+        .arg(std_path_canonical)
         .arg(Path::new(input_path.file_name().unwrap()))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

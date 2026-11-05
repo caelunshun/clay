@@ -27,9 +27,9 @@ use crate::{
             AdtCtor, AdtCtorField, AdtCtorFieldIdx, AdtCtorOwner, AdtCtorSyntax, AdtEnumVariant,
             AdtEnumVariantIdx, AdtItem, AdtKind, AdtKindEnum, AdtKindStruct, AnyGeneric, Crate,
             DebruijnAbsolute, DebruijnTop, EnumVariantItem, FnArg, FnDef, FnDefOwner, FnItem,
-            GenericBinder, HirLabelledBlock, HirLocal, ImplItem, Item, ItemKind, LangItems,
-            LocalNameSymbol, ModuleItem, RegionGeneric, SigTy, SigTyKind, TraitItem, TypeAliasItem,
-            TypeGeneric, Visibility,
+            GenericBinder, HirLabelledBlock, HirLocal, ImplItem, Item, ItemKind, LocalNameSymbol,
+            ModuleItem, RegionGeneric, SigTy, SigTyKind, TraitItem, TypeAliasItem, TypeGeneric,
+            Visibility,
         },
     },
     symbol,
@@ -63,7 +63,6 @@ pub fn lower_full_ast(s: &Session, ast: &AstItemModuleContents) -> Obj<Crate> {
         root: LateInit::uninit(),
         prelude: LateInit::uninit(),
         items: LateInit::uninit(),
-        lang_items: LangItems::default(),
     }
     .alloc_obj(s);
 

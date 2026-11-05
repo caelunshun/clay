@@ -1,7 +1,7 @@
 use crate::{
     base::{Diag, Intern, Obj, ObjAllocExt, ValueInternable},
     semantic::{
-        analysis::typeck::{BodyCtxt, infra::confirm::ThirExprConfirmedWithTy},
+        analysis::typeck::{driver::BodyCtxt, infra::confirm::ThirExprConfirmedWithTy},
         infer::{HrtbUniverse, SpannedError},
         syntax::{
             Divergence, HirBlock, HirExpr, HirLabelledBlock, HirStmt, InferTyVarSourceInfo,

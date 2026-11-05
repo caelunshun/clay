@@ -5,7 +5,7 @@ use crate::{
     },
     parse::ast::AstUnOpKind,
     semantic::{
-        analysis::typeck::BodyCtxt,
+        analysis::typeck::driver::BodyCtxt,
         infer::FloatingInferVar,
         syntax::{
             FnInstance, HirExpr, HirLabelledBlock, HirLocal, HirPat, HirPatListFrontAndTail,
@@ -393,8 +393,11 @@ trait Confirmable<'a, 'sess>: Sized + 'static {
     type Meta;
     type Body;
 
-    fn create_placeholder(bcx: &mut BodyCtxt<'a, 'sess>, span: Span, meta: &Self::Meta)
-    -> Obj<Self>;
+    fn create_placeholder(
+        bcx: &mut BodyCtxt<'a, 'sess>,
+        span: Span,
+        meta: &Self::Meta,
+    ) -> Obj<Self>;
 
     fn init_placeholder(bcx: &mut BodyCtxt<'a, 'sess>, target: Obj<Self>, body: Self::Body);
 

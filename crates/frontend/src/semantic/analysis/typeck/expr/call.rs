@@ -3,7 +3,7 @@ use crate::{
     parse::token::Ident,
     semantic::{
         analysis::typeck::{
-            BodyCtxt,
+            driver::BodyCtxt,
             infra::{
                 confirm::ThirExprConfirmedWithTy,
                 lookup::{LookupFieldResult, LookupMethodResult},
@@ -27,6 +27,7 @@ impl BodyCtxt<'_, '_> {
         divergence: &mut Divergence,
     ) -> ThirExprConfirmedWithTy {
         let s = self.session();
+        let lang_items = self.lang_items();
 
         let callee = self.check_expr(callee_expr, None).and_do(divergence);
 
@@ -39,7 +40,7 @@ impl BodyCtxt<'_, '_> {
         }
 
         let site_span = expr.r(s).span;
-        let fn_once_trait = self.krate().r(s).lang_items.fn_once_trait().unwrap();
+        let fn_once_trait = lang_items.fn_once_trait().unwrap();
         let input_ty = self.ccx_mut().fresh_ty_infer(
             HrtbUniverse::ROOT,
             InferTyVarSourceInfo::FunctionArgs { span: site_span },
