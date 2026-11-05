@@ -1,7 +1,7 @@
 //! Logic to implement the type-implements-trait obligation.
 
 use crate::{
-    base::arena::{HasInterner as _, Obj},
+    base::{Obj, Session, ValueInternable},
     semantic::{
         infer::{
             BlockImplUnsatisfiedError, BlockImplUnsatisfiedErrorCulprit, ClauseCx, ClauseFuel,
@@ -14,7 +14,7 @@ use crate::{
         },
         syntax::{
             HrtbBinder, ImplItem, RelationMode, SimpleTySet, TraitClause, TraitClauseList,
-            TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe, TyVisitor, TyVisitorInfallibleExt,
+            TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyVisitor, TyVisitorInfallibleExt,
             UniversalTy,
         },
     },
@@ -620,7 +620,6 @@ impl<'tcx> ClauseCx<'tcx> {
         rhs: TraitSpec,
     ) -> Result<PromiseValue<'tcx, Self, InstantiatedTraitImplErrorKind>, SelectionRejected> {
         let s = self.session();
-        let tcx = self.tcx();
         let krate = self.krate();
         let lhs = self.ucx().peel_ty_infer_var(lhs);
 
@@ -646,7 +645,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
             let Ok(unify_args_promise) = self.ucx_mut().unify_ty_and_ty(
                 rhs_input,
-                tcx.intern(TyKind::Tuple(sig.args)),
+                TyKind::Tuple(sig.args).intern(s),
                 RelationMode::Equate,
             ) else {
                 return Err(SelectionRejected);
@@ -728,8 +727,8 @@ impl<'tcx> ClauseCx<'tcx> {
         impl<'tcx> TyVisitor<'tcx> for CoverVisitor<'_, 'tcx> {
             type Break = Infallible;
 
-            fn tcx(&self) -> &'tcx TyCtxt {
-                self.ccx.tcx()
+            fn session(&self) -> &'tcx Session {
+                self.ccx.session()
             }
 
             fn visit_ty(&mut self, ty: Ty) -> ControlFlow<Self::Break> {

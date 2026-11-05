@@ -1,7 +1,7 @@
 use crate::{
     base::{
+        Intern, IterInternExt, Session, ValueInternable,
         analysis::{DebruijnRelative, DebruijnTop},
-        arena::{HasInterner as _, HasListInterner},
     },
     semantic::{
         infer::{
@@ -12,9 +12,9 @@ use crate::{
         syntax::{
             AnyGeneric, HrtbBinder, HrtbDebruijn, HrtbDebruijnDef, HrtbProjection, InferTyVar,
             InferTyVarSourceInfo, Re, RelationMode, TraitClause, TraitInstance, TraitParam,
-            TraitSpec, Ty, TyCtxt, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyKind, TyOrRe,
-            TyVisitor, TyVisitorInfallibleExt, UniversalReVarSourceInfo, UniversalTy,
-            UniversalTyOrReRoot, UniversalTyProjInner,
+            TraitSpec, Ty, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor,
+            TyVisitorInfallibleExt, UniversalReVarSourceInfo, UniversalTy, UniversalTyOrReRoot,
+            UniversalTyProjInner,
         },
     },
 };
@@ -80,7 +80,6 @@ impl<'tcx> ClauseCx<'tcx> {
         universal: UniversalTy,
     ) -> UniversalElaboration {
         let s = self.session();
-        let tcx = self.tcx();
 
         // See whether this universal variable has been elaborated yet.
         if let Some(cached) = self.universal_ty_elaboration_state(universal).cloned() {
@@ -123,38 +122,36 @@ impl<'tcx> ClauseCx<'tcx> {
 
             let mut late_assoc_params = Vec::new();
 
-            let instantiated_with_late = tcx.intern_list(
-                &instantiated
-                    .params
-                    .r(s)
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, &param)| {
-                        let is_assoc = idx >= *instantiated.def.r(s).regular_generic_count as usize;
+            let instantiated_with_late = instantiated
+                .params
+                .r(s)
+                .iter()
+                .enumerate()
+                .map(|(idx, &param)| {
+                    let is_assoc = idx >= *instantiated.def.r(s).regular_generic_count as usize;
 
-                        match param {
-                            TraitParam::Equals(eq) => {
-                                if is_assoc {
-                                    late_assoc_params.push(None);
-                                }
-
-                                eq
+                    match param {
+                        TraitParam::Equals(eq) => {
+                            if is_assoc {
+                                late_assoc_params.push(None);
                             }
-                            TraitParam::Unspecified(_spec) => {
-                                let var = self.fresh_ty_infer_var(
-                                    var_universe.clone(),
-                                    InferTyVarSourceInfo::LateAssocElabPlaceholder,
-                                );
 
-                                debug_assert!(is_assoc);
-                                late_assoc_params.push(Some(var));
-
-                                TyOrRe::Ty(tcx.intern(TyKind::InferVar(var)))
-                            }
+                            eq
                         }
-                    })
-                    .collect::<Vec<_>>(),
-            );
+                        TraitParam::Unspecified(_spec) => {
+                            let var = self.fresh_ty_infer_var(
+                                var_universe.clone(),
+                                InferTyVarSourceInfo::LateAssocElabPlaceholder,
+                            );
+
+                            debug_assert!(is_assoc);
+                            late_assoc_params.push(Some(var));
+
+                            TyOrRe::Ty(TyKind::InferVar(var).intern(s))
+                        }
+                    }
+                })
+                .intern(s);
 
             elaborated_clauses.push(ElaboratedClause::NotReady {
                 instantiated,
@@ -185,7 +182,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     // Associated types vary in the same way as their parent generic.
                     var_universe.clone(),
                     ClauseImportEnv::new(
-                        Some(tcx.intern(TyKind::Universal(universal))),
+                        Some(TyKind::Universal(universal).intern(s)),
                         [GenericSubst::new(
                             *instantiated.def.r(s).generics,
                             instantiated_with_late,
@@ -232,7 +229,6 @@ impl<'tcx> ClauseCx<'tcx> {
         }
 
         let s = self.session();
-        let tcx = self.tcx();
 
         let universe = self.lookup_universal_ty_hrtb_universe(universal).clone();
 
@@ -360,9 +356,7 @@ impl<'tcx> ClauseCx<'tcx> {
                                     unreachable!()
                                 };
 
-                                *merge_into = TraitParam::Unspecified(tcx.intern_list(
-                                    &lhs.r(s).iter().chain(rhs.r(s)).copied().collect::<Vec<_>>(),
-                                ));
+                                *merge_into = TraitParam::Unspecified(lhs.chain(s, rhs));
                             }
                         }
                     }
@@ -372,7 +366,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
                 TraitSpec {
                     def: instantiated.def,
-                    params: tcx.intern_list(&instantiated_merge_params),
+                    params: Intern::new_slice_copy(s, &instantiated_merge_params),
                 }
             };
 
@@ -426,7 +420,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     };
 
                     self.unify_ty_and_ty(
-                        tcx.intern(TyKind::InferVar(late_init_var)),
+                        TyKind::InferVar(late_init_var).intern(s),
                         late_init_to,
                         RelationMode::Equate,
                     )
@@ -455,7 +449,7 @@ impl<'tcx> ClauseCx<'tcx> {
         universal: UniversalTy,
         instantiated: TraitSpec,
     ) -> HrtbBinder {
-        let tcx = self.tcx();
+        let s = self.session();
 
         let mut folder = HrtbReverseTranscriptase {
             ccx: self,
@@ -471,7 +465,7 @@ impl<'tcx> ClauseCx<'tcx> {
         folder.debruijn_defs_backward.reverse();
 
         HrtbBinder {
-            defs: tcx.intern_list(&folder.debruijn_defs_backward),
+            defs: Intern::new_slice_copy(s, &folder.debruijn_defs_backward),
             inner,
         }
     }
@@ -498,24 +492,24 @@ impl<'tcx> ClauseCx<'tcx> {
         spec: TraitSpec,
     ) -> TraitInstance {
         let s = self.session();
-        let tcx = self.tcx();
-
-        let instance = spec
-            .params
-            .r(s)
-            .iter()
-            .enumerate()
-            .map(|(idx, &param)| match param {
-                TraitParam::Equals(v) => v,
-                TraitParam::Unspecified(_) => TyOrRe::Ty(tcx.intern(TyKind::Universal(
-                    self.fresh_ty_universal_proj(universal, spec, idx as u32),
-                ))),
-            })
-            .collect::<Vec<_>>();
 
         let instance = TraitInstance {
             def: spec.def,
-            params: tcx.intern_list(&instance),
+            params: spec
+                .params
+                .r(s)
+                .iter()
+                .enumerate()
+                .map(|(idx, &param)| match param {
+                    TraitParam::Equals(v) => v,
+                    TraitParam::Unspecified(_) => TyOrRe::Ty(
+                        TyKind::Universal(
+                            self.fresh_ty_universal_proj(universal, spec, idx as u32),
+                        )
+                        .intern(s),
+                    ),
+                })
+                .intern(s),
         };
 
         for ((&param, &instantiation), &generic) in spec
@@ -546,7 +540,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     fuel,
                     universe.clone(),
                     ClauseImportEnv::new(
-                        Some(tcx.intern(TyKind::Universal(universal))),
+                        Some(TyKind::Universal(universal).intern(s)),
                         [GenericSubst::new(*spec.def.r(s).generics, instance.params)],
                     ),
                     ImportWfMode::ReportElsewhere,
@@ -554,14 +548,7 @@ impl<'tcx> ClauseCx<'tcx> {
                 .import_trait_clause_list(*generic.r(s).clauses)
                 .report_delay_bug();
 
-            let clauses = tcx.intern_list(
-                &extra_clauses
-                    .r(s)
-                    .iter()
-                    .chain(base_clauses.r(s))
-                    .copied()
-                    .collect::<Vec<_>>(),
-            );
+            let clauses = extra_clauses.chain(s, base_clauses);
 
             self.init_ty_universal_direct_clauses(instantiation, clauses);
         }
@@ -618,11 +605,11 @@ impl HrtbReverseTranscriptase<'_, '_> {
     }
 }
 
-impl<'tcx> TyFolder<'tcx> for HrtbReverseTranscriptase<'_, 'tcx> {
+impl<'sess> TyFolder<'sess> for HrtbReverseTranscriptase<'_, 'sess> {
     type Error = Infallible;
 
-    fn tcx(&self) -> &'tcx TyCtxt {
-        self.ccx.tcx()
+    fn session(&self) -> &'sess Session {
+        self.ccx.session()
     }
 
     fn fold_re(&mut self, re: Re) -> Result<Re, Self::Error> {
@@ -641,7 +628,6 @@ impl<'tcx> TyFolder<'tcx> for HrtbReverseTranscriptase<'_, 'tcx> {
     }
 
     fn fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
-        let tcx = self.tcx();
         let s = self.session();
 
         let ty = self.ccx.peel_ty_infer_var_without_poll(ty);
@@ -658,7 +644,7 @@ impl<'tcx> TyFolder<'tcx> for HrtbReverseTranscriptase<'_, 'tcx> {
                     )
                 });
 
-                return Ok(tcx.intern(TyKind::InferVar(var)));
+                return Ok(TyKind::InferVar(var).intern(s));
             }
             _ => {
                 return Ok(self.super_(ty));
@@ -671,10 +657,10 @@ impl<'tcx> TyFolder<'tcx> for HrtbReverseTranscriptase<'_, 'tcx> {
                     self.universal_to_hrtb_if_was_instantiated(UniversalTyOrReRoot::Ty(root))
                 else {
                     // Not an HRTB.
-                    return Ok(tcx.intern(TyKind::Universal(universal)));
+                    return Ok(TyKind::Universal(universal).intern(s));
                 };
 
-                Ok(tcx.intern(TyKind::HrtbVar(debruijn)))
+                Ok(TyKind::HrtbVar(debruijn).intern(s))
             }
             UniversalTy::Projection(proj) => {
                 let UniversalTyProjInner {
@@ -684,14 +670,15 @@ impl<'tcx> TyFolder<'tcx> for HrtbReverseTranscriptase<'_, 'tcx> {
                     cache_idx: _,
                 } = *proj.r(s);
 
-                let target = self.fold(tcx.intern(TyKind::Universal(target)));
+                let target = self.fold(TyKind::Universal(target).intern(s));
                 let as_spec = self.fold(as_spec);
 
-                Ok(tcx.intern(TyKind::HrtbProjection(HrtbProjection {
+                Ok(TyKind::HrtbProjection(HrtbProjection {
                     target: target,
                     spec: as_spec,
                     assoc_idx,
-                })))
+                })
+                .intern(s))
             }
         }
     }
@@ -718,11 +705,11 @@ impl HrtbCoverChecker<'_, '_> {
     }
 }
 
-impl<'tcx> TyVisitor<'tcx> for HrtbCoverChecker<'_, 'tcx> {
+impl<'sess> TyVisitor<'sess> for HrtbCoverChecker<'_, 'sess> {
     type Break = Infallible;
 
-    fn tcx(&self) -> &'tcx TyCtxt {
-        self.ccx.tcx()
+    fn session(&self) -> &'sess Session {
+        self.ccx.session()
     }
 
     fn visit_hrtb_binder(&mut self, binder: HrtbBinder) -> ControlFlow<Self::Break> {

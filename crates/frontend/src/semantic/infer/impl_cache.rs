@@ -1,15 +1,11 @@
 use crate::{
-    base::{
-        Session,
-        arena::{HasListInterner as _, Obj},
-        syntax::Symbol,
-    },
+    base::{Intern, IterInternExt, ListInternable, Obj, Session, Symbol},
     semantic::{
         infer::ClauseCx,
         syntax::{
             AdtInstance, Crate, FnDef, ImplItem, SigAdtInstance, SigTy, SigTyKind, SigTyOrRe,
-            SolidTyShape, SolidTyShapeKind, TraitItem, TraitParam, TraitSpec, Ty, TyCtxt, TyKind,
-            TyOrRe, TyShape,
+            SolidTyShape, SolidTyShapeKind, TraitItem, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            TyShape,
         },
     },
     utils::lang::{UnionIsectBuilder, UnionIsectIter, UnionIsectOp},
@@ -33,19 +29,20 @@ pub enum ImplCacheEntry {
 }
 
 impl ImplCache {
-    pub fn populate(&mut self, tcx: &TyCtxt, krate: Obj<Crate>) {
-        let s = &tcx.session;
-
+    pub fn populate(&mut self, s: &Session, krate: Obj<Crate>) {
         for &item in &**krate.r(s).items {
             let Some(item) = item.r(s).kind.as_impl() else {
                 continue;
             };
 
-            let self_ty_shape =
-                SigShapeEraser { tcx, self_ty: None }.shape_of_ty(*item.r(s).target);
+            let self_ty_shape = SigShapeEraser {
+                session: s,
+                self_ty: None,
+            }
+            .shape_of_ty(*item.r(s).target);
 
             let trait_eraser = SigShapeEraser {
-                tcx,
+                session: s,
                 self_ty: Some(self_ty_shape),
             };
 
@@ -54,13 +51,13 @@ impl ImplCache {
                     let arg_count = *trait_.def.r(s).regular_generic_count as usize;
 
                     self.by_shape.insert(
+                        s,
                         trait_eraser.shape_of_trait_impl(
                             trait_.def,
                             &trait_.params.elems.r(s)[..arg_count],
                             *item.r(s).target,
                         ),
                         ImplCacheEntry::TraitImpl(item),
-                        s,
                     );
                 }
                 None => {
@@ -68,9 +65,9 @@ impl ImplCache {
                         let method = method.unwrap();
 
                         self.by_shape.insert(
+                            s,
                             trait_eraser.shape_of_inherent_function(method.r(s).name.text),
                             ImplCacheEntry::InherentMethod(method),
-                            s,
                         );
 
                         if !*method.r(s).has_self_param {
@@ -83,9 +80,9 @@ impl ImplCache {
                         let receiver = method.r(s).args.r(s)[0].ty;
 
                         self.by_shape.insert(
+                            s,
                             trait_eraser.shape_of_inherent_method(receiver, method.r(s).name.text),
                             ImplCacheEntry::InherentMethod(method),
-                            s,
                         );
                     }
                 }
@@ -103,7 +100,7 @@ impl ImplCache {
         let eraser = ImportedShapeEraser { ccx };
 
         self.by_shape
-            .lookup(eraser.shape_of_inherent_method(receiver, name), s)
+            .lookup(s, eraser.shape_of_inherent_method(receiver, name))
             .map(|v| {
                 let ImplCacheEntry::InherentMethod(v) = *v else {
                     unreachable!()
@@ -123,7 +120,7 @@ impl ImplCache {
         let eraser = ImportedShapeEraser { ccx };
 
         self.by_shape
-            .lookup(eraser.shape_of_inherent_function(self_ty, name), s)
+            .lookup(s, eraser.shape_of_inherent_function(self_ty, name))
             .map(|v| {
                 let ImplCacheEntry::InherentMethod(v) = *v else {
                     unreachable!()
@@ -144,6 +141,7 @@ impl ImplCache {
 
         self.by_shape
             .lookup(
+                s,
                 eraser.shape_of_trait_impl(
                     rhs.def,
                     &rhs.params.r(s)[..*rhs.def.r(s).regular_generic_count as usize]
@@ -155,7 +153,6 @@ impl ImplCache {
                         .collect::<Vec<_>>(),
                     lhs,
                 ),
-                s,
             )
             .map(|v| {
                 let ImplCacheEntry::TraitImpl(v) = *v else {
@@ -170,7 +167,7 @@ impl ImplCache {
 // === Type Erasure === //
 
 pub struct SigShapeEraser<'a> {
-    pub tcx: &'a TyCtxt,
+    pub session: &'a Session,
     pub self_ty: Option<TyShape>,
 }
 
@@ -181,41 +178,43 @@ impl SigShapeEraser<'_> {
         args: &[SigTyOrRe],
         target: SigTy,
     ) -> TyShape {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         debug_assert_eq!(args.len(), *def.r(s).regular_generic_count as usize);
 
         TyShape::Solid(SolidTyShape {
             kind: SolidTyShapeKind::TraitImpl(def),
-            children: self.tcx.intern_list(
-                &([self.shape_of_ty(target)]
-                    .into_iter()
-                    .chain(
-                        args.iter()
-                            .filter_map(|ty| ty.as_ty())
-                            .map(|ty| self.shape_of_ty(ty)),
-                    )
-                    .collect::<Vec<_>>()),
-            ),
+            children: [self.shape_of_ty(target)]
+                .into_iter()
+                .chain(
+                    args.iter()
+                        .filter_map(|ty| ty.as_ty())
+                        .map(|ty| self.shape_of_ty(ty)),
+                )
+                .intern(s),
         })
     }
 
     pub fn shape_of_inherent_method(&self, receiver: SigTy, name: Symbol) -> TyShape {
+        let s = self.session;
+
         TyShape::Solid(SolidTyShape {
             kind: SolidTyShapeKind::InherentMethodImpl(name),
-            children: self.tcx.intern_list(&[self.shape_of_ty(receiver)]),
+            children: self.shape_of_ty(receiver).intern_single(s),
         })
     }
 
     pub fn shape_of_inherent_function(&self, name: Symbol) -> TyShape {
+        let s = self.session;
+
         TyShape::Solid(SolidTyShape {
             kind: SolidTyShapeKind::InherentFunctionImpl(name),
-            children: self.tcx.intern_list(&[self.self_ty.unwrap()]),
+            children: self.self_ty.unwrap().intern_single(s),
         })
     }
 
     pub fn shape_of_ty(&self, ty: SigTy) -> TyShape {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         match ty.r(s).kind {
             SigTyKind::SelfTy => self.self_ty.expect("no self type provided"),
@@ -233,33 +232,29 @@ impl SigShapeEraser<'_> {
 
             SigTyKind::Simple(kind) => TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Simple(kind),
-                children: self.tcx.intern_list(&[]),
+                children: Intern::new_empty(s),
             }),
             SigTyKind::Reference(_re, mutability, pointee) => TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Reference(mutability),
-                children: self.tcx.intern_list(&[self.shape_of_ty(pointee)]),
+                children: self.shape_of_ty(pointee).intern_single(s),
             }),
             SigTyKind::Adt(SigAdtInstance { def, params }) => TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Adt(def),
-                children: self.tcx.intern_list(
-                    &params
-                        .elems
-                        .r(s)
-                        .iter()
-                        .filter_map(|ty| ty.as_ty())
-                        .map(|ty| self.shape_of_ty(ty))
-                        .collect::<Vec<_>>(),
-                ),
+                children: params
+                    .elems
+                    .r(s)
+                    .iter()
+                    .filter_map(|ty| ty.as_ty())
+                    .map(|ty| self.shape_of_ty(ty))
+                    .intern(s),
             }),
             SigTyKind::Tuple(children) => TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Tuple(children.r(s).len() as u32),
-                children: self.tcx.intern_list(
-                    &children
-                        .r(s)
-                        .iter()
-                        .map(|&ty| self.shape_of_ty(ty))
-                        .collect::<Vec<_>>(),
-                ),
+                children: children
+                    .r(s)
+                    .iter()
+                    .map(|&ty| self.shape_of_ty(ty))
+                    .intern(s),
             }),
         }
     }
@@ -271,47 +266,43 @@ pub struct ImportedShapeEraser<'a, 'tcx> {
 
 impl ImportedShapeEraser<'_, '_> {
     pub fn shape_of_trait_impl(&self, def: Obj<TraitItem>, args: &[TyOrRe], target: Ty) -> TyShape {
-        let tcx = self.ccx.tcx();
         let s = self.ccx.session();
 
         debug_assert_eq!(args.len(), *def.r(s).regular_generic_count as usize);
 
         TyShape::Solid(SolidTyShape {
             kind: SolidTyShapeKind::TraitImpl(def),
-            children: tcx.intern_list(
-                &([self.shape_of_ty(target)]
-                    .into_iter()
-                    .chain(
-                        args.iter()
-                            .filter_map(|ty| ty.as_ty())
-                            .map(|ty| self.shape_of_ty(ty)),
-                    )
-                    .collect::<Vec<_>>()),
-            ),
+            children: [self.shape_of_ty(target)]
+                .into_iter()
+                .chain(
+                    args.iter()
+                        .filter_map(|ty| ty.as_ty())
+                        .map(|ty| self.shape_of_ty(ty)),
+                )
+                .intern(s),
         })
     }
 
     pub fn shape_of_inherent_method(&self, receiver: Ty, name: Symbol) -> TyShape {
-        let tcx = self.ccx.tcx();
+        let s = self.ccx.session();
 
         TyShape::Solid(SolidTyShape {
             kind: SolidTyShapeKind::InherentMethodImpl(name),
-            children: tcx.intern_list(&[self.shape_of_ty(receiver)]),
+            children: self.shape_of_ty(receiver).intern_single(s),
         })
     }
 
     pub fn shape_of_inherent_function(&self, self_ty: Ty, name: Symbol) -> TyShape {
-        let tcx = self.ccx.tcx();
+        let s = self.ccx.session();
 
         TyShape::Solid(SolidTyShape {
             kind: SolidTyShapeKind::InherentFunctionImpl(name),
-            children: tcx.intern_list(&[self.shape_of_ty(self_ty)]),
+            children: self.shape_of_ty(self_ty).intern_single(s),
         })
     }
 
     pub fn shape_of_ty(&self, ty: Ty) -> TyShape {
         let s = self.ccx.session();
-        let tcx = self.ccx.tcx();
 
         match *self.ccx.peel_ty_infer_var_without_poll(ty).r(s) {
             // It's always safe to be conservative with these types.
@@ -325,32 +316,28 @@ impl ImportedShapeEraser<'_, '_> {
 
             TyKind::Simple(kind) => TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Simple(kind),
-                children: tcx.intern_list(&[]),
+                children: Intern::new_empty(s),
             }),
             TyKind::Reference(_re, mutability, pointee) => TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Reference(mutability),
-                children: tcx.intern_list(&[self.shape_of_ty(pointee)]),
+                children: self.shape_of_ty(pointee).intern_single(s),
             }),
             TyKind::Adt(AdtInstance { def, params }) => TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Adt(def),
-                children: tcx.intern_list(
-                    &params
-                        .r(s)
-                        .iter()
-                        .filter_map(|ty| ty.as_ty())
-                        .map(|ty| self.shape_of_ty(ty))
-                        .collect::<Vec<_>>(),
-                ),
+                children: params
+                    .r(s)
+                    .iter()
+                    .filter_map(|ty| ty.as_ty())
+                    .map(|ty| self.shape_of_ty(ty))
+                    .intern(s),
             }),
             TyKind::Tuple(children) => TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Tuple(children.r(s).len() as u32),
-                children: tcx.intern_list(
-                    &children
-                        .r(s)
-                        .iter()
-                        .map(|&ty| self.shape_of_ty(ty))
-                        .collect::<Vec<_>>(),
-                ),
+                children: children
+                    .r(s)
+                    .iter()
+                    .map(|&ty| self.shape_of_ty(ty))
+                    .intern(s),
             }),
         }
     }
@@ -366,15 +353,15 @@ pub struct TyShapeMap<T> {
 }
 
 impl<T> TyShapeMap<T> {
-    pub fn insert(&mut self, ty: TyShape, entry: T, s: &Session) {
+    pub fn insert(&mut self, s: &Session, ty: TyShape, entry: T) {
         let index = self.entries.push(entry);
         self.root_layer.insert(ty, index, s);
     }
 
-    pub fn lookup(&self, ty: TyShape, s: &Session) -> TyShapeMapIter<'_, T> {
+    pub fn lookup(&self, s: &Session, ty: TyShape) -> TyShapeMapIter<'_, T> {
         let mut set = UnionIsectBuilder::default();
 
-        self.root_layer.lookup(ty, &mut set, s);
+        self.root_layer.lookup(s, ty, &mut set);
 
         TyShapeMapIter {
             entries: &self.entries,
@@ -454,9 +441,9 @@ impl MapLayer {
 
     fn lookup<'a>(
         &'a self,
+        s: &Session,
         ty: TyShape,
         set: &mut UnionIsectBuilder<slice::Iter<'a, EntryIdx>>,
-        s: &Session,
     ) {
         set.push_op(UnionIsectOp::Union);
 
@@ -475,7 +462,7 @@ impl MapLayer {
                     ConditionalMatcher::RequiresChildren(layers) => {
                         set.push_op(UnionIsectOp::Intersect);
                         for (&ty, layer) in ty.children.r(s).iter().zip(layers) {
-                            layer.lookup(ty, set, s);
+                            layer.lookup(s, ty, set);
                         }
                         set.pop_op();
                     }
@@ -491,7 +478,7 @@ impl MapLayer {
                     }
                     ConditionalMatcher::RequiresChildren(layers) => {
                         for layer in layers {
-                            layer.lookup(TyShape::Hole, set, s);
+                            layer.lookup(s, TyShape::Hole, set);
                         }
                     }
                 }
@@ -507,55 +494,56 @@ impl MapLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::semantic::syntax::{SimpleTyKind, TyCtxt};
+    use crate::semantic::syntax::SimpleTyKind;
     use clay_core::FastHashSet;
 
     #[test]
     fn impl_cache_map() {
         let session = Session::new();
         let _guard = session.clone().bind();
-
-        let tcx = TyCtxt::new(session);
+        let s = &session;
 
         let mut map = TyShapeMap::<&'static str>::default();
 
-        map.insert(TyShape::Hole, "_", &tcx.session);
+        map.insert(s, TyShape::Hole, "_");
         map.insert(
+            s,
             TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Tuple(2),
-                children: tcx.intern_list(&[
+                children: [
                     TyShape::Hole,
                     TyShape::Solid(SolidTyShape {
                         kind: SolidTyShapeKind::Simple(SimpleTyKind::Bool),
-                        children: tcx.intern_list(&[]),
+                        children: Intern::new_empty(s),
                     }),
-                ]),
+                ]
+                .intern(s),
             }),
             "(_, bool)",
-            &tcx.session,
         );
         map.insert(
+            s,
             TyShape::Solid(SolidTyShape {
                 kind: SolidTyShapeKind::Tuple(2),
-                children: tcx.intern_list(&[
+                children: [
                     TyShape::Solid(SolidTyShape {
                         kind: SolidTyShapeKind::Simple(SimpleTyKind::Str),
-                        children: tcx.intern_list(&[]),
+                        children: Intern::new_empty(s),
                     }),
                     TyShape::Hole,
-                ]),
+                ]
+                .intern(s),
             }),
             "(str, _)",
-            &tcx.session,
         );
 
         assert_eq!(
             map.lookup(
+                s,
                 TyShape::Solid(SolidTyShape {
                     kind: SolidTyShapeKind::Tuple(2),
-                    children: tcx.intern_list(&[TyShape::Hole, TyShape::Hole]),
+                    children: [TyShape::Hole, TyShape::Hole].intern(s),
                 }),
-                &tcx.session,
             )
             .copied()
             .collect::<FastHashSet<_>>(),
@@ -564,17 +552,18 @@ mod tests {
 
         assert_eq!(
             map.lookup(
+                s,
                 TyShape::Solid(SolidTyShape {
                     kind: SolidTyShapeKind::Tuple(2),
-                    children: tcx.intern_list(&[
+                    children: [
                         TyShape::Hole,
                         TyShape::Solid(SolidTyShape {
                             kind: SolidTyShapeKind::Simple(SimpleTyKind::Bool),
-                            children: tcx.intern_list(&[])
+                            children: Intern::new_empty(s)
                         })
-                    ]),
+                    ]
+                    .intern(s),
                 }),
-                &tcx.session,
             )
             .copied()
             .collect::<FastHashSet<_>>(),
@@ -583,17 +572,18 @@ mod tests {
 
         assert_eq!(
             map.lookup(
+                s,
                 TyShape::Solid(SolidTyShape {
                     kind: SolidTyShapeKind::Tuple(2),
-                    children: tcx.intern_list(&[
+                    children: [
                         TyShape::Hole,
                         TyShape::Solid(SolidTyShape {
                             kind: SolidTyShapeKind::Simple(SimpleTyKind::Str),
-                            children: tcx.intern_list(&[])
+                            children: Intern::new_empty(s)
                         })
-                    ]),
+                    ]
+                    .intern(s),
                 }),
-                &tcx.session,
             )
             .copied()
             .collect::<FastHashSet<_>>(),

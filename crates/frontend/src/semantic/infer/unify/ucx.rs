@@ -1,6 +1,6 @@
 use super::{regions::ReUnifyTracker, types::TyUnifyTracker};
 use crate::{
-    base::{ErrorGuaranteed, Session, analysis::DebruijnTop, arena::HasInterner},
+    base::{ErrorGuaranteed, Session, ValueInternable, analysis::DebruijnTop},
     semantic::{
         infer::{
             ClauseCx, HrtbUniverse, InferTyLeaksHrtbVarError, InferTyLeaksUniversalError,
@@ -11,8 +11,8 @@ use crate::{
         syntax::{
             FnInstanceInner, FnOwner, HrtbBinder, InferTyVar, InferTyVarSourceInfo, Mutability, Re,
             ReVariance, RelationDirection, RelationMode, SimpleTySet, TraitClause, TraitClauseList,
-            TraitParam, TraitParamList, Ty, TyCtxt, TyFolder, TyFolderExt, TyFolderInfallibleExt,
-            TyKind, TyOrRe, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt, UniversalReVar,
+            TraitParam, TraitParamList, Ty, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyKind,
+            TyOrRe, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt, UniversalReVar,
             UniversalReVarSourceInfo, UniversalTy, UniversalTyProjInner, UniversalTyRoot,
             UniversalTyRootSourceInfo,
         },
@@ -41,7 +41,7 @@ pub enum UnifyCxMode {
 /// solve these obligations.
 #[derive(Debug, Clone)]
 pub struct UnifyCx<'tcx> {
-    tcx: &'tcx TyCtxt,
+    session: &'tcx Session,
     types: TyUnifyTracker,
     pub(super) regions: ReUnifyTracker<'tcx>,
 }
@@ -54,20 +54,16 @@ pub struct FloatingInferVar<'a> {
 }
 
 impl<'tcx> UnifyCx<'tcx> {
-    pub fn new(tcx: &'tcx TyCtxt, mode: UnifyCxMode) -> Self {
+    pub fn new(session: &'tcx Session, mode: UnifyCxMode) -> Self {
         Self {
-            tcx,
+            session,
             types: TyUnifyTracker::default(),
             regions: ReUnifyTracker::new(mode),
         }
     }
 
-    pub fn tcx(&self) -> &'tcx TyCtxt {
-        self.tcx
-    }
-
     pub fn session(&self) -> &'tcx Session {
-        &self.tcx.session
+        self.session
     }
 
     pub fn mode(&self) -> UnifyCxMode {
@@ -233,7 +229,6 @@ impl<'tcx> UnifyCx<'tcx> {
         re_collector: &mut MultiPromiseBuilder<'tcx, ReAndReUnifyError>,
         mode: RelationMode,
     ) {
-        let tcx = self.tcx();
         let s = self.session();
 
         if lhs == rhs {
@@ -251,7 +246,7 @@ impl<'tcx> UnifyCx<'tcx> {
                     && let Err(FloatingInferVar { root, .. }) = self.lookup_ty_infer_var(var)
                 {
                     // Ignore errors if permissions prevent the propagation.
-                    _ = self.unify_var_and_non_var_ty(root, tcx.intern(TyKind::Error(error)));
+                    _ = self.unify_var_and_non_var_ty(root, TyKind::Error(error).intern(s));
                 }
             }
             (
@@ -475,8 +470,11 @@ impl<'tcx> UnifyCx<'tcx> {
                         // Cannot fail occurs check because neither type structurally includes the
                         // other.
                         if !lhs_perm_set.intersection(rhs_perm_set).is_empty() {
-                            self.types
-                                .union_unrelated_infer_floating(self.tcx, lhs_var, rhs_var);
+                            self.types.union_unrelated_infer_floating(
+                                self.session,
+                                lhs_var,
+                                rhs_var,
+                            );
                         } else {
                             ty_culprits.push(TyAndTyUnifyCulprit::NotPermittedFloating(
                                 lhs_perm_set,
@@ -530,7 +528,6 @@ impl<'tcx> UnifyCx<'tcx> {
         re_collector: &mut MultiPromiseBuilder<'tcx, ReAndReUnifyError>,
     ) {
         let s = self.session();
-        let tcx = self.tcx;
 
         match (lhs, rhs) {
             (UniversalTy::Root(lhs), UniversalTy::Root(rhs)) => {
@@ -614,8 +611,8 @@ impl<'tcx> UnifyCx<'tcx> {
         }
 
         ty_culprits.push(TyAndTyUnifyCulprit::Types(
-            tcx.intern(TyKind::Universal(lhs)),
-            tcx.intern(TyKind::Universal(rhs)),
+            TyKind::Universal(lhs).intern(s),
+            TyKind::Universal(rhs).intern(s),
         ));
     }
 
@@ -653,8 +650,8 @@ impl<'tcx> UnifyCx<'tcx> {
         impl<'tcx> TyVisitor<'tcx> for OccursVisitor<'_, 'tcx> {
             type Break = ();
 
-            fn tcx(&self) -> &'tcx TyCtxt {
-                self.ucx.tcx()
+            fn session(&self) -> &'tcx Session {
+                self.ucx.session()
             }
 
             fn visit_ty(&mut self, ty: Ty) -> ControlFlow<Self::Break> {
@@ -703,8 +700,8 @@ impl<'tcx> UnifyCx<'tcx> {
         impl<'tcx> TyVisitor<'tcx> for HrtbLeakUniversalVisitor<'_, 'tcx> {
             type Break = UniversalTy;
 
-            fn tcx(&self) -> &'tcx TyCtxt {
-                self.ucx.tcx()
+            fn session(&self) -> &'tcx Session {
+                self.ucx.session()
             }
 
             fn visit_ty(&mut self, ty: Ty) -> ControlFlow<Self::Break> {
@@ -760,8 +757,8 @@ impl<'tcx> UnifyCx<'tcx> {
         impl<'tcx> TyVisitor<'tcx> for HrtbLeakHrtbVarVisitor<'_, 'tcx> {
             type Break = ();
 
-            fn tcx(&self) -> &'tcx TyCtxt {
-                self.ucx.tcx()
+            fn session(&self) -> &'tcx Session {
+                self.ucx.session()
             }
 
             fn visit_hrtb_binder(&mut self, binder: HrtbBinder) -> ControlFlow<Self::Break> {
@@ -818,8 +815,8 @@ impl<'tcx> UnifyCx<'tcx> {
         impl<'tcx> TyVisitor<'tcx> for InferUniverseConstrainVisitor<'_, 'tcx> {
             type Break = Infallible;
 
-            fn tcx(&self) -> &'tcx TyCtxt {
-                self.ucx.tcx()
+            fn session(&self) -> &'tcx Session {
+                self.ucx.session()
             }
 
             fn visit_ty(&mut self, ty: Ty) -> ControlFlow<Self::Break> {
@@ -966,7 +963,7 @@ impl<'tcx> UnifyCx<'tcx> {
         lhs: Ty,
         rhs: SimpleTySet,
     ) -> Result<(), TyAndSimpleTySetUnifyError> {
-        let tcx = self.tcx();
+        let tcx = self.session();
         let s = self.session();
 
         let success = match *lhs.r(s) {
@@ -1016,11 +1013,13 @@ pub enum UnboundVarHandlingMode {
 impl<'tcx> TyFolder<'tcx> for InferTySubstitutor<'_, 'tcx> {
     type Error = Infallible;
 
-    fn tcx(&self) -> &'tcx TyCtxt {
-        self.ucx.tcx()
+    fn session(&self) -> &'tcx Session {
+        self.ucx.session()
     }
 
     fn fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {
+        let s = self.session();
+
         let TyKind::InferVar(var) = *ty.r(self.session()) else {
             return self.super_fallible(ty);
         };
@@ -1028,9 +1027,9 @@ impl<'tcx> TyFolder<'tcx> for InferTySubstitutor<'_, 'tcx> {
         Ok(match self.ucx.lookup_ty_infer_var(var) {
             Ok(v) => self.fold(v),
             Err(floating) => match self.mode {
-                UnboundVarHandlingMode::Error(error) => self.tcx().intern(TyKind::Error(error)),
+                UnboundVarHandlingMode::Error(error) => TyKind::Error(error).intern(s),
                 UnboundVarHandlingMode::NormalizeToRoot => {
-                    self.tcx().intern(TyKind::InferVar(floating.root))
+                    TyKind::InferVar(floating.root).intern(s)
                 }
                 UnboundVarHandlingMode::Panic => {
                     unreachable!("unexpected ambiguous inference variable")
@@ -1048,8 +1047,8 @@ pub struct FallibleInferTySubstitutor<'a, 'tcx> {
 impl<'tcx> TyFolder<'tcx> for FallibleInferTySubstitutor<'_, 'tcx> {
     type Error = InferTyVar;
 
-    fn tcx(&self) -> &'tcx TyCtxt {
-        self.ucx.tcx()
+    fn session(&self) -> &'tcx Session {
+        self.ucx.session()
     }
 
     fn fold_ty(&mut self, ty: Ty) -> Result<Ty, Self::Error> {

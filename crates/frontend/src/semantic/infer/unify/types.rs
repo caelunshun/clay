@@ -3,8 +3,8 @@ use crate::{
     semantic::{
         infer::{FloatingInferVar, HrtbUniverse},
         syntax::{
-            InferTyVar, InferTyVarSourceInfo, SimpleTySet, Ty, TyCtxt, UniversalTy,
-            UniversalTyRoot, UniversalTyRootSourceInfo,
+            InferTyVar, InferTyVarSourceInfo, SimpleTySet, Ty, UniversalTy, UniversalTyRoot,
+            UniversalTyRootSourceInfo,
         },
     },
 };
@@ -147,7 +147,7 @@ impl TyUnifyTracker {
 
     pub fn union_unrelated_infer_floating(
         &mut self,
-        tcx: &TyCtxt,
+        s: &Session,
         lhs: InferTyVar,
         rhs: InferTyVar,
     ) {
@@ -185,7 +185,7 @@ impl TyUnifyTracker {
         let perm_set = lhs_perm_set.intersection(rhs_perm_set);
         debug_assert!(!perm_set.is_empty());
 
-        if let Some(unique_ty) = perm_set.to_unique_type(tcx) {
+        if let Some(unique_ty) = perm_set.to_unique_type(s) {
             *new_root = Some(DisjointTyInferRoot::Known(unique_ty));
         } else {
             *new_root = Some(DisjointTyInferRoot::Floating {
@@ -197,7 +197,7 @@ impl TyUnifyTracker {
 
     pub fn restrict_perm_set_of_floating(
         &mut self,
-        tcx: &TyCtxt,
+        s: &Session,
         lhs: InferTyVar,
         rhs: SimpleTySet,
     ) {
@@ -212,7 +212,7 @@ impl TyUnifyTracker {
         let new_perm_set = perm_set.intersection(rhs);
         debug_assert!(!new_perm_set.is_empty());
 
-        if let Some(unique_ty) = new_perm_set.to_unique_type(tcx) {
+        if let Some(unique_ty) = new_perm_set.to_unique_type(s) {
             self.disjoint[lhs_root].root = Some(DisjointTyInferRoot::Known(unique_ty));
         } else {
             *perm_set = new_perm_set;

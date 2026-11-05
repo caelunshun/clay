@@ -1,9 +1,5 @@
 use crate::{
-    base::{
-        Diag,
-        arena::{HasInterner as _, Obj},
-        syntax::Span,
-    },
+    base::{Diag, ObjAllocExt, ObjIterAllocExt, Span, ValueInternable},
     semantic::{
         infer::{ClauseCx, ClausePrettyFmtOpts},
         syntax::{
@@ -85,13 +81,19 @@ impl<'a, 'tcx> SigExporter<'a, 'tcx> {
     pub fn export_ty_list(&mut self, list: TyList) -> SigTyList {
         let s = self.ccx.session();
 
-        Obj::new_iter(list.r(s).iter().map(|&ty| self.export_ty(ty)), s)
+        list.r(s)
+            .iter()
+            .map(|&ty| self.export_ty(ty))
+            .alloc_obj_list(s)
     }
 
     pub fn export_ty_or_re_list(&mut self, list: TyOrReList) -> SigTyOrReList {
         let s = self.ccx.session();
 
-        Obj::new_iter(list.r(s).iter().map(|&term| self.export_ty_or_re(term)), s)
+        list.r(s)
+            .iter()
+            .map(|&term| self.export_ty_or_re(term))
+            .alloc_obj_list(s)
     }
 
     pub fn export_ty_or_re(&mut self, term: TyOrRe) -> SigTyOrRe {
@@ -126,7 +128,6 @@ impl<'a, 'tcx> SigExporter<'a, 'tcx> {
 
     pub fn export_ty(&mut self, ty: Ty) -> SigTy {
         let s = self.ccx.session();
-        let tcx = self.ccx.tcx();
 
         let ty = self.ccx.peel_ty_infer_var_without_poll(ty);
 
@@ -150,8 +151,8 @@ impl<'a, 'tcx> SigExporter<'a, 'tcx> {
 
                 self.ccx
                     .unify_ty_and_ty(
-                        tcx.intern(TyKind::InferVar(var)),
-                        tcx.intern(TyKind::Error(err)),
+                        TyKind::InferVar(var).intern(s),
+                        TyKind::Error(err).intern(s),
                         RelationMode::Equate,
                     )
                     .unwrap()
@@ -163,13 +164,11 @@ impl<'a, 'tcx> SigExporter<'a, 'tcx> {
             TyKind::Error(error) => SigTyKind::Error(error),
         };
 
-        Obj::new(
-            SigTyInner {
-                span: self.span,
-                kind,
-            },
-            s,
-        )
+        SigTyInner {
+            span: self.span,
+            kind,
+        }
+        .alloc_obj(s)
     }
 
     pub fn export_adt(&mut self, adt: AdtInstance) -> SigAdtInstance {
@@ -245,17 +244,13 @@ impl<'a, 'tcx> SigExporter<'a, 'tcx> {
     pub fn export_trait_clause_list(&mut self, clauses: TraitClauseList) -> SigTraitClauseList {
         let s = self.ccx.session();
 
-        let elems = Obj::new_iter(
-            clauses
-                .r(s)
-                .iter()
-                .map(|&clause| self.export_trait_clause(clause)),
-            s,
-        );
-
         SigTraitClauseList {
             span: self.span,
-            elems,
+            elems: clauses
+                .r(s)
+                .iter()
+                .map(|&clause| self.export_trait_clause(clause))
+                .alloc_obj_list(s),
         }
     }
 
@@ -291,12 +286,10 @@ impl<'a, 'tcx> SigExporter<'a, 'tcx> {
     ) -> SigHrtbDebruijnDefList {
         let s = self.ccx.session();
 
-        Obj::new_iter(
-            defs.r(s)
-                .iter()
-                .map(|&def| self.export_hrtb_debruijn_def(def)),
-            s,
-        )
+        defs.r(s)
+            .iter()
+            .map(|&def| self.export_hrtb_debruijn_def(def))
+            .alloc_obj_list(s)
     }
 
     pub fn export_hrtb_debruijn_def(&mut self, def: HrtbDebruijnDef) -> SigHrtbDebruijnDef {
@@ -328,13 +321,11 @@ impl<'a, 'tcx> SigExporter<'a, 'tcx> {
     pub fn export_trait_param_list(&mut self, params: TraitParamList) -> SigTraitParamList {
         let s = self.ccx.session();
 
-        Obj::new_iter(
-            params
-                .r(s)
-                .iter()
-                .map(|&param| self.export_trait_param(param)),
-            s,
-        )
+        params
+            .r(s)
+            .iter()
+            .map(|&param| self.export_trait_param(param))
+            .alloc_obj_list(s)
     }
 
     pub fn export_trait_param(&mut self, param: TraitParam) -> SigTraitParam {
@@ -387,12 +378,10 @@ impl<'a, 'tcx> SigExporter<'a, 'tcx> {
             }
         };
 
-        Obj::new(
-            SigTyInner {
-                span: self.span,
-                kind,
-            },
-            s,
-        )
+        SigTyInner {
+            span: self.span,
+            kind,
+        }
+        .alloc_obj(s)
     }
 }

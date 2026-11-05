@@ -29,7 +29,7 @@ where
         out.push(folder.fold_fallible(value)?);
     }
 
-    Ok(Intern::new_slice_copy(&out, s))
+    Ok(Intern::new_slice_copy(s, &out))
 }
 
 // === Core traits === //

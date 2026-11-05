@@ -1,8 +1,5 @@
 use crate::{
-    base::{
-        Session,
-        arena::{HasInterner, HasListInterner as _, Obj},
-    },
+    base::{Intern, IterInternExt, Obj, Session, ValueInternable},
     semantic::{
         infer::{
             AnyPromiseHandle, FloatingInferVar, GeneralOutlivesError, HrtbUniverse, ImplCache,
@@ -15,8 +12,8 @@ use crate::{
         },
         syntax::{
             Crate, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection, RelationMode,
-            SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyKind,
-            TyOrRe, UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProj,
+            SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProj,
             UniversalTyProjIdx, UniversalTyProjInner, UniversalTyRoot, UniversalTyRootSourceInfo,
         },
     },
@@ -184,15 +181,15 @@ struct UniversalTyProjDescriptor {
 //
 // Maybe use `enqueue_xxx` and `assert_xxx` or similar phrasing to make this distinction more
 // obvious.
-impl<'tcx> ClauseCx<'tcx> {
+impl<'sess> ClauseCx<'sess> {
     pub fn new(
-        tcx: &'tcx TyCtxt,
-        impl_cache: &'tcx ImplCache,
+        s: &'sess Session,
+        impl_cache: &'sess ImplCache,
         krate: Obj<Crate>,
         mode: UnifyCxMode,
     ) -> Self {
         Self {
-            ucx: UnifyCx::new(tcx, mode),
+            ucx: UnifyCx::new(s, mode),
             pending_obligations: Vec::new(),
             impl_cache,
             krate,
@@ -202,15 +199,11 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    pub fn tcx(&self) -> &'tcx TyCtxt {
-        self.ucx.tcx()
-    }
-
-    pub fn session(&self) -> &'tcx Session {
+    pub fn session(&self) -> &'sess Session {
         self.ucx.session()
     }
 
-    pub fn impl_cache(&self) -> &'tcx ImplCache {
+    pub fn impl_cache(&self) -> &'sess ImplCache {
         self.impl_cache
     }
 
@@ -218,11 +211,11 @@ impl<'tcx> ClauseCx<'tcx> {
         self.krate
     }
 
-    pub fn ucx(&self) -> &UnifyCx<'tcx> {
+    pub fn ucx(&self) -> &UnifyCx<'sess> {
         &self.ucx
     }
 
-    pub fn ucx_mut(&mut self) -> &mut UnifyCx<'tcx> {
+    pub fn ucx_mut(&mut self) -> &mut UnifyCx<'sess> {
         &mut self.ucx
     }
 
@@ -487,12 +480,10 @@ impl<'tcx> ClauseCx<'tcx> {
         source_info: InferTyVarSourceInfo,
         perm_set: SimpleTySet,
     ) -> Ty {
-        self.tcx()
-            .intern(TyKind::InferVar(self.fresh_ty_infer_var_restricted(
-                max_universe,
-                source_info,
-                perm_set,
-            )))
+        let s = self.session();
+
+        TyKind::InferVar(self.fresh_ty_infer_var_restricted(max_universe, source_info, perm_set))
+            .intern(s)
     }
 
     pub fn fresh_ty_infer_var(
@@ -708,9 +699,12 @@ impl<'tcx> ClauseCx<'tcx> {
         in_universe: HrtbUniverse,
         src_info: UniversalTyRootSourceInfo,
     ) -> Ty {
-        self.tcx().intern(TyKind::Universal(UniversalTy::Root(
+        let s = self.session();
+
+        TyKind::Universal(UniversalTy::Root(
             self.fresh_ty_universal_root_idx(in_universe, src_info),
-        )))
+        ))
+        .intern(s)
     }
 
     pub fn fresh_ty_universal_proj_unwrapped(
@@ -720,7 +714,6 @@ impl<'tcx> ClauseCx<'tcx> {
         assoc_idx: u32,
     ) -> UniversalTyProj {
         let s = self.session();
-        let tcx = self.tcx();
 
         let cache_idx = self.universal_projs.push(UniversalTyProjDescriptor {
             direct_clauses: None,
@@ -729,30 +722,29 @@ impl<'tcx> ClauseCx<'tcx> {
 
         let as_spec = TraitSpec {
             def: as_spec.def,
-            params: tcx.intern_list(
-                &as_spec
-                    .params
-                    .r(s)
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, &para)| {
-                        if idx >= *as_spec.def.r(s).regular_generic_count as usize {
-                            TraitParam::Unspecified(tcx.intern_list(&[]))
-                        } else {
-                            debug_assert!(matches!(para, TraitParam::Equals(_)));
-                            para
-                        }
-                    })
-                    .collect::<Vec<_>>(),
-            ),
+            params: as_spec
+                .params
+                .r(s)
+                .iter()
+                .enumerate()
+                .map(|(idx, &para)| {
+                    if idx >= *as_spec.def.r(s).regular_generic_count as usize {
+                        TraitParam::Unspecified(Intern::new_empty(s))
+                    } else {
+                        debug_assert!(matches!(para, TraitParam::Equals(_)));
+                        para
+                    }
+                })
+                .intern(s),
         };
 
-        self.tcx().intern(UniversalTyProjInner {
+        UniversalTyProjInner {
             target,
             as_spec,
             assoc_idx,
             cache_idx,
-        })
+        }
+        .intern(s)
     }
 
     pub fn fresh_ty_universal_proj(

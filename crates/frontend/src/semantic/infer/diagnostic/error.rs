@@ -1,5 +1,5 @@
 use crate::{
-    base::{arena::Obj, syntax::Span},
+    base::{Obj, Span},
     semantic::{
         infer::{
             ClauseFuelKillId, ClauseImportEnv, ClausePrettyFmtCx, ElaboratedClause, HrtbUniverse,

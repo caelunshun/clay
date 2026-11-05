@@ -1,14 +1,14 @@
 use crate::{
-    base::{Session, analysis::DebruijnMap, arena::Obj, syntax::Symbol},
+    base::{Obj, Session, Symbol, analysis::DebruijnMap},
     semantic::{
         infer::ClauseCx,
         syntax::{
             AdtCtor, AdtCtorOwner, AdtInstance, FloatKind, FnInstance, FnOwner, HrtbBinder,
             HrtbDebruijn, HrtbDebruijnDef, HrtbProjection, InferReVar, InferTyVar,
             InferTyVarSourceInfo, IntKind, Item, Re, SimpleTyKind, SimpleTySet, TraitClause,
-            TraitClauseList, TraitParam, TraitSpec, Ty, TyCtxt, TyKind, TyOrRe, TyOrReList,
-            UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProj,
-            UniversalTyProjInner, UniversalTyRoot, UniversalTyRootSourceInfo,
+            TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReList, UniversalReVar,
+            UniversalReVarSourceInfo, UniversalTy, UniversalTyProj, UniversalTyProjInner,
+            UniversalTyRoot, UniversalTyRootSourceInfo,
         },
     },
     utils::format::{SimpleListFormatGlue, format_list, format_list_into},
@@ -53,10 +53,6 @@ impl<'a, 'tcx> ClausePrettyFmtCx<'a, 'tcx> {
 
     pub fn ccx(&self) -> &'a ClauseCx<'tcx> {
         self.ccx
-    }
-
-    pub fn tcx(&self) -> &'tcx TyCtxt {
-        self.ccx.tcx()
     }
 
     pub fn session(&self) -> &'tcx Session {

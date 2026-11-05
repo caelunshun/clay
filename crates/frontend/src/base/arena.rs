@@ -165,7 +165,7 @@ pub trait ValueInternable:
     + LateField<SessionInterners, Value = DropBumpValueInterner<Self>>
 {
     fn intern(self, s: &Session) -> Intern<Self> {
-        Intern::new(self, s)
+        Intern::new(s, self)
     }
 }
 
@@ -177,6 +177,9 @@ pub trait ListInternable:
     + Clone
     + LateField<SessionInterners, Value = DropBumpListInterner<Self>>
 {
+    fn intern_single(self, s: &Session) -> Intern<[Self]> {
+        Intern::new_iter(s, [self])
+    }
 }
 
 pub trait IterInternExt: Sized + IntoIterator<Item: ListInternable> {
@@ -185,7 +188,7 @@ pub trait IterInternExt: Sized + IntoIterator<Item: ListInternable> {
 
 impl<I: IntoIterator<Item: ListInternable>> IterInternExt for I {
     fn intern(self, s: &Session) -> Intern<[Self::Item]> {
-        Intern::new_iter(self, s)
+        Intern::new_iter(s, self)
     }
 }
 
@@ -202,7 +205,7 @@ impl<T: ?Sized + 'static + fmt::Debug> fmt::Debug for Intern<T> {
 }
 
 impl<T: ValueInternable> Intern<T> {
-    pub fn new(value: T, s: &Session) -> Self {
+    pub fn new(s: &Session, value: T) -> Self {
         let obj = s.interners.raw.get::<T>().intern(value, &s.drop_bump);
         Self::wrap_unchecked(Obj::wrap(obj))
     }
@@ -213,7 +216,7 @@ impl<T: ListInternable> Intern<[T]> {
         Self::wrap_unchecked(Obj::new_empty(s))
     }
 
-    pub fn new_iter(values: impl IntoIterator<Item = T>, s: &Session) -> Self {
+    pub fn new_iter(s: &Session, values: impl IntoIterator<Item = T>) -> Self {
         let obj = s
             .interners
             .raw
@@ -223,7 +226,7 @@ impl<T: ListInternable> Intern<[T]> {
         Self::wrap_unchecked(Obj::wrap(obj))
     }
 
-    pub fn new_slice_clone(values: &[T], s: &Session) -> Self {
+    pub fn new_slice_clone(s: &Session, values: &[T]) -> Self {
         let obj = s
             .interners
             .raw
@@ -233,7 +236,7 @@ impl<T: ListInternable> Intern<[T]> {
         Self::wrap_unchecked(Obj::wrap(obj))
     }
 
-    pub fn new_slice_copy(values: &[T], s: &Session) -> Self
+    pub fn new_slice_copy(s: &Session, values: &[T]) -> Self
     where
         T: Copy,
     {
@@ -247,22 +250,26 @@ impl<T: ListInternable> Intern<[T]> {
     }
 
     pub fn extend(self, s: &Session, values: impl IntoIterator<Item = T>) -> Self {
-        Self::new_iter(self.r(s).iter().cloned().chain(values), s)
+        Self::new_iter(s, self.r(s).iter().cloned().chain(values))
+    }
+
+    pub fn chain(self, s: &Session, other: Self) -> Self {
+        self.extend(s, other.r(s).iter().cloned())
     }
 
     pub fn truncate_to_len_clone(self, s: &Session, len: usize) -> Self {
-        Self::new_slice_clone(&self.r(s)[..len], s)
+        Self::new_slice_clone(s, &self.r(s)[..len])
     }
 
     pub fn truncate_to_len_copy(self, s: &Session, len: usize) -> Self
     where
         T: Copy,
     {
-        Self::new_slice_copy(&self.r(s)[..len], s)
+        Self::new_slice_copy(s, &self.r(s)[..len])
     }
 
     pub fn map<V: ListInternable>(self, s: &Session, f: impl FnMut(T) -> V) -> Intern<[V]> {
-        Intern::new_iter(self.r(s).iter().cloned().map(f), s)
+        Intern::new_iter(s, self.r(s).iter().cloned().map(f))
     }
 }
 

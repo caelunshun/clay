@@ -1,5 +1,5 @@
 use crate::{
-    base::arena::{HasInterner as _, HasListInterner as _, Obj},
+    base::{Intern, IterInternExt, ListInternable as _, Obj, ValueInternable},
     semantic::{
         infer::{
             BinderParamWfBinderError, BinderParamWfParamError, BinderParamWfParamErrorKind,
@@ -37,9 +37,8 @@ impl<'tcx> ClauseCx<'tcx> {
 
     fn universal_binder_to_uninit_vars(&mut self, binder: Obj<GenericBinder>) -> TyOrReList {
         let s = self.session();
-        let tcx = self.tcx();
 
-        let vars = binder
+        binder
             .r(s)
             .defs
             .iter()
@@ -52,9 +51,7 @@ impl<'tcx> ClauseCx<'tcx> {
                     UniversalTyRootSourceInfo::Root(generic),
                 )),
             })
-            .collect::<Vec<_>>();
-
-        tcx.intern_list(&vars)
+            .intern(s)
     }
 
     fn universal_init_vars_for_binder(
@@ -107,7 +104,6 @@ impl<'tcx> ClauseCx<'tcx> {
 impl<'tcx> ClauseCx<'tcx> {
     pub fn universal_env_for_trait_def(&mut self, def: Obj<TraitItem>) -> ClauseImportEnv {
         let s = self.session();
-        let tcx = self.tcx();
 
         // Create a universal variable representing `Self`
         let self_var = UniversalTy::Root(self.fresh_ty_universal_root_idx(
@@ -115,7 +111,7 @@ impl<'tcx> ClauseCx<'tcx> {
             UniversalTyRootSourceInfo::WfTraitSelf,
         ));
 
-        let self_ty = tcx.intern(TyKind::Universal(self_var));
+        let self_ty = TyKind::Universal(self_var).intern(s);
 
         // Create universal variables for each parameter.
         let generic_params = self.universal_binder_to_init_vars(
@@ -126,19 +122,18 @@ impl<'tcx> ClauseCx<'tcx> {
         // Make `Self` implement the trait with these synthesized parameters.
         self.init_ty_universal_direct_clauses(
             self_var,
-            tcx.intern_list(&[TraitClause::Trait(HrtbBinder {
-                defs: tcx.intern_list(&[]),
+            TraitClause::Trait(HrtbBinder {
+                defs: Intern::new_empty(s),
                 inner: TraitSpec {
                     def,
-                    params: tcx.intern_list(
-                        &generic_params
-                            .r(s)
-                            .iter()
-                            .map(|&arg| TraitParam::Equals(arg))
-                            .collect::<Vec<_>>(),
-                    ),
+                    params: generic_params
+                        .r(s)
+                        .iter()
+                        .map(|&arg| TraitParam::Equals(arg))
+                        .intern(s),
                 },
-            })]),
+            })
+            .intern_single(s),
         );
 
         ClauseImportEnv::new(
@@ -149,16 +144,16 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub fn universal_env_for_adt_def(&mut self, def: Obj<AdtItem>) -> ClauseImportEnv {
         let s = self.session();
-        let tcx = self.tcx();
 
         // Create universal parameters.
         let sig_generic_substs = self.universal_binder_to_uninit_vars(def.r(s).generics);
 
         // Create the `Self` type.
-        let self_ty = tcx.intern(TyKind::Adt(AdtInstance {
+        let self_ty = TyKind::Adt(AdtInstance {
             def,
             params: sig_generic_substs,
-        }));
+        })
+        .intern(s);
 
         // Initialize the clauses.
         self.universal_init_vars_for_binder(
@@ -242,24 +237,21 @@ impl<'tcx> ClauseCx<'tcx> {
         ) -> InferTyVarSourceInfo,
     ) -> TyOrReList {
         let s = self.session();
-        let tcx = self.tcx();
 
-        tcx.intern_list(
-            &binder
-                .r(s)
-                .defs
-                .iter()
-                .enumerate()
-                .map(|(idx, &def)| match def {
-                    AnyGeneric::Re(_) => TyOrRe::Re(self.fresh_re_infer()),
-                    AnyGeneric::Ty(def) => {
-                        let info = create_info(self, idx, def);
+        binder
+            .r(s)
+            .defs
+            .iter()
+            .enumerate()
+            .map(|(idx, &def)| match def {
+                AnyGeneric::Re(_) => TyOrRe::Re(self.fresh_re_infer()),
+                AnyGeneric::Ty(def) => {
+                    let info = create_info(self, idx, def);
 
-                        TyOrRe::Ty(self.fresh_ty_infer(universe.clone(), info))
-                    }
-                })
-                .collect::<Vec<_>>(),
-        )
+                    TyOrRe::Ty(self.fresh_ty_infer(universe.clone(), info))
+                }
+            })
+            .intern(s)
     }
 
     pub fn ensure_binder_params_wf(
@@ -384,7 +376,6 @@ impl<'tcx> ClauseCx<'tcx> {
         spec: TraitSpec,
     ) -> PromiseValue<'tcx, TraitInstance, TraitSpecResolutionError> {
         let s = self.session();
-        let tcx = self.tcx();
 
         let mut collector = MultiPromiseBuilder::new();
 
@@ -417,11 +408,11 @@ impl<'tcx> ClauseCx<'tcx> {
                     TyOrRe::Ty(projection)
                 }
             })
-            .collect::<Vec<_>>();
+            .intern(s);
 
         let instance = TraitInstance {
             def: spec.def,
-            params: tcx.intern_list(&params),
+            params,
         };
 
         self.oblige_ty_meets_trait_instantiated(
@@ -429,7 +420,7 @@ impl<'tcx> ClauseCx<'tcx> {
             universe.clone(),
             self_ty,
             // Force the fresh variables to be properly constrained.
-            instance.to_spec(tcx),
+            instance.to_spec(s),
         )
         .map(move |_ccx, error| TraitSpecResolutionErrorCulprit::ImplRejected(error))
         .join(&mut collector);
@@ -480,7 +471,6 @@ impl<'tcx> ClauseCx<'tcx> {
         universe: &HrtbUniverse,
         fn_instance: FnInstance,
     ) -> PromiseValue<'tcx, InstantiatedFnSig, FnInstanceResolutionError> {
-        let tcx = self.tcx();
         let s = self.session();
 
         match fn_instance.r(s).owner {
@@ -651,10 +641,11 @@ impl<'tcx> ClauseCx<'tcx> {
                     item.r(s).generics,
                 );
 
-                let self_ty = tcx.intern(TyKind::Adt(AdtInstance {
+                let self_ty = TyKind::Adt(AdtInstance {
                     def: item,
                     params: early_args,
-                }));
+                })
+                .intern(s);
 
                 let env = ClauseImportEnv::new(
                     Some(self_ty),
@@ -663,23 +654,21 @@ impl<'tcx> ClauseCx<'tcx> {
 
                 let mut import_collector = MultiPromiseBuilder::new();
 
-                let args = tcx.intern_list(
-                    &ctor
-                        .r(s)
-                        .fields
-                        .iter()
-                        .map(|field| {
-                            self.importer(
-                                fuel,
-                                universe.clone(),
-                                env.clone(),
-                                ImportWfMode::ReportElsewhere,
-                            )
-                            .import_ty(*field.ty)
-                            .flat_join(&mut import_collector)
-                        })
-                        .collect::<Vec<_>>(),
-                );
+                let args = ctor
+                    .r(s)
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        self.importer(
+                            fuel,
+                            universe.clone(),
+                            env.clone(),
+                            ImportWfMode::ReportElsewhere,
+                        )
+                        .import_ty(*field.ty)
+                        .flat_join(&mut import_collector)
+                    })
+                    .intern(s);
 
                 let sig = InstantiatedFnSig {
                     args,
@@ -741,28 +730,26 @@ impl<'tcx> ClauseCx<'tcx> {
         env: ClauseImportEnv,
     ) -> MultiPromiseValue<'tcx, InstantiatedFnSig, ImportError> {
         let s = self.session();
-        let tcx = self.tcx();
 
         let mut collector = MultiPromiseBuilder::new();
 
         let output = InstantiatedFnSig {
-            args: tcx.intern_list(
-                &def.r(s)
-                    .args
-                    .r(s)
-                    .iter()
-                    .map(|arg| {
-                        self.importer(
-                            fuel,
-                            universe.clone(),
-                            env.clone(),
-                            ImportWfMode::ReportElsewhere,
-                        )
-                        .import_ty(arg.ty)
-                        .flat_join(&mut collector)
-                    })
-                    .collect::<Vec<_>>(),
-            ),
+            args: def
+                .r(s)
+                .args
+                .r(s)
+                .iter()
+                .map(|arg| {
+                    self.importer(
+                        fuel,
+                        universe.clone(),
+                        env.clone(),
+                        ImportWfMode::ReportElsewhere,
+                    )
+                    .import_ty(arg.ty)
+                    .flat_join(&mut collector)
+                })
+                .intern(s),
             ret_ty: self
                 .importer(
                     fuel,
@@ -797,36 +784,33 @@ impl<'tcx> ClauseCx<'tcx> {
         item: Obj<TraitItem>,
     ) -> TraitSpec {
         let s = self.session();
-        let tcx = self.tcx();
 
-        let params = tcx.intern_list(
-            &item
-                .r(s)
-                .generics
-                .r(s)
-                .defs
-                .iter()
-                .enumerate()
-                .map(|(idx, def)| {
-                    if idx >= *item.r(s).regular_generic_count as usize {
-                        debug_assert_eq!(def.kind(), TyOrReKind::Ty);
+        let params = item
+            .r(s)
+            .generics
+            .r(s)
+            .defs
+            .iter()
+            .enumerate()
+            .map(|(idx, def)| {
+                if idx >= *item.r(s).regular_generic_count as usize {
+                    debug_assert_eq!(def.kind(), TyOrReKind::Ty);
 
-                        return TraitParam::Unspecified(tcx.intern_list(&[]));
-                    }
+                    return TraitParam::Unspecified(Intern::new_empty(s));
+                }
 
-                    match def.kind() {
-                        TyOrReKind::Re => TraitParam::Equals(TyOrRe::Re(self.fresh_re_infer())),
-                        TyOrReKind::Ty => TraitParam::Equals(TyOrRe::Ty(self.fresh_ty_infer(
-                            universe.clone(),
-                            InferTyVarSourceInfo::TraitParam {
-                                trait_: item,
-                                idx: idx as u32,
-                            },
-                        ))),
-                    }
-                })
-                .collect::<Vec<_>>(),
-        );
+                match def.kind() {
+                    TyOrReKind::Re => TraitParam::Equals(TyOrRe::Re(self.fresh_re_infer())),
+                    TyOrReKind::Ty => TraitParam::Equals(TyOrRe::Ty(self.fresh_ty_infer(
+                        universe.clone(),
+                        InferTyVarSourceInfo::TraitParam {
+                            trait_: item,
+                            idx: idx as u32,
+                        },
+                    ))),
+                }
+            })
+            .intern(s);
 
         TraitSpec { def: item, params }
     }
