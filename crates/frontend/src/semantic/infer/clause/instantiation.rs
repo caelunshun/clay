@@ -24,7 +24,7 @@ use crate::{
 // === Universal === //
 
 /// Machinery
-impl<'tcx> ClauseCx<'tcx> {
+impl<'sess> ClauseCx<'sess> {
     fn universal_binder_to_init_vars(
         &mut self,
         binder_parent_env: &ClauseImportEnv,
@@ -101,7 +101,7 @@ impl<'tcx> ClauseCx<'tcx> {
 }
 
 /// Specialized
-impl<'tcx> ClauseCx<'tcx> {
+impl<'sess> ClauseCx<'sess> {
     pub fn universal_env_for_trait_def(&mut self, def: Obj<TraitItem>) -> ClauseImportEnv {
         let s = self.session();
 
@@ -225,13 +225,13 @@ impl<'tcx> ClauseCx<'tcx> {
 // === Inference === //
 
 /// Machinery
-impl<'tcx> ClauseCx<'tcx> {
+impl<'sess> ClauseCx<'sess> {
     pub fn fresh_binder_to_unconstrained_infer_params(
         &mut self,
         universe: &HrtbUniverse,
         binder: Obj<GenericBinder>,
         mut create_info: impl FnMut(
-            &mut ClauseCx<'tcx>,
+            &mut ClauseCx<'sess>,
             usize,
             Obj<TypeGeneric>,
         ) -> InferTyVarSourceInfo,
@@ -262,7 +262,7 @@ impl<'tcx> ClauseCx<'tcx> {
         binder_env: ClauseImportEnv,
         verify_first_n: Option<u32>,
         params: TyOrReList,
-    ) -> Promise<'tcx, BinderParamWfBinderError> {
+    ) -> Promise<'sess, BinderParamWfBinderError> {
         let s = self.session();
 
         let mut collector = MultiPromiseBuilder::new();
@@ -365,7 +365,7 @@ impl<'tcx> ClauseCx<'tcx> {
 }
 
 /// Full resolution
-impl<'tcx> ClauseCx<'tcx> {
+impl<'sess> ClauseCx<'sess> {
     /// Resolves all the projected types of a `TraitSpec` applying to a specified `self_ty`,
     /// returning a complete `TraitInstance`.
     pub fn resolve_trait_spec(
@@ -374,7 +374,7 @@ impl<'tcx> ClauseCx<'tcx> {
         universe: &HrtbUniverse,
         self_ty: Ty,
         spec: TraitSpec,
-    ) -> PromiseValue<'tcx, TraitInstance, TraitSpecResolutionError> {
+    ) -> PromiseValue<'sess, TraitInstance, TraitSpecResolutionError> {
         let s = self.session();
 
         let mut collector = MultiPromiseBuilder::new();
@@ -442,7 +442,7 @@ impl<'tcx> ClauseCx<'tcx> {
         universe: &HrtbUniverse,
         block: Obj<ImplItem>,
         self_ty: Ty,
-    ) -> PromiseValue<'tcx, InstantiatedImplBlock, InherentImplBlockSatisfyError> {
+    ) -> PromiseValue<'sess, InstantiatedImplBlock, InherentImplBlockSatisfyError> {
         let PromiseValue {
             value: instantiation,
             promise: block_clauses_promise,
@@ -470,7 +470,7 @@ impl<'tcx> ClauseCx<'tcx> {
         fuel: ClauseFuel,
         universe: &HrtbUniverse,
         fn_instance: FnInstance,
-    ) -> PromiseValue<'tcx, InstantiatedFnSig, FnInstanceResolutionError> {
+    ) -> PromiseValue<'sess, InstantiatedFnSig, FnInstanceResolutionError> {
         let s = self.session();
 
         match fn_instance.r(s).owner {
@@ -700,7 +700,7 @@ impl<'tcx> ClauseCx<'tcx> {
         fn_instance: FnInstance,
         parent_env: ClauseImportEnv,
         binder: Obj<GenericBinder>,
-    ) -> PromiseValue<'tcx, TyOrReList, BinderParamWfBinderError> {
+    ) -> PromiseValue<'sess, TyOrReList, BinderParamWfBinderError> {
         let s = self.session();
 
         if let Some(provided) = fn_instance.r(s).early_args {
@@ -728,7 +728,7 @@ impl<'tcx> ClauseCx<'tcx> {
         universe: &HrtbUniverse,
         def: Obj<FnDef>,
         env: ClauseImportEnv,
-    ) -> MultiPromiseValue<'tcx, InstantiatedFnSig, ImportError> {
+    ) -> MultiPromiseValue<'sess, InstantiatedFnSig, ImportError> {
         let s = self.session();
 
         let mut collector = MultiPromiseBuilder::new();
@@ -777,7 +777,7 @@ pub struct InstantiatedImplBlock {
 pub struct SignatureMismatchError;
 
 /// Instantiation.
-impl<'tcx> ClauseCx<'tcx> {
+impl<'sess> ClauseCx<'sess> {
     fn fresh_trait_item_to_unconstrained_trait_spec(
         &mut self,
         universe: &HrtbUniverse,
@@ -821,7 +821,7 @@ impl<'tcx> ClauseCx<'tcx> {
         universe: &HrtbUniverse,
         self_ty: Ty,
         def: Obj<FnDef>,
-    ) -> PromiseValue<'tcx, FnOwner, TypeRelativeFnDefToOwnerError> {
+    ) -> PromiseValue<'sess, FnOwner, TypeRelativeFnDefToOwnerError> {
         let s = self.session();
 
         match *def.r(s).owner {
@@ -857,7 +857,7 @@ impl<'tcx> ClauseCx<'tcx> {
         fuel: ClauseFuel,
         universe: &HrtbUniverse,
         block: Obj<ImplItem>,
-    ) -> PromiseValue<'tcx, InstantiatedImplBlock, ImplBlockSatisfyError> {
+    ) -> PromiseValue<'sess, InstantiatedImplBlock, ImplBlockSatisfyError> {
         let s = self.session();
 
         let mut collector = MultiPromiseBuilder::new();

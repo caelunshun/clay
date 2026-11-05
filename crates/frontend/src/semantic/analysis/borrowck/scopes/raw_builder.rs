@@ -21,8 +21,8 @@ bool_enum! {
     }
 }
 
-pub struct RawMirScopedBuilder<'tcx> {
-    session: &'tcx Session,
+pub struct RawMirScopedBuilder<'sess> {
+    session: &'sess Session,
     body: MirBody,
     drop_scheduler: DropScheduler,
     scope_id_gen: MirScopeIdx,
@@ -62,8 +62,8 @@ struct LiveBuilderScope {
     branch_bb: Option<MirBlockIdx>,
 }
 
-impl<'tcx> RawMirScopedBuilder<'tcx> {
-    pub fn new(session: &'tcx Session) -> Self {
+impl<'sess> RawMirScopedBuilder<'sess> {
+    pub fn new(session: &'sess Session) -> Self {
         let mut this = Self {
             session,
             body: MirBody::default(),

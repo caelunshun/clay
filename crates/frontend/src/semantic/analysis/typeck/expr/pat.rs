@@ -43,7 +43,7 @@ pub struct PatLvalueTemp {
     pub place: Obj<HirExpr>,
 }
 
-impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
+impl<'a, 'sess> BodyCtxt<'a, 'sess> {
     pub fn check_expr_inner_assign(
         &mut self,
         expr: Obj<HirExpr>,

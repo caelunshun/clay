@@ -29,10 +29,10 @@ impl TakenIfEq {
     }
 }
 
-pub trait MirScopedBuilder<'tcx> {
-    fn raw_builder(&mut self) -> &mut RawMirScopedBuilder<'tcx>;
+pub trait MirScopedBuilder<'sess> {
+    fn raw_builder(&mut self) -> &mut RawMirScopedBuilder<'sess>;
 
-    fn trait_cache(&mut self) -> &mut TraitCache<'tcx>;
+    fn trait_cache(&mut self) -> &mut TraitCache<'sess>;
 
     fn push_local(&mut self, in_scope: MirScopeIdx, local: MirLocal) -> MirLocalIdx {
         let can_omit_drop = self.trait_cache().can_omit_drop(local.ty);
@@ -265,17 +265,17 @@ pub trait MirScopedBuilder<'tcx> {
     }
 }
 
-pub struct MirScopedBuilderRef<'a, 'tcx> {
-    pub raw_builder: &'a mut RawMirScopedBuilder<'tcx>,
-    pub trait_cache: &'a mut TraitCache<'tcx>,
+pub struct MirScopedBuilderRef<'a, 'sess> {
+    pub raw_builder: &'a mut RawMirScopedBuilder<'sess>,
+    pub trait_cache: &'a mut TraitCache<'sess>,
 }
 
-impl<'tcx> MirScopedBuilder<'tcx> for MirScopedBuilderRef<'_, 'tcx> {
-    fn raw_builder(&mut self) -> &mut RawMirScopedBuilder<'tcx> {
+impl<'sess> MirScopedBuilder<'sess> for MirScopedBuilderRef<'_, 'sess> {
+    fn raw_builder(&mut self) -> &mut RawMirScopedBuilder<'sess> {
         self.raw_builder
     }
 
-    fn trait_cache(&mut self) -> &mut TraitCache<'tcx> {
+    fn trait_cache(&mut self) -> &mut TraitCache<'sess> {
         self.trait_cache
     }
 }

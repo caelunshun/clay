@@ -236,8 +236,8 @@ impl_sig_importable! {
     import_trait_spec: SigTraitSpec => TraitSpec;
 }
 
-pub struct SigImporter<'a, 'tcx> {
-    ccx: &'a mut ClauseCx<'tcx>,
+pub struct SigImporter<'a, 'sess> {
+    ccx: &'a mut ClauseCx<'sess>,
     fuel: ClauseFuel,
     opts: SigImporterOpts,
     reentrant_aliases: FastHashMap<Obj<TypeAliasItem>, ReentrantAliasState>,
@@ -783,14 +783,14 @@ impl<'a, 'sess> SigImporter<'a, 'sess> {
 }
 
 /// Traits
-impl<'a, 'tcx> SigImporter<'a, 'tcx> {
+impl<'a, 'sess> SigImporter<'a, 'sess> {
     // === Instance logic === //
 
     pub fn import_trait_instance(
         &mut self,
         instance_applies_to: Ty,
         instance: SigTraitInstance,
-    ) -> ImportPromise<'tcx, TraitInstance> {
+    ) -> ImportPromise<'sess, TraitInstance> {
         let s = self.session();
 
         let binder = *instance.def.r(s).generics;
@@ -809,7 +809,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
     pub fn import_trait_clause_list(
         &mut self,
         clauses: SigTraitClauseList,
-    ) -> ImportPromise<'tcx, TraitClauseList> {
+    ) -> ImportPromise<'sess, TraitClauseList> {
         let s = self.session();
 
         self.import_trait_clause_list_inner(clauses.elems.r(s))
@@ -818,14 +818,14 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
     pub fn import_trait_clause(
         &mut self,
         clause: SigTraitClause,
-    ) -> ImportPromise<'tcx, TraitClause> {
+    ) -> ImportPromise<'sess, TraitClause> {
         let s = self.session();
 
         self.import_trait_clause_list_inner(&[clause])
             .map_value(|v| v.r(s)[0])
     }
 
-    pub fn import_hrtb_binder(&mut self, clause: SigHrtbBinder) -> ImportPromise<'tcx, HrtbBinder> {
+    pub fn import_hrtb_binder(&mut self, clause: SigHrtbBinder) -> ImportPromise<'sess, HrtbBinder> {
         self.import_trait_clause(SigTraitClause {
             span: clause.defs_span,
             kind: SigTraitClauseKind::Trait(clause),
@@ -839,7 +839,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         })
     }
 
-    pub fn import_trait_spec(&mut self, clause: SigTraitSpec) -> ImportPromise<'tcx, TraitSpec> {
+    pub fn import_trait_spec(&mut self, clause: SigTraitSpec) -> ImportPromise<'sess, TraitSpec> {
         let s = self.session();
 
         self.import_hrtb_binder(SigHrtbBinder {
@@ -855,7 +855,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
     fn import_trait_clause_list_inner(
         &mut self,
         clauses: &[SigTraitClause],
-    ) -> ImportPromise<'tcx, TraitClauseList> {
+    ) -> ImportPromise<'sess, TraitClauseList> {
         let s = self.session();
 
         let mut collector = MultiPromiseBuilder::new();
@@ -887,7 +887,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         &mut self,
         wf_self_ty: Option<Ty>,
         clauses: &[SigTraitClause],
-    ) -> ImportPromise<'tcx, TraitClauseList> {
+    ) -> ImportPromise<'sess, TraitClauseList> {
         let s = self.session();
 
         let mut collector = MultiPromiseBuilder::new();
@@ -907,7 +907,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         &mut self,
         wf_self_ty: Option<Ty>,
         clause: SigTraitClause,
-    ) -> ImportPromise<'tcx, TraitClause> {
+    ) -> ImportPromise<'sess, TraitClause> {
         match clause.kind {
             SigTraitClauseKind::Outlives(dir, rhs) => self
                 .import_ty_or_re(rhs)
@@ -922,7 +922,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         &mut self,
         wf_self_ty: Option<Ty>,
         binder: SigHrtbBinder,
-    ) -> ImportPromise<'tcx, HrtbBinder> {
+    ) -> ImportPromise<'sess, HrtbBinder> {
         let s = self.session();
 
         if binder.defs.r(s).is_empty() {
@@ -992,7 +992,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         &mut self,
         wf_self_ty: Ty,
         binder: SigHrtbBinder,
-    ) -> MultiPromise<'tcx, ImportError> {
+    ) -> MultiPromise<'sess, ImportError> {
         let s = self.session();
 
         let mut collector = MultiPromiseBuilder::new();
@@ -1093,7 +1093,7 @@ impl<'a, 'tcx> SigImporter<'a, 'tcx> {
         &mut self,
         wf_self_ty: Option<Ty>,
         spec: SigTraitSpec,
-    ) -> ImportPromise<'tcx, TraitSpec> {
+    ) -> ImportPromise<'sess, TraitSpec> {
         let s = self.session();
 
         let span = spec.span;
@@ -1224,13 +1224,13 @@ pub struct InstantiatedTraitSpec {
     pub mapped_binder_defs: HrtbDebruijnDefList,
 }
 
-impl<'tcx> ClauseCx<'tcx> {
+impl<'sess> ClauseCx<'sess> {
     pub fn instantiate_hrtb_universal(
         &mut self,
         fuel: ClauseFuel,
         universe: HrtbUniverse,
         value: HrtbBinder,
-    ) -> PromiseValue<'tcx, InstantiatedTraitSpec, InstantiateHrtbUniversalError> {
+    ) -> PromiseValue<'sess, InstantiatedTraitSpec, InstantiateHrtbUniversalError> {
         let s = self.session();
 
         let HrtbBinder { defs, inner } = value;
@@ -1297,7 +1297,7 @@ impl<'tcx> ClauseCx<'tcx> {
         fuel: ClauseFuel,
         universe: HrtbUniverse,
         value: HrtbBinder,
-    ) -> PromiseValue<'tcx, TraitSpec, InstantiateHrtbInferError> {
+    ) -> PromiseValue<'sess, TraitSpec, InstantiateHrtbInferError> {
         let s = self.session();
 
         let HrtbBinder { defs, inner } = value;
@@ -1391,19 +1391,19 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 }
 
-struct HrtbInstantiator<'a, 'tcx> {
-    ccx: &'a mut ClauseCx<'tcx>,
-    normalize_errors: &'a mut MultiPromiseBuilder<'tcx, TraitSpecResolutionError>,
+struct HrtbInstantiator<'a, 'sess> {
+    ccx: &'a mut ClauseCx<'sess>,
+    normalize_errors: &'a mut MultiPromiseBuilder<'sess, TraitSpecResolutionError>,
     universe: HrtbUniverse,
     fuel: ClauseFuel,
     replace_with: TyOrReList,
     top: DebruijnTop,
 }
 
-impl<'a, 'tcx> HrtbInstantiator<'a, 'tcx> {
+impl<'a, 'sess> HrtbInstantiator<'a, 'sess> {
     fn new(
-        ccx: &'a mut ClauseCx<'tcx>,
-        normalize_errors: &'a mut MultiPromiseBuilder<'tcx, TraitSpecResolutionError>,
+        ccx: &'a mut ClauseCx<'sess>,
+        normalize_errors: &'a mut MultiPromiseBuilder<'sess, TraitSpecResolutionError>,
         universe: HrtbUniverse,
         fuel: ClauseFuel,
         replace_with: TyOrReList,

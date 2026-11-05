@@ -81,19 +81,19 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
 
 // === BodyCtxt === //
 
-pub(super) struct BodyCtxt<'a, 'tcx> {
-    pub ccx: &'a mut ClauseCx<'tcx>,
+pub(super) struct BodyCtxt<'a, 'sess> {
+    pub ccx: &'a mut ClauseCx<'sess>,
     pub def: Obj<FnDef>,
     pub import_env: &'a ClauseImportEnv,
     pub local_types: FastHashMap<Obj<HirLocal>, Ty>,
     pub block_break_demands: FastHashMap<HirLabelledBlock, Option<Ty>>,
-    pub confirm_state: BodyCtxtConfirmState<'a, 'tcx>,
+    pub confirm_state: BodyCtxtConfirmState<'a, 'sess>,
     pub return_ty: Ty,
 }
 
-impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
+impl<'a, 'sess> BodyCtxt<'a, 'sess> {
     pub fn new(
-        ccx: &'a mut ClauseCx<'tcx>,
+        ccx: &'a mut ClauseCx<'sess>,
         def: Obj<FnDef>,
         import_env: &'a ClauseImportEnv,
     ) -> Self {
@@ -112,7 +112,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         }
     }
 
-    pub fn session(&self) -> &'tcx Session {
+    pub fn session(&self) -> &'sess Session {
         self.ccx.session()
     }
 
@@ -125,20 +125,20 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         self.def.r(s).owner.as_item(s)
     }
 
-    pub fn ccx(&self) -> &ClauseCx<'tcx> {
+    pub fn ccx(&self) -> &ClauseCx<'sess> {
         self.ccx
     }
 
-    pub fn ccx_mut(&mut self) -> &mut ClauseCx<'tcx> {
+    pub fn ccx_mut(&mut self) -> &mut ClauseCx<'sess> {
         self.ccx
     }
 
     #[expect(unused)]
-    pub fn ucx(&self) -> &UnifyCx<'tcx> {
+    pub fn ucx(&self) -> &UnifyCx<'sess> {
         self.ccx.ucx()
     }
 
-    pub fn ucx_mut(&mut self) -> &mut UnifyCx<'tcx> {
+    pub fn ucx_mut(&mut self) -> &mut UnifyCx<'sess> {
         self.ccx.ucx_mut()
     }
 

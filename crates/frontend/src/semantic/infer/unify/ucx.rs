@@ -40,10 +40,10 @@ pub enum UnifyCxMode {
 /// deferred-solving functionality of a [`ObligationCx`](super::super::ObligationCx) internally to
 /// solve these obligations.
 #[derive(Debug, Clone)]
-pub struct UnifyCx<'tcx> {
-    session: &'tcx Session,
+pub struct UnifyCx<'sess> {
+    session: &'sess Session,
     types: TyUnifyTracker,
-    pub(super) regions: ReUnifyTracker<'tcx>,
+    pub(super) regions: ReUnifyTracker<'sess>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -53,8 +53,8 @@ pub struct FloatingInferVar<'a> {
     pub perm_set: SimpleTySet,
 }
 
-impl<'tcx> UnifyCx<'tcx> {
-    pub fn new(session: &'tcx Session, mode: UnifyCxMode) -> Self {
+impl<'sess> UnifyCx<'sess> {
+    pub fn new(session: &'sess Session, mode: UnifyCxMode) -> Self {
         Self {
             session,
             types: TyUnifyTracker::default(),
@@ -62,7 +62,7 @@ impl<'tcx> UnifyCx<'tcx> {
         }
     }
 
-    pub fn session(&self) -> &'tcx Session {
+    pub fn session(&self) -> &'sess Session {
         self.session
     }
 
@@ -70,15 +70,15 @@ impl<'tcx> UnifyCx<'tcx> {
         self.regions.mode()
     }
 
-    pub fn verify(ccx: &mut ClauseCx<'tcx>) {
+    pub fn verify(ccx: &mut ClauseCx<'sess>) {
         ReUnifyTracker::verify(ccx);
     }
 
-    pub fn substitutor(&self, mode: UnboundVarHandlingMode) -> InferTySubstitutor<'_, 'tcx> {
+    pub fn substitutor(&self, mode: UnboundVarHandlingMode) -> InferTySubstitutor<'_, 'sess> {
         InferTySubstitutor { ucx: self, mode }
     }
 
-    pub fn fallible_substitutor(&self) -> FallibleInferTySubstitutor<'_, 'tcx> {
+    pub fn fallible_substitutor(&self) -> FallibleInferTySubstitutor<'_, 'sess> {
         FallibleInferTySubstitutor { ucx: self }
     }
 
@@ -168,7 +168,7 @@ impl<'tcx> UnifyCx<'tcx> {
         lhs: Re,
         rhs: Re,
         mode: RelationMode,
-    ) -> Promise<'tcx, ReAndReUnifyError> {
+    ) -> Promise<'sess, ReAndReUnifyError> {
         let mut collector = MultiPromiseBuilder::default();
 
         for (lhs, rhs) in mode.enumerate(lhs, rhs) {
@@ -193,7 +193,7 @@ impl<'tcx> UnifyCx<'tcx> {
         lhs: Ty,
         rhs: Ty,
         mode: RelationMode,
-    ) -> Result<Promise<'tcx, TyAndTyRegionUnifyError>, Box<TyAndTyStructuralUnifyError>> {
+    ) -> Result<Promise<'sess, TyAndTyRegionUnifyError>, Box<TyAndTyStructuralUnifyError>> {
         let mut re_collector = MultiPromiseBuilder::new();
 
         let mut fork = self.clone();
@@ -226,7 +226,7 @@ impl<'tcx> UnifyCx<'tcx> {
         lhs: Ty,
         rhs: Ty,
         ty_culprits: &mut Vec<TyAndTyUnifyCulprit>,
-        re_collector: &mut MultiPromiseBuilder<'tcx, ReAndReUnifyError>,
+        re_collector: &mut MultiPromiseBuilder<'sess, ReAndReUnifyError>,
         mode: RelationMode,
     ) {
         let s = self.session();
@@ -525,7 +525,7 @@ impl<'tcx> UnifyCx<'tcx> {
         lhs: UniversalTy,
         rhs: UniversalTy,
         ty_culprits: &mut Vec<TyAndTyUnifyCulprit>,
-        re_collector: &mut MultiPromiseBuilder<'tcx, ReAndReUnifyError>,
+        re_collector: &mut MultiPromiseBuilder<'sess, ReAndReUnifyError>,
     ) {
         let s = self.session();
 
@@ -642,15 +642,15 @@ impl<'tcx> UnifyCx<'tcx> {
         }
 
         // Perform occurs check
-        struct OccursVisitor<'a, 'tcx> {
-            ucx: &'a UnifyCx<'tcx>,
+        struct OccursVisitor<'a, 'sess> {
+            ucx: &'a UnifyCx<'sess>,
             reject: InferTyVar,
         }
 
-        impl<'tcx> TyVisitor<'tcx> for OccursVisitor<'_, 'tcx> {
+        impl<'sess> TyVisitor<'sess> for OccursVisitor<'_, 'sess> {
             type Break = ();
 
-            fn session(&self) -> &'tcx Session {
+            fn session(&self) -> &'sess Session {
                 self.ucx.session()
             }
 
@@ -692,15 +692,15 @@ impl<'tcx> UnifyCx<'tcx> {
 
         // Perform HRTB universe check. First, let's ensure that the root isn't being unified with
         // a type beyond its maximum universe.
-        struct HrtbLeakUniversalVisitor<'a, 'tcx> {
-            ucx: &'a UnifyCx<'tcx>,
+        struct HrtbLeakUniversalVisitor<'a, 'sess> {
+            ucx: &'a UnifyCx<'sess>,
             max_universe: &'a HrtbUniverse,
         }
 
-        impl<'tcx> TyVisitor<'tcx> for HrtbLeakUniversalVisitor<'_, 'tcx> {
+        impl<'sess> TyVisitor<'sess> for HrtbLeakUniversalVisitor<'_, 'sess> {
             type Break = UniversalTy;
 
-            fn session(&self) -> &'tcx Session {
+            fn session(&self) -> &'sess Session {
                 self.ucx.session()
             }
 
@@ -749,15 +749,15 @@ impl<'tcx> UnifyCx<'tcx> {
         // will only ever get into this scenario if we attempt to unify two `Trait` objects. All
         // inference variables in such a unification will necessarily be outside of the binder and
         // so we can treat them identically to a leaked universal.
-        struct HrtbLeakHrtbVarVisitor<'a, 'tcx> {
-            ucx: &'a UnifyCx<'tcx>,
+        struct HrtbLeakHrtbVarVisitor<'a, 'sess> {
+            ucx: &'a UnifyCx<'sess>,
             debruijn: DebruijnTop,
         }
 
-        impl<'tcx> TyVisitor<'tcx> for HrtbLeakHrtbVarVisitor<'_, 'tcx> {
+        impl<'sess> TyVisitor<'sess> for HrtbLeakHrtbVarVisitor<'_, 'sess> {
             type Break = ();
 
-            fn session(&self) -> &'tcx Session {
+            fn session(&self) -> &'sess Session {
                 self.ucx.session()
             }
 
@@ -807,15 +807,15 @@ impl<'tcx> UnifyCx<'tcx> {
         // This is the second part of the HRTB universe check. Now that we know the operation is
         // valid, we need to ensure that any unbound inference variables in our concrete type are
         // constrained to our universe as well to avoid late-bound violations.
-        struct InferUniverseConstrainVisitor<'a, 'tcx> {
-            ucx: &'a mut UnifyCx<'tcx>,
+        struct InferUniverseConstrainVisitor<'a, 'sess> {
+            ucx: &'a mut UnifyCx<'sess>,
             max_universe: &'a HrtbUniverse,
         }
 
-        impl<'tcx> TyVisitor<'tcx> for InferUniverseConstrainVisitor<'_, 'tcx> {
+        impl<'sess> TyVisitor<'sess> for InferUniverseConstrainVisitor<'_, 'sess> {
             type Break = Infallible;
 
-            fn session(&self) -> &'tcx Session {
+            fn session(&self) -> &'sess Session {
                 self.ucx.session()
             }
 
@@ -850,7 +850,7 @@ impl<'tcx> UnifyCx<'tcx> {
         lhs_root: TraitClauseList,
         rhs_root: TraitClauseList,
         ty_culprits: &mut Vec<TyAndTyUnifyCulprit>,
-        re_collector: &mut MultiPromiseBuilder<'tcx, ReAndReUnifyError>,
+        re_collector: &mut MultiPromiseBuilder<'sess, ReAndReUnifyError>,
         mode: RelationMode,
     ) {
         let s = self.session();
@@ -920,7 +920,7 @@ impl<'tcx> UnifyCx<'tcx> {
         lhs: TraitParamList,
         rhs: TraitParamList,
         ty_culprits: &mut Vec<TyAndTyUnifyCulprit>,
-        re_collector: &mut MultiPromiseBuilder<'tcx, ReAndReUnifyError>,
+        re_collector: &mut MultiPromiseBuilder<'sess, ReAndReUnifyError>,
     ) {
         let s = self.session();
 
@@ -963,7 +963,6 @@ impl<'tcx> UnifyCx<'tcx> {
         lhs: Ty,
         rhs: SimpleTySet,
     ) -> Result<(), TyAndSimpleTySetUnifyError> {
-        let tcx = self.session();
         let s = self.session();
 
         let success = match *lhs.r(s) {
@@ -971,7 +970,7 @@ impl<'tcx> UnifyCx<'tcx> {
                 Ok(ty) => rhs.can_accept_type(ty, s),
                 Err(FloatingInferVar { perm_set, .. }) => {
                     if perm_set.intersects(rhs) {
-                        self.types.restrict_perm_set_of_floating(tcx, var, rhs);
+                        self.types.restrict_perm_set_of_floating(s, var, rhs);
                         true
                     } else {
                         false
@@ -993,8 +992,8 @@ impl<'tcx> UnifyCx<'tcx> {
 // === InfTySubstitutor === //
 
 #[derive(Debug, Copy, Clone)]
-pub struct InferTySubstitutor<'a, 'tcx> {
-    pub ucx: &'a UnifyCx<'tcx>,
+pub struct InferTySubstitutor<'a, 'sess> {
+    pub ucx: &'a UnifyCx<'sess>,
     pub mode: UnboundVarHandlingMode,
 }
 
@@ -1010,10 +1009,10 @@ pub enum UnboundVarHandlingMode {
     Panic,
 }
 
-impl<'tcx> TyFolder<'tcx> for InferTySubstitutor<'_, 'tcx> {
+impl<'sess> TyFolder<'sess> for InferTySubstitutor<'_, 'sess> {
     type Error = Infallible;
 
-    fn session(&self) -> &'tcx Session {
+    fn session(&self) -> &'sess Session {
         self.ucx.session()
     }
 
@@ -1040,14 +1039,14 @@ impl<'tcx> TyFolder<'tcx> for InferTySubstitutor<'_, 'tcx> {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct FallibleInferTySubstitutor<'a, 'tcx> {
-    pub ucx: &'a UnifyCx<'tcx>,
+pub struct FallibleInferTySubstitutor<'a, 'sess> {
+    pub ucx: &'a UnifyCx<'sess>,
 }
 
-impl<'tcx> TyFolder<'tcx> for FallibleInferTySubstitutor<'_, 'tcx> {
+impl<'sess> TyFolder<'sess> for FallibleInferTySubstitutor<'_, 'sess> {
     type Error = InferTyVar;
 
-    fn session(&self) -> &'tcx Session {
+    fn session(&self) -> &'sess Session {
         self.ucx.session()
     }
 

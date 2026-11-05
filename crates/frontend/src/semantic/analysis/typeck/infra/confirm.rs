@@ -23,11 +23,11 @@ use std::{cell::Cell, mem, rc::Rc};
 // === Infrastructure === //
 
 #[derive(Default)]
-pub struct BodyCtxtConfirmState<'a, 'tcx> {
+pub struct BodyCtxtConfirmState<'a, 'sess> {
     arena: Rc<Bump>,
     started_confirmation: bool,
-    expressions: ConfirmMap<'a, 'tcx, HirExpr, ThirExpr>,
-    patterns: ConfirmMap<'a, 'tcx, HirPat, ThirPat>,
+    expressions: ConfirmMap<'a, 'sess, HirExpr, ThirExpr>,
+    patterns: ConfirmMap<'a, 'sess, HirPat, ThirPat>,
     locals: FastHashMap<Obj<HirLocal>, Obj<ThirLocal>>,
     fallback_infers: Vec<InferTyVar>,
 }
@@ -57,7 +57,7 @@ pub struct ThirPatConfirmed {
 }
 
 /// Checking
-impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
+impl<'a, 'sess> BodyCtxt<'a, 'sess> {
     pub fn put_thir_expr(
         &mut self,
         hir: Obj<HirExpr>,
@@ -389,24 +389,24 @@ impl BodyCtxt<'_, '_> {
 
 // === Internals === //
 
-trait Confirmable<'a, 'tcx>: Sized + 'static {
+trait Confirmable<'a, 'sess>: Sized + 'static {
     type Meta;
     type Body;
 
-    fn create_placeholder(bcx: &mut BodyCtxt<'a, 'tcx>, span: Span, meta: &Self::Meta)
+    fn create_placeholder(bcx: &mut BodyCtxt<'a, 'sess>, span: Span, meta: &Self::Meta)
     -> Obj<Self>;
 
-    fn init_placeholder(bcx: &mut BodyCtxt<'a, 'tcx>, target: Obj<Self>, body: Self::Body);
+    fn init_placeholder(bcx: &mut BodyCtxt<'a, 'sess>, target: Obj<Self>, body: Self::Body);
 
-    fn create_err(bcx: &mut BodyCtxt<'a, 'tcx>, span: Span, err: ErrorGuaranteed) -> Obj<Self>;
+    fn create_err(bcx: &mut BodyCtxt<'a, 'sess>, span: Span, err: ErrorGuaranteed) -> Obj<Self>;
 }
 
-impl<'a, 'tcx> Confirmable<'a, 'tcx> for ThirExpr {
+impl<'a, 'sess> Confirmable<'a, 'sess> for ThirExpr {
     type Meta = Ty;
     type Body = ThirExprKind;
 
     fn create_placeholder(
-        bcx: &mut BodyCtxt<'a, 'tcx>,
+        bcx: &mut BodyCtxt<'a, 'sess>,
         span: Span,
         meta: &Self::Meta,
     ) -> Obj<Self> {
@@ -420,12 +420,12 @@ impl<'a, 'tcx> Confirmable<'a, 'tcx> for ThirExpr {
         .alloc_obj(s)
     }
 
-    fn init_placeholder(bcx: &mut BodyCtxt<'a, 'tcx>, target: Obj<Self>, body: Self::Body) {
+    fn init_placeholder(bcx: &mut BodyCtxt<'a, 'sess>, target: Obj<Self>, body: Self::Body) {
         let s = bcx.session();
         LateInit::init(&target.r(s).kind, body);
     }
 
-    fn create_err(bcx: &mut BodyCtxt<'a, 'tcx>, span: Span, err: ErrorGuaranteed) -> Obj<Self> {
+    fn create_err(bcx: &mut BodyCtxt<'a, 'sess>, span: Span, err: ErrorGuaranteed) -> Obj<Self> {
         let s = bcx.session();
 
         ThirExpr {
@@ -437,12 +437,12 @@ impl<'a, 'tcx> Confirmable<'a, 'tcx> for ThirExpr {
     }
 }
 
-impl<'a, 'tcx> Confirmable<'a, 'tcx> for ThirPat {
+impl<'a, 'sess> Confirmable<'a, 'sess> for ThirPat {
     type Meta = Ty;
     type Body = ThirPatKind;
 
     fn create_placeholder(
-        bcx: &mut BodyCtxt<'a, 'tcx>,
+        bcx: &mut BodyCtxt<'a, 'sess>,
         span: Span,
         meta: &Self::Meta,
     ) -> Obj<Self> {
@@ -456,12 +456,12 @@ impl<'a, 'tcx> Confirmable<'a, 'tcx> for ThirPat {
         .alloc_obj(s)
     }
 
-    fn init_placeholder(bcx: &mut BodyCtxt<'a, 'tcx>, target: Obj<Self>, body: Self::Body) {
+    fn init_placeholder(bcx: &mut BodyCtxt<'a, 'sess>, target: Obj<Self>, body: Self::Body) {
         let s = bcx.session();
         LateInit::init(&target.r(s).kind, body);
     }
 
-    fn create_err(bcx: &mut BodyCtxt<'a, 'tcx>, span: Span, err: ErrorGuaranteed) -> Obj<Self> {
+    fn create_err(bcx: &mut BodyCtxt<'a, 'sess>, span: Span, err: ErrorGuaranteed) -> Obj<Self> {
         let s = bcx.session();
 
         ThirPat {
@@ -480,38 +480,38 @@ enum ConfirmOrder {
 }
 
 #[derive_where(Default)]
-struct ConfirmMap<'a, 'tcx, K, V>
+struct ConfirmMap<'a, 'sess, K, V>
 where
     K: 'static,
-    V: Confirmable<'a, 'tcx>,
+    V: Confirmable<'a, 'sess>,
 {
-    entries: FastHashMap<Obj<K>, ConfirmEntry<'a, 'tcx, V>>,
+    entries: FastHashMap<Obj<K>, ConfirmEntry<'a, 'sess, V>>,
 }
 
 #[derive_where(Default)]
-struct ConfirmEntry<'a, 'tcx, V>
+struct ConfirmEntry<'a, 'sess, V>
 where
-    V: Confirmable<'a, 'tcx>,
+    V: Confirmable<'a, 'sess>,
 {
-    base: Option<ConfirmationBase<'a, 'tcx, V>>,
-    refinements: Vec<ConfirmRefinement<'a, 'tcx, V>>,
+    base: Option<ConfirmationBase<'a, 'sess, V>>,
+    refinements: Vec<ConfirmRefinement<'a, 'sess, V>>,
     resolution: Option<ConfirmResolution<V>>,
 }
 
-struct ConfirmationBase<'a, 'tcx, V>
+struct ConfirmationBase<'a, 'sess, V>
 where
-    V: Confirmable<'a, 'tcx>,
+    V: Confirmable<'a, 'sess>,
 {
     meta: V::Meta,
-    func: RcBumpPtr<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>) -> V::Body>,
+    func: RcBumpPtr<dyn 'a + Fn(&mut BodyCtxt<'a, 'sess>) -> V::Body>,
 }
 
-struct ConfirmRefinement<'a, 'tcx, V>
+struct ConfirmRefinement<'a, 'sess, V>
 where
-    V: Confirmable<'a, 'tcx>,
+    V: Confirmable<'a, 'sess>,
 {
     meta: V::Meta,
-    func: RcBumpPtr<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>, Obj<V>) -> V::Body>,
+    func: RcBumpPtr<dyn 'a + Fn(&mut BodyCtxt<'a, 'sess>, Obj<V>) -> V::Body>,
 }
 
 #[derive_where(Copy, Clone)]
@@ -520,20 +520,20 @@ struct ConfirmResolution<V: 'static> {
     end: Obj<V>,
 }
 
-impl<'a, 'tcx, K, V> ConfirmMap<'a, 'tcx, K, V>
+impl<'a, 'sess, K, V> ConfirmMap<'a, 'sess, K, V>
 where
     K: 'static,
-    V: Confirmable<'a, 'tcx>,
+    V: Confirmable<'a, 'sess>,
 {
     fn confirm<FP>(
-        bcx: &mut BodyCtxt<'a, 'tcx>,
+        bcx: &mut BodyCtxt<'a, 'sess>,
         mut project: FP,
         order: ConfirmOrder,
         hir_span: Span,
         hir: Obj<K>,
     ) -> ConfirmResolution<V>
     where
-        FP: for<'r> FnMut(&'r mut BodyCtxt<'a, 'tcx>) -> &'r mut Self,
+        FP: for<'r> FnMut(&'r mut BodyCtxt<'a, 'sess>) -> &'r mut Self,
     {
         let state = project(bcx).entries.entry(hir).or_default();
 
@@ -602,7 +602,7 @@ where
         arena: Rc<Bump>,
         hir: Obj<K>,
         meta: V::Meta,
-        f: impl 'a + FnOnce(&mut BodyCtxt<'a, 'tcx>) -> V::Body,
+        f: impl 'a + FnOnce(&mut BodyCtxt<'a, 'sess>) -> V::Body,
     ) {
         let state = self.entries.entry(hir).or_default();
 
@@ -613,8 +613,8 @@ where
             func: {
                 let f = Cell::new(Some(f));
 
-                RcBumpPtr::map::<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>) -> V::Body>(
-                    RcBumpPtr::new(arena, move |bcx: &mut BodyCtxt<'a, 'tcx>| -> V::Body {
+                RcBumpPtr::map::<dyn 'a + Fn(&mut BodyCtxt<'a, 'sess>) -> V::Body>(
+                    RcBumpPtr::new(arena, move |bcx: &mut BodyCtxt<'a, 'sess>| -> V::Body {
                         f.take().unwrap()(bcx)
                     }),
                     |v| v,
@@ -628,7 +628,7 @@ where
         arena: Rc<Bump>,
         hir: Obj<K>,
         meta: V::Meta,
-        f: impl 'a + FnOnce(&mut BodyCtxt<'a, 'tcx>, Obj<V>) -> V::Body,
+        f: impl 'a + FnOnce(&mut BodyCtxt<'a, 'sess>, Obj<V>) -> V::Body,
     ) {
         let state = self.entries.entry(hir).or_default();
 
@@ -637,10 +637,10 @@ where
             func: {
                 let f = Cell::new(Some(f));
 
-                RcBumpPtr::map::<dyn 'a + Fn(&mut BodyCtxt<'a, 'tcx>, Obj<V>) -> V::Body>(
+                RcBumpPtr::map::<dyn 'a + Fn(&mut BodyCtxt<'a, 'sess>, Obj<V>) -> V::Body>(
                     RcBumpPtr::new(
                         arena,
-                        move |bcx: &mut BodyCtxt<'a, 'tcx>, base: Obj<V>| -> V::Body {
+                        move |bcx: &mut BodyCtxt<'a, 'sess>, base: Obj<V>| -> V::Body {
                             f.take().unwrap()(bcx, base)
                         },
                     ),

@@ -28,28 +28,28 @@ use std::{
 // === Obligation Definitions === //
 
 #[derive(Debug, Clone)]
-pub enum ClauseObligation<'tcx> {
+pub enum ClauseObligation<'sess> {
     TyUnifiesTy {
-        handle: PromiseHandle<'tcx, TyAndTyUnifyError>,
+        handle: PromiseHandle<'sess, TyAndTyUnifyError>,
         lhs: Ty,
         rhs: Ty,
         mode: RelationMode,
     },
     TyMeetsTrait {
-        handle: PromiseHandle<'tcx, InstantiatedTraitImplError>,
+        handle: PromiseHandle<'sess, InstantiatedTraitImplError>,
         fuel: ClauseFuel,
         universe: HrtbUniverse,
         lhs: Ty,
         rhs: TraitSpec,
     },
     TyOutlivesRe {
-        handle: PromiseHandle<'tcx, TyOutlivesReError>,
+        handle: PromiseHandle<'sess, TyOutlivesReError>,
         lhs: Ty,
         rhs: Re,
         dir: RelationDirection,
     },
     Covered {
-        handle: PromiseHandle<'tcx, NotCoveredError>,
+        handle: PromiseHandle<'sess, NotCoveredError>,
         must_mention: Rc<FastHashMap<UniversalTy, u32>>,
         in_type: Option<Ty>,
         in_trait: Option<TraitSpec>,
@@ -140,10 +140,10 @@ impl ClauseFuel {
 /// Note that, if there are no type inference variables involved in your seed queries (e.g. when
 /// WF-checking traits), you can immediately skip to region aware checking.
 #[derive(Clone)]
-pub struct ClauseCx<'tcx> {
-    ucx: UnifyCx<'tcx>,
-    pending_obligations: Vec<ClauseObligationState<'tcx>>,
-    impl_cache: &'tcx ImplCache,
+pub struct ClauseCx<'sess> {
+    ucx: UnifyCx<'sess>,
+    pending_obligations: Vec<ClauseObligationState<'sess>>,
+    impl_cache: &'sess ImplCache,
     krate: Obj<Crate>,
     promise_mode: PromiseMode,
     universal_roots: IndexVec<UniversalTyRoot, UniversalTyRootDescriptor>,
@@ -151,8 +151,8 @@ pub struct ClauseCx<'tcx> {
 }
 
 #[derive(Clone)]
-struct ClauseObligationState<'tcx> {
-    kind: ClauseObligation<'tcx>,
+struct ClauseObligationState<'sess> {
+    kind: ClauseObligation<'sess>,
     not_ready: Option<ObligationNotReady>,
 }
 
@@ -243,8 +243,8 @@ impl<'sess> ClauseCx<'sess> {
 
 // === Obligation Runner === //
 
-impl<'tcx> ClauseCx<'tcx> {
-    pub(super) fn push_obligation(&mut self, kind: ClauseObligation<'tcx>) {
+impl<'sess> ClauseCx<'sess> {
+    pub(super) fn push_obligation(&mut self, kind: ClauseObligation<'sess>) {
         self.pending_obligations.push(ClauseObligationState {
             kind,
             not_ready: None,
@@ -352,7 +352,7 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 
     fn kill_obligations_with_id(&mut self, kill_id: ClauseFuelKillId) {
-        let mut to_accept = Vec::<Box<dyn AnyPromiseHandle<'tcx>>>::new();
+        let mut to_accept = Vec::<Box<dyn AnyPromiseHandle<'sess>>>::new();
 
         self.pending_obligations.retain(|obligation| {
             let other_kill_id = match obligation.kind {
@@ -463,7 +463,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
 // === Basic operations === //
 
-impl<'tcx> ClauseCx<'tcx> {
+impl<'sess> ClauseCx<'sess> {
     pub fn fresh_ty_infer_var_restricted(
         &mut self,
         max_universe: HrtbUniverse,
@@ -573,7 +573,7 @@ impl<'tcx> ClauseCx<'tcx> {
         lhs: Re,
         rhs: Re,
         mode: RelationMode,
-    ) -> Promise<'tcx, ReAndReUnifyError> {
+    ) -> Promise<'sess, ReAndReUnifyError> {
         self.ucx_mut().unify_re_and_re(lhs, rhs, mode)
     }
 
@@ -582,7 +582,7 @@ impl<'tcx> ClauseCx<'tcx> {
         lhs: Ty,
         rhs: Ty,
         mode: RelationMode,
-    ) -> Promise<'tcx, TyAndTyUnifyError> {
+    ) -> Promise<'sess, TyAndTyUnifyError> {
         let (promise, handle) = Promise::new();
 
         self.push_obligation(ClauseObligation::TyUnifiesTy {
@@ -597,7 +597,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     fn run_oblige_ty_unifies_ty(
         &mut self,
-        handle: PromiseHandle<'tcx, TyAndTyUnifyError>,
+        handle: PromiseHandle<'sess, TyAndTyUnifyError>,
         lhs: Ty,
         rhs: Ty,
         mode: RelationMode,
@@ -636,7 +636,7 @@ impl<'tcx> ClauseCx<'tcx> {
         lhs: Ty,
         rhs: Ty,
         mode: RelationMode,
-    ) -> Result<Promise<'tcx, TyAndTyRegionUnifyError>, Box<TyAndTyStructuralUnifyError>> {
+    ) -> Result<Promise<'sess, TyAndTyRegionUnifyError>, Box<TyAndTyStructuralUnifyError>> {
         self.ucx_mut().unify_ty_and_ty(lhs, rhs, mode)
     }
 
@@ -652,7 +652,7 @@ impl<'tcx> ClauseCx<'tcx> {
         &mut self,
         lhs: Re,
         rhs: TraitClauseList,
-    ) -> MultiPromise<'tcx, GeneralOutlivesError> {
+    ) -> MultiPromise<'sess, GeneralOutlivesError> {
         let s = self.session();
 
         let mut collector = MultiPromiseBuilder::new();
@@ -675,7 +675,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
 // === Universal Management === //
 
-impl<'tcx> ClauseCx<'tcx> {
+impl<'sess> ClauseCx<'sess> {
     pub fn fresh_ty_universal_root_idx(
         &mut self,
         in_universe: HrtbUniverse,

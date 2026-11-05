@@ -14,13 +14,13 @@ bool_enum! {
     }
 }
 
-pub struct TraitCache<'tcx> {
-    ccx: ClauseCx<'tcx>,
+pub struct TraitCache<'sess> {
+    ccx: ClauseCx<'sess>,
     env: ClauseImportEnv,
 }
 
-impl<'tcx> TraitCache<'tcx> {
-    pub fn new(s: &'tcx Session, impl_cache: &'tcx ImplCache, def: Obj<FnDef>) -> Self {
+impl<'sess> TraitCache<'sess> {
+    pub fn new(s: &'sess Session, impl_cache: &'sess ImplCache, def: Obj<FnDef>) -> Self {
         let mut ccx = ClauseCx::new(
             s,
             impl_cache,
@@ -33,7 +33,7 @@ impl<'tcx> TraitCache<'tcx> {
         Self { ccx, env }
     }
 
-    pub fn session(&self) -> &'tcx Session {
+    pub fn session(&self) -> &'sess Session {
         self.ccx.session()
     }
 

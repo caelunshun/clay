@@ -9,7 +9,7 @@ use crate::semantic::{
     syntax::{Re, RelationDirection, RelationMode, SimpleTySet, Ty, TyKind, TyOrRe},
 };
 
-impl<'tcx> ClauseCx<'tcx> {
+impl<'sess> ClauseCx<'sess> {
     pub fn permit_universe_re_outlives_general(
         &mut self,
         universal: Re,
@@ -67,7 +67,7 @@ impl<'tcx> ClauseCx<'tcx> {
         lhs: TyOrRe,
         rhs: TyOrRe,
         dir: RelationDirection,
-    ) -> Promise<'tcx, GeneralOutlivesError> {
+    ) -> Promise<'sess, GeneralOutlivesError> {
         let (lhs, rhs) = dir.adapt(lhs, rhs);
 
         match (lhs, rhs) {
@@ -86,7 +86,7 @@ impl<'tcx> ClauseCx<'tcx> {
         }
     }
 
-    pub fn oblige_ty_outlives_ty(&mut self, lhs: Ty, rhs: Ty) -> Promise<'tcx, TyOutlivesTyError> {
+    pub fn oblige_ty_outlives_ty(&mut self, lhs: Ty, rhs: Ty) -> Promise<'sess, TyOutlivesTyError> {
         // LHS: 'a
         // 'a: RHS
         // => LHS: RHS
@@ -113,7 +113,7 @@ impl<'tcx> ClauseCx<'tcx> {
         lhs: Ty,
         rhs: Re,
         dir: RelationDirection,
-    ) -> Promise<'tcx, TyOutlivesReError> {
+    ) -> Promise<'sess, TyOutlivesReError> {
         let (promise, handle) = Promise::new();
 
         self.push_obligation(ClauseObligation::TyOutlivesRe {
@@ -128,7 +128,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub(super) fn run_oblige_ty_outlives_re(
         &mut self,
-        handle: PromiseHandle<'tcx, TyOutlivesReError>,
+        handle: PromiseHandle<'sess, TyOutlivesReError>,
         lhs: Ty,
         rhs: Re,
         dir: RelationDirection,

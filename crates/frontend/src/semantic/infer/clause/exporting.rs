@@ -16,30 +16,30 @@ use crate::{
     },
 };
 
-impl<'tcx> ClauseCx<'tcx> {
-    pub fn exporter(&mut self, span: Span) -> SigExporter<'_, 'tcx> {
+impl<'sess> ClauseCx<'sess> {
+    pub fn exporter(&mut self, span: Span) -> SigExporter<'_, 'sess> {
         SigExporter { ccx: self, span }
     }
 
-    pub fn export<T: SigExportable<'tcx>>(&mut self, span: Span, val: T) -> T::Output {
+    pub fn export<T: SigExportable<'sess>>(&mut self, span: Span, val: T) -> T::Output {
         self.exporter(span).export(val)
     }
 }
 
-pub trait SigExportable<'tcx>: Sized {
+pub trait SigExportable<'sess>: Sized {
     type Output;
 
-    fn export(me: Self, exporter: &mut SigExporter<'_, 'tcx>) -> Self::Output;
+    fn export(me: Self, exporter: &mut SigExporter<'_, 'sess>) -> Self::Output;
 }
 
 macro_rules! impl_sig_exportable {
     ( $( $method:ident: $src:ty => $dest:ty; )* ) => {$(
-        impl<'tcx> SigExportable<'tcx> for $src {
+        impl<'sess> SigExportable<'sess> for $src {
             type Output = $dest;
 
             fn export(
                 me: Self,
-                exporter: &mut SigExporter<'_, 'tcx>,
+                exporter: &mut SigExporter<'_, 'sess>,
             ) -> Self::Output {
                 exporter.$method(me)
             }
@@ -68,13 +68,13 @@ impl_sig_exportable! {
     export_universal_ty: UniversalTy => SigTy;
 }
 
-pub struct SigExporter<'a, 'tcx> {
-    pub ccx: &'a mut ClauseCx<'tcx>,
+pub struct SigExporter<'a, 'sess> {
+    pub ccx: &'a mut ClauseCx<'sess>,
     pub span: Span,
 }
 
-impl<'a, 'tcx> SigExporter<'a, 'tcx> {
-    pub fn export<T: SigExportable<'tcx>>(&mut self, val: T) -> T::Output {
+impl<'a, 'sess> SigExporter<'a, 'sess> {
+    pub fn export<T: SigExportable<'sess>>(&mut self, val: T) -> T::Output {
         T::export(val, self)
     }
 

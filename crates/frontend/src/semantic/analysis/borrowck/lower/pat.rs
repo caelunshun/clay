@@ -29,7 +29,7 @@ struct LateUseProxyEntry {
     can_move_from: Option<Vec<MirPlace>>,
 }
 
-impl<'tcx> MirFromThirCtx<'tcx> {
+impl<'sess> MirFromThirCtx<'sess> {
     pub fn lower_fn_arg(
         &mut self,
         span: Span,
@@ -225,7 +225,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                                                     guard_scope,
                                                 );
                                             },
-                                            Some(|this: &mut MirFromThirCtx<'tcx>, falsy_scope| {
+                                            Some(|this: &mut MirFromThirCtx<'sess>, falsy_scope| {
                                                 this.push_break(
                                                     falsy_scope,
                                                     MirSourceInfo::Todo,

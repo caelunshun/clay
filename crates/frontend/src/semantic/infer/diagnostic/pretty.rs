@@ -20,14 +20,14 @@ use std::{
 
 // === PrettyFmtCx === //
 
-impl<'tcx> ClauseCx<'tcx> {
-    pub fn pretty(&self, opts: ClausePrettyFmtOpts) -> ClausePrettyFmtCx<'_, 'tcx> {
+impl<'sess> ClauseCx<'sess> {
+    pub fn pretty(&self, opts: ClausePrettyFmtOpts) -> ClausePrettyFmtCx<'_, 'sess> {
         ClausePrettyFmtCx::new(self, opts)
     }
 }
 
-pub struct ClausePrettyFmtCx<'a, 'tcx> {
-    ccx: &'a ClauseCx<'tcx>,
+pub struct ClausePrettyFmtCx<'a, 'sess> {
+    ccx: &'a ClauseCx<'sess>,
     opts: ClausePrettyFmtOpts,
     fmt_state: RefCell<FmtState>,
 }
@@ -42,8 +42,8 @@ struct FmtState {
     hrtb_defs: DebruijnMap<Symbol>,
 }
 
-impl<'a, 'tcx> ClausePrettyFmtCx<'a, 'tcx> {
-    pub fn new(ccx: &'a ClauseCx<'tcx>, opts: ClausePrettyFmtOpts) -> Self {
+impl<'a, 'sess> ClausePrettyFmtCx<'a, 'sess> {
+    pub fn new(ccx: &'a ClauseCx<'sess>, opts: ClausePrettyFmtOpts) -> Self {
         Self {
             ccx,
             opts,
@@ -51,29 +51,29 @@ impl<'a, 'tcx> ClausePrettyFmtCx<'a, 'tcx> {
         }
     }
 
-    pub fn ccx(&self) -> &'a ClauseCx<'tcx> {
+    pub fn ccx(&self) -> &'a ClauseCx<'sess> {
         self.ccx
     }
 
-    pub fn session(&self) -> &'tcx Session {
+    pub fn session(&self) -> &'sess Session {
         self.ccx.session()
     }
 
-    pub fn wrap<T>(&self, value: T) -> ClausePrettyFmt<'_, 'tcx, T> {
+    pub fn wrap<T>(&self, value: T) -> ClausePrettyFmt<'_, 'sess, T> {
         ClausePrettyFmt { cx: self, value }
     }
 }
 
 // === PrettyFmt === //
 
-pub struct ClausePrettyFmt<'a, 'tcx, T> {
-    pub cx: &'a ClausePrettyFmtCx<'a, 'tcx>,
+pub struct ClausePrettyFmt<'a, 'sess, T> {
+    pub cx: &'a ClausePrettyFmtCx<'a, 'sess>,
     pub value: T,
 }
 
-impl<'a, 'tcx, T: Copy> fmt::Display for ClausePrettyFmt<'a, 'tcx, &'a T>
+impl<'a, 'sess, T: Copy> fmt::Display for ClausePrettyFmt<'a, 'sess, &'a T>
 where
-    ClausePrettyFmt<'a, 'tcx, T>: fmt::Display,
+    ClausePrettyFmt<'a, 'sess, T>: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.cx.wrap(*self.value).fmt(f)

@@ -13,8 +13,8 @@ use std::ops::ControlFlow;
 // === ReUnifyTracker === //
 
 #[derive(Debug, Clone)]
-pub struct ReUnifyTracker<'tcx> {
-    non_blind_state: Option<NonBlindState<'tcx>>,
+pub struct ReUnifyTracker<'sess> {
+    non_blind_state: Option<NonBlindState<'sess>>,
 
     /// A map from universal variable to the set of regions it's explicitly permitted to outlive or
     /// be outlived by.
@@ -22,13 +22,13 @@ pub struct ReUnifyTracker<'tcx> {
 }
 
 #[derive(Debug, Clone)]
-struct NonBlindState<'tcx> {
+struct NonBlindState<'sess> {
     /// The next fresh inference variable to yield to the user.
     next_infer: InferReVar,
 
     /// The set of user-generated constraints between regions. May contain duplicate constraints and
     /// redundant constraints like `'gc: 'other` or `'other: 'other`.
-    constraints: Vec<ReConstraint<'tcx>>,
+    constraints: Vec<ReConstraint<'sess>>,
 }
 
 #[derive(Debug, Clone)]
@@ -45,13 +45,13 @@ struct ReUniversalState {
 }
 
 #[derive(Debug, Clone)]
-struct ReConstraint<'tcx> {
-    handle: PromiseHandle<'tcx, ReAndReUnifyErrorCause>,
+struct ReConstraint<'sess> {
+    handle: PromiseHandle<'sess, ReAndReUnifyErrorCause>,
     lhs: InferRe,
     rhs: InferRe,
 }
 
-impl<'tcx> ReUnifyTracker<'tcx> {
+impl<'sess> ReUnifyTracker<'sess> {
     pub fn new(mode: UnifyCxMode) -> Self {
         Self {
             non_blind_state: match mode {
@@ -94,7 +94,7 @@ impl<'tcx> ReUnifyTracker<'tcx> {
         var
     }
 
-    pub fn constrain(&mut self, lhs: Re, rhs: Re) -> Promise<'tcx, ReAndReUnifyErrorCause> {
+    pub fn constrain(&mut self, lhs: Re, rhs: Re) -> Promise<'sess, ReAndReUnifyErrorCause> {
         let Some(non_blind_state) = &mut self.non_blind_state else {
             return Promise::trivial();
         };
@@ -131,8 +131,8 @@ impl<'tcx> ReUnifyTracker<'tcx> {
         }
     }
 
-    pub fn verify(ccx: &mut ClauseCx<'tcx>) {
-        fn get_this<'a, 'tcx>(ccx: &'a mut ClauseCx<'tcx>) -> &'a mut ReUnifyTracker<'tcx> {
+    pub fn verify(ccx: &mut ClauseCx<'sess>) {
+        fn get_this<'a, 'sess>(ccx: &'a mut ClauseCx<'sess>) -> &'a mut ReUnifyTracker<'sess> {
             &mut ccx.ucx_mut().regions
         }
 

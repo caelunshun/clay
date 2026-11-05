@@ -14,7 +14,7 @@ use crate::{
     },
 };
 
-impl<'tcx> MirFromThirCtx<'tcx> {
+impl<'sess> MirFromThirCtx<'sess> {
     pub fn lower_expr_rvalue(&mut self, scope: MirScopeIdx, expr: Obj<ThirExpr>) -> MirRvalue {
         let s = self.session();
 
@@ -334,7 +334,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                         this.lower_expr_place(scope, truthy, Some(assign_into));
                     },
                     falsy.map(|falsy| {
-                        move |this: &mut MirFromThirCtx<'tcx>, scope| {
+                        move |this: &mut MirFromThirCtx<'sess>, scope| {
                             this.lower_expr_place(scope, falsy, Some(assign_into));
                         }
                     }),
@@ -466,7 +466,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     MirSourceInfo::Todo,
                     CanHoistLocals::Yes,
                     |this, break_if_falsy| {
-                        let lower_cond = |this: &mut MirFromThirCtx<'tcx>, cond: Obj<ThirExpr>| {
+                        let lower_cond = |this: &mut MirFromThirCtx<'sess>, cond: Obj<ThirExpr>| {
                             let cond = this.lower_expr_operand(break_if_falsy, cond);
 
                             this.push_if(

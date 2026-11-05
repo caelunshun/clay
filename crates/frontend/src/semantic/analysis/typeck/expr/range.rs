@@ -57,7 +57,7 @@ impl CheckedRangeExpr {
     }
 }
 
-impl<'tcx> BodyCtxt<'_, 'tcx> {
+impl<'sess> BodyCtxt<'_, 'sess> {
     pub fn check_range_expr(&mut self, expr: HirRangeExpr) -> DivergenceAnd<CheckedRangeExpr> {
         let mut divergence = Divergence::MayDiverge;
 

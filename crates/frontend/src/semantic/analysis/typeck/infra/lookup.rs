@@ -253,7 +253,7 @@ pub enum MethodQuery {
     AssocFn(Ty),
 }
 
-impl<'tcx> BodyCtxt<'tcx, '_> {
+impl<'sess> BodyCtxt<'sess, '_> {
     fn collect_inherent_candidates(
         &mut self,
         query: MethodQuery,

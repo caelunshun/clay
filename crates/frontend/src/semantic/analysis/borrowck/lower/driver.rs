@@ -35,21 +35,21 @@ pub fn build_function_mir(check_cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     LateInit::init(&def.r(s).mir_body, Some(body));
 }
 
-pub struct MirFromThirCtx<'tcx> {
-    pub session: &'tcx Session,
+pub struct MirFromThirCtx<'sess> {
+    pub session: &'sess Session,
     pub def: Obj<FnDef>,
-    pub raw_builder: RawMirScopedBuilder<'tcx>,
-    pub trait_cache: TraitCache<'tcx>,
+    pub raw_builder: RawMirScopedBuilder<'sess>,
+    pub trait_cache: TraitCache<'sess>,
     pub labelled_scopes: FastHashMap<Obj<ThirExpr>, LabelledScope>,
     pub thir_locals: FastHashMap<Obj<ThirLocal>, MirLocalIdx>,
 }
 
-impl<'tcx> MirScopedBuilder<'tcx> for MirFromThirCtx<'tcx> {
-    fn raw_builder(&mut self) -> &mut RawMirScopedBuilder<'tcx> {
+impl<'sess> MirScopedBuilder<'sess> for MirFromThirCtx<'sess> {
+    fn raw_builder(&mut self) -> &mut RawMirScopedBuilder<'sess> {
         &mut self.raw_builder
     }
 
-    fn trait_cache(&mut self) -> &mut TraitCache<'tcx> {
+    fn trait_cache(&mut self) -> &mut TraitCache<'sess> {
         &mut self.trait_cache
     }
 }
@@ -66,8 +66,8 @@ pub struct LabelledScope {
     pub out_place: MirPlace,
 }
 
-impl<'tcx> MirFromThirCtx<'tcx> {
-    pub fn new(s: &'tcx Session, impl_cache: &'tcx ImplCache, def: Obj<FnDef>) -> Self {
+impl<'sess> MirFromThirCtx<'sess> {
+    pub fn new(s: &'sess Session, impl_cache: &'sess ImplCache, def: Obj<FnDef>) -> Self {
         let mut this = Self {
             session: s,
             def,
@@ -91,7 +91,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         this
     }
 
-    pub fn session(&self) -> &'tcx Session {
+    pub fn session(&self) -> &'sess Session {
         self.session
     }
 

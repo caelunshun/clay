@@ -339,7 +339,7 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
         }
     }
 
-    let mut re_tcx = RegionTyCheckCx {
+    let mut re_cx = RegionTyCheckCx {
         ccx: &mut ccx,
         place_numbering: &place_numbering,
         env,
@@ -354,7 +354,7 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
             .lookup_range(s, MirPlace::new(local_idx, Intern::new_empty(s)))
             .iter_newtyped()
         {
-            re_tcx
+            re_cx
                 .ccx
                 .oblige_ty_outlives_re(
                     *local_ty,
@@ -366,15 +366,15 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     }
 
     // TODO: This is currently needed because the obligations above don't run in order.
-    re_tcx.ccx.poll_obligations();
+    re_cx.ccx.poll_obligations();
 
-    re_tcx.check_body();
+    re_cx.check_body();
 
     ccx.verify();
 }
 
-struct RegionTyCheckCx<'a, 'tcx> {
-    ccx: &'a mut ClauseCx<'tcx>,
+struct RegionTyCheckCx<'a, 'sess> {
+    ccx: &'a mut ClauseCx<'sess>,
     place_numbering: &'a PlaceNumbering,
     env: ClauseImportEnv,
     atomic_place_universals: &'a IndexVec<AtomicPlaceIdx, Re>,
@@ -382,8 +382,8 @@ struct RegionTyCheckCx<'a, 'tcx> {
     body: &'a MirBody,
 }
 
-impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
-    fn session(&self) -> &'tcx Session {
+impl<'a, 'sess> RegionTyCheckCx<'a, 'sess> {
+    fn session(&self) -> &'sess Session {
         self.ccx.session()
     }
 

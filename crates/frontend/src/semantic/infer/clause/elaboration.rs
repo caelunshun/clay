@@ -63,7 +63,7 @@ pub enum ElaboratedClause {
     Ready(HrtbBinder),
 }
 
-impl<'tcx> ClauseCx<'tcx> {
+impl<'sess> ClauseCx<'sess> {
     pub fn elaborate_universal_or_request(
         &mut self,
         universal: UniversalTy,
@@ -442,7 +442,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
 // === HRTB universals to binder === //
 
-impl<'tcx> ClauseCx<'tcx> {
+impl<'sess> ClauseCx<'sess> {
     pub fn hrtb_binder_from_elaboration_universals(
         &mut self,
         universe: HrtbUniverse,
@@ -557,8 +557,8 @@ impl<'tcx> ClauseCx<'tcx> {
     }
 }
 
-struct HrtbReverseTranscriptase<'a, 'tcx> {
-    ccx: &'a mut ClauseCx<'tcx>,
+struct HrtbReverseTranscriptase<'a, 'sess> {
+    ccx: &'a mut ClauseCx<'sess>,
     universe: HrtbUniverse,
     universal: UniversalTy,
     infer_remapping: FastHashMap<InferTyVar, InferTyVar>,
@@ -688,8 +688,8 @@ impl<'sess> TyFolder<'sess> for HrtbReverseTranscriptase<'_, 'sess> {
     }
 }
 
-struct HrtbCoverChecker<'a, 'tcx> {
-    ccx: &'a ClauseCx<'tcx>,
+struct HrtbCoverChecker<'a, 'sess> {
+    ccx: &'a ClauseCx<'sess>,
     was_covered: Vec<bool>,
     top: DebruijnTop,
 }

@@ -23,8 +23,8 @@ pub struct CrateSigckVisitor<'sess> {
     pub krate: Obj<Crate>,
 }
 
-impl<'tcx> CrateSigckVisitor<'tcx> {
-    pub fn session(&self) -> &'tcx Session {
+impl<'sess> CrateSigckVisitor<'sess> {
+    pub fn session(&self) -> &'sess Session {
         self.session
     }
 

@@ -90,9 +90,9 @@ impl ImplCache {
         }
     }
 
-    pub fn gather_inherent_impl_method_candidates<'a, 'tcx>(
+    pub fn gather_inherent_impl_method_candidates<'a, 'sess>(
         &'a self,
-        ccx: &'a ClauseCx<'tcx>,
+        ccx: &'a ClauseCx<'sess>,
         receiver: Ty,
         name: Symbol,
     ) -> impl Iterator<Item = Obj<FnDef>> + 'a {
@@ -130,9 +130,9 @@ impl ImplCache {
             })
     }
 
-    pub fn gather_trait_impl_candidates<'a, 'tcx>(
+    pub fn gather_trait_impl_candidates<'a, 'sess>(
         &'a self,
-        ccx: &'a ClauseCx<'tcx>,
+        ccx: &'a ClauseCx<'sess>,
         lhs: Ty,
         rhs: TraitSpec,
     ) -> impl Iterator<Item = Obj<ImplItem>> + 'a {
@@ -260,8 +260,8 @@ impl SigShapeEraser<'_> {
     }
 }
 
-pub struct ImportedShapeEraser<'a, 'tcx> {
-    pub ccx: &'a ClauseCx<'tcx>,
+pub struct ImportedShapeEraser<'a, 'sess> {
+    pub ccx: &'a ClauseCx<'sess>,
 }
 
 impl ImportedShapeEraser<'_, '_> {

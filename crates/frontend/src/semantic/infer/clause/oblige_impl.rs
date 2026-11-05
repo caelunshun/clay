@@ -28,14 +28,14 @@ use std::{convert::Infallible, ops::ControlFlow, rc::Rc};
 #[derive(Debug, Clone)]
 struct SelectionRejected;
 
-impl<'tcx> ClauseCx<'tcx> {
+impl<'sess> ClauseCx<'sess> {
     pub fn oblige_ty_meets_clauses(
         &mut self,
         fuel: ClauseFuel,
         universe: &HrtbUniverse,
         lhs: Ty,
         rhs: TraitClauseList,
-    ) -> MultiPromise<'tcx, TraitClauseError> {
+    ) -> MultiPromise<'sess, TraitClauseError> {
         let s = self.session();
 
         let mut collector = MultiPromiseBuilder::new();
@@ -54,7 +54,7 @@ impl<'tcx> ClauseCx<'tcx> {
         universe: &HrtbUniverse,
         lhs: Ty,
         rhs: TraitClause,
-    ) -> Promise<'tcx, TraitClauseError> {
+    ) -> Promise<'sess, TraitClauseError> {
         match rhs {
             TraitClause::Outlives(rhs_dir, rhs) => self
                 .oblige_general_outlives(TyOrRe::Ty(lhs), rhs, rhs_dir)
@@ -71,7 +71,7 @@ impl<'tcx> ClauseCx<'tcx> {
         universe: HrtbUniverse,
         lhs: Ty,
         rhs: HrtbBinder,
-    ) -> Promise<'tcx, UninstantiatedTraitImplError> {
+    ) -> Promise<'sess, UninstantiatedTraitImplError> {
         let s = self.session();
 
         let universe = {
@@ -117,7 +117,7 @@ impl<'tcx> ClauseCx<'tcx> {
         universe: HrtbUniverse,
         lhs: Ty,
         rhs: TraitSpec,
-    ) -> Promise<'tcx, InstantiatedTraitImplError> {
+    ) -> Promise<'sess, InstantiatedTraitImplError> {
         let (promise, handle) = Promise::new();
 
         self.push_obligation(ClauseObligation::TyMeetsTrait {
@@ -133,7 +133,7 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub(super) fn run_oblige_ty_meets_trait_instantiated(
         &mut self,
-        handle: PromiseHandle<'tcx, InstantiatedTraitImplError>,
+        handle: PromiseHandle<'sess, InstantiatedTraitImplError>,
         fuel: ClauseFuel,
         universe: HrtbUniverse,
         lhs: Ty,
@@ -291,7 +291,7 @@ impl<'tcx> ClauseCx<'tcx> {
         universal: UniversalTy,
         rhs: TraitSpec,
     ) -> ObligationResult<
-        Result<PromiseValue<'tcx, Self, InherentImplUnsatisfiedError>, SelectionRejected>,
+        Result<PromiseValue<'sess, Self, InherentImplUnsatisfiedError>, SelectionRejected>,
     > {
         for lhs in self
             .elaborate_universal_or_request(universal)?
@@ -358,7 +358,7 @@ impl<'tcx> ClauseCx<'tcx> {
         universal: UniversalTy,
         lhs: HrtbBinder,
         rhs: TraitSpec,
-    ) -> Result<PromiseValue<'tcx, Self, InherentImplUnsatisfiedError>, SelectionRejected> {
+    ) -> Result<PromiseValue<'sess, Self, InherentImplUnsatisfiedError>, SelectionRejected> {
         let s = self.session();
 
         assert_eq!(lhs.inner.def, rhs.def);
@@ -476,7 +476,7 @@ impl<'tcx> ClauseCx<'tcx> {
         lhs: Ty,
         rhs: Obj<ImplItem>,
         spec: TraitSpec,
-    ) -> Result<PromiseValue<'tcx, Self, InstantiatedTraitImplErrorKind>, SelectionRejected> {
+    ) -> Result<PromiseValue<'sess, Self, InstantiatedTraitImplErrorKind>, SelectionRejected> {
         let s = self.session();
 
         let mut collector = MultiPromiseBuilder::new();
@@ -618,7 +618,7 @@ impl<'tcx> ClauseCx<'tcx> {
         universe: &HrtbUniverse,
         lhs: Ty,
         rhs: TraitSpec,
-    ) -> Result<PromiseValue<'tcx, Self, InstantiatedTraitImplErrorKind>, SelectionRejected> {
+    ) -> Result<PromiseValue<'sess, Self, InstantiatedTraitImplErrorKind>, SelectionRejected> {
         let s = self.session();
         let krate = self.krate();
         let lhs = self.ucx().peel_ty_infer_var(lhs);
@@ -679,13 +679,13 @@ impl<'tcx> ClauseCx<'tcx> {
 
 // === Cover Obligation === //
 
-impl<'tcx> ClauseCx<'tcx> {
+impl<'sess> ClauseCx<'sess> {
     pub fn oblige_covered(
         &mut self,
         must_mention: impl IntoIterator<Item = UniversalTy>,
         in_type: Option<Ty>,
         in_trait: Option<TraitSpec>,
-    ) -> Promise<'tcx, NotCoveredError> {
+    ) -> Promise<'sess, NotCoveredError> {
         let (promise, handle) = Promise::new();
 
         let mut counter = 0u32;
@@ -712,22 +712,22 @@ impl<'tcx> ClauseCx<'tcx> {
 
     pub(super) fn run_oblige_covered(
         &mut self,
-        handle: PromiseHandle<'tcx, NotCoveredError>,
+        handle: PromiseHandle<'sess, NotCoveredError>,
         must_mention: Rc<FastHashMap<UniversalTy, u32>>,
         in_type: Option<Ty>,
         in_trait: Option<TraitSpec>,
     ) -> ObligationResult {
-        struct CoverVisitor<'a, 'tcx> {
-            ccx: &'a ClauseCx<'tcx>,
+        struct CoverVisitor<'a, 'sess> {
+            ccx: &'a ClauseCx<'sess>,
             must_mention: Rc<FastHashMap<UniversalTy, u32>>,
             cover_set: Vec<bool>,
             had_holes: bool,
         }
 
-        impl<'tcx> TyVisitor<'tcx> for CoverVisitor<'_, 'tcx> {
+        impl<'sess> TyVisitor<'sess> for CoverVisitor<'_, 'sess> {
             type Break = Infallible;
 
-            fn session(&self) -> &'tcx Session {
+            fn session(&self) -> &'sess Session {
                 self.ccx.session()
             }
 
