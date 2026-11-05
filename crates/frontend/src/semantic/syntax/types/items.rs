@@ -1,9 +1,12 @@
 use crate::{
-    base::{HasSession, HasSpan, Obj, Session, Span, Symbol, ValueInternable},
+    base::{HasSession, HasSpan, Obj, ObjAllocExt, Session, Span, Symbol, ValueInternable},
     parse::token::{Ident, Lifetime},
-    semantic::syntax::{
-        AdtInstance, FnDef, Item, Ty, TyKind, TyOrReKind, TyOrReList, Visibility,
-        types::signature::{SigTraitClauseList, SigTraitInstance, SigTy},
+    semantic::{
+        lower::modules::ItemPathFmt,
+        syntax::{
+            AdtInstance, FnDef, Item, Ty, TyKind, TyOrReKind, TyOrReList, Visibility,
+            types::signature::{SigTraitClauseList, SigTraitInstance, SigTy},
+        },
     },
     symbol,
     utils::mem::LateInit,
@@ -274,7 +277,7 @@ pub struct GenericBinder {
 
 impl GenericBinder {
     pub fn seal(self, s: &Session) -> Obj<GenericBinder> {
-        let binder = Obj::new(self, s);
+        let binder = self.alloc_obj(s);
 
         for (i, generic) in binder.r(s).defs.iter().enumerate() {
             LateInit::init(

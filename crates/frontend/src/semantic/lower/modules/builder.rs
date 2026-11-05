@@ -1,9 +1,5 @@
 use crate::{
-    base::{
-        Diag, LeafDiag, Session,
-        arena::{LateInit, Obj},
-        syntax::{Span, Symbol},
-    },
+    base::{Diag, LeafDiag, Obj, ObjAllocExt, Session, Span, Symbol},
     parse::{
         ast::{AstBarePath, AstVisibility, AstVisibilityKind},
         token::Ident,
@@ -16,6 +12,7 @@ use crate::{
         syntax::{Crate, DirectUse, GlobUse, Item, Visibility},
     },
     symbol,
+    utils::mem::LateInit,
 };
 use clay_core::FastIndexMap;
 use index_vec::{IndexVec, define_index_type};
@@ -314,7 +311,7 @@ impl BuilderModuleTree {
         let mut out_items = IndexVec::new();
 
         for item in &self.items {
-            out_items.push(Obj::new(
+            out_items.push(
                 Item {
                     krate,
                     direct_parent: item.direct_parent.map(|idx| out_items[idx]),
@@ -326,9 +323,9 @@ impl BuilderModuleTree {
                     traits_in_scope: LateInit::uninit(),
                     attrs: LateInit::uninit(),
                     kind: LateInit::uninit(),
-                },
-                s,
-            ));
+                }
+                .alloc_obj(s),
+            );
         }
 
         let wip_root = out_items[BuilderItemId::ROOT];

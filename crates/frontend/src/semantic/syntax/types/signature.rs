@@ -1,5 +1,5 @@
 use crate::{
-    base::{ErrorGuaranteed, Obj, Session, Span, Symbol},
+    base::{ErrorGuaranteed, Obj, ObjAllocExt, Session, Span, Symbol},
     semantic::syntax::{
         AdtCtor, AdtItem, DynSiteIdx, FnItem, HrtbDebruijn, ImplItem, Mutability, RegionGeneric,
         RelationDirection, SimpleTyKind, TraitItem, TyOrReKind, TypeAliasItem, TypeGeneric,
@@ -163,7 +163,7 @@ pub enum SigTyKind {
 
 impl SigTyKind {
     pub fn wrap(self, span: Span, s: &Session) -> SigTy {
-        Obj::new(SigTyInner { span, kind: self }, s)
+        SigTyInner { span, kind: self }.alloc_obj(s)
     }
 }
 

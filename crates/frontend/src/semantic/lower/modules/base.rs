@@ -1,8 +1,5 @@
 use crate::{
-    base::{
-        Diag, ErrorGuaranteed, LeafDiag, Session,
-        syntax::{HasSpan as _, Span, Symbol},
-    },
+    base::{Diag, ErrorGuaranteed, HasSpan as _, LeafDiag, Session, Span, Symbol},
     parse::ast::{AstBarePath, AstPathPart, AstPathPartKind, AstPathPartKw},
     symbol,
     utils::mem::Handle,

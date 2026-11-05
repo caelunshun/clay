@@ -57,7 +57,7 @@ where
 }
 
 impl<T: 'static> Obj<T> {
-    pub fn new(value: T, s: &Session) -> Self
+    pub fn new(s: &Session, value: T) -> Self
     where
         T: Sized,
     {
@@ -74,19 +74,19 @@ impl<T: 'static> Obj<[T]> {
         }
     }
 
-    pub fn new_iter(values: impl IntoIterator<Item = T>, s: &Session) -> Self {
+    pub fn new_iter(s: &Session, values: impl IntoIterator<Item = T>) -> Self {
         Self {
             raw: DropBumpPtr::new_iter(values, &s.drop_bump, &s.scratch_bump),
         }
     }
 
-    pub fn new_iter_with(len: usize, f: impl FnMut(usize) -> T, s: &Session) -> Self {
+    pub fn new_iter_with(s: &Session, len: usize, f: impl FnMut(usize) -> T) -> Self {
         Self {
             raw: DropBumpPtr::new_iter_with(len, f, &s.drop_bump),
         }
     }
 
-    pub fn new_slice_clone(values: &[T], s: &Session) -> Self
+    pub fn new_slice_clone(s: &Session, values: &[T]) -> Self
     where
         T: Clone,
     {
@@ -95,7 +95,7 @@ impl<T: 'static> Obj<[T]> {
         }
     }
 
-    pub fn new_slice_copy(values: &[T], s: &Session) -> Self
+    pub fn new_slice_copy(s: &Session, values: &[T]) -> Self
     where
         T: Copy,
     {
@@ -122,6 +122,26 @@ impl<T: ?Sized + 'static> Obj<T> {
 
     pub fn r(self, s: &Session) -> &T {
         self.raw.r(&s.drop_bump)
+    }
+}
+
+pub trait ObjAllocExt: Sized + 'static {
+    fn alloc_obj(self, s: &Session) -> Obj<Self>;
+}
+
+impl<T: 'static> ObjAllocExt for T {
+    fn alloc_obj(self, s: &Session) -> Obj<Self> {
+        Obj::new(s, self)
+    }
+}
+
+pub trait ObjIterAllocExt: Sized + IntoIterator<Item: 'static + Sized> {
+    fn alloc_obj_list(self, s: &Session) -> Obj<[Self::Item]>;
+}
+
+impl<T: IntoIterator<Item: 'static + Sized>> ObjIterAllocExt for T {
+    fn alloc_obj_list(self, s: &Session) -> Obj<[Self::Item]> {
+        Obj::new_iter(s, self)
     }
 }
 

@@ -1,9 +1,5 @@
 use crate::{
-    base::{
-        Session,
-        arena::{LateInit, Obj},
-        syntax::Span,
-    },
+    base::{Obj, ObjAllocExt, Session, Span},
     parse::{
         ast::{AstVisibility, AstVisibilityKind},
         token::Ident,
@@ -12,15 +8,14 @@ use crate::{
         lower::modules::{BuilderItemId, BuilderModuleTree, ItemCategory},
         syntax::{
             Crate, FloatKind, GenericBinder, IntKind, Item, ItemKind, LangItems, ModuleItem,
-            SigTyKind, SimpleTyKind, TyCtxt, TypeAliasItem,
+            SigTyKind, SimpleTyKind, TypeAliasItem,
         },
     },
     symbol,
+    utils::mem::LateInit,
 };
 
-pub fn synthesize_bootstrap_prelude(tcx: &TyCtxt) -> Obj<Crate> {
-    let s = &tcx.session;
-
+pub fn synthesize_bootstrap_prelude(s: &Session) -> Obj<Crate> {
     // Prepare crate data
     let name = symbol!("primitives");
     let types = [
@@ -100,17 +95,15 @@ pub fn synthesize_bootstrap_prelude(tcx: &TyCtxt) -> Obj<Crate> {
         })
         .collect::<Vec<_>>();
 
-    let krate = Obj::new(
-        Crate {
-            name,
-            is_local: false,
-            root: LateInit::uninit(),
-            prelude: LateInit::uninit(),
-            items: LateInit::uninit(),
-            lang_items: LangItems::default(),
-        },
-        s,
-    );
+    let krate = Crate {
+        name,
+        is_local: false,
+        root: LateInit::uninit(),
+        prelude: LateInit::uninit(),
+        items: LateInit::uninit(),
+        lang_items: LangItems::default(),
+    }
+    .alloc_obj(s);
 
     let items = builder.freeze_and_check(krate, s);
 
@@ -124,14 +117,14 @@ pub fn synthesize_bootstrap_prelude(tcx: &TyCtxt) -> Obj<Crate> {
 
         LateInit::init(
             &item.r(s).kind,
-            ItemKind::TypeAlias(Obj::new(
+            ItemKind::TypeAlias(
                 TypeAliasItem {
                     item,
                     generics: GenericBinder::default().seal(s),
                     body: LateInit::new(resolves_to),
-                },
-                s,
-            )),
+                }
+                .alloc_obj(s),
+            ),
         );
     }
 
@@ -141,7 +134,7 @@ pub fn synthesize_bootstrap_prelude(tcx: &TyCtxt) -> Obj<Crate> {
 pub fn lower_synthetic_module(item: Obj<Item>, s: &Session) {
     LateInit::init(
         &item.r(s).kind,
-        ItemKind::Module(Obj::new(ModuleItem { item }, s)),
+        ItemKind::Module(ModuleItem { item }.alloc_obj(s)),
     );
 
     LateInit::init(&item.r(s).attrs, Vec::new());

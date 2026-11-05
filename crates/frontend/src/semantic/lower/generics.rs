@@ -1,8 +1,7 @@
 use crate::{
     base::{
-        Diag, ErrorGuaranteed, LeafDiag, Level, Session,
-        arena::{LateInit, Obj},
-        syntax::{Span, Symbol},
+        Diag, ErrorGuaranteed, LeafDiag, Level, Obj, ObjAllocExt, ObjIterAllocExt, Session, Span,
+        Symbol,
     },
     parse::{
         ast::{
@@ -19,11 +18,14 @@ use crate::{
             AnyGeneric, AnyGenericIdent, GenericBinder, Item, RegionGeneric, SigGenericList,
             SigHrtbDebruijnDef, SigHrtbDebruijnDefList, SigReKind, SigTraitClauseList,
             SigTraitInstance, SigTraitParam, SigTraitParamKind, SigTraitParamList, SigTyKind,
-            SigTyOrRe, SigTyOrReList, TraitItem, TyCtxt, TyOrReKind, TypeGeneric,
+            SigTyOrRe, SigTyOrReList, TraitItem, TyOrReKind, TypeGeneric,
         },
     },
     symbol,
-    utils::format::{SimpleListFormatGlue, format_list},
+    utils::{
+        format::{SimpleListFormatGlue, format_list},
+        mem::LateInit,
+    },
 };
 use clay_core::FastHashMap;
 use hashbrown::hash_map;
@@ -32,10 +34,10 @@ use std::iter;
 // === Generic definition lowering === //
 
 fn lower_generic_defs<'ast>(
+    s: &Session,
     binder: &mut GenericBinder,
     ast: &'ast AstGenericParamList,
     generic_clause_lists: &mut Vec<Option<&'ast AstTraitClauseList>>,
-    s: &Session,
 ) {
     for def in &ast.list {
         let Some(def_kind) = def.kind.as_generic_def() else {
@@ -45,28 +47,28 @@ fn lower_generic_defs<'ast>(
 
         match def_kind {
             AstGenericDef::Re(lifetime, clauses) => {
-                binder.defs.push(AnyGeneric::Re(Obj::new(
+                binder.defs.push(AnyGeneric::Re(
                     RegionGeneric {
                         span: def.span,
                         lifetime,
                         binder: LateInit::uninit(),
                         clauses: LateInit::uninit(),
-                    },
-                    s,
-                )));
+                    }
+                    .alloc_obj(s),
+                ));
 
                 generic_clause_lists.push(clauses);
             }
             AstGenericDef::Ty(ident, clauses) => {
-                binder.defs.push(AnyGeneric::Ty(Obj::new(
+                binder.defs.push(AnyGeneric::Ty(
                     TypeGeneric {
                         span: def.span,
                         ident,
                         binder: LateInit::uninit(),
                         clauses: LateInit::uninit(),
-                    },
-                    s,
-                )));
+                    }
+                    .alloc_obj(s),
+                ));
 
                 generic_clause_lists.push(clauses);
             }
@@ -111,11 +113,12 @@ impl<'ast> InterItemLowerCtxt<'_, 'ast> {
         ast: &'ast AstGenericParamList,
         generic_clause_lists: &mut Vec<Option<&'ast AstTraitClauseList>>,
     ) {
-        lower_generic_defs(binder, ast, generic_clause_lists, &self.tcx.session);
+        let s = self.session;
+        lower_generic_defs(s, binder, ast, generic_clause_lists);
     }
 
     pub fn seal_generic_binder_with_checks(&mut self, binder: GenericBinder) -> Obj<GenericBinder> {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         check_generic_defs_for_duplicates(binder.defs.iter().map(|def| def.ident(s)));
 
@@ -128,17 +131,12 @@ impl IntraItemLowerCtxt<'_> {
         &mut self,
         ast: Option<&AstGenericParamList>,
     ) -> Obj<GenericBinder> {
-        let s = &self.tcx.session;
+        let s = self.session;
         let mut binder = GenericBinder::default();
         let mut generic_clause_lists = Vec::new();
 
         if let Some(ast) = ast {
-            lower_generic_defs(
-                &mut binder,
-                ast,
-                &mut generic_clause_lists,
-                &self.tcx.session,
-            );
+            lower_generic_defs(s, &mut binder, ast, &mut generic_clause_lists);
         }
 
         check_generic_defs_for_duplicates(binder.defs.iter().map(|def| def.ident(s)));
@@ -154,7 +152,7 @@ impl IntraItemLowerCtxt<'_> {
     }
 
     pub fn define_generics_in_binder(&mut self, binder: Obj<GenericBinder>) {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         for generic in &binder.r(s).defs {
             match generic {
@@ -175,7 +173,7 @@ impl IntraItemLowerCtxt<'_> {
         generics: Obj<GenericBinder>,
         clause_lists: &[Option<&AstTraitClauseList>],
     ) {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         for (&generic, &clause_list) in generics.r(s).defs.iter().zip(clause_lists) {
             match generic {
@@ -236,14 +234,13 @@ impl IntraItemLowerCtxt<'_> {
         &mut self,
         ast: Option<&AstGenericParamList>,
     ) -> SigHrtbDebruijnDefList {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         let Some(ast) = ast else {
-            return SigHrtbDebruijnDefList::new_slice(&[], s);
+            return Obj::new_empty(s);
         };
 
-        let defs = ast
-            .list
+        ast.list
             .iter()
             .map(|ast| match ast.kind.as_generic_def() {
                 Some(AstGenericDef::Re(lifetime, clauses)) => SigHrtbDebruijnDef {
@@ -264,13 +261,11 @@ impl IntraItemLowerCtxt<'_> {
                     kind: TyOrReKind::Ty,
                     clauses: SigTraitClauseList {
                         span: Span::DUMMY,
-                        elems: Obj::new_slice(&[], s),
+                        elems: Obj::new_empty(s),
                     },
                 },
             })
-            .collect::<Vec<_>>();
-
-        SigHrtbDebruijnDefList::new_slice(&defs, s)
+            .alloc_obj_list(s)
     }
 }
 
@@ -281,7 +276,7 @@ impl IntraItemLowerCtxt<'_> {
         &mut self,
         args: Option<&AstGenericParamList>,
     ) -> Option<SigGenericList> {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         args.as_ref().map(|args| {
             let (positional, associated) = self.lower_generic_params_syntactic(&args.list);
@@ -296,7 +291,7 @@ impl IntraItemLowerCtxt<'_> {
 
             SigGenericList {
                 segment_span: args.span,
-                elems: SigTyOrReList::new_slice(&positional, s),
+                elems: Obj::new_slice_copy(s, &positional),
             }
         })
     }
@@ -308,7 +303,7 @@ impl IntraItemLowerCtxt<'_> {
         segment_span: Span,
         generics: &[AstGenericParam],
     ) -> SigGenericList {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         let (positional, associated) = self.lower_generic_params_syntactic(generics);
 
@@ -335,7 +330,7 @@ impl IntraItemLowerCtxt<'_> {
         segment_span: Span,
         generics: Option<&AstGenericParamList>,
     ) -> SigGenericList {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         let Some(generics) = generics else {
             return self.construct_trait_instance_from_positionals(
@@ -370,10 +365,11 @@ impl IntraItemLowerCtxt<'_> {
         segment_span: Span,
         generics: Option<&AstGenericParamList>,
     ) -> SigTraitParamList {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         let Some(generics) = generics else {
-            return SigTraitParamList::new_slice(
+            return Obj::new_slice_copy(
+                s,
                 &self.construct_trait_spec_from_positionals(
                     def,
                     self.synthesize_inferred_generics_for_elision(
@@ -382,7 +378,6 @@ impl IntraItemLowerCtxt<'_> {
                         segment_span,
                     ),
                 ),
-                s,
             );
         };
 
@@ -399,7 +394,7 @@ impl IntraItemLowerCtxt<'_> {
 
         self.lower_associated_type_generic_params(def, &mut params, &associated);
 
-        SigTraitParamList::new_slice(&params, s)
+        Obj::new_slice_copy(s, &params)
     }
 
     pub fn lower_trait_instance_of_impl_block(
@@ -407,7 +402,7 @@ impl IntraItemLowerCtxt<'_> {
         for_trait: &AstTy,
         body: &AstImplLikeBody,
     ) -> Result<SigTraitInstance, ErrorGuaranteed> {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         // Lower target item.
         let AstTyKind::Name(for_trait_path, for_trait_generics) = &for_trait.kind else {
@@ -506,20 +501,21 @@ impl IntraItemLowerCtxt<'_> {
             .emit()
         });
 
-        let params = params.iter().map(|param| {
-            param.unwrap_or_else(|| {
-                SigTyOrRe::Ty(SigTyKind::Error(missing_mentions.unwrap()).wrap(for_trait.span, s))
-            })
-        });
-
-        let params = SigTyOrReList::new_iter(params, s);
-
         Ok(SigTraitInstance {
             span: for_trait.span,
             def,
             params: SigGenericList {
                 segment_span: for_trait.span,
-                elems: params,
+                elems: params
+                    .iter()
+                    .map(|param| {
+                        param.unwrap_or_else(|| {
+                            SigTyOrRe::Ty(
+                                SigTyKind::Error(missing_mentions.unwrap()).wrap(for_trait.span, s),
+                            )
+                        })
+                    })
+                    .alloc_obj_list(s),
             },
         })
     }
@@ -628,7 +624,7 @@ impl IntraItemLowerCtxt<'_> {
         orig_params: &[SigTyOrRe],
     ) -> SigGenericList {
         normalize_positional_generic_arity(
-            self.tcx,
+            self.session,
             binder,
             binder_len_override,
             segment_span,
@@ -642,20 +638,19 @@ impl IntraItemLowerCtxt<'_> {
         binder_len_override: Option<u32>,
         segment_span: Span,
     ) -> SigGenericList {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         let binder_len = binder_len_override.map_or(binder.r(s).defs.len(), |v| v as usize);
 
-        let params = binder.r(s).defs[..binder_len]
-            .iter()
-            .map(|expected| match expected {
-                AnyGeneric::Re(_) => SigTyOrRe::Re(SigReKind::Infer.wrap(segment_span)),
-                AnyGeneric::Ty(_) => SigTyOrRe::Ty(SigTyKind::Infer.wrap(segment_span, s)),
-            });
-
         SigGenericList {
             segment_span,
-            elems: SigTyOrReList::new_iter(params, s),
+            elems: binder.r(s).defs[..binder_len]
+                .iter()
+                .map(|expected| match expected {
+                    AnyGeneric::Re(_) => SigTyOrRe::Re(SigReKind::Infer.wrap(segment_span)),
+                    AnyGeneric::Ty(_) => SigTyOrRe::Ty(SigTyKind::Infer.wrap(segment_span, s)),
+                })
+                .alloc_obj_list(s),
         }
     }
 
@@ -664,7 +659,7 @@ impl IntraItemLowerCtxt<'_> {
         def: Obj<TraitItem>,
         params: SigGenericList,
     ) -> Vec<SigTraitParam> {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         debug_assert_eq!(
             *def.r(s).regular_generic_count as usize,
@@ -679,7 +674,7 @@ impl IntraItemLowerCtxt<'_> {
             .chain(iter::repeat(
                 SigTraitParamKind::Unspecified(SigTraitClauseList {
                     span: Span::DUMMY,
-                    elems: Obj::new_slice(&[], s),
+                    elems: Obj::new_empty(s),
                 })
                 .wrap(params.segment_span),
             ))
@@ -692,27 +687,25 @@ impl IntraItemLowerCtxt<'_> {
         def: Obj<TraitItem>,
         params: SigGenericList,
     ) -> SigGenericList {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         debug_assert_eq!(
             *def.r(s).regular_generic_count as usize,
             params.elems.r(s).len()
         );
 
-        let elaborated_params = params
-            .elems
-            .r(s)
-            .iter()
-            .copied()
-            .chain(iter::repeat(SigTyOrRe::Ty(
-                SigTyKind::Infer.wrap(params.segment_span, s),
-            )))
-            .take(def.r(s).generics.r(s).defs.len())
-            .collect::<Vec<_>>();
-
         SigGenericList {
             segment_span: params.segment_span,
-            elems: SigTyOrReList::new_slice(&elaborated_params, s),
+            elems: params
+                .elems
+                .r(s)
+                .iter()
+                .copied()
+                .chain(iter::repeat(SigTyOrRe::Ty(
+                    SigTyKind::Infer.wrap(params.segment_span, s),
+                )))
+                .take(def.r(s).generics.r(s).defs.len())
+                .alloc_obj_list(s),
         }
     }
 
@@ -722,7 +715,7 @@ impl IntraItemLowerCtxt<'_> {
         params: &mut [SigTraitParam],
         associated: &[LoweredAssocConstraint],
     ) {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         for associated in associated {
             let Some(generic) = def.r(s).associated_types.get(&associated.name.text) else {
@@ -749,14 +742,12 @@ impl IntraItemLowerCtxt<'_> {
 // === Cross-phase === //
 
 pub fn normalize_positional_generic_arity(
-    tcx: &TyCtxt,
+    s: &Session,
     binder: Obj<GenericBinder>,
     binder_len_override: Option<u32>,
     segment_span: Span,
     orig_params: &[SigTyOrRe],
 ) -> SigGenericList {
-    let s = &tcx.session;
-
     let binder_len = binder_len_override.map_or(binder.r(s).defs.len(), |v| v as usize);
 
     let mut errored_out_missing = None;
@@ -828,6 +819,6 @@ pub fn normalize_positional_generic_arity(
 
     SigGenericList {
         segment_span,
-        elems: SigTyOrReList::new_slice(&resolved_params, s),
+        elems: Obj::new_slice_copy(s, &resolved_params),
     }
 }

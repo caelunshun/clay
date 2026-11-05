@@ -1,15 +1,12 @@
 use crate::{
-    base::{
-        ErrorGuaranteed,
-        arena::{LateInit, Obj},
-        syntax::Matcher as _,
-    },
+    base::{ErrorGuaranteed, Obj, ObjAllocExt},
     parse::{
         ast::{
             AstAttribute,
             utils::{match_eos, match_str_lit},
         },
         token::TokenParser,
+        utils::Matcher as _,
     },
     semantic::{
         lower::{
@@ -19,6 +16,7 @@ use crate::{
         syntax::{Attribute, AttributeKind, EarlyAttrLang, Item},
     },
     symbol,
+    utils::mem::LateInit,
 };
 
 impl IntraItemLowerCtxt<'_> {
@@ -27,7 +25,7 @@ impl IntraItemLowerCtxt<'_> {
         item: Obj<Item>,
         attrs: impl IntoIterator<Item = &'ast AstAttribute>,
     ) {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         let attrs = attrs
             .into_iter()
@@ -42,9 +40,9 @@ impl IntraItemLowerCtxt<'_> {
         &mut self,
         ast: &AstAttribute,
     ) -> Result<Obj<Attribute>, ErrorGuaranteed> {
-        let s = &self.tcx.session;
+        let s = self.session;
 
-        let mut resolver = FrozenModuleResolver(&self.tcx.session);
+        let mut resolver = FrozenModuleResolver(s);
 
         let err = match resolver.try_resolve_bare_path(self.root, self.scope, &ast.path) {
             Ok(item) => {
@@ -54,13 +52,11 @@ impl IntraItemLowerCtxt<'_> {
         };
 
         match self.lower_early_attribute(ast) {
-            Ok(Some(kind)) => Ok(Obj::new(
-                Attribute {
-                    span: ast.span,
-                    kind,
-                },
-                s,
-            )),
+            Ok(Some(kind)) => Ok(Attribute {
+                span: ast.span,
+                kind,
+            }
+            .alloc_obj(s)),
             Ok(None) => Err(err.emit(&resolver)),
             Err(err) => Err(err),
         }

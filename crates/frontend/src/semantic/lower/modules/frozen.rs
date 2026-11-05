@@ -1,9 +1,5 @@
 use crate::{
-    base::{
-        Session,
-        arena::{LateInit, Obj},
-        syntax::{Span, Symbol},
-    },
+    base::{Obj, Session, Span, Symbol},
     semantic::{
         lower::modules::{
             ItemCategory, ItemPathFmt, ParentResolver, PathResolver, StepLookupError,
@@ -11,6 +7,7 @@ use crate::{
         },
         syntax::{Item, TraitItem},
     },
+    utils::mem::LateInit,
 };
 use clay_core::FastHashSet;
 

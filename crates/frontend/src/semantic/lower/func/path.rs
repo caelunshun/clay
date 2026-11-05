@@ -1,5 +1,5 @@
 use crate::{
-    base::{Diag, ErrorGuaranteed, LeafDiag, Session, arena::Obj, syntax::HasSpan as _},
+    base::{Diag, ErrorGuaranteed, HasSpan as _, LeafDiag, Obj, ObjAllocExt, Session},
     parse::{
         ast::{
             AstExprPath, AstExprPathKind, AstParamedPath, AstParamedPathSegment, AstPathPartKind,
@@ -15,8 +15,7 @@ use crate::{
         syntax::{
             AdtCtorUnresolved, AdtItem, EnumVariantItem, FnItem, HirLocal, Item, ItemKind,
             LocalNameIdent, LocalNameSymbol, SigAdtInstance, SigGenericList, SigTraitParamList,
-            SigTraitSpec, SigTy, SigTyInner, SigTyKind, TraitItem, TyCtxt, TypeAliasItem,
-            TypeGeneric,
+            SigTraitSpec, SigTy, SigTyInner, SigTyKind, TraitItem, TypeAliasItem, TypeGeneric,
         },
     },
 };
@@ -190,8 +189,8 @@ pub enum PathResolvedValue {
 }
 
 impl ExprPathResolution {
-    pub fn as_value(self, path: &AstExprPath, tcx: &TyCtxt) -> Option<PathResolvedValue> {
-        if let Some(resolved_ty) = self.as_resolved_ty(path, tcx) {
+    pub fn as_value(self, s: &Session, path: &AstExprPath) -> Option<PathResolvedValue> {
+        if let Some(resolved_ty) = self.as_resolved_ty(s, path) {
             return Some(PathResolvedValue::AdtCtorTy(resolved_ty));
         }
 
@@ -216,8 +215,8 @@ impl ExprPathResolution {
         }
     }
 
-    pub fn as_adt(self, path: &AstExprPath, tcx: &TyCtxt) -> Option<AdtCtorUnresolved> {
-        if let Some(resolved_ty) = self.as_resolved_ty(path, tcx) {
+    pub fn as_adt(self, s: &Session, path: &AstExprPath) -> Option<AdtCtorUnresolved> {
+        if let Some(resolved_ty) = self.as_resolved_ty(s, path) {
             return Some(AdtCtorUnresolved::ResolvedTy(resolved_ty));
         }
 
@@ -234,38 +233,36 @@ impl ExprPathResolution {
         }
     }
 
-    pub fn as_resolved_ty(self, path: &AstExprPath, tcx: &TyCtxt) -> Option<SigTy> {
-        let s = &tcx.session;
-
+    pub fn as_resolved_ty(self, s: &Session, path: &AstExprPath) -> Option<SigTy> {
         match self {
-            ExprPathResolution::ResolvedSelfTy => Some(Obj::new(
+            ExprPathResolution::ResolvedSelfTy => Some(
                 SigTyInner {
                     span: path.span,
                     kind: SigTyKind::SelfTy,
-                },
-                s,
-            )),
-            ExprPathResolution::ResolvedAdt(def, params) => Some(Obj::new(
+                }
+                .alloc_obj(s),
+            ),
+            ExprPathResolution::ResolvedAdt(def, params) => Some(
                 SigTyInner {
                     span: path.span,
                     kind: SigTyKind::Adt(SigAdtInstance { def, params }),
-                },
-                s,
-            )),
-            ExprPathResolution::ResolvedTypeAlias(def, params) => Some(Obj::new(
+                }
+                .alloc_obj(s),
+            ),
+            ExprPathResolution::ResolvedTypeAlias(def, params) => Some(
                 SigTyInner {
                     span: path.span,
                     kind: SigTyKind::Alias(def, params),
-                },
-                s,
-            )),
-            ExprPathResolution::ResolvedGeneric(generic) => Some(Obj::new(
+                }
+                .alloc_obj(s),
+            ),
+            ExprPathResolution::ResolvedGeneric(generic) => Some(
                 SigTyInner {
                     span: path.span,
                     kind: SigTyKind::Generic(generic),
-                },
-                s,
-            )),
+                }
+                .alloc_obj(s),
+            ),
             ExprPathResolution::ResolvedModule(_)
             | ExprPathResolution::ResolvedEnumVariant(_, _)
             | ExprPathResolution::ResolvedFn(_, _)
@@ -280,7 +277,7 @@ impl ExprPathResolution {
 
 impl IntraItemLowerCtxt<'_> {
     pub fn resolve_expr_path(&mut self, path: &AstExprPath) -> ExprPathResult {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         match &path.kind {
             AstExprPathKind::Bare(path) => self.resolve_bare_expr_path(path),
@@ -342,7 +339,7 @@ impl IntraItemLowerCtxt<'_> {
     }
 
     pub fn resolve_bare_expr_path(&mut self, path: &AstParamedPath) -> ExprPathResult {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         // See whether we can resolve this as a `self` or as a function local.
         let local_like = if let [single_segment] = &path.segments[..]
@@ -495,7 +492,7 @@ impl IntraItemLowerCtxt<'_> {
         adt_segment: &AstParamedPathSegment,
         additional_segments: &[AstParamedPathSegment],
     ) -> ExprPathResult {
-        let s = &self.tcx.session;
+        let s = self.session;
         let mut resolver = FrozenModuleResolver(s);
 
         let first_generics = adt_segment.args.as_ref().map(|args| {
@@ -575,7 +572,7 @@ impl IntraItemLowerCtxt<'_> {
         variant_segment: &AstParamedPathSegment,
         additional_segments: &[AstParamedPathSegment],
     ) -> ExprPathResolution {
-        let s = &self.tcx.session;
+        let s = self.session;
         let resolver = FrozenModuleResolver(s);
 
         if let Some(further) = additional_segments.first() {
@@ -622,7 +619,7 @@ impl IntraItemLowerCtxt<'_> {
         def_segment: &AstParamedPathSegment,
         segments: &[AstParamedPathSegment],
     ) -> ExprPathResult {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         let as_trait_generics = self.lower_generics_of_trait_spec_in_fn(
             def,
@@ -656,7 +653,7 @@ impl IntraItemLowerCtxt<'_> {
         def_segment: &AstParamedPathSegment,
         segments: &[AstParamedPathSegment],
     ) -> ExprPathResult {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         let params = self.lower_generics_of_entirely_positional(
             def.r(s).item,
@@ -682,7 +679,7 @@ impl IntraItemLowerCtxt<'_> {
         def_segment: &AstParamedPathSegment,
         segments: &[AstParamedPathSegment],
     ) -> ExprPathResult {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         if let Some(extra_segment) = segments.first() {
             Diag::span_err(

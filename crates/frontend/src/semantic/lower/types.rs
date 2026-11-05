@@ -1,9 +1,5 @@
 use crate::{
-    base::{
-        Diag, ErrorGuaranteed, LeafDiag, Level,
-        arena::Obj,
-        syntax::{HasSpan as _, Span},
-    },
+    base::{Diag, ErrorGuaranteed, HasSpan as _, LeafDiag, Level, Obj, ObjIterAllocExt, Span},
     parse::{
         ast::{
             AstBarePath, AstNamedSpec, AstTraitClause, AstTraitClauseList, AstTraitOutlivesClause,
@@ -43,7 +39,7 @@ impl IntraItemLowerCtxt<'_> {
         &self,
         path: &AstBarePath,
     ) -> Result<TyPathResolution, ErrorGuaranteed> {
-        let s = &self.tcx.session;
+        let s = self.session;
         let mut resolver = FrozenModuleResolver(s);
 
         if let Some(first) = path.parts.first()
@@ -83,7 +79,7 @@ impl IntraItemLowerCtxt<'_> {
         &self,
         path: &AstBarePath,
     ) -> Result<Obj<TraitItem>, ErrorGuaranteed> {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         let offending_item = match self.resolve_ty_item_path(path)? {
             TyPathResolution::Trait(def) => return Ok(def),
@@ -146,7 +142,7 @@ impl IntraItemLowerCtxt<'_> {
     }
 
     pub fn lower_ty(&mut self, ast: &AstTy) -> SigTy {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         match &ast.kind {
             AstTyKind::This => SigTyKind::SelfTy.wrap(ast.span, s),
@@ -257,9 +253,9 @@ impl IntraItemLowerCtxt<'_> {
     }
 
     pub fn lower_tys(&mut self, ast: &[AstTy]) -> SigTyList {
-        let s = &self.tcx.session;
+        let s = self.session;
 
-        SigTyList::new_iter(ast.iter().map(|ast| self.lower_ty(ast)), s)
+        ast.iter().map(|ast| self.lower_ty(ast)).alloc_obj_list(s)
     }
 }
 
@@ -267,12 +263,12 @@ impl IntraItemLowerCtxt<'_> {
 
 impl IntraItemLowerCtxt<'_> {
     pub fn lower_clauses(&mut self, ast: Option<&AstTraitClauseList>) -> SigTraitClauseList {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         let Some(ast) = ast else {
             return SigTraitClauseList {
                 span: Span::DUMMY,
-                elems: Obj::new_slice(&[], s),
+                elems: Obj::new_empty(s),
             };
         };
 
@@ -292,7 +288,7 @@ impl IntraItemLowerCtxt<'_> {
 
         SigTraitClauseList {
             span: ast.span,
-            elems: Obj::new_slice(&clauses, s),
+            elems: Obj::new_slice_copy(s, &clauses),
         }
     }
 
@@ -344,7 +340,7 @@ impl IntraItemLowerCtxt<'_> {
         &mut self,
         ast: &AstNamedSpec,
     ) -> Result<SigTraitSpec, ErrorGuaranteed> {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         // Figure out which trait we're talking about.
         let def = self.resolve_ty_item_path_as_trait(&ast.path)?;
@@ -363,7 +359,7 @@ impl IntraItemLowerCtxt<'_> {
 
         self.lower_associated_type_generic_params(def, &mut params, &associated);
 
-        let params = SigTraitParamList::new_slice(&params, s);
+        let params = Obj::new_slice_copy(s, &params);
 
         Ok(SigTraitSpec {
             span: ast.span,
