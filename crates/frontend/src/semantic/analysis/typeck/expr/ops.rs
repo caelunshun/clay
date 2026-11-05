@@ -1,8 +1,7 @@
 use crate::{
     base::{
-        Diag,
-        arena::{HasInterner, HasListInterner as _, LateInit, Obj},
-        syntax::Span,
+        Diag, Intern, IterInternExt, ListInternable, Obj, ObjAllocExt, ObjIterAllocExt, Span,
+        ValueInternable,
     },
     parse::{
         ast::{AstAssignOpKind, AstBinOpKind, AstBinOpSpanned, AstLit, AstUnOpKind},
@@ -10,7 +9,9 @@ use crate::{
     },
     semantic::{
         analysis::typeck::{BodyCtxt, infra::confirm::ThirExprConfirmedWithTy},
-        infer::{ClauseCx, ClauseFuel, ClausePrettyFmtOpts, HrtbUniverse, SpannedError},
+        infer::{
+            ClauseCx, ClauseFuel, ClausePrettyFmtOpts, HrtbUniverse, SpannedError, ToDebugTree as _,
+        },
         syntax::{
             Divergence, FloatKind, FnInstanceInner, FnOwner, HirExpr, InferTyVarSourceInfo,
             IntKind, LocalNameIdent, Mutability, Re, RelationMode, SimpleTyKind, SimpleTySet,
@@ -19,7 +20,7 @@ use crate::{
         },
     },
     symbol,
-    utils::format::ToDebugTree as _,
+    utils::mem::LateInit,
 };
 
 // === BodyCtxt === //
@@ -30,7 +31,7 @@ impl BodyCtxt<'_, '_> {
         expr: Obj<HirExpr>,
         lit: AstLit,
     ) -> ThirExprConfirmedWithTy {
-        let tcx = self.tcx();
+        let s = self.session();
 
         let ty = match lit {
             AstLit::Number(lit) => {
@@ -87,11 +88,11 @@ impl BodyCtxt<'_, '_> {
                     constraints,
                 );
                 self.register_infer_with_fallback(var);
-                tcx.intern(TyKind::InferVar(var))
+                TyKind::InferVar(var).intern(s)
             }
-            AstLit::Char(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Char)),
-            AstLit::String(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Str)),
-            AstLit::Bool(_) => tcx.intern(TyKind::Simple(SimpleTyKind::Bool)),
+            AstLit::Char(_) => TyKind::Simple(SimpleTyKind::Char).intern(s),
+            AstLit::String(_) => TyKind::Simple(SimpleTyKind::Str).intern(s),
+            AstLit::Bool(_) => TyKind::Simple(SimpleTyKind::Bool).intern(s),
         };
 
         self.put_thir_expr(expr, ty, move |_bcx| ThirExprKind::CreateLiteral(lit))
@@ -106,7 +107,6 @@ impl BodyCtxt<'_, '_> {
         divergence: &mut Divergence,
     ) -> ThirExprConfirmedWithTy {
         let s = self.session();
-        let tcx = self.tcx();
 
         let lhs = self.check_expr(lhs_expr, None).and_do(divergence);
         let rhs = self.check_expr(rhs_expr, None).and_do(divergence);
@@ -211,10 +211,11 @@ impl BodyCtxt<'_, '_> {
                 lhs,
                 TraitSpec {
                     def: overload,
-                    params: tcx.intern_list(&[
+                    params: [
                         TraitParam::Equals(TyOrRe::Ty(rhs)),
                         TraitParam::Equals(TyOrRe::Ty(result_ty)),
-                    ]),
+                    ]
+                    .intern(s),
                 },
             )
             // TODO
@@ -228,37 +229,38 @@ impl BodyCtxt<'_, '_> {
             let s = bcx.session();
 
             ThirExprKind::Call(
-                Obj::new(
-                    ThirExpr {
-                        span: expr.r(s).span,
-                        ty: bcx.ccx_mut().export(
-                            expr.r(s).span,
-                            tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
+                ThirExpr {
+                    span: expr.r(s).span,
+                    ty: bcx.ccx_mut().export(
+                        expr.r(s).span,
+                        TyKind::FnDef(
+                            FnInstanceInner {
                                 owner: FnOwner::Trait {
                                     instance: TraitSpec {
                                         def: overload,
-                                        params: tcx.intern_list(&[
+                                        params: [
                                             TraitParam::Equals(TyOrRe::Ty(rhs)),
                                             TraitParam::Equals(TyOrRe::Ty(result_ty)),
-                                        ]),
+                                        ]
+                                        .intern(s),
                                     },
                                     self_ty: lhs,
                                     method_idx: 0,
                                 },
-                                early_args: Some(tcx.intern_list(&[])),
-                            }))),
-                        ),
-                        kind: LateInit::new(ThirExprKind::CreateZst),
-                    },
-                    s,
-                ),
-                Obj::new_iter(
-                    [
-                        bcx.confirm_thir_expr_post(lhs_expr),
-                        bcx.confirm_thir_expr_post(rhs_expr),
-                    ],
-                    s,
-                ),
+                                early_args: Some(Intern::new_empty(s)),
+                            }
+                            .intern(s),
+                        )
+                        .intern(s),
+                    ),
+                    kind: LateInit::new(ThirExprKind::CreateZst),
+                }
+                .alloc_obj(s),
+                [
+                    bcx.confirm_thir_expr_post(lhs_expr),
+                    bcx.confirm_thir_expr_post(rhs_expr),
+                ]
+                .alloc_obj_list(s),
             )
         })
     }
@@ -271,7 +273,6 @@ impl BodyCtxt<'_, '_> {
         divergence: &mut Divergence,
     ) -> ThirExprConfirmedWithTy {
         let s = self.session();
-        let tcx = self.tcx();
 
         let lhs_ty = self.check_expr(lhs, None).and_do(divergence);
 
@@ -311,7 +312,7 @@ impl BodyCtxt<'_, '_> {
 
         let op_trait_spec = TraitSpec {
             def: kind_info.overload.unwrap(),
-            params: tcx.intern_list(&[TraitParam::Equals(TyOrRe::Ty(result_ty))]),
+            params: TraitParam::Equals(TyOrRe::Ty(result_ty)).intern_single(s),
         };
 
         self.ccx_mut()
@@ -331,21 +332,21 @@ impl BodyCtxt<'_, '_> {
 
         self.put_thir_expr(expr, result_ty, move |bcx| {
             let s = bcx.session();
-            let tcx = bcx.tcx();
 
             let args = [bcx.confirm_thir_expr_post(lhs)];
 
             bcx.create_thir_instance_call(
                 expr.r(s).span,
-                tcx.intern(FnInstanceInner {
+                FnInstanceInner {
                     owner: FnOwner::Trait {
                         instance: op_trait_spec,
                         self_ty: lhs_ty,
                         method_idx: 0,
                     },
                     early_args: None,
-                }),
-                args,
+                }
+                .intern(s),
+                args.alloc_obj_list(s),
             )
         })
     }
@@ -358,7 +359,6 @@ impl BodyCtxt<'_, '_> {
         rhs_expr: Obj<HirExpr>,
         divergence: &mut Divergence,
     ) -> ThirExprConfirmedWithTy {
-        let tcx = self.tcx();
         let s = self.session();
 
         let lhs = self.check_expr(lhs_expr, None).and_do(divergence);
@@ -401,7 +401,7 @@ impl BodyCtxt<'_, '_> {
 
             *self.ccx_mut() = prim_fork;
 
-            let unit_ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
+            let unit_ty = TyKind::Tuple(Intern::new_empty(s)).intern(s);
 
             // TODO
             return self.put_thir_expr(expr, unit_ty, move |bcx| {
@@ -427,10 +427,11 @@ impl BodyCtxt<'_, '_> {
 
         let op_trait_spec = TraitSpec {
             def: kind_info.overload.unwrap(),
-            params: tcx.intern_list(&[
+            params: [
                 TraitParam::Equals(TyOrRe::Ty(rhs)),
                 TraitParam::Equals(TyOrRe::Ty(result_ty)),
-            ]),
+            ]
+            .intern(s),
         };
 
         self.ccx_mut()
@@ -448,11 +449,10 @@ impl BodyCtxt<'_, '_> {
             })
             .report_loud();
 
-        let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
+        let ty = TyKind::Tuple(Intern::new_empty(s)).intern(s);
 
         self.put_thir_expr(expr, ty, move |bcx| {
             let s = bcx.session();
-            let tcx = bcx.tcx();
 
             let args = [
                 bcx.confirm_thir_expr_post(lhs_expr),
@@ -461,15 +461,16 @@ impl BodyCtxt<'_, '_> {
 
             bcx.create_thir_instance_call(
                 expr.r(s).span,
-                tcx.intern(FnInstanceInner {
+                FnInstanceInner {
                     owner: FnOwner::Trait {
                         instance: op_trait_spec,
                         self_ty: lhs,
                         method_idx: 0,
                     },
                     early_args: None,
-                }),
-                args,
+                }
+                .intern(s),
+                args.alloc_obj_list(s),
             )
         })
     }
@@ -483,29 +484,26 @@ impl BodyCtxt<'_, '_> {
         rhs_expr: Obj<HirExpr>,
     ) -> ThirExprKind {
         let s = self.session();
-        let tcx = self.tcx();
 
-        let unit_ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
-        let lhs_ref_ty = tcx.intern(TyKind::Reference(Re::ERASED, Mutability::Mut, lhs_ty));
+        let unit_ty = TyKind::Tuple(Intern::new_empty(s)).intern(s);
+        let lhs_ref_ty = TyKind::Reference(Re::ERASED, Mutability::Mut, lhs_ty).intern(s);
 
-        let lhs_stash = Obj::new(
-            ThirLocal {
-                mutability: Mutability::Not,
-                name: LocalNameIdent::User(Ident::new(span, symbol!("lhs_stash"))),
-                ty: self.ccx_mut().export(span, lhs_ref_ty),
-            },
-            s,
-        );
+        let lhs_stash = ThirLocal {
+            mutability: Mutability::Not,
+            name: LocalNameIdent::User(Ident::new(span, symbol!("lhs_stash"))),
+            ty: self.ccx_mut().export(span, lhs_ref_ty),
+        }
+        .alloc_obj(s);
 
-        ThirExprKind::Block(Obj::new(
+        ThirExprKind::Block(
             ThirBlock {
                 span,
                 stmts: [
-                    ThirStmt::Let(Obj::new(
+                    ThirStmt::Let(
                         ThirLetStmt {
                             span,
                             pat: self.create_thir_local_pat(span, lhs_stash),
-                            init: Some(Obj::new(
+                            init: Some(
                                 ThirExpr {
                                     span,
                                     ty: self.ccx_mut().export(span, lhs_ref_ty),
@@ -513,41 +511,39 @@ impl BodyCtxt<'_, '_> {
                                         Mutability::Mut,
                                         self.confirm_thir_expr_post(lhs_expr),
                                     )),
-                                },
-                                s,
-                            )),
+                                }
+                                .alloc_obj(s),
+                            ),
                             else_clause: None,
-                        },
-                        s,
-                    )),
-                    ThirStmt::Expr(Obj::new(
+                        }
+                        .alloc_obj(s),
+                    ),
+                    ThirStmt::Expr(
                         ThirExpr {
                             span,
                             ty: self.ccx_mut().export(span, unit_ty),
                             kind: LateInit::new(ThirExprKind::Assign(
                                 self.create_thir_local_deref_expr(span, lhs_stash),
-                                Obj::new(
-                                    ThirExpr {
-                                        span,
-                                        ty: self.ccx_mut().export(span, lhs_ty),
-                                        kind: LateInit::new(ThirExprKind::PrimitiveBinOp(
-                                            op,
-                                            self.create_thir_local_deref_expr(span, lhs_stash),
-                                            self.confirm_thir_expr_post(rhs_expr),
-                                        )),
-                                    },
-                                    s,
-                                ),
+                                ThirExpr {
+                                    span,
+                                    ty: self.ccx_mut().export(span, lhs_ty),
+                                    kind: LateInit::new(ThirExprKind::PrimitiveBinOp(
+                                        op,
+                                        self.create_thir_local_deref_expr(span, lhs_stash),
+                                        self.confirm_thir_expr_post(rhs_expr),
+                                    )),
+                                }
+                                .alloc_obj(s),
                             )),
-                        },
-                        s,
-                    )),
+                        }
+                        .alloc_obj(s),
+                    ),
                 ]
                 .into(),
                 last_expr: ThirBlockTrailing::Present(self.create_thir_unit_ctor(span)),
-            },
-            s,
-        ))
+            }
+            .alloc_obj(s),
+        )
     }
 
     pub fn check_expr_inner_index(
@@ -557,7 +553,6 @@ impl BodyCtxt<'_, '_> {
         index: Obj<HirExpr>,
         divergence: &mut Divergence,
     ) -> ThirExprConfirmedWithTy {
-        let tcx = self.tcx();
         let s = self.session();
 
         let target_ty = self.check_expr(target, None).and_do(divergence);
@@ -578,10 +573,11 @@ impl BodyCtxt<'_, '_> {
 
         let index_trait_spec = TraitSpec {
             def: index_trait,
-            params: tcx.intern_list(&[
+            params: [
                 TraitParam::Equals(TyOrRe::Ty(index_ty)),
                 TraitParam::Equals(TyOrRe::Ty(output_ty)),
-            ]),
+            ]
+            .intern(s),
         };
 
         self.ccx_mut()
@@ -602,7 +598,6 @@ impl BodyCtxt<'_, '_> {
 
         self.put_thir_expr(expr, output_ty, move |bcx| {
             let s = bcx.session();
-            let tcx = bcx.tcx();
 
             let args = [
                 bcx.confirm_thir_expr_post(target),
@@ -611,15 +606,16 @@ impl BodyCtxt<'_, '_> {
 
             bcx.create_thir_instance_call(
                 expr.r(s).span,
-                tcx.intern(FnInstanceInner {
+                FnInstanceInner {
                     owner: FnOwner::Trait {
                         instance: index_trait_spec,
                         self_ty: target_ty,
                         method_idx: 0,
                     },
                     early_args: None,
-                }),
-                args,
+                }
+                .intern(s),
+                args.alloc_obj_list(s),
             )
         })
     }
@@ -696,7 +692,6 @@ impl BodyCtxt<'_, '_> {
 
     pub fn decode_bin_op_kind(&self, op: AstBinOpKind) -> BinaryOperation {
         let s = self.session();
-        let tcx = self.tcx();
         let lang_items = &self.krate().r(s).lang_items;
 
         match op {
@@ -769,7 +764,7 @@ impl BodyCtxt<'_, '_> {
             AstBinOpKind::Eq => BinaryOperation {
                 lhs: SimpleTySet::NUM | SimpleTySet::BOOL,
                 rhs: EquateOrSet::EqualsLhs,
-                out: EquateOrTy::Unrelated(tcx.intern(TyKind::Simple(SimpleTyKind::Bool))),
+                out: EquateOrTy::Unrelated(TyKind::Simple(SimpleTyKind::Bool).intern(s)),
                 overload: lang_items.partial_eq_trait(),
             },
             AstBinOpKind::Lt
@@ -779,7 +774,7 @@ impl BodyCtxt<'_, '_> {
             | AstBinOpKind::Gt => BinaryOperation {
                 lhs: SimpleTySet::NUM,
                 rhs: EquateOrSet::EqualsLhs,
-                out: EquateOrTy::Unrelated(tcx.intern(TyKind::Simple(SimpleTyKind::Bool))),
+                out: EquateOrTy::Unrelated(TyKind::Simple(SimpleTyKind::Bool).intern(s)),
                 overload: lang_items.ord_trait(),
             },
         }

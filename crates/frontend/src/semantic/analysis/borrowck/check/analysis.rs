@@ -1,18 +1,21 @@
-use crate::semantic::{
-    analysis::borrowck::check::{
-        dataflow::{BackwardsDataflowAnalysis, DataflowOutput, ForwardsDataflowAnalysis},
-        places::{PlaceNumbering, PlaceSet, is_place_direct, truncate_place_to_direct},
-    },
-    syntax::{
-        MirBlockRef, MirBody, MirPlace, MirPlaceMentionKind, MirStmtRef, MirTerminatorSuccessor,
-        TraverseMentions, TyCtxt,
+use crate::{
+    base::{Intern, Session},
+    semantic::{
+        analysis::borrowck::check::{
+            dataflow::{BackwardsDataflowAnalysis, DataflowOutput, ForwardsDataflowAnalysis},
+            places::{PlaceNumbering, PlaceSet, is_place_direct, truncate_place_to_direct},
+        },
+        syntax::{
+            MirBlockRef, MirBody, MirPlace, MirPlaceMentionKind, MirStmtRef,
+            MirTerminatorSuccessor, TraverseMentions,
+        },
     },
 };
 
 // === LivenessAnalysis === //
 
 pub struct LivenessAnalysis<'g> {
-    pub tcx: &'g TyCtxt,
+    pub session: &'g Session,
     pub body: &'g MirBody,
     pub place_numbering: &'g PlaceNumbering,
 }
@@ -34,15 +37,15 @@ impl<'g> BackwardsDataflowAnalysis<'g> for LivenessAnalysis<'g> {
         input: &Self::Lattice,
         output: &mut DataflowOutput<Self::Lattice>,
     ) {
-        let s = &self.tcx.session;
+        let s = self.session;
         let mut new_output = input.clone();
 
-        for &mention in stmt.kind().mentions(self.tcx).iter().rev() {
+        for &mention in stmt.kind().mentions(self.session).iter().rev() {
             if mention.kind.intersects(MirPlaceMentionKind::LIVENESS_USE) {
                 new_output.add_place(
                     s,
                     self.place_numbering,
-                    truncate_place_to_direct(self.tcx, mention.place),
+                    truncate_place_to_direct(self.session, mention.place),
                 );
             }
 
@@ -62,7 +65,7 @@ impl<'g> BackwardsDataflowAnalysis<'g> for LivenessAnalysis<'g> {
         inputs: &[&Self::Lattice],
         output: &mut DataflowOutput<Self::Lattice>,
     ) {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         let mut new_output_success = PlaceSet::default();
         let mut new_output_unwind = PlaceSet::default();
@@ -75,9 +78,9 @@ impl<'g> BackwardsDataflowAnalysis<'g> for LivenessAnalysis<'g> {
             }
         }
 
-        for &mention in block.terminator_kind().mentions(self.tcx).iter().rev() {
+        for &mention in block.terminator_kind().mentions(self.session).iter().rev() {
             if mention.kind.intersects(MirPlaceMentionKind::LIVENESS_USE) {
-                let place = truncate_place_to_direct(self.tcx, mention.place);
+                let place = truncate_place_to_direct(self.session, mention.place);
 
                 new_output_success.add_place(s, self.place_numbering, place);
                 new_output_unwind.add_place(s, self.place_numbering, place);
@@ -98,7 +101,7 @@ impl<'g> BackwardsDataflowAnalysis<'g> for LivenessAnalysis<'g> {
 // === OccupancyAnalysis === //
 
 pub struct OccupancyAnalysis<'g> {
-    pub tcx: &'g TyCtxt,
+    pub session: &'g Session,
     pub body: &'g MirBody,
     pub place_numbering: &'g PlaceNumbering,
     pub mode: OccupancyAnalysisMode,
@@ -118,12 +121,16 @@ impl<'g> ForwardsDataflowAnalysis<'g> for OccupancyAnalysis<'g> {
     }
 
     fn init_effect(&mut self, is_entry: bool) -> Self::Lattice {
-        let s = &self.tcx.session;
+        let s = self.session;
         let mut set = PlaceSet::default();
 
         if is_entry {
             for local in self.body.arg_locals() {
-                set.add_place(s, self.place_numbering, MirPlace::new(self.tcx, local, []));
+                set.add_place(
+                    s,
+                    self.place_numbering,
+                    MirPlace::new(local, Intern::new_empty(s)),
+                );
             }
         }
 
@@ -162,11 +169,11 @@ impl<'g> ForwardsDataflowAnalysis<'g> for OccupancyAnalysis<'g> {
         input: &Self::Lattice,
         output: &mut Self::Lattice,
     ) {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         output.clone_from(input);
 
-        for mention in stmt.kind().mentions(self.tcx) {
+        for mention in stmt.kind().mentions(self.session) {
             if mention.kind.intersects(MirPlaceMentionKind::OCCUPANCY_ADD) {
                 if is_place_direct(s, mention.place) {
                     output.add_place(s, self.place_numbering, mention.place);
@@ -187,12 +194,12 @@ impl<'g> ForwardsDataflowAnalysis<'g> for OccupancyAnalysis<'g> {
         input: &Self::Lattice,
         outputs: &mut [&mut DataflowOutput<Self::Lattice>],
     ) {
-        let s = &self.tcx.session;
+        let s = self.session;
 
         let mut new_output_success = input.clone();
         let mut new_output_unwind = input.clone();
 
-        for mention in block.terminator_kind().mentions(self.tcx) {
+        for mention in block.terminator_kind().mentions(self.session) {
             if mention.kind.intersects(MirPlaceMentionKind::OCCUPANCY_ADD) {
                 if is_place_direct(s, mention.place) {
                     new_output_success.add_place(s, self.place_numbering, mention.place);

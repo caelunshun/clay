@@ -1,8 +1,5 @@
 use crate::{
-    base::{
-        Diag,
-        arena::{HasInterner as _, HasListInterner as _, Obj},
-    },
+    base::{Diag, Intern, Obj, ObjAllocExt, ValueInternable},
     semantic::{
         analysis::typeck::{BodyCtxt, infra::confirm::ThirExprConfirmedWithTy},
         infer::{HrtbUniverse, SpannedError},
@@ -35,14 +32,12 @@ impl BodyCtxt<'_, '_> {
     pub fn create_thir_block_no_trailing(&mut self, block: Obj<HirBlock>) -> Obj<ThirBlock> {
         let s = self.session();
 
-        Obj::new(
-            ThirBlock {
-                span: block.r(s).span,
-                stmts: self.create_thir_block_stmts(block),
-                last_expr: ThirBlockTrailing::MissingNotApplicable,
-            },
-            s,
-        )
+        ThirBlock {
+            span: block.r(s).span,
+            stmts: self.create_thir_block_stmts(block),
+            last_expr: ThirBlockTrailing::MissingNotApplicable,
+        }
+        .alloc_obj(s)
     }
 
     pub fn check_block_expr(
@@ -52,7 +47,6 @@ impl BodyCtxt<'_, '_> {
         demand_hint: Option<Ty>,
         divergence: &mut Divergence,
     ) -> ThirExprConfirmedWithTy {
-        let tcx = self.tcx();
         let s = self.session();
 
         let label = HirLabelledBlock {
@@ -77,7 +71,7 @@ impl BodyCtxt<'_, '_> {
                     self.ccx_mut()
                         .oblige_ty_unifies_ty(
                             demand,
-                            tcx.intern(TyKind::Tuple(tcx.intern_list(&[]))),
+                            TyKind::Tuple(Intern::new_empty(s)).intern(s),
                             RelationMode::Equate,
                         )
                         // TODO
@@ -90,16 +84,16 @@ impl BodyCtxt<'_, '_> {
 
                 demand
             } else if divergence.must_diverge() {
-                tcx.intern(TyKind::Simple(SimpleTyKind::Never))
+                TyKind::Simple(SimpleTyKind::Never).intern(s)
             } else {
-                tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))
+                TyKind::Tuple(Intern::new_empty(s)).intern(s)
             }
         };
 
         self.put_thir_expr(expr, ty, move |bcx| {
             let s = bcx.session();
 
-            ThirExprKind::Block(Obj::new(
+            ThirExprKind::Block(
                 ThirBlock {
                     span: block.r(s).span,
                     stmts: bcx.create_thir_block_stmts(block),
@@ -114,9 +108,9 @@ impl BodyCtxt<'_, '_> {
                             ),
                         },
                     },
-                },
-                s,
-            ))
+                }
+                .alloc_obj(s),
+            )
         })
     }
 
@@ -173,7 +167,7 @@ impl BodyCtxt<'_, '_> {
             .iter()
             .map(|&stmt| match stmt {
                 HirStmt::Expr(expr) => ThirStmt::Expr(self.confirm_thir_expr_post(expr)),
-                HirStmt::Let(stmt) => ThirStmt::Let(Obj::new(
+                HirStmt::Let(stmt) => ThirStmt::Let(
                     ThirLetStmt {
                         span: stmt.r(s).span,
                         pat: self.confirm_thir_pat(stmt.r(s).pat).outer,
@@ -182,9 +176,9 @@ impl BodyCtxt<'_, '_> {
                             .r(s)
                             .else_clause
                             .map(|block| self.create_thir_block_no_trailing(block)),
-                    },
-                    s,
-                )),
+                    }
+                    .alloc_obj(s),
+                ),
             })
             .collect::<Vec<_>>()
     }

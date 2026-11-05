@@ -1,8 +1,5 @@
 use crate::{
-    base::{
-        Diag, Session, anon_delay_bug,
-        arena::{HasInterner, HasListInterner, Obj},
-    },
+    base::{Diag, Intern, IterInternExt, Obj, Session, ValueInternable, anon_delay_bug},
     flags,
     semantic::{
         analysis::{
@@ -21,18 +18,18 @@ use crate::{
         },
         infer::{
             ClauseCx, ClauseImportEnv, ClausePrettyFmtOpts, GenericSubst, MirSpannedError,
-            UnifyCxMode,
+            ToDebugTree as _, UnifyCxMode,
         },
         syntax::{
             AdtInstance, FnDef, MirBlockIdx, MirBody, MirBodyDirection, MirLocalIdx,
             MirLocationAfter, MirPlace, MirPlaceElem, MirPlaceMention, MirPlaceMentionKind,
             MirPrettyFmt, MirPrettyFmtHooks, MirRvalue, MirSourceInfo, MirStmtIdx, MirStmtKind,
             MirStraightBinOpKind, MirStraightUnOpKind, MirTerminatorKind, Re, RelationDirection,
-            RelationMode, ResolvedFieldIdx, SimpleTyKind, TraverseMentions, Ty, TyCtxt, TyKind,
-            TyOrRe, UniversalReVarSourceInfo,
+            RelationMode, ResolvedFieldIdx, SimpleTyKind, TraverseMentions, Ty, TyKind, TyOrRe,
+            UniversalReVarSourceInfo,
         },
     },
-    utils::{format::ToDebugTree, lang::NewtypedRangeExt as _},
+    utils::lang::NewtypedRangeExt as _,
 };
 use index_vec::IndexVec;
 use std::{cell::RefCell, fmt};
@@ -43,18 +40,17 @@ use std::{cell::RefCell, fmt};
 // TODO: mutability analysis
 pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     let s = cx.session();
-    let tcx = cx.tcx();
 
     let Some(body) = &*def.r(s).mir_body else {
         return;
     };
 
     // Analyze dataflow facts about body
-    let place_numbering = number_places_in_body(tcx, body);
+    let place_numbering = number_places_in_body(s, body);
 
     let mut liveness_scratch = DataflowScratch::default();
     let mut liveness_analysis = LivenessAnalysis {
-        tcx,
+        session: s,
         body,
         place_numbering: &place_numbering,
     };
@@ -66,7 +62,7 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
 
     let mut occupancy_scratch = DataflowScratch::default();
     let mut occupancy_analysis = OccupancyAnalysis {
-        tcx,
+        session: s,
         body,
         place_numbering: &place_numbering,
         mode: OccupancyAnalysisMode::May,
@@ -108,7 +104,7 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
         }
     }
 
-    let fmt_cx = MirPrettyFmt::new(tcx, body);
+    let fmt_cx = MirPrettyFmt::new(s, body);
 
     if flags::should_print_mir_dataflow() {
         pub struct FmtHooks<'r, 'a> {
@@ -177,7 +173,7 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
                 s,
                 occupancy_iter.trans_before(stmt.stmt).clone(),
                 &place_numbering,
-                &stmt.kind().mentions(tcx),
+                &stmt.kind().mentions(s),
                 fmt_cx.plain_stmt(stmt.stmt()),
             );
         }
@@ -186,13 +182,13 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
             s,
             occupancy_iter.trans_before_end(block.block).clone(),
             &place_numbering,
-            &block.terminator_kind().mentions(tcx),
+            &block.terminator_kind().mentions(s),
             fmt_cx.plain_terminator(block.terminator()),
         );
     }
 
     // Check regions
-    let mut ccx = ClauseCx::new(tcx, &cx.impl_cache, cx.krate, UnifyCxMode::RegionAware);
+    let mut ccx = ClauseCx::new(s, &cx.impl_cache, cx.krate, UnifyCxMode::RegionAware);
     let env = ccx.universal_env_for_fn_def(def);
     // TODO: add dyn-site universals to environment
 
@@ -355,7 +351,7 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     // FIXME: more fine-grained
     for (local_idx, local_ty) in body.locals.indices().zip(&imported_locals) {
         for atomic in place_numbering
-            .lookup_range(s, MirPlace::new(tcx, local_idx, []))
+            .lookup_range(s, MirPlace::new(local_idx, Intern::new_empty(s)))
             .iter_newtyped()
         {
             re_tcx
@@ -387,10 +383,6 @@ struct RegionTyCheckCx<'a, 'tcx> {
 }
 
 impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
-    fn tcx(&self) -> &'tcx TyCtxt {
-        self.ccx.tcx()
-    }
-
     fn session(&self) -> &'tcx Session {
         self.ccx.session()
     }
@@ -450,7 +442,6 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
 
     fn check_place(&mut self, place: MirPlace) -> Ty {
         let s = self.session();
-        let tcx = self.tcx();
 
         let mut ty = self.imported_locals[place.local];
 
@@ -458,7 +449,7 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
             ty = match proj {
                 MirPlaceElem::DerefPtr => {
                     let TyKind::Reference(_lt, _muta, pointee) = *ty.r(s) else {
-                        return tcx.intern(TyKind::Error(anon_delay_bug("ill-formed place")));
+                        return TyKind::Error(anon_delay_bug("ill-formed place")).intern(s);
                     };
 
                     pointee
@@ -468,14 +459,14 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
                     max_elems: _,
                 }) => {
                     let TyKind::Tuple(elems) = *ty.r(s) else {
-                        return tcx.intern(TyKind::Error(anon_delay_bug("ill-formed place")));
+                        return TyKind::Error(anon_delay_bug("ill-formed place")).intern(s);
                     };
 
                     elems.r(s)[*field_idx as usize]
                 }
                 MirPlaceElem::Field(ResolvedFieldIdx::Adt(ctor, field_idx)) => {
                     let TyKind::Adt(AdtInstance { def, params }) = *ty.r(s) else {
-                        return tcx.intern(TyKind::Error(anon_delay_bug("ill-formed place")));
+                        return TyKind::Error(anon_delay_bug("ill-formed place")).intern(s);
                     };
 
                     let adt_env = ClauseImportEnv::new(
@@ -494,21 +485,19 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
 
     fn check_assign(&mut self, source_info: MirSourceInfo, lhs: Ty, rvalue: &MirRvalue) {
         let s = self.session();
-        let tcx = self.tcx();
 
         match rvalue {
             MirRvalue::UnreachablePlaceholder => {
                 unreachable!()
             }
             MirRvalue::Tuple(operands) => {
-                let rhs = tcx.intern(TyKind::Tuple(
-                    tcx.intern_list(
-                        &operands
-                            .iter()
-                            .map(|op| self.check_place(op.place()))
-                            .collect::<Vec<_>>(),
-                    ),
-                ));
+                let rhs = TyKind::Tuple(
+                    operands
+                        .iter()
+                        .map(|op| self.check_place(op.place()))
+                        .intern(s),
+                )
+                .intern(s);
 
                 self.check_assign_types(source_info, lhs, rhs);
             }
@@ -559,7 +548,7 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
                     // reference.
 
                     let TyKind::Reference(ref_lt, _, _) = *self
-                        .check_place(pointee.truncate_to_len(tcx, last_deref))
+                        .check_place(pointee.truncate_to_len(s, last_deref))
                         .r(s)
                     else {
                         anon_delay_bug("ill-formed dereference");
@@ -588,7 +577,7 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
                     ref_lt
                 };
 
-                let rhs = tcx.intern(TyKind::Reference(ref_lt, *mutability, pointee_ty));
+                let rhs = TyKind::Reference(ref_lt, *mutability, pointee_ty).intern(s);
                 self.check_assign_types(source_info, lhs, rhs);
             }
             MirRvalue::Zst(ty) | MirRvalue::Literal(ty, _) => {
@@ -615,7 +604,7 @@ impl<'a, 'tcx> RegionTyCheckCx<'a, 'tcx> {
                     | MirStraightBinOpKind::Le
                     | MirStraightBinOpKind::Ne
                     | MirStraightBinOpKind::Ge
-                    | MirStraightBinOpKind::Gt => tcx.intern(TyKind::Simple(SimpleTyKind::Bool)),
+                    | MirStraightBinOpKind::Gt => TyKind::Simple(SimpleTyKind::Bool).intern(s),
                 };
 
                 self.check_assign_types(source_info, lhs, rhs);

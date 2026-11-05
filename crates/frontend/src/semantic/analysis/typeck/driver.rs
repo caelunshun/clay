@@ -1,16 +1,13 @@
 use crate::{
-    base::{
-        Session,
-        arena::{LateInit, Obj},
-    },
+    base::{Obj, Session},
     semantic::{
         analysis::{sigck::CrateSigckVisitor, typeck::infra::confirm::BodyCtxtConfirmState},
         infer::{ClauseCx, ClauseImportEnv, HrtbUniverse, UnifyCx, UnifyCxMode},
         syntax::{
             Crate, FnDef, HirLabelledBlock, HirLocal, InferTyVarSourceInfo, Item, ThirBody, Ty,
-            TyCtxt,
         },
     },
+    utils::mem::LateInit,
 };
 use clay_core::FastHashMap;
 
@@ -18,11 +15,10 @@ use clay_core::FastHashMap;
 
 pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     let s = cx.session();
-    let tcx = cx.tcx();
 
     // Setup a `ClauseCx` for signature validation.
     {
-        let mut ccx = ClauseCx::new(tcx, cx.impl_cache, cx.krate, UnifyCxMode::RegionAware);
+        let mut ccx = ClauseCx::new(s, cx.impl_cache, cx.krate, UnifyCxMode::RegionAware);
         let env_sig = ccx.universal_env_for_fn_def(def);
 
         // WF-check the signature.
@@ -38,7 +34,7 @@ pub fn type_check_function(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     }
 
     // Check the body
-    let mut ccx = ClauseCx::new(tcx, cx.impl_cache, cx.krate, UnifyCxMode::RegionBlind);
+    let mut ccx = ClauseCx::new(s, cx.impl_cache, cx.krate, UnifyCxMode::RegionBlind);
     let env_sig = ccx.universal_env_for_fn_def(def);
 
     let Some(body) = *def.r(s).hir_body else {
@@ -114,10 +110,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
             confirm_state: BodyCtxtConfirmState::default(),
             return_ty,
         }
-    }
-
-    pub fn tcx(&self) -> &'tcx TyCtxt {
-        self.ccx.tcx()
     }
 
     pub fn session(&self) -> &'tcx Session {

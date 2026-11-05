@@ -1,5 +1,5 @@
 use crate::{
-    base::arena::{HasInterner, HasListInterner, Obj},
+    base::{ListInternable, Obj, ValueInternable},
     semantic::{
         analysis::typeck::{BodyCtxt, infra::deref::attempt_deref_clobber_obligations},
         infer::{ClauseCx, ClauseFuel, HrtbUniverse, SpannedError},
@@ -82,7 +82,6 @@ impl BodyCtxt<'_, '_> {
 
     fn apply_coercions(&mut self, exprs: &[(Obj<HirExpr>, Ty)], target: CoercionResolution) -> Ty {
         let s = self.session();
-        let tcx = self.tcx();
         let krate = self.krate();
 
         match target {
@@ -154,9 +153,8 @@ impl BodyCtxt<'_, '_> {
                                         output_pointee,
                                         TraitSpec {
                                             def: krate.r(s).lang_items.deref_trait().unwrap(),
-                                            params: tcx.intern_list(&[TraitParam::Equals(
-                                                TyOrRe::Ty(next_output),
-                                            )]),
+                                            params: TraitParam::Equals(TyOrRe::Ty(next_output))
+                                                .intern_single(s),
                                         },
                                     )
                                     // TODO
@@ -169,7 +167,7 @@ impl BodyCtxt<'_, '_> {
                                 output_pointee = next_output;
                             }
 
-                            tcx.intern(TyKind::Reference(Re::ERASED, to_muta, output_pointee))
+                            TyKind::Reference(Re::ERASED, to_muta, output_pointee).intern(s)
                         }
                     };
 
@@ -211,7 +209,7 @@ impl BodyCtxt<'_, '_> {
                         .report_loud();
                 }
 
-                tcx.intern(TyKind::Trait(Re::ERASED, to_muta, to_clauses))
+                TyKind::Trait(Re::ERASED, to_muta, to_clauses).intern(s)
             }
         }
     }

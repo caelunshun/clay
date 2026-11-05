@@ -1,5 +1,5 @@
 use crate::{
-    base::arena::{HasInterner as _, HasListInterner as _},
+    base::{ListInternable, ValueInternable},
     semantic::{
         infer::{ClauseCx, ClauseFuel, HrtbUniverse, PromiseProbe},
         syntax::{InferTyVarSourceInfo, TraitParam, TraitSpec, Ty, TyKind, TyOrRe},
@@ -20,13 +20,12 @@ pub fn attempt_deref(ccx: &mut ClauseCx<'_>, curr: Ty) -> Option<Ty> {
 
 pub fn attempt_deref_clobber_obligations(ccx: &mut ClauseCx<'_>, curr: Ty) -> Option<Ty> {
     let s = ccx.session();
-    let tcx = ccx.tcx();
     let krate = ccx.krate();
 
     let next_infer_var =
         ccx.fresh_ty_infer_var(HrtbUniverse::ROOT, InferTyVarSourceInfo::DerefHelper);
 
-    let next_infer = tcx.intern(TyKind::InferVar(next_infer_var));
+    let next_infer = TyKind::InferVar(next_infer_var).intern(s);
 
     // This probing routine works by attempting to resolve an obligation as much as possible and
     // bailing out if an error occurs.
@@ -82,7 +81,7 @@ pub fn attempt_deref_clobber_obligations(ccx: &mut ClauseCx<'_>, curr: Ty) -> Op
         curr,
         TraitSpec {
             def: krate.r(s).lang_items.deref_trait().unwrap(),
-            params: tcx.intern_list(&[TraitParam::Equals(TyOrRe::Ty(next_infer))]),
+            params: TraitParam::Equals(TyOrRe::Ty(next_infer)).intern_single(s),
         },
     )
     .probe(probe.clone());

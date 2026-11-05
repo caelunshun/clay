@@ -1,10 +1,7 @@
 use clay_frontend::{
-    base::{
-        Session,
-        syntax::{NaiveSegmenter, SourceFileOrigin},
-    },
+    base::{NaiveSegmenter, Session, SourceFileOrigin},
     parse::{ast::parse_file, token::tokenize},
-    semantic::{analysis::check_crate, lower::entry::lower_full_ast, syntax::TyCtxt},
+    semantic::{analysis::check_crate, lower::entry::lower_full_ast},
 };
 use std::{env, fs, path::Path, rc::Rc};
 
@@ -21,6 +18,7 @@ fn main() {
 
     let session = Session::new();
     let _guard = session.clone().bind();
+    let s = &session;
 
     let path = Path::new(entrypoint);
 
@@ -33,9 +31,8 @@ fn main() {
     let tokens = tokenize(span);
     let ast = parse_file(&tokens);
 
-    let tcx = TyCtxt::new(session.clone());
-    let krate = lower_full_ast(&tcx, &ast);
-    check_crate(&tcx, krate);
+    let krate = lower_full_ast(s, &ast);
+    check_crate(s, krate);
 
     _ = session.diag.finish();
 }

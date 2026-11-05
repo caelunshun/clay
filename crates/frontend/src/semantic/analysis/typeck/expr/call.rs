@@ -1,8 +1,5 @@
 use crate::{
-    base::{
-        Diag,
-        arena::{HasInterner, HasListInterner as _, LateInit, Obj},
-    },
+    base::{Diag, IterInternExt, Obj, ObjAllocExt, ValueInternable},
     parse::token::Ident,
     semantic::{
         analysis::typeck::{
@@ -18,6 +15,7 @@ use crate::{
             SigGenericList, ThirExpr, ThirExprKind, TraitParam, TraitSpec, TyKind, TyOrRe,
         },
     },
+    utils::mem::LateInit,
 };
 
 impl BodyCtxt<'_, '_> {
@@ -28,7 +26,6 @@ impl BodyCtxt<'_, '_> {
         actual_args: Obj<[Obj<HirExpr>]>,
         divergence: &mut Divergence,
     ) -> ThirExprConfirmedWithTy {
-        let tcx = self.tcx();
         let s = self.session();
 
         let callee = self.check_expr(callee_expr, None).and_do(divergence);
@@ -60,10 +57,11 @@ impl BodyCtxt<'_, '_> {
                 callee,
                 TraitSpec {
                     def: fn_once_trait,
-                    params: tcx.intern_list(&[
+                    params: [
                         TraitParam::Equals(TyOrRe::Ty(input_ty)),
                         TraitParam::Equals(TyOrRe::Ty(output_ty)),
-                    ]),
+                    ]
+                    .intern(s),
                 },
             )
             // TODO
@@ -195,19 +193,16 @@ impl BodyCtxt<'_, '_> {
 
         self.put_thir_expr(expr, expected_output, move |bcx| {
             let s = bcx.session();
-            let tcx = bcx.tcx();
 
             ThirExprKind::Call(
-                Obj::new(
-                    ThirExpr {
-                        span: expr.r(s).span,
-                        ty: bcx
-                            .ccx_mut()
-                            .export(expr.r(s).span, tcx.intern(TyKind::FnDef(instance))),
-                        kind: LateInit::new(ThirExprKind::CreateZst),
-                    },
-                    s,
-                ),
+                ThirExpr {
+                    span: expr.r(s).span,
+                    ty: bcx
+                        .ccx_mut()
+                        .export(expr.r(s).span, TyKind::FnDef(instance).intern(s)),
+                    kind: LateInit::new(ThirExprKind::CreateZst),
+                }
+                .alloc_obj(s),
                 bcx.confirm_thir_expr_iter_post(
                     [receiver_expr]
                         .iter()

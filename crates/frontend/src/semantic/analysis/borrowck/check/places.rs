@@ -1,8 +1,8 @@
 use crate::{
-    base::{Session, arena::HasListInterner},
+    base::{Intern, IterInternExt, Session},
     semantic::syntax::{
         AdtCtorOwner, MirBody, MirBodyDirection, MirPlace, MirPlaceElem, MirPrettyFmt,
-        ResolvedFieldIdx, TraverseMentions, TyCtxt,
+        ResolvedFieldIdx, TraverseMentions,
     },
     utils::{
         format::DebugAsDisplay,
@@ -221,26 +221,25 @@ impl PlaceNumberingBuilder {
     }
 }
 
-pub fn number_places_in_body(tcx: &TyCtxt, body: &MirBody) -> PlaceNumbering {
-    let s = &tcx.session;
+pub fn number_places_in_body(s: &Session, body: &MirBody) -> PlaceNumbering {
     let mut builder = PlaceNumberingBuilder::new(body.locals.len());
 
     for local in body.locals.indices() {
-        builder.mention(s, MirPlace::new(tcx, local, []));
+        builder.mention(s, MirPlace::new(local, Intern::new_empty(s)));
     }
 
     for block in body.blocks() {
         for stmt in block.stmts(MirBodyDirection::Forwards) {
             cbit::cbit! {
-                for mention in stmt.kind().iter_mentions(tcx) {
-                    builder.mention(s, truncate_place_to_direct(tcx, mention.place));
+                for mention in stmt.kind().iter_mentions(s) {
+                    builder.mention(s, truncate_place_to_direct(s, mention.place));
                 }
             }
         }
 
         cbit::cbit! {
-            for mention in block.terminator_kind().iter_mentions(tcx) {
-                builder.mention(s, truncate_place_to_direct(tcx, mention.place));
+            for mention in block.terminator_kind().iter_mentions(s) {
+                builder.mention(s, truncate_place_to_direct(s, mention.place));
             }
         }
     }
@@ -248,20 +247,16 @@ pub fn number_places_in_body(tcx: &TyCtxt, body: &MirBody) -> PlaceNumbering {
     builder.finish()
 }
 
-pub fn truncate_place_to_direct(tcx: &TyCtxt, place: MirPlace) -> MirPlace {
-    let s = &tcx.session;
-
+pub fn truncate_place_to_direct(s: &Session, place: MirPlace) -> MirPlace {
     MirPlace {
         local: place.local,
-        projections: tcx.intern_list(
-            &place
-                .projections
-                .r(s)
-                .iter()
-                .copied()
-                .take_while(|v| is_part_direct(*v))
-                .collect::<Vec<_>>(),
-        ),
+        projections: place
+            .projections
+            .r(s)
+            .iter()
+            .copied()
+            .take_while(|v| is_part_direct(*v))
+            .intern(s),
     }
 }
 

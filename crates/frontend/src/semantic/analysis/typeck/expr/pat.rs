@@ -1,8 +1,7 @@
 use crate::{
     base::{
-        Diag, ErrorGuaranteed,
-        arena::{HasInterner as _, HasListInterner, LateInit, Obj},
-        syntax::{HasSpan, Span},
+        Diag, ErrorGuaranteed, HasSpan as _, Intern, IterInternExt, ListInternable, Obj,
+        ObjAllocExt, ObjIterAllocExt, Span, ValueInternable,
     },
     parse::{
         ast::{AstMutability, AstPatStructRest},
@@ -10,7 +9,7 @@ use crate::{
     },
     semantic::{
         analysis::typeck::{BodyCtxt, infra::confirm::ThirExprConfirmedWithTy},
-        infer::{ClauseImportEnv, GenericSubst, HrtbUniverse, ClausePrettyFmtOpts, SpannedError},
+        infer::{ClauseImportEnv, ClausePrettyFmtOpts, GenericSubst, HrtbUniverse, SpannedError},
         syntax::{
             AdtCtorField, AdtCtorInstance, AdtCtorSyntaxStyle, AdtCtorUnresolved, AdtInstance,
             Divergence, HirExpr, HirLocal, HirPat, HirPatKind, HirPatListFrontAndTail,
@@ -20,6 +19,7 @@ use crate::{
         },
     },
     symbol,
+    utils::mem::LateInit,
 };
 
 #[derive(Debug)]
@@ -51,7 +51,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         rhs: Obj<HirExpr>,
         divergence: &mut Divergence,
     ) -> ThirExprConfirmedWithTy {
-        let tcx = self.tcx();
+        let s = self.session();
 
         let mut pat_lvalue_state = PatLvalueState::default();
         let pat_ty = self.check_pat_infer(lhs, Some(&mut pat_lvalue_state));
@@ -60,7 +60,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
         self.check_expr_demand(rhs, pat_ty).and_do(divergence);
 
-        let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
+        let ty = TyKind::Tuple(Intern::new_empty(s)).intern(s);
 
         self.put_thir_expr(expr, ty, move |bcx| {
             let s = bcx.session();
@@ -77,27 +77,26 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         pat_lvalue_state: PatLvalueState,
     ) -> ThirExprKind {
         let s = self.session();
-        let tcx = self.tcx();
 
-        let unit_ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
+        let unit_ty = TyKind::Tuple(Intern::new_empty(s)).intern(s);
         let unit_ty_exp = self.ccx_mut().export(span, unit_ty);
 
         let stmts =
-            [ThirStmt::Let(Obj::new(
+            [ThirStmt::Let(
                 ThirLetStmt {
                     span,
                     pat: self.confirm_thir_pat_outer(lhs),
                     init: Some(self.confirm_thir_expr_post(rhs)),
                     else_clause: None,
-                },
-                s,
-            ))]
+                }
+                .alloc_obj(s),
+            )]
             .into_iter()
             .chain(pat_lvalue_state.temporaries.into_iter().map(
                 |PatLvalueTemp { stash, place }| {
                     let stash = self.confirm_thir_local(stash);
 
-                    ThirStmt::Expr(Obj::new(
+                    ThirStmt::Expr(
                         ThirExpr {
                             span,
                             ty: unit_ty_exp,
@@ -105,21 +104,21 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                                 self.confirm_thir_expr_post(place),
                                 self.create_thir_local_expr(stash.r(s).name.span(), stash),
                             )),
-                        },
-                        s,
-                    ))
+                        }
+                        .alloc_obj(s),
+                    )
                 },
             ))
             .collect::<Vec<_>>();
 
-        ThirExprKind::Block(Obj::new(
+        ThirExprKind::Block(
             ThirBlock {
                 span,
                 stmts,
                 last_expr: ThirBlockTrailing::Present(self.create_thir_unit_ctor(span)),
-            },
-            s,
-        ))
+            }
+            .alloc_obj(s),
+        )
     }
 
     pub fn check_pat_infer(&mut self, pat: Obj<HirPat>, lvalue: Option<&mut PatLvalueState>) -> Ty {
@@ -152,7 +151,6 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         mut lvalues: Option<&mut PatLvalueState>,
     ) {
         let s = self.session();
-        let tcx = self.tcx();
 
         let res = match pat.r(s).kind {
             HirPatKind::Hole | HirPatKind::Error(_) => {
@@ -166,7 +164,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                 let local_ty = self.type_of_local(name);
                 let bound_ty = if let Some(by_ref) = by_ref {
-                    tcx.intern(TyKind::Reference(Re::ERASED, by_ref, demand))
+                    TyKind::Reference(Re::ERASED, by_ref, demand).intern(s)
                 } else {
                     demand
                 };
@@ -209,10 +207,11 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 self.ccx_mut()
                     .oblige_ty_unifies_ty(
                         demand,
-                        tcx.intern(TyKind::Adt(AdtInstance {
+                        TyKind::Adt(AdtInstance {
                             def: vec_lang_item,
-                            params: tcx.intern_list(&[TyOrRe::Ty(elem_ty)]),
-                        })),
+                            params: TyOrRe::Ty(elem_ty).intern_single(s),
+                        })
+                        .intern(s),
                         RelationMode::Equate,
                     )
                     // TODO
@@ -254,11 +253,11 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                             },
                         )
                     })
-                    .collect::<Vec<_>>();
+                    .intern(s);
 
                 self.ccx_mut()
                     .oblige_ty_unifies_ty(
-                        tcx.intern(TyKind::Tuple(tcx.intern_list(&front_infer))),
+                        TyKind::Tuple(front_infer).intern(s),
                         demand,
                         RelationMode::Equate,
                     )
@@ -269,7 +268,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                     })
                     .report_loud();
 
-                for (pat, &demand) in hir_list.zip(&front_infer, s) {
+                for (pat, &demand) in hir_list.zip(front_infer.r(s), s) {
                     self.check_pat_inner(pat, demand, default_by_ref, lvalues.as_deref_mut());
                 }
 
@@ -295,7 +294,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                             pat.r(s).span,
                             format_args!(
                                 "demand type must be tuple; got {}",
-                                self.ccx().pretty(ClausePrettyFmtOpts::default()).wrap(demand)
+                                self.ccx()
+                                    .pretty(ClausePrettyFmtOpts::default())
+                                    .wrap(demand)
                             ),
                         )
                         .emit());
@@ -327,11 +328,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                 if let Err(err) = res {
                     self.ccx_mut()
-                        .unify_ty_and_ty(
-                            demand,
-                            tcx.intern(TyKind::Error(err)),
-                            RelationMode::Equate,
-                        )
+                        .unify_ty_and_ty(demand, TyKind::Error(err).intern(s), RelationMode::Equate)
                         .unwrap()
                         .report_never();
                 }
@@ -370,7 +367,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 self.ccx_mut()
                     .oblige_ty_unifies_ty(
                         demand,
-                        tcx.intern(TyKind::Reference(Re::ERASED, mutability, pointee_ty)),
+                        TyKind::Reference(Re::ERASED, mutability, pointee_ty).intern(s),
                         RelationMode::Equate,
                     )
                     // TODO
@@ -402,7 +399,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 self.put_thir_pat(pat, demand, move |bcx| {
                     let s = bcx.session();
 
-                    ThirPatKind::Adt(ctor.def, Obj::new_iter([], s))
+                    ThirPatKind::Adt(ctor.def, Obj::new_empty(s))
                 })
             }
             HirPatKind::AdtTuple(instance, fields) => 'check: {
@@ -422,7 +419,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 };
 
                 let adt_item = ctor.def.r(s).owner.item(s);
-                let adt_ty = ctor.to_adt_instance_ty(tcx);
+                let adt_ty = ctor.to_adt_instance_ty(s);
 
                 // Verify tuple arity
                 let expected_len = ctor.def.r(s).fields.len() as u32;
@@ -451,7 +448,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                 // Check fields
                 for (pat, field) in fields.zip(&ctor.def.r(s).fields, s) {
-                    if !field.vis.is_visible_to(self.item(), s) {
+                    if !field.vis.is_visible_to(s, self.item()) {
                         Diag::span_err(
                             pat.r(s).span,
                             format_args!(
@@ -480,15 +477,13 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                     ThirPatKind::Adt(
                         ctor.def,
-                        Obj::new_iter(
-                            fields
-                                .zip(&ctor.def.r(s).fields, s)
-                                .map(|(pat, field)| ThirPatField {
-                                    idx: field.idx,
-                                    pat: bcx.confirm_thir_pat_outer(pat),
-                                }),
-                            s,
-                        ),
+                        fields
+                            .zip(&ctor.def.r(s).fields, s)
+                            .map(|(pat, field)| ThirPatField {
+                                idx: field.idx,
+                                pat: bcx.confirm_thir_pat_outer(pat),
+                            })
+                            .alloc_obj_list(s),
                     )
                 })
             }
@@ -511,7 +506,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 };
 
                 let adt_item = ctor.def.r(s).owner.item(s);
-                let adt_ty = ctor.to_adt_instance_ty(tcx);
+                let adt_ty = ctor.to_adt_instance_ty(s);
 
                 // Verify fields
                 let field_mapping = self.match_up_ctor_members(
@@ -546,15 +541,13 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 
                     ThirPatKind::Adt(
                         ctor.def,
-                        Obj::new_iter(
-                            field_mapping
-                                .into_iter()
-                                .map(|(resolved_idx, pat)| ThirPatField {
-                                    idx: resolved_idx,
-                                    pat: bcx.confirm_thir_pat_outer(pat),
-                                }),
-                            s,
-                        ),
+                        field_mapping
+                            .into_iter()
+                            .map(|(resolved_idx, pat)| ThirPatField {
+                                idx: resolved_idx,
+                                pat: bcx.confirm_thir_pat_outer(pat),
+                            })
+                            .alloc_obj_list(s),
                     )
                 })
             }
@@ -564,13 +557,11 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 self.check_expr_demand(place, demand)
                     .and_do(&mut lvalues.divergence);
 
-                let stash = Obj::new(
-                    HirLocal {
-                        mutability: Mutability::Not,
-                        name: LocalNameIdent::User(Ident::new(place.r(s).span, symbol!("tmp"))),
-                    },
-                    s,
-                );
+                let stash = HirLocal {
+                    mutability: Mutability::Not,
+                    name: LocalNameIdent::User(Ident::new(place.r(s).span, symbol!("tmp"))),
+                }
+                .alloc_obj(s);
 
                 let stash_ty = self.type_of_local(stash);
 
@@ -617,14 +608,13 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         default_by_ref: &mut Option<Mutability>,
     ) -> Result<AdtCtorInstance, ErrorGuaranteed> {
         let s = self.session();
-        let tcx = self.tcx();
 
         let ctor = self.resolve_adt_ctor(instance_span, instance)?;
 
         self.peel_references_from_demand_and_normalize(pat, demand, default_by_ref);
 
         self.ccx_mut()
-            .oblige_ty_unifies_ty(*demand, ctor.to_adt_instance_ty(tcx), RelationMode::Equate)
+            .oblige_ty_unifies_ty(*demand, ctor.to_adt_instance_ty(s), RelationMode::Equate)
             // TODO
             .map({
                 let span = pat.r(s).span;
@@ -640,7 +630,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
                 format_args!(
                     "expected {} constructor but {} has a {} constructor",
                     expected_syntax.style_name(),
-                    self.ccx().pretty(ClausePrettyFmtOpts::default()).wrap(ctor.def),
+                    self.ccx()
+                        .pretty(ClausePrettyFmtOpts::default())
+                        .wrap(ctor.def),
                     actual_syntax.style_name(),
                 ),
             )

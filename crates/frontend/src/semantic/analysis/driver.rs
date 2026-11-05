@@ -1,18 +1,16 @@
 use crate::{
-    base::{ErrorGuaranteed, arena::Obj},
+    base::{ErrorGuaranteed, Obj, Session},
     semantic::{
         analysis::sigck::CrateSigckVisitor,
         infer::ImplCache,
-        syntax::{AttributeKind, Crate, EarlyAttrLang, TyCtxt},
+        syntax::{AttributeKind, Crate, EarlyAttrLang},
     },
 };
 
-pub fn check_crate(tcx: &TyCtxt, krate: Obj<Crate>) {
-    let s = &tcx.session;
-
+pub fn check_crate(s: &Session, krate: Obj<Crate>) {
     // Populate implementation cache
     let mut impl_cache = ImplCache::default();
-    impl_cache.populate(tcx, krate);
+    impl_cache.populate(s, krate);
 
     // Discover language items
     for &def in &**krate.r(s).items {
@@ -22,13 +20,13 @@ pub fn check_crate(tcx: &TyCtxt, krate: Obj<Crate>) {
             };
 
             let (Ok(()) | Err(ErrorGuaranteed)) =
-                krate.r(s).lang_items.define(tcx, name, attr.r(s).span, def);
+                krate.r(s).lang_items.define(s, name, attr.r(s).span, def);
         }
     }
 
     // Signature-check crate
     CrateSigckVisitor {
-        tcx,
+        session: s,
         impl_cache: &impl_cache,
         krate,
     }

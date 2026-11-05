@@ -1,5 +1,5 @@
 use crate::{
-    base::arena::{HasListInterner as _, Obj},
+    base::{Intern, Obj},
     parse::ast::{AstBinOpKind, AstBoolLit, AstLit},
     semantic::{
         analysis::borrowck::{
@@ -109,7 +109,6 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         expr: Obj<ThirExpr>,
         mut assign_into: Option<MirPlace>,
     ) -> MirRvalueOrPlace {
-        let tcx = self.tcx();
         let s = self.session();
 
         match *expr.r(s).kind {
@@ -176,7 +175,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 )),
                 MirUnOpKind::Deref => MirRvalueOrPlace::Place(
                     self.lower_expr_place(scope, lhs, None)
-                        .extend(tcx, [MirPlaceElem::DerefPtr]),
+                        .extend(s, [MirPlaceElem::DerefPtr]),
                 ),
             },
             ThirExprKind::NoOp(expr) => self.lower_expr_preferred(scope, expr, assign_into),
@@ -204,7 +203,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 self.push_assign(
                     scope,
                     MirSourceInfo::Todo,
-                    MirPlace::new(tcx, MirLocalIdx::RETURN, []),
+                    MirPlace::new(MirLocalIdx::RETURN, Intern::new_empty(s)),
                     rv,
                 );
                 self.push_return(scope, MirSourceInfo::Todo);
@@ -276,7 +275,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
             }
             ThirExprKind::Field(target, field) => MirRvalueOrPlace::Place(
                 self.lower_expr_place(scope, target, None)
-                    .extend(tcx, [MirPlaceElem::Field(field)]),
+                    .extend(s, [MirPlaceElem::Field(field)]),
             ),
             ThirExprKind::CreateBracedAdt { ctor, fields, rest } => {
                 if let Some(rest) = rest {
@@ -293,7 +292,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                             scope,
                             field.init,
                             Some(output.extend(
-                                tcx,
+                                s,
                                 [MirPlaceElem::Field(ResolvedFieldIdx::Adt(ctor, field.idx))],
                             )),
                         );
@@ -316,9 +315,10 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                     ))
                 }
             }
-            ThirExprKind::Local(local) => {
-                MirRvalueOrPlace::Place(MirPlace::new(tcx, self.thir_locals[&local], []))
-            }
+            ThirExprKind::Local(local) => MirRvalueOrPlace::Place(MirPlace::new(
+                self.thir_locals[&local],
+                Intern::new_empty(s),
+            )),
             ThirExprKind::If {
                 cond,
                 truthy,
@@ -367,7 +367,6 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         assign_into: Option<MirPlace>,
     ) {
         let s = self.session();
-        let tcx = self.tcx();
 
         for &stmt in &block.r(s).stmts {
             match stmt {
@@ -384,7 +383,7 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                                 this.lower_expr_place(
                                     scope,
                                     expr,
-                                    Some(MirPlace::new(tcx, new_place, [])),
+                                    Some(MirPlace::new(new_place, Intern::new_empty(s))),
                                 );
                             }
                             CanOmitDrop::Yes => {
@@ -524,11 +523,11 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         place: &mut Option<MirPlace>,
         ty: SigTy,
     ) -> MirPlace {
-        let tcx = self.tcx();
+        let s = self.session();
 
         *place.get_or_insert_with(|| MirPlace {
             local: self.push_local(scope, MirLocal { ty }),
-            projections: tcx.intern_list(&[]),
+            projections: Intern::new_empty(s),
         })
     }
 }

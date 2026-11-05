@@ -1,5 +1,5 @@
 use crate::{
-    base::arena::{HasInterner as _, HasListInterner as _, Obj},
+    base::{Intern, ListInternable, Obj, ValueInternable},
     parse::ast::AstRangeLimits,
     semantic::{
         analysis::typeck::BodyCtxt,
@@ -45,15 +45,15 @@ impl CheckedRangeExpr {
 
     pub fn range_ty(self, bcx: &mut BodyCtxt<'_, '_>) -> Ty {
         let s = bcx.session();
-        let tcx = bcx.tcx();
 
-        tcx.intern(TyKind::Adt(AdtInstance {
+        TyKind::Adt(AdtInstance {
             def: self.lang_item(&bcx.krate().r(s).lang_items),
             params: match self.elem_ty() {
-                Some(ty) => tcx.intern_list(&[TyOrRe::Ty(ty)]),
-                None => tcx.intern_list(&[]),
+                Some(ty) => TyOrRe::Ty(ty).intern_single(s),
+                None => Intern::new_empty(s),
             },
-        }))
+        })
+        .intern(s)
     }
 }
 

@@ -1,8 +1,5 @@
 use crate::{
-    base::{
-        Session,
-        arena::{LateInit, Obj},
-    },
+    base::{Intern, Obj, Session},
     flags,
     semantic::{
         analysis::{
@@ -12,34 +9,34 @@ use crate::{
         infer::ImplCache,
         syntax::{
             FnDef, MirBody, MirLocal, MirLocalIdx, MirPlace, MirPrettyFmt, MirRvalue, MirScopeIdx,
-            MirSourceInfo, ThirBody, ThirExpr, ThirLocal, TyCtxt,
+            MirSourceInfo, ThirBody, ThirExpr, ThirLocal,
         },
     },
+    utils::mem::LateInit,
 };
 use clay_core::FastHashMap;
 
 pub fn build_function_mir(check_cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     let s = check_cx.session();
-    let tcx = check_cx.tcx();
 
     let Some(body) = &*def.r(s).thir_body else {
         LateInit::init(&def.r(s).mir_body, None);
         return;
     };
 
-    let mut build_cx = MirFromThirCtx::new(tcx, check_cx.impl_cache, def);
+    let mut build_cx = MirFromThirCtx::new(s, check_cx.impl_cache, def);
     build_cx.lower_fn(body);
     let body = build_cx.finish();
 
     if flags::should_print_mir_scopes() {
-        println!("{}", MirPrettyFmt::new(tcx, &body).flat_body());
+        println!("{}", MirPrettyFmt::new(s, &body).flat_body());
     }
 
     LateInit::init(&def.r(s).mir_body, Some(body));
 }
 
 pub struct MirFromThirCtx<'tcx> {
-    pub tcx: &'tcx TyCtxt,
+    pub session: &'tcx Session,
     pub def: Obj<FnDef>,
     pub raw_builder: RawMirScopedBuilder<'tcx>,
     pub trait_cache: TraitCache<'tcx>,
@@ -70,14 +67,12 @@ pub struct LabelledScope {
 }
 
 impl<'tcx> MirFromThirCtx<'tcx> {
-    pub fn new(tcx: &'tcx TyCtxt, impl_cache: &'tcx ImplCache, def: Obj<FnDef>) -> Self {
-        let s = &tcx.session;
-
+    pub fn new(s: &'tcx Session, impl_cache: &'tcx ImplCache, def: Obj<FnDef>) -> Self {
         let mut this = Self {
-            tcx,
+            session: s,
             def,
-            raw_builder: RawMirScopedBuilder::new(tcx),
-            trait_cache: TraitCache::new(tcx, impl_cache, def),
+            raw_builder: RawMirScopedBuilder::new(s),
+            trait_cache: TraitCache::new(s, impl_cache, def),
             labelled_scopes: FastHashMap::default(),
             thir_locals: FastHashMap::default(),
         };
@@ -96,17 +91,12 @@ impl<'tcx> MirFromThirCtx<'tcx> {
         this
     }
 
-    pub fn tcx(&self) -> &'tcx TyCtxt {
-        self.tcx
-    }
-
     pub fn session(&self) -> &'tcx Session {
-        &self.tcx.session
+        self.session
     }
 
     pub fn lower_fn(&mut self, body: &ThirBody) {
         let s = self.session();
-        let tcx = self.tcx();
 
         let scope = MirScopeIdx::ENTRY;
 
@@ -123,14 +113,14 @@ impl<'tcx> MirFromThirCtx<'tcx> {
                 hir_arg.span,
                 scope,
                 *thir_pat,
-                MirPlace::new(tcx, MirLocalIdx::from_usize(1 + idx), []),
+                MirPlace::new(MirLocalIdx::from_usize(1 + idx), Intern::new_empty(s)),
             );
         }
 
         self.lower_expr_place(
             scope,
             body.expr,
-            Some(MirPlace::new(tcx, MirLocalIdx::RETURN, [])),
+            Some(MirPlace::new(MirLocalIdx::RETURN, Intern::new_empty(s))),
         );
 
         self.push_return(scope, MirSourceInfo::BlockFallthrough);

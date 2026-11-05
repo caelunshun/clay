@@ -1,12 +1,12 @@
 use crate::{
     base::{
-        Diag,
-        arena::{HasInterner as _, HasListInterner as _, LateInit, Obj},
+        Diag, Intern, IterInternExt, ListInternable, Obj, ObjAllocExt, ObjIterAllocExt,
+        ValueInternable,
     },
     semantic::{
         analysis::typeck::BodyCtxt,
         infer::{
-            ClauseFuel, ClauseImportEnv, FixArity, GenericSubst, HrtbUniverse, ClausePrettyFmtOpts,
+            ClauseFuel, ClauseImportEnv, ClausePrettyFmtOpts, FixArity, GenericSubst, HrtbUniverse,
             SpannedError,
         },
         syntax::{
@@ -18,6 +18,7 @@ use crate::{
             UniversalTy, UniversalTyRootSourceInfo,
         },
     },
+    utils::mem::LateInit,
 };
 
 impl BodyCtxt<'_, '_> {
@@ -27,7 +28,6 @@ impl BodyCtxt<'_, '_> {
         demand_hint: Option<Ty>,
     ) -> TyAndDivergence {
         let s = self.session();
-        let tcx = self.tcx();
         let import_env = self.import_env;
 
         let mut divergence = Divergence::MayDiverge;
@@ -47,10 +47,11 @@ impl BodyCtxt<'_, '_> {
 
                 let vec_lang_item = self.krate().r(s).lang_items.vec().unwrap();
 
-                let ty = tcx.intern(TyKind::Adt(AdtInstance {
+                let ty = TyKind::Adt(AdtInstance {
                     def: vec_lang_item,
-                    params: tcx.intern_list(&[TyOrRe::Ty(elem)]),
-                }));
+                    params: TyOrRe::Ty(elem).intern_single(s),
+                })
+                .intern(s);
 
                 self.put_thir_expr(expr, ty, move |bcx| {
                     // ThirExprKind::CreateArray(bcx.confirm_thir_expr_list_post(elems))
@@ -74,13 +75,14 @@ impl BodyCtxt<'_, '_> {
                 &mut divergence,
             ),
             HirExprKind::Tuple(children_exprs) => {
-                let children = children_exprs
-                    .r(s)
-                    .iter()
-                    .map(|&expr| self.check_expr(expr, None).and_do(&mut divergence))
-                    .collect::<Vec<_>>();
-
-                let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&children)));
+                let ty = TyKind::Tuple(
+                    children_exprs
+                        .r(s)
+                        .iter()
+                        .map(|&expr| self.check_expr(expr, None).and_do(&mut divergence))
+                        .intern(s),
+                )
+                .intern(s);
 
                 self.put_thir_expr(expr, ty, move |bcx| {
                     ThirExprKind::CreateTuple(bcx.confirm_thir_expr_list_post(children_exprs))
@@ -96,7 +98,7 @@ impl BodyCtxt<'_, '_> {
             HirExprKind::FnItemLit(def, early_args) => {
                 let env = self.import_env;
 
-                let ty = tcx.intern(TyKind::FnDef(
+                let ty = TyKind::FnDef(
                     self.ccx_mut()
                         .importer_here(env)
                         .import_fn_instance_from_owner(
@@ -105,7 +107,8 @@ impl BodyCtxt<'_, '_> {
                             FixArity::AssumeCorrect,
                         )
                         .report_loud(),
-                ));
+                )
+                .intern(s);
 
                 self.put_thir_expr(expr, ty, |_bcx| ThirExprKind::CreateZst)
             }
@@ -165,11 +168,9 @@ impl BodyCtxt<'_, '_> {
                         self.ccx_mut()
                             .init_ty_universal_direct_clauses(universal, clauses);
 
-                        let ty = tcx.intern(TyKind::Reference(
-                            lt,
-                            muta,
-                            tcx.intern(TyKind::Universal(universal)),
-                        ));
+                        let ty =
+                            TyKind::Reference(lt, muta, TyKind::Universal(universal).intern(s))
+                                .intern(s);
 
                         self.put_thir_expr(expr, ty, move |bcx| {
                             ThirExprKind::DynUse(site, bcx.confirm_thir_expr_post(target))
@@ -182,7 +183,9 @@ impl BodyCtxt<'_, '_> {
                             target.r(s).span,
                             format_args!(
                                 "expected `dyn Trait`-object, got `{}`",
-                                self.ccx().pretty(ClausePrettyFmtOpts::default()).wrap(inner_ty)
+                                self.ccx()
+                                    .pretty(ClausePrettyFmtOpts::default())
+                                    .wrap(inner_ty)
                             ),
                         )
                         .emit(),
@@ -194,7 +197,7 @@ impl BodyCtxt<'_, '_> {
                 truthy,
                 falsy,
             } => {
-                self.check_expr_demand(cond, tcx.intern(TyKind::Simple(SimpleTyKind::Bool)))
+                self.check_expr_demand(cond, TyKind::Simple(SimpleTyKind::Bool).intern(s))
                     .and_do(&mut divergence);
 
                 // TODO: Flatten
@@ -212,12 +215,12 @@ impl BodyCtxt<'_, '_> {
                 })
             }
             HirExprKind::While(cond, block) => {
-                self.check_expr_demand(cond, tcx.intern(TyKind::Simple(SimpleTyKind::Bool)))
+                self.check_expr_demand(cond, TyKind::Simple(SimpleTyKind::Bool).intern(s))
                     .and_do(&mut divergence);
 
                 self.check_block_no_trailing(block);
 
-                let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
+                let ty = TyKind::Tuple(Intern::new_empty(s)).intern(s);
 
                 self.put_thir_expr(expr, ty, move |bcx| {
                     let s = bcx.session();
@@ -226,59 +229,55 @@ impl BodyCtxt<'_, '_> {
 
                     let unit_ty = bcx
                         .ccx_mut()
-                        .export(span, tcx.intern(TyKind::Tuple(tcx.intern_list(&[]))));
+                        .export(span, TyKind::Tuple(Intern::new_empty(s)).intern(s));
 
-                    ThirExprKind::Loop(Obj::new(
+                    ThirExprKind::Loop(
                         ThirBlock {
                             span,
-                            stmts: [ThirStmt::Expr(Obj::new(
+                            stmts: [ThirStmt::Expr(
                                 ThirExpr {
                                     span,
                                     ty: unit_ty,
                                     kind: LateInit::new(ThirExprKind::If {
                                         cond: bcx.confirm_thir_expr_post(cond),
-                                        truthy: Obj::new(
-                                            ThirExpr {
-                                                span,
-                                                ty: unit_ty,
-                                                kind: LateInit::new(ThirExprKind::Block(Obj::new(
-                                                    ThirBlock {
-                                                        span: block.r(s).span,
-                                                        stmts: bcx.create_thir_block_stmts(block),
-                                                        last_expr: ThirBlockTrailing::Present(
-                                                            bcx.create_thir_unit_ctor(
-                                                                block.r(s).span,
-                                                            ),
-                                                        ),
-                                                    },
-                                                    s,
-                                                ))),
-                                            },
-                                            s,
-                                        ),
-                                        falsy: Some(Obj::new(
+                                        truthy: ThirExpr {
+                                            span,
+                                            ty: unit_ty,
+                                            kind: LateInit::new(ThirExprKind::Block(
+                                                ThirBlock {
+                                                    span: block.r(s).span,
+                                                    stmts: bcx.create_thir_block_stmts(block),
+                                                    last_expr: ThirBlockTrailing::Present(
+                                                        bcx.create_thir_unit_ctor(block.r(s).span),
+                                                    ),
+                                                }
+                                                .alloc_obj(s),
+                                            )),
+                                        }
+                                        .alloc_obj(s),
+                                        falsy: Some(
                                             ThirExpr {
                                                 span,
                                                 ty: bcx.ccx_mut().export(
                                                     span,
-                                                    tcx.intern(TyKind::Simple(SimpleTyKind::Never)),
+                                                    TyKind::Simple(SimpleTyKind::Never).intern(s),
                                                 ),
                                                 kind: LateInit::new(ThirExprKind::Break(
                                                     bcx.confirm_thir_expr_post(expr),
                                                     bcx.create_thir_unit_ctor(span),
                                                 )),
-                                            },
-                                            s,
-                                        )),
+                                            }
+                                            .alloc_obj(s),
+                                        ),
                                     }),
-                                },
-                                s,
-                            ))]
+                                }
+                                .alloc_obj(s),
+                            )]
                             .into(),
                             last_expr: ThirBlockTrailing::MissingNotApplicable,
-                        },
-                        s,
-                    ))
+                        }
+                        .alloc_obj(s),
+                    )
                 })
             }
             HirExprKind::Let(pat, scrutinee_expr) => {
@@ -287,7 +286,7 @@ impl BodyCtxt<'_, '_> {
                     .and_do(&mut divergence);
                 self.check_pat_demand(pat, scrutinee, None);
 
-                let ty = tcx.intern(TyKind::Simple(SimpleTyKind::Bool));
+                let ty = TyKind::Simple(SimpleTyKind::Bool).intern(s);
 
                 self.put_thir_expr(expr, ty, move |bcx| {
                     ThirExprKind::Let(
@@ -313,10 +312,11 @@ impl BodyCtxt<'_, '_> {
                         iter_ty,
                         TraitSpec {
                             def: into_iter_trait,
-                            params: tcx.intern_list(&[
-                                TraitParam::Unspecified(tcx.intern_list(&[])),
+                            params: [
+                                TraitParam::Unspecified(Intern::new_empty(s)),
                                 TraitParam::Equals(TyOrRe::Ty(elem_ty)),
-                            ]),
+                            ]
+                            .intern(s),
                         },
                     )
                     // TODO
@@ -330,7 +330,7 @@ impl BodyCtxt<'_, '_> {
 
                 self.check_block_no_trailing(body);
 
-                let ty = tcx.intern(TyKind::Tuple(tcx.intern_list(&[])));
+                let ty = TyKind::Tuple(Intern::new_empty(s)).intern(s);
 
                 self.put_thir_expr(expr, ty, |bcx| todo!())
             }
@@ -346,7 +346,7 @@ impl BodyCtxt<'_, '_> {
                 let ty = if let Some(break_ty) = self.block_break_demands[&label] {
                     break_ty
                 } else {
-                    tcx.intern(TyKind::Simple(SimpleTyKind::Never))
+                    TyKind::Simple(SimpleTyKind::Never).intern(s)
                 };
 
                 self.put_thir_expr(expr, ty, move |bcx| {
@@ -382,11 +382,8 @@ impl BodyCtxt<'_, '_> {
                     self.check_pat_demand(pat, scrutinee, None);
 
                     if let Some(guard) = guard {
-                        self.check_expr_demand(
-                            guard,
-                            tcx.intern(TyKind::Simple(SimpleTyKind::Bool)),
-                        )
-                        .and_do(&mut arm_divergence);
+                        self.check_expr_demand(guard, TyKind::Simple(SimpleTyKind::Bool).intern(s))
+                            .and_do(&mut arm_divergence);
                     }
 
                     self.check_expr_demand(body, arm_demand)
@@ -402,8 +399,9 @@ impl BodyCtxt<'_, '_> {
 
                     ThirExprKind::Match(
                         bcx.confirm_thir_expr_post(scrutinee_expr),
-                        Obj::new_iter(
-                            arms.r(s).iter().map(|arm| {
+                        arms.r(s)
+                            .iter()
+                            .map(|arm| {
                                 let arm = arm.r(s);
 
                                 ThirMatchArm {
@@ -412,9 +410,8 @@ impl BodyCtxt<'_, '_> {
                                     guard: bcx.confirm_opt_thir_expr_post(arm.guard),
                                     body: bcx.confirm_thir_expr_post(arm.body),
                                 }
-                            }),
-                            s,
-                        ),
+                            })
+                            .alloc_obj_list(s),
                     )
                 })
             }
@@ -467,11 +464,11 @@ impl BodyCtxt<'_, '_> {
                         idx: AdtCtorFieldIdx::from_usize(idx),
                         init: expr,
                     })
-                    .collect::<Vec<_>>();
+                    .alloc_obj_list(s);
 
                     ThirExprKind::CreateBracedAdt {
                         ctor,
-                        fields: Obj::new_iter(fields, s),
+                        fields,
                         rest: None,
                     }
                 })
@@ -485,7 +482,7 @@ impl BodyCtxt<'_, '_> {
             }
             HirExprKind::AddrOf(mutability, pointee_expr) => {
                 let pointee = self.check_expr(pointee_expr, None).and_do(&mut divergence);
-                let ty = tcx.intern(TyKind::Reference(Re::ERASED, mutability, pointee));
+                let ty = TyKind::Reference(Re::ERASED, mutability, pointee).intern(s);
 
                 self.put_thir_expr(expr, ty, move |bcx| {
                     ThirExprKind::AddrOf(mutability, bcx.confirm_thir_expr_post(pointee_expr))
@@ -512,7 +509,7 @@ impl BodyCtxt<'_, '_> {
                     debug_assert!(value.is_none());
                 }
 
-                let ty = tcx.intern(TyKind::Simple(SimpleTyKind::Never));
+                let ty = TyKind::Simple(SimpleTyKind::Never).intern(s);
 
                 self.put_thir_expr(expr, ty, move |bcx| {
                     ThirExprKind::Break(
@@ -525,7 +522,7 @@ impl BodyCtxt<'_, '_> {
                 })
             }
             HirExprKind::Continue(label) => {
-                let ty = tcx.intern(TyKind::Simple(SimpleTyKind::Never));
+                let ty = TyKind::Simple(SimpleTyKind::Never).intern(s);
 
                 self.put_thir_expr(expr, ty, move |bcx| {
                     ThirExprKind::Continue(bcx.confirm_thir_label(label))
@@ -535,7 +532,7 @@ impl BodyCtxt<'_, '_> {
                 self.check_expr_demand(rv, self.return_ty)
                     .ignore_divergence();
 
-                let ty = tcx.intern(TyKind::Simple(SimpleTyKind::Never));
+                let ty = TyKind::Simple(SimpleTyKind::Never).intern(s);
 
                 self.put_thir_expr(expr, ty, move |bcx| {
                     ThirExprKind::Return(bcx.confirm_thir_expr_post(rv))
@@ -553,14 +550,18 @@ impl BodyCtxt<'_, '_> {
                 };
 
                 let ty = match &ctor.def.r(s).syntax {
-                    AdtCtorSyntax::Unit => ctor.to_adt_instance_ty(tcx),
+                    AdtCtorSyntax::Unit => ctor.to_adt_instance_ty(s),
                     AdtCtorSyntax::Tuple => {
                         _ = self.check_tuple_ctor_visibilities(ty_span, ctor);
 
-                        tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
-                            owner: FnOwner::AdtCtor(ctor.def),
-                            early_args: Some(ctor.params),
-                        })))
+                        TyKind::FnDef(
+                            FnInstanceInner {
+                                owner: FnOwner::AdtCtor(ctor.def),
+                                early_args: Some(ctor.params),
+                            }
+                            .intern(s),
+                        )
+                        .intern(s)
                     }
                     AdtCtorSyntax::Named(_) => {
                         break 'check self.put_thir_expr_err(
@@ -589,10 +590,11 @@ impl BodyCtxt<'_, '_> {
                             },
                         );
 
-                        tcx.intern(TyKind::Adt(AdtInstance {
+                        TyKind::Adt(AdtInstance {
                             def: ctor.r(s).owner.item(s),
                             params,
-                        }))
+                        })
+                        .intern(s)
                     }
                     AdtCtorSyntax::Tuple => {
                         let AdtInstance { def: _, params } = self.ccx_mut().import_here(
@@ -603,18 +605,23 @@ impl BodyCtxt<'_, '_> {
                             },
                         );
 
-                        tcx.intern(TyKind::FnDef(tcx.intern(FnInstanceInner {
-                            owner: FnOwner::AdtCtor(ctor),
-                            early_args: Some(params),
-                        })))
+                        TyKind::FnDef(
+                            FnInstanceInner {
+                                owner: FnOwner::AdtCtor(ctor),
+                                early_args: Some(params),
+                            }
+                            .intern(s),
+                        )
+                        .intern(s)
                     }
-                    AdtCtorSyntax::Named(_) => tcx.intern(TyKind::Error(
+                    AdtCtorSyntax::Named(_) => TyKind::Error(
                         Diag::span_err(
                             expr.r(s).span,
                             "cannot create functions out of braced constructors",
                         )
                         .emit(),
-                    )),
+                    )
+                    .intern(s),
                 };
 
                 self.put_thir_expr(expr, ty, |_bcx| ThirExprKind::CreateZst)
@@ -686,8 +693,9 @@ impl BodyCtxt<'_, '_> {
 
                     ThirExprKind::CreateBracedAdt {
                         ctor: ctor.def,
-                        fields: Obj::new_iter(
-                            mapping.into_iter().map(|(resolved_idx, expr_idx)| {
+                        fields: mapping
+                            .into_iter()
+                            .map(|(resolved_idx, expr_idx)| {
                                 let field = fields.r(s)[expr_idx];
 
                                 ThirStructField {
@@ -695,9 +703,8 @@ impl BodyCtxt<'_, '_> {
                                     idx: resolved_idx,
                                     init: bcx.confirm_thir_expr_post(field.init),
                                 }
-                            }),
-                            s,
-                        ),
+                            })
+                            .alloc_obj_list(s),
                         rest: bcx.confirm_opt_thir_expr_post(rest),
                     }
                 })

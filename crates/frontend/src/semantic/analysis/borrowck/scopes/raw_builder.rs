@@ -1,4 +1,5 @@
 use crate::{
+    base::Session,
     bool_enum,
     semantic::{
         analysis::borrowck::scopes::{
@@ -7,7 +8,7 @@ use crate::{
         },
         syntax::{
             MirBlockIdx, MirBody, MirLocal, MirLocalIdx, MirScopeIdx, MirSourceInfo, MirStmt,
-            MirStmtKind, MirTerminator, MirTerminatorKind, MirUnwindBehavior, TyCtxt,
+            MirStmtKind, MirTerminator, MirTerminatorKind, MirUnwindBehavior,
         },
     },
 };
@@ -21,7 +22,7 @@ bool_enum! {
 }
 
 pub struct RawMirScopedBuilder<'tcx> {
-    tcx: &'tcx TyCtxt,
+    session: &'tcx Session,
     body: MirBody,
     drop_scheduler: DropScheduler,
     scope_id_gen: MirScopeIdx,
@@ -62,9 +63,9 @@ struct LiveBuilderScope {
 }
 
 impl<'tcx> RawMirScopedBuilder<'tcx> {
-    pub fn new(tcx: &'tcx TyCtxt) -> Self {
+    pub fn new(session: &'tcx Session) -> Self {
         let mut this = Self {
-            tcx,
+            session,
             body: MirBody::default(),
             drop_scheduler: DropScheduler::default(),
             scope_id_gen: MirScopeIdx::ENTRY + 1,
@@ -100,7 +101,7 @@ impl<'tcx> RawMirScopedBuilder<'tcx> {
         self.end_scope(MirScopeIdx::ENTRY);
 
         self.drop_scheduler
-            .finish(self.tcx, &mut self.body, can_omit_return_drop);
+            .finish(self.session, &mut self.body, can_omit_return_drop);
 
         self.body
     }

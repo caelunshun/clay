@@ -1,8 +1,7 @@
 use crate::{
     base::{
-        Diag, ErrorGuaranteed,
-        arena::{HasInterner, HasListInterner as _, LateInit, Obj},
-        syntax::{HasSpan, Span},
+        Diag, ErrorGuaranteed, HasSpan as _, Intern, Obj, ObjAllocExt, ObjIterAllocExt, Span,
+        ValueInternable,
     },
     parse::ast::AstUnOpKind,
     semantic::{
@@ -14,7 +13,7 @@ use crate::{
             ThirPatKind, ThirPatListFrontAndTail, Ty, TyKind,
         },
     },
-    utils::bump::RcBumpPtr,
+    utils::{bump::RcBumpPtr, mem::LateInit},
 };
 use bumpalo::Bump;
 use clay_core::FastHashMap;
@@ -79,9 +78,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
         hir: Obj<HirExpr>,
         err: ErrorGuaranteed,
     ) -> ThirExprConfirmedWithTy {
-        let tcx = self.tcx();
+        let s = self.session();
 
-        self.put_thir_expr(hir, tcx.intern(TyKind::Error(err)), move |_bcx| {
+        self.put_thir_expr(hir, TyKind::Error(err).intern(s), move |_bcx| {
             ThirExprKind::Error(err)
         })
     }
@@ -115,9 +114,9 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
     }
 
     pub fn put_thir_pat_err(&mut self, hir: Obj<HirPat>, err: ErrorGuaranteed) -> ThirPatConfirmed {
-        let tcx = self.tcx();
+        let s = self.session();
 
-        self.put_thir_pat(hir, tcx.intern(TyKind::Error(err)), move |_bcx| {
+        self.put_thir_pat(hir, TyKind::Error(err).intern(s), move |_bcx| {
             ThirPatKind::Error(err)
         })
     }
@@ -143,7 +142,7 @@ impl<'a, 'tcx> BodyCtxt<'a, 'tcx> {
 /// Confirmation
 impl BodyCtxt<'_, '_> {
     pub fn begin_confirmation(&mut self) {
-        let tcx = self.tcx();
+        let s = self.session();
 
         assert!(!self.confirm_state.started_confirmation);
         self.confirm_state.started_confirmation = true;
@@ -160,9 +159,9 @@ impl BodyCtxt<'_, '_> {
                 continue;
             };
 
-            let var_ty = tcx.intern(TyKind::InferVar(var));
+            let var_ty = TyKind::InferVar(var).intern(s);
 
-            let Some(fallback) = perm_set.to_infer_fallback(tcx) else {
+            let Some(fallback) = perm_set.to_infer_fallback(s) else {
                 continue;
             };
 
@@ -213,10 +212,9 @@ impl BodyCtxt<'_, '_> {
     ) -> Obj<[Obj<ThirExpr>]> {
         let s = self.session();
 
-        Obj::new_iter(
-            hir.into_iter().map(|hir| self.confirm_thir_expr_post(hir)),
-            s,
-        )
+        hir.into_iter()
+            .map(|hir| self.confirm_thir_expr_post(hir))
+            .alloc_obj_list(s)
     }
 
     pub fn confirm_thir_pat(&mut self, hir: Obj<HirPat>) -> ThirPatResolution {
@@ -256,10 +254,10 @@ impl BodyCtxt<'_, '_> {
     pub fn confirm_thir_pat_list_outer(&mut self, hir: Obj<[Obj<HirPat>]>) -> Obj<[Obj<ThirPat>]> {
         let s = self.session();
 
-        Obj::new_iter(
-            hir.r(s).iter().map(|&hir| self.confirm_thir_pat_outer(hir)),
-            s,
-        )
+        hir.r(s)
+            .iter()
+            .map(|&hir| self.confirm_thir_pat_outer(hir))
+            .alloc_obj_list(s)
     }
 
     pub fn confirm_thir_opt_pat_list_outer(
@@ -287,14 +285,12 @@ impl BodyCtxt<'_, '_> {
         *self.confirm_state.locals.entry(hir).or_insert_with(|| {
             let hir = hir.r(s);
 
-            Obj::new(
-                ThirLocal {
-                    mutability: hir.mutability,
-                    name: hir.name,
-                    ty: self.ccx.export(hir.name.span(), ty),
-                },
-                s,
-            )
+            ThirLocal {
+                mutability: hir.mutability,
+                name: hir.name,
+                ty: self.ccx.export(hir.name.span(), ty),
+            }
+            .alloc_obj(s)
         })
     }
 }
@@ -311,31 +307,27 @@ impl BodyCtxt<'_, '_> {
     pub fn create_thir_local_expr(&mut self, span: Span, local: Obj<ThirLocal>) -> Obj<ThirExpr> {
         let s = self.session();
 
-        Obj::new(
-            ThirExpr {
-                span,
-                ty: local.r(s).ty,
-                kind: LateInit::new(ThirExprKind::Local(local)),
-            },
-            s,
-        )
+        ThirExpr {
+            span,
+            ty: local.r(s).ty,
+            kind: LateInit::new(ThirExprKind::Local(local)),
+        }
+        .alloc_obj(s)
     }
 
     pub fn create_thir_local_pat(&mut self, span: Span, local: Obj<ThirLocal>) -> Obj<ThirPat> {
         let s = self.session();
 
-        Obj::new(
-            ThirPat {
-                span,
-                ty: local.r(s).ty,
-                kind: LateInit::new(ThirPatKind::Binding {
-                    by_ref: None,
-                    local,
-                    and_bind: None,
-                }),
-            },
-            s,
-        )
+        ThirPat {
+            span,
+            ty: local.r(s).ty,
+            kind: LateInit::new(ThirPatKind::Binding {
+                by_ref: None,
+                local,
+                and_bind: None,
+            }),
+        }
+        .alloc_obj(s)
     }
 
     pub fn create_thir_local_deref_expr(
@@ -349,57 +341,49 @@ impl BodyCtxt<'_, '_> {
             unreachable!()
         };
 
-        Obj::new(
-            ThirExpr {
-                span,
-                ty: pointee,
-                kind: LateInit::new(ThirExprKind::PrimitiveUnOp(
-                    AstUnOpKind::Deref,
-                    self.create_thir_local_expr(span, local),
-                )),
-            },
-            s,
-        )
+        ThirExpr {
+            span,
+            ty: pointee,
+            kind: LateInit::new(ThirExprKind::PrimitiveUnOp(
+                AstUnOpKind::Deref,
+                self.create_thir_local_expr(span, local),
+            )),
+        }
+        .alloc_obj(s)
     }
 
     pub fn create_thir_instance_call(
         &mut self,
         span: Span,
         instance: FnInstance,
-        args: impl IntoIterator<Item = Obj<ThirExpr>, IntoIter: ExactSizeIterator>,
+        args: Obj<[Obj<ThirExpr>]>,
     ) -> ThirExprKind {
         let s = self.session();
-        let tcx = self.tcx();
 
         ThirExprKind::Call(
-            Obj::new(
-                ThirExpr {
-                    span,
-                    ty: self
-                        .ccx_mut()
-                        .export(span, tcx.intern(TyKind::FnDef(instance))),
-                    kind: LateInit::new(ThirExprKind::CreateZst),
-                },
-                s,
-            ),
-            Obj::new_iter(args, s),
+            ThirExpr {
+                span,
+                ty: self
+                    .ccx_mut()
+                    .export(span, TyKind::FnDef(instance).intern(s)),
+                kind: LateInit::new(ThirExprKind::CreateZst),
+            }
+            .alloc_obj(s),
+            args,
         )
     }
 
     pub fn create_thir_unit_ctor(&mut self, span: Span) -> Obj<ThirExpr> {
         let s = self.session();
-        let tcx = self.tcx();
 
-        Obj::new(
-            ThirExpr {
-                span,
-                ty: self
-                    .ccx_mut()
-                    .export(span, tcx.intern(TyKind::Tuple(tcx.intern_list(&[])))),
-                kind: LateInit::new(ThirExprKind::CreateTuple(Obj::new_iter([], s))),
-            },
-            s,
-        )
+        ThirExpr {
+            span,
+            ty: self
+                .ccx_mut()
+                .export(span, TyKind::Tuple(Intern::new_empty(s)).intern(s)),
+            kind: LateInit::new(ThirExprKind::CreateTuple(Obj::new_empty(s))),
+        }
+        .alloc_obj(s)
     }
 }
 
@@ -428,14 +412,12 @@ impl<'a, 'tcx> Confirmable<'a, 'tcx> for ThirExpr {
     ) -> Obj<Self> {
         let s = bcx.session();
 
-        Obj::new(
-            ThirExpr {
-                span,
-                ty: bcx.ccx_mut().export(span, *meta),
-                kind: LateInit::uninit(),
-            },
-            s,
-        )
+        ThirExpr {
+            span,
+            ty: bcx.ccx_mut().export(span, *meta),
+            kind: LateInit::uninit(),
+        }
+        .alloc_obj(s)
     }
 
     fn init_placeholder(bcx: &mut BodyCtxt<'a, 'tcx>, target: Obj<Self>, body: Self::Body) {
@@ -445,16 +427,13 @@ impl<'a, 'tcx> Confirmable<'a, 'tcx> for ThirExpr {
 
     fn create_err(bcx: &mut BodyCtxt<'a, 'tcx>, span: Span, err: ErrorGuaranteed) -> Obj<Self> {
         let s = bcx.session();
-        let tcx = bcx.tcx();
 
-        Obj::new(
-            ThirExpr {
-                span,
-                ty: bcx.ccx_mut().export(span, tcx.intern(TyKind::Error(err))),
-                kind: LateInit::new(ThirExprKind::Error(err)),
-            },
-            s,
-        )
+        ThirExpr {
+            span,
+            ty: bcx.ccx_mut().export(span, TyKind::Error(err).intern(s)),
+            kind: LateInit::new(ThirExprKind::Error(err)),
+        }
+        .alloc_obj(s)
     }
 }
 
@@ -469,14 +448,12 @@ impl<'a, 'tcx> Confirmable<'a, 'tcx> for ThirPat {
     ) -> Obj<Self> {
         let s = bcx.session();
 
-        Obj::new(
-            ThirPat {
-                span,
-                ty: bcx.ccx_mut().export(span, *meta),
-                kind: LateInit::uninit(),
-            },
-            s,
-        )
+        ThirPat {
+            span,
+            ty: bcx.ccx_mut().export(span, *meta),
+            kind: LateInit::uninit(),
+        }
+        .alloc_obj(s)
     }
 
     fn init_placeholder(bcx: &mut BodyCtxt<'a, 'tcx>, target: Obj<Self>, body: Self::Body) {
@@ -486,16 +463,13 @@ impl<'a, 'tcx> Confirmable<'a, 'tcx> for ThirPat {
 
     fn create_err(bcx: &mut BodyCtxt<'a, 'tcx>, span: Span, err: ErrorGuaranteed) -> Obj<Self> {
         let s = bcx.session();
-        let tcx = bcx.tcx();
 
-        Obj::new(
-            ThirPat {
-                span,
-                ty: bcx.ccx_mut().export(span, tcx.intern(TyKind::Error(err))),
-                kind: LateInit::new(ThirPatKind::Error(err)),
-            },
-            s,
-        )
+        ThirPat {
+            span,
+            ty: bcx.ccx_mut().export(span, TyKind::Error(err).intern(s)),
+            kind: LateInit::new(ThirPatKind::Error(err)),
+        }
+        .alloc_obj(s)
     }
 }
 

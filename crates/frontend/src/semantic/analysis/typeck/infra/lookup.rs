@@ -1,8 +1,5 @@
 use crate::{
-    base::{
-        Diag, ErrorGuaranteed, LeafDiag, Session,
-        arena::{HasInterner as _, Obj},
-    },
+    base::{Diag, ErrorGuaranteed, LeafDiag, Obj, Session, ValueInternable},
     parse::token::Ident,
     semantic::{
         analysis::typeck::{BodyCtxt, infra::deref::attempt_deref},
@@ -68,7 +65,7 @@ impl BodyCtxt<'_, '_> {
                             break 'search;
                         };
 
-                        if !field.vis.is_visible_to(self.item(), s) {
+                        if !field.vis.is_visible_to(s, self.item()) {
                             break 'search;
                         }
 
@@ -131,7 +128,6 @@ impl BodyCtxt<'_, '_> {
 
     pub fn lookup_method(&mut self, receiver: Ty, name: Ident) -> Option<LookupMethodResult> {
         let s = self.session();
-        let tcx = self.tcx();
 
         let scope_trait_candidates = self.collect_scope_trait_candidates(name);
 
@@ -162,7 +158,7 @@ impl BodyCtxt<'_, '_> {
             }
 
             if let Some(res) = self.lookup_single_method(
-                tcx.intern(TyKind::Reference(Re::ERASED, Mutability::Not, receiver)),
+                TyKind::Reference(Re::ERASED, Mutability::Not, receiver).intern(s),
                 name,
                 &scope_trait_candidates,
                 &generic_clause_candidates,
@@ -171,7 +167,7 @@ impl BodyCtxt<'_, '_> {
             }
 
             if let Some(res) = self.lookup_single_method(
-                tcx.intern(TyKind::Reference(Re::ERASED, Mutability::Mut, receiver)),
+                TyKind::Reference(Re::ERASED, Mutability::Mut, receiver).intern(s),
                 name,
                 &scope_trait_candidates,
                 &generic_clause_candidates,
@@ -197,12 +193,11 @@ impl BodyCtxt<'_, '_> {
         assoc_args: Option<SigGenericList>,
     ) -> Option<Ty> {
         let s = self.session();
-        let tcx = self.tcx();
 
         let self_ty = self.ccx_mut().peel_ty_infer_var_after_poll(self_ty);
 
         if let TyKind::Error(err) = *self_ty.r(s) {
-            return Some(tcx.intern(TyKind::Error(err)));
+            return Some(TyKind::Error(err).intern(s));
         }
 
         let owner = if let Some(as_trait) = as_trait {
@@ -248,7 +243,7 @@ impl BodyCtxt<'_, '_> {
             .map(move |_ccx, error| SpannedError(assoc_name.span, error))
             .report_loud();
 
-        Some(tcx.intern(TyKind::FnDef(instance)))
+        Some(TyKind::FnDef(instance).intern(s))
     }
 }
 
@@ -312,7 +307,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
         };
 
         candidates
-            .filter(move |candidate| candidate.r(s).impl_vis.unwrap().is_visible_to(item, s))
+            .filter(move |candidate| candidate.r(s).impl_vis.unwrap().is_visible_to(s, item))
             .collect()
     }
 
@@ -324,7 +319,7 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
             .scope_components(self.item())
             .into_iter()
             // : Iterator<Item = Obj<Item>>
-            .flat_map(|scope| traits_in_single_scope(scope, s).iter().copied())
+            .flat_map(|scope| traits_in_single_scope(s, scope).iter().copied())
             // : Iterator<Item = Obj<TraitItem>>
             .filter_map(|def| {
                 let &idx = def.r(s).name_to_method.get(&name.text)?;
@@ -444,7 +439,6 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
 
     #[must_use]
     fn attempt_single_candidate(&mut self, candidate: Obj<FnDef>, query: MethodQuery) -> bool {
-        let tcx = self.tcx();
         let s = self.session();
 
         let mut fork = self.ccx().clone().with_silent();
@@ -469,10 +463,11 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                     )
                     .probe(probe.clone());
 
-                let expected_instance = tcx.intern(FnInstanceInner {
+                let expected_instance = FnInstanceInner {
                     owner: expected_owner,
                     early_args: None,
-                });
+                }
+                .intern(s);
 
                 let InstantiatedFnSig {
                     args: expected_args,
@@ -502,10 +497,11 @@ impl<'tcx> BodyCtxt<'tcx, '_> {
                     )
                     .probe(probe.clone());
 
-                let expected_instance = tcx.intern(FnInstanceInner {
+                let expected_instance = FnInstanceInner {
                     owner: expected_owner,
                     early_args: None,
-                });
+                }
+                .intern(s);
 
                 // Call for validation side-effect of non-early-bound functions.
                 fork.resolve_fn_instance_sig(

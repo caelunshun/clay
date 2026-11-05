@@ -1,9 +1,9 @@
 use crate::{
-    base::{Session, arena::Obj},
+    base::{Obj, Session},
     bool_enum,
     semantic::{
         infer::{ClauseCx, ClauseImportEnv, ImplCache, UnifyCxMode},
-        syntax::{FnDef, MirOperandMode, SigTy, SigTyKind, TyCtxt},
+        syntax::{FnDef, MirOperandMode, SigTy, SigTyKind},
     },
 };
 
@@ -20,11 +20,9 @@ pub struct TraitCache<'tcx> {
 }
 
 impl<'tcx> TraitCache<'tcx> {
-    pub fn new(tcx: &'tcx TyCtxt, impl_cache: &'tcx ImplCache, def: Obj<FnDef>) -> Self {
-        let s = &tcx.session;
-
+    pub fn new(s: &'tcx Session, impl_cache: &'tcx ImplCache, def: Obj<FnDef>) -> Self {
         let mut ccx = ClauseCx::new(
-            tcx,
+            s,
             impl_cache,
             def.r(s).owner.as_item(s).r(s).krate,
             UnifyCxMode::RegionBlind,
@@ -35,12 +33,8 @@ impl<'tcx> TraitCache<'tcx> {
         Self { ccx, env }
     }
 
-    pub fn tcx(&self) -> &'tcx TyCtxt {
-        self.ccx.tcx()
-    }
-
     pub fn session(&self) -> &'tcx Session {
-        &self.tcx().session
+        self.ccx.session()
     }
 
     pub fn operand_mode(&mut self, ty: SigTy) -> MirOperandMode {

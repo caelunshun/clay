@@ -1,10 +1,11 @@
 use crate::{
+    base::{Intern, Session},
     bool_enum,
     semantic::{
         analysis::borrowck::scopes::CanOmitDrop,
         syntax::{
             MirBlockIdx, MirBody, MirLocalIdx, MirPlace, MirScopeIdx, MirSourceInfo, MirStmt,
-            MirStmtKind, MirTerminator, MirTerminatorKind, MirUnwindBehavior, TyCtxt,
+            MirStmtKind, MirTerminator, MirTerminatorKind, MirUnwindBehavior,
         },
     },
 };
@@ -214,7 +215,7 @@ impl DropScheduler {
             .or_insert_with(|| body.cfg.create_block())
     }
 
-    pub fn finish(mut self, tcx: &TyCtxt, body: &mut MirBody, can_omit_return_drop: CanOmitDrop) {
+    pub fn finish(mut self, s: &Session, body: &mut MirBody, can_omit_return_drop: CanOmitDrop) {
         // Freeze all scopes.
         for node in &mut self.nodes {
             match node {
@@ -322,7 +323,7 @@ impl DropScheduler {
                         debug_scope: MirScopeIdx::UNCATEGORIZED,
                         source_info: MirSourceInfo::Todo,
                         kind: MirTerminatorKind::EnsureDropped {
-                            place: MirPlace::new(tcx, local_needing_drop, []),
+                            place: MirPlace::new(local_needing_drop, Intern::new_empty(s)),
                             target: next_bb,
                             unwind: MirUnwindBehavior::Continue(unwind_bb),
                         },
@@ -406,7 +407,7 @@ impl DropScheduler {
                         debug_scope: MirScopeIdx::UNCATEGORIZED,
                         source_info: MirSourceInfo::Todo,
                         kind: MirTerminatorKind::EnsureDropped {
-                            place: MirPlace::new(tcx, local_needing_drop, []),
+                            place: MirPlace::new(local_needing_drop, Intern::new_empty(s)),
                             target: next_bb,
                             unwind: MirUnwindBehavior::DoublePanic,
                         },
@@ -436,7 +437,7 @@ impl DropScheduler {
                         debug_scope: MirScopeIdx::UNCATEGORIZED,
                         source_info: MirSourceInfo::Local(MirLocalIdx::RETURN),
                         kind: MirTerminatorKind::EnsureDropped {
-                            place: MirPlace::new(tcx, MirLocalIdx::RETURN, []),
+                            place: MirPlace::new(MirLocalIdx::RETURN, Intern::new_empty(s)),
                             target: new_unwind_bb,
                             unwind: MirUnwindBehavior::DoublePanic,
                         },

@@ -1,9 +1,5 @@
 use crate::{
-    base::{
-        Diag, ErrorGuaranteed,
-        arena::{HasInterner, Obj},
-        syntax::Span,
-    },
+    base::{Diag, ErrorGuaranteed, Obj, Span, ValueInternable},
     parse::token::Ident,
     semantic::{
         analysis::typeck::BodyCtxt,
@@ -80,12 +76,12 @@ impl BodyCtxt<'_, '_> {
 
     pub fn adt_ctor_to_instance_ty(&self, ctor: AdtCtorInstance) -> Ty {
         let s = self.session();
-        let tcx = self.tcx();
 
-        tcx.intern(TyKind::Adt(AdtInstance {
+        TyKind::Adt(AdtInstance {
             def: ctor.def.r(s).owner.item(s),
             params: ctor.params,
-        }))
+        })
+        .intern(s)
     }
 
     pub fn resolve_ty_as_adt_ctor_instance(
@@ -154,7 +150,7 @@ impl BodyCtxt<'_, '_> {
             .r(s)
             .fields
             .iter()
-            .filter(|field| !field.vis.is_visible_to(self.item(), s))
+            .filter(|field| !field.vis.is_visible_to(s, self.item()))
             .collect::<Vec<_>>();
 
         if offending_fields.is_empty() {
@@ -214,7 +210,7 @@ impl BodyCtxt<'_, '_> {
 
             if !ctor.r(s).fields[resolved_idx]
                 .vis
-                .is_visible_to(self.item(), s)
+                .is_visible_to(s, self.item())
             {
                 Diag::span_err(
                     name.span,
