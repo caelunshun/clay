@@ -1,5 +1,5 @@
 use crate::{
-    base::{Intern, IterInternExt, Session},
+    base::{IterInternExt, Session},
     semantic::syntax::{
         AdtCtorOwner, MirBody, MirBodyDirection, MirPlace, MirPlaceElem, MirPrettyFmt,
         ResolvedFieldIdx, TraverseMentions,
@@ -225,7 +225,7 @@ pub fn number_places_in_body(s: &Session, body: &MirBody) -> PlaceNumbering {
     let mut builder = PlaceNumberingBuilder::new(body.locals.len());
 
     for local in body.locals.indices() {
-        builder.mention(s, MirPlace::new(local, Intern::new_empty(s)));
+        builder.mention(s, MirPlace::new_root(s, local));
     }
 
     for block in body.blocks() {

@@ -203,7 +203,7 @@ impl<'sess> MirFromThirCtx<'sess> {
                 self.push_assign(
                     scope,
                     MirSourceInfo::Todo,
-                    MirPlace::new(MirLocalIdx::RETURN, Intern::new_empty(s)),
+                    MirPlace::new_root(s, MirLocalIdx::RETURN),
                     rv,
                 );
                 self.push_return(scope, MirSourceInfo::Todo);
@@ -383,7 +383,7 @@ impl<'sess> MirFromThirCtx<'sess> {
                                 this.lower_expr_place(
                                     scope,
                                     expr,
-                                    Some(MirPlace::new(new_place, Intern::new_empty(s))),
+                                    Some(MirPlace::new_root(s, new_place)),
                                 );
                             }
                             CanOmitDrop::Yes => {

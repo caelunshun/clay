@@ -1,5 +1,5 @@
 use crate::{
-    base::{Intern, Obj, ObjAllocExt, Span},
+    base::{Obj, ObjAllocExt, Span},
     semantic::{
         analysis::borrowck::{
             lower::driver::MirFromThirCtx,
@@ -225,13 +225,15 @@ impl<'sess> MirFromThirCtx<'sess> {
                                                     guard_scope,
                                                 );
                                             },
-                                            Some(|this: &mut MirFromThirCtx<'sess>, falsy_scope| {
-                                                this.push_break(
-                                                    falsy_scope,
-                                                    MirSourceInfo::Todo,
-                                                    break_on_reject,
-                                                );
-                                            }),
+                                            Some(
+                                                |this: &mut MirFromThirCtx<'sess>, falsy_scope| {
+                                                    this.push_break(
+                                                        falsy_scope,
+                                                        MirSourceInfo::Todo,
+                                                        break_on_reject,
+                                                    );
+                                                },
+                                            ),
                                         );
                                     },
                                 );
@@ -372,7 +374,7 @@ impl<'sess> MirFromThirCtx<'sess> {
                         self.push_assign(
                             scopes.match_logic,
                             MirSourceInfo::Todo,
-                            MirPlace::new(mir_local, Intern::new_empty(s)),
+                            MirPlace::new_root(s, mir_local),
                             MirRvalue::Ref(muta, scrutinee),
                         );
                     }
@@ -400,7 +402,7 @@ impl<'sess> MirFromThirCtx<'sess> {
                                 );
 
                                 LateUseProxyEntry {
-                                    ref_place: MirPlace::new(ref_local, Intern::new_empty(s)),
+                                    ref_place: MirPlace::new_root(s, ref_local),
                                     can_move_from: self
                                         .trait_cache
                                         .operand_mode(local.r(s).ty)
@@ -586,7 +588,7 @@ impl<'sess> MirFromThirCtx<'sess> {
             self.push_assign(
                 scope,
                 MirSourceInfo::Simple(span),
-                MirPlace::new(dest, Intern::new_empty(s)),
+                MirPlace::new_root(s, dest),
                 rvalue,
             );
         }

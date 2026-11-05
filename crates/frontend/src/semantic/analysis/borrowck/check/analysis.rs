@@ -1,5 +1,5 @@
 use crate::{
-    base::{Intern, Session},
+    base::Session,
     semantic::{
         analysis::borrowck::check::{
             dataflow::{BackwardsDataflowAnalysis, DataflowOutput, ForwardsDataflowAnalysis},
@@ -126,11 +126,7 @@ impl<'g> ForwardsDataflowAnalysis<'g> for OccupancyAnalysis<'g> {
 
         if is_entry {
             for local in self.body.arg_locals() {
-                set.add_place(
-                    s,
-                    self.place_numbering,
-                    MirPlace::new(local, Intern::new_empty(s)),
-                );
+                set.add_place(s, self.place_numbering, MirPlace::new_root(s, local));
             }
         }
 

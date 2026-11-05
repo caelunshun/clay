@@ -1,5 +1,5 @@
 use crate::{
-    base::{Diag, Intern, IterInternExt, Obj, Session, ValueInternable, anon_delay_bug},
+    base::{Diag, IterInternExt, Obj, Session, ValueInternable, anon_delay_bug},
     flags,
     semantic::{
         analysis::{
@@ -351,7 +351,7 @@ pub fn run_borrow_check(cx: &mut CrateSigckVisitor, def: Obj<FnDef>) {
     // FIXME: more fine-grained
     for (local_idx, local_ty) in body.locals.indices().zip(&imported_locals) {
         for atomic in place_numbering
-            .lookup_range(s, MirPlace::new(local_idx, Intern::new_empty(s)))
+            .lookup_range(s, MirPlace::new_root(s, local_idx))
             .iter_newtyped()
         {
             re_cx

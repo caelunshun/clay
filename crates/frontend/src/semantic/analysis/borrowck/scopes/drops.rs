@@ -1,5 +1,5 @@
 use crate::{
-    base::{Intern, Session},
+    base::Session,
     bool_enum,
     semantic::{
         analysis::borrowck::scopes::CanOmitDrop,
@@ -323,7 +323,7 @@ impl DropScheduler {
                         debug_scope: MirScopeIdx::UNCATEGORIZED,
                         source_info: MirSourceInfo::Todo,
                         kind: MirTerminatorKind::EnsureDropped {
-                            place: MirPlace::new(local_needing_drop, Intern::new_empty(s)),
+                            place: MirPlace::new_root(s, local_needing_drop),
                             target: next_bb,
                             unwind: MirUnwindBehavior::Continue(unwind_bb),
                         },
@@ -407,7 +407,7 @@ impl DropScheduler {
                         debug_scope: MirScopeIdx::UNCATEGORIZED,
                         source_info: MirSourceInfo::Todo,
                         kind: MirTerminatorKind::EnsureDropped {
-                            place: MirPlace::new(local_needing_drop, Intern::new_empty(s)),
+                            place: MirPlace::new_root(s, local_needing_drop),
                             target: next_bb,
                             unwind: MirUnwindBehavior::DoublePanic,
                         },
@@ -437,7 +437,7 @@ impl DropScheduler {
                         debug_scope: MirScopeIdx::UNCATEGORIZED,
                         source_info: MirSourceInfo::Local(MirLocalIdx::RETURN),
                         kind: MirTerminatorKind::EnsureDropped {
-                            place: MirPlace::new(MirLocalIdx::RETURN, Intern::new_empty(s)),
+                            place: MirPlace::new_root(s, MirLocalIdx::RETURN),
                             target: new_unwind_bb,
                             unwind: MirUnwindBehavior::DoublePanic,
                         },

@@ -1,5 +1,5 @@
 use crate::{
-    base::{Intern, Obj, Session},
+    base::{Obj, Session},
     flags,
     semantic::{
         analysis::{
@@ -113,14 +113,14 @@ impl<'sess> MirFromThirCtx<'sess> {
                 hir_arg.span,
                 scope,
                 *thir_pat,
-                MirPlace::new(MirLocalIdx::from_usize(1 + idx), Intern::new_empty(s)),
+                MirPlace::new_root(s, MirLocalIdx::from_usize(1 + idx)),
             );
         }
 
         self.lower_expr_place(
             scope,
             body.expr,
-            Some(MirPlace::new(MirLocalIdx::RETURN, Intern::new_empty(s))),
+            Some(MirPlace::new_root(s, MirLocalIdx::RETURN)),
         );
 
         self.push_return(scope, MirSourceInfo::BlockFallthrough);

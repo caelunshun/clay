@@ -724,13 +724,13 @@ impl TraverseMentions for MirStmtKind {
             MirStmtKind::StorageLive(local) => {
                 f(MirPlaceMention {
                     kind: MirPlaceMentionKind::STORAGE_LIVE,
-                    place: MirPlace::new(*local, MirPlaceElemList::new_empty(s)),
+                    place: MirPlace::new_root(s, *local),
                 })?;
             }
             MirStmtKind::StorageDead(local) => {
                 f(MirPlaceMention {
                     kind: MirPlaceMentionKind::STORAGE_DEAD,
-                    place: MirPlace::new(*local, MirPlaceElemList::new_empty(s)),
+                    place: MirPlace::new_root(s, *local),
                 })?;
             }
             MirStmtKind::Assign(stmt) => {
@@ -1305,6 +1305,10 @@ pub struct MirPlace {
 impl MirPlace {
     pub fn new(local: MirLocalIdx, projections: MirPlaceElemList) -> Self {
         Self { local, projections }
+    }
+
+    pub fn new_root(s: &Session, local: MirLocalIdx) -> Self {
+        Self::new(local, Intern::new_empty(s))
     }
 
     pub fn extend(self, s: &Session, proj: impl IntoIterator<Item = MirPlaceElem>) -> Self {
