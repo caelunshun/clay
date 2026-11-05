@@ -1,3 +1,6 @@
+mod debruijn;
+pub use self::debruijn::*;
+
 mod ops;
 pub use self::ops::*;
 

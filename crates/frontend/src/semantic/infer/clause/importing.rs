@@ -1,8 +1,6 @@
 use crate::{
     base::{
-        Diag, ErrorGuaranteed, Intern, IterInternExt, LeafDiag, Obj, Session, Span,
-        ValueInternable,
-        analysis::{DebruijnMap, DebruijnTop},
+        Diag, ErrorGuaranteed, Intern, IterInternExt, LeafDiag, Obj, Session, Span, ValueInternable,
     },
     semantic::{
         infer::{
@@ -13,16 +11,16 @@ use crate::{
         },
         lower::generics::normalize_positional_generic_arity,
         syntax::{
-            AdtInstance, AnyGeneric, DynSiteIdx, FnInstance, FnInstanceInner, FnOwner,
-            GenericBinder, HrtbBinder, HrtbDebruijnDef, HrtbDebruijnDefList, HrtbProjection,
-            InferTyVarSourceInfo, Re, RegionGeneric, RelationDirection, SigAdtInstance,
-            SigFnInstance, SigFnOwner, SigGenericList, SigHrtbBinder, SigProjectType, SigRe,
-            SigReKind, SigTraitClause, SigTraitClauseKind, SigTraitClauseList, SigTraitInstance,
-            SigTraitParamKind, SigTraitSpec, SigTy, SigTyKind, SigTyList, SigTyOrRe, SigTyOrReList,
-            TraitClause, TraitClauseList, TraitInstance, TraitParam, TraitSpec, Ty, TyFolder,
-            TyFolderInfallibleExt, TyKind, TyList, TyOrRe, TyOrReKind, TyOrReList, TypeAliasItem,
-            TypeGeneric, UniversalReVarSourceInfo, UniversalTy, UniversalTyRoot,
-            UniversalTyRootSourceInfo,
+            AdtInstance, AnyGeneric, DebruijnMap, DebruijnTop, DynSiteIdx, FnInstance,
+            FnInstanceInner, FnOwner, GenericBinder, HrtbBinder, HrtbDebruijnDef,
+            HrtbDebruijnDefList, HrtbProjection, InferTyVarSourceInfo, Re, RegionGeneric,
+            RelationDirection, SigAdtInstance, SigFnInstance, SigFnOwner, SigGenericList,
+            SigHrtbBinder, SigProjectType, SigRe, SigReKind, SigTraitClause, SigTraitClauseKind,
+            SigTraitClauseList, SigTraitInstance, SigTraitParamKind, SigTraitSpec, SigTy,
+            SigTyKind, SigTyList, SigTyOrRe, SigTyOrReList, TraitClause, TraitClauseList,
+            TraitInstance, TraitParam, TraitSpec, Ty, TyFolder, TyFolderInfallibleExt, TyKind,
+            TyList, TyOrRe, TyOrReKind, TyOrReList, TypeAliasItem, TypeGeneric,
+            UniversalReVarSourceInfo, UniversalTy, UniversalTyRoot, UniversalTyRootSourceInfo,
         },
     },
     typed_joiner,
@@ -825,7 +823,10 @@ impl<'a, 'sess> SigImporter<'a, 'sess> {
             .map_value(|v| v.r(s)[0])
     }
 
-    pub fn import_hrtb_binder(&mut self, clause: SigHrtbBinder) -> ImportPromise<'sess, HrtbBinder> {
+    pub fn import_hrtb_binder(
+        &mut self,
+        clause: SigHrtbBinder,
+    ) -> ImportPromise<'sess, HrtbBinder> {
         self.import_trait_clause(SigTraitClause {
             span: clause.defs_span,
             kind: SigTraitClauseKind::Trait(clause),

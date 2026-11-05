@@ -1,5 +1,3 @@
-pub mod analysis;
-
 mod arena;
 pub use self::arena::*;
 

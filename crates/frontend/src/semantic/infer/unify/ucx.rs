@@ -1,6 +1,6 @@
 use super::{regions::ReUnifyTracker, types::TyUnifyTracker};
 use crate::{
-    base::{ErrorGuaranteed, Session, ValueInternable, analysis::DebruijnTop},
+    base::{ErrorGuaranteed, Session, ValueInternable},
     semantic::{
         infer::{
             ClauseCx, HrtbUniverse, InferTyLeaksHrtbVarError, InferTyLeaksUniversalError,
@@ -9,12 +9,12 @@ use crate::{
             TyAndTyUnifyCulprit,
         },
         syntax::{
-            FnInstanceInner, FnOwner, HrtbBinder, InferTyVar, InferTyVarSourceInfo, Mutability, Re,
-            ReVariance, RelationDirection, RelationMode, SimpleTySet, TraitClause, TraitClauseList,
-            TraitParam, TraitParamList, Ty, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyKind,
-            TyOrRe, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt, UniversalReVar,
-            UniversalReVarSourceInfo, UniversalTy, UniversalTyProjInner, UniversalTyRoot,
-            UniversalTyRootSourceInfo,
+            DebruijnTop, FnInstanceInner, FnOwner, HrtbBinder, InferTyVar, InferTyVarSourceInfo,
+            Mutability, Re, ReVariance, RelationDirection, RelationMode, SimpleTySet, TraitClause,
+            TraitClauseList, TraitParam, TraitParamList, Ty, TyFolder, TyFolderExt,
+            TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt,
+            UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProjInner,
+            UniversalTyRoot, UniversalTyRootSourceInfo,
         },
     },
 };

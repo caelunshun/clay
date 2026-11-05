@@ -1,7 +1,6 @@
 use crate::{
     base::{
         Diag, HasSpan as _, LeafDiag, Obj, ObjAllocExt, ObjIterAllocExt, Session, Span, Symbol,
-        analysis::{DebruijnAbsolute, DebruijnTop, NameResolver},
     },
     parse::{
         ast::{
@@ -22,13 +21,15 @@ use crate::{
                 BuilderItemId, BuilderModuleTree, FrozenModuleResolver, FrozenVisibilityResolver,
                 ItemCategory, PathResolver, VisibilityResolver,
             },
+            resolver::NameResolver,
         },
         syntax::{
             AdtCtor, AdtCtorField, AdtCtorFieldIdx, AdtCtorOwner, AdtCtorSyntax, AdtEnumVariant,
             AdtEnumVariantIdx, AdtItem, AdtKind, AdtKindEnum, AdtKindStruct, AnyGeneric, Crate,
-            EnumVariantItem, FnArg, FnDef, FnDefOwner, FnItem, GenericBinder, HirLabelledBlock,
-            HirLocal, ImplItem, Item, ItemKind, LangItems, LocalNameSymbol, ModuleItem,
-            RegionGeneric, SigTy, SigTyKind, TraitItem, TypeAliasItem, TypeGeneric, Visibility,
+            DebruijnAbsolute, DebruijnTop, EnumVariantItem, FnArg, FnDef, FnDefOwner, FnItem,
+            GenericBinder, HirLabelledBlock, HirLocal, ImplItem, Item, ItemKind, LangItems,
+            LocalNameSymbol, ModuleItem, RegionGeneric, SigTy, SigTyKind, TraitItem, TypeAliasItem,
+            TypeGeneric, Visibility,
         },
     },
     symbol,

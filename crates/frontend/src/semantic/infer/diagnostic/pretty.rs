@@ -1,10 +1,10 @@
 use crate::{
-    base::{Obj, Session, Symbol, analysis::DebruijnMap},
+    base::{Obj, Session, Symbol},
     semantic::{
         infer::ClauseCx,
         syntax::{
-            AdtCtor, AdtCtorOwner, AdtInstance, FloatKind, FnInstance, FnOwner, HrtbBinder,
-            HrtbDebruijn, HrtbDebruijnDef, HrtbProjection, InferReVar, InferTyVar,
+            AdtCtor, AdtCtorOwner, AdtInstance, DebruijnMap, FloatKind, FnInstance, FnOwner,
+            HrtbBinder, HrtbDebruijn, HrtbDebruijnDef, HrtbProjection, InferReVar, InferTyVar,
             InferTyVarSourceInfo, IntKind, Item, Re, SimpleTyKind, SimpleTySet, TraitClause,
             TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReList, UniversalReVar,
             UniversalReVarSourceInfo, UniversalTy, UniversalTyProj, UniversalTyProjInner,

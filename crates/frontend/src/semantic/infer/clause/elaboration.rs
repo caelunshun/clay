@@ -1,8 +1,5 @@
 use crate::{
-    base::{
-        Intern, IterInternExt, Session, ValueInternable,
-        analysis::{DebruijnRelative, DebruijnTop},
-    },
+    base::{Intern, IterInternExt, Session, ValueInternable},
     semantic::{
         infer::{
             ClauseCx, ClauseFuel, ClauseImportEnv, ClauseObligation, GenericSubst, HrtbUniverse,
@@ -10,11 +7,11 @@ use crate::{
             ObligationTermination,
         },
         syntax::{
-            AnyGeneric, HrtbBinder, HrtbDebruijn, HrtbDebruijnDef, HrtbProjection, InferTyVar,
-            InferTyVarSourceInfo, Re, RelationMode, TraitClause, TraitInstance, TraitParam,
-            TraitSpec, Ty, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor,
-            TyVisitorInfallibleExt, UniversalReVarSourceInfo, UniversalTy, UniversalTyOrReRoot,
-            UniversalTyProjInner,
+            AnyGeneric, DebruijnRelative, DebruijnTop, HrtbBinder, HrtbDebruijn, HrtbDebruijnDef,
+            HrtbProjection, InferTyVar, InferTyVarSourceInfo, Re, RelationMode, TraitClause,
+            TraitInstance, TraitParam, TraitSpec, Ty, TyFolder, TyFolderExt, TyFolderInfallibleExt,
+            TyKind, TyOrRe, TyVisitor, TyVisitorInfallibleExt, UniversalReVarSourceInfo,
+            UniversalTy, UniversalTyOrReRoot, UniversalTyProjInner,
         },
     },
 };

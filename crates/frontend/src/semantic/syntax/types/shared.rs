@@ -1,7 +1,4 @@
-use crate::{
-    base::{Symbol, analysis::DebruijnRelative},
-    symbol,
-};
+use crate::{base::Symbol, semantic::syntax::DebruijnRelative, symbol};
 use smallvec::{SmallVec, smallvec};
 use std::fmt;
 
