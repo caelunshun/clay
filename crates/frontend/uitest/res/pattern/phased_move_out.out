@@ -1,0 +1,6 @@
+error: expected expression (`_`, `[`, `(`, `match`, `let`, `return`, `continue`, `break`, `..=`, `..`, `-`, `!`, `*`, or `&`), path (`Self` or `<`), path part (identifier, `super`, `crate`, or `self`), or literal expression (`true`, `false`, string literal, character literal, or numeric literal)
+   ┌─ phased_move_out.clay:19:28
+   │
+19 │         Foo::Bar(taken) if { consume(taken); false } => {}
+   │                            ^^^^^^^^^^^^^^^^^^^^^^^^^
+

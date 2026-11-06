@@ -1,0 +1,88 @@
+error: `EnumCell` not found in `app::accepted_2`
+   ┌─ enum_cell.clay:41:21
+   │
+41 │ fn accepted_2(foo: @EnumCell<Foo>) {
+   │                     ^^^^^^^^
+
+error: `EnumCell` not found in `app::rejected_3`
+   ┌─ enum_cell.clay:51:21
+   │
+51 │ fn rejected_3(foo: @EnumCell<Foo>) {
+   │                     ^^^^^^^^
+
+error: `EnumCell` not found in `app::rejected_4`
+   ┌─ enum_cell.clay:61:21
+   │
+61 │ fn rejected_4(foo: @EnumCell<Foo>) {
+   │                     ^^^^^^^^
+
+error: `EnumCell` not found in `app::accepted_4`
+   ┌─ enum_cell.clay:71:21
+   │
+71 │ fn accepted_4(foo: @EnumCell<Foo>) {
+   │                     ^^^^^^^^
+
+error: `EnumCell` not found in `app::rejected_5`
+   ┌─ enum_cell.clay:80:25
+   │
+80 │ fn rejected_5(foo: @mut EnumCell<Foo>) {
+   │                         ^^^^^^^^
+
+error: `EnumCell` not found in `app::rejected_5`
+   ┌─ enum_cell.clay:86:20
+   │
+86 │             *foo = EnumCell::new(Foo::Baz);
+   │                    ^^^^^^^^
+
+error: 
+- span: enum_cell.clay:22:27-28
+  cannot unify
+  LHS: u32
+  RHS: &'gc u32
+  mode: Equate
+    - structural error
+        - type mismatch
+          LHS: u32
+          RHS: &'gc u32
+
+error: 
+- span: enum_cell.clay:34:26-27
+  cannot unify
+  LHS: &'erased mut u32
+  RHS: u32
+  mode: Equate
+    - structural error
+        - type mismatch
+          LHS: &'erased mut u32
+          RHS: u32
+
+error: failed to find applicable method
+   ┌─ enum_cell.clay:42:15
+   │
+42 │     match foo.acquire() {
+   │               ^^^^^^^
+
+error: failed to find applicable method
+   ┌─ enum_cell.clay:52:15
+   │
+52 │     match foo.acquire() {
+   │               ^^^^^^^
+
+error: failed to find applicable method
+   ┌─ enum_cell.clay:62:15
+   │
+62 │     match foo.acquire() {
+   │               ^^^^^^^
+
+error: failed to find applicable method
+   ┌─ enum_cell.clay:72:15
+   │
+72 │     match foo.acquire_mut() {
+   │               ^^^^^^^^^^^
+
+error: failed to find applicable method
+   ┌─ enum_cell.clay:81:15
+   │
+81 │     match foo.acquire() {
+   │               ^^^^^^^
+

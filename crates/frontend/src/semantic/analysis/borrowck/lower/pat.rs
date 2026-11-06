@@ -197,7 +197,7 @@ impl<'sess> MirFromThirCtx<'sess> {
                                         &mut late_use_proxies,
                                         PatLowerScopes {
                                             local_scope: break_on_reject,
-                                            match_logic: break_on_reject,
+                                            match_logic: break_on_accept,
                                             break_on_accept,
                                             break_on_reject,
                                         },

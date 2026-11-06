@@ -590,7 +590,7 @@ where
             let body = (refinement.func)(bcx, prev);
 
             if idx == refinements.len() - 1 {
-                V::init_placeholder(bcx, start, body);
+                V::init_placeholder(bcx, end, body);
             } else {
                 prev = V::create_placeholder(bcx, hir_span, &refinement.meta);
                 V::init_placeholder(bcx, prev, body);
