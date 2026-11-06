@@ -2,8 +2,12 @@ use clay_frontend::{
     base::{NaiveSegmenter, Session, SourceFileOrigin},
     parse::{ast::parse_file, token::tokenize},
     semantic::{
-        analysis::TyCtxt, infer::ImplCache, lower::entry::lower_full_ast, syntax::LangItems,
+        analysis::TyCtxt,
+        infer::ImplCache,
+        lower::{bootstrap::synthesize_bootstrap_crate, entry::lower_full_ast},
+        syntax::LangItems,
     },
+    symbol,
 };
 use std::{env, fs, path::Path, rc::Rc};
 
@@ -40,7 +44,9 @@ fn main() {
     // Compile standard library
     let std_tokens = tokenize(std_span);
     let std_ast = parse_file(&std_tokens);
-    let std_krate = lower_full_ast(s, &std_ast);
+    let std_krate = lower_full_ast(s, symbol!("std"), &std_ast, |ctxt| {
+        ctxt.push_prelude_glob(*synthesize_bootstrap_crate(s).r(s).root);
+    });
 
     let mut impl_cache = ImplCache::default();
     impl_cache.populate(s, std_krate);
@@ -61,7 +67,10 @@ fn main() {
     // Compile app
     let app_tokens = tokenize(app_span);
     let app_ast = parse_file(&app_tokens);
-    let app_krate = lower_full_ast(s, &app_ast);
+    let app_krate = lower_full_ast(s, symbol!("app"), &app_ast, |ctxt| {
+        ctxt.push_prelude_use(symbol!("std"), *std_krate.r(s).root);
+        ctxt.push_prelude_glob(lang_items.std_prelude().unwrap().r(s).item);
+    });
 
     impl_cache.populate(s, app_krate);
     lang_items.populate(s, app_krate);

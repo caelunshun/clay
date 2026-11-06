@@ -1,5 +1,5 @@
 error: 
-- span: test32.clay:83:18-24
+- span: test32.clay:34:18-24
   cannot unify
   LHS: str
   RHS: ?(64) _
@@ -10,15 +10,15 @@ error:
           RHS: str
 
 error: type hints required for this type
-   ┌─ test32.clay:74:5
+   ┌─ test32.clay:25:5
    │
-74 │     Helper::<(), _>::meow(None, true);
+25 │     Helper::<(), _>::meow(None, true);
    │     ^^^^^^^^^^^^^^^^^^^^^
 
 error: type hints required for this type
-   ┌─ test32.clay:74:5
+   ┌─ test32.clay:25:5
    │
-74 │     Helper::<(), _>::meow(None, true);
+25 │     Helper::<(), _>::meow(None, true);
    │     ^^^^^^^^^^^^^^^^^^^^^
 
 error: oh no! _25 = call(move(_26), [move(_2)]) goto bb34v1 unwind bb35v1; // Todo

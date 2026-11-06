@@ -1,6 +1,3 @@
-#[lang("fn_once_trait")]
-pub trait FnOnce<I, O> {}
-
 mod pip {
     pub struct Meow(pub i32, u32);
 }

@@ -1,6 +1,6 @@
 use crate::{
     base::{Diag, ErrorGuaranteed, LeafDiag, Obj, Session, Span, Symbol},
-    semantic::syntax::{AdtItem, Crate, HirExpr, Item, TraitItem},
+    semantic::syntax::{AdtItem, Crate, HirExpr, Item, ModuleItem, TraitItem},
     symbol,
     utils::mem::LateInit,
 };
@@ -83,6 +83,33 @@ impl LangItemValidator for TypeValidator {
     ) -> Result<Self::Stored, ErrorGuaranteed> {
         item.r(s).kind.as_adt().ok_or_else(|| {
             Diag::span_err(span, format_args!("`{name}` language item must be an ADT")).emit()
+        })
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+pub struct ModuleValidator;
+
+impl LangItemValidator for ModuleValidator {
+    type Stored = Obj<ModuleItem>;
+
+    fn as_item(&self, s: &Session, stored: Self::Stored) -> Obj<Item> {
+        stored.r(s).item
+    }
+
+    fn assign(
+        &self,
+        s: &Session,
+        item: Obj<Item>,
+        name: Symbol,
+        span: Span,
+    ) -> Result<Self::Stored, ErrorGuaranteed> {
+        item.r(s).kind.as_module().ok_or_else(|| {
+            Diag::span_err(
+                span,
+                format_args!("`{name}` language item must be a module"),
+            )
+            .emit()
         })
     }
 }
@@ -227,4 +254,5 @@ define_lang_items! {
     range_inclusive => TypeValidator;
     range_to => TypeValidator;
     range_to_inclusive => TypeValidator;
+    std_prelude => ModuleValidator;
 }

@@ -1,30 +1,30 @@
-error: expected named struct or enum variant, got function `crate::foo`
-   ┌─ pattern.clay:13:6
+error: expected named struct or enum variant, got function `app::foo`
+   ┌─ pattern.clay:10:6
    │
-13 │     (foo(),) = (0,);
+10 │     (foo(),) = (0,);
    │      ^^^
 
-error: tuple constructor for struct `crate::pip::Meow` is not visible to function `crate::main` because field `1` is inaccessible
-   ┌─ pattern.clay:16:19
+error: tuple constructor for struct `app::pip::Meow` is not visible to function `app::main` because field `1` is inaccessible
+   ┌─ pattern.clay:13:19
    │
-16 │     Meow(a, ..) = Meow(1, 1);
+13 │     Meow(a, ..) = Meow(1, 1);
    │                   ^^^^
 
-error: field `1` of struct `crate::pip::Meow` is not visible to function `crate::main`
-   ┌─ pattern.clay:17:13
+error: field `1` of struct `app::pip::Meow` is not visible to function `app::main`
+   ┌─ pattern.clay:14:13
    │
-17 │     Meow(a, _) = Meow(1, 1);
+14 │     Meow(a, _) = Meow(1, 1);
    │             ^
 
-error: tuple constructor for struct `crate::pip::Meow` is not visible to function `crate::main` because field `1` is inaccessible
-   ┌─ pattern.clay:17:18
+error: tuple constructor for struct `app::pip::Meow` is not visible to function `app::main` because field `1` is inaccessible
+   ┌─ pattern.clay:14:18
    │
-17 │     Meow(a, _) = Meow(1, 1);
+14 │     Meow(a, _) = Meow(1, 1);
    │                  ^^^^
 
-error: struct `crate::main::Mew` is missing field: b
-   ┌─ pattern.clay:23:5
+error: struct `app::main::Mew` is missing field: b
+   ┌─ pattern.clay:20:5
    │
-23 │     Mew { a } = Mew { a: 1, b: 0 };
+20 │     Mew { a } = Mew { a: 1, b: 0 };
    │     ^^^^^^^^^
 

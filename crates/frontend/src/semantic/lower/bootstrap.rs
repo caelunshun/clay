@@ -15,9 +15,9 @@ use crate::{
     utils::mem::LateInit,
 };
 
-pub fn synthesize_bootstrap_prelude(s: &Session) -> Obj<Crate> {
+pub fn synthesize_bootstrap_crate(s: &Session) -> Obj<Crate> {
     // Prepare crate data
-    let name = symbol!("primitives");
+    let name = symbol!("bootstrap");
     let types = [
         (
             symbol!("u8"),
@@ -97,7 +97,6 @@ pub fn synthesize_bootstrap_prelude(s: &Session) -> Obj<Crate> {
 
     let krate = Crate {
         name,
-        is_local: false,
         root: LateInit::uninit(),
         prelude: LateInit::uninit(),
         items: LateInit::uninit(),

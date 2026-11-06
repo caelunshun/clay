@@ -1,24 +1,24 @@
 error: 
-- span: test21.clay:70:17-28
+- span: test21.clay:46:17-28
   uninstantiated trait not implemented
   LHS: fn @ meow<?(30) _>
-  RHS: for<T: Meow> std::FnOnce<(T,), T>
-  RHS instance: std::FnOnce<(u(8) T,), u(8) T>
+  RHS: for<T: Meow> ops::FnOnce<(T,), T>
+  RHS instance: ops::FnOnce<(u(8) T,), u(8) T>
   spec not met:
     - instantiated trait not implemented
       LHS: fn @ meow<?(30) _>
-      RHS: std::FnOnce<(u(8) T,), u(8) T>
+      RHS: ops::FnOnce<(u(8) T,), u(8) T>
         - no suitable impl met
 
-error: oh no! _9 = &_7; // Simple(test21.clay:56:9-11)
+error: oh no! _9 = &_7; // Simple(test21.clay:32:9-11)
 
-error: oh no! _12 = &_8; // Simple(test21.clay:58:14-16)
+error: oh no! _12 = &_8; // Simple(test21.clay:34:14-16)
 
-error: oh no! _21 = &_7; // Simple(test21.clay:64:14-16)
+error: oh no! _21 = &_7; // Simple(test21.clay:40:14-16)
 
 error: oh no! _18 = call(move(_16), [move(_21)]) goto bb48v1 unwind bb49v1; // Todo
 
-error: oh no! _22 = &_8; // Simple(test21.clay:66:14-16)
+error: oh no! _22 = &_8; // Simple(test21.clay:42:14-16)
 
 error: oh no! _18 = call(move(_16), [move(_22)]) goto bb55v1 unwind bb56v1; // Todo
 
@@ -27,7 +27,7 @@ error: oh no! _28 = call(move(_24), [move(_29)]) goto bb71v1 unwind bb72v1; // T
 error: oh no! _35 = call(move(_31), [move(_36)]) goto bb84v1 unwind bb85v1; // Todo
 
 error: 
-- source info: Simple(test21.clay:58:14-16)
+- source info: Simple(test21.clay:34:14-16)
   ty and ty region error
   LHS: &'?4 Baz
   RHS: &'?19 Baz

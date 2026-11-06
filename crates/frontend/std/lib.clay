@@ -1,1 +1,152 @@
-pub fn meow() {}
+#[lang("std_prelude")]
+pub mod prelude {
+    pub use {
+        u8,
+        u16,
+        u32,
+        u64,
+        i8,
+        i16,
+        i32,
+        i64,
+        f32,
+        f64,
+        bool,
+        char,
+        str,
+        Never,
+    };
+
+    pub use crate::{
+        drop,
+        todo,
+        vec::Vec,
+        ops::{FnOnce, Fn, FnMut},
+        clone::Clone,
+        iterator::{IntoIterator, Iterator},
+    };
+}
+
+pub mod ops {
+    use crate::prelude::*;
+
+    #[lang("deref_trait")]
+    pub trait Deref {
+        type Target: &longer Self;
+
+        // fn deref<'b: &shorter Self>(&'b self) -> &'b Target;
+    }
+
+    impl<'a, T: &longer 'a> Deref for &'a T {
+        type Target = T;
+
+        // fn deref<'b: &shorter Self>(&'b self) -> &'b T {
+        //     self
+        // }
+    }
+
+    impl<'a, T: &longer 'a> Deref for &'a mut T {
+        type Target = T;
+
+        // fn deref<'b: &shorter Self>(&'b self) -> &'b T {
+        //     self
+        // }
+    }
+
+    #[lang("index_trait")]
+    pub trait Index<I> {
+        type Output: &longer Self;
+    }
+
+    #[lang("fn_trait")]
+    pub trait Fn<I, O> {}
+
+    #[lang("fn_mut_trait")]
+    pub trait FnMut<I, O>: Fn<I, O> {}
+
+    #[lang("fn_once_trait")]
+    pub trait FnOnce<I, O>: FnMut<I, O> {}
+}
+
+pub mod iterator {
+    use crate::prelude::*;
+
+    #[lang("into_iterator_trait")]
+    pub trait IntoIterator {
+        type IntoIter: Iterator<Item = Item>;
+        type Item;
+    }
+
+    impl<I: Iterator> IntoIterator for I {
+        type IntoIter = I;
+        type Item = <I as Iterator>::Item;
+    }
+
+    #[lang("iterator_trait")]
+    pub trait Iterator {
+        type Item;
+    }
+}
+
+pub mod vec {
+    use crate::prelude::*;
+
+    use crate::ops::Index;
+
+    #[lang("vec")]
+    pub struct Vec<T> {
+        _priv: (),
+    }
+
+    impl<T> Vec<T> {
+        pub fn new() -> Self {
+            todo()
+        }
+
+        pub fn push<'a: &shorter Self>(&'a mut self, value: T) {
+            todo()
+        }
+
+        pub fn clear<'a: &shorter Self>(&'a mut self) {
+            todo()
+        }
+
+        pub fn get<'a: &shorter Self>(&'a self, idx: u32) -> &'a T {
+            todo()
+        }
+    }
+
+    impl<T> Index<u32> for Vec<T> {
+        type Output = T;
+    }
+
+    impl<T: Clone> Clone for Vec<T> {
+        fn clone<'a: &shorter Self>(&'a self) -> Self {
+            todo()
+        }
+    }
+
+    impl<'a: &shorter T, T> Iterator for &'a Vec<T> {
+        type Item = &'a T;
+    }
+}
+
+pub mod clone {
+    use crate::prelude::*;
+
+    pub trait Clone {
+        fn clone<'a: &shorter Self>(&'a self) -> Self;
+    }
+}
+
+pub fn identity<T>(value: T) -> T {
+    value
+}
+
+pub fn drop<T>(value: T) {
+    _ = value;
+}
+
+pub fn todo<T>() -> T {
+    loop {}
+}

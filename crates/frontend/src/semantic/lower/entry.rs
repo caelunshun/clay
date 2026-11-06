@@ -15,7 +15,7 @@ use crate::{
     },
     semantic::{
         lower::{
-            bootstrap::{lower_synthetic_module, synthesize_bootstrap_prelude},
+            bootstrap::lower_synthetic_module,
             func::pat::{PatLocalBranchResolver, PatLowerContext},
             modules::{
                 BuilderItemId, BuilderModuleTree, FrozenModuleResolver, FrozenVisibilityResolver,
@@ -32,7 +32,6 @@ use crate::{
             Visibility,
         },
     },
-    symbol,
     utils::{
         format::{SimpleListFormatGlue, format_list},
         mem::LateInit,
@@ -45,7 +44,12 @@ use std::{cell::Cell, rc::Rc};
 
 // === Driver === //
 
-pub fn lower_full_ast(s: &Session, ast: &AstItemModuleContents) -> Obj<Crate> {
+pub fn lower_full_ast<'ast>(
+    s: &Session,
+    krate_name: Symbol,
+    ast: &'ast AstItemModuleContents,
+    extend_prelude: impl FnOnce(&mut UseLowerCtxt<'ast>),
+) -> Obj<Crate> {
     let _delay_and_sort_guard = s.diag.delay_and_sort(s.clone());
 
     // Build the module tree.
@@ -55,11 +59,10 @@ pub fn lower_full_ast(s: &Session, ast: &AstItemModuleContents) -> Obj<Crate> {
     };
 
     ctxt.lower_module(BuilderItemId::ROOT, ast);
-    ctxt.push_prelude_glob(*synthesize_bootstrap_prelude(s).r(s).root);
+    extend_prelude(&mut ctxt);
 
     let krate = Crate {
-        name: symbol!("demo"),
-        is_local: true,
+        name: krate_name,
         root: LateInit::uninit(),
         prelude: LateInit::uninit(),
         items: LateInit::uninit(),
@@ -564,6 +567,18 @@ impl<'ast> UseLowerCtxt<'ast> {
         }
 
         prefix.truncate(old_len);
+    }
+
+    pub fn push_prelude_use(&mut self, name: Symbol, target: Obj<Item>) {
+        self.tree.push_single_external_use(
+            BuilderItemId::PRELUDE,
+            AstVisibility {
+                span: Span::DUMMY,
+                kind: AstVisibilityKind::Pub,
+            },
+            Ident::new(Span::DUMMY, name),
+            target,
+        );
     }
 
     pub fn push_prelude_glob(&mut self, target: Obj<Item>) {

@@ -8,7 +8,6 @@ use crate::{
             TypeAliasItem,
         },
     },
-    symbol,
     utils::mem::LateInit,
 };
 use clay_core::{FastHashSet, FastIndexMap};
@@ -17,7 +16,6 @@ use derive_where::derive_where;
 #[derive(Debug, Clone)]
 pub struct Crate {
     pub name: Symbol,
-    pub is_local: bool,
     pub root: LateInit<Obj<Item>>,
     pub prelude: LateInit<Obj<Item>>,
     pub items: LateInit<Vec<Obj<Item>>>,
@@ -43,11 +41,7 @@ pub struct Item {
 impl Item {
     pub fn display_path(&self, s: &Session) -> ItemPathFmt {
         ItemPathFmt {
-            prefix: if self.krate.r(s).is_local {
-                symbol!("crate")
-            } else {
-                self.krate.r(s).name
-            },
+            prefix: self.krate.r(s).name,
             main_part: self.path,
         }
     }
@@ -98,6 +92,13 @@ pub enum ItemKind {
 }
 
 impl ItemKind {
+    pub fn as_module(self) -> Option<Obj<ModuleItem>> {
+        match self {
+            ItemKind::Module(v) => Some(v),
+            _ => None,
+        }
+    }
+
     pub fn as_adt(self) -> Option<Obj<AdtItem>> {
         match self {
             ItemKind::Adt(v) => Some(v),

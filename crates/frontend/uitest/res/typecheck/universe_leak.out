@@ -1,8 +1,8 @@
 error: 
-- span: universe_leak.clay:16:20-37
+- span: universe_leak.clay:11:20-37
   instantiated trait not implemented
   LHS: fn @ types::taker_types
-  RHS: FnOnce<(fn @ types::hrtb_types<?(7) _>,), ()>
+  RHS: ops::FnOnce<(fn @ types::hrtb_types<?(7) _>,), ()>
     - fn impl unsatisfied
       resolve fn:
         - fn instance resolution error
@@ -13,17 +13,17 @@ error:
                     - idx: 0
                         - uninstantiated trait not implemented
                           LHS: fn @ types::hrtb_types<?(7) _>
-                          RHS: for<T> FnOnce<(T,), ()>
-                          RHS instance: FnOnce<(u(1) T,), ()>
+                          RHS: for<T> ops::FnOnce<(T,), ()>
+                          RHS instance: ops::FnOnce<(u(1) T,), ()>
                           spec not met:
                             - instantiated trait not implemented
                               LHS: fn @ types::hrtb_types<?(7) _>
-                              RHS: FnOnce<(u(1) T,), ()>
+                              RHS: ops::FnOnce<(u(1) T,), ()>
                                 - no suitable impl met
 
 error: type hints required for this type
-   ┌─ universe_leak.clay:16:21
+   ┌─ universe_leak.clay:11:21
    │
-16 │         taker_types(hrtb_types::<_>);
+11 │         taker_types(hrtb_types::<_>);
    │                     ^^^^^^^^^^^^^^^
 

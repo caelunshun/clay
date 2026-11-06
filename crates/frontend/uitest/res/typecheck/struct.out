@@ -1,4 +1,4 @@
-error: field `b` is not visible to function `crate::main`
+error: field `b` is not visible to function `app::main`
    ┌─ struct.clay:13:23
    │
 13 │     Meow { a: "meow", b: 2 }
