@@ -1,0 +1,8 @@
+fn foo<'a, 'b>(magic: (&'a (), &'b ())) {
+    // FIXME: This ICEs.
+    // bar(magic);
+
+    bar::<'a, 'b, _>(magic);
+}
+
+fn bar<'a, 'b, U: &longer (&'a (), &'b ())>(magic: U) {}

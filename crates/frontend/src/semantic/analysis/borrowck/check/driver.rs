@@ -210,8 +210,7 @@ impl TyCtxt<'_> {
         for &var in env.generics.iter().flat_map(|v| v.substs.r(s)) {
             match var {
                 TyOrRe::Re(var) => {
-                    ccx.ucx_mut()
-                        .unify_re_and_re(var, shortest_sig_universal, RelationMode::LhsOntoRhs)
+                    ccx.unify_re_and_re(var, shortest_sig_universal, RelationMode::LhsOntoRhs)
                         .report_never();
                 }
                 TyOrRe::Ty(ty) => {
@@ -365,9 +364,6 @@ impl TyCtxt<'_> {
                     .report_never();
             }
         }
-
-        // TODO: This is currently needed because the obligations above don't run in order.
-        re_cx.ccx.poll_obligations();
 
         re_cx.check_body();
 
@@ -571,7 +567,6 @@ impl<'a, 'sess> RegionTyCheckCx<'a, 'sess> {
                         let atomic_universal = self.atomic_place_universals[atomic_place];
 
                         self.ccx
-                            .ucx_mut()
                             .unify_re_and_re(atomic_universal, ref_lt, RelationMode::LhsOntoRhs)
                             .report_never();
                     }

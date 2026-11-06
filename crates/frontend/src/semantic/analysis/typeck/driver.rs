@@ -2,7 +2,7 @@ use crate::{
     base::{Obj, Session},
     semantic::{
         analysis::{TyCtxt, typeck::infra::confirm::BodyCtxtConfirmState},
-        infer::{ClauseCx, ClauseImportEnv, HrtbUniverse, UnifyCx, UnifyCxMode},
+        infer::{ClauseCx, ClauseImportEnv, HrtbUniverse, UnifyCxMode},
         syntax::{
             FnDef, HirLabelledBlock, HirLocal, InferTyVarSourceInfo, Item, LangItems, ThirBody, Ty,
         },
@@ -133,15 +133,6 @@ impl<'a, 'sess> BodyCtxt<'a, 'sess> {
 
     pub fn ccx_mut(&mut self) -> &mut ClauseCx<'sess> {
         self.ccx
-    }
-
-    #[expect(unused)]
-    pub fn ucx(&self) -> &UnifyCx<'sess> {
-        self.ccx.ucx()
-    }
-
-    pub fn ucx_mut(&mut self) -> &mut UnifyCx<'sess> {
-        self.ccx.ucx_mut()
     }
 
     pub fn type_of_local(&mut self, local: Obj<HirLocal>) -> Ty {

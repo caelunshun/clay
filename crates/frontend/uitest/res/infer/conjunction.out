@@ -1,0 +1,23 @@
+error: 
+- bad generics
+  span: conjunction.clay:5:5-21
+    - binder param WF error
+        - idx: 2
+            - ty outlives ty
+              LHS: (&'a (), &'b ())
+              RHS: (&'a (), &'b ())
+              Joiner: '?3
+              Errors:
+                - re and re unify error
+                  LHS: 'a
+                  RHS: '?3
+                  mode: RhsOntoLhs
+                    - requires var: 'b
+                      to outlive: 'a
+                    - re and re unify error
+                      LHS: 'b
+                      RHS: '?3
+                      mode: RhsOntoLhs
+                        - requires var: 'a
+                          to outlive: 'b
+

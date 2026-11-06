@@ -3,10 +3,10 @@
 use crate::semantic::{
     infer::{
         ClauseCx, ClauseObligation, GeneralOutlivesError, MultiPromiseBuilder, ObligationNotReady,
-        ObligationResult, ObligationTermination, Promise, PromiseHandle, TyOutlivesReError,
-        TyOutlivesReErrorCulprit, TyOutlivesTyError,
+        ObligationResult, ObligationTermination, Promise, PromiseHandle, ReConstraintOrder,
+        TyOutlivesReError, TyOutlivesReErrorCulprit, TyOutlivesTyError,
     },
-    syntax::{Re, RelationDirection, RelationMode, SimpleTySet, Ty, TyKind, TyOrRe},
+    syntax::{InferTyVar, Re, RelationDirection, RelationMode, SimpleTySet, Ty, TyKind, TyOrRe},
 };
 
 impl<'sess> ClauseCx<'sess> {
@@ -72,7 +72,7 @@ impl<'sess> ClauseCx<'sess> {
 
         match (lhs, rhs) {
             (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => self
-                .oblige_re_outlives_re(lhs, rhs, RelationMode::LhsOntoRhs)
+                .unify_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs)
                 .map(|_ccx, err| err.into()),
             (TyOrRe::Ty(lhs), TyOrRe::Re(rhs)) => self
                 .oblige_ty_outlives_re(lhs, rhs, RelationDirection::LhsOntoRhs)
@@ -115,9 +115,11 @@ impl<'sess> ClauseCx<'sess> {
         dir: RelationDirection,
     ) -> Promise<'sess, TyOutlivesReError> {
         let (promise, handle) = Promise::new();
+        let order = self.next_re_constraint();
 
         self.push_obligation(ClauseObligation::TyOutlivesRe {
             handle,
+            order,
             lhs,
             rhs,
             dir,
@@ -129,13 +131,36 @@ impl<'sess> ClauseCx<'sess> {
     pub(super) fn run_oblige_ty_outlives_re(
         &mut self,
         handle: PromiseHandle<'sess, TyOutlivesReError>,
+        order: ReConstraintOrder,
         lhs: Ty,
         rhs: Re,
         dir: RelationDirection,
     ) -> ObligationResult {
-        let s = self.session();
-
         let mut collector = MultiPromiseBuilder::new();
+
+        if let Err(inf_var) =
+            self.run_oblige_ty_outlives_re_inner(&mut collector, order, lhs, rhs, dir)
+        {
+            return Err(ObligationNotReady::UnresolvedInfer(inf_var));
+        }
+
+        collector
+            .finish()
+            .map(move |_ccx, errors| TyOutlivesReError { lhs, rhs, errors })
+            .forward(self, handle);
+
+        Ok(ObligationTermination::Finished)
+    }
+
+    fn run_oblige_ty_outlives_re_inner(
+        &mut self,
+        collector: &mut MultiPromiseBuilder<'sess, TyOutlivesReErrorCulprit>,
+        order: ReConstraintOrder,
+        lhs: Ty,
+        rhs: Re,
+        dir: RelationDirection,
+    ) -> Result<(), InferTyVar> {
+        let s = self.session();
 
         match *lhs.r(s) {
             TyKind::HrtbVar(_) | TyKind::HrtbProjection(_) => {
@@ -146,9 +171,9 @@ impl<'sess> ClauseCx<'sess> {
             }
             TyKind::Reference(lhs, _muta, _pointee) => {
                 self.ucx_mut()
-                    .unify_re_and_re(lhs, rhs, dir.to_mode())
+                    .unify_re_and_re(order, lhs, rhs, dir.to_mode())
                     .map(|_ccx, error| TyOutlivesReErrorCulprit::Regular(error))
-                    .join(&mut collector);
+                    .join(collector);
             }
             TyKind::Adt(lhs) => {
                 // ADTs are bounded by the regions which they mention.
@@ -156,14 +181,12 @@ impl<'sess> ClauseCx<'sess> {
                     match lhs {
                         TyOrRe::Re(lhs) => {
                             self.ucx_mut()
-                                .unify_re_and_re(lhs, rhs, dir.to_mode())
+                                .unify_re_and_re(order, lhs, rhs, dir.to_mode())
                                 .map(|_ccx, error| TyOutlivesReErrorCulprit::Regular(error))
-                                .join(&mut collector);
+                                .join(collector);
                         }
                         TyOrRe::Ty(lhs) => {
-                            self.oblige_ty_outlives_re(lhs, rhs, dir)
-                                .map(|_ccx, error| error.errors)
-                                .flat_join(&mut collector);
+                            self.run_oblige_ty_outlives_re_inner(collector, order, lhs, rhs, dir)?;
                         }
                     }
                 }
@@ -171,34 +194,31 @@ impl<'sess> ClauseCx<'sess> {
 
             TyKind::Trait(lhs_re, _muta, _lhs_spec) => {
                 self.ucx_mut()
-                    .unify_re_and_re(lhs_re, rhs, dir.to_mode())
+                    .unify_re_and_re(order, lhs_re, rhs, dir.to_mode())
                     .map(|_ccx, error| TyOutlivesReErrorCulprit::Regular(error))
-                    .join(&mut collector);
+                    .join(collector);
             }
             TyKind::Tuple(lhs) => {
                 for &lhs in lhs.r(s) {
-                    self.oblige_ty_outlives_re(lhs, rhs, dir)
-                        .map(|_ccx, error| error.errors)
-                        .flat_join(&mut collector);
+                    self.run_oblige_ty_outlives_re_inner(collector, order, lhs, rhs, dir)?;
                 }
             }
             TyKind::Universal(universal) => {
                 let lub_re = self.elaborate_universal_immediately(universal).lub_re;
 
-                self.oblige_re_outlives_re(lub_re, rhs, dir.to_mode())
+                self.ucx_mut()
+                    .unify_re_and_re(order, lub_re, rhs, dir.to_mode())
                     .map(|_ccx, error| TyOutlivesReErrorCulprit::Regular(error))
-                    .join(&mut collector);
+                    .join(collector);
             }
             TyKind::InferVar(inf_lhs) => {
                 match self.ucx().lookup_ty_infer_var(inf_lhs) {
                     Ok(inf_lhs) => {
-                        self.oblige_ty_outlives_re(inf_lhs, rhs, dir)
-                            .map(|_ccx, error| error.errors)
-                            .flat_join(&mut collector);
+                        self.run_oblige_ty_outlives_re_inner(collector, order, inf_lhs, rhs, dir)?;
                     }
                     Err(err) => {
-                        if err.perm_set.intersects(SimpleTySet::MAYBE_UNIVERSAL) {
-                            return Err(ObligationNotReady::UnresolvedInfer(inf_lhs));
+                        if err.perm_set.intersects(SimpleTySet::OTHER) {
+                            return Err(inf_lhs);
                         }
 
                         // (trivially true of all remaining types)
@@ -207,11 +227,6 @@ impl<'sess> ClauseCx<'sess> {
             }
         }
 
-        collector
-            .finish()
-            .map(move |_ccx, errors| TyOutlivesReError { lhs, rhs, errors })
-            .forward(self, handle);
-
-        Ok(ObligationTermination::Finished)
+        Ok(())
     }
 }

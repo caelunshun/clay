@@ -1,7 +1,10 @@
 use crate::{
     base::ErrorGuaranteed,
     semantic::{
-        infer::{ClauseCx, Promise, PromiseHandle, ReAndReUnifyErrorCause, UnifyCxMode},
+        infer::{
+            ClauseCx, Promise, PromiseHandle, ReAndReUnifyErrorCause, ReConstraintOrder,
+            UnifyCxMode,
+        },
         syntax::{InferReVar, Re, RelationDirection, UniversalReVar, UniversalReVarSourceInfo},
     },
 };
@@ -49,6 +52,7 @@ struct ReConstraint<'sess> {
     handle: PromiseHandle<'sess, ReAndReUnifyErrorCause>,
     lhs: InferRe,
     rhs: InferRe,
+    order: ReConstraintOrder,
 }
 
 impl<'sess> ReUnifyTracker<'sess> {
@@ -94,7 +98,12 @@ impl<'sess> ReUnifyTracker<'sess> {
         var
     }
 
-    pub fn constrain(&mut self, lhs: Re, rhs: Re) -> Promise<'sess, ReAndReUnifyErrorCause> {
+    pub fn constrain(
+        &mut self,
+        order: ReConstraintOrder,
+        lhs: Re,
+        rhs: Re,
+    ) -> Promise<'sess, ReAndReUnifyErrorCause> {
         let Some(non_blind_state) = &mut self.non_blind_state else {
             return Promise::trivial();
         };
@@ -105,9 +114,12 @@ impl<'sess> ReUnifyTracker<'sess> {
 
         let (promise, handle) = Promise::new();
 
-        non_blind_state
-            .constraints
-            .push(ReConstraint { handle, lhs, rhs });
+        non_blind_state.constraints.push(ReConstraint {
+            handle,
+            lhs,
+            rhs,
+            order,
+        });
 
         promise
     }
@@ -141,6 +153,12 @@ impl<'sess> ReUnifyTracker<'sess> {
         if this.non_blind_state.is_none() {
             return;
         }
+
+        this.non_blind_state
+            .as_mut()
+            .unwrap()
+            .constraints
+            .sort_by_key(|v| v.order);
 
         let permissions = ReElaboratedPermissions::new(this);
         let mut outlives = ReIncrementalConstraints::new(this);

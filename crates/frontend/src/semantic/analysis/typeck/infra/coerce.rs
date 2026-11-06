@@ -349,7 +349,6 @@ fn compute_deref_glb_clobber_obligations(ccx: &mut ClauseCx<'_>, pointees: &[Ty]
             };
 
             if ccx
-                .ucx()
                 .clone()
                 .unify_ty_and_ty(first, *other, RelationMode::Equate)
                 .is_err()

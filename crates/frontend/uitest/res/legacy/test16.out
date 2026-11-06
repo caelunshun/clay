@@ -108,7 +108,7 @@ error:
 
 error: 
 - bad ref pointee
-  span: test16.clay:22:38-43
+  span: test16.clay:22:31-36
     - ty outlives region
       LHS: u(2) V
       RHS: 'u0
@@ -120,7 +120,7 @@ error:
             - requires var: 'u3
               to outlive: 'u0
     - bad ref pointee
-      span: test16.clay:22:31-36
+      span: test16.clay:22:38-43
         - ty outlives region
           LHS: u(2) V
           RHS: 'u0
@@ -147,18 +147,15 @@ error:
                   RHS: Fn<&'u0 u(0) V, &'u0 u(0) V>
                     - block impl unsatisfied
                       block: test16.clay:28:45-51
-                        - impl block satisfy error
-                          block: test16.clay:28:45-51
-                            - binder param WF error
-                                - idx: 1
-                                    - ty outlives region
-                                      LHS: u(0) V
-                                      RHS: '?1
-                                      Errors:
-                                        - re and re unify error
-                                          LHS: 'u3
-                                          RHS: '?1
-                                          mode: LhsOntoRhs
-                                            - requires var: 'u3
-                                              to outlive: 'u0
+                        - idx: 0
+                            - ty and ty region error
+                              LHS: &'?1 u(0) V
+                              RHS: &'u0 u(0) V
+                              mode: Equate
+                                - re and re unify error
+                                  LHS: '?1
+                                  RHS: 'u0
+                                  mode: Equate
+                                    - requires var: 'u3
+                                      to outlive: 'u0
 

@@ -6,7 +6,7 @@ error:
             - uninstantiated trait not implemented
               LHS: u(0) Q
               RHS: for<T: Projector> Helper<<T as Projector>::Out, T>
-              RHS instance: Helper<u(5) <u(1) T as Projector>::Out, u(1) T>
+              RHS instance: Helper<u(1) <u(1) T as Projector>::Out, u(1) T>
               spec not met:
                 - instantiated trait not implemented
                   LHS: u(0) Q
@@ -14,11 +14,11 @@ error:
                     - clauses:
                         - ready
                           binder: for<T: Projector<Out: Fuzzy>> Helper<<T as Projector>::Out, T>
-                  RHS: Helper<u(5) <u(1) T as Projector>::Out, u(1) T>
+                  RHS: Helper<u(1) <u(1) T as Projector>::Out, u(1) T>
                     - inherent unsatisfied
                       LHS: for<T: Projector<Out: Fuzzy>> Helper<<T as Projector>::Out, T>
-                      RHS: Helper<u(5) <u(1) T as Projector>::Out, u(1) T>
-                      LHS instantiated: Helper<u(5) <u(1) T as Projector>::Out, u(1) T>
+                      RHS: Helper<u(1) <u(1) T as Projector>::Out, u(1) T>
+                      LHS instantiated: Helper<u(1) <u(1) T as Projector>::Out, u(1) T>
                       LHS instantiate error:
                         - instantiate HRTB infer
                           value: for<T: Projector<Out: Fuzzy>> Helper<<T as Projector>::Out, T>
@@ -59,7 +59,7 @@ error:
             - uninstantiated trait not implemented
               LHS: u(0) Q
               RHS: for<T: Projector> Helper<<T as Projector>::Out, T>
-              RHS instance: Helper<u(4) <u(2) T as Projector>::Out, u(2) T>
+              RHS instance: Helper<u(1) <u(1) T as Projector>::Out, u(1) T>
               spec not met:
                 - instantiated trait not implemented
                   LHS: u(0) Q
@@ -67,11 +67,11 @@ error:
                     - clauses:
                         - ready
                           binder: for<T: Projector<Out: Fuzzy>> Helper<<T as Projector>::Out, T>
-                  RHS: Helper<u(4) <u(2) T as Projector>::Out, u(2) T>
+                  RHS: Helper<u(1) <u(1) T as Projector>::Out, u(1) T>
                     - inherent unsatisfied
                       LHS: for<T: Projector<Out: Fuzzy>> Helper<<T as Projector>::Out, T>
-                      RHS: Helper<u(4) <u(2) T as Projector>::Out, u(2) T>
-                      LHS instantiated: Helper<u(4) <u(2) T as Projector>::Out, u(2) T>
+                      RHS: Helper<u(1) <u(1) T as Projector>::Out, u(1) T>
+                      LHS instantiated: Helper<u(1) <u(1) T as Projector>::Out, u(1) T>
                       LHS instantiate error:
                         - instantiate HRTB infer
                           value: for<T: Projector<Out: Fuzzy>> Helper<<T as Projector>::Out, T>
@@ -79,12 +79,12 @@ error:
                             - idx: 0
                                 - ty not met
                                     - uninstantiated trait not implemented
-                                      LHS: u(2) T
+                                      LHS: u(1) T
                                       RHS: Projector<Out: Fuzzy>
                                       RHS instance: Projector<Out: Fuzzy>
                                       spec not met:
                                         - instantiated trait not implemented
-                                          LHS: u(2) T
+                                          LHS: u(1) T
                                           RHS: Projector<Out: Fuzzy>
                                             - inherent unsatisfied
                                               LHS: Projector
@@ -93,12 +93,12 @@ error:
                                               Culprits:
                                                 - idx: 0
                                                     - uninstantiated trait not implemented
-                                                      LHS: u(3) <u(2) T as Projector>::Out
+                                                      LHS: u(4) <u(1) T as Projector>::Out
                                                       RHS: Fuzzy
                                                       RHS instance: Fuzzy
                                                       spec not met:
                                                         - instantiated trait not implemented
-                                                          LHS: u(3) <u(2) T as Projector>::Out
+                                                          LHS: u(4) <u(1) T as Projector>::Out
                                                           LHS elaboration:
                                                             - clauses:
                                                           RHS: Fuzzy

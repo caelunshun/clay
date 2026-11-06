@@ -165,7 +165,7 @@ impl BodyCtxt<'_, '_> {
                 continue;
             };
 
-            self.ucx_mut()
+            self.ccx_mut()
                 .unify_ty_and_ty(var_ty, fallback, RelationMode::Equate)
                 .unwrap()
                 .report_never();
