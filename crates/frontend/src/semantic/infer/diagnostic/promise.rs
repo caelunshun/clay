@@ -9,6 +9,7 @@ use std::{
     fmt,
     marker::PhantomData,
     mem,
+    panic::Location,
     rc::Rc,
 };
 
@@ -151,9 +152,24 @@ impl<'sess, E: 'sess> Promise<'sess, E> {
         });
     }
 
-    // TODO: Use bug machinery
-    pub fn report_never(self) {
-        self.report_with(|_ccx, _err| unreachable!());
+    #[track_caller]
+    pub fn report_never(self)
+    where
+        E: ToDebugTree,
+    {
+        self.report_never_at(Location::caller());
+    }
+
+    pub fn report_never_at(self, location: &'static Location<'static>)
+    where
+        E: ToDebugTree,
+    {
+        self.report_with(move |ccx, err| {
+            unreachable!(
+                "report_never at {location}:\n{}",
+                err.to_debug_tree(&ccx.pretty(ClausePrettyFmtOpts { verbose: true }))
+            )
+        });
     }
 
     pub fn probe(self, probe: PromiseProbe) {
@@ -289,8 +305,19 @@ impl<'sess, T, E: 'sess> PromiseValue<'sess, T, E> {
         self.finish_promise(|p| p.report_delay_bug())
     }
 
-    pub fn report_never(self) -> T {
-        self.finish_promise(|p| p.report_never())
+    #[track_caller]
+    pub fn report_never(self) -> T
+    where
+        E: ToDebugTree,
+    {
+        self.report_never_at(Location::caller())
+    }
+
+    pub fn report_never_at(self, location: &'static Location<'static>) -> T
+    where
+        E: ToDebugTree,
+    {
+        self.finish_promise(|p| p.report_never_at(location))
     }
 
     pub fn probe(self, probe: PromiseProbe) -> T {

@@ -28,8 +28,6 @@ pub mod prelude {
 }
 
 pub mod ops {
-    use crate::prelude::*;
-
     #[lang("deref_trait")]
     pub trait Deref {
         type Target: &longer Self;
@@ -69,8 +67,6 @@ pub mod ops {
 }
 
 pub mod iterator {
-    use crate::prelude::*;
-
     #[lang("into_iterator_trait")]
     pub trait IntoIterator {
         type IntoIter: Iterator<Item = Item>;
@@ -89,9 +85,12 @@ pub mod iterator {
 }
 
 pub mod vec {
-    use crate::prelude::*;
-
-    use crate::ops::Index;
+    use crate::{
+        clone::Clone,
+        iterator::{IntoIterator, Iterator},
+        ops::Index,
+        todo,
+    };
 
     #[lang("vec")]
     pub struct Vec<T> {
@@ -111,7 +110,7 @@ pub mod vec {
             todo()
         }
 
-        pub fn get<'a: &shorter Self>(&'a self, idx: u32) -> &'a T {
+        pub fn len<'a: &shorter Self>(&self) -> u32 {
             todo()
         }
     }
@@ -132,8 +131,6 @@ pub mod vec {
 }
 
 pub mod clone {
-    use crate::prelude::*;
-
     pub trait Clone {
         fn clone<'a: &shorter Self>(&'a self) -> Self;
     }

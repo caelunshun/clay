@@ -1,16 +1,6 @@
-fn make_vec<T>() -> Vec<T> {
-    todo()
-}
-
-fn todo() -> Never {
-    loop {}
-}
-
 fn main() {
-    // let vec = ().make::<_>();
     let vec = [(), (), ()];
 
-    vec.push(vec.my_field);
     let elem = vec[1];
     vec.push(elem.clone());
 
