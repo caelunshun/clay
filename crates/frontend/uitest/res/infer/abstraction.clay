@@ -3,14 +3,25 @@ fn concrete<'a, 'b>(magic: (&'a (), &'b ())) {
     // generic(magic);
 
     generic::<'a, 'b, _>(magic);
-    assert_re_longer::<'a, (&'a (), &'b ())>();
-    assert_re_longer::<'b, (&'a (), &'b ())>();
+
+    // These are accepted.
+    assert_outlives::<&'a (), (&'a (), &'b ())>();
+    assert_outlives::<&'b (), (&'a (), &'b ())>();
+
+    // These are rejected.
+    assert_outlives::<(&'a (), &'b ()), &'a ()>();
+    assert_outlives::<(&'a (), &'b ()), &'b ()>();
 }
 
-fn generic<'a, 'b, U: &longer (&'a (), &'b ())>(magic: U) {
-    // FIXME: these suddenly are accepted.
-    assert_re_longer::<'a, U>();
-    assert_re_longer::<'b, U>();
+fn generic<'a, 'b, U: &shorter (&'a (), &'b ()) + &longer (&'a (), &'b ())>(magic: U) {
+    // These are also accepted.
+    // FIXME: these should be accepted!
+    assert_outlives::<&'a (), U>();
+    assert_outlives::<&'b (), U>();
+
+    // These are also rejected.
+    assert_outlives::<U, &'a ()>();
+    assert_outlives::<U, &'b ()>();
 }
 
-fn assert_re_longer<'a, T: &longer 'a>() {}
+fn assert_outlives<LHS: &longer RHS, RHS>() {}

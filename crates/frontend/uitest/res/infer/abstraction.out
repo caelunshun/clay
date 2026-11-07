@@ -1,32 +1,102 @@
 error: 
 - bad generics
-  span: abstraction.clay:6:5-45
+  span: abstraction.clay:12:5-48
     - binder param WF error
-        - idx: 1
-            - ty outlives region
+        - idx: 0
+            - ty outlives ty
               LHS: (&'a (), &'b ())
-              RHS: 'a
+              RHS: &'a ()
+              RHS GLB: 'glb(&'a ())
               Errors:
                 - re and re unify error
                   LHS: 'b
-                  RHS: 'a
+                  RHS: 'glb(&'a ())
                   mode: LhsOntoRhs
                     - requires var: 'b
-                      to outlive: 'a
+                      to outlive: 'glb(&'a ())
 
 error: 
 - bad generics
-  span: abstraction.clay:7:5-45
+  span: abstraction.clay:13:5-48
     - binder param WF error
-        - idx: 1
-            - ty outlives region
+        - idx: 0
+            - ty outlives ty
               LHS: (&'a (), &'b ())
-              RHS: 'b
+              RHS: &'b ()
+              RHS GLB: 'glb(&'b ())
               Errors:
                 - re and re unify error
                   LHS: 'a
-                  RHS: 'b
+                  RHS: 'glb(&'b ())
                   mode: LhsOntoRhs
                     - requires var: 'a
-                      to outlive: 'b
+                      to outlive: 'glb(&'b ())
+
+error: 
+- bad generics
+  span: abstraction.clay:19:5-33
+    - binder param WF error
+        - idx: 0
+            - ty outlives ty
+              LHS: &'a ()
+              RHS: u(0) U
+              RHS GLB: 'glb(u(0) U)
+              Errors:
+                - re and re unify error
+                  LHS: 'a
+                  RHS: 'glb(u(0) U)
+                  mode: LhsOntoRhs
+                    - requires var: 'a
+                      to outlive: 'glb(u(0) U)
+
+error: 
+- bad generics
+  span: abstraction.clay:20:5-33
+    - binder param WF error
+        - idx: 0
+            - ty outlives ty
+              LHS: &'b ()
+              RHS: u(0) U
+              RHS GLB: 'glb(u(0) U)
+              Errors:
+                - re and re unify error
+                  LHS: 'b
+                  RHS: 'glb(u(0) U)
+                  mode: LhsOntoRhs
+                    - requires var: 'b
+                      to outlive: 'glb(u(0) U)
+
+error: 
+- bad generics
+  span: abstraction.clay:23:5-33
+    - binder param WF error
+        - idx: 0
+            - ty outlives ty
+              LHS: u(0) U
+              RHS: &'a ()
+              RHS GLB: 'glb(&'a ())
+              Errors:
+                - re and re unify error
+                  LHS: 'u18
+                  RHS: 'glb(&'a ())
+                  mode: LhsOntoRhs
+                    - requires var: 'u18
+                      to outlive: 'glb(&'a ())
+
+error: 
+- bad generics
+  span: abstraction.clay:24:5-33
+    - binder param WF error
+        - idx: 0
+            - ty outlives ty
+              LHS: u(0) U
+              RHS: &'b ()
+              RHS GLB: 'glb(&'b ())
+              Errors:
+                - re and re unify error
+                  LHS: 'u18
+                  RHS: 'glb(&'b ())
+                  mode: LhsOntoRhs
+                    - requires var: 'u18
+                      to outlive: 'glb(&'b ())
 
