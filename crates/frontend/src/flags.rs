@@ -23,3 +23,9 @@ pub fn should_print_mir_dataflow() -> bool {
 
     *CACHE.get_or_init(|| env::var("CLAY_PRINT_MIR_DATAFLOW").is_ok())
 }
+
+pub fn should_print_ccx_region_graph() -> bool {
+    static CACHE: OnceLock<bool> = OnceLock::new();
+
+    *CACHE.get_or_init(|| env::var("CLAY_PRINT_CCX_REGION_GRAPH").is_ok())
+}

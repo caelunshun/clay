@@ -1,17 +1,19 @@
 use crate::{
     base::ErrorGuaranteed,
+    flags,
     semantic::{
         infer::{
-            ClauseCx, Promise, PromiseHandle, ReAndReUnifyErrorCause, ReConstraintOrder,
-            UnifyCxMode,
+            ClauseCx, ClausePrettyFmtOpts, Promise, PromiseHandle, ReAndReUnifyErrorCause,
+            ReConstraintOrder, UnifyCxMode,
         },
         syntax::{InferReVar, Re, RelationDirection, UniversalReVar, UniversalReVarSourceInfo},
     },
 };
 use clay_core::FastHashSet;
 use index_vec::IndexVec;
+use petgraph::{dot::Dot, graph::NodeIndex};
 use smallvec::SmallVec;
-use std::ops::ControlFlow;
+use std::{fmt, ops::ControlFlow};
 
 // === ReUnifyTracker === //
 
@@ -198,6 +200,106 @@ impl<'sess> ReUnifyTracker<'sess> {
                 .handle
                 .clone()
                 .accept_if_not_rejected(ccx);
+        }
+
+        if flags::should_print_ccx_region_graph() {
+            #[derive(Clone)]
+            enum NodeKind {
+                Universal(String),
+                Infer(String),
+            }
+
+            impl fmt::Display for NodeKind {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    let (NodeKind::Universal(v) | NodeKind::Infer(v)) = self;
+                    f.write_str(v)
+                }
+            }
+
+            #[derive(Copy, Clone)]
+            enum EdgeKind {
+                Permit,
+                Constrain,
+            }
+
+            impl fmt::Display for EdgeKind {
+                fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    Ok(())
+                }
+            }
+
+            let this = get_this(ccx).clone();
+            let nbs = this.non_blind_state.as_ref().unwrap();
+
+            let fcx = ccx.pretty(ClausePrettyFmtOpts { verbose: true });
+
+            let mut graph = petgraph::Graph::new();
+
+            let universal_nodes = this
+                .universals
+                .indices()
+                .map(|universal| {
+                    graph.add_node(NodeKind::Universal(fcx.wrap(universal).to_string()))
+                })
+                .collect::<IndexVec<UniversalReVar, _>>();
+
+            let infer_nodes = (0..nbs.next_infer.index())
+                .map(InferReVar::from_usize)
+                .map(|infer| {
+                    graph.add_node(NodeKind::Infer(fcx.wrap(Re::InferVar(infer)).to_string()))
+                })
+                .collect::<IndexVec<InferReVar, _>>();
+
+            let gc_node = graph.add_node(NodeKind::Universal("'gc".to_string()));
+
+            let re_to_node = |re: InferRe| -> NodeIndex {
+                match re {
+                    InferRe::Gc => gc_node,
+                    InferRe::Universal(var) => universal_nodes[var],
+                    InferRe::Infer(var) => infer_nodes[var],
+                }
+            };
+
+            for cst in &nbs.constraints {
+                graph.add_edge(
+                    re_to_node(cst.lhs),
+                    re_to_node(cst.rhs),
+                    EdgeKind::Constrain,
+                );
+            }
+
+            for (universal, state) in this.universals.iter_enumerated() {
+                for &other in &state.allowed_outlive {
+                    graph.add_edge(
+                        universal_nodes[universal],
+                        re_to_node(other),
+                        EdgeKind::Permit,
+                    );
+                }
+
+                for &other in &state.allowed_outlived_by {
+                    graph.add_edge(
+                        re_to_node(other),
+                        universal_nodes[universal],
+                        EdgeKind::Permit,
+                    );
+                }
+            }
+
+            let viz = Dot::with_attr_getters(
+                &graph,
+                &[],
+                &|_graph, edge| match edge.weight() {
+                    EdgeKind::Permit => "style=solid".to_string(),
+                    EdgeKind::Constrain => "style=dashed".to_string(),
+                },
+                &|_graph, (_idx, node)| match node {
+                    NodeKind::Universal(_) => "shape=box".to_string(),
+                    NodeKind::Infer(_) => "shape=circle".to_string(),
+                },
+            );
+
+            println!("{viz}");
         }
     }
 }

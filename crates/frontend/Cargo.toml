@@ -19,6 +19,7 @@ index_vec.workspace = true
 indexmap.workspace = true
 late-struct.workspace = true
 paste.workspace = true
+petgraph.workspace = true
 scopeguard.workspace = true
 slotmap.workspace = true
 smallvec.workspace = true
