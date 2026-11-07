@@ -1,8 +1,19 @@
-fn foo<'a, 'b>(magic: (&'a (), &'b ())) {
+fn concrete<'a, 'b>(magic: (&'a (), &'b ())) {
     // FIXME: This ICEs.
-    // bar(magic);
+    // generic(magic);
 
-    bar::<'a, 'b, _>(magic);
+    generic::<'a, 'b, _>(magic);
+    assert_re_longer::<'a, (&'a (), &'b ())>();
+    assert_re_longer::<'b, (&'a (), &'b ())>();
+
+    assert_ty_longer::<(&'a (), &'b ()), (&'a (), &'b ())>();
 }
 
-fn bar<'a, 'b, U: &longer (&'a (), &'b ())>(magic: U) {}
+fn generic<'a, 'b, U: &longer (&'a (), &'b ())>(magic: U) {
+    assert_re_longer::<'a, U>();
+    assert_re_longer::<'b, U>();
+}
+
+fn assert_re_longer<'a, T: &longer 'a>() {}
+
+fn assert_ty_longer<T, V: &longer T>() {}

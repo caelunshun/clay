@@ -32,6 +32,7 @@ pub mod ops {
     pub trait Deref {
         type Target: &longer Self;
 
+        // FIXME
         // fn deref<'b: &shorter Self>(&'b self) -> &'b Target;
     }
 
@@ -144,6 +145,6 @@ pub fn drop<T>(value: T) {
     _ = value;
 }
 
-pub fn todo<T>() -> T {
+pub fn todo() -> Never {
     loop {}
 }
