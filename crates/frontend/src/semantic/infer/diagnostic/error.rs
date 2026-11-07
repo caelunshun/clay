@@ -423,7 +423,7 @@ impl ToDebugTree for GeneralOutlivesError {
 pub struct TyOutlivesTyError {
     pub lhs: Ty,
     pub rhs: Ty,
-    pub joiner: Re,
+    pub rhs_glb: Re,
     pub errors: Vec<TyOutlivesReErrorCulprit>,
 }
 
@@ -433,7 +433,7 @@ impl ToDebugTree for TyOutlivesTyError {
             .with_prose("ty outlives ty")
             .with_prose(format!("LHS: {}", pretty.wrap(self.lhs)))
             .with_prose(format!("RHS: {}", pretty.wrap(self.rhs)))
-            .with_prose(format!("Joiner: {}", pretty.wrap(self.joiner)))
+            .with_prose(format!("RHS GLB: {}", pretty.wrap(self.rhs_glb)))
             .with_prose(format!("Errors:"))
             .with_sublist(self.errors.to_debug_tree(pretty))
     }

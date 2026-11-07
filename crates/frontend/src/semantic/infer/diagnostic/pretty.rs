@@ -116,6 +116,12 @@ impl fmt::Display for ClausePrettyFmt<'_, '_, UniversalReVar> {
             UniversalReVarSourceInfo::Root(re) => {
                 write!(f, "'{}", re.r(s).lifetime.name)
             }
+            UniversalReVarSourceInfo::OutliveLub(lub) => {
+                write!(f, "'lub({})", self.cx.wrap(lub))
+            }
+            UniversalReVarSourceInfo::OutliveGlb(lub) => {
+                write!(f, "'glb({})", self.cx.wrap(lub))
+            }
             // TODO
             UniversalReVarSourceInfo::ElaboratedLub
             | UniversalReVarSourceInfo::InstantiatedHrtbVar

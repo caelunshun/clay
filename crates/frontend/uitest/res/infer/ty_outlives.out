@@ -1,0 +1,34 @@
+error: 
+- bad generics
+  span: ty_outlives.clay:7:5-48
+    - binder param WF error
+        - idx: 0
+            - ty outlives ty
+              LHS: &'d ()
+              RHS: (&'a (), &'b ())
+              RHS GLB: 'glb((&'a (), &'b ()))
+              Errors:
+                - re and re unify error
+                  LHS: 'd
+                  RHS: 'glb((&'a (), &'b ()))
+                  mode: LhsOntoRhs
+                    - requires var: 'd
+                      to outlive: 'glb((&'a (), &'b ()))
+
+error: 
+- bad generics
+  span: ty_outlives.clay:8:5-58
+    - binder param WF error
+        - idx: 0
+            - ty outlives ty
+              LHS: (&'a (), &'b ())
+              RHS: (&'c (), &'b ())
+              RHS GLB: 'glb((&'c (), &'b ()))
+              Errors:
+                - re and re unify error
+                  LHS: 'a
+                  RHS: 'glb((&'c (), &'b ()))
+                  mode: LhsOntoRhs
+                    - requires var: 'a
+                      to outlive: 'glb((&'c (), &'b ()))
+

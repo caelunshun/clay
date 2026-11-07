@@ -1,0 +1,11 @@
+fn accepted<'a, 'b, 'c: &longer 'a, 'd>() {
+    assert_outlives::<(&'a (), &'b ()), (&'a (), &'b ())>();
+    assert_outlives::<(&'c (), &'b ()), (&'a (), &'b ())>();
+}
+
+fn rejected<'a, 'b, 'c: &longer 'a, 'd>() {
+    assert_outlives::<&'d (), (&'a (), &'b ())>();
+    assert_outlives::<(&'a (), &'b ()), (&'c (), &'b ())>();
+}
+
+fn assert_outlives<LHS: &longer RHS, RHS>() {}

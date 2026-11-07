@@ -205,6 +205,8 @@ pub enum UniversalReVarSourceInfo {
     Root(Obj<RegionGeneric>),
     ElaboratedLub,
     InstantiatedHrtbVar,
+    OutliveGlb(Ty),
+    OutliveLub(Ty),
     HrtbWf { binder: SigHrtbBinder, idx: u32 },
     MirPlace(MirPlace),
 }

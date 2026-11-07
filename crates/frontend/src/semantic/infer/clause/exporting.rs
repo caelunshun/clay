@@ -111,6 +111,8 @@ impl<'a, 'sess> SigExporter<'a, 'sess> {
             Re::UniversalVar(var) => match self.ccx.lookup_universal_re_src_info(var) {
                 UniversalReVarSourceInfo::Root(generic) => SigReKind::Generic(generic),
                 UniversalReVarSourceInfo::ElaboratedLub
+                | UniversalReVarSourceInfo::OutliveGlb(_)
+                | UniversalReVarSourceInfo::OutliveLub(_)
                 | UniversalReVarSourceInfo::InstantiatedHrtbVar
                 | UniversalReVarSourceInfo::HrtbWf { .. }
                 | UniversalReVarSourceInfo::MirPlace(_) => {

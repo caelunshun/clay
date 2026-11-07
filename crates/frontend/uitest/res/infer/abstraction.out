@@ -1,0 +1,32 @@
+error: 
+- bad generics
+  span: abstraction.clay:6:5-45
+    - binder param WF error
+        - idx: 1
+            - ty outlives region
+              LHS: (&'a (), &'b ())
+              RHS: 'a
+              Errors:
+                - re and re unify error
+                  LHS: 'b
+                  RHS: 'a
+                  mode: LhsOntoRhs
+                    - requires var: 'b
+                      to outlive: 'a
+
+error: 
+- bad generics
+  span: abstraction.clay:7:5-45
+    - binder param WF error
+        - idx: 1
+            - ty outlives region
+              LHS: (&'a (), &'b ())
+              RHS: 'b
+              Errors:
+                - re and re unify error
+                  LHS: 'a
+                  RHS: 'b
+                  mode: LhsOntoRhs
+                    - requires var: 'a
+                      to outlive: 'b
+
