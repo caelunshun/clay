@@ -15,7 +15,6 @@ fn concrete<'a, 'b>(magic: (&'a (), &'b ())) {
 
 fn generic<'a, 'b, U: &shorter (&'a (), &'b ()) + &longer (&'a (), &'b ())>(magic: U) {
     // These are also accepted.
-    // FIXME: these should be accepted!
     assert_outlives::<&'a (), U>();
     assert_outlives::<&'b (), U>();
 

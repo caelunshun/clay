@@ -369,20 +369,26 @@ impl ReElaboratedPermissions {
 
         for (var, state) in tracker.universals.iter_enumerated() {
             // Find regions for which `'var: 'other` is permitted.
-
-            // Allow `dfs` to get saturated within the `allowed_outlive` loop since we only ever
-            // need to see a given DFS target once.
             perm_dfs.clear();
+            perm_dfs.visit_slice(&state.allowed_outlive);
 
-            for &root in &state.allowed_outlive {
-                match root {
-                    InferRe::Gc | InferRe::Universal(_) => {
-                        perm_dfs.visit(root);
+            cbit::cbit!(for (perm_dfs, other) in perm_dfs.flush() {
+                match other {
+                    InferRe::Gc => {
+                        permitted_gc_outlives.insert(var);
                     }
-                    InferRe::Infer(_) => {
-                        // We only want to traverse constraints until we reach a universal when
-                        // permitting universals to outlive an inference variable.
-                        cst_dfs.visit(root);
+                    InferRe::Universal(other) => {
+                        permitted_uni_outlives.insert((var, other));
+                    }
+                    InferRe::Infer(root) => {
+                        // If we have permission to outlive an inference variable, we have
+                        // permission to outlive everything that inference variable is constrained
+                        // to outlive.
+                        //
+                        // Note that we only ever trace the constraints for *inference variables*
+                        // and only ever trace permissions for universal/gc regions, hence why we
+                        // have two separate DFS instances.
+                        cst_dfs.visit(InferRe::Infer(root));
                         cbit::cbit!(for (dfs, other) in cst_dfs.flush() {
                             match other {
                                 InferRe::Gc | InferRe::Universal(_) => {
@@ -398,33 +404,24 @@ impl ReElaboratedPermissions {
                     }
                 }
 
-                cbit::cbit!(for (dfs, other) in perm_dfs.flush() {
-                    match other {
-                        InferRe::Gc => {
-                            permitted_gc_outlives.insert(var);
-                        }
-                        InferRe::Universal(other) => {
-                            permitted_uni_outlives.insert((var, other));
-                        }
-                        InferRe::Infer(_) => {
-                            // (nothing to register)
-                        }
-                    }
-
-                    dfs.visit_slice(perm_graph.outlives().successors(other));
-                });
-            }
+                perm_dfs.visit_slice(perm_graph.outlives().successors(other));
+            });
 
             // Find regions for which `'other: 'var` is permitted.
             perm_dfs.clear();
+            perm_dfs.visit_slice(&state.allowed_outlived_by);
 
-            for &root in &state.allowed_outlived_by {
-                match root {
-                    InferRe::Gc | InferRe::Universal(_) => {
-                        perm_dfs.visit(root);
+            cbit::cbit!(for (perm_dfs, other) in perm_dfs.flush() {
+                match other {
+                    InferRe::Gc => {
+                        // (implicit—no need to register)
                     }
-                    InferRe::Infer(_) => {
-                        cst_dfs.visit(root);
+                    InferRe::Universal(other) => {
+                        permitted_uni_outlives.insert((other, var));
+                    }
+                    InferRe::Infer(root) => {
+                        // See above.
+                        cst_dfs.visit(InferRe::Infer(root));
                         cbit::cbit!(for (dfs, other) in cst_dfs.flush() {
                             match other {
                                 InferRe::Gc | InferRe::Universal(_) => {
@@ -440,22 +437,8 @@ impl ReElaboratedPermissions {
                     }
                 }
 
-                cbit::cbit!(for (dfs, other) in perm_dfs.flush() {
-                    match other {
-                        InferRe::Gc => {
-                            // (implicit, no need to register)
-                        }
-                        InferRe::Universal(other) => {
-                            permitted_uni_outlives.insert((other, var));
-                        }
-                        InferRe::Infer(_) => {
-                            // (nothing to register)
-                        }
-                    }
-
-                    dfs.visit_slice(perm_graph.outlived_by().successors(other));
-                });
-            }
+                perm_dfs.visit_slice(perm_graph.outlived_by().successors(other));
+            });
         }
 
         Self {
