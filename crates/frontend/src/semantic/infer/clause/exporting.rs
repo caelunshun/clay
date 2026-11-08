@@ -110,7 +110,7 @@ impl<'a, 'sess> SigExporter<'a, 'sess> {
             Re::InferVar(_) => SigReKind::Infer,
             Re::UniversalVar(var) => match self.ccx.lookup_universal_re_src_info(var) {
                 UniversalReVarSourceInfo::Root(generic) => SigReKind::Generic(generic),
-                UniversalReVarSourceInfo::ElaboratedLub
+                UniversalReVarSourceInfo::UniversalTyRepr(_)
                 | UniversalReVarSourceInfo::OutliveGlb(_)
                 | UniversalReVarSourceInfo::OutliveLub(_)
                 | UniversalReVarSourceInfo::InstantiatedHrtbVar

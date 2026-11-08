@@ -23,7 +23,7 @@ use std::{collections::VecDeque, convert::Infallible, num::NonZeroU32, ops::Cont
 
 #[derive(Debug, Clone)]
 pub struct UniversalElaboration {
-    pub lub_re: Re,
+    pub re_representative: Re,
     pub hrtb_universals: FastHashMap<UniversalTyOrReRoot, HrtbDebruijnDef>,
     pub elaborated_clauses: Vec<ElaboratedClause>,
 }
@@ -85,7 +85,8 @@ impl<'sess> ClauseCx<'sess> {
 
         // If not, elaborate the clause list into its `NotReady` form.
         let var_universe = self.lookup_universal_ty_hrtb_universe(universal).clone();
-        let lub_re = self.fresh_re_universal(UniversalReVarSourceInfo::ElaboratedLub);
+        let re_representative =
+            self.fresh_re_universal(UniversalReVarSourceInfo::UniversalTyRepr(universal));
 
         let mut elaborated_clauses = Vec::new();
         let mut hrtb_universals = FastHashMap::default();
@@ -101,7 +102,11 @@ impl<'sess> ClauseCx<'sess> {
             // Handle the simple outlives case.
             let binder = match target {
                 TraitClause::Outlives(outlive_dir, outlive) => {
-                    self.permit_universe_re_outlives_general(lub_re, outlive, outlive_dir);
+                    self.permit_universe_re_outlives_general(
+                        re_representative,
+                        outlive,
+                        outlive_dir,
+                    );
                     continue;
                 }
                 TraitClause::Trait(binder) => binder,
@@ -196,7 +201,7 @@ impl<'sess> ClauseCx<'sess> {
 
         // Push an obligation to repeatedly poll for completion of `NotReady` clauses.
         let elaboration = UniversalElaboration {
-            lub_re,
+            re_representative,
             hrtb_universals,
             elaborated_clauses,
         };
@@ -214,7 +219,7 @@ impl<'sess> ClauseCx<'sess> {
             universal: UniversalTy,
         ) -> &'a mut Vec<ElaboratedClause> {
             let Some(UniversalElaboration {
-                lub_re: _,
+                re_representative: _,
                 hrtb_universals: _,
                 elaborated_clauses,
             }) = ccx.universal_ty_elaboration_state_mut(universal)

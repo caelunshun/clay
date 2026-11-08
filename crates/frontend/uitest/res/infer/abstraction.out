@@ -43,10 +43,10 @@ error:
               RHS GLB: 'glb(&'a ())
               Errors:
                 - re and re unify error
-                  LHS: 'u15
+                  LHS: 'universal(u(0) U)
                   RHS: 'glb(&'a ())
                   mode: LhsOntoRhs
-                    - requires var: 'u15
+                    - requires var: 'universal(u(0) U)
                       to outlive: 'glb(&'a ())
 
 error: 
@@ -60,9 +60,9 @@ error:
               RHS GLB: 'glb(&'b ())
               Errors:
                 - re and re unify error
-                  LHS: 'u15
+                  LHS: 'universal(u(0) U)
                   RHS: 'glb(&'b ())
                   mode: LhsOntoRhs
-                    - requires var: 'u15
+                    - requires var: 'universal(u(0) U)
                       to outlive: 'glb(&'b ())
 

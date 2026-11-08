@@ -114,10 +114,10 @@ error:
       RHS: 'u0
       Errors:
         - re and re unify error
-          LHS: 'u3
+          LHS: 'universal(u(2) V)
           RHS: 'u0
           mode: LhsOntoRhs
-            - requires var: 'u3
+            - requires var: 'universal(u(2) V)
               to outlive: 'u0
     - bad ref pointee
       span: test16.clay:22:38-43
@@ -126,10 +126,10 @@ error:
           RHS: 'u0
           Errors:
             - re and re unify error
-              LHS: 'u3
+              LHS: 'universal(u(2) V)
               RHS: 'u0
               mode: LhsOntoRhs
-                - requires var: 'u3
+                - requires var: 'universal(u(2) V)
                   to outlive: 'u0
 
 error: 
@@ -156,6 +156,6 @@ error:
                                   LHS: '?1
                                   RHS: 'u0
                                   mode: Equate
-                                    - requires var: 'u3
+                                    - requires var: 'universal(u(0) V)
                                       to outlive: 'u0
 

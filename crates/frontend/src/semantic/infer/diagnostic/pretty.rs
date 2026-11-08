@@ -122,10 +122,16 @@ impl fmt::Display for ClausePrettyFmt<'_, '_, UniversalReVar> {
             UniversalReVarSourceInfo::OutliveGlb(lub) => {
                 write!(f, "'glb({})", self.cx.wrap(lub))
             }
+            UniversalReVarSourceInfo::UniversalTyRepr(universal) => {
+                if self.cx.opts.verbose {
+                    write!(f, "'universal({})", self.cx.wrap(universal))
+                } else {
+                    self.cx.wrap(universal).fmt(f)
+                }
+            }
             UniversalReVarSourceInfo::UnitTest(name) => f.write_str(name),
             // TODO
-            UniversalReVarSourceInfo::ElaboratedLub
-            | UniversalReVarSourceInfo::InstantiatedHrtbVar
+            UniversalReVarSourceInfo::InstantiatedHrtbVar
             | UniversalReVarSourceInfo::HrtbWf { .. }
             | UniversalReVarSourceInfo::MirPlace(..) => {
                 write!(f, "'u{}", self.value.index())

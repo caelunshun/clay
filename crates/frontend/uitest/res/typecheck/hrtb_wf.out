@@ -6,9 +6,9 @@ error:
       RHS: 'u0
       Errors:
         - re and re unify error
-          LHS: 'u3
+          LHS: 'universal(u(2) T)
           RHS: 'u0
           mode: LhsOntoRhs
-            - requires var: 'u3
+            - requires var: 'universal(u(2) T)
               to outlive: 'u0
 

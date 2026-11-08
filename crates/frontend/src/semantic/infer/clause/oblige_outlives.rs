@@ -278,10 +278,12 @@ impl<'sess> ClauseCx<'sess> {
                 }
             }
             TyKind::Universal(universal) => {
-                let lub_re = self.elaborate_universal_immediately(universal).lub_re;
+                let re_representative = self
+                    .elaborate_universal_immediately(universal)
+                    .re_representative;
 
                 self.ucx_mut()
-                    .unify_re_and_re(order, lub_re, rhs, dir.to_mode())
+                    .unify_re_and_re(order, re_representative, rhs, dir.to_mode())
                     .map(|_ccx, error| TyOutlivesReErrorCulprit::Regular(error))
                     .join(collector);
             }

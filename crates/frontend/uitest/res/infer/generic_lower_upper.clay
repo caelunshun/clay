@@ -1,0 +1,25 @@
+fn meow<
+    'a: &longer 'b,
+    'b: &longer 'c,
+    'c: &longer 'd,
+    'd: &longer 'e,
+    'e,
+    U: &shorter 'b + &longer 'd
+>() {
+    // Should succeed.
+    assert_outlives::<&'a (), U>();
+    assert_outlives::<&'b (), U>();
+    assert_outlives::<U, &'d ()>();
+    assert_outlives::<U, &'e ()>();
+
+    // Should fail.
+    assert_outlives::<U, &'c ()>();
+    assert_outlives::<&'c (), U>();
+
+    assert_outlives::<U, &'a ()>();
+    assert_outlives::<U, &'b ()>();
+    assert_outlives::<&'d (), U>();
+    assert_outlives::<&'e (), U>();
+}
+
+fn assert_outlives<LHS: &longer RHS, RHS>() {}

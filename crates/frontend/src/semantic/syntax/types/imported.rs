@@ -203,7 +203,7 @@ pub enum UniversalTyRootSourceInfo {
 #[derive(Debug, Copy, Clone)]
 pub enum UniversalReVarSourceInfo {
     Root(Obj<RegionGeneric>),
-    ElaboratedLub,
+    UniversalTyRepr(UniversalTy),
     InstantiatedHrtbVar,
     OutliveGlb(Ty),
     OutliveLub(Ty),

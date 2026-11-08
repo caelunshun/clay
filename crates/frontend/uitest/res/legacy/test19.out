@@ -8,11 +8,11 @@ error:
               RHS: 'a
               Errors:
                 - re and re unify error
-                  LHS: 'u1
+                  LHS: 'universal(u(0) T)
                   RHS: 'a
                   mode: RhsOntoLhs
                     - requires var: 'a
-                      to outlive: 'u1
+                      to outlive: 'universal(u(0) T)
 
 error: 
 - bad generics
@@ -24,11 +24,11 @@ error:
               RHS: 'a
               Errors:
                 - re and re unify error
-                  LHS: 'u1
+                  LHS: 'universal(u(0) T)
                   RHS: 'a
                   mode: RhsOntoLhs
                     - requires var: 'a
-                      to outlive: 'u1
+                      to outlive: 'universal(u(0) T)
 
 error: 
 - bad generics
@@ -40,10 +40,10 @@ error:
               RHS: 'a
               Errors:
                 - re and re unify error
-                  LHS: 'u1
+                  LHS: 'universal(u(0) T)
                   RHS: 'a
                   mode: LhsOntoRhs
-                    - requires var: 'u1
+                    - requires var: 'universal(u(0) T)
                       to outlive: 'a
 
 error: 
@@ -56,9 +56,9 @@ error:
               RHS: 'a
               Errors:
                 - re and re unify error
-                  LHS: 'u1
+                  LHS: 'universal(u(0) T)
                   RHS: 'a
                   mode: LhsOntoRhs
-                    - requires var: 'u1
+                    - requires var: 'universal(u(0) T)
                       to outlive: 'a
 

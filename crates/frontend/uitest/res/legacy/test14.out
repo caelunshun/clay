@@ -8,9 +8,9 @@ error:
               RHS: 'c
               Errors:
                 - re and re unify error
-                  LHS: 'u3
+                  LHS: 'universal(u(0) T)
                   RHS: 'c
                   mode: LhsOntoRhs
-                    - requires var: 'u3
+                    - requires var: 'universal(u(0) T)
                       to outlive: 'c
 
