@@ -1,0 +1,19 @@
+error: 
+- span: occurs_simple.clay:10:15-18
+  cannot unify
+  LHS: CycleBuilder<?(3) _>
+  RHS: ?(3) _
+  mode: Equate
+    - structural error
+        - infer ty reoccurs
+          var: ?(3) _
+          occurs in: CycleBuilder<?(3) _>
+
+error: type hints required for this type
+  ┌─ occurs_simple.clay:8:9
+  │
+8 │     let foo = CycleBuilder::<_>;
+  │         ^^^
+
+error: oh no! _4 = call(move(_5), [move(_2), move(_2)]) goto bb8v1 unwind bb9v1; // Todo
+

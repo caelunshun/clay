@@ -1,0 +1,19 @@
+// FIXME: this stack overflows
+
+trait Projector<V> {
+    type Assoc;
+}
+
+struct CycleBuilder<Q>;
+
+impl<Q> CycleBuilder<Q> {
+    fn bind_q<'a: &shorter Self>(&'a self, _: Q) {}
+
+    fn make_proj_of_q<'a: &shorter Self, T: Projector<Q>>(&'a self) -> <T as Projector<Q>>::Assoc {}
+}
+
+fn main<T: for<V> Projector<V>>() {
+    let foo = CycleBuilder::<_>;
+
+    foo.bind_q(foo.make_proj_of_q::<'_, T>());
+}
