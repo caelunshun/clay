@@ -8,10 +8,11 @@ use crate::{
         },
         syntax::{
             AnyGeneric, DebruijnRelative, DebruijnTop, HrtbBinder, HrtbDebruijn, HrtbDebruijnDef,
-            HrtbProjection, InferTyVar, InferTyVarSourceInfo, Re, RelationMode, TraitClause,
-            TraitInstance, TraitParam, TraitSpec, Ty, TyFolder, TyFolderExt, TyFolderInfallibleExt,
-            TyKind, TyOrRe, TyVisitor, TyVisitorInfallibleExt, UniversalReVarSourceInfo,
-            UniversalTy, UniversalTyOrReRoot, UniversalTyProj, UniversalTyProjInner,
+            HrtbProjection, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection, RelationMode,
+            TraitClause, TraitInstance, TraitParam, TraitSpec, Ty, TyFolder, TyFolderExt,
+            TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorInfallibleExt,
+            UniversalReVarSourceInfo, UniversalTy, UniversalTyOrReRoot, UniversalTyProj,
+            UniversalTyProjInner,
         },
     },
 };
@@ -87,6 +88,44 @@ impl<'sess> ClauseCx<'sess> {
         let var_universe = self.lookup_universal_ty_hrtb_universe(universal).clone();
         let re_representative =
             self.fresh_re_universal(UniversalReVarSourceInfo::UniversalTyRepr(universal));
+
+        match universal {
+            UniversalTy::Root(_) => {
+                // (no intrinsic minimum lifetime)
+            }
+            UniversalTy::Projection(proj) => {
+                // Since there is no user-mentionable bottom region, projections can only live as
+                // short as the shortest lifetime passed to them. This is what the `glb` of the
+                // projection's mentioned types (including the implicit `Self`, which must mention
+                // all `impl` parameters) gives us.
+
+                let UniversalTyProjInner {
+                    target,
+                    as_spec,
+                    assoc_idx: _,
+                    cache_idx: _,
+                } = *proj.r(s);
+
+                // We can't just make it outlive the `proj` itself because we're building that
+                // representative right now, lol.
+                let outlives_comps = [TyOrRe::Ty(TyKind::Universal(target).intern(s))]
+                    .into_iter()
+                    .chain(as_spec.params.r(s).iter().filter_map(|&param| match param {
+                        TraitParam::Equals(term) => Some(term),
+                        TraitParam::Unspecified(_) => None,
+                    }))
+                    .intern(s);
+
+                let outlive_glb = self.obtain_ty_glb(outlives_comps);
+
+                // FIXME: doesn't work??
+                self.permit_universe_re_outlives_re(
+                    re_representative,
+                    outlive_glb,
+                    RelationDirection::LhsOntoRhs,
+                );
+            }
+        }
 
         let mut elaborated_clauses = Vec::new();
         let mut hrtb_universals = FastHashMap::default();

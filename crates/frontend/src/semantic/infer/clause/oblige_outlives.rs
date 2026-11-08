@@ -1,14 +1,17 @@
 //! Logic to implement the outlives obligation.
 
-use crate::semantic::{
-    infer::{
-        ClauseCx, ClauseObligation, GeneralOutlivesError, MultiPromiseBuilder, ObligationNotReady,
-        ObligationResult, ObligationTermination, Promise, PromiseHandle, ReConstraintOrder,
-        TyOutlivesReError, TyOutlivesReErrorCulprit, TyOutlivesTyError,
-    },
-    syntax::{
-        InferTyVar, Re, RelationDirection, RelationMode, SimpleTySet, Ty, TyKind, TyOrRe,
-        UniversalReVarSourceInfo,
+use crate::{
+    base::ListInternable,
+    semantic::{
+        infer::{
+            ClauseCx, ClauseObligation, GeneralOutlivesError, MultiPromiseBuilder,
+            ObligationNotReady, ObligationResult, ObligationTermination, Promise, PromiseHandle,
+            ReConstraintOrder, TyOutlivesReError, TyOutlivesReErrorCulprit, TyOutlivesTyError,
+        },
+        syntax::{
+            InferTyVar, Re, RelationDirection, RelationMode, SimpleTySet, Ty, TyKind, TyOrRe,
+            TyOrReList, UniversalReVarSourceInfo,
+        },
     },
 };
 
@@ -89,27 +92,45 @@ impl<'sess> ClauseCx<'sess> {
         }
     }
 
-    pub fn obtain_ty_lub(&mut self, ty: Ty) -> Re {
+    pub fn obtain_ty_lub(&mut self, elems: TyOrReList) -> Re {
         // The universal will range over all lifetimes which outlive the `ty`, including the genuine
         // LUB, which is the most restrictive case. In other words, creating this as a universal
         // forces the lifetime to act like the LUB.
 
-        let universal = self.fresh_re_universal(UniversalReVarSourceInfo::OutliveLub(ty));
-        self.permit_universe_re_outlives_ty(universal, ty, RelationDirection::LhsOntoRhs);
+        let s = self.session();
+        let universal = self.fresh_re_universal(UniversalReVarSourceInfo::OutliveLub(elems));
+
+        for &elem in elems.r(s) {
+            self.permit_universe_re_outlives_general(
+                universal,
+                elem,
+                RelationDirection::LhsOntoRhs,
+            );
+        }
 
         universal
     }
 
-    pub fn obtain_ty_glb(&mut self, ty: Ty) -> Re {
+    pub fn obtain_ty_glb(&mut self, elems: TyOrReList) -> Re {
         // See `obtain_ty_lub`.
 
-        let universal = self.fresh_re_universal(UniversalReVarSourceInfo::OutliveGlb(ty));
-        self.permit_universe_re_outlives_ty(universal, ty, RelationDirection::RhsOntoLhs);
+        let s = self.session();
+        let universal = self.fresh_re_universal(UniversalReVarSourceInfo::OutliveGlb(elems));
+
+        for &elem in elems.r(s) {
+            self.permit_universe_re_outlives_general(
+                universal,
+                elem,
+                RelationDirection::RhsOntoLhs,
+            );
+        }
 
         universal
     }
 
     pub fn oblige_ty_outlives_ty(&mut self, lhs: Ty, rhs: Ty) -> Promise<'sess, TyOutlivesTyError> {
+        let s = self.session();
+
         // One would think they could just run...
         //
         // ```
@@ -170,7 +191,7 @@ impl<'sess> ClauseCx<'sess> {
         //
         // See the `ty_outlives.clay` uitest for an exercising of this logic.
 
-        let rhs_glb = self.obtain_ty_glb(rhs);
+        let rhs_glb = self.obtain_ty_glb(TyOrRe::Ty(rhs).intern_single(s));
 
         // LHS: 'a
         self.oblige_ty_outlives_re(lhs, rhs_glb, RelationDirection::LhsOntoRhs)

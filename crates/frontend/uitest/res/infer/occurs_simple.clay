@@ -1,11 +1,11 @@
 struct CycleBuilder<T>;
 
 impl<T> CycleBuilder<T> {
-    fn setup<'a: &shorter Self>(&'a self, _: T) {}
+    fn bind<'a: &shorter Self>(&'a self, _: T) {}
 }
 
 fn meow() {
     let foo = CycleBuilder::<_>;
 
-    foo.setup(foo);
+    foo.bind(foo);
 }

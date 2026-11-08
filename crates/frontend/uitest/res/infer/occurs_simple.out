@@ -1,5 +1,5 @@
 error: 
-- span: occurs_simple.clay:10:15-18
+- span: occurs_simple.clay:10:14-17
   cannot unify
   LHS: CycleBuilder<?(3) _>
   RHS: ?(3) _
