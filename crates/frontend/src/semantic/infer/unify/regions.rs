@@ -754,21 +754,32 @@ mod tests {
         let mut ccx = ClauseCx::new(&tcx, UnifyCxMode::RegionAware);
 
         let re_a = ccx.fresh_re_universal(UniversalReVarSourceInfo::UnitTest("'a"));
-        let re_u18 = ccx.fresh_re_universal(UniversalReVarSourceInfo::UnitTest("'u18"));
-        let re_glb = ccx.fresh_re_universal(UniversalReVarSourceInfo::UnitTest("'glb"));
-        let re_i7 = ccx.fresh_re_infer();
-        let re_i3 = ccx.fresh_re_infer();
+        let re_b = ccx.fresh_re_universal(UniversalReVarSourceInfo::UnitTest("'b"));
+        let re_c = ccx.fresh_re_universal(UniversalReVarSourceInfo::UnitTest("'c"));
+        let re_1 = ccx.fresh_re_infer();
+        let re_2 = ccx.fresh_re_infer();
 
-        ccx.unify_re_and_re(re_a, re_i7, RelationMode::Equate)
+        // constrain(re_a: &longer re_1)
+        ccx.unify_re_and_re(re_a, re_1, RelationMode::LhsOntoRhs)
             .report_never();
 
-        ccx.unify_re_and_re(re_u18, re_i3, RelationMode::LhsOntoRhs)
+        // permit(re_1: &longer re_b)
+        ccx.permit_universe_re_outlives_re(re_b, re_1, RelationDirection::RhsOntoLhs);
+
+        // constrain(re_b: &longer re_2)
+        ccx.unify_re_and_re(re_b, re_2, RelationMode::LhsOntoRhs)
             .report_never();
 
-        ccx.permit_universe_re_outlives_re(re_u18, re_i7, RelationDirection::RhsOntoLhs);
-        ccx.permit_universe_re_outlives_re(re_glb, re_i3, RelationDirection::RhsOntoLhs);
+        // permit(re_2: &longer re_c)
+        ccx.permit_universe_re_outlives_re(re_c, re_2, RelationDirection::RhsOntoLhs);
 
-        ccx.unify_re_and_re(re_a, re_glb, RelationMode::LhsOntoRhs)
+        // constrain(re_a: &longer re_c)
+        // Should be derived from...
+        // - constrain(re_a: &longer re_1), permit(re_1: &longer re_b)
+        //   => permit(re_1: &longer re_b)
+        // - constrain(re_b: &longer re_2), permit(re_2: &longer re_c)
+        //   => permit(re_b: &longer re_c)
+        ccx.unify_re_and_re(re_a, re_c, RelationMode::LhsOntoRhs)
             .report_never();
 
         ccx.verify();
