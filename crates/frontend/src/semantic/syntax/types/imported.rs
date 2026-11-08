@@ -220,14 +220,68 @@ define_index_type! {
     pub struct UniversalTyProjIdx = u32;
 }
 
+/// A universally-quantified projection of an associated type belonging to another
+/// universally-quantified type.
+///
+/// This contains both in-band information describing the actual projection (i.e. target type,
+/// trait spec, and associated type index) and a `cache_idx` tying the projection to an out-of-band
+/// structure in the `ClauseCx` describing the direct clauses inherited from its parent's
+/// constraints and an elaboration state.
+///
+/// Keeping these two sources of information in sync is important! In particular, folders must
+/// ensure that they do not accidentally perform a substitution that changes the identity of the
+/// projection without also updating its `cache_idx`. By default, visitors and folders will visit
+/// the types inside a `UniversalTyProj`. To reduce risk, however, the `fold_universal_proj` method
+/// of the folder is left without a default implementation so users must opt-in to this structural
+/// folding behavior by calling `super_`.
+///
+/// This dual in-band and out-of-band structure ensures that...
+///
+/// - `UnifyCx` can properly unify projection types using the in-band information (e.g. unifying
+///   `<T as Foo<'_, i32>>::Out` and `<T as Foo<'a, _>>::Out` will unify the regions and the type
+///   parameters if `T` implements `for<'a, T> Foo<'a, T, Out: {left unbound}>`).
+///
+///    In particular, it ensures that the context can...
+///
+///    - Perform the occurs check with its visitor.
+///    - Properly normalize projection types.
+///
+/// - `ClauseCx`'s `oblige_impl` obligation can be easily implemented.
+///
+///   Each elaboration request is tied to the universal's `UniversalTyProjIdx`, which was
+///   pre-initialized with the direct clauses from the parent universal which need to be elaborated.
+///   These requests spawn obligations which attempt to make progress towards fully elaborating the
+///   universal's clauses.
+///
+///   We *could* do this without a `cache_idx` but that would require us to...
+///
+///   - Spawn elaboration requests for each interned instance of a `UniversalTyProj` so elaboration
+///     requests could be duplicated if a `UniversalTyProj` is normalized to some equivalent form.
+///
+///   - Determine the direct clauses of the type by scanning through the parent universal's clause
+///     list and figuring out which associated type universal this type should unify with, which
+///     would require some awkward logic.
+///
+///     We don't want to store these direct clauses as part of the `UniversalTyProj` itself since
+///     doing so would...
+///
+///     a) be just as error-prone as the out-of-band information because, in both cases, we'd have
+///        to ensure that the type defining information and auxiliary information are kept in
+///        sync.
+///     b) make it impossible to create universal projections with direct clauses that point to
+///        themself.
+///
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct UniversalTyProjInner {
+    /// The base universal out of which we're projecting this universal.
+    ///
+    /// This field must be updated in tandem with `cache_idx`.
     pub target: UniversalTy,
 
-    /// The specification as which this projection was instantiated. This is considered for
-    /// unification purposes. All associated parameters are expected to be left `Unspecified`.
+    /// The specification as which this projection was instantiated. All associated parameters are
+    /// expected to be left `Unspecified`.
     ///
-    /// Since this field must be updated in tandem with `cache_idx`, it is never folded or visited.
+    /// This field must be updated in tandem with `cache_idx`.
     pub as_spec: TraitSpec,
 
     /// The index of the associated type we're projecting.
@@ -236,7 +290,8 @@ pub struct UniversalTyProjInner {
     pub assoc_idx: u32,
 
     /// An ID for projection's state containing its pre-initialized direct clauses, debug info, and
-    /// cached elaboration. This should not be considered as relevant for unification.
+    /// cached elaboration. This should not be considered as relevant to unification since multiple
+    /// projections spawned in multiple places may still unify to one another.
     pub cache_idx: UniversalTyProjIdx,
 }
 

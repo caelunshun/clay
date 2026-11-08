@@ -13,8 +13,8 @@ use crate::{
             Mutability, Re, ReVariance, RelationDirection, RelationMode, SimpleTySet, TraitClause,
             TraitClauseList, TraitParam, TraitParamList, Ty, TyFolder, TyFolderExt,
             TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt,
-            UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProjInner,
-            UniversalTyRoot, UniversalTyRootSourceInfo,
+            UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProj,
+            UniversalTyProjInner, UniversalTyRoot, UniversalTyRootSourceInfo,
         },
     },
 };
@@ -1102,6 +1102,14 @@ impl<'sess> TyFolder<'sess> for InferTySubstitutor<'_, 'sess> {
             },
         })
     }
+
+    fn fold_universal_proj(
+        &mut self,
+        projection: UniversalTyProj,
+    ) -> Result<UniversalTyProj, Self::Error> {
+        // Preserves identity :)
+        self.fold_fallible(projection)
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -1125,5 +1133,13 @@ impl<'sess> TyFolder<'sess> for FallibleInferTySubstitutor<'_, 'sess> {
             Ok(v) => self.fold_fallible(v)?,
             Err(_) => return Err(var),
         })
+    }
+
+    fn fold_universal_proj(
+        &mut self,
+        projection: UniversalTyProj,
+    ) -> Result<UniversalTyProj, Self::Error> {
+        // Preserves identity :)
+        self.super_fallible(projection)
     }
 }

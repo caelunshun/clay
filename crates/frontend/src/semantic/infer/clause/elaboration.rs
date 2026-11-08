@@ -11,7 +11,7 @@ use crate::{
             HrtbProjection, InferTyVar, InferTyVarSourceInfo, Re, RelationMode, TraitClause,
             TraitInstance, TraitParam, TraitSpec, Ty, TyFolder, TyFolderExt, TyFolderInfallibleExt,
             TyKind, TyOrRe, TyVisitor, TyVisitorInfallibleExt, UniversalReVarSourceInfo,
-            UniversalTy, UniversalTyOrReRoot, UniversalTyProjInner,
+            UniversalTy, UniversalTyOrReRoot, UniversalTyProj, UniversalTyProjInner,
         },
     },
 };
@@ -686,6 +686,13 @@ impl<'sess> TyFolder<'sess> for HrtbReverseTranscriptase<'_, 'sess> {
     }
 
     fn fold_universal(&mut self, _ty: UniversalTy) -> Result<UniversalTy, Self::Error> {
+        unreachable!()
+    }
+
+    fn fold_universal_proj(
+        &mut self,
+        _projection: UniversalTyProj,
+    ) -> Result<UniversalTyProj, Self::Error> {
         unreachable!()
     }
 }

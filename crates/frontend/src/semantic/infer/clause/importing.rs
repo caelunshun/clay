@@ -20,7 +20,8 @@ use crate::{
             SigTyKind, SigTyList, SigTyOrRe, SigTyOrReList, TraitClause, TraitClauseList,
             TraitInstance, TraitParam, TraitSpec, Ty, TyFolder, TyFolderInfallibleExt, TyKind,
             TyList, TyOrRe, TyOrReKind, TyOrReList, TypeAliasItem, TypeGeneric,
-            UniversalReVarSourceInfo, UniversalTy, UniversalTyRoot, UniversalTyRootSourceInfo,
+            UniversalReVarSourceInfo, UniversalTy, UniversalTyProj, UniversalTyRoot,
+            UniversalTyRootSourceInfo,
         },
     },
     typed_joiner,
@@ -1494,5 +1495,13 @@ impl<'sess> TyFolder<'sess> for HrtbInstantiator<'_, 'sess> {
         }
 
         Ok(self.super_(re))
+    }
+
+    fn fold_universal_proj(
+        &mut self,
+        _projection: UniversalTyProj,
+    ) -> Result<UniversalTyProj, Self::Error> {
+        // HRTBs only ever contain `HrtbProjection` types which get normalized as needed.
+        unreachable!()
     }
 }

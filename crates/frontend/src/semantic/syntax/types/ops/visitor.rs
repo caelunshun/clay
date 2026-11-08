@@ -568,13 +568,13 @@ impl TyVisitable for UniversalTyProj {
         let s = visitor.session();
         let UniversalTyProjInner {
             target,
-            // Intentionally not visited
-            as_spec: _,
+            as_spec,
             assoc_idx: _,
             cache_idx: _,
         } = *me.r(s);
 
         visitor.visit_fallible(target)?;
+        visitor.visit_fallible(as_spec)?;
 
         ControlFlow::Continue(())
     }

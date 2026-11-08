@@ -130,12 +130,12 @@ pub trait TyFolder<'sess> {
         self.super_fallible(ty)
     }
 
+    // No default implementation to force consumers to ensure that the folder properly handles the
+    // peculiar semantics of `UniversalTyProj`. See its documentation for details.
     fn fold_universal_proj(
         &mut self,
         projection: UniversalTyProj,
-    ) -> Result<UniversalTyProj, Self::Error> {
-        self.super_fallible(projection)
-    }
+    ) -> Result<UniversalTyProj, Self::Error>;
 
     // === Binders === //
 
@@ -583,7 +583,7 @@ impl TyFoldable for UniversalTyProj {
 
         Ok(UniversalTyProjInner {
             target: folder.fold_fallible(target)?,
-            as_spec, // Intentionally not folded.
+            as_spec: folder.fold_fallible(as_spec)?,
             assoc_idx,
             cache_idx,
         }
