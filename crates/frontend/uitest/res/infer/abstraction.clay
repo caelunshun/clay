@@ -1,8 +1,5 @@
-fn concrete<'a, 'b>(magic: (&'a (), &'b ())) {
-    // FIXME: This ICEs.
-    // generic(magic);
-
-    generic::<'a, 'b, _>(magic);
+fn concrete<'a, 'b>() {
+    generic::<'a, 'b, (&'a (), &'b ())>();
 
     // These are accepted.
     assert_outlives::<&'a (), (&'a (), &'b ())>();
@@ -13,7 +10,7 @@ fn concrete<'a, 'b>(magic: (&'a (), &'b ())) {
     assert_outlives::<(&'a (), &'b ()), &'b ()>();
 }
 
-fn generic<'a, 'b, U: &shorter (&'a (), &'b ()) + &longer (&'a (), &'b ())>(magic: U) {
+fn generic<'a, 'b, U: &shorter (&'a (), &'b ()) + &longer (&'a (), &'b ())>() {
     // These are also accepted.
     assert_outlives::<&'a (), U>();
     assert_outlives::<&'b (), U>();

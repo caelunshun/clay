@@ -1,6 +1,6 @@
 error: 
 - bad generics
-  span: abstraction.clay:12:5-48
+  span: abstraction.clay:9:5-48
     - binder param WF error
         - idx: 0
             - ty outlives ty
@@ -17,7 +17,7 @@ error:
 
 error: 
 - bad generics
-  span: abstraction.clay:13:5-48
+  span: abstraction.clay:10:5-48
     - binder param WF error
         - idx: 0
             - ty outlives ty
@@ -34,7 +34,7 @@ error:
 
 error: 
 - bad generics
-  span: abstraction.clay:22:5-33
+  span: abstraction.clay:19:5-33
     - binder param WF error
         - idx: 0
             - ty outlives ty
@@ -43,15 +43,15 @@ error:
               RHS GLB: 'glb(&'a ())
               Errors:
                 - re and re unify error
-                  LHS: 'u18
+                  LHS: 'u15
                   RHS: 'glb(&'a ())
                   mode: LhsOntoRhs
-                    - requires var: 'u18
+                    - requires var: 'u15
                       to outlive: 'glb(&'a ())
 
 error: 
 - bad generics
-  span: abstraction.clay:23:5-33
+  span: abstraction.clay:20:5-33
     - binder param WF error
         - idx: 0
             - ty outlives ty
@@ -60,9 +60,9 @@ error:
               RHS GLB: 'glb(&'b ())
               Errors:
                 - re and re unify error
-                  LHS: 'u18
+                  LHS: 'u15
                   RHS: 'glb(&'b ())
                   mode: LhsOntoRhs
-                    - requires var: 'u18
+                    - requires var: 'u15
                       to outlive: 'glb(&'b ())
 
