@@ -209,6 +209,7 @@ pub enum UniversalReVarSourceInfo {
     OutliveLub(Ty),
     HrtbWf { binder: SigHrtbBinder, idx: u32 },
     MirPlace(MirPlace),
+    UnitTest(&'static str),
 }
 
 pub type UniversalTyProj = Intern<UniversalTyProjInner>;

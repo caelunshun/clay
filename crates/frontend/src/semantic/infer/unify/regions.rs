@@ -3,17 +3,16 @@ use crate::{
     flags,
     semantic::{
         infer::{
-            ClauseCx, ClausePrettyFmtOpts, Promise, PromiseHandle, ReAndReUnifyErrorCause,
-            ReConstraintOrder, UnifyCxMode,
+            ClauseCx, Promise, PromiseHandle, ReAndReUnifyErrorCause, ReConstraintOrder,
+            UnifyCxMode,
         },
         syntax::{InferReVar, Re, RelationDirection, UniversalReVar, UniversalReVarSourceInfo},
     },
 };
 use clay_core::FastHashSet;
 use index_vec::IndexVec;
-use petgraph::{dot::Dot, graph::NodeIndex};
 use smallvec::SmallVec;
-use std::{fmt, ops::ControlFlow};
+use std::ops::ControlFlow;
 
 // === ReUnifyTracker === //
 
@@ -203,104 +202,109 @@ impl<'sess> ReUnifyTracker<'sess> {
         }
 
         if flags::should_print_ccx_region_graph() {
-            #[derive(Clone)]
-            enum NodeKind {
-                Universal(String),
-                Infer(String),
+            println!("{}", ccx.ucx().regions.graphviz(ccx));
+        }
+    }
+
+    pub fn graphviz(&self, ccx: &ClauseCx<'sess>) -> String {
+        use crate::semantic::infer::ClausePrettyFmtOpts;
+        use petgraph::{dot::Dot, graph::NodeIndex};
+        use std::fmt;
+
+        #[derive(Clone)]
+        enum NodeKind {
+            Universal(String),
+            Infer(String),
+        }
+
+        impl fmt::Display for NodeKind {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let (NodeKind::Universal(v) | NodeKind::Infer(v)) = self;
+                f.write_str(v)
             }
+        }
 
-            impl fmt::Display for NodeKind {
-                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                    let (NodeKind::Universal(v) | NodeKind::Infer(v)) = self;
-                    f.write_str(v)
-                }
+        #[derive(Copy, Clone)]
+        enum EdgeKind {
+            Permit,
+            Constrain,
+        }
+
+        impl fmt::Display for EdgeKind {
+            fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                Ok(())
             }
+        }
 
-            #[derive(Copy, Clone)]
-            enum EdgeKind {
-                Permit,
-                Constrain,
+        let nbs = self
+            .non_blind_state
+            .as_ref()
+            .expect("cannot create a graph for a blind `ReUnifyTracker`");
+
+        let fcx = ccx.pretty(ClausePrettyFmtOpts { verbose: true });
+
+        let mut graph = petgraph::Graph::new();
+
+        let universal_nodes = self
+            .universals
+            .indices()
+            .map(|universal| graph.add_node(NodeKind::Universal(fcx.wrap(universal).to_string())))
+            .collect::<IndexVec<UniversalReVar, _>>();
+
+        let infer_nodes = (0..nbs.next_infer.index())
+            .map(InferReVar::from_usize)
+            .map(|infer| graph.add_node(NodeKind::Infer(fcx.wrap(Re::InferVar(infer)).to_string())))
+            .collect::<IndexVec<InferReVar, _>>();
+
+        let gc_node = graph.add_node(NodeKind::Universal("'gc".to_string()));
+
+        let re_to_node = |re: InferRe| -> NodeIndex {
+            match re {
+                InferRe::Gc => gc_node,
+                InferRe::Universal(var) => universal_nodes[var],
+                InferRe::Infer(var) => infer_nodes[var],
             }
+        };
 
-            impl fmt::Display for EdgeKind {
-                fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                    Ok(())
-                }
-            }
+        for cst in &nbs.constraints {
+            graph.add_edge(
+                re_to_node(cst.lhs),
+                re_to_node(cst.rhs),
+                EdgeKind::Constrain,
+            );
+        }
 
-            let this = get_this(ccx).clone();
-            let nbs = this.non_blind_state.as_ref().unwrap();
-
-            let fcx = ccx.pretty(ClausePrettyFmtOpts { verbose: true });
-
-            let mut graph = petgraph::Graph::new();
-
-            let universal_nodes = this
-                .universals
-                .indices()
-                .map(|universal| {
-                    graph.add_node(NodeKind::Universal(fcx.wrap(universal).to_string()))
-                })
-                .collect::<IndexVec<UniversalReVar, _>>();
-
-            let infer_nodes = (0..nbs.next_infer.index())
-                .map(InferReVar::from_usize)
-                .map(|infer| {
-                    graph.add_node(NodeKind::Infer(fcx.wrap(Re::InferVar(infer)).to_string()))
-                })
-                .collect::<IndexVec<InferReVar, _>>();
-
-            let gc_node = graph.add_node(NodeKind::Universal("'gc".to_string()));
-
-            let re_to_node = |re: InferRe| -> NodeIndex {
-                match re {
-                    InferRe::Gc => gc_node,
-                    InferRe::Universal(var) => universal_nodes[var],
-                    InferRe::Infer(var) => infer_nodes[var],
-                }
-            };
-
-            for cst in &nbs.constraints {
+        for (universal, state) in self.universals.iter_enumerated() {
+            for &other in &state.allowed_outlive {
                 graph.add_edge(
-                    re_to_node(cst.lhs),
-                    re_to_node(cst.rhs),
-                    EdgeKind::Constrain,
+                    universal_nodes[universal],
+                    re_to_node(other),
+                    EdgeKind::Permit,
                 );
             }
 
-            for (universal, state) in this.universals.iter_enumerated() {
-                for &other in &state.allowed_outlive {
-                    graph.add_edge(
-                        universal_nodes[universal],
-                        re_to_node(other),
-                        EdgeKind::Permit,
-                    );
-                }
-
-                for &other in &state.allowed_outlived_by {
-                    graph.add_edge(
-                        re_to_node(other),
-                        universal_nodes[universal],
-                        EdgeKind::Permit,
-                    );
-                }
+            for &other in &state.allowed_outlived_by {
+                graph.add_edge(
+                    re_to_node(other),
+                    universal_nodes[universal],
+                    EdgeKind::Permit,
+                );
             }
-
-            let viz = Dot::with_attr_getters(
-                &graph,
-                &[],
-                &|_graph, edge| match edge.weight() {
-                    EdgeKind::Permit => "style=solid".to_string(),
-                    EdgeKind::Constrain => "style=dashed".to_string(),
-                },
-                &|_graph, (_idx, node)| match node {
-                    NodeKind::Universal(_) => "shape=box".to_string(),
-                    NodeKind::Infer(_) => "shape=circle".to_string(),
-                },
-            );
-
-            println!("{viz}");
         }
+
+        Dot::with_attr_getters(
+            &graph,
+            &[],
+            &|_graph, edge| match edge.weight() {
+                EdgeKind::Permit => "style=solid".to_string(),
+                EdgeKind::Constrain => "style=dashed".to_string(),
+            },
+            &|_graph, (_idx, node)| match node {
+                NodeKind::Universal(_) => "shape=box".to_string(),
+                NodeKind::Infer(_) => "shape=circle".to_string(),
+            },
+        )
+        .to_string()
     }
 }
 
@@ -717,5 +721,56 @@ impl InferReDfs {
         }
 
         ControlFlow::Continue(())
+    }
+}
+
+// === Tests === //
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        base::Session,
+        semantic::{
+            analysis::TyCtxt,
+            infer::ImplCache,
+            syntax::{LangItems, RelationMode},
+        },
+    };
+
+    #[test]
+    fn region_chain() {
+        let s = Session::new();
+        let _guard = s.clone().bind();
+
+        let s = &s;
+
+        let tcx = TyCtxt {
+            session: s,
+            impl_cache: &ImplCache::default(),
+            lang_items: &LangItems::default(),
+        };
+
+        let mut ccx = ClauseCx::new(&tcx, UnifyCxMode::RegionAware);
+
+        let re_a = ccx.fresh_re_universal(UniversalReVarSourceInfo::UnitTest("'a"));
+        let re_u18 = ccx.fresh_re_universal(UniversalReVarSourceInfo::UnitTest("'u18"));
+        let re_glb = ccx.fresh_re_universal(UniversalReVarSourceInfo::UnitTest("'glb"));
+        let re_i7 = ccx.fresh_re_infer();
+        let re_i3 = ccx.fresh_re_infer();
+
+        ccx.unify_re_and_re(re_a, re_i7, RelationMode::Equate)
+            .report_never();
+
+        ccx.unify_re_and_re(re_u18, re_i3, RelationMode::LhsOntoRhs)
+            .report_never();
+
+        ccx.permit_universe_re_outlives_re(re_u18, re_i7, RelationDirection::RhsOntoLhs);
+        ccx.permit_universe_re_outlives_re(re_glb, re_i3, RelationDirection::RhsOntoLhs);
+
+        ccx.unify_re_and_re(re_a, re_glb, RelationMode::LhsOntoRhs)
+            .report_never();
+
+        ccx.verify();
     }
 }

@@ -115,7 +115,8 @@ impl<'a, 'sess> SigExporter<'a, 'sess> {
                 | UniversalReVarSourceInfo::OutliveLub(_)
                 | UniversalReVarSourceInfo::InstantiatedHrtbVar
                 | UniversalReVarSourceInfo::HrtbWf { .. }
-                | UniversalReVarSourceInfo::MirPlace(_) => {
+                | UniversalReVarSourceInfo::MirPlace(_)
+                | UniversalReVarSourceInfo::UnitTest(_) => {
                     unreachable!()
                 }
             },

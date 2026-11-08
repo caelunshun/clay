@@ -16,7 +16,6 @@ pub struct TyCtxt<'a> {
     pub session: &'a Session,
     pub impl_cache: &'a ImplCache,
     pub lang_items: &'a LangItems,
-    pub krate: Obj<Crate>,
 }
 
 impl<'a> TyCtxt<'a> {
@@ -24,10 +23,10 @@ impl<'a> TyCtxt<'a> {
         self.session
     }
 
-    pub fn check_crate(&self) {
+    pub fn check_crate(&self, krate: Obj<Crate>) {
         let s = self.session();
 
-        for &item in &**self.krate.r(s).items {
+        for &item in &**krate.r(s).items {
             match *item.r(s).kind {
                 ItemKind::Module(_) => {
                     // (intentionally empty)

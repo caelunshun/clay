@@ -58,9 +58,8 @@ fn main() {
         session: s,
         impl_cache: &impl_cache,
         lang_items: &lang_items,
-        krate: std_krate,
     }
-    .check_crate();
+    .check_crate(std_krate);
 
     _ = session.diag.finish();
 
@@ -79,9 +78,8 @@ fn main() {
         session: s,
         impl_cache: &impl_cache,
         lang_items: &lang_items,
-        krate: app_krate,
     }
-    .check_crate();
+    .check_crate(app_krate);
 
     _ = session.diag.finish();
 }
