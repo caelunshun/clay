@@ -1,0 +1,17 @@
+error: 
+- bad generics
+  span: min_proj_lifetime.clay:6:5-47
+    - binder param WF error
+        - idx: 0
+            - ty outlives ty
+              LHS: u(1) <u(0) T as Bar>::Out
+              RHS: &'a ()
+              RHS GLB: 'glb(&'a ())
+              Errors:
+                - re and re unify error
+                  LHS: 'universal(u(1) <u(0) T as Bar>::Out)
+                  RHS: 'glb(&'a ())
+                  mode: LhsOntoRhs
+                    - requires var: 'universal(u(1) <u(0) T as Bar>::Out)
+                      to outlive: 'glb(&'a ())
+

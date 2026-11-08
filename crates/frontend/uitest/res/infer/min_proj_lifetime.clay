@@ -1,0 +1,10 @@
+trait Bar {
+    type Out;
+}
+
+fn main<'a, T: &longer 'a + Bar>() {
+    // FIXME
+    assert_outlives::<<T as Bar>::Out, &'a ()>();
+}
+
+fn assert_outlives<LHS: &longer RHS, RHS>() {}

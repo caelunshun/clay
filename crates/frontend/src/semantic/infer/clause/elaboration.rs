@@ -118,7 +118,6 @@ impl<'sess> ClauseCx<'sess> {
 
                 let outlive_glb = self.obtain_ty_glb(outlives_comps);
 
-                // FIXME: doesn't work??
                 self.permit_universe_re_outlives_re(
                     re_representative,
                     outlive_glb,
