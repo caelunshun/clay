@@ -1,0 +1,11 @@
+fn re_outlive<'a, T: &longer 'a>() {
+    assert_outlives::<T, &'a ()>();
+}
+
+fn ty_outlive<'a, T: &longer (&'a (),)>() {
+    // FIXME: should work
+    assert_outlives::<T, &'a ()>();
+}
+
+fn assert_outlives<LHS: &longer RHS, RHS>() {}
+

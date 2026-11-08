@@ -1,6 +1,6 @@
 error: 
 - bad generics
-  span: ty_outlives.clay:7:5-48
+  span: ty_outlives_complex.clay:7:5-48
     - binder param WF error
         - idx: 0
             - ty outlives ty
@@ -17,7 +17,7 @@ error:
 
 error: 
 - bad generics
-  span: ty_outlives.clay:8:5-58
+  span: ty_outlives_complex.clay:8:5-58
     - binder param WF error
         - idx: 0
             - ty outlives ty
