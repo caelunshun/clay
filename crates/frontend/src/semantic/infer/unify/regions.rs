@@ -739,7 +739,54 @@ mod tests {
     };
 
     #[test]
-    fn region_chain() {
+    fn region_chain_shorter() {
+        let s = Session::new();
+        let _guard = s.clone().bind();
+
+        let s = &s;
+
+        let tcx = TyCtxt {
+            session: s,
+            impl_cache: &ImplCache::default(),
+            lang_items: &LangItems::default(),
+        };
+
+        let mut ccx = ClauseCx::new(&tcx, UnifyCxMode::RegionAware);
+
+        let re_a = ccx.fresh_re_universal(UniversalReVarSourceInfo::UnitTest("'a"));
+        let re_b = ccx.fresh_re_universal(UniversalReVarSourceInfo::UnitTest("'b"));
+        let re_c = ccx.fresh_re_universal(UniversalReVarSourceInfo::UnitTest("'c"));
+        let re_1 = ccx.fresh_re_infer();
+        let re_2 = ccx.fresh_re_infer();
+
+        // constrain(re_a: &shorter re_1)
+        ccx.unify_re_and_re(re_a, re_1, RelationMode::RhsOntoLhs)
+            .report_never();
+
+        // permit(re_1: &shorter re_b)
+        ccx.permit_universe_re_outlives_re(re_b, re_1, RelationDirection::LhsOntoRhs);
+
+        // constrain(re_b: &shorter re_2)
+        ccx.unify_re_and_re(re_b, re_2, RelationMode::RhsOntoLhs)
+            .report_never();
+
+        // permit(re_2: &shorter re_c)
+        ccx.permit_universe_re_outlives_re(re_c, re_2, RelationDirection::LhsOntoRhs);
+
+        // constrain(re_a: &shorter re_c)
+        // Should be derived from...
+        // - constrain(re_a: &shorter re_1), permit(re_1: &shorter re_b)
+        //   => permit(re_1: &shorter re_b)
+        // - constrain(re_b: &shorter re_2), permit(re_2: &shorter re_c)
+        //   => permit(re_b: &shorter re_c)
+        ccx.unify_re_and_re(re_a, re_c, RelationMode::RhsOntoLhs)
+            .report_never();
+
+        ccx.verify();
+    }
+
+    #[test]
+    fn region_chain_longer() {
         let s = Session::new();
         let _guard = s.clone().bind();
 
