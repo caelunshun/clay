@@ -22,7 +22,7 @@
 //!         (
 //!             'precond_1_rhs_1 && ... 'precond_1_rhs_n
 //!             ==>
-//!             'precond_1_lhs_1 && ... && 'precond_1_rhs_n
+//!             'precond_1_lhs_1 && ... && 'precond_1_lhs_n
 //!         )
 //!         &&
 //!         ...
@@ -30,7 +30,7 @@
 //!         (
 //!             'precond_m_rhs_1 && ... 'precond_m_rhs_n
 //!             ==>
-//!             'precond_m_lhs_1 && ... && 'precond_m_rhs_n
+//!             'precond_m_lhs_1 && ... && 'precond_m_lhs_n
 //!         )
 //!     )
 //!     ==>
@@ -38,7 +38,7 @@
 //!         (
 //!             'precond_1_rhs_1 && ... 'precond_1_rhs_n
 //!             ==>
-//!             'precond_1_lhs_1 && ... && 'precond_1_rhs_n
+//!             'precond_1_lhs_1 && ... && 'precond_1_lhs_n
 //!         )
 //!         &&
 //!         ...
@@ -46,7 +46,7 @@
 //!         (
 //!             'precond_m_rhs_1 && ... 'precond_m_rhs_n
 //!             ==>
-//!             'precond_m_lhs_1 && ... && 'precond_m_rhs_n
+//!             'precond_m_lhs_1 && ... && 'precond_m_lhs_n
 //!         )
 //!         &&
 //!         (
@@ -159,4 +159,73 @@
 //! - If we select neither `A_t` nor `A_f`, `?true_if_non_empty` will be allowed to be `false`.
 //! - If we don't match all terms, `?terms_truthy` will be allowed to be `false`.
 //!
-//! This is super unfortunate!
+//! Let's see how we would express this in Clay...
+//!
+//! ```text
+//! struct Binder<'a>;
+//!
+//! impl Binder<'a> {
+//!     fn new() -> Self {
+//!         Self
+//!     }
+//!
+//!     fn longer<'s: &shorter Self, 'b: &longer 'a>() {}
+//! }
+//!
+//! fn assert_all_imply<
+//!     'lhs: &longer (&'rhs_1 (), &'rhs_2 (), &'rhs_3 (), &'rhs_4 (), &'rhs_5 ()),
+//!     'rhs_1, 'rhs_2, 'rhs_3, 'rhs_4, 'rhs_5
+//! >(
+//!     rhs_1: Binder<'rhs_1>,
+//!     rhs_2: Binder<'rhs_2>,
+//!     rhs_3: Binder<'rhs_3>,
+//!     rhs_4: Binder<'rhs_4>,
+//!     rhs_5: Binder<'rhs_5>
+//! ) {
+//! }
+//!
+//! fn meow<
+//!     'a_t, 'a_f,
+//!     'b_t, 'b_f,
+//!     'c_t, 'c_f,
+//!     'false_if_not_both:
+//!         &longer (&'a_t (), &'a_f ()) +  // a_t + a_f -> false_if_not_both
+//!         &longer (&'b_t (), &'b_f ()) +  // b_t + b_f -> false_if_not_both
+//!         &longer (&'c_t (), &'c_f ()),   // c_t + c_f -> false_if_not_both
+//! >() {
+//!     let true_if_at_least_one_a = Binder::new();
+//!     true_if_at_least_one_a.longer::<'a_t>();  // 'a_t -> ?true_if_at_least_one_a
+//!     true_if_at_least_one_a.longer::<'a_f>();  // 'a_f -> ?true_if_at_least_one_a
+//!
+//!     let true_if_at_least_one_b = Binder::new();
+//!     true_if_at_least_one_b.longer::<'b_t>();  // 'b_t -> ?true_if_at_least_one_b
+//!     true_if_at_least_one_b.longer::<'b_f>();  // 'b_f -> ?true_if_at_least_one_b
+//!
+//!     let true_if_at_least_one_c = Binder::new();
+//!     true_if_at_least_one_c.longer::<'c_t>();  // 'c_t -> ?true_if_at_least_one_c
+//!     true_if_at_least_one_c.longer::<'c_f>();  // 'c_f -> ?true_if_at_least_one_c
+//!
+//!     let term_1_truthy = Binder::new();
+//!     term_1_truthy.longer::<'a_t>();  // 'a_t -> ?term_1_truthy
+//!     term_1_truthy.longer::<'b_f>();  // 'b_f -> ?term_1_truthy
+//!     term_1_truthy.longer::<'c_t>();  // 'c_t -> ?term_1_truthy
+//!
+//!     let term_2_truthy = Binder::new();
+//!     term_2_truthy.longer::<'a_f>();  // 'a_f -> ?term_2_truthy
+//!     term_2_truthy.longer::<'b_f>();  // 'b_f -> ?term_2_truthy
+//!     term_2_truthy.longer::<'c_t>();  // 'c_t -> ?term_2_truthy
+//!
+//!     // ?true_if_at_least_one_a + ?true_if_at_least_one_b + ?true_if_at_least_one_c +
+//!     //    ?term_1_truthy + ?term_2_truthy -> 'false_if_not_both
+//!     assert_all_imply::<'_, '_, '_, '_, '_, 'false_if_not_both>(
+//!         true_if_at_least_one_a,
+//!         true_if_at_least_one_b,
+//!         true_if_at_least_one_c,
+//!         term_1_truthy,
+//!         term_2_truthy,
+//!     );
+//! }
+//! ```
+//!
+//! Using just `&longer <type>` universal constraints, one can reduce SAT-3 to Clay. This is all
+//! very unfortunate!
