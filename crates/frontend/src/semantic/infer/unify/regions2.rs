@@ -1,5 +1,4 @@
-//! Clay's region solver. Because the runtime also uses region solving to perform borrow-checking,
-//! we make this system generic to the underlying representation of regions.
+//! Clay's region solver.
 //!
 //! ## Underlying Theory
 //!
@@ -9,9 +8,13 @@
 //! 'lhs_1 + ... + 'lhs_n: 'rhs_1 + ... + 'rhs_n
 //! ```
 //!
-//! ...where the `+` denotes a set of regions. For example, the source code region constraint
-//! `(&'a (), &'b ()): &longer (&'c (), &'d ())` would be represented in the solver as the formula
-//! `'a + 'b: 'c + 'd`.
+//! ...where the `+` denotes a set of regions. It indicates that, if `'rhs_1` through `'rhs_n` are
+//! all alive, `'lhs_1` through `'lhs_n` will also be alive.
+//!
+//! For example, the source code region constraint `(&'a (), &'b ()): &longer (&'c (), &'d ())`
+//! would be represented in the solver as the formula `'a + 'b: 'c + 'd`. As another example, the
+//! source code region constraint `'a: &longer 'gc` would indicate that, so long as `'gc` is alive,
+//! so too will `'a`; thus, since `'gc` is always alive, `'a` will also always be alive.
 //!
 //! Given a set of precondition formulae, a new formula can be determined sound *iff* it meets the
 //! following logical equation...
@@ -20,56 +23,59 @@
 //! forall<'universal_1, ..., 'universal_n>
 //!     (exists<'infer_1, ..., 'infer_n>
 //!         (
-//!             'precond_1_rhs_1 && ... 'precond_1_rhs_n
-//!             ==>
-//!             'precond_1_lhs_1 && ... && 'precond_1_lhs_n
+//!             'precond_1_rhs_1 & ... & 'precond_1_rhs_n
+//!             =>
+//!             'precond_1_lhs_1 & ... & 'precond_1_lhs_n
 //!         )
-//!         &&
+//!         &
 //!         ...
-//!         &&
+//!         &
 //!         (
-//!             'precond_m_rhs_1 && ... 'precond_m_rhs_n
-//!             ==>
-//!             'precond_m_lhs_1 && ... && 'precond_m_lhs_n
+//!             'precond_m_rhs_1 & ... & 'precond_m_rhs_n
+//!             =>
+//!             'precond_m_lhs_1 & ... & 'precond_m_lhs_n
 //!         )
 //!     )
-//!     ==>
+//!     =>
 //!     (exists<'infer_1, ..., 'infer_n>
 //!         (
-//!             'precond_1_rhs_1 && ... 'precond_1_rhs_n
-//!             ==>
-//!             'precond_1_lhs_1 && ... && 'precond_1_lhs_n
+//!             'precond_1_rhs_1 & ... & 'precond_1_rhs_n
+//!             =>
+//!             'precond_1_lhs_1 & ... & 'precond_1_lhs_n
 //!         )
-//!         &&
+//!         &
 //!         ...
-//!         &&
+//!         &
 //!         (
-//!             'precond_m_rhs_1 && ... 'precond_m_rhs_n
-//!             ==>
-//!             'precond_m_lhs_1 && ... && 'precond_m_lhs_n
+//!             'precond_m_rhs_1 & ... & 'precond_m_rhs_n
+//!             =>
+//!             'precond_m_lhs_1 & ... & 'precond_m_lhs_n
 //!         )
-//!         &&
+//!         &
 //!         (
-//!             'consequent_rhs_1 && ... && 'consequent_rhs_n
-//!             ==>
-//!             'consequent_lhs_1 && ... && 'consequent_lhs_n
+//!             'consequent_rhs_1 & ... & 'consequent_rhs_n
+//!             =>
+//!             'consequent_lhs_1 & ... & 'consequent_lhs_n
 //!         )
 //!     )
 //! ```
 //!
 //! A few notes...
 //!
-//! 1. We use two existential binders to handle inference variables rather than writing
+//! 1. Each universal region becomes a universally quantified boolean and each inference region
+//!    becomes an existentially quantified boolean.
+//!
+//! 2. The term `'lhs_1 + ... + 'lhs_n: 'rhs_1 + ... + 'rhs_n` becomes
+//!    `'rhs_1 & .. & 'rhs_n => 'lhs_1 & ... & 'lhs_n` where each variable denotes the liveness
+//!    of a given region.
+//!
+//! 3. The special region `'gc` is treated as a logical truth.
+//!
+//! 4. We use two existential binders to handle inference variables rather than writing
 //!    `forall<...> exists<...> precond => consequent` because, otherwise, the inference variables
 //!    could be chosen to potentially make the preconditions falsy regardless of the consequent.
 //!
-//! 2. The special region `'gc` is treated as a logical truth.
-//!
-//! 3. The term `'lhs: &longer 'rhs` becomes `'rhs ==> 'lhs` where each variable denotes the
-//!    liveness of a given region. This may seem unintuitive until you consider an example like
-//!    `'lhs: &longer 'gc`. `'lhs` should always be alive so this should be read as `true ==> 'lhs`.
-//!
-//! ## Simple Solving
+//! ## Solving and NP-Completeness
 //!
 //! We would like to construct an algorithm that takes preconditions and a consequent and returns
 //! whether that consequent is satisfiable according to the definition above.
@@ -85,76 +91,73 @@
 //! in the number of universals defined...
 //!
 //! ```text
-//! t_1 -> ?1
-//! f_1 -> ?1
+//! u't_1 => i'1
+//! u'f_1 => i'1
 //!
 //! ...
 //!
-//! t_n -> ?n
-//! f_n -> ?n
+//! u't_n => i'n
+//! u'f_n => i'n
 //!
-//! ?1 && ... && ?n -> rhs
+//! i'1 & ... & i'n => rhs
 //! ```
 //!
-//! ...where `?x` denotes an inference variable and the remaining variables are universals.
+//! ...where `i'x` denotes an inference region and `u'x` denotes a universal region.
 //!
 //! Likewise, consider the following input—this time, exponential in the number of ways in which
 //! it could be made falsy...
 //!
 //! ```text
-//! t_1 + f_1 -> ?a
+//! u't_1 + u'f_1 => i'a
 //! ...
-//! t_n + f_n -> ?a
+//! u't_n + u'f_n => i'a
 //!
-//! lhs -> ?a
+//! lhs => i'a
 //! ```
 //!
 //! Unfortunately, one can reduce a 3-SAT problem into our solver like so...
 //!
 //! ```text
-//! (A || !B || C) && (!A || !B || C)
+//! // Consider the following 3-SAT problem...
+//! // (A || !B || C) & (!A || !B || C)
 //!
-//! // Creates the following universals
-//! A_t
-//! B_t
-//! C_t
-//!
-//! A_f
-//! B_f
-//! C_f
+//! // First, we create the following universals...
+//! //
+//! // u'a_t, u'b_t, u'c_t
+//! // u'a_f, u'b_f, u'c_f
+//! //
+//! // `u'a_t` denotes `A` is `true` and `u'a_f` denotes `A` is `false`.
 //!
 //! // Disjunction
-//! A_t + A_f -> false_if_not_both
-//! B_t + B_f -> false_if_not_both
-//! C_t + C_f -> false_if_not_both
+//! u'a_t & u'a_f => u'dead_if_not_both
+//! u'b_t & u'b_f => u'dead_if_not_both
+//! u'c_t & u'c_f => u'dead_if_not_both
 //!
-//! A_t -> ?true_if_at_least_one_A
-//! A_f -> ?true_if_at_least_one_A
-//! B_t -> ?true_if_at_least_one_B
-//! B_f -> ?true_if_at_least_one_B
-//! C_t -> ?true_if_at_least_one_C
-//! C_f -> ?true_if_at_least_one_C
-//! ?true_if_at_least_one_A + ?true_if_at_least_one_B + ?true_if_at_least_one_C -> ?true_if_non_empty
+//! u'a_t => i'live_if_at_least_one_a
+//! u'a_f => i'live_if_at_least_one_a
+//! u'b_t => i'live_if_at_least_one_b
+//! u'b_f => i'live_if_at_least_one_b
+//! u'c_t => i'live_if_at_least_one_c
+//! u'c_f => i'live_if_at_least_one_c
 //!
 //! // 3-SAT triples
-//! A_t -> ?term_1_truthy
-//! B_f -> ?term_1_truthy
-//! C_t -> ?term_1_truthy
+//! u'a_t => i'live_if_term_1_truthy
+//! u'b_f => i'live_if_term_1_truthy
+//! u'c_t => i'live_if_term_1_truthy
 //!
-//! A_f -> ?term_2_truthy
-//! B_f -> ?term_2_truthy
-//! C_t -> ?term_2_truthy
-//!
-//! ?term_1_truthy + ?term_2_truthy -> ?terms_truthy
+//! u'a_f => i'live_if_term_2_truthy
+//! u'b_f => i'live_if_term_2_truthy
+//! u'c_t => i'live_if_term_2_truthy
 //!
 //! // Final consequent (all terms above were preconditions)
-//! ?true_if_non_empty + ?terms_truthy -> false_if_not_both
+//! i'?live_if_at_least_one_a & ?live_if_at_least_one_b & ?live_if_at_least_one_c &
+//!     i'live_if_term_1_truthy & i'live_if_term_2_truthy => u'dead_if_not_both
 //! ```
 //!
 //! The 3-SAT formula is satisfiable *iff* we can come up with a set of universals that cause a
 //! contradiction in our formula:
 //!
-//! - If we try to select `A_t` and `A_f`, we'll be forced to enable the `false_if_not_both`
+//! - If we try to select `A_t` and `A_f`, we'll be forced to enable the `dead_if_not_both`
 //!   universal and cause the consequent to pass.
 //! - If we select neither `A_t` nor `A_f`, `?true_if_non_empty` will be allowed to be `false`.
 //! - If we don't match all terms, `?terms_truthy` will be allowed to be `false`.
@@ -165,7 +168,7 @@
 //! struct Binder<'a>;
 //!
 //! impl Binder<'a> {
-//!     fn new() -> Self {
+//!     fn new() => Self {
 //!         Self
 //!     }
 //!
@@ -188,44 +191,117 @@
 //!     'a_t, 'a_f,
 //!     'b_t, 'b_f,
 //!     'c_t, 'c_f,
-//!     'false_if_not_both:
-//!         &longer (&'a_t (), &'a_f ()) +  // a_t + a_f -> false_if_not_both
-//!         &longer (&'b_t (), &'b_f ()) +  // b_t + b_f -> false_if_not_both
-//!         &longer (&'c_t (), &'c_f ()),   // c_t + c_f -> false_if_not_both
+//!     'dead_if_not_both:
+//!         &longer (&'a_t (), &'a_f ()) +  // a_t + a_f => dead_if_not_both
+//!         &longer (&'b_t (), &'b_f ()) +  // b_t + b_f => dead_if_not_both
+//!         &longer (&'c_t (), &'c_f ()),   // c_t + c_f => dead_if_not_both
 //! >() {
-//!     let true_if_at_least_one_a = Binder::new();
-//!     true_if_at_least_one_a.longer::<'a_t>();  // 'a_t -> ?true_if_at_least_one_a
-//!     true_if_at_least_one_a.longer::<'a_f>();  // 'a_f -> ?true_if_at_least_one_a
+//!     let live_if_at_least_one_a = Binder::new();
+//!     live_if_at_least_one_a.longer::<'a_t>();  // 'a_t => ?live_if_at_least_one_a
+//!     live_if_at_least_one_a.longer::<'a_f>();  // 'a_f => ?live_if_at_least_one_a
 //!
-//!     let true_if_at_least_one_b = Binder::new();
-//!     true_if_at_least_one_b.longer::<'b_t>();  // 'b_t -> ?true_if_at_least_one_b
-//!     true_if_at_least_one_b.longer::<'b_f>();  // 'b_f -> ?true_if_at_least_one_b
+//!     let live_if_at_least_one_b = Binder::new();
+//!     live_if_at_least_one_b.longer::<'b_t>();  // 'b_t => ?live_if_at_least_one_b
+//!     live_if_at_least_one_b.longer::<'b_f>();  // 'b_f => ?live_if_at_least_one_b
 //!
-//!     let true_if_at_least_one_c = Binder::new();
-//!     true_if_at_least_one_c.longer::<'c_t>();  // 'c_t -> ?true_if_at_least_one_c
-//!     true_if_at_least_one_c.longer::<'c_f>();  // 'c_f -> ?true_if_at_least_one_c
+//!     let live_if_at_least_one_c = Binder::new();
+//!     live_if_at_least_one_c.longer::<'c_t>();  // 'c_t => ?live_if_at_least_one_c
+//!     live_if_at_least_one_c.longer::<'c_f>();  // 'c_f => ?live_if_at_least_one_c
 //!
-//!     let term_1_truthy = Binder::new();
-//!     term_1_truthy.longer::<'a_t>();  // 'a_t -> ?term_1_truthy
-//!     term_1_truthy.longer::<'b_f>();  // 'b_f -> ?term_1_truthy
-//!     term_1_truthy.longer::<'c_t>();  // 'c_t -> ?term_1_truthy
+//!     let live_if_term_1_truthy = Binder::new();
+//!     live_if_term_1_truthy.longer::<'a_t>();  // 'a_t => ?live_if_term_1_truthy
+//!     live_if_term_1_truthy.longer::<'b_f>();  // 'b_f => ?live_if_term_1_truthy
+//!     live_if_term_1_truthy.longer::<'c_t>();  // 'c_t => ?live_if_term_1_truthy
 //!
-//!     let term_2_truthy = Binder::new();
-//!     term_2_truthy.longer::<'a_f>();  // 'a_f -> ?term_2_truthy
-//!     term_2_truthy.longer::<'b_f>();  // 'b_f -> ?term_2_truthy
-//!     term_2_truthy.longer::<'c_t>();  // 'c_t -> ?term_2_truthy
+//!     let live_if_term_2_truthy = Binder::new();
+//!     live_if_term_2_truthy.longer::<'a_f>();  // 'a_f => ?live_if_term_2_truthy
+//!     live_if_term_2_truthy.longer::<'b_f>();  // 'b_f => ?live_if_term_2_truthy
+//!     live_if_term_2_truthy.longer::<'c_t>();  // 'c_t => ?live_if_term_2_truthy
 //!
-//!     // ?true_if_at_least_one_a + ?true_if_at_least_one_b + ?true_if_at_least_one_c +
-//!     //    ?term_1_truthy + ?term_2_truthy -> 'false_if_not_both
-//!     assert_all_imply::<'_, '_, '_, '_, '_, 'false_if_not_both>(
-//!         true_if_at_least_one_a,
-//!         true_if_at_least_one_b,
-//!         true_if_at_least_one_c,
-//!         term_1_truthy,
-//!         term_2_truthy,
+//!     // ?live_if_at_least_one_a + ?live_if_at_least_one_b + ?live_if_at_least_one_c +
+//!     //    ?live_if_term_1_truthy + ?live_if_term_2_truthy => 'dead_if_not_both
+//!     assert_all_imply::<'_, '_, '_, '_, '_, 'dead_if_not_both>(
+//!         live_if_at_least_one_a,
+//!         live_if_at_least_one_b,
+//!         live_if_at_least_one_c,
+//!         live_if_term_1_truthy,
+//!         live_if_term_2_truthy,
 //!     );
 //! }
 //! ```
 //!
 //! Using just `&longer <type>` universal constraints, one can reduce SAT-3 to Clay. This is all
 //! very unfortunate!
+//!
+//! How does Rust fare? Here is the closest I got to replicating this case...
+//!
+//! ```ignore
+//! use std::marker::PhantomData;
+//!
+//! #[derive(Default, Copy, Clone)]
+//! struct Binder<'a>(PhantomData<fn(&'a ()) => &'a ()>);
+//!
+//! impl<'a> Binder<'a> {
+//!     fn longer<'b: 'a>(&self, _: Binder<'b>) {}
+//! }
+//!
+//! fn dead_unless_at_least_one_live<'a, 'b, 'c, A: 'a, B: 'b, C: 'c>(
+//!     _: A,
+//!     _: B,
+//!     _: C,
+//! ) => impl Sized + 'a + 'b + 'c {
+//! }
+//!
+//! fn meow<'a_t, 'a_f, 'b_t, 'b_f, 'c_t, 'c_f>(
+//!     a_t: Binder<'a_t>,
+//!     a_f: Binder<'a_f>,
+//!     b_t: Binder<'b_t>,
+//!     b_f: Binder<'b_f>,
+//!     c_t: Binder<'c_t>,
+//!     c_f: Binder<'c_f>,
+//! ) {
+//!     // live(u'a_t) & live (u'a_f) => live(u'dead_unless_true_and_false_simultaneously)
+//!     // live(u'b_t) & live (u'b_f) => live(u'dead_unless_true_and_false_simultaneously)
+//!     // live(u'c_t) & live (u'c_f) => live(u'dead_unless_true_and_false_simultaneously)
+//!     let dead_unless_true_and_false_simultaneously =
+//!         dead_unless_at_least_one_live((a_t, a_f), (b_t, b_f), (c_t, c_f));
+//!
+//!     let live_if_at_least_one_a = Binder::default();
+//!     live_if_at_least_one_a.longer(a_t); // live(u'a_t) => live(i'live_if_at_least_one_a)
+//!     live_if_at_least_one_a.longer(a_f); // live(u'a_f) => live(i'live_if_at_least_one_a)
+//!
+//!     let live_if_at_least_one_b = Binder::default();
+//!     live_if_at_least_one_b.longer(b_t); // live(u'b_t) => live(i'live_if_at_least_one_b)
+//!     live_if_at_least_one_b.longer(b_f); // live(u'b_f) => live(i'live_if_at_least_one_b)
+//!
+//!     let live_if_at_least_one_c = Binder::default();
+//!     live_if_at_least_one_c.longer(c_t); // live(u'c_t) => live(i'live_if_at_least_one_c)
+//!     live_if_at_least_one_c.longer(c_f); // live(u'c_f) => live(i'live_if_at_least_one_c)
+//!
+//!     let live_if_term_1_truthy = Binder::default();
+//!     live_if_term_1_truthy.longer(a_t); // live(u'a_t) => live(i'live_if_term_1_truthy)
+//!     live_if_term_1_truthy.longer(b_f); // live(u'b_f) => live(i'live_if_term_1_truthy)
+//!     live_if_term_1_truthy.longer(c_t); // live(u'c_t) => live(i'live_if_term_1_truthy)
+//!
+//!     let live_if_term_2_truthy = Binder::default();
+//!     live_if_term_2_truthy.longer(a_f); // live(u'a_f) => live(i'live_if_term_2_truthy)
+//!     live_if_term_2_truthy.longer(b_f); // live(u'b_f) => live(i'live_if_term_2_truthy)
+//!     live_if_term_2_truthy.longer(c_t); // live(u'c_t) => live(i'live_if_term_2_truthy)
+//!
+//!     let live_if_satisfied = (
+//!         live_if_at_least_one_a,
+//!         live_if_at_least_one_b,
+//!         live_if_at_least_one_c,
+//!         live_if_term_1_truthy,
+//!         live_if_term_2_truthy,
+//!     );
+//!
+//!     // ???
+//! }
+//! ```
+//!
+//! Since there is no mechanism to assert that `live_if_satisfied` being live implies that
+//! `dead_unless_true_and_false_simultaneously` is also live, it seems like this case is impossible
+//! to express in Rust.
+//!
+//! This suggests that we could adjust the surface-level syntax of Clay to deny
