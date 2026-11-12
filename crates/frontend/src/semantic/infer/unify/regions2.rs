@@ -108,9 +108,9 @@
 //! it could be made falsy...
 //!
 //! ```text
-//! u't_1 + u'f_1 => i'a
+//! u't_1 & u'f_1 => i'a
 //! ...
-//! u't_n + u'f_n => i'a
+//! u't_n & u'f_n => i'a
 //!
 //! lhs => i'a
 //! ```
@@ -230,8 +230,8 @@
 //! }
 //! ```
 //!
-//! Using just `&longer <type>` universal constraints, one can reduce SAT-3 to Clay. This is all
-//! very unfortunate!
+//! Using just `&longer <type>` universal constraints (or `<type>: &shorter <lifetime>`), one can
+//! reduce SAT-3 to Clay. This is all very unfortunate!
 //!
 //! How does Rust fare? Here is the closest I got to replicating this case...
 //!
@@ -304,4 +304,131 @@
 //! `dead_unless_true_and_false_simultaneously` is also live, it seems like this case is impossible
 //! to express in Rust.
 //!
-//! This suggests that we could adjust the surface-level syntax of Clay to deny
+//! Perhaps we could revisit the surface syntax of Clay to bring its complexity closer to Rust's?
+//!
+//! For the time being, we will write an NP-complete solver and hope that users won't run into
+//! it in practice. It's really difficult to say which exact restrictions we would have to put on
+//! the logical language itself to prevent NP-completeness and, with the presence of
+//! `&longer <type>` or `&longer (<region list>)` syntax in dynamic trait types to support a
+//! mechanism similar to Rust's `impl Trait + use<'a> + use<'b>` in return position feature, we'll
+//! likely end up having to accept some level of NP-completeness, even if we do ultimately curb the
+//! most obvious ways to trigger it.
+//!
+//! ## Reduction to SAT
+//!
+//! TODO
+//!
+//! ## Organization
+//!
+//! - The [`RegionSatSolver`] provides an interactive structure for verifying formulae using the
+//!   theory defined above. One can either push a formula as an axiom using `push_axiom` or
+//!   push a formula while checking its validity against the preconditions using `push_checked`.
+//!
+//! - The [`ReUnifyTracker`] builds on the `RegionSatSolver` to add support for permission and
+//!   constraint edges such that permissions properly propagate across reachable subgraphs of
+//!   inference nodes.
+
+use crate::semantic::syntax::{InferReVar, UniversalReVar};
+use index_vec::IndexVec;
+use petgraph::{Graph, graph::NodeIndex};
+
+// === RegionSatSolver === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum RegionSatTerm {
+    True,
+    Universal(UniversalReVar),
+    Existential(InferReVar),
+}
+
+pub struct RegionSatSolver {
+    graph: Graph<SatNode, ()>,
+    true_node: NodeIndex,
+    universal_nodes: IndexVec<UniversalReVar, NodeIndex>,
+    existential_nodes: IndexVec<InferReVar, NodeIndex>,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+enum SatNode {
+    And,
+    True,
+    Universal(UniversalReVar),
+    Existential(InferReVar),
+}
+
+impl RegionSatSolver {
+    pub fn new(universal_count: usize, existential_count: usize) -> Self {
+        let mut graph = Graph::new();
+
+        let true_node = graph.add_node(SatNode::True);
+
+        let universal_nodes = (0..universal_count)
+            .map(|idx| graph.add_node(SatNode::Universal(UniversalReVar::from_usize(idx))))
+            .collect();
+
+        let existential_nodes = (0..existential_count)
+            .map(|idx| graph.add_node(SatNode::Existential(InferReVar::from_usize(idx))))
+            .collect();
+
+        Self {
+            graph,
+            true_node,
+            universal_nodes,
+            existential_nodes,
+        }
+    }
+
+    fn transform_term(&self, term: RegionSatTerm) -> NodeIndex {
+        match term {
+            RegionSatTerm::True => self.true_node,
+            RegionSatTerm::Universal(var) => self.universal_nodes[var],
+            RegionSatTerm::Existential(var) => self.existential_nodes[var],
+        }
+    }
+
+    pub fn push_axiom(&mut self, lhs: &[RegionSatTerm], rhs: RegionSatTerm) {
+        todo!()
+    }
+
+    pub fn push_checked(
+        &mut self,
+        lhs: impl IntoIterator<Item = RegionSatTerm>,
+        rhs: impl IntoIterator<Item = RegionSatTerm>,
+    ) {
+        let mut lhs = lhs.into_iter().fuse();
+        let mut rhs = rhs.into_iter().peekable();
+
+        if rhs.peek().is_none() {
+            // Vacuous
+            return;
+        }
+
+        let lhs = match (lhs.next(), lhs.next()) {
+            (None, None) => {
+                // Vacuous
+                return;
+            }
+            (Some(node), None) => self.transform_term(node),
+            (Some(first), Some(second)) => {
+                let joiner = self.graph.add_node(SatNode::And);
+
+                for lhs in [first, second].into_iter().chain(lhs) {
+                    self.graph.add_edge(self.transform_term(lhs), joiner, ());
+                }
+
+                joiner
+            }
+            (None, Some(_)) => unreachable!(),
+        };
+
+        // TODO
+    }
+
+    fn push_checked_internal(&mut self, lhs: NodeIndex, rhs: NodeIndex) {
+        // First, let us determine all the ways to force the `lhs` to be true.
+    }
+}
+
+// === ReUnifyTracker === //
+
+pub struct ReUnifyTracker {}
