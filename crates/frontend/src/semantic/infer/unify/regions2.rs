@@ -150,7 +150,7 @@
 //! u'c_t => i'live_if_term_2_truthy
 //!
 //! // Final consequent (all terms above were preconditions)
-//! i'?live_if_at_least_one_a & ?live_if_at_least_one_b & ?live_if_at_least_one_c &
+//! i'live_if_at_least_one_a & i'live_if_at_least_one_b & i'live_if_at_least_one_c &
 //!     i'live_if_term_1_truthy & i'live_if_term_2_truthy => u'dead_if_not_both
 //! ```
 //!
@@ -159,8 +159,8 @@
 //!
 //! - If we try to select `A_t` and `A_f`, we'll be forced to enable the `dead_if_not_both`
 //!   universal and cause the consequent to pass.
-//! - If we select neither `A_t` nor `A_f`, `?true_if_non_empty` will be allowed to be `false`.
-//! - If we don't match all terms, `?terms_truthy` will be allowed to be `false`.
+//! - If we select neither `A_t` nor `A_f`, `i'true_if_non_empty` will be allowed to be `false`.
+//! - If we don't match all terms, `i'terms_truthy` will be allowed to be `false`.
 //!
 //! Let's see how we would express this in Clay...
 //!
@@ -192,34 +192,34 @@
 //!     'b_t, 'b_f,
 //!     'c_t, 'c_f,
 //!     'dead_if_not_both:
-//!         &longer (&'a_t (), &'a_f ()) +  // a_t + a_f => dead_if_not_both
-//!         &longer (&'b_t (), &'b_f ()) +  // b_t + b_f => dead_if_not_both
-//!         &longer (&'c_t (), &'c_f ()),   // c_t + c_f => dead_if_not_both
+//!         &longer (&'a_t (), &'a_f ()) +  // u'a_t + u'a_f => u'dead_if_not_both
+//!         &longer (&'b_t (), &'b_f ()) +  // u'b_t + u'b_f => u'dead_if_not_both
+//!         &longer (&'c_t (), &'c_f ()),   // u'c_t + u'c_f => u'dead_if_not_both
 //! >() {
 //!     let live_if_at_least_one_a = Binder::new();
-//!     live_if_at_least_one_a.longer::<'a_t>();  // 'a_t => ?live_if_at_least_one_a
-//!     live_if_at_least_one_a.longer::<'a_f>();  // 'a_f => ?live_if_at_least_one_a
+//!     live_if_at_least_one_a.longer::<'a_t>();  // u'a_t => i'live_if_at_least_one_a
+//!     live_if_at_least_one_a.longer::<'a_f>();  // u'a_f => i'live_if_at_least_one_a
 //!
 //!     let live_if_at_least_one_b = Binder::new();
-//!     live_if_at_least_one_b.longer::<'b_t>();  // 'b_t => ?live_if_at_least_one_b
-//!     live_if_at_least_one_b.longer::<'b_f>();  // 'b_f => ?live_if_at_least_one_b
+//!     live_if_at_least_one_b.longer::<'b_t>();  // u'b_t => i'live_if_at_least_one_b
+//!     live_if_at_least_one_b.longer::<'b_f>();  // u'b_f => i'live_if_at_least_one_b
 //!
 //!     let live_if_at_least_one_c = Binder::new();
-//!     live_if_at_least_one_c.longer::<'c_t>();  // 'c_t => ?live_if_at_least_one_c
-//!     live_if_at_least_one_c.longer::<'c_f>();  // 'c_f => ?live_if_at_least_one_c
+//!     live_if_at_least_one_c.longer::<'c_t>();  // u'c_t => i'live_if_at_least_one_c
+//!     live_if_at_least_one_c.longer::<'c_f>();  // u'c_f => i'live_if_at_least_one_c
 //!
 //!     let live_if_term_1_truthy = Binder::new();
-//!     live_if_term_1_truthy.longer::<'a_t>();  // 'a_t => ?live_if_term_1_truthy
-//!     live_if_term_1_truthy.longer::<'b_f>();  // 'b_f => ?live_if_term_1_truthy
-//!     live_if_term_1_truthy.longer::<'c_t>();  // 'c_t => ?live_if_term_1_truthy
+//!     live_if_term_1_truthy.longer::<'a_t>();  // u'a_t => i'live_if_term_1_truthy
+//!     live_if_term_1_truthy.longer::<'b_f>();  // u'b_f => i'live_if_term_1_truthy
+//!     live_if_term_1_truthy.longer::<'c_t>();  // u'c_t => i'live_if_term_1_truthy
 //!
 //!     let live_if_term_2_truthy = Binder::new();
-//!     live_if_term_2_truthy.longer::<'a_f>();  // 'a_f => ?live_if_term_2_truthy
-//!     live_if_term_2_truthy.longer::<'b_f>();  // 'b_f => ?live_if_term_2_truthy
-//!     live_if_term_2_truthy.longer::<'c_t>();  // 'c_t => ?live_if_term_2_truthy
+//!     live_if_term_2_truthy.longer::<'a_f>();  // u'a_f => i'live_if_term_2_truthy
+//!     live_if_term_2_truthy.longer::<'b_f>();  // u'b_f => i'live_if_term_2_truthy
+//!     live_if_term_2_truthy.longer::<'c_t>();  // u'c_t => i'live_if_term_2_truthy
 //!
-//!     // ?live_if_at_least_one_a + ?live_if_at_least_one_b + ?live_if_at_least_one_c +
-//!     //    ?live_if_term_1_truthy + ?live_if_term_2_truthy => 'dead_if_not_both
+//!     // i'live_if_at_least_one_a + i'live_if_at_least_one_b + i'live_if_at_least_one_c +
+//!     //    i'live_if_term_1_truthy + i'live_if_term_2_truthy => u'dead_if_not_both
 //!     assert_all_imply::<'_, '_, '_, '_, '_, 'dead_if_not_both>(
 //!         live_if_at_least_one_a,
 //!         live_if_at_least_one_b,
@@ -316,7 +316,68 @@
 //!
 //! ## Reduction to SAT
 //!
-//! TODO
+//! We've shown how to reduce SAT to the region system (i.e. NP-completeness) but how might we
+//! reduce the region system to a SAT problem (i.e. NP-hardness, specifically if we consider
+//! checking for unsoundness)? Doing this would allow us to reuse the existing hard work that has
+//! gone into implementing efficient SAT solvers.
+//!
+//! A formula is unsound *iff* we manage to find a set of *well-formed* universals which force the
+//! LHS to be live while forcing the RHS to be dead. Both the condition of "the LHS being forced to
+//! be live" and the condition of the "RHS being forced to be dead" can be expressed as nested
+//! conjunctions, disjunctions, and negations of boolean variables, which are bread-and-butter SAT
+//! constructs. Well-formedness, likewise, can be expressed using conjunctions of implications.
+//!
+//! In terms of lowering...
+//!
+//! - On the LHS, the terms `i/u'X_1 -> Y; ...; i/u'X_n -> i'Y` tell us that `i'Y` would be forced
+//!   to be alive *iff* `forced_alive(i'X_1) | ... | forced_alive(i'X_n)` is `true`.
+//!
+//!   The term `i/u'X_1 + ... + i/u'X_n -> i'Y` tell us that `i'Y` would be forced to be
+//!   alive *iff* `forced_alive(i'X_1) & ... & forced_alive(i'X_n)` is `true`.
+//!
+//!   If `Y` were a universal in either of the above equations, it would only be forced to be live
+//!   through well-formedness constraints.
+//!
+//!   The term `forced_alive(i'X)` where `X` is an inference variable with nothing implying it is
+//!   `false` and `forced_alive(u'x) = x` denotes `x` the SAT variable for `u'x`.
+//!
+//! - On the RHS, meanwhile, the terms `i/u'X_1 -> Y; ...; i/u'X_n -> i'Y` tell us that `i'Y` would
+//!   be forced to be dead *iff* `forced_dead(i'X_1) & ... & forced_dead(i'X_n)` is `true`.
+//!
+//!   The term `i/u'X_1 + ... + i/u'X_n -> i'Y` tell us that `i'Y` would be forced to be dead *iff*
+//!   `forced_dead(i'X_1) | ... | forced_dead(i'X_n)`.
+//!
+//!   In summary, the LHS and RHS flip conjunction and disjunction in their liveness determination.
+//!
+//!   The term `forced_dead(i'X)` is `false` and `forced_dead(u'x) = !x` where `x` denotes the SAT
+//!   variable for `u'x`.
+//!
+//! - If there is a cycle in an implication where the inference variable on the right occurs
+//!   somewhere in an inference variable on the left, that term can be safely discarded because the
+//!   existential value to which that inference variable corresponds can be set or unset so long as
+//!   it doesn't violate any universals.
+//!
+//! We can employ some shortcuts to avoid having to call into a SAT solver although we'll need to
+//! investigate whether any of these shortcuts are warranted or if SAT solvers already have good
+//! enough fast paths for these...
+//!
+//! - If the number of unique universals mentioned transitively in the **LHS** is lower than some
+//!   small limit (e.g. 4), we could just enumerate all the unique combinations of those universals
+//!   and see which combination forces the LHS to be `true` and, by setting all the remaining
+//!   universals to `false`, the RHS to be `false`.
+//!
+//! - If the number of unique universals mentioned transitively in the **RHS** is lower than some
+//!   small limit (e.g. 4), we could just enumerate all the unique combinations of those universals
+//!   and see which combination forces the RHS to be `false` and, by setting all the remaining
+//!   universals to `true`, the LHS to be `true`.
+//!
+//! - As a refinement of the above strategies, sometimes, sets of universals are all forced to be
+//!   on at the same time because they're mentioned inside a region conjunction.
+//!
+//! All in all, this should give hope that triggering exponential solving behavior is somewhat
+//! tricky in practice: users need to mention a large number of universals in both the LHS and the
+//! RHS simultaneously and must do so with a specific structure of inference lifetimes to create the
+//! particular structure required for exponential blowup.
 //!
 //! ## Organization
 //!
@@ -424,9 +485,7 @@ impl RegionSatSolver {
         // TODO
     }
 
-    fn push_checked_internal(&mut self, lhs: NodeIndex, rhs: NodeIndex) {
-        // First, let us determine all the ways to force the `lhs` to be true.
-    }
+    fn push_checked_internal(&mut self, lhs: NodeIndex, rhs: NodeIndex) {}
 }
 
 // === ReUnifyTracker === //
