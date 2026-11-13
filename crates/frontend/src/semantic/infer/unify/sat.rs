@@ -55,14 +55,142 @@ pub trait SatTerm: Copy + hash::Hash + Eq + Not<Output = Self> + From<Self::Var>
     fn falsy() -> Self;
 }
 
+// No-op
+mod nop {
+    use crate::semantic::infer::unify::sat::{SatBuilder, SatTerm, SatVar};
+    use std::ops::Not;
+
+    #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Default)]
+    pub struct NopSatVar;
+
+    impl SatVar for NopSatVar {
+        type Term = NopSatTerm;
+    }
+
+    #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Default)]
+    pub struct NopSatTerm;
+
+    impl From<NopSatVar> for NopSatTerm {
+        fn from(_value: NopSatVar) -> Self {
+            NopSatTerm
+        }
+    }
+
+    impl Not for NopSatTerm {
+        type Output = NopSatTerm;
+
+        fn not(self) -> Self::Output {
+            self
+        }
+    }
+
+    impl SatTerm for NopSatTerm {
+        type Var = NopSatVar;
+
+        fn constant(_v: bool) -> Self {
+            NopSatTerm
+        }
+
+        fn truthy() -> Self {
+            NopSatTerm
+        }
+
+        fn falsy() -> Self {
+            NopSatTerm
+        }
+    }
+
+    #[derive(Default)]
+    pub struct NopSatBuilder {}
+
+    impl SatBuilder for NopSatBuilder {
+        type Var = NopSatVar;
+        type Term = NopSatTerm;
+
+        fn fresh_var(&mut self) -> Self::Var {
+            NopSatVar
+        }
+
+        fn assert_or(&mut self, _terms: impl IntoIterator<Item = Self::Term>) {
+            // (empty)
+        }
+
+        fn assert_nor(&mut self, _terms: impl IntoIterator<Item = Self::Term>) {
+            // (empty)
+        }
+
+        fn assert_iff(&mut self, _lhs: Self::Term, _rhs: Self::Term) {
+            // (empty)
+        }
+
+        fn assert_implies(&mut self, _lhs: Self::Term, _rhs: Self::Term) {
+            // (empty)
+        }
+
+        fn assert_one(&mut self, _term: Self::Term) {
+            // (empty)
+        }
+
+        fn assert_or_implies(
+            &mut self,
+            _lhs: impl IntoIterator<Item = Self::Term>,
+            _rhs: Self::Term,
+        ) {
+            // (empty)
+        }
+
+        fn assert_or_iff(&mut self, _lhs: impl IntoIterator<Item = Self::Term>, _rhs: Self::Term) {
+            // (empty)
+        }
+
+        fn assert_and(&mut self, _terms: impl IntoIterator<Item = Self::Term>) {
+            // (empty)
+        }
+
+        fn assert_and_implies(
+            &mut self,
+            _lhs: impl IntoIterator<Item = Self::Term>,
+            _rhs: Self::Term,
+        ) {
+            // (empty)
+        }
+
+        fn assert_and_iff(&mut self, _lhs: impl IntoIterator<Item = Self::Term>, _rhs: Self::Term) {
+            // (empty)
+        }
+
+        fn join_or(&mut self, _terms: impl IntoIterator<Item = Self::Term>) -> Self::Term {
+            NopSatTerm
+        }
+
+        fn join_nor(&mut self, _terms: impl IntoIterator<Item = Self::Term>) -> Self::Term {
+            NopSatTerm
+        }
+
+        fn join_and(&mut self, _terms: impl IntoIterator<Item = Self::Term>) -> Self::Term {
+            NopSatTerm
+        }
+
+        fn join_iff(&mut self, _lhs: Self::Term, _rhs: Self::Term) -> Self::Term {
+            NopSatTerm
+        }
+
+        fn join_implies(&mut self, _lhs: Self::Term, _rhs: Self::Term) -> Self::Term {
+            NopSatTerm
+        }
+    }
+}
+
+pub use self::nop::*;
+
 // A low latency SAT solver for equations with a small number of variables.
-mod naive {
+mod brute {
     use super::*;
     use crate::{
         bool_enum,
         utils::lang::{IterCount, iter_two_or_more},
     };
-    use index_vec::define_index_type;
+    use index_vec::{IndexVec, define_index_type};
 
     // === Definitions === //
 
@@ -75,56 +203,64 @@ mod naive {
     const INSTR_STREAM_NAME_MASK: u32 = INSTR_STREAM_NEG_BIT - 1;
     const INSTR_STREAM_NEG_BIT: u32 = 1u32 << 31;
 
+    #[derive(Debug, Copy, Clone, Default)]
+    pub struct BruteUnsatisfied;
+
+    #[derive(Debug, Clone)]
+    pub struct BruteSatisfied {
+        pub model: IndexVec<BruteSatVar, bool>,
+    }
+
     bool_enum! {
-        pub enum SetNaivePolarity {
+        pub enum BruteSatPolarity {
             true => Positive;
             false => Negative;
         }
     }
 
     define_index_type! {
-        pub struct SatNaiveVar = u32;
+        pub struct BruteSatVar = u32;
         MAX_INDEX = INSTR_STREAM_MAX_VAR_EXCL as usize;
     }
 
     define_index_type! {
-        pub struct SatNaiveIntermediate = u32;
+        pub struct BruteSatIntermediate = u32;
         MAX_INDEX = (INSTR_STREAM_EOS - INSTR_STREAM_MAX_VAR_EXCL) as usize;
     }
 
-    impl SatVar for SatNaiveVar {
-        type Term = SatNaiveTerm;
+    impl SatVar for BruteSatVar {
+        type Term = BruteSatTerm;
     }
 
     #[derive(Copy, Clone, Hash, Eq, PartialEq)]
-    pub enum SatNaiveTerm {
+    pub enum BruteSatTerm {
         Const(bool),
-        Var(SetNaivePolarity, SatNaiveVar),
-        Intermediate(SetNaivePolarity, SatNaiveIntermediate),
+        Var(BruteSatPolarity, BruteSatVar),
+        Intermediate(BruteSatPolarity, BruteSatIntermediate),
     }
 
-    impl From<SatNaiveVar> for SatNaiveTerm {
-        fn from(var: SatNaiveVar) -> Self {
-            SatNaiveTerm::Var(SetNaivePolarity::Positive, var)
+    impl From<BruteSatVar> for BruteSatTerm {
+        fn from(var: BruteSatVar) -> Self {
+            BruteSatTerm::Var(BruteSatPolarity::Positive, var)
         }
     }
 
-    impl Not for SatNaiveTerm {
+    impl Not for BruteSatTerm {
         type Output = Self;
 
         fn not(self) -> Self::Output {
             match self {
-                SatNaiveTerm::Const(v) => SatNaiveTerm::Const(!v),
-                SatNaiveTerm::Var(polarity, var) => SatNaiveTerm::Var(polarity.flip(), var),
-                SatNaiveTerm::Intermediate(polarity, var) => {
-                    SatNaiveTerm::Intermediate(polarity.flip(), var)
+                BruteSatTerm::Const(v) => BruteSatTerm::Const(!v),
+                BruteSatTerm::Var(polarity, var) => BruteSatTerm::Var(polarity.flip(), var),
+                BruteSatTerm::Intermediate(polarity, var) => {
+                    BruteSatTerm::Intermediate(polarity.flip(), var)
                 }
             }
         }
     }
 
-    impl SatTerm for SatNaiveTerm {
-        type Var = SatNaiveVar;
+    impl SatTerm for BruteSatTerm {
+        type Var = BruteSatVar;
 
         fn constant(v: bool) -> Self {
             Self::Const(v)
@@ -141,33 +277,33 @@ mod naive {
 
     // === Builder === //
 
-    pub struct SatNaiveBuilder {
+    pub struct BruteSatBuilder {
         instructions: Vec<u32>,
-        var_gen: SatNaiveVar,
-        intermediate_gen: SatNaiveIntermediate,
+        var_gen: BruteSatVar,
+        intermediate_gen: BruteSatIntermediate,
         is_fused_false: bool,
     }
 
-    impl Default for SatNaiveBuilder {
+    impl Default for BruteSatBuilder {
         fn default() -> Self {
             Self {
                 instructions: Vec::new(),
-                var_gen: SatNaiveVar::from_usize(0),
-                intermediate_gen: SatNaiveIntermediate::from_usize(0),
+                var_gen: BruteSatVar::from_usize(0),
+                intermediate_gen: BruteSatIntermediate::from_usize(0),
                 is_fused_false: false,
             }
         }
     }
 
-    impl SatNaiveBuilder {
+    impl BruteSatBuilder {
         fn push_raw(
             &mut self,
             instr_kind: u32,
-            terms: impl IntoIterator<Item = SatNaiveTerm>,
-        ) -> SatNaiveTerm {
+            terms: impl IntoIterator<Item = BruteSatTerm>,
+        ) -> BruteSatTerm {
             let terms = match iter_two_or_more(terms) {
                 IterCount::None => {
-                    return SatNaiveTerm::truthy();
+                    return BruteSatTerm::truthy();
                 }
                 IterCount::One(unique) => return unique,
                 IterCount::TwoOrMore(v) => v,
@@ -178,22 +314,22 @@ mod naive {
 
             for term in terms {
                 match term {
-                    SatNaiveTerm::Const(false) => continue,
-                    SatNaiveTerm::Const(true) => {
+                    BruteSatTerm::Const(false) => continue,
+                    BruteSatTerm::Const(true) => {
                         self.instructions.truncate(old_len);
-                        return SatNaiveTerm::truthy();
+                        return BruteSatTerm::truthy();
                     }
-                    SatNaiveTerm::Var(SetNaivePolarity::Positive, var) => {
+                    BruteSatTerm::Var(BruteSatPolarity::Positive, var) => {
                         self.instructions.push(var.raw());
                     }
-                    SatNaiveTerm::Var(SetNaivePolarity::Negative, var) => {
+                    BruteSatTerm::Var(BruteSatPolarity::Negative, var) => {
                         self.instructions.push(INSTR_STREAM_NEG_BIT | var.raw());
                     }
-                    SatNaiveTerm::Intermediate(SetNaivePolarity::Positive, var) => {
+                    BruteSatTerm::Intermediate(BruteSatPolarity::Positive, var) => {
                         self.instructions
                             .push(INSTR_STREAM_MAX_VAR_EXCL + var.raw());
                     }
-                    SatNaiveTerm::Intermediate(SetNaivePolarity::Negative, var) => {
+                    BruteSatTerm::Intermediate(BruteSatPolarity::Negative, var) => {
                         self.instructions
                             .push(INSTR_STREAM_NEG_BIT | (INSTR_STREAM_MAX_VAR_EXCL + var.raw()));
                     }
@@ -202,43 +338,43 @@ mod naive {
 
             if old_len + 1 == self.instructions.len() {
                 self.instructions.truncate(old_len);
-                return SatNaiveTerm::falsy();
+                return BruteSatTerm::falsy();
             }
 
             let output = self.intermediate_gen;
             self.intermediate_gen += 1;
 
-            SatNaiveTerm::Intermediate(SetNaivePolarity::Positive, output)
+            BruteSatTerm::Intermediate(BruteSatPolarity::Positive, output)
         }
 
         fn push_assert(
             &mut self,
-            polarity: SetNaivePolarity,
-            terms: impl IntoIterator<Item = SatNaiveTerm>,
+            polarity: BruteSatPolarity,
+            terms: impl IntoIterator<Item = BruteSatTerm>,
         ) {
             let out = self.push_raw(
                 match polarity {
-                    SetNaivePolarity::Positive => INSTR_START_ASSERT_OR,
-                    SetNaivePolarity::Negative => INSTR_START_ASSERT_NOR,
+                    BruteSatPolarity::Positive => INSTR_START_ASSERT_OR,
+                    BruteSatPolarity::Negative => INSTR_START_ASSERT_NOR,
                 },
                 terms,
             );
 
             match out {
-                SatNaiveTerm::Const(true) => {
-                    if polarity == SetNaivePolarity::Negative {
+                BruteSatTerm::Const(true) => {
+                    if polarity == BruteSatPolarity::Negative {
                         self.is_fused_false = true;
                     }
                 }
-                SatNaiveTerm::Const(false) => {
-                    if polarity == SetNaivePolarity::Negative {
+                BruteSatTerm::Const(false) => {
+                    if polarity == BruteSatPolarity::Negative {
                         self.is_fused_false = true;
                     }
                 }
-                SatNaiveTerm::Var(_, _) => {
+                BruteSatTerm::Var(_, _) => {
                     // Result is completely varying
                 }
-                SatNaiveTerm::Intermediate(_, _) => {
+                BruteSatTerm::Intermediate(_, _) => {
                     // Result is completely varying. Do not allocate intermediate at end of
                     // function.
                     self.intermediate_gen -= 1;
@@ -247,7 +383,7 @@ mod naive {
         }
     }
 
-    impl SatNaiveBuilder {
+    impl BruteSatBuilder {
         pub fn clear(&mut self) {
             self.instructions.clear();
         }
@@ -256,10 +392,14 @@ mod naive {
             self.is_fused_false
         }
 
+        pub fn solve(&mut self) -> Result<BruteSatisfied, BruteSatisfied> {
+            todo!()
+        }
+
         pub fn eval(
             &mut self,
             solver_stack: &mut Vec<bool>,
-            mut resolve_var: impl FnMut(SatNaiveVar) -> bool,
+            mut resolve_var: impl FnMut(BruteSatVar) -> bool,
         ) -> bool {
             if self.is_fused_false {
                 return false;
@@ -278,7 +418,7 @@ mod naive {
 
                     let value = match term_instr & INSTR_STREAM_NAME_MASK {
                         0..INSTR_STREAM_MAX_VAR_EXCL => {
-                            resolve_var(SatNaiveVar::from_raw_unchecked(term_instr))
+                            resolve_var(BruteSatVar::from_raw_unchecked(term_instr))
                         }
                         INSTR_STREAM_MAX_VAR_EXCL..INSTR_STREAM_EOS => {
                             solver_stack[(term_instr - INSTR_STREAM_MAX_VAR_EXCL) as usize]
@@ -320,9 +460,9 @@ mod naive {
         }
     }
 
-    impl SatBuilder for SatNaiveBuilder {
-        type Var = SatNaiveVar;
-        type Term = SatNaiveTerm;
+    impl SatBuilder for BruteSatBuilder {
+        type Var = BruteSatVar;
+        type Term = BruteSatTerm;
 
         fn fresh_var(&mut self) -> Self::Var {
             let var = self.var_gen;
@@ -331,11 +471,11 @@ mod naive {
         }
 
         fn assert_or(&mut self, terms: impl IntoIterator<Item = Self::Term>) {
-            self.push_assert(SetNaivePolarity::Positive, terms);
+            self.push_assert(BruteSatPolarity::Positive, terms);
         }
 
         fn assert_nor(&mut self, terms: impl IntoIterator<Item = Self::Term>) {
-            self.push_assert(SetNaivePolarity::Negative, terms);
+            self.push_assert(BruteSatPolarity::Negative, terms);
         }
 
         fn assert_iff(&mut self, lhs: Self::Term, rhs: Self::Term) {
@@ -410,4 +550,4 @@ mod naive {
     }
 }
 
-pub use self::naive::*;
+pub use self::brute::*;

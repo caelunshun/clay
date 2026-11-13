@@ -390,7 +390,9 @@
 //!   inference nodes.
 
 use crate::semantic::{
-    infer::unify::sat::{SatBuilder, SatNaiveBuilder, SatTerm, SatVar},
+    infer::unify::sat::{
+        BruteSatBuilder, BruteSatTerm, BruteSatisfied, NopSatBuilder, SatBuilder, SatTerm, SatVar,
+    },
     syntax::{InferReVar, UniversalReVar},
 };
 use clay_core::{FastHashMap, FastHashSet, FastIndexMap};
@@ -497,33 +499,40 @@ impl RegionFormulaSolver {
     }
 
     fn check_implication(&mut self, lhs: NodeIndex, rhs: NodeIndex) {
-        // Create LHS-alive and RHS-dead logical formulas.
-        let mut builder = SatNaiveBuilder::default();
         let mut inf_cycle_set = FastHashSet::default();
-        let mut inf_dedup = FastHashMap::default();
-        let mut universals = FastIndexMap::default();
 
-        let lhs_live = SatLivenessCollector {
-            mode: SatLivenessMode::Lhs,
-            graph: &self.graph,
-            builder: &mut builder,
-            inf_cycle_set: &mut inf_cycle_set,
-            inf_dedup: &mut inf_dedup,
-            universals: &mut universals,
-        }
-        .translate(lhs);
+        // Determine which universals are used in our terms.
+        let universals = {
+            let mut builder = NopSatBuilder::default();
+            let mut inf_dedup = FastHashMap::default();
+            let mut universals = FastIndexMap::default();
 
-        inf_dedup.clear();
+            GraphToSatCollector {
+                side: EquationSide::Lhs,
+                missing_universal_mode: GraphToSatMissingUniversalMode::Create,
+                graph: &self.graph,
+                builder: &mut builder,
+                inf_cycle_set: &mut inf_cycle_set,
+                inf_dedup: &mut inf_dedup,
+                universals: &mut universals,
+            }
+            .translate(lhs);
 
-        let rhs_dead = SatLivenessCollector {
-            mode: SatLivenessMode::Rhs,
-            graph: &self.graph,
-            builder: &mut builder,
-            inf_cycle_set: &mut inf_cycle_set,
-            inf_dedup: &mut inf_dedup,
-            universals: &mut universals,
-        }
-        .translate(rhs);
+            inf_dedup.clear();
+
+            GraphToSatCollector {
+                side: EquationSide::Rhs,
+                missing_universal_mode: GraphToSatMissingUniversalMode::Create,
+                graph: &self.graph,
+                builder: &mut builder,
+                inf_cycle_set: &mut inf_cycle_set,
+                inf_dedup: &mut inf_dedup,
+                universals: &mut universals,
+            }
+            .translate(rhs);
+
+            universals
+        };
 
         // Attempt to use the brute-force approach to solve this equation.
         let mut lhs_universals = 0;
@@ -540,40 +549,130 @@ impl RegionFormulaSolver {
         }
 
         if lhs_universals < rhs_universals && lhs_universals < BRUTE_FORCE_VAR_LIMIT {
-            todo!()
+            self.check_implication_brute(&mut inf_cycle_set, lhs, rhs, EquationSide::Lhs);
+            return;
         }
 
         if rhs_universals < lhs_universals && rhs_universals < BRUTE_FORCE_VAR_LIMIT {
-            todo!()
+            self.check_implication_brute(&mut inf_cycle_set, lhs, rhs, EquationSide::Rhs);
+            return;
         }
 
         // Otherwise, punt it to a proper SAT solver.
         todo!();
     }
-}
 
-struct SatLivenessCollector<'a, B: SatBuilder> {
-    mode: SatLivenessMode,
-    graph: &'a Graph<FormulaNode, ()>,
-    builder: &'a mut B,
-    inf_cycle_set: &'a mut FastHashSet<InferReVar>,
-    inf_dedup: &'a mut FastHashMap<InferReVar, B::Term>,
-    universals: &'a mut FastIndexMap<UniversalReVar, SatLivenessUniversal<B>>,
+    fn check_implication_brute(
+        &mut self,
+        inf_cycle_set: &mut FastHashSet<InferReVar>,
+        lhs: NodeIndex,
+        rhs: NodeIndex,
+        side: EquationSide,
+    ) {
+        let mut builder = BruteSatBuilder::default();
+        let mut inf_dedup = FastHashMap::default();
+        let mut universals = FastIndexMap::default();
+
+        let (lhs, rhs) = match side {
+            EquationSide::Lhs => {
+                let lhs = GraphToSatCollector {
+                    side: EquationSide::Lhs,
+                    missing_universal_mode: GraphToSatMissingUniversalMode::Create,
+                    graph: &self.graph,
+                    builder: &mut builder,
+                    inf_cycle_set,
+                    inf_dedup: &mut inf_dedup,
+                    universals: &mut universals,
+                }
+                .translate(lhs);
+
+                inf_dedup.clear();
+
+                let rhs = GraphToSatCollector {
+                    side: EquationSide::Rhs,
+                    missing_universal_mode: GraphToSatMissingUniversalMode::FallbackTo(
+                        BruteSatTerm::falsy(),
+                    ),
+                    graph: &self.graph,
+                    builder: &mut builder,
+                    inf_cycle_set,
+                    inf_dedup: &mut inf_dedup,
+                    universals: &mut universals,
+                }
+                .translate(rhs);
+
+                (lhs, rhs)
+            }
+            EquationSide::Rhs => {
+                let rhs = GraphToSatCollector {
+                    side: EquationSide::Rhs,
+                    missing_universal_mode: GraphToSatMissingUniversalMode::Create,
+                    graph: &self.graph,
+                    builder: &mut builder,
+                    inf_cycle_set,
+                    inf_dedup: &mut inf_dedup,
+                    universals: &mut universals,
+                }
+                .translate(rhs);
+
+                inf_dedup.clear();
+
+                let lhs = GraphToSatCollector {
+                    side: EquationSide::Lhs,
+                    missing_universal_mode: GraphToSatMissingUniversalMode::FallbackTo(
+                        BruteSatTerm::truthy(),
+                    ),
+                    graph: &self.graph,
+                    builder: &mut builder,
+                    inf_cycle_set,
+                    inf_dedup: &mut inf_dedup,
+                    universals: &mut universals,
+                }
+                .translate(lhs);
+
+                (lhs, rhs)
+            }
+        };
+
+        let Ok(BruteSatisfied { model }) = builder.solve() else {
+            // Formula accepted.
+            // TODO
+            return;
+        };
+
+        // TODO: Dump information
+    }
 }
 
 #[derive(Copy, Clone)]
-enum SatLivenessMode {
+enum EquationSide {
     Lhs,
     Rhs,
 }
 
-struct SatLivenessUniversal<B: SatBuilder> {
+struct GraphToSatCollector<'a, B: SatBuilder> {
+    side: EquationSide,
+    missing_universal_mode: GraphToSatMissingUniversalMode<B>,
+    graph: &'a Graph<FormulaNode, ()>,
+    builder: &'a mut B,
+    inf_cycle_set: &'a mut FastHashSet<InferReVar>,
+    inf_dedup: &'a mut FastHashMap<InferReVar, B::Term>,
+    universals: &'a mut FastIndexMap<UniversalReVar, GraphToSatUniversal<B>>,
+}
+
+#[derive(Copy, Clone)]
+enum GraphToSatMissingUniversalMode<B: SatBuilder> {
+    Create,
+    FallbackTo(B::Term),
+}
+
+struct GraphToSatUniversal<B: SatBuilder> {
     var: B::Var,
     in_lhs: bool,
     in_rhs: bool,
 }
 
-impl<B: SatBuilder> SatLivenessCollector<'_, B> {
+impl<B: SatBuilder> GraphToSatCollector<'_, B> {
     fn translate(&mut self, node: NodeIndex) -> B::Term {
         match self.graph[node] {
             FormulaNode::True => <B::Term as SatTerm>::truthy(),
@@ -584,9 +683,9 @@ impl<B: SatBuilder> SatLivenessCollector<'_, B> {
                     .map(|edge| self.translate(edge.source()))
                     .collect::<SmallVec<[_; 4]>>();
 
-                match self.mode {
-                    SatLivenessMode::Lhs => self.builder.join_and(terms),
-                    SatLivenessMode::Rhs => self.builder.join_or(terms),
+                match self.side {
+                    EquationSide::Lhs => self.builder.join_and(terms),
+                    EquationSide::Rhs => self.builder.join_or(terms),
                 }
             }
             FormulaNode::Existential(var) => {
@@ -606,9 +705,9 @@ impl<B: SatBuilder> SatLivenessCollector<'_, B> {
 
                 self.inf_cycle_set.remove(&var);
 
-                let out_term = match self.mode {
-                    SatLivenessMode::Lhs => self.builder.join_or(terms),
-                    SatLivenessMode::Rhs => self.builder.join_and(terms),
+                let out_term = match self.side {
+                    EquationSide::Lhs => self.builder.join_or(terms),
+                    EquationSide::Rhs => self.builder.join_and(terms),
                 };
 
                 self.inf_dedup.insert(var, out_term);
@@ -616,21 +715,30 @@ impl<B: SatBuilder> SatLivenessCollector<'_, B> {
                 out_term
             }
             FormulaNode::Universal(var) => {
-                let universal =
-                    self.universals
+                let universal = match self.missing_universal_mode {
+                    GraphToSatMissingUniversalMode::Create => self
+                        .universals
                         .entry(var)
-                        .or_insert_with(|| SatLivenessUniversal {
+                        .or_insert_with(|| GraphToSatUniversal {
                             var: self.builder.fresh_var(),
                             in_lhs: false,
                             in_rhs: false,
-                        });
+                        }),
+                    GraphToSatMissingUniversalMode::FallbackTo(fallback) => {
+                        let Some(universal) = self.universals.get_mut(&var) else {
+                            return fallback;
+                        };
 
-                match self.mode {
-                    SatLivenessMode::Lhs => {
+                        universal
+                    }
+                };
+
+                match self.side {
+                    EquationSide::Lhs => {
                         universal.in_lhs = true;
                         universal.var.to_term()
                     }
-                    SatLivenessMode::Rhs => {
+                    EquationSide::Rhs => {
                         universal.in_rhs = true;
                         !universal.var.to_term()
                     }
