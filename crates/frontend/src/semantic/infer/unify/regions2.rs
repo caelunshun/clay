@@ -357,22 +357,27 @@
 //!   existential value to which that inference variable corresponds can be set or unset so long as
 //!   it doesn't violate any universals.
 //!
-//! We can employ some shortcuts to avoid having to call into a SAT solver although we'll need to
-//! investigate whether any of these shortcuts are warranted or if SAT solvers already have good
-//! enough fast paths for these...
+//! - To assert well-formedness, we create universal implications of the form `A & B -> C`. If a
+//!   universal is not part of the set of universals mentioned in the LHS and RHS, we assume it is
+//!   false to leave the system as unconstrained as possible since those options would be available
+//!   to us anyways.
 //!
-//! - If the number of unique universals mentioned transitively in the **LHS** is lower than some
-//!   small limit (e.g. 4), we could just enumerate all the unique combinations of those universals
-//!   and see which combination forces the LHS to be `true` and, by setting all the remaining
-//!   universals to `false`, the RHS to be `false`.
+//!   Be careful with this step! For RHS-driven lowerings (see below), we have to ensure that
+//!   universals mentioned in the LHS remain true rather than false.
 //!
-//! - If the number of unique universals mentioned transitively in the **RHS** is lower than some
-//!   small limit (e.g. 4), we could just enumerate all the unique combinations of those universals
-//!   and see which combination forces the RHS to be `false` and, by setting all the remaining
-//!   universals to `true`, the LHS to be `true`.
+//! We can employ some shortcuts to simplify the formula before passing it to a SAT solver...
 //!
-//! - As a refinement of the above strategies, sometimes, sets of universals are all forced to be
-//!   on at the same time because they're mentioned inside a region conjunction.
+//! - **LHS-driven solving:** If the number of unique universals mentioned transitively in the
+//!   LHS is lower than the number of universals in the RHS, we could use the set of universals in
+//!   the LHS and set all the remaining universals to `false`.
+//!
+//!   This works because setting additional universals could only make a falsy RHS truthy.
+//!
+//! - **RHS-driven solving:** Likewise, if the number of unique universals mentioned transitively in
+//!   the RHS is lower than the number of universals in the LHS, we could use the set of universals
+//!   in the RHS and set all the remaining universals to `true`.
+//!
+//!   This works because unsetting additional universals could only make a truthy LHS falsy.
 //!
 //! All in all, this should give hope that triggering exponential solving behavior is somewhat
 //! tricky in practice: users need to mention a large number of universals in both the LHS and the
@@ -396,6 +401,7 @@ use crate::semantic::{
     syntax::{InferReVar, UniversalReVar},
 };
 use clay_core::{FastHashMap, FastHashSet, FastIndexMap};
+use derive_where::derive_where;
 use index_vec::IndexVec;
 use petgraph::{Direction, Graph, graph::NodeIndex, visit::EdgeRef};
 use smallvec::SmallVec;
@@ -502,12 +508,12 @@ impl RegionFormulaSolver {
         let mut inf_cycle_set = FastHashSet::default();
 
         // Determine which universals are used in our terms.
-        let universals = {
+        let all_universals = {
             let mut builder = NopSatBuilder::default();
             let mut inf_dedup = FastHashMap::default();
             let mut universals = FastIndexMap::default();
 
-            GraphToSatCollector {
+            SatLivenessLower {
                 side: EquationSide::Lhs,
                 missing_universal_mode: GraphToSatMissingUniversalMode::Create,
                 graph: &self.graph,
@@ -516,11 +522,11 @@ impl RegionFormulaSolver {
                 inf_dedup: &mut inf_dedup,
                 universals: &mut universals,
             }
-            .translate(lhs);
+            .lower(lhs);
 
             inf_dedup.clear();
 
-            GraphToSatCollector {
+            SatLivenessLower {
                 side: EquationSide::Rhs,
                 missing_universal_mode: GraphToSatMissingUniversalMode::Create,
                 graph: &self.graph,
@@ -529,7 +535,7 @@ impl RegionFormulaSolver {
                 inf_dedup: &mut inf_dedup,
                 universals: &mut universals,
             }
-            .translate(rhs);
+            .lower(rhs);
 
             universals
         };
@@ -538,7 +544,7 @@ impl RegionFormulaSolver {
         let mut lhs_universals = 0;
         let mut rhs_universals = 0;
 
-        for universal in universals.values() {
+        for universal in all_universals.values() {
             if universal.in_lhs {
                 lhs_universals += 1;
             }
@@ -549,12 +555,24 @@ impl RegionFormulaSolver {
         }
 
         if lhs_universals < rhs_universals && lhs_universals < BRUTE_FORCE_VAR_LIMIT {
-            self.check_implication_brute(&mut inf_cycle_set, lhs, rhs, EquationSide::Lhs);
+            self.check_implication_brute(
+                &mut inf_cycle_set,
+                &all_universals,
+                lhs,
+                rhs,
+                EquationSide::Lhs,
+            );
             return;
         }
 
         if rhs_universals < lhs_universals && rhs_universals < BRUTE_FORCE_VAR_LIMIT {
-            self.check_implication_brute(&mut inf_cycle_set, lhs, rhs, EquationSide::Rhs);
+            self.check_implication_brute(
+                &mut inf_cycle_set,
+                &all_universals,
+                lhs,
+                rhs,
+                EquationSide::Rhs,
+            );
             return;
         }
 
@@ -565,30 +583,31 @@ impl RegionFormulaSolver {
     fn check_implication_brute(
         &mut self,
         inf_cycle_set: &mut FastHashSet<InferReVar>,
+        all_universals: &FastIndexMap<NodeIndex, GraphToSatUniversal<NopSatBuilder>>,
         lhs: NodeIndex,
         rhs: NodeIndex,
         side: EquationSide,
     ) {
         let mut builder = BruteSatBuilder::default();
         let mut inf_dedup = FastHashMap::default();
-        let mut universals = FastIndexMap::default();
+        let mut driver_universals = FastIndexMap::default();
 
         let (lhs, rhs) = match side {
             EquationSide::Lhs => {
-                let lhs = GraphToSatCollector {
+                let lhs = SatLivenessLower {
                     side: EquationSide::Lhs,
                     missing_universal_mode: GraphToSatMissingUniversalMode::Create,
                     graph: &self.graph,
                     builder: &mut builder,
                     inf_cycle_set,
                     inf_dedup: &mut inf_dedup,
-                    universals: &mut universals,
+                    universals: &mut driver_universals,
                 }
-                .translate(lhs);
+                .lower(lhs);
 
                 inf_dedup.clear();
 
-                let rhs = GraphToSatCollector {
+                let rhs = SatLivenessLower {
                     side: EquationSide::Rhs,
                     missing_universal_mode: GraphToSatMissingUniversalMode::FallbackTo(
                         BruteSatTerm::falsy(),
@@ -597,27 +616,27 @@ impl RegionFormulaSolver {
                     builder: &mut builder,
                     inf_cycle_set,
                     inf_dedup: &mut inf_dedup,
-                    universals: &mut universals,
+                    universals: &mut driver_universals,
                 }
-                .translate(rhs);
+                .lower(rhs);
 
                 (lhs, rhs)
             }
             EquationSide::Rhs => {
-                let rhs = GraphToSatCollector {
+                let rhs = SatLivenessLower {
                     side: EquationSide::Rhs,
                     missing_universal_mode: GraphToSatMissingUniversalMode::Create,
                     graph: &self.graph,
                     builder: &mut builder,
                     inf_cycle_set,
                     inf_dedup: &mut inf_dedup,
-                    universals: &mut universals,
+                    universals: &mut driver_universals,
                 }
-                .translate(rhs);
+                .lower(rhs);
 
                 inf_dedup.clear();
 
-                let lhs = GraphToSatCollector {
+                let lhs = SatLivenessLower {
                     side: EquationSide::Lhs,
                     missing_universal_mode: GraphToSatMissingUniversalMode::FallbackTo(
                         BruteSatTerm::truthy(),
@@ -626,9 +645,9 @@ impl RegionFormulaSolver {
                     builder: &mut builder,
                     inf_cycle_set,
                     inf_dedup: &mut inf_dedup,
-                    universals: &mut universals,
+                    universals: &mut driver_universals,
                 }
-                .translate(lhs);
+                .lower(lhs);
 
                 (lhs, rhs)
             }
@@ -636,7 +655,7 @@ impl RegionFormulaSolver {
 
         builder.assert_implies(lhs, !rhs);
 
-        // TODO: add universal implications
+        // TODO
 
         let Ok(BruteSatisfied { model }) = builder.solve() else {
             // Formula accepted.
@@ -654,14 +673,14 @@ enum EquationSide {
     Rhs,
 }
 
-struct GraphToSatCollector<'a, B: SatBuilder> {
+struct SatLivenessLower<'a, B: SatBuilder> {
     side: EquationSide,
     missing_universal_mode: GraphToSatMissingUniversalMode<B>,
     graph: &'a Graph<FormulaNode, ()>,
     builder: &'a mut B,
     inf_cycle_set: &'a mut FastHashSet<InferReVar>,
     inf_dedup: &'a mut FastHashMap<InferReVar, B::Term>,
-    universals: &'a mut FastIndexMap<UniversalReVar, GraphToSatUniversal<B>>,
+    universals: &'a mut FastIndexMap<NodeIndex, GraphToSatUniversal<B>>,
 }
 
 #[derive(Copy, Clone)]
@@ -670,21 +689,24 @@ enum GraphToSatMissingUniversalMode<B: SatBuilder> {
     FallbackTo(B::Term),
 }
 
+#[derive_where(Copy, Clone)]
 struct GraphToSatUniversal<B: SatBuilder> {
     var: B::Var,
     in_lhs: bool,
     in_rhs: bool,
 }
 
-impl<B: SatBuilder> GraphToSatCollector<'_, B> {
-    fn translate(&mut self, node: NodeIndex) -> B::Term {
+impl<B: SatBuilder> SatLivenessLower<'_, B> {
+    /// Returns whether the term has been forced to be live (if `side == LHS`) or dead (if `side ==
+    /// RHS`).
+    fn lower(&mut self, node: NodeIndex) -> B::Term {
         match self.graph[node] {
             FormulaNode::True => <B::Term as SatTerm>::truthy(),
             FormulaNode::And => {
                 let terms = self
                     .graph
                     .edges_directed(node, Direction::Incoming)
-                    .map(|edge| self.translate(edge.source()))
+                    .map(|edge| self.lower(edge.source()))
                     .collect::<SmallVec<[_; 4]>>();
 
                 match self.side {
@@ -704,7 +726,7 @@ impl<B: SatBuilder> GraphToSatCollector<'_, B> {
                 let terms = self
                     .graph
                     .edges_directed(node, Direction::Incoming)
-                    .map(|edge| self.translate(edge.source()))
+                    .map(|edge| self.lower(edge.source()))
                     .collect::<SmallVec<[_; 4]>>();
 
                 self.inf_cycle_set.remove(&var);
@@ -726,14 +748,14 @@ impl<B: SatBuilder> GraphToSatCollector<'_, B> {
                 let universal = match self.missing_universal_mode {
                     GraphToSatMissingUniversalMode::Create => self
                         .universals
-                        .entry(var)
+                        .entry(node)
                         .or_insert_with(|| GraphToSatUniversal {
                             var: self.builder.fresh_var(),
                             in_lhs: false,
                             in_rhs: false,
                         }),
                     GraphToSatMissingUniversalMode::FallbackTo(fallback) => {
-                        let Some(universal) = self.universals.get_mut(&var) else {
+                        let Some(universal) = self.universals.get_mut(&node) else {
                             return fallback;
                         };
 
@@ -753,5 +775,20 @@ impl<B: SatBuilder> GraphToSatCollector<'_, B> {
                 }
             }
         }
+    }
+}
+
+struct SatWfLower<'a, B: SatBuilder> {
+    graph: &'a Graph<FormulaNode, ()>,
+    driver_universals: &'a FastIndexMap<NodeIndex, GraphToSatUniversal<B>>,
+    all_universals: &'a FastIndexMap<NodeIndex, GraphToSatUniversal<NopSatBuilder>>,
+    builder: &'a mut B,
+}
+
+impl<B: SatBuilder> SatWfLower<'_, B> {
+    /// Returns whether the term has been forced to be live and creates the appropriate assertions
+    /// if this is a driver universal.
+    fn lower(&mut self, node: NodeIndex) -> B::Term {
+        todo!()
     }
 }
