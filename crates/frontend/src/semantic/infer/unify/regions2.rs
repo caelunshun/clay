@@ -395,9 +395,12 @@
 //!   inference nodes.
 
 use crate::semantic::{
-    infer::unify::sat::{
-        BruteSatBuilder, BruteSatTerm, BruteSatisfied, NopSatBuilder, NopSatTerm, SatBuilder,
-        SatTerm, SatVar,
+    infer::{
+        ReAndReUnifyError,
+        unify::sat::{
+            BruteSatBuilder, BruteSatTerm, BruteSatisfied, NopSatBuilder, NopSatTerm, SatBuilder,
+            SatTerm, SatVar,
+        },
     },
     syntax::{InferReVar, UniversalReVar},
 };
@@ -514,8 +517,20 @@ enum SolveDrivingSide {
     Rhs,
 }
 
+bitflags::bitflags! {
+    #[derive(Copy, Clone, Default)]
+    struct UniversalMentionMask: u8 {
+        const IN_LHS = 1 << 0;
+        const IN_RHS = 1 << 1;
+    }
+}
+
 impl RegionFormulaSolver {
-    fn check_implication(&mut self, lhs: NodeIndex, rhs: NodeIndex) {
+    fn check_implication(
+        &mut self,
+        lhs: NodeIndex,
+        rhs: NodeIndex,
+    ) -> Result<(), ReAndReUnifyError> {
         // Determine which universals are used in our terms.
         let all_universal_mentions = {
             let mut builder = NopSatBuilder::default();
@@ -571,12 +586,12 @@ impl RegionFormulaSolver {
             }
         };
 
-        if min_var_count < BRUTE_FORCE_VAR_LIMIT {
-            self.check_implication_brute(driving_side, lhs, rhs, &all_universal_mentions);
+        return if min_var_count < BRUTE_FORCE_VAR_LIMIT {
+            self.check_implication_brute(driving_side, lhs, rhs, &all_universal_mentions)
         } else {
             // Punt to proper solver.
             todo!();
-        }
+        };
     }
 
     fn check_implication_brute(
@@ -585,7 +600,7 @@ impl RegionFormulaSolver {
         lhs: NodeIndex,
         rhs: NodeIndex,
         all_universal_mentions: &FastHashMap<NodeIndex, UniversalMentionMask>,
-    ) {
+    ) -> Result<(), ReAndReUnifyError> {
         let mut builder = BruteSatBuilder::default();
         let mut driver_universals = FastIndexMap::default();
 
@@ -650,24 +665,39 @@ impl RegionFormulaSolver {
         builder.assert_implies(lhs, !rhs);
 
         // Assert that the universals are well-formed.
-        // TODO
+        for (&universal_node, &universal_var) in &driver_universals {
+            let universal_forced_live = SatLivenessLower::new(
+                SatLivenessLowerMode::Alive,
+                &self.graph,
+                &mut builder,
+                |_builder, node| {
+                    // Assume unmentioned universals are falsy.
+                    if !all_universal_mentions.contains_key(&node) {
+                        return BruteSatTerm::falsy();
+                    }
+
+                    // Otherwise, attempt to resolve the universal.
+                    match driver_universals.get(&node) {
+                        Some(&var) => var.to_term(),
+                        None => match side {
+                            SolveDrivingSide::Lhs => BruteSatTerm::falsy(),
+                            SolveDrivingSide::Rhs => BruteSatTerm::truthy(),
+                        },
+                    }
+                },
+            )
+            .lower(universal_node);
+
+            builder.assert_implies(universal_forced_live, universal_var.to_term());
+        }
 
         // Solve!
         let Ok(BruteSatisfied { model }) = builder.solve() else {
             // Formula accepted.
-            // TODO
-            return;
+            return Ok(());
         };
 
-        // TODO: Dump information
-    }
-}
-
-bitflags::bitflags! {
-    #[derive(Copy, Clone, Default)]
-    struct UniversalMentionMask: u8 {
-        const IN_LHS = 1 << 0;
-        const IN_RHS = 1 << 1;
+        todo!();
     }
 }
 
