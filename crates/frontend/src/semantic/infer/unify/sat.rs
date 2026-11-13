@@ -148,6 +148,17 @@ mod naive {
         is_fused_false: bool,
     }
 
+    impl Default for SatNaiveBuilder {
+        fn default() -> Self {
+            Self {
+                instructions: Vec::new(),
+                var_gen: SatNaiveVar::from_usize(0),
+                intermediate_gen: SatNaiveIntermediate::from_usize(0),
+                is_fused_false: false,
+            }
+        }
+    }
+
     impl SatNaiveBuilder {
         fn push_raw(
             &mut self,
@@ -398,3 +409,5 @@ mod naive {
         }
     }
 }
+
+pub use self::naive::*;

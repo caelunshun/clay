@@ -389,16 +389,22 @@
 //!   constraint edges such that permissions properly propagate across reachable subgraphs of
 //!   inference nodes.
 
-use crate::semantic::syntax::{InferReVar, UniversalReVar};
-use clay_core::FastHashSet;
+use crate::semantic::{
+    infer::unify::sat::{SatBuilder, SatNaiveBuilder, SatTerm, SatVar},
+    syntax::{InferReVar, UniversalReVar},
+};
+use clay_core::{FastHashMap, FastHashSet, FastIndexMap};
 use index_vec::IndexVec;
-use petgraph::{Graph, graph::NodeIndex};
+use petgraph::{Direction, Graph, graph::NodeIndex, visit::EdgeRef};
+use smallvec::SmallVec;
 
 // === ReUnifyTracker === //
 
 pub struct ReUnifyTracker {}
 
 // === RegionFormulaSolver === //
+
+const BRUTE_FORCE_VAR_LIMIT: u32 = 10;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum RegionFormulaTerm {
@@ -452,7 +458,11 @@ impl RegionFormulaSolver {
         }
     }
 
-    pub fn push_axiom(&mut self, lhs: &[RegionFormulaTerm], rhs: RegionFormulaTerm) {
+    pub fn push_axiom(
+        &mut self,
+        lhs: impl IntoIterator<Item = RegionFormulaTerm>,
+        rhs: impl IntoIterator<Item = RegionFormulaTerm>,
+    ) {
         todo!()
     }
 
@@ -461,20 +471,18 @@ impl RegionFormulaSolver {
         lhs: impl IntoIterator<Item = RegionFormulaTerm>,
         rhs: impl IntoIterator<Item = RegionFormulaTerm>,
     ) {
+        todo!()
+    }
+
+    fn lower_lhs(&mut self, lhs: impl IntoIterator<Item = RegionFormulaTerm>) -> Option<NodeIndex> {
         let mut lhs = lhs.into_iter().fuse();
-        let mut rhs = rhs.into_iter().peekable();
 
-        if rhs.peek().is_none() {
-            // Vacuous
-            return;
-        }
-
-        let lhs = match (lhs.next(), lhs.next()) {
+        match (lhs.next(), lhs.next()) {
             (None, None) => {
                 // Vacuous
-                return;
+                return None;
             }
-            (Some(node), None) => self.transform_term(node),
+            (Some(node), None) => Some(self.transform_term(node)),
             (Some(first), Some(second)) => {
                 let joiner = self.graph.add_node(FormulaNode::And);
 
@@ -482,33 +490,151 @@ impl RegionFormulaSolver {
                     self.graph.add_edge(self.transform_term(lhs), joiner, ());
                 }
 
-                joiner
+                Some(joiner)
             }
             (None, Some(_)) => unreachable!(),
-        };
-
-        // TODO
+        }
     }
 
-    fn push_checked_internal(&mut self, lhs: NodeIndex, rhs: NodeIndex) {
-        #[derive(Copy, Clone)]
-        enum LivenessMode {
-            ForceAlive,
-            ForceDead,
+    fn check_implication(&mut self, lhs: NodeIndex, rhs: NodeIndex) {
+        // Create LHS-alive and RHS-dead logical formulas.
+        let mut builder = SatNaiveBuilder::default();
+        let mut inf_cycle_set = FastHashSet::default();
+        let mut inf_dedup = FastHashMap::default();
+        let mut universals = FastIndexMap::default();
+
+        let lhs_live = SatLivenessCollector {
+            mode: SatLivenessMode::Lhs,
+            graph: &self.graph,
+            builder: &mut builder,
+            inf_cycle_set: &mut inf_cycle_set,
+            inf_dedup: &mut inf_dedup,
+            universals: &mut universals,
+        }
+        .translate(lhs);
+
+        inf_dedup.clear();
+
+        let rhs_dead = SatLivenessCollector {
+            mode: SatLivenessMode::Rhs,
+            graph: &self.graph,
+            builder: &mut builder,
+            inf_cycle_set: &mut inf_cycle_set,
+            inf_dedup: &mut inf_dedup,
+            universals: &mut universals,
+        }
+        .translate(rhs);
+
+        // Attempt to use the brute-force approach to solve this equation.
+        let mut lhs_universals = 0;
+        let mut rhs_universals = 0;
+
+        for universal in universals.values() {
+            if universal.in_lhs {
+                lhs_universals += 1;
+            }
+
+            if universal.in_rhs {
+                rhs_universals += 1;
+            }
         }
 
-        // Create LHS-alive and RHS-dead logical formulas.
-        fn translate_liveness(
-            solver: &RegionFormulaSolver,
-            node: NodeIndex,
-            visited_inf: &mut FastHashSet<NodeIndex>,
-            mode: LivenessMode,
-        ) {
-            match solver.graph[node] {
-                FormulaNode::And => todo!(),
-                FormulaNode::True => todo!(),
-                FormulaNode::Universal(universal_re_var) => todo!(),
-                FormulaNode::Existential(infer_re_var) => todo!(),
+        if lhs_universals < rhs_universals && lhs_universals < BRUTE_FORCE_VAR_LIMIT {
+            todo!()
+        }
+
+        if rhs_universals < lhs_universals && rhs_universals < BRUTE_FORCE_VAR_LIMIT {
+            todo!()
+        }
+
+        // Otherwise, punt it to a proper SAT solver.
+        todo!();
+    }
+}
+
+struct SatLivenessCollector<'a, B: SatBuilder> {
+    mode: SatLivenessMode,
+    graph: &'a Graph<FormulaNode, ()>,
+    builder: &'a mut B,
+    inf_cycle_set: &'a mut FastHashSet<InferReVar>,
+    inf_dedup: &'a mut FastHashMap<InferReVar, B::Term>,
+    universals: &'a mut FastIndexMap<UniversalReVar, SatLivenessUniversal<B>>,
+}
+
+#[derive(Copy, Clone)]
+enum SatLivenessMode {
+    Lhs,
+    Rhs,
+}
+
+struct SatLivenessUniversal<B: SatBuilder> {
+    var: B::Var,
+    in_lhs: bool,
+    in_rhs: bool,
+}
+
+impl<B: SatBuilder> SatLivenessCollector<'_, B> {
+    fn translate(&mut self, node: NodeIndex) -> B::Term {
+        match self.graph[node] {
+            FormulaNode::True => <B::Term as SatTerm>::truthy(),
+            FormulaNode::And => {
+                let terms = self
+                    .graph
+                    .edges_directed(node, Direction::Incoming)
+                    .map(|edge| self.translate(edge.source()))
+                    .collect::<SmallVec<[_; 4]>>();
+
+                match self.mode {
+                    SatLivenessMode::Lhs => self.builder.join_and(terms),
+                    SatLivenessMode::Rhs => self.builder.join_or(terms),
+                }
+            }
+            FormulaNode::Existential(var) => {
+                if let Some(pre_lowered) = self.inf_dedup.get(&var) {
+                    return *pre_lowered;
+                }
+
+                if self.inf_cycle_set.insert(var) {
+                    return <B::Term as SatTerm>::truthy();
+                }
+
+                let terms = self
+                    .graph
+                    .edges_directed(node, Direction::Incoming)
+                    .map(|edge| self.translate(edge.source()))
+                    .collect::<SmallVec<[_; 4]>>();
+
+                self.inf_cycle_set.remove(&var);
+
+                let out_term = match self.mode {
+                    SatLivenessMode::Lhs => self.builder.join_or(terms),
+                    SatLivenessMode::Rhs => self.builder.join_and(terms),
+                };
+
+                self.inf_dedup.insert(var, out_term);
+
+                out_term
+            }
+            FormulaNode::Universal(var) => {
+                let universal =
+                    self.universals
+                        .entry(var)
+                        .or_insert_with(|| SatLivenessUniversal {
+                            var: self.builder.fresh_var(),
+                            in_lhs: false,
+                            in_rhs: false,
+                        });
+
+                match self.mode {
+                    SatLivenessMode::Lhs => {
+                        universal.in_lhs = true;
+                        universal.var.to_term()
+                    }
+                    SatLivenessMode::Rhs => {
+                        universal.in_rhs = true;
+                        !universal.var.to_term()
+                    }
+                }
             }
         }
     }
