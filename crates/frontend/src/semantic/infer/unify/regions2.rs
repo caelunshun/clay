@@ -396,12 +396,13 @@
 
 use crate::semantic::{
     infer::unify::sat::{
-        BruteSatBuilder, BruteSatTerm, BruteSatisfied, NopSatBuilder, SatBuilder, SatTerm, SatVar,
+        BruteSatBuilder, BruteSatTerm, BruteSatisfied, NopSatBuilder, NopSatTerm, SatBuilder,
+        SatTerm, SatVar,
     },
     syntax::{InferReVar, UniversalReVar},
 };
-use clay_core::{FastHashMap, FastHashSet, FastIndexMap};
-use derive_where::derive_where;
+use clay_core::{FastHashMap, FastIndexMap};
+use hashbrown::hash_map;
 use index_vec::IndexVec;
 use petgraph::{Direction, Graph, graph::NodeIndex, visit::EdgeRef};
 use smallvec::SmallVec;
@@ -503,150 +504,143 @@ impl RegionFormulaSolver {
             (None, Some(_)) => unreachable!(),
         }
     }
+}
 
+// === RegionFormulaSolver::check_implication === //
+
+#[derive(Copy, Clone)]
+enum SolveDrivingSide {
+    Lhs,
+    Rhs,
+}
+
+impl RegionFormulaSolver {
     fn check_implication(&mut self, lhs: NodeIndex, rhs: NodeIndex) {
-        let mut inf_cycle_set = FastHashSet::default();
-
         // Determine which universals are used in our terms.
-        let all_universals = {
+        let all_universal_mentions = {
             let mut builder = NopSatBuilder::default();
-            let mut inf_dedup = FastHashMap::default();
-            let mut universals = FastIndexMap::default();
+            let mut all_universal_mentions =
+                FastHashMap::<NodeIndex, UniversalMentionMask>::default();
 
-            SatLivenessLower {
-                side: EquationSide::Lhs,
-                missing_universal_mode: GraphToSatMissingUniversalMode::Create,
-                graph: &self.graph,
-                builder: &mut builder,
-                inf_cycle_set: &mut inf_cycle_set,
-                inf_dedup: &mut inf_dedup,
-                universals: &mut universals,
-            }
+            SatLivenessLower::new(
+                SatLivenessLowerMode::Alive,
+                &self.graph,
+                &mut builder,
+                |_builder, node| {
+                    *all_universal_mentions.entry(node).or_default() |=
+                        UniversalMentionMask::IN_LHS;
+                    NopSatTerm
+                },
+            )
             .lower(lhs);
 
-            inf_dedup.clear();
-
-            SatLivenessLower {
-                side: EquationSide::Rhs,
-                missing_universal_mode: GraphToSatMissingUniversalMode::Create,
-                graph: &self.graph,
-                builder: &mut builder,
-                inf_cycle_set: &mut inf_cycle_set,
-                inf_dedup: &mut inf_dedup,
-                universals: &mut universals,
-            }
+            SatLivenessLower::new(
+                SatLivenessLowerMode::Dead,
+                &self.graph,
+                &mut builder,
+                |_builder, node| {
+                    *all_universal_mentions.entry(node).or_default() |=
+                        UniversalMentionMask::IN_RHS;
+                    NopSatTerm
+                },
+            )
             .lower(rhs);
 
-            universals
+            all_universal_mentions
         };
 
-        // Attempt to use the brute-force approach to solve this equation.
-        let mut lhs_universals = 0;
-        let mut rhs_universals = 0;
+        let mut lhs_universal_count = 0;
+        let mut rhs_universal_count = 0;
 
-        for universal in all_universals.values() {
-            if universal.in_lhs {
-                lhs_universals += 1;
+        for universal in all_universal_mentions.values() {
+            if universal.contains(UniversalMentionMask::IN_LHS) {
+                lhs_universal_count += 1;
             }
 
-            if universal.in_rhs {
-                rhs_universals += 1;
+            if universal.contains(UniversalMentionMask::IN_RHS) {
+                rhs_universal_count += 1;
             }
         }
 
-        if lhs_universals < rhs_universals && lhs_universals < BRUTE_FORCE_VAR_LIMIT {
-            self.check_implication_brute(
-                &mut inf_cycle_set,
-                &all_universals,
-                lhs,
-                rhs,
-                EquationSide::Lhs,
-            );
-            return;
-        }
+        // Select a solving strategy
+        let (driving_side, min_var_count) = {
+            if lhs_universal_count < rhs_universal_count {
+                (SolveDrivingSide::Lhs, lhs_universal_count)
+            } else {
+                (SolveDrivingSide::Rhs, rhs_universal_count)
+            }
+        };
 
-        if rhs_universals < lhs_universals && rhs_universals < BRUTE_FORCE_VAR_LIMIT {
-            self.check_implication_brute(
-                &mut inf_cycle_set,
-                &all_universals,
-                lhs,
-                rhs,
-                EquationSide::Rhs,
-            );
-            return;
+        if min_var_count < BRUTE_FORCE_VAR_LIMIT {
+            self.check_implication_brute(driving_side, lhs, rhs, &all_universal_mentions);
+        } else {
+            // Punt to proper solver.
+            todo!();
         }
-
-        // Otherwise, punt it to a proper SAT solver.
-        todo!();
     }
 
     fn check_implication_brute(
         &mut self,
-        inf_cycle_set: &mut FastHashSet<InferReVar>,
-        all_universals: &FastIndexMap<NodeIndex, GraphToSatUniversal<NopSatBuilder>>,
+        side: SolveDrivingSide,
         lhs: NodeIndex,
         rhs: NodeIndex,
-        side: EquationSide,
+        all_universal_mentions: &FastHashMap<NodeIndex, UniversalMentionMask>,
     ) {
         let mut builder = BruteSatBuilder::default();
-        let mut inf_dedup = FastHashMap::default();
         let mut driver_universals = FastIndexMap::default();
 
+        // Assert that `LHS => !RHS`.
         let (lhs, rhs) = match side {
-            EquationSide::Lhs => {
-                let lhs = SatLivenessLower {
-                    side: EquationSide::Lhs,
-                    missing_universal_mode: GraphToSatMissingUniversalMode::Create,
-                    graph: &self.graph,
-                    builder: &mut builder,
-                    inf_cycle_set,
-                    inf_dedup: &mut inf_dedup,
-                    universals: &mut driver_universals,
-                }
+            SolveDrivingSide::Lhs => {
+                let lhs = SatLivenessLower::new(
+                    SatLivenessLowerMode::Alive,
+                    &self.graph,
+                    &mut builder,
+                    |builder, node| {
+                        driver_universals
+                            .entry(node)
+                            .or_insert_with(|| builder.fresh_var())
+                            .to_term()
+                    },
+                )
                 .lower(lhs);
 
-                inf_dedup.clear();
-
-                let rhs = SatLivenessLower {
-                    side: EquationSide::Rhs,
-                    missing_universal_mode: GraphToSatMissingUniversalMode::FallbackTo(
-                        BruteSatTerm::falsy(),
-                    ),
-                    graph: &self.graph,
-                    builder: &mut builder,
-                    inf_cycle_set,
-                    inf_dedup: &mut inf_dedup,
-                    universals: &mut driver_universals,
-                }
+                let rhs = SatLivenessLower::new(
+                    SatLivenessLowerMode::Dead,
+                    &self.graph,
+                    &mut builder,
+                    |_builder, node| match driver_universals.get(&node) {
+                        Some(var) => var.to_term(),
+                        None => BruteSatTerm::falsy(),
+                    },
+                )
                 .lower(rhs);
 
                 (lhs, rhs)
             }
-            EquationSide::Rhs => {
-                let rhs = SatLivenessLower {
-                    side: EquationSide::Rhs,
-                    missing_universal_mode: GraphToSatMissingUniversalMode::Create,
-                    graph: &self.graph,
-                    builder: &mut builder,
-                    inf_cycle_set,
-                    inf_dedup: &mut inf_dedup,
-                    universals: &mut driver_universals,
-                }
+            SolveDrivingSide::Rhs => {
+                let rhs = SatLivenessLower::new(
+                    SatLivenessLowerMode::Dead,
+                    &self.graph,
+                    &mut builder,
+                    |builder, node| {
+                        driver_universals
+                            .entry(node)
+                            .or_insert_with(|| builder.fresh_var())
+                            .to_term()
+                    },
+                )
                 .lower(rhs);
 
-                inf_dedup.clear();
-
-                let lhs = SatLivenessLower {
-                    side: EquationSide::Lhs,
-                    missing_universal_mode: GraphToSatMissingUniversalMode::FallbackTo(
-                        BruteSatTerm::truthy(),
-                    ),
-                    graph: &self.graph,
-                    builder: &mut builder,
-                    inf_cycle_set,
-                    inf_dedup: &mut inf_dedup,
-                    universals: &mut driver_universals,
-                }
+                let lhs = SatLivenessLower::new(
+                    SatLivenessLowerMode::Alive,
+                    &self.graph,
+                    &mut builder,
+                    |_builder, node| match driver_universals.get(&node) {
+                        Some(var) => var.to_term(),
+                        None => BruteSatTerm::truthy(),
+                    },
+                )
                 .lower(lhs);
 
                 (lhs, rhs)
@@ -655,8 +649,10 @@ impl RegionFormulaSolver {
 
         builder.assert_implies(lhs, !rhs);
 
+        // Assert that the universals are well-formed.
         // TODO
 
+        // Solve!
         let Ok(BruteSatisfied { model }) = builder.solve() else {
             // Formula accepted.
             // TODO
@@ -667,36 +663,54 @@ impl RegionFormulaSolver {
     }
 }
 
-#[derive(Copy, Clone)]
-enum EquationSide {
-    Lhs,
-    Rhs,
+bitflags::bitflags! {
+    #[derive(Copy, Clone, Default)]
+    struct UniversalMentionMask: u8 {
+        const IN_LHS = 1 << 0;
+        const IN_RHS = 1 << 1;
+    }
 }
 
-struct SatLivenessLower<'a, B: SatBuilder> {
-    side: EquationSide,
-    missing_universal_mode: GraphToSatMissingUniversalMode<B>,
+// === SatLivenessLower === //
+
+struct SatLivenessLower<'a, B, F>
+where
+    B: SatBuilder,
+    F: FnMut(&mut B, NodeIndex) -> B::Term,
+{
+    mode: SatLivenessLowerMode,
     graph: &'a Graph<FormulaNode, ()>,
     builder: &'a mut B,
-    inf_cycle_set: &'a mut FastHashSet<InferReVar>,
-    inf_dedup: &'a mut FastHashMap<InferReVar, B::Term>,
-    universals: &'a mut FastIndexMap<NodeIndex, GraphToSatUniversal<B>>,
+    lookup_forced_universal_liveness: F,
+    inf_dedup_and_reentrancy: FastHashMap<InferReVar, Option<B::Term>>,
 }
 
 #[derive(Copy, Clone)]
-enum GraphToSatMissingUniversalMode<B: SatBuilder> {
-    Create,
-    FallbackTo(B::Term),
+enum SatLivenessLowerMode {
+    Alive,
+    Dead,
 }
 
-#[derive_where(Copy, Clone)]
-struct GraphToSatUniversal<B: SatBuilder> {
-    var: B::Var,
-    in_lhs: bool,
-    in_rhs: bool,
-}
+impl<'a, B, F> SatLivenessLower<'a, B, F>
+where
+    B: SatBuilder,
+    F: FnMut(&mut B, NodeIndex) -> B::Term,
+{
+    fn new(
+        mode: SatLivenessLowerMode,
+        graph: &'a Graph<FormulaNode, ()>,
+        builder: &'a mut B,
+        lookup_forced_universal_liveness: F,
+    ) -> Self {
+        Self {
+            mode,
+            graph,
+            builder,
+            lookup_forced_universal_liveness,
+            inf_dedup_and_reentrancy: FastHashMap::default(),
+        }
+    }
 
-impl<B: SatBuilder> SatLivenessLower<'_, B> {
     /// Returns whether the term has been forced to be live (if `side == LHS`) or dead (if `side ==
     /// RHS`).
     fn lower(&mut self, node: NodeIndex) -> B::Term {
@@ -709,18 +723,23 @@ impl<B: SatBuilder> SatLivenessLower<'_, B> {
                     .map(|edge| self.lower(edge.source()))
                     .collect::<SmallVec<[_; 4]>>();
 
-                match self.side {
-                    EquationSide::Lhs => self.builder.join_and(terms),
-                    EquationSide::Rhs => self.builder.join_or(terms),
+                match self.mode {
+                    SatLivenessLowerMode::Alive => self.builder.join_and(terms),
+                    SatLivenessLowerMode::Dead => self.builder.join_or(terms),
                 }
             }
             FormulaNode::Existential(var) => {
-                if let Some(pre_lowered) = self.inf_dedup.get(&var) {
-                    return *pre_lowered;
-                }
-
-                if self.inf_cycle_set.insert(var) {
-                    return <B::Term as SatTerm>::truthy();
+                match self.inf_dedup_and_reentrancy.entry(var) {
+                    hash_map::Entry::Occupied(entry) => {
+                        return match entry.get() {
+                            Some(pre_lowered) => *pre_lowered,
+                            // This is a cycle.
+                            None => <B::Term as SatTerm>::truthy(),
+                        };
+                    }
+                    hash_map::Entry::Vacant(entry) => {
+                        entry.insert_entry(None);
+                    }
                 }
 
                 let terms = self
@@ -729,66 +748,27 @@ impl<B: SatBuilder> SatLivenessLower<'_, B> {
                     .map(|edge| self.lower(edge.source()))
                     .collect::<SmallVec<[_; 4]>>();
 
-                self.inf_cycle_set.remove(&var);
-
                 let out_term = if !terms.is_empty() {
-                    match self.side {
-                        EquationSide::Lhs => self.builder.join_or(terms),
-                        EquationSide::Rhs => self.builder.join_and(terms),
+                    match self.mode {
+                        SatLivenessLowerMode::Alive => self.builder.join_or(terms),
+                        SatLivenessLowerMode::Dead => self.builder.join_and(terms),
                     }
                 } else {
                     <B::Term as SatTerm>::falsy()
                 };
 
-                self.inf_dedup.insert(var, out_term);
+                *self.inf_dedup_and_reentrancy.get_mut(&var).unwrap() = Some(out_term);
 
                 out_term
             }
-            FormulaNode::Universal(var) => {
-                let universal = match self.missing_universal_mode {
-                    GraphToSatMissingUniversalMode::Create => self
-                        .universals
-                        .entry(node)
-                        .or_insert_with(|| GraphToSatUniversal {
-                            var: self.builder.fresh_var(),
-                            in_lhs: false,
-                            in_rhs: false,
-                        }),
-                    GraphToSatMissingUniversalMode::FallbackTo(fallback) => {
-                        let Some(universal) = self.universals.get_mut(&node) else {
-                            return fallback;
-                        };
+            FormulaNode::Universal(_) => {
+                let var = (self.lookup_forced_universal_liveness)(self.builder, node);
 
-                        universal
-                    }
-                };
-
-                match self.side {
-                    EquationSide::Lhs => {
-                        universal.in_lhs = true;
-                        universal.var.to_term()
-                    }
-                    EquationSide::Rhs => {
-                        universal.in_rhs = true;
-                        !universal.var.to_term()
-                    }
+                match self.mode {
+                    SatLivenessLowerMode::Alive => var,
+                    SatLivenessLowerMode::Dead => !var,
                 }
             }
         }
-    }
-}
-
-struct SatWfLower<'a, B: SatBuilder> {
-    graph: &'a Graph<FormulaNode, ()>,
-    driver_universals: &'a FastIndexMap<NodeIndex, GraphToSatUniversal<B>>,
-    all_universals: &'a FastIndexMap<NodeIndex, GraphToSatUniversal<NopSatBuilder>>,
-    builder: &'a mut B,
-}
-
-impl<B: SatBuilder> SatWfLower<'_, B> {
-    /// Returns whether the term has been forced to be live and creates the appropriate assertions
-    /// if this is a driver universal.
-    fn lower(&mut self, node: NodeIndex) -> B::Term {
-        todo!()
     }
 }
