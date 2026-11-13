@@ -1,10 +1,36 @@
 use derive_where::derive_where;
 use std::{
+    array,
     cmp::Ordering,
     fmt::{self, Write},
+    iter,
     ops::ControlFlow,
     slice,
 };
+
+// === iter_two_or_more === //
+
+pub type TwoOrMoreIter<I> = iter::Chain<array::IntoIter<<I as Iterator>::Item, 2>, I>;
+
+pub enum IterCount<I: Iterator> {
+    None,
+    One(I::Item),
+    TwoOrMore(TwoOrMoreIter<I>),
+}
+
+pub fn iter_two_or_more<I: Iterator>(iter: impl IntoIterator<IntoIter = I>) -> IterCount<I> {
+    let mut iter = iter.into_iter();
+
+    let Some(first) = iter.next() else {
+        return IterCount::None;
+    };
+
+    let Some(second) = iter.next() else {
+        return IterCount::One(first);
+    };
+
+    IterCount::TwoOrMore([first, second].into_iter().chain(iter))
+}
 
 // === IterEither === //
 

@@ -381,54 +381,59 @@
 //!
 //! ## Organization
 //!
-//! - The [`RegionSatSolver`] provides an interactive structure for verifying formulae using the
+//! - The [`RegionFormulaSolver`] provides an interactive structure for verifying formulae using the
 //!   theory defined above. One can either push a formula as an axiom using `push_axiom` or
 //!   push a formula while checking its validity against the preconditions using `push_checked`.
 //!
-//! - The [`ReUnifyTracker`] builds on the `RegionSatSolver` to add support for permission and
+//! - The [`ReUnifyTracker`] builds on the `RegionFormulaSolver` to add support for permission and
 //!   constraint edges such that permissions properly propagate across reachable subgraphs of
 //!   inference nodes.
 
 use crate::semantic::syntax::{InferReVar, UniversalReVar};
+use clay_core::FastHashSet;
 use index_vec::IndexVec;
 use petgraph::{Graph, graph::NodeIndex};
 
-// === RegionSatSolver === //
+// === ReUnifyTracker === //
+
+pub struct ReUnifyTracker {}
+
+// === RegionFormulaSolver === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum RegionSatTerm {
+pub enum RegionFormulaTerm {
     True,
     Universal(UniversalReVar),
     Existential(InferReVar),
 }
 
-pub struct RegionSatSolver {
-    graph: Graph<SatNode, ()>,
+pub struct RegionFormulaSolver {
+    graph: Graph<FormulaNode, ()>,
     true_node: NodeIndex,
     universal_nodes: IndexVec<UniversalReVar, NodeIndex>,
     existential_nodes: IndexVec<InferReVar, NodeIndex>,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-enum SatNode {
+enum FormulaNode {
     And,
     True,
     Universal(UniversalReVar),
     Existential(InferReVar),
 }
 
-impl RegionSatSolver {
+impl RegionFormulaSolver {
     pub fn new(universal_count: usize, existential_count: usize) -> Self {
         let mut graph = Graph::new();
 
-        let true_node = graph.add_node(SatNode::True);
+        let true_node = graph.add_node(FormulaNode::True);
 
         let universal_nodes = (0..universal_count)
-            .map(|idx| graph.add_node(SatNode::Universal(UniversalReVar::from_usize(idx))))
+            .map(|idx| graph.add_node(FormulaNode::Universal(UniversalReVar::from_usize(idx))))
             .collect();
 
         let existential_nodes = (0..existential_count)
-            .map(|idx| graph.add_node(SatNode::Existential(InferReVar::from_usize(idx))))
+            .map(|idx| graph.add_node(FormulaNode::Existential(InferReVar::from_usize(idx))))
             .collect();
 
         Self {
@@ -439,22 +444,22 @@ impl RegionSatSolver {
         }
     }
 
-    fn transform_term(&self, term: RegionSatTerm) -> NodeIndex {
+    fn transform_term(&self, term: RegionFormulaTerm) -> NodeIndex {
         match term {
-            RegionSatTerm::True => self.true_node,
-            RegionSatTerm::Universal(var) => self.universal_nodes[var],
-            RegionSatTerm::Existential(var) => self.existential_nodes[var],
+            RegionFormulaTerm::True => self.true_node,
+            RegionFormulaTerm::Universal(var) => self.universal_nodes[var],
+            RegionFormulaTerm::Existential(var) => self.existential_nodes[var],
         }
     }
 
-    pub fn push_axiom(&mut self, lhs: &[RegionSatTerm], rhs: RegionSatTerm) {
+    pub fn push_axiom(&mut self, lhs: &[RegionFormulaTerm], rhs: RegionFormulaTerm) {
         todo!()
     }
 
     pub fn push_checked(
         &mut self,
-        lhs: impl IntoIterator<Item = RegionSatTerm>,
-        rhs: impl IntoIterator<Item = RegionSatTerm>,
+        lhs: impl IntoIterator<Item = RegionFormulaTerm>,
+        rhs: impl IntoIterator<Item = RegionFormulaTerm>,
     ) {
         let mut lhs = lhs.into_iter().fuse();
         let mut rhs = rhs.into_iter().peekable();
@@ -471,7 +476,7 @@ impl RegionSatSolver {
             }
             (Some(node), None) => self.transform_term(node),
             (Some(first), Some(second)) => {
-                let joiner = self.graph.add_node(SatNode::And);
+                let joiner = self.graph.add_node(FormulaNode::And);
 
                 for lhs in [first, second].into_iter().chain(lhs) {
                     self.graph.add_edge(self.transform_term(lhs), joiner, ());
@@ -485,9 +490,26 @@ impl RegionSatSolver {
         // TODO
     }
 
-    fn push_checked_internal(&mut self, lhs: NodeIndex, rhs: NodeIndex) {}
+    fn push_checked_internal(&mut self, lhs: NodeIndex, rhs: NodeIndex) {
+        #[derive(Copy, Clone)]
+        enum LivenessMode {
+            ForceAlive,
+            ForceDead,
+        }
+
+        // Create LHS-alive and RHS-dead logical formulas.
+        fn translate_liveness(
+            solver: &RegionFormulaSolver,
+            node: NodeIndex,
+            visited_inf: &mut FastHashSet<NodeIndex>,
+            mode: LivenessMode,
+        ) {
+            match solver.graph[node] {
+                FormulaNode::And => todo!(),
+                FormulaNode::True => todo!(),
+                FormulaNode::Universal(universal_re_var) => todo!(),
+                FormulaNode::Existential(infer_re_var) => todo!(),
+            }
+        }
+    }
 }
-
-// === ReUnifyTracker === //
-
-pub struct ReUnifyTracker {}
