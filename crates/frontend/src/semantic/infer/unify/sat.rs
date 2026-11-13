@@ -392,8 +392,35 @@ mod brute {
             self.is_fused_false
         }
 
-        pub fn solve(&mut self) -> Result<BruteSatisfied, BruteSatisfied> {
-            todo!()
+        pub fn solve(&mut self) -> Result<BruteSatisfied, BruteUnsatisfied> {
+            assert!(
+                self.var_gen.index() <= 64,
+                "model too big and will likely hang",
+            );
+
+            if self.is_fused_false {
+                return Err(BruteUnsatisfied);
+            }
+
+            if self.var_gen.index() == 0 {
+                return Ok(BruteSatisfied {
+                    model: IndexVec::new(),
+                });
+            }
+
+            let mut solver_stack = Vec::new();
+
+            for counter in 0..(1 << self.var_gen.index()) {
+                if self.eval(&mut solver_stack, |idx| counter & (1 << idx.index()) != 0) {
+                    return Ok(BruteSatisfied {
+                        model: (0..self.var_gen.index())
+                            .map(|idx| counter & (1 << idx) != 0)
+                            .collect(),
+                    });
+                }
+            }
+
+            Err(BruteUnsatisfied)
         }
 
         pub fn eval(

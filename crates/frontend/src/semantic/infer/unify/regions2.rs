@@ -452,14 +452,6 @@ impl RegionFormulaSolver {
         }
     }
 
-    fn transform_term(&self, term: RegionFormulaTerm) -> NodeIndex {
-        match term {
-            RegionFormulaTerm::True => self.true_node,
-            RegionFormulaTerm::Universal(var) => self.universal_nodes[var],
-            RegionFormulaTerm::Existential(var) => self.existential_nodes[var],
-        }
-    }
-
     pub fn push_axiom(
         &mut self,
         lhs: impl IntoIterator<Item = RegionFormulaTerm>,
@@ -474,6 +466,14 @@ impl RegionFormulaSolver {
         rhs: impl IntoIterator<Item = RegionFormulaTerm>,
     ) {
         todo!()
+    }
+
+    fn transform_term(&self, term: RegionFormulaTerm) -> NodeIndex {
+        match term {
+            RegionFormulaTerm::True => self.true_node,
+            RegionFormulaTerm::Universal(var) => self.universal_nodes[var],
+            RegionFormulaTerm::Existential(var) => self.existential_nodes[var],
+        }
     }
 
     fn lower_lhs(&mut self, lhs: impl IntoIterator<Item = RegionFormulaTerm>) -> Option<NodeIndex> {
@@ -634,6 +634,10 @@ impl RegionFormulaSolver {
             }
         };
 
+        builder.assert_implies(lhs, !rhs);
+
+        // TODO: add universal implications
+
         let Ok(BruteSatisfied { model }) = builder.solve() else {
             // Formula accepted.
             // TODO
@@ -705,9 +709,13 @@ impl<B: SatBuilder> GraphToSatCollector<'_, B> {
 
                 self.inf_cycle_set.remove(&var);
 
-                let out_term = match self.side {
-                    EquationSide::Lhs => self.builder.join_or(terms),
-                    EquationSide::Rhs => self.builder.join_and(terms),
+                let out_term = if !terms.is_empty() {
+                    match self.side {
+                        EquationSide::Lhs => self.builder.join_or(terms),
+                        EquationSide::Rhs => self.builder.join_and(terms),
+                    }
+                } else {
+                    <B::Term as SatTerm>::falsy()
                 };
 
                 self.inf_dedup.insert(var, out_term);
