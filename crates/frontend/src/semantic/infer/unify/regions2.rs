@@ -394,15 +394,18 @@
 //!   constraint edges such that permissions properly propagate across reachable subgraphs of
 //!   inference nodes.
 
-use crate::semantic::{
-    infer::{
-        ReAndReUnifyError,
-        unify::sat::{
-            BruteSatBuilder, BruteSatTerm, BruteSatisfied, NopSatBuilder, NopSatTerm, SatBuilder,
-            SatTerm, SatVar,
+use crate::{
+    bool_enum,
+    semantic::{
+        infer::{
+            ReAndReUnifyError,
+            unify::sat::{
+                BruteSatBuilder, BruteSatTerm, BruteSatisfied, NopSatBuilder, NopSatTerm,
+                SatBuilder, SatTerm, SatVar,
+            },
         },
+        syntax::{InferReVar, UniversalReVar},
     },
-    syntax::{InferReVar, UniversalReVar},
 };
 use clay_core::{FastHashMap, FastIndexMap};
 use hashbrown::hash_map;
@@ -440,6 +443,13 @@ enum FormulaNode {
     Existential(InferReVar),
 }
 
+bool_enum! {
+    enum ShouldValidate {
+        true => Yes;
+        false => No;
+    }
+}
+
 impl RegionFormulaSolver {
     pub fn new(universal_count: usize, existential_count: usize) -> Self {
         let mut graph = Graph::new();
@@ -467,15 +477,49 @@ impl RegionFormulaSolver {
         lhs: impl IntoIterator<Item = RegionFormulaTerm>,
         rhs: impl IntoIterator<Item = RegionFormulaTerm>,
     ) {
-        todo!()
+        self.push_common(ShouldValidate::No, lhs, rhs).unwrap();
     }
 
     pub fn push_checked(
         &mut self,
         lhs: impl IntoIterator<Item = RegionFormulaTerm>,
         rhs: impl IntoIterator<Item = RegionFormulaTerm>,
-    ) {
-        todo!()
+    ) -> Result<(), ReAndReUnifyError> {
+        self.push_common(ShouldValidate::Yes, lhs, rhs)
+    }
+
+    fn push_common(
+        &mut self,
+        should_validate: ShouldValidate,
+        lhs: impl IntoIterator<Item = RegionFormulaTerm>,
+        rhs: impl IntoIterator<Item = RegionFormulaTerm>,
+    ) -> Result<(), ReAndReUnifyError> {
+        let rhs = rhs
+            .into_iter()
+            .filter(|term| !matches!(term, RegionFormulaTerm::True))
+            .map(|term| self.transform_term(term))
+            .collect::<SmallVec<[NodeIndex; 4]>>();
+
+        if rhs.is_empty() {
+            return Ok(());
+        }
+
+        let lhs = self.lower_lhs(lhs);
+
+        if should_validate.is_truthy() {
+            // No need to push our edges before ensuring that all RHS terms pass because additional
+            // edges cannot contribute to whether this condition passes.
+
+            for &rhs in &rhs {
+                self.check_implication(lhs, rhs)?;
+            }
+        }
+
+        for &rhs in &rhs {
+            self.graph.add_edge(lhs, rhs, ());
+        }
+
+        Ok(())
     }
 
     fn transform_term(&self, term: RegionFormulaTerm) -> NodeIndex {
@@ -486,15 +530,18 @@ impl RegionFormulaSolver {
         }
     }
 
-    fn lower_lhs(&mut self, lhs: impl IntoIterator<Item = RegionFormulaTerm>) -> Option<NodeIndex> {
-        let mut lhs = lhs.into_iter().fuse();
+    fn lower_lhs(&mut self, lhs: impl IntoIterator<Item = RegionFormulaTerm>) -> NodeIndex {
+        let mut lhs = lhs
+            .into_iter()
+            .filter(|term| !matches!(term, RegionFormulaTerm::True))
+            .fuse();
 
         match (lhs.next(), lhs.next()) {
             (None, None) => {
                 // Vacuous
-                return None;
+                return self.true_node;
             }
-            (Some(node), None) => Some(self.transform_term(node)),
+            (Some(node), None) => self.transform_term(node),
             (Some(first), Some(second)) => {
                 let joiner = self.graph.add_node(FormulaNode::And);
 
@@ -502,7 +549,7 @@ impl RegionFormulaSolver {
                     self.graph.add_edge(self.transform_term(lhs), joiner, ());
                 }
 
-                Some(joiner)
+                joiner
             }
             (None, Some(_)) => unreachable!(),
         }
@@ -752,6 +799,8 @@ where
                     .edges_directed(node, Direction::Incoming)
                     .map(|edge| self.lower(edge.source()))
                     .collect::<SmallVec<[_; 4]>>();
+
+                debug_assert!(!terms.is_empty());
 
                 match self.mode {
                     SatLivenessLowerMode::Alive => self.builder.join_and(terms),
