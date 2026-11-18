@@ -1036,23 +1036,6 @@ mod tests {
     use core::fmt;
     use rand::{Rng, RngExt, SeedableRng as _, rngs::Xoshiro256PlusPlus};
 
-    fn random_term(
-        mut rng: impl Rng,
-        universal_count: u32,
-        existential_count: u32,
-    ) -> RegionFormulaTerm {
-        match rng.random_range(0..=2) {
-            0 => RegionFormulaTerm::Universal(UniversalReVar::from_usize(
-                rng.random_range::<u32, _>(0..universal_count) as usize,
-            )),
-            1 => RegionFormulaTerm::Existential(InferReVar::from_usize(
-                rng.random_range::<u32, _>(0..existential_count) as usize,
-            )),
-            2 => RegionFormulaTerm::True,
-            _ => unreachable!(),
-        }
-    }
-
     #[test]
     fn prop_test() {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(4);
@@ -1113,6 +1096,23 @@ mod tests {
         }
     }
 
+    fn random_term(
+        mut rng: impl Rng,
+        universal_count: u32,
+        existential_count: u32,
+    ) -> RegionFormulaTerm {
+        match rng.random_range(0..=2) {
+            0 => RegionFormulaTerm::Universal(UniversalReVar::from_usize(
+                rng.random_range::<u32, _>(0..universal_count) as usize,
+            )),
+            1 => RegionFormulaTerm::Existential(InferReVar::from_usize(
+                rng.random_range::<u32, _>(0..existential_count) as usize,
+            )),
+            2 => RegionFormulaTerm::True,
+            _ => unreachable!(),
+        }
+    }
+
     fn format_term(term: RegionFormulaTerm) -> impl fmt::Display {
         fmt::from_fn(move |f| {
             f.write_str("RegionFormulaTerm::")?;
@@ -1131,5 +1131,14 @@ mod tests {
 
             Ok(())
         })
+    }
+
+    #[test]
+    fn simple_infer() {
+        let mut solver = RegionFormulaSolver::new(0, 2);
+        _ = solver.push_checked(
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(1))],
+        );
     }
 }
