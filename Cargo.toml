@@ -11,11 +11,13 @@ members = [
 ]
 
 [workspace.dependencies]
+clay-core = { path = "crates/core" }
+clay-frontend = { path = "crates/frontend" }
+
 bit-set = "0.11.1"
 bitflags = "2.13.2"
 bunt = "0.2.9"
 cbit = "0.1.1"
-clay-core = { path = "crates/core" }
 codespan-reporting = "0.13.1"
 color-eyre = "0.6.5"
 compact_str = "0.10.0"
@@ -41,6 +43,7 @@ termcolor = "1.4.1"
 thiserror = "2.0.21"
 tracing-subscriber = "0.3.23"
 unicode-xid = "0.2.6"
+z3 = "0.23.0"
 
 [workspace.dependencies.bumpalo]
 version = "3.20.3"

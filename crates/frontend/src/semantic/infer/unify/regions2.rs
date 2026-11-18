@@ -87,8 +87,8 @@
 //! Unfortunately, there are a possibly exponential number of ways to force the RHS to be true and
 //! a possibly exponential number of ways to force the LHS to be false.
 //!
-//! Consider the following input, which has a number of ways to set the LHS to `true` exponential
-//! in the number of universals defined...
+//! Consider the following input, which has a number of ways to force the LHS to be `true` which is
+//! exponential in the number of universals defined...
 //!
 //! ```text
 //! u't_1 => i'1
@@ -100,19 +100,36 @@
 //! u'f_n => i'n
 //!
 //! i'1 & ... & i'n => rhs
+//!
+//! // You can make one of three independent choices for each `i'n` to force the LHS to be true:
+//! //
+//! // - u't_n = true, u'f_n = true
+//! // - u't_n = true, u'f_n = false
+//! // - u't_n = false, u'f_n = true
 //! ```
 //!
 //! ...where `i'x` denotes an inference region and `u'x` denotes a universal region.
 //!
 //! Likewise, consider the following input—this time, exponential in the number of ways in which
-//! it could be made falsy...
+//! it could be forced falsy...
 //!
 //! ```text
-//! u't_1 & u'f_1 => i'a
+//! i'rhs => u't_1 & u'f_1
 //! ...
-//! u't_n & u'f_n => i'a
+//! i'rhs => u't_n & u'f_n
 //!
-//! lhs => i'a
+//! lhs => i'rhs
+//!
+//! // You can make one of three independent choices for each implication to force `'rhs` to be
+//! // false:
+//! //
+//! // - u't_k = false, u'f_k = false
+//! // - u't_k = true, u'f_k = false
+//! // - u't_k = false, u'f_k = true
+//! //
+//! // If some other implication already has a false RHS, you could also choose...
+//! //
+//! // u't_k = true, u'f_k = true.
 //! ```
 //!
 //! Unfortunately, one can reduce a 3-SAT problem into our solver like so...
@@ -157,10 +174,11 @@
 //! The 3-SAT formula is satisfiable *iff* we can come up with a set of universals that cause a
 //! contradiction in our formula:
 //!
-//! - If we try to select `A_t` and `A_f`, we'll be forced to enable the `dead_if_not_both`
-//!   universal and cause the consequent to pass.
-//! - If we select neither `A_t` nor `A_f`, `i'true_if_non_empty` will be allowed to be `false`.
-//! - If we don't match all terms, `i'terms_truthy` will be allowed to be `false`.
+//! - If we try to select any pair of `A_t` and `A_f` simultaneously, we'll be forced to enable the
+//!   `dead_if_not_both` universal and cause the consequent to pass.
+//! - If we select neither of `A_t` nor `A_f`, `i'live_if_at_least_one_k` will be allowed to be
+//!   `false`, permitting the LHS to be `false`.
+//! - If we don't match all terms, `i'live_if_term_k_truthy` will be allowed to be `false`.
 //!
 //! Let's see how we would express this in Clay...
 //!
@@ -316,10 +334,12 @@
 //!
 //! ## Reduction to SAT
 //!
+//! TODO: This is out of date and requires proofs
+//!
 //! We've shown how to reduce SAT to the region system (i.e. NP-completeness) but how might we
-//! reduce the region system to a SAT problem (i.e. NP-hardness, specifically if we consider
-//! checking for unsoundness)? Doing this would allow us to reuse the existing hard work that has
-//! gone into implementing efficient SAT solvers.
+//! reduce the region system to a SAT problem (i.e. demonstrating NP-hardness, specifically if we
+//! consider checking for unsoundness)? Doing this would allow us to reuse the existing hard work
+//! that has gone into implementing efficient SAT solvers.
 //!
 //! A formula is unsound *iff* we manage to find a set of *well-formed* universals which force the
 //! LHS to be live while forcing the RHS to be dead. Both the condition of "the LHS being forced to
@@ -329,7 +349,7 @@
 //!
 //! In terms of lowering...
 //!
-//! - On the LHS, the terms `i/u'X_1 -> Y; ...; i/u'X_n -> i'Y` tell us that `i'Y` would be forced
+//! - On the LHS, the terms `i/u'X_1 -> i'Y; ...; i/u'X_n -> i'Y` tell us that `i'Y` would be forced
 //!   to be alive *iff* `forced_alive(i'X_1) | ... | forced_alive(i'X_n)` is `true`.
 //!
 //!   The term `i/u'X_1 + ... + i/u'X_n -> i'Y` tell us that `i'Y` would be forced to be
@@ -341,8 +361,8 @@
 //!   The term `forced_alive(i'X)` where `X` is an inference variable with nothing implying it is
 //!   `false` and `forced_alive(u'x) = x` denotes `x` the SAT variable for `u'x`.
 //!
-//! - On the RHS, meanwhile, the terms `i/u'X_1 -> Y; ...; i/u'X_n -> i'Y` tell us that `i'Y` would
-//!   be forced to be dead *iff* `forced_dead(i'X_1) & ... & forced_dead(i'X_n)` is `true`.
+//! - On the RHS, meanwhile, the terms `i'Y -> i/u'X_1; ...; i'Y -> i/u'X_n` tell us that `i'Y`
+//!   would be forced to be dead *iff* `forced_dead(i'X_1) & ... & forced_dead(i'X_n)` is `true`.
 //!
 //!   The term `i/u'X_1 + ... + i/u'X_n -> i'Y` tell us that `i'Y` would be forced to be dead *iff*
 //!   `forced_dead(i'X_1) | ... | forced_dead(i'X_n)`.
@@ -847,6 +867,70 @@ where
                     SatLivenessLowerMode::Alive => var,
                     SatLivenessLowerMode::Dead => !var,
                 }
+            }
+        }
+    }
+}
+
+// === Tests === //
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::{Rng, RngExt, SeedableRng as _, rngs::Xoshiro256PlusPlus};
+
+    fn random_term(
+        mut rng: impl Rng,
+        universal_count: u32,
+        existential_count: u32,
+    ) -> RegionFormulaTerm {
+        match rng.random_range(0..=2) {
+            0 => RegionFormulaTerm::Universal(UniversalReVar::from_usize(
+                rng.random_range::<u32, _>(0..universal_count) as usize,
+            )),
+            1 => RegionFormulaTerm::Universal(UniversalReVar::from_usize(
+                rng.random_range::<u32, _>(0..existential_count) as usize,
+            )),
+            2 => RegionFormulaTerm::True,
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn prop_test() {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(4);
+
+        for _ in 0..50_000 {
+            // Not sure whether `usize` has platform-dependent behavior for `rand`.
+            let universal_count = rng.random_range::<u32, _>(1..5);
+            let existential_count = rng.random_range::<u32, _>(1..5);
+
+            let mut solver =
+                RegionFormulaSolver::new(universal_count as usize, existential_count as usize);
+
+            // Setup axioms
+            for _ in 0..rng.random_range(0..8) {
+                let lhs = (0..rng.random_range(1..4))
+                    .map(|_| random_term(&mut rng, universal_count, existential_count))
+                    .collect::<SmallVec<[_; 4]>>();
+
+                solver.push_axiom(
+                    lhs,
+                    [random_term(&mut rng, universal_count, existential_count)],
+                );
+            }
+
+            // Check equations
+            // TODO: create Z3 "backend"
+            for _ in 0..8 {
+                let lhs = (0..rng.random_range(1..4))
+                    .map(|_| random_term(&mut rng, universal_count, existential_count))
+                    .collect::<Vec<_>>();
+
+                _ = solver.push_checked(
+                    lhs,
+                    [random_term(&mut rng, universal_count, existential_count)],
+                );
             }
         }
     }
