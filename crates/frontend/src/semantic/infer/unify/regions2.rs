@@ -523,8 +523,12 @@ impl RegionFormulaSolver {
             for &rhs in &rhs {
                 #[cfg(test)]
                 {
-                    self.check_implication_sat(lhs, rhs)?;
-                    self.check_implication_smt(lhs, rhs)?;
+                    let res_sat = self.check_implication_sat(lhs, rhs);
+                    let res_smt = self.check_implication_smt(lhs, rhs);
+
+                    assert_eq!(res_sat.is_ok(), res_smt.is_ok());
+
+                    () = res_sat?;
                 }
 
                 #[cfg(not(test))]
@@ -1015,6 +1019,8 @@ mod solver_smt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::format::{SimpleListFormatGlue, format_list};
+    use core::fmt;
     use rand::{Rng, RngExt, SeedableRng as _, rngs::Xoshiro256PlusPlus};
 
     fn random_term(
@@ -1038,10 +1044,16 @@ mod tests {
     fn prop_test() {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(4);
 
-        for _ in 0..1000 {
+        for i in 0..1000 {
+            println!("// Test {i}");
+
             // Not sure whether `usize` has platform-dependent behavior for `rand`.
             let universal_count = rng.random_range::<u32, _>(1..5);
             let existential_count = rng.random_range::<u32, _>(1..5);
+
+            println!(
+                "let mut solver = RegionFormulaSolver::new({universal_count}, {existential_count});"
+            );
 
             let mut solver =
                 RegionFormulaSolver::new(universal_count as usize, existential_count as usize);
@@ -1052,9 +1064,17 @@ mod tests {
                     .map(|_| random_term(&mut rng, universal_count, existential_count))
                     .collect::<SmallVec<[_; 4]>>();
 
-                solver.push_axiom(
-                    lhs,
-                    [random_term(&mut rng, universal_count, existential_count)],
+                let rhs = random_term(&mut rng, universal_count, existential_count);
+
+                solver.push_axiom(lhs.iter().copied(), [rhs]);
+
+                println!(
+                    "solver.push_axiom([{}], [{}]);",
+                    format_list(
+                        lhs.iter().copied().map(format_term),
+                        SimpleListFormatGlue::COMMA_LIST
+                    ),
+                    format_term(rhs),
                 );
             }
 
@@ -1064,11 +1084,39 @@ mod tests {
                     .map(|_| random_term(&mut rng, universal_count, existential_count))
                     .collect::<Vec<_>>();
 
-                _ = solver.push_checked(
-                    lhs,
-                    [random_term(&mut rng, universal_count, existential_count)],
+                let rhs = random_term(&mut rng, universal_count, existential_count);
+
+                println!(
+                    "_ = solver.push_checked([{}], [{}]);",
+                    format_list(
+                        lhs.iter().copied().map(format_term),
+                        SimpleListFormatGlue::COMMA_LIST
+                    ),
+                    format_term(rhs),
                 );
+
+                _ = solver.push_checked(lhs, [rhs]);
             }
         }
+    }
+
+    fn format_term(term: RegionFormulaTerm) -> impl fmt::Display {
+        fmt::from_fn(move |f| {
+            f.write_str("RegionFormulaTerm::")?;
+
+            match term {
+                RegionFormulaTerm::True => {
+                    f.write_str("True")?;
+                }
+                RegionFormulaTerm::Universal(var) => {
+                    write!(f, "Universal(UniversalReVar::from_usize({}))", var.index())?;
+                }
+                RegionFormulaTerm::Existential(var) => {
+                    write!(f, "Existential(InferReVar::from_usize({}))", var.index())?;
+                }
+            }
+
+            Ok(())
+        })
     }
 }
