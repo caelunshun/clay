@@ -22,6 +22,7 @@ use crate::{
 use clay_core::FastHashMap;
 use index_vec::IndexVec;
 use std::{
+    num::NonZeroU32,
     rc::Rc,
     sync::atomic::{AtomicU32, Ordering::*},
 };
@@ -177,7 +178,7 @@ impl<'sess> ClauseCx<'sess> {
             promise_mode: PromiseMode::RootContext,
             universal_roots: IndexVec::new(),
             universal_projs: IndexVec::new(),
-            re_constraint_gen: ReConstraintOrder(0),
+            re_constraint_gen: ReConstraintOrder(const { NonZeroU32::new(1).unwrap() }),
         }
     }
 
@@ -228,7 +229,7 @@ impl<'sess> ClauseCx<'sess> {
 
     pub fn next_re_constraint(&mut self) -> ReConstraintOrder {
         let curr = self.re_constraint_gen;
-        self.re_constraint_gen.0 += 1;
+        self.re_constraint_gen.0 = self.re_constraint_gen.0.checked_add(1).unwrap();
         curr
     }
 }

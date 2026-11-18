@@ -415,20 +415,123 @@
 //!   inference nodes.
 
 use crate::{
+    base::ErrorGuaranteed,
     bool_enum,
     semantic::{
-        infer::ReAndReUnifyError,
-        syntax::{InferReVar, UniversalReVar},
+        infer::{Promise, PromiseHandle, ReAndReUnifyError, ReConstraintOrder},
+        syntax::{InferReVar, Re, RelationMode, UniversalReVar},
     },
 };
-use index_vec::IndexVec;
+use index_vec::{IndexVec, define_index_type};
 use petgraph::{Graph, graph::NodeIndex};
 use smallvec::SmallVec;
+use std::range::Range;
 
 // === ReUnifyTracker === //
 
+define_index_type! {
+    struct BufferIdx = u32;
+}
+
 #[derive(Clone)]
-pub struct ReUnifyTracker {}
+pub struct ReUnifyTracker<'sess> {
+    buffer: IndexVec<BufferIdx, RegionFormulaTerm>,
+    relations: Vec<RegisteredRelation<'sess>>,
+}
+
+#[derive(Clone)]
+struct RegisteredRelation<'sess> {
+    /// A handle if this is a constraint or `None` if this is the assertion portion of a permission.
+    handle: Option<PromiseHandle<'sess, ReAndReUnifyError>>,
+
+    /// The order in which relations should be sorted for processing during verification. Lower
+    /// occurs before higher. Constraint index zero is reserved for permits to simplify
+    /// verification.
+    order: u32,
+
+    mode: RelationMode,
+    lhs: Range<BufferIdx>,
+    rhs: Range<BufferIdx>,
+}
+
+impl<'sess> ReUnifyTracker<'sess> {
+    pub fn permit(
+        &mut self,
+        mode: RelationMode,
+        lhs: impl IntoIterator<Item = Re>,
+        rhs: impl IntoIterator<Item = Re>,
+    ) {
+        let Some((lhs, rhs)) = self.push_to_buffer(lhs, rhs) else {
+            // (Vacuous)
+            return;
+        };
+
+        self.relations.push(RegisteredRelation {
+            handle: None,
+            order: 0,
+            mode,
+            lhs,
+            rhs,
+        });
+    }
+
+    pub fn constrain(
+        &mut self,
+        order: ReConstraintOrder,
+        mode: RelationMode,
+        lhs: impl IntoIterator<Item = Re>,
+        rhs: impl IntoIterator<Item = Re>,
+    ) -> Promise<'sess, ReAndReUnifyError> {
+        let Some((lhs, rhs)) = self.push_to_buffer(lhs, rhs) else {
+            // (Vacuous)
+            return Promise::trivial();
+        };
+
+        let (promise, handle) = Promise::new();
+
+        self.relations.push(RegisteredRelation {
+            handle: Some(handle),
+            order: order.0.get(),
+            mode,
+            lhs,
+            rhs,
+        });
+
+        promise
+    }
+
+    fn push_to_buffer(
+        &mut self,
+        lhs: impl IntoIterator<Item = Re>,
+        rhs: impl IntoIterator<Item = Re>,
+    ) -> Option<(Range<BufferIdx>, Range<BufferIdx>)> {
+        let lhs_start = self.buffer.len_idx();
+        self.buffer.extend(
+            lhs.into_iter()
+                .filter_map(|re| RegionFormulaTerm::from_re(re).ok()),
+        );
+
+        let rhs_start = self.buffer.len_idx();
+        self.buffer.extend(
+            rhs.into_iter()
+                .filter_map(|re| RegionFormulaTerm::from_re(re).ok()),
+        );
+
+        if lhs_start == rhs_start || rhs_start == self.buffer.len_idx() {
+            self.buffer.truncate(lhs_start.index());
+            return None;
+        }
+
+        Some((
+            (lhs_start..rhs_start).into(),
+            (rhs_start..self.buffer.len_idx()).into(),
+        ))
+    }
+
+    pub fn verify(&mut self) {
+        todo!()
+    }
+}
 
 // === RegionFormulaSolver === //
 
@@ -437,6 +540,26 @@ pub enum RegionFormulaTerm {
     True,
     Universal(UniversalReVar),
     Existential(InferReVar),
+}
+
+impl RegionFormulaTerm {
+    fn from_re(re: Re) -> Result<Self, ErrorGuaranteed> {
+        match re {
+            Re::Gc => Ok(RegionFormulaTerm::True),
+            Re::InferVar(var) => Ok(RegionFormulaTerm::Existential(var)),
+            Re::UniversalVar(var) => Ok(RegionFormulaTerm::Universal(var)),
+            Re::Error(err) => Err(err),
+            Re::HrtbVar(_) => unreachable!(),
+        }
+    }
+
+    fn to_re(self) -> Re {
+        match self {
+            RegionFormulaTerm::True => Re::Gc,
+            RegionFormulaTerm::Universal(var) => Re::UniversalVar(var),
+            RegionFormulaTerm::Existential(var) => Re::InferVar(var),
+        }
+    }
 }
 
 #[derive(Clone)]

@@ -18,7 +18,7 @@ use crate::{
         },
     },
 };
-use std::{convert::Infallible, ops::ControlFlow};
+use std::{convert::Infallible, num::NonZeroU32, ops::ControlFlow};
 
 // === UnifyCx === //
 
@@ -29,7 +29,7 @@ pub enum UnifyCxMode {
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub struct ReConstraintOrder(pub u32);
+pub struct ReConstraintOrder(pub NonZeroU32);
 
 /// A type inference context for solving type obligations of the form...
 ///
