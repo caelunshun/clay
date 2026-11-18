@@ -427,6 +427,7 @@ use smallvec::SmallVec;
 
 // === ReUnifyTracker === //
 
+#[derive(Clone)]
 pub struct ReUnifyTracker {}
 
 // === RegionFormulaSolver === //
@@ -438,6 +439,7 @@ pub enum RegionFormulaTerm {
     Existential(InferReVar),
 }
 
+#[derive(Clone)]
 pub struct RegionFormulaSolver {
     graph: Graph<FormulaNode, ()>,
     true_node: NodeIndex,
@@ -529,15 +531,13 @@ impl RegionFormulaSolver {
                     assert!(
                         res_sat.is_ok() == res_smt.is_ok(),
                         "mismatch between solver strategies: SAT {}, SMT {}",
-                        if res_sat.is_ok() {
-                            "accepted"
-                        } else {
-                            "rejected"
+                        match res_sat {
+                            Ok(_) => "accepted",
+                            Err(_) => "rejected",
                         },
-                        if res_smt.is_ok() {
-                            "accepted"
-                        } else {
-                            "rejected"
+                        match res_smt {
+                            Ok(_) => "accepted",
+                            Err(_) => "rejected",
                         }
                     );
 
@@ -1012,8 +1012,8 @@ mod tests {
             println!("// Test {i}");
 
             // Not sure whether `usize` has platform-dependent behavior for `rand`.
-            let universal_count = rng.random_range::<u32, _>(1..5);
-            let existential_count = rng.random_range::<u32, _>(1..5);
+            let universal_count = rng.random_range::<u32, _>(1..=4);
+            let existential_count = rng.random_range::<u32, _>(1..=4);
 
             println!(
                 "let mut solver = RegionFormulaSolver::new({universal_count}, {existential_count});"
@@ -1023,10 +1023,10 @@ mod tests {
                 RegionFormulaSolver::new(universal_count as usize, existential_count as usize);
 
             // Setup axioms
-            for _ in 0..rng.random_range(0..8) {
-                let lhs = (0..rng.random_range(1..4))
+            for _ in 0..rng.random_range(0..=8) {
+                let lhs = (0..rng.random_range(1..=3))
                     .map(|_| random_term(&mut rng, universal_count, existential_count))
-                    .collect::<SmallVec<[_; 4]>>();
+                    .collect::<SmallVec<[_; 3]>>();
 
                 let rhs = random_term(&mut rng, universal_count, existential_count);
 
@@ -1044,9 +1044,9 @@ mod tests {
 
             // Check equations
             for _ in 0..8 {
-                let lhs = (0..rng.random_range(1..4))
+                let lhs = (0..rng.random_range(1..=3))
                     .map(|_| random_term(&mut rng, universal_count, existential_count))
-                    .collect::<Vec<_>>();
+                    .collect::<SmallVec<[_; 3]>>();
 
                 let rhs = random_term(&mut rng, universal_count, existential_count);
 
