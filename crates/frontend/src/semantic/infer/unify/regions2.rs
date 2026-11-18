@@ -526,7 +526,20 @@ impl RegionFormulaSolver {
                     let res_sat = self.check_implication_sat(lhs, rhs);
                     let res_smt = self.check_implication_smt(lhs, rhs);
 
-                    assert_eq!(res_sat.is_ok(), res_smt.is_ok());
+                    assert!(
+                        res_sat.is_ok() == res_smt.is_ok(),
+                        "mismatch between solver strategies: SAT {}, SMT {}",
+                        if res_sat.is_ok() {
+                            "accepted"
+                        } else {
+                            "rejected"
+                        },
+                        if res_smt.is_ok() {
+                            "accepted"
+                        } else {
+                            "rejected"
+                        }
+                    );
 
                     () = res_sat?;
                 }
