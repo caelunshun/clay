@@ -417,20 +417,12 @@
 use crate::{
     bool_enum,
     semantic::{
-        infer::{
-            ReAndReUnifyError,
-            unify::sat::{
-                BruteSatBuilder, BruteSatTerm, BruteSatisfied, NopSatBuilder, NopSatTerm,
-                SatBuilder, SatTerm, SatVar,
-            },
-        },
+        infer::ReAndReUnifyError,
         syntax::{InferReVar, UniversalReVar},
     },
 };
-use clay_core::{FastHashMap, FastIndexMap};
-use hashbrown::hash_map;
 use index_vec::IndexVec;
-use petgraph::{Direction, Graph, graph::NodeIndex, visit::EdgeRef};
+use petgraph::{Graph, graph::NodeIndex};
 use smallvec::SmallVec;
 
 // === ReUnifyTracker === //
@@ -438,8 +430,6 @@ use smallvec::SmallVec;
 pub struct ReUnifyTracker {}
 
 // === RegionFormulaSolver === //
-
-const BRUTE_FORCE_VAR_LIMIT: u32 = 10;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum RegionFormulaTerm {
@@ -531,7 +521,7 @@ impl RegionFormulaSolver {
             // edges cannot contribute to whether this condition passes.
 
             for &rhs in &rhs {
-                self.check_implication(lhs, rhs)?;
+                self.check_implication_sat(lhs, rhs)?;
             }
         }
 
@@ -576,298 +566,428 @@ impl RegionFormulaSolver {
     }
 }
 
-// === RegionFormulaSolver::check_implication === //
+// === SAT region formula solver === //
 
-#[derive(Copy, Clone)]
-enum SolveDrivingSide {
-    Lhs,
-    Rhs,
-}
+mod solver_sat {
+    use super::*;
+    use crate::semantic::infer::unify::sat::{
+        BruteSatBuilder, BruteSatTerm, BruteSatisfied, NopSatBuilder, NopSatTerm, SatBuilder,
+        SatTerm, SatVar as _,
+    };
+    use clay_core::{FastHashMap, FastIndexMap};
+    use hashbrown::hash_map;
+    use petgraph::{Direction, visit::EdgeRef as _};
 
-bitflags::bitflags! {
-    #[derive(Copy, Clone, Default)]
-    struct UniversalMentionMask: u8 {
-        const IN_LHS = 1 << 0;
-        const IN_RHS = 1 << 1;
+    const BRUTE_FORCE_VAR_LIMIT: u32 = 10;
+
+    #[derive(Copy, Clone)]
+    enum SolveDrivingSide {
+        Lhs,
+        Rhs,
     }
-}
 
-impl RegionFormulaSolver {
-    fn check_implication(
-        &mut self,
-        lhs: NodeIndex,
-        rhs: NodeIndex,
-    ) -> Result<(), ReAndReUnifyError> {
-        // Determine which universals are used in our terms.
-        let all_universal_mentions = {
-            let mut builder = NopSatBuilder::default();
-            let mut all_universal_mentions =
-                FastHashMap::<NodeIndex, UniversalMentionMask>::default();
-
-            SatLivenessLower::new(
-                SatLivenessLowerMode::Alive,
-                &self.graph,
-                &mut builder,
-                |_builder, node| {
-                    *all_universal_mentions.entry(node).or_default() |=
-                        UniversalMentionMask::IN_LHS;
-                    NopSatTerm
-                },
-            )
-            .lower(lhs);
-
-            SatLivenessLower::new(
-                SatLivenessLowerMode::Dead,
-                &self.graph,
-                &mut builder,
-                |_builder, node| {
-                    *all_universal_mentions.entry(node).or_default() |=
-                        UniversalMentionMask::IN_RHS;
-                    NopSatTerm
-                },
-            )
-            .lower(rhs);
-
-            all_universal_mentions
-        };
-
-        let mut lhs_universal_count = 0;
-        let mut rhs_universal_count = 0;
-
-        for universal in all_universal_mentions.values() {
-            if universal.contains(UniversalMentionMask::IN_LHS) {
-                lhs_universal_count += 1;
-            }
-
-            if universal.contains(UniversalMentionMask::IN_RHS) {
-                rhs_universal_count += 1;
-            }
+    bitflags::bitflags! {
+        #[derive(Copy, Clone, Default)]
+        struct UniversalMentionMask: u8 {
+            const IN_LHS = 1 << 0;
+            const IN_RHS = 1 << 1;
         }
+    }
 
-        // Select a solving strategy
-        let (driving_side, min_var_count) = {
-            if lhs_universal_count < rhs_universal_count {
-                (SolveDrivingSide::Lhs, lhs_universal_count)
+    impl RegionFormulaSolver {
+        pub(super) fn check_implication_sat(
+            &self,
+            lhs: NodeIndex,
+            rhs: NodeIndex,
+        ) -> Result<(), ReAndReUnifyError> {
+            // Determine which universals are used in our terms.
+            let all_universal_mentions = {
+                let mut builder = NopSatBuilder::default();
+                let mut all_universal_mentions =
+                    FastHashMap::<NodeIndex, UniversalMentionMask>::default();
+
+                SatLivenessLower::new(
+                    SatLivenessLowerMode::Alive,
+                    &self.graph,
+                    &mut builder,
+                    |_builder, node| {
+                        *all_universal_mentions.entry(node).or_default() |=
+                            UniversalMentionMask::IN_LHS;
+                        NopSatTerm
+                    },
+                )
+                .lower(lhs);
+
+                SatLivenessLower::new(
+                    SatLivenessLowerMode::Dead,
+                    &self.graph,
+                    &mut builder,
+                    |_builder, node| {
+                        *all_universal_mentions.entry(node).or_default() |=
+                            UniversalMentionMask::IN_RHS;
+                        NopSatTerm
+                    },
+                )
+                .lower(rhs);
+
+                all_universal_mentions
+            };
+
+            let mut lhs_universal_count = 0;
+            let mut rhs_universal_count = 0;
+
+            for universal in all_universal_mentions.values() {
+                if universal.contains(UniversalMentionMask::IN_LHS) {
+                    lhs_universal_count += 1;
+                }
+
+                if universal.contains(UniversalMentionMask::IN_RHS) {
+                    rhs_universal_count += 1;
+                }
+            }
+
+            // Select a solving strategy
+            let (driving_side, min_var_count) = {
+                if lhs_universal_count < rhs_universal_count {
+                    (SolveDrivingSide::Lhs, lhs_universal_count)
+                } else {
+                    (SolveDrivingSide::Rhs, rhs_universal_count)
+                }
+            };
+
+            return if min_var_count < BRUTE_FORCE_VAR_LIMIT {
+                self.check_implication_sat_brute(driving_side, lhs, rhs, &all_universal_mentions)
             } else {
-                (SolveDrivingSide::Rhs, rhs_universal_count)
-            }
-        };
-
-        return if min_var_count < BRUTE_FORCE_VAR_LIMIT {
-            self.check_implication_brute(driving_side, lhs, rhs, &all_universal_mentions)
-        } else {
-            // Punt to proper solver.
-            todo!();
-        };
-    }
-
-    fn check_implication_brute(
-        &mut self,
-        side: SolveDrivingSide,
-        lhs: NodeIndex,
-        rhs: NodeIndex,
-        all_universal_mentions: &FastHashMap<NodeIndex, UniversalMentionMask>,
-    ) -> Result<(), ReAndReUnifyError> {
-        let mut builder = BruteSatBuilder::default();
-        let mut driver_universals = FastIndexMap::default();
-
-        // Assert that `LHS => !RHS`.
-        let (lhs, rhs) = match side {
-            SolveDrivingSide::Lhs => {
-                let lhs = SatLivenessLower::new(
-                    SatLivenessLowerMode::Alive,
-                    &self.graph,
-                    &mut builder,
-                    |builder, node| {
-                        driver_universals
-                            .entry(node)
-                            .or_insert_with(|| builder.fresh_var())
-                            .to_term()
-                    },
-                )
-                .lower(lhs);
-
-                let rhs = SatLivenessLower::new(
-                    SatLivenessLowerMode::Dead,
-                    &self.graph,
-                    &mut builder,
-                    |_builder, node| match driver_universals.get(&node) {
-                        Some(var) => var.to_term(),
-                        None => BruteSatTerm::falsy(),
-                    },
-                )
-                .lower(rhs);
-
-                (lhs, rhs)
-            }
-            SolveDrivingSide::Rhs => {
-                let rhs = SatLivenessLower::new(
-                    SatLivenessLowerMode::Dead,
-                    &self.graph,
-                    &mut builder,
-                    |builder, node| {
-                        driver_universals
-                            .entry(node)
-                            .or_insert_with(|| builder.fresh_var())
-                            .to_term()
-                    },
-                )
-                .lower(rhs);
-
-                let lhs = SatLivenessLower::new(
-                    SatLivenessLowerMode::Alive,
-                    &self.graph,
-                    &mut builder,
-                    |_builder, node| match driver_universals.get(&node) {
-                        Some(var) => var.to_term(),
-                        None => BruteSatTerm::truthy(),
-                    },
-                )
-                .lower(lhs);
-
-                (lhs, rhs)
-            }
-        };
-
-        builder.assert_implies(lhs, !rhs);
-
-        // Assert that the universals are well-formed.
-        for (&universal_node, &universal_var) in &driver_universals {
-            let universal_forced_live = SatLivenessLower::new(
-                SatLivenessLowerMode::Alive,
-                &self.graph,
-                &mut builder,
-                |_builder, node| {
-                    // Assume unmentioned universals are falsy.
-                    if !all_universal_mentions.contains_key(&node) {
-                        return BruteSatTerm::falsy();
-                    }
-
-                    // Otherwise, attempt to resolve the universal.
-                    match driver_universals.get(&node) {
-                        Some(&var) => var.to_term(),
-                        None => match side {
-                            SolveDrivingSide::Lhs => BruteSatTerm::falsy(),
-                            SolveDrivingSide::Rhs => BruteSatTerm::truthy(),
-                        },
-                    }
-                },
-            )
-            .lower(universal_node);
-
-            builder.assert_implies(universal_forced_live, universal_var.to_term());
+                // Punt to proper solver.
+                todo!();
+            };
         }
 
-        // Solve!
-        let Ok(BruteSatisfied { model }) = builder.solve() else {
-            // Formula accepted.
-            return Ok(());
-        };
+        fn check_implication_sat_brute(
+            &self,
+            side: SolveDrivingSide,
+            lhs: NodeIndex,
+            rhs: NodeIndex,
+            all_universal_mentions: &FastHashMap<NodeIndex, UniversalMentionMask>,
+        ) -> Result<(), ReAndReUnifyError> {
+            let mut builder = BruteSatBuilder::default();
+            let mut driver_universals = FastIndexMap::default();
 
-        todo!();
+            // Assert that `LHS => !RHS`.
+            let (lhs, rhs) = match side {
+                SolveDrivingSide::Lhs => {
+                    let lhs = SatLivenessLower::new(
+                        SatLivenessLowerMode::Alive,
+                        &self.graph,
+                        &mut builder,
+                        |builder, node| {
+                            driver_universals
+                                .entry(node)
+                                .or_insert_with(|| builder.fresh_var())
+                                .to_term()
+                        },
+                    )
+                    .lower(lhs);
+
+                    let rhs = SatLivenessLower::new(
+                        SatLivenessLowerMode::Dead,
+                        &self.graph,
+                        &mut builder,
+                        |_builder, node| match driver_universals.get(&node) {
+                            Some(var) => var.to_term(),
+                            None => BruteSatTerm::falsy(),
+                        },
+                    )
+                    .lower(rhs);
+
+                    (lhs, rhs)
+                }
+                SolveDrivingSide::Rhs => {
+                    let rhs = SatLivenessLower::new(
+                        SatLivenessLowerMode::Dead,
+                        &self.graph,
+                        &mut builder,
+                        |builder, node| {
+                            driver_universals
+                                .entry(node)
+                                .or_insert_with(|| builder.fresh_var())
+                                .to_term()
+                        },
+                    )
+                    .lower(rhs);
+
+                    let lhs = SatLivenessLower::new(
+                        SatLivenessLowerMode::Alive,
+                        &self.graph,
+                        &mut builder,
+                        |_builder, node| match driver_universals.get(&node) {
+                            Some(var) => var.to_term(),
+                            None => BruteSatTerm::truthy(),
+                        },
+                    )
+                    .lower(lhs);
+
+                    (lhs, rhs)
+                }
+            };
+
+            builder.assert_implies(lhs, !rhs);
+
+            // Assert that the universals are well-formed.
+            for (&universal_node, &universal_var) in &driver_universals {
+                let universal_forced_live = SatLivenessLower::new(
+                    SatLivenessLowerMode::Alive,
+                    &self.graph,
+                    &mut builder,
+                    |_builder, node| {
+                        // Assume unmentioned universals are falsy.
+                        if !all_universal_mentions.contains_key(&node) {
+                            return BruteSatTerm::falsy();
+                        }
+
+                        // Otherwise, attempt to resolve the universal.
+                        match driver_universals.get(&node) {
+                            Some(&var) => var.to_term(),
+                            None => match side {
+                                SolveDrivingSide::Lhs => BruteSatTerm::falsy(),
+                                SolveDrivingSide::Rhs => BruteSatTerm::truthy(),
+                            },
+                        }
+                    },
+                )
+                .lower(universal_node);
+
+                builder.assert_implies(universal_forced_live, universal_var.to_term());
+            }
+
+            // Solve!
+            let Ok(BruteSatisfied { model }) = builder.solve() else {
+                // Formula accepted.
+                return Ok(());
+            };
+
+            todo!();
+        }
     }
-}
 
-// === SatLivenessLower === //
+    // === SatLivenessLower === //
 
-struct SatLivenessLower<'a, B, F>
-where
-    B: SatBuilder,
-    F: FnMut(&mut B, NodeIndex) -> B::Term,
-{
-    mode: SatLivenessLowerMode,
-    graph: &'a Graph<FormulaNode, ()>,
-    builder: &'a mut B,
-    lookup_forced_universal_liveness: F,
-    inf_dedup_and_reentrancy: FastHashMap<InferReVar, Option<B::Term>>,
-}
-
-#[derive(Copy, Clone)]
-enum SatLivenessLowerMode {
-    Alive,
-    Dead,
-}
-
-impl<'a, B, F> SatLivenessLower<'a, B, F>
-where
-    B: SatBuilder,
-    F: FnMut(&mut B, NodeIndex) -> B::Term,
-{
-    fn new(
+    struct SatLivenessLower<'a, B, F>
+    where
+        B: SatBuilder,
+        F: FnMut(&mut B, NodeIndex) -> B::Term,
+    {
         mode: SatLivenessLowerMode,
         graph: &'a Graph<FormulaNode, ()>,
         builder: &'a mut B,
         lookup_forced_universal_liveness: F,
-    ) -> Self {
-        Self {
-            mode,
-            graph,
-            builder,
-            lookup_forced_universal_liveness,
-            inf_dedup_and_reentrancy: FastHashMap::default(),
+        inf_dedup_and_reentrancy: FastHashMap<InferReVar, Option<B::Term>>,
+    }
+
+    #[derive(Copy, Clone)]
+    enum SatLivenessLowerMode {
+        Alive,
+        Dead,
+    }
+
+    impl<'a, B, F> SatLivenessLower<'a, B, F>
+    where
+        B: SatBuilder,
+        F: FnMut(&mut B, NodeIndex) -> B::Term,
+    {
+        fn new(
+            mode: SatLivenessLowerMode,
+            graph: &'a Graph<FormulaNode, ()>,
+            builder: &'a mut B,
+            lookup_forced_universal_liveness: F,
+        ) -> Self {
+            Self {
+                mode,
+                graph,
+                builder,
+                lookup_forced_universal_liveness,
+                inf_dedup_and_reentrancy: FastHashMap::default(),
+            }
+        }
+
+        /// Returns whether the term has been forced to be live (if `side == LHS`) or dead (if `side ==
+        /// RHS`).
+        fn lower(&mut self, node: NodeIndex) -> B::Term {
+            match self.graph[node] {
+                FormulaNode::True => <B::Term as SatTerm>::truthy(),
+                FormulaNode::And => {
+                    let terms = self
+                        .graph
+                        .edges_directed(node, Direction::Incoming)
+                        .map(|edge| self.lower(edge.source()))
+                        .collect::<SmallVec<[_; 4]>>();
+
+                    debug_assert!(!terms.is_empty());
+
+                    match self.mode {
+                        SatLivenessLowerMode::Alive => self.builder.join_and(terms),
+                        SatLivenessLowerMode::Dead => self.builder.join_or(terms),
+                    }
+                }
+                FormulaNode::Existential(var) => {
+                    match self.inf_dedup_and_reentrancy.entry(var) {
+                        hash_map::Entry::Occupied(entry) => {
+                            return match entry.get() {
+                                Some(pre_lowered) => *pre_lowered,
+                                // This is a cycle.
+                                None => <B::Term as SatTerm>::truthy(),
+                            };
+                        }
+                        hash_map::Entry::Vacant(entry) => {
+                            entry.insert_entry(None);
+                        }
+                    }
+
+                    let terms = self
+                        .graph
+                        .edges_directed(node, Direction::Incoming)
+                        .map(|edge| self.lower(edge.source()))
+                        .collect::<SmallVec<[_; 4]>>();
+
+                    let out_term = if !terms.is_empty() {
+                        match self.mode {
+                            SatLivenessLowerMode::Alive => self.builder.join_or(terms),
+                            SatLivenessLowerMode::Dead => self.builder.join_and(terms),
+                        }
+                    } else {
+                        <B::Term as SatTerm>::falsy()
+                    };
+
+                    *self.inf_dedup_and_reentrancy.get_mut(&var).unwrap() = Some(out_term);
+
+                    out_term
+                }
+                FormulaNode::Universal(_) => {
+                    let var = (self.lookup_forced_universal_liveness)(self.builder, node);
+
+                    match self.mode {
+                        SatLivenessLowerMode::Alive => var,
+                        SatLivenessLowerMode::Dead => !var,
+                    }
+                }
+            }
+        }
+    }
+}
+
+// === SMT region formula solver === //
+
+#[cfg(test)]
+mod solver_smt {
+    use super::*;
+    use crate::semantic::syntax::{Re, RelationMode};
+    use index_vec::IndexSlice;
+    use petgraph::visit::EdgeRef;
+    use z3::{
+        Solver,
+        ast::{Ast, Bool, exists_const, forall_const},
+    };
+
+    impl RegionFormulaSolver {
+        pub(super) fn check_implication_smt(
+            &self,
+            lhs: NodeIndex,
+            rhs: NodeIndex,
+        ) -> Result<(), ReAndReUnifyError> {
+            // Create the required terms
+            let universals = self
+                .universal_nodes
+                .indices()
+                .map(|idx| Bool::new_const(format!("'u{idx:?}")))
+                .collect::<IndexVec<UniversalReVar, _>>();
+
+            let existentials = self
+                .existential_nodes
+                .indices()
+                .map(|idx| Bool::new_const(format!("'i{idx:?}")))
+                .collect::<IndexVec<InferReVar, _>>();
+
+            let precond_wf = self
+                .universal_nodes
+                .iter()
+                .chain(self.existential_nodes.iter())
+                .map(|&node| lower_wf(self, &universals, &existentials, node))
+                .collect::<Vec<_>>();
+
+            let precond_wf = Bool::and(&precond_wf);
+
+            let post_wf = {
+                let lhs = lower_wf(self, &universals, &existentials, lhs);
+                let rhs = lower_wf(self, &universals, &existentials, rhs);
+
+                (&precond_wf) & lhs.implies(rhs)
+            };
+
+            // Construct the full formula
+            let full = {
+                let full_lhs = exists_const(
+                    &existentials
+                        .iter()
+                        .map(|v| v as &dyn Ast)
+                        .collect::<Vec<_>>(),
+                    &[],
+                    &precond_wf,
+                );
+
+                let full_rhs = exists_const(
+                    &existentials
+                        .iter()
+                        .map(|v| v as &dyn Ast)
+                        .collect::<Vec<_>>(),
+                    &[],
+                    &post_wf,
+                );
+
+                forall_const(
+                    &universals.iter().map(|v| v as &dyn Ast).collect::<Vec<_>>(),
+                    &[],
+                    &full_lhs.implies(full_rhs),
+                )
+            };
+
+            // Solve it!
+            let solver = Solver::new();
+
+            solver.assert(full);
+
+            match solver.check() {
+                z3::SatResult::Sat => Ok(()),
+                // TODO: cleanup
+                z3::SatResult::Unsat => Err(ReAndReUnifyError {
+                    lhs: Re::Gc,
+                    rhs: Re::Gc,
+                    mode: RelationMode::Equate,
+                    causes: Vec::new(),
+                }),
+                z3::SatResult::Unknown => unreachable!(),
+            }
         }
     }
 
-    /// Returns whether the term has been forced to be live (if `side == LHS`) or dead (if `side ==
-    /// RHS`).
-    fn lower(&mut self, node: NodeIndex) -> B::Term {
-        match self.graph[node] {
-            FormulaNode::True => <B::Term as SatTerm>::truthy(),
+    fn lower_wf(
+        solver: &RegionFormulaSolver,
+        universals: &IndexSlice<UniversalReVar, [Bool]>,
+        existentials: &IndexSlice<InferReVar, [Bool]>,
+        node: NodeIndex,
+    ) -> Bool {
+        match solver.graph[node] {
             FormulaNode::And => {
-                let terms = self
+                let children = solver
                     .graph
-                    .edges_directed(node, Direction::Incoming)
-                    .map(|edge| self.lower(edge.source()))
-                    .collect::<SmallVec<[_; 4]>>();
+                    .edges_directed(node, petgraph::Direction::Incoming)
+                    .map(|edge| lower_wf(solver, universals, existentials, edge.source()))
+                    .collect::<Vec<_>>();
 
-                debug_assert!(!terms.is_empty());
-
-                match self.mode {
-                    SatLivenessLowerMode::Alive => self.builder.join_and(terms),
-                    SatLivenessLowerMode::Dead => self.builder.join_or(terms),
-                }
+                Bool::and(&children)
             }
-            FormulaNode::Existential(var) => {
-                match self.inf_dedup_and_reentrancy.entry(var) {
-                    hash_map::Entry::Occupied(entry) => {
-                        return match entry.get() {
-                            Some(pre_lowered) => *pre_lowered,
-                            // This is a cycle.
-                            None => <B::Term as SatTerm>::truthy(),
-                        };
-                    }
-                    hash_map::Entry::Vacant(entry) => {
-                        entry.insert_entry(None);
-                    }
-                }
-
-                let terms = self
-                    .graph
-                    .edges_directed(node, Direction::Incoming)
-                    .map(|edge| self.lower(edge.source()))
-                    .collect::<SmallVec<[_; 4]>>();
-
-                let out_term = if !terms.is_empty() {
-                    match self.mode {
-                        SatLivenessLowerMode::Alive => self.builder.join_or(terms),
-                        SatLivenessLowerMode::Dead => self.builder.join_and(terms),
-                    }
-                } else {
-                    <B::Term as SatTerm>::falsy()
-                };
-
-                *self.inf_dedup_and_reentrancy.get_mut(&var).unwrap() = Some(out_term);
-
-                out_term
-            }
-            FormulaNode::Universal(_) => {
-                let var = (self.lookup_forced_universal_liveness)(self.builder, node);
-
-                match self.mode {
-                    SatLivenessLowerMode::Alive => var,
-                    SatLivenessLowerMode::Dead => !var,
-                }
-            }
+            FormulaNode::True => Bool::from_bool(true),
+            FormulaNode::Universal(var) => universals[var].clone(),
+            FormulaNode::Existential(var) => existentials[var].clone(),
         }
     }
 }
