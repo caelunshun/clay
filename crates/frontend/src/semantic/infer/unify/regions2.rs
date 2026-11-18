@@ -523,6 +523,7 @@ impl RegionFormulaSolver {
             for &rhs in &rhs {
                 #[cfg(test)]
                 {
+                    self.check_implication_sat(lhs, rhs)?;
                     self.check_implication_smt(lhs, rhs)?;
                 }
 
@@ -578,9 +579,12 @@ impl RegionFormulaSolver {
 
 mod solver_sat {
     use super::*;
-    use crate::semantic::infer::unify::sat::{
-        BruteSatBuilder, BruteSatTerm, BruteSatisfied, NopSatBuilder, NopSatTerm, SatBuilder,
-        SatTerm, SatVar as _,
+    use crate::semantic::{
+        infer::unify::sat::{
+            BruteSatBuilder, BruteSatTerm, BruteSatisfied, NopSatBuilder, NopSatTerm, SatBuilder,
+            SatTerm, SatVar as _,
+        },
+        syntax::{Re, RelationMode},
     };
     use clay_core::{FastHashMap, FastIndexMap};
     use hashbrown::hash_map;
@@ -774,7 +778,13 @@ mod solver_sat {
                 return Ok(());
             };
 
-            todo!();
+            // TODO: update
+            Err(ReAndReUnifyError {
+                lhs: Re::Gc,
+                rhs: Re::Gc,
+                mode: RelationMode::Equate,
+                causes: Vec::new(),
+            })
         }
     }
 
@@ -965,7 +975,7 @@ mod solver_smt {
 
             match solver.check() {
                 z3::SatResult::Sat => Ok(()),
-                // TODO: cleanup
+                // TODO: update
                 z3::SatResult::Unsat => Err(ReAndReUnifyError {
                     lhs: Re::Gc,
                     rhs: Re::Gc,

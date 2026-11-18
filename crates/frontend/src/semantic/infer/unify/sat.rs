@@ -194,9 +194,9 @@ mod brute {
 
     // === Definitions === //
 
-    const INSTR_START_DEFINE_OR: u32 = 0;
-    const INSTR_START_ASSERT_OR: u32 = 1;
-    const INSTR_START_ASSERT_NOR: u32 = 2;
+    const INSTR_START_DEFINE_OR: u32 = 0xFACEF00D;
+    const INSTR_START_ASSERT_OR: u32 = 0xFACEF00E;
+    const INSTR_START_ASSERT_NOR: u32 = 0xFACEF00F;
 
     const INSTR_STREAM_MAX_VAR_EXCL: u32 = 1u32 << 30;
     const INSTR_STREAM_EOS: u32 = INSTR_STREAM_NAME_MASK;
@@ -341,6 +341,8 @@ mod brute {
                 return BruteSatTerm::falsy();
             }
 
+            self.instructions.push(INSTR_STREAM_EOS);
+
             let output = self.intermediate_gen;
             self.intermediate_gen += 1;
 
@@ -444,11 +446,11 @@ mod brute {
                     let term_instr = reader.next().unwrap();
 
                     let value = match term_instr & INSTR_STREAM_NAME_MASK {
-                        0..INSTR_STREAM_MAX_VAR_EXCL => {
-                            resolve_var(BruteSatVar::from_raw_unchecked(term_instr))
+                        var @ 0..INSTR_STREAM_MAX_VAR_EXCL => {
+                            resolve_var(BruteSatVar::from_raw_unchecked(var))
                         }
-                        INSTR_STREAM_MAX_VAR_EXCL..INSTR_STREAM_EOS => {
-                            solver_stack[(term_instr - INSTR_STREAM_MAX_VAR_EXCL) as usize]
+                        var @ INSTR_STREAM_MAX_VAR_EXCL..INSTR_STREAM_EOS => {
+                            solver_stack[(var - INSTR_STREAM_MAX_VAR_EXCL) as usize]
                         }
                         INSTR_STREAM_EOS => {
                             break false;
@@ -463,6 +465,13 @@ mod brute {
                     };
 
                     if value {
+                        const {
+                            assert!(INSTR_STREAM_EOS & INSTR_STREAM_NAME_MASK == INSTR_STREAM_EOS);
+                        }
+
+                        // Eat the rest of the argument stream.
+                        while reader.next().unwrap() != INSTR_STREAM_EOS {}
+
                         break true;
                     }
                 };
