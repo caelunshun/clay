@@ -450,7 +450,7 @@ impl<'sess> ClauseCx<'sess> {
             }
         }
 
-        UnifyCx::verify(self);
+        self.ucx.verify().flush(self);
     }
 }
 
@@ -535,14 +535,9 @@ impl<'sess> ClauseCx<'sess> {
         self.ucx().lookup_universal_re_src_info(var)
     }
 
-    pub fn permit_universe_re_outlives_re(
-        &mut self,
-        universal: Re,
-        other: Re,
-        dir: RelationDirection,
-    ) {
-        self.ucx_mut()
-            .permit_universe_re_outlives_re(universal, other, dir);
+    pub fn permit_re_and_re(&mut self, lhs: Re, rhs: Re, mode: RelationMode) {
+        // TODO: expose full interface
+        self.ucx_mut().permit_re_and_re(mode, [lhs], [rhs]);
     }
 
     pub fn init_re_universal_var_direct_clauses(&mut self, var: Re, clauses: TraitClauseList) {
@@ -617,7 +612,9 @@ impl<'sess> ClauseCx<'sess> {
         mode: RelationMode,
     ) -> Promise<'sess, ReAndReUnifyError> {
         let order = self.next_re_constraint();
-        self.ucx_mut().unify_re_and_re(order, lhs, rhs, mode)
+
+        // TODO: expose full interface
+        self.ucx_mut().unify_re_and_re(order, mode, [lhs], [rhs])
     }
 
     pub fn oblige_re_meets_clauses(

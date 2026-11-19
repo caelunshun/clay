@@ -3,7 +3,7 @@ use crate::{
     semantic::{
         infer::{
             Promise, PromiseHandle, PromiseResolutionQueue, ReAndReUnifyError, ReConstraintOrder,
-            unify::regions2::solver::{RegionFormulaSolver, RegionFormulaTerm},
+            unify::regions::solver::{RegionFormulaSolver, RegionFormulaTerm},
         },
         syntax::{InferReVar, Re, RelationMode, UniversalReVar},
     },
@@ -49,21 +49,21 @@ enum RelationOrder {
     Constraint(ReConstraintOrder),
 }
 
+impl RelationOrder {
+    fn to_num(self) -> u32 {
+        match self {
+            RelationOrder::Permission => 0,
+            RelationOrder::Constraint(order) => order.0.get(),
+        }
+    }
+}
+
 impl Default for RegionRelationGraph<'_> {
     fn default() -> Self {
         Self {
             buffer: IndexVec::new(),
             relations: IndexVec::new(),
             permission_count: RelationIdx::from_usize(0),
-        }
-    }
-}
-
-impl RelationOrder {
-    fn to_num(self) -> u32 {
-        match self {
-            RelationOrder::Permission => 0,
-            RelationOrder::Constraint(order) => order.0.get(),
         }
     }
 }

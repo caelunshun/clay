@@ -3,18 +3,18 @@ use crate::{
     base::{ErrorGuaranteed, Session, ValueInternable},
     semantic::{
         infer::{
-            ClauseCx, HrtbUniverse, InferTyLeaksHrtbVarError, InferTyLeaksUniversalError,
-            InferTyOccursError, MultiPromiseBuilder, Promise, ReAndReUnifyError,
+            HrtbUniverse, InferTyLeaksHrtbVarError, InferTyLeaksUniversalError, InferTyOccursError,
+            MultiPromiseBuilder, Promise, PromiseResolutionQueue, ReAndReUnifyError,
             TyAndSimpleTySetUnifyError, TyAndTyRegionUnifyError, TyAndTyStructuralUnifyError,
             TyAndTyUnifyCulprit,
         },
         syntax::{
             DebruijnTop, FnInstanceInner, FnOwner, HrtbBinder, InferTyVar, InferTyVarSourceInfo,
-            Mutability, Re, ReVariance, RelationDirection, RelationMode, SimpleTySet, TraitClause,
-            TraitClauseList, TraitParam, TraitParamList, Ty, TyFolder, TyFolderExt,
-            TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt,
-            UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProj,
-            UniversalTyProjInner, UniversalTyRoot, UniversalTyRootSourceInfo,
+            Mutability, Re, ReVariance, RelationMode, SimpleTySet, TraitClause, TraitClauseList,
+            TraitParam, TraitParamList, Ty, TyFolder, TyFolderExt, TyFolderInfallibleExt, TyKind,
+            TyOrRe, TyVisitor, TyVisitorExt, TyVisitorInfallibleExt, UniversalReVar,
+            UniversalReVarSourceInfo, UniversalTy, UniversalTyProj, UniversalTyProjInner,
+            UniversalTyRoot, UniversalTyRootSourceInfo,
         },
     },
 };
@@ -42,11 +42,11 @@ pub struct ReConstraintOrder(pub NonZeroU32);
 /// those obligations, you'll need an [`ClauseCx`](super::super::ClauseCx), which uses the
 /// deferred-solving functionality of a [`ObligationCx`](super::super::ObligationCx) internally to
 /// solve these obligations.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct UnifyCx<'sess> {
     session: &'sess Session,
     types: TyUnifyTracker,
-    pub(super) regions: ReUnifyTracker<'sess>,
+    regions: ReUnifyTracker<'sess>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -73,8 +73,8 @@ impl<'sess> UnifyCx<'sess> {
         self.regions.mode()
     }
 
-    pub fn verify(ccx: &mut ClauseCx<'sess>) {
-        ReUnifyTracker::verify(ccx);
+    pub fn verify(&mut self) -> PromiseResolutionQueue<'sess> {
+        self.regions.verify()
     }
 
     pub fn substitutor(&self, mode: UnboundVarHandlingMode) -> InferTySubstitutor<'_, 'sess> {
@@ -149,44 +149,27 @@ impl<'sess> UnifyCx<'sess> {
         self.regions.lookup_universal_src_info(var)
     }
 
-    pub fn permit_universe_re_outlives_re(
-        &mut self,
-        universal: Re,
-        other: Re,
-        dir: RelationDirection,
-    ) {
-        let Re::UniversalVar(universal) = universal else {
-            unreachable!()
-        };
-
-        self.regions.permit(universal, other, dir);
-    }
-
     pub fn fresh_re_infer(&mut self) -> Re {
         Re::InferVar(self.regions.fresh_infer())
+    }
+
+    pub fn permit_re_and_re(
+        &mut self,
+        mode: RelationMode,
+        lhs: impl IntoIterator<Item = Re>,
+        rhs: impl IntoIterator<Item = Re>,
+    ) {
+        self.regions.permit(mode, lhs, rhs);
     }
 
     pub fn unify_re_and_re(
         &mut self,
         order: ReConstraintOrder,
-        lhs: Re,
-        rhs: Re,
         mode: RelationMode,
+        lhs: impl IntoIterator<Item = Re>,
+        rhs: impl IntoIterator<Item = Re>,
     ) -> Promise<'sess, ReAndReUnifyError> {
-        let mut collector = MultiPromiseBuilder::default();
-
-        for (lhs, rhs) in mode.enumerate(lhs, rhs) {
-            self.regions.constrain(order, lhs, rhs).join(&mut collector);
-        }
-
-        collector
-            .finish()
-            .map(move |_ccx, causes| ReAndReUnifyError {
-                lhs,
-                rhs,
-                mode,
-                causes,
-            })
+        self.regions.constrain(order, mode, lhs, rhs)
     }
 
     /// Unifies two types such that they match. The `mode` specifies how the regions inside the
@@ -259,7 +242,7 @@ impl<'sess> UnifyCx<'sess> {
                 TyKind::Reference(lhs_re, lhs_muta, lhs_pointee),
                 TyKind::Reference(rhs_re, rhs_muta, rhs_pointee),
             ) if lhs_muta == rhs_muta => {
-                self.unify_re_and_re(order, lhs_re, rhs_re, mode)
+                self.unify_re_and_re(order, mode, [lhs_re], [rhs_re])
                     .join(re_collector);
 
                 let variance = match lhs_muta {
@@ -282,7 +265,7 @@ impl<'sess> UnifyCx<'sess> {
                 for (&lhs, &rhs) in lhs.params.r(s).iter().zip(rhs.params.r(s)) {
                     match (lhs, rhs) {
                         (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                            self.unify_re_and_re(order, lhs, rhs, mode)
+                            self.unify_re_and_re(order, mode, [lhs], [rhs])
                                 .join(re_collector);
                         }
                         (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
@@ -322,7 +305,7 @@ impl<'sess> UnifyCx<'sess> {
             (TyKind::Trait(lhs_re, lhs_muta, lhs), TyKind::Trait(rhs_re, rhs_muta, rhs))
                 if lhs_muta == rhs_muta =>
             {
-                self.unify_re_and_re(order, lhs_re, rhs_re, mode)
+                self.unify_re_and_re(order, mode, [lhs_re], [rhs_re])
                     .join(re_collector);
 
                 let variance = match lhs_muta {
@@ -430,7 +413,7 @@ impl<'sess> UnifyCx<'sess> {
                         for (&lhs, &rhs) in lhs_generics.r(s).iter().zip(rhs_generics.r(s)) {
                             match (lhs, rhs) {
                                 (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                                    self.unify_re_and_re(order, lhs, rhs, RelationMode::Equate)
+                                    self.unify_re_and_re(order, RelationMode::Equate, [lhs], [rhs])
                                         .join(re_collector);
                                 }
                                 (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
@@ -630,8 +613,13 @@ impl<'sess> UnifyCx<'sess> {
 
                     match (lhs_para, rhs_para) {
                         (TyOrRe::Re(lhs_para), TyOrRe::Re(rhs_para)) => {
-                            self.unify_re_and_re(order, lhs_para, rhs_para, RelationMode::Equate)
-                                .join(re_collector);
+                            self.unify_re_and_re(
+                                order,
+                                RelationMode::Equate,
+                                [lhs_para],
+                                [rhs_para],
+                            )
+                            .join(re_collector);
                         }
                         (TyOrRe::Ty(lhs_para), TyOrRe::Ty(rhs_para)) => {
                             self.unify_ty_and_ty_inner(
@@ -920,7 +908,7 @@ impl<'sess> UnifyCx<'sess> {
                 {
                     match (lhs, rhs) {
                         (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                            self.unify_re_and_re(order, lhs, rhs, mode)
+                            self.unify_re_and_re(order, mode, [lhs], [rhs])
                                 .join(re_collector);
                         }
                         (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
@@ -992,7 +980,7 @@ impl<'sess> UnifyCx<'sess> {
             match (lhs, rhs) {
                 (TraitParam::Equals(lhs), TraitParam::Equals(rhs)) => match (lhs, rhs) {
                     (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                        self.unify_re_and_re(order, lhs, rhs, RelationMode::Equate)
+                        self.unify_re_and_re(order, RelationMode::Equate, [lhs], [rhs])
                             .join(re_collector);
                     }
                     (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
@@ -1057,7 +1045,7 @@ impl<'sess> UnifyCx<'sess> {
 
 // === InfTySubstitutor === //
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub struct InferTySubstitutor<'a, 'sess> {
     pub ucx: &'a UnifyCx<'sess>,
     pub mode: UnboundVarHandlingMode,
@@ -1112,7 +1100,7 @@ impl<'sess> TyFolder<'sess> for InferTySubstitutor<'_, 'sess> {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub struct FallibleInferTySubstitutor<'a, 'sess> {
     pub ucx: &'a UnifyCx<'sess>,
 }

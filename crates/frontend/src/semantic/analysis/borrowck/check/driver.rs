@@ -227,10 +227,10 @@ impl TyCtxt<'_> {
         // TODO: make this not `O(n^2)`.
         for rhs in place_numbering.bit_to_atomic_place.indices() {
             // All locals live shorter than our signature universals
-            ccx.permit_universe_re_outlives_re(
+            ccx.permit_re_and_re(
                 atomic_place_universals[rhs],
                 shortest_sig_universal,
-                RelationDirection::RhsOntoLhs,
+                RelationMode::RhsOntoLhs,
             );
 
             // Determine which other *locals* the `rhs` can outlive.
@@ -331,10 +331,10 @@ impl TyCtxt<'_> {
             }
 
             for lhs in outlive_mask.iter() {
-                ccx.permit_universe_re_outlives_re(
+                ccx.permit_re_and_re(
                     atomic_place_universals[lhs],
                     atomic_place_universals[rhs],
-                    RelationDirection::LhsOntoRhs,
+                    RelationMode::LhsOntoRhs,
                 );
             }
         }

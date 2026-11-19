@@ -1,7 +1,7 @@
 use crate::semantic::{
     infer::{
-        Promise, ReAndReUnifyError, ReConstraintOrder, UnifyCxMode,
-        unify::regions2::graph::RegionRelationGraph,
+        Promise, PromiseResolutionQueue, ReAndReUnifyError, ReConstraintOrder, UnifyCxMode,
+        unify::regions::graph::RegionRelationGraph,
     },
     syntax::{InferReVar, Re, RelationMode, UniversalReVar, UniversalReVarSourceInfo},
 };
@@ -80,6 +80,18 @@ impl<'sess> ReUnifyTracker<'sess> {
 
         relations.permit(mode, lhs, rhs);
     }
+
+    pub fn verify(&mut self) -> PromiseResolutionQueue<'sess> {
+        let mut queue = PromiseResolutionQueue::default();
+
+        let Some(relations) = &mut self.relations else {
+            return queue;
+        };
+
+        relations.verify(&mut queue, self.universals.len(), self.next_infer.index());
+
+        queue
+    }
 }
 
 // === Tests === //
@@ -91,7 +103,7 @@ mod tests {
         semantic::{
             analysis::TyCtxt,
             infer::{ClauseCx, ImplCache, UnifyCxMode},
-            syntax::{LangItems, RelationDirection, RelationMode, UniversalReVarSourceInfo},
+            syntax::{LangItems, RelationMode, UniversalReVarSourceInfo},
         },
     };
 
@@ -121,14 +133,14 @@ mod tests {
             .report_never();
 
         // permit(re_1: &shorter re_b)
-        ccx.permit_universe_re_outlives_re(re_b, re_1, RelationDirection::LhsOntoRhs);
+        ccx.permit_re_and_re(re_b, re_1, RelationMode::LhsOntoRhs);
 
         // constrain(re_b: &shorter re_2)
         ccx.unify_re_and_re(re_b, re_2, RelationMode::RhsOntoLhs)
             .report_never();
 
         // permit(re_2: &shorter re_c)
-        ccx.permit_universe_re_outlives_re(re_c, re_2, RelationDirection::LhsOntoRhs);
+        ccx.permit_re_and_re(re_c, re_2, RelationMode::LhsOntoRhs);
 
         // constrain(re_a: &shorter re_c)
         // Should be derived from...
@@ -168,14 +180,14 @@ mod tests {
             .report_never();
 
         // permit(re_1: &longer re_b)
-        ccx.permit_universe_re_outlives_re(re_b, re_1, RelationDirection::RhsOntoLhs);
+        ccx.permit_re_and_re(re_b, re_1, RelationMode::RhsOntoLhs);
 
         // constrain(re_b: &longer re_2)
         ccx.unify_re_and_re(re_b, re_2, RelationMode::LhsOntoRhs)
             .report_never();
 
         // permit(re_2: &longer re_c)
-        ccx.permit_universe_re_outlives_re(re_c, re_2, RelationDirection::RhsOntoLhs);
+        ccx.permit_re_and_re(re_c, re_2, RelationMode::RhsOntoLhs);
 
         // constrain(re_a: &longer re_c)
         // Should be derived from...

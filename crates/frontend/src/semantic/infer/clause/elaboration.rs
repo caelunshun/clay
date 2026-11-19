@@ -8,11 +8,10 @@ use crate::{
         },
         syntax::{
             AnyGeneric, DebruijnRelative, DebruijnTop, HrtbBinder, HrtbDebruijn, HrtbDebruijnDef,
-            HrtbProjection, InferTyVar, InferTyVarSourceInfo, Re, RelationDirection, RelationMode,
-            TraitClause, TraitInstance, TraitParam, TraitSpec, Ty, TyFolder, TyFolderExt,
-            TyFolderInfallibleExt, TyKind, TyOrRe, TyVisitor, TyVisitorInfallibleExt,
-            UniversalReVarSourceInfo, UniversalTy, UniversalTyOrReRoot, UniversalTyProj,
-            UniversalTyProjInner,
+            HrtbProjection, InferTyVar, InferTyVarSourceInfo, Re, RelationMode, TraitClause,
+            TraitInstance, TraitParam, TraitSpec, Ty, TyFolder, TyFolderExt, TyFolderInfallibleExt,
+            TyKind, TyOrRe, TyVisitor, TyVisitorInfallibleExt, UniversalReVarSourceInfo,
+            UniversalTy, UniversalTyOrReRoot, UniversalTyProj, UniversalTyProjInner,
         },
     },
 };
@@ -118,11 +117,7 @@ impl<'sess> ClauseCx<'sess> {
 
                 let outlive_glb = self.obtain_ty_glb(outlives_comps);
 
-                self.permit_universe_re_outlives_re(
-                    re_representative,
-                    outlive_glb,
-                    RelationDirection::LhsOntoRhs,
-                );
+                self.permit_re_and_re(re_representative, outlive_glb, RelationMode::LhsOntoRhs);
             }
         }
 

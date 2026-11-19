@@ -197,7 +197,7 @@ impl RegionFormulaSolver {
 mod solver_sat {
     use super::*;
     use crate::semantic::{
-        infer::unify::regions2::sat::{BruteSatBuilder, SatBuilder, SatTerm, SatVar as _},
+        infer::unify::regions::sat::{BruteSatBuilder, SatBuilder, SatTerm, SatVar as _},
         syntax::{Re, RelationMode},
     };
     use clay_core::{FastHashMap, FastIndexMap};

@@ -24,7 +24,7 @@ impl<'sess> ClauseCx<'sess> {
     ) {
         match other {
             TyOrRe::Re(other) => {
-                self.permit_universe_re_outlives_re(universal, other, dir);
+                self.permit_re_and_re(universal, other, dir.to_mode());
             }
             TyOrRe::Ty(other) => {
                 self.permit_universe_re_outlives_ty(universal, other, dir);
@@ -65,7 +65,7 @@ impl<'sess> ClauseCx<'sess> {
             .report_never();
 
         // `universal: 'a` (inverse: `'a: universal`)
-        self.permit_universe_re_outlives_re(universal, joiner, dir);
+        self.permit_re_and_re(universal, joiner, dir.to_mode());
     }
 
     pub fn oblige_general_outlives(
@@ -266,7 +266,7 @@ impl<'sess> ClauseCx<'sess> {
             }
             TyKind::Reference(lhs, _muta, _pointee) => {
                 self.ucx_mut()
-                    .unify_re_and_re(order, lhs, rhs, dir.to_mode())
+                    .unify_re_and_re(order, dir.to_mode(), [lhs], [rhs])
                     .map(|_ccx, error| TyOutlivesReErrorCulprit::Regular(error))
                     .join(collector);
             }
@@ -276,7 +276,7 @@ impl<'sess> ClauseCx<'sess> {
                     match lhs {
                         TyOrRe::Re(lhs) => {
                             self.ucx_mut()
-                                .unify_re_and_re(order, lhs, rhs, dir.to_mode())
+                                .unify_re_and_re(order, dir.to_mode(), [lhs], [rhs])
                                 .map(|_ccx, error| TyOutlivesReErrorCulprit::Regular(error))
                                 .join(collector);
                         }
@@ -289,7 +289,7 @@ impl<'sess> ClauseCx<'sess> {
 
             TyKind::Trait(lhs_re, _muta, _lhs_spec) => {
                 self.ucx_mut()
-                    .unify_re_and_re(order, lhs_re, rhs, dir.to_mode())
+                    .unify_re_and_re(order, dir.to_mode(), [lhs_re], [rhs])
                     .map(|_ccx, error| TyOutlivesReErrorCulprit::Regular(error))
                     .join(collector);
             }
@@ -304,7 +304,7 @@ impl<'sess> ClauseCx<'sess> {
                     .re_representative;
 
                 self.ucx_mut()
-                    .unify_re_and_re(order, re_representative, rhs, dir.to_mode())
+                    .unify_re_and_re(order, dir.to_mode(), [re_representative], [rhs])
                     .map(|_ccx, error| TyOutlivesReErrorCulprit::Regular(error))
                     .join(collector);
             }

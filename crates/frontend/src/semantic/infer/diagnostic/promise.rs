@@ -951,6 +951,7 @@ impl<'sess, E> PromiseNodeTarget<'sess> for PromiseNodeForwardSink<'sess, E> {
 // === PromiseResolutionQueue === //
 
 #[derive(Default)]
+#[must_use]
 pub struct PromiseResolutionQueue<'sess> {
     resolutions: Vec<Box<dyn 'sess + AnyPromiseResolution<'sess>>>,
 }
