@@ -1,4 +1,4 @@
-default-uitest-pat := "all()"
+default-uitest-pat := ""
 
 uitest pat=default-uitest-pat:
     cargo nextest run --profile frontend-uitest -- "{{ pat }}"

@@ -197,7 +197,9 @@ impl RegionFormulaSolver {
 mod solver_sat {
     use super::*;
     use crate::semantic::{
-        infer::unify::regions::sat::{BruteSatBuilder, SatBuilder, SatTerm, SatVar as _},
+        infer::unify::regions::sat::{
+            BruteSatBuilder, BruteSatisfied, SatBuilder, SatTerm, SatVar as _,
+        },
         syntax::{Re, RelationMode},
     };
     use clay_core::{FastHashMap, FastIndexMap};
@@ -241,11 +243,10 @@ mod solver_sat {
                 builder.assert_implies(needs_to_be_live, universal_var.to_term());
             }
 
-            builder.assert_implies(lhs_forced_live, rhs_forced_dead);
+            builder.assert_and([lhs_forced_live, rhs_forced_dead]);
 
             match builder.solve() {
-                Ok(_) => Ok(()),
-                Err(_) => {
+                Ok(BruteSatisfied { model }) => {
                     // TODO: update
                     Err(ReAndReUnifyError {
                         lhs: Re::Gc,
@@ -254,6 +255,7 @@ mod solver_sat {
                         causes: Vec::new(),
                     })
                 }
+                Err(_) => Ok(()),
             }
         }
     }
@@ -304,10 +306,17 @@ mod solver_sat {
 
         fn lower_naturally(&mut self, node: NodeIndex) -> B::Term {
             match self.state().graph[node] {
-                FormulaNode::True => <B::Term as SatTerm>::truthy(),
+                FormulaNode::True => self.lower_true(),
                 FormulaNode::And => self.lower_as_conjunction(node),
                 FormulaNode::Existential(_) => self.lower_as_existential(node),
                 FormulaNode::Universal(_) => self.lower_as_universal(node),
+            }
+        }
+
+        fn lower_true(&mut self) -> B::Term {
+            match self.mode() {
+                SatForceLowererMode::Alive => <B::Term as SatTerm>::truthy(),
+                SatForceLowererMode::Dead => <B::Term as SatTerm>::falsy(),
             }
         }
 
@@ -333,7 +342,7 @@ mod solver_sat {
                 hash_map::Entry::Occupied(entry) => {
                     return match entry.get() {
                         Some(pre_lowered) => *pre_lowered,
-                        // This is a cycle.
+                        // This is a cycle. Determine this fact coinductively.
                         None => <B::Term as SatTerm>::truthy(),
                     };
                 }
@@ -357,6 +366,7 @@ mod solver_sat {
             let out_term = if !terms.is_empty() {
                 self.builder_mut().join_or(terms)
             } else {
+                // We can't force this term to be alive/dead.
                 <B::Term as SatTerm>::falsy()
             };
 
@@ -511,17 +521,23 @@ mod solver_smt {
                 .collect::<IndexVec<InferReVar, _>>();
 
             let precond_wf = self
-                .universal_nodes
-                .iter()
-                .chain(self.existential_nodes.iter())
-                .map(|&node| lower_wf(self, &universals, &existentials, node))
+                .graph
+                .edge_references()
+                // Filter to only include implications
+                .filter(|edge| !matches!(self.graph[edge.target()], FormulaNode::And))
+                .map(|edge| {
+                    let lhs = is_term_truthy(self, &universals, &existentials, edge.source());
+                    let rhs = is_term_truthy(self, &universals, &existentials, edge.target());
+
+                    lhs.implies(rhs)
+                })
                 .collect::<Vec<_>>();
 
             let precond_wf = Bool::and(&precond_wf);
 
             let post_wf = {
-                let lhs = lower_wf(self, &universals, &existentials, lhs);
-                let rhs = lower_wf(self, &universals, &existentials, rhs);
+                let lhs = is_term_truthy(self, &universals, &existentials, lhs);
+                let rhs = is_term_truthy(self, &universals, &existentials, rhs);
 
                 (&precond_wf) & lhs.implies(rhs)
             };
@@ -572,7 +588,7 @@ mod solver_smt {
         }
     }
 
-    fn lower_wf(
+    fn is_term_truthy(
         solver: &RegionFormulaSolver,
         universals: &IndexSlice<UniversalReVar, [Bool]>,
         existentials: &IndexSlice<InferReVar, [Bool]>,
@@ -583,7 +599,7 @@ mod solver_smt {
                 let children = solver
                     .graph
                     .edges_directed(node, petgraph::Direction::Incoming)
-                    .map(|edge| lower_wf(solver, universals, existentials, edge.source()))
+                    .map(|edge| is_term_truthy(solver, universals, existentials, edge.source()))
                     .collect::<Vec<_>>();
 
                 Bool::and(&children)
@@ -618,6 +634,7 @@ mod tests {
             println!(
                 "let mut solver = RegionFormulaSolver::new({universal_count}, {existential_count});"
             );
+            println!();
 
             let mut solver =
                 RegionFormulaSolver::new(universal_count as usize, existential_count as usize);
@@ -630,16 +647,26 @@ mod tests {
 
                 let rhs = random_term(&mut rng, universal_count, existential_count);
 
-                solver.push_axiom(lhs.iter().copied(), [rhs]);
+                println!(
+                    "// AXIOM: {} -> {}",
+                    format_list(
+                        lhs.iter().copied().map(format_term_comment),
+                        SimpleListFormatGlue::new_delimited(" ^ ")
+                    ),
+                    format_term_comment(rhs),
+                );
 
                 println!(
                     "solver.push_axiom([{}], [{}]);",
                     format_list(
-                        lhs.iter().copied().map(format_term),
+                        lhs.iter().copied().map(format_term_code),
                         SimpleListFormatGlue::COMMA_LIST
                     ),
-                    format_term(rhs),
+                    format_term_code(rhs),
                 );
+                println!();
+
+                solver.push_axiom(lhs.iter().copied(), [rhs]);
             }
 
             // Check equations
@@ -651,13 +678,22 @@ mod tests {
                 let rhs = random_term(&mut rng, universal_count, existential_count);
 
                 println!(
+                    "// ASSERTION: {} -> {}",
+                    format_list(
+                        lhs.iter().copied().map(format_term_comment),
+                        SimpleListFormatGlue::new_delimited(" ^ ")
+                    ),
+                    format_term_comment(rhs),
+                );
+                println!(
                     "_ = solver.push_checked([{}], [{}]);",
                     format_list(
-                        lhs.iter().copied().map(format_term),
+                        lhs.iter().copied().map(format_term_code),
                         SimpleListFormatGlue::COMMA_LIST
                     ),
-                    format_term(rhs),
+                    format_term_code(rhs),
                 );
+                println!();
 
                 _ = solver.push_checked(lhs, [rhs]);
             }
@@ -681,7 +717,25 @@ mod tests {
         }
     }
 
-    fn format_term(term: RegionFormulaTerm) -> impl fmt::Display {
+    fn format_term_comment(term: RegionFormulaTerm) -> impl fmt::Display {
+        fmt::from_fn(move |f| {
+            match term {
+                RegionFormulaTerm::True => {
+                    f.write_str("T")?;
+                }
+                RegionFormulaTerm::Universal(var) => {
+                    write!(f, "'u{}", var.index())?;
+                }
+                RegionFormulaTerm::Existential(var) => {
+                    write!(f, "'i{}", var.index())?;
+                }
+            }
+
+            Ok(())
+        })
+    }
+
+    fn format_term_code(term: RegionFormulaTerm) -> impl fmt::Display {
         fmt::from_fn(move |f| {
             f.write_str("RegionFormulaTerm::")?;
 
@@ -707,6 +761,29 @@ mod tests {
         _ = solver.push_checked(
             [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
             [RegionFormulaTerm::Existential(InferReVar::from_usize(1))],
+        );
+    }
+
+    #[test]
+    fn first_complex() {
+        let mut solver = RegionFormulaSolver::new(1, 1);
+
+        // AXIOM: 'u0 -> 'i0
+        solver.push_axiom(
+            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(0))],
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
+        );
+
+        // AXIOM: 'i0 -> 'u0
+        solver.push_axiom(
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
+            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(0))],
+        );
+
+        // ASSERTION: 'u0 -> 'i0
+        _ = solver.push_checked(
+            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(0))],
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
         );
     }
 }

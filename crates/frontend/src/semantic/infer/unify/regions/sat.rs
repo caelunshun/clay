@@ -232,7 +232,7 @@ mod brute {
         type Term = BruteSatTerm;
     }
 
-    #[derive(Copy, Clone, Hash, Eq, PartialEq)]
+    #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
     pub enum BruteSatTerm {
         Const(bool),
         Var(BruteSatPolarity, BruteSatVar),
