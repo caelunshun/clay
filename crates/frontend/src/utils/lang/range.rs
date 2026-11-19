@@ -1,10 +1,12 @@
 use crate::utils::lang::Extension;
-use std::range::Range;
+use std::{ops, range::Range};
 
 pub trait RangeExt: Extension<Range<Self::Idx>> {
     type Idx;
 
     fn map<V>(self, f: impl FnMut(Self::Idx) -> V) -> Range<V>;
+
+    fn to_ops_range(self) -> ops::Range<Self::Idx>;
 }
 
 impl<T> RangeExt for Range<T> {
@@ -12,6 +14,10 @@ impl<T> RangeExt for Range<T> {
 
     fn map<V>(self, mut f: impl FnMut(Self::Idx) -> V) -> Range<V> {
         (f(self.start)..f(self.end)).into()
+    }
+
+    fn to_ops_range(self) -> ops::Range<Self::Idx> {
+        self.into()
     }
 }
 
