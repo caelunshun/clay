@@ -3,14 +3,15 @@ use crate::{
     semantic::{
         infer::{
             Promise, PromiseHandle, ReAndReUnifyError, ReConstraintOrder,
-            unify::regions2::solver::RegionFormulaTerm,
+            unify::regions2::solver::{RegionFormulaSolver, RegionFormulaTerm},
         },
         syntax::{InferReVar, Re, RelationMode, UniversalReVar},
     },
     utils::lang::RangeExt as _,
 };
+use clay_core::FastHashSet;
 use index_vec::{IndexVec, define_index_type};
-use petgraph::Graph;
+use petgraph::{Direction, Graph, graph::NodeIndex, visit::EdgeRef};
 use std::range::Range;
 
 // === ReUnifyTracker === //
@@ -27,23 +28,34 @@ define_index_type! {
 #[derive(Clone)]
 pub struct ReUnifyTracker<'sess> {
     buffer: IndexVec<BufferIdx, RegionFormulaTerm>,
-    relations: IndexVec<RelationIdx, RegisteredRelation<'sess>>,
+    relations: IndexVec<RelationIdx, Relation<'sess>>,
     permission_count: RelationIdx,
 }
 
 #[derive(Clone)]
-struct RegisteredRelation<'sess> {
+struct Relation<'sess> {
     /// A handle if this is a constraint or `None` if this is the assertion portion of a permission.
     handle: Option<PromiseHandle<'sess, ReAndReUnifyError>>,
-
-    /// The order in which relations should be sorted for processing during verification. Lower
-    /// occurs before higher. Constraint index zero is reserved for permits to simplify
-    /// verification.
-    order: u32,
+    order: RelationOrder,
 
     mode: RelationMode,
     lhs: Range<BufferIdx>,
     rhs: Range<BufferIdx>,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+enum RelationOrder {
+    Permission,
+    Constraint(ReConstraintOrder),
+}
+
+impl RelationOrder {
+    fn to_num(self) -> u32 {
+        match self {
+            RelationOrder::Permission => 0,
+            RelationOrder::Constraint(order) => order.0.get(),
+        }
+    }
 }
 
 impl<'sess> ReUnifyTracker<'sess> {
@@ -58,9 +70,9 @@ impl<'sess> ReUnifyTracker<'sess> {
             return;
         };
 
-        self.relations.push(RegisteredRelation {
+        self.relations.push(Relation {
             handle: None,
-            order: 0,
+            order: RelationOrder::Permission,
             mode,
             lhs,
             rhs,
@@ -83,9 +95,9 @@ impl<'sess> ReUnifyTracker<'sess> {
 
         let (promise, handle) = Promise::new();
 
-        self.relations.push(RegisteredRelation {
+        self.relations.push(Relation {
             handle: Some(handle),
-            order: order.0.get(),
+            order: RelationOrder::Constraint(order),
             mode,
             lhs,
             rhs,
@@ -128,66 +140,227 @@ impl<'sess> ReUnifyTracker<'sess> {
         // universal variable or a `'gc`. If a relation has mixed axiomatic-ness—that is, parts of
         // it are axioms and parts aren't, as could happen with a conjunction term—we promote the
         // whole term.
-        {
-            bool_enum! {
-                enum ShouldPropagate {
-                    true => Yes;
-                    false => No;
-                }
+        PermissionElaborator::new(self, universal_count, infer_count).propagate(self);
+
+        self.relations
+            .sort_by_key(|relation| relation.order.to_num());
+
+        let (permissions, constraints) = self.relations.split_at(self.permission_count);
+
+        // Now, we can run our formula solver on the stream of axioms and checks.
+        let mut solver = RegionFormulaSolver::new(universal_count, infer_count);
+
+        for permission in permissions {
+            debug_assert!(permission.handle.is_none());
+            debug_assert_eq!(permission.order, RelationOrder::Permission);
+
+            for (lhs, rhs) in permission.mode.enumerate(
+                // Recall: the solver uses implications but we use `'a: &longer 'b` constraints,
+                // hence the backwards `rhs` and `lhs`.
+                &self.buffer[permission.rhs.to_ops_range()],
+                &self.buffer[permission.lhs.to_ops_range()],
+            ) {
+                solver.push_axiom(lhs.iter().copied(), rhs.iter().copied());
             }
-
-            const DUMMY_MARKER: RelationIdx = RelationIdx::from_raw_unchecked(u32::MAX - 1);
-            const PERMISSION_MARKER: RelationIdx = RelationIdx::from_raw_unchecked(u32::MAX);
-
-            let mut graph = Graph::new();
-
-            let existentials = (0..infer_count)
-                .map(InferReVar::from_usize)
-                .map(|_| graph.add_node(ShouldPropagate::Yes))
-                .collect::<IndexVec<InferReVar, _>>();
-
-            let universals = (0..universal_count)
-                .map(UniversalReVar::from_usize)
-                .map(|_| graph.add_node(ShouldPropagate::No))
-                .collect::<IndexVec<UniversalReVar, _>>();
-
-            let true_node = graph.add_node(ShouldPropagate::No);
-
-            for (relation_idx, relation) in self.relations.iter_enumerated() {
-                let weight = if relation.handle.is_some() {
-                    relation_idx
-                } else {
-                    PERMISSION_MARKER
-                };
-
-                let lhs = match self.buffer[relation.lhs.to_ops_range()].as_raw_slice() {
-                    [] => continue,
-                    &[unique] => unique,
-                    remainder => todo!(),
-                };
-
-                let lhs = match lhs {
-                    RegionFormulaTerm::True => true_node,
-                    RegionFormulaTerm::Universal(var) => universals[var],
-                    RegionFormulaTerm::Existential(var) => existentials[var],
-                };
-
-                for &rhs in &self.buffer[relation.rhs.to_ops_range()] {
-                    let rhs = match rhs {
-                        RegionFormulaTerm::True => true_node,
-                        RegionFormulaTerm::Universal(var) => universals[var],
-                        RegionFormulaTerm::Existential(var) => existentials[var],
-                    };
-
-                    // TODO: handle relation.mode
-                    graph.add_edge(lhs, rhs, weight);
-                }
-            }
-
-            // TODO
         }
 
-        // Now, we can run our formula solver on the stream of axioms and assertions.
-        // TODO
+        for constraint in constraints {
+            let handle = constraint.handle.as_ref().unwrap();
+            let mut errors = Vec::new();
+
+            for (lhs, rhs) in constraint.mode.enumerate(
+                // Same as above.
+                &self.buffer[constraint.rhs.to_ops_range()],
+                &self.buffer[constraint.lhs.to_ops_range()],
+            ) {
+                if let Err(err) = solver.push_checked(lhs.iter().copied(), rhs.iter().copied()) {
+                    errors.push(err);
+                }
+            }
+
+            // TODO: handle promise based off `errors`.
+        }
+    }
+}
+
+// === PermissionElaborator === //
+
+struct PermissionElaborator {
+    graph: Graph<NodeShouldPropagate, RelationIdx>,
+    universals: IndexVec<UniversalReVar, NodeIndex>,
+    existentials: IndexVec<InferReVar, NodeIndex>,
+    truthy: NodeIndex,
+}
+
+bool_enum! {
+    enum NodeShouldPropagate {
+        true => Yes;
+        false => No;
+    }
+}
+
+const DUMMY_EDGE: RelationIdx = RelationIdx::from_raw_unchecked(u32::MAX - 1);
+const PERMISSION_EDGE: RelationIdx = RelationIdx::from_raw_unchecked(u32::MAX);
+
+impl PermissionElaborator {
+    fn new(tracker: &ReUnifyTracker<'_>, universal_count: usize, infer_count: usize) -> Self {
+        let mut graph = Graph::new();
+
+        let existentials = (0..infer_count)
+            .map(InferReVar::from_usize)
+            .map(|_| graph.add_node(NodeShouldPropagate::Yes))
+            .collect::<IndexVec<InferReVar, _>>();
+
+        let universals = (0..universal_count)
+            .map(UniversalReVar::from_usize)
+            .map(|_| graph.add_node(NodeShouldPropagate::No))
+            .collect::<IndexVec<UniversalReVar, _>>();
+
+        let truthy = graph.add_node(NodeShouldPropagate::No);
+
+        let mut this = Self {
+            graph,
+            universals,
+            existentials,
+            truthy,
+        };
+
+        for (
+            relation_idx,
+            &Relation {
+                ref handle,
+                mode,
+                lhs,
+                rhs,
+                ..
+            },
+        ) in tracker.relations.iter_enumerated()
+        {
+            let weight = if handle.is_some() {
+                relation_idx
+            } else {
+                PERMISSION_EDGE
+            };
+
+            for (lhs, rhs) in mode.enumerate(lhs, rhs) {
+                this.build_relation(tracker, weight, lhs, rhs);
+            }
+        }
+
+        this
+    }
+
+    fn build_relation(
+        &mut self,
+        tracker: &ReUnifyTracker<'_>,
+        weight: RelationIdx,
+        lhs: Range<BufferIdx>,
+        rhs: Range<BufferIdx>,
+    ) {
+        let lhs = tracker.buffer[lhs.to_ops_range()].as_raw_slice();
+        let rhs = tracker.buffer[rhs.to_ops_range()].as_raw_slice();
+
+        match (lhs, rhs) {
+            ([], _) | (_, []) => return,
+            (&[lhs], rhs) => {
+                for &rhs in rhs {
+                    self.graph
+                        .add_edge(self.term_to_node(lhs), self.term_to_node(rhs), weight);
+                }
+            }
+            (lhs, &[rhs]) => {
+                for &lhs in lhs {
+                    self.graph
+                        .add_edge(self.term_to_node(lhs), self.term_to_node(rhs), weight);
+                }
+            }
+            // `joiner` avoids `O(n^2)` edge count.
+            (lhs, rhs) => {
+                let joiner = self.graph.add_node(NodeShouldPropagate::Yes);
+
+                for &lhs in lhs {
+                    self.graph
+                        .add_edge(self.term_to_node(lhs), joiner, DUMMY_EDGE);
+                }
+
+                for &rhs in rhs {
+                    self.graph.add_edge(joiner, self.term_to_node(rhs), weight);
+                }
+            }
+        };
+    }
+
+    fn term_to_node(&self, term: RegionFormulaTerm) -> NodeIndex {
+        match term {
+            RegionFormulaTerm::True => self.truthy,
+            RegionFormulaTerm::Universal(var) => self.universals[var],
+            RegionFormulaTerm::Existential(var) => self.existentials[var],
+        }
+    }
+
+    fn propagate(&self, tracker: &mut ReUnifyTracker<'_>) {
+        let mut backward = DirectionalPermissionElaborator::new(self, Direction::Incoming);
+        let mut forward = DirectionalPermissionElaborator::new(self, Direction::Outgoing);
+
+        for edge in self.graph.edge_references() {
+            if *edge.weight() != PERMISSION_EDGE {
+                continue;
+            }
+
+            if self.graph[edge.target()].is_truthy() {
+                forward.push(edge.target());
+                forward.flush(tracker);
+            }
+
+            if self.graph[edge.source()].is_truthy() {
+                backward.push(edge.target());
+                backward.flush(tracker);
+            }
+        }
+    }
+}
+
+struct DirectionalPermissionElaborator<'a> {
+    graph: &'a PermissionElaborator,
+    direction: Direction,
+    visit_stack: Vec<NodeIndex>,
+    visit_set: FastHashSet<NodeIndex>,
+}
+
+impl<'a> DirectionalPermissionElaborator<'a> {
+    fn new(graph: &'a PermissionElaborator, direction: Direction) -> Self {
+        Self {
+            graph,
+            direction,
+            visit_stack: Vec::new(),
+            visit_set: FastHashSet::default(),
+        }
+    }
+
+    fn push(&mut self, node: NodeIndex) {
+        if self.visit_set.insert(node) {
+            self.visit_stack.push(node);
+        }
+    }
+
+    fn flush(&mut self, tracker: &mut ReUnifyTracker<'_>) {
+        while let Some(node) = self.visit_stack.pop() {
+            for edge in self.graph.graph.edges_directed(node, self.direction) {
+                let relation = *edge.weight();
+
+                if relation.index() < RelationIdx::MAX_INDEX {
+                    let relation = &mut tracker.relations[relation];
+
+                    relation.order = RelationOrder::Permission;
+                    tracker.permission_count += 1;
+
+                    // TODO: resolve promise
+                }
+
+                if self.graph.graph[edge.target()].is_truthy() {
+                    self.push(edge.target());
+                }
+            }
+        }
     }
 }
