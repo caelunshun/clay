@@ -57,7 +57,7 @@ pub trait SatTerm: Copy + hash::Hash + Eq + Not<Output = Self> + From<Self::Var>
 
 // No-op
 mod nop {
-    use crate::semantic::infer::unify::sat::{SatBuilder, SatTerm, SatVar};
+    use super::{SatBuilder, SatTerm, SatVar};
     use std::ops::Not;
 
     #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Default)]
