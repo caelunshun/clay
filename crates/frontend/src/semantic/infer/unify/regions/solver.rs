@@ -360,7 +360,12 @@ mod solver_sat {
                         SatForceLowererMode::Dead => Direction::Outgoing,
                     },
                 )
-                .map(|edge| self.lower_naturally(edge.source()))
+                .map(|edge| {
+                    self.lower_naturally(match self.mode() {
+                        SatForceLowererMode::Alive => edge.source(),
+                        SatForceLowererMode::Dead => edge.target(),
+                    })
+                })
                 .collect::<SmallVec<[_; 4]>>();
 
             let out_term = if !terms.is_empty() {
@@ -767,12 +772,6 @@ mod tests {
     #[test]
     fn first_complex() {
         let mut solver = RegionFormulaSolver::new(1, 1);
-
-        // AXIOM: 'u0 -> 'i0
-        solver.push_axiom(
-            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(0))],
-            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
-        );
 
         // AXIOM: 'i0 -> 'u0
         solver.push_axiom(
