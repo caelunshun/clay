@@ -1,4 +1,4 @@
-use std::{hash, ops::Not};
+use std::{fmt, hash, ops::Not};
 
 pub trait SatBuilder {
     type Var: SatVar<Term = Self::Term>;
@@ -37,7 +37,7 @@ pub trait SatBuilder {
     fn join_implies(&mut self, lhs: Self::Term, rhs: Self::Term) -> Self::Term;
 }
 
-pub trait SatVar: Copy + hash::Hash + Eq {
+pub trait SatVar: fmt::Debug + Copy + hash::Hash + Eq {
     type Term: SatTerm<Var = Self>;
 
     fn to_term(self) -> Self::Term {
@@ -45,7 +45,9 @@ pub trait SatVar: Copy + hash::Hash + Eq {
     }
 }
 
-pub trait SatTerm: Copy + hash::Hash + Eq + Not<Output = Self> + From<Self::Var> {
+pub trait SatTerm:
+    fmt::Debug + Copy + hash::Hash + Eq + Not<Output = Self> + From<Self::Var>
+{
     type Var: SatVar<Term = Self>;
 
     fn constant(v: bool) -> Self;

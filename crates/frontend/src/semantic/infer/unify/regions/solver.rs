@@ -217,17 +217,27 @@ mod solver_sat {
             let mut builder = BruteSatBuilder::default();
             let mut universals = FastIndexMap::default();
 
+            // println!("LHS ====");
+
             let lhs_forced_live = SatForcedLiveLowerer {
                 state: SatForceLowererState::new(&self.graph, &mut builder),
                 universals: &mut universals,
             }
             .lower_naturally(lhs);
 
+            // println!("---> {lhs_forced_live:?}");
+
+            // println!("RHS ====");
+
             let rhs_forced_dead = SatForcedDeadLowerer {
                 state: SatForceLowererState::new(&self.graph, &mut builder),
                 universals: &mut universals,
             }
             .lower_naturally(rhs);
+
+            // println!("---> {rhs_forced_dead:?}");
+
+            // println!("WF ====");
 
             if universals.len() > BRUTE_FORCE_VAR_LIMIT as usize {
                 todo!();
@@ -343,7 +353,12 @@ mod solver_sat {
                     return match entry.get() {
                         Some(pre_lowered) => *pre_lowered,
                         // This is a cycle. Determine this fact coinductively.
-                        None => <B::Term as SatTerm>::truthy(),
+                        None => match self.mode() {
+                            // Conjunctions are used in this mode.
+                            SatForceLowererMode::Alive => <B::Term as SatTerm>::truthy(),
+                            // Disjunctions are used in this mode.
+                            SatForceLowererMode::Dead => <B::Term as SatTerm>::falsy(),
+                        },
                     };
                 }
                 hash_map::Entry::Vacant(entry) => {
@@ -630,7 +645,7 @@ mod tests {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(4);
 
         for i in 0..1000 {
-            println!("// Test {i}");
+            println!("// >>>>>>>>> Test {i}");
 
             // Not sure whether `usize` has platform-dependent behavior for `rand`.
             let universal_count = rng.random_range::<u32, _>(1..=4);
@@ -770,7 +785,7 @@ mod tests {
     }
 
     #[test]
-    fn first_complex() {
+    fn generated_1() {
         let mut solver = RegionFormulaSolver::new(1, 1);
 
         // AXIOM: 'i0 -> 'u0
@@ -782,6 +797,52 @@ mod tests {
         // ASSERTION: 'u0 -> 'i0
         _ = solver.push_checked(
             [RegionFormulaTerm::Universal(UniversalReVar::from_usize(0))],
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
+        );
+    }
+
+    #[test]
+    fn generated_2() {
+        let mut solver = RegionFormulaSolver::new(1, 1);
+
+        // AXIOM: 'i0 ^ 'u0 -> 'u0
+        _ = solver.push_axiom(
+            [
+                RegionFormulaTerm::Existential(InferReVar::from_usize(0)),
+                RegionFormulaTerm::Universal(UniversalReVar::from_usize(0)),
+            ],
+            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(0))],
+        );
+
+        // ASSERTION: 'u0 -> 'i0
+        _ = solver.push_checked(
+            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(0))],
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
+        );
+    }
+
+    #[test]
+    fn generated_3() {
+        let mut solver = RegionFormulaSolver::new(1, 1);
+
+        // AXIOM: 'i0 ^ 'u0 -> 'u0
+        _ = solver.push_axiom(
+            [
+                RegionFormulaTerm::Existential(InferReVar::from_usize(0)),
+                RegionFormulaTerm::Universal(UniversalReVar::from_usize(0)),
+            ],
+            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(0))],
+        );
+
+        // AXIOM: T -> 'i0
+        _ = solver.push_axiom(
+            [RegionFormulaTerm::True],
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
+        );
+
+        // ASSERTION: 'i0 -> 'i0
+        _ = solver.push_checked(
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
             [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
         );
     }
