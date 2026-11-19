@@ -2,7 +2,7 @@ use crate::{
     bool_enum,
     semantic::{
         infer::{
-            Promise, PromiseHandle, ReAndReUnifyError, ReConstraintOrder,
+            Promise, PromiseHandle, PromiseResolutionQueue, ReAndReUnifyError, ReConstraintOrder,
             unify::regions2::solver::{RegionFormulaSolver, RegionFormulaTerm},
         },
         syntax::{InferReVar, Re, RelationMode, UniversalReVar},
@@ -144,13 +144,18 @@ impl<'sess> RegionRelationGraph<'sess> {
         ))
     }
 
-    pub fn verify(&mut self, universal_count: usize, infer_count: usize) {
+    pub fn verify(
+        &mut self,
+        queue: &mut PromiseResolutionQueue<'sess>,
+        universal_count: usize,
+        infer_count: usize,
+    ) {
         // For permissions involving inference variables, we promote all relations that transitively
         // connect that inference variable to further terms into axioms, stopping until we reach a
         // universal variable or a `'gc`. If a relation has mixed axiomatic-ness—that is, parts of
         // it are axioms and parts aren't, as could happen with a conjunction term—we promote the
         // whole term.
-        PermissionElaborator::new(self, universal_count, infer_count).propagate(self);
+        PermissionElaborator::new(self, universal_count, infer_count).propagate(self, queue);
 
         self.relations
             .sort_by_key(|relation| relation.order.to_num());
@@ -188,7 +193,20 @@ impl<'sess> RegionRelationGraph<'sess> {
                 }
             }
 
-            // TODO: handle promise based off `errors`.
+            if errors.is_empty() {
+                handle.queue_accept(queue);
+            } else {
+                // TODO
+                handle.queue_reject(
+                    queue,
+                    ReAndReUnifyError {
+                        lhs: Re::Gc,
+                        rhs: Re::Gc,
+                        mode: RelationMode::Equate,
+                        causes: Vec::new(),
+                    },
+                );
+            }
         }
     }
 }
@@ -308,7 +326,11 @@ impl PermissionElaborator {
         }
     }
 
-    fn propagate(&self, tracker: &mut RegionRelationGraph<'_>) {
+    fn propagate<'sess>(
+        &self,
+        tracker: &mut RegionRelationGraph<'sess>,
+        queue: &mut PromiseResolutionQueue<'sess>,
+    ) {
         let mut backward = DirectionalPermissionElaborator::new(self, Direction::Incoming);
         let mut forward = DirectionalPermissionElaborator::new(self, Direction::Outgoing);
 
@@ -319,12 +341,12 @@ impl PermissionElaborator {
 
             if self.graph[edge.target()].is_truthy() {
                 forward.push(edge.target());
-                forward.flush(tracker);
+                forward.flush(tracker, queue);
             }
 
             if self.graph[edge.source()].is_truthy() {
                 backward.push(edge.target());
-                backward.flush(tracker);
+                backward.flush(tracker, queue);
             }
         }
     }
@@ -353,7 +375,11 @@ impl<'a> DirectionalPermissionElaborator<'a> {
         }
     }
 
-    fn flush(&mut self, tracker: &mut RegionRelationGraph<'_>) {
+    fn flush<'sess>(
+        &mut self,
+        tracker: &mut RegionRelationGraph<'sess>,
+        queue: &mut PromiseResolutionQueue<'sess>,
+    ) {
         while let Some(node) = self.visit_stack.pop() {
             for edge in self.graph.graph.edges_directed(node, self.direction) {
                 let relation = *edge.weight();
@@ -364,7 +390,7 @@ impl<'a> DirectionalPermissionElaborator<'a> {
                     relation.order = RelationOrder::Permission;
                     tracker.permission_count += 1;
 
-                    // TODO: resolve promise
+                    relation.handle.take().unwrap().queue_accept(queue);
                 }
 
                 if self.graph.graph[edge.target()].is_truthy() {

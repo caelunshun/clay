@@ -184,7 +184,7 @@ impl<'sess, E: 'sess> Promise<'sess, E> {
 
     pub fn forward(self, ccx: &mut ClauseCx<'sess>, handle: PromiseHandle<'sess, E>) {
         if self.builder.already_accepted_during_build() {
-            handle.accept(ccx);
+            handle.accept_now(ccx);
             return;
         }
 
@@ -367,7 +367,7 @@ impl<'sess, E: 'sess> fmt::Debug for PromiseHandle<'sess, E> {
 }
 
 impl<'sess, E: 'sess> PromiseHandle<'sess, E> {
-    pub fn accept(&self, ccx: &mut ClauseCx<'sess>) {
+    pub fn accept_now(&self, ccx: &mut ClauseCx<'sess>) {
         match ccx.promise_mode() {
             PromiseMode::RootContext => self.promise.accept_on_root(ccx),
             PromiseMode::ProbeContext => {
@@ -376,14 +376,14 @@ impl<'sess, E: 'sess> PromiseHandle<'sess, E> {
         }
     }
 
-    pub fn reject(&self, ccx: &mut ClauseCx<'sess>, error: E) {
+    pub fn reject_now(&self, ccx: &mut ClauseCx<'sess>, error: E) {
         match ccx.promise_mode() {
             PromiseMode::RootContext => self.promise.reject_on_root(ccx, error),
             PromiseMode::ProbeContext => self.promise.reject_on_fork(),
         }
     }
 
-    pub fn accept_if_not_rejected(&self, ccx: &mut ClauseCx<'sess>) {
+    pub fn accept_now_if_not_rejected(&self, ccx: &mut ClauseCx<'sess>) {
         match ccx.promise_mode() {
             PromiseMode::RootContext => {
                 if !self.promise.already_report_resolved.get() {
@@ -395,6 +395,17 @@ impl<'sess, E: 'sess> PromiseHandle<'sess, E> {
             }
         }
     }
+
+    pub fn queue_accept(&self, queue: &mut PromiseResolutionQueue<'sess>) {
+        queue.queue_accept(self.clone());
+    }
+
+    pub fn queue_reject(&self, queue: &mut PromiseResolutionQueue<'sess>, error: E)
+    where
+        E: Clone,
+    {
+        queue.queue_reject(self.clone(), error);
+    }
 }
 
 pub trait AnyPromiseHandle<'sess> {
@@ -403,7 +414,7 @@ pub trait AnyPromiseHandle<'sess> {
 
 impl<'sess, E: 'sess> AnyPromiseHandle<'sess> for PromiseHandle<'sess, E> {
     fn accept(&self, ccx: &mut ClauseCx<'sess>) {
-        self.accept(ccx);
+        self.accept_now(ccx);
     }
 }
 
@@ -971,7 +982,7 @@ impl<'sess> PromiseResolutionQueue<'sess> {
             }
 
             fn resolve(self: Box<Self>, ccx: &mut ClauseCx<'sess>) {
-                self.handle.accept(ccx);
+                self.handle.accept_now(ccx);
             }
         }
 
@@ -991,7 +1002,7 @@ impl<'sess> PromiseResolutionQueue<'sess> {
             }
 
             fn resolve(self: Box<Self>, ccx: &mut ClauseCx<'sess>) {
-                self.handle.reject(ccx, self.error);
+                self.handle.reject_now(ccx, self.error);
             }
         }
 

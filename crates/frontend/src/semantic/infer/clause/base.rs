@@ -260,7 +260,7 @@ impl<'sess> ClauseCx<'sess> {
 
                 let res = match kind {
                     ClauseObligation::RejectTyUnifiesTy { handle, error } => {
-                        handle.reject(&mut fork, error);
+                        handle.reject_now(&mut fork, error);
                         Ok(ObligationTermination::Finished)
                     }
                     ClauseObligation::TyMeetsTrait {
@@ -394,7 +394,7 @@ impl<'sess> ClauseCx<'sess> {
                 } => {
                     let not_ready = state.not_ready.clone().unwrap();
 
-                    handle.reject(
+                    handle.reject_now(
                         self,
                         InstantiatedTraitImplError {
                             lhs: *lhs,
@@ -413,7 +413,7 @@ impl<'sess> ClauseCx<'sess> {
                 } => {
                     let not_ready = state.not_ready.clone().unwrap();
 
-                    handle.reject(
+                    handle.reject_now(
                         self,
                         TyOutlivesReError {
                             lhs: *lhs,
@@ -438,7 +438,7 @@ impl<'sess> ClauseCx<'sess> {
                         unreachable!()
                     };
 
-                    handle.reject(
+                    handle.reject_now(
                         self,
                         NotCoveredError {
                             missing_mentions,

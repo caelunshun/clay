@@ -152,7 +152,7 @@ impl<'sess> ClauseCx<'sess> {
 
         // Enforce fuel limit.
         if fuel.is_exhausted() {
-            handle.reject(
+            handle.reject_now(
                 self,
                 InstantiatedTraitImplError {
                     lhs,
@@ -209,7 +209,7 @@ impl<'sess> ClauseCx<'sess> {
             }
             TyKind::Error(_) => {
                 // Error types can do anything.
-                handle.accept(self);
+                handle.accept_now(self);
 
                 return Ok(ObligationTermination::Finished);
             }
@@ -259,7 +259,7 @@ impl<'sess> ClauseCx<'sess> {
         }
 
         let Some(confirmation) = prev_confirmation else {
-            handle.reject(
+            handle.reject_now(
                 self,
                 InstantiatedTraitImplError {
                     lhs,
@@ -767,7 +767,7 @@ impl<'sess> ClauseCx<'sess> {
             .collect::<Vec<_>>();
 
         if missing_mentions.is_empty() {
-            handle.accept(self);
+            handle.accept_now(self);
 
             return Ok(ObligationTermination::Finished);
         }
@@ -776,7 +776,7 @@ impl<'sess> ClauseCx<'sess> {
             return Err(ObligationNotReady::CoverMissingInfer { missing_mentions });
         }
 
-        handle.reject(
+        handle.reject_now(
             self,
             NotCoveredError {
                 missing_mentions,

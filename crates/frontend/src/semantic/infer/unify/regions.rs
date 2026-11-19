@@ -185,7 +185,7 @@ impl<'sess> ReUnifyTracker<'sess> {
         }
 
         for (promise, err) in to_resolve {
-            promise.reject(ccx, err);
+            promise.reject_now(ccx, err);
         }
 
         for cst_idx in 0..get_this(ccx)
@@ -198,7 +198,7 @@ impl<'sess> ReUnifyTracker<'sess> {
             get_this(ccx).non_blind_state.as_ref().unwrap().constraints[cst_idx]
                 .handle
                 .clone()
-                .accept_if_not_rejected(ccx);
+                .accept_now_if_not_rejected(ccx);
         }
 
         if flags::should_print_ccx_region_graph() {
