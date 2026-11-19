@@ -936,3 +936,76 @@ impl<'sess, E> PromiseNodeTarget<'sess> for PromiseNodeForwardSink<'sess, E> {
         self.handle.promise.reject_on_fork();
     }
 }
+
+// === PromiseResolutionQueue === //
+
+#[derive(Default)]
+pub struct PromiseResolutionQueue<'sess> {
+    resolutions: Vec<Box<dyn 'sess + AnyPromiseResolution<'sess>>>,
+}
+
+trait AnyPromiseResolution<'sess> {
+    fn clone_boxed(&self) -> Box<dyn 'sess + AnyPromiseResolution<'sess>>;
+
+    fn resolve(self: Box<Self>, ccx: &mut ClauseCx<'sess>);
+}
+
+impl Clone for PromiseResolutionQueue<'_> {
+    fn clone(&self) -> Self {
+        Self {
+            resolutions: self.resolutions.iter().map(|v| v.clone_boxed()).collect(),
+        }
+    }
+}
+
+impl<'sess> PromiseResolutionQueue<'sess> {
+    pub fn queue_accept<E: 'sess>(&mut self, handle: PromiseHandle<'sess, E>) {
+        #[derive_where(Clone)]
+        struct Resolution<'sess, E> {
+            handle: PromiseHandle<'sess, E>,
+        }
+
+        impl<'sess, E: 'sess> AnyPromiseResolution<'sess> for Resolution<'sess, E> {
+            fn clone_boxed(&self) -> Box<dyn 'sess + AnyPromiseResolution<'sess>> {
+                Box::new((*self).clone())
+            }
+
+            fn resolve(self: Box<Self>, ccx: &mut ClauseCx<'sess>) {
+                self.handle.accept(ccx);
+            }
+        }
+
+        self.resolutions.push(Box::new(Resolution { handle }));
+    }
+
+    pub fn queue_reject<E: 'sess + Clone>(&mut self, handle: PromiseHandle<'sess, E>, error: E) {
+        #[derive(Clone)]
+        struct Resolution<'sess, E: 'sess> {
+            handle: PromiseHandle<'sess, E>,
+            error: E,
+        }
+
+        impl<'sess, E: 'sess + Clone> AnyPromiseResolution<'sess> for Resolution<'sess, E> {
+            fn clone_boxed(&self) -> Box<dyn 'sess + AnyPromiseResolution<'sess>> {
+                Box::new((*self).clone())
+            }
+
+            fn resolve(self: Box<Self>, ccx: &mut ClauseCx<'sess>) {
+                self.handle.reject(ccx, self.error);
+            }
+        }
+
+        self.resolutions
+            .push(Box::new(Resolution { handle, error }));
+    }
+
+    pub fn flush(self, ccx: &mut ClauseCx<'sess>) {
+        for resolution in self.resolutions {
+            resolution.resolve(ccx);
+        }
+    }
+
+    pub fn flush_ref(&mut self, ccx: &mut ClauseCx<'sess>) {
+        mem::take(self).flush(ccx);
+    }
+}

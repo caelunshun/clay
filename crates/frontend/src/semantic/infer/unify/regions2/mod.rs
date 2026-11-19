@@ -410,13 +410,15 @@
 //!   theory defined above. One can either push a formula as an axiom using `push_axiom` or
 //!   push a formula while checking its validity against the preconditions using `push_checked`.
 //!
-//! - The [`driver`] module builds on the `solver` to add support for permission and constraint
+//! - The [`graph`] module builds on the `solver` to add support for permission and constraint
 //!   edges such that permissions properly propagate across reachable subgraphs of inference nodes.
-//!   This is the public interface consumed by the unification context.
+//!
+//! - We package this all up in the [`driver`] module for `UnifyCx`'s consumption.
 //!
 
 mod driver;
 pub use self::driver::*;
 
+mod graph;
 mod sat;
 mod solver;
