@@ -340,12 +340,12 @@ impl PermissionElaborator {
             }
 
             if self.graph[edge.target()].is_truthy() {
-                forward.push(edge.target());
+                forward.queue(edge.target());
                 forward.flush(tracker, queue);
             }
 
             if self.graph[edge.source()].is_truthy() {
-                backward.push(edge.target());
+                backward.queue(edge.source());
                 backward.flush(tracker, queue);
             }
         }
@@ -369,7 +369,7 @@ impl<'a> DirectionalPermissionElaborator<'a> {
         }
     }
 
-    fn push(&mut self, node: NodeIndex) {
+    fn queue(&mut self, node: NodeIndex) {
         if self.visit_set.insert(node) {
             self.visit_stack.push(node);
         }
@@ -384,17 +384,22 @@ impl<'a> DirectionalPermissionElaborator<'a> {
             for edge in self.graph.graph.edges_directed(node, self.direction) {
                 let relation = *edge.weight();
 
-                if relation.index() < RelationIdx::MAX_INDEX {
-                    let relation = &mut tracker.relations[relation];
-
+                if relation.index() < RelationIdx::MAX_INDEX
+                    && let relation = &mut tracker.relations[relation]
+                    && let Some(handle) = relation.handle.take()
+                {
                     relation.order = RelationOrder::Permission;
                     tracker.permission_count += 1;
-
-                    relation.handle.take().unwrap().queue_accept(queue);
+                    handle.queue_accept(queue);
                 }
 
-                if self.graph.graph[edge.target()].is_truthy() {
-                    self.push(edge.target());
+                let other = match self.direction {
+                    Direction::Outgoing => edge.target(),
+                    Direction::Incoming => edge.source(),
+                };
+
+                if self.graph.graph[other].is_truthy() {
+                    self.queue(other);
                 }
             }
         }
