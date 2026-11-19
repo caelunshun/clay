@@ -406,13 +406,14 @@
 //!
 //! ## Organization
 //!
-//! - The [`RegionFormulaSolver`] provides an interactive structure for verifying formulae using the
+//! - The [`solver`] module provides an interactive structure for verifying formulae using the
 //!   theory defined above. One can either push a formula as an axiom using `push_axiom` or
 //!   push a formula while checking its validity against the preconditions using `push_checked`.
 //!
-//! - The [`ReUnifyTracker`] builds on the `RegionFormulaSolver` to add support for permission and
-//!   constraint edges such that permissions properly propagate across reachable subgraphs of
-//!   inference nodes.
+//! - The [`driver`] module builds on the `solver` to add support for permission and constraint
+//!   edges such that permissions properly propagate across reachable subgraphs of inference nodes.
+//!   This is the public interface consumed by the unification context.
+//!
 
 mod driver;
 pub use self::driver::*;
