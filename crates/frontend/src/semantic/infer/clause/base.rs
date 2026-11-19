@@ -1,5 +1,6 @@
 use crate::{
     base::{Intern, IterInternExt, Session, ValueInternable},
+    flags,
     semantic::{
         analysis::TyCtxt,
         infer::{
@@ -450,7 +451,16 @@ impl<'sess> ClauseCx<'sess> {
             }
         }
 
+        if flags::should_print_ccx_region_graph() {
+            println!("=======================");
+        }
+
         self.ucx.verify().flush(self);
+
+        if flags::should_print_ccx_region_graph() {
+            println!("----->");
+            println!("{}", self.ucx.region_graphviz(self));
+        }
     }
 }
 

@@ -19,8 +19,8 @@ mod demo1 {
     }
 
     // Rejected
-    impl<'a, 'b> Demo<'a> for &'b () {
-        type Foo = &'b ();
+    impl<'a, 'b_this_is_broken> Demo<'a> for &'b_this_is_broken () {
+        type Foo = &'b_this_is_broken ();
     }
 }
 

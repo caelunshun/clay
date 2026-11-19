@@ -1,7 +1,7 @@
 default-uitest-pat := "all()"
 
 uitest pat=default-uitest-pat:
-    cargo nextest run --profile frontend-uitest -E "{{ pat }}"
+    cargo nextest run --profile frontend-uitest -- "{{ pat }}"
 
 uitest-bless pat=default-uitest-pat:
     CLAY_FRONTEND_UI_TEST_BLESS=1 just uitest "{{ pat }}"

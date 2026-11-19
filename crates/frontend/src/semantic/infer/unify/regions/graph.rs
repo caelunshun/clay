@@ -2,7 +2,8 @@ use crate::{
     bool_enum,
     semantic::{
         infer::{
-            Promise, PromiseHandle, PromiseResolutionQueue, ReAndReUnifyError, ReConstraintOrder,
+            ClauseCx, ClausePrettyFmtOpts, Promise, PromiseHandle, PromiseResolutionQueue,
+            ReAndReUnifyError, ReConstraintOrder,
             unify::regions::solver::{RegionFormulaSolver, RegionFormulaTerm},
         },
         syntax::{InferReVar, Re, RelationMode, UniversalReVar},
@@ -11,8 +12,11 @@ use crate::{
 };
 use clay_core::FastHashSet;
 use index_vec::{IndexVec, define_index_type};
-use petgraph::{Direction, Graph, graph::NodeIndex, visit::EdgeRef};
-use std::range::Range;
+use petgraph::{Direction, Graph, dot::Dot, graph::NodeIndex, visit::EdgeRef};
+use std::{
+    fmt::{self, Display},
+    range::Range,
+};
 
 // === RegionRelationGraph === //
 
@@ -209,6 +213,120 @@ impl<'sess> RegionRelationGraph<'sess> {
             }
         }
     }
+
+    pub fn graphviz(
+        &self,
+        ccx: &ClauseCx<'_>,
+        universal_count: usize,
+        infer_count: usize,
+    ) -> String {
+        #[derive(Copy, Clone)]
+        enum VizNode {
+            Gc,
+            Universal(UniversalReVar),
+            Infer(InferReVar),
+            Conjunction,
+        }
+
+        #[derive(Copy, Clone)]
+        enum VizEdge {
+            Thin,
+            Constraint,
+            Permission,
+        }
+
+        let mut graph = Graph::<VizNode, VizEdge>::new();
+
+        let universals = (0..universal_count)
+            .map(UniversalReVar::from_usize)
+            .map(|var| graph.add_node(VizNode::Universal(var)))
+            .collect::<IndexVec<UniversalReVar, NodeIndex>>();
+
+        let infers = (0..infer_count)
+            .map(InferReVar::from_usize)
+            .map(|var| graph.add_node(VizNode::Infer(var)))
+            .collect::<IndexVec<InferReVar, NodeIndex>>();
+
+        let gc = graph.add_node(VizNode::Gc);
+
+        let translate_node = |term: RegionFormulaTerm| -> NodeIndex {
+            match term {
+                RegionFormulaTerm::True => gc,
+                RegionFormulaTerm::Universal(var) => universals[var],
+                RegionFormulaTerm::Existential(var) => infers[var],
+            }
+        };
+
+        for Relation {
+            handle,
+            mode,
+            lhs,
+            rhs,
+            ..
+        } in &self.relations
+        {
+            let lhs = &self.buffer[lhs.to_ops_range()];
+            let rhs = &self.buffer[rhs.to_ops_range()];
+
+            let edge = match handle {
+                Some(_) => VizEdge::Constraint,
+                None => VizEdge::Permission,
+            };
+
+            for (lhs, rhs) in mode.enumerate(lhs, rhs) {
+                let rhs = match rhs.as_raw_slice() {
+                    [] => continue,
+                    &[unique] => translate_node(unique),
+                    conjoined => {
+                        let conjunction = graph.add_node(VizNode::Conjunction);
+
+                        for &part in conjoined {
+                            graph.add_edge(conjunction, translate_node(part), VizEdge::Thin);
+                        }
+
+                        conjunction
+                    }
+                };
+
+                for &lhs in lhs {
+                    let lhs = translate_node(lhs);
+
+                    graph.add_edge(lhs, rhs, edge);
+                }
+            }
+        }
+
+        let pretty = ccx.pretty(ClausePrettyFmtOpts { verbose: true });
+
+        fmt::from_fn(|f| {
+            Dot::with_attr_getters(
+                &graph,
+                &[],
+                &|_, edge| match edge.weight() {
+                    VizEdge::Thin => "color=red".to_string(),
+                    VizEdge::Constraint => "color=black".to_string(),
+                    VizEdge::Permission => "color=gray".to_string(),
+                },
+                &|_, (_, node)| match node {
+                    VizNode::Gc => "shape=rectangle, color=gold".to_string(),
+                    VizNode::Universal(_) => "shape=rectangle, color=green".to_string(),
+                    VizNode::Infer(_) => "shape=circle, color=blue".to_string(),
+                    VizNode::Conjunction => "shape=circle, color=red".to_string(),
+                },
+            )
+            .graph_fmt(
+                f,
+                |node, f| match *node {
+                    VizNode::Gc => f.write_str("'gc"),
+                    VizNode::Universal(var) => pretty.wrap(var).fmt(f),
+                    VizNode::Infer(var) => pretty.wrap(Re::InferVar(var)).fmt(f),
+                    VizNode::Conjunction => f.write_str("^"),
+                },
+                |_edge, _f| Ok(()),
+            )
+        })
+        .to_string()
+    }
 }
 
 // === PermissionElaborator === //
@@ -331,8 +449,8 @@ impl PermissionElaborator {
         tracker: &mut RegionRelationGraph<'sess>,
         queue: &mut PromiseResolutionQueue<'sess>,
     ) {
-        let mut backward = DirectionalPermissionElaborator::new(self, Direction::Incoming);
         let mut forward = DirectionalPermissionElaborator::new(self, Direction::Outgoing);
+        let mut backward = DirectionalPermissionElaborator::new(self, Direction::Incoming);
 
         for edge in self.graph.edge_references() {
             if *edge.weight() != PERMISSION_EDGE {

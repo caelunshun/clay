@@ -1,7 +1,7 @@
 use crate::semantic::{
     infer::{
-        Promise, PromiseResolutionQueue, ReAndReUnifyError, ReConstraintOrder, UnifyCxMode,
-        unify::regions::graph::RegionRelationGraph,
+        ClauseCx, Promise, PromiseResolutionQueue, ReAndReUnifyError, ReConstraintOrder,
+        UnifyCxMode, unify::regions::graph::RegionRelationGraph,
     },
     syntax::{InferReVar, Re, RelationMode, UniversalReVar, UniversalReVarSourceInfo},
 };
@@ -91,6 +91,14 @@ impl<'sess> ReUnifyTracker<'sess> {
         relations.verify(&mut queue, self.universals.len(), self.next_infer.index());
 
         queue
+    }
+
+    pub fn graphviz(&self, ccx: &ClauseCx<'_>) -> String {
+        if let Some(relations) = &self.relations {
+            relations.graphviz(ccx, self.universals.len(), self.next_infer.index())
+        } else {
+            "[relations unavailable]".to_string()
+        }
     }
 }
 

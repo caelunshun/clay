@@ -3,10 +3,10 @@ use crate::{
     base::{ErrorGuaranteed, Session, ValueInternable},
     semantic::{
         infer::{
-            HrtbUniverse, InferTyLeaksHrtbVarError, InferTyLeaksUniversalError, InferTyOccursError,
-            MultiPromiseBuilder, Promise, PromiseResolutionQueue, ReAndReUnifyError,
-            TyAndSimpleTySetUnifyError, TyAndTyRegionUnifyError, TyAndTyStructuralUnifyError,
-            TyAndTyUnifyCulprit,
+            ClauseCx, HrtbUniverse, InferTyLeaksHrtbVarError, InferTyLeaksUniversalError,
+            InferTyOccursError, MultiPromiseBuilder, Promise, PromiseResolutionQueue,
+            ReAndReUnifyError, TyAndSimpleTySetUnifyError, TyAndTyRegionUnifyError,
+            TyAndTyStructuralUnifyError, TyAndTyUnifyCulprit,
         },
         syntax::{
             DebruijnTop, FnInstanceInner, FnOwner, HrtbBinder, InferTyVar, InferTyVarSourceInfo,
@@ -139,6 +139,10 @@ impl<'sess> UnifyCx<'sess> {
             }
             _ => ty,
         }
+    }
+
+    pub fn region_graphviz(&self, ccx: &ClauseCx<'_>) -> String {
+        self.regions.graphviz(ccx)
     }
 
     pub fn fresh_re_universal(&mut self, src_info: UniversalReVarSourceInfo) -> Re {
