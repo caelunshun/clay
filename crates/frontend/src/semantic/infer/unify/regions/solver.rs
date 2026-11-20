@@ -197,7 +197,7 @@ impl RegionFormulaSolver {
 mod solver_sat {
     use super::*;
     use crate::semantic::syntax::RelationMode;
-    use clay_core::FastHashMap;
+    use clay_core::{FastHashMap, FastHashSet};
     use hashbrown::hash_map;
     use petgraph::{Direction, algo::TarjanScc, visit::EdgeRef};
     use std::rc::Rc;
@@ -243,8 +243,6 @@ mod solver_sat {
                 }
             }
 
-            println!("{solver}");
-
             // TODO: create actual errors
             match solver.check() {
                 SatResult::Unsat => Ok(()),
@@ -265,7 +263,7 @@ mod solver_sat {
         universal_vars: Rc<IndexVec<UniversalReVar, Bool>>,
         existential_vars_pre: IndexVec<InferReVar, Option<Bool>>,
         existential_vars_post: IndexVec<InferReVar, Option<Bool>>,
-        curr_existential_lower_cache: FastHashMap<InferReVar, Option<Bool>>,
+        curr_reentrant_existentials: FastHashSet<InferReVar>,
         impl_lhs: NodeIndex,
         impl_rhs: NodeIndex,
         is_populating: bool,
@@ -303,7 +301,7 @@ mod solver_sat {
                 universal_vars: Rc::new(universal_vars),
                 existential_vars_pre: existential_vars.clone(),
                 existential_vars_post: existential_vars,
-                curr_existential_lower_cache: FastHashMap::default(),
+                curr_reentrant_existentials: FastHashSet::default(),
                 impl_lhs,
                 impl_rhs,
                 is_populating: false,
@@ -339,7 +337,7 @@ mod solver_sat {
 
             // Populate `existential_vars_pre`
             tarjan_scc.run(&sub_graph, |scc| {
-                self.curr_existential_lower_cache.clear();
+                self.curr_reentrant_existentials.clear();
 
                 for &var in scc {
                     let FormulaNode::Existential(var) = graph[var] else {
@@ -362,7 +360,7 @@ mod solver_sat {
             }
 
             tarjan_scc.run(&sub_graph, |scc| {
-                self.curr_existential_lower_cache.clear();
+                self.curr_reentrant_existentials.clear();
 
                 for &var in scc {
                     let FormulaNode::Existential(var) = graph[var] else {
@@ -375,7 +373,7 @@ mod solver_sat {
         }
 
         fn populate_existential(&mut self, var: InferReVar, conclusion_mode: ConclusionMode) {
-            debug_assert!(self.curr_existential_lower_cache.is_empty());
+            debug_assert!(self.curr_reentrant_existentials.is_empty());
 
             let term = Bool::new_const(format!(
                 "'i{}_{}",
@@ -401,7 +399,7 @@ mod solver_sat {
                 }
             }
 
-            self.curr_existential_lower_cache.clear();
+            self.curr_reentrant_existentials.clear();
         }
 
         fn are_universals_sound(&mut self, conclusion_mode: ConclusionMode) -> Bool {
@@ -457,27 +455,14 @@ mod solver_sat {
                     // population if we hit another term in the strongly connected component.
                     debug_assert!(self.is_populating);
 
-                    match self.curr_existential_lower_cache.entry(var) {
-                        hash_map::Entry::Occupied(entry) => {
-                            return match entry.get() {
-                                Some(already_lowered_locally) => {
-                                    Some(already_lowered_locally.clone())
-                                }
-                                None => {
-                                    // Reentrant!
-                                    None
-                                }
-                            };
-                        }
-                        hash_map::Entry::Vacant(entry) => {
-                            entry.insert_entry(None);
-                        }
+                    if !self.curr_reentrant_existentials.insert(var) {
+                        // Reentrant!
+                        return None;
                     }
 
                     let term = self.is_node_implied_uncached(node, conclusion_mode);
 
-                    self.curr_existential_lower_cache
-                        .insert(var, Some(term.clone()));
+                    self.curr_reentrant_existentials.remove(&var);
 
                     Some(term)
                 }
