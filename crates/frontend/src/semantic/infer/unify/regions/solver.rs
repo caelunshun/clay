@@ -196,8 +196,9 @@ impl RegionFormulaSolver {
 
 mod solver_sat {
     use super::*;
-    use huub::model::{Model, View, expressions::BoolFormula};
+    use crate::semantic::syntax::RelationMode;
     use petgraph::{Direction, visit::EdgeRef};
+    use z3::{SatResult, Solver, ast::Bool};
 
     impl RegionFormulaSolver {
         pub(super) fn check_implication_sat(
@@ -205,8 +206,8 @@ mod solver_sat {
             lhs: NodeIndex,
             rhs: NodeIndex,
         ) -> Result<(), ReAndReUnifyError> {
-            let mut model = Model::default();
-            let model_vars = ModelVarSet::new(&mut model, self, lhs, rhs);
+            let mut solver = Solver::new();
+            let model_vars = ModelVarSet::new(&mut solver, self, lhs, rhs);
 
             match self.graph[rhs] {
                 FormulaNode::Universal(_) => {
@@ -216,12 +217,7 @@ mod solver_sat {
                     let cond_2 = model_vars.is_alive(lhs, ConclusionMode::ExcludeConclusion);
                     let cond_3 = model_vars.is_alive(rhs, ConclusionMode::ExcludeConclusion);
 
-                    model
-                        .proposition(BoolFormula::And(
-                            [cond_1, cond_2, BoolFormula::Not(Box::new(cond_3))].into(),
-                        ))
-                        .post()
-                        .unwrap();
+                    solver.assert(cond_1 & cond_2 & !cond_3);
                 }
                 FormulaNode::Existential(_) => {
                     // If the universals are sound and the `lhs` is forced to be true without
@@ -234,27 +230,32 @@ mod solver_sat {
                     let cond_2 = model_vars.is_alive(lhs, ConclusionMode::ExcludeConclusion);
                     let cond_3 = model_vars.are_universals_sound(ConclusionMode::IncludeConclusion);
 
-                    model
-                        .proposition(BoolFormula::And(
-                            [cond_1, cond_2, BoolFormula::Not(Box::new(cond_3))].into(),
-                        ))
-                        .post()
-                        .unwrap();
+                    solver.assert(cond_1 & cond_2 & !cond_3);
                 }
                 FormulaNode::And | FormulaNode::True => {
                     unreachable!()
                 }
             }
 
-            todo!()
+            // TODO: create actual errors
+            match solver.check() {
+                SatResult::Unsat => Ok(()),
+                SatResult::Sat => Err(ReAndReUnifyError {
+                    lhs: Re::Gc,
+                    rhs: Re::Gc,
+                    mode: RelationMode::Equate,
+                    causes: Vec::new(),
+                }),
+                SatResult::Unknown => unreachable!(),
+            }
         }
     }
 
     struct ModelVarSet<'a> {
-        solver: &'a RegionFormulaSolver,
-        universal_vars: IndexVec<UniversalReVar, View<bool>>,
-        existential_vars_orig: IndexVec<InferReVar, View<bool>>,
-        existential_vars_concluded: IndexVec<InferReVar, View<bool>>,
+        formulas: &'a RegionFormulaSolver,
+        universal_vars: IndexVec<UniversalReVar, Bool>,
+        existential_vars_orig: IndexVec<InferReVar, Bool>,
+        existential_vars_concluded: IndexVec<InferReVar, Bool>,
         impl_lhs: NodeIndex,
         impl_rhs: NodeIndex,
     }
@@ -268,31 +269,31 @@ mod solver_sat {
 
     impl<'a> ModelVarSet<'a> {
         fn new(
-            model: &mut Model,
-            solver: &'a RegionFormulaSolver,
+            solver: &mut Solver,
+            formulas: &'a RegionFormulaSolver,
             impl_lhs: NodeIndex,
             impl_rhs: NodeIndex,
         ) -> Self {
-            let universal_vars = solver
+            let universal_vars = formulas
                 .universal_nodes
                 .indices()
-                .map(|_| model.new_bool_decision())
+                .map(|var| Bool::new_const(format!("'u{}", var.index())))
                 .collect::<IndexVec<UniversalReVar, _>>();
 
-            let existential_vars_orig = solver
+            let existential_vars_orig = formulas
                 .existential_nodes
                 .indices()
-                .map(|_| model.new_bool_decision())
+                .map(|var| Bool::new_const(format!("'i{}_orig", var.index())))
                 .collect::<IndexVec<InferReVar, _>>();
 
-            let existential_vars_concluded = solver
+            let existential_vars_concluded = formulas
                 .existential_nodes
                 .indices()
-                .map(|_| model.new_bool_decision())
+                .map(|var| Bool::new_const(format!("'i{}_concluded", var.index())))
                 .collect::<IndexVec<InferReVar, _>>();
 
             let this = Self {
-                solver,
+                formulas,
                 universal_vars,
                 existential_vars_orig,
                 existential_vars_concluded,
@@ -300,74 +301,58 @@ mod solver_sat {
                 impl_rhs,
             };
 
-            this.populate(model);
+            this.populate(solver);
 
             this
         }
 
-        fn populate(&self, model: &mut Model) {
-            for (&existential_node, (&existential_var_orig, &existential_var_concluded)) in
-                self.solver.existential_nodes.iter().zip(
+        fn populate(&self, solver: &mut Solver) {
+            for (&existential_node, (existential_var_orig, existential_var_concluded)) in
+                self.formulas.existential_nodes.iter().zip(
                     self.existential_vars_orig
                         .iter()
                         .zip(&self.existential_vars_concluded),
                 )
             {
-                model
-                    .proposition(BoolFormula::Equiv(
-                        [
-                            BoolFormula::Atom(existential_var_orig),
-                            self.is_node_implied(
-                                existential_node,
-                                ConclusionMode::ExcludeConclusion,
-                            ),
-                        ]
-                        .into(),
-                    ))
-                    .post()
-                    .unwrap();
+                solver.assert(
+                    existential_var_orig
+                        .eq(self
+                            .is_node_implied(existential_node, ConclusionMode::ExcludeConclusion)),
+                );
 
-                model
-                    .proposition(BoolFormula::Equiv(
-                        [
-                            BoolFormula::Atom(existential_var_concluded),
-                            self.is_node_implied(
-                                existential_node,
-                                ConclusionMode::IncludeConclusion,
-                            ),
-                        ]
-                        .into(),
-                    ))
-                    .post()
-                    .unwrap();
+                solver.assert(
+                    existential_var_concluded
+                        .eq(self
+                            .is_node_implied(existential_node, ConclusionMode::IncludeConclusion)),
+                );
             }
         }
 
-        fn is_alive(&self, node: NodeIndex, conclusion_mode: ConclusionMode) -> BoolFormula {
-            match self.solver.graph[node] {
-                FormulaNode::And => BoolFormula::And(
-                    self.solver
+        fn is_alive(&self, node: NodeIndex, conclusion_mode: ConclusionMode) -> Bool {
+            match self.formulas.graph[node] {
+                FormulaNode::And => Bool::and(
+                    &self
+                        .formulas
                         .graph
                         .edges_directed(node, Direction::Incoming)
                         .map(|edge| self.is_alive(edge.source(), conclusion_mode))
-                        .collect(),
+                        .collect::<Vec<_>>(),
                 ),
-                FormulaNode::True => BoolFormula::Atom(View::from(true)),
-                FormulaNode::Universal(var) => BoolFormula::Atom(self.universal_vars[var]),
+                FormulaNode::True => Bool::from_bool(true),
+                FormulaNode::Universal(var) => self.universal_vars[var].clone(),
                 FormulaNode::Existential(var) => match conclusion_mode {
-                    ConclusionMode::ExcludeConclusion => {
-                        BoolFormula::Atom(self.existential_vars_orig[var])
-                    }
+                    ConclusionMode::ExcludeConclusion => self.existential_vars_orig[var].clone(),
                     ConclusionMode::IncludeConclusion => {
-                        BoolFormula::Atom(self.existential_vars_concluded[var])
+                        self.existential_vars_concluded[var].clone()
                     }
                 },
             }
         }
 
-        fn is_node_implied(&self, node: NodeIndex, conclusion_mode: ConclusionMode) -> BoolFormula {
-            BoolFormula::Or(
-                self.solver
+        fn is_node_implied(&self, node: NodeIndex, conclusion_mode: ConclusionMode) -> Bool {
+            Bool::or(
+                &self
+                    .formulas
                     .graph
                     .edges_directed(node, Direction::Incoming)
                     .map(|edge| edge.source())
@@ -376,22 +361,21 @@ mod solver_sat {
                             .then_some(self.impl_lhs),
                     )
                     .map(|src| self.is_alive(src, conclusion_mode))
-                    .collect(),
+                    .collect::<Vec<_>>(),
             )
         }
 
-        fn are_universals_sound(&self, conclusion_mode: ConclusionMode) -> BoolFormula {
-            BoolFormula::And(
-                self.universal_vars
+        fn are_universals_sound(&self, conclusion_mode: ConclusionMode) -> Bool {
+            Bool::and(
+                &self
+                    .universal_vars
                     .iter()
-                    .zip(&self.solver.universal_nodes)
-                    .map(|(&universal_var, &universal_node)| {
-                        BoolFormula::Implies(
-                            Box::new(self.is_node_implied(universal_node, conclusion_mode)),
-                            Box::new(BoolFormula::Atom(universal_var)),
-                        )
+                    .zip(&self.formulas.universal_nodes)
+                    .map(|(universal_var, &universal_node)| {
+                        self.is_node_implied(universal_node, conclusion_mode)
+                            .implies(universal_var)
                     })
-                    .collect(),
+                    .collect::<Vec<_>>(),
             )
         }
     }
@@ -399,7 +383,6 @@ mod solver_sat {
 
 // === SMT-based solver === //
 
-#[cfg(test)]
 mod solver_smt {
     use super::*;
     use crate::semantic::syntax::{Re, RelationMode};

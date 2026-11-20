@@ -15,7 +15,6 @@ color-eyre.workspace = true
 derive-where.workspace = true
 disjoint.workspace = true
 hashbrown.workspace = true
-huub.workspace = true
 index_vec.workspace = true
 indexmap.workspace = true
 late-struct.workspace = true
@@ -27,7 +26,7 @@ smallvec.workspace = true
 termcolor.workspace = true
 thiserror.workspace = true
 unicode-xid.workspace = true
+z3.workspace = true
 
 [dev-dependencies]
 rand.workspace = true
-z3.workspace = true
