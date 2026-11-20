@@ -491,7 +491,9 @@ mod solver_sat {
                         .eval(&self.universal_vars[universal_var], false)
                         .unwrap()
                         .as_bool()
-                        .unwrap()
+                        // If the universal has no interpretation, assume it's not relevant to our
+                        // failure.
+                        .is_none_or(|v| v)
                     {
                         return None;
                     }
@@ -530,8 +532,15 @@ mod solver_sat {
 
             // If this term isn't alive, ignore it.
             let node_live = self.is_alive(node, ConclusionMode::IncludeConclusion);
+            let is_node_live = model
+                .eval(&node_live, false)
+                .unwrap()
+                .as_bool()
+                // If the value has no interpretation, assume it's dead and that it doesn't
+                // contribute to our failure.
+                .is_some_and(|v| v);
 
-            if !model.eval(&node_live, false).unwrap().as_bool().unwrap() {
+            if !is_node_live {
                 return false;
             }
 
@@ -577,20 +586,20 @@ mod solver_sat {
             model: &Model,
             reentrancy_set: &mut FastHashSet<InferReVar>,
         ) -> FastIndexSet<Re> {
-            let graph = &self.formulas.graph;
-
             let mut best_collect_into = None::<FastIndexSet<Re>>;
             let mut tmp_collect_into = FastIndexSet::<Re>::default();
 
-            for edge in graph.edges_directed(node, Direction::Incoming) {
+            for incoming in self
+                .formulas
+                .graph
+                .edges_directed(node, Direction::Incoming)
+                .map(|edge| edge.source())
+                .chain((node == self.impl_rhs).then_some(self.impl_lhs))
+            {
                 tmp_collect_into.clear();
 
-                let incoming_live = self.explain_why_alive(
-                    edge.source(),
-                    model,
-                    reentrancy_set,
-                    &mut tmp_collect_into,
-                );
+                let incoming_live =
+                    self.explain_why_alive(incoming, model, reentrancy_set, &mut tmp_collect_into);
 
                 if !incoming_live {
                     continue;
