@@ -197,8 +197,7 @@ impl RegionFormulaSolver {
 mod solver_sat {
     use super::*;
     use crate::semantic::syntax::RelationMode;
-    use clay_core::{FastHashMap, FastHashSet};
-    use hashbrown::hash_map;
+    use clay_core::FastHashSet;
     use petgraph::{Direction, algo::TarjanScc, visit::EdgeRef};
     use std::rc::Rc;
     use z3::{SatResult, Solver, ast::Bool};
@@ -337,15 +336,7 @@ mod solver_sat {
 
             // Populate `existential_vars_pre`
             tarjan_scc.run(&sub_graph, |scc| {
-                self.curr_reentrant_existentials.clear();
-
-                for &var in scc {
-                    let FormulaNode::Existential(var) = graph[var] else {
-                        continue;
-                    };
-
-                    self.populate_existential(var, ConclusionMode::ExcludeConclusion);
-                }
+                self.populate_existentials_scc(scc, ConclusionMode::ExcludeConclusion);
             });
 
             // Populate `existential_vars_post`
@@ -360,19 +351,29 @@ mod solver_sat {
             }
 
             tarjan_scc.run(&sub_graph, |scc| {
-                self.curr_reentrant_existentials.clear();
-
-                for &var in scc {
-                    let FormulaNode::Existential(var) = graph[var] else {
-                        continue;
-                    };
-
-                    self.populate_existential(var, ConclusionMode::IncludeConclusion);
-                }
+                self.populate_existentials_scc(scc, ConclusionMode::IncludeConclusion);
             });
         }
 
-        fn populate_existential(&mut self, var: InferReVar, conclusion_mode: ConclusionMode) {
+        fn populate_existentials_scc(
+            &mut self,
+            scc: &[NodeIndex],
+            conclusion_mode: ConclusionMode,
+        ) {
+            for &node in scc {
+                let FormulaNode::Existential(var) = self.formulas.graph[node] else {
+                    continue;
+                };
+
+                self.populate_existential(var, conclusion_mode);
+            }
+        }
+
+        fn populate_existential(
+            &mut self,
+            var: InferReVar,
+            conclusion_mode: ConclusionMode,
+        ) -> Bool {
             debug_assert!(self.curr_reentrant_existentials.is_empty());
 
             let term = Bool::new_const(format!(
@@ -392,14 +393,16 @@ mod solver_sat {
 
             match conclusion_mode {
                 ConclusionMode::ExcludeConclusion => {
-                    self.existential_vars_pre[var] = Some(term);
+                    self.existential_vars_pre[var] = Some(term.clone());
                 }
                 ConclusionMode::IncludeConclusion => {
-                    self.existential_vars_post[var] = Some(term);
+                    self.existential_vars_post[var] = Some(term.clone());
                 }
             }
 
             self.curr_reentrant_existentials.clear();
+
+            term
         }
 
         fn are_universals_sound(&mut self, conclusion_mode: ConclusionMode) -> Bool {
@@ -418,28 +421,17 @@ mod solver_sat {
         }
 
         fn is_alive(&mut self, node: NodeIndex, conclusion_mode: ConclusionMode) -> Bool {
-            self.is_alive_reentrant(node, conclusion_mode).unwrap()
-        }
-
-        fn is_alive_reentrant(
-            &mut self,
-            node: NodeIndex,
-            conclusion_mode: ConclusionMode,
-        ) -> Option<Bool> {
             match self.formulas.graph[node] {
-                FormulaNode::And => Some(Bool::and(
+                FormulaNode::And => Bool::and(
                     &self
                         .formulas
                         .graph
                         .edges_directed(node, Direction::Incoming)
-                        .map(|edge| {
-                            self.is_alive_reentrant(edge.source(), conclusion_mode)
-                                .unwrap_or(Bool::from_bool(false))
-                        })
+                        .map(|edge| self.is_alive(edge.source(), conclusion_mode))
                         .collect::<Vec<_>>(),
-                )),
-                FormulaNode::True => Some(Bool::from_bool(true)),
-                FormulaNode::Universal(var) => Some(self.universal_vars[var].clone()),
+                ),
+                FormulaNode::True => Bool::from_bool(true),
+                FormulaNode::Universal(var) => self.universal_vars[var].clone(),
                 FormulaNode::Existential(var) => {
                     // See whether we've finished the term completely before.
                     let finished_cache = match conclusion_mode {
@@ -448,7 +440,7 @@ mod solver_sat {
                     };
 
                     if let Some(term) = &finished_cache[var] {
-                        return Some(term.clone());
+                        return term.clone();
                     }
 
                     // Otherwise, lower it with reentrancy. This should only happen during
@@ -457,14 +449,14 @@ mod solver_sat {
 
                     if !self.curr_reentrant_existentials.insert(var) {
                         // Reentrant!
-                        return None;
+                        return Bool::from_bool(false);
                     }
 
                     let term = self.is_node_implied_uncached(node, conclusion_mode);
 
                     self.curr_reentrant_existentials.remove(&var);
 
-                    Some(term)
+                    term
                 }
             }
         }
@@ -484,7 +476,7 @@ mod solver_sat {
                         (conclusion_mode.is_truthy() && node == self.impl_rhs)
                             .then_some(self.impl_lhs),
                     )
-                    .filter_map(|src| self.is_alive_reentrant(src, conclusion_mode))
+                    .map(|src| self.is_alive(src, conclusion_mode))
                     .collect::<Vec<_>>(),
             )
         }
@@ -624,8 +616,15 @@ mod tests {
     use rand::{Rng, RngExt, SeedableRng as _, rngs::Xoshiro256PlusPlus};
 
     #[test]
-    fn prop_test() {
+    fn prop_test_fast() {
         for i in 0..1000 {
+            prop_test_id(i);
+        }
+    }
+
+    #[test]
+    fn prop_test_slow() {
+        for i in 0..100_000 {
             prop_test_id(i);
         }
     }

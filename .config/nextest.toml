@@ -7,6 +7,17 @@ command = "cargo run --bin setup_harness"
 filter = "deps(clay-frontend-uitest)"
 setup = "setup-frontend-uitest"
 
+[profile.default]
+default-filter = "not(test(prop_test_slow))"
+
+[[profile.default.overrides]]
+filter = "test(prop_test_slow)"
+slow-timeout = { period = "10m", terminate-after = 2 }
+
+[profile.slow]
+default-filter = "all()"
+fail-fast = false
+
 [profile.frontend-uitest]
 default-filter = "deps(clay-frontend-uitest)"
 fail-fast = false
