@@ -2,7 +2,7 @@ use crate::{
     base::ErrorGuaranteed,
     bool_enum,
     semantic::{
-        infer::ReAndReUnifyError,
+        infer::ReAndReUnifyErrorCause,
         syntax::{InferReVar, Re, UniversalReVar},
     },
 };
@@ -96,7 +96,7 @@ impl RegionFormulaSolver {
         &mut self,
         lhs: impl IntoIterator<Item = RegionFormulaTerm>,
         rhs: impl IntoIterator<Item = RegionFormulaTerm>,
-    ) -> Result<(), ReAndReUnifyError> {
+    ) -> Result<(), ReAndReUnifyErrorCause> {
         self.push_common(ShouldValidate::Yes, lhs, rhs)
     }
 
@@ -105,7 +105,7 @@ impl RegionFormulaSolver {
         should_validate: ShouldValidate,
         lhs: impl IntoIterator<Item = RegionFormulaTerm>,
         rhs: impl IntoIterator<Item = RegionFormulaTerm>,
-    ) -> Result<(), ReAndReUnifyError> {
+    ) -> Result<(), ReAndReUnifyErrorCause> {
         let rhs = rhs
             .into_iter()
             .filter(|term| !matches!(term, RegionFormulaTerm::True))
@@ -192,31 +192,31 @@ impl RegionFormulaSolver {
     }
 }
 
-// === SAT-based solver === //
+// === SAT solver === //
 
 mod solver_sat {
     use super::*;
-    use crate::semantic::syntax::RelationMode;
-    use clay_core::FastHashSet;
+    use crate::semantic::infer::ReAndReUnifyErrorCause;
+    use clay_core::{FastHashSet, FastIndexSet};
     use petgraph::{Direction, algo::TarjanScc, visit::EdgeRef};
-    use std::rc::Rc;
-    use z3::{SatResult, Solver, ast::Bool};
+    use std::{mem, rc::Rc};
+    use z3::{Model, SatResult, Solver, ast::Bool};
 
     impl RegionFormulaSolver {
         pub(super) fn check_implication_sat(
             &self,
             lhs: NodeIndex,
             rhs: NodeIndex,
-        ) -> Result<(), ReAndReUnifyError> {
+        ) -> Result<(), ReAndReUnifyErrorCause> {
             let solver = Solver::new();
-            let mut model_vars = ModelVarSet::new(&solver, self, lhs, rhs);
+            let mut var_set = ModelVarSet::new(&solver, self, lhs, rhs);
 
             match self.graph[rhs] {
                 FormulaNode::Universal(_) => {
                     // If the universals are sound, see if we can show `lhs` but not show `rhs`.
-                    let cond_1 = model_vars.are_universals_sound(ConclusionMode::ExcludeConclusion);
-                    let cond_2 = model_vars.is_alive(lhs, ConclusionMode::ExcludeConclusion);
-                    let cond_3 = model_vars.is_alive(rhs, ConclusionMode::ExcludeConclusion);
+                    let cond_1 = var_set.are_universals_sound(ConclusionMode::ExcludeConclusion);
+                    let cond_2 = var_set.is_alive(lhs, ConclusionMode::ExcludeConclusion);
+                    let cond_3 = var_set.is_alive(rhs, ConclusionMode::ExcludeConclusion);
 
                     solver.assert(cond_1);
                     solver.assert(cond_2);
@@ -229,9 +229,9 @@ mod solver_sat {
                     // `rhs` must be false, giving us a set of universals which disprove our
                     // conclusion.
 
-                    let cond_1 = model_vars.are_universals_sound(ConclusionMode::ExcludeConclusion);
-                    let cond_2 = model_vars.is_alive(lhs, ConclusionMode::ExcludeConclusion);
-                    let cond_3 = model_vars.are_universals_sound(ConclusionMode::IncludeConclusion);
+                    let cond_1 = var_set.are_universals_sound(ConclusionMode::ExcludeConclusion);
+                    let cond_2 = var_set.is_alive(lhs, ConclusionMode::ExcludeConclusion);
+                    let cond_3 = var_set.are_universals_sound(ConclusionMode::IncludeConclusion);
 
                     solver.assert(cond_1);
                     solver.assert(cond_2);
@@ -242,15 +242,13 @@ mod solver_sat {
                 }
             }
 
-            // TODO: create actual errors
             match solver.check() {
                 SatResult::Unsat => Ok(()),
-                SatResult::Sat => Err(ReAndReUnifyError {
-                    lhs: Re::Gc,
-                    rhs: Re::Gc,
-                    mode: RelationMode::Equate,
-                    causes: Vec::new(),
-                }),
+                SatResult::Sat => {
+                    let model = solver.get_model().unwrap();
+
+                    Err(var_set.explain_rejection(&model))
+                }
                 SatResult::Unknown => unreachable!(),
             }
         }
@@ -480,15 +478,145 @@ mod solver_sat {
                     .collect::<Vec<_>>(),
             )
         }
+
+        fn explain_rejection(&mut self, model: &Model) -> ReAndReUnifyErrorCause {
+            let mut reentrancy_set = FastHashSet::default();
+
+            self.formulas
+                .universal_nodes
+                .iter_enumerated()
+                .filter_map(|(universal_var, &universal_node)| {
+                    // Is this universal forced to be alive but actually dead?
+                    if model
+                        .eval(&self.universal_vars[universal_var], false)
+                        .unwrap()
+                        .as_bool()
+                        .unwrap()
+                    {
+                        return None;
+                    }
+
+                    let is_implied = self.is_node_implied_uncached(
+                        universal_node,
+                        ConclusionMode::IncludeConclusion,
+                    );
+
+                    if !model.eval(&is_implied, false).unwrap().as_bool().unwrap() {
+                        return None;
+                    }
+
+                    // If so, create a cause for it.
+                    let to_outlive =
+                        self.explain_why_implied(universal_node, model, &mut reentrancy_set);
+
+                    Some(ReAndReUnifyErrorCause {
+                        requires_var: universal_var,
+                        to_outlive: to_outlive.into_iter().collect(),
+                    })
+                })
+                // ...and find the most succinct cause
+                .min_by_key(|v| v.to_outlive.len())
+                .expect("no cause??")
+        }
+
+        fn explain_why_alive(
+            &mut self,
+            node: NodeIndex,
+            model: &Model,
+            reentrancy_set: &mut FastHashSet<InferReVar>,
+            collect_into: &mut FastIndexSet<Re>,
+        ) -> bool {
+            let graph = &self.formulas.graph;
+
+            // If this term isn't alive, ignore it.
+            let node_live = self.is_alive(node, ConclusionMode::IncludeConclusion);
+
+            if !model.eval(&node_live, false).unwrap().as_bool().unwrap() {
+                return false;
+            }
+
+            // Otherwise, collect the minimum set of regions it needs.
+            match graph[node] {
+                FormulaNode::And => {
+                    for edge in graph.edges_directed(node, Direction::Incoming) {
+                        let incoming_live = self.explain_why_alive(
+                            edge.source(),
+                            model,
+                            reentrancy_set,
+                            collect_into,
+                        );
+
+                        debug_assert!(incoming_live);
+                    }
+                }
+                FormulaNode::True => {
+                    collect_into.insert(Re::Gc);
+                }
+                FormulaNode::Universal(var) => {
+                    collect_into.insert(Re::UniversalVar(var));
+                }
+                FormulaNode::Existential(var) => {
+                    if !reentrancy_set.insert(var) {
+                        // We already checked whether this term was live.
+                        return true;
+                    }
+
+                    let why_implied = self.explain_why_implied(node, model, reentrancy_set);
+
+                    collect_into.extend(why_implied);
+                    reentrancy_set.remove(&var);
+                }
+            }
+
+            true
+        }
+
+        fn explain_why_implied(
+            &mut self,
+            node: NodeIndex,
+            model: &Model,
+            reentrancy_set: &mut FastHashSet<InferReVar>,
+        ) -> FastIndexSet<Re> {
+            let graph = &self.formulas.graph;
+
+            let mut best_collect_into = None::<FastIndexSet<Re>>;
+            let mut tmp_collect_into = FastIndexSet::<Re>::default();
+
+            for edge in graph.edges_directed(node, Direction::Incoming) {
+                tmp_collect_into.clear();
+
+                let incoming_live = self.explain_why_alive(
+                    edge.source(),
+                    model,
+                    reentrancy_set,
+                    &mut tmp_collect_into,
+                );
+
+                if !incoming_live {
+                    continue;
+                }
+
+                if best_collect_into
+                    .as_ref()
+                    .is_none_or(|best| tmp_collect_into.len() < best.len())
+                {
+                    mem::swap(
+                        best_collect_into.get_or_insert_default(),
+                        &mut tmp_collect_into,
+                    );
+                }
+            }
+
+            best_collect_into.unwrap()
+        }
     }
 }
 
-// === SMT-based solver === //
+// === SMT solver === //
 
 #[cfg(test)]
 mod solver_smt {
     use super::*;
-    use crate::semantic::syntax::{Re, RelationMode};
     use index_vec::IndexSlice;
     use petgraph::visit::EdgeRef;
     use z3::{
@@ -496,12 +624,15 @@ mod solver_smt {
         ast::{Ast, Bool, exists_const, forall_const},
     };
 
+    #[derive(Debug, Default)]
+    pub struct SmtRejected;
+
     impl RegionFormulaSolver {
         pub(super) fn check_implication_smt(
             &self,
             lhs: NodeIndex,
             rhs: NodeIndex,
-        ) -> Result<(), ReAndReUnifyError> {
+        ) -> Result<(), SmtRejected> {
             // Create the required terms
             let universals = self
                 .universal_nodes
@@ -571,13 +702,7 @@ mod solver_smt {
 
             match solver.check() {
                 SatResult::Sat => Ok(()),
-                // TODO: update
-                SatResult::Unsat => Err(ReAndReUnifyError {
-                    lhs: Re::Gc,
-                    rhs: Re::Gc,
-                    mode: RelationMode::Equate,
-                    causes: Vec::new(),
-                }),
+                SatResult::Unsat => Err(SmtRejected),
                 SatResult::Unknown => unreachable!(),
             }
         }

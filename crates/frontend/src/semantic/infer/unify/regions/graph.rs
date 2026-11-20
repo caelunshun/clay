@@ -185,7 +185,7 @@ impl<'sess> RegionRelationGraph<'sess> {
 
         for constraint in constraints {
             let handle = constraint.handle.as_ref().unwrap();
-            let mut errors = Vec::new();
+            let mut causes = Vec::new();
 
             for (lhs, rhs) in constraint.mode.enumerate(
                 // Same as above.
@@ -193,21 +193,27 @@ impl<'sess> RegionRelationGraph<'sess> {
                 &self.buffer[constraint.lhs.to_ops_range()],
             ) {
                 if let Err(err) = solver.push_checked(lhs.iter().copied(), rhs.iter().copied()) {
-                    errors.push(err);
+                    causes.push(err);
                 }
             }
 
-            if errors.is_empty() {
+            if causes.is_empty() {
                 handle.queue_accept(queue);
             } else {
                 // TODO
                 handle.queue_reject(
                     queue,
                     ReAndReUnifyError {
-                        lhs: Re::Gc,
-                        rhs: Re::Gc,
-                        mode: RelationMode::Equate,
-                        causes: Vec::new(),
+                        lhs: self.buffer[constraint.lhs.to_ops_range()]
+                            .iter()
+                            .map(|v| v.to_re())
+                            .collect(),
+                        rhs: self.buffer[constraint.rhs.to_ops_range()]
+                            .iter()
+                            .map(|v| v.to_re())
+                            .collect(),
+                        mode: constraint.mode,
+                        causes,
                     },
                 );
             }

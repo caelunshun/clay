@@ -12,8 +12,9 @@ use crate::{
             UniversalReVar, UniversalTy,
         },
     },
-    utils::format::DebugTree,
+    utils::format::{DebugTree, SimpleListFormatGlue, format_list},
 };
+use smallvec::SmallVec;
 
 // === ToDebugTree === //
 
@@ -1057,8 +1058,8 @@ impl ToDebugTree for TyAndTyRegionUnifyError {
 
 #[derive(Debug, Clone)]
 pub struct ReAndReUnifyError {
-    pub lhs: Re,
-    pub rhs: Re,
+    pub lhs: SmallVec<[Re; 1]>,
+    pub rhs: SmallVec<[Re; 1]>,
     pub mode: RelationMode,
     pub causes: Vec<ReAndReUnifyErrorCause>,
 }
@@ -1067,8 +1068,20 @@ impl ToDebugTree for ReAndReUnifyError {
     fn to_debug_tree(&self, pretty: &ClausePrettyFmtCx<'_, '_>) -> DebugTree {
         DebugTree::new()
             .with_prose("re and re unify error")
-            .with_prose(format!("LHS: {}", pretty.wrap(self.lhs)))
-            .with_prose(format!("RHS: {}", pretty.wrap(self.rhs)))
+            .with_prose(format!(
+                "LHS: {}",
+                format_list(
+                    self.lhs.iter().map(|v| pretty.wrap(v)),
+                    SimpleListFormatGlue::PLUS_LIST
+                )
+            ))
+            .with_prose(format!(
+                "RHS: {}",
+                format_list(
+                    self.rhs.iter().map(|v| pretty.wrap(v)),
+                    SimpleListFormatGlue::PLUS_LIST
+                )
+            ))
             .with_prose(format!("mode: {:?}", self.mode))
             .with_sublist(self.causes.to_debug_tree(pretty))
     }
@@ -1077,14 +1090,20 @@ impl ToDebugTree for ReAndReUnifyError {
 #[derive(Debug, Clone)]
 pub struct ReAndReUnifyErrorCause {
     pub requires_var: UniversalReVar,
-    pub to_outlive: Re,
+    pub to_outlive: Vec<Re>,
 }
 
 impl ToDebugTree for ReAndReUnifyErrorCause {
     fn to_debug_tree(&self, pretty: &ClausePrettyFmtCx<'_, '_>) -> DebugTree {
         DebugTree::new()
-            .with_prose(format!("requires var: {}", pretty.wrap(self.requires_var)))
-            .with_prose(format!("to outlive: {}", pretty.wrap(self.to_outlive)))
+            .with_prose(format!("requires var: {}", pretty.wrap(self.requires_var),))
+            .with_prose(format!(
+                "to outlive: {}",
+                format_list(
+                    self.to_outlive.iter().map(|v| pretty.wrap(v)),
+                    SimpleListFormatGlue::PLUS_LIST
+                )
+            ))
     }
 }
 
