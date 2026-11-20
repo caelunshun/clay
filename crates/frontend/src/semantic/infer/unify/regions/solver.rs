@@ -327,14 +327,29 @@ mod solver_sat {
             conclusion_mode: ConclusionMode,
         ) -> Option<Bool> {
             match self.formulas.graph[node] {
-                FormulaNode::And => Some(Bool::and(
-                    &self
+                FormulaNode::And => {
+                    debug_assert!(
+                        self.formulas
+                            .graph
+                            .edges_directed(node, Direction::Incoming)
+                            .next()
+                            .is_some()
+                    );
+
+                    let terms = self
                         .formulas
                         .graph
                         .edges_directed(node, Direction::Incoming)
                         .filter_map(|edge| self.is_alive_reentrant(edge.source(), conclusion_mode))
-                        .collect::<Vec<_>>(),
-                )),
+                        .collect::<Vec<_>>();
+
+                    if !terms.is_empty() {
+                        Some(Bool::and(&terms))
+                    } else {
+                        // This conjunction is fully coinductive. Assume it's false.
+                        Some(Bool::from_bool(false))
+                    }
+                }
                 FormulaNode::True => Some(Bool::from_bool(true)),
                 FormulaNode::Universal(var) => Some(self.universal_vars[var].clone()),
                 FormulaNode::Existential(var) => {
@@ -764,6 +779,52 @@ mod tests {
                 RegionFormulaTerm::Universal(UniversalReVar::from_usize(0)),
                 RegionFormulaTerm::Existential(InferReVar::from_usize(0)),
             ],
+            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(1))],
+        );
+    }
+
+    #[test]
+    fn generated_6() {
+        let mut solver = RegionFormulaSolver::new(1, 1);
+
+        // AXIOM: 'i0 -> 'u0
+        solver.push_axiom(
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
+            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(0))],
+        );
+
+        // AXIOM: 'i0 -> 'i0
+        solver.push_axiom(
+            [
+                RegionFormulaTerm::Existential(InferReVar::from_usize(0)),
+                RegionFormulaTerm::Existential(InferReVar::from_usize(0)),
+            ],
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
+        );
+
+        // ASSERTION: T -> 'i0
+        _ = solver.push_checked(
+            [RegionFormulaTerm::True],
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
+        );
+    }
+
+    #[test]
+    fn generated_7() {
+        let mut solver = RegionFormulaSolver::new(2, 1);
+
+        // ASSERTION: 'i0 ^ 'u0 -> 'i0
+        _ = solver.push_checked(
+            [
+                RegionFormulaTerm::Existential(InferReVar::from_usize(0)),
+                RegionFormulaTerm::Universal(UniversalReVar::from_usize(0)),
+            ],
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
+        );
+
+        // ASSERTION: 'i0 -> 'u1
+        _ = solver.push_checked(
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
             [RegionFormulaTerm::Universal(UniversalReVar::from_usize(1))],
         );
     }
