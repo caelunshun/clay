@@ -625,81 +625,85 @@ mod tests {
 
     #[test]
     fn prop_test() {
-        let mut rng = Xoshiro256PlusPlus::seed_from_u64(4);
-
         for i in 0..1000 {
-            println!("// >>>>>>>>> Test {i}");
+            prop_test_id(i);
+        }
+    }
 
-            // Not sure whether `usize` has platform-dependent behavior for `rand`.
-            let universal_count = rng.random_range::<u32, _>(1..=4);
-            let existential_count = rng.random_range::<u32, _>(1..=4);
+    fn prop_test_id(i: u64) {
+        println!("// >>>>>>>>> Test {i}");
+
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(i);
+
+        // Not sure whether `usize` has platform-dependent behavior for `rand`.
+        let universal_count = rng.random_range::<u32, _>(1..=4);
+        let existential_count = rng.random_range::<u32, _>(1..=4);
+
+        println!(
+            "let mut solver = RegionFormulaSolver::new({universal_count}, {existential_count});"
+        );
+        println!();
+
+        let mut solver =
+            RegionFormulaSolver::new(universal_count as usize, existential_count as usize);
+
+        // Setup axioms
+        for _ in 0..rng.random_range(0..=8) {
+            let lhs = (0..rng.random_range(1..=3))
+                .map(|_| random_term(&mut rng, universal_count, existential_count))
+                .collect::<SmallVec<[_; 3]>>();
+
+            let rhs = random_term(&mut rng, universal_count, existential_count);
 
             println!(
-                "let mut solver = RegionFormulaSolver::new({universal_count}, {existential_count});"
+                "// AXIOM: {} -> {}",
+                format_list(
+                    lhs.iter().copied().map(format_term_comment),
+                    SimpleListFormatGlue::new_delimited(" ^ ")
+                ),
+                format_term_comment(rhs),
+            );
+
+            println!(
+                "solver.push_axiom([{}], [{}]);",
+                format_list(
+                    lhs.iter().copied().map(format_term_code),
+                    SimpleListFormatGlue::COMMA_LIST
+                ),
+                format_term_code(rhs),
             );
             println!();
 
-            let mut solver =
-                RegionFormulaSolver::new(universal_count as usize, existential_count as usize);
+            solver.push_axiom(lhs.iter().copied(), [rhs]);
+        }
 
-            // Setup axioms
-            for _ in 0..rng.random_range(0..=8) {
-                let lhs = (0..rng.random_range(1..=3))
-                    .map(|_| random_term(&mut rng, universal_count, existential_count))
-                    .collect::<SmallVec<[_; 3]>>();
+        // Check equations
+        for _ in 0..8 {
+            let lhs = (0..rng.random_range(1..=3))
+                .map(|_| random_term(&mut rng, universal_count, existential_count))
+                .collect::<SmallVec<[_; 3]>>();
 
-                let rhs = random_term(&mut rng, universal_count, existential_count);
+            let rhs = random_term(&mut rng, universal_count, existential_count);
 
-                println!(
-                    "// AXIOM: {} -> {}",
-                    format_list(
-                        lhs.iter().copied().map(format_term_comment),
-                        SimpleListFormatGlue::new_delimited(" ^ ")
-                    ),
-                    format_term_comment(rhs),
-                );
+            println!(
+                "// ASSERTION: {} -> {}",
+                format_list(
+                    lhs.iter().copied().map(format_term_comment),
+                    SimpleListFormatGlue::new_delimited(" ^ ")
+                ),
+                format_term_comment(rhs),
+            );
+            println!(
+                "_ = solver.push_checked([{}], [{}]);",
+                format_list(
+                    lhs.iter().copied().map(format_term_code),
+                    SimpleListFormatGlue::COMMA_LIST
+                ),
+                format_term_code(rhs),
+            );
+            println!();
 
-                println!(
-                    "solver.push_axiom([{}], [{}]);",
-                    format_list(
-                        lhs.iter().copied().map(format_term_code),
-                        SimpleListFormatGlue::COMMA_LIST
-                    ),
-                    format_term_code(rhs),
-                );
-                println!();
-
-                solver.push_axiom(lhs.iter().copied(), [rhs]);
-            }
-
-            // Check equations
-            for _ in 0..8 {
-                let lhs = (0..rng.random_range(1..=3))
-                    .map(|_| random_term(&mut rng, universal_count, existential_count))
-                    .collect::<SmallVec<[_; 3]>>();
-
-                let rhs = random_term(&mut rng, universal_count, existential_count);
-
-                println!(
-                    "// ASSERTION: {} -> {}",
-                    format_list(
-                        lhs.iter().copied().map(format_term_comment),
-                        SimpleListFormatGlue::new_delimited(" ^ ")
-                    ),
-                    format_term_comment(rhs),
-                );
-                println!(
-                    "_ = solver.push_checked([{}], [{}]);",
-                    format_list(
-                        lhs.iter().copied().map(format_term_code),
-                        SimpleListFormatGlue::COMMA_LIST
-                    ),
-                    format_term_code(rhs),
-                );
-                println!();
-
-                _ = solver.push_checked(lhs, [rhs]);
-            }
+            _ = solver.push_checked(lhs, [rhs]);
         }
     }
 
