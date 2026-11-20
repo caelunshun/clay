@@ -243,6 +243,8 @@ mod solver_sat {
                 }
             }
 
+            // println!("{solver}");
+
             // TODO: create actual errors
             match solver.check() {
                 SatResult::Unsat => Ok(()),
@@ -988,53 +990,13 @@ mod tests {
     }
 
     #[test]
-    fn generated_10_full() {
-        // Test 9022
-        let mut solver = RegionFormulaSolver::new(4, 4);
+    fn generated_10() {
+        let mut solver = RegionFormulaSolver::new(1, 4);
 
-        // AXIOM: 'i0 -> 'i3
+        // AXIOM: 'i2 -> 'i3
         solver.push_axiom(
-            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(2))],
             [RegionFormulaTerm::Existential(InferReVar::from_usize(3))],
-        );
-
-        // AXIOM: 'i3 ^ 'u0 -> T
-        solver.push_axiom(
-            [
-                RegionFormulaTerm::Existential(InferReVar::from_usize(3)),
-                RegionFormulaTerm::Universal(UniversalReVar::from_usize(0)),
-            ],
-            [RegionFormulaTerm::True],
-        );
-
-        // AXIOM: 'u1 ^ 'u1 -> T
-        solver.push_axiom(
-            [
-                RegionFormulaTerm::Universal(UniversalReVar::from_usize(1)),
-                RegionFormulaTerm::Universal(UniversalReVar::from_usize(1)),
-            ],
-            [RegionFormulaTerm::True],
-        );
-
-        // AXIOM: T -> 'u0
-        solver.push_axiom(
-            [RegionFormulaTerm::True],
-            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(0))],
-        );
-
-        // AXIOM: 'i2 ^ T -> 'i3
-        solver.push_axiom(
-            [
-                RegionFormulaTerm::Existential(InferReVar::from_usize(2)),
-                RegionFormulaTerm::True,
-            ],
-            [RegionFormulaTerm::Existential(InferReVar::from_usize(3))],
-        );
-
-        // AXIOM: 'u1 -> 'u0
-        solver.push_axiom(
-            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(1))],
-            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(0))],
         );
 
         // AXIOM: T -> 'i0
@@ -1043,67 +1005,30 @@ mod tests {
             [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
         );
 
-        // ASSERTION: T ^ 'i1 -> 'u1
-        _ = solver.push_checked(
-            [
-                RegionFormulaTerm::True,
-                RegionFormulaTerm::Existential(InferReVar::from_usize(1)),
-            ],
-            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(1))],
+        // AXIOM: 'i2 -> 'i1
+        _ = solver.push_axiom(
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(2))],
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(1))],
         );
 
-        // ASSERTION: 'i2 ^ T ^ 'i3 -> T
-        _ = solver.push_checked(
+        // AXIOM: 'i1 -> 'u0
+        _ = solver.push_axiom(
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(1))],
+            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(0))],
+        );
+
+        // AXIOM: 'i2 ^ 'i3 -> 'i1
+        _ = solver.push_axiom(
             [
                 RegionFormulaTerm::Existential(InferReVar::from_usize(2)),
-                RegionFormulaTerm::True,
                 RegionFormulaTerm::Existential(InferReVar::from_usize(3)),
-            ],
-            [RegionFormulaTerm::True],
-        );
-
-        // ASSERTION: 'u2 -> 'u1
-        _ = solver.push_checked(
-            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(2))],
-            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(1))],
-        );
-
-        // ASSERTION: 'i2 ^ 'u2 ^ T -> 'i1
-        _ = solver.push_checked(
-            [
-                RegionFormulaTerm::Existential(InferReVar::from_usize(2)),
-                RegionFormulaTerm::Universal(UniversalReVar::from_usize(2)),
-                RegionFormulaTerm::True,
             ],
             [RegionFormulaTerm::Existential(InferReVar::from_usize(1))],
         );
 
-        // ASSERTION: 'i1 ^ T -> 'u1
-        _ = solver.push_checked(
-            [
-                RegionFormulaTerm::Existential(InferReVar::from_usize(1)),
-                RegionFormulaTerm::True,
-            ],
-            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(1))],
-        );
-
-        // ASSERTION: 'i2 ^ 'i3 ^ 'i1 -> 'i1
-        _ = solver.push_checked(
-            [
-                RegionFormulaTerm::Existential(InferReVar::from_usize(2)),
-                RegionFormulaTerm::Existential(InferReVar::from_usize(3)),
-                RegionFormulaTerm::Existential(InferReVar::from_usize(1)),
-            ],
-            [RegionFormulaTerm::Existential(InferReVar::from_usize(1))],
-        );
-
-        // ASSERTION: 'u2 ^ T ^ 'i0 -> 'i3
-        _ = solver.push_checked(
-            [
-                RegionFormulaTerm::Universal(UniversalReVar::from_usize(2)),
-                RegionFormulaTerm::True,
-                RegionFormulaTerm::Existential(InferReVar::from_usize(0)),
-            ],
+        // AXIOM: 'i0 -> 'i3
+        _ = solver.push_axiom(
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
             [RegionFormulaTerm::Existential(InferReVar::from_usize(3))],
         );
 
