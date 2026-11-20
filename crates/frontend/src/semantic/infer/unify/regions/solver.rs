@@ -198,6 +198,7 @@ mod solver_sat {
     use super::*;
     use crate::semantic::syntax::RelationMode;
     use petgraph::{Direction, visit::EdgeRef};
+    use std::rc::Rc;
     use z3::{SatResult, Solver, ast::Bool};
 
     impl RegionFormulaSolver {
@@ -206,33 +207,17 @@ mod solver_sat {
             lhs: NodeIndex,
             rhs: NodeIndex,
         ) -> Result<(), ReAndReUnifyError> {
-            let mut solver = Solver::new();
-            let model_vars = ModelVarSet::new(&mut solver, self, lhs, rhs);
-
-            let cond_1 = model_vars.are_universals_sound(ConclusionMode::ExcludeConclusion);
-            solver.assert(cond_1);
-
-            debug_assert!(unwrap_sat_result(solver.check()));
-
-            for existential in self.existential_nodes.indices() {
-                model_vars.fuse_free_var_to_false(
-                    &mut solver,
-                    &model_vars.existential_vars_orig[existential],
-                );
-
-                model_vars.fuse_free_var_to_false(
-                    &mut solver,
-                    &model_vars.existential_vars_concluded[existential],
-                );
-            }
+            let solver = Solver::new();
+            let mut model_vars = ModelVarSet::new(self, lhs, rhs);
 
             match self.graph[rhs] {
                 FormulaNode::Universal(_) => {
                     // If the universals are sound, see if we can show `lhs` but not show `rhs`.
+                    let cond_1 = model_vars.are_universals_sound(ConclusionMode::ExcludeConclusion);
                     let cond_2 = model_vars.is_alive(lhs, ConclusionMode::ExcludeConclusion);
                     let cond_3 = model_vars.is_alive(rhs, ConclusionMode::ExcludeConclusion);
 
-                    solver.assert(cond_2 & !cond_3);
+                    solver.assert(cond_1 & cond_2 & !cond_3);
                 }
                 FormulaNode::Existential(_) => {
                     // If the universals are sound and the `lhs` is forced to be true without
@@ -241,10 +226,11 @@ mod solver_sat {
                     // `rhs` must be false, giving us a set of universals which disprove our
                     // conclusion.
 
+                    let cond_1 = model_vars.are_universals_sound(ConclusionMode::ExcludeConclusion);
                     let cond_2 = model_vars.is_alive(lhs, ConclusionMode::ExcludeConclusion);
                     let cond_3 = model_vars.are_universals_sound(ConclusionMode::IncludeConclusion);
 
-                    solver.assert(cond_2 & !cond_3);
+                    solver.assert(cond_1 & cond_2 & !cond_3);
                 }
                 FormulaNode::And | FormulaNode::True => {
                     unreachable!()
@@ -267,11 +253,18 @@ mod solver_sat {
 
     struct ModelVarSet<'a> {
         formulas: &'a RegionFormulaSolver,
-        universal_vars: IndexVec<UniversalReVar, Bool>,
-        existential_vars_orig: IndexVec<InferReVar, Bool>,
-        existential_vars_concluded: IndexVec<InferReVar, Bool>,
+        universal_vars: Rc<IndexVec<UniversalReVar, Bool>>,
+        existential_vars_orig: IndexVec<InferReVar, ExistentialVarState>,
+        existential_vars_concluded: IndexVec<InferReVar, ExistentialVarState>,
         impl_lhs: NodeIndex,
         impl_rhs: NodeIndex,
+    }
+
+    #[derive(Clone)]
+    enum ExistentialVarState {
+        Resolved(Bool),
+        Reentrant,
+        Unresolved,
     }
 
     bool_enum! {
@@ -283,7 +276,6 @@ mod solver_sat {
 
     impl<'a> ModelVarSet<'a> {
         fn new(
-            solver: &mut Solver,
             formulas: &'a RegionFormulaSolver,
             impl_lhs: NodeIndex,
             impl_rhs: NodeIndex,
@@ -294,98 +286,95 @@ mod solver_sat {
                 .map(|var| Bool::new_const(format!("'u{}", var.index())))
                 .collect::<IndexVec<UniversalReVar, _>>();
 
-            let existential_vars_orig = formulas
+            let existential_vars = formulas
                 .existential_nodes
                 .indices()
-                .map(|var| Bool::new_const(format!("'i{}_orig", var.index())))
+                .map(|_| ExistentialVarState::Unresolved)
                 .collect::<IndexVec<InferReVar, _>>();
 
-            let existential_vars_concluded = formulas
-                .existential_nodes
-                .indices()
-                .map(|var| Bool::new_const(format!("'i{}_concluded", var.index())))
-                .collect::<IndexVec<InferReVar, _>>();
-
-            let this = Self {
+            Self {
                 formulas,
-                universal_vars,
-                existential_vars_orig,
-                existential_vars_concluded,
+                universal_vars: Rc::new(universal_vars),
+                existential_vars_orig: existential_vars.clone(),
+                existential_vars_concluded: existential_vars,
                 impl_lhs,
                 impl_rhs,
-            };
-
-            this.populate(solver);
-
-            this
-        }
-
-        fn populate(&self, solver: &mut Solver) {
-            for (&existential_node, (existential_var_orig, existential_var_concluded)) in
-                self.formulas.existential_nodes.iter().zip(
-                    self.existential_vars_orig
-                        .iter()
-                        .zip(&self.existential_vars_concluded),
-                )
-            {
-                solver.assert(
-                    existential_var_orig
-                        .eq(self
-                            .is_node_implied(existential_node, ConclusionMode::ExcludeConclusion)),
-                );
-
-                solver.assert(
-                    existential_var_concluded
-                        .eq(self
-                            .is_node_implied(existential_node, ConclusionMode::IncludeConclusion)),
-                );
             }
         }
 
-        fn fuse_free_var_to_false(&self, solver: &mut Solver, var: &Bool) {
-            solver.push();
-            solver.assert(var);
-            let can_be_true = unwrap_sat_result(solver.check());
-            solver.pop(1);
-
-            if !can_be_true {
-                return;
-            }
-
-            solver.push();
-            solver.assert(!var);
-            let can_be_false = unwrap_sat_result(solver.check());
-            solver.pop(1);
-
-            if !can_be_false {
-                return;
-            }
-
-            solver.assert(!var);
+        fn are_universals_sound(&mut self, conclusion_mode: ConclusionMode) -> Bool {
+            Bool::and(
+                &self
+                    .universal_vars
+                    .clone()
+                    .iter()
+                    .zip(&self.formulas.universal_nodes)
+                    .map(|(universal_var, &universal_node)| {
+                        self.is_node_implied_uncached(universal_node, conclusion_mode)
+                            .implies(universal_var)
+                    })
+                    .collect::<Vec<_>>(),
+            )
         }
 
-        fn is_alive(&self, node: NodeIndex, conclusion_mode: ConclusionMode) -> Bool {
+        fn is_alive(&mut self, node: NodeIndex, conclusion_mode: ConclusionMode) -> Bool {
+            self.is_alive_reentrant(node, conclusion_mode).unwrap()
+        }
+
+        fn is_alive_reentrant(
+            &mut self,
+            node: NodeIndex,
+            conclusion_mode: ConclusionMode,
+        ) -> Option<Bool> {
             match self.formulas.graph[node] {
-                FormulaNode::And => Bool::and(
+                FormulaNode::And => Some(Bool::and(
                     &self
                         .formulas
                         .graph
                         .edges_directed(node, Direction::Incoming)
-                        .map(|edge| self.is_alive(edge.source(), conclusion_mode))
+                        .filter_map(|edge| self.is_alive_reentrant(edge.source(), conclusion_mode))
                         .collect::<Vec<_>>(),
-                ),
-                FormulaNode::True => Bool::from_bool(true),
-                FormulaNode::Universal(var) => self.universal_vars[var].clone(),
-                FormulaNode::Existential(var) => match conclusion_mode {
-                    ConclusionMode::ExcludeConclusion => self.existential_vars_orig[var].clone(),
-                    ConclusionMode::IncludeConclusion => {
-                        self.existential_vars_concluded[var].clone()
+                )),
+                FormulaNode::True => Some(Bool::from_bool(true)),
+                FormulaNode::Universal(var) => Some(self.universal_vars[var].clone()),
+                FormulaNode::Existential(var) => {
+                    fn slot<'a>(
+                        this: &'a mut ModelVarSet<'_>,
+                        conclusion_mode: ConclusionMode,
+                        var: InferReVar,
+                    ) -> &'a mut ExistentialVarState {
+                        match conclusion_mode {
+                            ConclusionMode::ExcludeConclusion => {
+                                &mut this.existential_vars_orig[var]
+                            }
+                            ConclusionMode::IncludeConclusion => {
+                                &mut this.existential_vars_concluded[var]
+                            }
+                        }
                     }
-                },
+
+                    match slot(self, conclusion_mode, var) {
+                        ExistentialVarState::Resolved(cached) => return Some(cached.clone()),
+                        ExistentialVarState::Reentrant => return None,
+                        slot @ ExistentialVarState::Unresolved => {
+                            *slot = ExistentialVarState::Reentrant;
+                        }
+                    }
+
+                    let term = self.is_node_implied_uncached(node, conclusion_mode);
+
+                    *slot(self, conclusion_mode, var) = ExistentialVarState::Resolved(term.clone());
+
+                    Some(term)
+                }
             }
         }
 
-        fn is_node_implied(&self, node: NodeIndex, conclusion_mode: ConclusionMode) -> Bool {
+        fn is_node_implied_uncached(
+            &mut self,
+            node: NodeIndex,
+            conclusion_mode: ConclusionMode,
+        ) -> Bool {
             Bool::or(
                 &self
                     .formulas
@@ -396,38 +385,16 @@ mod solver_sat {
                         (conclusion_mode.is_truthy() && node == self.impl_rhs)
                             .then_some(self.impl_lhs),
                     )
-                    .map(|src| self.is_alive(src, conclusion_mode))
+                    .filter_map(|src| self.is_alive_reentrant(src, conclusion_mode))
                     .collect::<Vec<_>>(),
             )
-        }
-
-        fn are_universals_sound(&self, conclusion_mode: ConclusionMode) -> Bool {
-            Bool::and(
-                &self
-                    .universal_vars
-                    .iter()
-                    .zip(&self.formulas.universal_nodes)
-                    .map(|(universal_var, &universal_node)| {
-                        self.is_node_implied(universal_node, conclusion_mode)
-                            .implies(universal_var)
-                    })
-                    .collect::<Vec<_>>(),
-            )
-        }
-    }
-
-    #[must_use]
-    fn unwrap_sat_result(res: SatResult) -> bool {
-        match res {
-            SatResult::Sat => true,
-            SatResult::Unsat => false,
-            SatResult::Unknown => unreachable!(),
         }
     }
 }
 
 // === SMT-based solver === //
 
+#[cfg(test)]
 mod solver_smt {
     use super::*;
     use crate::semantic::syntax::{Re, RelationMode};
@@ -778,6 +745,26 @@ mod tests {
         _ = solver.push_checked(
             [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
             [RegionFormulaTerm::Universal(UniversalReVar::from_usize(0))],
+        );
+    }
+
+    #[test]
+    fn generated_5() {
+        let mut solver = RegionFormulaSolver::new(2, 1);
+
+        // AXIOM: 'u0 -> 'i0
+        solver.push_axiom(
+            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(0))],
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
+        );
+
+        // ASSERTION: 'u0 ^ 'i0 -> 'u1
+        _ = solver.push_checked(
+            [
+                RegionFormulaTerm::Universal(UniversalReVar::from_usize(0)),
+                RegionFormulaTerm::Existential(InferReVar::from_usize(0)),
+            ],
+            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(1))],
         );
     }
 }
