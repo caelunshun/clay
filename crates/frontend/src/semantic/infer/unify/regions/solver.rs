@@ -327,29 +327,17 @@ mod solver_sat {
             conclusion_mode: ConclusionMode,
         ) -> Option<Bool> {
             match self.formulas.graph[node] {
-                FormulaNode::And => {
-                    debug_assert!(
-                        self.formulas
-                            .graph
-                            .edges_directed(node, Direction::Incoming)
-                            .next()
-                            .is_some()
-                    );
-
-                    let terms = self
+                FormulaNode::And => Some(Bool::and(
+                    &self
                         .formulas
                         .graph
                         .edges_directed(node, Direction::Incoming)
-                        .filter_map(|edge| self.is_alive_reentrant(edge.source(), conclusion_mode))
-                        .collect::<Vec<_>>();
-
-                    if !terms.is_empty() {
-                        Some(Bool::and(&terms))
-                    } else {
-                        // This conjunction is fully coinductive. Assume it's false.
-                        Some(Bool::from_bool(false))
-                    }
-                }
+                        .map(|edge| {
+                            self.is_alive_reentrant(edge.source(), conclusion_mode)
+                                .unwrap_or(Bool::from_bool(false))
+                        })
+                        .collect::<Vec<_>>(),
+                )),
                 FormulaNode::True => Some(Bool::from_bool(true)),
                 FormulaNode::Universal(var) => Some(self.universal_vars[var].clone()),
                 FormulaNode::Existential(var) => {
