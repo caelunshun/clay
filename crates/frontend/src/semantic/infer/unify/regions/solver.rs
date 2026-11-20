@@ -197,7 +197,9 @@ impl RegionFormulaSolver {
 mod solver_sat {
     use super::*;
     use crate::semantic::syntax::RelationMode;
-    use petgraph::{Direction, visit::EdgeRef};
+    use clay_core::FastHashMap;
+    use hashbrown::hash_map;
+    use petgraph::{Direction, algo::TarjanScc, visit::EdgeRef};
     use std::rc::Rc;
     use z3::{SatResult, Solver, ast::Bool};
 
@@ -208,19 +210,14 @@ mod solver_sat {
             rhs: NodeIndex,
         ) -> Result<(), ReAndReUnifyError> {
             let solver = Solver::new();
-            let mut model_vars = ModelVarSet::new(self, lhs, rhs);
+            let mut model_vars = ModelVarSet::new(&solver, self, lhs, rhs);
 
             match self.graph[rhs] {
                 FormulaNode::Universal(_) => {
                     // If the universals are sound, see if we can show `lhs` but not show `rhs`.
-                    let cond_1 =
-                        model_vars.are_universals_sound(&solver, ConclusionMode::ExcludeConclusion);
-
-                    let cond_2 =
-                        model_vars.is_alive(&solver, lhs, ConclusionMode::ExcludeConclusion);
-
-                    let cond_3 =
-                        model_vars.is_alive(&solver, rhs, ConclusionMode::ExcludeConclusion);
+                    let cond_1 = model_vars.are_universals_sound(ConclusionMode::ExcludeConclusion);
+                    let cond_2 = model_vars.is_alive(lhs, ConclusionMode::ExcludeConclusion);
+                    let cond_3 = model_vars.is_alive(rhs, ConclusionMode::ExcludeConclusion);
 
                     solver.assert(cond_1);
                     solver.assert(cond_2);
@@ -233,14 +230,9 @@ mod solver_sat {
                     // `rhs` must be false, giving us a set of universals which disprove our
                     // conclusion.
 
-                    let cond_1 =
-                        model_vars.are_universals_sound(&solver, ConclusionMode::ExcludeConclusion);
-
-                    let cond_2 =
-                        model_vars.is_alive(&solver, lhs, ConclusionMode::ExcludeConclusion);
-
-                    let cond_3 =
-                        model_vars.are_universals_sound(&solver, ConclusionMode::IncludeConclusion);
+                    let cond_1 = model_vars.are_universals_sound(ConclusionMode::ExcludeConclusion);
+                    let cond_2 = model_vars.is_alive(lhs, ConclusionMode::ExcludeConclusion);
+                    let cond_3 = model_vars.are_universals_sound(ConclusionMode::IncludeConclusion);
 
                     solver.assert(cond_1);
                     solver.assert(cond_2);
@@ -268,19 +260,15 @@ mod solver_sat {
     }
 
     struct ModelVarSet<'a> {
+        solver: &'a Solver,
         formulas: &'a RegionFormulaSolver,
         universal_vars: Rc<IndexVec<UniversalReVar, Bool>>,
-        existential_vars_pre: IndexVec<InferReVar, ExistentialVarState>,
-        existential_vars_post: IndexVec<InferReVar, ExistentialVarState>,
+        existential_vars_pre: IndexVec<InferReVar, Option<Bool>>,
+        existential_vars_post: IndexVec<InferReVar, Option<Bool>>,
+        curr_existential_lower_cache: FastHashMap<InferReVar, Option<Bool>>,
         impl_lhs: NodeIndex,
         impl_rhs: NodeIndex,
-    }
-
-    #[derive(Clone)]
-    enum ExistentialVarState {
-        Resolved(Bool),
-        Reentrant,
-        Unresolved,
+        is_populating: bool,
     }
 
     bool_enum! {
@@ -292,6 +280,7 @@ mod solver_sat {
 
     impl<'a> ModelVarSet<'a> {
         fn new(
+            solver: &'a Solver,
             formulas: &'a RegionFormulaSolver,
             impl_lhs: NodeIndex,
             impl_rhs: NodeIndex,
@@ -305,24 +294,120 @@ mod solver_sat {
             let existential_vars = formulas
                 .existential_nodes
                 .indices()
-                .map(|_| ExistentialVarState::Unresolved)
+                .map(|_| None)
                 .collect::<IndexVec<InferReVar, _>>();
 
-            Self {
+            let mut this = Self {
+                solver,
                 formulas,
                 universal_vars: Rc::new(universal_vars),
                 existential_vars_pre: existential_vars.clone(),
                 existential_vars_post: existential_vars,
+                curr_existential_lower_cache: FastHashMap::default(),
                 impl_lhs,
                 impl_rhs,
-            }
+                is_populating: false,
+            };
+
+            this.populate_all_existentials();
+
+            this
         }
 
-        fn are_universals_sound(
-            &mut self,
-            solver: &Solver,
-            conclusion_mode: ConclusionMode,
-        ) -> Bool {
+        fn populate_all_existentials(&mut self) {
+            let mut tarjan_scc = TarjanScc::new();
+
+            // Create a subgraph with only edges connecting one existential to another implicand.
+            let graph = &self.formulas.graph;
+            let mut sub_graph = graph.filter_map(
+                |_, node| {
+                    Some(match *node {
+                        FormulaNode::Existential(var) => Some(var),
+                        FormulaNode::True | FormulaNode::Universal(_) | FormulaNode::And => None,
+                    })
+                },
+                |edge, _| {
+                    let (edge_src, edge_dst) = graph.edge_endpoints(edge).unwrap();
+
+                    match (&graph[edge_src], graph[edge_dst]) {
+                        (FormulaNode::Existential(_) | FormulaNode::And, _)
+                        | (_, FormulaNode::Existential(_) | FormulaNode::And) => Some(()),
+                        _ => None,
+                    }
+                },
+            );
+
+            // Populate `existential_vars_pre`
+            tarjan_scc.run(&sub_graph, |scc| {
+                self.curr_existential_lower_cache.clear();
+
+                for &var in scc {
+                    let FormulaNode::Existential(var) = graph[var] else {
+                        continue;
+                    };
+
+                    self.populate_existential(var, ConclusionMode::ExcludeConclusion);
+                }
+            });
+
+            // Populate `existential_vars_post`
+            match (graph[self.impl_lhs], graph[self.impl_rhs]) {
+                (FormulaNode::And | FormulaNode::Existential(_), FormulaNode::Existential(_)) => {
+                    // (proceed)
+                }
+                (_, FormulaNode::And) => unreachable!(),
+                _ => {
+                    self.existential_vars_post = self.existential_vars_pre.clone();
+                    return;
+                }
+            }
+
+            sub_graph.add_edge(self.impl_lhs, self.impl_rhs, ());
+
+            tarjan_scc.run(&sub_graph, |scc| {
+                self.curr_existential_lower_cache.clear();
+
+                for &var in scc {
+                    let FormulaNode::Existential(var) = graph[var] else {
+                        continue;
+                    };
+
+                    self.populate_existential(var, ConclusionMode::IncludeConclusion);
+                }
+            });
+        }
+
+        fn populate_existential(&mut self, var: InferReVar, conclusion_mode: ConclusionMode) {
+            debug_assert!(self.curr_existential_lower_cache.is_empty());
+
+            let term = Bool::new_const(format!(
+                "'i{}_{}",
+                var.index(),
+                match conclusion_mode {
+                    ConclusionMode::ExcludeConclusion => "pre",
+                    ConclusionMode::IncludeConclusion => "post",
+                }
+            ));
+
+            self.is_populating = true;
+            let raw_term = self.is_alive(self.formulas.existential_nodes[var], conclusion_mode);
+            self.is_populating = false;
+
+            self.solver.assert(term.eq(raw_term));
+
+            match conclusion_mode {
+                ConclusionMode::ExcludeConclusion => {
+                    self.existential_vars_pre[var] = Some(term);
+                }
+                ConclusionMode::IncludeConclusion => {
+                    self.existential_vars_post[var] = Some(term);
+                }
+            }
+
+            self.curr_existential_lower_cache.clear();
+        }
+
+        fn are_universals_sound(&mut self, conclusion_mode: ConclusionMode) -> Bool {
             Bool::and(
                 &self
                     .universal_vars
@@ -330,26 +415,19 @@ mod solver_sat {
                     .iter()
                     .zip(&self.formulas.universal_nodes)
                     .map(|(universal_var, &universal_node)| {
-                        self.is_node_implied_uncached(solver, universal_node, conclusion_mode)
+                        self.is_node_implied_uncached(universal_node, conclusion_mode)
                             .implies(universal_var)
                     })
                     .collect::<Vec<_>>(),
             )
         }
 
-        fn is_alive(
-            &mut self,
-            solver: &Solver,
-            node: NodeIndex,
-            conclusion_mode: ConclusionMode,
-        ) -> Bool {
-            self.is_alive_reentrant(solver, node, conclusion_mode)
-                .unwrap()
+        fn is_alive(&mut self, node: NodeIndex, conclusion_mode: ConclusionMode) -> Bool {
+            self.is_alive_reentrant(node, conclusion_mode).unwrap()
         }
 
         fn is_alive_reentrant(
             &mut self,
-            solver: &Solver,
             node: NodeIndex,
             conclusion_mode: ConclusionMode,
         ) -> Option<Bool> {
@@ -360,7 +438,7 @@ mod solver_sat {
                         .graph
                         .edges_directed(node, Direction::Incoming)
                         .map(|edge| {
-                            self.is_alive_reentrant(solver, edge.source(), conclusion_mode)
+                            self.is_alive_reentrant(edge.source(), conclusion_mode)
                                 .unwrap_or(Bool::from_bool(false))
                         })
                         .collect::<Vec<_>>(),
@@ -368,43 +446,41 @@ mod solver_sat {
                 FormulaNode::True => Some(Bool::from_bool(true)),
                 FormulaNode::Universal(var) => Some(self.universal_vars[var].clone()),
                 FormulaNode::Existential(var) => {
-                    fn slot<'a>(
-                        this: &'a mut ModelVarSet<'_>,
-                        conclusion_mode: ConclusionMode,
-                        var: InferReVar,
-                    ) -> &'a mut ExistentialVarState {
-                        match conclusion_mode {
-                            ConclusionMode::ExcludeConclusion => {
-                                &mut this.existential_vars_pre[var]
-                            }
-                            ConclusionMode::IncludeConclusion => {
-                                &mut this.existential_vars_post[var]
-                            }
+                    // See whether we've finished the term completely before.
+                    let finished_cache = match conclusion_mode {
+                        ConclusionMode::ExcludeConclusion => &self.existential_vars_pre,
+                        ConclusionMode::IncludeConclusion => &self.existential_vars_post,
+                    };
+
+                    if let Some(term) = &finished_cache[var] {
+                        return Some(term.clone());
+                    }
+
+                    // Otherwise, lower it with reentrancy. This should only happen during
+                    // population if we hit another term in the strongly connected component.
+                    debug_assert!(self.is_populating);
+
+                    match self.curr_existential_lower_cache.entry(var) {
+                        hash_map::Entry::Occupied(entry) => {
+                            return match entry.get() {
+                                Some(already_lowered_locally) => {
+                                    Some(already_lowered_locally.clone())
+                                }
+                                None => {
+                                    // Reentrant!
+                                    None
+                                }
+                            };
+                        }
+                        hash_map::Entry::Vacant(entry) => {
+                            entry.insert_entry(None);
                         }
                     }
 
-                    match slot(self, conclusion_mode, var) {
-                        ExistentialVarState::Resolved(cached) => return Some(cached.clone()),
-                        ExistentialVarState::Reentrant => return None,
-                        slot @ ExistentialVarState::Unresolved => {
-                            *slot = ExistentialVarState::Reentrant;
-                        }
-                    }
+                    let term = self.is_node_implied_uncached(node, conclusion_mode);
 
-                    let term = Bool::new_const(format!(
-                        "'i{}_{}",
-                        var.index(),
-                        match conclusion_mode {
-                            ConclusionMode::ExcludeConclusion => "pre",
-                            ConclusionMode::IncludeConclusion => "post",
-                        }
-                    ));
-
-                    let term_raw = self.is_node_implied_uncached(solver, node, conclusion_mode);
-
-                    solver.assert(term.eq(term_raw));
-
-                    *slot(self, conclusion_mode, var) = ExistentialVarState::Resolved(term.clone());
+                    self.curr_existential_lower_cache
+                        .insert(var, Some(term.clone()));
 
                     Some(term)
                 }
@@ -413,7 +489,6 @@ mod solver_sat {
 
         fn is_node_implied_uncached(
             &mut self,
-            solver: &Solver,
             node: NodeIndex,
             conclusion_mode: ConclusionMode,
         ) -> Bool {
@@ -427,7 +502,7 @@ mod solver_sat {
                         (conclusion_mode.is_truthy() && node == self.impl_rhs)
                             .then_some(self.impl_lhs),
                     )
-                    .filter_map(|src| self.is_alive_reentrant(solver, src, conclusion_mode))
+                    .filter_map(|src| self.is_alive_reentrant(src, conclusion_mode))
                     .collect::<Vec<_>>(),
             )
         }
