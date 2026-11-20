@@ -243,8 +243,6 @@ mod solver_sat {
                 }
             }
 
-            println!("{solver}");
-
             // TODO: create actual errors
             match solver.check() {
                 SatResult::Unsat => Ok(()),
@@ -353,16 +351,13 @@ mod solver_sat {
             // Populate `existential_vars_post`
             match (graph[self.impl_lhs], graph[self.impl_rhs]) {
                 (FormulaNode::And | FormulaNode::Existential(_), FormulaNode::Existential(_)) => {
-                    // (proceed)
+                    sub_graph.add_edge(self.impl_lhs, self.impl_rhs, ());
                 }
                 (_, FormulaNode::And) => unreachable!(),
                 _ => {
-                    self.existential_vars_post = self.existential_vars_pre.clone();
-                    return;
+                    // (edge not included in subgraph)
                 }
             }
-
-            sub_graph.add_edge(self.impl_lhs, self.impl_rhs, ());
 
             tarjan_scc.run(&sub_graph, |scc| {
                 self.curr_existential_lower_cache.clear();
@@ -966,6 +961,29 @@ mod tests {
         _ = solver.push_checked(
             [RegionFormulaTerm::Existential(InferReVar::from_usize(2))],
             [RegionFormulaTerm::Existential(InferReVar::from_usize(1))],
+        );
+    }
+
+    #[test]
+    fn generated_9() {
+        let mut solver = RegionFormulaSolver::new(1, 1);
+
+        // AXIOM: 'i0 -> 'u0
+        solver.push_axiom(
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
+            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(0))],
+        );
+
+        // AXIOM: 'u0 -> 'i0
+        _ = solver.push_axiom(
+            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(0))],
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
+        );
+
+        // ASSERTION: T -> 'i0
+        _ = solver.push_checked(
+            [RegionFormulaTerm::True],
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
         );
     }
 }
