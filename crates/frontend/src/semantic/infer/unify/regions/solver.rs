@@ -209,15 +209,30 @@ mod solver_sat {
             let mut solver = Solver::new();
             let model_vars = ModelVarSet::new(&mut solver, self, lhs, rhs);
 
+            let cond_1 = model_vars.are_universals_sound(ConclusionMode::ExcludeConclusion);
+            solver.assert(cond_1);
+
+            debug_assert!(unwrap_sat_result(solver.check()));
+
+            for existential in self.existential_nodes.indices() {
+                model_vars.fuse_free_var_to_false(
+                    &mut solver,
+                    &model_vars.existential_vars_orig[existential],
+                );
+
+                model_vars.fuse_free_var_to_false(
+                    &mut solver,
+                    &model_vars.existential_vars_concluded[existential],
+                );
+            }
+
             match self.graph[rhs] {
                 FormulaNode::Universal(_) => {
                     // If the universals are sound, see if we can show `lhs` but not show `rhs`.
-
-                    let cond_1 = model_vars.are_universals_sound(ConclusionMode::ExcludeConclusion);
                     let cond_2 = model_vars.is_alive(lhs, ConclusionMode::ExcludeConclusion);
                     let cond_3 = model_vars.is_alive(rhs, ConclusionMode::ExcludeConclusion);
 
-                    solver.assert(cond_1 & cond_2 & !cond_3);
+                    solver.assert(cond_2 & !cond_3);
                 }
                 FormulaNode::Existential(_) => {
                     // If the universals are sound and the `lhs` is forced to be true without
@@ -226,11 +241,10 @@ mod solver_sat {
                     // `rhs` must be false, giving us a set of universals which disprove our
                     // conclusion.
 
-                    let cond_1 = model_vars.are_universals_sound(ConclusionMode::ExcludeConclusion);
                     let cond_2 = model_vars.is_alive(lhs, ConclusionMode::ExcludeConclusion);
                     let cond_3 = model_vars.are_universals_sound(ConclusionMode::IncludeConclusion);
 
-                    solver.assert(cond_1 & cond_2 & !cond_3);
+                    solver.assert(cond_2 & !cond_3);
                 }
                 FormulaNode::And | FormulaNode::True => {
                     unreachable!()
@@ -328,6 +342,28 @@ mod solver_sat {
             }
         }
 
+        fn fuse_free_var_to_false(&self, solver: &mut Solver, var: &Bool) {
+            solver.push();
+            solver.assert(var);
+            let can_be_true = unwrap_sat_result(solver.check());
+            solver.pop(1);
+
+            if !can_be_true {
+                return;
+            }
+
+            solver.push();
+            solver.assert(!var);
+            let can_be_false = unwrap_sat_result(solver.check());
+            solver.pop(1);
+
+            if !can_be_false {
+                return;
+            }
+
+            solver.assert(!var);
+        }
+
         fn is_alive(&self, node: NodeIndex, conclusion_mode: ConclusionMode) -> Bool {
             match self.formulas.graph[node] {
                 FormulaNode::And => Bool::and(
@@ -379,6 +415,15 @@ mod solver_sat {
             )
         }
     }
+
+    #[must_use]
+    fn unwrap_sat_result(res: SatResult) -> bool {
+        match res {
+            SatResult::Sat => true,
+            SatResult::Unsat => false,
+            SatResult::Unknown => unreachable!(),
+        }
+    }
 }
 
 // === SMT-based solver === //
@@ -389,7 +434,7 @@ mod solver_smt {
     use index_vec::IndexSlice;
     use petgraph::visit::EdgeRef;
     use z3::{
-        Solver,
+        SatResult, Solver,
         ast::{Ast, Bool, exists_const, forall_const},
     };
 
@@ -467,15 +512,15 @@ mod solver_smt {
             solver.assert(full);
 
             match solver.check() {
-                z3::SatResult::Sat => Ok(()),
+                SatResult::Sat => Ok(()),
                 // TODO: update
-                z3::SatResult::Unsat => Err(ReAndReUnifyError {
+                SatResult::Unsat => Err(ReAndReUnifyError {
                     lhs: Re::Gc,
                     rhs: Re::Gc,
                     mode: RelationMode::Equate,
                     causes: Vec::new(),
                 }),
-                z3::SatResult::Unknown => unreachable!(),
+                SatResult::Unknown => unreachable!(),
             }
         }
     }
@@ -716,6 +761,23 @@ mod tests {
         _ = solver.push_checked(
             [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
             [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
+        );
+    }
+
+    #[test]
+    fn generated_4() {
+        let mut solver = RegionFormulaSolver::new(1, 1);
+
+        // ASSERTION: 'i0 -> 'i0
+        _ = solver.push_axiom(
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
+        );
+
+        // ASSERTION: 'i0 -> 'u0
+        _ = solver.push_checked(
+            [RegionFormulaTerm::Existential(InferReVar::from_usize(0))],
+            [RegionFormulaTerm::Universal(UniversalReVar::from_usize(0))],
         );
     }
 }
