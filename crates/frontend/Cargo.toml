@@ -15,6 +15,7 @@ color-eyre.workspace = true
 derive-where.workspace = true
 disjoint.workspace = true
 hashbrown.workspace = true
+huub.workspace = true
 index_vec.workspace = true
 indexmap.workspace = true
 late-struct.workspace = true

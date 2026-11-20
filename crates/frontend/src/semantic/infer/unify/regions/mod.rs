@@ -420,5 +420,4 @@ mod driver;
 pub use self::driver::*;
 
 mod graph;
-mod sat;
 mod solver;

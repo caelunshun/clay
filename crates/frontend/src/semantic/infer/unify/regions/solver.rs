@@ -196,17 +196,8 @@ impl RegionFormulaSolver {
 
 mod solver_sat {
     use super::*;
-    use crate::semantic::{
-        infer::unify::regions::sat::{
-            BruteSatBuilder, BruteSatisfied, SatBuilder, SatTerm, SatVar as _,
-        },
-        syntax::{Re, RelationMode},
-    };
-    use clay_core::{FastHashMap, FastIndexMap};
-    use hashbrown::hash_map;
-    use petgraph::{Direction, visit::EdgeRef as _};
-
-    const BRUTE_FORCE_VAR_LIMIT: u32 = 10;
+    use huub::model::{Model, View, expressions::BoolFormula};
+    use petgraph::{Direction, visit::EdgeRef};
 
     impl RegionFormulaSolver {
         pub(super) fn check_implication_sat(
@@ -214,296 +205,194 @@ mod solver_sat {
             lhs: NodeIndex,
             rhs: NodeIndex,
         ) -> Result<(), ReAndReUnifyError> {
-            let mut builder = BruteSatBuilder::default();
-            let mut universals = FastIndexMap::default();
+            let mut model = Model::default();
+            let model_vars = ModelVarSet::new(&mut model, self, lhs, rhs);
 
-            // println!("LHS ====");
+            match self.graph[rhs] {
+                FormulaNode::Universal(_) => {
+                    // If the universals are sound, see if we can show `lhs` but not show `rhs`.
 
-            let lhs_forced_live = SatForcedLiveLowerer {
-                state: SatForceLowererState::new(&self.graph, &mut builder),
-                universals: &mut universals,
-            }
-            .lower_naturally(lhs);
+                    let cond_1 = model_vars.are_universals_sound(ConclusionMode::ExcludeConclusion);
+                    let cond_2 = model_vars.is_alive(lhs, ConclusionMode::ExcludeConclusion);
+                    let cond_3 = model_vars.is_alive(rhs, ConclusionMode::ExcludeConclusion);
 
-            // println!("---> {lhs_forced_live:?}");
-
-            // println!("RHS ====");
-
-            let rhs_forced_dead = SatForcedDeadLowerer {
-                state: SatForceLowererState::new(&self.graph, &mut builder),
-                universals: &mut universals,
-            }
-            .lower_naturally(rhs);
-
-            // println!("---> {rhs_forced_dead:?}");
-
-            // println!("WF ====");
-
-            if universals.len() > BRUTE_FORCE_VAR_LIMIT as usize {
-                todo!();
-            }
-
-            for (&universal_node, &universal_var) in &universals {
-                let needs_to_be_live = SatUniversalForcedTrueByWf {
-                    state: SatForceLowererState::new(&self.graph, &mut builder),
-                    universals: &universals,
+                    model
+                        .proposition(BoolFormula::And(
+                            [cond_1, cond_2, BoolFormula::Not(Box::new(cond_3))].into(),
+                        ))
+                        .post()
+                        .unwrap();
                 }
-                .lower_naturally(universal_node);
+                FormulaNode::Existential(_) => {
+                    // If the universals are sound and the `lhs` is forced to be true without
+                    // forcing the `rhs` to be true, try to force it to be true and see whether the
+                    // universals are still well-formed. If they're not, this tells us that the
+                    // `rhs` must be false, giving us a set of universals which disprove our
+                    // conclusion.
 
-                builder.assert_implies(needs_to_be_live, universal_var.to_term());
-            }
+                    let cond_1 = model_vars.are_universals_sound(ConclusionMode::ExcludeConclusion);
+                    let cond_2 = model_vars.is_alive(lhs, ConclusionMode::ExcludeConclusion);
+                    let cond_3 = model_vars.are_universals_sound(ConclusionMode::IncludeConclusion);
 
-            builder.assert_and([lhs_forced_live, rhs_forced_dead]);
-
-            match builder.solve() {
-                Ok(BruteSatisfied { model }) => {
-                    // TODO: update
-                    Err(ReAndReUnifyError {
-                        lhs: Re::Gc,
-                        rhs: Re::Gc,
-                        mode: RelationMode::Equate,
-                        causes: Vec::new(),
-                    })
+                    model
+                        .proposition(BoolFormula::And(
+                            [cond_1, cond_2, BoolFormula::Not(Box::new(cond_3))].into(),
+                        ))
+                        .post()
+                        .unwrap();
                 }
-                Err(_) => Ok(()),
-            }
-        }
-    }
-
-    #[derive(Copy, Clone)]
-    enum SatForceLowererMode {
-        Alive,
-        Dead,
-    }
-
-    struct SatForceLowererState<'a, B: 'a + SatBuilder> {
-        graph: &'a Graph<FormulaNode, ()>,
-        builder: &'a mut B,
-        inf_dedup_and_reentrancy: FastHashMap<NodeIndex, Option<B::Term>>,
-    }
-
-    impl<'a, B: SatBuilder> SatForceLowererState<'a, B> {
-        fn new(graph: &'a Graph<FormulaNode, ()>, builder: &'a mut B) -> Self {
-            Self {
-                graph,
-                builder,
-                inf_dedup_and_reentrancy: FastHashMap::default(),
-            }
-        }
-    }
-
-    trait SatForceLowerer<'a, B: 'a + SatBuilder> {
-        fn mode(&self) -> SatForceLowererMode;
-
-        fn state<'b>(&'b self) -> &'b SatForceLowererState<'a, B>
-        where
-            'a: 'b;
-
-        fn state_mut<'b>(&'b mut self) -> &'b mut SatForceLowererState<'a, B>
-        where
-            'a: 'b;
-
-        fn graph(&self) -> &'a Graph<FormulaNode, ()> {
-            self.state().graph
-        }
-
-        fn builder_mut<'b>(&'b mut self) -> &'b mut B
-        where
-            'a: 'b,
-        {
-            self.state_mut().builder
-        }
-
-        fn lower_naturally(&mut self, node: NodeIndex) -> B::Term {
-            match self.state().graph[node] {
-                FormulaNode::True => self.lower_true(),
-                FormulaNode::And => self.lower_as_conjunction(node),
-                FormulaNode::Existential(_) => self.lower_as_existential(node),
-                FormulaNode::Universal(_) => self.lower_as_universal(node),
-            }
-        }
-
-        fn lower_true(&mut self) -> B::Term {
-            match self.mode() {
-                SatForceLowererMode::Alive => <B::Term as SatTerm>::truthy(),
-                SatForceLowererMode::Dead => <B::Term as SatTerm>::falsy(),
-            }
-        }
-
-        fn lower_as_conjunction(&mut self, node: NodeIndex) -> B::Term {
-            let terms = self
-                .graph()
-                .edges_directed(node, Direction::Incoming)
-                .map(|edge| self.lower_naturally(edge.source()))
-                .collect::<SmallVec<[_; 4]>>();
-
-            debug_assert!(!terms.is_empty());
-
-            match self.mode() {
-                SatForceLowererMode::Alive => self.builder_mut().join_and(terms),
-                SatForceLowererMode::Dead => self.builder_mut().join_or(terms),
-            }
-        }
-
-        fn lower_as_universal(&mut self, node: NodeIndex) -> B::Term;
-
-        fn lower_as_existential(&mut self, node: NodeIndex) -> B::Term {
-            match self.state_mut().inf_dedup_and_reentrancy.entry(node) {
-                hash_map::Entry::Occupied(entry) => {
-                    return match entry.get() {
-                        Some(pre_lowered) => *pre_lowered,
-                        // This is a cycle. Determine this fact coinductively.
-                        None => match self.mode() {
-                            // Conjunctions are used in this mode.
-                            SatForceLowererMode::Alive => <B::Term as SatTerm>::truthy(),
-                            // Disjunctions are used in this mode.
-                            SatForceLowererMode::Dead => <B::Term as SatTerm>::falsy(),
-                        },
-                    };
-                }
-                hash_map::Entry::Vacant(entry) => {
-                    entry.insert_entry(None);
+                FormulaNode::And | FormulaNode::True => {
+                    unreachable!()
                 }
             }
 
-            let terms = self
-                .graph()
-                .edges_directed(
-                    node,
-                    match self.mode() {
-                        SatForceLowererMode::Alive => Direction::Incoming,
-                        SatForceLowererMode::Dead => Direction::Outgoing,
-                    },
-                )
-                .map(|edge| {
-                    self.lower_naturally(match self.mode() {
-                        SatForceLowererMode::Alive => edge.source(),
-                        SatForceLowererMode::Dead => edge.target(),
-                    })
-                })
-                .collect::<SmallVec<[_; 4]>>();
+            todo!()
+        }
+    }
 
-            let out_term = if !terms.is_empty() {
-                self.builder_mut().join_or(terms)
-            } else {
-                // We can't force this term to be alive/dead.
-                <B::Term as SatTerm>::falsy()
+    struct ModelVarSet<'a> {
+        solver: &'a RegionFormulaSolver,
+        universal_vars: IndexVec<UniversalReVar, View<bool>>,
+        existential_vars_orig: IndexVec<InferReVar, View<bool>>,
+        existential_vars_concluded: IndexVec<InferReVar, View<bool>>,
+        impl_lhs: NodeIndex,
+        impl_rhs: NodeIndex,
+    }
+
+    bool_enum! {
+        enum ConclusionMode {
+            true => IncludeConclusion;
+            false => ExcludeConclusion;
+        }
+    }
+
+    impl<'a> ModelVarSet<'a> {
+        fn new(
+            model: &mut Model,
+            solver: &'a RegionFormulaSolver,
+            impl_lhs: NodeIndex,
+            impl_rhs: NodeIndex,
+        ) -> Self {
+            let universal_vars = solver
+                .universal_nodes
+                .indices()
+                .map(|_| model.new_bool_decision())
+                .collect::<IndexVec<UniversalReVar, _>>();
+
+            let existential_vars_orig = solver
+                .existential_nodes
+                .indices()
+                .map(|_| model.new_bool_decision())
+                .collect::<IndexVec<InferReVar, _>>();
+
+            let existential_vars_concluded = solver
+                .existential_nodes
+                .indices()
+                .map(|_| model.new_bool_decision())
+                .collect::<IndexVec<InferReVar, _>>();
+
+            let this = Self {
+                solver,
+                universal_vars,
+                existential_vars_orig,
+                existential_vars_concluded,
+                impl_lhs,
+                impl_rhs,
             };
 
-            *self
-                .state_mut()
-                .inf_dedup_and_reentrancy
-                .get_mut(&node)
-                .unwrap() = Some(out_term);
+            this.populate(model);
 
-            out_term
-        }
-    }
-
-    /// Returns whether a term is forced to be live assuming the universals used to derive that fact
-    /// are well-formed.
-    struct SatForcedLiveLowerer<'a, B: 'a + SatBuilder> {
-        state: SatForceLowererState<'a, B>,
-        universals: &'a mut FastIndexMap<NodeIndex, B::Var>,
-    }
-
-    impl<'a, B: 'a + SatBuilder> SatForceLowerer<'a, B> for SatForcedLiveLowerer<'a, B> {
-        fn mode(&self) -> SatForceLowererMode {
-            SatForceLowererMode::Alive
+            this
         }
 
-        fn state<'b>(&'b self) -> &'b SatForceLowererState<'a, B>
-        where
-            'a: 'b,
-        {
-            &self.state
-        }
+        fn populate(&self, model: &mut Model) {
+            for (&existential_node, (&existential_var_orig, &existential_var_concluded)) in
+                self.solver.existential_nodes.iter().zip(
+                    self.existential_vars_orig
+                        .iter()
+                        .zip(&self.existential_vars_concluded),
+                )
+            {
+                model
+                    .proposition(BoolFormula::Equiv(
+                        [
+                            BoolFormula::Atom(existential_var_orig),
+                            self.is_node_implied(
+                                existential_node,
+                                ConclusionMode::ExcludeConclusion,
+                            ),
+                        ]
+                        .into(),
+                    ))
+                    .post()
+                    .unwrap();
 
-        fn state_mut<'b>(&'b mut self) -> &'b mut SatForceLowererState<'a, B>
-        where
-            'a: 'b,
-        {
-            &mut self.state
-        }
-
-        fn lower_as_universal(&mut self, node: NodeIndex) -> <B as SatBuilder>::Term {
-            self.universals
-                .entry(node)
-                .or_insert_with(|| self.state.builder.fresh_var())
-                .to_term()
-        }
-    }
-
-    /// Returns whether a term is forced to be dead assuming the universals used to derive that fact
-    /// are well-formed.
-    struct SatForcedDeadLowerer<'a, B: 'a + SatBuilder> {
-        state: SatForceLowererState<'a, B>,
-        universals: &'a mut FastIndexMap<NodeIndex, B::Var>,
-    }
-
-    impl<'a, B: 'a + SatBuilder> SatForceLowerer<'a, B> for SatForcedDeadLowerer<'a, B> {
-        fn mode(&self) -> SatForceLowererMode {
-            SatForceLowererMode::Dead
-        }
-
-        fn state<'b>(&'b self) -> &'b SatForceLowererState<'a, B>
-        where
-            'a: 'b,
-        {
-            &self.state
-        }
-
-        fn state_mut<'b>(&'b mut self) -> &'b mut SatForceLowererState<'a, B>
-        where
-            'a: 'b,
-        {
-            &mut self.state
-        }
-
-        fn lower_as_universal(&mut self, node: NodeIndex) -> <B as SatBuilder>::Term {
-            !self
-                .universals
-                .entry(node)
-                .or_insert_with(|| self.state.builder.fresh_var())
-                .to_term()
-        }
-    }
-
-    /// Returns whether a universal is forced to be true depending on the states of all the
-    /// universals mentioned during forced-live and forced-dead collection. This is used for
-    /// universal well-formedness checking.
-    struct SatUniversalForcedTrueByWf<'a, B: 'a + SatBuilder> {
-        state: SatForceLowererState<'a, B>,
-        universals: &'a FastIndexMap<NodeIndex, B::Var>,
-    }
-
-    impl<'a, B: 'a + SatBuilder> SatForceLowerer<'a, B> for SatUniversalForcedTrueByWf<'a, B> {
-        fn mode(&self) -> SatForceLowererMode {
-            SatForceLowererMode::Alive
-        }
-
-        fn state<'b>(&'b self) -> &'b SatForceLowererState<'a, B>
-        where
-            'a: 'b,
-        {
-            &self.state
-        }
-
-        fn state_mut<'b>(&'b mut self) -> &'b mut SatForceLowererState<'a, B>
-        where
-            'a: 'b,
-        {
-            &mut self.state
-        }
-
-        fn lower_as_universal(&mut self, node: NodeIndex) -> <B as SatBuilder>::Term {
-            if let Some(var) = self.universals.get(&node) {
-                var.to_term()
-            } else {
-                // TODO: differential testing passes but why is this sound? Doesn't it assume that
-                //  unmentioned universals can be false?
-                self.lower_as_existential(node)
+                model
+                    .proposition(BoolFormula::Equiv(
+                        [
+                            BoolFormula::Atom(existential_var_concluded),
+                            self.is_node_implied(
+                                existential_node,
+                                ConclusionMode::IncludeConclusion,
+                            ),
+                        ]
+                        .into(),
+                    ))
+                    .post()
+                    .unwrap();
             }
+        }
+
+        fn is_alive(&self, node: NodeIndex, conclusion_mode: ConclusionMode) -> BoolFormula {
+            match self.solver.graph[node] {
+                FormulaNode::And => BoolFormula::And(
+                    self.solver
+                        .graph
+                        .edges_directed(node, Direction::Incoming)
+                        .map(|edge| self.is_alive(edge.source(), conclusion_mode))
+                        .collect(),
+                ),
+                FormulaNode::True => BoolFormula::Atom(View::from(true)),
+                FormulaNode::Universal(var) => BoolFormula::Atom(self.universal_vars[var]),
+                FormulaNode::Existential(var) => match conclusion_mode {
+                    ConclusionMode::ExcludeConclusion => {
+                        BoolFormula::Atom(self.existential_vars_orig[var])
+                    }
+                    ConclusionMode::IncludeConclusion => {
+                        BoolFormula::Atom(self.existential_vars_concluded[var])
+                    }
+                },
+            }
+        }
+
+        fn is_node_implied(&self, node: NodeIndex, conclusion_mode: ConclusionMode) -> BoolFormula {
+            BoolFormula::Or(
+                self.solver
+                    .graph
+                    .edges_directed(node, Direction::Incoming)
+                    .map(|edge| edge.source())
+                    .chain(
+                        (conclusion_mode.is_truthy() && node == self.impl_rhs)
+                            .then_some(self.impl_lhs),
+                    )
+                    .map(|src| self.is_alive(src, conclusion_mode))
+                    .collect(),
+            )
+        }
+
+        fn are_universals_sound(&self, conclusion_mode: ConclusionMode) -> BoolFormula {
+            BoolFormula::And(
+                self.universal_vars
+                    .iter()
+                    .zip(&self.solver.universal_nodes)
+                    .map(|(&universal_var, &universal_node)| {
+                        BoolFormula::Implies(
+                            Box::new(self.is_node_implied(universal_node, conclusion_mode)),
+                            Box::new(BoolFormula::Atom(universal_var)),
+                        )
+                    })
+                    .collect(),
+            )
         }
     }
 }
