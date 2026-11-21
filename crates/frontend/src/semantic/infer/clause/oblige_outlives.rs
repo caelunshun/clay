@@ -4,220 +4,77 @@ use crate::{
     base::ListInternable,
     semantic::{
         infer::{
-            ClauseCx, ClauseObligation, GeneralOutlivesError, MultiPromiseBuilder,
+            ClauseCx, ClauseObligation, GeneralOutlivesError, GeneralOutlivesErrorKind,
             ObligationNotReady, ObligationResult, ObligationTermination, Promise, PromiseHandle,
-            ReConstraintOrder, TyOutlivesReError, TyOutlivesReErrorCulprit, TyOutlivesTyError,
+            ReConstraintOrder,
         },
-        syntax::{
-            InferTyVar, Re, RelationDirection, RelationMode, SimpleTySet, Ty, TyKind, TyOrRe,
-            TyOrReList, UniversalReVarSourceInfo,
-        },
+        syntax::{InferTyVar, Re, RelationMode, SimpleTySet, Ty, TyKind, TyOrRe, TyOrReList},
     },
 };
 
 impl<'sess> ClauseCx<'sess> {
-    pub fn permit_universe_re_outlives_general(
+    pub fn permit_outlives(
         &mut self,
-        universal: Re,
-        other: TyOrRe,
-        dir: RelationDirection,
+        mode: RelationMode,
+        lhs: impl Into<TyOrRe>,
+        rhs: impl Into<TyOrRe>,
     ) {
-        match other {
-            TyOrRe::Re(other) => {
-                self.permit_re_and_re(dir.to_mode(), [universal], [other]);
-            }
-            TyOrRe::Ty(other) => {
-                self.permit_universe_re_outlives_ty(universal, other, dir);
-            }
-        }
+        let s = self.session();
+
+        self.permit_general_outlives(
+            mode,
+            lhs.into().intern_single(s),
+            rhs.into().intern_single(s),
+        );
     }
 
-    pub fn permit_universe_re_outlives_ty(
+    pub fn oblige_outlives(
         &mut self,
-        universal: Re,
-        other: Ty,
-        dir: RelationDirection,
+        mode: RelationMode,
+        lhs: impl Into<TyOrRe>,
+        rhs: impl Into<TyOrRe>,
+    ) -> Promise<'sess, GeneralOutlivesError> {
+        let s = self.session();
+
+        self.oblige_general_outlives(
+            mode,
+            lhs.into().intern_single(s),
+            rhs.into().intern_single(s),
+        )
+    }
+
+    pub fn permit_general_outlives(
+        &mut self,
+        mode: RelationMode,
+        lhs: TyOrReList,
+        rhs: TyOrReList,
     ) {
-        // Without loss of generality...
-        //
-        // If `dir == LhsOntoRhs`...
-        //
-        // ```
-        // permit(universal: 'a)
-        // constrain('a: other)
-        // =>
-        // permit(universal: other)
-        // ```
-        //
-        // If `dir == RhsOntoLhs`...
-        //
-        // ```
-        // permit('a: universal)
-        // constrain(other: 'a)
-        // =>
-        // permit(other: universal)
-        // ```
+        let order = self.next_re_constraint();
 
-        let joiner = self.fresh_re_infer();
-
-        // `'a: other` (inverse: `other: 'a`)
-        self.oblige_ty_outlives_re(other, joiner, dir.invert())
-            .report_never();
-
-        // `universal: 'a` (inverse: `'a: universal`)
-        self.permit_re_and_re(dir.to_mode(), [universal], [joiner]);
+        self.push_obligation(ClauseObligation::Outlives {
+            handle: None,
+            mode,
+            order,
+            lhs,
+            rhs,
+        });
     }
 
     pub fn oblige_general_outlives(
         &mut self,
-        lhs: TyOrRe,
-        rhs: TyOrRe,
-        dir: RelationDirection,
+        mode: RelationMode,
+        lhs: TyOrReList,
+        rhs: TyOrReList,
     ) -> Promise<'sess, GeneralOutlivesError> {
-        let (lhs, rhs) = dir.adapt(lhs, rhs);
-
-        match (lhs, rhs) {
-            (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => self
-                .unify_re_and_re(RelationMode::LhsOntoRhs, [lhs], [rhs])
-                .map(|_ccx, err| err.into()),
-            (TyOrRe::Ty(lhs), TyOrRe::Re(rhs)) => self
-                .oblige_ty_outlives_re(lhs, rhs, RelationDirection::LhsOntoRhs)
-                .map(|_ccx, err| err.into()),
-            (TyOrRe::Re(lhs), TyOrRe::Ty(rhs)) => self
-                .oblige_ty_outlives_re(rhs, lhs, RelationDirection::RhsOntoLhs)
-                .map(|_ccx, err| err.into()),
-            (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => self
-                .oblige_ty_outlives_ty(lhs, rhs)
-                .map(|_ccx, err| err.into()),
-        }
-    }
-
-    pub fn obtain_ty_lub(&mut self, elems: TyOrReList) -> Re {
-        // The universal will range over all lifetimes which outlive the `ty`, including the genuine
-        // LUB, which is the most restrictive case. In other words, creating this as a universal
-        // forces the lifetime to act like the LUB.
-
-        let s = self.session();
-        let universal = self.fresh_re_universal(UniversalReVarSourceInfo::OutliveLub(elems));
-
-        for &elem in elems.r(s) {
-            self.permit_universe_re_outlives_general(
-                universal,
-                elem,
-                RelationDirection::LhsOntoRhs,
-            );
-        }
-
-        universal
-    }
-
-    pub fn obtain_ty_glb(&mut self, elems: TyOrReList) -> Re {
-        // See `obtain_ty_lub`.
-
-        let s = self.session();
-        let universal = self.fresh_re_universal(UniversalReVarSourceInfo::OutliveGlb(elems));
-
-        for &elem in elems.r(s) {
-            self.permit_universe_re_outlives_general(
-                universal,
-                elem,
-                RelationDirection::RhsOntoLhs,
-            );
-        }
-
-        universal
-    }
-
-    pub fn oblige_ty_outlives_ty(&mut self, lhs: Ty, rhs: Ty) -> Promise<'sess, TyOutlivesTyError> {
-        let s = self.session();
-
-        // One would think they could just run...
-        //
-        // ```
-        // 'joiner = fresh_infer()
-        // constrain(lhs: &longer 'joiner)
-        // constrain('joiner: rhs)
-        // ```
-        //
-        // This, however, would reject `(&'a (), &'b ()): &longer (&'a (), &'b ())` where `'a, 'b`
-        // are universals. To understand why, check out this neat hasse diagram!
-        //
-        // ```
-        //               ┌──────┐
-        //        ┌─────►│ 'gc  │◄────┐
-        //        │      └──────┘     │
-        //        │                   │
-        //        │ ┌──►'?joiner◄───┐ │
-        //        │ ┼               ┼ │
-        //      ┌─┴─┴─┐            ┌┴─┴──┐
-        // ░░░░░│ 'a  │░░░░░░░░░░░░│ 'b  │░░░░░
-        //      └─▲─▲─┘            └▲─▲──┘
-        //        │ ┼               ┼ │
-        //        │ └───'?joiner────┘ │
-        //        │                   │
-        //        │                   │
-        //        │    ┌──────────┐   │
-        //        └────┤ 'bottom  ├───┘
-        //             └──────────┘
-        // ```
-        //
-        // Legend:
-        //
-        // - Boxed lifetimes are universals
-        // - Lifetimes without boxes with a question mark in front are inference lifetimes.
-        // - The lines without the dashes indicate universal permissions
-        // - The lines with the dashes indicate constraints
-        // - Note that `'bottom` is a virtual lifetime that cannot actually be mentioned by users.
-        //   This ensures that we can do mention analysis to figure out a lower bound for associated
-        //   types that don't give any additional bounds since we know projections can only mention
-        //   their inputs.
-        //
-        // The `joiner` inference lifetime simultaneously has to be somewhere above `'a` and `'b`
-        // *and*, simultaneously, below it as well!
-        //
-        // So, what's the actual solution?
-        //
-        // For `LHS: &longer RHS`, it has to be that, if *all parts of* the RHS are live, *all parts
-        // of* the LHS must also be live.
-        //
-        // If we compute the greatest lower bound of the RHS using `obtain_ty_glb`, we'll create a
-        // universal which can range over anything so long as the RHS outlives it, including a
-        // maximally strict bound which is longer than all lifetimes except the lifetimes living
-        // longer than *at least one* of the lifetimes mentioned in the RHS.
-        //
-        // In other words, if the LHS outlives the RHS's GLB, we'll know that if all lifetimes in
-        // the RHS are live, all lifetimes in the LHS will also be live since they must outlive at
-        // least one of those RHS lifetimes.
-        //
-        // See the `ty_outlives.clay` uitest for an exercising of this logic.
-
-        let rhs_glb = self.obtain_ty_glb(TyOrRe::Ty(rhs).intern_single(s));
-
-        // LHS: 'a
-        self.oblige_ty_outlives_re(lhs, rhs_glb, RelationDirection::LhsOntoRhs)
-            .map(move |_ccx, error| TyOutlivesTyError {
-                lhs,
-                rhs,
-                rhs_glb,
-                errors: error.errors,
-            })
-    }
-
-    pub fn oblige_ty_outlives_re(
-        &mut self,
-        lhs: Ty,
-        rhs: Re,
-        dir: RelationDirection,
-    ) -> Promise<'sess, TyOutlivesReError> {
         let (promise, handle) = Promise::new();
         let order = self.next_re_constraint();
 
-        self.push_obligation(ClauseObligation::TyOutlivesRe {
-            handle,
+        self.push_obligation(ClauseObligation::Outlives {
+            handle: Some(handle),
             order,
+            mode,
             lhs,
             rhs,
-            dir,
         });
 
         promise
@@ -225,77 +82,96 @@ impl<'sess> ClauseCx<'sess> {
 
     pub(super) fn run_oblige_ty_outlives_re(
         &mut self,
-        handle: PromiseHandle<'sess, TyOutlivesReError>,
+        handle: Option<PromiseHandle<'sess, GeneralOutlivesError>>,
         order: ReConstraintOrder,
-        lhs: Ty,
-        rhs: Re,
-        dir: RelationDirection,
+        mode: RelationMode,
+        lhs: TyOrReList,
+        rhs: TyOrReList,
     ) -> ObligationResult {
-        let mut collector = MultiPromiseBuilder::new();
+        let lhs_regions = self
+            .collect_dominating_regions_in_ty_or_re_list(lhs)
+            .map_err(ObligationNotReady::UnresolvedInfer)?;
 
-        if let Err(inf_var) =
-            self.run_oblige_ty_outlives_re_inner(&mut collector, order, lhs, rhs, dir)
-        {
-            return Err(ObligationNotReady::UnresolvedInfer(inf_var));
+        let rhs_regions = self
+            .collect_dominating_regions_in_ty_or_re_list(rhs)
+            .map_err(ObligationNotReady::UnresolvedInfer)?;
+
+        if let Some(handle) = handle {
+            self.ucx_mut()
+                .unify_re_and_re(order, mode, lhs_regions, rhs_regions)
+                .map(move |_ccx, error| GeneralOutlivesError {
+                    lhs,
+                    rhs,
+                    mode,
+                    error: GeneralOutlivesErrorKind::Unify(error),
+                })
+                .forward(self, handle);
+        } else {
+            self.permit_re_and_re(mode, lhs_regions, rhs_regions);
         }
-
-        collector
-            .finish()
-            .map(move |_ccx, errors| TyOutlivesReError { lhs, rhs, errors })
-            .forward(self, handle);
 
         Ok(ObligationTermination::Finished)
     }
 
-    fn run_oblige_ty_outlives_re_inner(
+    fn collect_dominating_regions_in_ty_or_re_list(
         &mut self,
-        collector: &mut MultiPromiseBuilder<'sess, TyOutlivesReErrorCulprit>,
-        order: ReConstraintOrder,
-        lhs: Ty,
-        rhs: Re,
-        dir: RelationDirection,
+        list: TyOrReList,
+    ) -> Result<Vec<Re>, InferTyVar> {
+        let s = self.session();
+
+        let mut collector = Vec::new();
+
+        for &term in list.r(s) {
+            match term {
+                TyOrRe::Re(re) => {
+                    collector.push(re);
+                }
+                TyOrRe::Ty(ty) => {
+                    self.collect_dominating_regions_in_ty(&mut collector, ty)?;
+                }
+            }
+        }
+
+        Ok(collector)
+    }
+
+    fn collect_dominating_regions_in_ty(
+        &mut self,
+        collector: &mut Vec<Re>,
+        ty: Ty,
     ) -> Result<(), InferTyVar> {
         let s = self.session();
 
-        match *lhs.r(s) {
+        match *ty.r(s) {
             TyKind::HrtbVar(_) | TyKind::HrtbProjection(_) => {
                 unreachable!()
             }
             TyKind::Simple(_) | TyKind::Error(_) | TyKind::FnDef(_) => {
                 // (trivial)
             }
-            TyKind::Reference(lhs, _muta, _pointee) => {
-                self.ucx_mut()
-                    .unify_re_and_re(order, dir.to_mode(), [lhs], [rhs])
-                    .map(|_ccx, error| TyOutlivesReErrorCulprit::Regular(error))
-                    .join(collector);
+            TyKind::Reference(re, _muta, _pointee) => {
+                collector.push(re);
             }
-            TyKind::Adt(lhs) => {
+            TyKind::Adt(ty) => {
                 // ADTs are bounded by the regions which they mention.
-                for &lhs in lhs.params.r(s) {
-                    match lhs {
-                        TyOrRe::Re(lhs) => {
-                            self.ucx_mut()
-                                .unify_re_and_re(order, dir.to_mode(), [lhs], [rhs])
-                                .map(|_ccx, error| TyOutlivesReErrorCulprit::Regular(error))
-                                .join(collector);
+                for &para in ty.params.r(s) {
+                    match para {
+                        TyOrRe::Re(re) => {
+                            collector.push(re);
                         }
-                        TyOrRe::Ty(lhs) => {
-                            self.run_oblige_ty_outlives_re_inner(collector, order, lhs, rhs, dir)?;
+                        TyOrRe::Ty(ty) => {
+                            self.collect_dominating_regions_in_ty(collector, ty)?;
                         }
                     }
                 }
             }
 
-            TyKind::Trait(lhs_re, _muta, _lhs_spec) => {
-                self.ucx_mut()
-                    .unify_re_and_re(order, dir.to_mode(), [lhs_re], [rhs])
-                    .map(|_ccx, error| TyOutlivesReErrorCulprit::Regular(error))
-                    .join(collector);
+            TyKind::Trait(re, _muta, _spec) => {
+                collector.push(re);
             }
-            TyKind::Tuple(lhs) => {
-                for &lhs in lhs.r(s) {
-                    self.run_oblige_ty_outlives_re_inner(collector, order, lhs, rhs, dir)?;
+            TyKind::Tuple(elems) => {
+                for &ty in elems.r(s) {
+                    self.collect_dominating_regions_in_ty(collector, ty);
                 }
             }
             TyKind::Universal(universal) => {
@@ -303,22 +179,19 @@ impl<'sess> ClauseCx<'sess> {
                     .elaborate_universal_immediately(universal)
                     .re_representative;
 
-                self.ucx_mut()
-                    .unify_re_and_re(order, dir.to_mode(), [re_representative], [rhs])
-                    .map(|_ccx, error| TyOutlivesReErrorCulprit::Regular(error))
-                    .join(collector);
+                collector.push(re_representative);
             }
-            TyKind::InferVar(inf_lhs) => {
-                match self.ucx().lookup_ty_infer_var(inf_lhs) {
-                    Ok(inf_lhs) => {
-                        self.run_oblige_ty_outlives_re_inner(collector, order, inf_lhs, rhs, dir)?;
+            TyKind::InferVar(var) => {
+                match self.ucx().lookup_ty_infer_var(var) {
+                    Ok(resolved) => {
+                        self.collect_dominating_regions_in_ty(collector, resolved)?;
                     }
                     Err(err) => {
                         if err.perm_set.intersects(SimpleTySet::OTHER) {
-                            return Err(inf_lhs);
+                            return Err(var);
                         }
 
-                        // (trivially true of all remaining types)
+                        // (all remaining types are trivial)
                     }
                 }
             }

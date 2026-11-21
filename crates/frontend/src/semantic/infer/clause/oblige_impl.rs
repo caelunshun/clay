@@ -57,7 +57,7 @@ impl<'sess> ClauseCx<'sess> {
     ) -> Promise<'sess, TraitClauseError> {
         match rhs {
             TraitClause::Outlives(rhs_dir, rhs) => self
-                .oblige_general_outlives(TyOrRe::Ty(lhs), rhs, rhs_dir)
+                .oblige_outlives(rhs_dir.to_mode(), lhs, rhs)
                 .map(|_ccx, error| TraitClauseError::Outlives(error)),
             TraitClause::Trait(rhs) => self
                 .oblige_ty_meets_trait(fuel, universe.clone(), lhs, rhs)

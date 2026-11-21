@@ -24,8 +24,8 @@ use crate::{
             AdtInstance, FnDef, MirBlockIdx, MirBody, MirBodyDirection, MirLocalIdx,
             MirLocationAfter, MirPlace, MirPlaceElem, MirPlaceMention, MirPlaceMentionKind,
             MirPrettyFmt, MirPrettyFmtHooks, MirRvalue, MirSourceInfo, MirStmtIdx, MirStmtKind,
-            MirStraightBinOpKind, MirStraightUnOpKind, MirTerminatorKind, Re, RelationDirection,
-            RelationMode, ResolvedFieldIdx, SimpleTyKind, TraverseMentions, Ty, TyKind, TyOrRe,
+            MirStraightBinOpKind, MirStraightUnOpKind, MirTerminatorKind, Re, RelationMode,
+            ResolvedFieldIdx, SimpleTyKind, TraverseMentions, Ty, TyKind, TyOrRe,
             UniversalReVarSourceInfo,
         },
     },
@@ -214,12 +214,8 @@ impl TyCtxt<'_> {
                         .report_never();
                 }
                 TyOrRe::Ty(ty) => {
-                    ccx.oblige_ty_outlives_re(
-                        ty,
-                        shortest_sig_universal,
-                        RelationDirection::LhsOntoRhs,
-                    )
-                    .report_never();
+                    ccx.oblige_outlives(RelationMode::LhsOntoRhs, ty, shortest_sig_universal)
+                        .report_never();
                 }
             }
         }
@@ -356,10 +352,10 @@ impl TyCtxt<'_> {
             {
                 re_cx
                     .ccx
-                    .oblige_ty_outlives_re(
+                    .oblige_outlives(
+                        RelationMode::LhsOntoRhs,
                         *local_ty,
                         atomic_place_universals[atomic],
-                        RelationDirection::LhsOntoRhs,
                     )
                     .report_never();
             }

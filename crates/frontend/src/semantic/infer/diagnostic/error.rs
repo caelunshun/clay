@@ -386,89 +386,49 @@ impl ToDebugTree for FnImplUnsatisfiedError {
 // === Outlives Error === //
 
 #[derive(Debug, Clone)]
-pub enum GeneralOutlivesError {
-    TyAndTy(TyOutlivesTyError),
-    TyAndRe(TyOutlivesReError),
-    ReAndRe(ReAndReUnifyError),
-}
-
-impl From<TyOutlivesTyError> for GeneralOutlivesError {
-    fn from(error: TyOutlivesTyError) -> Self {
-        GeneralOutlivesError::TyAndTy(error)
-    }
-}
-
-impl From<TyOutlivesReError> for GeneralOutlivesError {
-    fn from(error: TyOutlivesReError) -> Self {
-        GeneralOutlivesError::TyAndRe(error)
-    }
-}
-
-impl From<ReAndReUnifyError> for GeneralOutlivesError {
-    fn from(error: ReAndReUnifyError) -> Self {
-        GeneralOutlivesError::ReAndRe(error)
-    }
+pub struct GeneralOutlivesError {
+    pub lhs: TyOrReList,
+    pub rhs: TyOrReList,
+    pub mode: RelationMode,
+    pub error: GeneralOutlivesErrorKind,
 }
 
 impl ToDebugTree for GeneralOutlivesError {
     fn to_debug_tree(&self, pretty: &ClausePrettyFmtCx<'_, '_>) -> DebugTree {
-        match self {
-            GeneralOutlivesError::TyAndTy(error) => error.to_debug_tree(pretty),
-            GeneralOutlivesError::TyAndRe(error) => error.to_debug_tree(pretty),
-            GeneralOutlivesError::ReAndRe(error) => error.to_debug_tree(pretty),
-        }
-    }
-}
+        let s = pretty.session();
 
-#[derive(Debug, Clone)]
-pub struct TyOutlivesTyError {
-    pub lhs: Ty,
-    pub rhs: Ty,
-    pub rhs_glb: Re,
-    pub errors: Vec<TyOutlivesReErrorCulprit>,
-}
-
-impl ToDebugTree for TyOutlivesTyError {
-    fn to_debug_tree(&self, pretty: &ClausePrettyFmtCx<'_, '_>) -> DebugTree {
         DebugTree::new()
-            .with_prose("ty outlives ty")
-            .with_prose(format!("LHS: {}", pretty.wrap(self.lhs)))
-            .with_prose(format!("RHS: {}", pretty.wrap(self.rhs)))
-            .with_prose(format!("RHS GLB: {}", pretty.wrap(self.rhs_glb)))
-            .with_prose(format!("Errors:"))
-            .with_sublist(self.errors.to_debug_tree(pretty))
+            .with_prose("general outlives error")
+            .with_prose(format!(
+                "LHS: {}",
+                format_list(
+                    self.lhs.r(s).iter().map(|v| pretty.wrap(v)),
+                    SimpleListFormatGlue::PLUS_LIST
+                )
+            ))
+            .with_prose(format!(
+                "RHS: {}",
+                format_list(
+                    self.rhs.r(s).iter().map(|v| pretty.wrap(v)),
+                    SimpleListFormatGlue::PLUS_LIST
+                )
+            ))
+            .with_prose(format!("Error:"))
+            .with_sublist(self.error.to_debug_tree(pretty))
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct TyOutlivesReError {
-    pub lhs: Ty,
-    pub rhs: Re,
-    pub errors: Vec<TyOutlivesReErrorCulprit>,
+pub enum GeneralOutlivesErrorKind {
+    NotReady(ObligationNotReady),
+    Unify(ReAndReUnifyError),
 }
 
-impl ToDebugTree for TyOutlivesReError {
-    fn to_debug_tree(&self, pretty: &ClausePrettyFmtCx<'_, '_>) -> DebugTree {
-        DebugTree::new()
-            .with_prose("ty outlives region")
-            .with_prose(format!("LHS: {}", pretty.wrap(self.lhs)))
-            .with_prose(format!("RHS: {}", pretty.wrap(self.rhs)))
-            .with_prose(format!("Errors:"))
-            .with_sublist(self.errors.to_debug_tree(pretty))
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum TyOutlivesReErrorCulprit {
-    Regular(ReAndReUnifyError),
-    CannotProgress(ObligationNotReady),
-}
-
-impl ToDebugTree for TyOutlivesReErrorCulprit {
+impl ToDebugTree for GeneralOutlivesErrorKind {
     fn to_debug_tree(&self, pretty: &ClausePrettyFmtCx<'_, '_>) -> DebugTree {
         match self {
-            TyOutlivesReErrorCulprit::Regular(error) => error.to_debug_tree(pretty),
-            TyOutlivesReErrorCulprit::CannotProgress(error) => error.to_debug_tree(pretty),
+            GeneralOutlivesErrorKind::NotReady(err) => err.to_debug_tree(pretty),
+            GeneralOutlivesErrorKind::Unify(err) => err.to_debug_tree(pretty),
         }
     }
 }
@@ -499,7 +459,7 @@ pub enum ImportError {
     },
     BadRefPointee {
         ty: SigTy,
-        error: Box<TyOutlivesReError>,
+        error: Box<GeneralOutlivesError>,
     },
     BadGenerics {
         binder: Obj<GenericBinder>,

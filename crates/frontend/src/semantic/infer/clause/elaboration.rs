@@ -1,5 +1,5 @@
 use crate::{
-    base::{Intern, IterInternExt, Session, ValueInternable},
+    base::{Intern, IterInternExt, ListInternable, Session, ValueInternable},
     semantic::{
         infer::{
             ClauseCx, ClauseFuel, ClauseImportEnv, ClauseObligation, GenericSubst, HrtbUniverse,
@@ -115,9 +115,11 @@ impl<'sess> ClauseCx<'sess> {
                     }))
                     .intern(s);
 
-                let outlive_glb = self.obtain_ty_glb(outlives_comps);
-
-                self.permit_re_and_re(RelationMode::LhsOntoRhs, [re_representative], [outlive_glb]);
+                self.permit_general_outlives(
+                    RelationMode::LhsOntoRhs,
+                    TyOrRe::Re(re_representative).intern_single(s),
+                    outlives_comps,
+                );
             }
         }
 
@@ -135,11 +137,7 @@ impl<'sess> ClauseCx<'sess> {
             // Handle the simple outlives case.
             let binder = match target {
                 TraitClause::Outlives(outlive_dir, outlive) => {
-                    self.permit_universe_re_outlives_general(
-                        re_representative,
-                        outlive,
-                        outlive_dir,
-                    );
+                    self.permit_outlives(outlive_dir.to_mode(), re_representative, outlive);
                     continue;
                 }
                 TraitClause::Trait(binder) => binder,

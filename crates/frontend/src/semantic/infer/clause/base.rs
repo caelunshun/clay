@@ -4,18 +4,17 @@ use crate::{
     semantic::{
         analysis::TyCtxt,
         infer::{
-            AnyPromiseHandle, FloatingInferVar, GeneralOutlivesError, HrtbUniverse, ImplCache,
-            InstantiatedTraitImplError, InstantiatedTraitImplErrorKind, MultiPromise,
-            MultiPromiseBuilder, NotCoveredError, ObligationNotReady, ObligationTermination,
-            Promise, PromiseHandle, PromiseMode, PromiseResolutionQueue, ReAndReUnifyError,
-            ReConstraintOrder, TyAndSimpleTySetUnifyError, TyAndTyRegionUnifyError,
-            TyAndTyStructuralUnifyError, TyAndTyUnifyError, TyAndTyUnifyErrorKind,
-            TyOutlivesReError, TyOutlivesReErrorCulprit, UnifyCx, UnifyCxMode,
-            UniversalElaboration,
+            AnyPromiseHandle, FloatingInferVar, GeneralOutlivesError, GeneralOutlivesErrorKind,
+            HrtbUniverse, ImplCache, InstantiatedTraitImplError, InstantiatedTraitImplErrorKind,
+            MultiPromise, MultiPromiseBuilder, NotCoveredError, ObligationNotReady,
+            ObligationTermination, Promise, PromiseHandle, PromiseMode, PromiseResolutionQueue,
+            ReAndReUnifyError, ReConstraintOrder, TyAndSimpleTySetUnifyError,
+            TyAndTyRegionUnifyError, TyAndTyStructuralUnifyError, TyAndTyUnifyError,
+            TyAndTyUnifyErrorKind, UnifyCx, UnifyCxMode, UniversalElaboration,
         },
         syntax::{
-            InferTyVar, InferTyVarSourceInfo, LangItems, Re, RelationDirection, RelationMode,
-            SimpleTySet, TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe,
+            InferTyVar, InferTyVarSourceInfo, LangItems, Re, RelationMode, SimpleTySet,
+            TraitClause, TraitClauseList, TraitParam, TraitSpec, Ty, TyKind, TyOrRe, TyOrReList,
             UniversalReVar, UniversalReVarSourceInfo, UniversalTy, UniversalTyProj,
             UniversalTyProjIdx, UniversalTyProjInner, UniversalTyRoot, UniversalTyRootSourceInfo,
         },
@@ -41,12 +40,12 @@ pub enum ClauseObligation<'sess> {
         lhs: Ty,
         rhs: TraitSpec,
     },
-    TyOutlivesRe {
-        handle: PromiseHandle<'sess, TyOutlivesReError>,
+    Outlives {
+        handle: Option<PromiseHandle<'sess, GeneralOutlivesError>>,
         order: ReConstraintOrder,
-        lhs: Ty,
-        rhs: Re,
-        dir: RelationDirection,
+        mode: RelationMode,
+        lhs: TyOrReList,
+        rhs: TyOrReList,
     },
     Covered {
         handle: PromiseHandle<'sess, NotCoveredError>,
@@ -264,13 +263,13 @@ impl<'sess> ClauseCx<'sess> {
                         rhs,
                     } => fork
                         .run_oblige_ty_meets_trait_instantiated(handle, fuel, universe, lhs, rhs),
-                    ClauseObligation::TyOutlivesRe {
+                    ClauseObligation::Outlives {
                         handle,
                         order,
+                        mode,
                         lhs,
                         rhs,
-                        dir: direction,
-                    } => fork.run_oblige_ty_outlives_re(handle, order, lhs, rhs, direction),
+                    } => fork.run_oblige_ty_outlives_re(handle, order, mode, lhs, rhs),
                     ClauseObligation::Covered {
                         handle,
                         must_mention,
@@ -343,7 +342,7 @@ impl<'sess> ClauseCx<'sess> {
 
         self.pending_obligations.retain(|obligation| {
             let other_kill_id = match obligation.kind {
-                ClauseObligation::TyOutlivesRe { .. }
+                ClauseObligation::Outlives { .. }
                 | ClauseObligation::PollElaboration { .. }
                 | ClauseObligation::Covered { .. } => None,
                 ClauseObligation::TyMeetsTrait { fuel, .. } => Some(fuel.kill_id()),
@@ -353,7 +352,7 @@ impl<'sess> ClauseCx<'sess> {
 
             if should_kill {
                 match &obligation.kind {
-                    ClauseObligation::TyOutlivesRe { .. }
+                    ClauseObligation::Outlives { .. }
                     | ClauseObligation::PollElaboration { .. }
                     | ClauseObligation::Covered { .. } => unreachable!(),
                     ClauseObligation::TyMeetsTrait { handle, .. } => {
@@ -394,23 +393,26 @@ impl<'sess> ClauseCx<'sess> {
                         },
                     );
                 }
-                ClauseObligation::TyOutlivesRe {
+                ClauseObligation::Outlives {
                     handle,
                     order: _,
+                    mode,
                     lhs,
                     rhs,
-                    dir: _,
                 } => {
                     let not_ready = state.not_ready.clone().unwrap();
 
-                    handle.reject_now(
-                        self,
-                        TyOutlivesReError {
-                            lhs: *lhs,
-                            rhs: *rhs,
-                            errors: [TyOutlivesReErrorCulprit::CannotProgress(not_ready)].into(),
-                        },
-                    );
+                    if let Some(handle) = handle {
+                        handle.reject_now(
+                            self,
+                            GeneralOutlivesError {
+                                mode: *mode,
+                                lhs: *lhs,
+                                rhs: *rhs,
+                                error: GeneralOutlivesErrorKind::NotReady(not_ready),
+                            },
+                        );
+                    }
                 }
                 ClauseObligation::PollElaboration { universal: _ } => {
                     // (ignored)
@@ -551,7 +553,7 @@ impl<'sess> ClauseCx<'sess> {
                 unreachable!();
             };
 
-            self.permit_universe_re_outlives_general(var, permitted_outlive, permitted_outlive_dir);
+            self.permit_outlives(permitted_outlive_dir.to_mode(), var, permitted_outlive);
         }
     }
 
@@ -631,7 +633,7 @@ impl<'sess> ClauseCx<'sess> {
         for &clause in rhs.r(s) {
             match clause {
                 TraitClause::Outlives(dir, rhs) => {
-                    self.oblige_general_outlives(TyOrRe::Re(lhs), rhs, dir)
+                    self.oblige_outlives(dir.to_mode(), lhs, rhs)
                         .join(&mut collector);
                 }
                 TraitClause::Trait(_) => {

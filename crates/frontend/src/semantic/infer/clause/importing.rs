@@ -14,8 +14,8 @@ use crate::{
             AdtInstance, AnyGeneric, DebruijnMap, DebruijnTop, DynSiteIdx, FnInstance,
             FnInstanceInner, FnOwner, GenericBinder, HrtbBinder, HrtbDebruijnDef,
             HrtbDebruijnDefList, HrtbProjection, InferTyVarSourceInfo, Re, RegionGeneric,
-            RelationDirection, SigAdtInstance, SigFnInstance, SigFnOwner, SigGenericList,
-            SigHrtbBinder, SigProjectType, SigRe, SigReKind, SigTraitClause, SigTraitClauseKind,
+            RelationMode, SigAdtInstance, SigFnInstance, SigFnOwner, SigGenericList, SigHrtbBinder,
+            SigProjectType, SigRe, SigReKind, SigTraitClause, SigTraitClauseKind,
             SigTraitClauseList, SigTraitInstance, SigTraitParamKind, SigTraitSpec, SigTy,
             SigTyKind, SigTyList, SigTyOrRe, SigTyOrReList, TraitClause, TraitClauseList,
             TraitInstance, TraitParam, TraitSpec, Ty, TyFolder, TyFolderInfallibleExt, TyKind,
@@ -397,7 +397,7 @@ impl<'a, 'sess> SigImporter<'a, 'sess> {
 
                 if self.opts.wf_mode.do_wf() {
                     self.ccx
-                        .oblige_ty_outlives_re(pointee, re, RelationDirection::LhsOntoRhs)
+                        .oblige_outlives(RelationMode::LhsOntoRhs, pointee, re)
                         .map(move |_ccx, error| ImportError::BadRefPointee {
                             ty,
                             error: Box::new(error),

@@ -78,10 +78,10 @@ impl<'sess> ClauseCx<'sess> {
                             unreachable!()
                         };
 
-                        self.permit_universe_re_outlives_general(
+                        self.permit_outlives(
+                            allowed_to_outlive_dir.to_mode(),
                             target,
                             allowed_to_outlive,
-                            allowed_to_outlive_dir,
                         );
                     }
                 }
@@ -298,16 +298,12 @@ impl<'sess> ClauseCx<'sess> {
                             })
                             .join(&mut collector);
 
-                        self.oblige_general_outlives(
-                            TyOrRe::Re(var),
-                            must_outlive,
-                            must_outlive_dir,
-                        )
-                        .map(move |_ccx, error| BinderParamWfParamError {
-                            idx: idx as u32,
-                            kind: BinderParamWfParamErrorKind::OutlivesNotMet(error),
-                        })
-                        .join(&mut collector);
+                        self.oblige_outlives(must_outlive_dir.to_mode(), var, must_outlive)
+                            .map(move |_ccx, error| BinderParamWfParamError {
+                                idx: idx as u32,
+                                kind: BinderParamWfParamErrorKind::OutlivesNotMet(error),
+                            })
+                            .join(&mut collector);
                     }
                 }
                 (AnyGeneric::Ty(generic), TyOrRe::Ty(var)) => {
@@ -328,10 +324,10 @@ impl<'sess> ClauseCx<'sess> {
 
                         match clause {
                             TraitClause::Outlives(must_outlive_dir, must_outlive) => {
-                                self.oblige_general_outlives(
+                                self.oblige_outlives(
+                                    must_outlive_dir.to_mode(),
                                     TyOrRe::Ty(var),
                                     must_outlive,
-                                    must_outlive_dir,
                                 )
                                 .map(move |_ccx, error| BinderParamWfParamError {
                                     idx: idx as u32,

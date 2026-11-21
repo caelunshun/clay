@@ -65,6 +65,18 @@ impl TyOrRe {
     }
 }
 
+impl From<Ty> for TyOrRe {
+    fn from(value: Ty) -> Self {
+        TyOrRe::Ty(value)
+    }
+}
+
+impl From<Re> for TyOrRe {
+    fn from(value: Re) -> Self {
+        TyOrRe::Re(value)
+    }
+}
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum Re {
     /// The top region type. Essentially, this pointer is either managed by the garbage collector or
@@ -205,8 +217,6 @@ pub enum UniversalReVarSourceInfo {
     Root(Obj<RegionGeneric>),
     UniversalTyRepr(UniversalTy),
     InstantiatedHrtbVar,
-    OutliveGlb(TyOrReList),
-    OutliveLub(TyOrReList),
     HrtbWf { binder: SigHrtbBinder, idx: u32 },
     MirPlace(MirPlace),
     UnitTest(&'static str),
