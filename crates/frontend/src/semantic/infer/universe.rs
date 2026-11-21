@@ -5,7 +5,7 @@ use std::{fmt, hash, rc::Rc};
 /// parameter as a universally-quantified type. This can cause confusing scenarios when doing things
 /// like...
 ///
-/// ```ignore
+/// ```text
 /// fn meow<T>(v: T) -> T {
 ///     v
 //  }

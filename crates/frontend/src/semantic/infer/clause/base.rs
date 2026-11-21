@@ -7,10 +7,11 @@ use crate::{
             AnyPromiseHandle, FloatingInferVar, GeneralOutlivesError, HrtbUniverse, ImplCache,
             InstantiatedTraitImplError, InstantiatedTraitImplErrorKind, MultiPromise,
             MultiPromiseBuilder, NotCoveredError, ObligationNotReady, ObligationTermination,
-            Promise, PromiseHandle, PromiseMode, ReAndReUnifyError, ReConstraintOrder,
-            TyAndSimpleTySetUnifyError, TyAndTyRegionUnifyError, TyAndTyStructuralUnifyError,
-            TyAndTyUnifyError, TyAndTyUnifyErrorKind, TyOutlivesReError, TyOutlivesReErrorCulprit,
-            UnifyCx, UnifyCxMode, UniversalElaboration,
+            Promise, PromiseHandle, PromiseMode, PromiseResolutionQueue, ReAndReUnifyError,
+            ReConstraintOrder, TyAndSimpleTySetUnifyError, TyAndTyRegionUnifyError,
+            TyAndTyStructuralUnifyError, TyAndTyUnifyError, TyAndTyUnifyErrorKind,
+            TyOutlivesReError, TyOutlivesReErrorCulprit, UnifyCx, UnifyCxMode,
+            UniversalElaboration,
         },
         syntax::{
             InferTyVar, InferTyVarSourceInfo, LangItems, Re, RelationDirection, RelationMode,
@@ -23,6 +24,7 @@ use crate::{
 use clay_core::FastHashMap;
 use index_vec::IndexVec;
 use std::{
+    mem,
     num::NonZeroU32,
     rc::Rc,
     sync::atomic::{AtomicU32, Ordering::*},
@@ -32,10 +34,6 @@ use std::{
 
 #[derive(Debug, Clone)]
 pub enum ClauseObligation<'sess> {
-    RejectTyUnifiesTy {
-        handle: PromiseHandle<'sess, TyAndTyUnifyError>,
-        error: TyAndTyUnifyError,
-    },
     TyMeetsTrait {
         handle: PromiseHandle<'sess, InstantiatedTraitImplError>,
         fuel: ClauseFuel,
@@ -111,7 +109,7 @@ impl ClauseFuel {
 ///
 /// Obligations are enqueued out of order and the context solves them as inference variables arrive.
 ///
-/// This context is built on top of an [`ObligationCx`].
+/// This context is built on top of an [`UnifyCx`].
 ///
 /// ## Multi-Pass Checking
 ///
@@ -146,6 +144,7 @@ pub struct ClauseCx<'sess> {
     tcx: &'sess TyCtxt<'sess>,
     ucx: UnifyCx<'sess>,
     pending_obligations: Vec<ClauseObligationState<'sess>>,
+    promise_resolutions: PromiseResolutionQueue<'sess>,
     promise_mode: PromiseMode,
     universal_roots: IndexVec<UniversalTyRoot, UniversalTyRootDescriptor>,
     universal_projs: IndexVec<UniversalTyProjIdx, UniversalTyProjDescriptor>,
@@ -176,6 +175,7 @@ impl<'sess> ClauseCx<'sess> {
             tcx,
             ucx: UnifyCx::new(tcx.session(), mode),
             pending_obligations: Vec::new(),
+            promise_resolutions: PromiseResolutionQueue::default(),
             promise_mode: PromiseMode::RootContext,
             universal_roots: IndexVec::new(),
             universal_projs: IndexVec::new(),
@@ -211,16 +211,12 @@ impl<'sess> ClauseCx<'sess> {
         self.promise_mode
     }
 
-    pub fn is_silent(&self) -> bool {
-        !self.promise_mode.is_root()
-    }
-
-    pub fn make_silent(&mut self) {
+    pub fn make_probe_mode(&mut self) {
         self.promise_mode = PromiseMode::ProbeContext;
     }
 
-    pub fn with_silent(mut self) -> Self {
-        self.make_silent();
+    pub fn with_probe_mode(mut self) -> Self {
+        self.make_probe_mode();
         self
     }
 
@@ -260,10 +256,6 @@ impl<'sess> ClauseCx<'sess> {
                 let mut fork = self.clone();
 
                 let res = match kind {
-                    ClauseObligation::RejectTyUnifiesTy { handle, error } => {
-                        handle.reject_now(&mut fork, error);
-                        Ok(ObligationTermination::Finished)
-                    }
                     ClauseObligation::TyMeetsTrait {
                         handle,
                         fuel,
@@ -338,6 +330,8 @@ impl<'sess> ClauseCx<'sess> {
                 }
             }
 
+            mem::take(&mut self.promise_resolutions).flush(self);
+
             if !made_progress {
                 break;
             }
@@ -349,8 +343,7 @@ impl<'sess> ClauseCx<'sess> {
 
         self.pending_obligations.retain(|obligation| {
             let other_kill_id = match obligation.kind {
-                ClauseObligation::RejectTyUnifiesTy { .. }
-                | ClauseObligation::TyOutlivesRe { .. }
+                ClauseObligation::TyOutlivesRe { .. }
                 | ClauseObligation::PollElaboration { .. }
                 | ClauseObligation::Covered { .. } => None,
                 ClauseObligation::TyMeetsTrait { fuel, .. } => Some(fuel.kill_id()),
@@ -360,8 +353,7 @@ impl<'sess> ClauseCx<'sess> {
 
             if should_kill {
                 match &obligation.kind {
-                    ClauseObligation::RejectTyUnifiesTy { .. }
-                    | ClauseObligation::TyOutlivesRe { .. }
+                    ClauseObligation::TyOutlivesRe { .. }
                     | ClauseObligation::PollElaboration { .. }
                     | ClauseObligation::Covered { .. } => unreachable!(),
                     ClauseObligation::TyMeetsTrait { handle, .. } => {
@@ -383,9 +375,6 @@ impl<'sess> ClauseCx<'sess> {
 
         while let Some(state) = self.pending_obligations.pop() {
             match &state.kind {
-                ClauseObligation::RejectTyUnifiesTy { .. } => {
-                    unreachable!()
-                }
                 ClauseObligation::TyMeetsTrait {
                     handle,
                     fuel: _,
@@ -586,15 +575,15 @@ impl<'sess> ClauseCx<'sess> {
             Err(err) => {
                 let (promise, handle) = Promise::new();
 
-                self.push_obligation(ClauseObligation::RejectTyUnifiesTy {
+                self.promise_resolutions.queue_reject(
                     handle,
-                    error: TyAndTyUnifyError {
+                    TyAndTyUnifyError {
                         lhs,
                         rhs,
                         mode,
                         kind: TyAndTyUnifyErrorKind::Structural(err.culprits),
                     },
-                });
+                );
 
                 promise
             }

@@ -441,7 +441,7 @@ impl<'sess> BodyCtxt<'sess, '_> {
     fn attempt_single_candidate(&mut self, candidate: Obj<FnDef>, query: MethodQuery) -> bool {
         let s = self.session();
 
-        let mut fork = self.ccx().clone().with_silent();
+        let mut fork = self.ccx().clone().with_probe_mode();
 
         let probe = PromiseProbe::default();
 

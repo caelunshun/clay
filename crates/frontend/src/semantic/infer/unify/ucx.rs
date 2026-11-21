@@ -39,9 +39,8 @@ pub struct ReConstraintOrder(pub NonZeroU32);
 /// No operations performed by this context depend on the order in which prior operations have been
 /// performed and, as such, all operations can be performed and checked for correctness immediately.
 /// This property is not true for more complex `Ty: Clause` and `Ty: 're` obligations. To perform
-/// those obligations, you'll need an [`ClauseCx`](super::super::ClauseCx), which uses the
-/// deferred-solving functionality of a [`ObligationCx`](super::super::ObligationCx) internally to
-/// solve these obligations.
+/// those obligations, you'll need an [`ClauseCx`](super::super::ClauseCx), which uses
+/// deferred-solving to solve these obligations.
 #[derive(Clone)]
 pub struct UnifyCx<'sess> {
     session: &'sess Session,

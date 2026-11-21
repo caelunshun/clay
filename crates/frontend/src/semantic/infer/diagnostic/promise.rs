@@ -1016,8 +1016,4 @@ impl<'sess> PromiseResolutionQueue<'sess> {
             resolution.resolve(ccx);
         }
     }
-
-    pub fn flush_ref(&mut self, ccx: &mut ClauseCx<'sess>) {
-        mem::take(self).flush(ccx);
-    }
 }
