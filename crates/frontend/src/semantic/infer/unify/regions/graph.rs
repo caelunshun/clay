@@ -200,7 +200,6 @@ impl<'sess> RegionRelationGraph<'sess> {
             if causes.is_empty() {
                 handle.queue_accept(queue);
             } else {
-                // TODO
                 handle.queue_reject(
                     queue,
                     ReAndReUnifyError {

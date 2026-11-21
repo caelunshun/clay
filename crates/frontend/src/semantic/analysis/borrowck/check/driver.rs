@@ -210,7 +210,7 @@ impl TyCtxt<'_> {
         for &var in env.generics.iter().flat_map(|v| v.substs.r(s)) {
             match var {
                 TyOrRe::Re(var) => {
-                    ccx.unify_re_and_re(var, shortest_sig_universal, RelationMode::LhsOntoRhs)
+                    ccx.unify_re_and_re(RelationMode::LhsOntoRhs, [var], [shortest_sig_universal])
                         .report_never();
                 }
                 TyOrRe::Ty(ty) => {
@@ -228,9 +228,9 @@ impl TyCtxt<'_> {
         for rhs in place_numbering.bit_to_atomic_place.indices() {
             // All locals live shorter than our signature universals
             ccx.permit_re_and_re(
-                atomic_place_universals[rhs],
-                shortest_sig_universal,
-                RelationMode::RhsOntoLhs,
+                RelationMode::LhsOntoRhs,
+                [shortest_sig_universal],
+                [atomic_place_universals[rhs]],
             );
 
             // Determine which other *locals* the `rhs` can outlive.
@@ -332,9 +332,9 @@ impl TyCtxt<'_> {
 
             for lhs in outlive_mask.iter() {
                 ccx.permit_re_and_re(
-                    atomic_place_universals[lhs],
-                    atomic_place_universals[rhs],
                     RelationMode::LhsOntoRhs,
+                    [atomic_place_universals[lhs]],
+                    [atomic_place_universals[rhs]],
                 );
             }
         }
@@ -567,7 +567,7 @@ impl<'a, 'sess> RegionTyCheckCx<'a, 'sess> {
                         let atomic_universal = self.atomic_place_universals[atomic_place];
 
                         self.ccx
-                            .unify_re_and_re(atomic_universal, ref_lt, RelationMode::LhsOntoRhs)
+                            .unify_re_and_re(RelationMode::LhsOntoRhs, [atomic_universal], [ref_lt])
                             .report_never();
                     }
 
@@ -626,7 +626,7 @@ impl<'a, 'sess> RegionTyCheckCx<'a, 'sess> {
     }
 
     fn check_assign_types(&mut self, source_info: MirSourceInfo, lhs: Ty, rhs: Ty) {
-        let promise = match self.ccx.unify_ty_and_ty(lhs, rhs, RelationMode::RhsOntoLhs) {
+        let promise = match self.ccx.unify_ty_and_ty(RelationMode::RhsOntoLhs, lhs, rhs) {
             Ok(v) => v,
             Err(err) => {
                 anon_delay_bug(format_args!(

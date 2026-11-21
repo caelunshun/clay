@@ -384,7 +384,7 @@ impl<'sess> ClauseCx<'sess> {
                 TraitParam::Equals(rhs) => match (lhs, rhs) {
                     (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
                         // This can be an obligation because selection shouldn't depend on regions.
-                        self.unify_re_and_re(lhs, rhs, RelationMode::Equate)
+                        self.unify_re_and_re(RelationMode::Equate, [lhs], [rhs])
                             .map(move |_ccx, error| {
                                 InherentImplErrorImplCulprit::RegionEquate(idx as u32, error)
                             })
@@ -392,7 +392,7 @@ impl<'sess> ClauseCx<'sess> {
                     }
                     (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
                         // See whether we can reject this parameter.
-                        match self.unify_ty_and_ty(lhs, rhs, RelationMode::Equate) {
+                        match self.unify_ty_and_ty(RelationMode::Equate, lhs, rhs) {
                             Ok(promise) => promise
                                 .map(move |_ccx, error| {
                                     InherentImplErrorImplCulprit::TyEquateRegion(idx as u32, error)
@@ -416,14 +416,14 @@ impl<'sess> ClauseCx<'sess> {
             match rhs_param {
                 TraitParam::Equals(rhs) => match (lhs, rhs) {
                     (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => {
-                        self.unify_re_and_re(lhs, rhs, RelationMode::Equate)
+                        self.unify_re_and_re(RelationMode::Equate, [lhs], [rhs])
                             .map(move |_ccx, error| {
                                 InherentImplErrorImplCulprit::RegionEquate(idx as u32, error)
                             })
                             .join(&mut culprits);
                     }
                     (TyOrRe::Ty(lhs), TyOrRe::Ty(rhs)) => {
-                        self.oblige_ty_unifies_ty(lhs, rhs, RelationMode::Equate)
+                        self.oblige_ty_unifies_ty(RelationMode::Equate, lhs, rhs)
                             .map(move |_ccx, error| {
                                 InherentImplErrorImplCulprit::TyEquate(idx as u32, error)
                             })
@@ -494,7 +494,7 @@ impl<'sess> ClauseCx<'sess> {
         let target_trait = target_trait.unwrap();
 
         // Does the `lhs` type match the `rhs`'s target type?
-        match self.unify_ty_and_ty(lhs, target_ty, RelationMode::Equate) {
+        match self.unify_ty_and_ty(RelationMode::Equate, lhs, target_ty) {
             Ok(promise) => {
                 promise
                     .map(move |_ccx, error| {
@@ -519,7 +519,7 @@ impl<'sess> ClauseCx<'sess> {
             match required_param {
                 TraitParam::Equals(required) => match (instance, required) {
                     (TyOrRe::Re(instance), TyOrRe::Re(required)) => {
-                        self.unify_re_and_re(instance, required, RelationMode::Equate)
+                        self.unify_re_and_re(RelationMode::Equate, [instance], [required])
                             .map(move |_ccx, error| {
                                 BlockImplUnsatisfiedErrorCulprit::GenericReUnify(
                                     idx as u32,
@@ -529,7 +529,7 @@ impl<'sess> ClauseCx<'sess> {
                             .join(&mut collector);
                     }
                     (TyOrRe::Ty(instance), TyOrRe::Ty(required)) => {
-                        match self.unify_ty_and_ty(instance, required, RelationMode::Equate) {
+                        match self.unify_ty_and_ty(RelationMode::Equate, instance, required) {
                             Ok(promise) => {
                                 promise
                                     .map(move |_ccx, error| {
@@ -569,7 +569,7 @@ impl<'sess> ClauseCx<'sess> {
                         unreachable!()
                     };
 
-                    self.oblige_ty_unifies_ty(instance_ty, required_ty, RelationMode::Equate)
+                    self.oblige_ty_unifies_ty(RelationMode::Equate, instance_ty, required_ty)
                         .map(move |_ccx, error| {
                             BlockImplUnsatisfiedErrorCulprit::AssocTyUnify(
                                 idx as u32,
@@ -632,15 +632,15 @@ impl<'sess> ClauseCx<'sess> {
             } = self.resolve_fn_instance_sig(fuel, universe, instance);
 
             let Ok(unify_args_promise) = self.unify_ty_and_ty(
+                RelationMode::Equate,
                 rhs_input,
                 TyKind::Tuple(sig.args).intern(s),
-                RelationMode::Equate,
             ) else {
                 return Err(SelectionRejected);
             };
 
             let Ok(unify_output_promise) =
-                self.unify_ty_and_ty(rhs_output, sig.ret_ty, RelationMode::Equate)
+                self.unify_ty_and_ty(RelationMode::Equate, rhs_output, sig.ret_ty)
             else {
                 return Err(SelectionRejected);
             };

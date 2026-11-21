@@ -140,7 +140,7 @@ impl BodyCtxt<'_, '_> {
 
             match kind_info.rhs {
                 EquateOrSet::EqualsLhs => {
-                    match prim_fork.unify_ty_and_ty(lhs, rhs, RelationMode::Equate) {
+                    match prim_fork.unify_ty_and_ty(RelationMode::Equate, lhs, rhs) {
                         Ok(promise) => {
                             promise.report_loud();
                         }
@@ -383,7 +383,7 @@ impl BodyCtxt<'_, '_> {
 
             match kind_info.rhs {
                 EquateOrSet::EqualsLhs => {
-                    match prim_fork.unify_ty_and_ty(lhs, rhs, RelationMode::Equate) {
+                    match prim_fork.unify_ty_and_ty(RelationMode::Equate, lhs, rhs) {
                         Ok(promise) => {
                             promise.report_loud();
                         }

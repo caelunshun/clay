@@ -166,7 +166,7 @@ impl BodyCtxt<'_, '_> {
             };
 
             self.ccx_mut()
-                .unify_ty_and_ty(var_ty, fallback, RelationMode::Equate)
+                .unify_ty_and_ty(RelationMode::Equate, var_ty, fallback)
                 .unwrap()
                 .report_never();
 

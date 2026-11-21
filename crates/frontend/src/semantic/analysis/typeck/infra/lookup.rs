@@ -484,7 +484,7 @@ impl<'sess> BodyCtxt<'sess, '_> {
                     unreachable!()
                 };
 
-                fork.oblige_ty_unifies_ty(receiver, expected_receiver, RelationMode::Equate)
+                fork.oblige_ty_unifies_ty(RelationMode::Equate, receiver, expected_receiver)
                     .probe(probe.clone());
             }
             MethodQuery::AssocFn(self_ty) => {

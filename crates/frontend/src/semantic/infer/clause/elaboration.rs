@@ -117,7 +117,7 @@ impl<'sess> ClauseCx<'sess> {
 
                 let outlive_glb = self.obtain_ty_glb(outlives_comps);
 
-                self.permit_re_and_re(re_representative, outlive_glb, RelationMode::LhsOntoRhs);
+                self.permit_re_and_re(RelationMode::LhsOntoRhs, [re_representative], [outlive_glb]);
             }
         }
 
@@ -336,7 +336,7 @@ impl<'sess> ClauseCx<'sess> {
                         };
 
                         if probe
-                            .unify_ty_and_ty(lhs, rhs, RelationMode::Equate)
+                            .unify_ty_and_ty(RelationMode::Equate, lhs, rhs)
                             .is_err()
                         {
                             continue 'scan_peers;
@@ -455,9 +455,9 @@ impl<'sess> ClauseCx<'sess> {
                     };
 
                     self.unify_ty_and_ty(
+                        RelationMode::Equate,
                         TyKind::InferVar(late_init_var).intern(s),
                         late_init_to,
-                        RelationMode::Equate,
                     )
                     .unwrap()
                     .report_never();

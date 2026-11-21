@@ -24,7 +24,7 @@ impl<'sess> ClauseCx<'sess> {
     ) {
         match other {
             TyOrRe::Re(other) => {
-                self.permit_re_and_re(universal, other, dir.to_mode());
+                self.permit_re_and_re(dir.to_mode(), [universal], [other]);
             }
             TyOrRe::Ty(other) => {
                 self.permit_universe_re_outlives_ty(universal, other, dir);
@@ -65,7 +65,7 @@ impl<'sess> ClauseCx<'sess> {
             .report_never();
 
         // `universal: 'a` (inverse: `'a: universal`)
-        self.permit_re_and_re(universal, joiner, dir.to_mode());
+        self.permit_re_and_re(dir.to_mode(), [universal], [joiner]);
     }
 
     pub fn oblige_general_outlives(
@@ -78,7 +78,7 @@ impl<'sess> ClauseCx<'sess> {
 
         match (lhs, rhs) {
             (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) => self
-                .unify_re_and_re(lhs, rhs, RelationMode::LhsOntoRhs)
+                .unify_re_and_re(RelationMode::LhsOntoRhs, [lhs], [rhs])
                 .map(|_ccx, err| err.into()),
             (TyOrRe::Ty(lhs), TyOrRe::Re(rhs)) => self
                 .oblige_ty_outlives_re(lhs, rhs, RelationDirection::LhsOntoRhs)

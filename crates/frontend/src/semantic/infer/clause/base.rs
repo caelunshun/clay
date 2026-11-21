@@ -545,9 +545,13 @@ impl<'sess> ClauseCx<'sess> {
         self.ucx().lookup_universal_re_src_info(var)
     }
 
-    pub fn permit_re_and_re(&mut self, lhs: Re, rhs: Re, mode: RelationMode) {
-        // TODO: expose full interface
-        self.ucx_mut().permit_re_and_re(mode, [lhs], [rhs]);
+    pub fn permit_re_and_re(
+        &mut self,
+        mode: RelationMode,
+        lhs: impl IntoIterator<Item = Re>,
+        rhs: impl IntoIterator<Item = Re>,
+    ) {
+        self.ucx_mut().permit_re_and_re(mode, lhs, rhs);
     }
 
     pub fn init_re_universal_var_direct_clauses(&mut self, var: Re, clauses: TraitClauseList) {
@@ -568,11 +572,11 @@ impl<'sess> ClauseCx<'sess> {
 
     pub fn oblige_ty_unifies_ty(
         &mut self,
+        mode: RelationMode,
         lhs: Ty,
         rhs: Ty,
-        mode: RelationMode,
     ) -> Promise<'sess, TyAndTyUnifyError> {
-        match self.unify_ty_and_ty(lhs, rhs, mode) {
+        match self.unify_ty_and_ty(mode, lhs, rhs) {
             Ok(promise) => promise.map(move |_ccx, error| TyAndTyUnifyError {
                 lhs,
                 rhs,
@@ -599,12 +603,12 @@ impl<'sess> ClauseCx<'sess> {
 
     pub fn unify_ty_and_ty(
         &mut self,
+        mode: RelationMode,
         lhs: Ty,
         rhs: Ty,
-        mode: RelationMode,
     ) -> Result<Promise<'sess, TyAndTyRegionUnifyError>, Box<TyAndTyStructuralUnifyError>> {
         let order = self.next_re_constraint();
-        self.ucx_mut().unify_ty_and_ty(order, lhs, rhs, mode)
+        self.ucx_mut().unify_ty_and_ty(order, mode, lhs, rhs)
     }
 
     pub fn unify_ty_and_simple_set(
@@ -617,14 +621,13 @@ impl<'sess> ClauseCx<'sess> {
 
     pub fn unify_re_and_re(
         &mut self,
-        lhs: Re,
-        rhs: Re,
         mode: RelationMode,
+        lhs: impl IntoIterator<Item = Re>,
+        rhs: impl IntoIterator<Item = Re>,
     ) -> Promise<'sess, ReAndReUnifyError> {
         let order = self.next_re_constraint();
 
-        // TODO: expose full interface
-        self.ucx_mut().unify_re_and_re(order, mode, [lhs], [rhs])
+        self.ucx_mut().unify_re_and_re(order, mode, lhs, rhs)
     }
 
     pub fn oblige_re_meets_clauses(

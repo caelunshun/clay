@@ -451,7 +451,7 @@ impl<'sess> ClauseCx<'sess> {
         debug_assert!(instantiation.target_trait.is_none());
 
         let self_ty_unify_promise =
-            self.oblige_ty_unifies_ty(instantiation.target_ty, self_ty, RelationMode::Equate);
+            self.oblige_ty_unifies_ty(RelationMode::Equate, instantiation.target_ty, self_ty);
 
         let promise = typed_joiner! {
             let block_clauses = block_clauses_promise;

@@ -69,7 +69,7 @@ impl BodyCtxt<'_, '_> {
         let out_ty = self.apply_coercions(&[(expr, actual)], target);
 
         self.ccx_mut()
-            .oblige_ty_unifies_ty(out_ty, demand, RelationMode::Equate)
+            .oblige_ty_unifies_ty(RelationMode::Equate, out_ty, demand)
             // TODO
             .map({
                 let span = expr.r(s).span;
@@ -94,7 +94,7 @@ impl BodyCtxt<'_, '_> {
                     }
 
                     self.ccx_mut()
-                        .oblige_ty_unifies_ty(actual, solid, RelationMode::Equate)
+                        .oblige_ty_unifies_ty(RelationMode::Equate, actual, solid)
                         // TODO
                         .map({
                             let span = expr.r(s).span;
@@ -172,7 +172,7 @@ impl BodyCtxt<'_, '_> {
                     };
 
                     self.ccx_mut()
-                        .oblige_ty_unifies_ty(output_ty, unify_ty, RelationMode::Equate)
+                        .oblige_ty_unifies_ty(RelationMode::Equate, output_ty, unify_ty)
                         // TODO
                         .map({
                             let span = expr.r(s).span;
@@ -350,7 +350,7 @@ fn compute_deref_glb_clobber_obligations(ccx: &mut ClauseCx<'_>, pointees: &[Ty]
 
             if ccx
                 .clone()
-                .unify_ty_and_ty(first, *other, RelationMode::Equate)
+                .unify_ty_and_ty(RelationMode::Equate, first, *other)
                 .is_err()
             {
                 // We've reached our GLB.

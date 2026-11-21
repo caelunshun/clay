@@ -176,7 +176,7 @@ impl BodyCtxt<'_, '_> {
         let (self_ty, expected_args) = expected_args.r(s).split_first().unwrap();
 
         self.ccx_mut()
-            .oblige_ty_unifies_ty(*self_ty, receiver, RelationMode::Equate)
+            .oblige_ty_unifies_ty(RelationMode::Equate, *self_ty, receiver)
             // TODO
             .map(move |_ccx, error| SpannedError(name.span, error))
             .report_loud();

@@ -154,9 +154,9 @@ impl<'a, 'sess> SigExporter<'a, 'sess> {
 
                 self.ccx
                     .unify_ty_and_ty(
+                        RelationMode::Equate,
                         TyKind::InferVar(var).intern(s),
                         TyKind::Error(err).intern(s),
-                        RelationMode::Equate,
                     )
                     .unwrap()
                     .report_never();

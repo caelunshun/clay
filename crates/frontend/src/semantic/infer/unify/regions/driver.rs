@@ -137,18 +137,18 @@ mod tests {
         let re_2 = ccx.fresh_re_infer();
 
         // constrain(re_a: &shorter re_1)
-        ccx.unify_re_and_re(re_a, re_1, RelationMode::RhsOntoLhs)
+        ccx.unify_re_and_re(RelationMode::RhsOntoLhs, [re_a], [re_1])
             .report_never();
 
         // permit(re_1: &shorter re_b)
-        ccx.permit_re_and_re(re_b, re_1, RelationMode::LhsOntoRhs);
+        ccx.permit_re_and_re(RelationMode::LhsOntoRhs, [re_b], [re_1]);
 
         // constrain(re_b: &shorter re_2)
-        ccx.unify_re_and_re(re_b, re_2, RelationMode::RhsOntoLhs)
+        ccx.unify_re_and_re(RelationMode::RhsOntoLhs, [re_b], [re_2])
             .report_never();
 
         // permit(re_2: &shorter re_c)
-        ccx.permit_re_and_re(re_c, re_2, RelationMode::LhsOntoRhs);
+        ccx.permit_re_and_re(RelationMode::LhsOntoRhs, [re_c], [re_2]);
 
         // constrain(re_a: &shorter re_c)
         // Should be derived from...
@@ -156,7 +156,7 @@ mod tests {
         //   => permit(re_1: &shorter re_b)
         // - constrain(re_b: &shorter re_2), permit(re_2: &shorter re_c)
         //   => permit(re_b: &shorter re_c)
-        ccx.unify_re_and_re(re_a, re_c, RelationMode::RhsOntoLhs)
+        ccx.unify_re_and_re(RelationMode::RhsOntoLhs, [re_a], [re_c])
             .report_never();
 
         ccx.verify();
@@ -184,18 +184,18 @@ mod tests {
         let re_2 = ccx.fresh_re_infer();
 
         // constrain(re_a: &longer re_1)
-        ccx.unify_re_and_re(re_a, re_1, RelationMode::LhsOntoRhs)
+        ccx.unify_re_and_re(RelationMode::LhsOntoRhs, [re_a], [re_1])
             .report_never();
 
         // permit(re_1: &longer re_b)
-        ccx.permit_re_and_re(re_b, re_1, RelationMode::RhsOntoLhs);
+        ccx.permit_re_and_re(RelationMode::RhsOntoLhs, [re_b], [re_1]);
 
         // constrain(re_b: &longer re_2)
-        ccx.unify_re_and_re(re_b, re_2, RelationMode::LhsOntoRhs)
+        ccx.unify_re_and_re(RelationMode::LhsOntoRhs, [re_b], [re_2])
             .report_never();
 
         // permit(re_2: &longer re_c)
-        ccx.permit_re_and_re(re_c, re_2, RelationMode::RhsOntoLhs);
+        ccx.permit_re_and_re(RelationMode::RhsOntoLhs, [re_c], [re_2]);
 
         // constrain(re_a: &longer re_c)
         // Should be derived from...
@@ -203,7 +203,7 @@ mod tests {
         //   => permit(re_1: &longer re_b)
         // - constrain(re_b: &longer re_2), permit(re_2: &longer re_c)
         //   => permit(re_b: &longer re_c)
-        ccx.unify_re_and_re(re_a, re_c, RelationMode::LhsOntoRhs)
+        ccx.unify_re_and_re(RelationMode::LhsOntoRhs, [re_a], [re_c])
             .report_never();
 
         ccx.verify();

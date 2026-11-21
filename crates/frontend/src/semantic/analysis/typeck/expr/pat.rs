@@ -170,7 +170,7 @@ impl<'a, 'sess> BodyCtxt<'a, 'sess> {
                 };
 
                 self.ccx_mut()
-                    .oblige_ty_unifies_ty(local_ty, bound_ty, RelationMode::Equate)
+                    .oblige_ty_unifies_ty(RelationMode::Equate, local_ty, bound_ty)
                     // TODO
                     .map({
                         let span = pat.r(s).span;
@@ -206,13 +206,13 @@ impl<'a, 'sess> BodyCtxt<'a, 'sess> {
 
                 self.ccx_mut()
                     .oblige_ty_unifies_ty(
+                        RelationMode::Equate,
                         demand,
                         TyKind::Adt(AdtInstance {
                             def: vec_lang_item,
                             params: TyOrRe::Ty(elem_ty).intern_single(s),
                         })
                         .intern(s),
-                        RelationMode::Equate,
                     )
                     // TODO
                     .map({
@@ -257,9 +257,9 @@ impl<'a, 'sess> BodyCtxt<'a, 'sess> {
 
                 self.ccx_mut()
                     .oblige_ty_unifies_ty(
+                        RelationMode::Equate,
                         TyKind::Tuple(front_infer).intern(s),
                         demand,
-                        RelationMode::Equate,
                     )
                     // TODO
                     .map({
@@ -328,7 +328,7 @@ impl<'a, 'sess> BodyCtxt<'a, 'sess> {
 
                 if let Err(err) = res {
                     self.ccx_mut()
-                        .unify_ty_and_ty(demand, TyKind::Error(err).intern(s), RelationMode::Equate)
+                        .unify_ty_and_ty(RelationMode::Equate, demand, TyKind::Error(err).intern(s))
                         .unwrap()
                         .report_never();
                 }
@@ -366,9 +366,9 @@ impl<'a, 'sess> BodyCtxt<'a, 'sess> {
 
                 self.ccx_mut()
                     .oblige_ty_unifies_ty(
+                        RelationMode::Equate,
                         demand,
                         TyKind::Reference(Re::ERASED, mutability, pointee_ty).intern(s),
-                        RelationMode::Equate,
                     )
                     // TODO
                     .map({
@@ -566,7 +566,7 @@ impl<'a, 'sess> BodyCtxt<'a, 'sess> {
                 let stash_ty = self.type_of_local(stash);
 
                 self.ccx_mut()
-                    .oblige_ty_unifies_ty(stash_ty, demand, RelationMode::Equate)
+                    .oblige_ty_unifies_ty(RelationMode::Equate, stash_ty, demand)
                     .report_never();
 
                 lvalues.temporaries.push(PatLvalueTemp { stash, place });
@@ -582,7 +582,7 @@ impl<'a, 'sess> BodyCtxt<'a, 'sess> {
 
                 if let Some(elem_ty) = res.elem_ty() {
                     self.ccx_mut()
-                        .oblige_ty_unifies_ty(demand, elem_ty, RelationMode::Equate)
+                        .oblige_ty_unifies_ty(RelationMode::Equate, demand, elem_ty)
                         // TODO
                         .map({
                             let span = pat.r(s).span;
@@ -614,7 +614,7 @@ impl<'a, 'sess> BodyCtxt<'a, 'sess> {
         self.peel_references_from_demand_and_normalize(pat, demand, default_by_ref);
 
         self.ccx_mut()
-            .oblige_ty_unifies_ty(*demand, ctor.to_adt_instance_ty(s), RelationMode::Equate)
+            .oblige_ty_unifies_ty(RelationMode::Equate, *demand, ctor.to_adt_instance_ty(s))
             // TODO
             .map({
                 let span = pat.r(s).span;

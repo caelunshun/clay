@@ -70,9 +70,9 @@ impl BodyCtxt<'_, '_> {
                 if !divergence.must_diverge() {
                     self.ccx_mut()
                         .oblige_ty_unifies_ty(
+                            RelationMode::Equate,
                             demand,
                             TyKind::Tuple(Intern::new_empty(s)).intern(s),
-                            RelationMode::Equate,
                         )
                         // TODO
                         .map({
