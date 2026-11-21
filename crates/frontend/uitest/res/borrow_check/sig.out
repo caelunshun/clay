@@ -1,10 +1,10 @@
 error: 
 - bad ref pointee
   span: sig.clay:1:22-32
-    - ty outlives region
+    - general outlives error
       LHS: &'b ()
       RHS: 'a
-      Errors:
+      Error:
         - re and re unify error
           LHS: 'b
           RHS: 'a

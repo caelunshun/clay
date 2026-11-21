@@ -3,10 +3,10 @@ error:
   span: test14.clay:1:60-65
     - binder param WF error
         - idx: 1
-            - ty outlives region
+            - general outlives error
               LHS: u(0) T
               RHS: 'c
-              Errors:
+              Error:
                 - re and re unify error
                   LHS: 'universal(u(0) T)
                   RHS: 'c

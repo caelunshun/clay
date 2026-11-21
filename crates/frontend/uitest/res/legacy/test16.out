@@ -109,10 +109,10 @@ error:
 error: 
 - bad ref pointee
   span: test16.clay:22:31-36
-    - ty outlives region
+    - general outlives error
       LHS: u(2) V
       RHS: 'u0
-      Errors:
+      Error:
         - re and re unify error
           LHS: 'universal(u(2) V)
           RHS: 'u0
@@ -121,10 +121,10 @@ error:
               to outlive: 'u0
     - bad ref pointee
       span: test16.clay:22:38-43
-        - ty outlives region
+        - general outlives error
           LHS: u(2) V
           RHS: 'u0
-          Errors:
+          Error:
             - re and re unify error
               LHS: 'universal(u(2) V)
               RHS: 'u0

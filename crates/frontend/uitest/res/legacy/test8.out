@@ -3,10 +3,10 @@ error:
   span: test8.clay:22:38-23:41
     - binder param WF error
         - idx: 1
-            - ty outlives region
+            - general outlives error
               LHS: &'b_this_is_broken ()
               RHS: 'a
-              Errors:
+              Error:
                 - re and re unify error
                   LHS: 'b_this_is_broken
                   RHS: 'a

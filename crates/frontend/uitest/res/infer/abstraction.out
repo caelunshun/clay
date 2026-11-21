@@ -3,32 +3,62 @@ error:
   span: abstraction.clay:9:5-48
     - binder param WF error
         - idx: 0
-            - ty outlives ty
+            - general outlives error
               LHS: (&'a (), &'b ())
               RHS: &'a ()
-              RHS GLB: 'glb(&'a ())
-              Errors:
+              Error:
                 - re and re unify error
-                  LHS: 'b
-                  RHS: 'glb(&'a ())
+                  LHS: 'a + 'b
+                  RHS: 'a
                   mode: LhsOntoRhs
                     - requires var: 'b
-                      to outlive: 'glb(&'a ())
+                      to outlive: 'a
 
 error: 
 - bad generics
   span: abstraction.clay:10:5-48
     - binder param WF error
         - idx: 0
-            - ty outlives ty
+            - general outlives error
               LHS: (&'a (), &'b ())
               RHS: &'b ()
-              RHS GLB: 'glb(&'b ())
-              Errors:
+              Error:
                 - re and re unify error
-                  LHS: 'a
-                  RHS: 'glb(&'b ())
+                  LHS: 'a + 'b
+                  RHS: 'b
                   mode: LhsOntoRhs
                     - requires var: 'a
-                      to outlive: 'glb(&'b ())
+                      to outlive: 'b
+
+error: 
+- bad generics
+  span: abstraction.clay:19:5-33
+    - binder param WF error
+        - idx: 0
+            - general outlives error
+              LHS: u(0) U
+              RHS: &'a ()
+              Error:
+                - re and re unify error
+                  LHS: 'universal(u(0) U)
+                  RHS: 'a
+                  mode: LhsOntoRhs
+                    - requires var: 'universal(u(0) U)
+                      to outlive: 'a
+
+error: 
+- bad generics
+  span: abstraction.clay:20:5-33
+    - binder param WF error
+        - idx: 0
+            - general outlives error
+              LHS: u(0) U
+              RHS: &'b ()
+              Error:
+                - re and re unify error
+                  LHS: 'universal(u(0) U)
+                  RHS: 'b
+                  mode: LhsOntoRhs
+                    - requires var: 'universal(u(0) U)
+                      to outlive: 'b
 

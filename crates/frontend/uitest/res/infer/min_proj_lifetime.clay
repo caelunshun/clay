@@ -3,7 +3,6 @@ trait Bar {
 }
 
 fn main<'a, T: &longer 'a + Bar>() {
-    // FIXME
     assert_outlives::<<T as Bar>::Out, &'a ()>();
 }
 

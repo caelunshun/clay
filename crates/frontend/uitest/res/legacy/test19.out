@@ -3,14 +3,14 @@ error:
   span: test19.clay:29:43-48
     - binder param WF error
         - idx: 0
-            - ty outlives region
-              LHS: u(0) T
-              RHS: 'a
-              Errors:
+            - general outlives error
+              LHS: 'a
+              RHS: u(0) T
+              Error:
                 - re and re unify error
-                  LHS: 'universal(u(0) T)
-                  RHS: 'a
-                  mode: RhsOntoLhs
+                  LHS: 'a
+                  RHS: 'universal(u(0) T)
+                  mode: LhsOntoRhs
                     - requires var: 'a
                       to outlive: 'universal(u(0) T)
 
@@ -19,10 +19,10 @@ error:
   span: test19.clay:35:43-48
     - binder param WF error
         - idx: 1
-            - ty outlives region
+            - general outlives error
               LHS: u(0) T
               RHS: 'a
-              Errors:
+              Error:
                 - re and re unify error
                   LHS: 'universal(u(0) T)
                   RHS: 'a
@@ -35,14 +35,14 @@ error:
   span: test19.clay:41:44-49
     - binder param WF error
         - idx: 0
-            - ty outlives region
-              LHS: u(0) T
-              RHS: 'a
-              Errors:
+            - general outlives error
+              LHS: 'a
+              RHS: u(0) T
+              Error:
                 - re and re unify error
-                  LHS: 'universal(u(0) T)
-                  RHS: 'a
-                  mode: LhsOntoRhs
+                  LHS: 'a
+                  RHS: 'universal(u(0) T)
+                  mode: RhsOntoLhs
                     - requires var: 'universal(u(0) T)
                       to outlive: 'a
 
@@ -51,10 +51,10 @@ error:
   span: test19.clay:47:42-47
     - binder param WF error
         - idx: 1
-            - ty outlives region
+            - general outlives error
               LHS: u(0) T
               RHS: 'a
-              Errors:
+              Error:
                 - re and re unify error
                   LHS: 'universal(u(0) T)
                   RHS: 'a

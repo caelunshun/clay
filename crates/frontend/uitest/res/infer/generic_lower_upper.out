@@ -3,100 +3,94 @@ error:
   span: generic_lower_upper.clay:16:5-33
     - binder param WF error
         - idx: 0
-            - ty outlives ty
+            - general outlives error
               LHS: u(0) U
               RHS: &'c ()
-              RHS GLB: 'glb(&'c ())
-              Errors:
+              Error:
                 - re and re unify error
                   LHS: 'universal(u(0) U)
-                  RHS: 'glb(&'c ())
+                  RHS: 'c
                   mode: LhsOntoRhs
                     - requires var: 'universal(u(0) U)
-                      to outlive: 'glb(&'c ())
+                      to outlive: 'c
 
 error: 
 - bad generics
   span: generic_lower_upper.clay:17:5-33
     - binder param WF error
         - idx: 0
-            - ty outlives ty
+            - general outlives error
               LHS: &'c ()
               RHS: u(0) U
-              RHS GLB: 'glb(u(0) U)
-              Errors:
+              Error:
                 - re and re unify error
                   LHS: 'c
-                  RHS: 'glb(u(0) U)
+                  RHS: 'universal(u(0) U)
                   mode: LhsOntoRhs
                     - requires var: 'c
-                      to outlive: 'glb(u(0) U)
+                      to outlive: 'universal(u(0) U)
 
 error: 
 - bad generics
   span: generic_lower_upper.clay:19:5-33
     - binder param WF error
         - idx: 0
-            - ty outlives ty
+            - general outlives error
               LHS: u(0) U
               RHS: &'a ()
-              RHS GLB: 'glb(&'a ())
-              Errors:
+              Error:
                 - re and re unify error
                   LHS: 'universal(u(0) U)
-                  RHS: 'glb(&'a ())
+                  RHS: 'a
                   mode: LhsOntoRhs
                     - requires var: 'universal(u(0) U)
-                      to outlive: 'glb(&'a ())
+                      to outlive: 'a
 
 error: 
 - bad generics
   span: generic_lower_upper.clay:20:5-33
     - binder param WF error
         - idx: 0
-            - ty outlives ty
+            - general outlives error
               LHS: u(0) U
               RHS: &'b ()
-              RHS GLB: 'glb(&'b ())
-              Errors:
+              Error:
                 - re and re unify error
                   LHS: 'universal(u(0) U)
-                  RHS: 'glb(&'b ())
+                  RHS: 'b
                   mode: LhsOntoRhs
                     - requires var: 'universal(u(0) U)
-                      to outlive: 'glb(&'b ())
+                      to outlive: 'b
 
 error: 
 - bad generics
   span: generic_lower_upper.clay:21:5-33
     - binder param WF error
         - idx: 0
-            - ty outlives ty
+            - general outlives error
               LHS: &'d ()
               RHS: u(0) U
-              RHS GLB: 'glb(u(0) U)
-              Errors:
+              Error:
                 - re and re unify error
                   LHS: 'd
-                  RHS: 'glb(u(0) U)
+                  RHS: 'universal(u(0) U)
                   mode: LhsOntoRhs
                     - requires var: 'd
-                      to outlive: 'glb(u(0) U)
+                      to outlive: 'universal(u(0) U)
 
 error: 
 - bad generics
   span: generic_lower_upper.clay:22:5-33
     - binder param WF error
         - idx: 0
-            - ty outlives ty
+            - general outlives error
               LHS: &'e ()
               RHS: u(0) U
-              RHS GLB: 'glb(u(0) U)
-              Errors:
+              Error:
                 - re and re unify error
                   LHS: 'e
-                  RHS: 'glb(u(0) U)
+                  RHS: 'universal(u(0) U)
                   mode: LhsOntoRhs
                     - requires var: 'e
-                      to outlive: 'glb(u(0) U)
+                      to outlive: 'universal(u(0) U)
 
