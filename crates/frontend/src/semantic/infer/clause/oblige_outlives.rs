@@ -51,7 +51,7 @@ impl<'sess> ClauseCx<'sess> {
 
                     GeneralOutlivesError {
                         lhs: TyOrRe::Re(lhs).intern_single(s),
-                        rhs: TyOrRe::Re(lhs).intern_single(s),
+                        rhs: TyOrRe::Re(rhs).intern_single(s),
                         mode,
                         error: GeneralOutlivesErrorKind::Unify(error),
                     }
