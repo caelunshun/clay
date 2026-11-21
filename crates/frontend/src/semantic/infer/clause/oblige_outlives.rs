@@ -171,7 +171,7 @@ impl<'sess> ClauseCx<'sess> {
             }
             TyKind::Tuple(elems) => {
                 for &ty in elems.r(s) {
-                    self.collect_dominating_regions_in_ty(collector, ty);
+                    self.collect_dominating_regions_in_ty(collector, ty)?;
                 }
             }
             TyKind::Universal(universal) => {
