@@ -2,8 +2,22 @@ trait Bar {
     type Out;
 }
 
-fn main<'a, T: &longer 'a + Bar>() {
+trait BarParameterized<'a> {
+    type Out;
+}
+
+fn unparameterized<'a, T: &longer 'a + Bar>() {
     assert_outlives::<<T as Bar>::Out, &'a ()>();
+
+    obtain::<<T as Bar>::Out>();
+}
+
+fn parameterized<T: for<'a> BarParameterized<'a>>() {
+    obtain::<<T as BarParameterized<'_>>::Out>();
 }
 
 fn assert_outlives<LHS: &longer RHS, RHS>() {}
+
+fn obtain<V>() -> V {
+    loop {}
+}

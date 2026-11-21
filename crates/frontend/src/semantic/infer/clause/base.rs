@@ -442,15 +442,18 @@ impl<'sess> ClauseCx<'sess> {
             }
         }
 
+        let errors = self.ucx.verify();
+
         if flags::should_print_ccx_region_graph() {
-            println!("=======================");
+            println!("=== VERIFICATION ===");
+            println!("{}", self.ucx.region_graphviz(self));
+            println!("Errors...");
         }
 
-        self.ucx.verify().flush(self);
+        errors.flush(self);
 
         if flags::should_print_ccx_region_graph() {
-            println!("----->");
-            println!("{}", self.ucx.region_graphviz(self));
+            println!("==============");
         }
     }
 }

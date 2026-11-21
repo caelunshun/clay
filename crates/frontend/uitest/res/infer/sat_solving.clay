@@ -1,0 +1,64 @@
+struct Binder<'a>;
+
+impl<'a> Binder<'a> {
+    fn new() -> Self {
+        Self
+    }
+
+    fn longer<'s: &shorter Self, 'b: &longer 'a>(&'s self) {}
+}
+
+fn assert_all_imply<
+    'lhs: &longer (&'rhs_1 (), &'rhs_2 (), &'rhs_3 (), &'rhs_4 (), &'rhs_5 ()),
+    'rhs_1, 'rhs_2, 'rhs_3, 'rhs_4, 'rhs_5
+>(
+    rhs_1: Binder<'rhs_1>,
+    rhs_2: Binder<'rhs_2>,
+    rhs_3: Binder<'rhs_3>,
+    rhs_4: Binder<'rhs_4>,
+    rhs_5: Binder<'rhs_5>
+) {
+}
+
+fn rejected<
+    'a_t, 'a_f,
+    'b_t, 'b_f,
+    'c_t, 'c_f,
+    'dead_if_not_both:
+        &longer (&'a_t (), &'a_f ()) +  // u'a_t + u'a_f => u'dead_if_not_both
+        &longer (&'b_t (), &'b_f ()) +  // u'b_t + u'b_f => u'dead_if_not_both
+        &longer (&'c_t (), &'c_f ()),   // u'c_t + u'c_f => u'dead_if_not_both
+>() {
+    let live_if_at_least_one_a = Binder::new();
+    live_if_at_least_one_a.longer::<'_, 'a_t>();  // u'a_t => i'live_if_at_least_one_a
+    live_if_at_least_one_a.longer::<'_, 'a_f>();  // u'a_f => i'live_if_at_least_one_a
+
+    let live_if_at_least_one_b = Binder::new();
+    live_if_at_least_one_b.longer::<'_, 'b_t>();  // u'b_t => i'live_if_at_least_one_b
+    live_if_at_least_one_b.longer::<'_, 'b_f>();  // u'b_f => i'live_if_at_least_one_b
+
+    let live_if_at_least_one_c = Binder::new();
+    live_if_at_least_one_c.longer::<'_, 'c_t>();  // u'c_t => i'live_if_at_least_one_c
+    live_if_at_least_one_c.longer::<'_, 'c_f>();  // u'c_f => i'live_if_at_least_one_c
+
+    let live_if_term_1_truthy = Binder::new();
+    live_if_term_1_truthy.longer::<'_, 'a_t>();  // u'a_t => i'live_if_term_1_truthy
+    live_if_term_1_truthy.longer::<'_, 'b_f>();  // u'b_f => i'live_if_term_1_truthy
+    live_if_term_1_truthy.longer::<'_, 'c_t>();  // u'c_t => i'live_if_term_1_truthy
+
+    let live_if_term_2_truthy = Binder::new();
+    live_if_term_2_truthy.longer::<'_, 'a_f>();  // u'a_f => i'live_if_term_2_truthy
+    live_if_term_2_truthy.longer::<'_, 'b_f>();  // u'b_f => i'live_if_term_2_truthy
+    live_if_term_2_truthy.longer::<'_, 'c_t>();  // u'c_t => i'live_if_term_2_truthy
+
+    // i'live_if_at_least_one_a + i'live_if_at_least_one_b + i'live_if_at_least_one_c +
+    //    i'live_if_term_1_truthy + i'live_if_term_2_truthy => u'dead_if_not_both
+    // FIXME: should be rejected because this SAT problem is satisfiable
+    assert_all_imply::<'_, '_, '_, '_, '_, 'dead_if_not_both>(
+        live_if_at_least_one_a,
+        live_if_at_least_one_b,
+        live_if_at_least_one_c,
+        live_if_term_1_truthy,
+        live_if_term_2_truthy,
+    );
+}

@@ -21,11 +21,15 @@ impl<'sess> ClauseCx<'sess> {
     ) {
         let s = self.session();
 
-        self.permit_general_outlives(
-            mode,
-            lhs.into().intern_single(s),
-            rhs.into().intern_single(s),
-        );
+        let lhs = lhs.into();
+        let rhs = rhs.into();
+
+        if let (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) = (lhs, rhs) {
+            self.permit_re_and_re(mode, [lhs], [rhs]);
+            return;
+        }
+
+        self.permit_general_outlives(mode, lhs.intern_single(s), rhs.intern_single(s));
     }
 
     pub fn oblige_outlives(
@@ -36,11 +40,25 @@ impl<'sess> ClauseCx<'sess> {
     ) -> Promise<'sess, GeneralOutlivesError> {
         let s = self.session();
 
-        self.oblige_general_outlives(
-            mode,
-            lhs.into().intern_single(s),
-            rhs.into().intern_single(s),
-        )
+        let lhs = lhs.into();
+        let rhs = rhs.into();
+
+        if let (TyOrRe::Re(lhs), TyOrRe::Re(rhs)) = (lhs, rhs) {
+            return self
+                .unify_re_and_re(mode, [lhs], [rhs])
+                .map(move |ccx, error| {
+                    let s = ccx.session();
+
+                    GeneralOutlivesError {
+                        lhs: TyOrRe::Re(lhs).intern_single(s),
+                        rhs: TyOrRe::Re(lhs).intern_single(s),
+                        mode,
+                        error: GeneralOutlivesErrorKind::Unify(error),
+                    }
+                });
+        }
+
+        self.oblige_general_outlives(mode, lhs.intern_single(s), rhs.intern_single(s))
     }
 
     pub fn permit_general_outlives(
