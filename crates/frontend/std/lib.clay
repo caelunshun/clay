@@ -100,19 +100,23 @@ pub mod vec {
 
     impl<T> Vec<T> {
         pub fn new() -> Self {
-            todo()
+            // todo()
+            loop {}
         }
 
         pub fn push<'a: &shorter Self>(&'a mut self, value: T) {
-            todo()
+            // todo()
+            loop {}
         }
 
         pub fn clear<'a: &shorter Self>(&'a mut self) {
-            todo()
+            // todo()
+            loop {}
         }
 
         pub fn len<'a: &shorter Self>(&self) -> u32 {
-            todo()
+            // todo()
+            loop {}
         }
     }
 
@@ -122,7 +126,8 @@ pub mod vec {
 
     impl<T: Clone> Clone for Vec<T> {
         fn clone<'a: &shorter Self>(&'a self) -> Self {
-            todo()
+            // todo()
+            loop {}
         }
     }
 

@@ -1,0 +1,24 @@
+error: 
+- source info: Todo
+  instantiated trait not implemented
+  LHS: fn @ is_gc
+  RHS: ops::FnOnce<(u(1) <u(0) T as Foo<'?11>>::Out,), ()>
+    - fn impl unsatisfied
+      resolve fn:
+        - fn instance resolution error
+          instance: fn @ is_gc
+            - item fn unsatisfied
+              early args error:
+                - binder param WF error
+                    - idx: 0
+                        - general outlives error
+                          LHS: u(1) <u(0) T as Foo<'?11>>::Out
+                          RHS: 'gc
+                          Error:
+                            - re and re unify error
+                              LHS: 'universal(u(1) <u(0) T as Foo<'?11>>::Out)
+                              RHS: 'gc
+                              mode: LhsOntoRhs
+                                - requires var: 'universal(u(1) <u(0) T as Foo<'?11>>::Out)
+                                  to outlive: 'gc
+

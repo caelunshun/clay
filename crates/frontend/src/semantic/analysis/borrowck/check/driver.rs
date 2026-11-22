@@ -210,12 +210,20 @@ impl TyCtxt<'_> {
         for &var in env.generics.iter().flat_map(|v| v.substs.r(s)) {
             match var {
                 TyOrRe::Re(var) => {
-                    ccx.unify_re_and_re(RelationMode::LhsOntoRhs, [var], [shortest_sig_universal])
-                        .report_never();
+                    ccx.permit_outlives(
+                        RelationMode::LhsOntoRhs,
+                        RePermissionFlags::empty(),
+                        var,
+                        shortest_sig_universal,
+                    );
                 }
                 TyOrRe::Ty(ty) => {
-                    ccx.oblige_outlives(RelationMode::LhsOntoRhs, ty, shortest_sig_universal)
-                        .report_never();
+                    ccx.permit_outlives(
+                        RelationMode::LhsOntoRhs,
+                        RePermissionFlags::empty(),
+                        ty,
+                        shortest_sig_universal,
+                    );
                 }
             }
         }
@@ -225,7 +233,7 @@ impl TyCtxt<'_> {
             // All locals live shorter than our signature universals
             ccx.permit_re_and_re(
                 RelationMode::LhsOntoRhs,
-                RePermissionFlags::TRANSITIVE,
+                RePermissionFlags::empty(),
                 [shortest_sig_universal],
                 [atomic_place_universals[rhs]],
             );
@@ -330,7 +338,7 @@ impl TyCtxt<'_> {
             for lhs in outlive_mask.iter() {
                 ccx.permit_re_and_re(
                     RelationMode::LhsOntoRhs,
-                    RePermissionFlags::TRANSITIVE,
+                    RePermissionFlags::empty(),
                     [atomic_place_universals[lhs]],
                     [atomic_place_universals[rhs]],
                 );

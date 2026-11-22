@@ -34,16 +34,6 @@ pub struct ReConstraintOrder(pub NonZeroU32);
 bitflags::bitflags! {
     #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
     pub struct RePermissionFlags: u8 {
-        const TRANSITIVE = Self::TRANSITIVE_LHS.bits() | Self::TRANSITIVE_RHS.bits();
-
-        /// If the LHS is an inference node, all transitive constraints up until a universal or
-        /// `'gc` lifetime will be promoted to permissions.
-        const TRANSITIVE_LHS = 1 << 0;
-
-        /// If the RHS is an inference node, all transitive constraints up until a universal or
-        /// `'gc` lifetime will be promoted to permissions.
-        const TRANSITIVE_RHS = 1 << 1;
-
         /// Makes the inference variable grant maximally powerful permissions without breaking other
         /// constraints.
         ///

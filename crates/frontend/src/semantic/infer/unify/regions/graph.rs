@@ -165,7 +165,7 @@ impl<'sess> RegionRelationGraph<'sess> {
 
     pub fn verify(&mut self, queue: &mut PromiseResolutionQueue<'sess>, universal_count: usize) {
         // Elaborate permissions according to their `RePermissionFlags`.
-        PermissionElaborator::new(self, universal_count).elaborate(self, queue);
+        PermissionElaborator::new(self, universal_count).elaborate(self);
 
         self.relations
             .sort_by_key(|relation| relation.order.to_num());
@@ -343,8 +343,6 @@ struct PermissionElaborator {
     existentials: IndexVec<InferReVar, NodeIndex>,
     truthy: NodeIndex,
     to_idealize: FastIndexSet<InferReVar>,
-    to_propagate_queue: Vec<ToPropagate>,
-    to_propagate_set: FastHashSet<ToPropagate>,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -353,12 +351,6 @@ enum ElaboratorNode {
     And,
     Universal(UniversalReVar),
     Existential(InferReVar),
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-struct ToPropagate {
-    target: NodeIndex,
-    direction: Direction,
 }
 
 impl PermissionElaborator {
@@ -383,8 +375,6 @@ impl PermissionElaborator {
             existentials,
             truthy,
             to_idealize: FastIndexSet::default(),
-            to_propagate_queue: Vec::new(),
-            to_propagate_set: FastHashSet::default(),
         };
 
         for (
@@ -466,38 +456,6 @@ impl PermissionElaborator {
                         if permissions.contains(RePermissionFlags::IDEALIZE_RHS) {
                             self.to_idealize.insert(var);
                         }
-
-                        if permissions.contains(RePermissionFlags::TRANSITIVE_RHS) {
-                            let action = ToPropagate {
-                                target: self.term_to_node(lhs),
-                                direction: Direction::Incoming,
-                            };
-
-                            if self.to_propagate_set.insert(action) {
-                                self.to_propagate_queue.push(action);
-                            }
-                        }
-                    }
-                    RegionFormulaTerm::True | RegionFormulaTerm::Universal(_) => {
-                        // (no need to complete)
-                    }
-                }
-            }
-
-            for &rhs in rhs {
-                match rhs {
-                    RegionFormulaTerm::Existential(_) => {
-                        // Again, implication terminology and unification terminology are backwards.
-                        if permissions.contains(RePermissionFlags::TRANSITIVE_LHS) {
-                            let action = ToPropagate {
-                                target: self.term_to_node(rhs),
-                                direction: Direction::Outgoing,
-                            };
-
-                            if self.to_propagate_set.insert(action) {
-                                self.to_propagate_queue.push(action);
-                            }
-                        }
                     }
                     RegionFormulaTerm::True | RegionFormulaTerm::Universal(_) => {
                         // (no need to complete)
@@ -515,55 +473,7 @@ impl PermissionElaborator {
         }
     }
 
-    fn elaborate<'sess>(
-        &mut self,
-        tracker: &mut RegionRelationGraph<'sess>,
-        queue: &mut PromiseResolutionQueue<'sess>,
-    ) {
-        self.elaborate_propagations(tracker, queue);
-        self.elaborate_idealizations(tracker);
-    }
-
-    fn elaborate_propagations<'sess>(
-        &mut self,
-        tracker: &mut RegionRelationGraph<'sess>,
-        queue: &mut PromiseResolutionQueue<'sess>,
-    ) {
-        while let Some(ToPropagate { target, direction }) = self.to_propagate_queue.pop() {
-            for edge in self.graph.edges_directed(target, direction) {
-                let next = match direction {
-                    Direction::Outgoing => edge.target(),
-                    Direction::Incoming => edge.source(),
-                };
-
-                let relation = &mut tracker.relations[*edge.weight()];
-
-                if let Some(handle) = relation.handle.take() {
-                    handle.queue_accept(queue);
-                    relation.order = RelationOrder::Permission;
-                    tracker.permission_count += 1;
-                }
-
-                match self.graph[next] {
-                    ElaboratorNode::True | ElaboratorNode::Universal(_) => {
-                        // (stop propagating)
-                    }
-                    ElaboratorNode::And | ElaboratorNode::Existential(_) => {
-                        let action = ToPropagate {
-                            target: next,
-                            direction,
-                        };
-
-                        if self.to_propagate_set.insert(action) {
-                            self.to_propagate_queue.push(action);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fn elaborate_idealizations(&self, tracker: &mut RegionRelationGraph<'_>) {
+    fn elaborate(&self, tracker: &mut RegionRelationGraph<'_>) {
         let mut queue = Vec::new();
         let mut visit_set = FastHashSet::default();
         let mut universal_set = FastIndexSet::default();
